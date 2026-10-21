@@ -1,4 +1,4 @@
-#include "sema/Types.h"
+#include "sema/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringSwitch.h"

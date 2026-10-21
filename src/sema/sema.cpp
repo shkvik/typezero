@@ -1,4 +1,4 @@
-#include "sema/Sema.h"
+#include "sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ast/Ast.h"
-#include "sema/Types.h"
+#include "ast/ast.h"
+#include "sema/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
@@ -162,7 +162,7 @@ private:
   // Whether evaluating `expr` cannot assign to any variable.
   static bool cannotAssign(const Expr *expr);
 
-  // Arrays (CodeGenArray.cpp)
+  // Arrays (codegen_array.cpp)
   llvm::Constant *typeDescriptor(const Type *type);
   llvm::Value *arrayField(llvm::Value *array, unsigned field);
   llvm::Value *arrayLength(llvm::Value *array); // as i64

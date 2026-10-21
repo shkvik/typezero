@@ -72,11 +72,12 @@ _Static_assert(sizeof(Segment) <= UNIT_SIZE, "segment metadata must fit in unit 
 // Units 1..63 free, unit 0 taken by the metadata.
 #define ALL_UNITS_FREE (~(uint64_t)1)
 
-static struct {
+// Not static: see the rules in tzrt.h.
+struct {
   Page *bins[BINS];   // pages with room, per size class
   Segment *segments;  // small segments, those with free units first
   Segment *spare;     // one empty segment kept for reuse
-} heap;
+} tz_heap;
 
 //===----------------------------------------------------------------------===//
 // The operating system
@@ -173,25 +174,25 @@ static inline Segment *segment_of(const void *p) {
 
 static void segment_link(Segment *s) {
   s->prev = NULL;
-  s->next = heap.segments;
-  if (heap.segments)
-    heap.segments->prev = s;
-  heap.segments = s;
+  s->next = tz_heap.segments;
+  if (tz_heap.segments)
+    tz_heap.segments->prev = s;
+  tz_heap.segments = s;
 }
 
 static void segment_unlink(Segment *s) {
   if (s->prev)
     s->prev->next = s->next;
   else
-    heap.segments = s->next;
+    tz_heap.segments = s->next;
   if (s->next)
     s->next->prev = s->prev;
 }
 
 static Segment *segment_new(void) {
-  Segment *s = heap.spare;
+  Segment *s = tz_heap.spare;
   if (s) {
-    heap.spare = NULL;
+    tz_heap.spare = NULL;
   } else {
     void *base;
     size_t reserved;
@@ -217,7 +218,7 @@ static unsigned find_units(const Segment *s, unsigned n) {
 }
 
 static void bin_push(Page *page) {
-  Page **head = &heap.bins[page->bin];
+  Page **head = &tz_heap.bins[page->bin];
   page->prev = NULL;
   page->next = *head;
   if (*head)
@@ -230,7 +231,7 @@ static void bin_remove(Page *page) {
   if (page->prev)
     page->prev->next = page->next;
   else
-    heap.bins[page->bin] = page->next;
+    tz_heap.bins[page->bin] = page->next;
   if (page->next)
     page->next->prev = page->prev;
   page->listed = 0;
@@ -238,7 +239,7 @@ static void bin_remove(Page *page) {
 
 static Page *page_new(unsigned bin) {
   unsigned units = bin_units(bin);
-  Segment *s = heap.segments;
+  Segment *s = tz_heap.segments;
   unsigned first = 0;
   for (; s; s = s->next)
     if ((first = find_units(s, units)) != 0)
@@ -277,8 +278,8 @@ static void page_release(Page *page) {
   if (s->free_units != ALL_UNITS_FREE)
     return;
   segment_unlink(s);
-  if (!heap.spare)
-    heap.spare = s;
+  if (!tz_heap.spare)
+    tz_heap.spare = s;
   else
     os_free(s->os_base, s->os_size);
 }
@@ -302,13 +303,18 @@ static void *huge_alloc(size_t size) {
   return (char *)s + HUGE_HEADER;
 }
 
-static void *alloc_slow(unsigned bin) {
+// tz_alloc when the first page of the size class has no room, or the block
+// is huge.
+TZ_NOINLINE void *tz_alloc_slow(size_t size) {
+  if (size > MAX_SMALL)
+    return huge_alloc(size);
   // Pages at the head of the list without room are full: drop them from it
   // until one has room, or start a new page.
-  Page *page = heap.bins[bin];
+  unsigned bin = bin_of(size);
+  Page *page = tz_heap.bins[bin];
   while (page && !page->free && page->bump >= page->end) {
     bin_remove(page);
-    page = heap.bins[bin];
+    page = tz_heap.bins[bin];
   }
   if (!page)
     page = page_new(bin);
@@ -323,41 +329,41 @@ static void *alloc_slow(unsigned bin) {
   return block;
 }
 
-void *tz_alloc(size_t size) {
-  if (size > MAX_SMALL)
-    return huge_alloc(size);
-  unsigned bin = bin_of(size);
-  Page *page = heap.bins[bin];
-  if (page) {
-    void *block = page->free;
-    if (block) {
-      page->free = *(void **)block;
-      ++page->used;
-      return block;
-    }
-    if (page->bump < page->end) {
-      block = page->bump;
-      page->bump += page->block_size;
-      ++page->used;
-      return block;
+TZ_HOT void *tz_alloc(size_t size) {
+  if (size <= MAX_SMALL) {
+    Page *page = tz_heap.bins[bin_of(size)];
+    if (page) {
+      void *block = page->free;
+      if (block) {
+        page->free = *(void **)block;
+        ++page->used;
+        return block;
+      }
+      if (page->bump < page->end) {
+        block = page->bump;
+        page->bump += page->block_size;
+        ++page->used;
+        return block;
+      }
     }
   }
-  return alloc_slow(bin);
+  return tz_alloc_slow(size);
 }
 
-void tz_free(void *p) {
-  if (!p)
-    return;
+static inline Page *page_of(Segment *s, const void *p) {
+  unsigned unit = (unsigned)(((uintptr_t)p - (uintptr_t)s) >> UNIT_SHIFT);
+  return &s->pages[s->first_unit[unit]];
+}
+
+// tz_free of a huge block, or of a small one already back in its page when
+// the page has to move: it was full, or it is now empty.
+TZ_NOINLINE void tz_free_slow(void *p) {
   Segment *s = segment_of(p);
   if (s->kind == KIND_HUGE) {
     os_free(s->os_base, s->os_size);
     return;
   }
-  unsigned unit = (unsigned)(((uintptr_t)p - (uintptr_t)s) >> UNIT_SHIFT);
-  Page *page = &s->pages[s->first_unit[unit]];
-  *(void **)p = page->free;
-  page->free = p;
-  --page->used;
+  Page *page = page_of(s, p);
   if (!page->listed) {
     bin_push(page); // it has room again
   } else if (page->used == 0 && (page->next || page->prev)) {
@@ -365,4 +371,18 @@ void tz_free(void *p) {
     // stays, so that allocating and freeing one object does not churn.
     page_release(page);
   }
+}
+
+TZ_HOT void tz_free(void *p) {
+  if (!p)
+    return;
+  Segment *s = segment_of(p);
+  if (s->kind == KIND_SMALL) {
+    Page *page = page_of(s, p);
+    *(void **)p = page->free;
+    page->free = p;
+    if (--page->used != 0 && page->listed)
+      return;
+  }
+  tz_free_slow(p);
 }

@@ -79,7 +79,7 @@ foreach ($n in $Names) {
   $dir = Join-Path $PSScriptRoot $n
   $ts = Join-Path $dir "main.ts"
   if (Test-Path $ts) {
-    & $Tz build -O2 -o (Join-Path $out "$n-tz.exe") $ts
+    & $Tz build -o (Join-Path $out "$n-tz.exe") $ts
     if ($LASTEXITCODE -ne 0) { throw "tz failed on $n" }
   }
   & $Go build -o (Join-Path $out "$n-go.exe") (Join-Path $dir "main.go")

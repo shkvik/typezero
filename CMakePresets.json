@@ -12,7 +12,6 @@
       "architecture": { "value": "x64", "strategy": "external" },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static",
         "LLVM_DIR": "$env{LLVM_ROOT}/lib/cmake/llvm",

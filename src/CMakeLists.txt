@@ -1,17 +1,17 @@
 add_executable(tz
   main.cpp
-  support/Diagnostics.cpp
-  lex/Lexer.cpp
-  parse/Parser.cpp
-  sema/Types.cpp
-  sema/Facts.cpp
-  sema/Sema.cpp
-  sema/SemaFlow.cpp
-  sema/SemaBuiltins.cpp
-  codegen/CodeGen.cpp
-  codegen/CodeGenArray.cpp
-  driver/Driver.cpp
-  driver/Linker.cpp
+  support/diagnostics.cpp
+  lex/lexer.cpp
+  parse/parser.cpp
+  sema/types.cpp
+  sema/facts.cpp
+  sema/sema.cpp
+  sema/sema_flow.cpp
+  sema/sema_builtins.cpp
+  codegen/codegen.cpp
+  codegen/codegen_array.cpp
+  driver/driver.cpp
+  driver/linker.cpp
 )
 
 set_target_properties(tz PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TZ_OUTPUT_DIR})
@@ -23,7 +23,7 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 target_compile_definitions(tz PRIVATE ${LLVM_DEFINITIONS_LIST} TZ_VERSION="${PROJECT_VERSION}")
 
 llvm_map_components_to_libnames(TZ_LLVM_LIBS
-  Core Support Analysis Passes Target TargetParser MC X86 AArch64)
+  Core Support Analysis Passes IPO BitReader Linker Target TargetParser MC X86 AArch64)
 target_link_libraries(tz PRIVATE ${TZ_LLVM_LIBS} lldCOFF lldCommon)
 
 if(MSVC)

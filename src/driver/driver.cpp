@@ -1,14 +1,18 @@
-#include "driver/Driver.h"
+#include "driver/driver.h"
 
-#include "codegen/CodeGen.h"
-#include "driver/Linker.h"
-#include "parse/Parser.h"
-#include "sema/Sema.h"
+#include "codegen/codegen.h"
+#include "driver/linker.h"
+#include "parse/parser.h"
+#include "sema/sema.h"
 
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringSet.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
@@ -22,6 +26,7 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
 
 #include <cstdint>
 #include <string>
@@ -39,9 +44,11 @@ commands:
 
 options:
   -o <path>         where to write the output (build only)
-  -O0 -O1 -O2 -O3   optimization level (default: -O2)
   --emit-llvm       write LLVM IR (.ll) instead of an executable (build only)
 )";
+// Not in the usage: -O0 turns optimization off, runtime inlining included.
+// The tests run every program both ways, and with --emit-llvm it shows the IR
+// exactly as CodeGen emits it.
 
 // Exit codes of tz itself. `tz run` otherwise exits with the program's code.
 constexpr int kExitError = 1;
@@ -53,7 +60,7 @@ struct Options {
   Command command = Command::Build;
   std::string input;
   std::string output;
-  unsigned optLevel = 2;
+  bool optimize = true;
   bool emitLLVM = false;
   std::vector<std::string> programArgs;
 };
@@ -95,8 +102,8 @@ int parseArgs(llvm::ArrayRef<const char *> args, Options &opts) {
       if (++i == args.size())
         return usageError("'-o' needs a path");
       opts.output = args[i];
-    } else if (arg.size() == 3 && arg.starts_with("-O") && arg[2] >= '0' && arg[2] <= '3') {
-      opts.optLevel = arg[2] - '0';
+    } else if (arg == "-O0") {
+      opts.optimize = false;
     } else if (arg == "--emit-llvm") {
       opts.emitLLVM = true;
     } else if (arg.starts_with("-")) {
@@ -158,22 +165,140 @@ std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContex
   return module;
 }
 
-std::unique_ptr<llvm::TargetMachine> createTargetMachine(const llvm::Triple &triple, unsigned optLevel) {
+std::unique_ptr<llvm::TargetMachine> createTargetMachine(const llvm::Triple &triple, bool optimize) {
   std::string error;
   const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, error);
   if (!target) {
     llvm::errs() << "tz: " << error << "\n";
     return nullptr;
   }
-  static const llvm::CodeGenOptLevel levels[] = {
-      llvm::CodeGenOptLevel::None, llvm::CodeGenOptLevel::Less,
-      llvm::CodeGenOptLevel::Default, llvm::CodeGenOptLevel::Aggressive};
   llvm::TargetOptions options;
   return std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
-      triple, "generic", "", options, std::nullopt, std::nullopt, levels[optLevel]));
+      triple, "generic", "", options, std::nullopt, std::nullopt,
+      optimize ? llvm::CodeGenOptLevel::Default : llvm::CodeGenOptLevel::None));
 }
 
-void optimize(llvm::Module &module, llvm::TargetMachine &tm, unsigned optLevel) {
+// The runtime files sit next to the tz executable.
+std::string runtimeFile(const char *argv0, llvm::StringRef name) {
+  std::string self = llvm::sys::fs::getMainExecutable(argv0, (void *)(intptr_t)&runDriver);
+  llvm::SmallString<256> path(llvm::sys::path::parent_path(self));
+  llvm::sys::path::append(path, name);
+  return std::string(path);
+}
+
+// A hot runtime function with more instructions than this, counting the
+// static helpers it brings along, is not copied into programs after all: the
+// inliner would rarely take it, and optimizing it again for every program
+// only costs compile time.
+constexpr unsigned kRuntimeCopyLimit = 100;
+
+// The instructions of `fn` and of the static functions it refers to, which
+// would be copied with it.
+unsigned copySize(llvm::Function &fn, llvm::SmallPtrSetImpl<llvm::Function *> &seen) {
+  unsigned size = fn.getInstructionCount();
+  for (llvm::Instruction &inst : llvm::instructions(fn))
+    for (llvm::Value *operand : inst.operands()) {
+      auto *callee = llvm::dyn_cast<llvm::Function>(operand);
+      if (callee && callee->hasLocalLinkage() && !callee->isDeclaration() &&
+          seen.insert(callee).second)
+        size += copySize(*callee, seen);
+    }
+  return size;
+}
+
+// Copies the hot runtime functions (TZ_HOT in runtime/tzrt.h) the program
+// calls, and the hot ones they call, from the runtime bitcode into the
+// program's module as available_externally: the optimizer may inline them
+// into the program's loops, and then drops them, so every call that is left
+// goes to tzrt.lib, which is linked as usual. Returns false after reporting
+// an error.
+bool linkRuntime(llvm::Module &module, const std::string &path) {
+  auto buffer = llvm::MemoryBuffer::getFile(path);
+  if (!buffer) {
+    llvm::errs() << "tz: the runtime is missing: " << path << "\n";
+    return false;
+  }
+  // Lazily: only the functions that end up linked are read in full.
+  llvm::Expected<std::unique_ptr<llvm::Module>> runtime =
+      llvm::getOwningLazyBitcodeModule(std::move(*buffer), module.getContext());
+  if (!runtime) {
+    llvm::errs() << "tz: cannot read the runtime " << path << ": "
+                 << llvm::toString(runtime.takeError()) << "\n";
+    return false;
+  }
+  (*runtime)->setTargetTriple(module.getTargetTriple());
+  (*runtime)->setDataLayout(module.getDataLayout());
+
+  // A call through a declaration that disagrees with the definition would
+  // not be inlined, or would pass its arguments wrongly.
+  for (llvm::Function &decl : module) {
+    llvm::Function *def = decl.isDeclaration() ? (*runtime)->getFunction(decl.getName()) : nullptr;
+    if (def && def->getFunctionType() != decl.getFunctionType()) {
+      llvm::errs() << "tz: internal error: " << decl.getName()
+                   << " is declared differently in CodeGen and in the runtime\n";
+      return false;
+    }
+  }
+  // What the copies refer to by name is the one copy in tzrt.lib. State that
+  // is static would be duplicated instead: every copied function would get a
+  // variable of its own. (Names starting with __ belong to the C library's
+  // inline functions.)
+  llvm::StringSet<> shared;
+  for (llvm::GlobalValue &value : (*runtime)->global_values()) {
+    if (value.isDeclaration())
+      continue;
+    auto *var = llvm::dyn_cast<llvm::GlobalVariable>(&value);
+    if (var && var->hasLocalLinkage() && !var->isConstant() && !var->getName().starts_with("__")) {
+      llvm::errs() << "tz: internal error: the runtime variable " << var->getName()
+                   << " is static\n";
+      return false;
+    }
+    if (value.hasExternalLinkage())
+      shared.insert(value.getName());
+  }
+
+  // CodeGen declares every runtime function; only those the program calls
+  // are to be linked.
+  for (llvm::Function &fn : llvm::make_early_inc_range(module))
+    if (fn.isDeclaration() && fn.use_empty())
+      fn.eraseFromParent();
+  if (llvm::Linker::linkModules(module, std::move(*runtime), llvm::Linker::LinkOnlyNeeded)) {
+    llvm::errs() << "tz: internal error: cannot link the runtime\n";
+    return false;
+  }
+
+  for (llvm::Function &fn : module) {
+    // clang named a CPU for the runtime; the inliner does not mix functions
+    // built for different CPUs, so everything uses the target's default.
+    fn.removeFnAttr("target-cpu");
+    fn.removeFnAttr("target-features");
+    fn.removeFnAttr("tune-cpu");
+    if (fn.isDeclaration() || !shared.contains(fn.getName()))
+      continue;
+    fn.setComdat(nullptr);
+    llvm::SmallPtrSet<llvm::Function *, 8> helpers;
+    if (!fn.hasFnAttribute(llvm::Attribute::Hot) || copySize(fn, helpers) > kRuntimeCopyLimit)
+      fn.deleteBody();
+    else
+      fn.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+  }
+  for (llvm::GlobalVariable &var : module.globals()) {
+    if (var.isDeclaration() || !shared.contains(var.getName()))
+      continue;
+    var.setComdat(nullptr);
+    if (var.isConstant()) {
+      var.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
+    } else {
+      var.setInitializer(nullptr);
+      var.setLinkage(llvm::GlobalValue::ExternalLinkage);
+    }
+  }
+  // Static helpers that only the dropped bodies called are left over; runPasses
+  // removes them before optimizing.
+  return true;
+}
+
+void runPasses(llvm::Module &module, llvm::TargetMachine &tm, bool optimize) {
   // The analysis managers must be destroyed in this reverse order.
   llvm::LoopAnalysisManager lam;
   llvm::FunctionAnalysisManager fam;
@@ -187,12 +312,15 @@ void optimize(llvm::Module &module, llvm::TargetMachine &tm, unsigned optLevel) 
   pb.registerLoopAnalyses(lam);
   pb.crossRegisterProxies(lam, fam, cgam, mam);
 
-  static const llvm::OptimizationLevel levels[] = {
-      llvm::OptimizationLevel::O0, llvm::OptimizationLevel::O1, llvm::OptimizationLevel::O2,
-      llvm::OptimizationLevel::O3};
-  llvm::ModulePassManager mpm = optLevel == 0
-                                    ? pb.buildO0DefaultPipeline(llvm::OptimizationLevel::O0)
-                                    : pb.buildPerModuleDefaultPipeline(levels[optLevel]);
+  llvm::ModulePassManager mpm;
+  if (optimize) {
+    // First drop what linkRuntime left unused, so it is not optimized for
+    // nothing.
+    mpm.addPass(llvm::GlobalDCEPass());
+    mpm.addPass(pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
+  } else {
+    mpm.addPass(pb.buildO0DefaultPipeline(llvm::OptimizationLevel::O0));
+  }
   mpm.run(module, mam);
 }
 
@@ -228,19 +356,11 @@ bool emitObjectFile(llvm::Module &module, llvm::TargetMachine &tm, llvm::StringR
   return written && supported;
 }
 
-// The runtime library sits next to the tz executable.
-std::string runtimeLibraryPath(const char *argv0, const llvm::Triple &triple) {
-  std::string self = llvm::sys::fs::getMainExecutable(argv0, (void *)(intptr_t)&runDriver);
-  llvm::SmallString<256> path(llvm::sys::path::parent_path(self));
-  llvm::sys::path::append(path, triple.isOSWindows() ? "tzrt.lib" : "libtzrt.a");
-  return std::string(path);
-}
-
 int build(const Options &opts, llvm::StringRef output, const char *argv0) {
   // The target comes first: code generation needs its data layout to know
   // the size of values.
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
-  std::unique_ptr<llvm::TargetMachine> tm = createTargetMachine(triple, opts.optLevel);
+  std::unique_ptr<llvm::TargetMachine> tm = createTargetMachine(triple, opts.optimize);
   if (!tm)
     return kExitError;
 
@@ -249,16 +369,18 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
   if (!module)
     return kExitError;
   module->setTargetTriple(triple);
-  optimize(*module, *tm, opts.optLevel);
+  if (opts.optimize && !linkRuntime(*module, runtimeFile(argv0, "tzrt.bc")))
+    return kExitError;
+  runPasses(*module, *tm, opts.optimize);
 
   if (opts.emitLLVM)
     return writeFile(output, [&](llvm::raw_pwrite_stream &out) { module->print(out, nullptr); })
                ? 0
                : kExitError;
 
-  std::string runtime = runtimeLibraryPath(argv0, triple);
+  std::string runtime = runtimeFile(argv0, triple.isOSWindows() ? "tzrt.lib" : "libtzrt.a");
   if (!llvm::sys::fs::exists(runtime)) {
-    llvm::errs() << "tz: the runtime library is missing: " << runtime << "\n";
+    llvm::errs() << "tz: the runtime is missing: " << runtime << "\n";
     return kExitError;
   }
 

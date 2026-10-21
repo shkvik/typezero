@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ast/Ast.h"
-#include "sema/Facts.h"
-#include "sema/Types.h"
-#include "support/Diagnostics.h"
+#include "ast/ast.h"
+#include "sema/facts.h"
+#include "sema/types.h"
+#include "support/diagnostics.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
@@ -48,7 +48,7 @@ private:
   static Flow join(const Flow &a, const Flow &b);
 
   // What a loop may change, found by scanning it before checking it (see
-  // SemaFlow.cpp).
+  // sema_flow.cpp).
   struct LoopScan {
     struct Change {
       unsigned count = 0; // assignments and updates of the variable
@@ -141,7 +141,7 @@ private:
   static const Type *unify(const Type *a, const Type *b);
   static bool alwaysReturns(const Stmt *stmt);
 
-  // Flow: facts, narrowing and proofs (SemaFlow.cpp)
+  // Flow: facts, narrowing and proofs (sema_flow.cpp)
   // `expr` (checked, of an integer type) as `term + offset`, if it has that
   // form and its computation cannot overflow.
   std::optional<Linear> linear(const Expr *expr) const;

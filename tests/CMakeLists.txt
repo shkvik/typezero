@@ -1,5 +1,7 @@
-# Every tests/run/*.ts is compiled and run at -O0 and -O2; every
-# tests/errors/*.ts must fail to compile. See check.cmake for the expectations.
+# Every tests/run/*.ts is compiled and run twice: as usual (optimized, with
+# the runtime bitcode linked into the program) and with -O0 (no optimization,
+# the runtime library). Every tests/errors/*.ts must fail to compile. See
+# check.cmake for the expectations.
 #
 # Run tests marked with a `// same-as-node` line behave exactly as in
 # JavaScript; when Node.js (23.6 or newer, which strips types) is installed,
@@ -10,11 +12,12 @@ find_program(TZ_NODE node)
 file(GLOB TZ_RUN_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/run/*.ts)
 foreach(src ${TZ_RUN_TESTS})
   get_filename_component(name ${src} NAME_WE)
-  foreach(opt O0 O2)
-    add_test(NAME run/${name}/${opt}
-      COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run -DOPT=-${opt}
-              -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
-  endforeach()
+  add_test(NAME run/${name}
+    COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
+  add_test(NAME run/${name}/O0
+    COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run -DOPT=-O0
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
 
   file(STRINGS ${src} same_as_node REGEX "^// same-as-node")
   if(TZ_NODE AND same_as_node)
@@ -29,7 +32,7 @@ file(GLOB TZ_EXAMPLES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/examples/*.ts)
 foreach(src ${TZ_EXAMPLES})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME examples/${name}
-    COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run -DOPT=-O2
+    COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
 endforeach()
 

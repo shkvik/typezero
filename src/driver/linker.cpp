@@ -1,4 +1,4 @@
-#include "driver/Linker.h"
+#include "driver/linker.h"
 
 #include "lld/Common/Driver.h"
 #include "llvm/Support/raw_ostream.h"

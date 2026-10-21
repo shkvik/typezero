@@ -21,12 +21,12 @@
 #include <string.h>
 
 // The same limit as for strings, which keeps every length far from the int
-// range (see kMaxLength in src/sema/Facts.h).
+// range (see kMaxLength in src/sema/facts.h).
 #define MAX_LENGTH ((1u << 30) - 1)
 
-static int64_t live_arrays;
+int64_t tz_live_arrays; // not static: see the rules in tzrt.h
 
-int64_t tz_arr_live_objects(void) { return live_arrays; }
+int64_t tz_arr_live_objects(void) { return tz_live_arrays; }
 
 int tz_is_managed(const TzType *type) {
   switch (type->kind) {
@@ -130,7 +130,7 @@ void tz_arr_free(TzArray *array) {
         release_value(type, element(a, i), &dead);
     tz_free(a->alloc);
     tz_free(a);
-    --live_arrays;
+    --tz_live_arrays;
     if (dead.count == 0)
       break;
     a = dead.items[--dead.count];
@@ -172,7 +172,7 @@ TzArray *tz_arr_new(const TzType *type, int64_t length, int64_t capacity) {
   a->alloc = NULL;
   if (length)
     memset(a->data, 0, (size_t)length * type->size);
-  ++live_arrays;
+  ++tz_live_arrays;
   return a;
 }
 
@@ -198,7 +198,7 @@ static void reallocate(TzArray *a, uint32_t front, uint32_t capacity) {
 }
 
 // Makes room for at least `min` elements, growing by half as V8 does.
-void tz_arr_grow(TzArray *a, int64_t min) {
+TZ_COLD void tz_arr_grow(TzArray *a, int64_t min) {
   if (min > MAX_LENGTH)
     invalid_length(min);
   uint64_t capacity = (uint64_t)a->length + a->length / 2 + 8;
@@ -211,7 +211,7 @@ void tz_arr_grow(TzArray *a, int64_t min) {
 
 // Moves the first element to `out` (zeroes it if the array is empty) and
 // returns whether there was one.
-int32_t tz_arr_shift(TzArray *a, void *out) {
+TZ_HOT int32_t tz_arr_shift(TzArray *a, void *out) {
   size_t size = a->type->size;
   if (a->length == 0) {
     memset(out, 0, size);

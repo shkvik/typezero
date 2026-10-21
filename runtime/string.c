@@ -16,7 +16,7 @@
 //                     characters (without HEAP, see below)
 //         bit  63     HEAP: obj is reference counted (literals are not)
 //
-// The layout must match CodeGen (kStr* constants in src/codegen/CodeGen.cpp).
+// The layout must match CodeGen (kStr* constants in src/codegen/codegen.cpp).
 //
 // Representations:
 //   inline        a one-byte string of up to 8 code units lives in `obj`, the
@@ -128,16 +128,16 @@ static inline TzStr inline_str(const uint8_t *data, uint32_t len) {
 // Objects and reference counts
 //===----------------------------------------------------------------------===//
 
-static int64_t live_objects;
+int64_t tz_live_strings; // not static: see the rules in tzrt.h
 
-int64_t tz_str_live_objects(void) { return live_objects; }
+int64_t tz_str_live_objects(void) { return tz_live_strings; }
 
 static void *object_new(size_t size, uint32_t kind) {
   Header *h = (Header *)tz_alloc(size);
   h->rc = 1;
   h->kind = kind;
   h->reserved = 0;
-  ++live_objects;
+  ++tz_live_strings;
   return h;
 }
 
@@ -187,13 +187,8 @@ static void stack_free(PtrStack *s) {
 
 // Frees an object whose count reached zero, and everything that dies with it.
 // Called by the inline release code that the compiler emits.
-void tz_str_free(void *obj) {
-  Header *first = (Header *)obj;
-  if (first->kind != KIND_ROPE) { // a buffer: nothing else dies with it
-    --live_objects;
-    tz_free(first);
-    return;
-  }
+// tz_str_free of a rope: its halves may die with it.
+TZ_NOINLINE void tz_str_free_rope(void *obj) {
   PtrStack pending;
   stack_init(&pending);
   stack_push(&pending, obj);
@@ -206,10 +201,19 @@ void tz_str_free(void *obj) {
         if ((children[i].meta & F_HEAP) && --((Header *)children[i].obj)->rc == 0)
           stack_push(&pending, children[i].obj);
     }
-    --live_objects;
+    --tz_live_strings;
     tz_free(h);
   }
   stack_free(&pending);
+}
+
+TZ_HOT void tz_str_free(void *obj) {
+  if (((Header *)obj)->kind == KIND_ROPE) {
+    tz_str_free_rope(obj);
+    return;
+  }
+  --tz_live_strings; // a buffer: nothing else dies with it
+  tz_free(obj);
 }
 
 //===----------------------------------------------------------------------===//
@@ -226,15 +230,15 @@ static Buffer *buffer_new(uint32_t capacity, int two) {
 
 static inline char *buffer_units(Buffer *b) { return (char *)b + sizeof(Buffer); }
 
-static void flatten(Rope *r, uint64_t meta);
+TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta);
 
 // The flat string behind `s`, borrowed from `s`. Ropes are flattened once.
-static TzStr flat(TzStr s) {
+static inline TzStr flat(TzStr s) {
   if (!is_rope(s.meta))
     return s;
   Rope *r = (Rope *)s.obj;
   if (!r->flat.obj)
-    flatten(r, s.meta);
+    tz_str_flatten(r, s.meta);
   return r->flat;
 }
 
@@ -286,7 +290,7 @@ static inline uint64_t add_inline_units(uint64_t bits, uint32_t pos, TzStr s) {
   return bits;
 }
 
-static void flatten(Rope *r, uint64_t meta) {
+TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
   uint32_t len = str_len(meta);
   int two = is_two(meta);
   // Spare room: a flattened string is often appended to next.
@@ -581,11 +585,8 @@ static int concat_inline(TzStr *out, const TzStr *parts, int64_t n) {
   return 1;
 }
 
-// `parts[0] + parts[1] + ... + parts[n-1]`: the compiler turns chains of `+`
-// and template literals into one call. Parts may be number parts.
-void tz_str_concat_n(TzStr *out, const TzStr *parts, int64_t n) {
-  if (concat_inline(out, parts, n))
-    return;
+// tz_str_concat_n when the result is not a short string.
+TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
   TzStr local[16];
   NumberText local_numbers[4];
   TzStr *kept = n <= 16 ? local : (TzStr *)tz_alloc((size_t)n * sizeof(TzStr));
@@ -672,6 +673,13 @@ void tz_str_concat_n(TzStr *out, const TzStr *parts, int64_t n) {
     tz_free(numbers);
 }
 
+// `parts[0] + parts[1] + ... + parts[n-1]`: the compiler turns chains of `+`
+// and template literals into one call. Parts may be number parts.
+void tz_str_concat_n(TzStr *out, const TzStr *parts, int64_t n) {
+  if (!concat_inline(out, parts, n))
+    tz_str_concat_slow(out, parts, n);
+}
+
 // `items` joined by `sep` (NULL for ","), in one buffer of the exact size:
 // join() of a string[].
 void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep) {
@@ -684,7 +692,8 @@ void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep) {
 //===----------------------------------------------------------------------===//
 
 // Whether a[ia..ia+n) and b[ib..ib+n) hold the same code units.
-static int units_equal(const TzStr *a, uint32_t ia, const TzStr *b, uint32_t ib, uint32_t n) {
+TZ_NOINLINE int tz_str_units_equal(const TzStr *a, uint32_t ia, const TzStr *b, uint32_t ib,
+                                   uint32_t n) {
   if (n == 0)
     return 1;
   if (is_two(a->meta) == is_two(b->meta)) {
@@ -698,7 +707,7 @@ static int units_equal(const TzStr *a, uint32_t ia, const TzStr *b, uint32_t ib,
   return 1;
 }
 
-int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
+TZ_HOT int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
   uint32_t len = str_len(a_meta);
   if (len != str_len(b_meta))
     return 0;
@@ -707,7 +716,7 @@ int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta)
   if (is_inline(a_meta) && is_inline(b_meta))
     return 0;
   TzStr a = flat(make_str(a_obj, a_meta)), b = flat(make_str(b_obj, b_meta));
-  return units_equal(&a, 0, &b, 0, len);
+  return tz_str_units_equal(&a, 0, &b, 0, len);
 }
 
 // Orders strings by UTF-16 code units, as JavaScript's `<` does.
@@ -736,7 +745,7 @@ static int64_t index_of(const TzStr *s, const TzStr *t, uint32_t from) {
     return -1;
   uint16_t first = unit_at(t, 0);
   for (uint32_t i = from; i + tlen <= len; ++i)
-    if (unit_at(s, i) == first && units_equal(s, i + 1, t, 1, tlen - 1))
+    if (unit_at(s, i) == first && tz_str_units_equal(s, i + 1, t, 1, tlen - 1))
       return i;
   return -1;
 }
@@ -761,8 +770,8 @@ static inline int inline_has_at(void *s_obj, uint32_t start, void *t_obj, uint32
   return (((uint64_t)(uintptr_t)s_obj >> (8 * start)) & mask) == (uint64_t)(uintptr_t)t_obj;
 }
 
-int32_t tz_str_starts_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
-                           int64_t position, int32_t has_position) {
+TZ_HOT int32_t tz_str_starts_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
+                                  int64_t position, int32_t has_position) {
   uint32_t len = str_len(s_meta), tlen = str_len(t_meta);
   uint32_t start = has_position ? clamp(position, len) : 0;
   if ((uint64_t)start + tlen > len)
@@ -770,11 +779,11 @@ int32_t tz_str_starts_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t
   if (is_inline(s_meta) && is_inline(t_meta))
     return inline_has_at(s_obj, start, t_obj, tlen);
   TzStr s = flat(make_str(s_obj, s_meta)), t = flat(make_str(t_obj, t_meta));
-  return units_equal(&s, start, &t, 0, tlen);
+  return tz_str_units_equal(&s, start, &t, 0, tlen);
 }
 
-int32_t tz_str_ends_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
-                         int64_t end_position, int32_t has_end) {
+TZ_HOT int32_t tz_str_ends_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
+                                int64_t end_position, int32_t has_end) {
   uint32_t len = str_len(s_meta), tlen = str_len(t_meta);
   uint32_t end = has_end ? clamp(end_position, len) : len;
   if (tlen > end)
@@ -782,7 +791,7 @@ int32_t tz_str_ends_with(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_m
   if (is_inline(s_meta) && is_inline(t_meta))
     return inline_has_at(s_obj, end - tlen, t_obj, tlen);
   TzStr s = flat(make_str(s_obj, s_meta)), t = flat(make_str(t_obj, t_meta));
-  return units_equal(&s, end - tlen, &t, 0, tlen);
+  return tz_str_units_equal(&s, end - tlen, &t, 0, tlen);
 }
 
 //===----------------------------------------------------------------------===//
@@ -797,7 +806,7 @@ static void check_index(int64_t index, uint32_t len) {
               len);
 }
 
-int32_t tz_str_char_code_at(void *obj, uint64_t meta, int64_t index) {
+TZ_HOT int32_t tz_str_char_code_at(void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
   TzStr f = flat(make_str(obj, meta));
   return unit_at(&f, (uint32_t)index);
@@ -924,7 +933,7 @@ void tz_str_from_f64(TzStr *out, double value) {
 
 // Writes code units to stdout as UTF-8. A lone surrogate, which UTF-8 cannot
 // express, becomes U+FFFD, as in Node.js.
-static void write_units(const void *data, uint32_t len, int two) {
+TZ_NOINLINE void tz_out_write_units(const void *data, uint32_t len, int two) {
   char buf[256];
   size_t n = 0;
   for (uint32_t i = 0; i < len; ++i) {
@@ -962,7 +971,7 @@ static void write_units(const void *data, uint32_t len, int two) {
 }
 
 void tz_out_write_utf16(const uint16_t *units, size_t length) {
-  write_units(units, (uint32_t)length, 1);
+  tz_out_write_units(units, (uint32_t)length, 1);
 }
 
 void tz_print_string(void *obj, uint64_t meta) {
@@ -973,7 +982,7 @@ void tz_print_string(void *obj, uint64_t meta) {
   if (is_ascii(f.meta))
     tz_out_write((const char *)units(&f), len);
   else
-    write_units(units(&f), len, is_two(f.meta));
+    tz_out_write_units(units(&f), len, is_two(f.meta));
 }
 
 //===----------------------------------------------------------------------===//

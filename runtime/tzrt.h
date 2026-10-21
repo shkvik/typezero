@@ -1,5 +1,5 @@
 // Declarations shared between the files of the runtime. Programs call the
-// runtime through the functions declared in src/codegen/CodeGen.cpp
+// runtime through the functions declared in src/codegen/codegen.cpp
 // (CodeGen::declareRuntime); keep both in sync.
 
 #ifndef TZRT_H
@@ -14,6 +14,29 @@
 #define TZ_NORETURN __attribute__((noreturn))
 #endif
 
+// TZ_HOT marks the fast paths that programs call in their loops. tz copies
+// those a program calls into the program, so that the optimizer can inline
+// them there (see linkRuntime in src/driver/driver.cpp); every other call
+// goes to tzrt.lib. Two rules follow:
+//
+//   - State is never `static`: a copied function must reach the one variable
+//     in tzrt.lib, not a copy of its own. The driver rejects static state.
+//   - A TZ_HOT function stays small: it calls its slow path as a separate
+//     TZ_NOINLINE function that is not `static`, which stays in tzrt.lib.
+//     The driver does not copy a function that would bring more than about
+//     a hundred instructions along.
+//
+// TZ_COLD: rarely called; the optimizer keeps calls to it out of the hot path.
+#if defined(__clang__) || defined(__GNUC__)
+#define TZ_HOT __attribute__((hot))
+#define TZ_COLD __attribute__((cold))
+#define TZ_NOINLINE __attribute__((noinline))
+#else
+#define TZ_HOT
+#define TZ_COLD
+#define TZ_NOINLINE __declspec(noinline)
+#endif
+
 // Buffered stdout.
 void tz_out_write(const char *data, size_t len);
 
@@ -21,8 +44,8 @@ void tz_out_write(const char *data, size_t len);
 // `out` must hold at least 32 bytes.
 size_t tz_format_f64(double value, char *out);
 
-TZ_NORETURN void tz_panic(const char *message, int64_t len);
-TZ_NORETURN void tz_panicf(const char *format, ...);
+TZ_COLD TZ_NORETURN void tz_panic(const char *message, int64_t len);
+TZ_COLD TZ_NORETURN void tz_panicf(const char *format, ...);
 
 // The allocator (alloc.c). tz_alloc panics when memory runs out; tz_free
 // takes any block from tz_alloc, or NULL.

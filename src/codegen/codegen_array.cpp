@@ -6,7 +6,7 @@
 // element. Elements are stored unboxed by their static type. The hot paths
 // (indexing, length, push, pop) are emitted inline; the rest calls the runtime.
 
-#include "codegen/CodeGen.h"
+#include "codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"

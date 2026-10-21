@@ -1,6 +1,6 @@
 // Built-in methods of strings and arrays, array literals and `new Array`.
 
-#include "sema/Sema.h"
+#include "sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

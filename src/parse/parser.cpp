@@ -1,4 +1,4 @@
-#include "parse/Parser.h"
+#include "parse/parser.h"
 
 #include "llvm/ADT/SmallString.h"
 

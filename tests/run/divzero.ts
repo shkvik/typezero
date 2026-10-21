@@ -1,7 +1,9 @@
 // expect-exit: 2
 // expect-stderr: panic: integer divide by zero
-let a: int = 10
-let b: int = 0
-console.log("before")
-console.log(a / b)
+// Division by zero is checked at run time, also where the divisor is only
+// known to be zero after inlining and unrolling.
+function divide(a: int, b: int): int {
+  return a / b
+}
+for (let i = 3; i >= 0; i--) console.log("10 /", i, "=", divide(10, i))
 console.log("after")

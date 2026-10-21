@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(typezero VERSION 0.1.0 LANGUAGES C CXX)
+# The runtime (C) is built by clang through custom commands: see runtime/.
+project(typezero VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_C_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # The prebuilt LLVM is a Release build with the static CRT (/MT), no RTTI and no
@@ -28,7 +28,7 @@ find_package(LLVM REQUIRED CONFIG)
 find_package(LLD REQUIRED CONFIG)
 message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
 
-# tz looks for the runtime library next to its own executable.
+# tz looks for the runtime files next to its own executable.
 set(TZ_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin)
 
 add_subdirectory(runtime)

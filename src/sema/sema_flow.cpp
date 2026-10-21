@@ -11,7 +11,7 @@
 // is linear only where Sema can show it does not overflow. Indices and
 // positions are computed as long, where that never happens.
 
-#include "sema/Sema.h"
+#include "sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

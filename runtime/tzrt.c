@@ -30,8 +30,9 @@ typedef struct {
   int isConsole;
 } Stream;
 
-static Stream out_stream;
-static Stream err_stream;
+// Not static: see the rules in tzrt.h.
+Stream tz_out_stream;
+Stream tz_err_stream;
 
 #ifdef _WIN32
 
@@ -109,37 +110,46 @@ static void stream_write(Stream *s, const char *data, size_t len) {
 #endif
 
 // stdout is buffered; a console gets every line as soon as it is complete.
-static char out_buf[8192];
-static size_t out_len;
+char tz_out_buf[8192]; // not static: see the rules in tzrt.h
+size_t tz_out_len;
 
-static void out_flush(int all) {
-  size_t n = all ? out_len : utf8_complete_prefix(out_buf, out_len);
-  stream_write(&out_stream, out_buf, n);
-  memmove(out_buf, out_buf + n, out_len - n);
-  out_len -= n;
+// Writes out the buffer, or with `all` unset, only its complete characters.
+TZ_NOINLINE void tz_out_flush(int all) {
+  size_t n = all ? tz_out_len : utf8_complete_prefix(tz_out_buf, tz_out_len);
+  stream_write(&tz_out_stream, tz_out_buf, n);
+  memmove(tz_out_buf, tz_out_buf + n, tz_out_len - n);
+  tz_out_len -= n;
 }
 
-static void out_flush_all(void) { out_flush(1); }
+static void out_flush_all(void) { tz_out_flush(1); }
+
+// tz_out_write when the buffer has no room.
+TZ_NOINLINE void tz_out_write_slow(const char *data, size_t len) {
+  tz_out_flush(1);
+  if (len >= sizeof tz_out_buf) {
+    stream_write(&tz_out_stream, data, len);
+    return;
+  }
+  memcpy(tz_out_buf + tz_out_len, data, len);
+  tz_out_len += len;
+}
 
 void tz_out_write(const char *data, size_t len) {
-  if (len > sizeof out_buf - out_len) {
-    out_flush(1);
-    if (len >= sizeof out_buf) {
-      stream_write(&out_stream, data, len);
-      return;
-    }
+  if (len > sizeof tz_out_buf - tz_out_len) {
+    tz_out_write_slow(data, len);
+    return;
   }
-  memcpy(out_buf + out_len, data, len);
-  out_len += len;
+  memcpy(tz_out_buf + tz_out_len, data, len);
+  tz_out_len += len;
 }
 
 void tz_rt_init(void) {
 #ifdef _WIN32
-  stream_init(&out_stream, STD_OUTPUT_HANDLE);
-  stream_init(&err_stream, STD_ERROR_HANDLE);
+  stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
+  stream_init(&tz_err_stream, STD_ERROR_HANDLE);
 #else
-  stream_init(&out_stream, 1);
-  stream_init(&err_stream, 2);
+  stream_init(&tz_out_stream, 1);
+  stream_init(&tz_err_stream, 2);
 #endif
   atexit(out_flush_all);
 }
@@ -150,7 +160,7 @@ void tz_rt_init(void) {
 // release everything, and tz_rt_shutdown checks that nothing is left.
 void tz_rt_main_done(void) {
   if (!getenv("TZ_CHECK_LEAKS")) {
-    out_flush(1);
+    tz_out_flush(1);
     exit(0);
   }
 }
@@ -165,8 +175,8 @@ void tz_rt_shutdown(void) {
     int len = snprintf(message, sizeof message,
                        "tz: %lld string object(s) and %lld array(s) leaked\n", (long long)strings,
                        (long long)arrays);
-    out_flush(1);
-    stream_write(&err_stream, message, (size_t)len);
+    tz_out_flush(1);
+    stream_write(&tz_err_stream, message, (size_t)len);
   }
 }
 
@@ -177,8 +187,8 @@ void tz_rt_shutdown(void) {
 void tz_print_char(int32_t c) {
   char ch = (char)c;
   tz_out_write(&ch, 1);
-  if (c == '\n' && out_stream.isConsole)
-    out_flush(0);
+  if (c == '\n' && tz_out_stream.isConsole)
+    tz_out_flush(0);
 }
 
 static void print_u64(uint64_t value, int negative) {
@@ -296,10 +306,10 @@ void tz_print_f64(double value) {
 //===----------------------------------------------------------------------===//
 
 TZ_NORETURN void tz_panic(const char *message, int64_t len) {
-  out_flush(1);
-  stream_write(&err_stream, "panic: ", 7);
-  stream_write(&err_stream, message, (size_t)len);
-  stream_write(&err_stream, "\n", 1);
+  tz_out_flush(1);
+  stream_write(&tz_err_stream, "panic: ", 7);
+  stream_write(&tz_err_stream, message, (size_t)len);
+  stream_write(&tz_err_stream, "\n", 1);
   exit(2);
 }
 

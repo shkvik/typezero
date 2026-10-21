@@ -1,7 +1,7 @@
 #pragma once
 
-#include "lex/Token.h"
-#include "support/Diagnostics.h"
+#include "lex/token.h"
+#include "support/diagnostics.h"
 
 #include <string>
 #include <vector>
