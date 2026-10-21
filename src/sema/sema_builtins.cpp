@@ -119,7 +119,7 @@ Expr *Sema::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expect
   if (fn->kind == Pow) {
     // Math.pow(x, y) is x ** y.
     auto *pow = ctx_.make<BinaryExpr>(call->loc(), BinaryOp::Pow, call->args[0], call->args[1]);
-    return checkBinary(pow, expected);
+    return checkBinary(pow, expected, /*wraps=*/false);
   }
 
   call->builtin = fn->builtin;

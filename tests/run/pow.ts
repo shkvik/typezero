@@ -7,7 +7,7 @@ let two: int = 2
 let thirtyOne: int = 31
 let minusOne: int = -1
 console.log(two ** thirtyOne, two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
-const base: long = 2
+let base: long = 2
 console.log(base ** 62, base ** 63, base ** 64, (-base) ** 3)
 let x: int = 5
 x **= 2

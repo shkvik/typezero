@@ -5,6 +5,7 @@
 #include "sema/types.h"
 #include "support/diagnostics.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
@@ -115,6 +116,18 @@ private:
   Expr *checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected);
   Expr *checkEnumIndex(EnumDecl *decl, IndexExpr *index);
 
+  // Integer constants (sema_decls.cpp): expressions of literals, `const`
+  // variables holding constants, and operators. Computing them reports what
+  // would go wrong at run time: a division by zero, or a value that does not
+  // fit in its type and would wrap around where JavaScript keeps it.
+  std::optional<int64_t> intConstant(const Expr *expr) const;
+  void foldUnary(UnaryExpr *unary, bool wraps);
+  void foldBinary(BinaryExpr *bin, bool wraps);
+  // `x / 0` and `x % 0` of integers: an error even when x is not constant.
+  void checkDivisor(BinaryOp op, const Expr *divisor);
+  void reportOverflow(const Expr *expr, const Type *type, const std::string &value, int64_t wrapped,
+                      bool wraps);
+
   // Declarations and statements
   void declareFunction(FunctionDecl *fn);
   void checkFunctionBody(FunctionDecl *fn);
@@ -140,14 +153,15 @@ private:
   Expr *checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse);
 
   // Expressions. Each returns the expression to use in place of the argument,
-  // which differs when a conversion was inserted.
-  Expr *checkExpr(Expr *expr, const Type *expected = nullptr);
+  // which differs when a conversion was inserted. `wraps`: only the low bits
+  // of the value matter, as in an operand of `|` (see foldBinary).
+  Expr *checkExpr(Expr *expr, const Type *expected = nullptr, bool wraps = false);
   Expr *checkIntLit(IntLitExpr *lit, const Type *expected, bool negated);
   Expr *checkName(NameExpr *name);
   // Reports a use of a variable declared by an earlier case of a switch.
   void checkVisible(NameExpr *name, const VarSymbol *var);
-  Expr *checkUnary(UnaryExpr *unary, const Type *expected);
-  Expr *checkBinary(BinaryExpr *binary, const Type *expected);
+  Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
+  Expr *checkBinary(BinaryExpr *binary, const Type *expected, bool wraps);
   Expr *checkEquality(BinaryExpr *bin);
   Expr *checkNullish(BinaryExpr *bin, const Type *expected);
   Expr *checkAssign(AssignExpr *assign);
@@ -271,6 +285,11 @@ private:
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   llvm::StringSet<> namesInFunctions_;
+  // The values of the integer constants computed so far: operator expressions
+  // and `const` variables. In a `wraps` context a value may exceed its type
+  // (see foldBinary).
+  llvm::DenseMap<const Expr *, int64_t> constants_;
+  llvm::DenseMap<const VarSymbol *, int64_t> constVars_;
 };
 
 // "2 arguments", "1-3 arguments", "1 or more arguments".

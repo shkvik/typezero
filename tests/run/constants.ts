@@ -1,0 +1,34 @@
+// same-as-node --experimental-transform-types
+// Integer constants are computed at compile time, where an overflow is an
+// error (see errors/constants.ts). These fit, or are meant to wrap around.
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const month: long = MS_PER_DAY * 30
+const big: long = 2 ** 40
+const huge: double = 2 ** 70
+console.log(MS_PER_DAY, month, big, huge)
+
+// Bounds of the types are still constants.
+const min = -2147483648
+const max = 2147483647
+console.log(min, max, -max, min + max, min / 2, max % 7, -(min + 1))
+
+// Under `| 0` and the other bitwise operators only the low 32 bits count,
+// and wrapping around gives what JavaScript gives.
+console.log((max + 1) | 0, (max * 31 + 7) | 0, (min - 1) >> 0, ~(max + 1), (2 ** 40 + 5) | 0)
+const FNV_PRIME = 16777619
+const FNV_OFFSET = -2128831035
+console.log(FNV_OFFSET, (FNV_OFFSET * 31) ^ FNV_PRIME, 1 << 31, (1 << 31) >>> 31)
+
+// Enum members are constants too.
+enum Size {
+  Small = 1000,
+  Large = 1000000,
+}
+const area: long = Size.Large * Size.Large
+console.log(area, Size.Small * Size.Large)
+
+// Only `const` is constant: `let` may change, so its arithmetic wraps at
+// run time, as in Go.
+let wraps = max
+wraps += 0
+console.log((wraps + 1) | 0)

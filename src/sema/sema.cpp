@@ -877,6 +877,9 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
     d.sym = declareVar(d.name, d.loc, type, decl->isConst);
     if (value)
       assigned(d.sym, value);
+    if (decl->isConst && d.init && type->isInteger())
+      if (std::optional<int64_t> constant = intConstant(d.init))
+        constVars_[d.sym] = *constant;
   }
 }
 
@@ -1128,7 +1131,7 @@ bool Sema::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> label
 // Expressions
 //===----------------------------------------------------------------------===//
 
-Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
+Expr *Sema::checkExpr(Expr *expr, const Type *expected, bool wraps) {
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
     return checkIntLit(cast<IntLitExpr>(expr), expected, /*negated=*/false);
@@ -1155,9 +1158,9 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
   case Expr::Kind::Index:
     return checkIndex(cast<IndexExpr>(expr));
   case Expr::Kind::Unary:
-    return checkUnary(cast<UnaryExpr>(expr), expected);
+    return checkUnary(cast<UnaryExpr>(expr), expected, wraps);
   case Expr::Kind::Binary:
-    return checkBinary(cast<BinaryExpr>(expr), expected);
+    return checkBinary(cast<BinaryExpr>(expr), expected, wraps);
   case Expr::Kind::Assign:
     return checkAssign(cast<AssignExpr>(expr));
   case Expr::Kind::Update:
@@ -1233,7 +1236,7 @@ void Sema::checkVisible(NameExpr *name, const VarSymbol *var) {
                                   "before the 'switch' to use it in several cases");
 }
 
-Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
+Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
   const char *op = opSpelling(unary->op);
   switch (unary->op) {
   case UnaryOp::Neg:
@@ -1242,7 +1245,7 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand))
       unary->operand = checkIntLit(lit, hint, /*negated=*/unary->op == UnaryOp::Neg);
     else
-      unary->operand = checkExpr(unary->operand, hint);
+      unary->operand = checkExpr(unary->operand, hint, wraps);
     const Type *type = unary->operand->type;
     if (unary->op == UnaryOp::Plus && (type->isString() || type->isBool())) {
       // `+s` is Number(s), as in JavaScript.
@@ -1265,7 +1268,7 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
   }
   case UnaryOp::BitNot: {
     const Type *hint = expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
-    unary->operand = checkExpr(unary->operand, hint);
+    unary->operand = checkExpr(unary->operand, hint, /*wraps=*/true);
     const Type *type = unary->operand->type;
     if (type->isFloat()) {
       unary->operand = toInt32(unary->operand);
@@ -1283,10 +1286,12 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
     unary->type = Type::string();
     break;
   }
+  if (unary->type && unary->type->isInteger())
+    foldUnary(unary, wraps);
   return unary;
 }
 
-Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
+Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
   const char *op = opSpelling(bin->op);
   if (expected)
     expected = expected->nonOptional();
@@ -1333,9 +1338,10 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
+    // Only the low bits of both sides matter: the count is masked.
     const Type *hint = expected && expected->isInteger() ? expected : nullptr;
-    bin->lhs = checkExpr(bin->lhs, hint);
-    bin->rhs = checkExpr(bin->rhs);
+    bin->lhs = checkExpr(bin->lhs, hint, /*wraps=*/true);
+    bin->rhs = checkExpr(bin->rhs, nullptr, /*wraps=*/true);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     bin->type = Type::error();
     if (l->isError() || r->isError())
@@ -1360,6 +1366,7 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     // the bit width, so converting it to that type loses nothing.
     bin->rhs = convert(bin->rhs, l);
     bin->type = l;
+    foldBinary(bin, wraps);
     return bin;
   }
 
@@ -1369,8 +1376,11 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     const Type *hint = nullptr;
     if (expected && (bitwise ? expected->isInteger() : expected->isNumeric()))
       hint = expected;
-    bin->lhs = checkExpr(bin->lhs, hint);
-    bin->rhs = checkExpr(bin->rhs, hint);
+    // The low bits of a sum, difference, product or power depend only on the
+    // low bits of the operands; not so for a quotient.
+    bool operandsWrap = bitwise || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
+    bin->lhs = checkExpr(bin->lhs, hint, operandsWrap);
+    bin->rhs = checkExpr(bin->rhs, hint, operandsWrap);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     bin->type = Type::error();
     if (l->isError() || r->isError())
@@ -1399,14 +1409,20 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     bin->lhs = convert(bin->lhs, common);
     bin->rhs = convert(bin->rhs, common);
     bin->type = common;
+    if (!common->isInteger())
+      return bin;
     // An integer to a negative power is a fraction (as with `/`, integers
-    // stay integers); a negative literal exponent is surely a mistake.
-    if (bin->op == BinaryOp::Pow && common->isInteger())
-      if (auto *neg = dyn_cast<UnaryExpr>(bin->rhs);
-          neg && neg->op == UnaryOp::Neg && isa<IntLitExpr>(neg->operand))
+    // stay integers); a negative constant exponent is surely a mistake.
+    if (bin->op == BinaryOp::Pow) {
+      if (std::optional<int64_t> exponent = intConstant(bin->rhs); exponent && *exponent < 0) {
         diags_.error(bin->rhs->loc(), "'" + common->name() +
                                           "' raised to a negative power is a fraction, which an "
                                           "integer cannot hold; use a double, e.g. '2.0 ** -1'");
+        return bin;
+      }
+    }
+    checkDivisor(bin->op, bin->rhs);
+    foldBinary(bin, wraps);
     return bin;
   }
   }
@@ -1612,7 +1628,7 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
       bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
       bool integerOnly =
           shift || op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
-      assign->value = checkExpr(assign->value, shift ? nullptr : type);
+      assign->value = checkExpr(assign->value, shift ? nullptr : type, /*wraps=*/integerOnly);
       const Type *valueType = assign->value->type;
       if (!type->isError() && !valueType->isError()) {
         if (integerOnly && valueType->isFloat())
@@ -1626,6 +1642,8 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
         } else {
           // `x op= v` must produce a value of x's type, so v converts to it.
           assign->value = shift ? convert(assign->value, type) : coerce(assign->value, type);
+          if (type->isInteger())
+            checkDivisor(op, assign->value);
         }
       }
       if (var) {

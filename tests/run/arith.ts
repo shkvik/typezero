@@ -1,7 +1,9 @@
-// Integer arithmetic wraps around on overflow.
+// Integer arithmetic wraps around on overflow at run time (in constants it is
+// an error, see errors/constants.ts).
 let big: int = 2147483647
 console.log(big + 1)
-console.log(-2147483648 - 1)
+let small: int = -2147483648
+console.log(small - 1)
 
 // Integer division truncates; the remainder takes the sign of the dividend.
 console.log(7 / 2, -7 / 2, 7 % 3, -7 % 3)

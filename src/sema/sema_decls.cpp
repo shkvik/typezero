@@ -2,11 +2,13 @@
 
 #include "sema/sema.h"
 
+#include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"
 
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <string>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -339,6 +341,231 @@ Expr *Sema::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
   index->enumDecl = decl;
   index->type = Type::optional(Type::string());
   return index;
+}
+
+//===----------------------------------------------------------------------===//
+// Integer constants
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+// Doubles hold every integer up to 2^53 exactly.
+constexpr int64_t kMaxExact = int64_t(1) << 53;
+
+// `value` wrapped around to `bits` bits, as the machine computes it.
+int64_t wrapTo(unsigned bits, int64_t value) {
+  return bits == 32 ? static_cast<int32_t>(static_cast<uint32_t>(value)) : value;
+}
+
+bool fitsIn(unsigned bits, int64_t value) { return wrapTo(bits, value) == value; }
+
+// base ** exponent wrapped around to 64 bits, and the true value if it fits.
+std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t exponent) {
+  uint64_t wrapped = 1, factor = static_cast<uint64_t>(base);
+  std::optional<int64_t> exact = 1, exactFactor = base;
+  for (; exponent > 0; exponent >>= 1) {
+    if (exponent & 1) {
+      wrapped *= factor;
+      exact = exact && exactFactor ? llvm::checkedMul(*exact, *exactFactor) : std::nullopt;
+    }
+    factor *= factor;
+    if (exponent > 1)
+      exactFactor = exactFactor ? llvm::checkedMul(*exactFactor, *exactFactor) : std::nullopt;
+  }
+  return {static_cast<int64_t>(wrapped), exact};
+}
+
+// The true value of an integer constant as JavaScript prints it (up to 1e21).
+std::string constantText(std::optional<int64_t> exact, double value) {
+  if (exact)
+    return std::to_string(*exact);
+  if (std::fabs(value) >= 1e21)
+    return formatNumber(value);
+  char text[32];
+  std::snprintf(text, sizeof text, "%.0f", value);
+  return text;
+}
+
+} // namespace
+
+std::optional<int64_t> Sema::intConstant(const Expr *expr) const {
+  if (!expr->type || !expr->type->isInteger())
+    return std::nullopt;
+  switch (expr->kind()) {
+  case Expr::Kind::IntLit: {
+    // One that does not fit was reported; `-2147483648` is a UnaryExpr.
+    uint64_t value = cast<IntLitExpr>(expr)->value;
+    if (value > uint64_t(std::numeric_limits<int64_t>::max()) ||
+        !fitsIn(expr->type->bitWidth(), static_cast<int64_t>(value)))
+      return std::nullopt;
+    return static_cast<int64_t>(value);
+  }
+  case Expr::Kind::Name: {
+    auto found = constVars_.find(cast<NameExpr>(expr)->var);
+    if (found == constVars_.end())
+      return std::nullopt;
+    return found->second;
+  }
+  case Expr::Kind::Cast: {
+    // An int widened to long: the value the int holds.
+    auto *conv = cast<CastExpr>(expr);
+    if (!conv->isImplicit())
+      return std::nullopt;
+    std::optional<int64_t> value = intConstant(conv->operand);
+    if (!value)
+      return std::nullopt;
+    return wrapTo(conv->operand->type->bitWidth(), *value);
+  }
+  default: {
+    auto found = constants_.find(expr);
+    if (found == constants_.end())
+      return std::nullopt;
+    return found->second;
+  }
+  }
+}
+
+void Sema::foldUnary(UnaryExpr *unary, bool wraps) {
+  unsigned bits = unary->type->bitWidth();
+  if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
+    // `-2147483648` fits in an int, though 2147483648 alone does not.
+    uint64_t magnitude = lit->value;
+    if (magnitude <= uint64_t(1) << (bits - 1))
+      constants_[unary] = static_cast<int64_t>(0 - magnitude);
+    return;
+  }
+  std::optional<int64_t> value = intConstant(unary->operand);
+  if (!value)
+    return;
+  switch (unary->op) {
+  case UnaryOp::Plus:
+    constants_[unary] = *value;
+    return;
+  case UnaryOp::BitNot:
+    constants_[unary] = ~wrapTo(bits, *value);
+    return;
+  case UnaryOp::Neg: {
+    std::optional<int64_t> exact = llvm::checkedSub(int64_t(0), *value);
+    if (exact && (fitsIn(bits, *exact) || (wraps && *exact >= -kMaxExact && *exact <= kMaxExact))) {
+      constants_[unary] = *exact;
+      return;
+    }
+    reportOverflow(unary, unary->type, constantText(exact, -static_cast<double>(*value)),
+                   wrapTo(bits, static_cast<int64_t>(0 - static_cast<uint64_t>(*value))), wraps);
+    return;
+  }
+  default:
+    return;
+  }
+}
+
+// In a `wraps` context only the low bits of the value matter, as in
+// `(h * 31 + c) | 0`: JavaScript computes the true value and `| 0` takes its
+// low 32 bits, which is what wrapping around gives. So there the value may
+// exceed its type, but not 2^53, beyond which JavaScript rounds it.
+void Sema::foldBinary(BinaryExpr *bin, bool wraps) {
+  std::optional<int64_t> l = intConstant(bin->lhs), r = intConstant(bin->rhs);
+  if (!l || !r)
+    return;
+  unsigned bits = bin->type->bitWidth();
+  int64_t a = *l, b = *r;
+  auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
+  std::optional<int64_t> exact; // the true value, if it fits in 64 bits
+  int64_t wrapped = 0;          // what the program computes, before wrapTo
+  double value = 0;             // what JavaScript computes
+  switch (bin->op) {
+  case BinaryOp::Add:
+    exact = llvm::checkedAdd(a, b);
+    wrapped = static_cast<int64_t>(ua + ub);
+    value = static_cast<double>(a) + static_cast<double>(b);
+    break;
+  case BinaryOp::Sub:
+    exact = llvm::checkedSub(a, b);
+    wrapped = static_cast<int64_t>(ua - ub);
+    value = static_cast<double>(a) - static_cast<double>(b);
+    break;
+  case BinaryOp::Mul:
+    exact = llvm::checkedMul(a, b);
+    wrapped = static_cast<int64_t>(ua * ub);
+    value = static_cast<double>(a) * static_cast<double>(b);
+    break;
+  case BinaryOp::Div:
+  case BinaryOp::Rem: {
+    if (b == 0) // reported by checkDivisor
+      return;
+    int64_t min = bits == 32 ? std::numeric_limits<int32_t>::min() : std::numeric_limits<int64_t>::min();
+    if (b == -1) { // MIN / -1 wraps around to MIN (see CodeGen::emitIntDivRem)
+      exact = bin->op == BinaryOp::Rem ? 0 : llvm::checkedSub(int64_t(0), a);
+      wrapped = bin->op == BinaryOp::Rem ? 0 : (a == min ? min : -a);
+      value = -static_cast<double>(a);
+    } else {
+      exact = wrapped = bin->op == BinaryOp::Div ? a / b : a % b; // truncated, as integers divide
+    }
+    break;
+  }
+  case BinaryOp::Pow: {
+    if (b < 0) // reported by checkBinary
+      return;
+    auto [low, product] = intPower(a, b);
+    exact = product;
+    wrapped = low;
+    value = std::pow(static_cast<double>(a), static_cast<double>(b));
+    break;
+  }
+  case BinaryOp::BitAnd:
+    exact = wrapTo(bits, a) & wrapTo(bits, b);
+    break;
+  case BinaryOp::BitOr:
+    exact = wrapTo(bits, a) | wrapTo(bits, b);
+    break;
+  case BinaryOp::BitXor:
+    exact = wrapTo(bits, a) ^ wrapTo(bits, b);
+    break;
+  case BinaryOp::Shl:
+  case BinaryOp::Shr:
+  case BinaryOp::UShr: {
+    // As CodeGen does it: the count masked to the width, `>>>` on the bits.
+    unsigned count = static_cast<unsigned>(b) & (bits - 1);
+    int64_t x = wrapTo(bits, a);
+    uint64_t pattern = bits == 32 ? static_cast<uint32_t>(x) : static_cast<uint64_t>(x);
+    if (bin->op == BinaryOp::Shl)
+      exact = wrapTo(bits, static_cast<int64_t>(pattern << count));
+    else if (bin->op == BinaryOp::Shr)
+      exact = x >> count;
+    else
+      exact = wrapTo(bits, static_cast<int64_t>(pattern >> count));
+    break;
+  }
+  default:
+    return;
+  }
+  if (exact && (fitsIn(bits, *exact) || (wraps && *exact >= -kMaxExact && *exact <= kMaxExact))) {
+    constants_[bin] = *exact;
+    return;
+  }
+  reportOverflow(bin, bin->type, constantText(exact, value), wrapTo(bits, wrapped), wraps);
+}
+
+void Sema::checkDivisor(BinaryOp op, const Expr *divisor) {
+  if ((op == BinaryOp::Div || op == BinaryOp::Rem) && intConstant(divisor) == 0)
+    diags_.error(divisor->loc(), "integer division by zero; to get Infinity or NaN as in "
+                                 "JavaScript, divide doubles, e.g. '1.0 / 0'");
+}
+
+void Sema::reportOverflow(const Expr *expr, const Type *type, const std::string &value,
+                          int64_t wrapped, bool wraps) {
+  if (wraps) {
+    diags_.error(expr->loc(), "this constant is " + value +
+                                  ", beyond 2^53, where JavaScript rounds it before taking its "
+                                  "low bits; for a 32-bit product use Math.imul");
+    return;
+  }
+  bool isInt = type->bitWidth() == 32;
+  diags_.error(expr->loc(), "this constant is " + value + ", which does not fit in '" +
+                                type->name() + "' and would wrap around to " +
+                                std::to_string(wrapped) + "; compute it as a " +
+                                (isInt ? "'long' or a 'double', e.g. 'const x: long = ...'"
+                                       : "'double', e.g. 'const x: double = ...'"));
 }
 
 //===----------------------------------------------------------------------===//
