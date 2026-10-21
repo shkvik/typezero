@@ -1,0 +1,7 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/dev/compile_commands.json",
+  "cmake.useCMakePresets": "always",
+  "files.associations": {
+    "*.out": "plaintext"
+  }
+}

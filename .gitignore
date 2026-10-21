@@ -1,0 +1,11 @@
+/build/
+/out/
+/.vs/
+/.cache/
+CMakeUserPresets.json
+
+# Programs compiled while trying things out
+*.exe
+*.obj
+*.ll
+!tests/**/*.ll

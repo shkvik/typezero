@@ -1,0 +1,46 @@
+#include "driver/Linker.h"
+
+#include "lld/Common/Driver.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <vector>
+
+LLD_HAS_DRIVER(coff)
+
+namespace tz {
+
+bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inputs,
+                    llvm::StringRef output, std::string &errors) {
+  if (!triple.isOSWindows()) {
+    errors = "tz: linking for " + triple.str() + " is not supported yet\n";
+    return false;
+  }
+
+  std::vector<std::string> args = {
+      "lld-link",
+      "/nologo",
+      "/subsystem:console",
+      "/incremental:no",
+      triple.getArch() == llvm::Triple::aarch64 ? "/machine:arm64" : "/machine:x64",
+      "/out:" + output.str(),
+  };
+  args.insert(args.end(), inputs.begin(), inputs.end());
+  // The runtime is built against the static CRT (/MT). LLD locates the MSVC
+  // and Windows SDK libraries on its own.
+  args.push_back("/defaultlib:libcmt");
+  args.push_back("/defaultlib:kernel32");
+
+  std::vector<const char *> argv;
+  for (const std::string &arg : args)
+    argv.push_back(arg.c_str());
+
+  std::string messages;
+  llvm::raw_string_ostream stdoutStream(messages);
+  llvm::raw_string_ostream stderrStream(messages);
+  lld::Result result =
+      lld::lldMain(argv, stdoutStream, stderrStream, {{lld::WinLink, &lld::coff::link}});
+  errors = std::move(messages);
+  return result.retCode == 0;
+}
+
+} // namespace tz

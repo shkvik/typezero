@@ -1,0 +1,14 @@
+{
+  "name": "typezero",
+  "version-string": "0.1.0",
+  "description": "Static libraries the prebuilt LLVM expects to be provided by its user.",
+  "dependencies": [
+    "zlib",
+    "zstd",
+    {
+      "name": "libxml2",
+      "default-features": false
+    }
+  ],
+  "builtin-baseline": "6f6324d69cc4d5229804bee9f72737fe2ef08087"
+}

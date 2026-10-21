@@ -1,0 +1,5 @@
+console.log("Hello, typezero!")
+console.log("Привет, мир!")
+console.log()
+console.log("mixed:", 1, true, 2.5)
+console.log('single quotes, escapes: \t|\x41B\u{1F600}|')

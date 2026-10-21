@@ -1,0 +1,13 @@
+sum 16
+n 5
+k 9
+pairs 6
+zero
+one
+many 2
+inner 2
+outer 1
+false 1
+true 2
+10 2
+true false true true true
