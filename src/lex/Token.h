@@ -11,6 +11,13 @@ enum class Tok {
   IntLiteral,
   FloatLiteral,
   StringLiteral,
+  // Template literals: `text` is a TemplateString; `a${x}b${y}c` lexes as
+  // TemplateHead `a${, the tokens of x, TemplateMiddle }b${, the tokens of y,
+  // TemplateTail }c`.
+  TemplateString,
+  TemplateHead,
+  TemplateMiddle,
+  TemplateTail,
 
   // Keywords
   KwAs,
@@ -24,6 +31,7 @@ enum class Tok {
   KwFunction,
   KwIf,
   KwLet,
+  KwNew,
   KwReturn,
   KwTrue,
   KwVar,
@@ -40,7 +48,9 @@ enum class Tok {
   Semi,
   Colon,
   Dot,
+  Ellipsis,
   Question,
+  QuestionQuestion,
 
   // Operators
   Plus,
@@ -80,6 +90,7 @@ enum class Tok {
   ShlAssign,
   ShrAssign,
   UShrAssign,
+  QuestionQuestionAssign,
 };
 
 // How a token kind is shown in diagnostics, e.g. "'('" or "identifier".

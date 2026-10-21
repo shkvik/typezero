@@ -128,7 +128,8 @@ void initializeTargets() {
 
 // Front end: source text to verified LLVM IR. Returns null after reporting
 // errors.
-std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContext &ctx) {
+std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContext &ctx,
+                                          const llvm::DataLayout &layout) {
   auto buffer = llvm::MemoryBuffer::getFile(path);
   if (!buffer) {
     llvm::errs() << "tz: cannot read '" << path << "': " << buffer.getError().message() << "\n";
@@ -148,7 +149,8 @@ std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContex
   if (diags.hasErrors())
     return nullptr;
 
-  std::unique_ptr<llvm::Module> module = CodeGen(ctx, llvm::sys::path::filename(path)).generate(file);
+  std::unique_ptr<llvm::Module> module =
+      CodeGen(ctx, llvm::sys::path::filename(path), layout).generate(file);
   if (llvm::verifyModule(*module, &llvm::errs())) {
     llvm::errs() << "tz: internal error: the generated LLVM IR is invalid\n";
     return nullptr;
@@ -235,17 +237,18 @@ std::string runtimeLibraryPath(const char *argv0, const llvm::Triple &triple) {
 }
 
 int build(const Options &opts, llvm::StringRef output, const char *argv0) {
-  llvm::LLVMContext ctx;
-  std::unique_ptr<llvm::Module> module = compileToIR(opts.input, ctx);
-  if (!module)
-    return kExitError;
-
+  // The target comes first: code generation needs its data layout to know
+  // the size of values.
   llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
   std::unique_ptr<llvm::TargetMachine> tm = createTargetMachine(triple, opts.optLevel);
   if (!tm)
     return kExitError;
+
+  llvm::LLVMContext ctx;
+  std::unique_ptr<llvm::Module> module = compileToIR(opts.input, ctx, tm->createDataLayout());
+  if (!module)
+    return kExitError;
   module->setTargetTriple(triple);
-  module->setDataLayout(tm->createDataLayout());
   optimize(*module, *tm, opts.optLevel);
 
   if (opts.emitLLVM)

@@ -1,0 +1,75 @@
+// same-as-node
+// Length and indexing count UTF-16 code units, as in JavaScript.
+let hello = "hello"
+let privet = "привет"
+let smile = "😀"
+console.log(hello.length, privet.length, smile.length, "".length)
+console.log(hello[1], privet[1], hello.charCodeAt(0), privet.charCodeAt(0), smile.charCodeAt(1))
+
+// + concatenates and turns numbers and booleans into strings.
+let n = 42
+console.log("n = " + n, "pi ~ " + 3.14, "ok: " + true, 1 + 2 + "3", "1" + 2 + 3)
+let s = "a"
+s += "b"
+s += 1
+s += false
+console.log(s)
+
+// Template literals.
+let name = "Мир"
+console.log(`Привет, ${name}! ${n} * 2 = ${n * 2}`)
+console.log(`multi
+line`, `${hello}`, `no substitutions`, `${1}${2}${3}`)
+
+// Comparison is by code units.
+console.log("a" < "b", "abc" < "abd", "Z" < "a", "a" === "a", hello === "hel" + "lo", "x" !== "y")
+console.log("ё" > "е", "" < "a", "abc" >= "ab")
+
+// Methods.
+let text = "The quick brown fox"
+console.log(text.slice(4, 9), text.slice(-3), text.slice(10), text.slice(5, 2) === "")
+console.log(text.substring(9, 4), text.substring(-5, 3))
+console.log(text.indexOf("quick"), text.indexOf("o"), text.indexOf("o", 13), text.indexOf("cat"))
+console.log(text.includes("brown"), text.startsWith("The"), text.endsWith("fox"), text.startsWith("quick", 4))
+console.log("ab".repeat(3), "-".repeat(0).length, String(12), String(true), (2.5).toString(), n.toString())
+
+// Long strings: slices share the buffer, `+` builds ropes.
+let long = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+let part = long.slice(3, 20)
+console.log(part, part.length, part[0], long.slice(30))
+
+// Functions take and return strings.
+function greet(who: string, times: int): string {
+  let out = ""
+  for (let i = 0; i < times; i++) {
+    out += who
+    if (i < times - 1) out += ", "
+  }
+  return out
+}
+console.log(greet("hi", 3))
+
+function pick(flag: boolean): string {
+  return flag ? "yes" : "no"
+}
+console.log(pick(true), pick(false))
+
+// Strings in a loop with break and continue release correctly.
+let kept = ""
+for (let i = 0; i < 10; i++) {
+  let piece = `<${i}>`
+  if (i % 3 == 0) continue
+  if (i > 7) break
+  kept += piece
+}
+console.log(kept)
+
+// Reassigning variables and parameters.
+function shout(word: string): string {
+  word = word + "!"
+  word += "!"
+  return word
+}
+let w = "hey"
+w = shout(w)
+console.log(w)

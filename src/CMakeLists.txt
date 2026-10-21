@@ -4,8 +4,12 @@ add_executable(tz
   lex/Lexer.cpp
   parse/Parser.cpp
   sema/Types.cpp
+  sema/Facts.cpp
   sema/Sema.cpp
+  sema/SemaFlow.cpp
+  sema/SemaBuiltins.cpp
   codegen/CodeGen.cpp
+  codegen/CodeGenArray.cpp
   driver/Driver.cpp
   driver/Linker.cpp
 )

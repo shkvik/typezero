@@ -4,6 +4,7 @@
 #include "support/Diagnostics.h"
 
 #include <string>
+#include <vector>
 
 namespace tz {
 
@@ -21,15 +22,23 @@ private:
   Token make(Tok kind, const char *start, bool newlineBefore) const;
   Token lexNumber(const char *start, bool newlineBefore);
   Token lexString(const char *start, char quote, bool newlineBefore);
+  // Lexes template text after '`' (continuation = false) or after the '}'
+  // that closes a substitution (continuation = true).
+  Token lexTemplate(const char *start, bool continuation, bool newlineBefore);
   Token lexIdentifier(const char *start, bool newlineBefore);
 
   const char *cur_;
   const char *end_;
   Diagnostics &diags_;
+  // One entry per open `${`: the number of unclosed '{' inside it, so that the
+  // matching '}' resumes the template.
+  std::vector<unsigned> templateBraces_;
 };
 
-// Decodes the escapes of a string literal token (quotes included) into UTF-8.
-// Returns false and reports an error on a malformed escape.
-bool decodeStringLiteral(const Token &tok, std::string &out, Diagnostics &diags);
+// Decode the text of a string literal or a template part into UTF-16 code
+// units, the way JavaScript sees it. Return false after reporting a malformed
+// escape.
+bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags);
+bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags);
 
 } // namespace tz

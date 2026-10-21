@@ -1,5 +1,6 @@
 /build/
 /out/
+/bench/out/
 /.vs/
 /.cache/
 CMakeUserPresets.json

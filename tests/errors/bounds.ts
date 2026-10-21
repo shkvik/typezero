@@ -1,0 +1,62 @@
+// Indices the compiler must not take as proven: each read stays
+// `int | undefined`, so assigning it to an int is an error.
+function other(): void {}
+function traps(a: int[], n: int, s: string): void {
+  let x = 0
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i <= a.length; i++) x = a[i]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i < a.length; i++) { a.pop(); x = a[i] }
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i < a.length; i++) { other(); x = a[i] }
+  const b = a
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i < a.length; i++) { b.pop(); x = a[i] }
+  let j = 0
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  while (true) { j++; if (j < a.length) x = a[j]; if (j > 5) break }
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i < n; i++) x = a[i]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 2147483640; i + 10 < a.length; i++) x = a[i]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i <= a.length; i += 2) x = a[i]
+  // A step that could wrap around past INT_MAX.
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 2147483000; i < 2147483647; i += 1000) x = a[i]
+  let t = "abc"
+  // expect-error: type 'string | undefined' is not assignable to type 'string'
+  for (let i = 0; i < t.length; i++) { t = t.slice(1); let c: string = t[i] }
+  let k = a.length
+  k = k + 1
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  x = a[k - 1]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  if (n > 0) { n = n - 2; x = a[n] }
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  x = a[-1]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = a.length; i >= 0; i--) x = a[i]
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  for (let i = 0; i < a.length; i++) { i = i * 2; x = a[i] }
+  // A position that may be out of range gives NaN, which needs a double.
+  // expect-error: type 'double' is not assignable to type 'int'
+  x = s.charCodeAt(0)
+  // expect-error: type 'int | undefined' is not assignable to type 'int'
+  x = a.pop()
+  if (a.length > 0) x = a.pop()
+}
+
+// Writes: past the end JavaScript would leave holes.
+function writes(a: int[], i: int): void {
+  // expect-error: cannot prove that the index is within the array
+  a[i] = 5
+  // expect-error: cannot prove that the index is within the array
+  a[a.length + 1] = 2
+  // expect-error: cannot prove that the index is within the array
+  a[i] += 1
+  // expect-error: cannot prove that the index is within the array
+  a[i]++
+  a[a.length] = 7
+  if (i >= 0 && i < a.length) a[i] = 1
+}

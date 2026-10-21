@@ -1,3 +1,4 @@
+// same-as-node
 console.log("Hello, typezero!")
 console.log("Привет, мир!")
 console.log()

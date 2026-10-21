@@ -1,0 +1,23 @@
+// same-as-node
+// Numbers in concatenations and templates are written straight into the
+// result; each way the result can be built must give the same text.
+const n = 42
+const big: long = 1234567890123
+const half = -0.5
+const negZero = -0.0
+console.log("" + n, `${n}`, n + "", "n=" + n, `n=${n}!`)
+console.log("a long prefix, longer than a rope: " + n)
+console.log(big + "", big + "ab", "ab" + big, `${big}${big}`)
+console.log(half + "", `${half}|${negZero}|${1e21}|${0.1 + 0.2}`, -7 + "!")
+let s = ""
+for (let i = 0; i < 20; i++) s += i
+console.log(s, s.length)
+let t = "values:"
+for (let i = -3; i <= 3; i++) t = t + " " + i * 1.5
+console.log(t)
+const parts = [1, 2, 3]
+let u = ""
+for (const p of parts) u += `[${p}:${p * p}]`
+console.log(u)
+const words = ["a", "bb", "", "ccc"]
+console.log(words.join(), words.join(""), words.join(" - "), words.slice(4).join(), ["x"].join("+"))

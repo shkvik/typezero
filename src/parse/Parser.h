@@ -32,6 +32,8 @@ private:
   BlockStmt *parseBlock();
   FunctionDecl *parseFunction();
   VarDeclStmt *parseVarDecl();
+  void parseDeclarators(VarDeclStmt *decl);
+  bool parseBinding(VarDeclarator &d);
   Stmt *parseIf();
   Stmt *parseWhile();
   Stmt *parseDoWhile();
@@ -40,6 +42,9 @@ private:
 
   // Types
   TypeRef parseType();
+  TypeRef parseArrayType();
+  TypeRef parsePrimaryType();
+  std::vector<TypeRef> parseTypeArgs();
 
   // Expressions, from lowest to highest precedence
   Expr *parseExpr();
@@ -49,6 +54,9 @@ private:
   Expr *parsePostfix();
   Expr *parseCallOrMember();
   Expr *parsePrimary();
+  Expr *parseTemplate();
+  Expr *parseArrayLiteral();
+  Expr *parseNew();
   Expr *parseIntLiteral();
   Expr *parseFloatLiteral();
 

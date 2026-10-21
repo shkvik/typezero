@@ -1,3 +1,4 @@
+// same-as-node
 // Semicolons are optional, as in TypeScript.
 let a = 1
 let b = 2;

@@ -1,0 +1,29 @@
+[] 0 = = =
+[97] 1 = = =
+[97,98] 2 = = =
+[97,98,99,100,101,102,103] 7 = = =
+[97,98,99,100,101,102,103,104] 8 = = =
+[97,98,99,100,101,102,103,104,105] 9 = = =
+[233] 1 = = =
+[8364] 1 = = =
+[0] 1 = = =
+true false false false
+true 8
+true false 9
+true true 0 true
+true 4 233
+true 2 8364
+true false 1 2
+abcdefghijklmnopqrst 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
+|cdcdcdcdcd ab|cdcdcdcd abab|cdcdcd ababab|cdcd abababab|cd ababababab|
+shorta much longer piece of textend 35 true true
+7 | -1234567 | 12345678 | 123456789 | 1.5 | 0.1 | 1e+21 | 42 | n99999999 | -0.5x
+true true true true
+héllowörld,alongertext true true true
+1 5 true false
+Bob,al,al,alexander,bob,eve,zoe,émile
+true true true true
+true true 2 true
+true true true false
+true true true true true
+false false true true true

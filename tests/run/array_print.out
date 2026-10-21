@@ -1,0 +1,95 @@
+[
+    0,  37,  74, 111, 148, 185, 222, 259, 296, 333, 370, 407,
+  444, 481, 518, 555, 592, 629, 666, 703, 740, 777, 814, 851,
+  888, 925, 962, 999,  36,  73, 110, 147, 184, 221, 258, 295,
+  332, 369, 406, 443, 480, 517, 554, 591, 628, 665, 702, 739,
+  776, 813, 850, 887, 924, 961, 998,  35,  72, 109, 146, 183,
+  220, 257, 294, 331, 368, 405, 442, 479, 516, 553, 590, 627,
+  664, 701, 738, 775, 812, 849, 886, 923, 960, 997,  34,  71,
+  108, 145, 182, 219, 256, 293, 330, 367, 404, 441, 478, 515,
+  552, 589, 626, 663,
+  ... 50 more items
+]
+[
+  'item0',  'item1',  'item2',
+  'item3',  'item4',  'item5',
+  'item6',  'item7',  'item8',
+  'item9',  'item10', 'item11',
+  'item12', 'item13', 'item14',
+  'item15', 'item16', 'item17',
+  'item18', 'item19', 'item20',
+  'item21', 'item22', 'item23',
+  'item24', 'item25'
+]
+[
+  'a\nb',         'tab\there',
+  'backslash',    "q'uote",
+  `both'"`,       'all\'"`',
+  '\x01\x7F\x9F', 'привет',
+  '😀',           'a😀b'
+]
+[
+  'This is a fairly long string that goes on and on.\n' +
+    'It has a second line too.\n' +
+    'And a third one.'
+] [
+  'This is a fairly long string that goes on and on.\n' +
+    'It has a second line too.\n' +
+    'And a third one.',
+  'x'
+]
+[ [ [ [Array] ] ] ] [ [ [ [] ] ] ] [ [ [ 'deep', 'er' ], [ 'x' ] ] ] [ [ [ [Array], [Array] ] ] ]
+[
+    -1, 22, -333,
+  4444,  5,   66,
+   777, -8
+]
+[
+    1.5, 22.25, 333,
+  0.125,     5,  66,
+    777,     8,   9,
+     10
+]
+[
+  'the',   'quick',
+  'brown', 'fox',
+  'jumps', 'over',
+  'the',   'lazy',
+  'dog',   'again',
+  'and',   'again'
+]
+[
+  'internationalization',
+  'localization',
+  'accessibility',
+  'configuration',
+  'documentation',
+  'implementation',
+  'optimization'
+]
+[ 1, undefined, 2, 3, 4, 5, 6, 7 ]
+[ '日本', '中文', '한국어', 'abc', 'de', 'f', 'gh' ]
+[
+  [ 1, 2, 3 ],
+  [ 4, 5, 6 ],
+  [ 7, 8, 9 ],
+  [ 10, 11, 12 ],
+  [ 13, 14, 15 ],
+  [ 16, 17, 18 ],
+  [ 19, 20, 21 ]
+]
+[
+  true,  false, true,
+  false, true,  false,
+  true,  false, true
+]
+[
+  '',           'x',
+  'xx',         'xxx',
+  'xxxx',       'xxxxx',
+  'xxxxxx',     'xxxxxxx',
+  'xxxxxxxx',   'xxxxxxxxx',
+  'xxxxxxxxxx', 'xxxxxxxxxxx'
+]
+1 [ 'yyyyyyyyyyyyyyyyyyyy' ]
+[ '' ] [ '', '' ] [ ' ' ]

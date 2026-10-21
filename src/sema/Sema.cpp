@@ -1,6 +1,7 @@
 #include "sema/Sema.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using llvm::cast;
@@ -8,6 +9,128 @@ using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
+
+namespace {
+
+// The names a statement mentions, to know which globals functions may use.
+void collectNames(const Expr *expr, llvm::StringSet<> &names);
+
+void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
+  if (!stmt)
+    return;
+  switch (stmt->kind()) {
+  case Stmt::Kind::Block:
+    for (const Stmt *s : cast<BlockStmt>(stmt)->body)
+      collectNames(s, names);
+    break;
+  case Stmt::Kind::VarDecl:
+    for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls)
+      if (d.init)
+        collectNames(d.init, names);
+    break;
+  case Stmt::Kind::Function:
+    collectNames(cast<FunctionDecl>(stmt)->body, names);
+    break;
+  case Stmt::Kind::Expr:
+    collectNames(cast<ExprStmt>(stmt)->expr, names);
+    break;
+  case Stmt::Kind::If: {
+    auto *s = cast<IfStmt>(stmt);
+    collectNames(s->cond, names);
+    collectNames(s->thenStmt, names);
+    collectNames(s->elseStmt, names);
+    break;
+  }
+  case Stmt::Kind::While:
+    collectNames(cast<WhileStmt>(stmt)->cond, names);
+    collectNames(cast<WhileStmt>(stmt)->body, names);
+    break;
+  case Stmt::Kind::DoWhile:
+    collectNames(cast<DoWhileStmt>(stmt)->cond, names);
+    collectNames(cast<DoWhileStmt>(stmt)->body, names);
+    break;
+  case Stmt::Kind::For: {
+    auto *s = cast<ForStmt>(stmt);
+    collectNames(s->init, names);
+    if (s->cond)
+      collectNames(s->cond, names);
+    if (s->step)
+      collectNames(s->step, names);
+    collectNames(s->body, names);
+    break;
+  }
+  case Stmt::Kind::ForOf:
+    collectNames(cast<ForOfStmt>(stmt)->iterable, names);
+    collectNames(cast<ForOfStmt>(stmt)->body, names);
+    break;
+  case Stmt::Kind::Return:
+    if (const Expr *value = cast<ReturnStmt>(stmt)->value)
+      collectNames(value, names);
+    break;
+  case Stmt::Kind::Break:
+  case Stmt::Kind::Continue:
+  case Stmt::Kind::Empty:
+    break;
+  }
+}
+
+void collectNames(const Expr *expr, llvm::StringSet<> &names) {
+  switch (expr->kind()) {
+  case Expr::Kind::Name:
+    names.insert(cast<NameExpr>(expr)->name);
+    break;
+  case Expr::Kind::Template:
+    for (const Expr *e : cast<TemplateExpr>(expr)->exprs)
+      collectNames(e, names);
+    break;
+  case Expr::Kind::ArrayLit:
+    for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
+      collectNames(e.expr, names);
+    break;
+  case Expr::Kind::Member:
+    collectNames(cast<MemberExpr>(expr)->object, names);
+    break;
+  case Expr::Kind::Index:
+    collectNames(cast<IndexExpr>(expr)->object, names);
+    collectNames(cast<IndexExpr>(expr)->index, names);
+    break;
+  case Expr::Kind::Unary:
+    collectNames(cast<UnaryExpr>(expr)->operand, names);
+    break;
+  case Expr::Kind::Binary:
+    collectNames(cast<BinaryExpr>(expr)->lhs, names);
+    collectNames(cast<BinaryExpr>(expr)->rhs, names);
+    break;
+  case Expr::Kind::Assign:
+    collectNames(cast<AssignExpr>(expr)->target, names);
+    collectNames(cast<AssignExpr>(expr)->value, names);
+    break;
+  case Expr::Kind::Update:
+    collectNames(cast<UpdateExpr>(expr)->target, names);
+    break;
+  case Expr::Kind::Call:
+    collectNames(cast<CallExpr>(expr)->callee, names);
+    for (const Expr *arg : cast<CallExpr>(expr)->args)
+      collectNames(arg, names);
+    break;
+  case Expr::Kind::New:
+    for (const Expr *arg : cast<NewExpr>(expr)->args)
+      collectNames(arg, names);
+    break;
+  case Expr::Kind::Conditional:
+    collectNames(cast<ConditionalExpr>(expr)->cond, names);
+    collectNames(cast<ConditionalExpr>(expr)->thenExpr, names);
+    collectNames(cast<ConditionalExpr>(expr)->elseExpr, names);
+    break;
+  case Expr::Kind::Cast:
+    collectNames(cast<CastExpr>(expr)->operand, names);
+    break;
+  default:
+    break;
+  }
+}
+
+} // namespace
 
 void Sema::check(SourceFile &file) {
   pushScope(); // functions and globals
@@ -17,15 +140,26 @@ void Sema::check(SourceFile &file) {
     if (auto *fn = dyn_cast<FunctionDecl>(item))
       declareFunction(fn);
 
+  // A global no function mentions cannot change during a call, and can live in
+  // main's stack frame.
+  for (Stmt *item : file.items)
+    if (auto *fn = dyn_cast<FunctionDecl>(item))
+      collectNames(fn->body, namesInFunctions_);
+
   // Top-level code runs in order; its `let` and `const` become globals.
+  flow_ = Flow();
   for (Stmt *item : file.items)
     if (!isa<FunctionDecl>(item))
       checkStmt(item);
 
   // Bodies come last so that functions can use globals declared after them.
-  for (Stmt *item : file.items)
-    if (auto *fn = dyn_cast<FunctionDecl>(item))
+  // Nothing is known about the globals when a function starts.
+  for (Stmt *item : file.items) {
+    if (auto *fn = dyn_cast<FunctionDecl>(item)) {
+      flow_ = Flow();
       checkFunctionBody(fn);
+    }
+  }
 
   popScope();
 }
@@ -35,6 +169,10 @@ void Sema::check(SourceFile &file) {
 //===----------------------------------------------------------------------===//
 
 void Sema::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
+  if (name == "undefined") {
+    diags_.error(loc, "'undefined' cannot be used as a name");
+    return;
+  }
   auto [it, inserted] = scopes_.back().try_emplace(name, entry);
   if (inserted)
     return;
@@ -52,28 +190,104 @@ Sema::ScopeEntry Sema::lookup(llvm::StringRef name) const {
   return {};
 }
 
+VarSymbol *Sema::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type, bool isConst) {
+  VarSymbol *var = ctx_.newVar();
+  var->name = name;
+  var->loc = loc;
+  var->type = type;
+  var->isConst = isConst;
+  var->isGlobal = scopes_.size() == 1;
+  var->usedInFunction = var->isGlobal && namesInFunctions_.contains(name);
+  declare(name, loc, {var, nullptr});
+  return var;
+}
+
 const Type *Sema::resolveType(const TypeRef &ref, bool allowVoid) {
-  if (ref.name.empty())
-    return Type::error(); // the parser already reported it
-  const Type *type = Type::fromName(ref.name);
-  if (!type) {
-    diags_.error(ref.loc, "cannot find type '" + ref.name + "'");
-    return Type::error();
-  }
-  if (type->isString()) {
-    diags_.error(ref.loc, "the 'string' type is not supported yet");
-    return Type::error();
-  }
+  const Type *type = resolveTypeInner(ref);
   if (type->isVoid() && !allowVoid) {
     diags_.error(ref.loc, "'void' can only be used as a return type");
+    return Type::error();
+  }
+  if (type->isUndefined()) {
+    diags_.error(ref.loc, "the type 'undefined' alone is not supported; use 'T | undefined'");
     return Type::error();
   }
   return type;
 }
 
+const Type *Sema::resolveTypeInner(const TypeRef &ref) {
+  switch (ref.kind) {
+  case TypeRef::Kind::Name: {
+    if (ref.name.empty())
+      return Type::error(); // the parser already reported it
+    if (const Type *type = Type::fromName(ref.name))
+      return type;
+    if (ref.name == "Array")
+      diags_.error(ref.loc, "'Array' needs an element type, e.g. 'Array<int>' or 'int[]'");
+    else
+      diags_.error(ref.loc, "cannot find type '" + ref.name + "'");
+    return Type::error();
+  }
+  case TypeRef::Kind::Generic:
+    if (ref.name == "Array") {
+      if (ref.args.size() != 1) {
+        diags_.error(ref.loc, "'Array' takes one type argument");
+        return Type::error();
+      }
+      TypeRef array;
+      array.kind = TypeRef::Kind::Array;
+      array.loc = ref.loc;
+      array.args = ref.args;
+      return resolveTypeInner(array);
+    }
+    diags_.error(ref.loc, "generic type '" + ref.name + "' is not supported");
+    return Type::error();
+  case TypeRef::Kind::Array: {
+    const Type *element = resolveTypeInner(ref.args[0]);
+    if (element->isVoid() || element->isUndefined()) {
+      diags_.error(ref.loc, "arrays of '" + element->name() + "' are not supported");
+      return Type::error();
+    }
+    return Type::array(element);
+  }
+  case TypeRef::Kind::Union: {
+    bool withUndefined = false;
+    const Type *base = nullptr;
+    for (const TypeRef &member : ref.args) {
+      const Type *type = resolveTypeInner(member);
+      if (type->isError())
+        return type;
+      if (type->isUndefined() || type->isOptional())
+        withUndefined = true;
+      const Type *value = type->isUndefined() ? nullptr : type->nonOptional();
+      if (!value || value == base)
+        continue;
+      if (base) {
+        diags_.error(ref.loc, "union types other than 'T | undefined' are not supported yet");
+        return Type::error();
+      }
+      base = value;
+    }
+    if (!base)
+      return Type::undefinedTy();
+    if (base->isVoid()) {
+      diags_.error(ref.loc, "'void' cannot be part of a union");
+      return Type::error();
+    }
+    return withUndefined ? Type::optional(base) : base;
+  }
+  }
+  llvm_unreachable("unknown type reference");
+}
+
 bool Sema::isImplicitlyConvertible(const Type *from, const Type *to) {
-  return from == to ||
-         (from == Type::intTy() && (to == Type::longTy() || to == Type::doubleTy()));
+  if (from == to)
+    return true;
+  if (from == Type::intTy() && (to == Type::longTy() || to == Type::doubleTy()))
+    return true;
+  if (to->isOptional())
+    return from->isUndefined() || isImplicitlyConvertible(from->nonOptional(), to->inner());
+  return false;
 }
 
 const Type *Sema::commonNumericType(const Type *a, const Type *b) {
@@ -84,9 +298,39 @@ const Type *Sema::commonNumericType(const Type *a, const Type *b) {
   return nullptr;
 }
 
+const Type *Sema::unify(const Type *a, const Type *b) {
+  if (a == b)
+    return a;
+  if (a->isError() || b->isError())
+    return Type::error();
+  if (a->isVoid() || b->isVoid())
+    return nullptr;
+  if (a->isUndefined())
+    return Type::optional(b);
+  if (b->isUndefined())
+    return Type::optional(a);
+  const Type *x = a->nonOptional(), *y = b->nonOptional();
+  const Type *base = x == y ? x : x->isNumeric() && y->isNumeric() ? commonNumericType(x, y) : nullptr;
+  if (!base)
+    return nullptr;
+  return a->isOptional() || b->isOptional() ? Type::optional(base) : base;
+}
+
 Expr *Sema::convert(Expr *expr, const Type *to) {
   if (expr->type == to || expr->type->isError() || to->isError())
     return expr;
+  // An integer literal becomes a literal of the wider type, so that `-0` in
+  // `[1.5, -0]` stays a negative zero.
+  if (to->isNumeric() && expr->type->isInteger()) {
+    auto *unary = dyn_cast<UnaryExpr>(expr);
+    auto *lit = dyn_cast<IntLitExpr>(unary && unary->op == UnaryOp::Neg ? unary->operand : expr);
+    if (lit) {
+      lit->type = to;
+      if (unary)
+        unary->type = to;
+      return expr;
+    }
+  }
   auto *cast = ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
   return cast;
@@ -101,7 +345,10 @@ Expr *Sema::coerce(Expr *expr, const Type *to) {
 
   std::string message =
       ("type '" + from->name() + "' is not assignable to type '" + to->name() + "'").str();
-  if (from->isNumeric() && to->isNumeric())
+  if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
+    message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
+               "default with '??'";
+  else if (from->isNumeric() && to->isNumeric())
     message += ("; convert it explicitly with 'as " + to->name() + "'").str();
   diags_.error(expr->loc(), message);
   return expr;
@@ -111,7 +358,9 @@ void Sema::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs, 
   std::string message = (llvm::Twine("operator '") + op + "' cannot be applied to types '" +
                          lhs->name() + "' and '" + rhs->name() + "'")
                             .str();
-  if (lhs->isNumeric() && rhs->isNumeric())
+  if (lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined())
+    message += "; a value may be undefined: check it first or give a default with '??'";
+  else if (lhs->isNumeric() && rhs->isNumeric())
     message += "; convert one side explicitly with 'as'";
   diags_.error(loc, message);
 }
@@ -146,12 +395,7 @@ void Sema::checkFunctionBody(FunctionDecl *fn) {
   pushScope();
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
-    VarSymbol *var = ctx_.newVar();
-    var->name = param.name;
-    var->loc = param.loc;
-    var->type = sym->params[i];
-    param.sym = var;
-    declare(param.name, param.loc, {var, nullptr});
+    param.sym = declareVar(param.name, param.loc, sym->params[i], /*isConst=*/false);
   }
   // The parameters and the outermost block of the body share one scope.
   for (Stmt *stmt : fn->body->body)
@@ -159,9 +403,11 @@ void Sema::checkFunctionBody(FunctionDecl *fn) {
   popScope();
   currentFunction_ = nullptr;
 
-  if (!sym->ret->isVoid() && !sym->ret->isError() && !alwaysReturns(fn->body))
+  // As in TypeScript, a function that may return undefined may also just end.
+  const Type *ret = sym->ret;
+  if (!ret->isVoid() && !ret->isError() && !ret->isOptional() && !alwaysReturns(fn->body))
     diags_.error(fn->loc(), "function '" + fn->name + "' must return a value of type '" +
-                                sym->ret->name() + "' on every path");
+                                ret->name() + "' on every path");
 }
 
 void Sema::checkStmt(Stmt *stmt) {
@@ -184,68 +430,151 @@ void Sema::checkStmt(Stmt *stmt) {
     s->expr = checkExpr(s->expr);
     break;
   }
-  case Stmt::Kind::If: {
-    auto *s = cast<IfStmt>(stmt);
-    s->cond = checkCondition(s->cond);
-    checkStmt(s->thenStmt);
-    if (s->elseStmt)
-      checkStmt(s->elseStmt);
+  case Stmt::Kind::If:
+    checkIf(cast<IfStmt>(stmt));
     break;
-  }
-  case Stmt::Kind::While: {
-    auto *s = cast<WhileStmt>(stmt);
-    s->cond = checkCondition(s->cond);
-    checkLoopBody(s->body);
+  case Stmt::Kind::While:
+    checkWhile(cast<WhileStmt>(stmt));
     break;
-  }
-  case Stmt::Kind::DoWhile: {
-    auto *s = cast<DoWhileStmt>(stmt);
-    checkLoopBody(s->body);
-    s->cond = checkCondition(s->cond);
+  case Stmt::Kind::DoWhile:
+    checkDoWhile(cast<DoWhileStmt>(stmt));
     break;
-  }
-  case Stmt::Kind::For: {
-    auto *s = cast<ForStmt>(stmt);
-    pushScope(); // variables declared in the loop header
-    if (s->init)
-      checkStmt(s->init);
-    if (s->cond)
-      s->cond = checkCondition(s->cond);
-    if (s->step)
-      s->step = checkExpr(s->step);
-    checkLoopBody(s->body);
-    popScope();
+  case Stmt::Kind::For:
+    checkFor(cast<ForStmt>(stmt));
     break;
-  }
+  case Stmt::Kind::ForOf:
+    checkForOf(cast<ForOfStmt>(stmt));
+    break;
   case Stmt::Kind::Return:
     checkReturn(cast<ReturnStmt>(stmt));
+    flow_.unreachable = true;
     break;
   case Stmt::Kind::Break:
-    if (loopDepth_ == 0)
-      diags_.error(stmt->loc(), "'break' can only be used inside a loop");
-    break;
   case Stmt::Kind::Continue:
     if (loopDepth_ == 0)
-      diags_.error(stmt->loc(), "'continue' can only be used inside a loop");
+      diags_.error(stmt->loc(), llvm::Twine("'") + (isa<BreakStmt>(stmt) ? "break" : "continue") +
+                                    "' can only be used inside a loop");
+    flow_.unreachable = true;
     break;
   case Stmt::Kind::Empty:
     break;
   }
 }
 
+void Sema::checkIf(IfStmt *stmt) {
+  Flow whenTrue, whenFalse;
+  stmt->cond = checkCondition(stmt->cond, whenTrue, whenFalse);
+  flow_ = whenTrue;
+  checkBody(stmt->thenStmt);
+  Flow afterThen = flow_;
+  flow_ = whenFalse;
+  if (stmt->elseStmt)
+    checkBody(stmt->elseStmt);
+  flow_ = join(afterThen, flow_);
+}
+
+// Loops are checked once. Their head state comes from scanning the loop for
+// what it changes (loopHead), so what Sema assumes at the start of the body
+// holds on every iteration, and everywhere in the loop.
+void Sema::checkWhile(WhileStmt *stmt) {
+  LoopScan scan = scanLoop({stmt->body}, {stmt->cond});
+  Flow head = loopHead(scan, stmt->cond, /*induction=*/true);
+  flow_ = head;
+  Flow whenTrue, whenFalse;
+  stmt->cond = checkCondition(stmt->cond, whenTrue, whenFalse);
+  flow_ = whenTrue;
+  checkLoopBody(stmt->body);
+  flow_ = scan.breaks ? join(whenFalse, head) : whenFalse;
+}
+
+void Sema::checkDoWhile(DoWhileStmt *stmt) {
+  // No induction: the body runs once before the condition is first checked.
+  LoopScan scan = scanLoop({stmt->body}, {stmt->cond});
+  Flow head = loopHead(scan, nullptr, /*induction=*/false);
+  flow_ = head;
+  checkLoopBody(stmt->body);
+  flow_ = join(flow_, head); // `continue` jumps to the condition
+  Flow whenTrue, whenFalse;
+  stmt->cond = checkCondition(stmt->cond, whenTrue, whenFalse);
+  flow_ = scan.breaks ? join(whenFalse, head) : whenFalse;
+}
+
+void Sema::checkFor(ForStmt *stmt) {
+  pushScope(); // variables declared in the loop header
+  if (stmt->init)
+    checkStmt(stmt->init);
+  LoopScan scan = scanLoop({stmt->body}, {stmt->cond, stmt->step});
+  Flow head = loopHead(scan, stmt->cond, /*induction=*/true);
+  flow_ = head;
+  Flow whenTrue = head, whenFalse = head;
+  whenFalse.unreachable = true;
+  if (stmt->cond)
+    stmt->cond = checkCondition(stmt->cond, whenTrue, whenFalse);
+  flow_ = whenTrue;
+  checkLoopBody(stmt->body);
+  if (stmt->step) {
+    flow_ = head;
+    stmt->step = checkExpr(stmt->step);
+  }
+  flow_ = scan.breaks ? join(whenFalse, head) : whenFalse;
+  popScope();
+}
+
+void Sema::checkForOf(ForOfStmt *stmt) {
+  stmt->iterable = checkExpr(stmt->iterable);
+  const Type *type = stmt->iterable->type;
+  const Type *element = Type::error();
+  if (type->isArray())
+    element = type->inner();
+  else if (type->isString())
+    element = Type::string();
+  else if (type->isOptional() && (type->inner()->isArray() || type->inner()->isString()))
+    diags_.error(stmt->iterable->loc(), "'" + type->name() +
+                                            "' may be undefined; check it before iterating");
+  else if (!type->isError())
+    diags_.error(stmt->iterable->loc(), "cannot iterate over a value of type '" + type->name() + "'");
+  if (stmt->binding.typeAnn)
+    diags_.error(stmt->binding.typeAnn->loc, "a 'for...of' variable cannot have a type annotation");
+
+  LoopScan scan = scanLoop({stmt->body}, {});
+  // The array keeps each element alive during its iteration unless the body
+  // could remove or replace elements, directly or through a function. Then a
+  // const loop variable can borrow the element instead of counting it.
+  stmt->borrowElements = stmt->isConst && type->isArray() && element->isManaged() &&
+                         !scan.callsFunctions && !scan.releasesElements;
+  Flow head = loopHead(scan, nullptr, /*induction=*/false);
+  flow_ = head;
+  pushScope();
+  stmt->binding.sym =
+      declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
+  checkLoopBody(stmt->body);
+  popScope();
+  flow_ = head;
+}
+
 void Sema::checkLoopBody(Stmt *body) {
   ++loopDepth_;
-  checkStmt(body);
+  checkBody(body);
   --loopDepth_;
 }
 
+// The body of `if`, `while` or `for`. As in TypeScript, a declaration there
+// needs braces: it would be visible nowhere else.
+void Sema::checkBody(Stmt *body) {
+  if (isa<VarDeclStmt>(body)) {
+    diags_.error(body->loc(), "a declaration cannot be the whole body here; wrap it in '{ }'");
+    return;
+  }
+  checkStmt(body);
+}
+
 void Sema::checkVarDecl(VarDeclStmt *decl) {
-  bool isGlobal = scopes_.size() == 1;
   for (VarDeclarator &d : decl->decls) {
     const Type *declared = d.typeAnn ? resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
     const Type *type = declared;
+    Expr *value = nullptr; // the initializer before its conversion
     if (d.init) {
-      d.init = checkExpr(d.init, declared);
+      d.init = value = checkExpr(d.init, declared);
       if (declared) {
         d.init = coerce(d.init, declared);
       } else {
@@ -253,8 +582,9 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
         if (type->isVoid()) {
           diags_.error(d.init->loc(), "an expression of type 'void' cannot initialize a variable");
           type = Type::error();
-        } else if (type->isString()) {
-          diags_.error(d.loc, "string variables are not supported yet");
+        } else if (type->isUndefined()) {
+          diags_.error(d.init->loc(), "cannot infer a type from 'undefined'; add one, e.g. 'let " +
+                                          d.name + ": int | undefined = undefined'");
           type = Type::error();
         }
       }
@@ -267,14 +597,9 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
       type = Type::error();
     }
 
-    VarSymbol *var = ctx_.newVar();
-    var->name = d.name;
-    var->loc = d.loc;
-    var->type = type;
-    var->isConst = decl->isConst;
-    var->isGlobal = isGlobal;
-    d.sym = var;
-    declare(d.name, d.loc, {var, nullptr});
+    d.sym = declareVar(d.name, d.loc, type, decl->isConst);
+    if (value)
+      assigned(d.sym, value);
   }
 }
 
@@ -288,7 +613,7 @@ void Sema::checkReturn(ReturnStmt *ret) {
 
   const FuncSymbol *fn = currentFunction_;
   if (!ret->value) {
-    if (!fn->ret->isVoid() && !fn->ret->isError())
+    if (!fn->ret->isVoid() && !fn->ret->isError() && !fn->ret->isOptional())
       diags_.error(ret->loc(), "function '" + fn->name + "' must return a value of type '" +
                                    fn->ret->name() + "'");
     return;
@@ -307,16 +632,74 @@ void Sema::checkReturn(ReturnStmt *ret) {
   ret->value = coerce(ret->value, fn->ret);
 }
 
-Expr *Sema::checkCondition(Expr *cond) {
-  cond = checkExpr(cond, Type::boolTy());
+Expr *Sema::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) {
+  cond = checkBranching(cond, whenTrue, whenFalse);
   if (!cond->type->isBool() && !cond->type->isError())
     diags_.error(cond->loc(), "condition must be of type 'boolean', found '" + cond->type->name() + "'");
   return cond;
 }
 
+// Checks an expression whose truth matters, following `&&`, `||` and `!` so
+// that the right side of `i < a.length && a[i] > 0` knows `i < a.length`.
+Expr *Sema::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse) {
+  if (auto *bin = dyn_cast<BinaryExpr>(expr);
+      bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
+    bool isAnd = bin->op == BinaryOp::LogAnd;
+    Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
+    bin->lhs = checkBranching(bin->lhs, lhsTrue, lhsFalse);
+    flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
+    bin->rhs = checkBranching(bin->rhs, rhsTrue, rhsFalse);
+    whenTrue = isAnd ? rhsTrue : join(lhsTrue, rhsTrue);
+    whenFalse = isAnd ? join(lhsFalse, rhsFalse) : rhsFalse;
+    flow_ = join(whenTrue, whenFalse);
+    const Type *l = bin->lhs->type, *r = bin->rhs->type;
+    if (!l->isError() && !r->isError() && !(l->isBool() && r->isBool()))
+      reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    bin->type = Type::boolTy();
+    return bin;
+  }
+  if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
+    Flow operandTrue, operandFalse;
+    unary->operand = checkBranching(unary->operand, operandTrue, operandFalse);
+    whenTrue = operandFalse;
+    whenFalse = operandTrue;
+    const Type *type = unary->operand->type;
+    if (!type->isBool() && !type->isError())
+      diags_.error(unary->loc(), "operator '!' cannot be applied to type '" + type->name() + "'");
+    unary->type = Type::boolTy();
+    return unary;
+  }
+
+  expr = checkExpr(expr, Type::boolTy());
+  whenTrue = flow_;
+  whenFalse = flow_;
+  if (auto *lit = dyn_cast<BoolLitExpr>(expr))
+    (lit->value ? whenFalse : whenTrue).unreachable = true;
+  else
+    addConditionFacts(expr, whenTrue, whenFalse);
+  return expr;
+}
+
 static bool isTrueLiteral(const Expr *expr) {
   auto *lit = llvm::dyn_cast_or_null<BoolLitExpr>(expr);
   return lit && lit->value;
+}
+
+// Whether `stmt` contains a `break` that leaves the loop enclosing it. Nested
+// loops are skipped: their breaks are their own.
+static bool containsBreak(const Stmt *stmt) {
+  switch (stmt->kind()) {
+  case Stmt::Kind::Break:
+    return true;
+  case Stmt::Kind::Block:
+    return llvm::any_of(cast<BlockStmt>(stmt)->body, containsBreak);
+  case Stmt::Kind::If: {
+    auto *s = cast<IfStmt>(stmt);
+    return containsBreak(s->thenStmt) || (s->elseStmt && containsBreak(s->elseStmt));
+  }
+  default:
+    return false;
+  }
 }
 
 // Conservative: true only if control can never reach the end of `stmt`.
@@ -348,23 +731,6 @@ bool Sema::alwaysReturns(const Stmt *stmt) {
   }
 }
 
-// Whether `stmt` contains a `break` that leaves the loop enclosing it. Nested
-// loops are skipped: their breaks are their own.
-bool Sema::containsBreak(const Stmt *stmt) {
-  switch (stmt->kind()) {
-  case Stmt::Kind::Break:
-    return true;
-  case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, containsBreak);
-  case Stmt::Kind::If: {
-    auto *s = cast<IfStmt>(stmt);
-    return containsBreak(s->thenStmt) || (s->elseStmt && containsBreak(s->elseStmt));
-  }
-  default:
-    return false;
-  }
-}
-
 //===----------------------------------------------------------------------===//
 // Expressions
 //===----------------------------------------------------------------------===//
@@ -382,12 +748,19 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
   case Expr::Kind::StringLit:
     expr->type = Type::string();
     return expr;
+  case Expr::Kind::Undefined:
+    expr->type = Type::undefinedTy();
+    return expr;
+  case Expr::Kind::Template:
+    return checkTemplate(cast<TemplateExpr>(expr));
+  case Expr::Kind::ArrayLit:
+    return checkArrayLit(cast<ArrayLitExpr>(expr), expected);
   case Expr::Kind::Name:
     return checkName(cast<NameExpr>(expr));
   case Expr::Kind::Member:
-    diags_.error(expr->loc(), "property access is not supported yet");
-    expr->type = Type::error();
-    return expr;
+    return checkMember(cast<MemberExpr>(expr));
+  case Expr::Kind::Index:
+    return checkIndex(cast<IndexExpr>(expr));
   case Expr::Kind::Unary:
     return checkUnary(cast<UnaryExpr>(expr), expected);
   case Expr::Kind::Binary:
@@ -398,6 +771,8 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
     return checkUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
     return checkCall(cast<CallExpr>(expr));
+  case Expr::Kind::New:
+    return checkNew(cast<NewExpr>(expr), expected);
   case Expr::Kind::Conditional:
     return checkConditional(cast<ConditionalExpr>(expr), expected);
   case Expr::Kind::Cast:
@@ -414,6 +789,8 @@ Expr *Sema::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
     return negated ? lit->value <= limit : lit->value < limit;
   };
 
+  if (expected)
+    expected = expected->nonOptional();
   if (expected && expected->isNumeric()) {
     lit->type = expected;
     if (expected->isInteger() && !fits(expected->bitWidth()))
@@ -436,6 +813,9 @@ Expr *Sema::checkName(NameExpr *name) {
   if (entry.var) {
     name->var = entry.var;
     name->type = entry.var->type;
+    // Narrowed: known to hold a value here.
+    if (name->type->isOptional() && isDefined(entry.var))
+      return convert(name, name->type->inner());
     return name;
   }
   if (entry.func)
@@ -451,7 +831,7 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
   switch (unary->op) {
   case UnaryOp::Neg:
   case UnaryOp::Plus: {
-    const Type *hint = expected && expected->isNumeric() ? expected : nullptr;
+    const Type *hint = expected && expected->nonOptional()->isNumeric() ? expected->nonOptional() : nullptr;
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand))
       unary->operand = checkIntLit(lit, hint, /*negated=*/unary->op == UnaryOp::Neg);
     else
@@ -466,15 +846,13 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
     break;
   }
   case UnaryOp::Not: {
-    unary->operand = checkExpr(unary->operand, Type::boolTy());
-    const Type *type = unary->operand->type;
-    if (!type->isBool() && !type->isError())
-      diags_.error(unary->loc(), "operator '!' cannot be applied to type '" + type->name() + "'");
-    unary->type = Type::boolTy();
+    Flow whenTrue, whenFalse;
+    checkBranching(unary, whenTrue, whenFalse);
+    flow_ = join(whenTrue, whenFalse);
     break;
   }
   case UnaryOp::BitNot: {
-    const Type *hint = expected && expected->isInteger() ? expected : nullptr;
+    const Type *hint = expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
     unary->operand = checkExpr(unary->operand, hint);
     const Type *type = unary->operand->type;
     if (!type->isInteger() && !type->isError()) {
@@ -490,32 +868,36 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
 
 Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
   const char *op = opSpelling(bin->op);
+  if (expected)
+    expected = expected->nonOptional();
   switch (bin->op) {
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
-    bin->lhs = checkExpr(bin->lhs, Type::boolTy());
-    bin->rhs = checkExpr(bin->rhs, Type::boolTy());
-    const Type *l = bin->lhs->type, *r = bin->rhs->type;
-    if (!l->isError() && !r->isError() && !(l->isBool() && r->isBool()))
-      reportOperandTypes(bin->loc(), op, l, r);
-    bin->type = Type::boolTy();
+    Flow whenTrue, whenFalse;
+    checkBranching(bin, whenTrue, whenFalse);
+    flow_ = join(whenTrue, whenFalse);
     return bin;
   }
+
+  case BinaryOp::Nullish:
+    return checkNullish(bin, expected);
+
+  case BinaryOp::Eq:
+  case BinaryOp::Ne:
+    return checkEquality(bin);
 
   case BinaryOp::Lt:
   case BinaryOp::Le:
   case BinaryOp::Gt:
-  case BinaryOp::Ge:
-  case BinaryOp::Eq:
-  case BinaryOp::Ne: {
+  case BinaryOp::Ge: {
     bin->lhs = checkExpr(bin->lhs);
     bin->rhs = checkExpr(bin->rhs);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     bin->type = Type::boolTy();
     if (l->isError() || r->isError())
       return bin;
-    bool equality = bin->op == BinaryOp::Eq || bin->op == BinaryOp::Ne;
-    if (equality && l->isBool() && r->isBool())
+    // Strings compare by UTF-16 code units, as in JavaScript.
+    if (l->isString() && r->isString())
       return bin;
     if (l->isNumeric() && r->isNumeric()) {
       if (const Type *common = commonNumericType(l, r)) {
@@ -561,6 +943,13 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     bin->type = Type::error();
     if (l->isError() || r->isError())
       return bin;
+    if (bin->op == BinaryOp::Add && (l->isString() || r->isString())) {
+      // As in JavaScript, `+` concatenates when either side is a string.
+      bin->lhs = toStringOperand(bin->lhs);
+      bin->rhs = toStringOperand(bin->rhs);
+      bin->type = Type::string();
+      return bin;
+    }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
     const Type *common = operandsOk ? commonNumericType(l, r) : nullptr;
     if (!common) {
@@ -575,59 +964,269 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
   }
 }
 
-VarSymbol *Sema::checkAssignTarget(Expr *target) {
-  auto *name = dyn_cast<NameExpr>(target);
-  if (!name) {
-    diags_.error(target->loc(), "only variables can be assigned to for now");
-    return nullptr;
+// `===` and `!==` (`==` and `!=` behave the same, as there is no null). Any
+// value can be compared with undefined; `T | undefined` compares with `T`.
+Expr *Sema::checkEquality(BinaryExpr *bin) {
+  bin->lhs = checkExpr(bin->lhs);
+  bin->rhs = checkExpr(bin->rhs);
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  bin->type = Type::boolTy();
+  if (l->isError() || r->isError())
+    return bin;
+  if (l->isVoid() || r->isVoid()) {
+    reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    return bin;
   }
-  checkName(name);
-  if (name->var && name->var->isConst)
-    diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a constant");
-  return name->var;
+  if (l->isUndefined() || r->isUndefined())
+    return bin;
+
+  const Type *common = unify(l, r);
+  bool comparable = common && (common->nonOptional()->isNumeric() || common->nonOptional()->isBool() ||
+                               common->nonOptional()->isString() || common->nonOptional()->isArray());
+  if (!comparable) {
+    reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    return bin;
+  }
+  bin->lhs = convert(bin->lhs, common);
+  bin->rhs = convert(bin->rhs, common);
+  return bin;
 }
 
+// `a ?? b`: b when a is undefined. When a cannot be undefined (for example an
+// index Sema proved in range), b is checked but never evaluated.
+Expr *Sema::checkNullish(BinaryExpr *bin, const Type *expected) {
+  bin->lhs = checkExpr(bin->lhs, expected);
+  const Type *l = bin->lhs->type;
+  Flow afterLhs = flow_;
+  const Type *hint = l->isUndefined() || l->isError() ? expected : l->nonOptional();
+  bin->rhs = checkExpr(bin->rhs, hint);
+  flow_ = join(afterLhs, flow_); // the right side may not run
+  const Type *r = bin->rhs->type;
+  bin->type = Type::error();
+  if (l->isError() || r->isError())
+    return bin;
+  if (l->isVoid() || r->isVoid()) {
+    reportOperandTypes(bin->loc(), "??", l, r);
+    return bin;
+  }
+  if (l->isUndefined()) {
+    bin->type = r;
+    return bin;
+  }
+  const Type *base = r->isUndefined() ? l->nonOptional() : unify(l->nonOptional(), r->nonOptional());
+  if (!base || base->isError()) {
+    reportOperandTypes(bin->loc(), "??", l, r);
+    return bin;
+  }
+  const Type *result = r->isOptional() || r->isUndefined() ? Type::optional(base) : base;
+  bin->lhs = convert(bin->lhs, l->isOptional() ? Type::optional(base) : result);
+  bin->rhs = convert(bin->rhs, result);
+  bin->type = result;
+  return bin;
+}
+
+const Type *Sema::checkAssignTarget(Expr *target, bool compound) {
+  if (auto *name = dyn_cast<NameExpr>(target)) {
+    VarSymbol *var = checkVarTarget(name);
+    return var ? var->type : Type::error();
+  }
+
+  if (auto *index = dyn_cast<IndexExpr>(target)) {
+    index->object = checkExpr(index->object);
+    index->index = checkPosition(index->index);
+    const Type *type = index->object->type;
+    index->type = Type::error();
+    if (type->isError())
+      return type;
+    if (type->isArray()) {
+      index->type = type->inner();
+      return index->type;
+    }
+    if (type->isString())
+      diags_.error(index->loc(), "strings are immutable; a character cannot be assigned to");
+    else if (type->isOptional() && type->inner()->isArray())
+      diags_.error(index->object->loc(), "the array may be undefined; check it first");
+    else
+      diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed");
+    return Type::error();
+  }
+
+  if (auto *member = dyn_cast<MemberExpr>(target)) {
+    member->object = checkExpr(member->object);
+    const Type *type = member->object->type;
+    member->type = Type::error();
+    if (type->isError())
+      return type;
+    if (type->isArray() && member->name == "length") {
+      if (compound) {
+        diags_.error(member->loc(), "only '=' can change the length of an array");
+        return Type::error();
+      }
+      member->type = Type::intTy();
+      return Type::longTy(); // a new length is computed as long, like positions
+    }
+    if (type->isString() && member->name == "length")
+      diags_.error(member->loc(), "the length of a string cannot be changed");
+    else
+      diags_.error(member->loc(), "property '" + member->name + "' of type '" + type->name() +
+                                      "' cannot be assigned to");
+    return Type::error();
+  }
+
+  diags_.error(target->loc(), "only variables, array elements and 'length' can be assigned to");
+  return Type::error();
+}
+
+VarSymbol *Sema::checkVarTarget(NameExpr *name) {
+  ScopeEntry entry = lookup(name->name);
+  if (!entry.var) {
+    checkName(name); // reports the error
+    return nullptr;
+  }
+  name->var = entry.var;
+  name->type = entry.var->type;
+  if (entry.var->isConst)
+    diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a constant");
+  return entry.var;
+}
+
+// After the value of `a[i] = v` is known: the store happens then, so the
+// index must be in range at that point.
+static const char kWriteOutOfRange[] =
+    "cannot prove that the index is within the array (0 <= index <= length); writing further "
+    "would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()";
+
 Expr *Sema::checkAssign(AssignExpr *assign) {
-  VarSymbol *var = checkAssignTarget(assign->target);
-  const Type *type = var ? var->type : Type::error();
+  bool compound = assign->op.has_value();
+  BinaryOp op = compound ? *assign->op : BinaryOp::Add;
+
+  if (compound && op == BinaryOp::Nullish) {
+    // `x ??= v`: assigns only if x is undefined.
+    auto *name = dyn_cast<NameExpr>(assign->target);
+    VarSymbol *var = name ? checkVarTarget(name) : nullptr;
+    if (!name)
+      diags_.error(assign->target->loc(), "only variables can be the target of '??='");
+    const Type *type = var ? var->type : Type::error();
+    assign->type = type;
+    if (!type->isOptional() && !type->isError()) {
+      diags_.error(assign->loc(), "'??=' needs a variable that may be undefined; '" + name->name +
+                                      "' has type '" + type->name() + "'");
+      type = Type::error();
+    }
+    Flow before = flow_;
+    assign->value = checkExpr(assign->value, type->isError() ? nullptr : type->inner());
+    const Type *valueType = assign->value->type;
+    flow_ = join(before, flow_);
+    if (type->isError())
+      return assign;
+    bool definite = !valueType->isOptional() && !valueType->isUndefined();
+    assign->value = coerce(assign->value, definite ? type->inner() : type);
+    if (var) {
+      if (definite)
+        setDefined(var, true);
+      assign->type = definite ? type->inner() : type;
+    }
+    return assign;
+  }
+
+  const Type *type = checkAssignTarget(assign->target, compound);
   assign->type = type;
-
-  if (!assign->op) {
-    assign->value = coerce(checkExpr(assign->value, type), type);
-    return assign;
+  auto *index = dyn_cast<IndexExpr>(assign->target);
+  auto *member = dyn_cast<MemberExpr>(assign->target);
+  auto *name = dyn_cast<NameExpr>(assign->target);
+  const VarSymbol *var = name ? name->var : nullptr;
+  // `a[i] op= v` reads the element before v is evaluated.
+  bool reportedRange = false;
+  if (index && compound && index->object->type->isArray() &&
+      !provesInBounds(index->object, index->index, /*allowEnd=*/false)) {
+    diags_.error(index->loc(), "cannot prove that the index is within the array; check it first, "
+                               "e.g. 'if (i < a.length)'");
+    reportedRange = true;
   }
 
-  BinaryOp op = *assign->op;
-  std::string spelling = std::string(opSpelling(op)) + "=";
-  bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
-  bool integerOnly = shift || op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
-
-  assign->value = checkExpr(assign->value, shift ? nullptr : type);
-  const Type *valueType = assign->value->type;
-  if (type->isError() || valueType->isError())
-    return assign;
-
-  bool targetOk = integerOnly ? type->isInteger() : type->isNumeric();
-  if (!targetOk || (shift && !valueType->isInteger())) {
-    reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
-    return assign;
+  if (!compound) {
+    Expr *value = checkExpr(assign->value, type->isError() ? nullptr : type);
+    assign->value = coerce(value, type);
+    if (var)
+      assigned(var, value);
+  } else {
+    std::string spelling = std::string(opSpelling(op)) + "=";
+    if (type->isString()) {
+      assign->value = checkExpr(assign->value);
+      if (op != BinaryOp::Add) {
+        if (!assign->value->type->isError())
+          reportOperandTypes(assign->loc(), spelling.c_str(), type, assign->value->type);
+      } else {
+        assign->value = toStringOperand(assign->value);
+      }
+      if (var)
+        flow_.facts.forget(var);
+    } else {
+      bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
+      bool integerOnly =
+          shift || op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
+      assign->value = checkExpr(assign->value, shift ? nullptr : type);
+      const Type *valueType = assign->value->type;
+      if (!type->isError() && !valueType->isError()) {
+        bool targetOk = integerOnly ? type->isInteger() : type->isNumeric();
+        if (!targetOk || (shift && !valueType->isInteger())) {
+          reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
+        } else {
+          // `x op= v` must produce a value of x's type, so v converts to it.
+          assign->value = shift ? convert(assign->value, type) : coerce(assign->value, type);
+        }
+      }
+      if (var) {
+        std::optional<Linear> delta = linear(assign->value);
+        if ((op == BinaryOp::Add || op == BinaryOp::Sub) && delta && delta->term.isZero())
+          incremented(var, op == BinaryOp::Add ? delta->offset : -delta->offset);
+        else
+          flow_.facts.forget(var);
+      }
+    }
   }
-  // `x op= v` must produce a value of x's type, so v converts to it.
-  assign->value = shift ? convert(assign->value, type) : coerce(assign->value, type);
+
+  if (index && index->object->type->isArray()) {
+    // The store happens after the value is evaluated, so prove it here.
+    bool inRange = provesInBounds(index->object, index->index, /*allowEnd=*/false);
+    if (!inRange && !reportedRange &&
+        (compound || !provesInBounds(index->object, index->index, /*allowEnd=*/true)))
+      diags_.error(index->loc(), kWriteOutOfRange);
+    index->mayAppend = !inRange;
+    if (!inRange)
+      arrayResized(index->object->type, /*grew=*/true, /*shrank=*/false);
+  }
+  if (member && member->object->type->isArray()) {
+    if (std::optional<Linear> length = linear(assign->value);
+        length && length->term.isZero() && length->offset < 0)
+      diags_.error(assign->value->loc(), "an array length cannot be negative");
+    arrayResized(member->object->type, /*grew=*/true, /*shrank=*/true);
+    if (std::optional<Linear> self = lengthOf(member->object); self && !self->term.isZero())
+      if (std::optional<Linear> length = linear(assign->value))
+        flow_.facts.addEqual(self->term, length->term, length->offset);
+  }
   return assign;
 }
 
 Expr *Sema::checkUpdate(UpdateExpr *update) {
-  VarSymbol *var = checkAssignTarget(update->target);
   update->type = Type::error();
-  if (!var || var->type->isError())
+  const Type *type = checkAssignTarget(update->target, /*compound=*/true);
+  if (type->isError())
     return update;
-  if (!var->type->isNumeric()) {
+  if (!type->isNumeric()) {
     diags_.error(update->loc(), llvm::Twine("operator '") + (update->increment ? "++" : "--") +
-                                    "' cannot be applied to type '" + var->type->name() + "'");
+                                    "' cannot be applied to type '" + type->name() + "'");
     return update;
   }
-  update->type = var->type;
+  update->type = type;
+  if (auto *name = dyn_cast<NameExpr>(update->target)) {
+    if (name->var)
+      incremented(name->var, update->increment ? 1 : -1);
+  } else if (auto *index = dyn_cast<IndexExpr>(update->target)) {
+    if (!provesInBounds(index->object, index->index, /*allowEnd=*/false))
+      diags_.error(index->loc(), "cannot prove that the index is within the array; check it "
+                                 "first, e.g. 'if (i < a.length)'");
+  }
   return update;
 }
 
@@ -639,19 +1238,34 @@ Expr *Sema::checkCall(CallExpr *call) {
   };
 
   if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-    auto *object = dyn_cast<NameExpr>(member->object);
-    if (object && object->name == "console") {
-      ScopeEntry shadow = lookup("console");
-      if (!shadow.var && !shadow.func) {
-        if (member->name == "log")
-          return checkConsoleLog(call);
-        diags_.error(member->loc(), "'console." + member->name +
-                                        "' is not supported yet; only 'console.log' is");
-        checkArgsLoosely();
-        return call;
-      }
+    if (isGlobalName(member->object, "console")) {
+      if (member->name == "log")
+        return checkConsoleLog(call);
+      diags_.error(member->loc(), "'console." + member->name +
+                                      "' is not supported yet; only 'console.log' is");
+      checkArgsLoosely();
+      return call;
     }
-    diags_.error(member->loc(), "method calls are not supported yet");
+    member->object = checkExpr(member->object);
+    const Type *receiver = member->object->type;
+    if (receiver->isString())
+      return checkStringMethod(call, member);
+    if (receiver->isArray())
+      return checkArrayMethod(call, member);
+    if ((receiver->isNumeric() || receiver->isBool()) && member->name == "toString" &&
+        call->args.empty()) {
+      // `x.toString()` is `String(x)`.
+      call->args.push_back(toStringOperand(member->object));
+      call->builtin = Builtin::StringOf;
+      call->type = Type::string();
+      return call;
+    }
+    if (receiver->isOptional())
+      diags_.error(member->object->loc(), "the value may be undefined; check it before calling '" +
+                                              member->name + "'");
+    else if (!receiver->isError())
+      diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
+                                      receiver->name() + "'");
     checkArgsLoosely();
     return call;
   }
@@ -660,6 +1274,20 @@ Expr *Sema::checkCall(CallExpr *call) {
   if (!name) {
     diags_.error(call->callee->loc(), "only functions can be called, by name, for now");
     checkArgsLoosely();
+    return call;
+  }
+
+  if (isGlobalName(name, "String")) {
+    if (call->args.size() > 1) {
+      diags_.error(name->loc(), "expected at most 1 argument, but got " +
+                                    llvm::Twine(call->args.size()));
+      checkArgsLoosely();
+      return call;
+    }
+    for (Expr *&arg : call->args)
+      arg = toStringOperand(checkExpr(arg));
+    call->builtin = Builtin::StringOf;
+    call->type = Type::string();
     return call;
   }
 
@@ -685,6 +1313,7 @@ Expr *Sema::checkCall(CallExpr *call) {
   }
   for (size_t i = 0; i < call->args.size(); ++i)
     call->args[i] = coerce(checkExpr(call->args[i], func->params[i]), func->params[i]);
+  calledFunction();
   return call;
 }
 
@@ -693,37 +1322,132 @@ Expr *Sema::checkConsoleLog(CallExpr *call) {
   call->type = Type::voidTy();
   for (Expr *&arg : call->args) {
     arg = checkExpr(arg);
-    const Type *type = arg->type;
-    if (type->isVoid())
+    if (arg->type->isVoid())
       diags_.error(arg->loc(), "an expression of type 'void' cannot be printed");
-    else if (type->isString() && !isa<StringLitExpr>(arg))
-      diags_.error(arg->loc(), "only string literals can be printed for now");
   }
   return call;
 }
 
+bool Sema::isGlobalName(const Expr *expr, llvm::StringRef name) const {
+  auto *n = dyn_cast<NameExpr>(expr);
+  if (!n || n->name != name)
+    return false;
+  ScopeEntry shadow = lookup(name);
+  return !shadow.var && !shadow.func;
+}
+
+Expr *Sema::toStringOperand(Expr *expr) {
+  const Type *type = expr->type;
+  if (type->isString() || type->isError())
+    return expr;
+  if (type->isVoid()) {
+    diags_.error(expr->loc(), "an expression of type 'void' cannot be converted to a string");
+    return expr;
+  }
+  // Numbers, booleans, undefined, arrays (joined with commas) and optionals of
+  // those convert as in JavaScript.
+  return convert(expr, Type::string());
+}
+
+Expr *Sema::checkTemplate(TemplateExpr *tmpl) {
+  for (Expr *&e : tmpl->exprs)
+    e = toStringOperand(checkExpr(e));
+  tmpl->type = Type::string();
+  return tmpl;
+}
+
+Expr *Sema::checkMember(MemberExpr *member) {
+  member->type = Type::error();
+  if (isGlobalName(member->object, "console")) {
+    diags_.error(member->loc(), "'console." + member->name + "' can only be called");
+    return member;
+  }
+  member->object = checkExpr(member->object);
+  const Type *type = member->object->type;
+  if (type->isError())
+    return member;
+  if ((type->isString() || type->isArray()) && member->name == "length") {
+    member->type = Type::intTy();
+    return member;
+  }
+  if (type->isOptional())
+    diags_.error(member->object->loc(), "the value may be undefined; check it before reading '" +
+                                            member->name + "'");
+  else if (type->isArray() || type->isString())
+    diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
+                                    type->name() + "'; methods must be called");
+  else
+    diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
+                                    type->name() + "'");
+  return member;
+}
+
+Expr *Sema::checkPosition(Expr *expr) {
+  expr = checkExpr(expr, Type::longTy());
+  const Type *type = expr->type;
+  if (type->isError())
+    return expr;
+  if (!type->isInteger()) {
+    std::string message = "an index or position must be an integer, found '" + type->name().str() + "'";
+    if (type->isFloat())
+      message += "; convert it with 'as int'";
+    else if (type->isOptional())
+      message += "; the value may be undefined: check it first or give a default with '??'";
+    diags_.error(expr->loc(), message);
+    return expr;
+  }
+  return convert(expr, Type::longTy());
+}
+
+Expr *Sema::checkIndex(IndexExpr *index) {
+  index->object = checkExpr(index->object);
+  index->index = checkPosition(index->index);
+  index->type = Type::error();
+  const Type *type = index->object->type;
+  if (type->isError() || index->index->type->isError())
+    return index;
+  const Type *element = type->isString() ? type : type->isArray() ? type->inner() : nullptr;
+  if (!element) {
+    if (type->isOptional() && (type->inner()->isArray() || type->inner()->isString()))
+      diags_.error(index->object->loc(), "the value may be undefined; check it before indexing");
+    else
+      diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed");
+    return index;
+  }
+  // Proved in range: a plain read. Otherwise JavaScript yields undefined.
+  bool inRange = provesInBounds(index->object, index->index, /*allowEnd=*/false);
+  index->mayBeOutOfRange = !inRange;
+  index->type = inRange ? element : Type::optional(element);
+  return index;
+}
+
 Expr *Sema::checkConditional(ConditionalExpr *cond, const Type *expected) {
-  cond->cond = checkCondition(cond->cond);
+  Flow whenTrue, whenFalse;
+  cond->cond = checkCondition(cond->cond, whenTrue, whenFalse);
+  flow_ = whenTrue;
   cond->thenExpr = checkExpr(cond->thenExpr, expected);
+  Flow afterThen = flow_;
+  flow_ = whenFalse;
   cond->elseExpr = checkExpr(cond->elseExpr, expected);
+  flow_ = join(afterThen, flow_);
+
   const Type *a = cond->thenExpr->type, *b = cond->elseExpr->type;
   cond->type = Type::error();
   if (a->isError() || b->isError())
     return cond;
-  if (a == b) {
+  if (a->isVoid() && b->isVoid()) {
     cond->type = a;
     return cond;
   }
-  if (a->isNumeric() && b->isNumeric()) {
-    if (const Type *common = commonNumericType(a, b)) {
-      cond->thenExpr = convert(cond->thenExpr, common);
-      cond->elseExpr = convert(cond->elseExpr, common);
-      cond->type = common;
-      return cond;
-    }
+  const Type *common = unify(a, b);
+  if (!common) {
+    diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" + a->name() +
+                                  "' and '" + b->name() + "'");
+    return cond;
   }
-  diags_.error(cond->loc(), "the branches of '?:' have incompatible types '" + a->name() + "' and '" +
-                                b->name() + "'");
+  cond->thenExpr = convert(cond->thenExpr, common);
+  cond->elseExpr = convert(cond->elseExpr, common);
+  cond->type = common;
   return cond;
 }
 
@@ -736,7 +1460,14 @@ Expr *Sema::checkCast(CastExpr *cast) {
     return cast;
   if (from == to || (from->isNumeric() && to->isNumeric()))
     return cast;
-  diags_.error(cast->loc(), "cannot convert type '" + from->name() + "' to '" + to->name() + "'");
+  if (isImplicitlyConvertible(from, to)) {
+    cast->target.reset(); // the same as the implicit conversion
+    return cast;
+  }
+  std::string message = ("cannot convert type '" + from->name() + "' to '" + to->name() + "'").str();
+  if (from->isOptional())
+    message += "; 'as' does not check for undefined: use '!== undefined' or '??'";
+  diags_.error(cast->loc(), message);
   return cast;
 }
 

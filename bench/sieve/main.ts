@@ -1,0 +1,15 @@
+function count(n: int): int {
+  const composite = new Array<boolean>(n + 1)
+  let found = 0
+  for (let i = 2; i < composite.length; i++) {
+    if (composite[i]) continue
+    found++
+    let j = i + i
+    while (j >= 0 && j < composite.length) {
+      composite[j] = true
+      j += i
+    }
+  }
+  return found
+}
+console.log(count(20000000))

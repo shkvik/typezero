@@ -35,6 +35,7 @@ const char *opSpelling(BinaryOp op) {
   case BinaryOp::Ne: return "!==";
   case BinaryOp::LogAnd: return "&&";
   case BinaryOp::LogOr: return "||";
+  case BinaryOp::Nullish: return "??";
   }
   return "?";
 }
@@ -47,7 +48,8 @@ constexpr int kRelationalPrec = 7;
 
 int binaryPrec(Tok kind) {
   switch (kind) {
-  case Tok::PipePipe: return 1;
+  case Tok::PipePipe:
+  case Tok::QuestionQuestion: return 1;
   case Tok::AmpAmp: return 2;
   case Tok::Pipe: return 3;
   case Tok::Caret: return 4;
@@ -75,6 +77,7 @@ int binaryPrec(Tok kind) {
 BinaryOp binaryOpFor(Tok kind) {
   switch (kind) {
   case Tok::PipePipe: return BinaryOp::LogOr;
+  case Tok::QuestionQuestion: return BinaryOp::Nullish;
   case Tok::AmpAmp: return BinaryOp::LogAnd;
   case Tok::Pipe: return BinaryOp::BitOr;
   case Tok::Caret: return BinaryOp::BitXor;
@@ -113,6 +116,7 @@ bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   case Tok::ShlAssign: op = BinaryOp::Shl; return true;
   case Tok::ShrAssign: op = BinaryOp::Shr; return true;
   case Tok::UShrAssign: op = BinaryOp::UShr; return true;
+  case Tok::QuestionQuestionAssign: op = BinaryOp::Nullish; return true;
   default: return false;
   }
 }
@@ -344,23 +348,33 @@ FunctionDecl *Parser::parseFunction() {
 VarDeclStmt *Parser::parseVarDecl() {
   auto *decl = ctx_.make<VarDeclStmt>(tok_.loc(), tok_.is(Tok::KwConst));
   advance(); // 'let' / 'const' / 'var'
+  parseDeclarators(decl);
+  return decl;
+}
 
+void Parser::parseDeclarators(VarDeclStmt *decl) {
   do {
     VarDeclarator d;
-    d.loc = tok_.loc();
-    if (!tok_.is(Tok::Identifier)) {
-      error(tok_.loc(), "expected a variable name");
-      return decl;
-    }
-    d.name = tok_.text;
-    advance();
-    if (accept(Tok::Colon))
-      d.typeAnn = parseType();
+    if (!parseBinding(d))
+      return;
     if (accept(Tok::Assign))
       d.init = parseExpr();
     decl->decls.push_back(d);
   } while (accept(Tok::Comma));
-  return decl;
+}
+
+// A variable name with an optional type annotation.
+bool Parser::parseBinding(VarDeclarator &d) {
+  d.loc = tok_.loc();
+  if (!tok_.is(Tok::Identifier)) {
+    error(tok_.loc(), "expected a variable name");
+    return false;
+  }
+  d.name = tok_.text;
+  advance();
+  if (accept(Tok::Colon))
+    d.typeAnn = parseType();
+  return true;
 }
 
 Stmt *Parser::parseIf() {
@@ -400,20 +414,42 @@ Stmt *Parser::parseDoWhile() {
 }
 
 Stmt *Parser::parseFor() {
-  auto *loop = ctx_.make<ForStmt>(tok_.loc());
+  llvm::SMLoc forLoc = tok_.loc();
+  auto *loop = ctx_.make<ForStmt>(forLoc);
   advance(); // 'for'
   expect(Tok::LParen, "after 'for'");
 
   if (tok_.is(Tok::KwLet) || tok_.is(Tok::KwConst) || tok_.is(Tok::KwVar)) {
     if (tok_.is(Tok::KwVar))
       error(tok_.loc(), "'var' is not supported; use 'let' or 'const'");
-    loop->init = parseVarDecl();
+    auto *decl = ctx_.make<VarDeclStmt>(tok_.loc(), tok_.is(Tok::KwConst));
+    advance();
+    VarDeclarator first;
+    if (!parseBinding(first))
+      return loop;
+    if (tok_.is(Tok::Identifier) && tok_.text == "of") {
+      advance();
+      auto *forOf = ctx_.make<ForOfStmt>(forLoc);
+      forOf->isConst = decl->isConst;
+      forOf->binding = first;
+      forOf->iterable = parseExpr();
+      expect(Tok::RParen, "to close the loop header");
+      forOf->body = parseStatement();
+      return forOf;
+    }
+    if (accept(Tok::Assign))
+      first.init = parseExpr();
+    decl->decls.push_back(first);
+    if (accept(Tok::Comma))
+      parseDeclarators(decl);
+    loop->init = decl;
   } else if (!tok_.is(Tok::Semi)) {
     llvm::SMLoc loc = tok_.loc();
     loop->init = ctx_.make<ExprStmt>(loc, parseExpr());
   }
   if (tok_.is(Tok::Identifier) && (tok_.text == "of" || tok_.text == "in")) {
-    error(tok_.loc(), "'for...of' and 'for...in' loops are not supported yet");
+    error(tok_.loc(), tok_.text == "in" ? "'for...in' loops are not supported; use 'for...of'"
+                                        : "'for...of' needs a new variable: 'for (const x of ...)'");
     return loop;
   }
   expect(Tok::Semi, "after the loop initializer");
@@ -445,29 +481,91 @@ Stmt *Parser::parseReturn() {
 // Types
 //===----------------------------------------------------------------------===//
 
+// type := '|'? arrayType ('|' arrayType)*
 TypeRef Parser::parseType() {
+  llvm::SMLoc loc = tok_.loc();
+  accept(Tok::Pipe); // a leading `|` is allowed, as in TypeScript
+  TypeRef first = parseArrayType();
+  if (!tok_.is(Tok::Pipe))
+    return first;
+  TypeRef ref;
+  ref.kind = TypeRef::Kind::Union;
+  ref.loc = loc;
+  ref.args.push_back(std::move(first));
+  while (accept(Tok::Pipe))
+    ref.args.push_back(parseArrayType());
+  return ref;
+}
+
+// arrayType := primaryType ('[' ']')*
+TypeRef Parser::parseArrayType() {
+  TypeRef ref = parsePrimaryType();
+  while (tok_.is(Tok::LBracket)) {
+    TypeRef array;
+    array.kind = TypeRef::Kind::Array;
+    array.loc = ref.loc;
+    advance();
+    expect(Tok::RBracket, "in the array type");
+    array.args.push_back(std::move(ref));
+    ref = std::move(array);
+  }
+  return ref;
+}
+
+// primaryType := name ('<' type (',' type)* '>')? | '(' type ')'
+TypeRef Parser::parsePrimaryType() {
   TypeRef ref;
   ref.loc = tok_.loc();
-  if (tok_.is(Tok::Identifier)) {
-    ref.name = tok_.text;
-    advance();
-  } else {
+  if (accept(Tok::LParen)) {
+    ref = parseType();
+    expect(Tok::RParen, "to close the parenthesized type");
+    return ref;
+  }
+  if (!tok_.is(Tok::Identifier)) {
     error(tok_.loc(), llvm::Twine("expected a type, found ") + tokSpelling(tok_.kind));
     return ref;
   }
-
-  if (tok_.is(Tok::LBracket)) {
-    report(tok_.loc(), "array types are not supported yet");
-    advance();
-    expect(Tok::RBracket);
-  } else if (tok_.is(Tok::Pipe)) {
-    report(tok_.loc(), "union types are not supported yet");
-    advance();
-    parseType();
-  } else if (tok_.is(Tok::Less)) {
-    error(tok_.loc(), "generic types are not supported yet");
+  ref.name = tok_.text;
+  advance();
+  if (tok_.is(Tok::Less)) {
+    ref.kind = TypeRef::Kind::Generic;
+    ref.args = parseTypeArgs();
   }
   return ref;
+}
+
+// `<T, U>`. A closing `>>` (as in `Array<Array<int>>`) is split in two.
+std::vector<TypeRef> Parser::parseTypeArgs() {
+  std::vector<TypeRef> args;
+  advance(); // '<'
+  do
+    args.push_back(parseType());
+  while (accept(Tok::Comma));
+
+  switch (tok_.kind) {
+  case Tok::Greater:
+    advance();
+    break;
+  case Tok::Shr:
+  case Tok::UShr:
+  case Tok::GreaterEq:
+  case Tok::ShrAssign:
+  case Tok::UShrAssign:
+    // Keep the rest of the token: `>>` leaves `>`, `>=` leaves `=`.
+    tok_.kind = tok_.is(Tok::Shr)        ? Tok::Greater
+                : tok_.is(Tok::UShr)     ? Tok::Shr
+                : tok_.is(Tok::GreaterEq) ? Tok::Assign
+                : tok_.is(Tok::ShrAssign) ? Tok::GreaterEq
+                                          : Tok::ShrAssign;
+    tok_.text = tok_.text.drop_front();
+    tok_.newlineBefore = false;
+    break;
+  default:
+    error(tok_.loc(), llvm::Twine("expected '>' to close the type arguments, found ") +
+                          tokSpelling(tok_.kind));
+    break;
+  }
+  return args;
 }
 
 //===----------------------------------------------------------------------===//
@@ -576,8 +674,11 @@ Expr *Parser::parseCallOrMember() {
       expr = ctx_.make<MemberExpr>(loc, expr, tok_.text);
       advance();
     } else if (tok_.is(Tok::LBracket)) {
-      error(tok_.loc(), "indexing is not supported yet");
-      return expr;
+      llvm::SMLoc loc = tok_.loc();
+      advance();
+      Expr *index = parseExpr();
+      expect(Tok::RBracket, "to close the index");
+      expr = ctx_.make<IndexExpr>(loc, expr, index);
     } else {
       return expr;
     }
@@ -592,11 +693,14 @@ Expr *Parser::parsePrimary() {
   case Tok::FloatLiteral:
     return parseFloatLiteral();
   case Tok::StringLiteral: {
-    std::string value;
+    std::u16string value;
     decodeStringLiteral(tok_, value, diags_);
     advance();
     return ctx_.make<StringLitExpr>(loc, std::move(value));
   }
+  case Tok::TemplateString:
+  case Tok::TemplateHead:
+    return parseTemplate();
   case Tok::KwTrue:
   case Tok::KwFalse: {
     bool value = tok_.is(Tok::KwTrue);
@@ -606,6 +710,8 @@ Expr *Parser::parsePrimary() {
   case Tok::Identifier: {
     llvm::StringRef name = tok_.text;
     advance();
+    if (name == "undefined")
+      return ctx_.make<UndefinedExpr>(loc);
     return ctx_.make<NameExpr>(loc, name);
   }
   case Tok::LParen: {
@@ -614,11 +720,81 @@ Expr *Parser::parsePrimary() {
     expect(Tok::RParen, "to close the parenthesized expression");
     return inner;
   }
+  case Tok::LBracket:
+    return parseArrayLiteral();
+  case Tok::KwNew:
+    return parseNew();
   default:
     error(loc, llvm::Twine("expected an expression, found ") + tokSpelling(tok_.kind));
     // Placeholder so callers never see null; the source will not compile anyway.
     return ctx_.make<IntLitExpr>(loc, 0);
   }
+}
+
+Expr *Parser::parseArrayLiteral() {
+  auto *lit = ctx_.make<ArrayLitExpr>(tok_.loc());
+  advance(); // '['
+  while (!tok_.is(Tok::RBracket) && !tok_.is(Tok::Eof)) {
+    if (tok_.is(Tok::Comma)) {
+      report(tok_.loc(), "arrays cannot have holes; write the element explicitly");
+      advance();
+      continue;
+    }
+    bool spread = accept(Tok::Ellipsis);
+    lit->elements.push_back({parseExpr(), spread});
+    if (!accept(Tok::Comma))
+      break;
+  }
+  expect(Tok::RBracket, "to close the array");
+  return lit;
+}
+
+// `new Name<T>(args)`
+Expr *Parser::parseNew() {
+  llvm::SMLoc loc = tok_.loc();
+  advance(); // 'new'
+  if (!tok_.is(Tok::Identifier)) {
+    error(tok_.loc(), "expected a class name after 'new'");
+    return ctx_.make<IntLitExpr>(loc, 0);
+  }
+  llvm::StringRef name = tok_.text;
+  llvm::SMLoc nameLoc = tok_.loc();
+  advance();
+  std::vector<TypeRef> typeArgs;
+  if (tok_.is(Tok::Less))
+    typeArgs = parseTypeArgs();
+  std::vector<Expr *> args;
+  if (accept(Tok::LParen)) {
+    while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
+      args.push_back(parseExpr());
+      if (!accept(Tok::Comma))
+        break;
+    }
+    expect(Tok::RParen, "to close the argument list");
+  }
+  return ctx_.make<NewExpr>(nameLoc, name, std::move(typeArgs), std::move(args));
+}
+
+Expr *Parser::parseTemplate() {
+  auto *tmpl = ctx_.make<TemplateExpr>(tok_.loc());
+  std::u16string text;
+  decodeTemplatePart(tok_, text, diags_);
+  tmpl->quasis.push_back(text);
+  bool done = tok_.is(Tok::TemplateString);
+  advance();
+  while (!done) {
+    tmpl->exprs.push_back(parseExpr());
+    if (!tok_.is(Tok::TemplateMiddle) && !tok_.is(Tok::TemplateTail)) {
+      error(tok_.loc(), "expected '}' to close the template substitution");
+      tmpl->quasis.emplace_back();
+      return tmpl;
+    }
+    decodeTemplatePart(tok_, text, diags_);
+    tmpl->quasis.push_back(text);
+    done = tok_.is(Tok::TemplateTail);
+    advance();
+  }
+  return tmpl;
 }
 
 Expr *Parser::parseIntLiteral() {

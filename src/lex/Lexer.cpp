@@ -12,6 +12,10 @@ const char *tokSpelling(Tok kind) {
   case Tok::IntLiteral: return "integer literal";
   case Tok::FloatLiteral: return "number literal";
   case Tok::StringLiteral: return "string literal";
+  case Tok::TemplateString:
+  case Tok::TemplateHead: return "template literal";
+  case Tok::TemplateMiddle:
+  case Tok::TemplateTail: return "'}'";
   case Tok::KwAs: return "'as'";
   case Tok::KwBreak: return "'break'";
   case Tok::KwConst: return "'const'";
@@ -23,6 +27,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::KwFunction: return "'function'";
   case Tok::KwIf: return "'if'";
   case Tok::KwLet: return "'let'";
+  case Tok::KwNew: return "'new'";
   case Tok::KwReturn: return "'return'";
   case Tok::KwTrue: return "'true'";
   case Tok::KwVar: return "'var'";
@@ -37,7 +42,9 @@ const char *tokSpelling(Tok kind) {
   case Tok::Semi: return "';'";
   case Tok::Colon: return "':'";
   case Tok::Dot: return "'.'";
+  case Tok::Ellipsis: return "'...'";
   case Tok::Question: return "'?'";
+  case Tok::QuestionQuestion: return "'??'";
   case Tok::Plus: return "'+'";
   case Tok::Minus: return "'-'";
   case Tok::Star: return "'*'";
@@ -75,6 +82,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::ShlAssign: return "'<<='";
   case Tok::ShrAssign: return "'>>='";
   case Tok::UShrAssign: return "'>>>='";
+  case Tok::QuestionQuestionAssign: return "'??='";
   }
   return "token";
 }
@@ -157,18 +165,38 @@ Token Lexer::next() {
   switch (c) {
   case '(': return make(Tok::LParen, start, nl);
   case ')': return make(Tok::RParen, start, nl);
-  case '{': return make(Tok::LBrace, start, nl);
-  case '}': return make(Tok::RBrace, start, nl);
+  case '{':
+    if (!templateBraces_.empty())
+      ++templateBraces_.back();
+    return make(Tok::LBrace, start, nl);
+  case '}':
+    if (!templateBraces_.empty()) {
+      if (templateBraces_.back() == 0) {
+        templateBraces_.pop_back();
+        return lexTemplate(start, /*continuation=*/true, nl);
+      }
+      --templateBraces_.back();
+    }
+    return make(Tok::RBrace, start, nl);
+  case '`':
+    return lexTemplate(start, /*continuation=*/false, nl);
   case '[': return make(Tok::LBracket, start, nl);
   case ']': return make(Tok::RBracket, start, nl);
   case ',': return make(Tok::Comma, start, nl);
   case ';': return make(Tok::Semi, start, nl);
   case ':': return make(Tok::Colon, start, nl);
-  case '?': return make(Tok::Question, start, nl);
+  case '?':
+    if (match('?'))
+      return make(match('=') ? Tok::QuestionQuestionAssign : Tok::QuestionQuestion, start, nl);
+    return make(Tok::Question, start, nl);
   case '~': return make(Tok::Tilde, start, nl);
   case '.':
     if (llvm::isDigit(peek()))
       return lexNumber(start, nl);
+    if (peek() == '.' && peek(1) == '.') {
+      cur_ += 2;
+      return make(Tok::Ellipsis, start, nl);
+    }
     return make(Tok::Dot, start, nl);
   case '+':
     if (match('+')) return make(Tok::PlusPlus, start, nl);
@@ -288,6 +316,25 @@ Token Lexer::lexString(const char *start, char quote, bool newlineBefore) {
   return make(Tok::StringLiteral, start, newlineBefore);
 }
 
+Token Lexer::lexTemplate(const char *start, bool continuation, bool newlineBefore) {
+  for (;;) {
+    if (cur_ >= end_) {
+      diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated template literal");
+      return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
+    }
+    char c = *cur_++;
+    if (c == '`')
+      return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
+    if (c == '$' && peek() == '{') {
+      ++cur_;
+      templateBraces_.push_back(0);
+      return make(continuation ? Tok::TemplateMiddle : Tok::TemplateHead, start, newlineBefore);
+    }
+    if (c == '\\' && cur_ < end_)
+      ++cur_;
+  }
+}
+
 Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
   while (isIdentChar(peek()))
     ++cur_;
@@ -304,6 +351,7 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("function", Tok::KwFunction)
                  .Case("if", Tok::KwIf)
                  .Case("let", Tok::KwLet)
+                 .Case("new", Tok::KwNew)
                  .Case("return", Tok::KwReturn)
                  .Case("true", Tok::KwTrue)
                  .Case("var", Tok::KwVar)
@@ -316,22 +364,43 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
 // String literal decoding
 //===----------------------------------------------------------------------===//
 
-static void appendUtf8(std::string &out, uint32_t cp) {
-  if (cp < 0x80) {
-    out += static_cast<char>(cp);
-  } else if (cp < 0x800) {
-    out += static_cast<char>(0xC0 | (cp >> 6));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
-  } else if (cp < 0x10000) {
-    out += static_cast<char>(0xE0 | (cp >> 12));
-    out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
+static void appendUtf16(std::u16string &out, uint32_t cp) {
+  if (cp < 0x10000) {
+    out += static_cast<char16_t>(cp);
   } else {
-    out += static_cast<char>(0xF0 | (cp >> 18));
-    out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-    out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
+    cp -= 0x10000;
+    out += static_cast<char16_t>(0xD800 + (cp >> 10));
+    out += static_cast<char16_t>(0xDC00 + (cp & 0x3FF));
   }
+}
+
+// Decodes one UTF-8 sequence of the source text at `s[i]`, advancing `i`.
+// Malformed input becomes U+FFFD.
+static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
+  unsigned char lead = static_cast<unsigned char>(s[i]);
+  if (lead < 0x80) {
+    ++i;
+    return lead;
+  }
+  size_t extra = lead >= 0xF0 ? 3 : lead >= 0xE0 ? 2 : lead >= 0xC0 ? 1 : 0;
+  if (extra == 0 || lead >= 0xF8 || i + extra >= s.size()) {
+    ++i;
+    return 0xFFFD;
+  }
+  uint32_t cp = lead & (0x3F >> extra);
+  for (size_t k = 1; k <= extra; ++k) {
+    unsigned char c = static_cast<unsigned char>(s[i + k]);
+    if ((c & 0xC0) != 0x80) {
+      ++i;
+      return 0xFFFD;
+    }
+    cp = (cp << 6) | (c & 0x3F);
+  }
+  i += extra + 1;
+  static const uint32_t minimum[] = {0, 0x80, 0x800, 0x10000};
+  if (cp < minimum[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+    return 0xFFFD;
+  return cp;
 }
 
 // Parses exactly `count` hex digits at `s[i]`, advancing `i`.
@@ -364,17 +433,20 @@ static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
   return parseHex(s, i, 4, cp);
 }
 
-bool decodeStringLiteral(const Token &tok, std::string &out, Diagnostics &diags) {
-  llvm::StringRef raw = tok.text.drop_front();
-  if (!raw.empty() && raw.back() == tok.text.front())
-    raw = raw.drop_back();
-
+// Decodes literal text (without its delimiters). Templates keep raw line
+// breaks, normalized to "\n" as JavaScript requires.
+static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out,
+                       Diagnostics &diags) {
   out.clear();
   for (size_t i = 0; i < raw.size();) {
     char c = raw[i];
+    if (isTemplate && c == '\r') {
+      out += u'\n';
+      i += raw.substr(i).starts_with("\r\n") ? 2 : 1;
+      continue;
+    }
     if (c != '\\') {
-      out += c;
-      ++i;
+      appendUtf16(out, decodeUtf8(raw, i));
       continue;
     }
 
@@ -384,21 +456,26 @@ bool decodeStringLiteral(const Token &tok, std::string &out, Diagnostics &diags)
       break;
     char e = raw[i++];
     switch (e) {
-    case 'n': out += '\n'; break;
-    case 't': out += '\t'; break;
-    case 'r': out += '\r'; break;
-    case 'b': out += '\b'; break;
-    case 'f': out += '\f'; break;
-    case 'v': out += '\v'; break;
-    case '0': out += '\0'; break;
-    case '\n': break; // line continuation
+    case 'n': out += u'\n'; break;
+    case 't': out += u'\t'; break;
+    case 'r': out += u'\r'; break;
+    case 'b': out += u'\b'; break;
+    case 'f': out += u'\f'; break;
+    case 'v': out += u'\v'; break;
+    case '0': out += u'\0'; break;
+    case '\r': // line continuation
+      if (i < raw.size() && raw[i] == '\n')
+        ++i;
+      break;
+    case '\n':
+      break;
     case 'x': {
       uint32_t value;
       if (!parseHex(raw, i, 2, value)) {
         diags.error(escapeLoc, "invalid '\\x' escape: expected two hex digits");
         return false;
       }
-      appendUtf8(out, value);
+      out += static_cast<char16_t>(value);
       break;
     }
     case 'u': {
@@ -407,26 +484,35 @@ bool decodeStringLiteral(const Token &tok, std::string &out, Diagnostics &diags)
         diags.error(escapeLoc, "invalid '\\u' escape");
         return false;
       }
-      // Join a UTF-16 surrogate pair written as two escapes.
-      if (cp >= 0xD800 && cp <= 0xDBFF && raw.substr(i).starts_with("\\u")) {
-        size_t j = i + 2;
-        uint32_t low;
-        if (parseUnicodeEscape(raw, j, low) && low >= 0xDC00 && low <= 0xDFFF) {
-          cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-          i = j;
-        }
-      }
-      if (cp >= 0xD800 && cp <= 0xDFFF)
-        cp = 0xFFFD; // a lone surrogate cannot be encoded in UTF-8
-      appendUtf8(out, cp);
+      // `😀` naturally yields a surrogate pair, and a lone
+      // surrogate stays one code unit, exactly as in JavaScript.
+      appendUtf16(out, cp);
       break;
     }
     default:
-      out += e;
+      --i;
+      appendUtf16(out, decodeUtf8(raw, i));
       break;
     }
   }
   return true;
+}
+
+bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags) {
+  llvm::StringRef raw = tok.text.drop_front();
+  if (!raw.empty() && raw.back() == tok.text.front())
+    raw = raw.drop_back();
+  return decodeText(raw, /*isTemplate=*/false, out, diags);
+}
+
+bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
+  // Strip the leading '`' or '}' and the trailing '`' or '${'.
+  llvm::StringRef raw = tok.text.drop_front();
+  if (raw.ends_with("${"))
+    raw = raw.drop_back(2);
+  else if (raw.ends_with("`"))
+    raw = raw.drop_back();
+  return decodeText(raw, /*isTemplate=*/true, out, diags);
 }
 
 } // namespace tz

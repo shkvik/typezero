@@ -22,6 +22,10 @@ struct VarSymbol {
   const Type *type = nullptr;
   bool isConst = false;
   bool isGlobal = false;
+  // A global whose name some function mentions, so a call may read or change
+  // it. Other globals live in main's stack frame, where LLVM can keep them in
+  // registers, and calls cannot touch them.
+  bool usedInFunction = false;
 };
 
 struct FunctionDecl;
@@ -42,11 +46,20 @@ public:
   virtual ~Node() = default;
 };
 
-// A type written in the source, e.g. `int` in `let x: int`. Only plain names
-// for now.
+// A type written in the source: `int`, `string[]`, `int | undefined`,
+// `Array<int>`.
 struct TypeRef {
+  enum class Kind {
+    Name,    // `name`; empty after a syntax error
+    Array,   // `args[0][]`
+    Union,   // `args[0] | args[1] | ...`
+    Generic, // `name<args...>`
+  };
+
+  Kind kind = Kind::Name;
   llvm::StringRef name;
   llvm::SMLoc loc;
+  std::vector<TypeRef> args;
 };
 
 //===----------------------------------------------------------------------===//
@@ -60,6 +73,7 @@ enum class BinaryOp {
   BitAnd, BitOr, BitXor, Shl, Shr, UShr,
   Lt, Le, Gt, Ge, Eq, Ne,
   LogAnd, LogOr,
+  Nullish, // `a ?? b`
 };
 
 const char *opSpelling(UnaryOp op);
@@ -68,8 +82,8 @@ const char *opSpelling(BinaryOp op);
 class Expr : public Node {
 public:
   enum class Kind {
-    IntLit, FloatLit, BoolLit, StringLit, Name, Member,
-    Unary, Binary, Assign, Update, Call, Conditional, Cast,
+    IntLit, FloatLit, BoolLit, StringLit, Undefined, Template, ArrayLit, Name, Member, Index,
+    Unary, Binary, Assign, Update, Call, New, Conditional, Cast,
   };
 
   Kind kind() const { return kind_; }
@@ -113,12 +127,42 @@ public:
 
 class StringLitExpr : public Expr {
 public:
-  StringLitExpr(llvm::SMLoc loc, std::string value)
+  StringLitExpr(llvm::SMLoc loc, std::u16string value)
       : Expr(Kind::StringLit, loc), value(std::move(value)) {}
   static bool classof(const Expr *e) { return e->kind() == Kind::StringLit; }
 
-  // Decoded UTF-8 contents.
-  std::string value;
+  // UTF-16 code units, as JavaScript sees the string.
+  std::u16string value;
+};
+
+class UndefinedExpr : public Expr {
+public:
+  explicit UndefinedExpr(llvm::SMLoc loc) : Expr(Kind::Undefined, loc) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::Undefined; }
+};
+
+// `a${x}b${y}c`: quasis are the texts "a", "b", "c" around the expressions.
+class TemplateExpr : public Expr {
+public:
+  explicit TemplateExpr(llvm::SMLoc loc) : Expr(Kind::Template, loc) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::Template; }
+
+  std::vector<std::u16string> quasis; // always exprs.size() + 1 entries
+  std::vector<Expr *> exprs;
+};
+
+// `[a, b, ...c]`
+class ArrayLitExpr : public Expr {
+public:
+  struct Element {
+    Expr *expr;
+    bool spread; // `...expr`
+  };
+
+  explicit ArrayLitExpr(llvm::SMLoc loc) : Expr(Kind::ArrayLit, loc) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::ArrayLit; }
+
+  std::vector<Element> elements;
 };
 
 class NameExpr : public Expr {
@@ -138,6 +182,22 @@ public:
 
   Expr *object;
   llvm::StringRef name;
+};
+
+// `object[index]`
+class IndexExpr : public Expr {
+public:
+  IndexExpr(llvm::SMLoc loc, Expr *object, Expr *index)
+      : Expr(Kind::Index, loc), object(object), index(index) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::Index; }
+
+  Expr *object;
+  Expr *index;
+  // Set by Sema. A read that Sema could not prove in range checks the index
+  // and yields `T | undefined`. A write may append: Sema proved only
+  // `index <= length`.
+  bool mayBeOutOfRange = false;
+  bool mayAppend = false;
 };
 
 class UnaryExpr : public Expr {
@@ -185,7 +245,39 @@ public:
   Expr *target;
 };
 
-enum class Builtin { None, ConsoleLog };
+// Functions and methods implemented by the compiler and the runtime.
+enum class Builtin {
+  None,
+  ConsoleLog,
+  StringOf, // String(x)
+  // Methods of string; the receiver is the object of the callee MemberExpr.
+  StrCharCodeAt,
+  StrAt,
+  StrSlice,
+  StrSubstring,
+  StrIndexOf,
+  StrIncludes,
+  StrStartsWith,
+  StrEndsWith,
+  StrRepeat,
+  StrToString,
+  // Methods of arrays.
+  ArrPush,
+  ArrPop,
+  ArrShift,
+  ArrUnshift,
+  ArrAt,
+  ArrSlice,
+  ArrConcat,
+  ArrIndexOf,
+  ArrLastIndexOf,
+  ArrIncludes,
+  ArrJoin,
+  ArrReverse,
+  ArrFill,
+  ArrSort,
+  ArrToString,
+};
 
 class CallExpr : public Expr {
 public:
@@ -198,6 +290,22 @@ public:
   // Set by Sema: exactly one of these describes the callee.
   FuncSymbol *func = nullptr;
   Builtin builtin = Builtin::None;
+  // Set by Sema for charCodeAt, at, pop and shift: the position may be out of
+  // range (or the array empty), so the result type admits that case.
+  bool mayBeOutOfRange = false;
+};
+
+// `new Array<T>(n)` or `new Array<T>()`.
+class NewExpr : public Expr {
+public:
+  NewExpr(llvm::SMLoc loc, llvm::StringRef name, std::vector<TypeRef> typeArgs,
+          std::vector<Expr *> args)
+      : Expr(Kind::New, loc), name(name), typeArgs(std::move(typeArgs)), args(std::move(args)) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::New; }
+
+  llvm::StringRef name;
+  std::vector<TypeRef> typeArgs;
+  std::vector<Expr *> args;
 };
 
 class ConditionalExpr : public Expr {
@@ -211,8 +319,9 @@ public:
   Expr *elseExpr;
 };
 
-// A numeric conversion: either `x as T` written by the user, or an implicit
-// widening inserted by Sema (then `target` is empty).
+// A conversion: either `x as T` written by the user, or one inserted by Sema
+// (then `target` is empty): a numeric widening, or turning a value into a
+// string for `+` and template literals.
 class CastExpr : public Expr {
 public:
   CastExpr(llvm::SMLoc loc, Expr *operand, std::optional<TypeRef> target)
@@ -232,7 +341,8 @@ public:
 class Stmt : public Node {
 public:
   enum class Kind {
-    Block, VarDecl, Function, Expr, If, While, DoWhile, For, Return, Break, Continue, Empty,
+    Block, VarDecl, Function, Expr, If, While, DoWhile, For, ForOf, Return, Break, Continue,
+    Empty,
   };
 
   Kind kind() const { return kind_; }
@@ -330,6 +440,21 @@ struct ForStmt : Stmt {
   Expr *cond = nullptr;
   Expr *step = nullptr;
   Stmt *body = nullptr;
+};
+
+// `for (const x of iterable) body`: over the elements of an array, or the
+// code points of a string.
+struct ForOfStmt : Stmt {
+  explicit ForOfStmt(llvm::SMLoc loc) : Stmt(Kind::ForOf, loc) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::ForOf; }
+
+  bool isConst = false;
+  VarDeclarator binding; // no initializer
+  Expr *iterable = nullptr;
+  Stmt *body = nullptr;
+  // Set by Sema: the loop variable may borrow each element from the array,
+  // without reference counting.
+  bool borrowElements = false;
 };
 
 struct ReturnStmt : Stmt {

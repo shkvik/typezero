@@ -1,11 +1,11 @@
-// The typezero runtime, linked into every program: buffered output for
-// console.log, number formatting and panics.
-//
-// The compiler calls the functions declared in src/codegen/CodeGen.cpp
-// (CodeGen::declareRuntime); keep both in sync.
+// The core of the typezero runtime, linked into every program: buffered
+// output for console.log, number formatting, panics, startup and shutdown.
+// Strings live in string.c.
+
+#include "tzrt.h"
 
 #include <math.h>
-#include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,10 +13,8 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#define TZ_NORETURN __declspec(noreturn)
 #else
 #include <unistd.h>
-#define TZ_NORETURN __attribute__((noreturn))
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -123,7 +121,7 @@ static void out_flush(int all) {
 
 static void out_flush_all(void) { out_flush(1); }
 
-static void out_write(const char *data, size_t len) {
+void tz_out_write(const char *data, size_t len) {
   if (len > sizeof out_buf - out_len) {
     out_flush(1);
     if (len >= sizeof out_buf) {
@@ -146,15 +144,39 @@ void tz_rt_init(void) {
   atexit(out_flush_all);
 }
 
+// Called when the top-level code has finished. Freeing every object one by
+// one would only slow down the exit, since the OS takes the memory back
+// anyway, so the program ends here. With TZ_CHECK_LEAKS set it goes on to
+// release everything, and tz_rt_shutdown checks that nothing is left.
+void tz_rt_main_done(void) {
+  if (!getenv("TZ_CHECK_LEAKS")) {
+    out_flush(1);
+    exit(0);
+  }
+}
+
+// Called when main returns normally. With TZ_CHECK_LEAKS set, reports objects
+// that are still alive: after main has released its globals, every reference
+// count should be back to zero.
+void tz_rt_shutdown(void) {
+  int64_t strings = tz_str_live_objects(), arrays = tz_arr_live_objects();
+  if ((strings != 0 || arrays != 0) && getenv("TZ_CHECK_LEAKS")) {
+    char message[96];
+    int len = snprintf(message, sizeof message,
+                       "tz: %lld string object(s) and %lld array(s) leaked\n", (long long)strings,
+                       (long long)arrays);
+    out_flush(1);
+    stream_write(&err_stream, message, (size_t)len);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // console.log
 //===----------------------------------------------------------------------===//
 
-void tz_print_str(const char *data, int64_t len) { out_write(data, (size_t)len); }
-
 void tz_print_char(int32_t c) {
   char ch = (char)c;
-  out_write(&ch, 1);
+  tz_out_write(&ch, 1);
   if (c == '\n' && out_stream.isConsole)
     out_flush(0);
 }
@@ -168,7 +190,7 @@ static void print_u64(uint64_t value, int negative) {
   } while (value != 0);
   if (negative)
     *--p = '-';
-  out_write(p, (size_t)(buf + sizeof buf - p));
+  tz_out_write(p, (size_t)(buf + sizeof buf - p));
 }
 
 void tz_print_i64(int64_t value) {
@@ -182,15 +204,15 @@ void tz_print_i32(int32_t value) { tz_print_i64(value); }
 
 void tz_print_bool(int32_t value) {
   if (value)
-    out_write("true", 4);
+    tz_out_write("true", 4);
   else
-    out_write("false", 5);
+    tz_out_write("false", 5);
 }
 
 // Formats `value` like JavaScript's Number.prototype.toString(): the shortest
 // digits that read back as the same double, in plain notation for decimal
 // exponents from -7 to 20 and in exponential notation otherwise.
-static size_t format_f64(double value, char *out) {
+size_t tz_format_f64(double value, char *out) {
   char *p = out;
   if (isnan(value)) {
     memcpy(out, "NaN", 3);
@@ -259,9 +281,14 @@ static size_t format_f64(double value, char *out) {
   return (size_t)(p - out);
 }
 
+// console.log shows negative zero as -0, unlike String(-0).
 void tz_print_f64(double value) {
   char buf[64];
-  out_write(buf, format_f64(value, buf));
+  if (value == 0 && signbit(value)) {
+    tz_out_write("-0", 2);
+    return;
+  }
+  tz_out_write(buf, tz_format_f64(value, buf));
 }
 
 //===----------------------------------------------------------------------===//
@@ -274,4 +301,17 @@ TZ_NORETURN void tz_panic(const char *message, int64_t len) {
   stream_write(&err_stream, message, (size_t)len);
   stream_write(&err_stream, "\n", 1);
   exit(2);
+}
+
+TZ_NORETURN void tz_panicf(const char *format, ...) {
+  char message[256];
+  va_list args;
+  va_start(args, format);
+  int len = vsnprintf(message, sizeof message, format, args);
+  va_end(args);
+  if (len < 0)
+    len = 0;
+  if ((size_t)len >= sizeof message)
+    len = (int)sizeof message - 1;
+  tz_panic(message, len);
 }
