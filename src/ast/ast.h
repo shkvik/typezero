@@ -33,7 +33,12 @@ struct FunctionDecl;
 struct FuncSymbol {
   llvm::StringRef name;
   llvm::SMLoc loc;
+  // The types callers pass: `T | undefined` for a parameter that is optional
+  // or has a default value, as a caller may leave it out.
   std::vector<const Type *> params;
+  // The arguments a call must give: those up to the last parameter that is
+  // neither optional nor has a default value.
+  size_t minArgs = 0;
   const Type *ret = nullptr;
   FunctionDecl *decl = nullptr;
 };
@@ -66,10 +71,10 @@ struct TypeRef {
 // Expressions
 //===----------------------------------------------------------------------===//
 
-enum class UnaryOp { Neg, Plus, Not, BitNot };
+enum class UnaryOp { Neg, Plus, Not, BitNot, TypeOf };
 
 enum class BinaryOp {
-  Add, Sub, Mul, Div, Rem,
+  Add, Sub, Mul, Div, Rem, Pow,
   BitAnd, BitOr, BitXor, Shl, Shr, UShr,
   Lt, Le, Gt, Ge, Eq, Ne,
   LogAnd, LogOr,
@@ -184,6 +189,8 @@ public:
   llvm::StringRef name;
 };
 
+struct EnumDecl;
+
 // `object[index]`
 class IndexExpr : public Expr {
 public:
@@ -198,6 +205,8 @@ public:
   // `index <= length`.
   bool mayBeOutOfRange = false;
   bool mayAppend = false;
+  // Set by Sema for `Color[value]`: the name of an enum member.
+  EnumDecl *enumDecl = nullptr;
 };
 
 class UnaryExpr : public Expr {
@@ -249,18 +258,43 @@ public:
 enum class Builtin {
   None,
   ConsoleLog,
-  StringOf, // String(x)
+  StringOf,      // String(x)
+  NumberOf,      // Number(x)
+  ParseInt,      // parseInt and Number.parseInt
+  ParseFloat,    // parseFloat and Number.parseFloat
+  IsNaN,         // isNaN and Number.isNaN
+  IsFinite,      // isFinite and Number.isFinite
+  IsInteger,     // Number.isInteger
+  IsSafeInteger, // Number.isSafeInteger
+  FromCharCode,  // String.fromCharCode
+  FromCodePoint, // String.fromCodePoint
+  // x.toFixed(digits) of a number.
+  NumToFixed,
   // Methods of string; the receiver is the object of the callee MemberExpr.
   StrCharCodeAt,
+  StrCharAt,
+  StrCodePointAt,
   StrAt,
   StrSlice,
   StrSubstring,
   StrIndexOf,
+  StrLastIndexOf,
   StrIncludes,
   StrStartsWith,
   StrEndsWith,
   StrRepeat,
   StrToString,
+  StrConcat,
+  StrSplit,
+  StrTrim,
+  StrTrimStart,
+  StrTrimEnd,
+  StrPadStart,
+  StrPadEnd,
+  StrToUpperCase,
+  StrToLowerCase,
+  StrReplace,
+  StrReplaceAll,
   // Methods of arrays.
   ArrPush,
   ArrPop,
@@ -277,7 +311,53 @@ enum class Builtin {
   ArrFill,
   ArrSort,
   ArrToString,
+  ArrSplice,
+  // The functions of Math. The first four round, and give an integer where
+  // one is expected (see Sema::checkMathCall).
+  MathFloor,
+  MathCeil,
+  MathRound,
+  MathTrunc,
+  MathAbs,
+  MathSign,
+  MathMin,
+  MathMax,
+  MathPow,
+  MathSqrt,
+  MathCbrt,
+  MathExp,
+  MathExpm1,
+  MathLog,
+  MathLog1p,
+  MathLog2,
+  MathLog10,
+  MathSin,
+  MathCos,
+  MathTan,
+  MathAsin,
+  MathAcos,
+  MathAtan,
+  MathAtan2,
+  MathSinh,
+  MathCosh,
+  MathTanh,
+  MathAsinh,
+  MathAcosh,
+  MathAtanh,
+  MathHypot,
+  MathFround,
+  MathClz32,
+  MathImul,
+  MathRandom,
 };
+
+inline bool isMathBuiltin(Builtin builtin) {
+  return builtin >= Builtin::MathFloor && builtin <= Builtin::MathRandom;
+}
+
+inline bool isRoundingBuiltin(Builtin builtin) {
+  return builtin >= Builtin::MathFloor && builtin <= Builtin::MathTrunc;
+}
 
 class CallExpr : public Expr {
 public:
@@ -319,9 +399,10 @@ public:
   Expr *elseExpr;
 };
 
-// A conversion: either `x as T` written by the user, or one inserted by Sema
-// (then `target` is empty): a numeric widening, or turning a value into a
-// string for `+` and template literals.
+// A conversion inserted by Sema: a numeric widening, ToInt32 for an operand
+// of a bitwise operator, or turning a value into a string for `+` and
+// template literals. `target` is set only for `x as T` in the source, which
+// Sema rejects (see Sema::checkCast).
 class CastExpr : public Expr {
 public:
   CastExpr(llvm::SMLoc loc, Expr *operand, std::optional<TypeRef> target)
@@ -341,8 +422,8 @@ public:
 class Stmt : public Node {
 public:
   enum class Kind {
-    Block, VarDecl, Function, Expr, If, While, DoWhile, For, ForOf, Return, Break, Continue,
-    Empty,
+    Block, VarDecl, Function, Expr, If, While, DoWhile, For, ForOf, Switch, Labeled, Return,
+    Break, Continue, Empty, TypeAlias, Enum,
   };
 
   Kind kind() const { return kind_; }
@@ -384,7 +465,12 @@ struct Param {
   llvm::StringRef name;
   llvm::SMLoc loc;
   std::optional<TypeRef> type;
-  VarSymbol *sym = nullptr; // set by Sema
+  bool optional = false;        // `name?: T`
+  Expr *defaultValue = nullptr; // `name: T = value`
+  // Set by Sema: the type of the parameter inside the function, and its
+  // variable.
+  const Type *declaredType = nullptr;
+  VarSymbol *sym = nullptr;
 };
 
 struct FunctionDecl : Stmt {
@@ -457,6 +543,38 @@ struct ForOfStmt : Stmt {
   bool borrowElements = false;
 };
 
+// `case test:` (or `default:`, which has no test) and the statements after it.
+struct SwitchCase {
+  llvm::SMLoc loc;
+  Expr *test = nullptr;
+  std::vector<Stmt *> body;
+  // Set by Sema: the type in which the discriminant and the test compare, as
+  // with `===`. Null when the test is `undefined`.
+  const Type *compareType = nullptr;
+};
+
+// `switch (discriminant) { case a: ... default: ... }`. The discriminant is
+// evaluated once and compared with the tests in order, with `===`; control
+// falls through from one case into the next.
+struct SwitchStmt : Stmt {
+  SwitchStmt(llvm::SMLoc loc, Expr *discriminant)
+      : Stmt(Kind::Switch, loc), discriminant(discriminant) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::Switch; }
+
+  Expr *discriminant;
+  std::vector<SwitchCase> cases;
+};
+
+// `label: body`, a target of `break label` and, for a loop, `continue label`.
+struct LabeledStmt : Stmt {
+  LabeledStmt(llvm::SMLoc loc, llvm::StringRef label, Stmt *body)
+      : Stmt(Kind::Labeled, loc), label(label), body(body) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::Labeled; }
+
+  llvm::StringRef label;
+  Stmt *body;
+};
+
 struct ReturnStmt : Stmt {
   ReturnStmt(llvm::SMLoc loc, Expr *value) : Stmt(Kind::Return, loc), value(value) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Return; }
@@ -465,18 +583,68 @@ struct ReturnStmt : Stmt {
 };
 
 struct BreakStmt : Stmt {
-  explicit BreakStmt(llvm::SMLoc loc) : Stmt(Kind::Break, loc) {}
+  BreakStmt(llvm::SMLoc loc, llvm::StringRef label) : Stmt(Kind::Break, loc), label(label) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Break; }
+
+  llvm::StringRef label; // empty without one
 };
 
 struct ContinueStmt : Stmt {
-  explicit ContinueStmt(llvm::SMLoc loc) : Stmt(Kind::Continue, loc) {}
+  ContinueStmt(llvm::SMLoc loc, llvm::StringRef label) : Stmt(Kind::Continue, loc), label(label) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Continue; }
+
+  llvm::StringRef label; // empty without one
 };
 
 struct EmptyStmt : Stmt {
   explicit EmptyStmt(llvm::SMLoc loc) : Stmt(Kind::Empty, loc) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Empty; }
+};
+
+// `type Name = T`: another name for a type, visible in the whole block that
+// declares it.
+struct TypeAliasDecl : Stmt {
+  TypeAliasDecl(llvm::SMLoc loc, llvm::StringRef name, TypeRef type)
+      : Stmt(Kind::TypeAlias, loc), name(name), type(std::move(type)) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::TypeAlias; }
+
+  llvm::StringRef name;
+  TypeRef type;
+  // Set by Sema.
+  const Type *resolved = nullptr;
+  bool resolving = false; // catches an alias that refers to itself
+};
+
+struct EnumMember {
+  llvm::StringRef name;
+  llvm::SMLoc loc;
+  Expr *init = nullptr;
+  // Set by Sema: the value, a number or a string.
+  bool isString = false;
+  int32_t number = 0;
+  std::u16string text;
+};
+
+// `enum Name { A, B = 5, C }`. The members are constants: numbers counting up
+// from 0 or from the last initializer, or strings. As a type, the enum is
+// `int`, or `string` when its members are strings.
+struct EnumDecl : Stmt {
+  EnumDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Enum, loc), name(name) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::Enum; }
+
+  const EnumMember *find(llvm::StringRef member) const {
+    for (const EnumMember &m : members)
+      if (m.name == member)
+        return &m;
+    return nullptr;
+  }
+
+  llvm::StringRef name;
+  std::vector<EnumMember> members;
+  // Set by Sema.
+  bool isString = false;
+  bool resolved = false;
+  bool resolving = false;
 };
 
 // One parsed .ts file. Top-level statements other than function declarations

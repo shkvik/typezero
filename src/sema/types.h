@@ -75,4 +75,8 @@ private:
   std::string name_;
 };
 
+// What `typeof` gives for a value of `type` ("number", "string"...). For
+// `T | undefined` that holds a value, it is the name for T.
+const char *typeOfName(const Type *type);
+
 } // namespace tz

@@ -1047,3 +1047,446 @@ TzStr tz_buf_take(TzBuf *b) {
   tz_buf_free(b);
   return s;
 }
+
+//===----------------------------------------------------------------------===//
+// Building a string of a known length
+//===----------------------------------------------------------------------===//
+
+// A flat string built from pieces whose total length is known up front:
+// inline when it is one-byte and short enough, otherwise one buffer.
+typedef struct {
+  Buffer *b; // NULL while inline
+  uint64_t bits;
+  uint32_t pos;
+  int two;
+} Builder;
+
+static void builder_init(Builder *w, uint32_t total, int two) {
+  w->b = !two && total <= INLINE_MAX ? NULL : buffer_new(total, two);
+  w->bits = 0;
+  w->pos = 0;
+  w->two = two;
+}
+
+// Appends `n` code units of flat `s` from `from` on. A two-byte `s` needs a
+// two-byte builder.
+static void builder_put(Builder *w, const TzStr *s, uint32_t from, uint32_t n) {
+  if (n == 0)
+    return;
+  if (!w->b) {
+    for (uint32_t i = 0; i < n; ++i)
+      w->bits |= (uint64_t)(uint8_t)unit_at(s, from + i) << (8 * (w->pos + i));
+  } else {
+    char *dst = buffer_units(w->b) + (size_t)w->pos * (w->two ? 2 : 1);
+    const char *src = (const char *)units(s);
+    if (is_two(s->meta) == w->two) {
+      size_t width = w->two ? 2 : 1;
+      memcpy(dst, src + (size_t)from * width, (size_t)n * width);
+    } else {
+      for (uint32_t i = 0; i < n; ++i)
+        ((uint16_t *)dst)[i] = ((const uint8_t *)src)[from + i];
+    }
+  }
+  w->pos += n;
+}
+
+static TzStr builder_finish(Builder *w, int ascii) {
+  if (!w->b)
+    return w->pos == 0 ? kEmpty : inline_from_bits(w->bits, w->pos);
+  w->b->used = w->pos;
+  return make_str(w->b, make_meta(w->pos, 0, w->two, ascii, F_HEAP));
+}
+
+// Appends code units of flat `s` to a growing buffer.
+static void buf_put(TzBuf *b, const TzStr *s, uint32_t from, uint32_t n) {
+  if (n == 0)
+    return;
+  buf_reserve(b, n);
+  const void *u = units(s);
+  for (uint32_t i = 0; i < n; ++i)
+    b->data[b->length + i] =
+        is_two(s->meta) ? ((const uint16_t *)u)[from + i] : ((const uint8_t *)u)[from + i];
+  b->length += n;
+}
+
+static void buf_code_point(TzBuf *b, uint32_t cp) {
+  if (cp < 0x10000) {
+    tz_buf_push(b, (uint16_t)cp);
+  } else {
+    cp -= 0x10000;
+    tz_buf_push(b, (uint16_t)(0xD800 + (cp >> 10)));
+    tz_buf_push(b, (uint16_t)(0xDC00 + (cp & 0x3FF)));
+  }
+}
+
+// The code point at `*i` of flat `s` (a surrogate pair, or one code unit),
+// advancing `*i` past it.
+static uint32_t next_code_point(const TzStr *s, uint32_t *i, uint32_t len) {
+  uint32_t unit = unit_at(s, *i);
+  ++*i;
+  if (unit >= 0xD800 && unit <= 0xDBFF && *i < len) {
+    uint32_t low = unit_at(s, *i);
+    if (low >= 0xDC00 && low <= 0xDFFF) {
+      ++*i;
+      return 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+    }
+  }
+  return unit;
+}
+
+// The code point that ends before `*i`, moving `*i` back to its start.
+static uint32_t previous_code_point(const TzStr *s, uint32_t *i) {
+  uint32_t unit = unit_at(s, --*i);
+  if (unit >= 0xDC00 && unit <= 0xDFFF && *i > 0) {
+    uint32_t high = unit_at(s, *i - 1);
+    if (high >= 0xD800 && high <= 0xDBFF) {
+      --*i;
+      return 0x10000 + ((high - 0xD800) << 10) + (unit - 0xDC00);
+    }
+  }
+  return unit;
+}
+
+//===----------------------------------------------------------------------===//
+// More methods
+//===----------------------------------------------------------------------===//
+
+// charAt(): "" out of range.
+void tz_str_char_at_or_empty(TzStr *out, void *obj, uint64_t meta, int64_t index) {
+  if (index < 0 || index >= (int64_t)str_len(meta)) {
+    *out = kEmpty;
+    return;
+  }
+  *out = substring_of(make_str(obj, meta), (uint32_t)index, (uint32_t)index + 1);
+}
+
+// codePointAt(), for a position the compiler checked.
+TZ_HOT int32_t tz_str_code_point(void *obj, uint64_t meta, int64_t index) {
+  uint32_t len = str_len(meta);
+  check_index(index, len);
+  TzStr f = flat(make_str(obj, meta));
+  uint32_t i = (uint32_t)index;
+  return (int32_t)next_code_point(&f, &i, len);
+}
+
+// lastIndexOf(): the last match that starts at or before `position`.
+int32_t tz_str_last_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
+                             int64_t position, int32_t has_position) {
+  TzStr s = flat(make_str(s_obj, s_meta)), t = flat(make_str(t_obj, t_meta));
+  uint32_t len = str_len(s.meta), tlen = str_len(t.meta);
+  if (tlen > len)
+    return -1;
+  uint32_t start = has_position ? clamp(position, len) : len;
+  for (int64_t k = start < len - tlen ? start : len - tlen; k >= 0; --k)
+    if (tz_str_units_equal(&s, (uint32_t)k, &t, 0, tlen))
+      return (int32_t)k;
+  return -1;
+}
+
+// split(separator, limit): the pieces between the separators, at most
+// `limit` of them; an empty separator splits into code units.
+TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void *sep_obj,
+                      uint64_t sep_meta, int32_t has_sep, int64_t limit, int32_t has_limit) {
+  uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX; // ToUint32, as in JavaScript
+  TzArray *a = tz_arr_new(string_type, 0, 0);
+  if (max == 0)
+    return a;
+  TzStr s = make_str(obj, meta), piece;
+  if (!has_sep) {
+    retain(s);
+    tz_arr_push_value(a, &s);
+    return a;
+  }
+  TzStr f = flat(s), sep = flat(make_str(sep_obj, sep_meta));
+  uint32_t len = str_len(f.meta), sep_len = str_len(sep.meta);
+  if (sep_len == 0) {
+    for (uint32_t i = 0; i < len && a->length < max; ++i) {
+      piece = substring_of(s, i, i + 1);
+      tz_arr_push_value(a, &piece);
+    }
+    return a;
+  }
+  uint32_t p = 0;
+  for (int64_t q; (q = index_of(&f, &sep, p)) >= 0; p = (uint32_t)q + sep_len) {
+    piece = substring_of(s, p, (uint32_t)q);
+    tz_arr_push_value(a, &piece);
+    if (a->length == max)
+      return a;
+  }
+  piece = substring_of(s, p, len);
+  tz_arr_push_value(a, &piece);
+  return a;
+}
+
+// trim() (ends 3), trimStart() (1) and trimEnd() (2).
+void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
+  TzStr s = make_str(obj, meta);
+  TzStr f = flat(s);
+  uint32_t start = 0, end = str_len(f.meta);
+  if (ends & 1)
+    while (start < end && tz_is_js_space(unit_at(&f, start)))
+      ++start;
+  if (ends & 2)
+    while (end > start && tz_is_js_space(unit_at(&f, end - 1)))
+      --end;
+  *out = substring_of(s, start, end);
+}
+
+// padStart() and padEnd(): `fill` (by default a space) repeated, and cut, up
+// to `length` code units in all.
+void tz_str_pad(TzStr *out, void *obj, uint64_t meta, int64_t length, void *fill_obj,
+                uint64_t fill_meta, int32_t has_fill, int32_t at_start) {
+  TzStr s = make_str(obj, meta);
+  TzStr fill = has_fill ? flat(make_str(fill_obj, fill_meta)) : single_char(' ');
+  uint32_t len = str_len(meta), fill_len = str_len(fill.meta);
+  if (length <= (int64_t)len || fill_len == 0) {
+    retain(s);
+    *out = s;
+    return;
+  }
+  if (length > (int64_t)MAX_LENGTH)
+    tz_panicf("RangeError: Invalid string length %lld", (long long)length);
+  TzStr f = flat(s);
+  uint32_t total = (uint32_t)length, gap = total - len;
+  Builder w;
+  builder_init(&w, total, is_two(f.meta) || is_two(fill.meta));
+  if (!at_start)
+    builder_put(&w, &f, 0, len);
+  for (uint32_t done = 0; done < gap; done += fill_len)
+    builder_put(&w, &fill, 0, gap - done < fill_len ? gap - done : fill_len);
+  if (at_start)
+    builder_put(&w, &f, 0, len);
+  *out = builder_finish(&w, is_ascii(f.meta) && is_ascii(fill.meta));
+}
+
+// Unicode's Final_Sigma: the sigma at `i` ends a word if a cased letter comes
+// before it and none after it, not counting case-ignorable ones.
+static int final_sigma(const TzStr *f, uint32_t i, uint32_t len) {
+  int preceded = 0;
+  for (uint32_t j = i; j > 0;) {
+    uint32_t cp = previous_code_point(f, &j);
+    if (!tz_is_case_ignorable(cp)) {
+      preceded = tz_is_cased(cp);
+      break;
+    }
+  }
+  if (!preceded)
+    return 0;
+  for (uint32_t j = i + 1; j < len;) {
+    uint32_t cp = next_code_point(f, &j, len);
+    if (!tz_is_case_ignorable(cp))
+      return !tz_is_cased(cp);
+  }
+  return 1;
+}
+
+// toUpperCase() and toLowerCase(), with the full mappings of Unicode, as V8
+// has them: "ß" becomes "SS", and a final capital sigma a final small one.
+static void convert_case(TzStr *out, void *obj, uint64_t meta, int upper) {
+  TzStr s = make_str(obj, meta);
+  TzStr f = flat(s);
+  uint32_t len = str_len(f.meta);
+  if (is_ascii(f.meta)) {
+    const uint8_t *u = (const uint8_t *)units(&f);
+    uint8_t from = upper ? 'a' : 'A';
+    uint32_t i = 0;
+    while (i < len && (uint8_t)(u[i] - from) > 25)
+      ++i;
+    if (i == len) {
+      retain(s);
+      *out = s;
+      return;
+    }
+    Builder w;
+    builder_init(&w, len, 0);
+    builder_put(&w, &f, 0, len);
+    uint8_t *dst = w.b ? (uint8_t *)buffer_units(w.b) : (uint8_t *)&w.bits;
+    for (; i < len; ++i)
+      if ((uint8_t)(dst[i] - from) <= 25)
+        dst[i] ^= 0x20;
+    *out = builder_finish(&w, 1);
+    return;
+  }
+  TzBuf b;
+  tz_buf_init(&b);
+  int changed = 0;
+  for (uint32_t i = 0; i < len;) {
+    uint32_t at = i;
+    uint32_t cp = next_code_point(&f, &i, len);
+    uint32_t mapped[3];
+    int count;
+    if (!upper && cp == 0x3A3) {
+      mapped[0] = final_sigma(&f, at, len) ? 0x3C2 : 0x3C3;
+      count = 1;
+    } else {
+      count = tz_case_map(cp, upper, mapped);
+    }
+    changed |= count != 1 || mapped[0] != cp;
+    for (int k = 0; k < count; ++k)
+      buf_code_point(&b, mapped[k]);
+  }
+  if (!changed) {
+    tz_buf_free(&b);
+    retain(s);
+    *out = s;
+    return;
+  }
+  *out = tz_buf_take(&b);
+}
+
+void tz_str_to_upper(TzStr *out, void *obj, uint64_t meta) { convert_case(out, obj, meta, 1); }
+
+void tz_str_to_lower(TzStr *out, void *obj, uint64_t meta) { convert_case(out, obj, meta, 0); }
+
+// The text that replaces a match, with the patterns of JavaScript: "$$" is
+// "$", "$&" the match, "$`" what comes before it and "$'" what follows it.
+static void put_replacement(TzBuf *b, const TzStr *replacement, const TzStr *s, uint32_t at,
+                            uint32_t match_len) {
+  uint32_t len = str_len(replacement->meta), s_len = str_len(s->meta);
+  uint32_t plain = 0; // where the text not copied yet starts
+  for (uint32_t i = 0; i + 1 < len; ++i) {
+    if (unit_at(replacement, i) != '$')
+      continue;
+    uint16_t next = unit_at(replacement, i + 1);
+    if (next != '$' && next != '&' && next != '`' && next != '\'')
+      continue;
+    buf_put(b, replacement, plain, i - plain);
+    if (next == '$')
+      tz_buf_push(b, '$');
+    else if (next == '&')
+      buf_put(b, s, at, match_len);
+    else if (next == '`')
+      buf_put(b, s, 0, at);
+    else
+      buf_put(b, s, at + match_len, s_len - at - match_len);
+    plain = i + 2;
+    ++i;
+  }
+  buf_put(b, replacement, plain, len - plain);
+}
+
+// replace() (the first match) and replaceAll() of a string pattern.
+void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint64_t p_meta,
+                    void *r_obj, uint64_t r_meta, int32_t all) {
+  TzStr s = make_str(s_obj, s_meta);
+  TzStr f = flat(s), pattern = flat(make_str(p_obj, p_meta)),
+        replacement = flat(make_str(r_obj, r_meta));
+  uint32_t len = str_len(f.meta), p_len = str_len(pattern.meta);
+  int64_t at = index_of(&f, &pattern, 0);
+  if (at < 0) {
+    retain(s);
+    *out = s;
+    return;
+  }
+  TzBuf b;
+  tz_buf_init(&b);
+  uint32_t copied = 0;
+  while (at >= 0) {
+    buf_put(&b, &f, copied, (uint32_t)at - copied);
+    put_replacement(&b, &replacement, &f, (uint32_t)at, p_len);
+    copied = (uint32_t)at + p_len;
+    if (!all)
+      break;
+    // An empty pattern matches between every two code units.
+    uint32_t from = (uint32_t)at + (p_len ? p_len : 1);
+    at = from <= len ? index_of(&f, &pattern, from) : -1;
+  }
+  buf_put(&b, &f, copied, len - copied);
+  *out = tz_buf_take(&b);
+}
+
+// String.fromCharCode(): each code is taken modulo 2^16.
+void tz_str_from_char_codes(TzStr *out, const int32_t *codes, int64_t n) {
+  TzBuf b;
+  tz_buf_init(&b);
+  for (int64_t i = 0; i < n; ++i)
+    tz_buf_push(&b, (uint16_t)codes[i]);
+  *out = tz_buf_take(&b);
+}
+
+// String.fromCodePoint(): a code point that is not an integer from 0 to
+// 0x10FFFF is a RangeError.
+void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
+  TzBuf b;
+  tz_buf_init(&b);
+  for (int64_t i = 0; i < n; ++i) {
+    double cp = code_points[i];
+    if (!(cp >= 0 && cp <= 0x10FFFF && cp == (double)(uint32_t)cp)) {
+      char text[32];
+      text[tz_format_f64(cp, text)] = 0;
+      tz_panicf("RangeError: Invalid code point %s", text);
+    }
+    buf_code_point(&b, (uint32_t)cp);
+  }
+  *out = tz_buf_take(&b);
+}
+
+//===----------------------------------------------------------------------===//
+// Numbers from strings (number.c does the parsing)
+//===----------------------------------------------------------------------===//
+
+// The ASCII characters of flat `f` from `from` to `to`, up to the first other
+// one, as a C string in `local` or in a new block; `*n` gets their count.
+static char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local, size_t size,
+                        size_t *n) {
+  char *text = (size_t)(to - from) < size ? local : (char *)tz_alloc((size_t)(to - from) + 1);
+  size_t k = 0;
+  for (uint32_t i = from; i < to; ++i) {
+    uint16_t unit = unit_at(f, i);
+    if (unit >= 0x80)
+      break;
+    text[k++] = (char)unit;
+  }
+  text[k] = 0;
+  *n = k;
+  return text;
+}
+
+// Number(s) and `+s`: the whole string, without the whitespace around it,
+// must be a number; the empty string is 0.
+double tz_str_to_number(void *obj, uint64_t meta) {
+  TzStr f = flat(make_str(obj, meta));
+  uint32_t start = 0, end = str_len(f.meta);
+  while (start < end && tz_is_js_space(unit_at(&f, start)))
+    ++start;
+  while (end > start && tz_is_js_space(unit_at(&f, end - 1)))
+    --end;
+  char local[64];
+  size_t n;
+  char *text = ascii_text(&f, start, end, local, sizeof local, &n);
+  double value = tz_number_from_ascii(text, n, n == end - start);
+  if (text != local)
+    tz_free(text);
+  return value;
+}
+
+// The ASCII text after the leading whitespace, which parseInt and parseFloat
+// read a number from the start of.
+static char *leading_text(void *obj, uint64_t meta, char *local, size_t size, size_t *n) {
+  TzStr f = flat(make_str(obj, meta));
+  uint32_t start = 0, end = str_len(f.meta);
+  while (start < end && tz_is_js_space(unit_at(&f, start)))
+    ++start;
+  return ascii_text(&f, start, end, local, size, n);
+}
+
+// parseInt(s, radix); a radix of 0 means none, as in JavaScript.
+double tz_parse_int(void *obj, uint64_t meta, int32_t radix) {
+  char local[64];
+  size_t n;
+  char *text = leading_text(obj, meta, local, sizeof local, &n);
+  double value = tz_parse_int_ascii(text, n, radix);
+  if (text != local)
+    tz_free(text);
+  return value;
+}
+
+double tz_parse_float(void *obj, uint64_t meta) {
+  char local[64];
+  size_t n;
+  char *text = leading_text(obj, meta, local, sizeof local, &n);
+  double value = tz_parse_float_ascii(text, n);
+  if (text != local)
+    tz_free(text);
+  return value;
+}

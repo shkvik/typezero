@@ -77,6 +77,19 @@ const Type *Type::array(const Type *element) {
   return slot.get();
 }
 
+const char *typeOfName(const Type *type) {
+  switch (type->kind()) {
+  case Type::Kind::Int:
+  case Type::Kind::Long:
+  case Type::Kind::Double: return "number";
+  case Type::Kind::String: return "string";
+  case Type::Kind::Bool: return "boolean";
+  case Type::Kind::Array: return "object";
+  case Type::Kind::Optional: return typeOfName(type->inner());
+  default: return "undefined";
+  }
+}
+
 const Type *Type::fromName(llvm::StringRef name) {
   return llvm::StringSwitch<const Type *>(name)
       .Case("void", voidTy())

@@ -10,9 +10,3 @@ let zero: double = 0
 console.log(zero / zero, 1 / zero, -1 / zero)
 console.log(2.5 % 1, -7.5 % 2)
 
-// `as` truncates toward zero and saturates instead of overflowing.
-let f: double = 1.9
-console.log(f as int, -f as int)
-console.log((zero / zero) as int, 1e300 as int, -1e300 as long)
-let big: long = 9007199254740993
-console.log(big as double)

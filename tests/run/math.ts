@@ -1,0 +1,34 @@
+// same-as-node
+// The functions and constants of Math.
+console.log(Math.PI, Math.E, Math.SQRT2, Math.SQRT1_2, Math.LN2, Math.LN10, Math.LOG2E, Math.LOG10E)
+
+const zero: double = 0
+const nan = zero / zero
+const inf = 1 / zero
+console.log(Math.sqrt(16), Math.sqrt(2), Math.sqrt(-1), Math.cbrt(27), Math.cbrt(-8))
+console.log(Math.abs(-3), Math.abs(2.5), Math.abs(-zero), Math.sign(-4), Math.sign(0.5), Math.sign(-zero))
+console.log(Math.max(1, 7, 3), Math.min(4, -2.5), Math.max(), Math.min(), Math.max(1, nan), Math.min(0, -zero))
+console.log(Math.pow(2, 8), Math.pow(9, 0.5), Math.pow(1, inf), Math.hypot(3, 4), Math.hypot(), Math.hypot(nan, inf))
+console.log(Math.exp(0), Math.log(1), Math.log(0), Math.log2(8), Math.log10(1000), Math.log1p(0), Math.expm1(0))
+console.log(Math.sin(0), Math.cos(0), Math.tan(0), Math.atan2(0, -1), Math.atan2(1, 1) * 4, Math.asin(1) * 2)
+console.log(Math.sinh(0), Math.cosh(0), Math.tanh(inf), Math.asinh(0), Math.acosh(1), Math.atanh(0))
+console.log(Math.fround(5.5), Math.fround(5.05), Math.clz32(1), Math.clz32(0), Math.imul(65536, 65536), Math.imul(3, -4))
+console.log(Math.round(2.5), Math.floor(-1.5), Math.ceil(0.2), Math.trunc(-4.7))
+
+// Integers stay integers for abs, sign, min and max.
+const a: int = -7
+const b: int = 3
+const smallest: int = Math.min(a, b)
+const sum: int = Math.abs(a) + Math.max(a, b) + Math.sign(a)
+console.log(smallest, sum)
+
+// Math.random gives doubles from 0 up to 1.
+let inRange = true
+let different = false
+const first = Math.random()
+for (let i = 0; i < 1000; i++) {
+  const r = Math.random()
+  if (r < 0 || r >= 1) inRange = false
+  if (r != first) different = true
+}
+console.log(inRange, different)

@@ -19,9 +19,11 @@ console.log("итого:", total)
 let half: double = 7 / 2
 console.log("7 / 2 в double:", half)
 
-// Всё, что может потерять данные, пишется явно через `as`.
-let whole = total as int
-console.log("без дробной части:", whole)
+// Дробное в целое — как в JavaScript: `| 0` отбрасывает дробную часть, а
+// Math.round / floor / ceil / trunc там, где ждут int, дают int.
+let whole = total | 0
+let rounded: int = Math.round(total / 10)
+console.log("без дробной части:", whole, "десятков:", rounded)
 
 let expensive: boolean = total > 50
 console.log("дорого?", expensive)

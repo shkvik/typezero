@@ -3,7 +3,10 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
+
+#include <array>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -117,6 +120,20 @@ void CodeGen::declareRuntime() {
   rt_.printString = declare("tz_print_string", voidTy, {ptr, i64});
   rt_.printValue = declare("tz_print_value", voidTy, {ptr, ptr});
   rt_.panic = declare("tz_panic", voidTy, {ptr, i64});
+  // Numbers (runtime/tzrt.c, number.c and math.c).
+  rt_.toInt32 = declare("tz_to_int32", i32, {f64});
+  rt_.mathRound = declare("tz_math_round", f64, {f64});
+  rt_.mathPow = declare("tz_math_pow", f64, {f64, f64});
+  rt_.mathPowLong = declare("tz_math_pow_long", i64, {i64, i64});
+  rt_.mathHypot = declare("tz_math_hypot", f64, {ptr, i64});
+  rt_.mathRandom = declare("tz_math_random", f64, {});
+  rt_.checkedInt32 = declare("tz_checked_int32", i32, {f64});
+  rt_.checkedInt64 = declare("tz_checked_int64", i64, {f64});
+  rt_.checkedInt32OfLong = declare("tz_checked_int32_of_long", i32, {i64});
+  rt_.strToNumber = declare("tz_str_to_number", f64, {ptr, i64});
+  rt_.parseInt = declare("tz_parse_int", f64, {ptr, i64, i32});
+  rt_.parseFloat = declare("tz_parse_float", f64, {ptr, i64});
+  rt_.numToFixed = declare("tz_num_to_fixed", voidTy, {ptr, f64, i64});
 
   // String functions take strings as (obj, meta) pairs and return them
   // through a pointer passed first.
@@ -137,6 +154,17 @@ void CodeGen::declareRuntime() {
   rt_.strFromI64 = declare("tz_str_from_i64", voidTy, {ptr, i64});
   rt_.strFromF64 = declare("tz_str_from_f64", voidTy, {ptr, f64});
   rt_.valueToString = declare("tz_value_to_string", voidTy, {ptr, ptr, ptr});
+  rt_.strCharAtOrEmpty = declare("tz_str_char_at_or_empty", voidTy, {ptr, ptr, i64, i64});
+  rt_.strCodePoint = declare("tz_str_code_point", i32, {ptr, i64, i64});
+  rt_.strLastIndexOf = declare("tz_str_last_index_of", i32, {ptr, i64, ptr, i64, i64, i32});
+  rt_.strSplit = declare("tz_str_split", ptr, {ptr, ptr, i64, ptr, i64, i32, i64, i32});
+  rt_.strTrim = declare("tz_str_trim", voidTy, {ptr, ptr, i64, i32});
+  rt_.strPad = declare("tz_str_pad", voidTy, {ptr, ptr, i64, i64, ptr, i64, i32, i32});
+  rt_.strToUpper = declare("tz_str_to_upper", voidTy, {ptr, ptr, i64});
+  rt_.strToLower = declare("tz_str_to_lower", voidTy, {ptr, ptr, i64});
+  rt_.strReplace = declare("tz_str_replace", voidTy, {ptr, ptr, i64, ptr, i64, ptr, i64, i32});
+  rt_.strFromCharCodes = declare("tz_str_from_char_codes", voidTy, {ptr, ptr, i64});
+  rt_.strFromCodePoints = declare("tz_str_from_code_points", voidTy, {ptr, ptr, i64});
 
   // Arrays (runtime/array.c). Values of any type go by address, with the
   // type descriptor of the elements stored in the array.
@@ -155,6 +183,7 @@ void CodeGen::declareRuntime() {
   rt_.arrReverse = declare("tz_arr_reverse", voidTy, {ptr});
   rt_.arrFill = declare("tz_arr_fill", voidTy, {ptr, ptr, i64, i64, i32, i32});
   rt_.arrSort = declare("tz_arr_sort", voidTy, {ptr});
+  rt_.arrSplice = declare("tz_arr_splice", ptr, {ptr, i64, i64, i32, i64, ptr});
 
   auto *panic = cast<llvm::Function>(rt_.panic.getCallee());
   panic->addFnAttr(llvm::Attribute::NoReturn);
@@ -267,7 +296,28 @@ void CodeGen::emitFunction(FunctionDecl *fn) {
     llvm::Argument *arg = function_->getArg(static_cast<unsigned>(i));
     arg->setName(param.name);
     // Parameters can be assigned to, so they live in stack slots like locals.
-    builder_.CreateStore(arg, createLocal(param.sym, param.name));
+    llvm::Value *slot = createLocal(param.sym, param.name);
+    if (!param.defaultValue) {
+      builder_.CreateStore(arg, slot);
+      continue;
+    }
+    // The argument is `T | undefined`; undefined takes the default value.
+    llvm::BasicBlock *givenBlock = newBlock("param.given");
+    llvm::BasicBlock *defaultBlock = newBlock("param.default");
+    llvm::BasicBlock *doneBlock = newBlock("param.done");
+    builder_.CreateCondBr(builder_.CreateExtractValue(arg, 1), givenBlock, defaultBlock);
+    switchTo(givenBlock);
+    llvm::Value *given = param.sym->type->isOptional() ? arg : builder_.CreateExtractValue(arg, 0);
+    builder_.CreateBr(doneBlock);
+    switchTo(defaultBlock);
+    llvm::Value *fallback = emitExpr(param.defaultValue);
+    llvm::BasicBlock *defaultEnd = builder_.GetInsertBlock();
+    builder_.CreateBr(doneBlock);
+    switchTo(doneBlock);
+    llvm::PHINode *value = builder_.CreatePHI(lower(param.sym->type), 2);
+    value->addIncoming(given, givenBlock);
+    value->addIncoming(fallback, defaultEnd);
+    builder_.CreateStore(value, slot);
   }
   emitStmt(fn->body);
   popScope();
@@ -516,22 +566,131 @@ void CodeGen::emitStmt(Stmt *stmt) {
   case Stmt::Kind::ForOf:
     emitForOf(cast<ForOfStmt>(stmt));
     break;
+  case Stmt::Kind::Switch:
+    emitSwitch(cast<SwitchStmt>(stmt));
+    break;
+  case Stmt::Kind::Labeled:
+    emitLabeled(cast<LabeledStmt>(stmt));
+    break;
   case Stmt::Kind::Return:
     emitReturn(cast<ReturnStmt>(stmt));
     break;
   case Stmt::Kind::Break:
-    emitCleanups(loops_.back().scopeDepth);
-    builder_.CreateBr(loops_.back().breakTarget);
-    startDeadBlock();
-    break;
   case Stmt::Kind::Continue:
-    emitCleanups(loops_.back().scopeDepth);
-    builder_.CreateBr(loops_.back().continueTarget);
-    startDeadBlock();
+    emitJump(stmt);
     break;
   case Stmt::Kind::Empty:
+  case Stmt::Kind::TypeAlias:
+  case Stmt::Kind::Enum:
     break;
   }
+}
+
+void CodeGen::pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget,
+                       size_t scopeDepth) {
+  targets_.push_back(
+      {std::move(pendingLabels_), /*isLoop=*/true, /*isSwitch=*/false, breakTarget, continueTarget, scopeDepth});
+  pendingLabels_.clear();
+}
+
+void CodeGen::emitJump(Stmt *stmt) {
+  bool isBreak = isa<BreakStmt>(stmt);
+  llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
+  const JumpTarget *target = nullptr;
+  for (const JumpTarget &t : llvm::reverse(targets_)) {
+    bool matches = !label.empty() ? llvm::is_contained(t.labels, label)
+                   : isBreak      ? t.isLoop || t.isSwitch
+                                  : t.isLoop;
+    if (matches) {
+      target = &t;
+      break;
+    }
+  }
+  assert(target && "Sema checks every break and continue");
+  emitCleanups(target->scopeDepth);
+  builder_.CreateBr(isBreak ? target->breakTarget : target->continueTarget);
+  startDeadBlock();
+}
+
+void CodeGen::emitLabeled(LabeledStmt *stmt) {
+  llvm::SmallVector<llvm::StringRef, 1> labels;
+  Stmt *body = stmt;
+  while (auto *labeled = dyn_cast<LabeledStmt>(body)) {
+    labels.push_back(labeled->label);
+    body = labeled->body;
+  }
+  if (isa<WhileStmt>(body) || isa<DoWhileStmt>(body) || isa<ForStmt>(body) ||
+      isa<ForOfStmt>(body) || isa<SwitchStmt>(body)) {
+    pendingLabels_ = labels; // the loop or switch takes them
+    emitStmt(body);
+    return;
+  }
+  // `label: { ... break label; ... }`
+  llvm::BasicBlock *endBlock = newBlock("label.end");
+  targets_.push_back({labels, /*isLoop=*/false, /*isSwitch=*/false, endBlock, nullptr, scopes_.size()});
+  emitStmt(body);
+  targets_.pop_back();
+  emitBlock(endBlock);
+}
+
+// The discriminant is evaluated once and compared with each test in order;
+// the first one equal to it jumps to its case, and no match to `default`.
+// The case bodies follow each other, so control falls through.
+void CodeGen::emitSwitch(SwitchStmt *stmt) {
+  const Type *type = stmt->discriminant->type;
+  llvm::SmallVector<llvm::StringRef, 1> labels = std::move(pendingLabels_);
+  pendingLabels_.clear();
+  size_t depth = scopes_.size();
+  pushScope(); // the variables of the cases
+  llvm::Value *value = emitExpr(stmt->discriminant);
+  llvm::Value *slot = nullptr;
+  if (type->isManaged()) {
+    // Released whichever way control leaves the switch.
+    slot = createManagedSlot(type, "switch.value");
+    builder_.CreateStore(value, slot);
+  }
+
+  llvm::BasicBlock *exitBlock = newBlock("switch.exit");
+  llvm::BasicBlock *endBlock = newBlock("switch.end");
+  std::vector<llvm::BasicBlock *> bodies;
+  llvm::BasicBlock *defaultBody = exitBlock;
+  for (const SwitchCase &c : stmt->cases) {
+    bodies.push_back(newBlock(c.test ? "switch.case" : "switch.default"));
+    if (!c.test)
+      defaultBody = bodies.back();
+  }
+
+  for (size_t i = 0; i < stmt->cases.size(); ++i) {
+    const SwitchCase &c = stmt->cases[i];
+    if (!c.test)
+      continue;
+    llvm::Value *test = emitExpr(c.test);
+    llvm::Value *current = slot ? builder_.CreateLoad(lower(type), slot) : value;
+    llvm::Value *equal;
+    if (!c.compareType) // `case undefined:`
+      equal = type->isOptional()    ? builder_.CreateNot(builder_.CreateExtractValue(current, 1))
+              : type->isUndefined() ? builder_.getTrue()
+                                    : builder_.getFalse();
+    else
+      equal = emitValuesEqual(emitConversion(current, type, c.compareType), test, c.compareType);
+    releaseValue(test, c.test->type);
+    llvm::BasicBlock *next = newBlock("switch.test");
+    builder_.CreateCondBr(equal, bodies[i], next);
+    switchTo(next);
+  }
+  builder_.CreateBr(defaultBody);
+
+  targets_.push_back({labels, /*isLoop=*/false, /*isSwitch=*/true, endBlock, nullptr, depth});
+  for (size_t i = 0; i < stmt->cases.size(); ++i) {
+    switchTo(bodies[i]);
+    for (Stmt *s : stmt->cases[i].body)
+      emitStmt(s);
+    branchTo(i + 1 < bodies.size() ? bodies[i + 1] : exitBlock);
+  }
+  targets_.pop_back();
+  switchTo(exitBlock);
+  popScope();
+  emitBlock(endBlock);
 }
 
 void CodeGen::storeReplacing(llvm::Value *address, llvm::Value *value, const Type *type) {
@@ -585,9 +744,9 @@ void CodeGen::emitWhile(WhileStmt *stmt) {
   builder_.CreateCondBr(cond, bodyBlock, endBlock);
 
   switchTo(bodyBlock);
-  loops_.push_back({endBlock, condBlock, scopes_.size()});
+  pushLoop(endBlock, condBlock, scopes_.size());
   emitStmt(stmt->body);
-  loops_.pop_back();
+  targets_.pop_back();
   branchTo(condBlock);
 
   switchTo(endBlock);
@@ -599,9 +758,9 @@ void CodeGen::emitDoWhile(DoWhileStmt *stmt) {
   llvm::BasicBlock *endBlock = newBlock("do.end");
 
   emitBlock(bodyBlock);
-  loops_.push_back({endBlock, condBlock, scopes_.size()});
+  pushLoop(endBlock, condBlock, scopes_.size());
   emitStmt(stmt->body);
-  loops_.pop_back();
+  targets_.pop_back();
 
   emitBlock(condBlock);
   llvm::Value *cond = emitExpr(stmt->cond);
@@ -629,9 +788,9 @@ void CodeGen::emitFor(ForStmt *stmt) {
   }
 
   switchTo(bodyBlock);
-  loops_.push_back({endBlock, stepBlock, scopes_.size()});
+  pushLoop(endBlock, stepBlock, scopes_.size());
   emitStmt(stmt->body);
-  loops_.pop_back();
+  targets_.pop_back();
 
   emitBlock(stepBlock);
   if (stmt->step)
@@ -715,6 +874,8 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     return emitMember(cast<MemberExpr>(expr));
   case Expr::Kind::Index: {
     auto *index = cast<IndexExpr>(expr);
+    if (index->enumDecl)
+      return emitEnumName(index);
     if (index->object->type->isString())
       return emitStringIndex(index);
     return emitArrayIndex(index);
@@ -742,17 +903,63 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
 }
 
 llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
+  if (unary->op == UnaryOp::TypeOf)
+    return emitTypeOf(unary->operand);
+  const Type *type = unary->operand->type;
+  if (unary->op == UnaryOp::Plus && type->isString()) { // `+s` is Number(s)
+    Operand str = emitOperand(unary->operand, /*canBorrow=*/true);
+    llvm::Value *number = emitStringToNumber(str.value);
+    dropOperand(str);
+    return number;
+  }
   llvm::Value *operand = emitExpr(unary->operand);
   switch (unary->op) {
   case UnaryOp::Neg:
     return unary->type->isFloat() ? builder_.CreateFNeg(operand) : builder_.CreateNeg(operand);
   case UnaryOp::Plus:
-    return operand;
+    return type->isBool() ? builder_.CreateUIToFP(operand, builder_.getDoubleTy()) : operand;
   case UnaryOp::Not:
   case UnaryOp::BitNot:
     return builder_.CreateNot(operand);
+  case UnaryOp::TypeOf:
+    break;
   }
   llvm_unreachable("unknown unary operator");
+}
+
+static std::u16string ascii16(llvm::StringRef text) { return std::u16string(text.begin(), text.end()); }
+
+// `typeof x` follows from the type of x, except for `T | undefined`.
+llvm::Value *CodeGen::emitTypeOf(Expr *operand) {
+  const Type *type = operand->type;
+  if (type->isOptional()) {
+    Operand value = emitOperand(operand, /*canBorrow=*/true);
+    llvm::Value *has = builder_.CreateExtractValue(value.value, 1);
+    dropOperand(value);
+    return builder_.CreateSelect(has, stringLiteral(ascii16(typeOfName(type->inner()))),
+                                 stringLiteral(u"undefined"));
+  }
+  if (!isa<NameExpr>(operand)) // evaluated for its side effects
+    emitDiscarded(operand);
+  return stringLiteral(ascii16(typeOfName(type)));
+}
+
+// `Color[value]`: the name of the enum member with that value, or undefined.
+llvm::Value *CodeGen::emitEnumName(IndexExpr *index) {
+  llvm::Value *value = emitExpr(index->index);
+  const Type *type = index->type;
+  llvm::Value *result = undefinedValue(type);
+  // Each member's test wraps those of the members before it, so that of
+  // members with one value the last names it, as in JavaScript.
+  for (const EnumMember &m : index->enumDecl->members) {
+    llvm::SmallVector<llvm::UTF16, 16> units;
+    llvm::convertUTF8ToUTF16String(m.name, units);
+    llvm::Value *name = makeOptional(stringLiteral(std::u16string(units.begin(), units.end())),
+                                     builder_.getTrue(), type);
+    llvm::Value *matches = builder_.CreateICmpEQ(value, builder_.getInt64(static_cast<uint64_t>(int64_t(m.number))));
+    result = builder_.CreateSelect(matches, name, result);
+  }
+  return result;
 }
 
 llvm::Value *CodeGen::emitBinary(BinaryExpr *bin) {
@@ -909,6 +1116,15 @@ llvm::Value *CodeGen::emitNullish(BinaryExpr *bin) {
 llvm::Value *CodeGen::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs,
                                      const Type *type) {
   bool isFloat = type->isFloat();
+  bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
+                 op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
+  if (isFloat && bitwise) {
+    // `x |= v` where x is a double: on 32-bit integers, as in JavaScript (Sema
+    // made v an int), and the result goes back as a double.
+    llvm::Value *result =
+        emitArithmetic(op, builder_.CreateCall(rt_.toInt32, {lhs}), rhs, Type::intTy());
+    return builder_.CreateSIToFP(result, lhs->getType());
+  }
   switch (op) {
   // Integer arithmetic wraps around on overflow, as in Go.
   case BinaryOp::Add:
@@ -921,6 +1137,16 @@ llvm::Value *CodeGen::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value 
     return isFloat ? builder_.CreateFDiv(lhs, rhs) : emitIntDivRem(op, lhs, rhs);
   case BinaryOp::Rem:
     return isFloat ? builder_.CreateFRem(lhs, rhs) : emitIntDivRem(op, lhs, rhs);
+  case BinaryOp::Pow: {
+    if (isFloat)
+      return builder_.CreateCall(rt_.mathPow, {lhs, rhs});
+    // Integers: computed as longs, which wrap around like repeated `*`; the
+    // low half of that is the int result.
+    llvm::Type *i64 = builder_.getInt64Ty();
+    llvm::Value *result = builder_.CreateCall(
+        rt_.mathPowLong, {builder_.CreateSExt(lhs, i64), builder_.CreateSExt(rhs, i64)});
+    return builder_.CreateTrunc(result, lhs->getType());
+  }
   case BinaryOp::BitAnd:
     return builder_.CreateAnd(lhs, rhs);
   case BinaryOp::BitOr:
@@ -1120,19 +1346,36 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
   case Builtin::StringOf:
     // Sema already converted the argument to a string.
     return call->args.empty() ? stringLiteral(u"") : emitExpr(call->args[0]);
+  case Builtin::NumberOf:
+  case Builtin::ParseInt:
+  case Builtin::ParseFloat:
+  case Builtin::IsNaN:
+  case Builtin::IsFinite:
+  case Builtin::IsInteger:
+  case Builtin::IsSafeInteger:
+  case Builtin::FromCharCode:
+  case Builtin::FromCodePoint:
+  case Builtin::NumToFixed:
+    return emitNumberBuiltin(call);
   case Builtin::None:
     break;
   default:
+    if (isMathBuiltin(call->builtin))
+      return emitMathCall(call);
     if (cast<MemberExpr>(call->callee)->object->type->isArray())
       return emitArrayMethod(call);
     return emitStringMethod(call);
   }
 
-  // The callee takes ownership of its arguments.
+  // The callee takes ownership of its arguments. Parameters left out get
+  // undefined (and then their default values).
+  const FuncSymbol *func = call->func;
   std::vector<llvm::Value *> args;
   for (Expr *arg : call->args)
     args.push_back(emitExpr(arg));
-  return builder_.CreateCall(functions_.lookup(call->func), args);
+  for (size_t i = args.size(); i < func->params.size(); ++i)
+    args.push_back(undefinedValue(func->params[i]));
+  return builder_.CreateCall(functions_.lookup(func), args);
 }
 
 // console.log(a, b) prints its arguments separated by spaces, then a newline.
@@ -1253,10 +1496,10 @@ llvm::Value *CodeGen::emitConversion(llvm::Value *value, const Type *from, const
                                              : builder_.CreateTrunc(value, target);
   if (from->isInteger() && to->isFloat())
     return builder_.CreateSIToFP(value, target);
-  if (from->isFloat() && to->isInteger())
-    // Saturates instead of being undefined: NaN becomes 0 and out-of-range
-    // values clamp to the limits, as in Rust.
-    return builder_.CreateIntrinsic(llvm::Intrinsic::fptosi_sat, {target, value->getType()}, {value});
+  // An operand of a bitwise operator: JavaScript's ToInt32. A double becomes a
+  // long only through Math functions (emitMathCall).
+  if (from->isFloat() && to->isInt())
+    return builder_.CreateCall(rt_.toInt32, {value});
   llvm_unreachable("Sema rejects this conversion");
 }
 
@@ -1316,7 +1559,8 @@ bool CodeGen::cannotAssign(const Expr *expr) {
     if (!llvm::all_of(call->args, cannotAssign))
       return false;
     auto *member = dyn_cast<MemberExpr>(call->callee);
-    return !member || call->builtin == Builtin::ConsoleLog || cannotAssign(member->object);
+    return !member || call->builtin == Builtin::ConsoleLog || isMathBuiltin(call->builtin) ||
+           cannotAssign(member->object);
   }
   case Expr::Kind::Assign:
   case Expr::Kind::Update:
@@ -1467,6 +1711,17 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   if (call->builtin == Builtin::StrToString)
     return emitExpr(member->object);
+  if (call->builtin == Builtin::StrConcat) {
+    // `s.concat(a, b)` is `s + a + b`.
+    std::vector<Expr *> parts{member->object};
+    parts.insert(parts.end(), call->args.begin(), call->args.end());
+    std::vector<Operand> operands;
+    for (size_t i = 0; i < parts.size(); ++i) {
+      bool later = std::all_of(parts.begin() + i + 1, parts.end(), cannotAssign);
+      operands.push_back(emitConcatPart(parts[i], later));
+    }
+    return concatOperands(operands);
+  }
 
   Operand receiver = emitOperand(member->object, llvm::all_of(call->args, cannotAssign));
   std::vector<Operand> strings;
@@ -1485,6 +1740,13 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
     if (i < numbers.size())
       return {numbers[i], builder_.getInt32(1)};
     return {builder_.getInt64(0), builder_.getInt32(0)};
+  };
+  // An optional string argument: its parts and whether it was given.
+  auto optionalString = [&](size_t i) -> std::array<llvm::Value *, 3> {
+    if (i < strings.size())
+      return {stringObj(strings[i].value), stringMeta(strings[i].value), builder_.getInt32(1)};
+    return {llvm::ConstantPointerNull::get(builder_.getPtrTy()), builder_.getInt64(0),
+            builder_.getInt32(0)};
   };
 
   llvm::Value *obj = stringObj(receiver.value);
@@ -1555,6 +1817,63 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   case Builtin::StrRepeat:
     result = callReturningString(rt_.strRepeat, {obj, meta, numbers[0]});
     break;
+  case Builtin::StrCharAt: // "" out of range
+    result = callReturningString(rt_.strCharAtOrEmpty,
+                                 {obj, meta, numbers.empty() ? builder_.getInt64(0) : numbers[0]});
+    break;
+  case Builtin::StrCodePointAt: {
+    llvm::Value *position = numbers[0];
+    auto read = [&]() -> llvm::Value * {
+      return builder_.CreateCall(rt_.strCodePoint, {obj, meta, position});
+    };
+    result = call->mayBeOutOfRange
+                 ? emitCheckedRead(builder_.CreateICmpULT(position, stringLength(receiver.value)),
+                                   call->type, read)
+                 : read();
+    break;
+  }
+  case Builtin::StrLastIndexOf: {
+    llvm::Value *search = strings[0].value;
+    auto [position, hasPosition] = optional(0);
+    result = builder_.CreateCall(rt_.strLastIndexOf, {obj, meta, stringObj(search), stringMeta(search),
+                                                      position, hasPosition});
+    break;
+  }
+  case Builtin::StrSplit: {
+    auto [sepObj, sepMeta, hasSep] = optionalString(0);
+    auto [limit, hasLimit] = optional(0);
+    result = builder_.CreateCall(rt_.strSplit, {typeDescriptor(Type::string()), obj, meta, sepObj,
+                                                sepMeta, hasSep, limit, hasLimit},
+                                 "split");
+    break;
+  }
+  case Builtin::StrTrim:
+  case Builtin::StrTrimStart:
+  case Builtin::StrTrimEnd: {
+    int ends = call->builtin == Builtin::StrTrimStart ? 1 : call->builtin == Builtin::StrTrimEnd ? 2 : 3;
+    result = callReturningString(rt_.strTrim, {obj, meta, builder_.getInt32(ends)});
+    break;
+  }
+  case Builtin::StrPadStart:
+  case Builtin::StrPadEnd: {
+    auto [fillObj, fillMeta, hasFill] = optionalString(0);
+    result = callReturningString(rt_.strPad, {obj, meta, numbers[0], fillObj, fillMeta, hasFill,
+                                              builder_.getInt32(call->builtin == Builtin::StrPadStart)});
+    break;
+  }
+  case Builtin::StrToUpperCase:
+  case Builtin::StrToLowerCase:
+    result = callReturningString(
+        call->builtin == Builtin::StrToUpperCase ? rt_.strToUpper : rt_.strToLower, {obj, meta});
+    break;
+  case Builtin::StrReplace:
+  case Builtin::StrReplaceAll: {
+    llvm::Value *pattern = strings[0].value, *replacement = strings[1].value;
+    result = callReturningString(
+        rt_.strReplace, {obj, meta, stringObj(pattern), stringMeta(pattern), stringObj(replacement),
+                         stringMeta(replacement), builder_.getInt32(call->builtin == Builtin::StrReplaceAll)});
+    break;
+  }
   default:
     llvm_unreachable("not a string method");
   }

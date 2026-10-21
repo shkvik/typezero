@@ -302,6 +302,67 @@ void tz_print_f64(double value) {
 }
 
 //===----------------------------------------------------------------------===//
+// Number conversions
+//===----------------------------------------------------------------------===//
+
+// Math.round of JavaScript: halves round up, toward +Infinity, and a zero
+// result has the sign of the argument (Math.round(-0.4) is -0).
+TZ_HOT double tz_math_round(double x) {
+  double r = floor(x);
+  if (x - r >= 0.5)
+    r += 1;
+  return r == 0 ? copysign(0.0, x) : r;
+}
+
+// tz_to_int32 for a double outside the int range.
+TZ_NOINLINE int32_t tz_to_int32_slow(double x) {
+  if (!isfinite(x))
+    return 0;
+  double m = fmod(trunc(x), 4294967296.0);
+  if (m < 0)
+    m += 4294967296.0;
+  if (m >= 2147483648.0)
+    m -= 4294967296.0;
+  return (int32_t)m;
+}
+
+// JavaScript's ToInt32, which the bitwise operators apply to a double: the
+// fraction is dropped and the rest wraps around modulo 2^32; NaN and the
+// infinities become 0.
+TZ_HOT int32_t tz_to_int32(double x) {
+  if (x > -2147483649.0 && x < 2147483648.0)
+    return (int32_t)x;
+  return tz_to_int32_slow(x);
+}
+
+TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, const char *type) {
+  char text[32];
+  text[tz_format_f64(x, text)] = 0;
+  tz_panicf("the number %s does not fit in %s", text, type);
+}
+
+// A whole number where an int or a long is expected (Math.floor and the
+// like). JavaScript would go on with a number the type cannot hold; the
+// program stops instead of going on with a different one.
+TZ_HOT int32_t tz_checked_int32(double x) {
+  if (x >= -2147483648.0 && x <= 2147483647.0)
+    return (int32_t)x;
+  tz_panic_does_not_fit(x, "int");
+}
+
+TZ_HOT int64_t tz_checked_int64(double x) {
+  if (x >= -9223372036854775808.0 && x < 9223372036854775808.0)
+    return (int64_t)x;
+  tz_panic_does_not_fit(x, "long");
+}
+
+TZ_HOT int32_t tz_checked_int32_of_long(int64_t x) {
+  if (x >= INT32_MIN && x <= INT32_MAX)
+    return (int32_t)x;
+  tz_panicf("the number %lld does not fit in int", (long long)x);
+}
+
+//===----------------------------------------------------------------------===//
 // Panics
 //===----------------------------------------------------------------------===//
 

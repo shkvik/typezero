@@ -384,6 +384,21 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
     result = returnArray();
     break;
   }
+  case Builtin::ArrSplice: {
+    // The runtime moves the removed elements into a new array and opens a
+    // gap for the inserted ones, which take over the values.
+    std::vector<llvm::Value *> values = ownedArgs(0);
+    auto [count, hasCount] = position(values, 1);
+    size_t inserted = values.size() > 2 ? values.size() - 2 : 0;
+    llvm::Value *slotsOut = createStackSlot(builder_.getPtrTy(), "splice.slots");
+    result = builder_.CreateCall(rt_.arrSplice, {array.value, values[0], count, hasCount,
+                                                 builder_.getInt64(inserted), slotsOut},
+                                 "removed");
+    llvm::Value *slots = builder_.CreateLoad(builder_.getPtrTy(), slotsOut);
+    for (size_t i = 0; i < inserted; ++i)
+      builder_.CreateStore(values[i + 2], elementAddress(slots, element, builder_.getInt64(i)));
+    break;
+  }
   default:
     llvm_unreachable("not an array method");
   }
@@ -432,9 +447,9 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
     storeReplacing(createLocal(stmt->binding.sym, stmt->binding.name), value, element);
   }
 
-  loops_.push_back({endBlock, condBlock, scopes_.size() - 1});
+  pushLoop(endBlock, condBlock, scopes_.size() - 1);
   emitStmt(stmt->body);
-  loops_.pop_back();
+  targets_.pop_back();
   popScope();
   branchTo(condBlock);
 }

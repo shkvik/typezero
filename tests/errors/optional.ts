@@ -12,7 +12,7 @@ const n = f(false)
 const m = n + 1
 // expect-error: type 'int | undefined' is not assignable to type 'int'
 const k: int = n
-// expect-error: 'as' does not check for undefined
+// expect-error: 'as' is not supported; the value may be undefined
 const c = n as int
 // expect-error: the type 'undefined' alone is not supported
 let only: undefined

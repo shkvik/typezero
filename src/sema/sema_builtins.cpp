@@ -1,8 +1,12 @@
-// Built-in methods of strings and arrays, array literals and `new Array`.
+// Built-in functions: methods of strings, arrays and numbers, array literals,
+// `new Array`, the functions of Math, Number and String, and parseInt and
+// the like.
 
 #include "sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
+
+#include <cstring>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -23,6 +27,19 @@ const VarSymbol *arrayVariable(const Expr *object) {
   return name->var;
 }
 
+// The type a call that gives a whole number has where `expected` is
+// expected: an int or a long when one is expected, which the program checks
+// the number fits in (JavaScript would go on with a number that type cannot
+// hold), and otherwise `type` itself.
+const Type *wholeNumberType(const Type *type, const Type *expected) {
+  const Type *wanted = expected ? expected->nonOptional() : nullptr;
+  bool narrows = wanted && wanted->isInteger() &&
+                 (type->isFloat() || type->bitWidth() > wanted->bitWidth());
+  return narrows ? wanted : type;
+}
+
+} // namespace
+
 std::string argumentCount(unsigned min, unsigned max) {
   std::string text = std::to_string(min);
   if (max != min)
@@ -30,27 +47,295 @@ std::string argumentCount(unsigned min, unsigned max) {
   return text + (max == 1 && min == 1 ? " argument" : " arguments");
 }
 
-} // namespace
+Expr *Sema::numericArg(Expr *arg, const Type *hint) {
+  arg = checkExpr(arg, hint);
+  const Type *type = arg->type;
+  if (!type->isNumeric() && !type->isError()) {
+    std::string message = "argument of type '" + type->name().str() +
+                          "' is not assignable to parameter of type 'double'";
+    if (type->isOptional() && type->inner()->isNumeric())
+      message += "; the value may be undefined: check it first or give a default with '??'";
+    diags_.error(arg->loc(), message);
+  }
+  return arg;
+}
+
+// The functions of Math, which work as in JavaScript. Most take and return
+// doubles. Others keep the type of their arguments: abs, sign, min and max
+// of ints give an int, and pow is `**`. floor, ceil, round and trunc give a
+// double, or an int or a long where one is expected (see wholeNumberType).
+Expr *Sema::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected) {
+  enum Kind {
+    Rounding, // floor, ceil, round, trunc
+    Float,    // doubles in, a double out
+    Same,     // the type of the argument out: abs, sign
+    MinMax,   // the common type of the arguments
+    Pow,
+    Int32,    // ToInt32 of the arguments, an int out: clz32, imul
+  };
+  struct Function {
+    llvm::StringLiteral name;
+    Builtin builtin;
+    Kind kind;
+    unsigned minArgs, maxArgs;
+  };
+  constexpr unsigned kAny = ~0u;
+  static const Function functions[] = {
+      {"floor", Builtin::MathFloor, Rounding, 1, 1},  {"ceil", Builtin::MathCeil, Rounding, 1, 1},
+      {"round", Builtin::MathRound, Rounding, 1, 1},  {"trunc", Builtin::MathTrunc, Rounding, 1, 1},
+      {"abs", Builtin::MathAbs, Same, 1, 1},          {"sign", Builtin::MathSign, Same, 1, 1},
+      {"min", Builtin::MathMin, MinMax, 0, kAny},     {"max", Builtin::MathMax, MinMax, 0, kAny},
+      {"pow", Builtin::MathPow, Pow, 2, 2},           {"sqrt", Builtin::MathSqrt, Float, 1, 1},
+      {"cbrt", Builtin::MathCbrt, Float, 1, 1},       {"exp", Builtin::MathExp, Float, 1, 1},
+      {"expm1", Builtin::MathExpm1, Float, 1, 1},     {"log", Builtin::MathLog, Float, 1, 1},
+      {"log1p", Builtin::MathLog1p, Float, 1, 1},     {"log2", Builtin::MathLog2, Float, 1, 1},
+      {"log10", Builtin::MathLog10, Float, 1, 1},     {"sin", Builtin::MathSin, Float, 1, 1},
+      {"cos", Builtin::MathCos, Float, 1, 1},         {"tan", Builtin::MathTan, Float, 1, 1},
+      {"asin", Builtin::MathAsin, Float, 1, 1},       {"acos", Builtin::MathAcos, Float, 1, 1},
+      {"atan", Builtin::MathAtan, Float, 1, 1},       {"atan2", Builtin::MathAtan2, Float, 2, 2},
+      {"sinh", Builtin::MathSinh, Float, 1, 1},       {"cosh", Builtin::MathCosh, Float, 1, 1},
+      {"tanh", Builtin::MathTanh, Float, 1, 1},       {"asinh", Builtin::MathAsinh, Float, 1, 1},
+      {"acosh", Builtin::MathAcosh, Float, 1, 1},     {"atanh", Builtin::MathAtanh, Float, 1, 1},
+      {"hypot", Builtin::MathHypot, Float, 0, kAny},  {"fround", Builtin::MathFround, Float, 1, 1},
+      {"clz32", Builtin::MathClz32, Int32, 1, 1},     {"imul", Builtin::MathImul, Int32, 2, 2},
+      {"random", Builtin::MathRandom, Float, 0, 0},
+  };
+  const Function *fn = nullptr;
+  for (const Function &f : functions)
+    if (member->name == f.name)
+      fn = &f;
+  if (!fn) {
+    if (globalConstant("Math", member->name, member->loc()))
+      diags_.error(member->loc(), "'Math." + member->name + "' is a number, not a function");
+    else
+      diags_.error(member->loc(), "property '" + member->name + "' does not exist on 'Math'");
+    for (Expr *&arg : call->args)
+      arg = checkExpr(arg);
+    return call;
+  }
+  if (!checkArity(call, member->loc(), fn->minArgs, fn->maxArgs))
+    return call;
+
+  if (fn->kind == Pow) {
+    // Math.pow(x, y) is x ** y.
+    auto *pow = ctx_.make<BinaryExpr>(call->loc(), BinaryOp::Pow, call->args[0], call->args[1]);
+    return checkBinary(pow, expected);
+  }
+
+  call->builtin = fn->builtin;
+  const Type *hint = expected && expected->nonOptional()->isNumeric() ? expected->nonOptional() : nullptr;
+  bool ok = true;
+  for (Expr *&arg : call->args) {
+    arg = numericArg(arg, fn->kind == Same || fn->kind == MinMax ? hint : nullptr);
+    ok &= arg->type->isNumeric();
+  }
+  if (!ok)
+    return call;
+
+  switch (fn->kind) {
+  case Rounding:
+    call->type = wholeNumberType(call->args[0]->type, expected);
+    break;
+  case Float:
+    for (Expr *&arg : call->args)
+      arg = convert(arg, Type::doubleTy());
+    call->type = Type::doubleTy();
+    break;
+  case Same:
+    call->type = call->args[0]->type;
+    break;
+  case MinMax: {
+    // Math.min() is Infinity, a double.
+    const Type *common = call->args.empty() ? Type::doubleTy() : call->args[0]->type;
+    for (Expr *arg : call->args)
+      common = commonNumericType(common, arg->type);
+    for (Expr *&arg : call->args)
+      arg = convert(arg, common);
+    call->type = common;
+    break;
+  }
+  case Int32:
+    for (Expr *&arg : call->args)
+      arg = toInt32(arg);
+    call->type = Type::intTy();
+    break;
+  case Pow:
+    break;
+  }
+  return call;
+}
+
+// String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x).
+Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
+  static const llvm::StringLiteral names[] = {"String",     "Number", "parseInt",
+                                              "parseFloat", "isNaN",  "isFinite"};
+  if (!llvm::any_of(names, [&](llvm::StringRef n) { return isGlobalName(name, n); }))
+    return nullptr;
+  return checkGlobalFunction(call, name->name, name->loc(), expected);
+}
+
+Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+                                const Type *expected) {
+  call->type = Type::error();
+  if (fn == "String" || fn == "Number") {
+    if (!checkArity(call, loc, 0, 1))
+      return call;
+    if (fn == "String") {
+      for (Expr *&arg : call->args)
+        arg = toStringOperand(checkExpr(arg));
+      call->builtin = Builtin::StringOf;
+      call->type = Type::string();
+      return call;
+    }
+    // Number(x) of a number, a boolean, a string or undefined.
+    for (Expr *&arg : call->args) {
+      arg = checkExpr(arg);
+      const Type *type = arg->type, *base = type->nonOptional();
+      if (type->isError())
+        return call;
+      if (base->isNumeric()) {
+        arg = convert(arg, type->isOptional() ? Type::optional(Type::doubleTy()) : Type::doubleTy());
+      } else if (!base->isBool() && !base->isString() && !type->isUndefined()) {
+        diags_.error(arg->loc(), "Number() takes a number, a boolean or a string, found '" +
+                                     type->name() + "'");
+        return call;
+      }
+    }
+    call->builtin = Builtin::NumberOf;
+    call->type = Type::doubleTy();
+    return call;
+  }
+
+  if (fn == "parseInt" || fn == "parseFloat") {
+    bool isInt = fn == "parseInt";
+    if (!checkArity(call, loc, 1, isInt ? 2 : 1))
+      return call;
+    call->args[0] = checkArg(call->args[0], Type::string());
+    if (call->args.size() == 2)
+      call->args[1] = toInt32(numericArg(call->args[1]));
+    call->builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat;
+    // parseInt gives a whole number (or NaN), so an int where one is expected.
+    call->type = isInt ? wholeNumberType(Type::doubleTy(), expected) : Type::doubleTy();
+    return call;
+  }
+
+  // isNaN, isFinite
+  if (!checkArity(call, loc, 1, 1))
+    return call;
+  call->args[0] = numericArg(call->args[0]);
+  call->builtin = fn == "isNaN" ? Builtin::IsNaN : Builtin::IsFinite;
+  call->type = Type::boolTy();
+  return call;
+}
+
+// String.fromCharCode, String.fromCodePoint, and the functions of Number.
+Expr *Sema::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected) {
+  bool isString = isGlobalName(member->object, "String");
+  llvm::StringRef fn = member->name;
+  call->type = Type::error();
+  if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
+    bool codeUnits = fn == "fromCharCode";
+    for (Expr *&arg : call->args) {
+      // Code units are taken modulo 2^16, as JavaScript does; a code point
+      // must be one, or the program stops with a RangeError.
+      arg = numericArg(arg);
+      arg = codeUnits ? toInt32(arg) : convert(arg, Type::doubleTy());
+    }
+    call->builtin = codeUnits ? Builtin::FromCharCode : Builtin::FromCodePoint;
+    call->type = Type::string();
+    return call;
+  }
+  if (!isString && (fn == "parseInt" || fn == "parseFloat"))
+    return checkGlobalFunction(call, fn, member->loc(), expected); // Number.parseInt is parseInt
+  static const std::pair<llvm::StringLiteral, Builtin> predicates[] = {
+      {"isNaN", Builtin::IsNaN},
+      {"isFinite", Builtin::IsFinite},
+      {"isInteger", Builtin::IsInteger},
+      {"isSafeInteger", Builtin::IsSafeInteger},
+  };
+  if (!isString) {
+    for (const auto &[name, builtin] : predicates) {
+      if (fn != name)
+        continue;
+      if (!checkArity(call, member->loc(), 1, 1))
+        return call;
+      call->args[0] = numericArg(call->args[0]);
+      call->builtin = builtin;
+      call->type = Type::boolTy();
+      return call;
+    }
+  }
+  diags_.error(member->loc(), "property '" + fn + "' does not exist on '" +
+                                  (isString ? "String" : "Number") + "'");
+  for (Expr *&arg : call->args)
+    arg = checkExpr(arg);
+  return call;
+}
+
+// x.toString() and x.toFixed(digits) of a number.
+Expr *Sema::checkNumberMethod(CallExpr *call, MemberExpr *member) {
+  if (member->name == "toString") {
+    if (!checkArity(call, member->loc(), 0, 0))
+      return call;
+    // `x.toString()` is `String(x)`.
+    call->args.push_back(toStringOperand(member->object));
+    call->builtin = Builtin::StringOf;
+    call->type = Type::string();
+    return call;
+  }
+  if (member->name == "toFixed") {
+    if (!checkArity(call, member->loc(), 0, 1))
+      return call;
+    member->object = convert(member->object, Type::doubleTy());
+    if (!call->args.empty())
+      call->args[0] = checkPosition(call->args[0]);
+    call->builtin = Builtin::NumToFixed;
+    call->type = Type::string();
+    return call;
+  }
+  diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
+                                  member->object->type->name() + "'");
+  for (Expr *&arg : call->args)
+    arg = checkExpr(arg);
+  return call;
+}
 
 Expr *Sema::checkStringMethod(CallExpr *call, MemberExpr *member) {
   struct Method {
     llvm::StringRef name;
     Builtin builtin;
     unsigned minArgs, maxArgs;
-    bool firstArgIsString; // the other arguments are positions or counts
+    // The kinds of the arguments: 's' a string, 'p' a position or count,
+    // '*' any value, turned into a string. The last one repeats.
+    const char *args;
     const Type *ret;
   };
+  constexpr unsigned kAny = ~0u;
   static const Method methods[] = {
-      {"charCodeAt", Builtin::StrCharCodeAt, 1, 1, false, Type::intTy()},
-      {"at", Builtin::StrAt, 1, 1, false, Type::string()},
-      {"slice", Builtin::StrSlice, 0, 2, false, Type::string()},
-      {"substring", Builtin::StrSubstring, 1, 2, false, Type::string()},
-      {"indexOf", Builtin::StrIndexOf, 1, 2, true, Type::intTy()},
-      {"includes", Builtin::StrIncludes, 1, 2, true, Type::boolTy()},
-      {"startsWith", Builtin::StrStartsWith, 1, 2, true, Type::boolTy()},
-      {"endsWith", Builtin::StrEndsWith, 1, 2, true, Type::boolTy()},
-      {"repeat", Builtin::StrRepeat, 1, 1, false, Type::string()},
-      {"toString", Builtin::StrToString, 0, 0, false, Type::string()},
+      {"charCodeAt", Builtin::StrCharCodeAt, 1, 1, "p", Type::intTy()},
+      {"charAt", Builtin::StrCharAt, 0, 1, "p", Type::string()},
+      {"codePointAt", Builtin::StrCodePointAt, 1, 1, "p", Type::intTy()},
+      {"at", Builtin::StrAt, 1, 1, "p", Type::string()},
+      {"slice", Builtin::StrSlice, 0, 2, "p", Type::string()},
+      {"substring", Builtin::StrSubstring, 1, 2, "p", Type::string()},
+      {"indexOf", Builtin::StrIndexOf, 1, 2, "sp", Type::intTy()},
+      {"lastIndexOf", Builtin::StrLastIndexOf, 1, 2, "sp", Type::intTy()},
+      {"includes", Builtin::StrIncludes, 1, 2, "sp", Type::boolTy()},
+      {"startsWith", Builtin::StrStartsWith, 1, 2, "sp", Type::boolTy()},
+      {"endsWith", Builtin::StrEndsWith, 1, 2, "sp", Type::boolTy()},
+      {"repeat", Builtin::StrRepeat, 1, 1, "p", Type::string()},
+      {"toString", Builtin::StrToString, 0, 0, "", Type::string()},
+      {"concat", Builtin::StrConcat, 0, kAny, "*", Type::string()},
+      {"split", Builtin::StrSplit, 0, 2, "sp", Type::array(Type::string())},
+      {"trim", Builtin::StrTrim, 0, 0, "", Type::string()},
+      {"trimStart", Builtin::StrTrimStart, 0, 0, "", Type::string()},
+      {"trimEnd", Builtin::StrTrimEnd, 0, 0, "", Type::string()},
+      {"padStart", Builtin::StrPadStart, 1, 2, "ps", Type::string()},
+      {"padEnd", Builtin::StrPadEnd, 1, 2, "ps", Type::string()},
+      {"toUpperCase", Builtin::StrToUpperCase, 0, 0, "", Type::string()},
+      {"toLowerCase", Builtin::StrToLowerCase, 0, 0, "", Type::string()},
+      {"replace", Builtin::StrReplace, 2, 2, "ss", Type::string()},
+      {"replaceAll", Builtin::StrReplaceAll, 2, 2, "ss", Type::string()},
   };
 
   const Method *method = nullptr;
@@ -63,21 +348,23 @@ Expr *Sema::checkStringMethod(CallExpr *call, MemberExpr *member) {
       arg = checkExpr(arg);
     return call;
   }
-
-  size_t count = call->args.size();
-  if (count < method->minArgs || count > method->maxArgs) {
-    diags_.error(member->loc(), "expected " + argumentCount(method->minArgs, method->maxArgs) +
-                                    ", but got " + llvm::Twine(count));
-    for (Expr *&arg : call->args)
-      arg = checkExpr(arg);
+  if (!checkArity(call, member->loc(), method->minArgs, method->maxArgs))
     return call;
-  }
 
-  for (size_t i = 0; i < count; ++i) {
-    if (i == 0 && method->firstArgIsString)
-      call->args[i] = coerce(checkExpr(call->args[i], Type::string()), Type::string());
-    else
-      call->args[i] = checkPosition(call->args[i]);
+  size_t kinds = std::strlen(method->args);
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    Expr *&arg = call->args[i];
+    switch (method->args[std::min(i, kinds - 1)]) {
+    case 's':
+      arg = checkArg(arg, Type::string());
+      break;
+    case 'p':
+      arg = checkPosition(arg);
+      break;
+    default:
+      arg = toStringOperand(checkExpr(arg));
+      break;
+    }
   }
   call->builtin = method->builtin;
   call->type = method->ret;
@@ -86,6 +373,10 @@ Expr *Sema::checkStringMethod(CallExpr *call, MemberExpr *member) {
     // Out of range, JavaScript returns NaN, which only a double can hold.
     call->mayBeOutOfRange = !provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
     call->type = call->mayBeOutOfRange ? Type::doubleTy() : Type::intTy();
+  } else if (method->builtin == Builtin::StrCodePointAt) {
+    // Out of range, JavaScript returns undefined.
+    call->mayBeOutOfRange = !provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
+    call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrAt) {
     call->mayBeOutOfRange = !provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
@@ -243,11 +534,24 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  if (name == "splice")
-    diags_.error(member->loc(), "'splice' is not supported yet");
-  else
-    diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                    arrayType->name() + "'");
+  if (name == "splice") {
+    // splice(start, deleteCount, ...items): removes and returns elements,
+    // and inserts items in their place.
+    if (!arity(1, ~0u))
+      return call;
+    for (size_t i = 0; i < count; ++i) {
+      if (i < 2)
+        call->args[i] = checkPosition(call->args[i]);
+      else
+        elementArg(i);
+    }
+    call->builtin = Builtin::ArrSplice;
+    call->type = arrayType;
+    arrayResized(arrayType, /*grew=*/true, /*shrank=*/true);
+    return call;
+  }
+  diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                  arrayType->name() + "'");
   checkArgsLoosely();
   return call;
 }

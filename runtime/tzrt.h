@@ -103,6 +103,21 @@ int32_t tz_str_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_met
 void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep);
 // Writes UTF-16 to stdout as UTF-8; lone surrogates become U+FFFD.
 void tz_out_write_utf16(const uint16_t *units, size_t length);
+void tz_str_from_f64(TzStr *out, double value);
+
+// Unicode (unicode.c).
+int tz_case_map(uint32_t cp, int upper, uint32_t out[3]);
+int tz_is_cased(uint32_t cp);
+int tz_is_case_ignorable(uint32_t cp);
+int tz_is_js_space(uint32_t unit);
+
+// Numbers in text (number.c), for Number(s), parseInt and parseFloat once
+// string.c has taken off the whitespace around them: `text` holds the ASCII
+// characters of the string up to its first other one, and `complete` says
+// whether that was all of it.
+double tz_number_from_ascii(const char *text, size_t length, int complete);
+double tz_parse_int_ascii(const char *text, size_t length, int32_t radix);
+double tz_parse_float_ascii(const char *text, size_t length);
 
 // A growable buffer of UTF-16 code units, for building strings in C.
 typedef struct {
@@ -137,6 +152,9 @@ typedef struct TzArray {
 } TzArray;
 
 int64_t tz_arr_live_objects(void);
+TzArray *tz_arr_new(const TzType *type, int64_t length, int64_t capacity);
+// Appends the value at `value`, which the array takes over.
+void tz_arr_push_value(TzArray *a, const void *value);
 void tz_value_retain(const TzType *type, void *value);
 void tz_value_release(const TzType *type, void *value);
 int tz_is_managed(const TzType *type);

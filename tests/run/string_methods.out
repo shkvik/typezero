@@ -1,0 +1,29 @@
+[ 'red', 'green', '', 'blue' ] [ 'red', 'green' ] [
+  'r', 'e', 'd', ',',
+  'g', 'r', 'e', 'e',
+  'n', ',', ',', 'b',
+  'l', 'u', 'e'
+] [ '' ] []
+[ 'a', 'b', 'c' ] [ 'red,green,,blue' ] [ 'abc' ] []
+3 then a third sentence
+[padded] [start] [end]
+[wide spaces] []
+007 7-- 12121abc abc    x
+...........long text toolong abc
+HELLO, WORLD hello, world ÀÉÎÕÜ àéîõü
+STRASSE ǆ Ǆ FI 2
+σίσυφος σ ας σα ПРИВЕТ МИР
+Ÿ Μ 𐐀 already lower
+a/b.c a/b/c abc
+-abc -a-b-c- ba
+price: $5 c[a]t a(a|c)c $1$
+e [] h 128512 56832 120
+0 97
+1 128512
+2 56832
+3 98
+undefined 3 2 -1 5
+0 0 2
+concat abcd x
+Hi! A  _
+😀A  1

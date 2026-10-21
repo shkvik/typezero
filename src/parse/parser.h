@@ -18,6 +18,8 @@ public:
 private:
   // Tokens
   void advance();
+  // The token after the current one.
+  const Token &peek();
   bool accept(Tok kind);
   bool expect(Tok kind, llvm::StringRef context = {});
   void expectSemicolon();
@@ -38,7 +40,11 @@ private:
   Stmt *parseWhile();
   Stmt *parseDoWhile();
   Stmt *parseFor();
+  Stmt *parseSwitch();
   Stmt *parseReturn();
+  Stmt *parseBreakOrContinue();
+  Stmt *parseTypeAlias();
+  Stmt *parseEnum();
 
   // Types
   TypeRef parseType();
@@ -64,6 +70,8 @@ private:
   AstContext &ctx_;
   Diagnostics &diags_;
   Token tok_;
+  Token peeked_;
+  bool hasPeeked_ = false;
   bool recovering_ = false;
 };
 

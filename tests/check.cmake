@@ -9,6 +9,7 @@
 #
 #   node tests (MODE=node): the same source run by Node.js must print exactly
 #     <name>.out too, which keeps the expectations honest about JavaScript.
+#     Options for node may follow the `// same-as-node` marker.
 #
 #   error tests (MODE=error):
 #     // expect-error: text    the compiler must report an error containing
@@ -68,8 +69,12 @@ if(MODE STREQUAL "run")
   check_stdout("${stdout}")
 
 elseif(MODE STREQUAL "node")
+  # Options for node may follow `// same-as-node`.
+  file(STRINGS ${SRC} marker REGEX "^// same-as-node")
+  string(REGEX REPLACE "^// same-as-node *" "" node_options "${marker}")
+  separate_arguments(node_options)
   execute_process(
-    COMMAND ${NODE} --no-warnings ${SRC}
+    COMMAND ${NODE} --no-warnings ${node_options} ${SRC}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
     RESULT_VARIABLE exit_code)

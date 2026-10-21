@@ -18,10 +18,13 @@ const char *tokSpelling(Tok kind) {
   case Tok::TemplateTail: return "'}'";
   case Tok::KwAs: return "'as'";
   case Tok::KwBreak: return "'break'";
+  case Tok::KwCase: return "'case'";
   case Tok::KwConst: return "'const'";
   case Tok::KwContinue: return "'continue'";
+  case Tok::KwDefault: return "'default'";
   case Tok::KwDo: return "'do'";
   case Tok::KwElse: return "'else'";
+  case Tok::KwEnum: return "'enum'";
   case Tok::KwFalse: return "'false'";
   case Tok::KwFor: return "'for'";
   case Tok::KwFunction: return "'function'";
@@ -29,7 +32,9 @@ const char *tokSpelling(Tok kind) {
   case Tok::KwLet: return "'let'";
   case Tok::KwNew: return "'new'";
   case Tok::KwReturn: return "'return'";
+  case Tok::KwSwitch: return "'switch'";
   case Tok::KwTrue: return "'true'";
+  case Tok::KwTypeof: return "'typeof'";
   case Tok::KwVar: return "'var'";
   case Tok::KwWhile: return "'while'";
   case Tok::LParen: return "'('";
@@ -48,6 +53,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::Plus: return "'+'";
   case Tok::Minus: return "'-'";
   case Tok::Star: return "'*'";
+  case Tok::StarStar: return "'**'";
   case Tok::Slash: return "'/'";
   case Tok::Percent: return "'%'";
   case Tok::PlusPlus: return "'++'";
@@ -74,6 +80,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::PlusAssign: return "'+='";
   case Tok::MinusAssign: return "'-='";
   case Tok::StarAssign: return "'*='";
+  case Tok::StarStarAssign: return "'**='";
   case Tok::SlashAssign: return "'/='";
   case Tok::PercentAssign: return "'%='";
   case Tok::AmpAssign: return "'&='";
@@ -207,6 +214,8 @@ Token Lexer::next() {
     if (match('=')) return make(Tok::MinusAssign, start, nl);
     return make(Tok::Minus, start, nl);
   case '*':
+    if (match('*'))
+      return make(match('=') ? Tok::StarStarAssign : Tok::StarStar, start, nl);
     if (match('=')) return make(Tok::StarAssign, start, nl);
     return make(Tok::Star, start, nl);
   case '/':
@@ -342,10 +351,13 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
   Tok kind = llvm::StringSwitch<Tok>(text)
                  .Case("as", Tok::KwAs)
                  .Case("break", Tok::KwBreak)
+                 .Case("case", Tok::KwCase)
                  .Case("const", Tok::KwConst)
                  .Case("continue", Tok::KwContinue)
+                 .Case("default", Tok::KwDefault)
                  .Case("do", Tok::KwDo)
                  .Case("else", Tok::KwElse)
+                 .Case("enum", Tok::KwEnum)
                  .Case("false", Tok::KwFalse)
                  .Case("for", Tok::KwFor)
                  .Case("function", Tok::KwFunction)
@@ -353,7 +365,9 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("let", Tok::KwLet)
                  .Case("new", Tok::KwNew)
                  .Case("return", Tok::KwReturn)
+                 .Case("switch", Tok::KwSwitch)
                  .Case("true", Tok::KwTrue)
+                 .Case("typeof", Tok::KwTypeof)
                  .Case("var", Tok::KwVar)
                  .Case("while", Tok::KwWhile)
                  .Default(Tok::Identifier);

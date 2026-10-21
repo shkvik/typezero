@@ -30,6 +30,10 @@ constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 // Larger constants are not tracked, which keeps all offsets small.
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
+// Built-in functions called by name; they change no variables and arrays.
+const llvm::StringRef kGlobalFunctions[] = {"String",   "Number", "parseInt",
+                                            "parseFloat", "isNaN", "isFinite"};
+
 // The variable `expr` reads, looking through the conversion Sema inserts for
 // a narrowed `T | undefined` variable.
 const VarSymbol *variableOf(const Expr *expr) {
@@ -227,6 +231,21 @@ void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) 
       const NameExpr *name = optionalVariable(side);
       if (name && conv && conv->isImplicit() && !conv->operand->type->isOptional() &&
           !conv->operand->type->isUndefined())
+        (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
+    }
+    // `typeof x === "undefined"`, `typeof x === "number"`
+    for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
+      auto *typeOf = dyn_cast<UnaryExpr>(side);
+      auto *text = dyn_cast<StringLitExpr>(other);
+      if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text)
+        continue;
+      const NameExpr *name = optionalVariable(typeOf->operand);
+      if (!name)
+        continue;
+      llvm::StringRef valueType = typeOfName(name->var->type->inner());
+      if (text->value == u"undefined")
+        (op == BinaryOp::Eq ? whenFalse : whenTrue).defined.insert(name->var);
+      else if (std::u16string(valueType.begin(), valueType.end()) == text->value)
         (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
     }
   }
@@ -432,13 +451,40 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
     scanStmt(s->body, scan, depth + 1);
     break;
   }
+  case Stmt::Kind::Switch: {
+    auto *s = cast<SwitchStmt>(stmt);
+    scanExpr(s->discriminant, scan, depth);
+    for (const SwitchCase &c : s->cases)
+      if (c.test)
+        scanExpr(c.test, scan, depth);
+    ++scan.switches; // an unlabeled `break` in it leaves the switch
+    for (const SwitchCase &c : s->cases)
+      for (const Stmt *body : c.body)
+        scanStmt(body, scan, depth);
+    --scan.switches;
+    break;
+  }
+  case Stmt::Kind::Labeled: {
+    auto *s = cast<LabeledStmt>(stmt);
+    scan.innerLabels.push_back(s->label);
+    scanStmt(s->body, scan, depth);
+    scan.innerLabels.pop_back();
+    break;
+  }
   case Stmt::Kind::Return:
     if (auto *value = cast<ReturnStmt>(stmt)->value)
       scanExpr(value, scan, depth);
     break;
-  case Stmt::Kind::Break:
-    if (depth == 0)
+  case Stmt::Kind::Break: {
+    // `break label` leaves the loop unless the label is inside it.
+    llvm::StringRef label = cast<BreakStmt>(stmt)->label;
+    if (label.empty() ? depth == 0 && scan.switches == 0
+                      : !llvm::is_contained(scan.innerLabels, label))
       scan.breaks = true;
+    break;
+  }
+  case Stmt::Kind::TypeAlias:
+  case Stmt::Kind::Enum:
     break;
   }
 }
@@ -539,7 +585,7 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
     for (const Expr *arg : call->args)
       scanExpr(arg, scan, depth);
     if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-      if (isGlobalName(member->object, "console"))
+      if (isGlobalName(member->object, "console") || isGlobalName(member->object, "Math"))
         break;
       scanExpr(member->object, scan, depth);
       llvm::StringRef method = member->name;
@@ -551,7 +597,9 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
         scan.growsArrays = scan.shrinksArrays = scan.releasesElements = true;
       else if (method == "fill")
         scan.releasesElements = true;
-    } else if (!isGlobalName(call->callee, "String")) {
+    } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
+                 return isGlobalName(call->callee, name);
+               })) {
       scan.callsFunctions = true;
     }
     break;

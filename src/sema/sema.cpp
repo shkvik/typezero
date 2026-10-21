@@ -28,9 +28,14 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
       if (d.init)
         collectNames(d.init, names);
     break;
-  case Stmt::Kind::Function:
-    collectNames(cast<FunctionDecl>(stmt)->body, names);
+  case Stmt::Kind::Function: {
+    auto *fn = cast<FunctionDecl>(stmt);
+    for (const Param &param : fn->params)
+      if (param.defaultValue)
+        collectNames(param.defaultValue, names);
+    collectNames(fn->body, names);
     break;
+  }
   case Stmt::Kind::Expr:
     collectNames(cast<ExprStmt>(stmt)->expr, names);
     break;
@@ -63,6 +68,20 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
     collectNames(cast<ForOfStmt>(stmt)->iterable, names);
     collectNames(cast<ForOfStmt>(stmt)->body, names);
     break;
+  case Stmt::Kind::Switch: {
+    auto *s = cast<SwitchStmt>(stmt);
+    collectNames(s->discriminant, names);
+    for (const SwitchCase &c : s->cases) {
+      if (c.test)
+        collectNames(c.test, names);
+      for (const Stmt *body : c.body)
+        collectNames(body, names);
+    }
+    break;
+  }
+  case Stmt::Kind::Labeled:
+    collectNames(cast<LabeledStmt>(stmt)->body, names);
+    break;
   case Stmt::Kind::Return:
     if (const Expr *value = cast<ReturnStmt>(stmt)->value)
       collectNames(value, names);
@@ -70,6 +89,8 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue:
   case Stmt::Kind::Empty:
+  case Stmt::Kind::TypeAlias:
+  case Stmt::Kind::Enum:
     break;
   }
 }
@@ -134,6 +155,7 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names) {
 
 void Sema::check(SourceFile &file) {
   pushScope(); // functions and globals
+  declareTypes(file.items);
 
   // Functions are visible in the whole file, as in JavaScript.
   for (Stmt *item : file.items)
@@ -143,8 +165,8 @@ void Sema::check(SourceFile &file) {
   // A global no function mentions cannot change during a call, and can live in
   // main's stack frame.
   for (Stmt *item : file.items)
-    if (auto *fn = dyn_cast<FunctionDecl>(item))
-      collectNames(fn->body, namesInFunctions_);
+    if (isa<FunctionDecl>(item))
+      collectNames(item, namesInFunctions_);
 
   // Top-level code runs in order; its `let` and `const` become globals.
   flow_ = Flow();
@@ -178,7 +200,10 @@ void Sema::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
     return;
   diags_.error(loc, "duplicate declaration of '" + name + "'");
   const ScopeEntry &previous = it->second;
-  diags_.note(previous.var ? previous.var->loc : previous.func->loc, "previously declared here");
+  diags_.note(previous.var    ? previous.var->loc
+              : previous.func ? previous.func->loc
+                              : previous.enumDecl->loc(),
+              "previously declared here");
 }
 
 Sema::ScopeEntry Sema::lookup(llvm::StringRef name) const {
@@ -222,6 +247,13 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
       return Type::error(); // the parser already reported it
     if (const Type *type = Type::fromName(ref.name))
       return type;
+    if (Stmt *decl = lookupType(ref.name)) {
+      if (auto *alias = dyn_cast<TypeAliasDecl>(decl))
+        return resolveAlias(alias);
+      auto *e = cast<EnumDecl>(decl);
+      resolveEnum(e);
+      return e->isString ? Type::string() : Type::intTy();
+    }
     if (ref.name == "Array")
       diags_.error(ref.loc, "'Array' needs an element type, e.g. 'Array<int>' or 'int[]'");
     else
@@ -283,7 +315,11 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
 bool Sema::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (from == to)
     return true;
+  // Widening, as in C#. A long beyond 2^53 loses precision as a double, as
+  // every such number does in JavaScript.
   if (from == Type::intTy() && (to == Type::longTy() || to == Type::doubleTy()))
+    return true;
+  if (from == Type::longTy() && to == Type::doubleTy())
     return true;
   if (to->isOptional())
     return from->isUndefined() || isImplicitlyConvertible(from->nonOptional(), to->inner());
@@ -321,7 +357,7 @@ Expr *Sema::convert(Expr *expr, const Type *to) {
     return expr;
   // An integer literal becomes a literal of the wider type, so that `-0` in
   // `[1.5, -0]` stays a negative zero.
-  if (to->isNumeric() && expr->type->isInteger()) {
+  if (to->isNumeric() && expr->type->isInteger() && isImplicitlyConvertible(expr->type, to)) {
     auto *unary = dyn_cast<UnaryExpr>(expr);
     auto *lit = dyn_cast<IntLitExpr>(unary && unary->op == UnaryOp::Neg ? unary->operand : expr);
     if (lit) {
@@ -348,8 +384,13 @@ Expr *Sema::coerce(Expr *expr, const Type *to) {
   if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
     message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
                "default with '??'";
-  else if (from->isNumeric() && to->isNumeric())
-    message += ("; convert it explicitly with 'as " + to->name() + "'").str();
+  else if (from->isFloat() && to->isInt())
+    message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, "
+               "Math.ceil or Math.trunc";
+  else if (from->isFloat() && to->isInteger())
+    message += "; round it with Math.round, Math.floor, Math.ceil or Math.trunc";
+  else if (from->isInteger() && to->isInteger())
+    message += "; Math.trunc(x) converts it and checks that it fits";
   diags_.error(expr->loc(), message);
   return expr;
 }
@@ -360,27 +401,69 @@ void Sema::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs, 
                             .str();
   if (lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined())
     message += "; a value may be undefined: check it first or give a default with '??'";
-  else if (lhs->isNumeric() && rhs->isNumeric())
-    message += "; convert one side explicitly with 'as'";
   diags_.error(loc, message);
+}
+
+const Type *Sema::comparisonType(const Type *a, const Type *b) {
+  const Type *common = a->isVoid() || b->isVoid() ? nullptr : unify(a, b);
+  if (common && common->isError())
+    return common;
+  const Type *base = common ? common->nonOptional() : nullptr;
+  if (base && (base->isNumeric() || base->isBool() || base->isString() || base->isArray()))
+    return common;
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//
 // Declarations and statements
 //===----------------------------------------------------------------------===//
 
+// The type of a parameter without an annotation, from a default value that
+// is a literal, as `let x = 5` would give it; null for other values.
+static const Type *literalType(const Expr *value) {
+  if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg)
+    value = unary->operand;
+  if (auto *lit = dyn_cast<IntLitExpr>(value))
+    return lit->value < (uint64_t(1) << 31) ? Type::intTy() : Type::longTy();
+  if (isa<FloatLitExpr>(value))
+    return Type::doubleTy();
+  if (isa<StringLitExpr>(value) || isa<TemplateExpr>(value))
+    return Type::string();
+  if (isa<BoolLitExpr>(value))
+    return Type::boolTy();
+  return nullptr;
+}
+
 void Sema::declareFunction(FunctionDecl *fn) {
   FuncSymbol *sym = ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
-  for (const Param &param : fn->params) {
+  bool afterOptional = false;
+  for (size_t i = 0; i < fn->params.size(); ++i) {
+    Param &param = fn->params[i];
+    const Type *type = nullptr;
     if (param.type) {
-      sym->params.push_back(resolveType(*param.type, /*allowVoid=*/false));
+      type = resolveType(*param.type, /*allowVoid=*/false);
+    } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
+      // `function f(n = 10)`: n is an int.
     } else {
       diags_.error(param.loc, "parameter '" + param.name + "' needs a type annotation");
-      sym->params.push_back(Type::error());
+      type = Type::error();
     }
+    if (param.optional)
+      type = Type::optional(type);
+    param.declaredType = type;
+    // A caller may leave out an optional parameter or one with a default
+    // value, or pass undefined: then the default applies.
+    bool mayOmit = param.optional || param.defaultValue;
+    sym->params.push_back(mayOmit ? Type::optional(type) : type);
+    if (!mayOmit) {
+      if (afterOptional)
+        diags_.error(param.loc, "a required parameter cannot follow an optional one");
+      sym->minArgs = i + 1;
+    }
+    afterOptional |= param.optional;
   }
   // Unlike TypeScript, a missing return type means `void` rather than inferred.
   sym->ret = fn->returnType ? resolveType(*fn->returnType, /*allowVoid=*/true) : Type::voidTy();
@@ -393,11 +476,21 @@ void Sema::checkFunctionBody(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
   currentFunction_ = sym;
   pushScope();
-  for (size_t i = 0; i < fn->params.size(); ++i) {
-    Param &param = fn->params[i];
-    param.sym = declareVar(param.name, param.loc, sym->params[i], /*isConst=*/false);
+  for (Param &param : fn->params) {
+    // A default value is computed at each call that leaves the parameter
+    // out, where it sees the parameters before it.
+    const Type *type = param.declaredType;
+    if (param.defaultValue) {
+      param.defaultValue = checkExpr(param.defaultValue, type->isError() ? nullptr : type);
+      param.defaultValue = coerce(param.defaultValue, type);
+    }
+    param.sym = declareVar(param.name, param.loc, type, /*isConst=*/false);
+    if (param.defaultValue && type->isOptional() && !param.defaultValue->type->isOptional() &&
+        !param.defaultValue->type->isUndefined())
+      setDefined(param.sym, true);
   }
   // The parameters and the outermost block of the body share one scope.
+  declareTypes(fn->body->body);
   for (Stmt *stmt : fn->body->body)
     checkStmt(stmt);
   popScope();
@@ -412,15 +505,21 @@ void Sema::checkFunctionBody(FunctionDecl *fn) {
 
 void Sema::checkStmt(Stmt *stmt) {
   switch (stmt->kind()) {
-  case Stmt::Kind::Block:
+  case Stmt::Kind::Block: {
+    auto *block = cast<BlockStmt>(stmt);
     pushScope();
-    for (Stmt *s : cast<BlockStmt>(stmt)->body)
+    declareTypes(block->body);
+    for (Stmt *s : block->body)
       checkStmt(s);
     popScope();
     break;
+  }
   case Stmt::Kind::VarDecl:
     checkVarDecl(cast<VarDeclStmt>(stmt));
     break;
+  case Stmt::Kind::TypeAlias:
+  case Stmt::Kind::Enum:
+    break; // declared with the block (declareTypes)
   case Stmt::Kind::Function:
     // check() handles top-level functions; this one is nested.
     diags_.error(stmt->loc(), "functions can only be declared at the top level for now");
@@ -445,20 +544,198 @@ void Sema::checkStmt(Stmt *stmt) {
   case Stmt::Kind::ForOf:
     checkForOf(cast<ForOfStmt>(stmt));
     break;
+  case Stmt::Kind::Switch:
+    checkSwitch(cast<SwitchStmt>(stmt));
+    break;
+  case Stmt::Kind::Labeled:
+    checkLabeled(cast<LabeledStmt>(stmt));
+    break;
   case Stmt::Kind::Return:
     checkReturn(cast<ReturnStmt>(stmt));
     flow_.unreachable = true;
     break;
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue:
-    if (loopDepth_ == 0)
-      diags_.error(stmt->loc(), llvm::Twine("'") + (isa<BreakStmt>(stmt) ? "break" : "continue") +
-                                    "' can only be used inside a loop");
+    checkJump(stmt);
     flow_.unreachable = true;
     break;
   case Stmt::Kind::Empty:
     break;
   }
+}
+
+void Sema::pushTarget(JumpTarget::Kind kind) {
+  JumpTarget target{kind, std::move(pendingLabels_), Flow()};
+  pendingLabels_.clear();
+  target.breaks.unreachable = true;
+  targets_.push_back(std::move(target));
+}
+
+void Sema::checkJump(Stmt *stmt) {
+  bool isBreak = isa<BreakStmt>(stmt);
+  llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
+  const char *keyword = isBreak ? "break" : "continue";
+  JumpTarget *target = nullptr;
+  for (JumpTarget &t : llvm::reverse(targets_)) {
+    bool matches = label.empty() ? (isBreak ? t.kind != JumpTarget::Kind::Block
+                                            : t.kind == JumpTarget::Kind::Loop)
+                                 : llvm::is_contained(t.labels, label);
+    if (matches) {
+      target = &t;
+      break;
+    }
+  }
+  if (!target) {
+    if (!label.empty())
+      diags_.error(stmt->loc(), "cannot find label '" + label + "'");
+    else if (isBreak)
+      diags_.error(stmt->loc(), "'break' can only be used inside a loop or a 'switch'");
+    else
+      diags_.error(stmt->loc(), "'continue' can only be used inside a loop");
+    return;
+  }
+  if (!isBreak && target->kind != JumpTarget::Kind::Loop) {
+    diags_.error(stmt->loc(), llvm::Twine("'") + keyword + " " + label +
+                                  "' needs a loop, and '" + label + "' does not label one");
+    return;
+  }
+  if (isBreak && target->kind != JumpTarget::Kind::Loop)
+    target->breaks = join(target->breaks, flow_);
+}
+
+static bool isLoop(const Stmt *stmt) {
+  return isa<WhileStmt>(stmt) || isa<DoWhileStmt>(stmt) || isa<ForStmt>(stmt) || isa<ForOfStmt>(stmt);
+}
+
+void Sema::checkLabeled(LabeledStmt *stmt) {
+  llvm::SmallVector<llvm::StringRef, 1> labels;
+  Stmt *body = stmt;
+  while (auto *labeled = dyn_cast<LabeledStmt>(body)) {
+    bool duplicate = llvm::is_contained(labels, labeled->label) ||
+                     llvm::any_of(targets_, [&](const JumpTarget &t) {
+                       return llvm::is_contained(t.labels, labeled->label);
+                     });
+    if (duplicate)
+      diags_.error(labeled->loc(), "duplicate label '" + labeled->label + "'");
+    labels.push_back(labeled->label);
+    body = labeled->body;
+  }
+  if (isLoop(body) || isa<SwitchStmt>(body)) {
+    pendingLabels_ = labels; // for the loop or switch to take
+    checkStmt(body);
+    return;
+  }
+  if (isa<VarDeclStmt>(body) || isa<FunctionDecl>(body) || isa<TypeAliasDecl>(body) ||
+      isa<EnumDecl>(body)) {
+    diags_.error(body->loc(), "a declaration cannot have a label");
+    return;
+  }
+  // `label: { ... break label; ... }`
+  pendingLabels_ = labels;
+  pushTarget(JumpTarget::Kind::Block);
+  checkStmt(body);
+  Flow breaks = targets_.back().breaks;
+  targets_.pop_back();
+  flow_ = join(flow_, breaks);
+}
+
+// A literal case test: comparing with it cannot change any variable, so what
+// the comparison says about the discriminant holds in the case's body.
+static bool isConstantTest(const Expr *test) {
+  if (auto *unary = dyn_cast<UnaryExpr>(test); unary && unary->op == UnaryOp::Neg)
+    test = unary->operand;
+  return isa<IntLitExpr>(test) || isa<FloatLitExpr>(test) || isa<StringLitExpr>(test) ||
+         isa<BoolLitExpr>(test) || isa<UndefinedExpr>(test);
+}
+
+// The tests run in order until one matches; then control enters that case
+// (or `default` if none matches) and falls through the cases after it until
+// a `break`.
+void Sema::checkSwitch(SwitchStmt *stmt) {
+  stmt->discriminant = checkExpr(stmt->discriminant);
+  const Type *type = stmt->discriminant->type;
+  if (type->isVoid()) {
+    diags_.error(stmt->discriminant->loc(), "an expression of type 'void' cannot be compared");
+    type = Type::error();
+  }
+  // As in JavaScript, the cases share one scope.
+  pushScope();
+  std::vector<Stmt *> all;
+  for (SwitchCase &c : stmt->cases)
+    all.insert(all.end(), c.body.begin(), c.body.end());
+  declareTypes(all);
+
+  const Type *hint = type->nonOptional()->isNumeric() ? type->nonOptional() : nullptr;
+  Flow tests = flow_; // what holds while the tests run
+  std::vector<Flow> matched(stmt->cases.size());
+  for (size_t i = 0; i < stmt->cases.size(); ++i) {
+    SwitchCase &c = stmt->cases[i];
+    if (!c.test)
+      continue;
+    flow_ = tests;
+    c.test = checkExpr(c.test, hint);
+    const Type *testType = c.test->type;
+    Flow whenTrue = flow_, whenFalse = flow_;
+    if (!type->isError() && !testType->isError() && !testType->isUndefined()) {
+      const Type *common = comparisonType(type, testType);
+      if (!common) {
+        diags_.error(c.test->loc(), "a case of type '" + testType->name() +
+                                        "' cannot be compared with a 'switch' value of type '" +
+                                        type->name() + "'");
+      } else if (!common->isError()) {
+        // A literal discriminant has nothing to learn about, and converting
+        // it here would change its type.
+        bool constant = isConstantTest(c.test) && !isConstantTest(stmt->discriminant);
+        c.test = convert(c.test, common);
+        c.compareType = common;
+        if (constant) {
+          // `discriminant === test`, to learn from it as from a condition.
+          BinaryExpr equal(c.loc, BinaryOp::Eq, convert(stmt->discriminant, common), c.test);
+          equal.type = Type::boolTy();
+          addConditionFacts(&equal, whenTrue, whenFalse);
+        }
+      }
+    } else if (testType->isUndefined() && isa<UndefinedExpr>(c.test)) {
+      BinaryExpr equal(c.loc, BinaryOp::Eq, stmt->discriminant, c.test);
+      equal.type = Type::boolTy();
+      addConditionFacts(&equal, whenTrue, whenFalse);
+    }
+    matched[i] = whenTrue;
+    tests = whenFalse;
+  }
+
+  pushTarget(JumpTarget::Kind::Switch);
+  Flow fallthrough;
+  fallthrough.unreachable = true;
+  bool hasDefault = false;
+  for (size_t i = 0; i < stmt->cases.size(); ++i) {
+    SwitchCase &c = stmt->cases[i];
+    hasDefault |= !c.test;
+    flow_ = join(fallthrough, c.test ? matched[i] : tests);
+    for (Stmt *s : c.body)
+      checkStmt(s);
+    fallthrough = flow_;
+    // A variable declared in this case is in scope in the cases after it,
+    // but JavaScript reports its use there as an error unless control fell
+    // through its declaration. Sema rejects such uses outright.
+    for (Stmt *s : c.body)
+      if (auto *decl = dyn_cast<VarDeclStmt>(s))
+        for (const VarDeclarator &d : decl->decls)
+          if (d.sym)
+            otherCaseVars_.insert(d.sym);
+  }
+  Flow exit = fallthrough;
+  if (!hasDefault)
+    exit = join(exit, tests);
+  exit = join(exit, targets_.back().breaks);
+  targets_.pop_back();
+  for (SwitchCase &c : stmt->cases)
+    for (Stmt *s : c.body)
+      if (auto *decl = dyn_cast<VarDeclStmt>(s))
+        for (const VarDeclarator &d : decl->decls)
+          otherCaseVars_.erase(d.sym);
+  popScope();
+  flow_ = exit;
 }
 
 void Sema::checkIf(IfStmt *stmt) {
@@ -553,15 +830,15 @@ void Sema::checkForOf(ForOfStmt *stmt) {
 }
 
 void Sema::checkLoopBody(Stmt *body) {
-  ++loopDepth_;
+  pushTarget(JumpTarget::Kind::Loop);
   checkBody(body);
-  --loopDepth_;
+  targets_.pop_back();
 }
 
 // The body of `if`, `while` or `for`. As in TypeScript, a declaration there
 // needs braces: it would be visible nowhere else.
 void Sema::checkBody(Stmt *body) {
-  if (isa<VarDeclStmt>(body)) {
+  if (isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body)) {
     diags_.error(body->loc(), "a declaration cannot be the whole body here; wrap it in '{ }'");
     return;
   }
@@ -685,46 +962,162 @@ static bool isTrueLiteral(const Expr *expr) {
   return lit && lit->value;
 }
 
-// Whether `stmt` contains a `break` that leaves the loop enclosing it. Nested
-// loops are skipped: their breaks are their own.
-static bool containsBreak(const Stmt *stmt) {
+namespace {
+
+// Finds the `break` and `continue` statements inside a statement S that
+// leave S: those that jump to S itself (except `continue` to a loop S) or to
+// a statement around it.
+class Exits {
+public:
+  Exits(bool isLoop, llvm::ArrayRef<llvm::StringRef> labels) : isLoop_(isLoop), labels_(labels) {}
+
+  bool any(llvm::ArrayRef<Stmt *> stmts) {
+    return llvm::any_of(stmts, [&](const Stmt *s) { return in(s); });
+  }
+
+  bool in(const Stmt *stmt) {
+    switch (stmt->kind()) {
+    case Stmt::Kind::Break: {
+      llvm::StringRef label = cast<BreakStmt>(stmt)->label;
+      return label.empty() ? breakables_ == 0 : !llvm::is_contained(inner_, label);
+    }
+    case Stmt::Kind::Continue: {
+      llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
+      if (label.empty())
+        return loops_ == 0 && !isLoop_;
+      if (llvm::is_contained(inner_, label))
+        return false;
+      return !(isLoop_ && llvm::is_contained(labels_, label));
+    }
+    case Stmt::Kind::Block:
+      return any(cast<BlockStmt>(stmt)->body);
+    case Stmt::Kind::If: {
+      auto *s = cast<IfStmt>(stmt);
+      return in(s->thenStmt) || (s->elseStmt && in(s->elseStmt));
+    }
+    case Stmt::Kind::While:
+      return inLoop(cast<WhileStmt>(stmt)->body);
+    case Stmt::Kind::DoWhile:
+      return inLoop(cast<DoWhileStmt>(stmt)->body);
+    case Stmt::Kind::For:
+      return inLoop(cast<ForStmt>(stmt)->body);
+    case Stmt::Kind::ForOf:
+      return inLoop(cast<ForOfStmt>(stmt)->body);
+    case Stmt::Kind::Switch: {
+      ++breakables_;
+      bool found = llvm::any_of(cast<SwitchStmt>(stmt)->cases,
+                                [&](const SwitchCase &c) { return any(c.body); });
+      --breakables_;
+      return found;
+    }
+    case Stmt::Kind::Labeled: {
+      auto *s = cast<LabeledStmt>(stmt);
+      inner_.push_back(s->label);
+      bool found = in(s->body);
+      inner_.pop_back();
+      return found;
+    }
+    default:
+      return false;
+    }
+  }
+
+private:
+  bool inLoop(const Stmt *body) {
+    ++loops_;
+    ++breakables_;
+    bool found = in(body);
+    --loops_;
+    --breakables_;
+    return found;
+  }
+
+  bool isLoop_;
+  llvm::ArrayRef<llvm::StringRef> labels_; // of S
+  llvm::SmallVector<llvm::StringRef, 4> inner_; // declared inside S
+  unsigned loops_ = 0, breakables_ = 0; // inside S, around the current statement
+};
+
+// Whether some `break` inside `stmt` jumps to one of `labels`.
+bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
+  if (labels.empty())
+    return false;
   switch (stmt->kind()) {
   case Stmt::Kind::Break:
-    return true;
+    return llvm::is_contained(labels, cast<BreakStmt>(stmt)->label);
   case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, containsBreak);
+    return llvm::any_of(cast<BlockStmt>(stmt)->body,
+                        [&](const Stmt *s) { return breaksTo(s, labels); });
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    return containsBreak(s->thenStmt) || (s->elseStmt && containsBreak(s->elseStmt));
+    return breaksTo(s->thenStmt, labels) || (s->elseStmt && breaksTo(s->elseStmt, labels));
   }
+  case Stmt::Kind::While:
+    return breaksTo(cast<WhileStmt>(stmt)->body, labels);
+  case Stmt::Kind::DoWhile:
+    return breaksTo(cast<DoWhileStmt>(stmt)->body, labels);
+  case Stmt::Kind::For:
+    return breaksTo(cast<ForStmt>(stmt)->body, labels);
+  case Stmt::Kind::ForOf:
+    return breaksTo(cast<ForOfStmt>(stmt)->body, labels);
+  case Stmt::Kind::Switch:
+    return llvm::any_of(cast<SwitchStmt>(stmt)->cases, [&](const SwitchCase &c) {
+      return llvm::any_of(c.body, [&](const Stmt *s) { return breaksTo(s, labels); });
+    });
+  case Stmt::Kind::Labeled:
+    return breaksTo(cast<LabeledStmt>(stmt)->body, labels);
   default:
     return false;
   }
 }
 
+} // namespace
+
 // Conservative: true only if control can never reach the end of `stmt`.
-bool Sema::alwaysReturns(const Stmt *stmt) {
+bool Sema::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
+  auto returns = [](const Stmt *s) { return alwaysReturns(s); };
   switch (stmt->kind()) {
   case Stmt::Kind::Return:
     return true;
   case Stmt::Kind::Block:
-    return llvm::any_of(cast<BlockStmt>(stmt)->body, alwaysReturns);
+    return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) && !breaksTo(stmt, labels);
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    return s->elseStmt && alwaysReturns(s->thenStmt) && alwaysReturns(s->elseStmt);
+    return s->elseStmt && alwaysReturns(s->thenStmt) && alwaysReturns(s->elseStmt) &&
+           !breaksTo(stmt, labels);
   }
-  // An endless loop never falls through unless it breaks.
+  // An endless loop never falls through unless something leaves it.
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
-    return isTrueLiteral(s->cond) && !containsBreak(s->body);
+    return isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
   }
   case Stmt::Kind::DoWhile: {
     auto *s = cast<DoWhileStmt>(stmt);
-    return isTrueLiteral(s->cond) && !containsBreak(s->body);
+    return isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
   }
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
-    return (!s->cond || isTrueLiteral(s->cond)) && !containsBreak(s->body);
+    return (!s->cond || isTrueLiteral(s->cond)) && !Exits(true, labels).in(s->body);
+  }
+  // A switch with `default` always enters some case, and control falls
+  // through to the end of the last one unless something leaves the switch.
+  case Stmt::Kind::Switch: {
+    auto *s = cast<SwitchStmt>(stmt);
+    bool hasDefault = llvm::any_of(s->cases, [](const SwitchCase &c) { return !c.test; });
+    if (!hasDefault || s->cases.empty())
+      return false;
+    Exits exits(false, labels);
+    if (llvm::any_of(s->cases, [&](const SwitchCase &c) { return exits.any(c.body); }))
+      return false;
+    return llvm::any_of(s->cases.back().body, returns);
+  }
+  case Stmt::Kind::Labeled: {
+    llvm::SmallVector<llvm::StringRef, 2> all(labels.begin(), labels.end());
+    while (auto *labeled = dyn_cast<LabeledStmt>(stmt)) {
+      all.push_back(labeled->label);
+      stmt = labeled->body;
+    }
+    return alwaysReturns(stmt, all);
   }
   default:
     return false;
@@ -758,7 +1151,7 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
   case Expr::Kind::Name:
     return checkName(cast<NameExpr>(expr));
   case Expr::Kind::Member:
-    return checkMember(cast<MemberExpr>(expr));
+    return checkMember(cast<MemberExpr>(expr), expected);
   case Expr::Kind::Index:
     return checkIndex(cast<IndexExpr>(expr));
   case Expr::Kind::Unary:
@@ -770,7 +1163,7 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected) {
   case Expr::Kind::Update:
     return checkUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
-    return checkCall(cast<CallExpr>(expr));
+    return checkCall(cast<CallExpr>(expr), expected);
   case Expr::Kind::New:
     return checkNew(cast<NewExpr>(expr), expected);
   case Expr::Kind::Conditional:
@@ -813,17 +1206,31 @@ Expr *Sema::checkName(NameExpr *name) {
   if (entry.var) {
     name->var = entry.var;
     name->type = entry.var->type;
+    checkVisible(name, entry.var);
     // Narrowed: known to hold a value here.
     if (name->type->isOptional() && isDefined(entry.var))
       return convert(name, name->type->inner());
     return name;
   }
+  if (!entry.func && !entry.enumDecl)
+    if (Expr *constant = globalConstant("", name->name, name->loc()))
+      return constant;
   if (entry.func)
     diags_.error(name->loc(), "functions cannot be used as values yet");
+  else if (entry.enumDecl)
+    diags_.error(name->loc(), "enum '" + name->name + "' can only be used as '" + name->name +
+                                  ".Member' or '" + name->name + "[value]'");
   else
     diags_.error(name->loc(), "cannot find name '" + name->name + "'");
   name->type = Type::error();
   return name;
+}
+
+void Sema::checkVisible(NameExpr *name, const VarSymbol *var) {
+  if (otherCaseVars_.contains(var))
+    diags_.error(name->loc(), "'" + name->name +
+                                  "' is declared in an earlier case of the 'switch'; declare it "
+                                  "before the 'switch' to use it in several cases");
 }
 
 Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
@@ -837,6 +1244,11 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
     else
       unary->operand = checkExpr(unary->operand, hint);
     const Type *type = unary->operand->type;
+    if (unary->op == UnaryOp::Plus && (type->isString() || type->isBool())) {
+      // `+s` is Number(s), as in JavaScript.
+      unary->type = Type::doubleTy();
+      break;
+    }
     if (!type->isNumeric() && !type->isError()) {
       diags_.error(unary->loc(), llvm::Twine("operator '") + op + "' cannot be applied to type '" +
                                      type->name() + "'");
@@ -855,13 +1267,21 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected) {
     const Type *hint = expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
     unary->operand = checkExpr(unary->operand, hint);
     const Type *type = unary->operand->type;
-    if (!type->isInteger() && !type->isError()) {
+    if (type->isFloat()) {
+      unary->operand = toInt32(unary->operand);
+      type = Type::intTy();
+    } else if (!type->isInteger() && !type->isError()) {
       diags_.error(unary->loc(), "operator '~' cannot be applied to type '" + type->name() + "'");
       type = Type::error();
     }
     unary->type = type;
     break;
   }
+  case UnaryOp::TypeOf:
+    // Known from the type, except whether a `T | undefined` holds a value.
+    unary->operand = checkExpr(unary->operand);
+    unary->type = Type::string();
+    break;
   }
   return unary;
 }
@@ -920,10 +1340,22 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     bin->type = Type::error();
     if (l->isError() || r->isError())
       return bin;
-    if (!l->isInteger() || !r->isInteger()) {
+    if (!l->isNumeric() || !r->isNumeric()) {
       reportOperandTypes(bin->loc(), op, l, r);
       return bin;
     }
+    if (l->isFloat()) {
+      // JavaScript's `x >>> n` is unsigned, and an int cannot hold it.
+      if (bin->op == BinaryOp::UShr) {
+        diags_.error(bin->lhs->loc(), "operator '>>>' cannot be applied to type 'double'; "
+                                      "convert it to int with 'x | 0' first");
+        return bin;
+      }
+      bin->lhs = toInt32(bin->lhs);
+      l = Type::intTy();
+    }
+    if (r->isFloat())
+      bin->rhs = toInt32(bin->rhs);
     // The result has the type of the left side. The shift count is masked to
     // the bit width, so converting it to that type loses nothing.
     bin->rhs = convert(bin->rhs, l);
@@ -950,6 +1382,14 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
       bin->type = Type::string();
       return bin;
     }
+    if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat())) {
+      // As in JavaScript, both sides become 32-bit integers first, so `x | 0`
+      // drops the fraction of a double exactly the way JavaScript does.
+      bin->lhs = toInt32(bin->lhs);
+      bin->rhs = toInt32(bin->rhs);
+      bin->type = Type::intTy();
+      return bin;
+    }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
     const Type *common = operandsOk ? commonNumericType(l, r) : nullptr;
     if (!common) {
@@ -959,6 +1399,14 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected) {
     bin->lhs = convert(bin->lhs, common);
     bin->rhs = convert(bin->rhs, common);
     bin->type = common;
+    // An integer to a negative power is a fraction (as with `/`, integers
+    // stay integers); a negative literal exponent is surely a mistake.
+    if (bin->op == BinaryOp::Pow && common->isInteger())
+      if (auto *neg = dyn_cast<UnaryExpr>(bin->rhs);
+          neg && neg->op == UnaryOp::Neg && isa<IntLitExpr>(neg->operand))
+        diags_.error(bin->rhs->loc(), "'" + common->name() +
+                                          "' raised to a negative power is a fraction, which an "
+                                          "integer cannot hold; use a double, e.g. '2.0 ** -1'");
     return bin;
   }
   }
@@ -980,10 +1428,8 @@ Expr *Sema::checkEquality(BinaryExpr *bin) {
   if (l->isUndefined() || r->isUndefined())
     return bin;
 
-  const Type *common = unify(l, r);
-  bool comparable = common && (common->nonOptional()->isNumeric() || common->nonOptional()->isBool() ||
-                               common->nonOptional()->isString() || common->nonOptional()->isArray());
-  if (!comparable) {
+  const Type *common = comparisonType(l, r);
+  if (!common) {
     reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     return bin;
   }
@@ -1085,6 +1531,7 @@ VarSymbol *Sema::checkVarTarget(NameExpr *name) {
   }
   name->var = entry.var;
   name->type = entry.var->type;
+  checkVisible(name, entry.var);
   if (entry.var->isConst)
     diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a constant");
   return entry.var;
@@ -1168,8 +1615,13 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
       assign->value = checkExpr(assign->value, shift ? nullptr : type);
       const Type *valueType = assign->value->type;
       if (!type->isError() && !valueType->isError()) {
-        bool targetOk = integerOnly ? type->isInteger() : type->isNumeric();
-        if (!targetOk || (shift && !valueType->isInteger())) {
+        if (integerOnly && valueType->isFloat())
+          assign->value = toInt32(assign->value); // as with `x | v`
+        if (integerOnly && type->isFloat() && valueType->isNumeric() && op != BinaryOp::UShr) {
+          // `x |= v` on a double works on 32-bit integers, as in JavaScript;
+          // the result goes back into x as a double.
+          assign->value = toInt32(assign->value);
+        } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
           reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
         } else {
           // `x op= v` must produce a value of x's type, so v converts to it.
@@ -1230,7 +1682,7 @@ Expr *Sema::checkUpdate(UpdateExpr *update) {
   return update;
 }
 
-Expr *Sema::checkCall(CallExpr *call) {
+Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args)
@@ -1246,14 +1698,19 @@ Expr *Sema::checkCall(CallExpr *call) {
       checkArgsLoosely();
       return call;
     }
+    if (isGlobalName(member->object, "Math"))
+      return checkMathCall(call, member, expected);
+    if (isGlobalName(member->object, "String") || isGlobalName(member->object, "Number"))
+      return checkStaticCall(call, member, expected);
     member->object = checkExpr(member->object);
     const Type *receiver = member->object->type;
     if (receiver->isString())
       return checkStringMethod(call, member);
     if (receiver->isArray())
       return checkArrayMethod(call, member);
-    if ((receiver->isNumeric() || receiver->isBool()) && member->name == "toString" &&
-        call->args.empty()) {
+    if (receiver->isNumeric())
+      return checkNumberMethod(call, member);
+    if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
       // `x.toString()` is `String(x)`.
       call->args.push_back(toStringOperand(member->object));
       call->builtin = Builtin::StringOf;
@@ -1277,44 +1734,48 @@ Expr *Sema::checkCall(CallExpr *call) {
     return call;
   }
 
-  if (isGlobalName(name, "String")) {
-    if (call->args.size() > 1) {
-      diags_.error(name->loc(), "expected at most 1 argument, but got " +
-                                    llvm::Twine(call->args.size()));
-      checkArgsLoosely();
-      return call;
-    }
-    for (Expr *&arg : call->args)
-      arg = toStringOperand(checkExpr(arg));
-    call->builtin = Builtin::StringOf;
-    call->type = Type::string();
-    return call;
-  }
+  if (Expr *builtin = checkGlobalCall(call, name, expected))
+    return builtin;
+  return checkUserCall(call, name);
+}
 
+Expr *Sema::checkUserCall(CallExpr *call, NameExpr *name) {
   ScopeEntry entry = lookup(name->name);
   if (!entry.func) {
     if (entry.var)
       diags_.error(name->loc(), "'" + name->name + "' is not a function");
     else
       diags_.error(name->loc(), "cannot find name '" + name->name + "'");
-    checkArgsLoosely();
+    for (Expr *&arg : call->args)
+      arg = checkExpr(arg);
     return call;
   }
 
   FuncSymbol *func = entry.func;
   call->func = func;
   call->type = func->ret;
-  if (call->args.size() != func->params.size()) {
-    diags_.error(name->loc(), "expected " + llvm::Twine(func->params.size()) + " argument" +
-                                  (func->params.size() == 1 ? "" : "s") + ", but got " +
-                                  llvm::Twine(call->args.size()));
-    checkArgsLoosely();
+  if (!checkArity(call, name->loc(), static_cast<unsigned>(func->minArgs),
+                  static_cast<unsigned>(func->params.size())))
     return call;
-  }
+  // Parameters left out get undefined, and with it their default values.
   for (size_t i = 0; i < call->args.size(); ++i)
-    call->args[i] = coerce(checkExpr(call->args[i], func->params[i]), func->params[i]);
+    call->args[i] = checkArg(call->args[i], func->params[i]);
   calledFunction();
   return call;
+}
+
+bool Sema::checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max) {
+  size_t count = call->args.size();
+  if (count >= min && count <= max)
+    return true;
+  diags_.error(loc, "expected " + argumentCount(min, max) + ", but got " + llvm::Twine(count));
+  for (Expr *&arg : call->args)
+    arg = checkExpr(arg);
+  return false;
+}
+
+Expr *Sema::checkArg(Expr *arg, const Type *to) {
+  return coerce(checkExpr(arg, to->isError() ? nullptr : to), to);
 }
 
 Expr *Sema::checkConsoleLog(CallExpr *call) {
@@ -1349,6 +1810,10 @@ Expr *Sema::toStringOperand(Expr *expr) {
   return convert(expr, Type::string());
 }
 
+Expr *Sema::toInt32(Expr *expr) {
+  return expr->type->isInt() || expr->type->isError() ? expr : convert(expr, Type::intTy());
+}
+
 Expr *Sema::checkTemplate(TemplateExpr *tmpl) {
   for (Expr *&e : tmpl->exprs)
     e = toStringOperand(checkExpr(e));
@@ -1356,11 +1821,18 @@ Expr *Sema::checkTemplate(TemplateExpr *tmpl) {
   return tmpl;
 }
 
-Expr *Sema::checkMember(MemberExpr *member) {
+Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
   member->type = Type::error();
-  if (isGlobalName(member->object, "console")) {
-    diags_.error(member->loc(), "'console." + member->name + "' can only be called");
-    return member;
+  if (auto *name = dyn_cast<NameExpr>(member->object))
+    if (EnumDecl *decl = lookup(name->name).enumDecl)
+      return checkEnumMember(decl, member, expected);
+  for (llvm::StringRef global : {"console", "Math", "String", "Number"}) {
+    if (isGlobalName(member->object, global)) {
+      if (Expr *constant = globalConstant(global, member->name, member->loc()))
+        return constant;
+      diags_.error(member->loc(), "'" + global + "." + member->name + "' can only be called");
+      return member;
+    }
   }
   member->object = checkExpr(member->object);
   const Type *type = member->object->type;
@@ -1390,7 +1862,7 @@ Expr *Sema::checkPosition(Expr *expr) {
   if (!type->isInteger()) {
     std::string message = "an index or position must be an integer, found '" + type->name().str() + "'";
     if (type->isFloat())
-      message += "; convert it with 'as int'";
+      message += "; round it with Math.floor(x) or drop the fraction with 'x | 0'";
     else if (type->isOptional())
       message += "; the value may be undefined: check it first or give a default with '??'";
     diags_.error(expr->loc(), message);
@@ -1400,6 +1872,9 @@ Expr *Sema::checkPosition(Expr *expr) {
 }
 
 Expr *Sema::checkIndex(IndexExpr *index) {
+  if (auto *name = dyn_cast<NameExpr>(index->object))
+    if (EnumDecl *decl = lookup(name->name).enumDecl)
+      return checkEnumIndex(decl, index);
   index->object = checkExpr(index->object);
   index->index = checkPosition(index->index);
   index->type = Type::error();
@@ -1451,22 +1926,38 @@ Expr *Sema::checkConditional(ConditionalExpr *cond, const Type *expected) {
   return cond;
 }
 
+// `x as T` is not part of the language: in TypeScript it changes nothing at
+// run time, so a conversion written with it would behave differently under
+// tsc. The error says what to write instead.
 Expr *Sema::checkCast(CastExpr *cast) {
-  cast->operand = checkExpr(cast->operand);
-  const Type *from = cast->operand->type;
   const Type *to = resolveType(*cast->target, /*allowVoid=*/false);
+  // An array literal gets the type it is cast to, so that `[] as int[]`
+  // reports only this error.
+  bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
+  cast->operand = checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
+  const Type *from = cast->operand->type;
   cast->type = to;
+  std::string message = "'as' is not supported";
   if (from->isError() || to->isError())
-    return cast;
-  if (from == to || (from->isNumeric() && to->isNumeric()))
-    return cast;
-  if (isImplicitlyConvertible(from, to)) {
-    cast->target.reset(); // the same as the implicit conversion
-    return cast;
-  }
-  std::string message = ("cannot convert type '" + from->name() + "' to '" + to->name() + "'").str();
-  if (from->isOptional())
-    message += "; 'as' does not check for undefined: use '!== undefined' or '??'";
+    ;
+  else if (arrayLiteral)
+    message += "; declare the type of the variable instead, e.g. 'let x: " + to->name().str() +
+               " = ...'";
+  else if (from == to || isImplicitlyConvertible(from, to))
+    message += "; the value converts to '" + to->name().str() + "' by itself, so remove 'as'";
+  else if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
+    message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
+               "default with '??'";
+  else if (from->isFloat() && to->isInt())
+    message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, Math.ceil "
+               "or Math.trunc";
+  else if (from->isFloat() && to->isInteger())
+    message += "; round with Math.round, Math.floor, Math.ceil or Math.trunc where a '" +
+               to->name().str() + "' is expected";
+  else if (from->isInteger() && to->isInteger())
+    message += "; Math.trunc(x) where an 'int' is expected converts it and checks that it fits";
+  else
+    message += ", and type '" + from->name().str() + "' cannot become '" + to->name().str() + "'";
   diags_.error(cast->loc(), message);
   return cast;
 }

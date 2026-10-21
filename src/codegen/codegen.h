@@ -93,6 +93,9 @@ private:
   void emitDoWhile(DoWhileStmt *stmt);
   void emitFor(ForStmt *stmt);
   void emitForOf(ForOfStmt *stmt);
+  void emitSwitch(SwitchStmt *stmt);
+  void emitLabeled(LabeledStmt *stmt);
+  void emitJump(Stmt *stmt);
   void emitReturn(ReturnStmt *stmt);
   // Evaluates an expression for its side effects only.
   void emitDiscarded(Expr *expr);
@@ -116,6 +119,8 @@ private:
   llvm::Value *emitElementAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitLengthAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitUpdate(UpdateExpr *update);
+  llvm::Value *emitTypeOf(Expr *operand);
+  llvm::Value *emitEnumName(IndexExpr *index);
   llvm::Value *emitCall(CallExpr *call);
   void emitConsoleLog(CallExpr *call);
   llvm::Value *emitConditional(ConditionalExpr *cond);
@@ -156,6 +161,16 @@ private:
   llvm::Value *emitTemplate(TemplateExpr *tmpl);
   llvm::Value *emitStringComparison(BinaryExpr *bin);
   llvm::Value *emitStringMethod(CallExpr *call);
+  // Math, Number, parseInt, String.fromCharCode... (codegen_builtins.cpp)
+  llvm::Value *emitMathCall(CallExpr *call);
+  llvm::Value *emitNumberBuiltin(CallExpr *call);
+  // Number(s) of a string; `str` is borrowed.
+  llvm::Value *emitStringToNumber(llvm::Value *str);
+  // A double that must be a whole number fitting in `to` (an int or a long),
+  // or the program stops.
+  llvm::Value *emitCheckedInteger(llvm::Value *value, const Type *to);
+  // Passes `values` to the runtime as an array on the stack.
+  llvm::Value *spillArray(llvm::ArrayRef<llvm::Value *> values, llvm::Type *element);
   llvm::Value *emitStringIndex(IndexExpr *index);
   llvm::Value *emitMember(MemberExpr *member);
   llvm::Constant *stringLiteral(const std::u16string &text);
@@ -205,12 +220,20 @@ private:
   std::map<std::u16string, llvm::Constant *> literals_;
   std::vector<Scope> scopes_;
 
-  struct LoopTargets {
+  // A loop, switch or labeled statement that `break` and `continue` jump out
+  // of.
+  struct JumpTarget {
+    llvm::SmallVector<llvm::StringRef, 1> labels;
+    bool isLoop;
+    bool isSwitch;
     llvm::BasicBlock *breakTarget;
-    llvm::BasicBlock *continueTarget;
+    llvm::BasicBlock *continueTarget; // loops only
     size_t scopeDepth; // scopes to keep when jumping to either target
   };
-  std::vector<LoopTargets> loops_;
+  std::vector<JumpTarget> targets_;
+  // The labels of the loop or switch being emitted next.
+  llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
+  void pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget, size_t scopeDepth);
 
   // Functions of the C runtime (runtime/*.c).
   struct Runtime {
@@ -241,6 +264,30 @@ private:
     llvm::FunctionCallee strRepeat;
     llvm::FunctionCallee strFromI64;
     llvm::FunctionCallee strFromF64;
+    llvm::FunctionCallee strCharAtOrEmpty;
+    llvm::FunctionCallee strCodePoint;
+    llvm::FunctionCallee strLastIndexOf;
+    llvm::FunctionCallee strSplit;
+    llvm::FunctionCallee strTrim;
+    llvm::FunctionCallee strPad;
+    llvm::FunctionCallee strToUpper;
+    llvm::FunctionCallee strToLower;
+    llvm::FunctionCallee strReplace;
+    llvm::FunctionCallee strFromCharCodes;
+    llvm::FunctionCallee strFromCodePoints;
+    llvm::FunctionCallee strToNumber;
+    llvm::FunctionCallee parseInt;
+    llvm::FunctionCallee parseFloat;
+    llvm::FunctionCallee numToFixed;
+    llvm::FunctionCallee toInt32;
+    llvm::FunctionCallee mathRound;
+    llvm::FunctionCallee mathPow;
+    llvm::FunctionCallee mathPowLong;
+    llvm::FunctionCallee mathHypot;
+    llvm::FunctionCallee mathRandom;
+    llvm::FunctionCallee checkedInt32;
+    llvm::FunctionCallee checkedInt64;
+    llvm::FunctionCallee checkedInt32OfLong;
     llvm::FunctionCallee valueToString;
     llvm::FunctionCallee arrNew;
     llvm::FunctionCallee arrNewLength;
@@ -257,7 +304,10 @@ private:
     llvm::FunctionCallee arrReverse;
     llvm::FunctionCallee arrFill;
     llvm::FunctionCallee arrSort;
+    llvm::FunctionCallee arrSplice;
   } rt_;
+  // A runtime function of doubles: tz_math_sin and the like.
+  llvm::FunctionCallee mathFunction(llvm::StringRef name, unsigned params);
   llvm::Function *retainFn_ = nullptr;
   llvm::Function *releaseFn_ = nullptr;
   llvm::Function *arrRetainFn_ = nullptr;

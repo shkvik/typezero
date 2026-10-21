@@ -230,6 +230,13 @@ TZ_HOT int32_t tz_arr_shift(TzArray *a, void *out) {
   return 1;
 }
 
+void tz_arr_push_value(TzArray *a, const void *value) {
+  if (a->length == a->capacity)
+    tz_arr_grow(a, (int64_t)a->length + 1);
+  memcpy(element(a, a->length), value, a->type->size);
+  ++a->length;
+}
+
 // Makes `n` slots at the front for unshift() and returns the first one. The
 // compiler stores the new elements there.
 void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
@@ -317,6 +324,34 @@ TzArray *tz_arr_slice(TzArray *a, int64_t start, int64_t end, int32_t has_end) {
 }
 
 TzArray *tz_arr_copy(TzArray *a) { return tz_arr_slice(a, 0, 0, 0); }
+
+// splice(start, deleteCount, ...items): moves the removed elements into a new
+// array, which it returns, and opens a gap of `insert` slots where they were;
+// `*slots` gets its address, and the compiler stores the items there.
+TzArray *tz_arr_splice(TzArray *a, int64_t start, int64_t delete_count, int32_t has_delete,
+                       int64_t insert, void **slots) {
+  int64_t length = a->length;
+  int64_t from = relative(start, length);
+  int64_t count = length - from;
+  if (has_delete && delete_count < count)
+    count = delete_count < 0 ? 0 : delete_count;
+  size_t size = a->type->size;
+  TzArray *removed = tz_arr_new(a->type, count, count);
+  if (count)
+    memcpy(removed->data, element(a, (uint32_t)from), (size_t)count * size);
+  int64_t new_length = length - count + insert;
+  if (new_length > MAX_LENGTH)
+    invalid_length(new_length);
+  if (insert != count) {
+    if (new_length > a->capacity)
+      tz_arr_grow(a, new_length);
+    memmove(element(a, (uint32_t)(from + insert)), element(a, (uint32_t)(from + count)),
+            (size_t)(length - from - count) * size);
+  }
+  a->length = (uint32_t)new_length;
+  *slots = element(a, (uint32_t)from);
+  return removed;
+}
 
 // Appends the elements of `src` to `dst` (for spreads and concat()).
 void tz_arr_append(TzArray *dst, TzArray *src) {

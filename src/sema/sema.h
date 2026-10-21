@@ -18,8 +18,10 @@ namespace tz {
 // become explicit CastExpr nodes, so code generation needs no type rules.
 //
 // Numeric rules: no implicit conversion loses information. int widens to long
-// and double on its own; everything else needs `as`. Integer literals take the
-// type the context expects (`let x: double = 1 / 2` divides floats).
+// and double on its own, long to double. A double becomes an int through a
+// bitwise operator (`x | 0`, JavaScript's ToInt32) or through Math.round and
+// the like where an integer is expected. There is no `as`. Integer literals
+// take the type the context expects (`let x: double = 1 / 2` divides floats).
 //
 // Sema also follows the flow of the program (see Flow): it narrows
 // `T | undefined` after checks such as `x !== undefined`, and it proves
@@ -35,6 +37,7 @@ private:
   struct ScopeEntry {
     VarSymbol *var = nullptr;
     FuncSymbol *func = nullptr;
+    EnumDecl *enumDecl = nullptr;
   };
 
   // What is known at the current point of the program: facts about ints and
@@ -62,18 +65,55 @@ private:
     // Some element of some array may be removed or replaced (pop, shift,
     // `a[i] = x`, fill...), and so released.
     bool releasesElements = false;
-    bool breaks = false;
+    bool breaks = false; // a `break` may leave the loop
+    // While scanning: the switches around the current statement inside the
+    // loop, and the labels declared inside it.
+    unsigned switches = 0;
+    llvm::SmallVector<llvm::StringRef, 2> innerLabels;
+  };
+
+  // A statement that `break` (and for loops `continue`) can leave.
+  struct JumpTarget {
+    enum class Kind { Loop, Switch, Block };
+    Kind kind;
+    llvm::SmallVector<llvm::StringRef, 1> labels;
+    // What holds where a `break` leaves a switch or a labeled block. Loops do
+    // without: their head state holds at every `break` (see loopHead).
+    Flow breaks;
   };
 
   // Scopes
-  void pushScope() { scopes_.emplace_back(); }
-  void popScope() { scopes_.pop_back(); }
+  void pushScope() {
+    scopes_.emplace_back();
+    typeScopes_.emplace_back();
+  }
+  void popScope() {
+    scopes_.pop_back();
+    typeScopes_.pop_back();
+  }
   void declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry);
   ScopeEntry lookup(llvm::StringRef name) const;
   VarSymbol *declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type, bool isConst);
 
   const Type *resolveType(const TypeRef &ref, bool allowVoid);
   const Type *resolveTypeInner(const TypeRef &ref);
+
+  // Type aliases and enums (sema_decls.cpp). They are visible in the whole
+  // block that declares them, so each block declares them before anything
+  // else.
+  void declareTypes(llvm::ArrayRef<Stmt *> stmts);
+  Stmt *lookupType(llvm::StringRef name) const;
+  const Type *resolveAlias(TypeAliasDecl *alias);
+  void resolveEnum(EnumDecl *decl);
+  // The value of an enum member's initializer.
+  struct Constant {
+    bool isString = false;
+    double number = 0;
+    std::u16string text;
+  };
+  std::optional<Constant> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
+  Expr *checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected);
+  Expr *checkEnumIndex(EnumDecl *decl, IndexExpr *index);
 
   // Declarations and statements
   void declareFunction(FunctionDecl *fn);
@@ -86,8 +126,14 @@ private:
   void checkDoWhile(DoWhileStmt *stmt);
   void checkFor(ForStmt *stmt);
   void checkForOf(ForOfStmt *stmt);
+  void checkSwitch(SwitchStmt *stmt);
+  void checkLabeled(LabeledStmt *stmt);
+  void checkJump(Stmt *stmt);
   void checkLoopBody(Stmt *body);
   void checkBody(Stmt *body);
+  // Enters a loop, switch or labeled block; a loop or switch takes the
+  // labels in pendingLabels_.
+  void pushTarget(JumpTarget::Kind kind);
   // Checks a condition and computes the flow where it is true and where it is
   // false.
   Expr *checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse);
@@ -98,14 +144,26 @@ private:
   Expr *checkExpr(Expr *expr, const Type *expected = nullptr);
   Expr *checkIntLit(IntLitExpr *lit, const Type *expected, bool negated);
   Expr *checkName(NameExpr *name);
+  // Reports a use of a variable declared by an earlier case of a switch.
+  void checkVisible(NameExpr *name, const VarSymbol *var);
   Expr *checkUnary(UnaryExpr *unary, const Type *expected);
   Expr *checkBinary(BinaryExpr *binary, const Type *expected);
   Expr *checkEquality(BinaryExpr *bin);
   Expr *checkNullish(BinaryExpr *bin, const Type *expected);
   Expr *checkAssign(AssignExpr *assign);
   Expr *checkUpdate(UpdateExpr *update);
-  Expr *checkCall(CallExpr *call);
+  Expr *checkCall(CallExpr *call, const Type *expected);
+  Expr *checkUserCall(CallExpr *call, NameExpr *name);
   Expr *checkConsoleLog(CallExpr *call);
+  // String(x), Number(x), parseInt... (sema_builtins.cpp); null if `name` is
+  // not one of them.
+  Expr *checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected);
+  Expr *checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
+                            const Type *expected);
+  // String.fromCharCode, Number.isNaN...
+  Expr *checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkNumberMethod(CallExpr *call, MemberExpr *member);
   Expr *checkStringMethod(CallExpr *call, MemberExpr *member);
   Expr *checkArrayMethod(CallExpr *call, MemberExpr *member);
   Expr *checkNew(NewExpr *expr, const Type *expected);
@@ -113,13 +171,25 @@ private:
   Expr *checkConditional(ConditionalExpr *cond, const Type *expected);
   Expr *checkCast(CastExpr *cast);
   Expr *checkTemplate(TemplateExpr *tmpl);
-  Expr *checkMember(MemberExpr *member);
+  Expr *checkMember(MemberExpr *member, const Type *expected);
+  // Math.PI, Number.MAX_SAFE_INTEGER, NaN...: null if `name` is not one.
+  Expr *globalConstant(llvm::StringRef object, llvm::StringRef name, llvm::SMLoc loc);
   Expr *checkIndex(IndexExpr *index);
   // A position or count argument: any integer, computed as long.
   Expr *checkPosition(Expr *expr);
+  // An argument that must be a number; reports anything else.
+  Expr *numericArg(Expr *arg, const Type *hint = nullptr);
+  // An argument converted the way a parameter of type `to` takes it.
+  Expr *checkArg(Expr *arg, const Type *to);
+  // Reports a wrong number of arguments; checks them loosely then.
+  bool checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max);
 
   // Converts a value to a string for `+` and template literals.
   Expr *toStringOperand(Expr *expr);
+  // An operand of a bitwise operator as an int, the way JavaScript's ToInt32
+  // makes one: a double loses its fraction and wraps around, NaN and the
+  // infinities become 0; a long keeps its low 32 bits.
+  Expr *toInt32(Expr *expr);
   // Whether `expr` names a built-in global such as `console` that the program
   // does not shadow.
   bool isGlobalName(const Expr *expr, llvm::StringRef name) const;
@@ -139,7 +209,11 @@ private:
   // The type both `a` and `b` convert to (for `?:`, `??` and array
   // literals), or null.
   static const Type *unify(const Type *a, const Type *b);
-  static bool alwaysReturns(const Stmt *stmt);
+  // The type in which `===` compares values of types `a` and `b` (neither
+  // undefined), or null if they cannot be compared.
+  static const Type *comparisonType(const Type *a, const Type *b);
+  // Whether control can never reach the end of `stmt`; `labels` are its own.
+  static bool alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels = {});
 
   // Flow: facts, narrowing and proofs (sema_flow.cpp)
   // `expr` (checked, of an integer type) as `term + offset`, if it has that
@@ -188,10 +262,18 @@ private:
   AstContext &ctx_;
   Diagnostics &diags_;
   std::vector<llvm::StringMap<ScopeEntry>> scopes_;
-  FuncSymbol *currentFunction_ = nullptr; // null in top-level code
-  unsigned loopDepth_ = 0;
+  std::vector<llvm::StringMap<Stmt *>> typeScopes_; // TypeAliasDecl or EnumDecl
+  FuncSymbol *currentFunction_ = nullptr;           // null in top-level code
+  std::vector<JumpTarget> targets_;
+  llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
+  // Variables declared by the earlier cases of the switches being checked:
+  // the case being checked must not use them (see checkSwitch).
+  llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   llvm::StringSet<> namesInFunctions_;
 };
+
+// "2 arguments", "1-3 arguments", "1 or more arguments".
+std::string argumentCount(unsigned min, unsigned max);
 
 } // namespace tz

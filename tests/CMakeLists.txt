@@ -5,7 +5,9 @@
 #
 # Run tests marked with a `// same-as-node` line behave exactly as in
 # JavaScript; when Node.js (23.6 or newer, which strips types) is installed,
-# they also run under node against the same expected output.
+# they also run under node against the same expected output. Options for
+# node may follow, as in `// same-as-node --experimental-transform-types`
+# for enums, which node does not strip.
 
 find_program(TZ_NODE node)
 

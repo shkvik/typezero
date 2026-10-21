@@ -8,8 +8,10 @@ add_executable(tz
   sema/sema.cpp
   sema/sema_flow.cpp
   sema/sema_builtins.cpp
+  sema/sema_decls.cpp
   codegen/codegen.cpp
   codegen/codegen_array.cpp
+  codegen/codegen_builtins.cpp
   driver/driver.cpp
   driver/linker.cpp
 )

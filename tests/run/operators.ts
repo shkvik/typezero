@@ -1,0 +1,36 @@
+// same-as-node
+// `**`, typeof and unary plus.
+console.log(2 ** 10, 3 ** 4, (-2) ** 3, 2 ** 3 ** 2, (2 ** 3) ** 2)
+console.log(2 ** 0.5, 2.0 ** -1, 10.0 ** -2, 4 ** 0.5, (-8) ** (1.0 / 3))
+const zero: double = 0
+console.log(1 ** (zero / zero), (-1) ** (1 / zero), (zero / zero) ** 0, 0 ** 0)
+let p = 3
+p **= 3
+let q = 1.5
+q **= 2
+console.log(p, q, -(2 ** 2), 2 * 3 ** 2)
+const big: long = 3
+console.log(big ** 30)
+
+// typeof follows from the type, and narrows `T | undefined`.
+const maybe: int | undefined = undefined
+const some: string | undefined = "s"
+console.log(typeof 1, typeof 2.5, typeof "", typeof false, typeof [1], typeof maybe, typeof some)
+function len(s?: string): int {
+  if (typeof s === "undefined") return -1
+  return s.length
+}
+function size(n: int | undefined): int {
+  if (typeof n === "number") return n * 2
+  return 0
+}
+console.log(len(), len("four"), size(21), size(undefined))
+let effects = 0
+function effect(): int {
+  effects++
+  return effects
+}
+console.log(typeof effect(), effects)
+
+// Unary plus makes a number of a string or a boolean, as Number() does.
+console.log(+"42", +" 1.5 ", +"", +"0x10", +"abc", +true, +false, +"-0")

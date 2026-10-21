@@ -10,6 +10,7 @@ const char *opSpelling(UnaryOp op) {
   case UnaryOp::Plus: return "+";
   case UnaryOp::Not: return "!";
   case UnaryOp::BitNot: return "~";
+  case UnaryOp::TypeOf: return "typeof";
   }
   return "?";
 }
@@ -21,6 +22,7 @@ const char *opSpelling(BinaryOp op) {
   case BinaryOp::Mul: return "*";
   case BinaryOp::Div: return "/";
   case BinaryOp::Rem: return "%";
+  case BinaryOp::Pow: return "**";
   case BinaryOp::BitAnd: return "&";
   case BinaryOp::BitOr: return "|";
   case BinaryOp::BitXor: return "^";
@@ -43,8 +45,10 @@ const char *opSpelling(BinaryOp op) {
 namespace {
 
 // Binding strength of binary operators, following JavaScript. `as` binds like
-// the relational operators.
+// the relational operators; it is parsed only for Sema to report that the
+// language has no `as`.
 constexpr int kRelationalPrec = 7;
+constexpr int kPowPrec = 11; // `**`, the only right-associative one
 
 int binaryPrec(Tok kind) {
   switch (kind) {
@@ -70,6 +74,7 @@ int binaryPrec(Tok kind) {
   case Tok::Star:
   case Tok::Slash:
   case Tok::Percent: return 10;
+  case Tok::StarStar: return kPowPrec;
   default: return -1;
   }
 }
@@ -96,6 +101,7 @@ BinaryOp binaryOpFor(Tok kind) {
   case Tok::Plus: return BinaryOp::Add;
   case Tok::Minus: return BinaryOp::Sub;
   case Tok::Star: return BinaryOp::Mul;
+  case Tok::StarStar: return BinaryOp::Pow;
   case Tok::Slash: return BinaryOp::Div;
   default: return BinaryOp::Rem;
   }
@@ -108,6 +114,7 @@ bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   case Tok::PlusAssign: op = BinaryOp::Add; return true;
   case Tok::MinusAssign: op = BinaryOp::Sub; return true;
   case Tok::StarAssign: op = BinaryOp::Mul; return true;
+  case Tok::StarStarAssign: op = BinaryOp::Pow; return true;
   case Tok::SlashAssign: op = BinaryOp::Div; return true;
   case Tok::PercentAssign: op = BinaryOp::Rem; return true;
   case Tok::AmpAssign: op = BinaryOp::BitAnd; return true;
@@ -131,6 +138,10 @@ bool startsStatement(Tok kind) {
   case Tok::KwWhile:
   case Tok::KwDo:
   case Tok::KwFor:
+  case Tok::KwSwitch:
+  case Tok::KwCase:
+  case Tok::KwDefault:
+  case Tok::KwEnum:
   case Tok::KwReturn:
   case Tok::KwBreak:
   case Tok::KwContinue:
@@ -151,7 +162,22 @@ Parser::Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags)
 // Tokens and error recovery
 //===----------------------------------------------------------------------===//
 
-void Parser::advance() { tok_ = lexer_.next(); }
+void Parser::advance() {
+  if (hasPeeked_) {
+    tok_ = peeked_;
+    hasPeeked_ = false;
+    return;
+  }
+  tok_ = lexer_.next();
+}
+
+const Token &Parser::peek() {
+  if (!hasPeeked_) {
+    peeked_ = lexer_.next();
+    hasPeeked_ = true;
+  }
+  return peeked_;
+}
 
 bool Parser::accept(Tok kind) {
   if (!tok_.is(kind))
@@ -240,6 +266,10 @@ Stmt *Parser::parseStatement() {
     [[fallthrough]];
   case Tok::KwLet:
   case Tok::KwConst: {
+    if (tok_.is(Tok::KwConst) && peek().is(Tok::KwEnum)) {
+      advance(); // `const enum` is an enum like any other
+      return parseEnum();
+    }
     VarDeclStmt *decl = parseVarDecl();
     expectSemicolon();
     return decl;
@@ -252,30 +282,135 @@ Stmt *Parser::parseStatement() {
     return parseDoWhile();
   case Tok::KwFor:
     return parseFor();
+  case Tok::KwSwitch:
+    return parseSwitch();
+  case Tok::KwEnum:
+    return parseEnum();
   case Tok::KwReturn:
     return parseReturn();
   case Tok::KwBreak:
-  case Tok::KwContinue: {
-    bool isBreak = tok_.is(Tok::KwBreak);
-    advance();
-    if (tok_.is(Tok::Identifier) && !tok_.newlineBefore) {
-      report(tok_.loc(), "labels are not supported yet");
-      advance();
-    }
-    expectSemicolon();
-    if (isBreak)
-      return ctx_.make<BreakStmt>(loc);
-    return ctx_.make<ContinueStmt>(loc);
-  }
+  case Tok::KwContinue:
+    return parseBreakOrContinue();
   case Tok::Semi:
     advance();
     return ctx_.make<EmptyStmt>(loc);
+  case Tok::Identifier:
+    if (peek().is(Tok::Colon)) {
+      llvm::StringRef label = tok_.text;
+      advance();
+      advance(); // ':'
+      return ctx_.make<LabeledStmt>(loc, label, parseStatement());
+    }
+    // `type` declares an alias only when a name follows on the same line;
+    // otherwise it is an ordinary name.
+    if (tok_.text == "type" && peek().is(Tok::Identifier) && !peek().newlineBefore)
+      return parseTypeAlias();
+    [[fallthrough]];
   default: {
     Expr *expr = parseExpr();
     expectSemicolon();
     return ctx_.make<ExprStmt>(loc, expr);
   }
   }
+}
+
+Stmt *Parser::parseBreakOrContinue() {
+  llvm::SMLoc loc = tok_.loc();
+  bool isBreak = tok_.is(Tok::KwBreak);
+  advance();
+  llvm::StringRef label;
+  if (tok_.is(Tok::Identifier) && !tok_.newlineBefore) {
+    label = tok_.text;
+    advance();
+  }
+  expectSemicolon();
+  if (isBreak)
+    return ctx_.make<BreakStmt>(loc, label);
+  return ctx_.make<ContinueStmt>(loc, label);
+}
+
+// `type Name = T`
+Stmt *Parser::parseTypeAlias() {
+  advance(); // 'type'
+  llvm::SMLoc loc = tok_.loc();
+  llvm::StringRef name = tok_.text;
+  advance();
+  if (tok_.is(Tok::Less)) {
+    report(tok_.loc(), "generic type aliases are not supported yet");
+    parseTypeArgs();
+  }
+  expect(Tok::Assign, "after the name of the type");
+  TypeRef type = parseType();
+  expectSemicolon();
+  return ctx_.make<TypeAliasDecl>(loc, name, std::move(type));
+}
+
+// `enum Name { A, B = value, ... }`
+Stmt *Parser::parseEnum() {
+  advance(); // 'enum'
+  llvm::SMLoc loc = tok_.loc();
+  if (!tok_.is(Tok::Identifier)) {
+    error(tok_.loc(), "expected the name of the enum");
+    return ctx_.make<EmptyStmt>(loc);
+  }
+  auto *decl = ctx_.make<EnumDecl>(loc, tok_.text);
+  advance();
+  expect(Tok::LBrace, "to start the members of the enum");
+  while (!tok_.is(Tok::RBrace) && !tok_.is(Tok::Eof)) {
+    EnumMember member;
+    member.loc = tok_.loc();
+    if (!tok_.is(Tok::Identifier)) {
+      error(tok_.loc(), llvm::Twine("expected the name of an enum member, found ") +
+                            tokSpelling(tok_.kind));
+      break;
+    }
+    member.name = tok_.text;
+    advance();
+    if (accept(Tok::Assign))
+      member.init = parseExpr();
+    decl->members.push_back(member);
+    if (!accept(Tok::Comma))
+      break;
+  }
+  expect(Tok::RBrace, "to close the enum");
+  return decl;
+}
+
+// `switch (x) { case a: ... default: ... }`
+Stmt *Parser::parseSwitch() {
+  llvm::SMLoc loc = tok_.loc();
+  advance(); // 'switch'
+  expect(Tok::LParen, "after 'switch'");
+  Expr *discriminant = parseExpr();
+  expect(Tok::RParen, "after the value of 'switch'");
+  auto *stmt = ctx_.make<SwitchStmt>(loc, discriminant);
+  expect(Tok::LBrace, "to start the cases of 'switch'");
+  bool hasDefault = false;
+  while (!tok_.is(Tok::RBrace) && !tok_.is(Tok::Eof)) {
+    SwitchCase c;
+    c.loc = tok_.loc();
+    if (accept(Tok::KwCase)) {
+      c.test = parseExpr();
+    } else if (tok_.is(Tok::KwDefault)) {
+      if (hasDefault)
+        report(tok_.loc(), "a 'switch' can have only one 'default'");
+      hasDefault = true;
+      advance();
+    } else {
+      error(tok_.loc(), llvm::Twine("expected 'case' or 'default', found ") + tokSpelling(tok_.kind));
+      break;
+    }
+    expect(Tok::Colon, c.test ? "after the value of 'case'" : "after 'default'");
+    while (!tok_.is(Tok::KwCase) && !tok_.is(Tok::KwDefault) && !tok_.is(Tok::RBrace) &&
+           !tok_.is(Tok::Eof)) {
+      c.body.push_back(parseStatement());
+      if (recovering_)
+        synchronize();
+    }
+    stmt->cases.push_back(std::move(c));
+  }
+  expect(Tok::RBrace, "to close 'switch'");
+  return stmt;
 }
 
 BlockStmt *Parser::parseBlock() {
@@ -314,16 +449,15 @@ FunctionDecl *Parser::parseFunction() {
       error(tok_.loc(), "expected a parameter name");
       break;
     }
-    if (tok_.is(Tok::Question)) {
-      report(tok_.loc(), "optional parameters are not supported yet");
-      advance();
-    }
+    if (accept(Tok::Question))
+      param.optional = true;
     if (accept(Tok::Colon))
       param.type = parseType();
     if (tok_.is(Tok::Assign)) {
-      report(tok_.loc(), "default parameter values are not supported yet");
+      if (param.optional)
+        report(tok_.loc(), "a parameter with a default value is optional already; remove the '?'");
       advance();
-      parseExpr();
+      param.defaultValue = parseExpr();
     }
     fn->params.push_back(param);
     if (!accept(Tok::Comma))
@@ -597,7 +731,17 @@ Expr *Parser::parseConditional() {
 }
 
 Expr *Parser::parseBinary(int minPrec) {
+  // `-x ** 2` is an error in JavaScript: it could mean either `(-x) ** 2` or
+  // `-(x ** 2)`.
+  llvm::StringRef unary;
+  if (tok_.is(Tok::Minus) || tok_.is(Tok::Plus) || tok_.is(Tok::Bang) || tok_.is(Tok::Tilde) ||
+      tok_.is(Tok::KwTypeof))
+    unary = tok_.text;
   Expr *lhs = parseUnary();
+  if (!unary.empty() && tok_.is(Tok::StarStar))
+    report(tok_.loc(), "the left side of '**' cannot be a unary '" + unary +
+                           "' expression; add parentheses, e.g. '(" + unary +
+                           (unary == "typeof" ? " " : "") + "x) ** 2'");
   for (;;) {
     if (tok_.is(Tok::KwAs) && kRelationalPrec >= minPrec) {
       llvm::SMLoc loc = tok_.loc();
@@ -611,7 +755,7 @@ Expr *Parser::parseBinary(int minPrec) {
     BinaryOp op = binaryOpFor(tok_.kind);
     llvm::SMLoc loc = tok_.loc();
     advance();
-    Expr *rhs = parseBinary(prec + 1);
+    Expr *rhs = parseBinary(prec == kPowPrec ? prec : prec + 1);
     lhs = ctx_.make<BinaryExpr>(loc, op, lhs, rhs);
   }
 }
@@ -624,6 +768,7 @@ Expr *Parser::parseUnary() {
   case Tok::Plus: op = UnaryOp::Plus; break;
   case Tok::Bang: op = UnaryOp::Not; break;
   case Tok::Tilde: op = UnaryOp::BitNot; break;
+  case Tok::KwTypeof: op = UnaryOp::TypeOf; break;
   case Tok::PlusPlus:
   case Tok::MinusMinus: {
     bool increment = tok_.is(Tok::PlusPlus);
