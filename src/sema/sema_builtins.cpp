@@ -113,6 +113,8 @@ Expr *Sema::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expect
       arg = checkExpr(arg);
     return call;
   }
+  if (fn->kind != MinMax && rejectSpread(call))
+    return call;
   if (!checkArity(call, member->loc(), fn->minArgs, fn->maxArgs))
     return call;
 
@@ -124,6 +126,8 @@ Expr *Sema::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expect
 
   call->builtin = fn->builtin;
   const Type *hint = expected && expected->nonOptional()->isNumeric() ? expected->nonOptional() : nullptr;
+  if (call->hasSpread())
+    return checkMinMaxSpread(call, hint);
   bool ok = true;
   for (Expr *&arg : call->args) {
     arg = numericArg(arg, fn->kind == Same || fn->kind == MinMax ? hint : nullptr);
@@ -165,6 +169,54 @@ Expr *Sema::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expect
   return call;
 }
 
+// `Math.max(...a, x)`: the elements of a count as arguments. Of an empty
+// array Math.max gives -Infinity, which only a double holds, so the result is
+// an integer only if some argument is surely there.
+Expr *Sema::checkMinMaxSpread(CallExpr *call, const Type *hint) {
+  const Type *common = nullptr;
+  bool someValue = false, ok = true;
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    Expr *&arg = call->args[i];
+    const Type *type;
+    if (call->spreads(i)) {
+      arg = checkExpr(arg, hint ? Type::array(hint) : nullptr);
+      type = arg->type->isArray() ? arg->type->inner() : arg->type;
+      if (!arg->type->isError() && (!arg->type->isArray() || !type->isNumeric())) {
+        diags_.error(arg->loc(), "only an array of numbers can be spread here, found '" +
+                                     arg->type->name() + "'");
+        ok = false;
+      }
+      someValue |= provesNotEmpty(arg);
+    } else {
+      arg = numericArg(arg, hint);
+      type = arg->type;
+      someValue = true;
+    }
+    ok &= type->isNumeric();
+    if (ok)
+      common = common ? commonNumericType(common, type) : type;
+  }
+  if (!ok)
+    return call;
+  if (common->isInteger() && !someValue) {
+    if (hint && hint->isInteger()) {
+      auto *member = cast<MemberExpr>(call->callee);
+      diags_.error(call->loc(), "Math." + member->name + " of an array that may be empty is " +
+                                    (member->name == "max" ? "-" : "") +
+                                    "Infinity, which only a double holds; check that the array "
+                                    "is not empty, or pass a first value: 'Math." +
+                                    member->name + "(0, ...a)'");
+      return call;
+    }
+    common = Type::doubleTy();
+  }
+  for (size_t i = 0; i < call->args.size(); ++i)
+    if (!call->spreads(i))
+      call->args[i] = convert(call->args[i], common);
+  call->type = common;
+  return call;
+}
+
 // String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x).
 Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
   static const llvm::StringLiteral names[] = {"String",     "Number", "parseInt",
@@ -177,6 +229,8 @@ Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected
 Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                 const Type *expected) {
   call->type = Type::error();
+  if (rejectSpread(call))
+    return call;
   if (fn == "String" || fn == "Number") {
     if (!checkArity(call, loc, 0, 1))
       return call;
@@ -422,14 +476,19 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
   }
 
   if (name == "push" || name == "unshift") {
-    for (size_t i = 0; i < count; ++i)
-      elementArg(i);
+    bool spreads = call->hasSpread();
+    for (size_t i = 0; i < count; ++i) {
+      if (call->spreads(i)) // `a.push(...b)`: b has the same type as a
+        call->args[i] = coerce(checkExpr(call->args[i], arrayType), arrayType);
+      else
+        elementArg(i);
+    }
     call->builtin = name == "push" ? Builtin::ArrPush : Builtin::ArrUnshift;
     call->type = Type::intTy();
-    // The length grows by exactly `count`.
-    if (self)
+    // The length grows by exactly `count`, unless arrays are spread.
+    if (self && !spreads)
       flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
-    arrayResized(arrayType, /*grew=*/true, /*shrank=*/false, self);
+    arrayResized(arrayType, /*grew=*/true, /*shrank=*/false, spreads ? nullptr : self);
     return call;
   }
 
@@ -605,7 +664,17 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
   if (expected && expected->nonOptional()->isArray())
     expectedElement = expected->nonOptional()->inner();
 
+  if (auto hole = llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.hole; });
+      hole != lit->elements.end()) {
+    diags_.error(hole->expr->loc(), "arrays cannot have holes; write the element explicitly");
+    for (ArrayLitExpr::Element &e : lit->elements)
+      e.expr = checkExpr(e.expr);
+    lit->type = Type::error();
+    return lit;
+  }
+
   // The element types: of the values, or of the arrays spread into this one.
+  // A string spreads into its characters.
   std::vector<const Type *> types;
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
@@ -615,8 +684,13 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
     }
     e.expr = checkExpr(e.expr, expectedElement ? Type::array(expectedElement) : nullptr);
     const Type *type = e.expr->type;
+    if (type->isString()) {
+      types.push_back(type);
+      continue;
+    }
     if (!type->isArray() && !type->isError()) {
-      diags_.error(e.expr->loc(), "only arrays can be spread here, found '" + type->name() + "'");
+      diags_.error(e.expr->loc(), "only arrays and strings can be spread here, found '" +
+                                      type->name() + "'");
       type = Type::error();
     }
     types.push_back(type->isError() ? type : type->inner());
@@ -655,7 +729,8 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
       e.expr = coerce(e.expr, element);
-    } else if (e.expr->type != arrayType && !e.expr->type->isError()) {
+    } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
+               !(e.expr->type->isString() && element->isString())) {
       // Arrays of different types have different layouts, so no conversion.
       diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() + "' into '" +
                                       arrayType->name() + "'");

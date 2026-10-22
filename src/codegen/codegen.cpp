@@ -178,6 +178,7 @@ void CodeGen::declareRuntime() {
   rt_.arrSlice = declare("tz_arr_slice", ptr, {ptr, i64, i64, i32});
   rt_.arrCopy = declare("tz_arr_copy", ptr, {ptr});
   rt_.arrAppend = declare("tz_arr_append", voidTy, {ptr, ptr});
+  rt_.arrAppendCodePoints = declare("tz_arr_append_code_points", voidTy, {ptr, ptr, i64});
   rt_.arrIndexOf = declare("tz_arr_index_of", i32, {ptr, ptr, i64, i32, i32});
   rt_.arrJoin = declare("tz_arr_join", voidTy, {ptr, ptr, ptr, i64, i32});
   rt_.arrReverse = declare("tz_arr_reverse", voidTy, {ptr});
@@ -835,6 +836,11 @@ void CodeGen::emitDiscarded(Expr *expr) {
     emitAssign(assign, /*needResult=*/false);
     return;
   }
+  if (auto *seq = dyn_cast<SequenceExpr>(expr)) {
+    for (Expr *e : seq->exprs)
+      emitDiscarded(e);
+    return;
+  }
   llvm::Value *value = emitExpr(expr);
   if (expr->type->isManaged())
     releaseValue(value, expr->type);
@@ -896,15 +902,62 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     return emitConditional(cast<ConditionalExpr>(expr));
   case Expr::Kind::Cast: {
     auto *c = cast<CastExpr>(expr);
+    if (c->shortCircuit)
+      return emitChainLink(c);
     return emitConversion(emitExpr(c->operand), c->operand->type, c->type);
   }
+  case Expr::Kind::Sequence: {
+    auto *seq = cast<SequenceExpr>(expr);
+    for (size_t i = 0; i + 1 < seq->exprs.size(); ++i)
+      emitDiscarded(seq->exprs[i]);
+    return emitExpr(seq->exprs.back());
+  }
+  case Expr::Kind::OptionalChain:
+    return emitOptionalChain(cast<OptionalChainExpr>(expr));
   }
   llvm_unreachable("unknown expression kind");
+}
+
+// `a?.b.c`: each link whose object is undefined jumps to the end, where the
+// chain is undefined.
+llvm::Value *CodeGen::emitOptionalChain(OptionalChainExpr *chain) {
+  if (!chain->mayShortCircuit)
+    return emitExpr(chain->chain);
+  llvm::BasicBlock *undefinedBlock = newBlock("chain.undefined");
+  llvm::BasicBlock *endBlock = newBlock("chain.end");
+  chainEnds_.push_back(undefinedBlock);
+  llvm::Value *value = emitExpr(chain->chain);
+  chainEnds_.pop_back();
+  const Type *type = chain->chain->type;
+  if (!type->isVoid() && !type->isOptional())
+    value = makeOptional(value, builder_.getTrue(), chain->type);
+  llvm::BasicBlock *valueEnd = builder_.GetInsertBlock();
+  builder_.CreateBr(endBlock);
+  switchTo(undefinedBlock);
+  builder_.CreateBr(endBlock);
+  switchTo(endBlock);
+  if (type->isVoid())
+    return nullptr;
+  llvm::PHINode *phi = builder_.CreatePHI(lower(chain->type), 2);
+  phi->addIncoming(value, valueEnd);
+  phi->addIncoming(undefinedValue(chain->type), undefinedBlock);
+  return phi;
+}
+
+llvm::Value *CodeGen::emitChainLink(CastExpr *link) {
+  llvm::Value *value = emitExpr(link->operand);
+  llvm::BasicBlock *valueBlock = newBlock("chain.link");
+  // Undefined holds nothing to release.
+  builder_.CreateCondBr(builder_.CreateExtractValue(value, 1), valueBlock, chainEnds_.back());
+  switchTo(valueBlock);
+  return builder_.CreateExtractValue(value, 0);
 }
 
 llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
   if (unary->op == UnaryOp::TypeOf)
     return emitTypeOf(unary->operand);
+  if (unary->op == UnaryOp::NonNull)
+    return emitNonNull(unary);
   const Type *type = unary->operand->type;
   if (unary->op == UnaryOp::Plus && type->isString()) { // `+s` is Number(s)
     Operand str = emitOperand(unary->operand, /*canBorrow=*/true);
@@ -922,9 +975,25 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
   case UnaryOp::BitNot:
     return builder_.CreateNot(operand);
   case UnaryOp::TypeOf:
+  case UnaryOp::NonNull:
     break;
   }
   llvm_unreachable("unknown unary operator");
+}
+
+// `x!`: the program stops if x is undefined.
+llvm::Value *CodeGen::emitNonNull(UnaryExpr *unary) {
+  llvm::Value *value = emitExpr(unary->operand);
+  if (!unary->operand->type->isOptional())
+    return value;
+  llvm::BasicBlock *panicBlock = newBlock("nonnull.undefined");
+  llvm::BasicBlock *okBlock = newBlock("nonnull.ok");
+  builder_.CreateCondBr(builder_.CreateNot(builder_.CreateExtractValue(value, 1)), panicBlock, okBlock,
+                        llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
+  switchTo(panicBlock);
+  emitPanic("TypeError: the value asserted with '!' is undefined");
+  switchTo(okBlock);
+  return builder_.CreateExtractValue(value, 0);
 }
 
 static std::u16string ascii16(llvm::StringRef text) { return std::u16string(text.begin(), text.end()); }
@@ -1548,6 +1617,10 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   }
   case Expr::Kind::Cast:
     return cannotAssign(cast<CastExpr>(expr)->operand);
+  case Expr::Kind::Sequence:
+    return llvm::all_of(cast<SequenceExpr>(expr)->exprs, cannotAssign);
+  case Expr::Kind::OptionalChain:
+    return cannotAssign(cast<OptionalChainExpr>(expr)->chain);
   case Expr::Kind::New:
     return llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
   case Expr::Kind::Call: {

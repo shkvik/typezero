@@ -102,9 +102,32 @@ llvm::Value *CodeGen::emitMathCall(CallExpr *call) {
     // before 0, as JavaScript does.
     llvm::Intrinsic::ID id = type->isFloat() ? (isMin ? llvm::Intrinsic::minimum : llvm::Intrinsic::maximum)
                                              : (isMin ? llvm::Intrinsic::smin : llvm::Intrinsic::smax);
-    llvm::Value *result = args[0];
-    for (size_t i = 1; i < args.size(); ++i)
-      result = builder_.CreateBinaryIntrinsic(id, result, args[i]);
+    if (!call->hasSpread()) {
+      llvm::Value *result = args[0];
+      for (size_t i = 1; i < args.size(); ++i)
+        result = builder_.CreateBinaryIntrinsic(id, result, args[i]);
+      return result;
+    }
+    // `Math.max(...a)`: from the value that changes nothing, ±Infinity (or
+    // the extreme integer, where Sema proved some value is there), over the
+    // arguments and the elements of the arrays, in order.
+    llvm::Value *result;
+    if (type->isFloat())
+      result = llvm::ConstantFP::getInfinity(f64, /*Negative=*/!isMin);
+    else
+      result = isMin ? llvm::ConstantInt::get(lower(type), llvm::APInt::getSignedMaxValue(type->bitWidth()))
+                     : llvm::ConstantInt::get(lower(type), llvm::APInt::getSignedMinValue(type->bitWidth()));
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (!call->spreads(i)) {
+        result = builder_.CreateBinaryIntrinsic(id, result, args[i]);
+        continue;
+      }
+      const Type *arrayType = call->args[i]->type, *element = arrayType->inner();
+      result = emitArrayFold(args[i], element, result, [&](llvm::Value *acc, llvm::Value *value) {
+        return builder_.CreateBinaryIntrinsic(id, acc, emitConversion(value, element, type));
+      });
+      releaseValue(args[i], arrayType);
+    }
     return result;
   }
   case Builtin::MathSqrt:

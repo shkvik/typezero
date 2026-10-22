@@ -140,15 +140,44 @@ llvm::Value *CodeGen::emitArrayLiteral(ArrayLitExpr *lit) {
       rt_.arrNew, {descriptor, builder_.getInt64(0), builder_.getInt64(plain)}, "array");
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (e.spread) {
-      // Appended right away, so a variable can be borrowed.
+      // Appended right away, so a variable can be borrowed. A string adds
+      // its characters.
       Operand source = emitOperand(e.expr, /*canBorrow=*/true);
-      builder_.CreateCall(rt_.arrAppend, {array, source.value});
+      if (e.expr->type->isString())
+        builder_.CreateCall(rt_.arrAppendCodePoints,
+                            {array, stringObj(source.value), stringMeta(source.value)});
+      else
+        builder_.CreateCall(rt_.arrAppend, {array, source.value});
       dropOperand(source);
     } else {
       emitPush(array, {emitExpr(e.expr)}, element);
     }
   }
   return array;
+}
+
+llvm::Value *CodeGen::emitArrayFold(llvm::Value *array, const Type *element, llvm::Value *init,
+                                    llvm::function_ref<llvm::Value *(llvm::Value *, llvm::Value *)> step) {
+  llvm::BasicBlock *before = builder_.GetInsertBlock();
+  llvm::Value *length = arrayLength(array);
+  llvm::BasicBlock *headBlock = newBlock("fold");
+  llvm::BasicBlock *bodyBlock = newBlock("fold.body");
+  llvm::BasicBlock *endBlock = newBlock("fold.end");
+  builder_.CreateBr(headBlock);
+  switchTo(headBlock);
+  llvm::PHINode *i = builder_.CreatePHI(builder_.getInt64Ty(), 2, "i");
+  llvm::PHINode *acc = builder_.CreatePHI(init->getType(), 2, "acc");
+  i->addIncoming(builder_.getInt64(0), before);
+  acc->addIncoming(init, before);
+  builder_.CreateCondBr(builder_.CreateICmpULT(i, length), bodyBlock, endBlock);
+  switchTo(bodyBlock);
+  llvm::Value *value = builder_.CreateLoad(lower(element), elementAddress(arrayData(array), element, i));
+  llvm::Value *next = step(acc, value);
+  i->addIncoming(builder_.CreateAdd(i, builder_.getInt64(1)), builder_.GetInsertBlock());
+  acc->addIncoming(next, builder_.GetInsertBlock());
+  builder_.CreateBr(headBlock);
+  switchTo(endBlock);
+  return acc;
 }
 
 llvm::Value *CodeGen::emitNewArray(NewExpr *expr) {
@@ -270,7 +299,21 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::ArrPush: {
     std::vector<llvm::Value *> values = ownedArgs(0);
-    emitPush(array.value, values, element);
+    // `a.push(x, ...b)`: the arrays spread are appended where they stand.
+    std::vector<llvm::Value *> run;
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (!call->spreads(i)) {
+        run.push_back(values[i]);
+        continue;
+      }
+      if (!run.empty())
+        emitPush(array.value, run, element);
+      run.clear();
+      builder_.CreateCall(rt_.arrAppend, {array.value, values[i]});
+      releaseValue(values[i], arrayType);
+    }
+    if (!run.empty())
+      emitPush(array.value, run, element);
     result = builder_.CreateTrunc(arrayLength(array.value), builder_.getInt32Ty());
     break;
   }

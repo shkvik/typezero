@@ -146,6 +146,13 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names) {
   case Expr::Kind::Cast:
     collectNames(cast<CastExpr>(expr)->operand, names);
     break;
+  case Expr::Kind::Sequence:
+    for (const Expr *e : cast<SequenceExpr>(expr)->exprs)
+      collectNames(e, names);
+    break;
+  case Expr::Kind::OptionalChain:
+    collectNames(cast<OptionalChainExpr>(expr)->chain, names);
+    break;
   default:
     break;
   }
@@ -261,9 +268,10 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
     return Type::error();
   }
   case TypeRef::Kind::Generic:
-    if (ref.name == "Array") {
+    // ReadonlyArray<T> is for tsc; changes to it are not stopped here.
+    if (ref.name == "Array" || ref.name == "ReadonlyArray") {
       if (ref.args.size() != 1) {
-        diags_.error(ref.loc, "'Array' takes one type argument");
+        diags_.error(ref.loc, "'" + ref.name + "' takes one type argument");
         return Type::error();
       }
       TypeRef array;
@@ -424,7 +432,9 @@ static const Type *literalType(const Expr *value) {
   if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg)
     value = unary->operand;
   if (auto *lit = dyn_cast<IntLitExpr>(value))
-    return lit->value < (uint64_t(1) << 31) ? Type::intTy() : Type::longTy();
+    return lit->value < (uint64_t(1) << 31)   ? Type::intTy()
+           : lit->value < (uint64_t(1) << 63) ? Type::longTy()
+                                               : Type::doubleTy();
   if (isa<FloatLitExpr>(value))
     return Type::doubleTy();
   if (isa<StringLitExpr>(value) || isa<TemplateExpr>(value))
@@ -454,6 +464,17 @@ void Sema::declareFunction(FunctionDecl *fn) {
     if (param.optional)
       type = Type::optional(type);
     param.declaredType = type;
+    if (param.rest) {
+      // The arguments from here on, as an array (empty without any).
+      if (!type->isArray() && !type->isError()) {
+        diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." + param.name +
+                                    ": int[]'");
+        param.declaredType = Type::error();
+      }
+      sym->hasRest = true;
+      sym->params.push_back(param.declaredType);
+      continue;
+    }
     // A caller may leave out an optional parameter or one with a default
     // value, or pass undefined: then the default applies.
     bool mayOmit = param.optional || param.defaultValue;
@@ -812,6 +833,11 @@ void Sema::checkForOf(ForOfStmt *stmt) {
     diags_.error(stmt->iterable->loc(), "cannot iterate over a value of type '" + type->name() + "'");
   if (stmt->binding.typeAnn)
     diags_.error(stmt->binding.typeAnn->loc, "a 'for...of' variable cannot have a type annotation");
+  if (stmt->binding.destructured && !element->isArray() && !element->isError()) {
+    diags_.error(stmt->binding.loc, "only arrays can be destructured; the elements are '" +
+                                        element->name() + "'");
+    element = Type::error();
+  }
 
   LoopScan scan = scanLoop({stmt->body}, {});
   // The array keeps each element alive during its iteration unless the body
@@ -871,6 +897,22 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
         type = Type::error();
     } else if (!declared) {
       diags_.error(d.loc, "variable '" + d.name + "' needs a type annotation or an initializer");
+      type = Type::error();
+    }
+
+    if (d.destructured && type->isString() && !declared) {
+      // A string destructures into its characters, as JavaScript's iterator
+      // gives them: `[...s]`.
+      auto *chars = ctx_.make<ArrayLitExpr>(d.init->loc());
+      chars->elements.push_back({d.init, /*spread=*/true});
+      chars->type = Type::array(Type::string());
+      d.init = value = chars;
+      type = chars->type;
+    } else if (d.destructured && !type->isArray() && !type->isError()) {
+      std::string message = "only arrays can be destructured, found '" + type->name().str() + "'";
+      if (type->isOptional() && type->inner()->isArray())
+        message += "; the array may be undefined: check it first";
+      diags_.error(d.init ? d.init->loc() : d.loc, message);
       type = Type::error();
     }
 
@@ -1173,8 +1215,49 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected, bool wraps) {
     return checkConditional(cast<ConditionalExpr>(expr), expected);
   case Expr::Kind::Cast:
     return checkCast(cast<CastExpr>(expr));
+  case Expr::Kind::Sequence:
+    return checkSequence(cast<SequenceExpr>(expr), expected, wraps);
+  case Expr::Kind::OptionalChain:
+    return checkOptionalChain(cast<OptionalChainExpr>(expr));
   }
   llvm_unreachable("unknown expression kind");
+}
+
+Expr *Sema::checkSequence(SequenceExpr *seq, const Type *expected, bool wraps) {
+  for (size_t i = 0; i + 1 < seq->exprs.size(); ++i)
+    seq->exprs[i] = checkExpr(seq->exprs[i]);
+  Expr *&last = seq->exprs.back();
+  last = checkExpr(last, expected, wraps);
+  seq->type = last->type;
+  return seq;
+}
+
+Expr *Sema::checkOptionalChain(OptionalChainExpr *chain) {
+  bool outer = std::exchange(chainShortCircuits_, false);
+  Flow before = flow_;
+  chain->chain = checkExpr(chain->chain);
+  chain->mayShortCircuit = chainShortCircuits_;
+  chainShortCircuits_ = outer;
+  const Type *type = chain->chain->type;
+  chain->type = type;
+  if (!chain->mayShortCircuit || type->isError())
+    return chain;
+  // The rest of the chain may not have run.
+  flow_ = join(before, flow_);
+  if (!type->isVoid())
+    chain->type = Type::optional(type);
+  return chain;
+}
+
+Expr *Sema::chainLink(Expr *object) {
+  const Type *type = object->type;
+  if (!type->isOptional())
+    return object; // `?.` on a value that is always there is a plain `.`
+  auto *link = ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
+  link->type = type->inner();
+  link->shortCircuit = true;
+  chainShortCircuits_ = true;
+  return link;
 }
 
 // An integer literal takes the numeric type the context expects; otherwise
@@ -1193,14 +1276,12 @@ Expr *Sema::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
       diags_.error(lit->loc(), "integer literal does not fit in type '" + expected->name() + "'");
     return lit;
   }
-  if (fits(32)) {
+  if (fits(32))
     lit->type = Type::intTy();
-  } else if (fits(64)) {
+  else if (fits(64))
     lit->type = Type::longTy();
-  } else {
-    diags_.error(lit->loc(), "integer literal does not fit in 64 bits");
-    lit->type = Type::error();
-  }
+  else // only a double holds it, as any number in JavaScript
+    lit->type = Type::doubleTy();
   return lit;
 }
 
@@ -1285,6 +1366,20 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
     unary->operand = checkExpr(unary->operand);
     unary->type = Type::string();
     break;
+  case UnaryOp::NonNull: {
+    // `x!`: the program stops if x is undefined, so from here on a variable
+    // holds a value.
+    unary->operand = checkExpr(unary->operand, expected);
+    const Type *type = unary->operand->type;
+    if (type->isUndefined()) {
+      diags_.error(unary->loc(), "the value is always undefined");
+      type = Type::error();
+    }
+    unary->type = type->nonOptional();
+    if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var && type->isOptional())
+      setDefined(name->var, true);
+    break;
+  }
   }
   if (unary->type && unary->type->isInteger())
     foldUnary(unary, wraps);
@@ -1535,7 +1630,10 @@ const Type *Sema::checkAssignTarget(Expr *target, bool compound) {
     return Type::error();
   }
 
-  diags_.error(target->loc(), "only variables, array elements and 'length' can be assigned to");
+  if (isa<ArrayLitExpr>(target))
+    diags_.error(target->loc(), "destructuring assignment can only be a statement, e.g. '[a, b] = [b, a]'");
+  else
+    diags_.error(target->loc(), "only variables, array elements and 'length' can be assigned to");
   return Type::error();
 }
 
@@ -1562,6 +1660,9 @@ static const char kWriteOutOfRange[] =
 Expr *Sema::checkAssign(AssignExpr *assign) {
   bool compound = assign->op.has_value();
   BinaryOp op = compound ? *assign->op : BinaryOp::Add;
+
+  if (compound && (op == BinaryOp::LogOr || op == BinaryOp::LogAnd))
+    return checkLogicalAssign(assign);
 
   if (compound && op == BinaryOp::Nullish) {
     // `x ??= v`: assigns only if x is undefined.
@@ -1678,6 +1779,43 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
   return assign;
 }
 
+// `x ||= v` is `x || (x = v)` and `x &&= v` is `x && (x = v)`: v is evaluated
+// and assigned only when x does not decide the result. x is read twice, so it
+// must be a variable or an element at a simple index.
+Expr *Sema::checkLogicalAssign(AssignExpr *assign) {
+  const char *op = assign->op == BinaryOp::LogOr ? "||=" : "&&=";
+  auto simple = [](const Expr *e) { return isa<NameExpr>(e) || isa<IntLitExpr>(e); };
+  auto copy = [&](const Expr *e) -> Expr * {
+    if (auto *name = dyn_cast<NameExpr>(e))
+      return ctx_.make<NameExpr>(name->loc(), name->name);
+    return ctx_.make<IntLitExpr>(e->loc(), cast<IntLitExpr>(e)->value);
+  };
+  Expr *read = nullptr;
+  if (auto *name = dyn_cast<NameExpr>(assign->target)) {
+    if (VarSymbol *var = lookup(name->name).var; var && !var->type->isBool() && !var->type->isError()) {
+      diags_.error(assign->loc(), llvm::Twine("'") + op + "' needs a boolean variable; '" + name->name +
+                                      "' has type '" + var->type->name() + "'" +
+                                      (var->type->isOptional() ? "; for undefined use '??='" : ""));
+      assign->value = checkExpr(assign->value);
+      assign->type = Type::error();
+      return assign;
+    }
+    read = copy(name);
+  } else if (auto *index = dyn_cast<IndexExpr>(assign->target);
+             index && !index->optional && simple(index->object) && simple(index->index)) {
+    read = ctx_.make<IndexExpr>(index->loc(), copy(index->object), copy(index->index));
+  } else {
+    diags_.error(assign->target->loc(), llvm::Twine("'") + op +
+                                            "' needs a variable or an array element at a simple "
+                                            "index, such as 'a[i]'");
+    assign->value = checkExpr(assign->value);
+    assign->type = Type::error();
+    return assign;
+  }
+  auto *set = ctx_.make<AssignExpr>(assign->loc(), std::nullopt, assign->target, assign->value);
+  return checkExpr(ctx_.make<BinaryExpr>(assign->loc(), *assign->op, read, set));
+}
+
 Expr *Sema::checkUpdate(UpdateExpr *update) {
   update->type = Type::error();
   const Type *type = checkAssignTarget(update->target, /*compound=*/true);
@@ -1707,8 +1845,16 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
       arg = checkExpr(arg);
   };
 
+  if (call->optional) {
+    diags_.error(call->loc(), "'?.()' calls a function value, and functions cannot be values yet");
+    checkArgsLoosely();
+    return call;
+  }
+
   if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
     if (isGlobalName(member->object, "console")) {
+      if (rejectSpread(call))
+        return call;
       if (member->name == "log")
         return checkConsoleLog(call);
       diags_.error(member->loc(), "'console." + member->name +
@@ -1718,10 +1864,17 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
     }
     if (isGlobalName(member->object, "Math"))
       return checkMathCall(call, member, expected);
-    if (isGlobalName(member->object, "String") || isGlobalName(member->object, "Number"))
+    if (isGlobalName(member->object, "String") || isGlobalName(member->object, "Number")) {
+      if (rejectSpread(call))
+        return call;
       return checkStaticCall(call, member, expected);
+    }
     member->object = checkExpr(member->object);
+    if (member->optional)
+      member->object = chainLink(member->object);
     const Type *receiver = member->object->type;
+    if (!(receiver->isArray() && member->name == "push") && rejectSpread(call))
+      return call;
     if (receiver->isString())
       return checkStringMethod(call, member);
     if (receiver->isArray())
@@ -1772,9 +1925,26 @@ Expr *Sema::checkUserCall(CallExpr *call, NameExpr *name) {
   FuncSymbol *func = entry.func;
   call->func = func;
   call->type = func->ret;
+  size_t fixed = func->params.size() - (func->hasRest ? 1 : 0);
+  for (size_t i = 0; i < call->args.size() && i < (func->hasRest ? fixed : call->args.size()); ++i)
+    if (call->spreads(i) && rejectSpread(call))
+      return call;
   if (!checkArity(call, name->loc(), static_cast<unsigned>(func->minArgs),
-                  static_cast<unsigned>(func->params.size())))
+                  func->hasRest ? ~0u : static_cast<unsigned>(func->params.size())))
     return call;
+  if (func->hasRest) {
+    // The arguments for the rest parameter become one array, as `f(1, ...a)`
+    // passes `[1, ...a]`.
+    llvm::SMLoc loc = call->args.size() > fixed ? call->args[fixed]->loc() : call->loc();
+    auto *rest = ctx_.make<ArrayLitExpr>(loc);
+    for (size_t i = fixed; i < call->args.size(); ++i)
+      rest->elements.push_back({call->args[i], call->spreads(i)});
+    call->args.resize(std::min(call->args.size(), fixed));
+    while (call->args.size() < fixed) // optional parameters left out
+      call->args.push_back(ctx_.make<UndefinedExpr>(call->loc()));
+    call->args.push_back(rest);
+    call->spread.clear();
+  }
   // Parameters left out get undefined, and with it their default values.
   for (size_t i = 0; i < call->args.size(); ++i)
     call->args[i] = checkArg(call->args[i], func->params[i]);
@@ -1789,6 +1959,20 @@ bool Sema::checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned ma
   diags_.error(loc, "expected " + argumentCount(min, max) + ", but got " + llvm::Twine(count));
   for (Expr *&arg : call->args)
     arg = checkExpr(arg);
+  return false;
+}
+
+bool Sema::rejectSpread(CallExpr *call) {
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    if (!call->spreads(i))
+      continue;
+    diags_.error(call->args[i]->loc(), "a spread argument can only be passed to a rest parameter, "
+                                       "Math.min, Math.max or push");
+    for (Expr *&arg : call->args)
+      arg = checkExpr(arg);
+    call->type = Type::error();
+    return true;
+  }
   return false;
 }
 
@@ -1853,6 +2037,8 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
     }
   }
   member->object = checkExpr(member->object);
+  if (member->optional)
+    member->object = chainLink(member->object);
   const Type *type = member->object->type;
   if (type->isError())
     return member;
@@ -1894,6 +2080,8 @@ Expr *Sema::checkIndex(IndexExpr *index) {
     if (EnumDecl *decl = lookup(name->name).enumDecl)
       return checkEnumIndex(decl, index);
   index->object = checkExpr(index->object);
+  if (index->optional)
+    index->object = chainLink(index->object);
   index->index = checkPosition(index->index);
   index->type = Type::error();
   const Type *type = index->object->type;

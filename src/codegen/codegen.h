@@ -105,6 +105,9 @@ private:
   // Expressions
   llvm::Value *emitExpr(Expr *expr);
   llvm::Value *emitUnary(UnaryExpr *unary);
+  llvm::Value *emitNonNull(UnaryExpr *unary);
+  llvm::Value *emitOptionalChain(OptionalChainExpr *chain);
+  llvm::Value *emitChainLink(CastExpr *link);
   llvm::Value *emitBinary(BinaryExpr *bin);
   llvm::Value *emitLogical(BinaryExpr *bin);
   llvm::Value *emitEquality(BinaryExpr *bin);
@@ -190,6 +193,10 @@ private:
   llvm::Value *emitCheckedRead(llvm::Value *inRange, const Type *resultType,
                                llvm::function_ref<llvm::Value *()> read);
   llvm::Value *emitArrayLiteral(ArrayLitExpr *lit);
+  // `step(acc, element)` over the elements of a borrowed array of numbers or
+  // booleans, starting from `init`; the last result.
+  llvm::Value *emitArrayFold(llvm::Value *array, const Type *element, llvm::Value *init,
+                             llvm::function_ref<llvm::Value *(llvm::Value *, llvm::Value *)> step);
   llvm::Value *emitNewArray(NewExpr *expr);
   llvm::Value *emitArrayIndex(IndexExpr *index);
   llvm::Value *emitArrayMethod(CallExpr *call);
@@ -233,6 +240,9 @@ private:
   std::vector<JumpTarget> targets_;
   // The labels of the loop or switch being emitted next.
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
+  // Where the links of the optional chains being emitted go when their object
+  // is undefined: the innermost chain's last.
+  std::vector<llvm::BasicBlock *> chainEnds_;
   void pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget, size_t scopeDepth);
 
   // Functions of the C runtime (runtime/*.c).
@@ -299,6 +309,7 @@ private:
     llvm::FunctionCallee arrSlice;
     llvm::FunctionCallee arrCopy;
     llvm::FunctionCallee arrAppend;
+    llvm::FunctionCallee arrAppendCodePoints;
     llvm::FunctionCallee arrIndexOf;
     llvm::FunctionCallee arrJoin;
     llvm::FunctionCallee arrReverse;

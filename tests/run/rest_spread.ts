@@ -1,0 +1,30 @@
+// same-as-node
+// Rest parameters and spread arguments.
+function sum(...xs: int[]): int {
+  let total = 0
+  for (const x of xs) total += x
+  return total
+}
+const nums = [4, 5, 6]
+console.log(sum(), sum(1), sum(1, 2, 3), sum(...nums), sum(1, ...nums, 10))
+
+function label(prefix: string, sep = ", ", ...parts: string[]): string {
+  return prefix + ": " + parts.join(sep)
+}
+console.log(label("none"), label("list", " | ", "a", "b"), label("words", undefined, ..."hi"))
+
+// Math.max and Math.min take the elements of arrays. Of an empty one they
+// give -Infinity and Infinity.
+const values = [3, -1, 7.5, 2]
+const none: int[] = []
+console.log(Math.max(...values), Math.min(...values), Math.max(0, ...nums), Math.min(...nums, 5))
+console.log(Math.max(...none), Math.min(...none), Math.max(...[0.5, NaN]))
+
+// push appends the elements of arrays.
+const out = [1]
+console.log(out.push(...nums, 7, ...[8, 9]), out)
+out.push(...out)
+console.log(out.length)
+
+// A string spreads into its characters.
+console.log([..."héllo"], [..."😀ab"].length, ["<", ..."ab", ">"].join(""))

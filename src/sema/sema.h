@@ -165,7 +165,14 @@ private:
   Expr *checkEquality(BinaryExpr *bin);
   Expr *checkNullish(BinaryExpr *bin, const Type *expected);
   Expr *checkAssign(AssignExpr *assign);
+  Expr *checkLogicalAssign(AssignExpr *assign);
   Expr *checkUpdate(UpdateExpr *update);
+  Expr *checkSequence(SequenceExpr *seq, const Type *expected, bool wraps);
+  Expr *checkOptionalChain(OptionalChainExpr *chain);
+  // The object of a link `object?.x` of an optional chain: if it may be
+  // undefined, a conversion to its value that ends the chain when it is
+  // undefined (see OptionalChainExpr).
+  Expr *chainLink(Expr *object);
   Expr *checkCall(CallExpr *call, const Type *expected);
   Expr *checkUserCall(CallExpr *call, NameExpr *name);
   Expr *checkConsoleLog(CallExpr *call);
@@ -177,6 +184,7 @@ private:
   // String.fromCharCode, Number.isNaN...
   Expr *checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *checkMinMaxSpread(CallExpr *call, const Type *hint);
   Expr *checkNumberMethod(CallExpr *call, MemberExpr *member);
   Expr *checkStringMethod(CallExpr *call, MemberExpr *member);
   Expr *checkArrayMethod(CallExpr *call, MemberExpr *member);
@@ -197,6 +205,10 @@ private:
   Expr *checkArg(Expr *arg, const Type *to);
   // Reports a wrong number of arguments; checks them loosely then.
   bool checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max);
+  // Reports spread arguments where the callee takes none (only rest
+  // parameters, Math.min, Math.max and push do); checks the arguments loosely
+  // then.
+  bool rejectSpread(CallExpr *call);
 
   // Converts a value to a string for `+` and template literals.
   Expr *toStringOperand(Expr *expr);
@@ -285,6 +297,8 @@ private:
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   llvm::StringSet<> namesInFunctions_;
+  // Some link of the optional chain being checked may end it.
+  bool chainShortCircuits_ = false;
   // The values of the integer constants computed so far: operator expressions
   // and `const` variables. In a `wraps` context a value may exceed its type
   // (see foldBinary).

@@ -50,6 +50,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::Ellipsis: return "'...'";
   case Tok::Question: return "'?'";
   case Tok::QuestionQuestion: return "'??'";
+  case Tok::QuestionDot: return "'?.'";
   case Tok::Plus: return "'+'";
   case Tok::Minus: return "'-'";
   case Tok::Star: return "'*'";
@@ -90,6 +91,8 @@ const char *tokSpelling(Tok kind) {
   case Tok::ShrAssign: return "'>>='";
   case Tok::UShrAssign: return "'>>>='";
   case Tok::QuestionQuestionAssign: return "'??='";
+  case Tok::AmpAmpAssign: return "'&&='";
+  case Tok::PipePipeAssign: return "'||='";
   }
   return "token";
 }
@@ -195,6 +198,11 @@ Token Lexer::next() {
   case '?':
     if (match('?'))
       return make(match('=') ? Tok::QuestionQuestionAssign : Tok::QuestionQuestion, start, nl);
+    // `a?.5:1` is a conditional with the number .5.
+    if (peek() == '.' && !llvm::isDigit(peek(1))) {
+      ++cur_;
+      return make(Tok::QuestionDot, start, nl);
+    }
     return make(Tok::Question, start, nl);
   case '~': return make(Tok::Tilde, start, nl);
   case '.':
@@ -225,11 +233,11 @@ Token Lexer::next() {
     if (match('=')) return make(Tok::PercentAssign, start, nl);
     return make(Tok::Percent, start, nl);
   case '&':
-    if (match('&')) return make(Tok::AmpAmp, start, nl);
+    if (match('&')) return make(match('=') ? Tok::AmpAmpAssign : Tok::AmpAmp, start, nl);
     if (match('=')) return make(Tok::AmpAssign, start, nl);
     return make(Tok::Amp, start, nl);
   case '|':
-    if (match('|')) return make(Tok::PipePipe, start, nl);
+    if (match('|')) return make(match('=') ? Tok::PipePipeAssign : Tok::PipePipe, start, nl);
     if (match('=')) return make(Tok::PipeAssign, start, nl);
     return make(Tok::Pipe, start, nl);
   case '^':

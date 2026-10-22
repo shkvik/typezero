@@ -1218,6 +1218,19 @@ TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void 
   return a;
 }
 
+// `[...s]`: appends the code points of s to `a`, each as a string, as the
+// string's iterator gives them.
+void tz_arr_append_code_points(TzArray *a, void *obj, uint64_t meta) {
+  TzStr s = make_str(obj, meta), f = flat(s);
+  uint32_t len = str_len(meta);
+  for (uint32_t i = 0; i < len;) {
+    uint32_t start = i;
+    next_code_point(&f, &i, len);
+    TzStr piece = substring_of(s, start, i);
+    tz_arr_push_value(a, &piece);
+  }
+}
+
 // trim() (ends 3), trimStart() (1) and trimEnd() (2).
 void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
   TzStr s = make_str(obj, meta);

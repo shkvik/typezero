@@ -1,5 +1,6 @@
 #pragma once
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SMLoc.h"
@@ -39,6 +40,9 @@ struct FuncSymbol {
   // The arguments a call must give: those up to the last parameter that is
   // neither optional nor has a default value.
   size_t minArgs = 0;
+  // The last parameter is `...rest: T[]`: the arguments from its position on
+  // become the elements of one array.
+  bool hasRest = false;
   const Type *ret = nullptr;
   FunctionDecl *decl = nullptr;
 };
@@ -71,7 +75,10 @@ struct TypeRef {
 // Expressions
 //===----------------------------------------------------------------------===//
 
-enum class UnaryOp { Neg, Plus, Not, BitNot, TypeOf };
+enum class UnaryOp {
+  Neg, Plus, Not, BitNot, TypeOf,
+  NonNull, // postfix `x!`
+};
 
 enum class BinaryOp {
   Add, Sub, Mul, Div, Rem, Pow,
@@ -88,7 +95,7 @@ class Expr : public Node {
 public:
   enum class Kind {
     IntLit, FloatLit, BoolLit, StringLit, Undefined, Template, ArrayLit, Name, Member, Index,
-    Unary, Binary, Assign, Update, Call, New, Conditional, Cast,
+    Unary, Binary, Assign, Update, Call, New, Conditional, Cast, Sequence, OptionalChain,
   };
 
   Kind kind() const { return kind_; }
@@ -161,7 +168,8 @@ class ArrayLitExpr : public Expr {
 public:
   struct Element {
     Expr *expr;
-    bool spread; // `...expr`
+    bool spread;       // `...expr`
+    bool hole = false; // `[a, , b]`: allowed only in destructuring; expr is undefined
   };
 
   explicit ArrayLitExpr(llvm::SMLoc loc) : Expr(Kind::ArrayLit, loc) {}
@@ -187,6 +195,7 @@ public:
 
   Expr *object;
   llvm::StringRef name;
+  bool optional = false; // `object?.name`
 };
 
 struct EnumDecl;
@@ -200,6 +209,7 @@ public:
 
   Expr *object;
   Expr *index;
+  bool optional = false; // `object?.[index]`
   // Set by Sema. A read that Sema could not prove in range checks the index
   // and yields `T | undefined`. A write may append: Sema proved only
   // `index <= length`.
@@ -367,6 +377,11 @@ public:
 
   Expr *callee;
   std::vector<Expr *> args;
+  // `f(...a)`: the arguments that are spread, by position; empty if none are.
+  std::vector<bool> spread;
+  bool spreads(size_t i) const { return i < spread.size() && spread[i]; }
+  bool hasSpread() const { return llvm::is_contained(spread, true); }
+  bool optional = false; // `callee?.(args)`
   // Set by Sema: exactly one of these describes the callee.
   FuncSymbol *func = nullptr;
   Builtin builtin = Builtin::None;
@@ -413,6 +428,33 @@ public:
 
   Expr *operand;
   std::optional<TypeRef> target;
+  // A link of an optional chain, `operand?.x`: from `T | undefined` to T,
+  // where undefined ends the whole chain (see OptionalChainExpr).
+  bool shortCircuit = false;
+};
+
+// `a, b, c`: evaluates each in order; the value is the last one's.
+class SequenceExpr : public Expr {
+public:
+  SequenceExpr(llvm::SMLoc loc, std::vector<Expr *> exprs)
+      : Expr(Kind::Sequence, loc), exprs(std::move(exprs)) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::Sequence; }
+
+  std::vector<Expr *> exprs;
+};
+
+// `a?.b.c`, `a?.[i]`, `s?.trim()`: the member accesses, indexing and calls
+// after `?.` form the chain, and if the object before any `?.` in it is
+// undefined, the whole chain is undefined and the rest is not evaluated. Sema
+// marks those objects with CastExpr::shortCircuit.
+class OptionalChainExpr : public Expr {
+public:
+  OptionalChainExpr(llvm::SMLoc loc, Expr *chain) : Expr(Kind::OptionalChain, loc), chain(chain) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::OptionalChain; }
+
+  Expr *chain;
+  // Set by Sema: some object in the chain may be undefined.
+  bool mayShortCircuit = false;
 };
 
 //===----------------------------------------------------------------------===//
@@ -450,6 +492,8 @@ struct VarDeclarator {
   std::optional<TypeRef> typeAnn;
   Expr *init = nullptr;
   VarSymbol *sym = nullptr; // set by Sema
+  // A hidden variable holding the array a pattern destructures (see Parser).
+  bool destructured = false;
 };
 
 // `let a = 1, b = 2` or `const c: double = 3`.
@@ -466,6 +510,7 @@ struct Param {
   llvm::SMLoc loc;
   std::optional<TypeRef> type;
   bool optional = false;        // `name?: T`
+  bool rest = false;            // `...name: T[]`, the last parameter
   Expr *defaultValue = nullptr; // `name: T = value`
   // Set by Sema: the type of the parameter inside the function, and its
   // variable.
@@ -666,9 +711,15 @@ public:
 
   VarSymbol *newVar() { return &vars_.emplace_back(); }
   FuncSymbol *newFunc() { return &funcs_.emplace_back(); }
+  // A name the source cannot contain, for a hidden variable the parser
+  // introduces (destructuring keeps the value there).
+  llvm::StringRef hiddenName() {
+    return names_.emplace_back("%" + std::to_string(names_.size()));
+  }
 
 private:
   std::vector<std::unique_ptr<Node>> nodes_;
+  std::deque<std::string> names_;
   std::deque<VarSymbol> vars_;
   std::deque<FuncSymbol> funcs_;
 };

@@ -1,6 +1,12 @@
 #include "parse/parser.h"
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 
@@ -11,6 +17,7 @@ const char *opSpelling(UnaryOp op) {
   case UnaryOp::Not: return "!";
   case UnaryOp::BitNot: return "~";
   case UnaryOp::TypeOf: return "typeof";
+  case UnaryOp::NonNull: return "!";
   }
   return "?";
 }
@@ -124,6 +131,8 @@ bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   case Tok::ShrAssign: op = BinaryOp::Shr; return true;
   case Tok::UShrAssign: op = BinaryOp::UShr; return true;
   case Tok::QuestionQuestionAssign: op = BinaryOp::Nullish; return true;
+  case Tok::AmpAmpAssign: op = BinaryOp::LogAnd; return true;
+  case Tok::PipePipeAssign: op = BinaryOp::LogOr; return true;
   default: return false;
   }
 }
@@ -247,20 +256,20 @@ SourceFile Parser::parseSourceFile() {
       recovering_ = false;
       continue;
     }
-    file.items.push_back(parseStatement());
+    file.items.push_back(parseStatement(/*topLevel=*/true));
     if (recovering_)
       synchronize();
   }
   return file;
 }
 
-Stmt *Parser::parseStatement() {
+Stmt *Parser::parseStatement(bool topLevel) {
   llvm::SMLoc loc = tok_.loc();
   switch (tok_.kind) {
   case Tok::LBrace:
     return parseBlock();
   case Tok::KwFunction:
-    return parseFunction();
+    return parseFunctionDecl();
   case Tok::KwVar:
     report(loc, "'var' is not supported; use 'let' or 'const'");
     [[fallthrough]];
@@ -295,6 +304,22 @@ Stmt *Parser::parseStatement() {
     advance();
     return ctx_.make<EmptyStmt>(loc);
   case Tok::Identifier:
+    // `export` before a declaration is for tsc and other modules; a program
+    // is one file for now, so it changes nothing.
+    if (tok_.text == "export" && !peek().newlineBefore) {
+      const Token &next = peek();
+      if (next.is(Tok::KwFunction) || next.is(Tok::KwConst) || next.is(Tok::KwLet) ||
+          next.is(Tok::KwEnum) || (next.is(Tok::Identifier) && next.text == "type")) {
+        if (!topLevel)
+          report(loc, "'export' is allowed only at the top level");
+        advance();
+        return parseStatement(topLevel);
+      }
+      if (next.is(Tok::KwDefault) || next.is(Tok::LBrace) || next.is(Tok::Star)) {
+        error(loc, "only declarations can be exported; a program is one file for now");
+        return ctx_.make<EmptyStmt>(loc);
+      }
+    }
     if (peek().is(Tok::Colon)) {
       llvm::StringRef label = tok_.text;
       advance();
@@ -307,7 +332,14 @@ Stmt *Parser::parseStatement() {
       return parseTypeAlias();
     [[fallthrough]];
   default: {
-    Expr *expr = parseExpr();
+    Expr *expr = parseSequence();
+    // `[a, b] = [b, a]`
+    if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op)
+      if (auto *lit = dyn_cast<ArrayLitExpr>(assign->target)) {
+        Stmt *stmt = assignPattern(loc, *patternFromLiteral(lit), assign->value);
+        expectSemicolon();
+        return stmt;
+      }
     expectSemicolon();
     return ctx_.make<ExprStmt>(loc, expr);
   }
@@ -381,7 +413,7 @@ Stmt *Parser::parseSwitch() {
   llvm::SMLoc loc = tok_.loc();
   advance(); // 'switch'
   expect(Tok::LParen, "after 'switch'");
-  Expr *discriminant = parseExpr();
+  Expr *discriminant = parseSequence();
   expect(Tok::RParen, "after the value of 'switch'");
   auto *stmt = ctx_.make<SwitchStmt>(loc, discriminant);
   expect(Tok::LBrace, "to start the cases of 'switch'");
@@ -425,6 +457,27 @@ BlockStmt *Parser::parseBlock() {
   return block;
 }
 
+// A function declaration, after any overload signatures (`function f(x:
+// int): int` without a body): those are for tsc, and calls use the
+// implementation, which must come right after them.
+Stmt *Parser::parseFunctionDecl() {
+  FunctionDecl *fn = parseFunction();
+  while (!fn->body) {
+    llvm::StringRef name = fn->name;
+    if (tok_.is(Tok::Identifier) && tok_.text == "export" && peek().is(Tok::KwFunction))
+      advance();
+    if (!tok_.is(Tok::KwFunction)) {
+      report(fn->loc(), "the overload signature of '" + name +
+                            "' must be followed by the function's implementation");
+      return ctx_.make<EmptyStmt>(fn->loc());
+    }
+    fn = parseFunction();
+    if (fn->name != name)
+      report(fn->loc(), "expected the implementation of '" + name + "' after its overload signature");
+  }
+  return fn;
+}
+
 FunctionDecl *Parser::parseFunction() {
   advance(); // 'function'
 
@@ -441,6 +494,7 @@ FunctionDecl *Parser::parseFunction() {
   expect(Tok::LParen, "after the function name");
   while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
     Param param;
+    param.rest = accept(Tok::Ellipsis);
     param.loc = tok_.loc();
     if (tok_.is(Tok::Identifier)) {
       param.name = tok_.text;
@@ -459,18 +513,24 @@ FunctionDecl *Parser::parseFunction() {
       advance();
       param.defaultValue = parseExpr();
     }
+    if (param.rest && (param.optional || param.defaultValue))
+      report(param.loc, "a rest parameter cannot be optional or have a default value");
     fn->params.push_back(param);
     if (!accept(Tok::Comma))
       break;
+    if (param.rest && !tok_.is(Tok::RParen))
+      report(param.loc, "a rest parameter must be the last parameter");
   }
   expect(Tok::RParen, "to close the parameter list");
 
   if (accept(Tok::Colon))
     fn->returnType = parseType();
 
-  if (tok_.is(Tok::LBrace))
+  if (tok_.is(Tok::LBrace)) {
     fn->body = parseBlock();
-  else {
+  } else if (accept(Tok::Semi) || tok_.newlineBefore || tok_.is(Tok::RBrace) || tok_.is(Tok::Eof)) {
+    // An overload signature: no body (see parseFunctionDecl).
+  } else {
     error(tok_.loc(), "expected '{' to start the function body");
     fn->body = ctx_.make<BlockStmt>(tok_.loc());
   }
@@ -488,6 +548,20 @@ VarDeclStmt *Parser::parseVarDecl() {
 
 void Parser::parseDeclarators(VarDeclStmt *decl) {
   do {
+    if (tok_.is(Tok::LBracket)) {
+      // `const [a, b]: int[] = value`
+      std::unique_ptr<Pattern> pattern = parseBindingPattern();
+      std::optional<TypeRef> typeAnn;
+      if (accept(Tok::Colon))
+        typeAnn = parseType();
+      if (!tok_.is(Tok::Assign)) {
+        error(tok_.loc(), "a destructuring declaration needs a value: '[a, b] = ...'");
+        return;
+      }
+      advance();
+      declarePattern(decl, *pattern, parseExpr(), std::move(typeAnn));
+      continue;
+    }
     VarDeclarator d;
     if (!parseBinding(d))
       return;
@@ -511,11 +585,182 @@ bool Parser::parseBinding(VarDeclarator &d) {
   return true;
 }
 
+//===----------------------------------------------------------------------===//
+// Destructuring
+//===----------------------------------------------------------------------===//
+
+bool Parser::Pattern::declares(llvm::StringRef name) const {
+  for (const Element &e : elements)
+    if (e.name == name || (e.nested && e.nested->declares(name)))
+      return true;
+  return false;
+}
+
+// `[a, , b = 1, [c, d], ...rest]` in a declaration.
+std::unique_ptr<Parser::Pattern> Parser::parseBindingPattern() {
+  auto pattern = std::make_unique<Pattern>();
+  pattern->loc = tok_.loc();
+  advance(); // '['
+  while (!tok_.is(Tok::RBracket) && !tok_.is(Tok::Eof)) {
+    Pattern::Element e;
+    e.loc = tok_.loc();
+    if (accept(Tok::Comma)) {
+      e.hole = true;
+      pattern->elements.push_back(std::move(e));
+      continue;
+    }
+    e.rest = accept(Tok::Ellipsis);
+    if (tok_.is(Tok::LBracket)) {
+      e.nested = parseBindingPattern();
+    } else if (tok_.is(Tok::Identifier)) {
+      e.name = tok_.text;
+      advance();
+    } else {
+      error(tok_.loc(), llvm::Twine("expected a variable name in the destructuring pattern, found ") +
+                            tokSpelling(tok_.kind));
+      return pattern;
+    }
+    if (tok_.is(Tok::Assign)) {
+      if (e.rest)
+        report(tok_.loc(), "a rest element cannot have a default value");
+      advance();
+      e.defaultValue = parseExpr();
+    }
+    bool rest = e.rest;
+    pattern->elements.push_back(std::move(e));
+    if (!accept(Tok::Comma))
+      break;
+    if (rest)
+      report(pattern->elements.back().loc, "a rest element must be the last one");
+  }
+  expect(Tok::RBracket, "to close the destructuring pattern");
+  return pattern;
+}
+
+std::unique_ptr<Parser::Pattern> Parser::patternFromLiteral(ArrayLitExpr *lit) {
+  auto pattern = std::make_unique<Pattern>();
+  pattern->loc = lit->loc();
+  for (size_t i = 0; i < lit->elements.size(); ++i) {
+    const ArrayLitExpr::Element &element = lit->elements[i];
+    Pattern::Element e;
+    e.loc = element.expr->loc();
+    e.hole = element.hole;
+    e.rest = element.spread;
+    if (e.rest && i + 1 != lit->elements.size())
+      report(e.loc, "a rest element must be the last one");
+    Expr *target = element.expr;
+    if (auto *assign = dyn_cast<AssignExpr>(target); assign && !assign->op && !e.rest) {
+      target = assign->target; // `[a = 1] = values`
+      e.defaultValue = assign->value;
+    }
+    if (auto *nested = dyn_cast<ArrayLitExpr>(target))
+      e.nested = patternFromLiteral(nested);
+    else if (!e.hole)
+      e.target = target;
+    pattern->elements.push_back(std::move(e));
+  }
+  return pattern;
+}
+
+VarDeclarator Parser::hiddenDeclarator(llvm::SMLoc loc, Expr *init) {
+  VarDeclarator d;
+  d.name = ctx_.hiddenName();
+  d.loc = loc;
+  d.init = init;
+  return d;
+}
+
+// `const [a, b = 1, ...rest] = value` is
+// `const %0 = value, a = %0[0], b = %0[1] ?? 1, rest = %0.slice(2)`.
+void Parser::declarePattern(VarDeclStmt *decl, const Pattern &pattern, Expr *value,
+                            std::optional<TypeRef> typeAnn) {
+  VarDeclarator hidden = hiddenDeclarator(pattern.loc, value);
+  hidden.typeAnn = std::move(typeAnn);
+  hidden.destructured = true;
+  decl->decls.push_back(hidden);
+  declareElements(decl, pattern, hidden.name);
+}
+
+void Parser::declareElements(VarDeclStmt *decl, const Pattern &pattern, llvm::StringRef base) {
+  for (size_t i = 0; i < pattern.elements.size(); ++i) {
+    const Pattern::Element &e = pattern.elements[i];
+    if (e.hole)
+      continue;
+    Expr *value = elementOf(base, i, e);
+    if (e.nested) {
+      declarePattern(decl, *e.nested, value, std::nullopt);
+      continue;
+    }
+    VarDeclarator d;
+    d.name = e.name;
+    d.loc = e.loc;
+    d.init = value;
+    decl->decls.push_back(d);
+  }
+}
+
+// `[a, b] = value` is `{ const %0 = value; a = %0[0]; b = %0[1] }`. When value
+// is an array literal, as in `[a, b] = [b, a]`, its elements go to hidden
+// variables instead, and no array is made: `{ const %0 = b, %1 = a; a = %0;
+// b = %1 }`.
+Stmt *Parser::assignPattern(llvm::SMLoc loc, const Pattern &pattern, Expr *value) {
+  auto *block = ctx_.make<BlockStmt>(loc);
+  auto *decl = ctx_.make<VarDeclStmt>(loc, /*isConst=*/true);
+  block->body.push_back(decl);
+  auto *lit = dyn_cast<ArrayLitExpr>(value);
+  bool direct = lit && lit->elements.size() >= pattern.elements.size() &&
+                llvm::none_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; }) &&
+                llvm::none_of(pattern.elements, [](const Pattern::Element &e) { return e.rest; });
+  std::vector<llvm::StringRef> values;
+  if (direct) {
+    for (const ArrayLitExpr::Element &e : lit->elements) {
+      decl->decls.push_back(hiddenDeclarator(e.expr->loc(), e.expr));
+      values.push_back(decl->decls.back().name);
+    }
+  } else {
+    VarDeclarator hidden = hiddenDeclarator(pattern.loc, value);
+    hidden.destructured = true;
+    decl->decls.push_back(hidden);
+  }
+  llvm::StringRef base = decl->decls.front().name;
+  for (size_t i = 0; i < pattern.elements.size(); ++i) {
+    const Pattern::Element &e = pattern.elements[i];
+    if (e.hole)
+      continue;
+    Expr *element;
+    if (direct) {
+      element = ctx_.make<NameExpr>(e.loc, values[i]);
+      if (e.defaultValue)
+        element = ctx_.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
+    } else {
+      element = elementOf(base, i, e);
+    }
+    if (e.nested)
+      block->body.push_back(assignPattern(e.loc, *e.nested, element));
+    else
+      block->body.push_back(ctx_.make<ExprStmt>(e.loc, ctx_.make<AssignExpr>(e.loc, std::nullopt, e.target, element)));
+  }
+  return block;
+}
+
+Expr *Parser::elementOf(llvm::StringRef base, size_t i, const Pattern::Element &e) {
+  auto *array = ctx_.make<NameExpr>(e.loc, base);
+  auto *position = ctx_.make<IntLitExpr>(e.loc, i);
+  if (e.rest) {
+    auto *slice = ctx_.make<MemberExpr>(e.loc, array, "slice");
+    return ctx_.make<CallExpr>(e.loc, slice, std::vector<Expr *>{position});
+  }
+  Expr *element = ctx_.make<IndexExpr>(e.loc, array, position);
+  if (e.defaultValue)
+    element = ctx_.make<BinaryExpr>(e.loc, BinaryOp::Nullish, element, e.defaultValue);
+  return element;
+}
+
 Stmt *Parser::parseIf() {
   llvm::SMLoc loc = tok_.loc();
   advance(); // 'if'
   expect(Tok::LParen, "after 'if'");
-  Expr *cond = parseExpr();
+  Expr *cond = parseSequence();
   expect(Tok::RParen, "after the condition");
   Stmt *thenStmt = parseStatement();
   Stmt *elseStmt = nullptr;
@@ -528,7 +773,7 @@ Stmt *Parser::parseWhile() {
   llvm::SMLoc loc = tok_.loc();
   advance(); // 'while'
   expect(Tok::LParen, "after 'while'");
-  Expr *cond = parseExpr();
+  Expr *cond = parseSequence();
   expect(Tok::RParen, "after the condition");
   Stmt *body = parseStatement();
   return ctx_.make<WhileStmt>(loc, cond, body);
@@ -540,7 +785,7 @@ Stmt *Parser::parseDoWhile() {
   Stmt *body = parseStatement();
   expect(Tok::KwWhile, "after the body of 'do'");
   expect(Tok::LParen, "after 'while'");
-  Expr *cond = parseExpr();
+  Expr *cond = parseSequence();
   expect(Tok::RParen, "after the condition");
   // A semicolon after `do ... while (...)` is always optional.
   accept(Tok::Semi);
@@ -559,27 +804,49 @@ Stmt *Parser::parseFor() {
     auto *decl = ctx_.make<VarDeclStmt>(tok_.loc(), tok_.is(Tok::KwConst));
     advance();
     VarDeclarator first;
-    if (!parseBinding(first))
+    std::unique_ptr<Pattern> pattern;
+    if (tok_.is(Tok::LBracket))
+      pattern = parseBindingPattern();
+    else if (!parseBinding(first))
       return loop;
     if (tok_.is(Tok::Identifier) && tok_.text == "of") {
       advance();
       auto *forOf = ctx_.make<ForOfStmt>(forLoc);
       forOf->isConst = decl->isConst;
-      forOf->binding = first;
       forOf->iterable = parseExpr();
       expect(Tok::RParen, "to close the loop header");
       forOf->body = parseStatement();
+      if (!pattern) {
+        forOf->binding = first;
+        return forOf;
+      }
+      // `for (const [a, b] of pairs) body` is
+      // `for (const %0 of pairs) { const a = %0[0], b = %0[1]; body }`.
+      forOf->binding.name = ctx_.hiddenName();
+      forOf->binding.loc = pattern->loc;
+      forOf->binding.destructured = true;
+      auto *elements = ctx_.make<VarDeclStmt>(pattern->loc, decl->isConst);
+      declareElements(elements, *pattern, forOf->binding.name);
+      auto *body = ctx_.make<BlockStmt>(forOf->body->loc());
+      body->body = {elements, forOf->body};
+      forOf->body = body;
       return forOf;
     }
-    if (accept(Tok::Assign))
-      first.init = parseExpr();
-    decl->decls.push_back(first);
+    if (pattern) {
+      if (!expect(Tok::Assign, "after the destructuring pattern"))
+        return loop;
+      declarePattern(decl, *pattern, parseExpr(), std::nullopt);
+    } else {
+      if (accept(Tok::Assign))
+        first.init = parseExpr();
+      decl->decls.push_back(first);
+    }
     if (accept(Tok::Comma))
       parseDeclarators(decl);
     loop->init = decl;
   } else if (!tok_.is(Tok::Semi)) {
     llvm::SMLoc loc = tok_.loc();
-    loop->init = ctx_.make<ExprStmt>(loc, parseExpr());
+    loop->init = ctx_.make<ExprStmt>(loc, parseSequence());
   }
   if (tok_.is(Tok::Identifier) && (tok_.text == "of" || tok_.text == "in")) {
     error(tok_.loc(), tok_.text == "in" ? "'for...in' loops are not supported; use 'for...of'"
@@ -589,11 +856,11 @@ Stmt *Parser::parseFor() {
   expect(Tok::Semi, "after the loop initializer");
 
   if (!tok_.is(Tok::Semi))
-    loop->cond = parseExpr();
+    loop->cond = parseSequence();
   expect(Tok::Semi, "after the loop condition");
 
   if (!tok_.is(Tok::RParen))
-    loop->step = parseExpr();
+    loop->step = parseSequence();
   expect(Tok::RParen, "to close the loop header");
 
   loop->body = parseStatement();
@@ -606,7 +873,7 @@ Stmt *Parser::parseReturn() {
   Expr *value = nullptr;
   // `return` followed by a line break returns nothing, as in JavaScript.
   if (!tok_.is(Tok::Semi) && !tok_.is(Tok::RBrace) && !tok_.is(Tok::Eof) && !tok_.newlineBefore)
-    value = parseExpr();
+    value = parseSequence();
   expectSemicolon();
   return ctx_.make<ReturnStmt>(loc, value);
 }
@@ -631,8 +898,18 @@ TypeRef Parser::parseType() {
   return ref;
 }
 
-// arrayType := primaryType ('[' ']')*
+// arrayType := 'readonly'? primaryType ('[' ']')*
 TypeRef Parser::parseArrayType() {
+  // `readonly T[]` is for tsc: the compiler does not stop changes to the array.
+  if (tok_.is(Tok::Identifier) && tok_.text == "readonly" &&
+      (peek().is(Tok::Identifier) || peek().is(Tok::LParen))) {
+    llvm::SMLoc loc = tok_.loc();
+    advance();
+    TypeRef ref = parseArrayType();
+    if (ref.kind != TypeRef::Kind::Array)
+      report(loc, "'readonly' applies only to array types");
+    return ref;
+  }
   TypeRef ref = parsePrimaryType();
   while (tok_.is(Tok::LBracket)) {
     TypeRef array;
@@ -706,7 +983,19 @@ std::vector<TypeRef> Parser::parseTypeArgs() {
 // Expressions
 //===----------------------------------------------------------------------===//
 
-// Assignment is right-associative and has the lowest precedence.
+// `a, b, c`
+Expr *Parser::parseSequence() {
+  Expr *first = parseExpr();
+  if (!tok_.is(Tok::Comma))
+    return first;
+  std::vector<Expr *> exprs{first};
+  while (accept(Tok::Comma))
+    exprs.push_back(parseExpr());
+  return ctx_.make<SequenceExpr>(first->loc(), std::move(exprs));
+}
+
+// Assignment is right-associative and has the lowest precedence after the
+// comma.
 Expr *Parser::parseExpr() {
   Expr *lhs = parseConditional();
   std::optional<BinaryOp> op;
@@ -794,38 +1083,75 @@ Expr *Parser::parsePostfix() {
   return expr;
 }
 
+// Calls, `.name`, `[index]`, `x!`, and their optional forms `?.(`, `?.name`
+// and `?.[`. After a `?.` the rest of them form an optional chain.
 Expr *Parser::parseCallOrMember() {
   Expr *expr = parsePrimary();
+  bool chain = false;
+  auto finish = [&]() -> Expr * {
+    return chain ? ctx_.make<OptionalChainExpr>(expr->loc(), expr) : expr;
+  };
   for (;;) {
+    bool optional = false;
+    if (tok_.is(Tok::QuestionDot)) {
+      optional = chain = true;
+      advance();
+      if (tok_.is(Tok::Identifier)) {
+        auto *member = ctx_.make<MemberExpr>(tok_.loc(), expr, tok_.text);
+        member->optional = true;
+        expr = member;
+        advance();
+        continue;
+      }
+      if (!tok_.is(Tok::LParen) && !tok_.is(Tok::LBracket)) {
+        error(tok_.loc(), "expected a property name, '[' or '(' after '?.'");
+        return finish();
+      }
+    }
     if (tok_.is(Tok::LParen)) {
       // Diagnostics about a call point at its start, e.g. `f` in `f(x)`.
       llvm::SMLoc loc = expr->loc();
       advance();
       std::vector<Expr *> args;
+      std::vector<bool> spread;
       while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
+        bool spreads = accept(Tok::Ellipsis);
+        if (spreads || !spread.empty()) {
+          spread.resize(args.size(), false);
+          spread.push_back(spreads);
+        }
         args.push_back(parseExpr());
         if (!accept(Tok::Comma))
           break;
       }
       expect(Tok::RParen, "to close the argument list");
-      expr = ctx_.make<CallExpr>(loc, expr, std::move(args));
+      auto *call = ctx_.make<CallExpr>(loc, expr, std::move(args));
+      call->optional = optional;
+      call->spread = std::move(spread);
+      expr = call;
     } else if (tok_.is(Tok::Dot)) {
       advance();
       llvm::SMLoc loc = tok_.loc();
       if (!tok_.is(Tok::Identifier)) {
         error(tok_.loc(), "expected a property name after '.'");
-        return expr;
+        return finish();
       }
       expr = ctx_.make<MemberExpr>(loc, expr, tok_.text);
       advance();
     } else if (tok_.is(Tok::LBracket)) {
       llvm::SMLoc loc = tok_.loc();
       advance();
-      Expr *index = parseExpr();
+      Expr *index = parseSequence();
       expect(Tok::RBracket, "to close the index");
-      expr = ctx_.make<IndexExpr>(loc, expr, index);
+      auto *access = ctx_.make<IndexExpr>(loc, expr, index);
+      access->optional = optional;
+      expr = access;
+    } else if (tok_.is(Tok::Bang) && !tok_.newlineBefore) {
+      // `x!`: x is not undefined (checked when the program runs).
+      expr = ctx_.make<UnaryExpr>(tok_.loc(), UnaryOp::NonNull, expr);
+      advance();
     } else {
-      return expr;
+      return finish();
     }
   }
 }
@@ -861,7 +1187,7 @@ Expr *Parser::parsePrimary() {
   }
   case Tok::LParen: {
     advance();
-    Expr *inner = parseExpr();
+    Expr *inner = parseSequence();
     expect(Tok::RParen, "to close the parenthesized expression");
     return inner;
   }
@@ -881,7 +1207,9 @@ Expr *Parser::parseArrayLiteral() {
   advance(); // '['
   while (!tok_.is(Tok::RBracket) && !tok_.is(Tok::Eof)) {
     if (tok_.is(Tok::Comma)) {
-      report(tok_.loc(), "arrays cannot have holes; write the element explicitly");
+      // A hole: an error, unless the literal turns out to be a pattern, as in
+      // `[, b] = pair`.
+      lit->elements.push_back({ctx_.make<UndefinedExpr>(tok_.loc()), false, /*hole=*/true});
       advance();
       continue;
     }
@@ -928,7 +1256,7 @@ Expr *Parser::parseTemplate() {
   bool done = tok_.is(Tok::TemplateString);
   advance();
   while (!done) {
-    tmpl->exprs.push_back(parseExpr());
+    tmpl->exprs.push_back(parseSequence());
     if (!tok_.is(Tok::TemplateMiddle) && !tok_.is(Tok::TemplateTail)) {
       error(tok_.loc(), "expected '}' to close the template substitution");
       tmpl->quasis.emplace_back();
@@ -964,9 +1292,27 @@ Expr *Parser::parseIntLiteral() {
   }
 
   uint64_t value = 0;
-  if (text.getAsInteger(radix, value))
-    report(loc, "invalid integer literal, or too large for 64 bits");
-  return ctx_.make<IntLitExpr>(loc, value);
+  if (!text.getAsInteger(radix, value))
+    return ctx_.make<IntLitExpr>(loc, value);
+  for (char c : text) {
+    unsigned digit = llvm::isDigit(c) ? c - '0' : llvm::isAlpha(c) ? (c | 0x20) - 'a' + 10 : radix;
+    if (digit >= radix) {
+      report(loc, "invalid integer literal");
+      return ctx_.make<IntLitExpr>(loc, 0);
+    }
+  }
+  // Beyond 64 bits: the nearest double, as in JavaScript.
+  double rounded = 0;
+  if (radix == 10) {
+    text.getAsDouble(rounded);
+  } else {
+    unsigned bits = static_cast<unsigned>(text.size()) * (radix == 16 ? 4 : radix == 8 ? 3 : 1);
+    llvm::APFloat number(llvm::APFloat::IEEEdouble());
+    number.convertFromAPInt(llvm::APInt(bits, text, static_cast<uint8_t>(radix)), /*IsSigned=*/false,
+                            llvm::APFloat::rmNearestTiesToEven);
+    rounded = number.convertToDouble();
+  }
+  return ctx_.make<FloatLitExpr>(loc, rounded);
 }
 
 Expr *Parser::parseFloatLiteral() {

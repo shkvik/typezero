@@ -56,6 +56,7 @@ enum class Tok {
   Ellipsis,
   Question,
   QuestionQuestion,
+  QuestionDot, // `?.`
 
   // Operators
   Plus,
@@ -98,6 +99,8 @@ enum class Tok {
   ShrAssign,
   UShrAssign,
   QuestionQuestionAssign,
+  AmpAmpAssign,
+  PipePipeAssign,
 };
 
 // How a token kind is shown in diagnostics, e.g. "'('" or "identifier".

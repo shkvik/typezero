@@ -618,6 +618,13 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
   case Expr::Kind::Cast:
     scanExpr(cast<CastExpr>(expr)->operand, scan, depth);
     break;
+  case Expr::Kind::Sequence:
+    for (const Expr *e : cast<SequenceExpr>(expr)->exprs)
+      scanExpr(e, scan, depth);
+    break;
+  case Expr::Kind::OptionalChain:
+    scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
+    break;
   }
 }
 

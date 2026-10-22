@@ -1,0 +1,15 @@
+undefined -1 undefined
+undefined -1 undefined
+TEXT 1 6 t
+bb 2
+undefined 0
+undefined undefined
+undefined undefined
+2 [ 'y', 'x' ]
+undefined 1
+Y 1
+12
+one two [ 'three', '0' ] [ 'three', '0' ] [ 'one' ]
+one two [ 'three', '1' ] [ 'three', '1' ] [ 'one' ]
+aaa
+a-b-c-x-y-z 
