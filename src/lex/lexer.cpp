@@ -51,6 +51,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::Question: return "'?'";
   case Tok::QuestionQuestion: return "'??'";
   case Tok::QuestionDot: return "'?.'";
+  case Tok::Arrow: return "'=>'";
   case Tok::Plus: return "'+'";
   case Tok::Minus: return "'-'";
   case Tok::Star: return "'*'";
@@ -250,6 +251,8 @@ Token Lexer::next() {
   case '=':
     if (match('='))
       return make(match('=') ? Tok::EqEqEq : Tok::EqEq, start, nl);
+    if (match('>'))
+      return make(Tok::Arrow, start, nl);
     return make(Tok::Assign, start, nl);
   case '<':
     if (match('<'))

@@ -57,6 +57,7 @@ enum class Tok {
   Question,
   QuestionQuestion,
   QuestionDot, // `?.`
+  Arrow,       // `=>`
 
   // Operators
   Plus,

@@ -10,9 +10,9 @@ g()
 g(1, 2, "3", 4)
 // expect-error: type 'string' is not assignable to type 'int'
 function h(a: int = "zero"): void {}
-// expect-error: parameter 'p' needs a type annotation
-function m(p = [1]): void {}
-// expect-error: cannot find name 'later'
+// expect-error: cannot tell the type of 'p' from its default value
+function m(p = undefined): void {}
+// expect-error: the default value of 'first' uses 'later', which is not set yet
 function o(first: int = later, later: int = 1): void {}
 function q(maybe?: string): int {
   // expect-error: the value may be undefined

@@ -32,6 +32,7 @@ int tz_is_managed(const TzType *type) {
   switch (type->kind) {
   case TZ_T_STRING:
   case TZ_T_ARRAY:
+  case TZ_T_FUNCTION:
     return 1;
   case TZ_T_OPTIONAL:
     return tz_is_managed(type->inner);
@@ -94,6 +95,9 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead) {
     // Undefined holds the zero value, which releases as nothing.
     release_value(type->inner, value, dead);
     break;
+  case TZ_T_FUNCTION:
+    tz_obj_release(((TzFunction *)value)->env);
+    break;
   default:
     break;
   }
@@ -112,6 +116,9 @@ void tz_value_retain(const TzType *type, void *value) {
   }
   case TZ_T_OPTIONAL:
     tz_value_retain(type->inner, value);
+    break;
+  case TZ_T_FUNCTION:
+    tz_obj_retain(((TzFunction *)value)->env);
     break;
   default:
     break;
@@ -150,6 +157,13 @@ static void retain_range(TzArray *a, uint32_t from, uint32_t to) {
   if (tz_is_managed(a->type))
     for (uint32_t i = from; i < to; ++i)
       tz_value_retain(a->type, element(a, i));
+}
+
+// The same for `n` values of `type` stored from `values` on.
+static void retain_range_of(const TzType *type, char *values, uint32_t n) {
+  if (tz_is_managed(type))
+    for (uint32_t i = 0; i < n; ++i)
+      tz_value_retain(type, values + (size_t)i * type->size);
 }
 
 //===----------------------------------------------------------------------===//
@@ -387,6 +401,10 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
   }
   case TZ_T_ARRAY:
     return *(TzArray *const *)a == *(TzArray *const *)b;
+  case TZ_T_FUNCTION: {
+    const TzFunction *x = (const TzFunction *)a, *y = (const TzFunction *)b;
+    return x->info == y->info && x->env == y->env;
+  }
   case TZ_T_OPTIONAL: {
     int has_a = tz_optional_has(type, a), has_b = tz_optional_has(type, b);
     if (!has_a || !has_b)
@@ -562,6 +580,76 @@ static void merge_sort(SortItem *items, SortItem *tmp, size_t n) {
   while (j < n)
     tmp[k++] = items[j++];
   memcpy(items, tmp, n * sizeof(SortItem));
+}
+
+// sort(compare): `compare(ctx, x, y)` calls the program's comparison function
+// on the elements at x and y and returns the sign of its result (NaN counts
+// as 0). Stable, and undefined elements go last without being compared, as
+// in JavaScript.
+typedef int32_t (*TzCompare)(void *ctx, const void *x, const void *y);
+
+static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCompare compare, void *ctx) {
+  if (n < 2)
+    return;
+  size_t half = n / 2;
+  merge_sort_with(items, tmp, half, size, compare, ctx);
+  merge_sort_with(items + half * size, tmp, n - half, size, compare, ctx);
+  size_t i = 0, j = half, k = 0;
+  while (i < half && j < n) {
+    // The right one goes first only if it compares strictly before.
+    if (compare(ctx, items + i * size, items + j * size) > 0)
+      memcpy(tmp + k++ * size, items + j++ * size, size);
+    else
+      memcpy(tmp + k++ * size, items + i++ * size, size);
+  }
+  while (i < half)
+    memcpy(tmp + k++ * size, items + i++ * size, size);
+  while (j < n)
+    memcpy(tmp + k++ * size, items + j++ * size, size);
+  memcpy(items, tmp, n * size);
+}
+
+void tz_arr_sort_with(TzArray *a, TzCompare compare, void *ctx) {
+  uint32_t n = a->length;
+  if (n < 2)
+    return;
+  const TzType *type = a->type;
+  size_t size = type->size;
+  // The elements are sorted in a copy that holds references of its own: the
+  // comparison function may change the array meanwhile.
+  char *items = (char *)tz_alloc((size_t)n * size);
+  char *tmp = (char *)tz_alloc((size_t)n * size);
+  size_t defined = 0, undefined = n;
+  for (uint32_t i = 0; i < n; ++i) {
+    const char *value = element(a, i);
+    if (type->kind == TZ_T_OPTIONAL && !tz_optional_has(type, value))
+      memcpy(tmp + (size_t)--undefined * size, value, size);
+    else
+      memcpy(items + defined++ * size, value, size);
+  }
+  // The undefined ones keep their order, after the others.
+  for (size_t i = defined; i < n; ++i)
+    memcpy(items + i * size, tmp + (n - 1 - (i - defined)) * size, size);
+  retain_range_of(type, items, n);
+  merge_sort_with(items, tmp, defined, size, compare, ctx);
+  if (a->length == n) {
+    if (tz_is_managed(type)) {
+      DeadArrays dead = {NULL, 0, 0};
+      for (uint32_t i = 0; i < n; ++i)
+        release_value(type, element(a, i), &dead);
+      while (dead.count > 0)
+        tz_arr_free(dead.items[--dead.count]);
+      tz_free(dead.items);
+    }
+    memcpy(a->data, items, (size_t)n * size);
+  } else if (tz_is_managed(type)) {
+    // The function changed the array's length: JavaScript leaves the result
+    // up to the engine; here the array stays as the function left it.
+    for (uint32_t i = 0; i < n; ++i)
+      tz_value_release(type, items + (size_t)i * size);
+  }
+  tz_free(items);
+  tz_free(tmp);
 }
 
 void tz_arr_sort(TzArray *a) {

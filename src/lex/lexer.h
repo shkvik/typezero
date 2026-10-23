@@ -14,6 +14,17 @@ public:
 
   Token next();
 
+  // Where the lexer is, so that the parser can look ahead and come back.
+  struct State {
+    const char *cur;
+    std::vector<unsigned> templateBraces;
+  };
+  State save() const { return {cur_, templateBraces_}; }
+  void restore(State state) {
+    cur_ = state.cur;
+    templateBraces_ = std::move(state.templateBraces);
+  }
+
 private:
   // Skips whitespace and comments; returns true if a line break was skipped.
   bool skipTrivia();

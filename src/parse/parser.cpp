@@ -7,6 +7,7 @@
 #include "llvm/ADT/StringExtras.h"
 
 using llvm::dyn_cast;
+using llvm::isa;
 
 namespace tz {
 
@@ -172,6 +173,7 @@ Parser::Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags)
 //===----------------------------------------------------------------------===//
 
 void Parser::advance() {
+  prevEnd_ = tok_.text.end();
   if (hasPeeked_) {
     tok_ = peeked_;
     hasPeeked_ = false;
@@ -225,6 +227,19 @@ void Parser::error(llvm::SMLoc loc, const llvm::Twine &message) {
 void Parser::report(llvm::SMLoc loc, const llvm::Twine &message) {
   if (!recovering_)
     diags_.error(loc, message);
+}
+
+Parser::Snapshot Parser::snapshot() const {
+  return {lexer_.save(), tok_, peeked_, prevEnd_, hasPeeked_, recovering_};
+}
+
+void Parser::rewind(Snapshot s) {
+  lexer_.restore(std::move(s.lexer));
+  tok_ = s.tok;
+  peeked_ = s.peeked;
+  prevEnd_ = s.prevEnd;
+  hasPeeked_ = s.hasPeeked;
+  recovering_ = s.recovering;
 }
 
 // Skips to a likely statement boundary after a syntax error.
@@ -461,7 +476,7 @@ BlockStmt *Parser::parseBlock() {
 // int): int` without a body): those are for tsc, and calls use the
 // implementation, which must come right after them.
 Stmt *Parser::parseFunctionDecl() {
-  FunctionDecl *fn = parseFunction();
+  FunctionDecl *fn = parseFunction(/*expression=*/false);
   while (!fn->body) {
     llvm::StringRef name = fn->name;
     if (tok_.is(Tok::Identifier) && tok_.text == "export" && peek().is(Tok::KwFunction))
@@ -471,14 +486,16 @@ Stmt *Parser::parseFunctionDecl() {
                             "' must be followed by the function's implementation");
       return ctx_.make<EmptyStmt>(fn->loc());
     }
-    fn = parseFunction();
+    fn = parseFunction(/*expression=*/false);
     if (fn->name != name)
       report(fn->loc(), "expected the implementation of '" + name + "' after its overload signature");
   }
   return fn;
 }
 
-FunctionDecl *Parser::parseFunction() {
+FunctionDecl *Parser::parseFunction(bool expression) {
+  const char *start = tok_.text.data();
+  llvm::SMLoc keywordLoc = tok_.loc();
   advance(); // 'function'
 
   llvm::StringRef name;
@@ -486,12 +503,35 @@ FunctionDecl *Parser::parseFunction() {
   if (tok_.is(Tok::Identifier)) {
     name = tok_.text;
     advance();
+  } else if (expression) {
+    nameLoc = keywordLoc;
   } else {
     error(tok_.loc(), "expected a function name");
   }
   auto *fn = ctx_.make<FunctionDecl>(nameLoc, name);
+  fn->isExpression = expression;
+  if (expression)
+    fn->ownName = name;
+  parseParams(fn);
 
-  expect(Tok::LParen, "after the function name");
+  if (accept(Tok::Colon))
+    fn->returnType = parseType();
+
+  if (tok_.is(Tok::LBrace)) {
+    fn->body = parseBlock();
+  } else if (!expression &&
+             (accept(Tok::Semi) || tok_.newlineBefore || tok_.is(Tok::RBrace) || tok_.is(Tok::Eof))) {
+    // An overload signature: no body (see parseFunctionDecl).
+  } else {
+    error(tok_.loc(), "expected '{' to start the function body");
+    fn->body = ctx_.make<BlockStmt>(tok_.loc());
+  }
+  fn->source = llvm::StringRef(start, static_cast<size_t>(prevEnd_ - start));
+  return fn;
+}
+
+void Parser::parseParams(FunctionDecl *fn) {
+  expect(Tok::LParen, fn->isArrow ? "to start the parameters" : "after the function name");
   while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
     Param param;
     param.rest = accept(Tok::Ellipsis);
@@ -522,19 +562,70 @@ FunctionDecl *Parser::parseFunction() {
       report(param.loc, "a rest parameter must be the last parameter");
   }
   expect(Tok::RParen, "to close the parameter list");
+}
 
-  if (accept(Tok::Colon))
-    fn->returnType = parseType();
+// At `(`: the parameters of an arrow function follow if they parse as such
+// and `=>` (or a return type and `=>`) comes after them.
+bool Parser::arrowAhead() {
+  Snapshot start = snapshot();
+  bool muted = diags_.setMuted(true);
+  recovering_ = false;
+  FunctionDecl probe(tok_.loc(), "");
+  probe.isArrow = true;
+  parseParams(&probe);
+  bool arrow = !recovering_;
+  if (arrow && accept(Tok::Colon)) {
+    parseType();
+    arrow = !recovering_;
+  }
+  arrow = arrow && tok_.is(Tok::Arrow);
+  diags_.setMuted(muted);
+  rewind(std::move(start));
+  return arrow;
+}
 
+FunctionExpr *Parser::parseArrow() {
+  const char *start = tok_.text.data();
+  llvm::SMLoc loc = tok_.loc();
+  auto *fn = ctx_.make<FunctionDecl>(loc, "");
+  fn->isExpression = fn->isArrow = true;
+  if (tok_.is(Tok::Identifier)) {
+    Param param;
+    param.loc = tok_.loc();
+    param.name = tok_.text;
+    advance();
+    fn->params.push_back(param);
+  } else {
+    parseParams(fn);
+    if (accept(Tok::Colon))
+      fn->returnType = parseType();
+  }
+  if (tok_.is(Tok::Arrow) && tok_.newlineBefore)
+    report(tok_.loc(), "'=>' must be on the same line as the parameters");
+  expect(Tok::Arrow, "after the parameters of the arrow function");
   if (tok_.is(Tok::LBrace)) {
     fn->body = parseBlock();
-  } else if (accept(Tok::Semi) || tok_.newlineBefore || tok_.is(Tok::RBrace) || tok_.is(Tok::Eof)) {
-    // An overload signature: no body (see parseFunctionDecl).
+    // `() => { a: 1 }` is a block with the label `a`, not an object.
+    if (fn->body->body.size() == 1)
+      if (auto *labeled = dyn_cast<LabeledStmt>(fn->body->body[0]); labeled && isa<ExprStmt>(labeled->body))
+        report(labeled->loc(), "'{' after '=>' starts the body of the function, so '" + labeled->label +
+                                   ":' is a label, and the function returns nothing");
   } else {
-    error(tok_.loc(), "expected '{' to start the function body");
-    fn->body = ctx_.make<BlockStmt>(tok_.loc());
+    // `x => value` returns the value.
+    llvm::SMLoc valueLoc = tok_.loc();
+    Expr *value = parseExpr();
+    fn->body = ctx_.make<BlockStmt>(valueLoc);
+    fn->body->body.push_back(ctx_.make<ReturnStmt>(valueLoc, value));
+    fn->concise = true;
   }
-  return fn;
+  fn->source = llvm::StringRef(start, static_cast<size_t>(prevEnd_ - start));
+  return ctx_.make<FunctionExpr>(loc, fn);
+}
+
+FunctionDecl *Parser::parseFunctionExprCopy() {
+  if (tok_.is(Tok::KwFunction))
+    return parseFunction(/*expression=*/true);
+  return parseArrow()->fn;
 }
 
 // Parses `let`/`const` declarators without the trailing semicolon, so that it
@@ -927,6 +1018,8 @@ TypeRef Parser::parseArrayType() {
 TypeRef Parser::parsePrimaryType() {
   TypeRef ref;
   ref.loc = tok_.loc();
+  if (tok_.is(Tok::LParen) && functionTypeAhead())
+    return parseFunctionType();
   if (accept(Tok::LParen)) {
     ref = parseType();
     expect(Tok::RParen, "to close the parenthesized type");
@@ -942,6 +1035,63 @@ TypeRef Parser::parsePrimaryType() {
     ref.kind = TypeRef::Kind::Generic;
     ref.args = parseTypeArgs();
   }
+  return ref;
+}
+
+// At `(`: a function type if a parameter list (names, optionally with `?`,
+// `...` and types) and `=>` follow; otherwise a parenthesized type.
+bool Parser::functionTypeAhead() {
+  Snapshot start = snapshot();
+  bool muted = diags_.setMuted(true);
+  recovering_ = false;
+  advance(); // '('
+  bool ok = true;
+  while (ok && !tok_.is(Tok::RParen)) {
+    accept(Tok::Ellipsis);
+    ok = accept(Tok::Identifier);
+    accept(Tok::Question);
+    if (ok && accept(Tok::Colon)) {
+      parseType();
+      ok = !recovering_;
+    }
+    if (ok && !accept(Tok::Comma))
+      break;
+  }
+  ok = ok && accept(Tok::RParen) && tok_.is(Tok::Arrow);
+  diags_.setMuted(muted);
+  rewind(std::move(start));
+  return ok;
+}
+
+TypeRef Parser::parseFunctionType() {
+  TypeRef ref;
+  ref.kind = TypeRef::Kind::Function;
+  ref.loc = tok_.loc();
+  advance(); // '('
+  while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
+    bool rest = accept(Tok::Ellipsis);
+    llvm::SMLoc loc = tok_.loc();
+    llvm::StringRef name = tok_.text;
+    if (!expect(Tok::Identifier, "for a parameter of the function type"))
+      return ref;
+    bool optional = accept(Tok::Question);
+    TypeRef param;
+    param.loc = loc;
+    if (accept(Tok::Colon))
+      param = parseType();
+    else
+      report(loc, "parameter '" + name + "' of the function type needs a type, e.g. '" + name + ": int'");
+    if (ref.rest)
+      report(loc, "a rest parameter must be the last parameter");
+    ref.args.push_back(std::move(param));
+    ref.optional.push_back(optional);
+    ref.rest |= rest;
+    if (!accept(Tok::Comma))
+      break;
+  }
+  expect(Tok::RParen, "to close the parameters of the function type");
+  expect(Tok::Arrow, "after the parameters of the function type");
+  ref.args.push_back(parseType());
   return ref;
 }
 
@@ -1179,13 +1329,21 @@ Expr *Parser::parsePrimary() {
     return ctx_.make<BoolLitExpr>(loc, value);
   }
   case Tok::Identifier: {
+    if (peek().is(Tok::Arrow) && !peek().newlineBefore)
+      return parseArrow(); // `x => ...`
     llvm::StringRef name = tok_.text;
     advance();
     if (name == "undefined")
       return ctx_.make<UndefinedExpr>(loc);
     return ctx_.make<NameExpr>(loc, name);
   }
+  case Tok::KwFunction: {
+    FunctionDecl *fn = parseFunction(/*expression=*/true);
+    return ctx_.make<FunctionExpr>(loc, fn);
+  }
   case Tok::LParen: {
+    if (arrowAhead())
+      return parseArrow();
     advance();
     Expr *inner = parseSequence();
     expect(Tok::RParen, "to close the parenthesized expression");

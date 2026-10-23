@@ -15,7 +15,7 @@ find_program(TZ_CLANG clang PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUI
 find_program(TZ_LLVM_LINK llvm-link PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 find_program(TZ_LLVM_LIB llvm-lib PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 
-set(sources alloc.c tzrt.c string.c array.c inspect.c number.c math.c unicode.c)
+set(sources alloc.c tzrt.c string.c array.c inspect.c number.c math.c unicode.c closure.c)
 set(flags -O2 -std=c17 -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS)
 if(WIN32)
   list(APPEND flags -fms-runtime-lib=static) # the static CRT, as tz links it

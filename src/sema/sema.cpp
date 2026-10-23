@@ -4,87 +4,89 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 
+#include <functional>
+
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
 
-namespace {
-
 // The names a statement mentions, to know which globals functions may use.
-void collectNames(const Expr *expr, llvm::StringSet<> &names);
-
-void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
+// With `inFunction` unset, only the names inside the functions it contains
+// count.
+void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
   if (!stmt)
     return;
+  auto expr = [&](const Expr *e) { collectNames(e, names, inFunction); };
+  auto sub = [&](const Stmt *s) { collectNames(s, names, inFunction); };
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
     for (const Stmt *s : cast<BlockStmt>(stmt)->body)
-      collectNames(s, names);
+      sub(s);
     break;
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls)
       if (d.init)
-        collectNames(d.init, names);
+        expr(d.init);
     break;
   case Stmt::Kind::Function: {
     auto *fn = cast<FunctionDecl>(stmt);
     for (const Param &param : fn->params)
       if (param.defaultValue)
-        collectNames(param.defaultValue, names);
-    collectNames(fn->body, names);
+        collectNames(param.defaultValue, names, true);
+    collectNames(fn->body, names, true);
     break;
   }
   case Stmt::Kind::Expr:
-    collectNames(cast<ExprStmt>(stmt)->expr, names);
+    expr(cast<ExprStmt>(stmt)->expr);
     break;
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    collectNames(s->cond, names);
-    collectNames(s->thenStmt, names);
-    collectNames(s->elseStmt, names);
+    expr(s->cond);
+    sub(s->thenStmt);
+    sub(s->elseStmt);
     break;
   }
   case Stmt::Kind::While:
-    collectNames(cast<WhileStmt>(stmt)->cond, names);
-    collectNames(cast<WhileStmt>(stmt)->body, names);
+    expr(cast<WhileStmt>(stmt)->cond);
+    sub(cast<WhileStmt>(stmt)->body);
     break;
   case Stmt::Kind::DoWhile:
-    collectNames(cast<DoWhileStmt>(stmt)->cond, names);
-    collectNames(cast<DoWhileStmt>(stmt)->body, names);
+    expr(cast<DoWhileStmt>(stmt)->cond);
+    sub(cast<DoWhileStmt>(stmt)->body);
     break;
   case Stmt::Kind::For: {
     auto *s = cast<ForStmt>(stmt);
-    collectNames(s->init, names);
+    sub(s->init);
     if (s->cond)
-      collectNames(s->cond, names);
+      expr(s->cond);
     if (s->step)
-      collectNames(s->step, names);
-    collectNames(s->body, names);
+      expr(s->step);
+    sub(s->body);
     break;
   }
   case Stmt::Kind::ForOf:
-    collectNames(cast<ForOfStmt>(stmt)->iterable, names);
-    collectNames(cast<ForOfStmt>(stmt)->body, names);
+    expr(cast<ForOfStmt>(stmt)->iterable);
+    sub(cast<ForOfStmt>(stmt)->body);
     break;
   case Stmt::Kind::Switch: {
     auto *s = cast<SwitchStmt>(stmt);
-    collectNames(s->discriminant, names);
+    expr(s->discriminant);
     for (const SwitchCase &c : s->cases) {
       if (c.test)
-        collectNames(c.test, names);
+        expr(c.test);
       for (const Stmt *body : c.body)
-        collectNames(body, names);
+        sub(body);
     }
     break;
   }
   case Stmt::Kind::Labeled:
-    collectNames(cast<LabeledStmt>(stmt)->body, names);
+    sub(cast<LabeledStmt>(stmt)->body);
     break;
   case Stmt::Kind::Return:
     if (const Expr *value = cast<ReturnStmt>(stmt)->value)
-      collectNames(value, names);
+      expr(value);
     break;
   case Stmt::Kind::Break:
   case Stmt::Kind::Continue:
@@ -95,96 +97,114 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names) {
   }
 }
 
-void collectNames(const Expr *expr, llvm::StringSet<> &names) {
+void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
+  auto sub = [&](const Expr *e) { collectNames(e, names, inFunction); };
   switch (expr->kind()) {
   case Expr::Kind::Name:
-    names.insert(cast<NameExpr>(expr)->name);
+    if (inFunction)
+      names.insert(cast<NameExpr>(expr)->name);
     break;
   case Expr::Kind::Template:
     for (const Expr *e : cast<TemplateExpr>(expr)->exprs)
-      collectNames(e, names);
+      sub(e);
     break;
   case Expr::Kind::ArrayLit:
     for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
-      collectNames(e.expr, names);
+      sub(e.expr);
     break;
   case Expr::Kind::Member:
-    collectNames(cast<MemberExpr>(expr)->object, names);
+    sub(cast<MemberExpr>(expr)->object);
     break;
   case Expr::Kind::Index:
-    collectNames(cast<IndexExpr>(expr)->object, names);
-    collectNames(cast<IndexExpr>(expr)->index, names);
+    sub(cast<IndexExpr>(expr)->object);
+    sub(cast<IndexExpr>(expr)->index);
     break;
   case Expr::Kind::Unary:
-    collectNames(cast<UnaryExpr>(expr)->operand, names);
+    sub(cast<UnaryExpr>(expr)->operand);
     break;
   case Expr::Kind::Binary:
-    collectNames(cast<BinaryExpr>(expr)->lhs, names);
-    collectNames(cast<BinaryExpr>(expr)->rhs, names);
+    sub(cast<BinaryExpr>(expr)->lhs);
+    sub(cast<BinaryExpr>(expr)->rhs);
     break;
   case Expr::Kind::Assign:
-    collectNames(cast<AssignExpr>(expr)->target, names);
-    collectNames(cast<AssignExpr>(expr)->value, names);
+    sub(cast<AssignExpr>(expr)->target);
+    sub(cast<AssignExpr>(expr)->value);
     break;
   case Expr::Kind::Update:
-    collectNames(cast<UpdateExpr>(expr)->target, names);
+    sub(cast<UpdateExpr>(expr)->target);
     break;
   case Expr::Kind::Call:
-    collectNames(cast<CallExpr>(expr)->callee, names);
+    sub(cast<CallExpr>(expr)->callee);
     for (const Expr *arg : cast<CallExpr>(expr)->args)
-      collectNames(arg, names);
+      sub(arg);
     break;
   case Expr::Kind::New:
     for (const Expr *arg : cast<NewExpr>(expr)->args)
-      collectNames(arg, names);
+      sub(arg);
     break;
   case Expr::Kind::Conditional:
-    collectNames(cast<ConditionalExpr>(expr)->cond, names);
-    collectNames(cast<ConditionalExpr>(expr)->thenExpr, names);
-    collectNames(cast<ConditionalExpr>(expr)->elseExpr, names);
+    sub(cast<ConditionalExpr>(expr)->cond);
+    sub(cast<ConditionalExpr>(expr)->thenExpr);
+    sub(cast<ConditionalExpr>(expr)->elseExpr);
     break;
   case Expr::Kind::Cast:
-    collectNames(cast<CastExpr>(expr)->operand, names);
+    sub(cast<CastExpr>(expr)->operand);
     break;
   case Expr::Kind::Sequence:
     for (const Expr *e : cast<SequenceExpr>(expr)->exprs)
-      collectNames(e, names);
+      sub(e);
     break;
   case Expr::Kind::OptionalChain:
-    collectNames(cast<OptionalChainExpr>(expr)->chain, names);
+    sub(cast<OptionalChainExpr>(expr)->chain);
+    break;
+  case Expr::Kind::Function:
+    collectNames(cast<FunctionExpr>(expr)->fn, names, true);
     break;
   default:
     break;
   }
 }
 
-} // namespace
-
 void Sema::check(SourceFile &file) {
+  file_ = &file;
   pushScope(); // functions and globals
   declareTypes(file.items);
 
   // Functions are visible in the whole file, as in JavaScript.
+  std::vector<FunctionDecl *> functions;
   for (Stmt *item : file.items)
-    if (auto *fn = dyn_cast<FunctionDecl>(item))
+    if (auto *fn = dyn_cast<FunctionDecl>(item)) {
       declareFunction(fn);
+      functions.push_back(fn);
+    }
+  findCycles(functions);
 
   // A global no function mentions cannot change during a call, and can live in
-  // main's stack frame.
+  // main's stack frame. That includes the arrows of top-level code.
   for (Stmt *item : file.items)
-    if (isa<FunctionDecl>(item))
-      collectNames(item, namesInFunctions_);
+    collectNames(item, namesInFunctions_, /*inFunction=*/isa<FunctionDecl>(item));
+
+  for (Stmt *item : file.items)
+    if (auto *decl = dyn_cast<VarDeclStmt>(item))
+      for (const VarDeclarator &d : decl->decls)
+        topLevelNames_.insert(d.name);
 
   // Top-level code runs in order; its `let` and `const` become globals.
   flow_ = Flow();
   for (Stmt *item : file.items)
     if (!isa<FunctionDecl>(item))
       checkStmt(item);
+  topLevelDone_ = true;
 
-  // Bodies come last so that functions can use globals declared after them.
-  // Nothing is known about the globals when a function starts.
+  // Bodies come last so that functions can use globals declared after them,
+  // except those whose return type top-level code needed first. Nothing is
+  // known about the globals when a function starts.
   for (Stmt *item : file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item)) {
+      if (!fn->sym->ret)
+        inferReturnType(fn->sym);
+      if (fn->checked)
+        continue;
       flow_ = Flow();
       checkFunctionBody(fn);
     }
@@ -196,6 +216,66 @@ void Sema::check(SourceFile &file) {
 //===----------------------------------------------------------------------===//
 // Scopes and types
 //===----------------------------------------------------------------------===//
+
+void Sema::findCycles(llvm::ArrayRef<FunctionDecl *> functions) {
+  // Tarjan's algorithm over the calls between functions without a return
+  // type. A name that only looks like such a call (a variable with the same
+  // name) costs a few more checks, nothing else.
+  std::vector<FunctionDecl *> nodes;
+  llvm::StringMap<size_t> byName;
+  for (FunctionDecl *fn : functions)
+    if (fn->sym && !fn->sym->ret) {
+      byName[fn->name] = nodes.size();
+      nodes.push_back(fn);
+    }
+  std::vector<std::vector<size_t>> calls(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    llvm::StringSet<> names;
+    for (const Param &param : nodes[i]->params)
+      if (param.defaultValue)
+        collectNames(param.defaultValue, names);
+    collectNames(nodes[i]->body, names);
+    for (const auto &name : names)
+      if (auto found = byName.find(name.getKey()); found != byName.end())
+        calls[i].push_back(found->second);
+  }
+
+  std::vector<int> index(nodes.size(), -1), low(nodes.size(), 0);
+  std::vector<bool> onStack(nodes.size(), false);
+  std::vector<size_t> stack;
+  int next = 0;
+  std::function<void(size_t)> visit = [&](size_t v) {
+    index[v] = low[v] = next++;
+    stack.push_back(v);
+    onStack[v] = true;
+    for (size_t w : calls[v]) {
+      if (index[w] < 0) {
+        visit(w);
+        low[v] = std::min(low[v], low[w]);
+      } else if (onStack[w]) {
+        low[v] = std::min(low[v], index[w]);
+      }
+    }
+    if (low[v] != index[v])
+      return;
+    std::vector<FuncSymbol *> cycle;
+    size_t w;
+    do {
+      w = stack.back();
+      stack.pop_back();
+      onStack[w] = false;
+      cycle.push_back(nodes[w]->sym);
+    } while (w != v);
+    if (cycle.size() == 1 && !llvm::is_contained(calls[v], v))
+      return; // not recursive
+    for (FuncSymbol *fn : cycle)
+      cycleOf_[fn] = static_cast<unsigned>(cycles_.size());
+    cycles_.push_back(std::move(cycle));
+  };
+  for (size_t v = 0; v < nodes.size(); ++v)
+    if (index[v] < 0)
+      visit(v);
+}
 
 void Sema::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
   if (name == "undefined") {
@@ -230,6 +310,8 @@ VarSymbol *Sema::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *t
   var->isConst = isConst;
   var->isGlobal = scopes_.size() == 1;
   var->usedInFunction = var->isGlobal && namesInFunctions_.contains(name);
+  var->owner = var->isGlobal ? nullptr : currentDecl();
+  var->declSeq = ++seq_;
   declare(name, loc, {var, nullptr});
   return var;
 }
@@ -316,6 +398,38 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
     }
     return withUndefined ? Type::optional(base) : base;
   }
+  case TypeRef::Kind::Function: {
+    // `(a: int, b?: int, ...rest: int[]) => T`
+    std::vector<const Type *> params;
+    size_t minArgs = 0;
+    bool optional = false, ok = true;
+    size_t count = ref.args.size() - 1;
+    for (size_t i = 0; i < count; ++i) {
+      const Type *type = resolveType(ref.args[i], /*allowVoid=*/false);
+      ok &= !type->isError();
+      bool rest = ref.rest && i + 1 == count;
+      if (rest) {
+        if (!type->isArray() && !type->isError()) {
+          diags_.error(ref.args[i].loc, "a rest parameter must be an array, e.g. '...xs: int[]'");
+          ok = false;
+        }
+      } else if (ref.optional[i]) {
+        type = Type::optional(type);
+        optional = true;
+      } else {
+        if (optional) {
+          diags_.error(ref.args[i].loc, "a required parameter cannot follow an optional one");
+          ok = false;
+        }
+        minArgs = i + 1;
+      }
+      params.push_back(type);
+    }
+    const Type *ret = resolveType(ref.args.back(), /*allowVoid=*/true);
+    if (!ok || ret->isError())
+      return Type::error();
+    return Type::function(params, minArgs, ref.rest, ret);
+  }
   }
   llvm_unreachable("unknown type reference");
 }
@@ -386,9 +500,18 @@ Expr *Sema::coerce(Expr *expr, const Type *to) {
     return expr;
   if (isImplicitlyConvertible(from, to))
     return convert(expr, to);
+  // A function named here can be given a type that takes more or fewer
+  // arguments.
+  const Type *function = to->isOptional() && to->inner()->isFunction() ? to->inner() : to;
+  if (from->isFunction() && function->isFunction())
+    if (Expr *adapted = adaptFunction(expr, function))
+      return function == to ? adapted : convert(adapted, to);
 
   std::string message =
       ("type '" + from->name() + "' is not assignable to type '" + to->name() + "'").str();
+  if (from->isFunction() && function->isFunction())
+    message += "; the types of functions must match exactly: wrap it in an arrow that converts "
+               "what it needs";
   if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
     message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
                "default with '??'";
@@ -417,7 +540,8 @@ const Type *Sema::comparisonType(const Type *a, const Type *b) {
   if (common && common->isError())
     return common;
   const Type *base = common ? common->nonOptional() : nullptr;
-  if (base && (base->isNumeric() || base->isBool() || base->isString() || base->isArray()))
+  if (base && (base->isNumeric() || base->isBool() || base->isString() || base->isArray() ||
+               base->isFunction()))
     return common;
   return nullptr;
 }
@@ -428,7 +552,7 @@ const Type *Sema::comparisonType(const Type *a, const Type *b) {
 
 // The type of a parameter without an annotation, from a default value that
 // is a literal, as `let x = 5` would give it; null for other values.
-static const Type *literalType(const Expr *value) {
+const Type *literalType(const Expr *value) {
   if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg)
     value = unary->operand;
   if (auto *lit = dyn_cast<IntLitExpr>(value))
@@ -444,7 +568,7 @@ static const Type *literalType(const Expr *value) {
   return nullptr;
 }
 
-void Sema::declareFunction(FunctionDecl *fn) {
+void Sema::declareFunction(FunctionDecl *fn, VarSymbol *var) {
   FuncSymbol *sym = ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
@@ -457,6 +581,13 @@ void Sema::declareFunction(FunctionDecl *fn) {
       type = resolveType(*param.type, /*allowVoid=*/false);
     } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
       // `function f(n = 10)`: n is an int.
+    } else if (param.defaultValue && !param.rest && !fn->source.empty()) {
+      // `function f(n = limit * 2)`: the type of the value, found when
+      // needed (see resolveParams).
+      param.declaredType = nullptr;
+      sym->params.push_back(nullptr);
+      sym->pendingParams = true;
+      continue;
     } else {
       diags_.error(param.loc, "parameter '" + param.name + "' needs a type annotation");
       type = Type::error();
@@ -486,22 +617,55 @@ void Sema::declareFunction(FunctionDecl *fn) {
     }
     afterOptional |= param.optional;
   }
-  // Unlike TypeScript, a missing return type means `void` rather than inferred.
-  sym->ret = fn->returnType ? resolveType(*fn->returnType, /*allowVoid=*/true) : Type::voidTy();
+  // Without an annotation: void if no `return` gives a value, else what the
+  // body returns, found when needed (see returnType).
+  if (fn->returnType)
+    sym->ret = resolveType(*fn->returnType, /*allowVoid=*/true);
+  else if (!returnsValue(fn->body))
+    sym->ret = Type::voidTy();
   fn->sym = sym;
   if (!fn->name.empty())
-    declare(fn->name, fn->loc(), {nullptr, sym});
+    declare(fn->name, fn->loc(), {var, sym});
 }
 
 void Sema::checkFunctionBody(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
+  resolveParams(sym);
+  fn->checked = true;
+  FuncSymbol *outer = currentFunction_;
   currentFunction_ = sym;
+  functions_.push_back(fn);
   pushScope();
-  for (Param &param : fn->params) {
+  for (size_t i = 0; i < fn->params.size(); ++i) {
     // A default value is computed at each call that leaves the parameter
     // out, where it sees the parameters before it.
+    Param &param = fn->params[i];
     const Type *type = param.declaredType;
+    if (param.defaultValue && type->isError() && !param.type) {
+      // Its type comes from it, and checking it failed (see resolveParams).
+      param.defaultValue->type = type;
+      param.sym = declareVar(param.name, param.loc, type, /*isConst=*/false);
+      continue;
+    }
     if (param.defaultValue) {
+      llvm::StringSet<> names;
+      collectNames(param.defaultValue, names);
+      bool forward = false;
+      for (size_t j = i; j < fn->params.size() && !forward; ++j)
+        if (names.contains(fn->params[j].name)) {
+          diags_.error(param.defaultValue->loc(), "the default value of '" + param.name + "' uses '" +
+                                                      fn->params[j].name +
+                                                      "', which is not set yet: a default value can "
+                                                      "use only the parameters before it");
+          forward = true;
+        }
+      if (forward) {
+        param.defaultValue->type = Type::error();
+        param.sym = declareVar(param.name, param.loc, type, /*isConst=*/false);
+        continue;
+      }
+      if (auto *fe = dyn_cast<FunctionExpr>(param.defaultValue); fe && fe->fn->name.empty())
+        fe->fn->name = param.name; // as JavaScript names it
       param.defaultValue = checkExpr(param.defaultValue, type->isError() ? nullptr : type);
       param.defaultValue = coerce(param.defaultValue, type);
     }
@@ -511,30 +675,25 @@ void Sema::checkFunctionBody(FunctionDecl *fn) {
       setDefined(param.sym, true);
   }
   // The parameters and the outermost block of the body share one scope.
-  declareTypes(fn->body->body);
-  for (Stmt *stmt : fn->body->body)
-    checkStmt(stmt);
+  checkStatements(fn->body);
   popScope();
-  currentFunction_ = nullptr;
+  functions_.pop_back();
+  currentFunction_ = outer;
 
   // As in TypeScript, a function that may return undefined may also just end.
   const Type *ret = sym->ret;
-  if (!ret->isVoid() && !ret->isError() && !ret->isOptional() && !alwaysReturns(fn->body))
-    diags_.error(fn->loc(), "function '" + fn->name + "' must return a value of type '" +
+  if (ret && !ret->isVoid() && !ret->isError() && !ret->isOptional() && !alwaysReturns(fn->body))
+    diags_.error(fn->loc(), functionLabel(fn->name) + " must return a value of type '" +
                                 ret->name() + "' on every path");
 }
 
 void Sema::checkStmt(Stmt *stmt) {
   switch (stmt->kind()) {
-  case Stmt::Kind::Block: {
-    auto *block = cast<BlockStmt>(stmt);
+  case Stmt::Kind::Block:
     pushScope();
-    declareTypes(block->body);
-    for (Stmt *s : block->body)
-      checkStmt(s);
+    checkStatements(cast<BlockStmt>(stmt));
     popScope();
     break;
-  }
   case Stmt::Kind::VarDecl:
     checkVarDecl(cast<VarDeclStmt>(stmt));
     break;
@@ -542,8 +701,11 @@ void Sema::checkStmt(Stmt *stmt) {
   case Stmt::Kind::Enum:
     break; // declared with the block (declareTypes)
   case Stmt::Kind::Function:
-    // check() handles top-level functions; this one is nested.
-    diags_.error(stmt->loc(), "functions can only be declared at the top level for now");
+    // check() handles top-level functions, and checkStatements those of a
+    // block.
+    if (!cast<FunctionDecl>(stmt)->group)
+      diags_.error(stmt->loc(), "a function can be declared only directly in a block; in a "
+                                "'switch', declare it before the 'switch'");
     break;
   case Stmt::Kind::Expr: {
     auto *s = cast<ExprStmt>(stmt);
@@ -704,6 +866,8 @@ void Sema::checkSwitch(SwitchStmt *stmt) {
                                         "' cannot be compared with a 'switch' value of type '" +
                                         type->name() + "'");
       } else if (!common->isError()) {
+        if (common->nonOptional()->isFunction())
+          file_->comparesFunctions = true;
         // A literal discriminant has nothing to learn about, and converting
         // it here would change its type.
         bool constant = isConstantTest(c.test) && !isConstantTest(stmt->discriminant);
@@ -864,7 +1028,8 @@ void Sema::checkLoopBody(Stmt *body) {
 // The body of `if`, `while` or `for`. As in TypeScript, a declaration there
 // needs braces: it would be visible nowhere else.
 void Sema::checkBody(Stmt *body) {
-  if (isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body)) {
+  if (isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
+      isa<FunctionDecl>(body)) {
     diags_.error(body->loc(), "a declaration cannot be the whole body here; wrap it in '{ }'");
     return;
   }
@@ -874,6 +1039,24 @@ void Sema::checkBody(Stmt *body) {
 void Sema::checkVarDecl(VarDeclStmt *decl) {
   for (VarDeclarator &d : decl->decls) {
     const Type *declared = d.typeAnn ? resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
+    if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init)) {
+      if (fe->fn->name.empty())
+        fe->fn->name = d.name; // as JavaScript names it
+      if (decl->isConst && !d.destructured) {
+        // The constant exists while its function is checked, so that the
+        // function can call itself through it.
+        VarSymbol *var = declareVar(d.name, d.loc, nullptr, /*isConst=*/true);
+        var->lambda = fe->fn;
+        d.sym = var;
+        const Type *function = declared && declared->nonOptional()->isFunction() ? declared->nonOptional() : nullptr;
+        Signature sig = function ? signatureOf(function) : Signature();
+        d.init = checkFunctionExpr(fe, function ? &sig : nullptr);
+        if (declared)
+          d.init = coerce(d.init, declared);
+        var->type = declared ? declared : d.init->type;
+        continue;
+      }
+    }
     const Type *type = declared;
     Expr *value = nullptr; // the initializer before its conversion
     if (d.init) {
@@ -934,21 +1117,28 @@ void Sema::checkReturn(ReturnStmt *ret) {
   }
 
   const FuncSymbol *fn = currentFunction_;
+  if (!fn->ret) {
+    // Its type comes from what its return statements give.
+    if (ret->value)
+      ret->value = checkExpr(ret->value);
+    returns_->push_back(ret);
+    return;
+  }
   if (!ret->value) {
     if (!fn->ret->isVoid() && !fn->ret->isError() && !fn->ret->isOptional())
-      diags_.error(ret->loc(), "function '" + fn->name + "' must return a value of type '" +
+      diags_.error(ret->loc(), functionLabel(fn->name) + " must return a value of type '" +
                                    fn->ret->name() + "'");
     return;
   }
 
   ret->value = checkExpr(ret->value, fn->ret->isVoid() ? nullptr : fn->ret);
   if (fn->ret->isVoid()) {
-    // `return f()` with a void `f` is fine, as in TypeScript.
+    // `return f()` with a void `f` is fine, as in TypeScript, and so is any
+    // value in a callback whose result is dropped.
     const Type *type = ret->value->type;
-    if (!type->isVoid() && !type->isError())
-      diags_.error(ret->value->loc(), "function '" + fn->name +
-                                          "' has no return type; declare one, e.g. '): " +
-                                          type->name() + "'");
+    if (!type->isVoid() && !type->isError() && !fn->discardsResult)
+      diags_.error(ret->value->loc(), functionLabel(fn->name) + " is declared to return 'void', "
+                                                               "but returns '" + type->name() + "'");
     return;
   }
   ret->value = coerce(ret->value, fn->ret);
@@ -1174,6 +1364,13 @@ bool Sema::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> label
 //===----------------------------------------------------------------------===//
 
 Expr *Sema::checkExpr(Expr *expr, const Type *expected, bool wraps) {
+  // A built-in such as Math.sqrt where a function is expected.
+  if (expected && (isa<NameExpr>(expr) || isa<MemberExpr>(expr)))
+    if (const Type *function = expected->nonOptional(); function->isFunction()) {
+      Signature sig = signatureOf(function);
+      if (FunctionExpr *wrapper = builtinFunctionValue(expr, sig, unsigned(sig.params.size()), {}))
+        return checkFunctionExpr(wrapper, &sig);
+    }
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
     return checkIntLit(cast<IntLitExpr>(expr), expected, /*negated=*/false);
@@ -1219,6 +1416,15 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected, bool wraps) {
     return checkSequence(cast<SequenceExpr>(expr), expected, wraps);
   case Expr::Kind::OptionalChain:
     return checkOptionalChain(cast<OptionalChainExpr>(expr));
+  case Expr::Kind::Function: {
+    // Where a function type is expected, the parameters take its types.
+    const Type *function = expected ? expected->nonOptional() : nullptr;
+    if (function && function->isFunction()) {
+      Signature sig = signatureOf(function);
+      return checkFunctionExpr(cast<FunctionExpr>(expr), &sig);
+    }
+    return checkFunctionExpr(cast<FunctionExpr>(expr), nullptr);
+  }
   }
   llvm_unreachable("unknown expression kind");
 }
@@ -1285,11 +1491,25 @@ Expr *Sema::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
   return lit;
 }
 
+const Type *Sema::varType(VarSymbol *var) {
+  if (var->type)
+    return var->type;
+  // A function's variable, while its type is being worked out.
+  FunctionDecl *fn = var->function ? var->function : var->lambda;
+  if (!fn || !fn->sym)
+    return Type::error();
+  const Type *type = functionType(fn->sym);
+  if (var->function && fn->sym->ret)
+    var->type = type;
+  return type;
+}
+
 Expr *Sema::checkName(NameExpr *name) {
   ScopeEntry entry = lookup(name->name);
   if (entry.var) {
     name->var = entry.var;
-    name->type = entry.var->type;
+    noteUse(entry.var, name->loc());
+    name->type = varType(entry.var);
     checkVisible(name, entry.var);
     // Narrowed: known to hold a value here.
     if (name->type->isOptional() && isDefined(entry.var))
@@ -1299,11 +1519,35 @@ Expr *Sema::checkName(NameExpr *name) {
   if (!entry.func && !entry.enumDecl)
     if (Expr *constant = globalConstant("", name->name, name->loc()))
       return constant;
-  if (entry.func)
-    diags_.error(name->loc(), "functions cannot be used as values yet");
+  if (entry.func) {
+    // A top-level function as a value.
+    name->func = entry.func;
+    name->type = functionType(entry.func);
+    return name;
+  }
+  static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat", "isNaN",
+                                                 "isFinite"};
+  if (name->name == "this")
+    diags_.error(name->loc(), "'this' exists only in the methods of classes, which are not supported yet");
+  else if (llvm::is_contained(builtins, name->name))
+    diags_.error(name->loc(), "'" + name->name + "' can be used as a value only where a function type "
+                                                 "is expected, e.g. 'const f: (s: string) => double = " +
+                                  name->name + "'");
+  else if (name->name == "arguments")
+    diags_.error(name->loc(), "'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'");
   else if (entry.enumDecl)
     diags_.error(name->loc(), "enum '" + name->name + "' can only be used as '" + name->name +
                                   ".Member' or '" + name->name + "[value]'");
+  else if (early_ && (topLevelNames_.contains(name->name) || declaredLater(name->name)))
+    diags_.error(name->loc(), "'" + name->name + "' is declared after the code that first calls '" +
+                                  early_->name + "', which needs to know what '" + early_->name +
+                                  "' returns; move the declaration up, or declare the return type");
+  else if (const BlockNames *later = declaredLater(name->name); later && functions_.size() > later->functions)
+    diags_.error(name->loc(), "'" + name->name + "' is declared later in the block, after this function "
+                                                 "is created; move the declaration up, or declare the "
+                                                 "function with 'function', which can use it");
+  else if (later)
+    diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
   else
     diags_.error(name->loc(), "cannot find name '" + name->name + "'");
   name->type = Type::error();
@@ -1544,6 +1788,8 @@ Expr *Sema::checkEquality(BinaryExpr *bin) {
     reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     return bin;
   }
+  if (common->nonOptional()->isFunction())
+    file_->comparesFunctions = true;
   bin->lhs = convert(bin->lhs, common);
   bin->rhs = convert(bin->rhs, common);
   return bin;
@@ -1560,8 +1806,11 @@ Expr *Sema::checkNullish(BinaryExpr *bin, const Type *expected) {
   flow_ = join(afterLhs, flow_); // the right side may not run
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
-  if (l->isError() || r->isError())
+  if (l->isError() || r->isError()) {
+    if (trial_ && l->isError() != r->isError()) // as in checkConditional
+      bin->type = l->isError() ? r : l->nonOptional();
     return bin;
+  }
   if (l->isVoid() || r->isVoid()) {
     reportOperandTypes(bin->loc(), "??", l, r);
     return bin;
@@ -1644,10 +1893,13 @@ VarSymbol *Sema::checkVarTarget(NameExpr *name) {
     return nullptr;
   }
   name->var = entry.var;
-  name->type = entry.var->type;
+  name->type = varType(entry.var);
   checkVisible(name, entry.var);
   if (entry.var->isConst)
-    diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a constant");
+    diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a " +
+                                  (entry.var->function ? "function" : "constant"));
+  entry.var->reassigned = true;
+  noteUse(entry.var, name->loc());
   return entry.var;
 }
 
@@ -1709,6 +1961,8 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
   }
 
   if (!compound) {
+    if (auto *fe = dyn_cast<FunctionExpr>(assign->value); fe && name && fe->fn->name.empty())
+      fe->fn->name = name->name; // as JavaScript names it
     Expr *value = checkExpr(assign->value, type->isError() ? nullptr : type);
     assign->value = coerce(value, type);
     if (var)
@@ -1845,13 +2099,7 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
       arg = checkExpr(arg);
   };
 
-  if (call->optional) {
-    diags_.error(call->loc(), "'?.()' calls a function value, and functions cannot be values yet");
-    checkArgsLoosely();
-    return call;
-  }
-
-  if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
+  if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !call->optional) {
     if (isGlobalName(member->object, "console")) {
       if (rejectSpread(call))
         return call;
@@ -1891,6 +2139,11 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
     if (receiver->isOptional())
       diags_.error(member->object->loc(), "the value may be undefined; check it before calling '" +
                                               member->name + "'");
+    else if (receiver->isFunction() &&
+             (member->name == "call" || member->name == "apply" || member->name == "bind"))
+      diags_.error(member->loc(), "'" + member->name + "' is not supported yet: it sets 'this', "
+                                                         "which exists only in classes; call the "
+                                                         "function directly");
     else if (!receiver->isError())
       diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
                                       receiver->name() + "'");
@@ -1898,45 +2151,77 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
     return call;
   }
 
-  auto *name = dyn_cast<NameExpr>(call->callee);
-  if (!name) {
-    diags_.error(call->callee->loc(), "only functions can be called, by name, for now");
-    checkArgsLoosely();
-    return call;
+  if (auto *name = dyn_cast<NameExpr>(call->callee); name && !call->optional) {
+    if (Expr *builtin = checkGlobalCall(call, name, expected))
+      return builtin;
+    ScopeEntry entry = lookup(name->name);
+    if (entry.func && !entry.var)
+      return checkDirectCall(call, entry.func, name->loc()); // a top-level function
+    // A function declared in a block, or a constant arrow: called directly,
+    // with the environment its variable holds.
+    VarSymbol *var = entry.var;
+    FunctionDecl *known = var ? (var->function ? var->function : var->isConst ? var->lambda : nullptr) : nullptr;
+    if (known && known->sym) {
+      name->var = var;
+      noteUse(var, name->loc());
+      name->type = varType(var);
+      return checkDirectCall(call, known->sym, name->loc());
+    }
+    if (!entry.var && !entry.func) {
+      if (!checkName(name)->type->isError()) // NaN, Infinity
+        diags_.error(name->loc(), "'" + name->name + "' is not a function");
+      checkArgsLoosely();
+      return call;
+    }
   }
 
-  if (Expr *builtin = checkGlobalCall(call, name, expected))
-    return builtin;
-  return checkUserCall(call, name);
+  // A call through a function value: `f(x)` with a variable f, `fs[i](x)`,
+  // `make()(x)`, `f?.(x)`.
+  auto *calleeName = dyn_cast<NameExpr>(call->callee);
+  call->callee = checkExpr(call->callee);
+  if (call->optional)
+    call->callee = chainLink(call->callee);
+  const Type *type = call->callee->type;
+  if (type->isFunction())
+    return checkValueCall(call, type);
+  if (type->isOptional() && type->inner()->isFunction())
+    diags_.error(call->callee->loc(), "the function may be undefined; check it first, or call it with "
+                                      "'?.()', which gives undefined then");
+  else if (calleeName && !type->isError())
+    diags_.error(call->callee->loc(), "'" + calleeName->name + "' is not a function; it has type '" +
+                                          type->name() + "'");
+  else if (!type->isError())
+    diags_.error(call->callee->loc(), "a value of type '" + type->name() + "' cannot be called");
+  checkArgsLoosely();
+  return call;
 }
 
-Expr *Sema::checkUserCall(CallExpr *call, NameExpr *name) {
-  ScopeEntry entry = lookup(name->name);
-  if (!entry.func) {
-    if (entry.var)
-      diags_.error(name->loc(), "'" + name->name + "' is not a function");
-    else
-      diags_.error(name->loc(), "cannot find name '" + name->name + "'");
-    for (Expr *&arg : call->args)
-      arg = checkExpr(arg);
-    return call;
-  }
-
-  FuncSymbol *func = entry.func;
+Expr *Sema::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc loc) {
+  resolveParams(func);
   call->func = func;
-  call->type = func->ret;
-  size_t fixed = func->params.size() - (func->hasRest ? 1 : 0);
-  for (size_t i = 0; i < call->args.size() && i < (func->hasRest ? fixed : call->args.size()); ++i)
+  call->type = returnType(func);
+  return checkArguments(call, func->params, func->minArgs, func->hasRest, loc);
+}
+
+Expr *Sema::checkValueCall(CallExpr *call, const Type *type) {
+  call->type = type->ret();
+  return checkArguments(call, type->params(), type->minArgs(), type->hasRest(), call->callee->loc());
+}
+
+Expr *Sema::checkArguments(CallExpr *call, llvm::ArrayRef<const Type *> params, size_t minArgs,
+                           bool hasRest, llvm::SMLoc loc) {
+  size_t fixed = params.size() - (hasRest ? 1 : 0);
+  for (size_t i = 0; i < call->args.size() && i < (hasRest ? fixed : call->args.size()); ++i)
     if (call->spreads(i) && rejectSpread(call))
       return call;
-  if (!checkArity(call, name->loc(), static_cast<unsigned>(func->minArgs),
-                  func->hasRest ? ~0u : static_cast<unsigned>(func->params.size())))
+  if (!checkArity(call, loc, static_cast<unsigned>(minArgs),
+                  hasRest ? ~0u : static_cast<unsigned>(params.size())))
     return call;
-  if (func->hasRest) {
+  if (hasRest) {
     // The arguments for the rest parameter become one array, as `f(1, ...a)`
     // passes `[1, ...a]`.
-    llvm::SMLoc loc = call->args.size() > fixed ? call->args[fixed]->loc() : call->loc();
-    auto *rest = ctx_.make<ArrayLitExpr>(loc);
+    llvm::SMLoc restLoc = call->args.size() > fixed ? call->args[fixed]->loc() : call->loc();
+    auto *rest = ctx_.make<ArrayLitExpr>(restLoc);
     for (size_t i = fixed; i < call->args.size(); ++i)
       rest->elements.push_back({call->args[i], call->spreads(i)});
     call->args.resize(std::min(call->args.size(), fixed));
@@ -1947,7 +2232,7 @@ Expr *Sema::checkUserCall(CallExpr *call, NameExpr *name) {
   }
   // Parameters left out get undefined, and with it their default values.
   for (size_t i = 0; i < call->args.size(); ++i)
-    call->args[i] = checkArg(call->args[i], func->params[i]);
+    call->args[i] = checkArg(call->args[i], params[i]);
   calledFunction();
   return call;
 }
@@ -2007,6 +2292,12 @@ Expr *Sema::toStringOperand(Expr *expr) {
     diags_.error(expr->loc(), "an expression of type 'void' cannot be converted to a string");
     return expr;
   }
+  if (holdsFunctions(type)) {
+    // JavaScript would give the source code of the function.
+    diags_.error(expr->loc(), "a function cannot be converted to a string; print it with "
+                              "console.log, or use its name");
+    return expr;
+  }
   // Numbers, booleans, undefined, arrays (joined with commas) and optionals of
   // those convert as in JavaScript.
   return convert(expr, Type::string());
@@ -2032,7 +2323,9 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
     if (isGlobalName(member->object, global)) {
       if (Expr *constant = globalConstant(global, member->name, member->loc()))
         return constant;
-      diags_.error(member->loc(), "'" + global + "." + member->name + "' can only be called");
+      diags_.error(member->loc(), "'" + global + "." + member->name +
+                                      "' can be used as a value only where a function type is "
+                                      "expected, e.g. as a callback");
       return member;
     }
   }
@@ -2114,8 +2407,13 @@ Expr *Sema::checkConditional(ConditionalExpr *cond, const Type *expected) {
 
   const Type *a = cond->thenExpr->type, *b = cond->elseExpr->type;
   cond->type = Type::error();
-  if (a->isError() || b->isError())
+  if (a->isError() || b->isError()) {
+    // A call in a cycle may have no type yet (see inferCycle): the other
+    // branch tells.
+    if (trial_ && a->isError() != b->isError())
+      cond->type = a->isError() ? b : a;
     return cond;
+  }
   if (a->isVoid() && b->isVoid()) {
     cond->type = a;
     return cond;

@@ -128,8 +128,117 @@ private:
   void reportOverflow(const Expr *expr, const Type *type, const std::string &value, int64_t wrapped,
                       bool wraps);
 
+  // Return types inferred from function bodies (sema_infer.cpp). A function
+  // without a return type annotation returns what its `return` statements
+  // give; Sema finds that the first time it needs it.
+  const Type *returnType(FuncSymbol *fn);
+  // The type of the function as a value.
+  const Type *functionType(FuncSymbol *fn);
+  void inferReturnType(FuncSymbol *fn);
+  void resolveParams(FuncSymbol *fn);
+  // Checks the body of a function without a return type and sets the type
+  // from its returns.
+  void checkAndInfer(FunctionDecl *decl);
+  // Functions that call each other, directly or not, depend on each other's
+  // types: their bodies are checked on copies until the types settle.
+  void inferCycle(llvm::ArrayRef<FuncSymbol *> cycle);
+  // Finds those cycles among the functions without a return type.
+  void findCycles(llvm::ArrayRef<FunctionDecl *> functions);
+  // The type of the values `returns` give, with undefined if the function
+  // may also end without a value; null if none has a type (yet).
+  const Type *unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns, bool fallsOff,
+                           bool report);
+  FunctionDecl *freshCopy(const FunctionDecl *fn);
+  static bool returnsValue(const Stmt *stmt);
+  // The variables the blocks being checked declare, for messages about
+  // using one before its declaration.
+  struct BlockNames {
+    size_t functions; // functions_.size() in the block
+    std::vector<llvm::StringRef> names;
+  };
+  // What checking a function body may change, so that one body can be
+  // checked in the middle of another.
+  struct BodyState {
+    Flow flow;
+    std::vector<llvm::StringMap<ScopeEntry>> scopes;
+    std::vector<llvm::StringMap<Stmt *>> typeScopes;
+    std::vector<FunctionDecl *> functions;
+    std::vector<NestedGroup *> groups;
+    std::vector<BlockNames> blockNames;
+    FuncSymbol *function = nullptr;
+    std::vector<JumpTarget> targets;
+    llvm::SmallVector<llvm::StringRef, 1> pendingLabels;
+    llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars;
+    bool chainShortCircuits = false;
+    std::vector<ReturnStmt *> *returns = nullptr;
+    bool trial = false;
+    const FuncSymbol *early = nullptr;
+  };
+  // Saves the state and starts a fresh one for checking the body of `fn`:
+  // only globals are visible to a top-level function, and to a closure what
+  // is visible where it is declared.
+  BodyState enterBody(const FunctionDecl *fn);
+  void leaveBody(BodyState &saved);
+
+  // Closures (sema_closure.cpp): arrows, function expressions and functions
+  // declared inside blocks, the variables they capture, calls through
+  // function values, and the array methods that take callbacks.
+  //
+  // What a function is expected to be where it is written: the arguments it
+  // will get, and the result wanted (null: whatever the body returns). With
+  // `pad`, it takes all of params even if it names fewer, so that its type is
+  // the one expected; a callback of a built-in method takes just the
+  // parameters it names.
+  struct Signature {
+    std::vector<const Type *> params;
+    size_t minArgs = 0;
+    const Type *ret = nullptr;
+    bool voidResult = false; // what it returns is dropped (forEach)
+    bool pad = true;
+  };
+  static Signature signatureOf(const Type *fnType);
+  // `self`: the constant the function is assigned to (`const f = () => ...`),
+  // through which it calls itself.
+  Expr *checkFunctionExpr(FunctionExpr *fe, const Signature *expected);
+  void checkClosureBody(FunctionDecl *fn);
+  // `function f() {}` as an expression: f is visible in its body, in a scope
+  // of its own.
+  void declareOwnName(FunctionDecl *fn);
+  // The statements of a block, with the functions it declares.
+  void checkStatements(BlockStmt *block);
+  NestedGroup *declareNested(BlockStmt *block);
+  void finishGroup(NestedGroup *group);
+  FunctionDecl *currentDecl() const { return functions_.empty() ? nullptr : functions_.back(); }
+  // A use of a variable: the functions between its owner and here capture it.
+  void noteUse(VarSymbol *var, llvm::SMLoc loc);
+  Expr *checkValueCall(CallExpr *call, const Type *fnType);
+  // An argument where a function of the signature is expected. `primary` is
+  // the number of arguments a built-in callback is meant to use; a function
+  // passed by name must not take the others (the index, the array) into
+  // optional parameters, as parseInt would take the index as its radix.
+  Expr *checkFunctionArg(Expr *arg, const Signature &expected, unsigned primary, llvm::StringRef method);
+  // A built-in such as Math.sqrt or parseInt where a function is expected:
+  // an arrow calling it, or null if `arg` names none.
+  FunctionExpr *builtinFunctionValue(Expr *arg, const Signature &expected, unsigned primary,
+                                      llvm::StringRef method);
+  Expr *checkCallbackMethod(CallExpr *call, MemberExpr *member);
+  // A function known by name (a declaration or a constant arrow) where a
+  // function type that passes more or fewer arguments, or drops the result,
+  // is expected: a conversion that CodeGen turns into a small adapter. Null
+  // if that type does not fit.
+  Expr *adaptFunction(Expr *expr, const Type *to);
+  // The function a name refers to directly, if any.
+  FunctionDecl *namedFunction(const Expr *expr) const;
+  // A function, or an array or optional of them.
+  static bool holdsFunctions(const Type *type) {
+    while (type->isOptional() || type->isArray())
+      type = type->inner();
+    return type->isFunction();
+  }
+
   // Declarations and statements
-  void declareFunction(FunctionDecl *fn);
+  // `var` is the variable of a function declared in a block.
+  void declareFunction(FunctionDecl *fn, VarSymbol *var = nullptr);
   void checkFunctionBody(FunctionDecl *fn);
   void checkStmt(Stmt *stmt);
   void checkVarDecl(VarDeclStmt *decl);
@@ -158,6 +267,7 @@ private:
   Expr *checkExpr(Expr *expr, const Type *expected = nullptr, bool wraps = false);
   Expr *checkIntLit(IntLitExpr *lit, const Type *expected, bool negated);
   Expr *checkName(NameExpr *name);
+  const Type *varType(VarSymbol *var);
   // Reports a use of a variable declared by an earlier case of a switch.
   void checkVisible(NameExpr *name, const VarSymbol *var);
   Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
@@ -174,7 +284,11 @@ private:
   // undefined (see OptionalChainExpr).
   Expr *chainLink(Expr *object);
   Expr *checkCall(CallExpr *call, const Type *expected);
-  Expr *checkUserCall(CallExpr *call, NameExpr *name);
+  // A call to a function known by name; `loc` is where to report the
+  // arguments.
+  Expr *checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc loc);
+  Expr *checkArguments(CallExpr *call, llvm::ArrayRef<const Type *> params, size_t minArgs, bool hasRest,
+                       llvm::SMLoc loc);
   Expr *checkConsoleLog(CallExpr *call);
   // String(x), Number(x), parseInt... (sema_builtins.cpp); null if `name` is
   // not one of them.
@@ -261,9 +375,11 @@ private:
   void assigned(const VarSymbol *var, const Expr *value);
   // Records `var += delta`, where delta is a constant.
   void incremented(const VarSymbol *var, int64_t delta);
-  // A call to a user function may change globals and the length of any array.
+  // A call to a user function may change globals, the length of any array,
+  // and variables that closures assign to.
   void calledFunction();
-  static void forgetCallEffects(Flow &flow);
+  void forgetCallEffects(Flow &flow) const;
+  bool changedByCalls(const VarSymbol *var) const;
   // Arrays of type `type` (any of which may be the one changed) may have
   // grown or shrunk; `except` is an array whose facts were already updated.
   void arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except = nullptr);
@@ -299,14 +415,54 @@ private:
   llvm::StringSet<> namesInFunctions_;
   // Some link of the optional chain being checked may end it.
   bool chainShortCircuits_ = false;
+  // Inferring the return type of currentFunction_: its return statements.
+  std::vector<ReturnStmt *> *returns_ = nullptr;
+  // Checking a copy of a function of a cycle (see inferCycle): a call within
+  // the cycle may not have a type yet.
+  bool trial_ = false;
+  // Top-level code is still being checked; then a function inferred early,
+  // because top-level code calls it, cannot see the globals declared later.
+  bool topLevelDone_ = false;
+  const FuncSymbol *early_ = nullptr;
+  llvm::StringSet<> topLevelNames_;
+  std::vector<std::vector<FuncSymbol *>> cycles_;
+  llvm::DenseMap<const FuncSymbol *, unsigned> cycleOf_;
   // The values of the integer constants computed so far: operator expressions
   // and `const` variables. In a `wraps` context a value may exceed its type
   // (see foldBinary).
   llvm::DenseMap<const Expr *, int64_t> constants_;
   llvm::DenseMap<const VarSymbol *, int64_t> constVars_;
+  // The functions being checked, innermost last; empty in main's code.
+  std::vector<FunctionDecl *> functions_;
+  // The groups of the blocks being checked: the names their functions
+  // assign, which a call may change.
+  std::vector<NestedGroup *> groups_;
+  unsigned seq_ = 0; // see VarSymbol::declSeq
+  SourceFile *file_ = nullptr;
+  std::vector<BlockNames> blockNames_;
+  const BlockNames *declaredLater(llvm::StringRef name) const {
+    for (const BlockNames &block : llvm::reverse(blockNames_))
+      if (llvm::is_contained(block.names, name))
+        return &block;
+    return nullptr;
+  }
 };
 
 // "2 arguments", "1-3 arguments", "1 or more arguments".
 std::string argumentCount(unsigned min, unsigned max);
+
+// A function in messages: "'f'" and "function 'f'", or "the function" for an
+// arrow without a name.
+inline std::string quotedName(llvm::StringRef name) {
+  return name.empty() ? "the function" : "'" + name.str() + "'";
+}
+inline std::string functionLabel(llvm::StringRef name) {
+  return name.empty() ? "the function" : "function '" + name.str() + "'";
+}
+
+// The names a statement or an expression mentions. With `inFunction` unset,
+// only those inside the functions it contains.
+void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction = true);
+void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction = true);
 
 } // namespace tz

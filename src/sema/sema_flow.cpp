@@ -56,17 +56,21 @@ void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
 
 bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional()->isArray(); }
 
-// Whether a call to a user function may change the value of `t`: a global
-// variable, or the length of any array (arrays are shared by reference).
-bool changedByCalls(const Term &t) {
-  if (!t.var)
-    return false;
-  if (isArrayLength(t))
-    return true;
-  return t.var->usedInFunction && !t.var->isConst;
-}
-
 } // namespace
+
+// Whether a call to a user function may change the value of `var`: a global
+// some function uses, a variable a closure uses (the closures checked so far
+// mark it captured), or one that a function declared in a block around here
+// assigns to (their bodies are checked at the end of the block).
+bool Sema::changedByCalls(const VarSymbol *var) const {
+  if (var->isConst)
+    return false;
+  if (var->isGlobal)
+    return var->usedInFunction;
+  if (var->captured)
+    return true;
+  return llvm::any_of(groups_, [&](const NestedGroup *g) { return llvm::is_contained(g->assignedNames, var->name); });
+}
 
 Sema::Flow Sema::join(const Flow &a, const Flow &b) {
   if (a.unreachable)
@@ -358,11 +362,12 @@ void Sema::incremented(const VarSymbol *var, int64_t delta) {
     flow_.facts.forget(var);
 }
 
-void Sema::forgetCallEffects(Flow &flow) {
-  flow.facts.forgetIf(
-      [](const Facts::Fact &f) { return changedByCalls(f.lhs) || changedByCalls(f.rhs); });
+void Sema::forgetCallEffects(Flow &flow) const {
+  // The length of any array may change too: arrays are shared by reference.
+  auto changed = [&](const Term &t) { return t.var && (isArrayLength(t) || changedByCalls(t.var)); };
+  flow.facts.forgetIf([&](const Facts::Fact &f) { return changed(f.lhs) || changed(f.rhs); });
   for (const VarSymbol *var : llvm::to_vector(flow.defined))
-    if (var->usedInFunction && !var->isConst)
+    if (changedByCalls(var))
       flow.defined.erase(var);
 }
 
@@ -408,6 +413,10 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
         scanExpr(d.init, scan, depth);
     break;
   case Stmt::Kind::Function:
+    // What a function declared in the loop assigns to may change in the
+    // loop, when it is called.
+    scanStmt(cast<FunctionDecl>(stmt)->body, scan, depth + 1);
+    break;
   case Stmt::Kind::Continue:
   case Stmt::Kind::Empty:
     break;
@@ -597,6 +606,12 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
         scan.growsArrays = scan.shrinksArrays = scan.releasesElements = true;
       else if (method == "fill")
         scan.releasesElements = true;
+      // The methods that call back.
+      static const char *const callbacks[] = {
+          "map",  "filter", "forEach", "reduce",  "reduceRight", "find",          "findIndex",
+          "some", "every",  "flatMap", "findLast", "findLastIndex", "sort"};
+      if (llvm::is_contained(callbacks, method) && !call->args.empty())
+        scan.callsFunctions = true;
     } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
                  return isGlobalName(call->callee, name);
                })) {
@@ -624,6 +639,10 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
     break;
   case Expr::Kind::OptionalChain:
     scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
+    break;
+  case Expr::Kind::Function:
+    // The same for an arrow created in the loop.
+    scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
     break;
   }
 }

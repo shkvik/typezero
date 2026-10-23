@@ -37,3 +37,5 @@ const [...all = []] = [1, 2]
   // expect-error: 'export' is allowed only at the top level
   export const inner = 1
 }
+// expect-error: '{' after '=>' starts the body of the function, so 'a:' is a label, and the function returns nothing
+const object = () => { a: 1 }

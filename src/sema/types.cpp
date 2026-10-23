@@ -4,7 +4,9 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 
+#include <map>
 #include <memory>
+#include <tuple>
 
 namespace tz {
 
@@ -12,6 +14,7 @@ bool Type::isManaged() const {
   switch (kind_) {
   case Kind::String:
   case Kind::Array:
+  case Kind::Function: // its environment
     return true;
   case Kind::Optional:
     return inner_->isManaged();
@@ -47,6 +50,8 @@ namespace {
 // Composite types, created on first use and kept for the whole compilation.
 struct Interned {
   llvm::DenseMap<const Type *, std::unique_ptr<Type>> optionals, arrays;
+  using FunctionKey = std::tuple<std::vector<const Type *>, size_t, bool, const Type *>;
+  std::map<FunctionKey, std::unique_ptr<Type>> functions;
 };
 
 Interned &interned() {
@@ -60,8 +65,10 @@ const Type *Type::optional(const Type *type) {
   if (type->isError() || type->isUndefined() || type->isOptional())
     return type;
   std::unique_ptr<Type> &slot = interned().optionals[type];
-  if (!slot)
-    slot.reset(new Type(Kind::Optional, type->name().str() + " | undefined", type));
+  if (!slot) {
+    std::string name = type->isFunction() ? "(" + type->name().str() + ")" : type->name().str();
+    slot.reset(new Type(Kind::Optional, name + " | undefined", type));
+  }
   return slot.get();
 }
 
@@ -70,9 +77,42 @@ const Type *Type::array(const Type *element) {
     return element;
   std::unique_ptr<Type> &slot = interned().arrays[element];
   if (!slot) {
-    std::string name = element->isOptional() ? "(" + element->name().str() + ")[]"
-                                             : element->name().str() + "[]";
+    std::string name = element->isOptional() || element->isFunction()
+                           ? "(" + element->name().str() + ")[]"
+                           : element->name().str() + "[]";
     slot.reset(new Type(Kind::Array, std::move(name), element));
+  }
+  return slot.get();
+}
+
+// `(int, string?) => double`: a parameter that may be left out shows its value
+// type with `?`.
+const Type *Type::function(llvm::ArrayRef<const Type *> params, size_t minArgs, bool hasRest,
+                           const Type *ret) {
+  for (const Type *t : params)
+    if (t->isError())
+      return t;
+  if (ret->isError())
+    return ret;
+  Interned::FunctionKey key{std::vector<const Type *>(params.begin(), params.end()), minArgs, hasRest, ret};
+  std::unique_ptr<Type> &slot = interned().functions[key];
+  if (!slot) {
+    std::string name = "(";
+    for (size_t i = 0; i < params.size(); ++i) {
+      if (i > 0)
+        name += ", ";
+      if (hasRest && i + 1 == params.size())
+        name += "..." + params[i]->name().str();
+      else if (i >= minArgs && params[i]->isOptional())
+        name += params[i]->inner()->name().str() + "?";
+      else
+        name += params[i]->name().str();
+    }
+    name += ") => " + ret->name().str();
+    slot.reset(new Type(Kind::Function, std::move(name), ret));
+    slot->params_.assign(params.begin(), params.end());
+    slot->minArgs_ = minArgs;
+    slot->hasRest_ = hasRest;
   }
   return slot.get();
 }
@@ -85,6 +125,7 @@ const char *typeOfName(const Type *type) {
   case Type::Kind::String: return "string";
   case Type::Kind::Bool: return "boolean";
   case Type::Kind::Array: return "object";
+  case Type::Kind::Function: return "function";
   case Type::Kind::Optional: return typeOfName(type->inner());
   default: return "undefined";
   }

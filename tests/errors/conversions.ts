@@ -30,7 +30,7 @@ const m = d >>> 0
 const n = Math.floor(d, 2)
 // expect-error: property 'sqrtt' does not exist on 'Math'
 const p = Math.sqrtt(d)
-// expect-error: 'Math.floor' can only be called
+// expect-error: 'Math.floor' can be used as a value only where a function type is expected
 const q = Math.floor
 // expect-error: argument of type 'string' is not assignable to parameter of type 'double'
 const r = Math.round("1.5")

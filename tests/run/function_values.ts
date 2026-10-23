@@ -1,0 +1,47 @@
+// same-as-node
+// Closures inside recursive functions whose return types are inferred.
+function f(n: int) {
+  const g = (x: int) => x + 1
+  return n === 0 ? 0 : g(f(n - 1))
+}
+console.log(f(5))
+function outer() {
+  function a(n: int) { return n <= 0 ? 0 : 1 + b(n - 1) }
+  function b(n: int) { return a(n) * 2 }
+  return a(5)
+}
+console.log(outer())
+
+// Arrows that take fewer parameters than they get, and functions adapted
+// to the type expected.
+function apply2(fn: (a: int, b: int) => int) {
+  return fn(1, 2)
+}
+console.log(apply2(a => a * 10), apply2((a, b) => a + b))
+function inc1(x: int) { return x + 1 }
+console.log(apply2(inc1))
+function opt2(x: int, y?: int) { return x + (y ?? 100) }
+const one: (x: int) => int = opt2
+console.log(one(5))
+function each2(fn: (x: int) => void) { fn(7) }
+each2(inc1)
+each2(x => console.log("got", x))
+
+// Closures made by a callback outlive it.
+let k = 10
+const fs = [1, 2].map(x => () => x + k)
+console.log(fs.map(g => g()))
+const maybeFns: (((x: int) => int) | undefined)[] = [inc1, undefined]
+console.log(maybeFns.map(m => m?.(1)))
+
+// A callback that calls back into a function of the block.
+function sortByKey(words: string[]) {
+  function key(w: string) { return w.length * 100 + (w.charCodeAt(0) | 0) }
+  return words.sort((a, b) => key(a) - key(b))
+}
+console.log(sortByKey(["bb", "a", "ccc", "ab"]))
+
+// Recursion through a function stored in a variable.
+let walk: (n: int) => int = n => n
+walk = n => (n <= 0 ? 0 : n + walk(n - 1))
+console.log(walk(10))

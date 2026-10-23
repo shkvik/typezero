@@ -17,6 +17,8 @@ namespace tz {
 class Type;
 
 // A variable, parameter or global. Created by Sema, shared by all its uses.
+struct FunctionDecl;
+
 struct VarSymbol {
   llvm::StringRef name;
   llvm::SMLoc loc;
@@ -27,9 +29,32 @@ struct VarSymbol {
   // it. Other globals live in main's stack frame, where LLVM can keep them in
   // registers, and calls cannot touch them.
   bool usedInFunction = false;
-};
 
-struct FunctionDecl;
+  // Closures (see FunctionDecl::captures). The function whose frame holds the
+  // variable: null for main and for globals.
+  FunctionDecl *owner = nullptr;
+  // The order of declarations, to tell whether a closure is created before
+  // the variable is.
+  unsigned declSeq = 0;
+  // A function nested in some function uses the variable.
+  bool captured = false;
+  // Assigned after its declaration, anywhere.
+  bool reassigned = false;
+  // Captured by a closure created before the variable is declared.
+  bool capturedEarly = false;
+  // The variable a nested function declaration introduces: its value is that
+  // function.
+  FunctionDecl *function = nullptr;
+  // A constant initialized with an arrow or a function expression (or the
+  // name of a function expression inside it): calls through it are direct,
+  // and the function calls itself without capturing itself.
+  FunctionDecl *lambda = nullptr;
+
+  // Closures copy the value of a variable that never changes after they are
+  // created; any other variable they capture lives in a box on the heap,
+  // shared by the function that declares it and the closures.
+  bool boxed() const { return captured && (reassigned || capturedEarly); }
+};
 
 struct FuncSymbol {
   llvm::StringRef name;
@@ -43,8 +68,20 @@ struct FuncSymbol {
   // The last parameter is `...rest: T[]`: the arguments from its position on
   // become the elements of one array.
   bool hasRest = false;
+  // Without an annotation, null until Sema infers it from the body (see
+  // Sema::returnType).
   const Type *ret = nullptr;
+  // Set while Sema infers the return type: a call now is recursion, and
+  // returns `assumed`, the type found so far (null at first).
+  bool inferring = false;
+  const Type *assumed = nullptr;
   FunctionDecl *decl = nullptr;
+  // An arrow passed where a callback returns void, as in forEach: what its
+  // body returns is dropped.
+  bool discardsResult = false;
+  // Some parameter has its type from a default value that is not a literal,
+  // found when first needed (Sema::resolveParams).
+  bool pendingParams = false;
 };
 
 // Base of every AST node. Nodes are owned by AstContext and linked by raw
@@ -59,16 +96,21 @@ public:
 // `Array<int>`.
 struct TypeRef {
   enum class Kind {
-    Name,    // `name`; empty after a syntax error
-    Array,   // `args[0][]`
-    Union,   // `args[0] | args[1] | ...`
-    Generic, // `name<args...>`
+    Name,     // `name`; empty after a syntax error
+    Array,    // `args[0][]`
+    Union,    // `args[0] | args[1] | ...`
+    Generic,  // `name<args...>`
+    Function, // `(a: args[0], b?: args[1]) => args.back()`
   };
 
   Kind kind = Kind::Name;
   llvm::StringRef name;
   llvm::SMLoc loc;
   std::vector<TypeRef> args;
+  // Function types: which parameters are optional, and whether the last one
+  // is a rest parameter.
+  std::vector<bool> optional;
+  bool rest = false;
 };
 
 //===----------------------------------------------------------------------===//
@@ -96,6 +138,7 @@ public:
   enum class Kind {
     IntLit, FloatLit, BoolLit, StringLit, Undefined, Template, ArrayLit, Name, Member, Index,
     Unary, Binary, Assign, Update, Call, New, Conditional, Cast, Sequence, OptionalChain,
+    Function,
   };
 
   Kind kind() const { return kind_; }
@@ -185,6 +228,8 @@ public:
 
   llvm::StringRef name;
   VarSymbol *var = nullptr; // set by Sema
+  // Set by Sema for a top-level function used as a value.
+  FuncSymbol *func = nullptr;
 };
 
 class MemberExpr : public Expr {
@@ -322,6 +367,20 @@ enum class Builtin {
   ArrSort,
   ArrToString,
   ArrSplice,
+  // Methods of arrays that take a callback: the first argument.
+  ArrForEach,
+  ArrMap,
+  ArrFilter,
+  ArrFlatMap,
+  ArrReduce,
+  ArrReduceRight,
+  ArrFind,
+  ArrFindIndex,
+  ArrFindLast,
+  ArrFindLastIndex,
+  ArrSome,
+  ArrEvery,
+  ArrSortWith, // sort(compare)
   // The functions of Math. The first four round, and give an integer where
   // one is expected (see Sema::checkMathCall).
   MathFloor,
@@ -457,6 +516,17 @@ public:
   bool mayShortCircuit = false;
 };
 
+// An arrow function or a function expression: a function value, which
+// captures the variables around it that its body uses (see
+// FunctionDecl::captures).
+class FunctionExpr : public Expr {
+public:
+  FunctionExpr(llvm::SMLoc loc, FunctionDecl *fn) : Expr(Kind::Function, loc), fn(fn) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::Function; }
+
+  FunctionDecl *fn;
+};
+
 //===----------------------------------------------------------------------===//
 // Statements
 //===----------------------------------------------------------------------===//
@@ -479,11 +549,15 @@ private:
   llvm::SMLoc loc_;
 };
 
+struct NestedGroup;
+
 struct BlockStmt : Stmt {
   explicit BlockStmt(llvm::SMLoc loc) : Stmt(Kind::Block, loc) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Block; }
 
   std::vector<Stmt *> body;
+  // Set by Sema: the functions declared in this block, if any.
+  NestedGroup *group = nullptr;
 };
 
 struct VarDeclarator {
@@ -518,6 +592,9 @@ struct Param {
   VarSymbol *sym = nullptr;
 };
 
+// A function: a declaration, or the function of a FunctionExpr. A function
+// nested in another one (or in main's blocks) is a closure: its value carries
+// an environment with the variables of the functions around it that it uses.
 struct FunctionDecl : Stmt {
   FunctionDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Function, loc), name(name) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Function; }
@@ -526,7 +603,62 @@ struct FunctionDecl : Stmt {
   std::vector<Param> params;
   std::optional<TypeRef> returnType;
   BlockStmt *body = nullptr;
+  // The source text of the declaration, for Sema to parse a fresh copy.
+  llvm::StringRef source;
+  bool isExpression = false; // an arrow or a function expression
+  bool isArrow = false;
+  // A function expression's own name (`function f() {}`), which its body
+  // sees.
+  llvm::StringRef ownName;
+  // An arrow whose body is an expression: the parser makes it `{ return e }`.
+  bool concise = false;
   FuncSymbol *sym = nullptr; // set by Sema
+  bool checked = false;      // set by Sema once the body is checked
+
+  // Set by Sema for closures. `parent` is the function around this one (null
+  // for main). `captures` are the variables of the functions around it that
+  // the body uses, in the order of the environment's fields; the functions
+  // declared in one block share an environment (`group`).
+  FunctionDecl *parent = nullptr;
+  std::vector<VarSymbol *> captures;
+  NestedGroup *group = nullptr;
+  // The other functions of its group that it uses.
+  std::vector<FunctionDecl *> siblings;
+  VarSymbol *var = nullptr; // a nested declaration's variable
+  // When the closure is created, in the order of declarations (see VarSymbol).
+  unsigned creationSeq = 0;
+  // Passed straight to a built-in that only calls it during the call, such as
+  // map: the environment can live on the stack.
+  bool nonEscaping = false;
+  bool isClosure() const { return parent || isExpression || group; }
+};
+
+// The functions declared in one block. They are created together, before the
+// first statement of the block that mentions one of them, and share one
+// environment: they call each other (and themselves) without capturing each
+// other, so no reference cycle forms.
+struct NestedGroup {
+  std::vector<FunctionDecl *> members;
+  std::vector<VarSymbol *> captures;
+  FunctionDecl *owner = nullptr; // the function whose block declares them
+  // The statement of the block before which they are created; none if
+  // nothing mentions them.
+  size_t firstUse = ~size_t(0);
+  unsigned creationSeq = 0;
+  // Used by Sema while it checks the block: where the block's scope and
+  // function are, the names the block declares and the names the functions
+  // assign to.
+  size_t scopeDepth = 0, functionDepth = 0;
+  std::vector<llvm::StringRef> declaredNames, assignedNames;
+  bool finished = false;
+  // Where the block's own code uses the functions, to find those that run
+  // before a variable they use is declared.
+  struct Use {
+    FunctionDecl *fn;
+    unsigned seq;
+    llvm::SMLoc loc;
+  };
+  std::vector<Use> uses;
 };
 
 struct ExprStmt : Stmt {
@@ -696,6 +828,9 @@ struct EnumDecl : Stmt {
 // form the program's entry point.
 struct SourceFile {
   std::vector<Stmt *> items;
+  // Set by Sema: the program compares functions (`===`, indexOf...), so every
+  // evaluation of a function expression must give a distinct value.
+  bool comparesFunctions = false;
 };
 
 // Owns all AST nodes and symbols of a compilation.
@@ -711,6 +846,7 @@ public:
 
   VarSymbol *newVar() { return &vars_.emplace_back(); }
   FuncSymbol *newFunc() { return &funcs_.emplace_back(); }
+  NestedGroup *newGroup() { return &groups_.emplace_back(); }
   // A name the source cannot contain, for a hidden variable the parser
   // introduces (destructuring keeps the value there).
   llvm::StringRef hiddenName() {
@@ -722,6 +858,7 @@ private:
   std::deque<std::string> names_;
   std::deque<VarSymbol> vars_;
   std::deque<FuncSymbol> funcs_;
+  std::deque<NestedGroup> groups_;
 };
 
 } // namespace tz

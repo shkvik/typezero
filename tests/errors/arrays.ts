@@ -5,7 +5,7 @@ const mixed = [1, "x"]
 const ints: int[] = [1, 2]
 // expect-error: type 'int[]' is not assignable to type 'double[]'
 const doubles: double[] = ints
-// expect-error: 'map' takes a callback, and arrow functions are not supported yet
+// expect-error: 'map' needs a function, found 'int'
 const twice = ints.map(2)
 // expect-error: 'new Array<T>(n)' fills the array with a default value, and 'int[]' has none
 const rows = new Array<int[]>(3)
@@ -24,7 +24,7 @@ text[0] = "x"
 const spread: double[] = [...ints]
 // expect-error: property 'size' does not exist on type 'int[]'
 const size = ints.size
-// expect-error: a comparison function needs arrow functions
+// expect-error: 'sort' needs a function, found 'int'
 ints.sort(1)
 // expect-error: union types other than 'T | undefined' are not supported yet
 let either: int | string = 1

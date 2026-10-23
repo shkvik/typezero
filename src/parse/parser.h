@@ -18,6 +18,11 @@ public:
   Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags);
 
   SourceFile parseSourceFile();
+  // A function declaration, with the lexer at its `function`: Sema parses
+  // FunctionDecl::source again to get a fresh copy.
+  FunctionDecl *parseFunctionCopy() { return parseFunction(/*expression=*/false); }
+  // The same for an arrow or a function expression.
+  FunctionDecl *parseFunctionExprCopy();
 
 private:
   // Tokens
@@ -33,12 +38,30 @@ private:
   void report(llvm::SMLoc loc, const llvm::Twine &message);
   void synchronize();
 
+  // Looking ahead: the parser tries a construct with diagnostics off, then
+  // goes back to where it started.
+  struct Snapshot {
+    Lexer::State lexer;
+    Token tok, peeked;
+    const char *prevEnd;
+    bool hasPeeked, recovering;
+  };
+  Snapshot snapshot() const;
+  void rewind(Snapshot snapshot);
+
   // Statements. `export` is accepted, and ignored, only at the top level.
   Stmt *parseStatement(bool topLevel = false);
   BlockStmt *parseBlock();
   Stmt *parseFunctionDecl();
-  // A function, or an overload signature (without a body) for tsc.
-  FunctionDecl *parseFunction();
+  // A function, or an overload signature (without a body) for tsc. A function
+  // expression may have no name.
+  FunctionDecl *parseFunction(bool expression);
+  // `(a: int, b = 1, ...rest: int[])`
+  void parseParams(FunctionDecl *fn);
+  // Whether the `(` here starts the parameters of an arrow function.
+  bool arrowAhead();
+  // `x => body` or `(params): T => body`.
+  FunctionExpr *parseArrow();
   VarDeclStmt *parseVarDecl();
   void parseDeclarators(VarDeclStmt *decl);
   bool parseBinding(VarDeclarator &d);
@@ -88,6 +111,9 @@ private:
   TypeRef parseType();
   TypeRef parseArrayType();
   TypeRef parsePrimaryType();
+  // `(a: int, b?: string) => T`, with the lexer at `(`.
+  bool functionTypeAhead();
+  TypeRef parseFunctionType();
   std::vector<TypeRef> parseTypeArgs();
 
   // Expressions, from lowest to highest precedence. parseSequence admits the
@@ -111,6 +137,7 @@ private:
   AstContext &ctx_;
   Diagnostics &diags_;
   Token tok_;
+  const char *prevEnd_ = nullptr; // the end of the token before tok_
   Token peeked_;
   bool hasPeeked_ = false;
   bool recovering_ = false;

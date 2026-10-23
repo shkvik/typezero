@@ -1,8 +1,10 @@
 #pragma once
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 
 #include <string>
+#include <vector>
 
 namespace tz {
 
@@ -21,6 +23,7 @@ public:
     String,
     Optional,  // `T | undefined`
     Array,     // `T[]`
+    Function,  // `(a: int, b?: string) => T`
   };
 
   Kind kind() const { return kind_; }
@@ -35,9 +38,18 @@ public:
   bool isNumeric() const { return isInteger() || isFloat(); }
   bool isOptional() const { return kind_ == Kind::Optional; }
   bool isArray() const { return kind_ == Kind::Array; }
+  bool isFunction() const { return kind_ == Kind::Function; }
 
-  // The value type of `T | undefined`, or the element type of `T[]`.
+  // The value type of `T | undefined`, the element type of `T[]`, or the
+  // return type of a function.
   const Type *inner() const { return inner_; }
+  // Function types: the types callers pass (`T | undefined` for an optional
+  // parameter), how many arguments a call must give, and whether the last
+  // parameter is `...rest: T[]`.
+  llvm::ArrayRef<const Type *> params() const { return params_; }
+  size_t minArgs() const { return minArgs_; }
+  bool hasRest() const { return hasRest_; }
+  const Type *ret() const { return inner_; }
   // `T` for `T | undefined`, the type itself otherwise.
   const Type *nonOptional() const { return isOptional() ? inner_ : this; }
   // Whether values hold references that are counted: strings, arrays and
@@ -62,6 +74,8 @@ public:
   // `type | undefined`. Optional and undefined types stay as they are.
   static const Type *optional(const Type *type);
   static const Type *array(const Type *element);
+  static const Type *function(llvm::ArrayRef<const Type *> params, size_t minArgs, bool hasRest,
+                              const Type *ret);
 
   // The type a plain name in a type annotation refers to, or null.
   static const Type *fromName(llvm::StringRef name);
@@ -73,6 +87,9 @@ private:
   Kind kind_;
   const Type *inner_;
   std::string name_;
+  std::vector<const Type *> params_;
+  size_t minArgs_ = 0;
+  bool hasRest_ = false;
 };
 
 // What `typeof` gives for a value of `type` ("number", "string"...). For

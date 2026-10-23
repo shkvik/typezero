@@ -143,10 +143,28 @@ void tz_out_write(const char *data, size_t len) {
   tz_out_len += len;
 }
 
+#ifdef _WIN32
+// Recursion that runs out of stack stops the program with a panic, as
+// JavaScript throws a RangeError, instead of crashing. The handler runs on
+// the little stack Windows keeps for it (SetThreadStackGuarantee).
+static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
+  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
+    return EXCEPTION_CONTINUE_SEARCH;
+  static const char message[] = "panic: RangeError: Maximum call stack size exceeded\n";
+  tz_out_flush(1);
+  stream_write(&tz_err_stream, message, sizeof message - 1);
+  TerminateProcess(GetCurrentProcess(), 2);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 void tz_rt_init(void) {
 #ifdef _WIN32
   stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
   stream_init(&tz_err_stream, STD_ERROR_HANDLE);
+  ULONG guarantee = 64 * 1024;
+  SetThreadStackGuarantee(&guarantee);
+  AddVectoredExceptionHandler(1, on_exception);
 #else
   stream_init(&tz_out_stream, 1);
   stream_init(&tz_err_stream, 2);
@@ -170,11 +188,12 @@ void tz_rt_main_done(void) {
 // count should be back to zero.
 void tz_rt_shutdown(void) {
   int64_t strings = tz_str_live_objects(), arrays = tz_arr_live_objects();
-  if ((strings != 0 || arrays != 0) && getenv("TZ_CHECK_LEAKS")) {
-    char message[96];
+  int64_t objects = tz_obj_live_objects();
+  if ((strings != 0 || arrays != 0 || objects != 0) && getenv("TZ_CHECK_LEAKS")) {
+    char message[160];
     int len = snprintf(message, sizeof message,
-                       "tz: %lld string object(s) and %lld array(s) leaked\n", (long long)strings,
-                       (long long)arrays);
+                       "tz: %lld string object(s), %lld array(s) and %lld closure object(s) leaked\n",
+                       (long long)strings, (long long)arrays, (long long)objects);
     tz_out_flush(1);
     stream_write(&tz_err_stream, message, (size_t)len);
   }

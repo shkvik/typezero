@@ -33,6 +33,7 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::Array: return 6;
   case Type::Kind::Optional: return 7;
   case Type::Kind::Undefined: return 8;
+  case Type::Kind::Function: return 9;
   default: llvm_unreachable("no runtime descriptor for this type");
   }
 }
@@ -83,7 +84,10 @@ llvm::Value *CodeGen::emitCheckedRead(llvm::Value *inRange, const Type *resultTy
   builder_.CreateCondBr(inRange, readBlock, endBlock);
 
   switchTo(readBlock);
-  llvm::Value *value = makeOptional(read(), builder_.getTrue(), resultType);
+  // An element that is itself `T | undefined` is the result as it is.
+  llvm::Value *value = read();
+  if (value->getType() != lower(resultType))
+    value = makeOptional(value, builder_.getTrue(), resultType);
   llvm::BasicBlock *readEnd = builder_.GetInsertBlock();
   builder_.CreateBr(endBlock);
 
@@ -454,6 +458,8 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
                              llvm::BasicBlock *bodyBlock, llvm::BasicBlock *endBlock) {
   const Type *iterableType = stmt->iterable->type;
   bool isString = iterableType->isString();
+  // A loop variable a closure keeps in a box holds its own reference.
+  bool borrow = stmt->borrowElements && !stmt->binding.sym->boxed();
   const Type *element = isString ? iterableType : iterableType->inner();
   llvm::Type *i64 = builder_.getInt64Ty();
   llvm::Value *indexSlot = createStackSlot(i64, "for.index");
@@ -477,11 +483,11 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
     value = builder_.CreateLoad(strTy_, out);
   } else {
     value = builder_.CreateLoad(lower(element), elementAddress(arrayData(iterable), element, index));
-    if (!stmt->borrowElements)
+    if (!borrow)
       retainValue(value, element);
     builder_.CreateStore(builder_.CreateAdd(index, builder_.getInt64(1)), indexSlot);
   }
-  if (stmt->borrowElements) {
+  if (borrow) {
     // A plain slot: nothing to release when the iteration ends.
     llvm::Value *slot = createStackSlot(lower(element), stmt->binding.name);
     addresses_[stmt->binding.sym] = slot;
@@ -495,6 +501,269 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
   targets_.pop_back();
   popScope();
   branchTo(condBlock);
+}
+
+// forEach, map, filter, flatMap, reduce, reduceRight, find, findIndex,
+// findLast, findLastIndex, some and every. The array is evaluated once and
+// stays alive during the call, and the callback gets that array, whatever it
+// does meanwhile. As in JavaScript, the elements visited are those below the
+// length the array had at the start that are still there when their turn
+// comes; elements the callback adds are not visited.
+llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
+  auto *member = cast<MemberExpr>(call->callee);
+  const Type *arrayType = member->object->type;
+  const Type *element = arrayType->inner();
+  const Type *callbackType = call->args[0]->type;
+  llvm::Type *i64 = builder_.getInt64Ty();
+  Builtin method = call->builtin;
+
+  llvm::Value *array = emitExpr(member->object);
+  llvm::Value *callback = emitExpr(call->args[0]);
+  llvm::Value *init = call->args.size() > 1 ? emitExpr(call->args[1]) : nullptr;
+
+  if (method == Builtin::ArrSortWith) {
+    // The runtime sorts; the comparison goes through a function that calls
+    // the callback.
+    llvm::Value *context = spill(callback, "compare");
+    builder_.CreateCall(rt_.arrSortWith, {array, sortComparator(call), context});
+    releaseValue(callback, callbackType);
+    return array; // the same array, with this reference
+  }
+
+  bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
+  bool backward = method == Builtin::ArrReduceRight || method == Builtin::ArrFindLast ||
+                  method == Builtin::ArrFindLastIndex;
+  size_t passes = std::min(callbackType->params().size(), size_t(reduce ? 4 : 3));
+  // The arguments of the callback that are the element (and the accumulator).
+  size_t valueArgs = reduce ? 2 : 1;
+
+  llvm::Value *length = arrayLength(array);
+  llvm::Value *start = backward ? builder_.CreateSub(length, builder_.getInt64(1)) : builder_.getInt64(0);
+  llvm::Value *step = builder_.getInt64(backward ? -1 : 1);
+  auto readElement = [&](llvm::Value *at) {
+    return builder_.CreateLoad(lower(element), elementAddress(arrayData(array), element, at), "element");
+  };
+
+  // reduce: the accumulator, from the initial value or the first element.
+  llvm::Value *accSlot = nullptr;
+  if (reduce) {
+    accSlot = createStackSlot(lower(call->type), "acc");
+    if (init) {
+      builder_.CreateStore(init, accSlot);
+    } else {
+      llvm::BasicBlock *emptyBlock = newBlock("reduce.empty");
+      llvm::BasicBlock *firstBlock = newBlock("reduce.first");
+      builder_.CreateCondBr(builder_.CreateICmpEQ(length, builder_.getInt64(0)), emptyBlock, firstBlock,
+                            llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
+      switchTo(emptyBlock);
+      emitPanic("TypeError: Reduce of empty array with no initial value");
+      switchTo(firstBlock);
+      llvm::Value *first = readElement(start);
+      retainValue(first, element);
+      builder_.CreateStore(first, accSlot);
+      start = builder_.CreateAdd(start, step);
+    }
+  }
+  // map, filter, flatMap: the new array.
+  llvm::Value *out = nullptr;
+  if (method == Builtin::ArrMap || method == Builtin::ArrFilter || method == Builtin::ArrFlatMap)
+    out = builder_.CreateCall(rt_.arrNew, {typeDescriptor(call->type->inner()), builder_.getInt64(0),
+                                           method == Builtin::ArrMap ? length : builder_.getInt64(0)},
+                              "result");
+  // find, findIndex, some, every: the result if no element decides it.
+  llvm::Value *resultSlot = nullptr;
+  if (!reduce && !out && method != Builtin::ArrForEach) {
+    resultSlot = createStackSlot(lower(call->type), "result");
+    llvm::Value *none = method == Builtin::ArrSome    ? builder_.getFalse()
+                        : method == Builtin::ArrEvery ? builder_.getTrue()
+                        : call->type->isInt()         ? builder_.getInt32(~0u)
+                                                      : undefinedValue(call->type);
+    builder_.CreateStore(none, resultSlot);
+  }
+
+  llvm::Value *indexSlot = createStackSlot(i64, "index");
+  builder_.CreateStore(start, indexSlot);
+  llvm::BasicBlock *headBlock = newBlock("each");
+  llvm::BasicBlock *bodyBlock = newBlock("each.body");
+  llvm::BasicBlock *nextBlock = newBlock("each.next");
+  llvm::BasicBlock *endBlock = newBlock("each.end");
+  emitBlock(headBlock);
+  llvm::Value *i = builder_.CreateLoad(i64, indexSlot, "i");
+  // Below the length at the start (or not below 0 going back), and still in
+  // the array. Going back, the unsigned comparison covers both.
+  llvm::Value *inRange = builder_.CreateICmpULT(i, arrayLength(array));
+  if (!backward)
+    inRange = builder_.CreateAnd(inRange, builder_.CreateICmpULT(i, length));
+  builder_.CreateCondBr(inRange, bodyBlock, endBlock);
+
+  switchTo(bodyBlock);
+  llvm::Value *value = readElement(i);
+  // The callback owns its arguments; filter and find keep one more
+  // reference to the element, to put it in the result.
+  bool keeps = method == Builtin::ArrFilter || method == Builtin::ArrFind || method == Builtin::ArrFindLast;
+  if (passes >= valueArgs)
+    retainValue(value, element);
+  if (keeps)
+    retainValue(value, element);
+  std::vector<llvm::Value *> args;
+  if (reduce)
+    args.push_back(builder_.CreateLoad(lower(call->type), accSlot)); // moves into the call
+  args.push_back(value);
+  args.push_back(builder_.CreateTrunc(i, builder_.getInt32Ty()));
+  args.push_back(array);
+  // The accumulator moves into the call, unless the callback takes none.
+  if (reduce && passes == 0)
+    releaseValue(args[0], call->type);
+  args.resize(passes);
+  if (passes == valueArgs + 2)
+    retainValue(array, arrayType);
+  llvm::Value *result = callFunctionValue(callback, callbackType, args);
+  const Type *resultType = callbackType->ret();
+
+  // What the result means. `found` is where an element decides the result.
+  llvm::BasicBlock *foundBlock = nullptr;
+  auto test = [&](llvm::Value *decides) {
+    foundBlock = newBlock("each.found");
+    llvm::BasicBlock *otherBlock = newBlock("each.other");
+    builder_.CreateCondBr(decides, foundBlock, otherBlock);
+    switchTo(otherBlock);
+  };
+  switch (method) {
+  case Builtin::ArrForEach:
+    if (result)
+      releaseValue(result, resultType);
+    break;
+  case Builtin::ArrMap:
+    // One result per element visited, in order: the new array has room for
+    // them all.
+    builder_.CreateStore(result, elementAddress(arrayData(out), resultType, i));
+    builder_.CreateStore(builder_.CreateTrunc(builder_.CreateAdd(i, builder_.getInt64(1)), builder_.getInt32Ty()),
+                         arrayField(out, kLength));
+    break;
+  case Builtin::ArrFlatMap:
+    if (resultType->isArray()) {
+      builder_.CreateCall(rt_.arrAppend, {out, result});
+      releaseValue(result, resultType);
+    } else {
+      emitPush(out, {result}, resultType);
+    }
+    break;
+  case Builtin::ArrFilter: {
+    llvm::BasicBlock *keepBlock = newBlock("filter.keep");
+    llvm::BasicBlock *dropBlock = newBlock("filter.drop");
+    builder_.CreateCondBr(result, keepBlock, dropBlock);
+    switchTo(keepBlock);
+    emitPush(out, {value}, element);
+    builder_.CreateBr(nextBlock);
+    switchTo(dropBlock);
+    releaseValue(value, element);
+    break;
+  }
+  case Builtin::ArrReduce:
+  case Builtin::ArrReduceRight:
+    builder_.CreateStore(result, accSlot);
+    break;
+  case Builtin::ArrFind:
+  case Builtin::ArrFindLast:
+    test(result);
+    releaseValue(value, element);
+    builder_.CreateBr(nextBlock);
+    switchTo(foundBlock);
+    builder_.CreateStore(makeOptional(value, builder_.getTrue(), call->type), resultSlot);
+    builder_.CreateBr(endBlock);
+    switchTo(newBlock("dead"));
+    break;
+  case Builtin::ArrFindIndex:
+  case Builtin::ArrFindLastIndex:
+    test(result);
+    builder_.CreateBr(nextBlock);
+    switchTo(foundBlock);
+    builder_.CreateStore(builder_.CreateTrunc(i, builder_.getInt32Ty()), resultSlot);
+    builder_.CreateBr(endBlock);
+    switchTo(newBlock("dead"));
+    break;
+  case Builtin::ArrSome:
+  case Builtin::ArrEvery: {
+    bool some = method == Builtin::ArrSome;
+    test(some ? result : builder_.CreateNot(result));
+    builder_.CreateBr(nextBlock);
+    switchTo(foundBlock);
+    builder_.CreateStore(builder_.getInt1(some), resultSlot);
+    builder_.CreateBr(endBlock);
+    switchTo(newBlock("dead"));
+    break;
+  }
+  default:
+    llvm_unreachable("not a method with a callback");
+  }
+  branchTo(nextBlock);
+
+  switchTo(nextBlock);
+  builder_.CreateStore(builder_.CreateAdd(i, step), indexSlot);
+  builder_.CreateBr(headBlock);
+
+  switchTo(endBlock);
+  releaseValue(callback, callbackType);
+  releaseValue(array, arrayType);
+  if (out)
+    return out;
+  if (reduce)
+    return builder_.CreateLoad(lower(call->type), accSlot);
+  if (resultSlot)
+    return builder_.CreateLoad(lower(call->type), resultSlot);
+  return nullptr;
+}
+
+// The function the runtime calls to compare two elements for sort(compare):
+// (ptr context, ptr x, ptr y) -> i32, the sign of compare(*x, *y), where
+// the context holds the function value. NaN counts as 0.
+llvm::Function *CodeGen::sortComparator(CallExpr *call) {
+  const Type *element = cast<MemberExpr>(call->callee)->object->type->inner();
+  Expr *callbackExpr = call->args[0];
+  const Type *callbackType = callbackExpr->type;
+  llvm::Type *ptr = builder_.getPtrTy();
+  auto *type = llvm::FunctionType::get(builder_.getInt32Ty(), {ptr, ptr, ptr}, false);
+  auto *fn = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.compare", module_.get());
+  setFunctionAttributes(fn);
+  llvm::IRBuilderBase::InsertPoint point = builder_.saveIP();
+  llvm::Function *outer = function_;
+  function_ = fn;
+  builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", fn));
+  llvm::Value *callback = builder_.CreateLoad(fnTy_, fn->getArg(0), "compare");
+  size_t passes = std::min<size_t>(callbackType->params().size(), 2);
+  std::vector<llvm::Value *> args;
+  for (size_t k = 0; k < passes; ++k) {
+    llvm::Value *value = builder_.CreateLoad(lower(element), fn->getArg(unsigned(k + 1)));
+    retainValue(value, element); // the callback owns its arguments
+    args.push_back(value);
+  }
+  llvm::Value *result;
+  if (auto *fe = dyn_cast<FunctionExpr>(callbackExpr)) {
+    // An arrow written here: its code is known, and may be inlined.
+    std::vector<llvm::Value *> all{builder_.CreateExtractValue(callback, 1)};
+    all.insert(all.end(), args.begin(), args.end());
+    for (size_t k = passes; k < callbackType->params().size(); ++k)
+      all.push_back(undefinedValue(callbackType->params()[k]));
+    result = builder_.CreateCall(closureCode(fe->fn), all);
+  } else {
+    result = callFunctionValue(callback, callbackType, args);
+  }
+  const Type *resultType = callbackType->ret();
+  llvm::Value *positive, *negative;
+  if (resultType->isFloat()) {
+    llvm::Value *zero = llvm::ConstantFP::get(builder_.getDoubleTy(), 0.0);
+    positive = builder_.CreateFCmpOGT(result, zero);
+    negative = builder_.CreateFCmpOLT(result, zero);
+  } else {
+    llvm::Value *zero = llvm::ConstantInt::get(result->getType(), 0);
+    positive = builder_.CreateICmpSGT(result, zero);
+    negative = builder_.CreateICmpSLT(result, zero);
+  }
+  builder_.CreateRet(builder_.CreateSub(builder_.CreateZExt(positive, builder_.getInt32Ty()),
+                                        builder_.CreateZExt(negative, builder_.getInt32Ty())));
+  function_ = outer;
+  builder_.restoreIP(point);
+  return fn;
 }
 
 llvm::Value *CodeGen::emitValueToString(llvm::Value *value, const Type *type) {

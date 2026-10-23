@@ -1,0 +1,94 @@
+// Functions as values, closures and callbacks used wrongly.
+const nums = [1, 2, 3]
+const texts = ["1", "2"]
+
+// A callback that would get the index in an optional parameter.
+// expect-error: 'parseInt' would also get the index as its second argument: 'map' calls it with (value, index, array); pass only what it needs: 'x => parseInt(x)'
+const parsed = texts.map(parseInt)
+// expect-error: 'console.log' would also get the index as its second argument
+nums.forEach(console.log)
+// expect-error: 'Math.max' would also get the index as its second argument
+const maxes = nums.map(Math.max)
+function format(n: int, digits?: int): string {
+  return n.toFixed(digits ?? 2)
+}
+// expect-error: 'format' would also get the index in its optional parameter 'digits'
+const formatted = nums.map(format)
+function triple(n: int, i: int, all: int[], extra: int): int {
+  return n * 3
+}
+// expect-error: 'map' passes 3 arguments, but 'triple' needs 4
+const tripled = nums.map(triple)
+function half(n: int) {
+  return n / 2.0
+}
+// expect-error: 'filter' needs a function that returns 'boolean', but 'half' returns 'double'
+const halves = nums.filter(half)
+// expect-error: the callback of 'map' must return a value
+const nothing = nums.map(x => { console.log(x) })
+// expect-error: the second argument of 'map' sets 'this' for the callback, which is not supported
+const withThis = nums.map(x => x, nums)
+// expect-error: a comparison function must return a number (negative, zero or positive), found 'boolean'
+nums.sort((a, b) => a < b)
+
+// Types that tell nothing about the parameters.
+// expect-error: parameter 'x' needs a type: nothing here says what the function is called with
+const id = (x) => x
+// expect-error: parameter 'x' is declared as 'int', but the function gets 'double' here
+const widen: (x: double) => double = (x: int) => x
+const inc = (x: int) => x + 1
+// expect-error: type '(int) => int' is not assignable to type '(double) => double'
+const widened: (x: double) => double = inc
+
+// Variables used before they exist.
+function early() {
+  // expect-error: 'helper' uses 'scale' before it is declared: JavaScript would throw a ReferenceError when it runs here; move the declaration of 'scale' up
+  const first = helper(1)
+  function helper(x: int): int {
+    return x * scale
+  }
+  const scale = 2
+  return first
+}
+function later() {
+  // expect-error: 'limit' is declared later in the block, after this function is created
+  const check = (x: int) => x < limit
+  const limit = 10
+  return check(5)
+}
+// expect-error: the default value of 'a' uses 'b', which is not set yet: a default value can use only the parameters before it
+function defaults(a: int = b, b: int = 1) {
+  return a + b
+}
+
+// What a function is not.
+// expect-error: a function cannot be converted to a string
+const source = "" + inc
+// expect-error: functions cannot be converted to strings
+const joined = [inc].join()
+// expect-error: sorting functions needs a comparison function
+const sorted = [inc].sort()
+// expect-error: 'call' is not supported yet: it sets 'this', which exists only in classes; call the function directly
+inc.call(undefined, 1)
+// expect-error: 'this' exists only in the methods of classes, which are not supported yet
+const self = this
+function count() {
+  // expect-error: 'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'
+  return arguments
+}
+function maybe(f?: (x: int) => int) {
+  // expect-error: the function may be undefined; check it first, or call it with '?.()', which gives undefined then
+  return f(1)
+}
+const five = 5
+// expect-error: 'five' is not a function; it has type 'int'
+five()
+function inSwitch(n: int) {
+  switch (n) {
+    case 1:
+      // expect-error: a function can be declared only directly in a block; in a 'switch', declare it before the 'switch'
+      function one() {}
+  }
+}
+// expect-error: 'parseInt' can be used as a value only where a function type is expected
+const parse = parseInt

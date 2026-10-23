@@ -21,6 +21,9 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
       "/nologo",
       "/subsystem:console",
       "/incremental:no",
+      // 8 MiB of stack for the main thread, as Linux gives by default
+      // (Windows gives 1 MiB).
+      "/stack:8388608",
       triple.getArch() == llvm::Triple::aarch64 ? "/machine:arm64" : "/machine:x64",
       "/out:" + output.str(),
   };

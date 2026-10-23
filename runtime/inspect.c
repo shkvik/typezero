@@ -425,9 +425,28 @@ static void format_array(Ctx *ctx, TzBuf *out, const TzArray *array, int recurse
   entries_free(&output);
 }
 
+// `[Function: name]`, or `[Function (anonymous)]`.
+static void format_function(TzBuf *out, const TzFunction *fn) {
+  TzStr name = {fn->info->name.obj, fn->info->name.meta};
+  TzBuf text;
+  tz_buf_init(&text);
+  tz_buf_str(&text, name);
+  if (text.length == 0) {
+    tz_buf_ascii(out, "[Function (anonymous)]");
+  } else {
+    tz_buf_ascii(out, "[Function: ");
+    tz_buf_units(out, text.data, text.length);
+    tz_buf_push(out, ']');
+  }
+  tz_buf_free(&text);
+}
+
 static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *value,
                          int recurse_times) {
   switch (type->kind) {
+  case TZ_T_FUNCTION:
+    format_function(out, (const TzFunction *)value);
+    return;
   case TZ_T_DOUBLE: {
     double d = *(const double *)value;
     if (d == 0 && signbit(d)) {

@@ -48,7 +48,5 @@ function index(): int {
 // expect-error: '&&=' needs a variable or an array element at a simple index, such as 'a[i]'
 flags[index()] &&= false
 
-// expect-error: '?.()' calls a function value, and functions cannot be values yet
-two?.(1, 2)
 // expect-error: the value is always undefined
 const u = undefined!

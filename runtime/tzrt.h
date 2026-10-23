@@ -69,6 +69,7 @@ enum {
   TZ_T_ARRAY = 6,
   TZ_T_OPTIONAL = 7,
   TZ_T_UNDEFINED = 8,
+  TZ_T_FUNCTION = 9,
 };
 
 typedef struct TzType {
@@ -80,6 +81,47 @@ typedef struct TzType {
 // Whether a `T | undefined` at `value` holds a value.
 static inline int tz_optional_has(const TzType *type, const void *value) {
   return ((const uint8_t *)value)[type->inner->size] != 0;
+}
+
+//===----------------------------------------------------------------------===//
+// Functions and the objects of closures (closure.c)
+//===----------------------------------------------------------------------===//
+
+// The environments of closures and the boxes of the variables they share
+// start with this header. The compiler emits a `drop` function for each kind
+// of them, which releases what the object holds and frees it.
+typedef struct TzObject {
+  int64_t rc;
+  void (*drop)(struct TzObject *);
+} TzObject;
+
+// A function value: what it is, and its environment (NULL if it captures
+// nothing).
+typedef struct {
+  const struct TzFunctionInfo *info;
+  TzObject *env;
+} TzFunction;
+
+typedef struct TzFunctionInfo {
+  void *code;
+  struct {
+    void *obj;
+    uint64_t meta;
+  } name; // a TzStr, empty for an anonymous function
+} TzFunctionInfo;
+
+int64_t tz_obj_live_objects(void);
+void *tz_obj_alloc(int64_t size);
+void tz_obj_free(void *object);
+
+static inline void tz_obj_retain(TzObject *o) {
+  if (o)
+    ++o->rc;
+}
+
+static inline void tz_obj_release(TzObject *o) {
+  if (o && --o->rc == 0)
+    o->drop(o);
 }
 
 //===----------------------------------------------------------------------===//

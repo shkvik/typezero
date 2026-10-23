@@ -468,12 +468,8 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
   static const char *const callbacks[] = {
       "map",  "filter", "forEach", "reduce",    "reduceRight", "find",    "findIndex",
       "some", "every",  "flatMap", "findLast",  "findLastIndex"};
-  if (llvm::is_contained(callbacks, name)) {
-    diags_.error(member->loc(), "'" + name +
-                                    "' takes a callback, and arrow functions are not supported yet");
-    checkArgsLoosely();
-    return call;
-  }
+  if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0))
+    return checkCallbackMethod(call, member);
 
   if (name == "push" || name == "unshift") {
     bool spreads = call->hasSpread();
@@ -544,6 +540,8 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
   if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
     if (!arity(1, 2))
       return call;
+    if (element->nonOptional()->isFunction())
+      file_->comparesFunctions = true;
     elementArg(0);
     positionArgs(1);
     call->builtin = name == "indexOf"       ? Builtin::ArrIndexOf
@@ -553,6 +551,11 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
+  if ((name == "join" || name == "toString") && holdsFunctions(element)) {
+    diags_.error(member->loc(), "functions cannot be converted to strings");
+    checkArgsLoosely();
+    return call;
+  }
   if (name == "join") {
     if (!arity(0, 1))
       return call;
@@ -582,10 +585,9 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
   }
 
   if (name == "sort") {
-    if (count != 0) {
-      diags_.error(member->loc(), "a comparison function needs arrow functions, which are not "
-                                  "supported yet; 'sort()' without one compares as strings");
-      checkArgsLoosely();
+    if (holdsFunctions(element)) {
+      diags_.error(member->loc(), "sorting functions needs a comparison function: 'sort()' "
+                                  "without one compares their source code");
       return call;
     }
     call->builtin = Builtin::ArrSort;
