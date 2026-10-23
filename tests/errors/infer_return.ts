@@ -10,7 +10,7 @@ function forever(n: int) {
 }
 // expect-error: 'suffix' returns values of different types; a function returns values of one type
 function suffix(n: int) {
-  if (n === 0) return 0
+  if (n == 0) return 0
   return suffix(n - 1) + "x"
 }
 // expect-error: 'nothing' returns only undefined; declare the return type, e.g. '): int | undefined'

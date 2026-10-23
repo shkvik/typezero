@@ -34,6 +34,7 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::Optional: return 7;
   case Type::Kind::Undefined: return 8;
   case Type::Kind::Function: return 9;
+  case Type::Kind::Object: return 10;
   default: llvm_unreachable("no runtime descriptor for this type");
   }
 }
@@ -45,8 +46,11 @@ uint32_t descriptorKind(const Type *type) {
 llvm::Constant *CodeGen::typeDescriptor(const Type *type) {
   if (llvm::Constant *found = typeDescriptors_.lookup(type))
     return found;
-  llvm::Constant *inner = type->inner() ? typeDescriptor(type->inner())
-                                        : llvm::ConstantPointerNull::get(builder_.getPtrTy());
+  // The element of an array, the value of `T | undefined`; a function's
+  // inner() is its return type, which is not part of the value.
+  llvm::Constant *inner = type->isArray() || type->isOptional()
+                              ? typeDescriptor(type->inner())
+                              : llvm::ConstantPointerNull::get(builder_.getPtrTy());
   uint64_t size = module_->getDataLayout().getTypeAllocSize(lower(type));
   llvm::Constant *init = llvm::ConstantStruct::get(
       typeDescTy_, {builder_.getInt32(descriptorKind(type)), builder_.getInt32(static_cast<uint32_t>(size)),

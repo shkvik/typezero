@@ -52,4 +52,4 @@ function touch(v: boolean): boolean {
 console.log(touch(false) && touch(true), calls)
 console.log(touch(true) || touch(true), calls)
 console.log(calls > 1 ? 10 : 20, calls > 5 ? 1.5 : 2)
-console.log(1 < 2 && 2 < 3, !(1 == 1), 3 != 4, 2.5 >= 2, true === true)
+console.log(1 < 2 && 2 < 3, !(1 == 1), 3 != 4, 2.5 >= 2, true == true)

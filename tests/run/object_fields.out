@@ -1,0 +1,10 @@
+{ text: 'cats' } { text: 'dogs', tags: [ 'pets' ] } { text: 'birds' }
+{ text: 'dogs', limit: 3, tags: [ 'pets' ] }
+{ text: 'dogs', tags: [ 'pets' ] } 20
+cats fish (10)
+2 { text: 'dogs', limit: 1, tags: [ 'pets' ] }
+3 2 -1
+3
+2 2
+{ name: 'default', retries: 3 } 3
+{ name: 'default', retries: 3, verbose: false }

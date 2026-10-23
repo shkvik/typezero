@@ -128,18 +128,9 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   подсказкой. Сравнивать с `null` можно только `Json`. `typeof null` — `"object"`, как в JS.
 - `JSON.stringify` своего объекта пропускает поля со значением `undefined`, как JS. Нужен
   `null` в выводе — собрать `Json` явно: `const patch: Json = { phone: null }`.
-- **Перевод `Json` в свои типы пишет программист** — проверки полей и исключение, если пришло не
-  то:
-  ```ts
-  function toConfig(j: Json): Config {
-    if (typeof j != "object" || j == null || Array.isArray(j)) throw new Error("ждали объект")
-    const port = j["port"]
-    if (typeof port != "number") throw new Error("port: ждали число")
-    ...
-  }
-  ```
-  Однотипный код потом уберут библиотеки вроде zod (схема → проверка и тип) — их можно будет
-  написать на tz, когда появятся условные типы ([generics.md](generics.md), раздел 10).
+- **Перевод `Json` в свои типы пишет компилятор:** `JSON.parse<Config>(text)` или
+  `fromJson<Config>(j)` проверяет каждое поле и строит объект, ошибка — `TypeError` с путём до
+  поля ([narrowing.md](narrowing.md), раздел 3). Руками тоже можно — проверками и сужением.
 
 ## 6. Объявления для редактора
 

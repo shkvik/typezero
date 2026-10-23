@@ -17,7 +17,7 @@ function next(): int {
   return calls
 }
 function find(name: string): int[] | undefined {
-  return name === "some" ? [7, 8, 9] : undefined
+  return name == "some" ? [7, 8, 9] : undefined
 }
 console.log(find("none")?.at(next()), calls, find("some")?.at(next()), calls)
 console.log(find("none")?.length ?? 0, find("some")?.slice(1).length)

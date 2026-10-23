@@ -33,6 +33,7 @@ int tz_is_managed(const TzType *type) {
   case TZ_T_STRING:
   case TZ_T_ARRAY:
   case TZ_T_FUNCTION:
+  case TZ_T_OBJECT:
     return 1;
   case TZ_T_OPTIONAL:
     return tz_is_managed(type->inner);
@@ -98,6 +99,9 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead) {
   case TZ_T_FUNCTION:
     tz_obj_release(((TzFunction *)value)->env);
     break;
+  case TZ_T_OBJECT:
+    tz_instance_release(*(TzInstance **)value);
+    break;
   default:
     break;
   }
@@ -120,6 +124,12 @@ void tz_value_retain(const TzType *type, void *value) {
   case TZ_T_FUNCTION:
     tz_obj_retain(((TzFunction *)value)->env);
     break;
+  case TZ_T_OBJECT: {
+    TzInstance *o = *(TzInstance **)value;
+    if (o)
+      ++o->rc;
+    break;
+  }
   default:
     break;
   }
@@ -286,12 +296,18 @@ void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
   return data;
 }
 
-// `a.length = n`: drops elements, or adds zero ones.
+// `a.length = n`: drops elements, or adds zero ones. Arrays, functions and
+// objects have no zero value: an array of them can only get shorter.
 void tz_arr_set_length(TzArray *a, int64_t n) {
   if (n < 0 || n > MAX_LENGTH)
     invalid_length(n);
   size_t size = a->type->size;
   uint32_t old = a->length;
+  uint32_t kind = a->type->kind;
+  if ((uint64_t)n > old && (kind == TZ_T_ARRAY || kind == TZ_T_FUNCTION || kind == TZ_T_OBJECT))
+    tz_panicf("RangeError: an array of %s cannot grow by setting its length, which would leave "
+              "elements without a value; use push()",
+              kind == TZ_T_ARRAY ? "arrays" : kind == TZ_T_FUNCTION ? "functions" : "objects");
   if ((uint64_t)n < old) {
     a->length = (uint32_t)n;
     if (tz_is_managed(a->type)) {
@@ -400,7 +416,8 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
     return tz_str_equal(x->obj, x->meta, y->obj, y->meta);
   }
   case TZ_T_ARRAY:
-    return *(TzArray *const *)a == *(TzArray *const *)b;
+  case TZ_T_OBJECT: // the same one
+    return *(void *const *)a == *(void *const *)b;
   case TZ_T_FUNCTION: {
     const TzFunction *x = (const TzFunction *)a, *y = (const TzFunction *)b;
     return x->info == y->info && x->env == y->env;

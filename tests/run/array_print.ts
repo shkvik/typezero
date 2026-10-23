@@ -4,7 +4,7 @@ const big: int[] = []
 for (let i = 0; i < 150; i++) big.push(i * 37 % 1000)
 console.log(big)
 const many: string[] = []
-for (let i = 0; i < 26; i++) many.push("item" + i)
+for (let i = 0; i < 26; i++) many.push(`item${i}`)
 console.log(many)
 console.log(["a\nb", "tab\there", "back\slash", "q'uote", "both'\"", "all'\"`", "\x01\x7f\x9f", "привет", "😀", "a😀b"])
 const long = "This is a fairly long string that goes on and on.\nIt has a second line too.\nAnd a third one."

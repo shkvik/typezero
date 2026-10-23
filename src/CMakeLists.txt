@@ -11,10 +11,13 @@ add_executable(tz
   sema/sema_decls.cpp
   sema/sema_infer.cpp
   sema/sema_closure.cpp
+  sema/sema_truth.cpp
+  sema/sema_object.cpp
   codegen/codegen.cpp
   codegen/codegen_array.cpp
   codegen/codegen_builtins.cpp
   codegen/codegen_closure.cpp
+  codegen/codegen_object.cpp
   codegen/codegen_tail.cpp
   driver/driver.cpp
   driver/linker.cpp

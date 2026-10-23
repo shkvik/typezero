@@ -103,16 +103,36 @@ Stmt *Sema::lookupType(llvm::StringRef name) const {
   return nullptr;
 }
 
+// An object type may refer to itself through its fields (`next?: Node`,
+// `children: Tree[]`): those get a placeholder for it, which becomes the type
+// once its fields are known. Such a type stays tied to its declaration; any
+// other object type is the same as every other one with the same fields.
 const Type *Sema::resolveAlias(TypeAliasDecl *alias) {
   if (alias->resolved)
     return alias->resolved;
   if (alias->resolving) {
+    if (alias->self) {
+      alias->recursive = true;
+      return alias->self;
+    }
     diags_.error(alias->loc(), "type alias '" + alias->name + "' refers to itself");
     alias->resolved = Type::error();
     return alias->resolved;
   }
   alias->resolving = true;
-  const Type *type = resolveTypeInner(alias->type);
+  const Type *type;
+  if (alias->type.kind == TypeRef::Kind::Object) {
+    alias->self = Type::declareObject(alias->name);
+    std::vector<Field> fields = resolveFields(alias->type);
+    if (alias->recursive) {
+      alias->self->defineFields(std::move(fields));
+      type = alias->self;
+    } else {
+      type = Type::object(std::move(fields), alias->name);
+    }
+  } else {
+    type = resolveTypeInner(alias->type);
+  }
   alias->resolving = false;
   if (!alias->resolved)
     alias->resolved = type;
@@ -407,14 +427,15 @@ std::optional<int64_t> Sema::intConstant(const Expr *expr) const {
     return found->second;
   }
   case Expr::Kind::Cast: {
-    // An int widened to long: the value the int holds.
+    // An int widened to long: the value the int holds. A long cut to an int
+    // for a bitwise operator: its low 32 bits.
     auto *conv = cast<CastExpr>(expr);
     if (!conv->isImplicit())
       return std::nullopt;
     std::optional<int64_t> value = intConstant(conv->operand);
     if (!value)
       return std::nullopt;
-    return wrapTo(conv->operand->type->bitWidth(), *value);
+    return wrapTo(std::min(conv->operand->type->bitWidth(), conv->type->bitWidth()), *value);
   }
   default: {
     auto found = constants_.find(expr);
@@ -525,9 +546,12 @@ void Sema::foldBinary(BinaryExpr *bin, bool wraps) {
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
     // As CodeGen does it: the count masked to the width, `>>>` on the bits.
-    unsigned count = static_cast<unsigned>(b) & (bits - 1);
-    int64_t x = wrapTo(bits, a);
-    uint64_t pattern = bits == 32 ? static_cast<uint32_t>(x) : static_cast<uint64_t>(x);
+    // An int's `>>>` may give a long (see checkBinary), which holds the
+    // unsigned 32-bit result.
+    unsigned width = bin->lhs->type->bitWidth();
+    unsigned count = static_cast<unsigned>(b) & (width - 1);
+    int64_t x = wrapTo(width, a);
+    uint64_t pattern = width == 32 ? static_cast<uint32_t>(x) : static_cast<uint64_t>(x);
     if (bin->op == BinaryOp::Shl)
       exact = wrapTo(bits, static_cast<int64_t>(pattern << count));
     else if (bin->op == BinaryOp::Shr)

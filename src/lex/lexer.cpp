@@ -21,7 +21,9 @@ const char *tokSpelling(Tok kind) {
   case Tok::KwCase: return "'case'";
   case Tok::KwConst: return "'const'";
   case Tok::KwContinue: return "'continue'";
+  case Tok::KwDebugger: return "'debugger'";
   case Tok::KwDefault: return "'default'";
+  case Tok::KwDelete: return "'delete'";
   case Tok::KwDo: return "'do'";
   case Tok::KwElse: return "'else'";
   case Tok::KwEnum: return "'enum'";
@@ -29,6 +31,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::KwFor: return "'for'";
   case Tok::KwFunction: return "'function'";
   case Tok::KwIf: return "'if'";
+  case Tok::KwIn: return "'in'";
   case Tok::KwLet: return "'let'";
   case Tok::KwNew: return "'new'";
   case Tok::KwReturn: return "'return'";
@@ -36,6 +39,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::KwTrue: return "'true'";
   case Tok::KwTypeof: return "'typeof'";
   case Tok::KwVar: return "'var'";
+  case Tok::KwVoid: return "'void'";
   case Tok::KwWhile: return "'while'";
   case Tok::LParen: return "'('";
   case Tok::RParen: return "')'";
@@ -297,7 +301,23 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
       isFloat = true;
     while (llvm::isDigit(peek()) || peek() == '_')
       ++cur_;
-    if (!isFloat && peek() == '.' && llvm::isDigit(peek(1))) {
+    // As in JavaScript, the point may end the number: `5.` is 5, and in
+    // `5..toString()` the second point reads the property.
+    if (!isFloat && peek() == '.' && isIdentStart(peek(1)) && peek(1) != 'e' && peek(1) != 'E') {
+      // `5.toString()`: the point belongs to the number, and a name cannot
+      // follow it. The point is left to be read as `.`, so that the rest
+      // parses as meant and this is the only error.
+      llvm::StringRef number(start, static_cast<size_t>(cur_ - start));
+      const char *name = cur_ + 1, *nameEnd = name;
+      while (nameEnd < end_ && isIdentChar(*nameEnd))
+        ++nameEnd;
+      llvm::StringRef property(name, static_cast<size_t>(nameEnd - name));
+      diags_.error(llvm::SMLoc::getFromPointer(name),
+                   "a point right after a number belongs to the number, so a name cannot follow it; "
+                   "write '" + number + ".." + property + "' or '(" + number + ")." + property + "'");
+      return make(Tok::IntLiteral, start, newlineBefore);
+    }
+    if (!isFloat && peek() == '.') {
       isFloat = true;
       ++cur_;
       while (llvm::isDigit(peek()) || peek() == '_')
@@ -365,7 +385,9 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("case", Tok::KwCase)
                  .Case("const", Tok::KwConst)
                  .Case("continue", Tok::KwContinue)
+                 .Case("debugger", Tok::KwDebugger)
                  .Case("default", Tok::KwDefault)
+                 .Case("delete", Tok::KwDelete)
                  .Case("do", Tok::KwDo)
                  .Case("else", Tok::KwElse)
                  .Case("enum", Tok::KwEnum)
@@ -373,6 +395,7 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("for", Tok::KwFor)
                  .Case("function", Tok::KwFunction)
                  .Case("if", Tok::KwIf)
+                 .Case("in", Tok::KwIn)
                  .Case("let", Tok::KwLet)
                  .Case("new", Tok::KwNew)
                  .Case("return", Tok::KwReturn)
@@ -380,6 +403,7 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("true", Tok::KwTrue)
                  .Case("typeof", Tok::KwTypeof)
                  .Case("var", Tok::KwVar)
+                 .Case("void", Tok::KwVoid)
                  .Case("while", Tok::KwWhile)
                  .Default(Tok::Identifier);
   return make(kind, start, newlineBefore);
@@ -530,14 +554,32 @@ bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &dia
   return decodeText(raw, /*isTemplate=*/false, out, diags);
 }
 
-bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
-  // Strip the leading '`' or '}' and the trailing '`' or '${'.
+// The text of a template part without the leading '`' or '}' and the
+// trailing '`' or '${'.
+static llvm::StringRef templateText(const Token &tok) {
   llvm::StringRef raw = tok.text.drop_front();
   if (raw.ends_with("${"))
-    raw = raw.drop_back(2);
-  else if (raw.ends_with("`"))
-    raw = raw.drop_back();
-  return decodeText(raw, /*isTemplate=*/true, out, diags);
+    return raw.drop_back(2);
+  if (raw.ends_with("`"))
+    return raw.drop_back();
+  return raw;
+}
+
+bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
+  return decodeText(templateText(tok), /*isTemplate=*/true, out, diags);
+}
+
+void decodeTemplateRaw(const Token &tok, std::u16string &out) {
+  llvm::StringRef raw = templateText(tok);
+  out.clear();
+  for (size_t i = 0; i < raw.size();) {
+    if (raw[i] == '\r') {
+      out += u'\n';
+      i += raw.substr(i).starts_with("\r\n") ? 2 : 1;
+      continue;
+    }
+    appendUtf16(out, decodeUtf8(raw, i));
+  }
 }
 
 } // namespace tz

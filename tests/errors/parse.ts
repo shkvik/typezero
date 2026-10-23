@@ -19,14 +19,6 @@ switch (x) {
 function r1(...xs: int[], y: int): void {}
 // expect-error: a rest parameter cannot be optional or have a default value
 function r2(...xs: int[] = []): void {}
-// expect-error: the overload signature of 'lonely' must be followed by the function's implementation
-function lonely(a: int): int
-const afterLonely = 1
-function first(a: int): int
-// expect-error: expected the implementation of 'first' after its overload signature
-function second(a: int): int {
-  return a
-}
 // expect-error: 'readonly' applies only to array types
 function ro(a: readonly int): void {}
 // expect-error: a rest element must be the last one

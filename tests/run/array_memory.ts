@@ -3,7 +3,7 @@
 // memory goes back when objects die.
 function make(n: int): string[] {
   const out: string[] = []
-  for (let i = 0; i < n; i++) out.push("s" + i)
+  for (let i = 0; i < n; i++) out.push(`s${i}`)
   return out
 }
 function total(rows: int[][]): int {
@@ -20,7 +20,7 @@ function firstLong(words: string[]): string | undefined {
 const global = make(3)
 const alias = global
 alias.push("added")
-console.log(global, alias === global, make(0), firstLong(["ab", "abcd", "x"]), firstLong(global))
+console.log(global, alias == global, make(0), firstLong(["ab", "abcd", "x"]), firstLong(global))
 const grid: int[][] = []
 for (let i = 0; i < 3; i++) {
   const row: int[] = []
@@ -38,7 +38,7 @@ let swap = [["a"], ["b"]]
 swap = [swap[1] ?? [], swap[0] ?? []]
 console.log(swap)
 for (const ch of "héllo😀!") {
-  if (ch === "!") break
+  if (ch == "!") break
   console.log(ch, ch.length)
 }
 const strs = ["x", "y"]
@@ -67,7 +67,7 @@ function churn(rounds: int): int {
   let check = 0
   for (let r = 0; r < rounds; r++) {
     const parts: string[] = []
-    for (let i = 0; i < 2000; i++) parts.push("x".repeat(i % 300 + 1) + i)
+    for (let i = 0; i < 2000; i++) parts.push(`${"x".repeat(i % 300 + 1)}${i}`)
     let size = 0
     for (const p of parts) size += p.length
     check = (check + size) % 1000007
@@ -102,9 +102,9 @@ console.log(x, grids.length)
 
 const dq: string[] = []
 for (let i = 0; i < 100000; i++) {
-  if (i % 3 === 0) dq.unshift("u" + i)
-  else dq.push("p" + i)
-  if (i % 5 === 0) dq.shift()
+  if (i % 3 == 0) dq.unshift(`u${i}`)
+  else dq.push(`p${i}`)
+  if (i % 5 == 0) dq.shift()
 }
 console.log(dq.length, dq[0], dq[dq.length - 1])
 

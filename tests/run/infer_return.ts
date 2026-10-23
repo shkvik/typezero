@@ -8,7 +8,7 @@ function half(x: int) {
 }
 function describe(n: int) {
   if (n < 0) return "negative"
-  return n === 0 ? "zero" : "positive"
+  return n == 0 ? "zero" : "positive"
 }
 function firstWord(s: string) {
   const space = s.indexOf(" ")
@@ -37,17 +37,17 @@ function fact(n: int) {
   return n * fact(n - 1)
 }
 function power(x: double, n: int) {
-  if (n === 0) return 1
+  if (n == 0) return 1
   return x * power(x, n - 1)
 }
 function repeat(s: string, n: int) {
   return n <= 0 ? "" : s + repeat(s, n - 1)
 }
 function isEven(n: int) {
-  return n === 0 ? true : isOdd(n - 1)
+  return n == 0 ? true : isOdd(n - 1)
 }
 function isOdd(n: int) {
-  return n === 0 ? false : isEven(n - 1)
+  return n == 0 ? false : isEven(n - 1)
 }
 function depth(tree: int[], at: int) {
   if (at >= tree.length) return 0

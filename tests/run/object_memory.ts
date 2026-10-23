@@ -1,0 +1,112 @@
+// same-as-node
+// Objects are reference counted: whatever holds one keeps it, and the last
+// reference frees it with what it holds. The test runs with leak checks.
+interface Node {
+  value: int
+  next?: Node
+}
+
+// A long list: freeing it takes no stack.
+let list: Node | undefined = undefined
+for (let i = 0; i < 1000000; i++) list = { value: i % 7, next: list }
+let sum = 0
+for (let node = list; node != undefined; node = node.next) sum += node.value
+console.log(sum)
+list = undefined
+
+// A list built by a function calling itself in tail position.
+function build(n: int, acc: Node | undefined): Node | undefined {
+  if (n == 0) return acc
+  return build(n - 1, { value: n, next: acc })
+}
+const built = build(5000, undefined)
+console.log(built?.value, built?.next?.value)
+
+// A balanced tree.
+interface Tree {
+  left?: Tree
+  right?: Tree
+}
+function tree(depth: int): Tree {
+  return depth == 0 ? {} : { left: tree(depth - 1), right: tree(depth - 1) }
+}
+function size(t: Tree): int {
+  if (t.left == undefined || t.right == undefined) return 1
+  return 1 + size(t.left) + size(t.right)
+}
+let total = 0
+for (let i = 0; i < 20; i++) total += size(tree(10))
+console.log(total)
+
+// Assigning to a field releases what it held.
+interface Holder {
+  text: string
+  items: string[]
+  child?: Holder
+  onDone?: () => string
+}
+const holder: Holder = { text: "a", items: ["x"] }
+for (let i = 0; i < 1000; i++) {
+  holder.text = `text ${i}`
+  holder.items = [holder.text, "y"]
+  holder.child = { text: holder.text, items: holder.items }
+  const captured = holder.child
+  holder.onDone = () => captured.text
+}
+console.log(holder.text, holder.items, holder.child?.text, holder.onDone?.())
+holder.child = undefined
+holder.onDone = undefined
+console.log(holder.child, holder.onDone, holder.items)
+
+// Arrays of objects: elements come and go.
+const objects = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+const popped = objects.pop()
+const shifted = objects.shift()
+const removed = objects.splice(0, 1)
+objects.push({ id: 6 }, { id: 7 })
+objects.unshift({ id: 0 })
+console.log(popped, shifted, removed, objects)
+objects.reverse()
+const tail = objects.slice(1)
+const more = objects.concat([{ id: 8 }])
+objects.fill({ id: 9 }, 2)
+console.log(objects, tail, more.length, more.map(o => o.id))
+objects.length = 1
+console.log(objects, objects.filter(o => o.id > 5))
+
+// Objects kept by closures, also when the variable changes.
+function counters() {
+  let state = { count: 0 }
+  const increment = () => {
+    state.count++
+    return state.count
+  }
+  const reset = () => {
+    state = { count: 0 }
+  }
+  return { increment, reset }
+}
+const c = counters()
+c.increment()
+c.increment()
+console.log(c.increment())
+c.reset()
+console.log(c.increment())
+
+// Values chosen between objects.
+function pick(flag: boolean, a: Node, b: Node): Node {
+  return flag ? a : b
+}
+const one: Node = { value: 1 }
+const two: Node = { value: 2 }
+let chosen: Node | undefined = pick(false, one, two)
+chosen = chosen ?? one
+const maybe: Node | undefined = chosen.value > 1 ? undefined : chosen
+console.log(chosen, maybe ?? two, maybe && maybe.value, (maybe || one).value)
+
+// Objects made in a loop, kept in an array, read back.
+const rows: { index: int; label: string; tags: string[] }[] = []
+for (let i = 0; i < 5000; i++) rows.push({ index: i, label: `row ${i}`, tags: [`t${i % 3}`] })
+let found = 0
+for (const row of rows) if (row.tags[0] == "t1" && row.label.endsWith("7")) found++
+console.log(found, rows[4999]?.label)

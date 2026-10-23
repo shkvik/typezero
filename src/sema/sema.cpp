@@ -93,6 +93,7 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
   case Stmt::Kind::Empty:
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
+  case Stmt::Kind::Debugger:
     break;
   }
 }
@@ -111,6 +112,10 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
   case Expr::Kind::ArrayLit:
     for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
       sub(e.expr);
+    break;
+  case Expr::Kind::ObjectLit:
+    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props)
+      sub(p.value);
     break;
   case Expr::Kind::Member:
     sub(cast<MemberExpr>(expr)->object);
@@ -183,6 +188,17 @@ void Sema::check(SourceFile &file) {
   // main's stack frame. That includes the arrows of top-level code.
   for (Stmt *item : file.items)
     collectNames(item, namesInFunctions_, /*inFunction=*/isa<FunctionDecl>(item));
+  // The same for fields: only those assigned somewhere can change.
+  for (Stmt *item : file.items)
+    visitExprs(item, [&](const Expr *e) {
+      const Expr *target = nullptr;
+      if (auto *assign = dyn_cast<AssignExpr>(e))
+        target = assign->target;
+      else if (auto *update = dyn_cast<UpdateExpr>(e))
+        target = update->target;
+      if (auto *member = llvm::dyn_cast_or_null<MemberExpr>(target))
+        assignedFields_.insert(member->name);
+    });
 
   for (Stmt *item : file.items)
     if (auto *decl = dyn_cast<VarDeclStmt>(item))
@@ -285,8 +301,13 @@ void Sema::declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry) {
   auto [it, inserted] = scopes_.back().try_emplace(name, entry);
   if (inserted)
     return;
-  diags_.error(loc, "duplicate declaration of '" + name + "'");
   const ScopeEntry &previous = it->second;
+  // Two functions with one name are not overloads: plain functions have none
+  // (docs/overloads.md).
+  diags_.error(loc, "duplicate declaration of '" + name + "'" +
+                        (entry.func && previous.func
+                             ? "; plain functions are not overloaded: give each variant its own name"
+                             : ""));
   diags_.note(previous.var    ? previous.var->loc
               : previous.func ? previous.func->loc
                               : previous.enumDecl->loc(),
@@ -343,8 +364,15 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
       resolveEnum(e);
       return e->isString ? Type::string() : Type::intTy();
     }
+    // What TypeScript calls the texts a tag gets from its template: here a
+    // plain array of strings, without `raw` (see checkMember).
+    if (ref.name == "TemplateStringsArray")
+      return Type::array(Type::string());
     if (ref.name == "Array")
       diags_.error(ref.loc, "'Array' needs an element type, e.g. 'Array<int>' or 'int[]'");
+    else if (ref.name == "null")
+      diags_.error(ref.loc, "'null' is not supported: the only value for nothing is 'undefined'; "
+                            "write 'T | undefined'");
     else
       diags_.error(ref.loc, "cannot find type '" + ref.name + "'");
     return Type::error();
@@ -430,8 +458,26 @@ const Type *Sema::resolveTypeInner(const TypeRef &ref) {
       return Type::error();
     return Type::function(params, minArgs, ref.rest, ret);
   }
+  case TypeRef::Kind::Object:
+    return Type::object(resolveFields(ref));
   }
   llvm_unreachable("unknown type reference");
+}
+
+std::vector<Field> Sema::resolveFields(const TypeRef &ref) {
+  std::vector<Field> fields;
+  for (size_t i = 0; i < ref.args.size(); ++i) {
+    llvm::StringRef name = ref.names[i];
+    if (llvm::any_of(fields, [&](const Field &f) { return f.name == name; })) {
+      diags_.error(ref.locs[i], "duplicate field '" + name + "'");
+      continue;
+    }
+    const Type *type = resolveType(ref.args[i], /*allowVoid=*/false);
+    if (ref.optional[i])
+      type = Type::optional(type);
+    fields.push_back({name.str(), type, ref.readonly[i]});
+  }
+  return fields;
 }
 
 bool Sema::isImplicitlyConvertible(const Type *from, const Type *to) {
@@ -445,6 +491,16 @@ bool Sema::isImplicitlyConvertible(const Type *from, const Type *to) {
     return true;
   if (to->isOptional())
     return from->isUndefined() || isImplicitlyConvertible(from->nonOptional(), to->inner());
+  // An object may be seen through a type that makes some of its fields
+  // read-only; the fields are the same, so nothing changes in memory.
+  if (from->isObject() && to->isObject() && from->fields().size() == to->fields().size()) {
+    for (const Field &f : from->fields()) {
+      const Field *t = to->field(f.name);
+      if (!t || t->type != f.type || (f.readonly && !t->readonly))
+        return false;
+    }
+    return true;
+  }
   return false;
 }
 
@@ -468,7 +524,10 @@ const Type *Sema::unify(const Type *a, const Type *b) {
   if (b->isUndefined())
     return Type::optional(a);
   const Type *x = a->nonOptional(), *y = b->nonOptional();
-  const Type *base = x == y ? x : x->isNumeric() && y->isNumeric() ? commonNumericType(x, y) : nullptr;
+  // An object and the same object with read-only fields give the read-only
+  // one.
+  bool related = (x->isNumeric() && y->isNumeric()) || (x->isObject() && y->isObject());
+  const Type *base = x == y ? x : related ? commonNumericType(x, y) : nullptr;
   if (!base)
     return nullptr;
   return a->isOptional() || b->isOptional() ? Type::optional(base) : base;
@@ -494,7 +553,12 @@ Expr *Sema::convert(Expr *expr, const Type *to) {
   return cast;
 }
 
-Expr *Sema::coerce(Expr *expr, const Type *to) {
+// Why an int's `x >>> n` may not go back into an int (see checkBinary).
+static const char kUnsignedShift[] =
+    "'>>>' is unsigned in JavaScript, and with a count of 0 a negative int becomes a number above "
+    "int: keep the result in a long";
+
+Expr *Sema::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   const Type *from = expr->type;
   if (from == to || from->isError() || to->isError())
     return expr;
@@ -509,17 +573,31 @@ Expr *Sema::coerce(Expr *expr, const Type *to) {
 
   std::string message =
       ("type '" + from->name() + "' is not assignable to type '" + to->name() + "'").str();
+  if (!what.empty())
+    message += (" of " + what).str();
+  // Objects, or arrays of them: the fields that differ.
+  const Type *fromObject = from->nonOptional(), *toObject = to->nonOptional();
+  while (fromObject->isArray() && toObject->isArray()) {
+    fromObject = fromObject->inner()->nonOptional();
+    toObject = toObject->inner()->nonOptional();
+  }
   if (from->isFunction() && function->isFunction())
     message += "; the types of functions must match exactly: wrap it in an arrow that converts "
                "what it needs";
-  if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
-    message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
+  if (fromObject->isObject() && toObject->isObject() && !isImplicitlyConvertible(fromObject, toObject))
+    message += objectMismatch(fromObject, toObject);
+  else if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
+    message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
                "default with '??'";
   else if (from->isFloat() && to->isInt())
     message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, "
                "Math.ceil or Math.trunc";
   else if (from->isFloat() && to->isInteger())
     message += "; round it with Math.round, Math.floor, Math.ceil or Math.trunc";
+  else if (auto *bin = dyn_cast<BinaryExpr>(expr);
+           bin && bin->op == BinaryOp::UShr && bin->lhs->type->isInt() && to->isInt())
+    message += "; " + std::string(kUnsignedShift) +
+               (bin->source.empty() ? "" : ", e.g. 'const u = " + bin->source.str() + "'");
   else if (from->isInteger() && to->isInteger())
     message += "; Math.trunc(x) converts it and checks that it fits";
   diags_.error(expr->loc(), message);
@@ -541,7 +619,7 @@ const Type *Sema::comparisonType(const Type *a, const Type *b) {
     return common;
   const Type *base = common ? common->nonOptional() : nullptr;
   if (base && (base->isNumeric() || base->isBool() || base->isString() || base->isArray() ||
-               base->isFunction()))
+               base->isFunction() || base->isObject()))
     return common;
   return nullptr;
 }
@@ -743,6 +821,7 @@ void Sema::checkStmt(Stmt *stmt) {
     flow_.unreachable = true;
     break;
   case Stmt::Kind::Empty:
+  case Stmt::Kind::Debugger:
     break;
   }
 }
@@ -874,7 +953,7 @@ void Sema::checkSwitch(SwitchStmt *stmt) {
         c.test = convert(c.test, common);
         c.compareType = common;
         if (constant) {
-          // `discriminant === test`, to learn from it as from a condition.
+          // `discriminant == test`, to learn from it as from a condition.
           BinaryExpr equal(c.loc, BinaryOp::Eq, convert(stmt->discriminant, common), c.test);
           equal.type = Type::boolTy();
           addConditionFacts(&equal, whenTrue, whenFalse);
@@ -961,7 +1040,41 @@ void Sema::checkDoWhile(DoWhileStmt *stmt) {
   flow_ = scan.breaks ? join(whenFalse, head) : whenFalse;
 }
 
+// Whether `stmt`, the body of a loop with `labels`, has a `continue` that
+// goes to that loop; `loops` counts the loops around `stmt` inside it.
+static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels, unsigned loops = 0) {
+  if (!stmt)
+    return false;
+  auto inside = [&](const Stmt *s) { return continuesTo(s, labels, loops); };
+  switch (stmt->kind()) {
+  case Stmt::Kind::Continue: {
+    llvm::StringRef label = cast<ContinueStmt>(stmt)->label;
+    return label.empty() ? loops == 0 : llvm::is_contained(labels, label);
+  }
+  case Stmt::Kind::Block:
+    return llvm::any_of(cast<BlockStmt>(stmt)->body, inside);
+  case Stmt::Kind::If:
+    return inside(cast<IfStmt>(stmt)->thenStmt) || inside(cast<IfStmt>(stmt)->elseStmt);
+  case Stmt::Kind::While:
+    return continuesTo(cast<WhileStmt>(stmt)->body, labels, loops + 1);
+  case Stmt::Kind::DoWhile:
+    return continuesTo(cast<DoWhileStmt>(stmt)->body, labels, loops + 1);
+  case Stmt::Kind::For:
+    return continuesTo(cast<ForStmt>(stmt)->body, labels, loops + 1);
+  case Stmt::Kind::ForOf:
+    return continuesTo(cast<ForOfStmt>(stmt)->body, labels, loops + 1);
+  case Stmt::Kind::Switch:
+    return llvm::any_of(cast<SwitchStmt>(stmt)->cases,
+                        [&](const SwitchCase &c) { return llvm::any_of(c.body, inside); });
+  case Stmt::Kind::Labeled:
+    return inside(cast<LabeledStmt>(stmt)->body);
+  default:
+    return false;
+  }
+}
+
 void Sema::checkFor(ForStmt *stmt) {
+  llvm::SmallVector<llvm::StringRef, 1> labels = pendingLabels_;
   pushScope(); // variables declared in the loop header
   if (stmt->init)
     checkStmt(stmt->init);
@@ -975,7 +1088,14 @@ void Sema::checkFor(ForStmt *stmt) {
   flow_ = whenTrue;
   checkLoopBody(stmt->body);
   if (stmt->step) {
-    flow_ = head;
+    // The step runs where the body ends (`node = node.next` after
+    // `node != undefined`), unless a `continue` may jump there from
+    // elsewhere; what holds at the head holds there too. If the body never
+    // ends, the step never runs, and is checked as the body starts.
+    if (continuesTo(stmt->body, labels))
+      flow_ = head;
+    else if (flow_.unreachable)
+      flow_ = whenTrue;
     stmt->step = checkExpr(stmt->step);
   }
   flow_ = scan.breaks ? join(whenFalse, head) : whenFalse;
@@ -1059,8 +1179,11 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
     }
     const Type *type = declared;
     Expr *value = nullptr; // the initializer before its conversion
+    bool untyped = false;  // reported with the scope (see noteUntyped)
     if (d.init) {
+      initializing_.push_back(d.name);
       d.init = value = checkExpr(d.init, declared);
+      initializing_.pop_back();
       if (declared) {
         d.init = coerce(d.init, declared);
       } else {
@@ -1068,9 +1191,13 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
         if (type->isVoid()) {
           diags_.error(d.init->loc(), "an expression of type 'void' cannot initialize a variable");
           type = Type::error();
+        } else if (type->isUndefined() && !decl->isConst && !d.destructured) {
+          untyped = true;
+          type = Type::error();
         } else if (type->isUndefined()) {
-          diags_.error(d.init->loc(), "cannot infer a type from 'undefined'; add one, e.g. 'let " +
-                                          d.name + ": int | undefined = undefined'");
+          diags_.error(d.init->loc(), llvm::Twine("cannot infer a type from 'undefined'; add one, e.g. '") +
+                                          (decl->isConst ? "const " : "let ") + d.name +
+                                          ": int | undefined = undefined'");
           type = Type::error();
         }
       }
@@ -1079,7 +1206,7 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
       if (!type)
         type = Type::error();
     } else if (!declared) {
-      diags_.error(d.loc, "variable '" + d.name + "' needs a type annotation or an initializer");
+      untyped = true;
       type = Type::error();
     }
 
@@ -1100,12 +1227,55 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
     }
 
     d.sym = declareVar(d.name, d.loc, type, decl->isConst);
+    if (untyped)
+      noteUntyped(d.sym, d.init != nullptr);
     if (value)
       assigned(d.sym, value);
     if (decl->isConst && d.init && type->isInteger())
       if (std::optional<int64_t> constant = intConstant(d.init))
         constVars_[d.sym] = *constant;
   }
+}
+
+// As in TypeScript, the type of a variable is where it is declared; unlike
+// tsc, Sema does not take it from the assignments that follow. It looks at
+// them only for the hint, so the error waits for the end of the scope.
+void Sema::noteUntyped(VarSymbol *var, bool initUndefined) {
+  untyped_.push_back({var, initUndefined, {}});
+}
+
+void Sema::assignedUntyped(const VarSymbol *var, const Type *type) {
+  for (Untyped &u : untyped_)
+    if (u.var == var && !type->isError() && !type->isVoid())
+      u.assigned.push_back(type);
+}
+
+// Reports the variables declared in the innermost scope, which is ending.
+void Sema::reportUntyped() {
+  llvm::erase_if(untyped_, [&](const Untyped &u) {
+    auto found = scopes_.back().find(u.var->name);
+    if (found == scopes_.back().end() || found->second.var != u.var)
+      return false;
+    // The type that holds every value assigned, if there is one.
+    const Type *type = u.initUndefined ? Type::undefinedTy() : nullptr;
+    for (const Type *t : u.assigned) {
+      const Type *common = type ? unify(type, t) : t;
+      type = common ? common : Type::error();
+    }
+    std::string name = u.var->name.str();
+    std::string hint;
+    if (type && !type->isError() && !type->isUndefined())
+      hint = "write the type: 'let " + name + ": " + type->name().str() + "'";
+    else if (u.initUndefined)
+      hint = "add one, e.g. 'let " + name + ": int | undefined'";
+    else
+      hint = "e.g. 'let " + name + ": int' or 'let " + name + " = 0'";
+    if (u.initUndefined)
+      diags_.error(u.var->loc, "cannot infer a type from 'undefined'; " + hint);
+    else
+      diags_.error(u.var->loc, "variable '" + name + "' needs a type annotation or an initializer; " + hint);
+    return true;
+  });
 }
 
 void Sema::checkReturn(ReturnStmt *ret) {
@@ -1133,63 +1303,16 @@ void Sema::checkReturn(ReturnStmt *ret) {
 
   ret->value = checkExpr(ret->value, fn->ret->isVoid() ? nullptr : fn->ret);
   if (fn->ret->isVoid()) {
-    // `return f()` with a void `f` is fine, as in TypeScript, and so is any
-    // value in a callback whose result is dropped.
+    // `return f()` with a void `f` is fine, as in TypeScript, and so are
+    // `return void f()` and `return undefined`, and any value in a callback
+    // whose result is dropped.
     const Type *type = ret->value->type;
-    if (!type->isVoid() && !type->isError() && !fn->discardsResult)
+    if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult)
       diags_.error(ret->value->loc(), functionLabel(fn->name) + " is declared to return 'void', "
                                                                "but returns '" + type->name() + "'");
     return;
   }
   ret->value = coerce(ret->value, fn->ret);
-}
-
-Expr *Sema::checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse) {
-  cond = checkBranching(cond, whenTrue, whenFalse);
-  if (!cond->type->isBool() && !cond->type->isError())
-    diags_.error(cond->loc(), "condition must be of type 'boolean', found '" + cond->type->name() + "'");
-  return cond;
-}
-
-// Checks an expression whose truth matters, following `&&`, `||` and `!` so
-// that the right side of `i < a.length && a[i] > 0` knows `i < a.length`.
-Expr *Sema::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse) {
-  if (auto *bin = dyn_cast<BinaryExpr>(expr);
-      bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
-    bool isAnd = bin->op == BinaryOp::LogAnd;
-    Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-    bin->lhs = checkBranching(bin->lhs, lhsTrue, lhsFalse);
-    flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
-    bin->rhs = checkBranching(bin->rhs, rhsTrue, rhsFalse);
-    whenTrue = isAnd ? rhsTrue : join(lhsTrue, rhsTrue);
-    whenFalse = isAnd ? join(lhsFalse, rhsFalse) : rhsFalse;
-    flow_ = join(whenTrue, whenFalse);
-    const Type *l = bin->lhs->type, *r = bin->rhs->type;
-    if (!l->isError() && !r->isError() && !(l->isBool() && r->isBool()))
-      reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
-    bin->type = Type::boolTy();
-    return bin;
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
-    Flow operandTrue, operandFalse;
-    unary->operand = checkBranching(unary->operand, operandTrue, operandFalse);
-    whenTrue = operandFalse;
-    whenFalse = operandTrue;
-    const Type *type = unary->operand->type;
-    if (!type->isBool() && !type->isError())
-      diags_.error(unary->loc(), "operator '!' cannot be applied to type '" + type->name() + "'");
-    unary->type = Type::boolTy();
-    return unary;
-  }
-
-  expr = checkExpr(expr, Type::boolTy());
-  whenTrue = flow_;
-  whenFalse = flow_;
-  if (auto *lit = dyn_cast<BoolLitExpr>(expr))
-    (lit->value ? whenFalse : whenTrue).unreachable = true;
-  else
-    addConditionFacts(expr, whenTrue, whenFalse);
-  return expr;
 }
 
 static bool isTrueLiteral(const Expr *expr) {
@@ -1390,6 +1513,8 @@ Expr *Sema::checkExpr(Expr *expr, const Type *expected, bool wraps) {
     return checkTemplate(cast<TemplateExpr>(expr));
   case Expr::Kind::ArrayLit:
     return checkArrayLit(cast<ArrayLitExpr>(expr), expected);
+  case Expr::Kind::ObjectLit:
+    return checkObjectLit(cast<ObjectLitExpr>(expr), expected);
   case Expr::Kind::Name:
     return checkName(cast<NameExpr>(expr));
   case Expr::Kind::Member:
@@ -1526,7 +1651,7 @@ Expr *Sema::checkName(NameExpr *name) {
     return name;
   }
   static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat", "isNaN",
-                                                 "isFinite"};
+                                                 "isFinite", "Boolean"};
   if (name->name == "this")
     diags_.error(name->loc(), "'this' exists only in the methods of classes, which are not supported yet");
   else if (llvm::is_contained(builtins, name->name))
@@ -1535,6 +1660,11 @@ Expr *Sema::checkName(NameExpr *name) {
                                   name->name + "'");
   else if (name->name == "arguments")
     diags_.error(name->loc(), "'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'");
+  else if (name->name == "null")
+    diags_.error(name->loc(), "'null' is not supported: the only value for nothing is 'undefined'; "
+                              "write 'undefined'");
+  else if (const char *why = whyUnsupported(name->name))
+    diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
   else if (entry.enumDecl)
     diags_.error(name->loc(), "enum '" + name->name + "' can only be used as '" + name->name +
                                   ".Member' or '" + name->name + "[value]'");
@@ -1548,6 +1678,8 @@ Expr *Sema::checkName(NameExpr *name) {
                                                  "function with 'function', which can use it");
   else if (later)
     diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
+  else if (llvm::is_contained(initializing_, name->name))
+    diags_.error(name->loc(), "'" + name->name + "' is used in its own initializer, before it has a value");
   else
     diags_.error(name->loc(), "cannot find name '" + name->name + "'");
   name->type = Type::error();
@@ -1572,8 +1704,8 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
     else
       unary->operand = checkExpr(unary->operand, hint, wraps);
     const Type *type = unary->operand->type;
-    if (unary->op == UnaryOp::Plus && (type->isString() || type->isBool())) {
-      // `+s` is Number(s), as in JavaScript.
+    if (type->isString() || type->isBool()) {
+      // `+s` is Number(s), and `-s` is -Number(s), as in JavaScript.
       unary->type = Type::doubleTy();
       break;
     }
@@ -1610,6 +1742,15 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
     unary->operand = checkExpr(unary->operand);
     unary->type = Type::string();
     break;
+  case UnaryOp::Void:
+    // `void f()` runs f and drops what it returns; the value is undefined,
+    // usable wherever the literal `undefined` is.
+    unary->operand = checkExpr(unary->operand);
+    unary->type = Type::undefinedTy();
+    break;
+  case UnaryOp::Delete:
+    checkDelete(unary);
+    break;
   case UnaryOp::NonNull: {
     // `x!`: the program stops if x is undefined, so from here on a variable
     // holds a value.
@@ -1622,6 +1763,8 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
     unary->type = type->nonOptional();
     if (auto *name = dyn_cast<NameExpr>(unary->operand); name && name->var && type->isOptional())
       setDefined(name->var, true);
+    else if (std::optional<FieldPath> path = fieldPath(unary->operand); path && type->isOptional())
+      defineField(flow_, *path);
     break;
   }
   }
@@ -1630,15 +1773,188 @@ Expr *Sema::checkUnary(UnaryExpr *unary, const Type *expected, bool wraps) {
   return unary;
 }
 
+// A name or an integer literal as written, for messages that show how to
+// rewrite the code around it.
+static std::optional<std::string> simpleText(const Expr *expr) {
+  if (auto *name = dyn_cast<NameExpr>(expr))
+    return name->name.str();
+  if (auto *lit = dyn_cast<IntLitExpr>(expr))
+    return std::to_string(lit->value);
+  return std::nullopt;
+}
+
+// `delete` removes a property of an object, and an object always has the
+// fields of its type. An array element would leave a hole, and arrays have
+// none.
+void Sema::checkDelete(UnaryExpr *unary) {
+  unary->type = Type::boolTy();
+  auto *index = dyn_cast<IndexExpr>(unary->operand);
+  if (!index) {
+    unary->operand = checkExpr(unary->operand);
+    const Type *type = unary->operand->type;
+    auto *member = dyn_cast<MemberExpr>(unary->operand);
+    if (type->isError())
+      return;
+    if (member && member->object->type->nonOptional()->isObject())
+      diags_.error(unary->loc(), "'delete' cannot remove field '" + member->name +
+                                     "': an object always has the fields of its type");
+    else
+      diags_.error(unary->loc(), "'delete' removes fields of objects, and this is not a field");
+    return;
+  }
+  std::string array = simpleText(index->object).value_or("a");
+  std::string position = simpleText(index->index).value_or("i");
+  index->object = checkExpr(index->object);
+  index->index = checkExpr(index->index);
+  index->type = Type::error();
+  const Type *type = index->object->type->nonOptional();
+  if (type->isArray())
+    diags_.error(unary->loc(), "'delete' would leave a hole in the array, and arrays have none; "
+                               "remove the element with '" + array + ".splice(" + position +
+                                   ", 1)', or replace it: '" + array + "[" + position + "] = ...'");
+  else if (type->isString())
+    diags_.error(unary->loc(), "strings are immutable; a character cannot be deleted");
+  else if (type->isObject())
+    diags_.error(unary->loc(), "'delete' cannot remove a field: an object always has the fields of its "
+                               "type");
+  else if (!type->isError())
+    diags_.error(unary->loc(), "'delete' removes fields of objects, and this is not a field");
+}
+
+// `key in object` asks whether the object has the property; an object always
+// has the fields of its type. Arrays have no holes, so for them it is a
+// comparison of the index with the length.
+Expr *Sema::checkIn(BinaryExpr *bin) {
+  std::optional<std::string> key = simpleText(bin->lhs);
+  bool literalKey = isa<IntLitExpr>(bin->lhs);
+  std::string array = simpleText(bin->rhs).value_or("a");
+  bin->lhs = checkExpr(bin->lhs);
+  bin->rhs = checkExpr(bin->rhs);
+  bin->type = Type::boolTy();
+  const Type *l = bin->lhs->type, *r = bin->rhs->type;
+  if (l->isError() || r->isError())
+    return bin;
+  if (r->nonOptional()->isObject()) {
+    diags_.error(bin->loc(), "operator 'in' is not supported for objects: an object always has the "
+                             "fields of its type");
+    return bin;
+  }
+  if (!r->nonOptional()->isArray()) {
+    reportOperandTypes(bin->loc(), "in", l, r);
+    return bin;
+  }
+  std::string i = l->isInteger() && key ? *key : "i";
+  std::string check = literalKey ? i + " < " + array + ".length"
+                                 : i + " >= 0 && " + i + " < " + array + ".length";
+  diags_.error(bin->loc(), "operator 'in' is not supported for arrays, which have no holes; compare "
+                           "the index with the length instead: '" + check + "'");
+  return bin;
+}
+
+namespace {
+
+// The source text of the two sides of `bin`, an operator `length` characters
+// long; empty if the source is not known.
+std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source, llvm::SMLoc op,
+                                                         size_t length) {
+  const char *at = op.getPointer();
+  if (source.empty() || at < source.begin() || at + length > source.end())
+    return {};
+  return {llvm::StringRef(source.begin(), static_cast<size_t>(at - source.begin())).trim(),
+          llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
+}
+
+// An operand as it was before toStringOperand converted it.
+const Expr *unconverted(const Expr *expr) {
+  auto *cast = dyn_cast<CastExpr>(expr);
+  return cast && cast->isImplicit() && cast->type->isString() ? cast->operand : expr;
+}
+
+// The parts `+` joins in the chain ending at `bin`, with their source text:
+// for `a + b + "x" + c` they are `a + b` (a sum: the numbers before the first
+// string add up, as in JavaScript), "x" and c.
+void concatParts(const BinaryExpr *bin, std::vector<std::pair<const Expr *, llvm::StringRef>> &parts) {
+  auto [lhs, rhs] = operandTexts(bin->source, bin->loc(), 1);
+  auto *left = dyn_cast<BinaryExpr>(unconverted(bin->lhs));
+  if (left && left->op == BinaryOp::Add && left->type && left->type->isString())
+    concatParts(left, parts);
+  else
+    parts.push_back({unconverted(bin->lhs), lhs});
+  parts.push_back({unconverted(bin->rhs), rhs});
+}
+
+// `text` without parentheses around all of it, which `${...}` makes
+// unnecessary. Text with quotes keeps them: a parenthesis in a string would
+// confuse the count.
+llvm::StringRef withoutParens(llvm::StringRef text) {
+  while (text.size() >= 2 && text.front() == '(' && text.back() == ')' &&
+         text.find_first_of("\"'`") == llvm::StringRef::npos) {
+    int depth = 0;
+    size_t close = 0;
+    for (size_t i = 0; i < text.size() && !close; ++i) {
+      depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+      if (depth == 0)
+        close = i;
+    }
+    if (close != text.size() - 1)
+      break;
+    text = text.drop_front().drop_back().trim();
+  }
+  return text;
+}
+
+// The parts as one template literal, or "" if some text is not known. If
+// the template would hold just one value, `only` gets its text.
+std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRef>> parts,
+                           llvm::StringRef &only) {
+  std::string result = "`";
+  unsigned values = 0;
+  for (auto [expr, text] : parts) {
+    if (text.empty())
+      return "";
+    bool quoted = text.size() >= 2 && text.back() == text.front();
+    if (isa<StringLitExpr>(expr) && quoted && (text.front() == '"' || text.front() == '\'')) {
+      // The escapes of the literal mean the same in a template; a backquote
+      // and `${` would not.
+      llvm::StringRef body = text.drop_front().drop_back();
+      for (size_t i = 0; i < body.size(); ++i) {
+        if (body[i] == '\\' && i + 1 < body.size()) {
+          result += body.substr(i, 2);
+          ++i;
+          continue;
+        }
+        if (body[i] == '`' || (body[i] == '$' && body.substr(i + 1).starts_with("{")))
+          result += '\\';
+        result += body[i];
+      }
+    } else if (isa<TemplateExpr>(expr) && quoted && text.front() == '`') {
+      result += text.drop_front().drop_back();
+    } else {
+      only = withoutParens(text);
+      ++values;
+      result += ("${" + only + "}").str();
+    }
+  }
+  if (values != 1 || result.size() != only.size() + 4) // "`${" and "}"
+    only = "";
+  return result + "`";
+}
+
+} // namespace
+
 Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
   const char *op = opSpelling(bin->op);
   if (expected)
     expected = expected->nonOptional();
   switch (bin->op) {
+  case BinaryOp::In:
+    return checkIn(bin);
+
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
     Flow whenTrue, whenFalse;
-    checkBranching(bin, whenTrue, whenFalse);
+    checkLogical(bin, expected, whenTrue, whenFalse, /*tested=*/false,
+                 bin->op == BinaryOp::LogAnd ? TruthUse::And : TruthUse::Or);
     flow_ = join(whenTrue, whenFalse);
     return bin;
   }
@@ -1705,6 +2021,18 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
     // the bit width, so converting it to that type loses nothing.
     bin->rhs = convert(bin->rhs, l);
     bin->type = l;
+    // JavaScript's `x >>> n` is unsigned. Shifted by 1 to 31 bits an int
+    // still fits in an int, but `-1 >>> 0` is 4294967295, so with a count
+    // that may be 0 the result is a long, unless only its low 32 bits matter
+    // (`(h >>> 0) | 0`) or it is a constant that fits.
+    if (bin->op == BinaryOp::UShr && l->isInt() && !wraps) {
+      std::optional<int64_t> count = intConstant(bin->rhs);
+      if (!count || (*count & 31) == 0) {
+        std::optional<int64_t> value = intConstant(bin->lhs);
+        if (!value || static_cast<uint32_t>(*value) > uint32_t(std::numeric_limits<int32_t>::max()))
+          bin->type = Type::longTy();
+      }
+    }
     foldBinary(bin, wraps);
     return bin;
   }
@@ -1712,15 +2040,42 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
   default: { // arithmetic and bitwise
     bool bitwise = bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr ||
                    bin->op == BinaryOp::BitXor;
+    // The operands of `&`, `|` and `^` take no type from the context: they
+    // become 32-bit integers the way JavaScript makes them, and `x | 0` stays
+    // ToInt32 wherever it is (`2166136261 | 0` cuts the literal to 32 bits,
+    // `Math.floor(x) | 0` wraps around).
     const Type *hint = nullptr;
-    if (expected && (bitwise ? expected->isInteger() : expected->isNumeric()))
+    if (expected && !bitwise && expected->isNumeric())
       hint = expected;
     // The low bits of a sum, difference, product or power depend only on the
     // low bits of the operands; not so for a quotient.
     bool operandsWrap = bitwise || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
+    // In the chain `a + b + c` the last `+` is checked first; it reports
+    // joining numbers with strings for the whole chain (see reportMixedConcat).
+    BinaryExpr *chain = std::exchange(concatChain_, nullptr);
+    bool chainEnd = bin->op == BinaryOp::Add && !chain;
+    const BinaryExpr *outerMixed = chainEnd ? std::exchange(mixedConcat_, nullptr) : nullptr;
+    if (auto *left = dyn_cast<BinaryExpr>(bin->lhs);
+        bin->op == BinaryOp::Add && left && left->op == BinaryOp::Add)
+      concatChain_ = chain ? chain : bin;
     bin->lhs = checkExpr(bin->lhs, hint, operandsWrap);
+    concatChain_ = nullptr;
     bin->rhs = checkExpr(bin->rhs, hint, operandsWrap);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
+    if (bin->op == BinaryOp::Add) {
+      // JavaScript joins a number or a boolean with a string as text: `10 + "1"`
+      // is "101", which is rarely meant where it is not written as a template.
+      auto joinsAsText = [](const Type *type) {
+        return type->nonOptional()->isNumeric() || type->nonOptional()->isBool();
+      };
+      if (!mixedConcat_ && ((l->isString() && joinsAsText(r)) || (r->isString() && joinsAsText(l))))
+        mixedConcat_ = bin;
+      if (chainEnd) {
+        if (mixedConcat_)
+          reportMixedConcat(bin, mixedConcat_);
+        mixedConcat_ = outerMixed;
+      }
+    }
     bin->type = Type::error();
     if (l->isError() || r->isError())
       return bin;
@@ -1731,12 +2086,15 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
       bin->type = Type::string();
       return bin;
     }
-    if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat())) {
+    if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat() || l != r)) {
       // As in JavaScript, both sides become 32-bit integers first, so `x | 0`
-      // drops the fraction of a double exactly the way JavaScript does.
+      // drops the fraction of a double exactly the way JavaScript does. A
+      // long next to an int keeps its low 32 bits the same way: `x | 0` is
+      // JavaScript's ToInt32 for a long too. Only two longs work on 64 bits.
       bin->lhs = toInt32(bin->lhs);
       bin->rhs = toInt32(bin->rhs);
       bin->type = Type::intTy();
+      foldBinary(bin, wraps);
       return bin;
     }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
@@ -1767,7 +2125,7 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
   }
 }
 
-// `===` and `!==` (`==` and `!=` behave the same, as there is no null). Any
+// `==` and `!=` (the only equality operators; there is no null to convert). Any
 // value can be compared with undefined; `T | undefined` compares with `T`.
 Expr *Sema::checkEquality(BinaryExpr *bin) {
   bin->lhs = checkExpr(bin->lhs);
@@ -1839,9 +2197,15 @@ const Type *Sema::checkAssignTarget(Expr *target, bool compound) {
 
   if (auto *index = dyn_cast<IndexExpr>(target)) {
     index->object = checkExpr(index->object);
-    index->index = checkPosition(index->index);
     const Type *type = index->object->type;
     index->type = Type::error();
+    if (type->nonOptional()->isObject()) {
+      index->index = checkExpr(index->index);
+      diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed; assign a field by its "
+                                                           "name, e.g. 'o.name = ...'");
+      return Type::error();
+    }
+    index->index = checkPosition(index->index);
     if (type->isError())
       return type;
     if (type->isArray()) {
@@ -1863,6 +2227,8 @@ const Type *Sema::checkAssignTarget(Expr *target, bool compound) {
     member->type = Type::error();
     if (type->isError())
       return type;
+    if (type->isObject() || (type->isOptional() && type->inner()->isObject()))
+      return checkFieldTarget(member);
     if (type->isArray() && member->name == "length") {
       if (compound) {
         diags_.error(member->loc(), "only '=' can change the length of an array");
@@ -1882,7 +2248,7 @@ const Type *Sema::checkAssignTarget(Expr *target, bool compound) {
   if (isa<ArrayLitExpr>(target))
     diags_.error(target->loc(), "destructuring assignment can only be a statement, e.g. '[a, b] = [b, a]'");
   else
-    diags_.error(target->loc(), "only variables, array elements and 'length' can be assigned to");
+    diags_.error(target->loc(), "only variables, fields, array elements and 'length' can be assigned to");
   return Type::error();
 }
 
@@ -1917,6 +2283,8 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
     return checkLogicalAssign(assign);
 
   if (compound && op == BinaryOp::Nullish) {
+    if (isa<MemberExpr>(assign->target))
+      return checkFieldLogicalAssign(assign);
     // `x ??= v`: assigns only if x is undefined.
     auto *name = dyn_cast<NameExpr>(assign->target);
     VarSymbol *var = name ? checkVarTarget(name) : nullptr;
@@ -1960,20 +2328,35 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
     reportedRange = true;
   }
 
+  bool definite = false; // the value assigned is not undefined
   if (!compound) {
     if (auto *fe = dyn_cast<FunctionExpr>(assign->value); fe && name && fe->fn->name.empty())
       fe->fn->name = name->name; // as JavaScript names it
     Expr *value = checkExpr(assign->value, type->isError() ? nullptr : type);
     assign->value = coerce(value, type);
+    definite = !value->type->isOptional() && !value->type->isUndefined();
     if (var)
       assigned(var, value);
+    if (var && type->isError() && !untyped_.empty())
+      assignedUntyped(var, value->type);
   } else {
     std::string spelling = std::string(opSpelling(op)) + "=";
     if (type->isString()) {
       assign->value = checkExpr(assign->value);
+      const Type *valueType = assign->value->type;
       if (op != BinaryOp::Add) {
-        if (!assign->value->type->isError())
-          reportOperandTypes(assign->loc(), spelling.c_str(), type, assign->value->type);
+        if (!valueType->isError())
+          reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
+      } else if (valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool()) {
+        // As with `s + 5` (see reportMixedConcat).
+        std::string message = "operator '+=' cannot be applied to types 'string' and '" +
+                              valueType->name().str() + "' (JavaScript would join them as text)";
+        auto [target, value] = operandTexts(assign->source, assign->loc(), 2);
+        if (target.empty())
+          message += "; convert the value with String()";
+        else
+          message += ("; write '" + target + " += String(" + withoutParens(value) + ")'").str();
+        diags_.error(assign->loc(), message);
       } else {
         assign->value = toStringOperand(assign->value);
       }
@@ -1981,9 +2364,10 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
         flow_.facts.forget(var);
     } else {
       bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
-      bool integerOnly =
-          shift || op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
-      assign->value = checkExpr(assign->value, shift ? nullptr : type, /*wraps=*/integerOnly);
+      bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
+      bool integerOnly = shift || bitwise;
+      // As with `x | v`, v takes no type from x (see checkBinary).
+      assign->value = checkExpr(assign->value, integerOnly ? nullptr : type, /*wraps=*/integerOnly);
       const Type *valueType = assign->value->type;
       if (!type->isError() && !valueType->isError()) {
         if (integerOnly && valueType->isFloat())
@@ -1994,11 +2378,29 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
           assign->value = toInt32(assign->value);
         } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
           reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
+        } else if (bitwise && assign->value->type->isInteger() && assign->value->type != type) {
+          // As with `x | v`: a long next to an int keeps its low 32 bits, and
+          // the operator works on 32-bit integers; a long x gets the result
+          // back as a long.
+          assign->value = toInt32(assign->value);
         } else {
           // `x op= v` must produce a value of x's type, so v converts to it.
           assign->value = shift ? convert(assign->value, type) : coerce(assign->value, type);
           if (type->isInteger())
             checkDivisor(op, assign->value);
+          // `x >>>= n` is `x = x >>> n`, a long unless the count is 1 to 31
+          // (see checkBinary), which an int x cannot hold.
+          if (op == BinaryOp::UShr && type->isInt()) {
+            std::optional<int64_t> count = intConstant(assign->value);
+            if (!count || (*count & 31) == 0) {
+              auto [target, value] = operandTexts(assign->source, assign->loc(), 4);
+              std::string message = std::string("the result of '>>>=' may not fit in 'int'; ") +
+                                    kUnsignedShift;
+              if (!target.empty())
+                message += (", e.g. 'const u = " + target + " >>> " + value + "'").str();
+              diags_.error(assign->loc(), message + ", or shift by 1 to 31 bits");
+            }
+          }
         }
       }
       if (var) {
@@ -2030,44 +2432,87 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
       if (std::optional<Linear> length = linear(assign->value))
         flow_.facts.addEqual(self->term, length->term, length->offset);
   }
+  if (member && member->object->type->isObject()) {
+    // The store happens now; until here the field kept its old value.
+    fieldsAssigned(member->name);
+    if (std::optional<FieldPath> path = fieldPath(member); path && definite)
+      defineField(flow_, *path);
+  }
   return assign;
+}
+
+// A copy of a name, a literal index or a chain of fields of a name (`o.a.b`),
+// which reads the same value again; null for anything else.
+static Expr *copyChain(AstContext &ctx, const Expr *e) {
+  if (auto *name = dyn_cast<NameExpr>(e))
+    return ctx.make<NameExpr>(name->loc(), name->name);
+  if (auto *lit = dyn_cast<IntLitExpr>(e))
+    return ctx.make<IntLitExpr>(lit->loc(), lit->value);
+  if (auto *member = dyn_cast<MemberExpr>(e); member && !member->optional)
+    if (Expr *object = copyChain(ctx, member->object))
+      return ctx.make<MemberExpr>(member->loc(), object, member->name);
+  return nullptr;
 }
 
 // `x ||= v` is `x || (x = v)` and `x &&= v` is `x && (x = v)`: v is evaluated
 // and assigned only when x does not decide the result. x is read twice, so it
-// must be a variable or an element at a simple index.
+// must be a variable, a field of one or an element at a simple index. Its
+// truth is tested as in a condition.
 Expr *Sema::checkLogicalAssign(AssignExpr *assign) {
   const char *op = assign->op == BinaryOp::LogOr ? "||=" : "&&=";
-  auto simple = [](const Expr *e) { return isa<NameExpr>(e) || isa<IntLitExpr>(e); };
-  auto copy = [&](const Expr *e) -> Expr * {
-    if (auto *name = dyn_cast<NameExpr>(e))
-      return ctx_.make<NameExpr>(name->loc(), name->name);
-    return ctx_.make<IntLitExpr>(e->loc(), cast<IntLitExpr>(e)->value);
-  };
   Expr *read = nullptr;
-  if (auto *name = dyn_cast<NameExpr>(assign->target)) {
-    if (VarSymbol *var = lookup(name->name).var; var && !var->type->isBool() && !var->type->isError()) {
-      diags_.error(assign->loc(), llvm::Twine("'") + op + "' needs a boolean variable; '" + name->name +
-                                      "' has type '" + var->type->name() + "'" +
-                                      (var->type->isOptional() ? "; for undefined use '??='" : ""));
-      assign->value = checkExpr(assign->value);
-      assign->type = Type::error();
-      return assign;
-    }
-    read = copy(name);
-  } else if (auto *index = dyn_cast<IndexExpr>(assign->target);
-             index && !index->optional && simple(index->object) && simple(index->index)) {
-    read = ctx_.make<IndexExpr>(index->loc(), copy(index->object), copy(index->index));
-  } else {
+  if (isa<NameExpr>(assign->target) || isa<MemberExpr>(assign->target)) {
+    read = copyChain(ctx_, assign->target);
+  } else if (auto *index = dyn_cast<IndexExpr>(assign->target); index && !index->optional) {
+    Expr *object = copyChain(ctx_, index->object), *position = copyChain(ctx_, index->index);
+    if (object && position)
+      read = ctx_.make<IndexExpr>(index->loc(), object, position);
+  }
+  if (!read) {
     diags_.error(assign->target->loc(), llvm::Twine("'") + op +
-                                            "' needs a variable or an array element at a simple "
-                                            "index, such as 'a[i]'");
+                                            "' needs a variable, a field or an array element at a "
+                                            "simple index, such as 'a[i]'");
     assign->value = checkExpr(assign->value);
     assign->type = Type::error();
     return assign;
   }
   auto *set = ctx_.make<AssignExpr>(assign->loc(), std::nullopt, assign->target, assign->value);
-  return checkExpr(ctx_.make<BinaryExpr>(assign->loc(), *assign->op, read, set));
+  auto *bin = ctx_.make<BinaryExpr>(assign->loc(), *assign->op, read, set);
+  Flow whenTrue, whenFalse;
+  checkLogical(bin, nullptr, whenTrue, whenFalse, /*tested=*/false,
+               bin->op == BinaryOp::LogAnd ? TruthUse::AndAssign : TruthUse::OrAssign);
+  flow_ = join(whenTrue, whenFalse);
+  return bin;
+}
+
+// `o.f ??= v` is `o.f ?? (o.f = v)`: o is read twice, so it must be a
+// variable or a field of one.
+Expr *Sema::checkFieldLogicalAssign(AssignExpr *assign) {
+  Expr *read = copyChain(ctx_, assign->target);
+  if (!read) {
+    diags_.error(assign->target->loc(), "'??=' needs a variable or a field of one, such as 'o.x'");
+    assign->value = checkExpr(assign->value);
+    assign->type = Type::error();
+    return assign;
+  }
+  auto *set = ctx_.make<AssignExpr>(assign->loc(), std::nullopt, assign->target, assign->value);
+  auto *bin = ctx_.make<BinaryExpr>(assign->loc(), BinaryOp::Nullish, read, set);
+  Expr *result = checkNullish(bin, nullptr);
+  auto *member = cast<MemberExpr>(set->target);
+  const Type *type = member->type;
+  if (type && !type->isOptional() && !type->isError()) {
+    diags_.error(assign->loc(), "'??=' needs a field that may be undefined; '" + member->name +
+                                    "' has type '" + type->name() + "'");
+    return result;
+  }
+  // The field holds a value now, unless the one assigned may be undefined.
+  const Type *valueType = set->value->type;
+  if (auto *conv = dyn_cast<CastExpr>(set->value); conv && conv->isImplicit())
+    valueType = conv->operand->type;
+  if (!valueType->isOptional() && !valueType->isUndefined())
+    if (std::optional<FieldPath> path = fieldPath(member))
+      defineField(flow_, *path);
+  return result;
 }
 
 Expr *Sema::checkUpdate(UpdateExpr *update) {
@@ -2088,6 +2533,8 @@ Expr *Sema::checkUpdate(UpdateExpr *update) {
     if (!provesInBounds(index->object, index->index, /*allowEnd=*/false))
       diags_.error(index->loc(), "cannot prove that the index is within the array; check it "
                                  "first, e.g. 'if (i < a.length)'");
+  } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
+    fieldsAssigned(member->name);
   }
   return update;
 }
@@ -2121,6 +2568,8 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
     if (member->optional)
       member->object = chainLink(member->object);
     const Type *receiver = member->object->type;
+    if (receiver->isObject())
+      return checkFieldCall(call, member);
     if (!(receiver->isArray() && member->name == "push") && rejectSpread(call))
       return call;
     if (receiver->isString())
@@ -2241,7 +2690,14 @@ bool Sema::checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned ma
   size_t count = call->args.size();
   if (count >= min && count <= max)
     return true;
-  diags_.error(loc, "expected " + argumentCount(min, max) + ", but got " + llvm::Twine(count));
+  if (call->tagged) // the arguments are not written out
+    diags_.error(loc, "expected " + argumentCount(min, max) + ", but the tagged template passes " +
+                          llvm::Twine(count) + ": the array of its texts" +
+                          (count == 1   ? ""
+                           : count == 2 ? " and 1 value"
+                                        : " and " + std::to_string(count - 1) + " values"));
+  else
+    diags_.error(loc, "expected " + argumentCount(min, max) + ", but got " + llvm::Twine(count));
   for (Expr *&arg : call->args)
     arg = checkExpr(arg);
   return false;
@@ -2298,9 +2754,54 @@ Expr *Sema::toStringOperand(Expr *expr) {
                               "console.log, or use its name");
     return expr;
   }
+  if (holdsObjects(type)) {
+    // JavaScript would give "[object Object]", or call a toString method.
+    diags_.error(expr->loc(), "an object cannot be converted to a string: JavaScript would give "
+                              "'[object Object]'; print it with console.log, or build the text from "
+                              "its fields");
+    return expr;
+  }
   // Numbers, booleans, undefined, arrays (joined with commas) and optionals of
   // those convert as in JavaScript.
   return convert(expr, Type::string());
+}
+
+void Sema::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed) {
+  const Type *l = unconverted(mixed->lhs)->type, *r = unconverted(mixed->rhs)->type;
+  std::string message = ("operator '+' cannot be applied to types '" + l->name() + "' and '" +
+                         r->name() + "' (JavaScript would join them as text)")
+                            .str();
+  std::vector<std::pair<const Expr *, llvm::StringRef>> parts;
+  concatParts(root, parts);
+  llvm::StringRef only;
+  std::string joined = concatTemplate(parts, only);
+  if (joined.empty()) {
+    diags_.error(mixed->loc(), message + "; use a template literal instead");
+    return;
+  }
+  if (!only.empty()) { // `"" + n`
+    diags_.error(mixed->loc(), message + "; convert it with 'String(" + only + ")'");
+    return;
+  }
+  // `count + input` may be meant as a sum: then the string needs Number().
+  if (parts.size() == 2) {
+    auto [first, firstText] = parts[0];
+    auto [second, secondText] = parts[1];
+    auto isText = [](const Expr *e) {
+      return e->type->isString() && !isa<StringLitExpr>(e) && !isa<TemplateExpr>(e);
+    };
+    std::string sum;
+    if (first->type->isNumeric() && isText(second))
+      sum = (firstText + " + Number(" + secondText + ")").str();
+    else if (isText(first) && second->type->isNumeric())
+      sum = ("Number(" + firstText + ") + " + secondText).str();
+    if (!sum.empty()) {
+      diags_.error(mixed->loc(), message + "; to add, convert the string: '" + sum +
+                                     "'; to join, use a template: '" + joined + "'");
+      return;
+    }
+  }
+  diags_.error(mixed->loc(), message + "; use a template: '" + joined + "'");
 }
 
 Expr *Sema::toInt32(Expr *expr) {
@@ -2335,6 +2836,8 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   if (type->isError())
     return member;
+  if (type->isObject())
+    return checkField(member);
   if ((type->isString() || type->isArray()) && member->name == "length") {
     member->type = Type::intTy();
     return member;
@@ -2342,6 +2845,9 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
   if (type->isOptional())
     diags_.error(member->object->loc(), "the value may be undefined; check it before reading '" +
                                             member->name + "'");
+  else if (type == Type::array(Type::string()) && member->name == "raw")
+    diags_.error(member->loc(), "'raw' is not supported: a tag gets the texts of its template as a "
+                                "plain 'string[]', with the escapes already applied");
   else if (type->isArray() || type->isString())
     diags_.error(member->loc(), "property '" + member->name + "' does not exist on type '" +
                                     type->name() + "'; methods must be called");
@@ -2375,8 +2881,14 @@ Expr *Sema::checkIndex(IndexExpr *index) {
   index->object = checkExpr(index->object);
   if (index->optional)
     index->object = chainLink(index->object);
-  index->index = checkPosition(index->index);
   index->type = Type::error();
+  if (index->object->type->nonOptional()->isObject()) {
+    index->index = checkExpr(index->index);
+    diags_.error(index->loc(), "type '" + index->object->type->name() +
+                                   "' cannot be indexed; read a field by its name, e.g. 'o.name'");
+    return index;
+  }
+  index->index = checkPosition(index->index);
   const Type *type = index->object->type;
   if (type->isError() || index->index->type->isError())
     return index;
@@ -2450,7 +2962,7 @@ Expr *Sema::checkCast(CastExpr *cast) {
   else if (from == to || isImplicitlyConvertible(from, to))
     message += "; the value converts to '" + to->name().str() + "' by itself, so remove 'as'";
   else if (from->isOptional() && isImplicitlyConvertible(from->inner(), to))
-    message += "; the value may be undefined: check it first (e.g. 'x !== undefined') or give a "
+    message += "; the value may be undefined: check it first (e.g. 'x != undefined') or give a "
                "default with '??'";
   else if (from->isFloat() && to->isInt())
     message += "; drop the fraction with 'x | 0', or round with Math.round, Math.floor, Math.ceil "

@@ -19,12 +19,6 @@ using llvm::isa;
 
 namespace tz {
 
-namespace {
-
-// Calls `visit` on every expression inside `stmt`, those in the functions it
-// contains included.
-void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit);
-
 void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit) {
   visit(expr);
   auto sub = [&](const Expr *e) { visitExprs(e, visit); };
@@ -36,6 +30,10 @@ void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit) 
   case Expr::Kind::ArrayLit:
     for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
       sub(e.expr);
+    break;
+  case Expr::Kind::ObjectLit:
+    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props)
+      sub(p.value);
     break;
   case Expr::Kind::Member:
     sub(cast<MemberExpr>(expr)->object);
@@ -164,6 +162,8 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit) 
     break;
   }
 }
+
+namespace {
 
 // The names `stmt` assigns to: `x = v`, `x += v`, `x++`...
 void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
@@ -404,10 +404,6 @@ NestedGroup *Sema::declareNested(BlockStmt *block) {
   group->functionDepth = functions_.size();
   llvm::StringSet<> names;
   for (FunctionDecl *fn : members) {
-    if (!fn->body) {
-      diags_.error(fn->loc(), "an overload signature can only be declared at the top level");
-      continue;
-    }
     fn->group = group;
     fn->parent = currentDecl();
     group->members.push_back(fn);
@@ -548,7 +544,8 @@ FunctionExpr *Sema::builtinFunctionValue(Expr *arg, const Signature &expected, u
   bool returnsNothing = false;
   if (auto *n = dyn_cast<NameExpr>(arg)) {
     static const std::pair<llvm::StringLiteral, unsigned> globals[] = {
-        {"String", 1}, {"Number", 1}, {"parseInt", 2}, {"parseFloat", 1}, {"isNaN", 1}, {"isFinite", 1}};
+        {"String", 1}, {"Number", 1}, {"parseInt", 2}, {"parseFloat", 1}, {"isNaN", 1}, {"isFinite", 1},
+        {"Boolean", 1}};
     for (const auto &[global, count] : globals)
       if (isGlobalName(n, global)) {
         name = global;

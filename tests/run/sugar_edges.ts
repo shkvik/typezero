@@ -3,7 +3,7 @@
 // the leak check: values in hidden variables, chains that stop early, and
 // values dropped by the comma operator must all be released.
 function maybe(n: int): string | undefined {
-  return n > 0 ? "  text " + n + "  " : undefined
+  return n > 0 ? `  text ${n}  ` : undefined
 }
 for (let i = -1; i <= 1; i++) {
   const s = maybe(i)
@@ -33,7 +33,7 @@ console.log(area())
 
 // Hidden variables hold strings and arrays until their scope ends.
 for (let round = 0; round < 2; round++) {
-  const [w1, w2 = "-", ...more] = ("one two three " + round).split(" ")
+  const [w1, w2 = "-", ...more] = `one two three ${round}`.split(" ")
   let [m, n] = [[w1 ?? ""], more]
   ;[m, n] = [n, m]
   console.log(w1, w2, more, m, n)

@@ -32,10 +32,14 @@ namespace tz {
 //   function                     { ptr info, ptr env }: info is a constant
 //                                { ptr code, string name }, env the closure's
 //                                environment or null (see codegen_closure.cpp)
+//   object                       ptr to { i64 rc, ptr layout, fields... }
+//                                (see codegen_object.cpp); an object's
+//                                `T | undefined` is that ptr, null when
+//                                undefined
 //
-// Strings and arrays are reference counted ("managed", as are optionals of
-// them). The ownership rules are simple for now and LLVM cleans up part of
-// the overhead:
+// Strings, arrays, functions and objects are reference counted ("managed",
+// as are optionals of them). The ownership rules are simple for now and LLVM
+// cleans up part of the overhead:
 // - an expression of a managed type produces an owned (+1) value, which its
 //   consumer either stores or releases;
 // - a variable owns its value: assignment releases the old one, and leaving a
@@ -44,8 +48,8 @@ namespace tz {
 // - a call passes ownership of its arguments to the callee, which releases
 //   its parameters when it returns;
 // - an operand may be borrowed, without retain and release, when it is a
-//   plain variable and nothing evaluated while it is in use can reassign that
-//   variable.
+//   plain variable, or a field read through fields from one (`a.b.c`), and
+//   nothing evaluated while it is in use can assign to anything.
 class CodeGen {
 public:
   CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout);
@@ -125,11 +129,20 @@ private:
   llvm::Value *emitChainLink(CastExpr *link);
   llvm::Value *emitBinary(BinaryExpr *bin);
   llvm::Value *emitLogical(BinaryExpr *bin);
+  // What `a && b` or `a || b` gives when a decides: a's value `lhs` (owned),
+  // as the type of the whole.
+  llvm::Value *decidedValue(BinaryExpr *bin, llvm::Value *lhs);
+  // Whether a borrowed value is truthy, as a condition tests it (see Sema's
+  // checkTruthy): a string when it is not empty, `T | undefined` when it
+  // holds a value that is.
+  llvm::Value *emitTruth(llvm::Value *value, const Type *type);
+  // The truth of an expression converted to boolean.
+  llvm::Value *emitTruthOf(Expr *expr);
   llvm::Value *emitEquality(BinaryExpr *bin);
   llvm::Value *emitNullish(BinaryExpr *bin);
   llvm::Value *emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs, const Type *type);
   llvm::Value *emitComparison(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs, const Type *type);
-  // Whether two values of `type` are equal (===); both borrowed.
+  // Whether two values of `type` are equal (==); both borrowed.
   llvm::Value *emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type);
   llvm::Value *emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs);
   llvm::Value *emitAssign(AssignExpr *assign, bool needResult);
@@ -149,9 +162,12 @@ private:
   // Reference counting of any managed value.
   void retainValue(llvm::Value *value, const Type *type);
   void releaseValue(llvm::Value *value, const Type *type);
-  // `T | undefined`
+  // `T | undefined`: whether it holds a value, and the value (zero when it
+  // does not).
   llvm::Value *makeOptional(llvm::Value *value, llvm::Value *has, const Type *type);
   llvm::Value *undefinedValue(const Type *optionalType);
+  llvm::Value *optionalHas(llvm::Value *value, const Type *optionalType);
+  llvm::Value *optionalValue(llvm::Value *value, const Type *optionalType);
 
   // Operands that are used and then dropped.
   struct Operand {
@@ -160,6 +176,9 @@ private:
     const Type *type;
   };
   Operand emitOperand(Expr *expr, bool canBorrow);
+  // A variable, or a field read through fields from one, without counting
+  // its reference; null for anything else.
+  llvm::Value *emitBorrowed(Expr *expr);
   void dropOperand(const Operand &operand);
   // Writes a value to a fresh stack slot, for runtime functions that take
   // values of any type by address.
@@ -263,6 +282,30 @@ private:
   // The addresses of the variables a closure captured, in its environment.
   void bindCaptures(const FunctionDecl *fn);
 
+  // Objects (codegen_object.cpp). The fields of a layout lie in memory by
+  // alignment, largest first, then by name: so no padding is needed between
+  // them, and an object type and its read-only twin have the same layout.
+  struct ObjectLayout {
+    llvm::StructType *type = nullptr; // { i64 rc, ptr layout, fields... }
+    // The struct element of each field, in the order of Type::fields().
+    std::vector<unsigned> elements;
+    // Releases what the fields hold and frees the object.
+    llvm::Function *drop = nullptr;
+    // Releases a reference, dropping the object with the last one.
+    llvm::Function *release = nullptr;
+  };
+  const ObjectLayout &objectLayout(const Type *type);
+  // The constant that describes objects of `type` created with the fields in
+  // `keys` order (positions in Type::fields()) to the runtime: the drop
+  // function, and the names, offsets and types of the fields in that order,
+  // for printing.
+  llvm::Constant *layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys);
+  void emitObjectDrop(const Type *type, ObjectLayout &layout);
+  llvm::Value *fieldAddress(llvm::Value *object, const Type *type, llvm::StringRef name);
+  llvm::Value *emitObjectLiteral(ObjectLitExpr *lit);
+  llvm::Value *emitFieldRead(MemberExpr *member);
+  llvm::Value *emitFieldAssign(AssignExpr *assign, bool needResult);
+
   // Tail calls (codegen_tail.cpp). A cycle of functions that call each
   // other (or one that calls itself) in tail position, emitted as one LLVM
   // function where those calls jump.
@@ -329,6 +372,10 @@ private:
   llvm::DenseSet<const Stmt *> tailStatements_;
   llvm::DenseMap<const FuncSymbol *, llvm::Function *> functions_;
   llvm::DenseMap<const Type *, llvm::Constant *> typeDescriptors_;
+  std::map<const Type *, ObjectLayout> objectLayouts_; // stable while more are added
+  std::map<std::pair<const Type *, std::vector<unsigned>>, llvm::Constant *> layoutDescriptors_;
+  llvm::StructType *fieldDescTy_;  // { ptr name, i32 length, i32 offset, ptr type }
+  llvm::StructType *layoutDescTy_; // { ptr drop, ptr fields, i32 count }
   std::vector<const VarSymbol *> managedGlobals_;
   llvm::StringMap<llvm::Constant *> utf8Constants_;
   std::map<std::u16string, llvm::Constant *> literals_;
@@ -365,6 +412,7 @@ private:
     llvm::FunctionCallee printString;
     llvm::FunctionCallee printValue;
     llvm::FunctionCallee panic;
+    llvm::FunctionCallee debugger;
     llvm::FunctionCallee strFree;
     llvm::FunctionCallee strConcatN;
     llvm::FunctionCallee strEqual;

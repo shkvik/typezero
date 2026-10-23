@@ -1,0 +1,50 @@
+// same-as-node
+// Bits of JavaScript syntax: `void`, `debugger`, number literals that end in
+// a point, and unary minus on strings and booleans.
+let calls = 0
+function bump(): int {
+  calls++
+  return calls
+}
+
+// `void x` evaluates x and gives undefined, wherever undefined can go.
+void bump()
+console.log(calls, void 0, void bump(), calls)
+let maybe: int | undefined = void bump()
+console.log(maybe, maybe == undefined, void bump() == undefined, undefined != void bump(), calls)
+console.log(typeof void bump(), `${void bump()}`, (void bump()) ?? -1, calls)
+maybe = calls > 0 ? void bump() : 1
+console.log(maybe, calls)
+
+// An arrow or a function that returns `void x` returns nothing.
+const run = () => void bump()
+run()
+function quietly(): void {
+  return void bump()
+}
+quietly()
+function skip(n: int) {
+  if (n > 0) return void bump()
+}
+skip(1)
+skip(0)
+console.log(calls)
+const ticks: int[] = []
+;[1, 2].forEach(x => void ticks.push(x))
+console.log(ticks)
+
+// What `void` drops is released.
+void "abc".repeat(3)
+console.log(void [1, 2].concat([3]), void `${calls}`.repeat(9), void (maybe = calls))
+
+// Stops only when a debugger is attached.
+debugger
+for (let i = 0; i < 2; i++) debugger
+
+// A point may end a number literal; then `..` reads a property.
+const five = 5.
+console.log(five, 5..toString(), 2..toFixed(1), 5.e1, 1.5.toFixed(2), 0x10.toString())
+
+// `-s` is -Number(s), as `+s` is Number(s).
+const text = "3"
+console.log(-"3", -text, -" 12 ", -"1e3", -"abc", -"", -true, -false, +text)

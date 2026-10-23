@@ -32,7 +32,7 @@ constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 // Built-in functions called by name; they change no variables and arrays.
 const llvm::StringRef kGlobalFunctions[] = {"String",   "Number", "parseInt",
-                                            "parseFloat", "isNaN", "isFinite"};
+                                            "parseFloat", "isNaN", "isFinite", "Boolean"};
 
 // The variable `expr` reads, looking through the conversion Sema inserts for
 // a narrowed `T | undefined` variable.
@@ -82,6 +82,9 @@ Sema::Flow Sema::join(const Flow &a, const Flow &b) {
   for (const VarSymbol *var : a.defined)
     if (b.defined.contains(var))
       result.defined.insert(var);
+  for (const FieldPath &path : a.definedFields)
+    if (llvm::is_contained(b.definedFields, path))
+      result.definedFields.push_back(path);
   return result;
 }
 
@@ -216,6 +219,21 @@ bool Sema::provesNotEmpty(const Expr *object) const {
 //===----------------------------------------------------------------------===//
 
 void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {
+  // `if (x)`: a `T | undefined` that is truthy holds a value.
+  if (const NameExpr *name = optionalVariable(cond)) {
+    whenTrue.defined.insert(name->var);
+    return;
+  }
+  // The same for a field, `if (q.limit)`.
+  auto optionalField = [&](const Expr *expr) -> std::optional<FieldPath> {
+    if (!expr->type || !expr->type->isOptional())
+      return std::nullopt;
+    return fieldPath(expr);
+  };
+  if (std::optional<FieldPath> path = optionalField(cond)) {
+    defineField(whenTrue, *path);
+    return;
+  }
   auto *bin = dyn_cast<BinaryExpr>(cond);
   if (!bin)
     return;
@@ -227,6 +245,8 @@ void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) 
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
       if (const NameExpr *name = optionalVariable(side))
         (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var);
+      else if (std::optional<FieldPath> path = optionalField(side))
+        defineField(op == BinaryOp::Ne ? whenTrue : whenFalse, *path);
       return;
     }
     // `x === v` where v cannot be undefined: x holds a value if they are equal.
@@ -323,6 +343,7 @@ void Sema::assigned(const VarSymbol *var, const Expr *value) {
   const Type *type = var->type;
   if (type->isError())
     return;
+  forgetFieldsOf(flow_, var); // it holds another object now
   if (type->isOptional())
     setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
 
@@ -369,6 +390,12 @@ void Sema::forgetCallEffects(Flow &flow) const {
   for (const VarSymbol *var : llvm::to_vector(flow.defined))
     if (changedByCalls(var))
       flow.defined.erase(var);
+  // A field of any object, since objects are shared by reference, that some
+  // code assigns to; or one reached from a variable a call may change.
+  llvm::erase_if(flow.definedFields, [&](const FieldPath &path) {
+    return changedByCalls(path.var) ||
+           llvm::any_of(path.names, [&](llvm::StringRef field) { return assignedFields_.contains(field); });
+  });
 }
 
 void Sema::calledFunction() { forgetCallEffects(flow_); }
@@ -419,6 +446,7 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
     break;
   case Stmt::Kind::Continue:
   case Stmt::Kind::Empty:
+  case Stmt::Kind::Debugger:
     break;
   case Stmt::Kind::Expr:
     scanExpr(cast<ExprStmt>(stmt)->expr, scan, depth);
@@ -524,8 +552,12 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
       scan.releasesElements = true;
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       scanExpr(member->object, scan, depth);
-      scan.growsArrays = scan.shrinksArrays = true; // `a.length = n`
-      scan.releasesElements = true;
+      scan.fieldWrites.insert(member->name);
+      // `a.length = n`; the field of an object changes no array.
+      if (member->name == "length") {
+        scan.growsArrays = scan.shrinksArrays = true;
+        scan.releasesElements = true;
+      }
     }
   };
 
@@ -544,6 +576,10 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
   case Expr::Kind::ArrayLit:
     for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
       scanExpr(e.expr, scan, depth);
+    break;
+  case Expr::Kind::ObjectLit:
+    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props)
+      scanExpr(p.value, scan, depth);
     break;
   case Expr::Kind::Member:
     scanExpr(cast<MemberExpr>(expr)->object, scan, depth);
@@ -598,6 +634,9 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
         break;
       scanExpr(member->object, scan, depth);
       llvm::StringRef method = member->name;
+      // `o.run()` calls the function in a field: any code.
+      if (file_->fieldNames.contains(method))
+        scan.callsFunctions = true;
       if (method == "push" || method == "unshift")
         scan.growsArrays = true;
       else if (method == "pop" || method == "shift")
@@ -839,7 +878,11 @@ Sema::Flow Sema::loopHead(const LoopScan &scan, const Expr *cond, bool induction
     for (const VarSymbol *defined : llvm::to_vector(head.defined))
       if (defined->name == name)
         head.defined.erase(defined);
+    llvm::erase_if(head.definedFields, [&](const FieldPath &path) { return path.var->name == name; });
   }
+  llvm::erase_if(head.definedFields, [&](const FieldPath &path) {
+    return llvm::any_of(path.names, [&](llvm::StringRef field) { return scan.fieldWrites.contains(field); });
+  });
   if (scan.callsFunctions)
     forgetCallEffects(head);
   head.facts.forgetIf([&](const Facts::Fact &f) {

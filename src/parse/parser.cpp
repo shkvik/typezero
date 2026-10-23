@@ -5,6 +5,8 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/ConvertUTF.h"
+#include "llvm/Support/SaveAndRestore.h"
 
 using llvm::dyn_cast;
 using llvm::isa;
@@ -18,6 +20,8 @@ const char *opSpelling(UnaryOp op) {
   case UnaryOp::Not: return "!";
   case UnaryOp::BitNot: return "~";
   case UnaryOp::TypeOf: return "typeof";
+  case UnaryOp::Void: return "void";
+  case UnaryOp::Delete: return "delete";
   case UnaryOp::NonNull: return "!";
   }
   return "?";
@@ -41,20 +45,21 @@ const char *opSpelling(BinaryOp op) {
   case BinaryOp::Le: return "<=";
   case BinaryOp::Gt: return ">";
   case BinaryOp::Ge: return ">=";
-  case BinaryOp::Eq: return "===";
-  case BinaryOp::Ne: return "!==";
+  case BinaryOp::Eq: return "==";
+  case BinaryOp::Ne: return "!=";
   case BinaryOp::LogAnd: return "&&";
   case BinaryOp::LogOr: return "||";
   case BinaryOp::Nullish: return "??";
+  case BinaryOp::In: return "in";
   }
   return "?";
 }
 
 namespace {
 
-// Binding strength of binary operators, following JavaScript. `as` binds like
-// the relational operators; it is parsed only for Sema to report that the
-// language has no `as`.
+// Binding strength of binary operators, following JavaScript. `as` and
+// `satisfies` bind like the relational operators; they are parsed only to
+// report that the language has neither.
 constexpr int kRelationalPrec = 7;
 constexpr int kPowPrec = 11; // `**`, the only right-associative one
 
@@ -73,7 +78,8 @@ int binaryPrec(Tok kind) {
   case Tok::Less:
   case Tok::LessEq:
   case Tok::Greater:
-  case Tok::GreaterEq: return kRelationalPrec;
+  case Tok::GreaterEq:
+  case Tok::KwIn: return kRelationalPrec;
   case Tok::Shl:
   case Tok::Shr:
   case Tok::UShr: return 8;
@@ -103,6 +109,7 @@ BinaryOp binaryOpFor(Tok kind) {
   case Tok::LessEq: return BinaryOp::Le;
   case Tok::Greater: return BinaryOp::Gt;
   case Tok::GreaterEq: return BinaryOp::Ge;
+  case Tok::KwIn: return BinaryOp::In;
   case Tok::Shl: return BinaryOp::Shl;
   case Tok::Shr: return BinaryOp::Shr;
   case Tok::UShr: return BinaryOp::UShr;
@@ -155,6 +162,7 @@ bool startsStatement(Tok kind) {
   case Tok::KwReturn:
   case Tok::KwBreak:
   case Tok::KwContinue:
+  case Tok::KwDebugger:
     return true;
   default:
     return false;
@@ -252,9 +260,25 @@ void Parser::synchronize() {
       advance();
       return;
     }
-    if (tok_.newlineBefore && startsStatement(tok_.kind))
+    bool declaration = tok_.is(Tok::Identifier) && (tok_.text == "type" || tok_.text == "interface") &&
+                       peek().is(Tok::Identifier) && !peek().newlineBefore;
+    if (tok_.newlineBefore && (startsStatement(tok_.kind) || declaration))
       return;
     advance();
+  }
+}
+
+void Parser::skipToClosingBrace() {
+  for (unsigned depth = 0; !tok_.is(Tok::Eof); advance()) {
+    if (tok_.is(Tok::LBrace)) {
+      ++depth;
+    } else if (tok_.is(Tok::RBrace)) {
+      if (depth == 0) {
+        advance();
+        return;
+      }
+      --depth;
+    }
   }
 }
 
@@ -275,6 +299,7 @@ SourceFile Parser::parseSourceFile() {
     if (recovering_)
       synchronize();
   }
+  file.fieldNames = std::move(fieldNames_);
   return file;
 }
 
@@ -315,6 +340,10 @@ Stmt *Parser::parseStatement(bool topLevel) {
   case Tok::KwBreak:
   case Tok::KwContinue:
     return parseBreakOrContinue();
+  case Tok::KwDebugger:
+    advance();
+    expectSemicolon();
+    return ctx_.make<DebuggerStmt>(loc);
   case Tok::Semi:
     advance();
     return ctx_.make<EmptyStmt>(loc);
@@ -324,7 +353,7 @@ Stmt *Parser::parseStatement(bool topLevel) {
     if (tok_.text == "export" && !peek().newlineBefore) {
       const Token &next = peek();
       if (next.is(Tok::KwFunction) || next.is(Tok::KwConst) || next.is(Tok::KwLet) ||
-          next.is(Tok::KwEnum) || (next.is(Tok::Identifier) && next.text == "type")) {
+          next.is(Tok::KwEnum) || (next.is(Tok::Identifier) && (next.text == "type" || next.text == "interface"))) {
         if (!topLevel)
           report(loc, "'export' is allowed only at the top level");
         advance();
@@ -342,9 +371,11 @@ Stmt *Parser::parseStatement(bool topLevel) {
       return ctx_.make<LabeledStmt>(loc, label, parseStatement());
     }
     // `type` declares an alias only when a name follows on the same line;
-    // otherwise it is an ordinary name.
+    // otherwise it is an ordinary name. The same for `interface`.
     if (tok_.text == "type" && peek().is(Tok::Identifier) && !peek().newlineBefore)
       return parseTypeAlias();
+    if (tok_.text == "interface" && peek().is(Tok::Identifier) && !peek().newlineBefore)
+      return parseInterface();
     [[fallthrough]];
   default: {
     Expr *expr = parseSequence();
@@ -390,6 +421,33 @@ Stmt *Parser::parseTypeAlias() {
   TypeRef type = parseType();
   expectSemicolon();
   return ctx_.make<TypeAliasDecl>(loc, name, std::move(type));
+}
+
+// `interface Name { fields }`: the name of an object type, as with `type`.
+Stmt *Parser::parseInterface() {
+  advance(); // 'interface'
+  llvm::SMLoc loc = tok_.loc();
+  llvm::StringRef name = tok_.text;
+  advance();
+  if (tok_.is(Tok::Less)) {
+    report(tok_.loc(), "generic interfaces are not supported yet");
+    parseTypeArgs();
+  }
+  if (tok_.is(Tok::Identifier) && tok_.text == "extends") {
+    report(tok_.loc(), "'extends' for interfaces is not supported yet; list all the fields in '" + name + "'");
+    advance();
+    do
+      parseType();
+    while (accept(Tok::Comma));
+  }
+  if (!tok_.is(Tok::LBrace)) {
+    error(tok_.loc(), llvm::Twine("expected '{' to start the fields of the interface, found ") +
+                          tokSpelling(tok_.kind));
+    return ctx_.make<EmptyStmt>(loc);
+  }
+  auto *decl = ctx_.make<TypeAliasDecl>(loc, name, parseObjectType());
+  accept(Tok::Semi);
+  return decl;
 }
 
 // `enum Name { A, B = value, ... }`
@@ -472,24 +530,29 @@ BlockStmt *Parser::parseBlock() {
   return block;
 }
 
-// A function declaration, after any overload signatures (`function f(x:
-// int): int` without a body): those are for tsc, and calls use the
-// implementation, which must come right after them.
+// A function declaration. TypeScript's overload signatures (`function f(x:
+// int): int` without a body, before the implementation, which then works out
+// what it was given) are an error: a plain function has one body, and a
+// variant with other parameters is a function of its own, with its own name.
+// The signatures are skipped and the implementation is kept, so that the rest
+// of the program is still checked.
 Stmt *Parser::parseFunctionDecl() {
   FunctionDecl *fn = parseFunction(/*expression=*/false);
+  if (fn->body)
+    return fn;
+  llvm::StringRef name = fn->name;
+  llvm::SMLoc loc = fn->loc();
   while (!fn->body) {
-    llvm::StringRef name = fn->name;
     if (tok_.is(Tok::Identifier) && tok_.text == "export" && peek().is(Tok::KwFunction))
       advance();
-    if (!tok_.is(Tok::KwFunction)) {
-      report(fn->loc(), "the overload signature of '" + name +
-                            "' must be followed by the function's implementation");
-      return ctx_.make<EmptyStmt>(fn->loc());
+    if (!tok_.is(Tok::KwFunction) || peek().text != name) {
+      report(loc, "function '" + name + "' has no body; add it after the parameters: '{ ... }'");
+      return ctx_.make<EmptyStmt>(loc);
     }
     fn = parseFunction(/*expression=*/false);
-    if (fn->name != name)
-      report(fn->loc(), "expected the implementation of '" + name + "' after its overload signature");
   }
+  report(loc, "overload signatures are not supported: plain functions are not overloaded; give each "
+              "variant its own name and body");
   return fn;
 }
 
@@ -521,7 +584,7 @@ FunctionDecl *Parser::parseFunction(bool expression) {
     fn->body = parseBlock();
   } else if (!expression &&
              (accept(Tok::Semi) || tok_.newlineBefore || tok_.is(Tok::RBrace) || tok_.is(Tok::Eof))) {
-    // An overload signature: no body (see parseFunctionDecl).
+    // No body, as in an overload signature (see parseFunctionDecl).
   } else {
     error(tok_.loc(), "expected '{' to start the function body");
     fn->body = ctx_.make<BlockStmt>(tok_.loc());
@@ -652,6 +715,17 @@ void Parser::parseDeclarators(VarDeclStmt *decl) {
       advance();
       declarePattern(decl, *pattern, parseExpr(), std::move(typeAnn));
       continue;
+    }
+    if (tok_.is(Tok::LBrace)) {
+      error(tok_.loc(), "destructuring objects is not supported yet; read the fields one by one: "
+                        "'const x = p.x'");
+      advance();
+      skipToClosingBrace();
+      if (accept(Tok::Colon))
+        parseType();
+      if (accept(Tok::Assign))
+        parseExpr();
+      return;
     }
     VarDeclarator d;
     if (!parseBinding(d))
@@ -889,6 +963,9 @@ Stmt *Parser::parseFor() {
   advance(); // 'for'
   expect(Tok::LParen, "after 'for'");
 
+  // In the initializer, as in JavaScript, `in` is not an operator: it
+  // belongs to `for (x in y)`.
+  llvm::SaveAndRestore<bool> noIn(noIn_, true);
   if (tok_.is(Tok::KwLet) || tok_.is(Tok::KwConst) || tok_.is(Tok::KwVar)) {
     if (tok_.is(Tok::KwVar))
       error(tok_.loc(), "'var' is not supported; use 'let' or 'const'");
@@ -902,6 +979,7 @@ Stmt *Parser::parseFor() {
       return loop;
     if (tok_.is(Tok::Identifier) && tok_.text == "of") {
       advance();
+      noIn_ = false;
       auto *forOf = ctx_.make<ForOfStmt>(forLoc);
       forOf->isConst = decl->isConst;
       forOf->iterable = parseExpr();
@@ -939,11 +1017,12 @@ Stmt *Parser::parseFor() {
     llvm::SMLoc loc = tok_.loc();
     loop->init = ctx_.make<ExprStmt>(loc, parseSequence());
   }
-  if (tok_.is(Tok::Identifier) && (tok_.text == "of" || tok_.text == "in")) {
-    error(tok_.loc(), tok_.text == "in" ? "'for...in' loops are not supported; use 'for...of'"
-                                        : "'for...of' needs a new variable: 'for (const x of ...)'");
+  if (tok_.is(Tok::KwIn) || (tok_.is(Tok::Identifier) && tok_.text == "of")) {
+    error(tok_.loc(), tok_.is(Tok::KwIn) ? "'for...in' loops are not supported; use 'for...of'"
+                                         : "'for...of' needs a new variable: 'for (const x of ...)'");
     return loop;
   }
+  noIn_ = false;
   expect(Tok::Semi, "after the loop initializer");
 
   if (!tok_.is(Tok::Semi))
@@ -1014,10 +1093,12 @@ TypeRef Parser::parseArrayType() {
   return ref;
 }
 
-// primaryType := name ('<' type (',' type)* '>')? | '(' type ')'
+// primaryType := name ('<' type (',' type)* '>')? | '(' type ')' | objectType
 TypeRef Parser::parsePrimaryType() {
   TypeRef ref;
   ref.loc = tok_.loc();
+  if (tok_.is(Tok::LBrace))
+    return parseObjectType();
   if (tok_.is(Tok::LParen) && functionTypeAhead())
     return parseFunctionType();
   if (accept(Tok::LParen)) {
@@ -1025,7 +1106,7 @@ TypeRef Parser::parsePrimaryType() {
     expect(Tok::RParen, "to close the parenthesized type");
     return ref;
   }
-  if (!tok_.is(Tok::Identifier)) {
+  if (!tok_.is(Tok::Identifier) && !tok_.is(Tok::KwVoid)) {
     error(tok_.loc(), llvm::Twine("expected a type, found ") + tokSpelling(tok_.kind));
     return ref;
   }
@@ -1035,6 +1116,97 @@ TypeRef Parser::parsePrimaryType() {
     ref.kind = TypeRef::Kind::Generic;
     ref.args = parseTypeArgs();
   }
+  return ref;
+}
+
+bool Parser::parseFieldName(llvm::StringRef &name) {
+  if (tok_.is(Tok::Identifier) || isKeyword(tok_.kind)) {
+    name = tok_.text;
+    fieldNames_.insert(name);
+    advance();
+    return true;
+  }
+  if (tok_.is(Tok::StringLiteral)) {
+    // `"content-type": ...` names the field by the text of the string.
+    std::u16string text;
+    decodeStringLiteral(tok_, text, diags_);
+    std::string utf8;
+    llvm::convertUTF16ToUTF8String(llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()),
+                                                                text.size()),
+                                   utf8);
+    name = ctx_.keepName(std::move(utf8));
+    fieldNames_.insert(name);
+    advance();
+    return true;
+  }
+  if (tok_.is(Tok::LBracket))
+    error(tok_.loc(), "a field name in brackets is not supported yet; write the name itself");
+  else if (tok_.is(Tok::IntLiteral) || tok_.is(Tok::FloatLiteral))
+    error(tok_.loc(), "a number cannot name a field; an object with numbered entries is an array");
+  else
+    error(tok_.loc(), llvm::Twine("expected a field name, found ") + tokSpelling(tok_.kind));
+  return false;
+}
+
+// `{ x: int; readonly y?: string }`. Fields are separated by `;`, `,` or line
+// breaks.
+TypeRef Parser::parseObjectType() {
+  TypeRef ref;
+  ref.kind = TypeRef::Kind::Object;
+  ref.loc = tok_.loc();
+  advance(); // '{'
+  while (!tok_.is(Tok::RBrace) && !tok_.is(Tok::Eof)) {
+    llvm::SMLoc loc = tok_.loc();
+    bool readonly = false;
+    if (tok_.is(Tok::Identifier) && tok_.text == "readonly" && !peek().is(Tok::Colon) &&
+        !peek().is(Tok::Question) && !peek().is(Tok::LParen)) {
+      readonly = true;
+      advance();
+      loc = tok_.loc();
+    }
+    if (tok_.is(Tok::LBracket)) {
+      error(loc, "index signatures are not supported yet: an object has a fixed set of fields; a "
+                 "dictionary will be 'Record' or 'Map'");
+      skipToClosingBrace();
+      return ref;
+    }
+    if (tok_.is(Tok::LParen) || tok_.is(Tok::Less) || tok_.is(Tok::KwNew)) {
+      error(loc, "call signatures are not supported; a field can hold a function: 'f: (x: int) => int'");
+      skipToClosingBrace();
+      return ref;
+    }
+    llvm::StringRef name;
+    if (!parseFieldName(name)) {
+      skipToClosingBrace();
+      return ref;
+    }
+    bool optional = accept(Tok::Question);
+    if (tok_.is(Tok::LParen) || tok_.is(Tok::Less)) {
+      error(tok_.loc(), "methods in types are not supported yet; declare a field that holds a function, "
+                        "e.g. '" + name + ": (x: int) => int'");
+      skipToClosingBrace();
+      return ref;
+    }
+    if (!tok_.is(Tok::Colon)) {
+      error(tok_.loc(), "field '" + name + "' needs a type, e.g. '" + name + ": int'");
+      skipToClosingBrace();
+      return ref;
+    }
+    advance();
+    ref.args.push_back(parseType());
+    ref.names.push_back(name);
+    ref.locs.push_back(loc);
+    ref.optional.push_back(optional);
+    ref.readonly.push_back(readonly);
+    if (accept(Tok::Semi) || accept(Tok::Comma))
+      continue;
+    if (!tok_.is(Tok::RBrace) && !tok_.newlineBefore) {
+      error(tok_.loc(), llvm::Twine("expected ';' after the field, found ") + tokSpelling(tok_.kind));
+      skipToClosingBrace();
+      return ref;
+    }
+  }
+  expect(Tok::RBrace, "to close the object type");
   return ref;
 }
 
@@ -1147,6 +1319,7 @@ Expr *Parser::parseSequence() {
 // Assignment is right-associative and has the lowest precedence after the
 // comma.
 Expr *Parser::parseExpr() {
+  const char *start = tok_.text.begin();
   Expr *lhs = parseConditional();
   std::optional<BinaryOp> op;
   if (!assignmentOp(tok_.kind, op))
@@ -1154,7 +1327,9 @@ Expr *Parser::parseExpr() {
   llvm::SMLoc loc = tok_.loc();
   advance();
   Expr *rhs = parseExpr();
-  return ctx_.make<AssignExpr>(loc, op, lhs, rhs);
+  auto *assign = ctx_.make<AssignExpr>(loc, op, lhs, rhs);
+  assign->source = llvm::StringRef(start, static_cast<size_t>(prevEnd_ - start));
+  return assign;
 }
 
 Expr *Parser::parseConditional() {
@@ -1170,17 +1345,18 @@ Expr *Parser::parseConditional() {
 }
 
 Expr *Parser::parseBinary(int minPrec) {
+  const char *start = tok_.text.begin();
   // `-x ** 2` is an error in JavaScript: it could mean either `(-x) ** 2` or
   // `-(x ** 2)`.
   llvm::StringRef unary;
   if (tok_.is(Tok::Minus) || tok_.is(Tok::Plus) || tok_.is(Tok::Bang) || tok_.is(Tok::Tilde) ||
-      tok_.is(Tok::KwTypeof))
+      tok_.is(Tok::KwTypeof) || tok_.is(Tok::KwVoid) || tok_.is(Tok::KwDelete))
     unary = tok_.text;
   Expr *lhs = parseUnary();
   if (!unary.empty() && tok_.is(Tok::StarStar))
     report(tok_.loc(), "the left side of '**' cannot be a unary '" + unary +
                            "' expression; add parentheses, e.g. '(" + unary +
-                           (unary == "typeof" ? " " : "") + "x) ** 2'");
+                           (llvm::isAlpha(unary[0]) ? " " : "") + "x) ** 2'");
   for (;;) {
     if (tok_.is(Tok::KwAs) && kRelationalPrec >= minPrec) {
       llvm::SMLoc loc = tok_.loc();
@@ -1188,14 +1364,38 @@ Expr *Parser::parseBinary(int minPrec) {
       lhs = ctx_.make<CastExpr>(loc, lhs, parseType());
       continue;
     }
+    // `x satisfies T` checks x against T and leaves its type as it is. tz
+    // has no operators on types, as with `as`: the type goes on the variable.
+    if (tok_.is(Tok::Identifier) && tok_.text == "satisfies" && !tok_.newlineBefore &&
+        kRelationalPrec >= minPrec) {
+      llvm::SMLoc loc = tok_.loc();
+      advance();
+      const char *typeStart = tok_.text.data();
+      parseType();
+      llvm::StringRef type(typeStart,
+                           static_cast<size_t>(std::max(prevEnd_, typeStart) - typeStart));
+      report(loc, "'satisfies' is not supported, just as 'as' is not; declare the type of the "
+                  "variable instead: 'const x: " + type + " = ...'");
+      continue;
+    }
+    if (tok_.is(Tok::KwIn) && noIn_)
+      return lhs;
     int prec = binaryPrec(tok_.kind);
     if (prec < 0 || prec < minPrec)
       return lhs;
     BinaryOp op = binaryOpFor(tok_.kind);
     llvm::SMLoc loc = tok_.loc();
+    // `==` never converts its operands (both sides must have the same type),
+    // so the strict form of JavaScript has nothing left to do.
+    if (tok_.is(Tok::EqEqEq))
+      report(loc, "'===' is not supported; use '==', which does not convert types");
+    else if (tok_.is(Tok::BangEqEq))
+      report(loc, "'!==' is not supported; use '!=', which does not convert types");
     advance();
     Expr *rhs = parseBinary(prec == kPowPrec ? prec : prec + 1);
-    lhs = ctx_.make<BinaryExpr>(loc, op, lhs, rhs);
+    auto *bin = ctx_.make<BinaryExpr>(loc, op, lhs, rhs);
+    bin->source = llvm::StringRef(start, static_cast<size_t>(prevEnd_ - start));
+    lhs = bin;
   }
 }
 
@@ -1208,6 +1408,8 @@ Expr *Parser::parseUnary() {
   case Tok::Bang: op = UnaryOp::Not; break;
   case Tok::Tilde: op = UnaryOp::BitNot; break;
   case Tok::KwTypeof: op = UnaryOp::TypeOf; break;
+  case Tok::KwVoid: op = UnaryOp::Void; break;
+  case Tok::KwDelete: op = UnaryOp::Delete; break;
   case Tok::PlusPlus:
   case Tok::MinusMinus: {
     bool increment = tok_.is(Tok::PlusPlus);
@@ -1234,7 +1436,8 @@ Expr *Parser::parsePostfix() {
 }
 
 // Calls, `.name`, `[index]`, `x!`, and their optional forms `?.(`, `?.name`
-// and `?.[`. After a `?.` the rest of them form an optional chain.
+// and `?.[`. After a `?.` the rest of them form an optional chain. Also
+// tagged templates. A property name may be a keyword, as in `set.delete(x)`.
 Expr *Parser::parseCallOrMember() {
   Expr *expr = parsePrimary();
   bool chain = false;
@@ -1246,7 +1449,7 @@ Expr *Parser::parseCallOrMember() {
     if (tok_.is(Tok::QuestionDot)) {
       optional = chain = true;
       advance();
-      if (tok_.is(Tok::Identifier)) {
+      if (tok_.is(Tok::Identifier) || isKeyword(tok_.kind)) {
         auto *member = ctx_.make<MemberExpr>(tok_.loc(), expr, tok_.text);
         member->optional = true;
         expr = member;
@@ -1262,6 +1465,7 @@ Expr *Parser::parseCallOrMember() {
       // Diagnostics about a call point at its start, e.g. `f` in `f(x)`.
       llvm::SMLoc loc = expr->loc();
       advance();
+      llvm::SaveAndRestore<bool> allowIn(noIn_, false);
       std::vector<Expr *> args;
       std::vector<bool> spread;
       while (!tok_.is(Tok::RParen) && !tok_.is(Tok::Eof)) {
@@ -1282,7 +1486,7 @@ Expr *Parser::parseCallOrMember() {
     } else if (tok_.is(Tok::Dot)) {
       advance();
       llvm::SMLoc loc = tok_.loc();
-      if (!tok_.is(Tok::Identifier)) {
+      if (!tok_.is(Tok::Identifier) && !isKeyword(tok_.kind)) {
         error(tok_.loc(), "expected a property name after '.'");
         return finish();
       }
@@ -1291,11 +1495,32 @@ Expr *Parser::parseCallOrMember() {
     } else if (tok_.is(Tok::LBracket)) {
       llvm::SMLoc loc = tok_.loc();
       advance();
+      llvm::SaveAndRestore<bool> allowIn(noIn_, false);
       Expr *index = parseSequence();
       expect(Tok::RBracket, "to close the index");
       auto *access = ctx_.make<IndexExpr>(loc, expr, index);
       access->optional = optional;
       expr = access;
+    } else if (tok_.is(Tok::TemplateString) || tok_.is(Tok::TemplateHead)) {
+      // tag`a${x}b${y}c` calls the tag with the texts around the values, as
+      // one array, and then the values: tag(["a", "b", "c"], x, y). String.raw
+      // gets the texts as written, escapes and all.
+      if (chain)
+        report(tok_.loc(), "a tagged template cannot be part of an optional chain; check the tag "
+                           "before the template");
+      auto *member = dyn_cast<MemberExpr>(expr);
+      auto *object = member ? dyn_cast<NameExpr>(member->object) : nullptr;
+      bool raw = object && object->name == "String" && member->name == "raw";
+      llvm::SMLoc loc = expr->loc();
+      TemplateExpr *tmpl = parseTemplate(raw);
+      auto *texts = ctx_.make<ArrayLitExpr>(tmpl->loc());
+      for (std::u16string &text : tmpl->quasis)
+        texts->elements.push_back({ctx_.make<StringLitExpr>(tmpl->loc(), std::move(text)), false});
+      std::vector<Expr *> args{texts};
+      args.insert(args.end(), tmpl->exprs.begin(), tmpl->exprs.end());
+      auto *call = ctx_.make<CallExpr>(loc, expr, std::move(args));
+      call->tagged = true;
+      expr = call;
     } else if (tok_.is(Tok::Bang) && !tok_.newlineBefore) {
       // `x!`: x is not undefined (checked when the program runs).
       expr = ctx_.make<UnaryExpr>(tok_.loc(), UnaryOp::NonNull, expr);
@@ -1308,6 +1533,8 @@ Expr *Parser::parseCallOrMember() {
 
 Expr *Parser::parsePrimary() {
   llvm::SMLoc loc = tok_.loc();
+  // `in` is an operator again inside brackets, even in a loop header.
+  llvm::SaveAndRestore<bool> allowIn(noIn_, false);
   switch (tok_.kind) {
   case Tok::IntLiteral:
     return parseIntLiteral();
@@ -1351,6 +1578,8 @@ Expr *Parser::parsePrimary() {
   }
   case Tok::LBracket:
     return parseArrayLiteral();
+  case Tok::LBrace:
+    return parseObjectLiteral();
   case Tok::KwNew:
     return parseNew();
   default:
@@ -1380,6 +1609,67 @@ Expr *Parser::parseArrayLiteral() {
   return lit;
 }
 
+// `{ x: 1, y }`
+Expr *Parser::parseObjectLiteral() {
+  auto *lit = ctx_.make<ObjectLitExpr>(tok_.loc());
+  advance(); // '{'
+  while (!tok_.is(Tok::RBrace) && !tok_.is(Tok::Eof)) {
+    llvm::SMLoc loc = tok_.loc();
+    if (tok_.is(Tok::Ellipsis)) {
+      report(loc, "spread in object literals is not supported yet; list the fields");
+      advance();
+      parseExpr();
+      if (!accept(Tok::Comma))
+        break;
+      continue;
+    }
+    // `get x() {}`, `set x(v) {}`, `async f() {}`, `*gen() {}`
+    bool accessor = tok_.is(Tok::Identifier) && (tok_.text == "get" || tok_.text == "set") &&
+                    (peek().is(Tok::Identifier) || isKeyword(peek().kind) || peek().is(Tok::StringLiteral));
+    if (accessor) {
+      error(loc, "getters and setters are not supported: reading or writing a field never runs code; "
+                 "write a function instead");
+      skipToClosingBrace();
+      return lit;
+    }
+    if (tok_.is(Tok::Star) || (tok_.is(Tok::Identifier) && tok_.text == "async" && !peek().is(Tok::Colon) &&
+                                !peek().is(Tok::Comma) && !peek().is(Tok::RBrace))) {
+      error(loc, "methods in object literals are not supported yet; use a field with an arrow function");
+      skipToClosingBrace();
+      return lit;
+    }
+    bool identifier = tok_.is(Tok::Identifier);
+    llvm::StringRef name;
+    if (!parseFieldName(name)) {
+      skipToClosingBrace();
+      return lit;
+    }
+    Expr *value = nullptr;
+    if (tok_.is(Tok::LParen) || tok_.is(Tok::Less)) {
+      error(loc, "methods in object literals are not supported yet; use a field with an arrow function: '" +
+                     name + ": () => ...'");
+      skipToClosingBrace();
+      return lit;
+    }
+    if (accept(Tok::Colon)) {
+      value = parseExpr();
+    } else if (identifier && (tok_.is(Tok::Comma) || tok_.is(Tok::RBrace))) {
+      // `{ x }` is `{ x: x }`.
+      value = name == "undefined" ? static_cast<Expr *>(ctx_.make<UndefinedExpr>(loc))
+                                  : ctx_.make<NameExpr>(loc, name);
+    } else {
+      error(tok_.loc(), llvm::Twine("expected ':' after the field name, found ") + tokSpelling(tok_.kind));
+      skipToClosingBrace();
+      return lit;
+    }
+    lit->props.push_back({name, loc, value});
+    if (!accept(Tok::Comma))
+      break;
+  }
+  expect(Tok::RBrace, "to close the object");
+  return lit;
+}
+
 // `new Name<T>(args)`
 Expr *Parser::parseNew() {
   llvm::SMLoc loc = tok_.loc();
@@ -1406,10 +1696,16 @@ Expr *Parser::parseNew() {
   return ctx_.make<NewExpr>(nameLoc, name, std::move(typeArgs), std::move(args));
 }
 
-Expr *Parser::parseTemplate() {
+TemplateExpr *Parser::parseTemplate(bool raw) {
   auto *tmpl = ctx_.make<TemplateExpr>(tok_.loc());
   std::u16string text;
-  decodeTemplatePart(tok_, text, diags_);
+  auto decode = [&] {
+    if (raw)
+      decodeTemplateRaw(tok_, text);
+    else
+      decodeTemplatePart(tok_, text, diags_);
+  };
+  decode();
   tmpl->quasis.push_back(text);
   bool done = tok_.is(Tok::TemplateString);
   advance();
@@ -1420,7 +1716,7 @@ Expr *Parser::parseTemplate() {
       tmpl->quasis.emplace_back();
       return tmpl;
     }
-    decodeTemplatePart(tok_, text, diags_);
+    decode();
     tmpl->quasis.push_back(text);
     done = tok_.is(Tok::TemplateTail);
     advance();

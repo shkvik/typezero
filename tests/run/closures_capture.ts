@@ -24,7 +24,7 @@ console.log(stepper(5)())
 
 // Narrowing inside a closure.
 function describe(x?: int) {
-  const show = () => (x !== undefined ? "value " + x : "nothing")
+  const show = () => (x != undefined ? `value ${x}` : "nothing")
   return show()
 }
 console.log(describe(3), describe())
@@ -47,7 +47,7 @@ function tally(items: string[]) {
     text += item
   }
   items.forEach(item => add(item))
-  return text + ":" + count
+  return `${text}:${count}`
 }
 console.log(tally(["x", "y", "z"]))
 
@@ -64,15 +64,15 @@ console.log(useCurrent(2))
 if (n > 0) {
   const local = "local"
   let changed = 1
-  const read = () => local + changed
+  const read = () => `${local}${changed}`
   changed = 2
   console.log(read())
 }
 
 // Distinct evaluations give distinct functions.
 const made = [1, 2].map(() => () => 1)
-console.log(made[0] === made[1], made[0] === made[0])
-console.log(made, typeof made[0] === "function")
+console.log(made[0] == made[1], made[0] == made[0])
+console.log(made, typeof made[0] == "function")
 
 // Rest parameters through a function value.
 const sum = (...xs: int[]) => xs.reduce((a, b) => a + b, 0)

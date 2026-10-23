@@ -31,8 +31,8 @@ console.log(repeat("la"), repeat("ho", 3), repeat("x", 4, ""))
 
 // An optional parameter is undefined when left out.
 function describe(n?: int): string {
-  if (n === undefined) return "nothing"
-  return "number " + (n + 1)
+  if (n == undefined) return "nothing"
+  return `number ${n + 1}`
 }
 console.log(describe(), describe(41))
 

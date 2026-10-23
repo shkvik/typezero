@@ -47,6 +47,18 @@ std::string argumentCount(unsigned min, unsigned max) {
   return text + (max == 1 && min == 1 ? " argument" : " arguments");
 }
 
+const char *whyUnsupported(llvm::StringRef name) {
+  if (name == "eval")
+    return "a compiled program cannot run code from a string";
+  if (name == "Function")
+    return "a compiled program cannot run code from a string; write the function itself, e.g. "
+           "'(a: int) => a'";
+  if (name == "Proxy")
+    return "the fields of an object are read and written straight in memory, so nothing can "
+           "intercept that";
+  return nullptr;
+}
+
 Expr *Sema::numericArg(Expr *arg, const Type *hint) {
   arg = checkExpr(arg, hint);
   const Type *type = arg->type;
@@ -220,7 +232,7 @@ Expr *Sema::checkMinMaxSpread(CallExpr *call, const Type *hint) {
 // String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x).
 Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
   static const llvm::StringLiteral names[] = {"String",     "Number", "parseInt",
-                                              "parseFloat", "isNaN",  "isFinite"};
+                                              "parseFloat", "isNaN",  "isFinite", "Boolean"};
   if (!llvm::any_of(names, [&](llvm::StringRef n) { return isGlobalName(name, n); }))
     return nullptr;
   return checkGlobalFunction(call, name->name, name->loc(), expected);
@@ -231,6 +243,20 @@ Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc 
   call->type = Type::error();
   if (rejectSpread(call))
     return call;
+  if (fn == "Boolean") {
+    // The truth of the value, as a condition tests it; `Boolean()` is false.
+    if (!checkArity(call, loc, 0, 1))
+      return call;
+    if (call->args.empty()) {
+      auto *no = ctx_.make<BoolLitExpr>(call->loc(), false);
+      no->type = Type::boolTy();
+      return no;
+    }
+    Flow whenTrue, whenFalse;
+    Expr *truth = checkBooleanCall(call, whenTrue, whenFalse);
+    flow_ = join(whenTrue, whenFalse);
+    return truth;
+  }
   if (fn == "String" || fn == "Number") {
     if (!checkArity(call, loc, 0, 1))
       return call;
@@ -287,6 +313,22 @@ Expr *Sema::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expe
   bool isString = isGlobalName(member->object, "String");
   llvm::StringRef fn = member->name;
   call->type = Type::error();
+  if (isString && fn == "raw") {
+    // String.raw`C:\dir` is the template itself, with its texts as written
+    // (see Parser::parseCallOrMember).
+    if (!call->tagged) {
+      diags_.error(member->loc(), "String.raw can only tag a template, e.g. String.raw`C:\\dir`");
+      for (Expr *&arg : call->args)
+        arg = checkExpr(arg);
+      return call;
+    }
+    auto *texts = cast<ArrayLitExpr>(call->args[0]);
+    auto *tmpl = ctx_.make<TemplateExpr>(texts->loc());
+    for (const ArrayLitExpr::Element &e : texts->elements)
+      tmpl->quasis.push_back(cast<StringLitExpr>(e.expr)->value);
+    tmpl->exprs.assign(call->args.begin() + 1, call->args.end());
+    return checkTemplate(tmpl);
+  }
   if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
     bool codeUnits = fn == "fromCharCode";
     for (Expr *&arg : call->args) {
@@ -556,6 +598,13 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
+  if ((name == "join" || name == "toString") && holdsObjects(element)) {
+    diags_.error(member->loc(), "objects cannot be converted to strings: JavaScript would give "
+                                "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
+                                    name + "()'");
+    checkArgsLoosely();
+    return call;
+  }
   if (name == "join") {
     if (!arity(0, 1))
       return call;
@@ -588,6 +637,22 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
     if (holdsFunctions(element)) {
       diags_.error(member->loc(), "sorting functions needs a comparison function: 'sort()' "
                                   "without one compares their source code");
+      return call;
+    }
+    if (holdsObjects(element)) {
+      diags_.error(member->loc(), "sorting objects needs a comparison function: 'sort()' without one "
+                                  "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
+                                  "=> a.x - b.x)'");
+      return call;
+    }
+    // JavaScript would sort numbers as strings; sorting them differently
+    // would give another order than node for the same code. (Undefined
+    // elements go to the end without being compared.)
+    if (element->nonOptional()->isNumeric()) {
+      diags_.error(member->loc(), llvm::Twine("'sort()' without a comparison function compares "
+                                              "numbers as strings, as in JavaScript: [2, 10, 1] "
+                                              "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
+                                      (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
       return call;
     }
     call->builtin = Builtin::ArrSort;
@@ -623,6 +688,11 @@ Expr *Sema::checkNew(NewExpr *expr, const Type *expected) {
     for (Expr *&arg : expr->args)
       arg = checkExpr(arg);
   };
+  if (const char *why = whyUnsupported(expr->name)) {
+    diags_.error(expr->loc(), "'new " + expr->name + "' is not supported: " + why);
+    checkArgsLoosely();
+    return expr;
+  }
   if (expr->name != "Array") {
     diags_.error(expr->loc(), "'new " + expr->name + "' is not supported; only 'new Array<T>(length)' is");
     checkArgsLoosely();

@@ -37,6 +37,8 @@ private:
   // An error that leaves the parser on track, e.g. an unsupported feature.
   void report(llvm::SMLoc loc, const llvm::Twine &message);
   void synchronize();
+  // After an error inside `{ ... }`: skips past the `}` that closes it.
+  void skipToClosingBrace();
 
   // Looking ahead: the parser tries a construct with diagnostics off, then
   // goes back to where it started.
@@ -53,8 +55,9 @@ private:
   Stmt *parseStatement(bool topLevel = false);
   BlockStmt *parseBlock();
   Stmt *parseFunctionDecl();
-  // A function, or an overload signature (without a body) for tsc. A function
-  // expression may have no name.
+  // A function, or a declaration without a body, such as an overload
+  // signature, which parseFunctionDecl rejects. A function expression may
+  // have no name.
   FunctionDecl *parseFunction(bool expression);
   // `(a: int, b = 1, ...rest: int[])`
   void parseParams(FunctionDecl *fn);
@@ -73,6 +76,7 @@ private:
   Stmt *parseReturn();
   Stmt *parseBreakOrContinue();
   Stmt *parseTypeAlias();
+  Stmt *parseInterface();
   Stmt *parseEnum();
 
   // Destructuring: `[a, , b = 1, [c], ...rest]`.
@@ -114,6 +118,10 @@ private:
   // `(a: int, b?: string) => T`, with the lexer at `(`.
   bool functionTypeAhead();
   TypeRef parseFunctionType();
+  TypeRef parseObjectType();
+  // The name of a field in an object type or literal: an identifier, a
+  // keyword or a string literal.
+  bool parseFieldName(llvm::StringRef &name);
   std::vector<TypeRef> parseTypeArgs();
 
   // Expressions, from lowest to highest precedence. parseSequence admits the
@@ -127,8 +135,10 @@ private:
   Expr *parsePostfix();
   Expr *parseCallOrMember();
   Expr *parsePrimary();
-  Expr *parseTemplate();
+  // A template literal; `raw` keeps the texts as written, for String.raw.
+  TemplateExpr *parseTemplate(bool raw = false);
   Expr *parseArrayLiteral();
+  Expr *parseObjectLiteral();
   Expr *parseNew();
   Expr *parseIntLiteral();
   Expr *parseFloatLiteral();
@@ -141,6 +151,10 @@ private:
   Token peeked_;
   bool hasPeeked_ = false;
   bool recovering_ = false;
+  // In the initializer of a `for` header `in` is not an operator.
+  bool noIn_ = false;
+  // See SourceFile::fieldNames.
+  llvm::StringSet<> fieldNames_;
 };
 
 } // namespace tz

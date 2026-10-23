@@ -18,7 +18,7 @@ for (let i = 0; i < 20000; i++) u = "y" + u
 console.log(u.length, u[0], u[19999])
 
 let v = ""
-for (let i = 0; i < 1000; i++) v = v + i + ","
+for (let i = 0; i < 1000; i++) v = `${v}${i},`
 console.log(v.length, v.slice(0, 20))
 
 // Two strings appended to the same base must not see each other.

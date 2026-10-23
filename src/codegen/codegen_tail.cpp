@@ -340,20 +340,25 @@ void CodeGen::emitTailReturn(Expr *value) {
   auto *bin = cast<BinaryExpr>(value);
   llvm::BasicBlock *decidedBlock = newBlock("tail.decided");
   llvm::BasicBlock *restBlock = newBlock("tail.rest");
-  if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr) {
-    // The left side decides: false for `&&`, true for `||`.
+  bool logical = bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
+  llvm::Value *lhs = nullptr;
+  if (logical) {
+    // The left side decides when falsy for `&&`, truthy for `||`, and is
+    // then the result.
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    llvm::Value *lhs = emitExpr(bin->lhs);
-    builder_.CreateCondBr(lhs, isAnd ? restBlock : decidedBlock, isAnd ? decidedBlock : restBlock);
+    lhs = emitExpr(bin->lhs);
+    llvm::Value *truth = emitTruth(lhs, bin->lhs->type);
+    builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock, isAnd ? decidedBlock : restBlock);
     switchTo(decidedBlock);
+    llvm::Value *result = decidedValue(bin, lhs);
     emitCleanups(0);
-    builder_.CreateRet(builder_.getInt1(!isAnd));
+    builder_.CreateRet(result);
   } else if (bin->lhs->type->isOptional()) {
     // `a ?? f(x)`: a when it holds a value.
-    llvm::Value *lhs = emitExpr(bin->lhs);
-    builder_.CreateCondBr(builder_.CreateExtractValue(lhs, 1), decidedBlock, restBlock);
+    lhs = emitExpr(bin->lhs);
+    builder_.CreateCondBr(optionalHas(lhs, bin->lhs->type), decidedBlock, restBlock);
     switchTo(decidedBlock);
-    llvm::Value *result = bin->type->isOptional() ? lhs : builder_.CreateExtractValue(lhs, 0);
+    llvm::Value *result = bin->type->isOptional() ? lhs : optionalValue(lhs, bin->lhs->type);
     emitCleanups(0);
     builder_.CreateRet(result);
   } else {
@@ -362,6 +367,8 @@ void CodeGen::emitTailReturn(Expr *value) {
     return;
   }
   switchTo(restBlock);
+  if (logical) // undefined after `??` holds nothing to release
+    releaseValue(lhs, bin->lhs->type);
   emitTailReturn(bin->rhs);
 }
 

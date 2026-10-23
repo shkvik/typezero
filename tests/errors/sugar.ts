@@ -39,13 +39,13 @@ const best: int = Math.max(...nums.slice(1))
 const fine: int = Math.max(...nums) // nums is not empty
 
 let count = 0
-// expect-error: '||=' needs a boolean variable; 'count' has type 'int'
+// expect-error: '||=' cannot test a number: 0 would count as false; compare it: 'if (count == 0) count = 5'
 count ||= 5
 const flags = [true]
 function index(): int {
   return 0
 }
-// expect-error: '&&=' needs a variable or an array element at a simple index, such as 'a[i]'
+// expect-error: '&&=' needs a variable, a field or an array element at a simple index, such as 'a[i]'
 flags[index()] &&= false
 
 // expect-error: the value is always undefined

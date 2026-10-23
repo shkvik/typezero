@@ -40,8 +40,8 @@ console.log(hello("Bob"))
 
 // Functions declared in blocks: hoisted, recursive, calling each other.
 function parity(n: int): string {
-  function isEven(k: int): boolean { return k === 0 ? true : isOdd(k - 1) }
-  function isOdd(k: int): boolean { return k === 0 ? false : isEven(k - 1) }
+  function isEven(k: int): boolean { return k == 0 ? true : isOdd(k - 1) }
+  function isOdd(k: int): boolean { return k == 0 ? false : isEven(k - 1) }
   return isEven(n) ? "even" : "odd"
 }
 console.log(parity(10), parity(7))
@@ -71,7 +71,7 @@ console.log(counterBlock())
 const fact = (n: int): int => n <= 1 ? 1 : n * fact(n - 1)
 const fib = function f(n: int): int { return n < 2 ? n : f(n - 1) + f(n - 2) }
 console.log(fact(10), fib(15))
-const sumTo = (n: int) => n === 0 ? 0 : n + sumTo(n - 1)
+const sumTo = (n: int) => n == 0 ? 0 : n + sumTo(n - 1)
 console.log(sumTo(100))
 
 // Functions as values: returned, stored, passed, compared.
@@ -88,7 +88,7 @@ function square(x: int) { return x * x }
 console.log(apply(square, 7), apply(x => -x, 7))
 const ops: ((x: int) => int)[] = [inc, dbl, square]
 console.log(ops.map(op => op(6)))
-console.log(inc === inc, inc === dbl, typeof inc, ops.indexOf(dbl))
+console.log(inc == inc, inc == dbl, typeof inc, ops.indexOf(dbl))
 console.log(ops)
 
 // Optional functions and `?.()`.

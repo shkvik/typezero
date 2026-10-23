@@ -22,6 +22,6 @@ let total = 0
 // expect-error: '??=' needs a variable that may be undefined
 total ??= 1
 // After a check, the variable holds a value until it is assigned again.
-if (n !== undefined) {
+if (n != undefined) {
   const ok: int = n
 }

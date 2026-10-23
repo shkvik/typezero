@@ -35,6 +35,6 @@ const done: string[] = []
 while (tasks.length > 0) {
   const task = tasks.shift() // the loop condition proves it is there
   done.push(`${task}: ok`)
-  if (task === "build") tasks.push("package")
+  if (task == "build") tasks.push("package")
 }
 console.log(done)

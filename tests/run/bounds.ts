@@ -31,7 +31,7 @@ function guarded(a: int[], i: int): int {
   return a[i]
 }
 function lastPlusFirst(a: int[]): int {
-  if (a.length === 0) return 0
+  if (a.length == 0) return 0
   return a[a.length - 1] + a[0]
 }
 function whileLoop(a: int[]): int {
@@ -76,7 +76,7 @@ function nested(m: int[][]): int {
 function codes(s: string): int {
   let n = 0
   for (let i = 0; i < s.length; i++) n += s.charCodeAt(i)
-  for (let i = s.length - 1; i >= 0; i--) if (s[i] === "a") n++
+  for (let i = s.length - 1; i >= 0; i--) if (s[i] == "a") n++
   return n
 }
 const a = [1, 2, 3, 4]
@@ -90,4 +90,4 @@ function at(xs: string[], i: int): string {
 const word = "hi"
 let k = 5
 console.log(at(["x", "y"], 1), at(["x", "y"], 2), at(["x"], -1), word[k], word.charCodeAt(k), word.at(-1), word.at(-3))
-console.log(a.at(-1), a.at(-5), [7, 8][k] === undefined)
+console.log(a.at(-1), a.at(-5), [7, 8][k] == undefined)

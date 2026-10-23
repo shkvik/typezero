@@ -22,7 +22,7 @@ console.log(flag, calls)
 
 // Elements at a simple index work too.
 const seen = [false, true, false]
-for (let i = 0; i < seen.length; i++) seen[i] ||= i === 2
+for (let i = 0; i < seen.length; i++) seen[i] ||= i == 2
 console.log(seen)
 
 // The value of the expression is the variable's new value.

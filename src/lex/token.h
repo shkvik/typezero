@@ -25,7 +25,9 @@ enum class Tok {
   KwCase,
   KwConst,
   KwContinue,
+  KwDebugger,
   KwDefault,
+  KwDelete,
   KwDo,
   KwElse,
   KwEnum,
@@ -33,6 +35,7 @@ enum class Tok {
   KwFor,
   KwFunction,
   KwIf,
+  KwIn,
   KwLet,
   KwNew,
   KwReturn,
@@ -40,6 +43,7 @@ enum class Tok {
   KwTrue,
   KwTypeof,
   KwVar,
+  KwVoid,
   KwWhile,
 
   // Punctuation
@@ -106,6 +110,9 @@ enum class Tok {
 
 // How a token kind is shown in diagnostics, e.g. "'('" or "identifier".
 const char *tokSpelling(Tok kind);
+
+// The keywords come in one run of Tok, from KwAs to KwWhile.
+inline bool isKeyword(Tok kind) { return kind >= Tok::KwAs && kind <= Tok::KwWhile; }
 
 struct Token {
   Tok kind = Tok::Eof;

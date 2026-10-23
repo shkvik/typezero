@@ -14,8 +14,8 @@ const f = Number([1])
 const g = Number.parse("1")
 // expect-error: expected 0-2 arguments, but got 3
 const h = "a".split(",", 1, 2)
-// expect-error: operator '-' cannot be applied to type 'string'
-const i = -"5"
+// expect-error: operator '-' cannot be applied to type 'string[]'
+const i = -["5"]
 // expect-error: expected 2 arguments, but got 1
 const j = Math.atan2(1)
 const parts = [1, 2, 3]

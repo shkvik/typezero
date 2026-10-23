@@ -1,0 +1,103 @@
+// What a condition cannot test: numbers (0 is a value too), arrays and
+// functions (always truthy), and assignments.
+let count = 0
+// expect-error: a number cannot be a condition: 0 would count as false; compare it: 'count != 0'
+if (count) console.log(count)
+// expect-error: '!' cannot test a number: 0 would count as false; compare it: 'count == 0'
+if (!count) console.log(count)
+const stack = [1, 2]
+// expect-error: compare it: 'stack.length > 0'
+while (stack.length) stack.pop()
+// expect-error: compare it: 'stack.length == 0'
+const done = !stack.length
+let ratio = 0.5
+// expect-error: 0 and NaN would count as false; compare it as you mean: 'ratio != 0', 'ratio > 0' or '!Number.isNaN(ratio)'
+const half = ratio ? ratio / 2 : 0
+const big: long = 5
+// expect-error: a number cannot be a condition
+do count++; while (big)
+// expect-error: a number cannot be a condition
+for (let i = 3; i; i--) console.log(i)
+enum Level { Low, High }
+const level = Level.Low
+// expect-error: a number cannot be a condition
+if (level) console.log(level)
+
+// A number that may be undefined: was it there?
+function timeoutOf(): int | undefined {
+  return undefined
+}
+const timeout = timeoutOf()
+// expect-error: a number that may be undefined cannot be a condition: 0 would count as false too; check for undefined: 'timeout != undefined'
+if (timeout) console.log(timeout)
+// expect-error: '||' cannot test a number that may be undefined: 0 would count as false too; give a default with '??': 'timeout ?? 1000'
+const wait = timeout || 1000
+let retries = timeoutOf()
+// expect-error: give a default with '??=': 'retries ??= 3'
+retries ||= 3
+const sizes: int[] | undefined = undefined
+// expect-error: compare it: '(sizes?.length ?? 0) > 0'
+if (sizes?.length) console.log(sizes)
+let port = 0
+// expect-error: '||' cannot test a number: 0 would count as false; compare it: 'port != 0 ? port : 3000'
+const listen = port || 3000
+// expect-error: '||=' cannot test a number: 0 would count as false; compare it: 'if (port == 0) port = 80'
+port ||= 80
+// expect-error: '&&' cannot test a number
+const both = count && "some"
+// expect-error: compare it: 'count != 0'
+console.log(Boolean(count))
+// expect-error: compare it: 'x != 0'
+const nonZero = [0, 1, 2].filter(Boolean)
+
+// Always truthy.
+const items = [1, 2]
+// expect-error: an array is always truthy, even when empty, so the condition is always true; check its length: 'items.length > 0'
+if (items) console.log(items)
+// expect-error: an array is always truthy, even when empty, so '||' never gives its right side; drop '|| []'
+const all = items || []
+function check(): boolean {
+  return true
+}
+// expect-error: a function is always truthy, so the condition is always true; call it: 'check()'
+if (check) console.log(1)
+// expect-error: a function is always truthy, so '!' always gives false; call it: '!check()'
+const failed = !check
+function show(list: int[] | undefined, report?: () => void): void {
+  if (!list) return
+  // expect-error: 'list' always holds an array at this point, so the condition is always true; drop the check, or check the length: 'list.length > 0'
+  if (list) console.log(list)
+  if (report) {
+    // expect-error: 'report' always holds a function at this point, so '!' always gives false; drop the check
+    if (!report) return
+  }
+}
+
+// An assignment, also in double parentheses.
+let lvl = 1
+// expect-error: an assignment cannot be a condition; to compare, use '==': 'lvl == 0'
+if (lvl = 0) console.log(lvl)
+// expect-error: an assignment cannot be a condition; to compare, use '==': 'lvl == 2'
+if ((lvl = 2)) console.log(lvl)
+function next(): string | undefined {
+  return undefined
+}
+let line: string | undefined
+// expect-error: an assignment cannot be a condition; to test the assigned value, compare it: '(line = next()) != undefined'
+while (line = next()) console.log(line)
+
+// Values `&&` and `||` cannot give.
+const flag = count > 0
+// expect-error: '&&' gives 'boolean' when its left side is falsy and 'string' otherwise, and no type holds both; say what each case gives with '?:'
+const answer = flag && "yes"
+function maybeName(): string | undefined {
+  return "x"
+}
+const name = maybeName()
+// expect-error: '&&' gives 'string | undefined' when its left side is falsy and 'int' otherwise
+const size = name && name.length
+function log(): void {}
+// expect-error: the right side of '&&' returns nothing, so there is no value to give; call it with 'if': 'if (flag) log()'
+flag && log()
+// expect-error: an expression of type 'void' has no value to test
+if (log()) console.log(1)

@@ -1,0 +1,156 @@
+{ a: 1, b: 'two', c: true, d: 4.5, e: -0, f: NaN, g: -Infinity }
+{ big: 9007199254740991, small: -7 } [ { x: 1 } ] text { y: "it's" }
+{
+  first: 'aaaaaaaaaaaaaaaa',
+  second: 'bbbbbbbbbbbbbbbb',
+  third: 'ccccccccccc'
+}
+{
+  first: 'aaaaaaaaaaaaaaaa',
+  second: 'bbbbbbbbbbbbbbbb',
+  third: 'cccccccccccc'
+}
+{
+  first: 'aaaaaaaaaaaaaaaa',
+  second: 'bbbbbbbbbbbbbbbb',
+  third: 'ccccccccccccc'
+}
+{
+  k1: 1,
+  k2: 2,
+  k3: 3,
+  k4: 4,
+  k5: 5,
+  k6: 6,
+  k7: 7,
+  k8: 8,
+  k9: 9,
+  k10: 10,
+  k11: 11,
+  k12: 12
+}
+{
+  k1: 1,
+  k2: 2,
+  k3: 3,
+  k4: 4,
+  k5: 5,
+  k6: 6,
+  k7: 7,
+  k8: 8,
+  k9: 9,
+  k10: 10,
+  k11: 11,
+  k12: 12,
+  k13: 13
+}
+{ a: { b: { c: [Object] } } }
+{ a: { b: { c: [Array] } }, e: { f: {} }, g: { h: { i: [] } } }
+[ { a: { b: [Object] } } ]
+{
+  list: [ 1, 2, 3 ],
+  nested: [ [ [Array], [Array] ] ],
+  empty: [],
+  nothing: {}
+}
+{ level: 1, child: { level: 2, child: { level: 3, child: [Object] } } } { level: 2, child: { level: 3, child: { level: 4 } } } { level: 3, child: { level: 4 } }
+{
+  title: 'A fairly long title for the report that is printed below',
+  author: {
+    name: 'Ann Lee',
+    email: 'ann@example.com',
+    roles: [ 'admin', 'editor', 'viewer' ]
+  },
+  pages: 120,
+  draft: false
+}
+{
+  report: {
+    title: 'A fairly long title for the report that is printed below',
+    author: { name: 'Ann Lee', email: 'ann@example.com', roles: [Array] },
+    pages: 120,
+    draft: false
+  }
+}
+[
+  {
+    title: 'A fairly long title for the report that is printed below',
+    author: { name: 'Ann Lee', email: 'ann@example.com', roles: [Array] },
+    pages: 120,
+    draft: false
+  },
+  {
+    title: 'A fairly long title for the report that is printed below',
+    author: { name: 'Ann Lee', email: 'ann@example.com', roles: [Array] },
+    pages: 120,
+    draft: false
+  }
+]
+{
+  name: 'squares',
+  numbers: [
+      0,   1,   4,   9,  16,  25,  36,  49,
+     64,  81, 100, 121, 144, 169, 196, 225,
+    256, 289, 324, 361, 400, 441, 484, 529,
+    576, 625, 676, 729, 784, 841
+  ]
+}
+{
+  text: 'first line of a long text that goes on\nsecond line of the same text\nthird'
+} [
+  {
+    text: 'first line of a long text that goes on\n' +
+      'second line of the same text\n' +
+      'third'
+  }
+]
+[
+  { v: 0 },  { v: 1 },
+  { v: 2 },  { v: 3 },
+  { v: 4 },  { v: 5 },
+  { v: 6 },  { v: 7 },
+  { v: 8 },  { v: 9 },
+  { v: 10 }, { v: 11 }
+]
+[
+  { k: 'a', v: 1 },
+  { k: 'b', v: 2 },
+  { k: 'c', v: 3 },
+  { k: 'd', v: 4 },
+  { k: 'e', v: 5 },
+  { k: 'f', v: 6 },
+  { k: 'g', v: 7 }
+]
+{
+  'content-type': 'json',
+  '$id': 1,
+  _x: 2,
+  x1: 3,
+  '1st': 4,
+  'имя': 'Иван',
+  "it's": 5,
+  '': 6
+}
+{
+  named: [Function: named],
+  arrow: [Function: arrow],
+  inner: { fn: [Function: fn] }
+}
+{ id: 1 } { id: 2, parent: { id: 1 }, note: 'leaf' }
+<ref *1> { name: 'loop', self: [Circular *1] }
+<ref *1> {
+  name: 'parent',
+  child: { name: 'child', self: [Circular *1] }
+} [
+  <ref *1> {
+    name: 'parent',
+    child: { name: 'child', self: [Circular *1] }
+  }
+]
+[
+  <ref *1> { name: 'n0', self: [Circular *1] },
+  <ref *2> { name: 'n1', self: [Circular *2] },
+  <ref *3> { name: 'n2', self: [Circular *3] },
+  <ref *4> { name: 'n3', self: [Circular *4] },
+  <ref *5> { name: 'n4', self: [Circular *5] }
+]

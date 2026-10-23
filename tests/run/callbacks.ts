@@ -3,20 +3,20 @@
 const nums = [5, 3, 8, 1, 9, 2]
 console.log(nums.map((x, i) => x * i))
 console.log(nums.map((x, i, all) => all.length - i + x))
-console.log(nums.filter((x, i) => i % 2 === 0 && x > 2))
+console.log(nums.filter((x, i) => i % 2 == 0 && x > 2))
 console.log(nums.reduce((a, b) => a + b))
 console.log(nums.reduce((acc, x, i) => acc + x * i, 0))
-console.log(nums.reduceRight((acc, x) => acc + "," + x, ""))
+console.log(nums.reduceRight((acc, x) => `${acc},${x}`, ""))
 console.log([1.5, 2.5].reduce((a, b) => a + b, 0))
 console.log(nums.find(x => x > 5), nums.find(x => x > 50))
-console.log(nums.findLast(x => x < 5), nums.findLastIndex(x => x > 100), nums.findIndex(x => x === 8))
+console.log(nums.findLast(x => x < 5), nums.findLastIndex(x => x > 100), nums.findIndex(x => x == 8))
 const none: int[] = []
 console.log(nums.some(x => x > 8), nums.every(x => x > 0), none.every(x => x > 0))
 console.log(nums.flatMap(x => [x, x * 10]).length, nums.flatMap(x => x + 1))
 let visited = 0
 nums.forEach((x, i, all) => {
   visited += x
-  if (i === 0) all.push(100) // not visited: added after the start
+  if (i == 0) all.push(100) // not visited: added after the start
 })
 console.log(visited, nums.length)
 nums.pop()
@@ -42,7 +42,7 @@ const strs = ["10", "20"]
 console.log(strs.map(s => parseInt(s)))
 
 // Named functions as callbacks.
-function isEven(x: int) { return x % 2 === 0 }
+function isEven(x: int) { return x % 2 == 0 }
 function describe(x: int, i: int) { return `${i}:${x}` }
 console.log(nums.filter(isEven), nums.map(describe))
 function total(acc: int, x: int) { return acc + x }
@@ -50,7 +50,7 @@ console.log(nums.reduce(total, 0))
 
 // Chains.
 const result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  .filter(x => x % 3 !== 0)
+  .filter(x => x % 3 != 0)
   .map(x => x * x)
   .reduce((a, b) => a + b, 0)
 console.log(result)

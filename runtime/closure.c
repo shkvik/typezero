@@ -1,6 +1,7 @@
-// The objects of closures: environments and the boxes of shared variables
-// (see TzObject in tzrt.h). The compiler lays them out and releases what they
-// hold; the runtime only allocates them and counts them for leak checks.
+// The objects of closures, environments and the boxes of shared variables
+// (see TzObject in tzrt.h), and the objects of the language (TzInstance).
+// The compiler lays them out and releases what they hold; the runtime only
+// allocates them and counts them for leak checks.
 
 #include "tzrt.h"
 

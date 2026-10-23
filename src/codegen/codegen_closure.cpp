@@ -320,9 +320,11 @@ llvm::Value *CodeGen::callFunctionValue(llvm::Value *fn, const Type *fnType, llv
 }
 
 // `f(x)` with a function value f: the function stays alive during the call.
+// One in a field, `o.f(x)`, is not borrowed: the call may assign to the field.
 llvm::Value *CodeGen::emitValueCall(CallExpr *call) {
   const Type *type = call->callee->type;
-  Operand callee = emitOperand(call->callee, llvm::all_of(call->args, cannotAssign));
+  Operand callee =
+      emitOperand(call->callee, isa<NameExpr>(call->callee) && llvm::all_of(call->args, cannotAssign));
   std::vector<llvm::Value *> args;
   for (Expr *arg : call->args)
     args.push_back(emitExpr(arg));

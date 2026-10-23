@@ -1,0 +1,29 @@
+{ x: 0, y: 0 } { x: 3, y: 4 } 5 10
+{ width: 640, height: 480 } 307200 object
+2.5
+{ x: 30, y: 5.5 } { name: 'abc', count: 10, tags: [ 't', 'u', 'v' ] } 3 3
+{ name: 'Ann', age: 31, 'home town': 'Oslo' } Ann 31
+{ from: { x: 1, y: 1 }, to: { x: 6, y: 4 }, label: 'diagonal' } 4
+[ { x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 } ] [ 3, 7, 11 ] 2
+{ x: -3, y: 4 } 2 false
+Bob < Ann < Cid 96
+1 false
+true false true
+26
+{ x: 1, y: 2 } { x: 11, y: 2 }
+2 { increment: [Function: increment], current: [Function: current] }
+{ hits: 101 }
+clicked 2 Q { onClick: [Function: onClick], onKey: [Function: onKey] }
+20 5 undefined cats undefined
+{ text: 'cats' } { text: 'dogs', limit: 5, next: { text: 'cats' } }
+{ text: 'cats', limit: 10 }
+4
+undefined true undefined undefined
+{ x: -3, y: 4 } true 4 object
+4
+true { x: 0, y: 0 }
+10 { value: 4, next: { value: 3, next: { value: 2, next: [Object] } } }
+10 1
+{ port: 8080, host: 'example.com' } 8080
+{} [ {}, {} ]
+301

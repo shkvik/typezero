@@ -1,5 +1,5 @@
 // same-as-node
-// switch compares with ===, runs the first matching case and falls through
+// switch compares with ==, runs the first matching case and falls through
 // into the next ones until a break.
 function name(n: int): string {
   switch (n) {
@@ -102,7 +102,7 @@ function describe(items: string[]): string {
     }
     default:
       const joined = items.join(" and ")
-      return joined + " (" + items.length + ")"
+      return `${joined} (${items.length})`
   }
 }
 console.log(describe([]), "|", describe(["tea"]), "|", describe(["tea", "milk"]))

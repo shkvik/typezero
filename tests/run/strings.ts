@@ -6,13 +6,14 @@ let smile = "😀"
 console.log(hello.length, privet.length, smile.length, "".length)
 console.log(hello[1], privet[1], hello.charCodeAt(0), privet.charCodeAt(0), smile.charCodeAt(1))
 
-// + concatenates and turns numbers and booleans into strings.
+// + concatenates strings; numbers and booleans join them through templates
+// or String() (see errors/string_plus.ts).
 let n = 42
-console.log("n = " + n, "pi ~ " + 3.14, "ok: " + true, 1 + 2 + "3", "1" + 2 + 3)
+console.log(`n = ${n}`, `pi ~ ${3.14}`, `ok: ${true}`, `${1 + 2}3`, `1${2}${3}`)
 let s = "a"
 s += "b"
-s += 1
-s += false
+s += String(1)
+s += String(false)
 console.log(s)
 
 // Template literals.
@@ -22,12 +23,12 @@ console.log(`multi
 line`, `${hello}`, `no substitutions`, `${1}${2}${3}`)
 
 // Comparison is by code units.
-console.log("a" < "b", "abc" < "abd", "Z" < "a", "a" === "a", hello === "hel" + "lo", "x" !== "y")
+console.log("a" < "b", "abc" < "abd", "Z" < "a", "a" == "a", hello == "hel" + "lo", "x" != "y")
 console.log("ё" > "е", "" < "a", "abc" >= "ab")
 
 // Methods.
 let text = "The quick brown fox"
-console.log(text.slice(4, 9), text.slice(-3), text.slice(10), text.slice(5, 2) === "")
+console.log(text.slice(4, 9), text.slice(-3), text.slice(10), text.slice(5, 2) == "")
 console.log(text.substring(9, 4), text.substring(-5, 3))
 console.log(text.indexOf("quick"), text.indexOf("o"), text.indexOf("o", 13), text.indexOf("cat"))
 console.log(text.includes("brown"), text.startsWith("The"), text.endsWith("fox"), text.startsWith("quick", 4))

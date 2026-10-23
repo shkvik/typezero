@@ -1,0 +1,185 @@
+// same-as-node
+// Objects: types, literals, fields, and objects as values.
+interface Point {
+  x: double
+  y: double
+}
+type Size = { width: int; height: int }
+
+// A literal takes the types of the fields where its type is known.
+const origin: Point = { x: 0, y: 0 }
+const p: Point = { x: 3, y: 4 }
+function length(v: Point) {
+  return Math.hypot(v.x, v.y)
+}
+console.log(origin, p, length(p), length({ x: 6, y: 8 }))
+
+// Without a known type, the types of the values.
+const size = { width: 640, height: 480 }
+const area = (s: Size): int => s.width * s.height
+console.log(size, area(size), typeof size)
+
+// The same fields make the same type, whatever its name.
+type Vector = { x: double; y: double }
+const v: Vector = { x: 1.5, y: -2 }
+console.log(length(v))
+
+// Reading and writing fields.
+p.x = 30
+p.y += 0.5
+p.y++
+const s = { name: "a", count: 0, tags: ["t"] }
+s.name += "bc"
+s.count++
+s.count *= 10
+s.tags.push("u")
+s.tags = [...s.tags, "v"]
+console.log(p, s, s.tags.length, s.name.length)
+
+// Shorthand fields and string keys.
+const name = "Ann"
+const age = 31
+const person = { name, age, "home town": "Oslo" }
+console.log(person, person.name, person.age)
+
+// Nested objects and arrays of objects.
+interface Line {
+  from: Point
+  to: Point
+  label: string
+}
+const line: Line = { from: { x: 0, y: 0 }, to: { x: 3, y: 4 }, label: "diagonal" }
+line.to.x = 6
+line.from = { x: 1, y: 1 }
+console.log(line, line.to.y)
+const points: Point[] = [
+  { x: 1, y: 2 },
+  { x: 3, y: 4 },
+]
+points.push({ x: 5, y: 6 })
+console.log(points, points.map(q => q.x + q.y), points.filter(q => q.x > 2).length)
+for (const q of points) q.x *= -1
+console.log(points.find(q => q.y == 4), points.findIndex(q => q.y == 6), points.some(q => q.x > 0))
+const people = [
+  { name: "Ann", age: 31 },
+  { name: "Bob", age: 25 },
+  { name: "Cid", age: 40 },
+]
+people.sort((a, b) => a.age - b.age)
+console.log(people.map(q => q.name).join(" < "), people.reduce((sum, q) => sum + q.age, 0))
+console.log(people.indexOf(people[1]!), people.includes({ name: "Ann", age: 31 }))
+
+// Objects are references: `==` compares them.
+const first = people[0]!
+const same = first
+const copy = { name: first.name, age: first.age }
+console.log(first == same, first == copy, first != copy)
+same.age = 26
+console.log(first.age)
+
+// Objects as parameters, results and in closures.
+function makePoint(x: double, y: double): Point {
+  return { x, y }
+}
+function moved(q: Point, dx: double) {
+  return { x: q.x + dx, y: q.y }
+}
+console.log(makePoint(1, 2), moved(makePoint(1, 2), 10))
+function counter() {
+  const state = { count: 0 }
+  return { increment: () => ++state.count, current: () => state.count }
+}
+const c = counter()
+c.increment()
+c.increment()
+console.log(c.current(), c)
+let shared = { hits: 0 }
+const hit = () => {
+  shared.hits++
+}
+hit()
+shared = { hits: 100 }
+hit()
+console.log(shared)
+
+// Fields that hold functions.
+const handlers = {
+  onClick: (n: int) => `clicked ${n}`,
+  onKey: (key: string): string => key.toUpperCase(),
+}
+console.log(handlers.onClick(2), handlers.onKey("q"), handlers)
+
+// Optional fields: a field that is not there is undefined.
+interface Query {
+  text: string
+  limit?: int
+  next?: Query
+}
+const a: Query = { text: "cats" }
+const b: Query = { text: "dogs", limit: 5, next: a }
+console.log(a.limit ?? 20, b.limit ?? 20, a.next?.text, b.next?.text, b.next?.limit)
+console.log(a, b)
+a.limit = 10
+console.log(a)
+if (b.next != undefined) console.log(b.next.text.length)
+
+// `T | undefined` of an object is the reference or nothing.
+function at(x: double): Point | undefined {
+  return points.find(q => q.x == x)
+}
+let maybe = at(12345)
+console.log(maybe, maybe == undefined, typeof maybe, maybe?.x)
+maybe = at(-3)
+console.log(maybe, maybe == points[1], maybe?.y, typeof maybe)
+if (maybe) console.log(maybe.y)
+const fallback = at(0) ?? origin
+console.log(fallback == origin, fallback)
+
+// Recursive types: lists and trees.
+interface ListNode {
+  value: int
+  next?: ListNode
+}
+let list: ListNode | undefined = undefined
+for (let i = 1; i <= 4; i++) list = { value: i, next: list }
+let sum = 0
+for (let node = list; node != undefined; node = node.next) sum += node.value
+console.log(sum, list)
+interface Tree {
+  value: int
+  children: Tree[]
+}
+const tree: Tree = { value: 1, children: [{ value: 2, children: [] }, { value: 3, children: [{ value: 4, children: [] }] }] }
+function total(t: Tree): int {
+  return t.children.reduce((acc, child) => acc + total(child), t.value)
+}
+console.log(total(tree), tree.children[1]?.children.length)
+
+// A read-only field: the object can be seen through a type that says so.
+interface Settings {
+  readonly port: int
+  host: string
+}
+const config = { port: 8080, host: "localhost" }
+const settings: Settings = config
+config.host = "example.com"
+console.log(settings, settings.port)
+
+// The empty object.
+const empty = {}
+console.log(empty, [empty, {}])
+
+// A function in a field may change anything, as any call may.
+const values = [1, 2, 3, 4]
+const ops = {
+  clear: () => {
+    values.length = 0
+  },
+}
+const count = values.length
+let seen = 0
+for (let i = 0; i < count; i++) {
+  seen += values[i] ?? 100
+  ops.clear()
+}
+console.log(seen)

@@ -1,5 +1,6 @@
 // The core of the typezero runtime, linked into every program: buffered
-// output for console.log, number formatting, panics, startup and shutdown.
+// output for console.log, number formatting, panics, the debugger statement,
+// startup and shutdown.
 // Strings live in string.c.
 
 #include "tzrt.h"
@@ -190,9 +191,10 @@ void tz_rt_shutdown(void) {
   int64_t strings = tz_str_live_objects(), arrays = tz_arr_live_objects();
   int64_t objects = tz_obj_live_objects();
   if ((strings != 0 || arrays != 0 || objects != 0) && getenv("TZ_CHECK_LEAKS")) {
-    char message[160];
+    char message[192];
     int len = snprintf(message, sizeof message,
-                       "tz: %lld string object(s), %lld array(s) and %lld closure object(s) leaked\n",
+                       "tz: %lld string object(s), %lld array(s) and %lld object(s) or closure "
+                       "environment(s) leaked\n",
                        (long long)strings, (long long)arrays, (long long)objects);
     tz_out_flush(1);
     stream_write(&tz_err_stream, message, (size_t)len);
@@ -379,6 +381,20 @@ TZ_HOT int32_t tz_checked_int32_of_long(int64_t x) {
   if (x >= INT32_MIN && x <= INT32_MAX)
     return (int32_t)x;
   tz_panicf("the number %lld does not fit in int", (long long)x);
+}
+
+//===----------------------------------------------------------------------===//
+// The debugger statement
+//===----------------------------------------------------------------------===//
+
+// `debugger` stops at a breakpoint when a debugger is attached, as in
+// JavaScript. Without one, a breakpoint would end the program, so nothing
+// happens; other systems have no such check yet and always go on.
+void tz_debugger(void) {
+#ifdef _WIN32
+  if (IsDebuggerPresent())
+    __builtin_debugtrap();
+#endif
 }
 
 //===----------------------------------------------------------------------===//

@@ -2,7 +2,7 @@
 // Closures inside recursive functions whose return types are inferred.
 function f(n: int) {
   const g = (x: int) => x + 1
-  return n === 0 ? 0 : g(f(n - 1))
+  return n == 0 ? 0 : g(f(n - 1))
 }
 console.log(f(5))
 function outer() {

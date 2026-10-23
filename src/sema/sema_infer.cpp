@@ -20,8 +20,12 @@ bool Sema::returnsValue(const Stmt *stmt) {
   if (!stmt)
     return false;
   switch (stmt->kind()) {
-  case Stmt::Kind::Return:
-    return cast<ReturnStmt>(stmt)->value != nullptr;
+  case Stmt::Kind::Return: {
+    // `return void f()` gives undefined, as a plain `return` does.
+    const Expr *value = cast<ReturnStmt>(stmt)->value;
+    auto *unary = llvm::dyn_cast_or_null<UnaryExpr>(value);
+    return value && !(unary && unary->op == UnaryOp::Void);
+  }
   case Stmt::Kind::Block:
     return llvm::any_of(cast<BlockStmt>(stmt)->body, returnsValue);
   case Stmt::Kind::If:

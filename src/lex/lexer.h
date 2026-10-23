@@ -51,5 +51,8 @@ private:
 // escape.
 bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags);
 bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags);
+// The raw text of a template part, as String.raw gives it: escapes stay as
+// written, and only line breaks are normalized to "\n".
+void decodeTemplateRaw(const Token &tok, std::u16string &out);
 
 } // namespace tz

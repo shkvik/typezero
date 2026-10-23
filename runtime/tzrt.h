@@ -59,7 +59,8 @@ void tz_free(void *p);
 // Describes a type to the runtime; the compiler emits one constant per type
 // it needs (CodeGen::typeDescriptor). `size` is the size of a value in
 // memory. `inner` is the element type of an array, or the value type of
-// `T | undefined`, which is laid out as { T value; uint8_t has }.
+// `T | undefined`, which is laid out as { T value; uint8_t has }, except
+// for an object, whose `T | undefined` is the reference, NULL for undefined.
 enum {
   TZ_T_INT = 1,
   TZ_T_LONG = 2,
@@ -70,6 +71,7 @@ enum {
   TZ_T_OPTIONAL = 7,
   TZ_T_UNDEFINED = 8,
   TZ_T_FUNCTION = 9,
+  TZ_T_OBJECT = 10,
 };
 
 typedef struct TzType {
@@ -80,6 +82,8 @@ typedef struct TzType {
 
 // Whether a `T | undefined` at `value` holds a value.
 static inline int tz_optional_has(const TzType *type, const void *value) {
+  if (type->inner->kind == TZ_T_OBJECT)
+    return *(void *const *)value != NULL;
   return ((const uint8_t *)value)[type->inner->size] != 0;
 }
 
@@ -122,6 +126,38 @@ static inline void tz_obj_retain(TzObject *o) {
 static inline void tz_obj_release(TzObject *o) {
   if (o && --o->rc == 0)
     o->drop(o);
+}
+
+//===----------------------------------------------------------------------===//
+// Objects of the language
+//===----------------------------------------------------------------------===//
+
+// An object is allocated as the objects of closures are, but starts with
+// { rc, layout }: a constant the compiler emits for each layout and each
+// order of the keys (CodeGen::layoutDescriptor). The fields follow, at the
+// offsets the layout gives, each stored as a value of its type.
+typedef struct TzField {
+  const char *name; // UTF-8
+  uint32_t name_length;
+  uint32_t offset; // from the start of the object
+  const TzType *type;
+} TzField;
+
+typedef struct TzLayout {
+  // Releases what the fields hold, and frees the object.
+  void (*drop)(void *object);
+  const TzField *fields; // in the order of the keys, for printing
+  uint32_t count;
+} TzLayout;
+
+typedef struct TzInstance {
+  int64_t rc;
+  const TzLayout *layout;
+} TzInstance;
+
+static inline void tz_instance_release(TzInstance *o) {
+  if (o && --o->rc == 0)
+    o->layout->drop(o);
 }
 
 //===----------------------------------------------------------------------===//

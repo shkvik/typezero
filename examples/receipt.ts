@@ -22,9 +22,9 @@ const names: string[] = []
 const sums: Money[] = []
 for (const raw of input.split("\n")) {
   const line = raw.trim()
-  if (line === "") continue
+  if (line == "") continue
   const parts = line.split(";")
-  if (parts.length !== 3) {
+  if (parts.length != 3) {
     console.log("не понял строку:", line)
     continue
   }

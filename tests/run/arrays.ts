@@ -21,9 +21,10 @@ console.log(a.slice(2), a.slice(-3), a.slice(1, 3), a.slice(5, 2), a.at(0), a.at
 console.log(a.concat([7, 8], 9), a.join(), a.join(" | "), a.toString())
 // reverse() and sort() change the array and return it; console.log shows the
 // state after all its arguments ran. Without a comparison function, sort()
-// compares the string forms, as in JavaScript.
+// compares the string forms, as in JavaScript; numbers need one (see
+// errors/sort.ts), here one that compares them as strings.
 const b = a.slice()
-console.log(b.reverse(), b.sort(), [10, 9, 1, 100, 25].sort())
+console.log(b.reverse(), b.sort((x, y) => x - y), [10, 9, 1, 100, 25].sort((x, y) => (String(x) < String(y) ? -1 : 1)))
 console.log(["b", "a", "C", "ä"].sort(), [true, false, true].sort())
 const q: int[] = []
 for (let i = 0; i < 5; i++) q.push(i)
@@ -39,7 +40,7 @@ const all = [...words, "delta", ...words.slice(1)]
 console.log(all, all.length)
 const opt: (int | undefined)[] = [1, undefined, 3]
 console.log(opt, opt.join("-"), String(opt), opt.includes(undefined), opt.indexOf(3))
-// indexOf uses ===, where NaN equals nothing; includes finds NaN.
+// indexOf uses ==, where NaN equals nothing; includes finds NaN.
 function notANumber(): double {
   return 0.0 / 0.0
 }

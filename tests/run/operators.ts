@@ -17,11 +17,11 @@ const maybe: int | undefined = undefined
 const some: string | undefined = "s"
 console.log(typeof 1, typeof 2.5, typeof "", typeof false, typeof [1], typeof maybe, typeof some)
 function len(s?: string): int {
-  if (typeof s === "undefined") return -1
+  if (typeof s == "undefined") return -1
   return s.length
 }
 function size(n: int | undefined): int {
-  if (typeof n === "number") return n * 2
+  if (typeof n == "number") return n * 2
   return 0
 }
 console.log(len(), len("four"), size(21), size(undefined))

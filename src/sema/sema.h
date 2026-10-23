@@ -41,11 +41,18 @@ private:
     EnumDecl *enumDecl = nullptr;
   };
 
+  // A field reached from a variable through fields: `q.limit`, `a.b.c`.
+  struct FieldPath {
+    const VarSymbol *var = nullptr;
+    llvm::SmallVector<llvm::StringRef, 2> names;
+    bool operator==(const FieldPath &other) const { return var == other.var && names == other.names; }
+  };
   // What is known at the current point of the program: facts about ints and
-  // lengths, and the `T | undefined` variables that hold a value.
+  // lengths, and the `T | undefined` variables and fields that hold a value.
   struct Flow {
     Facts facts;
     llvm::SmallPtrSet<const VarSymbol *, 4> defined;
+    std::vector<FieldPath> definedFields;
     bool unreachable = false; // after return, break or continue
   };
   // What holds after control merges from `a` and `b`.
@@ -63,6 +70,8 @@ private:
     bool callsFunctions = false;
     bool growsArrays = false;
     bool shrinksArrays = false;
+    // The fields assigned to, by name, of objects of any type.
+    llvm::StringSet<> fieldWrites;
     // Some element of some array may be removed or replaced (pop, shift,
     // `a[i] = x`, fill...), and so released.
     bool releasesElements = false;
@@ -89,6 +98,8 @@ private:
     typeScopes_.emplace_back();
   }
   void popScope() {
+    if (!untyped_.empty())
+      reportUntyped();
     scopes_.pop_back();
     typeScopes_.pop_back();
   }
@@ -98,6 +109,8 @@ private:
 
   const Type *resolveType(const TypeRef &ref, bool allowVoid);
   const Type *resolveTypeInner(const TypeRef &ref);
+  // The fields of an object type written in the source.
+  std::vector<Field> resolveFields(const TypeRef &ref);
 
   // Type aliases and enums (sema_decls.cpp). They are visible in the whole
   // block that declares them, so each block declares them before anything
@@ -235,6 +248,12 @@ private:
       type = type->inner();
     return type->isFunction();
   }
+  // The same for objects.
+  static bool holdsObjects(const Type *type) {
+    while (type->isOptional() || type->isArray())
+      type = type->inner();
+    return type->isObject();
+  }
 
   // Declarations and statements
   // `var` is the variable of a function declared in a block.
@@ -256,10 +275,36 @@ private:
   // Enters a loop, switch or labeled block; a loop or switch takes the
   // labels in pendingLabels_.
   void pushTarget(JumpTarget::Kind kind);
+  // `let x` without a type or a value, and `let x = undefined`: reported when
+  // the scope of x ends, with a type made from the values assigned to x up
+  // to there as the hint.
+  void noteUntyped(VarSymbol *var, bool initUndefined);
+  void assignedUntyped(const VarSymbol *var, const Type *type);
+  void reportUntyped();
+
+  // Truthiness (sema_truth.cpp). As in JavaScript, a condition may test a
+  // string or a value that may be undefined, but not a number; `&&` and `||`
+  // give one of their operands. `use` says how a tested value is used, for
+  // the hints of the errors.
+  enum class TruthUse { Condition, Not, Or, And, OrAssign, AndAssign };
   // Checks a condition and computes the flow where it is true and where it is
-  // false.
+  // false. The result is a boolean.
   Expr *checkCondition(Expr *cond, Flow &whenTrue, Flow &whenFalse);
-  Expr *checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse);
+  Expr *checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse use = TruthUse::Condition);
+  // An operand of `&&` or `||` whose value is the result when it decides.
+  Expr *checkTestedValue(Expr *expr, const Type *expected, Flow &whenTrue, Flow &whenFalse, TruthUse use);
+  // `a && b` and `a || b` as values. With `tested`, an enclosing `&&` or `||`
+  // tests the result too.
+  Expr *checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue, Flow &whenFalse, bool tested,
+                     TruthUse use);
+  // Reports a value whose truth cannot be tested; `other` is the right side
+  // of `||` or the value of `||=`, for the hint.
+  bool checkTruthy(const Expr *expr, TruthUse use, const Expr *other = nullptr);
+  // `if (level = 0)`
+  void reportAssignmentCondition(const AssignExpr *assign, TruthUse use);
+  // `Boolean(x)`, which converts like a condition.
+  Expr *checkBooleanCall(CallExpr *call, Flow &whenTrue, Flow &whenFalse);
+  bool isBooleanCall(const Expr *expr) const;
 
   // Expressions. Each returns the expression to use in place of the argument,
   // which differs when a conversion was inserted. `wraps`: only the low bits
@@ -271,6 +316,9 @@ private:
   // Reports a use of a variable declared by an earlier case of a switch.
   void checkVisible(NameExpr *name, const VarSymbol *var);
   Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
+  // `delete x[i]` and `key in x`: errors until objects come (see sema.cpp).
+  void checkDelete(UnaryExpr *unary);
+  Expr *checkIn(BinaryExpr *bin);
   Expr *checkBinary(BinaryExpr *binary, const Type *expected, bool wraps);
   Expr *checkEquality(BinaryExpr *bin);
   Expr *checkNullish(BinaryExpr *bin, const Type *expected);
@@ -304,6 +352,29 @@ private:
   Expr *checkArrayMethod(CallExpr *call, MemberExpr *member);
   Expr *checkNew(NewExpr *expr, const Type *expected);
   Expr *checkArrayLit(ArrayLitExpr *lit, const Type *expected);
+  // Objects (sema_object.cpp). A literal takes the type expected where it is
+  // written, and its fields the types of that type's fields; without one it
+  // has the types of its values.
+  Expr *checkObjectLit(ObjectLitExpr *lit, const Type *expected);
+  // `object.name` of an object, whose object is checked.
+  Expr *checkField(MemberExpr *member);
+  // `object.name(args)` of an object: a call of the function in the field.
+  Expr *checkFieldCall(CallExpr *call, MemberExpr *member);
+  const Type *checkFieldTarget(MemberExpr *member);
+  // `o.f ??= v`: `o.f ?? (o.f = v)`, when the object can be read twice.
+  // (`||=` and `&&=` on fields go through checkLogicalAssign.)
+  Expr *checkFieldLogicalAssign(AssignExpr *assign);
+  // Why `from` does not fit an object type `to`: the fields that differ.
+  std::string objectMismatch(const Type *from, const Type *to) const;
+  // Fields that hold a value (see Flow::definedFields). A narrowed field is
+  // forgotten when any field of that name is assigned to, the variable it
+  // starts from changes, or a function is called and some code of the
+  // program assigns to a field of that name: any of those may change it.
+  std::optional<FieldPath> fieldPath(const Expr *expr) const;
+  bool isFieldDefined(const FieldPath &path) const;
+  static void defineField(Flow &flow, const FieldPath &path);
+  void fieldsAssigned(llvm::StringRef name);
+  static void forgetFieldsOf(Flow &flow, const VarSymbol *var);
   Expr *checkConditional(ConditionalExpr *cond, const Type *expected);
   Expr *checkCast(CastExpr *cast);
   Expr *checkTemplate(TemplateExpr *tmpl);
@@ -326,6 +397,9 @@ private:
 
   // Converts a value to a string for `+` and template literals.
   Expr *toStringOperand(Expr *expr);
+  // Reports a number or a boolean joined with a string by `+` in the chain
+  // `a + b + c` that ends at `root`; `mixed` is the first `+` that does it.
+  void reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed);
   // An operand of a bitwise operator as an int, the way JavaScript's ToInt32
   // makes one: a double loses its fraction and wraps around, NaN and the
   // infinities become 0; a long keeps its low 32 bits.
@@ -340,8 +414,9 @@ private:
   VarSymbol *checkVarTarget(NameExpr *name);
   // Wraps `expr` in an implicit conversion to `to` (no checks).
   Expr *convert(Expr *expr, const Type *to);
-  // Converts `expr` to `to` if that is allowed implicitly, else reports an error.
-  Expr *coerce(Expr *expr, const Type *to);
+  // Converts `expr` to `to` if that is allowed implicitly, else reports an
+  // error; `what` names the place, as "field 'x'".
+  Expr *coerce(Expr *expr, const Type *to, llvm::StringRef what = {});
   void reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs, const Type *rhs);
 
   static bool isImplicitlyConvertible(const Type *from, const Type *to);
@@ -413,8 +488,20 @@ private:
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   llvm::StringSet<> namesInFunctions_;
+  // The names of the fields the program assigns to anywhere: only those can
+  // change during a call.
+  llvm::StringSet<> assignedFields_;
+  // The variables whose initializers are being checked, for the message
+  // about one that uses itself: `const o = { f: () => o.n }`.
+  llvm::SmallVector<llvm::StringRef, 2> initializing_;
   // Some link of the optional chain being checked may end it.
   bool chainShortCircuits_ = false;
+  // The last `+` of the chain `a + b + c` whose left side is about to be
+  // checked, and the first `+` of the chain being checked that joins a
+  // number or a boolean with a string: the chain reports it once, with a
+  // template made of all its parts.
+  BinaryExpr *concatChain_ = nullptr;
+  const BinaryExpr *mixedConcat_ = nullptr;
   // Inferring the return type of currentFunction_: its return statements.
   std::vector<ReturnStmt *> *returns_ = nullptr;
   // Checking a copy of a function of a cycle (see inferCycle): a call within
@@ -427,6 +514,14 @@ private:
   llvm::StringSet<> topLevelNames_;
   std::vector<std::vector<FuncSymbol *>> cycles_;
   llvm::DenseMap<const FuncSymbol *, unsigned> cycleOf_;
+  // The variables declared without a type that the scopes being checked hold
+  // (see noteUntyped), with the types of the values assigned to them.
+  struct Untyped {
+    VarSymbol *var;
+    bool initUndefined; // `let x = undefined`
+    std::vector<const Type *> assigned;
+  };
+  std::vector<Untyped> untyped_;
   // The values of the integer constants computed so far: operator expressions
   // and `const` variables. In a `wraps` context a value may exceed its type
   // (see foldBinary).
@@ -451,6 +546,10 @@ private:
 // "2 arguments", "1-3 arguments", "1 or more arguments".
 std::string argumentCount(unsigned min, unsigned max);
 
+// Why a compiled program cannot have the global `name` of JavaScript (eval,
+// Function, Proxy), or null for any other name.
+const char *whyUnsupported(llvm::StringRef name);
+
 // A function in messages: "'f'" and "function 'f'", or "the function" for an
 // arrow without a name.
 inline std::string quotedName(llvm::StringRef name) {
@@ -464,5 +563,10 @@ inline std::string functionLabel(llvm::StringRef name) {
 // only those inside the functions it contains.
 void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction = true);
 void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction = true);
+
+// Calls `visit` on every expression inside `stmt`, those in the functions it
+// contains included.
+void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit);
+void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit);
 
 } // namespace tz

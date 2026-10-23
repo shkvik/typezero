@@ -2,6 +2,7 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SMLoc.h"
 
@@ -93,7 +94,7 @@ public:
 };
 
 // A type written in the source: `int`, `string[]`, `int | undefined`,
-// `Array<int>`.
+// `Array<int>`, `{ x: int; y?: string }`.
 struct TypeRef {
   enum class Kind {
     Name,     // `name`; empty after a syntax error
@@ -101,6 +102,7 @@ struct TypeRef {
     Union,    // `args[0] | args[1] | ...`
     Generic,  // `name<args...>`
     Function, // `(a: args[0], b?: args[1]) => args.back()`
+    Object,   // `{ names[0]: args[0]; names[1]?: args[1] }`
   };
 
   Kind kind = Kind::Name;
@@ -108,9 +110,14 @@ struct TypeRef {
   llvm::SMLoc loc;
   std::vector<TypeRef> args;
   // Function types: which parameters are optional, and whether the last one
-  // is a rest parameter.
+  // is a rest parameter. Object types: which fields are optional.
   std::vector<bool> optional;
   bool rest = false;
+  // Object types: the names of the fields, where they are written, and which
+  // are `readonly`.
+  std::vector<llvm::StringRef> names;
+  std::vector<llvm::SMLoc> locs;
+  std::vector<bool> readonly;
 };
 
 //===----------------------------------------------------------------------===//
@@ -119,6 +126,8 @@ struct TypeRef {
 
 enum class UnaryOp {
   Neg, Plus, Not, BitNot, TypeOf,
+  Void,    // `void x`: evaluates x; the value is undefined
+  Delete,  // `delete x[i]`, for objects to come; Sema rejects it for now
   NonNull, // postfix `x!`
 };
 
@@ -128,6 +137,7 @@ enum class BinaryOp {
   Lt, Le, Gt, Ge, Eq, Ne,
   LogAnd, LogOr,
   Nullish, // `a ?? b`
+  In,      // `key in object`, for objects to come; Sema rejects it for now
 };
 
 const char *opSpelling(UnaryOp op);
@@ -136,8 +146,8 @@ const char *opSpelling(BinaryOp op);
 class Expr : public Node {
 public:
   enum class Kind {
-    IntLit, FloatLit, BoolLit, StringLit, Undefined, Template, ArrayLit, Name, Member, Index,
-    Unary, Binary, Assign, Update, Call, New, Conditional, Cast, Sequence, OptionalChain,
+    IntLit, FloatLit, BoolLit, StringLit, Undefined, Template, ArrayLit, ObjectLit, Name, Member,
+    Index, Unary, Binary, Assign, Update, Call, New, Conditional, Cast, Sequence, OptionalChain,
     Function,
   };
 
@@ -221,6 +231,22 @@ public:
   std::vector<Element> elements;
 };
 
+// `{ x: 1, y }`: an object with these fields, in this order; `y` alone is
+// `y: y`.
+class ObjectLitExpr : public Expr {
+public:
+  struct Property {
+    llvm::StringRef name;
+    llvm::SMLoc loc;
+    Expr *value;
+  };
+
+  explicit ObjectLitExpr(llvm::SMLoc loc) : Expr(Kind::ObjectLit, loc) {}
+  static bool classof(const Expr *e) { return e->kind() == Kind::ObjectLit; }
+
+  std::vector<Property> props;
+};
+
 class NameExpr : public Expr {
 public:
   NameExpr(llvm::SMLoc loc, llvm::StringRef name) : Expr(Kind::Name, loc), name(name) {}
@@ -283,6 +309,9 @@ public:
   BinaryOp op;
   Expr *lhs;
   Expr *rhs;
+  // The source text of the whole expression (loc() is the operator), for
+  // hints that rewrite it. Empty for one Sema made.
+  llvm::StringRef source;
 };
 
 // `target = value`, or a compound assignment such as `target += value`.
@@ -295,6 +324,8 @@ public:
   std::optional<BinaryOp> op;
   Expr *target;
   Expr *value;
+  // As in BinaryExpr.
+  llvm::StringRef source;
 };
 
 // `++x`, `x++`, `--x`, `x--`.
@@ -441,6 +472,9 @@ public:
   bool spreads(size_t i) const { return i < spread.size() && spread[i]; }
   bool hasSpread() const { return llvm::is_contained(spread, true); }
   bool optional = false; // `callee?.(args)`
+  // A tagged template, tag`a${x}b`: the first argument is the array of the
+  // texts, ["a", "b"], and the values follow.
+  bool tagged = false;
   // Set by Sema: exactly one of these describes the callee.
   FuncSymbol *func = nullptr;
   Builtin builtin = Builtin::None;
@@ -535,7 +569,7 @@ class Stmt : public Node {
 public:
   enum class Kind {
     Block, VarDecl, Function, Expr, If, While, DoWhile, For, ForOf, Switch, Labeled, Return,
-    Break, Continue, Empty, TypeAlias, Enum,
+    Break, Continue, Empty, TypeAlias, Enum, Debugger,
   };
 
   Kind kind() const { return kind_; }
@@ -726,12 +760,12 @@ struct SwitchCase {
   Expr *test = nullptr;
   std::vector<Stmt *> body;
   // Set by Sema: the type in which the discriminant and the test compare, as
-  // with `===`. Null when the test is `undefined`.
+  // with `==`. Null when the test is `undefined`.
   const Type *compareType = nullptr;
 };
 
 // `switch (discriminant) { case a: ... default: ... }`. The discriminant is
-// evaluated once and compared with the tests in order, with `===`; control
+// evaluated once and compared with the tests in order, with `==`; control
 // falls through from one case into the next.
 struct SwitchStmt : Stmt {
   SwitchStmt(llvm::SMLoc loc, Expr *discriminant)
@@ -778,8 +812,15 @@ struct EmptyStmt : Stmt {
   static bool classof(const Stmt *s) { return s->kind() == Kind::Empty; }
 };
 
+// `debugger`: stops the program if a debugger is attached, and does nothing
+// otherwise.
+struct DebuggerStmt : Stmt {
+  explicit DebuggerStmt(llvm::SMLoc loc) : Stmt(Kind::Debugger, loc) {}
+  static bool classof(const Stmt *s) { return s->kind() == Kind::Debugger; }
+};
+
 // `type Name = T`: another name for a type, visible in the whole block that
-// declares it.
+// declares it. `interface Name { ... }` is the same for an object type.
 struct TypeAliasDecl : Stmt {
   TypeAliasDecl(llvm::SMLoc loc, llvm::StringRef name, TypeRef type)
       : Stmt(Kind::TypeAlias, loc), name(name), type(std::move(type)) {}
@@ -790,6 +831,10 @@ struct TypeAliasDecl : Stmt {
   // Set by Sema.
   const Type *resolved = nullptr;
   bool resolving = false; // catches an alias that refers to itself
+  // An object type may refer to itself through its fields: while it is
+  // resolved, they get this type (see Type::declareObject).
+  Type *self = nullptr;
+  bool recursive = false; // some field did
 };
 
 struct EnumMember {
@@ -828,7 +873,10 @@ struct EnumDecl : Stmt {
 // form the program's entry point.
 struct SourceFile {
   std::vector<Stmt *> items;
-  // Set by Sema: the program compares functions (`===`, indexOf...), so every
+  // The names of the fields of the object types and literals of the program:
+  // `o.name(...)` with any other name cannot call a function in a field.
+  llvm::StringSet<> fieldNames;
+  // Set by Sema: the program compares functions (`==`, indexOf...), so every
   // evaluation of a function expression must give a distinct value.
   bool comparesFunctions = false;
 };
@@ -852,6 +900,9 @@ public:
   llvm::StringRef hiddenName() {
     return names_.emplace_back("%" + std::to_string(names_.size()));
   }
+  // A name that is not in the source as it is, such as a field name written
+  // as a string literal.
+  llvm::StringRef keepName(std::string name) { return names_.emplace_back(std::move(name)); }
 
 private:
   std::vector<std::unique_ptr<Node>> nodes_;

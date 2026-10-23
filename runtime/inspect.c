@@ -1,9 +1,13 @@
-// console.log for arrays and optionals: the part of Node.js's util.inspect
-// (lib/internal/util/inspect.js) that the language's values need, ported so
-// that programs print exactly what Node prints. Function names follow Node's.
+// console.log for arrays, objects and optionals: the part of Node.js's
+// util.inspect (lib/internal/util/inspect.js) that the language's values
+// need, ported so that programs print exactly what Node prints. Function
+// names follow Node's.
 //
 // The defaults console.log uses: breakLength 80, compact 3, depth 2,
 // maxArrayLength 100, maxStringLength 10000.
+//
+// One difference is deliberate: an optional field that holds undefined is
+// not shown, since in tz a missing field and an undefined one are the same.
 
 #include "tzrt.h"
 
@@ -26,6 +30,14 @@ enum {
 typedef struct {
   int indentation; // ctx.indentationLvl
   int current_depth;
+  // ctx.seen: the arrays and objects being formatted, outermost first. No
+  // more than kDepth + 1 are, since deeper ones print as [Object].
+  const void *seen[kDepth + 1];
+  int seen_count;
+  // ctx.circular: the objects that some object inside them refers to; the
+  // first is <ref *1>, the next <ref *2>.
+  const void **circular;
+  int circular_count, circular_capacity;
 } Ctx;
 
 // The formatted entries of an array (Node's `output`).
@@ -362,36 +374,89 @@ static void join_entries(TzBuf *out, const Entries *output, const char *separato
   }
 }
 
-// reduceToSingleString for arrays.
+// The `<ref *N>` that starts an array or object which something inside it
+// refers to (formatRaw's `base`), or "" for others.
+static void circular_base(Ctx *ctx, const void *value, char base[32]) {
+  base[0] = 0;
+  for (int i = 0; i < ctx->circular_count; ++i)
+    if (ctx->circular[i] == value)
+      snprintf(base, 32, "<ref *%d>", i + 1);
+}
+
+// reduceToSingleString for arrays (with `array`, whose entries may be grouped
+// in columns) and objects. `open` and `close` are the braces; `base` is
+// empty or `<ref *N>`.
 static void reduce_to_single_string(Ctx *ctx, TzBuf *out, Entries *output, int recurse_times,
-                                    const TzArray *array) {
+                                    const TzArray *array, char open, char close, const char *base) {
   size_t entries = output->count;
+  size_t base_length = strlen(base);
   Entries grouped = {NULL, 0, 0};
   Entries *lines = output;
-  if (entries > 6 && group_array_elements(ctx, output, array, &grouped))
+  if (array && entries > 6 && group_array_elements(ctx, output, array, &grouped))
     lines = &grouped;
   if (ctx->current_depth - recurse_times < kCompact && entries == lines->count) {
-    size_t start = lines->count + (size_t)ctx->indentation + 1 + 10;
+    size_t start = lines->count + (size_t)ctx->indentation + 1 + base_length + 10;
     int newline = 0;
     for (size_t i = 0; i < lines->count && !newline; ++i)
       newline = contains(lines->items[i].data, lines->items[i].length, '\n');
     if (is_below_break_length(ctx, lines, start) && !newline) {
-      tz_buf_ascii(out, "[ ");
+      if (base_length) {
+        tz_buf_ascii(out, base);
+        tz_buf_push(out, ' ');
+      }
+      tz_buf_push(out, (uint16_t)open);
+      tz_buf_push(out, ' ');
       join_entries(out, lines, ", ", 0);
-      tz_buf_ascii(out, " ]");
+      tz_buf_push(out, ' ');
+      tz_buf_push(out, (uint16_t)close);
       entries_free(&grouped);
       return;
     }
   }
   // One entry per line.
-  tz_buf_push(out, '[');
+  if (base_length) {
+    tz_buf_ascii(out, base);
+    tz_buf_push(out, ' ');
+  }
+  tz_buf_push(out, (uint16_t)open);
   tz_buf_push(out, '\n');
   spaces(out, ctx->indentation + 2);
   join_entries(out, lines, ",\n", ctx->indentation + 2);
   tz_buf_push(out, '\n');
   spaces(out, ctx->indentation);
-  tz_buf_push(out, ']');
+  tz_buf_push(out, (uint16_t)close);
   entries_free(&grouped);
+}
+
+// formatValue's check for an array or object that contains itself: it
+// prints as `[Circular *N]`, and the outer one gets `<ref *N>`.
+static int format_circular(Ctx *ctx, TzBuf *out, const void *value) {
+  int seen = 0;
+  for (int i = 0; i < ctx->seen_count && !seen; ++i)
+    seen = ctx->seen[i] == value;
+  if (!seen)
+    return 0;
+  int index = 0;
+  for (int i = 0; i < ctx->circular_count && !index; ++i)
+    if (ctx->circular[i] == value)
+      index = i + 1;
+  if (!index) {
+    if (ctx->circular_count == ctx->circular_capacity) {
+      int capacity = ctx->circular_capacity * 2 + 4;
+      const void **items = (const void **)tz_alloc((size_t)capacity * sizeof(void *));
+      if (ctx->circular_count)
+        memcpy(items, ctx->circular, (size_t)ctx->circular_count * sizeof(void *));
+      tz_free((void *)ctx->circular);
+      ctx->circular = items;
+      ctx->circular_capacity = capacity;
+    }
+    ctx->circular[ctx->circular_count++] = value;
+    index = ctx->circular_count;
+  }
+  char text[32];
+  int n = snprintf(text, sizeof text, "[Circular *%d]", index);
+  tz_buf_ascii_n(out, text, (size_t)n);
+  return 1;
 }
 
 // formatRaw and formatArray for arrays.
@@ -405,6 +470,7 @@ static void format_array(Ctx *ctx, TzBuf *out, const TzArray *array, int recurse
     return;
   }
   ++recurse_times;
+  ctx->seen[ctx->seen_count++] = array;
   ctx->current_depth = recurse_times;
 
   uint32_t shown = array->length < kMaxArrayLength ? array->length : kMaxArrayLength;
@@ -421,7 +487,97 @@ static void format_array(Ctx *ctx, TzBuf *out, const TzArray *array, int recurse
     int n = snprintf(text, sizeof text, "... %u more item%s", remaining, remaining > 1 ? "s" : "");
     tz_buf_ascii_n(entries_add(&output), text, (size_t)n);
   }
-  reduce_to_single_string(ctx, out, &output, recurse_times, array);
+  --ctx->seen_count;
+  char base[32];
+  circular_base(ctx, array, base);
+  reduce_to_single_string(ctx, out, &output, recurse_times, array, '[', ']', base);
+  entries_free(&output);
+}
+
+//===----------------------------------------------------------------------===//
+// Objects
+//===----------------------------------------------------------------------===//
+
+// Appends UTF-8 text as UTF-16 code units.
+static void buf_utf8(TzBuf *out, const char *text, size_t n) {
+  for (size_t i = 0; i < n;) {
+    uint32_t c = (unsigned char)text[i];
+    size_t extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+    if (extra)
+      c &= 0x3Fu >> extra;
+    for (size_t k = 1; k <= extra && i + k < n; ++k)
+      c = (c << 6) | ((unsigned char)text[i + k] & 0x3F);
+    i += extra + 1;
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      tz_buf_push(out, (uint16_t)(0xD800 + (c >> 10)));
+      tz_buf_push(out, (uint16_t)(0xDC00 + (c & 0x3FF)));
+    } else {
+      tz_buf_push(out, (uint16_t)c);
+    }
+  }
+}
+
+// A key that matches keyStrRegExp, /^[a-zA-Z_][a-zA-Z_0-9]*$/, is shown as
+// it is; any other is quoted like a string.
+static int is_plain_key(const char *name, size_t n) {
+  if (n == 0)
+    return 0;
+  for (size_t i = 0; i < n; ++i) {
+    char c = name[i];
+    int letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    if (!letter && !(i > 0 && c >= '0' && c <= '9'))
+      return 0;
+  }
+  return 1;
+}
+
+// formatRaw and formatProperty for objects.
+static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times) {
+  const TzLayout *layout = object->layout;
+  const char *fields = (const char *)object;
+  uint32_t shown = 0;
+  for (uint32_t i = 0; i < layout->count; ++i) {
+    const TzField *field = &layout->fields[i];
+    shown += field->type->kind != TZ_T_OPTIONAL || tz_optional_has(field->type, fields + field->offset);
+  }
+  if (shown == 0) {
+    tz_buf_ascii(out, "{}");
+    return;
+  }
+  if (recurse_times > kDepth) {
+    tz_buf_ascii(out, "[Object]");
+    return;
+  }
+  ++recurse_times;
+  ctx->seen[ctx->seen_count++] = object;
+  ctx->current_depth = recurse_times;
+
+  Entries output = {NULL, 0, 0};
+  for (uint32_t i = 0; i < layout->count; ++i) {
+    const TzField *field = &layout->fields[i];
+    const void *value = fields + field->offset;
+    if (field->type->kind == TZ_T_OPTIONAL && !tz_optional_has(field->type, value))
+      continue;
+    TzBuf *entry = entries_add(&output);
+    if (is_plain_key(field->name, field->name_length)) {
+      tz_buf_ascii_n(entry, field->name, field->name_length);
+    } else {
+      TzBuf key;
+      tz_buf_init(&key);
+      buf_utf8(&key, field->name, field->name_length);
+      str_escape(entry, key.data, key.length);
+      tz_buf_free(&key);
+    }
+    tz_buf_ascii(entry, ": ");
+    ctx->indentation += 2;
+    format_value(ctx, entry, field->type, value, recurse_times);
+    ctx->indentation -= 2;
+  }
+  --ctx->seen_count;
+  char base[32];
+  circular_base(ctx, object, base);
+  reduce_to_single_string(ctx, out, &output, recurse_times, NULL, '{', '}', base);
   entries_free(&output);
 }
 
@@ -460,7 +616,12 @@ static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *v
     format_string(ctx, out, *(const TzStr *)value);
     return;
   case TZ_T_ARRAY:
-    format_array(ctx, out, *(TzArray *const *)value, recurse_times);
+    if (!format_circular(ctx, out, *(void *const *)value))
+      format_array(ctx, out, *(TzArray *const *)value, recurse_times);
+    return;
+  case TZ_T_OBJECT:
+    if (!format_circular(ctx, out, *(void *const *)value))
+      format_object(ctx, out, *(TzInstance *const *)value, recurse_times);
     return;
   case TZ_T_OPTIONAL:
     if (tz_optional_has(type, value))
@@ -489,10 +650,12 @@ void tz_print_value(const TzType *type, const void *value) {
     tz_print_string(s->obj, s->meta);
     return;
   }
-  Ctx ctx = {0, 0};
+  Ctx ctx;
+  memset(&ctx, 0, sizeof ctx);
   TzBuf out;
   tz_buf_init(&out);
   format_value(&ctx, &out, type, value, 0);
   tz_out_write_utf16(out.data, out.length);
   tz_buf_free(&out);
+  tz_free((void *)ctx.circular);
 }

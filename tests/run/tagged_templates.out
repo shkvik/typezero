@@ -1,0 +1,14 @@
+[a]<5>[b]<10>[c] [plain] [] []<1>[]<2>[]
+[tab	here, line
+break, A, ${n}]
+[first
+second]
+select * from users where id = ? and name = ? -- 42, Ann
+<MID>
+(XY)
+(xy)
+3 5
+C:\dir\new\t5\u0041 a\`b \${n}
+11  1.5true
+C:\Users\${"Ann"}\docs 22
+[ 'one ', ' two' ] 5

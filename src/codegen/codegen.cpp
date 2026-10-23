@@ -61,6 +61,8 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
   typeDescTy_ = llvm::StructType::create(ctx, {i32, i32, ptr}, "tz.type");
   fnTy_ = llvm::StructType::create(ctx, {ptr, ptr}, "tz.fn");
   fnInfoTy_ = llvm::StructType::create(ctx, {ptr, strTy_}, "tz.fninfo");
+  fieldDescTy_ = llvm::StructType::create(ctx, {ptr, i32, i32, ptr}, "tz.field");
+  layoutDescTy_ = llvm::StructType::create(ctx, {ptr, ptr, i32}, "tz.layout");
 }
 
 std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
@@ -95,8 +97,11 @@ llvm::Type *CodeGen::lower(const Type *type) {
   case Type::Kind::String: return strTy_;
   case Type::Kind::Array: return builder_.getPtrTy();
   case Type::Kind::Optional:
+    if (type->inner()->isObject()) // null is undefined
+      return builder_.getPtrTy();
     return llvm::StructType::get(ctx_, {lower(type->inner()), builder_.getInt1Ty()});
   case Type::Kind::Function: return fnTy_;
+  case Type::Kind::Object: return builder_.getPtrTy();
   case Type::Kind::Error: break;
   }
   llvm_unreachable("an erroneous type reached code generation");
@@ -130,6 +135,7 @@ void CodeGen::declareRuntime() {
   rt_.printString = declare("tz_print_string", voidTy, {ptr, i64});
   rt_.printValue = declare("tz_print_value", voidTy, {ptr, ptr});
   rt_.panic = declare("tz_panic", voidTy, {ptr, i64});
+  rt_.debugger = declare("tz_debugger", voidTy, {});
   // Numbers (runtime/tzrt.c, number.c and math.c).
   rt_.toInt32 = declare("tz_to_int32", i32, {f64});
   rt_.mathRound = declare("tz_math_round", f64, {f64});
@@ -214,7 +220,9 @@ void CodeGen::declareRuntime() {
 // - tz.str.retain / tz.str.release: only heap strings, whose meta has the sign
 //   bit set, are counted;
 // - tz.arr.retain / tz.arr.release: every array is counted; null (the zero
-//   value of a slot) is skipped.
+//   value of a slot) is skipped. tz.arr.retain serves objects too, whose
+//   count is the first word as well (see codegen_object.cpp for releasing
+//   them).
 void CodeGen::defineRefCountHelpers() {
   for (bool isString : {true, false}) {
     llvm::Type *param = isString ? static_cast<llvm::Type *>(strTy_) : builder_.getPtrTy();
@@ -379,12 +387,13 @@ void CodeGen::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> 
       continue;
     }
     // The argument is `T | undefined`; undefined takes the default value.
+    const Type *passed = Type::optional(param.sym->type);
     llvm::BasicBlock *givenBlock = newBlock("param.given");
     llvm::BasicBlock *defaultBlock = newBlock("param.default");
     llvm::BasicBlock *doneBlock = newBlock("param.done");
-    builder_.CreateCondBr(builder_.CreateExtractValue(arg, 1), givenBlock, defaultBlock);
+    builder_.CreateCondBr(optionalHas(arg, passed), givenBlock, defaultBlock);
     switchTo(givenBlock);
-    llvm::Value *given = param.sym->type->isOptional() ? arg : builder_.CreateExtractValue(arg, 0);
+    llvm::Value *given = param.sym->type->isOptional() ? arg : optionalValue(arg, passed);
     builder_.CreateBr(doneBlock);
     switchTo(defaultBlock);
     llvm::Value *fallback = emitExpr(param.defaultValue);
@@ -587,10 +596,13 @@ void CodeGen::retainValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Function:
     builder_.CreateCall(objRetainFn_, {builder_.CreateExtractValue(value, 1)});
     break;
+  case Type::Kind::Object: // the count is the first word, as for arrays
+    builder_.CreateCall(arrRetainFn_, {value});
+    break;
   case Type::Kind::Optional:
     // Undefined holds the zero value, which needs no counting.
     if (type->inner()->isManaged())
-      retainValue(builder_.CreateExtractValue(value, 0), type->inner());
+      retainValue(optionalValue(value, type), type->inner());
     break;
   default:
     break;
@@ -610,9 +622,12 @@ void CodeGen::releaseValue(llvm::Value *value, const Type *type) {
   case Type::Kind::Function:
     builder_.CreateCall(objReleaseFn_, {builder_.CreateExtractValue(value, 1)});
     break;
+  case Type::Kind::Object:
+    builder_.CreateCall(objectLayout(type).release, {value});
+    break;
   case Type::Kind::Optional:
     if (type->inner()->isManaged())
-      releaseValue(builder_.CreateExtractValue(value, 0), type->inner());
+      releaseValue(optionalValue(value, type), type->inner());
     break;
   default:
     break;
@@ -624,6 +639,11 @@ void CodeGen::retainString(llvm::Value *str) { retainValue(str, Type::string());
 void CodeGen::releaseString(llvm::Value *str) { releaseValue(str, Type::string()); }
 
 llvm::Value *CodeGen::makeOptional(llvm::Value *value, llvm::Value *has, const Type *type) {
+  if (type->inner()->isObject()) {
+    if (auto *always = dyn_cast<llvm::ConstantInt>(has); always && always->isOne())
+      return value;
+    return builder_.CreateSelect(has, value, llvm::ConstantPointerNull::get(builder_.getPtrTy()));
+  }
   llvm::Value *result = llvm::UndefValue::get(lower(type));
   result = builder_.CreateInsertValue(result, value, 0);
   return builder_.CreateInsertValue(result, has, 1);
@@ -633,11 +653,45 @@ llvm::Value *CodeGen::undefinedValue(const Type *optionalType) {
   return llvm::Constant::getNullValue(lower(optionalType));
 }
 
+llvm::Value *CodeGen::optionalHas(llvm::Value *value, const Type *optionalType) {
+  if (optionalType->inner()->isObject())
+    return builder_.CreateIsNotNull(value);
+  return builder_.CreateExtractValue(value, 1);
+}
+
+llvm::Value *CodeGen::optionalValue(llvm::Value *value, const Type *optionalType) {
+  if (optionalType->inner()->isObject())
+    return value;
+  return builder_.CreateExtractValue(value, 0);
+}
+
 CodeGen::Operand CodeGen::emitOperand(Expr *expr, bool canBorrow) {
   if (canBorrow)
-    if (auto *name = dyn_cast<NameExpr>(expr); name && name->var)
-      return {emitVarValue(name->var, /*borrow=*/true), false, expr->type};
+    if (llvm::Value *value = emitBorrowed(expr))
+      return {value, false, expr->type};
   return {emitExpr(expr), true, expr->type};
+}
+
+// The variable keeps the objects on the way alive, and the caller made sure
+// that nothing assigns to them, or to the variable, while the value is used.
+llvm::Value *CodeGen::emitBorrowed(Expr *expr) {
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var)
+    return emitVarValue(name->var, /*borrow=*/true);
+  // A variable or a field narrowed to hold a value.
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
+                                             conv->operand->type->isOptional() &&
+                                             conv->type == conv->operand->type->inner()) {
+    llvm::Value *value = emitBorrowed(conv->operand);
+    return value ? optionalValue(value, conv->operand->type) : nullptr;
+  }
+  auto *member = dyn_cast<MemberExpr>(expr);
+  if (!member || !member->object->type->isObject())
+    return nullptr;
+  llvm::Value *object = emitBorrowed(member->object);
+  if (!object)
+    return nullptr;
+  return builder_.CreateLoad(lower(member->type), fieldAddress(object, member->object->type, member->name),
+                             member->name);
 }
 
 void CodeGen::dropOperand(const Operand &operand) {
@@ -698,6 +752,9 @@ void CodeGen::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Empty:
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
+    break;
+  case Stmt::Kind::Debugger:
+    builder_.CreateCall(rt_.debugger);
     break;
   }
 }
@@ -793,7 +850,7 @@ void CodeGen::emitSwitch(SwitchStmt *stmt) {
     llvm::Value *current = slot ? builder_.CreateLoad(lower(type), slot) : value;
     llvm::Value *equal;
     if (!c.compareType) // `case undefined:`
-      equal = type->isOptional()    ? builder_.CreateNot(builder_.CreateExtractValue(current, 1))
+      equal = type->isOptional()    ? builder_.CreateNot(optionalHas(current, type))
               : type->isUndefined() ? builder_.getTrue()
                                     : builder_.getFalse();
     else
@@ -1025,6 +1082,8 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     return emitTemplate(cast<TemplateExpr>(expr));
   case Expr::Kind::ArrayLit:
     return emitArrayLiteral(cast<ArrayLitExpr>(expr));
+  case Expr::Kind::ObjectLit:
+    return emitObjectLiteral(cast<ObjectLitExpr>(expr));
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
     if (name->func) // a top-level function as a value
@@ -1064,6 +1123,8 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
       return emitChainLink(c);
     if (c->type->isFunction() && c->operand->type->isFunction())
       return emitFunctionAdapter(c);
+    if (c->type->isBool() && !c->operand->type->isBool())
+      return emitTruthOf(c->operand);
     return emitConversion(emitExpr(c->operand), c->operand->type, c->type);
   }
   case Expr::Kind::Sequence: {
@@ -1105,12 +1166,13 @@ llvm::Value *CodeGen::emitOptionalChain(OptionalChainExpr *chain) {
 }
 
 llvm::Value *CodeGen::emitChainLink(CastExpr *link) {
+  const Type *type = link->operand->type;
   llvm::Value *value = emitExpr(link->operand);
   llvm::BasicBlock *valueBlock = newBlock("chain.link");
   // Undefined holds nothing to release.
-  builder_.CreateCondBr(builder_.CreateExtractValue(value, 1), valueBlock, chainEnds_.back());
+  builder_.CreateCondBr(optionalHas(value, type), valueBlock, chainEnds_.back());
   switchTo(valueBlock);
-  return builder_.CreateExtractValue(value, 0);
+  return optionalValue(value, type);
 }
 
 llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
@@ -1118,16 +1180,23 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
     return emitTypeOf(unary->operand);
   if (unary->op == UnaryOp::NonNull)
     return emitNonNull(unary);
+  if (unary->op == UnaryOp::Void) {
+    emitDiscarded(unary->operand);
+    return builder_.getFalse(); // undefined, as for the literal
+  }
   const Type *type = unary->operand->type;
-  if (unary->op == UnaryOp::Plus && type->isString()) { // `+s` is Number(s)
+  if ((unary->op == UnaryOp::Plus || unary->op == UnaryOp::Neg) && type->isString()) {
+    // `+s` is Number(s), and `-s` is -Number(s).
     Operand str = emitOperand(unary->operand, /*canBorrow=*/true);
     llvm::Value *number = emitStringToNumber(str.value);
     dropOperand(str);
-    return number;
+    return unary->op == UnaryOp::Neg ? builder_.CreateFNeg(number) : number;
   }
   llvm::Value *operand = emitExpr(unary->operand);
   switch (unary->op) {
   case UnaryOp::Neg:
+    if (type->isBool()) // `-true` is -1
+      return builder_.CreateFNeg(builder_.CreateUIToFP(operand, builder_.getDoubleTy()));
     return unary->type->isFloat() ? builder_.CreateFNeg(operand) : builder_.CreateNeg(operand);
   case UnaryOp::Plus:
     return type->isBool() ? builder_.CreateUIToFP(operand, builder_.getDoubleTy()) : operand;
@@ -1136,6 +1205,8 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
     return builder_.CreateNot(operand);
   case UnaryOp::TypeOf:
   case UnaryOp::NonNull:
+  case UnaryOp::Void:
+  case UnaryOp::Delete: // Sema rejects it for now
     break;
   }
   llvm_unreachable("unknown unary operator");
@@ -1143,17 +1214,18 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
 
 // `x!`: the program stops if x is undefined.
 llvm::Value *CodeGen::emitNonNull(UnaryExpr *unary) {
+  const Type *type = unary->operand->type;
   llvm::Value *value = emitExpr(unary->operand);
-  if (!unary->operand->type->isOptional())
+  if (!type->isOptional())
     return value;
   llvm::BasicBlock *panicBlock = newBlock("nonnull.undefined");
   llvm::BasicBlock *okBlock = newBlock("nonnull.ok");
-  builder_.CreateCondBr(builder_.CreateNot(builder_.CreateExtractValue(value, 1)), panicBlock, okBlock,
+  builder_.CreateCondBr(builder_.CreateNot(optionalHas(value, type)), panicBlock, okBlock,
                         llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
   switchTo(panicBlock);
   emitPanic("TypeError: the value asserted with '!' is undefined");
   switchTo(okBlock);
-  return builder_.CreateExtractValue(value, 0);
+  return optionalValue(value, type);
 }
 
 static std::u16string ascii16(llvm::StringRef text) { return std::u16string(text.begin(), text.end()); }
@@ -1163,7 +1235,7 @@ llvm::Value *CodeGen::emitTypeOf(Expr *operand) {
   const Type *type = operand->type;
   if (type->isOptional()) {
     Operand value = emitOperand(operand, /*canBorrow=*/true);
-    llvm::Value *has = builder_.CreateExtractValue(value.value, 1);
+    llvm::Value *has = optionalHas(value.value, type);
     dropOperand(value);
     return builder_.CreateSelect(has, stringLiteral(ascii16(typeOfName(type->inner()))),
                                  stringLiteral(u"undefined"));
@@ -1217,33 +1289,93 @@ llvm::Value *CodeGen::emitBinary(BinaryExpr *bin) {
   case BinaryOp::Gt:
   case BinaryOp::Ge:
     return emitComparison(bin->op, lhs, rhs, bin->lhs->type);
+  case BinaryOp::UShr:
+    // An int's `x >>> n` that Sema made a long: the unsigned 32-bit result.
+    if (bin->type != bin->lhs->type)
+      return builder_.CreateZExt(emitArithmetic(bin->op, lhs, rhs, bin->lhs->type), lower(bin->type));
+    return emitArithmetic(bin->op, lhs, rhs, bin->type);
   default:
     return emitArithmetic(bin->op, lhs, rhs, bin->type);
   }
 }
 
-// `&&` and `||` evaluate their right side only when needed.
+// `&&` and `||` evaluate their right side only when needed. When the left
+// side decides, it is the result (Sema converted the right side to the type
+// of the whole).
 llvm::Value *CodeGen::emitLogical(BinaryExpr *bin) {
   bool isAnd = bin->op == BinaryOp::LogAnd;
+  const Type *lhsType = bin->lhs->type;
   llvm::Value *lhs = emitExpr(bin->lhs);
+  llvm::Value *truth = emitTruth(lhs, lhsType);
+  llvm::Value *decided = decidedValue(bin, lhs); // used only when it decides
   llvm::BasicBlock *lhsEnd = builder_.GetInsertBlock();
   llvm::BasicBlock *rhsBlock = newBlock(isAnd ? "and.rhs" : "or.rhs");
   llvm::BasicBlock *endBlock = newBlock(isAnd ? "and.end" : "or.end");
   if (isAnd)
-    builder_.CreateCondBr(lhs, rhsBlock, endBlock);
+    builder_.CreateCondBr(truth, rhsBlock, endBlock);
   else
-    builder_.CreateCondBr(lhs, endBlock, rhsBlock);
+    builder_.CreateCondBr(truth, endBlock, rhsBlock);
 
   switchTo(rhsBlock);
+  releaseValue(lhs, lhsType); // the right side gives the result
   llvm::Value *rhs = emitExpr(bin->rhs);
   llvm::BasicBlock *rhsEnd = builder_.GetInsertBlock();
   builder_.CreateBr(endBlock);
 
   switchTo(endBlock);
-  llvm::PHINode *phi = builder_.CreatePHI(builder_.getInt1Ty(), 2);
-  phi->addIncoming(builder_.getInt1(!isAnd), lhsEnd);
+  llvm::PHINode *phi = builder_.CreatePHI(lower(bin->type), 2);
+  phi->addIncoming(decided, lhsEnd);
   phi->addIncoming(rhs, rhsEnd);
   return phi;
+}
+
+llvm::Value *CodeGen::decidedValue(BinaryExpr *bin, llvm::Value *lhs) {
+  bool isAnd = bin->op == BinaryOp::LogAnd;
+  const Type *from = bin->lhs->type, *to = bin->type;
+  if (from->isBool() && to->isBool())
+    return builder_.getInt1(!isAnd);
+  const Type *base = from->nonOptional();
+  // A falsy array, function or object is undefined, which holds nothing to
+  // release.
+  if (isAnd && (base->isArray() || base->isFunction() || base->isObject()))
+    return undefinedValue(to);
+  if (from == to)
+    return lhs;
+  // A truthy `T | undefined` holds a value; the other side may be undefined.
+  if (from->isOptional())
+    return optionalValue(lhs, from);
+  return makeOptional(lhs, builder_.getTrue(), to);
+}
+
+llvm::Value *CodeGen::emitTruth(llvm::Value *value, const Type *type) {
+  switch (type->kind()) {
+  case Type::Kind::Bool:
+    return value;
+  case Type::Kind::String:
+    return builder_.CreateICmpNE(stringLength(value), builder_.getInt64(0));
+  case Type::Kind::Optional: {
+    llvm::Value *has = optionalHas(value, type);
+    const Type *inner = type->inner();
+    if (!inner->isBool() && !inner->isString())
+      return has; // an array, a function or an object is always truthy
+    return builder_.CreateAnd(has, emitTruth(optionalValue(value, type), inner));
+  }
+  default:
+    llvm_unreachable("Sema rejects testing other types");
+  }
+}
+
+llvm::Value *CodeGen::emitTruthOf(Expr *expr) {
+  // A narrowed variable holds a value: its own truth is the same, and it can
+  // be borrowed.
+  if (auto *conv = dyn_cast<CastExpr>(expr);
+      conv && conv->isImplicit() && !conv->shortCircuit && isa<NameExpr>(conv->operand) &&
+      conv->operand->type->isOptional() && conv->type == conv->operand->type->inner())
+    expr = conv->operand;
+  Operand value = emitOperand(expr, /*canBorrow=*/true);
+  llvm::Value *truth = emitTruth(value.value, value.type);
+  dropOperand(value);
+  return truth;
 }
 
 llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
@@ -1268,6 +1400,7 @@ llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type
     return builder_.CreateICmpNE(builder_.CreateCall(rt_.strEqual, args), builder_.getInt32(0));
   }
   case Type::Kind::Array: // the same array
+  case Type::Kind::Object: // the same object
   case Type::Kind::Bool:
     return builder_.CreateICmpEQ(a, b);
   case Type::Kind::Function: // the same function with the same environment
@@ -1275,6 +1408,8 @@ llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type
         builder_.CreateICmpEQ(builder_.CreateExtractValue(a, 0), builder_.CreateExtractValue(b, 0)),
         builder_.CreateICmpEQ(builder_.CreateExtractValue(a, 1), builder_.CreateExtractValue(b, 1)));
   case Type::Kind::Optional: {
+    if (type->inner()->isObject()) // both null, or the same object
+      return builder_.CreateICmpEQ(a, b);
     llvm::Value *hasA = builder_.CreateExtractValue(a, 1), *hasB = builder_.CreateExtractValue(b, 1);
     llvm::Value *values = emitValuesEqual(builder_.CreateExtractValue(a, 0),
                                           builder_.CreateExtractValue(b, 0), type->inner());
@@ -1289,18 +1424,25 @@ llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type
   }
 }
 
-// `===` and `!==`. Sema converted both sides to one type, unless one of them
+// `==` and `!=`. Sema converted both sides to one type, unless one of them
 // is `undefined`.
 llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
   bool isEq = bin->op == BinaryOp::Eq;
   Expr *lhs = bin->lhs, *rhs = bin->rhs;
   if (lhs->type->isUndefined() || rhs->type->isUndefined()) {
+    // A side that is always undefined, such as `void f()`, still runs, in
+    // its turn.
+    if (lhs->type->isUndefined())
+      emitDiscarded(lhs);
     Expr *other = lhs->type->isUndefined() ? rhs : lhs;
-    if (other->type->isUndefined())
+    if (other->type->isUndefined()) {
+      emitDiscarded(rhs);
       return builder_.getInt1(isEq);
-    Operand value = emitOperand(other, /*canBorrow=*/true);
-    llvm::Value *has = other->type->isOptional() ? builder_.CreateExtractValue(value.value, 1)
-                                                 : builder_.getTrue();
+    }
+    Operand value = emitOperand(other, /*canBorrow=*/other == rhs || cannotAssign(rhs));
+    if (rhs->type->isUndefined())
+      emitDiscarded(rhs);
+    llvm::Value *has = other->type->isOptional() ? optionalHas(value.value, other->type) : builder_.getTrue();
     dropOperand(value);
     return isEq ? builder_.CreateNot(has) : has;
   }
@@ -1318,8 +1460,10 @@ llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
 // `a ?? b`: b is evaluated only when a is undefined.
 llvm::Value *CodeGen::emitNullish(BinaryExpr *bin) {
   const Type *lhsType = bin->lhs->type;
-  if (lhsType->isUndefined())
+  if (lhsType->isUndefined()) {
+    emitDiscarded(bin->lhs); // `void f() ?? x` still runs f
     return emitExpr(bin->rhs);
+  }
   if (!lhsType->isOptional()) // never undefined
     return emitExpr(bin->lhs);
 
@@ -1327,10 +1471,10 @@ llvm::Value *CodeGen::emitNullish(BinaryExpr *bin) {
   llvm::BasicBlock *valueBlock = newBlock("nullish.value");
   llvm::BasicBlock *defaultBlock = newBlock("nullish.default");
   llvm::BasicBlock *endBlock = newBlock("nullish.end");
-  builder_.CreateCondBr(builder_.CreateExtractValue(lhs, 1), valueBlock, defaultBlock);
+  builder_.CreateCondBr(optionalHas(lhs, lhsType), valueBlock, defaultBlock);
 
   switchTo(valueBlock);
-  llvm::Value *value = bin->type->isOptional() ? lhs : builder_.CreateExtractValue(lhs, 0);
+  llvm::Value *value = bin->type->isOptional() ? lhs : optionalValue(lhs, lhsType);
   llvm::BasicBlock *valueEnd = builder_.GetInsertBlock();
   builder_.CreateBr(endBlock);
 
@@ -1357,6 +1501,13 @@ llvm::Value *CodeGen::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value 
     llvm::Value *result =
         emitArithmetic(op, builder_.CreateCall(rt_.toInt32, {lhs}), rhs, Type::intTy());
     return builder_.CreateSIToFP(result, lhs->getType());
+  }
+  if (bitwise && lhs->getType() != rhs->getType()) {
+    // `x |= v` where x is a long and v an int: on 32-bit integers too (Sema
+    // left v an int), and the result goes back as a long.
+    llvm::Value *result =
+        emitArithmetic(op, builder_.CreateTrunc(lhs, rhs->getType()), rhs, Type::intTy());
+    return builder_.CreateSExt(result, lhs->getType());
   }
   switch (op) {
   // Integer arithmetic wraps around on overflow, as in Go.
@@ -1414,7 +1565,7 @@ llvm::Value *CodeGen::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::Value 
     case BinaryOp::Gt: return builder_.CreateFCmpOGT(lhs, rhs);
     case BinaryOp::Ge: return builder_.CreateFCmpOGE(lhs, rhs);
     case BinaryOp::Eq: return builder_.CreateFCmpOEQ(lhs, rhs);
-    case BinaryOp::Ne: return builder_.CreateFCmpUNE(lhs, rhs); // NaN !== NaN
+    case BinaryOp::Ne: return builder_.CreateFCmpUNE(lhs, rhs); // NaN != NaN
     default: break;
     }
   } else {
@@ -1469,8 +1620,9 @@ llvm::Value *CodeGen::emitAssign(AssignExpr *assign, bool needResult) {
     return emitNullishAssign(assign, needResult);
   if (isa<IndexExpr>(assign->target))
     return emitElementAssign(assign, needResult);
-  if (isa<MemberExpr>(assign->target))
-    return emitLengthAssign(assign, needResult);
+  if (auto *member = dyn_cast<MemberExpr>(assign->target))
+    return member->object->type->isObject() ? emitFieldAssign(assign, needResult)
+                                            : emitLengthAssign(assign, needResult);
 
   const VarSymbol *var = cast<NameExpr>(assign->target)->var;
   llvm::Value *address = addressOf(var);
@@ -1510,14 +1662,14 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
   llvm::BasicBlock *keepBlock = newBlock("nullish.keep");
   llvm::BasicBlock *assignBlock = newBlock("nullish.assign");
   llvm::BasicBlock *endBlock = newBlock("nullish.end");
-  builder_.CreateCondBr(builder_.CreateExtractValue(old, 1), keepBlock, assignBlock);
+  builder_.CreateCondBr(optionalHas(old, varType), keepBlock, assignBlock);
 
   const Type *resultType = assign->type;
   switchTo(keepBlock);
   llvm::Value *kept = nullptr;
   if (needResult) {
     retainValue(old, varType);
-    kept = resultType->isOptional() ? old : builder_.CreateExtractValue(old, 0);
+    kept = resultType->isOptional() ? old : optionalValue(old, varType);
   }
   llvm::BasicBlock *keepEnd = builder_.GetInsertBlock();
   builder_.CreateBr(endBlock);
@@ -1530,7 +1682,7 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
   llvm::Value *assigned = nullptr;
   if (needResult) {
     retainValue(stored, varType);
-    assigned = resultType->isOptional() ? stored : builder_.CreateExtractValue(stored, 0);
+    assigned = resultType->isOptional() ? stored : optionalValue(stored, varType);
   }
   llvm::BasicBlock *assignEnd = builder_.GetInsertBlock();
   builder_.CreateBr(endBlock);
@@ -1546,12 +1698,16 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
 
 llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
   llvm::Value *address;
-  Operand array{nullptr, false, nullptr};
+  Operand holder{nullptr, false, nullptr};
   if (auto *index = dyn_cast<IndexExpr>(update->target)) {
     // `a[i]++`: Sema proved the index in range.
-    array = emitOperand(index->object, cannotAssign(index->index));
+    holder = emitOperand(index->object, cannotAssign(index->index));
     llvm::Value *position = emitExpr(index->index);
-    address = elementAddress(arrayData(array.value), update->type, position);
+    address = elementAddress(arrayData(holder.value), update->type, position);
+  } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
+    // `o.count++`: the object holds the number.
+    holder = emitOperand(member->object, /*canBorrow=*/true);
+    address = fieldAddress(holder.value, member->object->type, member->name);
   } else {
     address = addressOf(cast<NameExpr>(update->target)->var);
   }
@@ -1566,8 +1722,8 @@ llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
     updated = update->increment ? builder_.CreateAdd(old, one) : builder_.CreateSub(old, one);
   }
   builder_.CreateStore(updated, address);
-  if (array.value)
-    dropOperand(array);
+  if (holder.value)
+    dropOperand(holder);
   return update->prefix ? updated : old;
 }
 
@@ -1646,9 +1802,10 @@ void CodeGen::emitConsoleLog(CallExpr *call) {
     laterCannotAssign[i - 2] = laterCannotAssign[i - 1] && cannotAssign(call->args[i - 1]);
   std::vector<Operand> values;
   for (size_t i = 0; i < count; ++i) {
-    if (call->args[i]->type->isUndefined())
+    if (call->args[i]->type->isUndefined()) {
+      emitDiscarded(call->args[i]); // `void f()` still runs f
       values.push_back({nullptr, false, call->args[i]->type});
-    else
+    } else
       values.push_back(emitOperand(call->args[i], laterCannotAssign[i]));
   }
 
@@ -1681,6 +1838,7 @@ void CodeGen::emitConsoleLog(CallExpr *call) {
     case Type::Kind::Array:
     case Type::Kind::Optional:
     case Type::Kind::Function:
+    case Type::Kind::Object:
       builder_.CreateCall(rt_.printValue, {typeDescriptor(type), spill(value.value, "print.value")});
       break;
     default:
@@ -1740,13 +1898,15 @@ llvm::Value *CodeGen::emitConversion(llvm::Value *value, const Type *from, const
   if (to->isOptional()) {
     if (from->isUndefined())
       return undefinedValue(to);
-    if (from->isOptional()) // only numeric widening, which keeps zero zero
-      return makeOptional(emitConversion(builder_.CreateExtractValue(value, 0), from->inner(), to->inner()),
-                          builder_.CreateExtractValue(value, 1), to);
+    if (from->isOptional()) // numeric widening, which keeps zero zero, or an object
+      return makeOptional(emitConversion(optionalValue(value, from), from->inner(), to->inner()),
+                          optionalHas(value, from), to);
     return makeOptional(emitConversion(value, from, to->inner()), builder_.getTrue(), to);
   }
   if (from->isOptional()) // narrowed: known to hold a value
-    return emitConversion(builder_.CreateExtractValue(value, 0), from->inner(), to);
+    return emitConversion(optionalValue(value, from), from->inner(), to);
+  if (from->isObject()) // seen through a type with read-only fields
+    return value;
 
   llvm::Type *target = lower(to);
   if (from->isInteger() && to->isInteger())
@@ -1788,6 +1948,9 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   case Expr::Kind::ArrayLit:
     return llvm::all_of(cast<ArrayLitExpr>(expr)->elements,
                         [](const ArrayLitExpr::Element &e) { return cannotAssign(e.expr); });
+  case Expr::Kind::ObjectLit:
+    return llvm::all_of(cast<ObjectLitExpr>(expr)->props,
+                        [](const ObjectLitExpr::Property &p) { return cannotAssign(p.value); });
   case Expr::Kind::Member:
     return cannotAssign(cast<MemberExpr>(expr)->object);
   case Expr::Kind::Index: {
@@ -1814,10 +1977,12 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   case Expr::Kind::New:
     return llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
   case Expr::Kind::Call: {
-    // A user function may assign to globals; built-ins only evaluate their
-    // operands (array methods change arrays, not variables).
+    // A user function may assign to globals and fields, and so may the
+    // callback of a built-in; other built-ins only evaluate their operands
+    // (array methods change arrays, not variables).
     auto *call = cast<CallExpr>(expr);
-    if (call->builtin == Builtin::None)
+    if (call->builtin == Builtin::None ||
+        (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith))
       return false;
     if (!llvm::all_of(call->args, cannotAssign))
       return false;
@@ -1944,7 +2109,9 @@ llvm::Value *CodeGen::emitStringComparison(BinaryExpr *bin) {
 }
 
 llvm::Value *CodeGen::emitMember(MemberExpr *member) {
-  // Sema allows only `.length` of a string or an array.
+  if (member->object->type->isObject())
+    return emitFieldRead(member);
+  // Otherwise Sema allows only `.length` of a string or an array.
   Operand object = emitOperand(member->object, /*canBorrow=*/true);
   llvm::Value *length = object.type->isArray() ? arrayLength(object.value) : stringLength(object.value);
   dropOperand(object);

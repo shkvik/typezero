@@ -29,12 +29,12 @@ function paint(c: Color): string {
     case Color.Blue:
       return "blue"
     default:
-      return "color " + c
+      return `color ${c}`
   }
 }
 console.log(paint(Color.Red), paint(Color.Green), paint(Color.Blue))
 let d: Direction = Direction.Up
-if (d === Direction.Up) d = Direction.Down
+if (d == Direction.Up) d = Direction.Down
 console.log(d)
 
 // A numeric enum maps values back to names.

@@ -1,0 +1,33 @@
+0 has ann 3
+false yes true
+1 empty or missing
+true no false
+2 has bob 3
+false yes true
+3 empty or missing
+true no false
+[] true
+HEY (nothing) (nothing)
+-1 no list
+undefined [ 9 ]
+0 list of 0
+0 []
+5 list of 3
+3 [ 0, 2, 4 ]
+no task ran
+true false true true
+false true true false
+undefined true true undefined
+ann ann! ann
+anon  undefined
+bob bob! bob
+anon undefined undefined
+right left  right
+long first
+some name
+set
+SET
+filled.
+a c 3
+x undefined
+[ 'a', 'b' ] false true
