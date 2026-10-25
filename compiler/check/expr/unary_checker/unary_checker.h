@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Unary operators, delete and in.
 class UnaryChecker {
 public:
-  explicit UnaryChecker(Sema &sema);
+  explicit UnaryChecker(Checker &checker);
 
   Expr *checkUnary(UnaryExpr *unary, const Type *expected, bool wraps);
   // `delete x[i]` and `key in x`: errors but for dictionaries (see sema.cpp).
@@ -15,7 +15,7 @@ public:
   Expr *checkIn(BinaryExpr *bin);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

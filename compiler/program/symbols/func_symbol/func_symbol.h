@@ -35,10 +35,10 @@ struct FuncSymbol {
   // `function (this: unknown, ...)`: the first parameter is the `this` the
   // function gets (see Type::hasThis).
   bool hasThis = false;
-  // Without an annotation, null until Sema infers it from the body (see
-  // Sema::returnType).
+  // Without an annotation, null until Checker infers it from the body (see
+  // Checker::returnType).
   const Type *ret = nullptr;
-  // Set while Sema infers the return type: a call now is recursion, and
+  // Set while Checker infers the return type: a call now is recursion, and
   // returns `assumed`, the type found so far (null at first).
   bool inferring = false;
   const Type *assumed = nullptr;
@@ -47,11 +47,11 @@ struct FuncSymbol {
   // body returns is dropped.
   bool discardsResult = false;
   // Some parameter has its type from a default value that is not a literal,
-  // found when first needed (Sema::resolveParams).
+  // found when first needed (Checker::resolveParams).
   bool pendingParams = false;
   // A generic function: its type parameters, which its parameter and return
   // types mention. A call gives them types and calls a copy of the function
-  // made for those (see Sema::checkGenericCall).
+  // made for those (see Checker::checkGenericCall).
   std::vector<const Type *> typeParams;
   std::vector<const Type *> typeDefaults; // `<T = int>`; null without one
   bool isGeneric() const { return !typeParams.empty(); }

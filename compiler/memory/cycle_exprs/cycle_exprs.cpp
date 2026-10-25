@@ -1,6 +1,6 @@
-#include "compiler/lower/memory/cycle_exprs/cycle_exprs.h"
-#include "compiler/lower/memory/cycle_escapes/cycle_escapes.h"
-
+#include "compiler/memory/cycle_exprs/cycle_exprs.h"
+#include "compiler/memory/cycle_escapes/cycle_escapes.h"
+#include "llvm/Support/ConvertUTF.h"
 
 namespace tz {
 
@@ -240,14 +240,16 @@ bool CycleExprs::constructionWrite(const AssignExpr *assign) {
   auto [it, inserted] = scanner_.safeWrites_.try_emplace(fn);
   if (inserted) {
     const ClassDecl *cls = fn->cls;
-    bool initEscapes =
-        cls->init && cls->init->thisVar && CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar);
+    bool initEscapes = cls->init && cls->init->thisVar &&
+                       CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar);
     // Before a constructor's body: the initializers, which run first in a
     // class that extends none; in one that does, `super()` runs the class
     // extended and then them.
-    bool escaped = fn == cls->init ? cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)
-                                   : !cls->parent && initEscapes;
-    bool afterSuper = (cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)) || initEscapes;
+    bool escaped = fn == cls->init
+                       ? cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)
+                       : !cls->parent && initEscapes;
+    bool afterSuper =
+        (cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)) || initEscapes;
     CycleEscapes::ordered(fn->body, fn->thisVar, escaped, afterSuper, it->second);
   }
 

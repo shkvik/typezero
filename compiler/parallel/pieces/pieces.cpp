@@ -1,14 +1,15 @@
 #include "compiler/parallel/pieces/pieces.h"
-#include "compiler/parallel/code_walk/code_walk.h"
-#include "compiler/parallel/expr_walk/expr_walk.h"
-#include "compiler/parallel/call_walk/call_walk.h"
-#include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
+#include "compiler/parallel/call_walk/call_walk.h"
+#include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
 #include "compiler/parallel/explainer/explainer.h"
+#include "compiler/parallel/expr_walk/expr_walk.h"
+#include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +25,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -45,7 +45,7 @@ bool Pieces::scheduled(const Activation &act, unsigned seg) const {
 }
 
 unsigned Pieces::activate(unsigned fn, int root, std::optional<Ref> self, bool callbackStart,
-                            bool rootStart) {
+                          bool rootStart) {
   auto key = std::make_tuple(fn, root, self, callbackStart);
   auto [it, inserted] = analysis_.actIndex_.try_emplace(key, unsigned(analysis_.acts_.size()));
   if (inserted) {
@@ -62,7 +62,7 @@ unsigned Pieces::activate(unsigned fn, int root, std::optional<Ref> self, bool c
 }
 
 int Pieces::newRoot(int parent, unsigned fn, std::optional<Ref> self, unsigned callerFn,
-                      unsigned rec, Mode mode) {
+                    unsigned rec, Mode mode) {
   // A task that starts itself again down its chain is that task again:
   // several of it may run at once.
   for (int p = parent; p >= 0; p = analysis_.roots_[p].parent) {
@@ -152,7 +152,8 @@ void Pieces::findPieces() {
         continue;
       }
       auto key = std::make_tuple(act.fn, s, act.root, act.self);
-      auto [it, inserted] = analysis_.pieceIndex_.try_emplace(key, unsigned(analysis_.pieces_.size()));
+      auto [it, inserted] =
+          analysis_.pieceIndex_.try_emplace(key, unsigned(analysis_.pieces_.size()));
       if (inserted) {
         analysis_.pieces_.push_back({act.fn, s, act.root, act.self});
         analysis_.segPieces_[{act.fn, s}].push_back(it->second);
@@ -179,8 +180,7 @@ void Pieces::findHosts() {
   }
 }
 
-std::vector<unsigned> Pieces::piecesAt(const Activation &act,
-                                         llvm::ArrayRef<unsigned> segs) const {
+std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<unsigned> segs) const {
   std::vector<unsigned> out;
   const FnInfo &f = analysis_.fns_[act.fn];
   for (unsigned s : segs) {
@@ -282,8 +282,8 @@ bool Pieces::fnRejectionEnds(unsigned fi, unsigned depth) {
         break;
       case Mode::Spawn:
         // `void f()`: an error nobody handles ends the program.
-        ends = rec.voided ||
-               (rec.join && !analysis_.joins_.lookup(rec.join).settled && rejectionEnds(rec.join, depth + 1));
+        ends = rec.voided || (rec.join && !analysis_.joins_.lookup(rec.join).settled &&
+                              rejectionEnds(rec.join, depth + 1));
         break;
       case Mode::Callback:
         ends = !rec.handled;

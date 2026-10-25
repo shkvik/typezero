@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Async functions as state machines, and await.
 class AsyncLowerer {
 public:
-  explicit AsyncLowerer(CodeGen &codegen);
+  explicit AsyncLowerer(Lowering &lowering);
 
   llvm::FunctionCallee asyncFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
@@ -34,9 +34,9 @@ public:
   llvm::Value *emitAwait(AwaitExpr *await);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Function *asyncResumeFn_ = nullptr;
-  const AwaitExpr *awaiting_ = nullptr;            // the await being emitted
+  const AwaitExpr *awaiting_ = nullptr; // the await being emitted
 };
 
 } // namespace tz

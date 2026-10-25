@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
@@ -8,7 +8,7 @@ namespace tz {
 // methods of timers.
 class TimerChecker {
 public:
-  explicit TimerChecker(Sema &sema);
+  explicit TimerChecker(Checker &checker);
 
   Expr *checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                 const Type *expected = nullptr);
@@ -27,7 +27,7 @@ public:
   Expr *checkTimerMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

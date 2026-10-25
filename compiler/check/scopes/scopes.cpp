@@ -9,62 +9,63 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-Scopes::Scopes(Sema &sema) : sema_(sema) {}
+Scopes::Scopes(Checker &checker) : checker_(checker) {}
 
-void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, Sema::ScopeEntry entry) {
+void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, Checker::ScopeEntry entry) {
   if (name == "undefined") {
-    sema_.diags_.error(loc, "'undefined' cannot be used as a name");
+    checker_.diags_.error(loc, "'undefined' cannot be used as a name");
     return;
   }
-  auto [it, inserted] = sema_.scopes_.back().try_emplace(name, entry);
+  auto [it, inserted] = checker_.scopes_.back().try_emplace(name, entry);
   if (inserted) {
     return;
   }
-  const Sema::ScopeEntry &previous = it->second;
+  const Checker::ScopeEntry &previous = it->second;
   // Two functions with one name are not overloads: plain functions have none
   // (docs/overloads.md).
-  sema_.diags_.error(loc,
-               "duplicate declaration of '" + name + "'" +
-                   (entry.func && previous.func
-                        ? "; plain functions are not overloaded: give each variant its own name"
-                        : ""));
-  sema_.diags_.note(previous.var        ? previous.var->loc
-              : previous.func     ? previous.func->loc
-              : previous.enumDecl ? previous.enumDecl->loc()
-                                  : previous.cls->loc(),
-              "previously declared here");
+  checker_.diags_.error(
+      loc, "duplicate declaration of '" + name + "'" +
+               (entry.func && previous.func
+                    ? "; plain functions are not overloaded: give each variant its own name"
+                    : ""));
+  checker_.diags_.note(previous.var        ? previous.var->loc
+                       : previous.func     ? previous.func->loc
+                       : previous.enumDecl ? previous.enumDecl->loc()
+                                           : previous.cls->loc(),
+                       "previously declared here");
 }
 
-Sema::ScopeEntry Scopes::lookup(llvm::StringRef name) const {
-  for (auto scope = sema_.scopes_.rbegin(); scope != sema_.scopes_.rend(); ++scope) {
+Checker::ScopeEntry Scopes::lookup(llvm::StringRef name) const {
+  for (auto scope = checker_.scopes_.rbegin(); scope != checker_.scopes_.rend(); ++scope) {
     auto found = scope->find(name);
     if (found != scope->end()) {
       return found->second;
     }
   }
   // Error and its kinds, which the program's own names hide.
-  if (ClassDecl *kind = sema_.throwChecker().errorKindClass(name)) {
+  if (ClassDecl *kind = checker_.throwChecker().errorKindClass(name)) {
     return {nullptr, nullptr, nullptr, kind};
   }
 
   return {};
 }
 
-VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type, bool isConst) {
-  VarSymbol *var = sema_.ctx_.newVar();
+VarSymbol *Scopes::declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type,
+                              bool isConst) {
+  VarSymbol *var = checker_.ctx_.newVar();
   var->name = name;
   var->loc = loc;
   var->type = type;
   var->isConst = isConst;
-  var->isGlobal = sema_.scopes_.size() == 1;
-  var->usedInFunction = var->isGlobal && sema_.namesInFunctions_.contains(name);
-  var->owner = var->isGlobal ? nullptr : sema_.currentDecl();
-  var->declSeq = ++sema_.seq_;
+  var->isGlobal = checker_.scopes_.size() == 1;
+  var->usedInFunction = var->isGlobal && checker_.namesInFunctions_.contains(name);
+  var->owner = var->isGlobal ? nullptr : checker_.currentDecl();
+  var->declSeq = ++checker_.seq_;
   declare(name, loc, {var, nullptr});
 
   return var;
@@ -79,7 +80,7 @@ const Type *Scopes::varType(VarSymbol *var) {
   if (!fn || !fn->sym) {
     return Type::error();
   }
-  const Type *type = sema_.returnInferrer().functionType(fn->sym);
+  const Type *type = checker_.returnInferrer().functionType(fn->sym);
   if (var->function && fn->sym->ret) {
     var->type = type;
   }
@@ -88,10 +89,11 @@ const Type *Scopes::varType(VarSymbol *var) {
 }
 
 void Scopes::checkVisible(NameExpr *name, const VarSymbol *var) {
-  if (sema_.otherCaseVars_.contains(var)) {
-    sema_.diags_.error(name->loc(), "'" + name->name +
-                                  "' is declared in an earlier case of the 'switch'; declare it "
-                                  "before the 'switch' to use it in several cases");
+  if (checker_.otherCaseVars_.contains(var)) {
+    checker_.diags_.error(name->loc(),
+                          "'" + name->name +
+                              "' is declared in an earlier case of the 'switch'; declare it "
+                              "before the 'switch' to use it in several cases");
   }
 }
 

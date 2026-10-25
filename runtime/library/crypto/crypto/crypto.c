@@ -3,6 +3,16 @@
 // numbers of the system, timingSafeEqual and secret keys.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/json/json/json.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,7 +188,7 @@ static const TzLayout hmac_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Hmac");
 const TzLayout tz_crypto_sign_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Sign");
 const TzLayout tz_crypto_verify_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Verify");
 
-// The objects of node:crypto, which the program frees as any object (CodeGen names this drop
+// The objects of node:crypto, which the program frees as any object (Lowering names this drop
 // for all their types): each by its own layout.
 void tz_crypto_drop(void *object) { ((TzInstance *)object)->layout->drop(object); }
 

@@ -9,7 +9,7 @@ class FsFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "fs"; }
 
-  void declare(Sema &sema) const override;
+  void declare(Checker &checker) const override;
 };
 
 } // namespace tz

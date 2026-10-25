@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The checks of the debug mode of memory.
 class MemoryDebug {
 public:
-  explicit MemoryDebug(CodeGen &codegen);
+  explicit MemoryDebug(Lowering &lowering);
 
   // In the drop of an object of `type`, the value of its field `name`, which
   // goes now: an owned object (layer 2) must have no other reference.
@@ -21,7 +21,7 @@ public:
                                 llvm::StringRef name);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

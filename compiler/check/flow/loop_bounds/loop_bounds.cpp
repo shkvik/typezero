@@ -1,13 +1,13 @@
 #include "compiler/check/flow/loop_bounds/loop_bounds.h"
-#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -49,7 +49,7 @@ varPlus(const Expr *expr, const VarSymbol *var,
   return static_cast<int64_t>(lit->value);
 }
 
-LoopBounds::LoopBounds(Sema &sema) : sema_(sema) {}
+LoopBounds::LoopBounds(Checker &checker) : checker_(checker) {}
 
 std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const Expr *expr) const {
   if (auto *lit = dyn_cast<IntLitExpr>(expr)) {
@@ -68,7 +68,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::pair{v, v};
   }
   if (auto *name = dyn_cast<NameExpr>(expr)) {
-    const VarSymbol *var = sema_.scopes().lookup(name->name).var;
+    const VarSymbol *var = checker_.scopes().lookup(name->name).var;
     if (var && var->type->isInt()) {
       return std::pair{kIntMin, kIntMax};
     }
@@ -76,7 +76,7 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? sema_.scopes().lookup(name->name).var : nullptr;
+    const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
     // The bytes of binary data, which no buffer has more of than a length.
     if (member->name == "byteLength" && var && var->type->isBytes()) {
       return std::pair{int64_t(0), kMaxLength};
@@ -113,30 +113,32 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
 // Whether `expr` stays <= limit (or >= limit) while the loop runs: by its
 // form, or as an int variable the loop does not change, from the facts known
 // on entry.
-bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit, const Sema::LoopScan &scan) const {
+bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit,
+                              const Checker::LoopScan &scan) const {
   if (std::optional<std::pair<int64_t, int64_t>> range = syntacticIntRange(expr)) {
     if (range->second <= limit) {
       return true;
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? sema_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         sema_.flow_.facts.proves(Term::of(var), Term::zero(), limit + 1);
+         checker_.flow_.facts.proves(Term::of(var), Term::zero(), limit + 1);
 }
 
-bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const Sema::LoopScan &scan) const {
+bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
+                              const Checker::LoopScan &scan) const {
   if (std::optional<std::pair<int64_t, int64_t>> range = syntacticIntRange(expr)) {
     if (range->first >= limit) {
       return true;
     }
   }
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? sema_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
 
   return var && var->type->isInt() && !scan.changes.count(name->name) &&
-         sema_.flow_.facts.proves(Term::zero(), Term::of(var), 1 - limit);
+         checker_.flow_.facts.proves(Term::zero(), Term::of(var), 1 - limit);
 }
 
 // Whether an `&&`-joined part of `cond` keeps `var + k` low enough while the
@@ -148,7 +150,8 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit, const Sema::LoopS
 // step, which stays <= INT_MAX - k when E <= INT_MAX + 1 - step. With `<=`
 // the bound is one lower.
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
-                                             const Sema::LoopScan &scan, int64_t step) const {
+                                                   const Checker::LoopScan &scan,
+                                                   int64_t step) const {
   auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(cond);
   if (!bin) {
     return std::nullopt;
@@ -159,7 +162,9 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
     }
     return condBoundsAbove(bin->rhs, var, scan, step);
   }
-  auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * { return sema_.scopes().lookup(name).var; };
+  auto lookupVar = [&](llvm::StringRef name) -> const VarSymbol * {
+    return checker_.scopes().lookup(name).var;
+  };
   const Expr *small = nullptr, *large = nullptr;
   bool strict = false;
   switch (bin->op) {
@@ -194,8 +199,8 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
 
 // The same for `var -= step`: `var > E` or `var >= E` keeps var - step at or
 // above INT_MIN.
-bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var, const Sema::LoopScan &scan,
-                           int64_t step) const {
+bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var,
+                                 const Checker::LoopScan &scan, int64_t step) const {
   auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(cond);
   if (!bin) {
     return false;
@@ -206,7 +211,7 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var, const S
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast<NameExpr>(e);
 
-    return name && sema_.scopes().lookup(name->name).var == var;
+    return name && checker_.scopes().lookup(name->name).var == var;
   };
   switch (bin->op) {
   case BinaryOp::Gt:
@@ -222,13 +227,14 @@ bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var, const S
   }
 }
 
-Sema::Flow LoopBounds::loopHead(const Sema::LoopScan &scan, const Expr *cond, bool induction) const {
-  Sema::Flow head = sema_.flow_;
+Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *cond,
+                                   bool induction) const {
+  Checker::Flow head = checker_.flow_;
   head.unreachable = false;
   for (const auto &entry : scan.changes) {
     llvm::StringRef name = entry.first();
-    const Sema::LoopScan::Change &change = entry.second;
-    const VarSymbol *var = sema_.scopes().lookup(name).var;
+    const Checker::LoopScan::Change &change = entry.second;
+    const VarSymbol *var = checker_.scopes().lookup(name).var;
 
     // An induction variable that only grows by a constant step per
     // iteration, while the condition keeps it from wrapping around, keeps its
@@ -237,7 +243,7 @@ Sema::Flow LoopBounds::loopHead(const Sema::LoopScan &scan, const Expr *cond, bo
     //
     // With a condition `i + k < E`, i stays <= INT_MAX - k if it starts so:
     // then `i + k` never wraps around, and the condition keeps i + 1 below
-    // that bound. Sema records that invariant too.
+    // that bound. Checker records that invariant too.
     bool keepLower = false, keepUpper = false;
     std::optional<int64_t> invariant;
     if (induction && var && var->type->isInt() && change.count == 1 && !change.nested) {
@@ -245,7 +251,7 @@ Sema::Flow LoopBounds::loopHead(const Sema::LoopScan &scan, const Expr *cond, bo
         if (std::optional<int64_t> k = condBoundsAbove(cond, var, scan, change.delta)) {
           if (*k == 0) {
             keepLower = true;
-          } else if (sema_.flow_.facts.proves(Term::of(var), Term::zero(), kIntMax - *k + 1)) {
+          } else if (checker_.flow_.facts.proves(Term::of(var), Term::zero(), kIntMax - *k + 1)) {
             keepLower = true;
             invariant = *k;
           }
@@ -287,18 +293,18 @@ Sema::Flow LoopBounds::loopHead(const Sema::LoopScan &scan, const Expr *cond, bo
       }
     }
     llvm::erase_if(head.definedFields,
-                   [&](const Sema::FieldPath &path) { return path.var->name == name; });
+                   [&](const Checker::FieldPath &path) { return path.var->name == name; });
     llvm::erase_if(head.narrowedFields,
                    [&](const auto &entry) { return entry.first.var->name == name; });
   }
-  auto written = [&](const Sema::FieldPath &path) {
+  auto written = [&](const Checker::FieldPath &path) {
     return llvm::any_of(path.names,
                         [&](llvm::StringRef field) { return scan.fieldWrites.contains(field); });
   };
   llvm::erase_if(head.definedFields, written);
   llvm::erase_if(head.narrowedFields, [&](const auto &entry) { return written(entry.first); });
   if (scan.callsFunctions) {
-    sema_.flowChecker().forgetCallEffects(head);
+    checker_.flowChecker().forgetCallEffects(head);
   }
   head.facts.forgetIf([&](const Facts::Fact &f) {
     return (scan.growsArrays && f.lhs.length && isArrayLength(f.lhs)) ||

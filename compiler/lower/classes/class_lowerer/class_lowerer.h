@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Instances: new, constructors, methods, instanceof and static fields.
 class ClassLowerer {
 public:
-  explicit ClassLowerer(CodeGen &codegen);
+  explicit ClassLowerer(Lowering &lowering);
 
   // A new instance whose fields are empty (zero).
   llvm::Value *allocInstance(const ClassDecl *cls);
@@ -28,7 +28,7 @@ public:
   bool constructionThrows(const ClassDecl *cls, const FuncSymbol *ctor) const;
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

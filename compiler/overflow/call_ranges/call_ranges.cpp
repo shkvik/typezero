@@ -1,14 +1,16 @@
 #include "compiler/overflow/call_ranges/call_ranges.h"
-#include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
+#include "compiler/overflow/builtin_evaluator/builtin_evaluator.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +29,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -65,29 +66,32 @@ bool CallRanges::mergeSummaries(bool narrowing) {
   for (auto &entry : check_.cur_.rets) {
     auto from = check_.next_.rets.find(entry.first);
     const Type *type = entry.first->sym ? entry.first->sym->ret : nullptr;
-    changed |= check_.slots().mergeSlot(entry.second, from != check_.next_.rets.end() ? &from->second : nullptr, type,
-                         narrowing);
+    changed |= check_.slots().mergeSlot(
+        entry.second, from != check_.next_.rets.end() ? &from->second : nullptr, type, narrowing);
   }
   for (auto &entry : check_.cur_.vars) {
     auto from = check_.next_.vars.find(entry.first);
-    changed |= check_.slots().mergeSlot(entry.second, from != check_.next_.vars.end() ? &from->second : nullptr,
-                         entry.first->type, narrowing);
+    changed |= check_.slots().mergeSlot(entry.second,
+                                        from != check_.next_.vars.end() ? &from->second : nullptr,
+                                        entry.first->type, narrowing);
   }
   for (auto &entry : check_.cur_.fields) {
     auto from = check_.next_.fields.find(entry.first);
     const OverflowCheck::Slot *slot = from != check_.next_.fields.end() ? &from->second : nullptr;
-    changed |= check_.slots().mergeSlot(entry.second, slot, slot ? slot->type : entry.second.type, narrowing);
+    changed |= check_.slots().mergeSlot(entry.second, slot, slot ? slot->type : entry.second.type,
+                                        narrowing);
   }
   for (auto &entry : check_.cur_.elements) {
     auto from = check_.next_.elements.find(entry.first);
-    changed |= check_.slots().mergeSlot(entry.second, from != check_.next_.elements.end() ? &from->second : nullptr,
-                         entry.first, narrowing);
+    changed |= check_.slots().mergeSlot(
+        entry.second, from != check_.next_.elements.end() ? &from->second : nullptr, entry.first,
+        narrowing);
   }
   for (auto &entry : check_.cur_.dicts) {
     auto from = check_.next_.dicts.find(entry.first);
     const Type *value = entry.first->valueType();
-    changed |= check_.slots().mergeSlot(entry.second, from != check_.next_.dicts.end() ? &from->second : nullptr, value,
-                         narrowing);
+    changed |= check_.slots().mergeSlot(
+        entry.second, from != check_.next_.dicts.end() ? &from->second : nullptr, value, narrowing);
   }
   if (!narrowing) {
     for (auto &entry : check_.next_.preds) {
@@ -173,8 +177,7 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
 }
 
 // Adds what a call passes to the summaries of the parameters.
-void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call,
-                             llvm::ArrayRef<Val> args) {
+void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::ArrayRef<Val> args) {
   if (check_.quiet_ || !fn) {
     return;
   }
@@ -233,7 +236,7 @@ void CallRanges::calledUserCode(State &st) {
 
 Val CallRanges::evalCall(const CallExpr *call, State &st) {
   if (call->builtin != Builtin::None) {
-    return check_.evaluator().evalBuiltin(call, st);
+    return check_.builtinEvaluator().evalBuiltin(call, st);
   }
   auto *member = dyn_cast<MemberExpr>(call->callee);
   if (member) {
@@ -288,14 +291,15 @@ Val CallRanges::evalNew(const NewExpr *ne, State &st) {
     return v;
   }
   if (type && type->isDict() && !args.empty() && isNumberType(type->valueType())) {
-    check_.contribute(check_.next_.dicts[type], check_.overflowWarnings().trusted(type->valueType()));
+    check_.contribute(check_.next_.dicts[type],
+                      check_.overflowWarnings().trusted(type->valueType()));
   }
 
   return Val();
 }
 
 Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, size_t first,
-                               State &st) {
+                            State &st) {
   OverflowCheck::Frame frame;
   frame.fn = fn;
   frame.callback = true;
@@ -308,7 +312,9 @@ Val CallRanges::runCallback(const FunctionDecl *fn, llvm::ArrayRef<Val> args, si
     if (!p || !tracked(p->type)) {
       continue;
     }
-    check_.slots().writeVar(p, i - first < args.size() ? args[i - first] : check_.overflowWarnings().trusted(p->type), st);
+    check_.slots().writeVar(
+        p, i - first < args.size() ? args[i - first] : check_.overflowWarnings().trusted(p->type),
+        st);
   }
   check_.executor().exec(fn->body, st);
   OverflowCheck::Frame done = std::move(check_.frames_.back());
@@ -385,9 +391,10 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     if (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrayFrom) {
       Val v;
       v.len = passes.empty() ? someLength() : passes;
-      v.elem = share(
-          named ? result
-                : check_.overflowWarnings().trusted(call->type && call->type->isArray() ? call->type->inner() : nullptr));
+      v.elem =
+          share(named ? result
+                      : check_.overflowWarnings().trusted(
+                            call->type && call->type->isArray() ? call->type->inner() : nullptr));
       return v;
     }
     return check_.overflowWarnings().trusted(call->type);
@@ -410,10 +417,10 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
     if (call->builtin == Builtin::ArrSortWith) {
       args = {element, element};
     } else if (call->builtin == Builtin::MapForEach) {
-      args = {
-          element,
-          check_.overflowWarnings().trusted(fn->params.size() > 1 && fn->params[1].sym ? fn->params[1].sym->type : nullptr),
-          Val()};
+      args = {element,
+              check_.overflowWarnings().trusted(
+                  fn->params.size() > 1 && fn->params[1].sym ? fn->params[1].sym->type : nullptr),
+              Val()};
     } else {
       args = {element, indexVal, array};
     }
@@ -444,10 +451,10 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   case Builtin::ArrFlatMap: {
     Val v;
     v.len = someLength();
-    v.elem =
-        result.elem
-            ? result.elem
-            : share(check_.overflowWarnings().trusted(call->type && call->type->isArray() ? call->type->inner() : nullptr));
+    v.elem = result.elem
+                 ? result.elem
+                 : share(check_.overflowWarnings().trusted(
+                       call->type && call->type->isArray() ? call->type->inner() : nullptr));
     return v;
   }
   case Builtin::ArrReduce:

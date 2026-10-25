@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The metadata decorators write, and the design types (docs/decorators.md, section 5).
 class MetadataChecker {
 public:
-  explicit MetadataChecker(Sema &sema);
+  explicit MetadataChecker(Checker &checker);
 
   // The declaration an object key names (a function, a class, a constant);
   // null for anything else, which is a string key.
@@ -38,7 +38,7 @@ public:
                          llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The functions that write records, by the name of the key they write.
   llvm::StringMap<std::vector<FunctionDecl *>> metaWriters_;
   llvm::StringMap<ClassDecl *> builtinConstructors_;

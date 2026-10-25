@@ -1,16 +1,16 @@
 #include "compiler/check/functions/nested_functions/nested_functions.h"
-#include "compiler/infer/call_cycles/call_cycles.h"
 #include "compiler/check/functions/function_checker/function_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/declare/function_names/function_names.h"
+#include "compiler/infer/call_cycles/call_cycles.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -212,7 +212,7 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
         expr(f.init);
       }
     }
-    // So do the decorators, and what applies them (Sema::decorateClass).
+    // So do the decorators, and what applies them (Checker::decorateClass).
     for (const Decorator &d : cls->decorators) {
       expr(d.expr);
     }
@@ -273,7 +273,7 @@ void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
 
 } // namespace
 
-NestedFunctions::NestedFunctions(Sema &sema) : sema_(sema) {}
+NestedFunctions::NestedFunctions(Checker &checker) : checker_(checker) {}
 
 NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
   std::vector<FunctionDecl *> members;
@@ -285,25 +285,25 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
   if (members.empty()) {
     return nullptr;
   }
-  NestedGroup *group = sema_.ctx_.newGroup();
+  NestedGroup *group = checker_.ctx_.newGroup();
   block->group = group;
-  group->owner = sema_.currentDecl();
-  group->scopeDepth = sema_.scopes_.size();
-  group->functionDepth = sema_.functions_.size();
+  group->owner = checker_.currentDecl();
+  group->scopeDepth = checker_.scopes_.size();
+  group->functionDepth = checker_.functions_.size();
   llvm::StringSet<> names;
   for (FunctionDecl *fn : members) {
     fn->group = group;
-    fn->parent = sema_.currentDecl();
+    fn->parent = checker_.currentDecl();
     group->members.push_back(fn);
     names.insert(fn->name);
-    VarSymbol *var = sema_.ctx_.newVar();
+    VarSymbol *var = checker_.ctx_.newVar();
     var->name = fn->name;
     var->loc = fn->loc();
     var->isConst = true;
-    var->owner = sema_.currentDecl();
+    var->owner = checker_.currentDecl();
     var->function = fn;
     fn->var = var;
-    sema_.functionChecker().declareFunction(fn, var);
+    checker_.functionChecker().declareFunction(fn, var);
     collectAssigned(fn->body, group->assignedNames);
   }
   for (Stmt *stmt : block->body) {
@@ -325,7 +325,7 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
       group->firstUse = i;
     }
   }
-  sema_.callCycles().findCycles(group->members);
+  checker_.callCycles().findCycles(group->members);
 
   return group;
 }
@@ -335,14 +335,14 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
   group->finished = true;
   for (FunctionDecl *fn : group->members) {
     if (!fn->sym->ret) {
-      sema_.returnInferrer().inferReturnType(fn->sym);
+      checker_.returnInferrer().inferReturnType(fn->sym);
     }
     if (fn->checked) {
       continue;
     }
-    Sema::BodyState saved = sema_.returnInferrer().enterBody(fn);
-    sema_.functionChecker().checkFunctionBody(fn);
-    sema_.returnInferrer().leaveBody(saved);
+    Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
+    checker_.functionChecker().checkFunctionBody(fn);
+    checker_.returnInferrer().leaveBody(saved);
   }
 
   // A function the block calls (or passes on) before a variable it uses is
@@ -368,12 +368,12 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
   };
   for (const NestedGroup::Use &use : group->uses) {
     if (VarSymbol *var = declaredAfter(use)) {
-      sema_.diags_.error(use.loc,
-                   "'" + use.fn->name + "' uses '" + var->name +
+      checker_.diags_.error(
+          use.loc, "'" + use.fn->name + "' uses '" + var->name +
                        "' before it is declared: JavaScript would throw a ReferenceError when it "
                        "runs here; move the declaration of '" +
                        var->name + "' up");
-      sema_.diags_.note(var->loc, "'" + var->name + "' is declared here");
+      checker_.diags_.note(var->loc, "'" + var->name + "' is declared here");
     }
   }
 }
@@ -384,11 +384,12 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
   }
   // The block's own code uses one of its functions: it runs, or may run,
   // from here (see finishGroup).
-  if (FunctionDecl *member = var->function; member && sema_.currentDecl() == member->group->owner) {
-    member->group->uses.push_back({member, sema_.seq_, loc});
+  if (FunctionDecl *member = var->function;
+      member && checker_.currentDecl() == member->group->owner) {
+    member->group->uses.push_back({member, checker_.seq_, loc});
   }
-  for (size_t i = sema_.functions_.size(); i-- > 0;) {
-    FunctionDecl *fn = sema_.functions_[i];
+  for (size_t i = checker_.functions_.size(); i-- > 0;) {
+    FunctionDecl *fn = checker_.functions_[i];
     // Its own variables, and the function itself through its name.
     if (fn == var->owner || fn == var->lambda) {
       break;

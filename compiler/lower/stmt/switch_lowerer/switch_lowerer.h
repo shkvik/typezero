@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // switch.
 class SwitchLowerer {
 public:
-  explicit SwitchLowerer(CodeGen &codegen);
+  explicit SwitchLowerer(Lowering &lowering);
 
   void emitSwitch(SwitchStmt *stmt);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

@@ -1,5 +1,6 @@
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -15,7 +16,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;

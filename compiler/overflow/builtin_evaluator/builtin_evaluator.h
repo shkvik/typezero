@@ -1,0 +1,21 @@
+#pragma once
+
+#include "compiler/overflow/overflow_check/overflow_check.h"
+
+namespace tz {
+
+// The ranges of calls of built-ins: Math, and the values a Json may give.
+class BuiltinEvaluator {
+public:
+  explicit BuiltinEvaluator(OverflowCheck &check);
+
+  Val evalBuiltin(const CallExpr *call, State &st);
+  Val evalMath(const CallExpr *call, State &st);
+  void jsonValues(const Type *type, const Reason *why, llvm::SmallPtrSetImpl<const Type *> &seen);
+  Val jsonVal(const Type *type, const Reason *why);
+
+private:
+  OverflowCheck &check_;
+};
+
+} // namespace tz

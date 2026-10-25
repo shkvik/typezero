@@ -1,15 +1,15 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The values of constant expressions: enum members and the constants of global objects.
 class ConstantFolder {
 public:
-  explicit ConstantFolder(Sema &sema);
+  explicit ConstantFolder(Checker &checker);
 
-  std::optional<Sema::Constant> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
+  std::optional<Checker::Constant> evalConstant(const Expr *expr, EnumDecl *self, size_t defined);
   // Integer constants (sema_decls.cpp): expressions of literals, `const`
   // variables holding constants, and operators. Computing them reports what
   // would go wrong at run time: a division by zero, or a value that does not
@@ -25,7 +25,7 @@ public:
   Expr *globalConstant(llvm::StringRef object, llvm::StringRef name, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The values of the integer constants computed so far: operator expressions
   // and `const` variables. In a `wraps` context a value may exceed its type
   // (see foldBinary).

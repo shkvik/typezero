@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Which variant of an overloaded method a call means (docs/overloads.md).
 class OverloadResolver {
 public:
-  explicit OverloadResolver(Sema &sema);
+  explicit OverloadResolver(Checker &checker);
 
   // Overloads (docs/overloads.md). The variant of `variants` a call with
   // `args` chooses, or null after an error. With several variants that take
@@ -36,7 +36,7 @@ public:
   std::vector<FunctionDecl *> signatureVariants(const Type *iface, const Overload &overload);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // See signatureVariants.
   std::map<std::pair<const Type *, std::string>, std::vector<FunctionDecl *>> signatureVariants_;
 };

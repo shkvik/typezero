@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The intrinsics of node:stream.
 class StreamLowerer {
 public:
-  explicit StreamLowerer(CodeGen &codegen);
+  explicit StreamLowerer(Lowering &lowering);
 
   // The intrinsics of node:stream (codegen_stream.cpp): LibChunk,
   // LibIsChunk and LibOverrides. emitChunkAs: the value of `to` the unknown
@@ -16,7 +16,7 @@ public:
   llvm::Value *emitChunkAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

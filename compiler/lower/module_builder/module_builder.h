@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The module: declarations, globals, functions and main, in that order.
 class ModuleBuilder {
 public:
-  explicit ModuleBuilder(CodeGen &codegen);
+  explicit ModuleBuilder(Lowering &lowering);
 
   std::unique_ptr<llvm::Module> generate(SourceFile &file);
   llvm::Type *lower(const Type *type);
@@ -15,7 +15,7 @@ public:
   void emitMain(SourceFile &file);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Instruction *mainInit_ = nullptr;
   std::vector<const VarSymbol *> managedGlobals_;
 };

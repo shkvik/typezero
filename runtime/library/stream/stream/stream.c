@@ -2,7 +2,11 @@
 // of the runtime through its intrinsics
 // (compiler/library/stream/sema/sema_stream.cpp).
 
+#include "runtime/library/stream/stream/stream.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/reflect/reflect/reflect.h"
 
 // `__tz_chunk<T>(u)` of an unknown that holds no T: the types of the
 // library promise it never happens, so it is a fault of tz.

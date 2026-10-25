@@ -1,9 +1,14 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSet.h"
 #include <functional>
 #include <map>
 #include <set>

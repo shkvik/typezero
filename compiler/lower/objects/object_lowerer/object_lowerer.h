@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Object literals, tuples, fields and Object.keys.
 class ObjectLowerer {
 public:
-  explicit ObjectLowerer(CodeGen &codegen);
+  explicit ObjectLowerer(Lowering &lowering);
 
   llvm::Value *emitObjectLiteral(ObjectLitExpr *lit);
   llvm::Value *emitSpreadLiteral(ObjectLitExpr *lit);
@@ -25,7 +25,7 @@ public:
                                  const Type *keyType);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

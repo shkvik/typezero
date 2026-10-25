@@ -1,20 +1,20 @@
 #include "compiler/library/reflect/metadata_checker/metadata_checker.h"
+#include "compiler/check/classes/class_value_checker/class_value_checker.h"
+#include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-MetadataChecker::MetadataChecker(Sema &sema) : sema_(sema) {}
+MetadataChecker::MetadataChecker(Checker &checker) : checker_(checker) {}
 
 ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   static const llvm::StringLiteral names[] = {"Number",       "String",
@@ -36,7 +36,7 @@ ClassDecl *MetadataChecker::builtinConstructor(llvm::StringRef name) {
   }
   ClassDecl *&cls = builtinConstructors_[name];
   if (!cls) {
-    cls = sema_.ctx_.make<ClassDecl>(llvm::SMLoc(), *found);
+    cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), *found);
     cls->builtin = true;
     cls->resolved = cls->declared = true;
   }
@@ -49,7 +49,7 @@ const void *MetadataChecker::metadataKey(const Expr *key, std::string &label) {
   if (!name) {
     return nullptr;
   }
-  Sema::ScopeEntry entry = sema_.scopes().lookup(name->name);
+  Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
   label = name->name.str();
   if (entry.var) {
     return entry.var->isConst && entry.var->type && !entry.var->type->isString() ? entry.var
@@ -93,34 +93,35 @@ void MetadataChecker::findMetadataWriters(SourceFile &program) {
 }
 
 void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
-  if (!fn->sym || fn->checked || fn->sym->isGeneric() || llvm::is_contained(sema_.functions_, fn)) {
+  if (!fn->sym || fn->checked || fn->sym->isGeneric() ||
+      llvm::is_contained(checker_.functions_, fn)) {
     return;
   }
   if (!fn->sym->ret) { // checking it finds what it returns
-    sema_.returnInferrer().inferReturnType(fn->sym);
+    checker_.returnInferrer().inferReturnType(fn->sym);
     return;
   }
   if (fn->cls) { // checked with its class
     return;
   }
-  Sema::BodyState saved = sema_.returnInferrer().enterBody(fn);
-  if (!sema_.topLevelDone_) {
-    sema_.early_ = fn->sym; // top-level code reads it: globals declared later are not there yet
+  Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
+  if (!checker_.topLevelDone_) {
+    checker_.early_ = fn->sym; // top-level code reads it: globals declared later are not there yet
   }
-  sema_.flow_ = Sema::Flow();
-  sema_.functionChecker().checkFunctionBody(fn);
-  sema_.returnInferrer().leaveBody(saved);
+  checker_.flow_ = Checker::Flow();
+  checker_.functionChecker().checkFunctionBody(fn);
+  checker_.returnInferrer().leaveBody(saved);
 }
 
 const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label, llvm::SMLoc loc,
-                               const Type *expected) {
-  if (auto found = sema_.metaTypes_.find(key); found != sema_.metaTypes_.end()) {
+                                          const Type *expected) {
+  if (auto found = checker_.metaTypes_.find(key); found != checker_.metaTypes_.end()) {
     return found->second.type;
   }
   if (auto writers = metaWriters_.find(label); writers != metaWriters_.end()) {
     for (FunctionDecl *fn : std::vector<FunctionDecl *>(writers->second)) {
       checkBodyEarly(fn);
-      if (auto found = sema_.metaTypes_.find(key); found != sema_.metaTypes_.end()) {
+      if (auto found = checker_.metaTypes_.find(key); found != checker_.metaTypes_.end()) {
         return found->second.type;
       }
     }
@@ -128,23 +129,23 @@ const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label
   // `const names: string[] = Reflect.getMetadata(Column, cls) ?? []` in the
   // function that writes them next.
   if (expected && !expected->nonOptional()->isUnknown() && !mentionsParam(expected)) {
-    sema_.metaTypes_[key] = {expected->nonOptional(), loc};
+    checker_.metaTypes_[key] = {expected->nonOptional(), loc};
     return expected->nonOptional();
   }
-  sema_.diags_.error(loc,
-               "the records of '" + label +
-                   "' have the type of the first one written, "
-                   "'Reflect.defineMetadata(" +
-                   label +
-                   ", value, target)', and none is written "
-                   "before this; write one first, give the type where this one goes (e.g. "
-                   "'const x: string[] = ...'), or use a string key, whose records are 'unknown'");
+  checker_.diags_.error(
+      loc, "the records of '" + label +
+               "' have the type of the first one written, "
+               "'Reflect.defineMetadata(" +
+               label +
+               ", value, target)', and none is written "
+               "before this; write one first, give the type where this one goes (e.g. "
+               "'const x: string[] = ...'), or use a string key, whose records are 'unknown'");
 
   return Type::error();
 }
 
 Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
-  return sema_.classValueChecker().classValueAt(designConstructor(type), loc);
+  return checker_.classValueChecker().classValueAt(designConstructor(type), loc);
 }
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
@@ -195,43 +196,46 @@ ClassDecl *MetadataChecker::designConstructor(const Type *type) {
 }
 
 void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Expr *value,
-                             llvm::StringRef member, llvm::SMLoc loc) {
-  auto *callee = sema_.ctx_.make<NameExpr>(loc, "Reflect");
+                                        llvm::StringRef member, llvm::SMLoc loc) {
+  auto *callee = checker_.ctx_.make<NameExpr>(loc, "Reflect");
   callee->type = Type::error(); // the call is a built-in, which needs none
-  auto *keyLit = sema_.ctx_.make<StringLitExpr>(loc, key);
+  auto *keyLit = checker_.ctx_.make<StringLitExpr>(loc, key);
   keyLit->type = Type::string();
   Expr *property;
   if (member.empty()) {
-    property = sema_.ctx_.make<UndefinedExpr>(loc);
+    property = checker_.ctx_.make<UndefinedExpr>(loc);
     property->type = Type::undefinedTy();
   } else {
-    property = sema_.ctx_.make<StringLitExpr>(loc, std::u16string(member.begin(), member.end()));
+    property = checker_.ctx_.make<StringLitExpr>(loc, std::u16string(member.begin(), member.end()));
     property->type = Type::string();
   }
   if (value->type->isClassRef()) {
-    value = sema_.typeRelations().convert(value, Type::constructorOf(Type::anyObject()));
+    value = checker_.typeRelations().convert(value, Type::constructorOf(Type::anyObject()));
   }
-  std::vector<Expr *> args{keyLit, sema_.typeRelations().convert(value, Type::unknown()),
-                           sema_.typeRelations().convert(sema_.classValueChecker().classValueAt(cls, loc), Type::anyObject()),
-                           sema_.typeRelations().convert(property, Type::optional(Type::string()))};
-  auto *call = sema_.ctx_.make<CallExpr>(loc, callee, std::move(args));
+  std::vector<Expr *> args{
+      keyLit, checker_.typeRelations().convert(value, Type::unknown()),
+      checker_.typeRelations().convert(checker_.classValueChecker().classValueAt(cls, loc),
+                                       Type::anyObject()),
+      checker_.typeRelations().convert(property, Type::optional(Type::string()))};
+  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
   call->builtin = Builtin::MetaDefine;
   call->designRecord = true;
   call->type = Type::voidTy();
-  cls->decorations.push_back(sema_.ctx_.make<ExprStmt>(loc, call));
+  cls->decorations.push_back(checker_.ctx_.make<ExprStmt>(loc, call));
 }
 
 // As TypeScript's emitDecoratorMetadata writes them, here always: in the
 // order TypeScript applies them, design:returntype first.
 void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, FunctionDecl *method,
-                              const FunctionDecl *ctor, llvm::SMLoc loc) {
+                                         const FunctionDecl *ctor, llvm::SMLoc loc) {
   auto paramTypes = [&](const FunctionDecl *fn) {
-    auto *list = sema_.ctx_.make<ArrayLitExpr>(loc);
-    sema_.returnInferrer().resolveParams(fn->sym);
+    auto *list = checker_.ctx_.make<ArrayLitExpr>(loc);
+    checker_.returnInferrer().resolveParams(fn->sym);
     const Type *any = Type::constructorOf(Type::anyObject());
     for (const Type *param : fn->sym->params) {
       if (param) {
-        list->elements.push_back({sema_.typeRelations().convert(designClass(param, loc), any), false});
+        list->elements.push_back(
+            {checker_.typeRelations().convert(designClass(param, loc), any), false});
       }
     }
     list->type = Type::array(any);
@@ -239,20 +243,22 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
     return list;
   };
   if (field) {
-    sema_.classDeclarer().completeClass(cls); // the types that come from the initializers
+    checker_.classDeclarer().completeClass(cls); // the types that come from the initializers
     if (field->resolved && !field->resolved->isError()) {
       writeDesignRecord(cls, u"design:type", designClass(field->resolved, loc), field->name, loc);
     }
     return;
   }
   if (method) {
-    const Type *ret = sema_.returnInferrer().returnType(method->sym);
+    const Type *ret = checker_.returnInferrer().returnType(method->sym);
     if (ret && !ret->isVoid() && !ret->isError()) {
       writeDesignRecord(cls, u"design:returntype", designClass(ret, loc), method->name, loc);
     }
     writeDesignRecord(cls, u"design:paramtypes", paramTypes(method), method->name, loc);
-    writeDesignRecord(cls, u"design:type", sema_.classValueChecker().classValueAt(builtinConstructor("Function"), loc),
-                      method->name, loc);
+    writeDesignRecord(
+        cls, u"design:type",
+        checker_.classValueChecker().classValueAt(builtinConstructor("Function"), loc),
+        method->name, loc);
     return;
   }
   if (ctor) {

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // ==, != and ??.
 class EqualityLowerer {
 public:
-  explicit EqualityLowerer(CodeGen &codegen);
+  explicit EqualityLowerer(Lowering &lowering);
 
   llvm::Value *emitEquality(BinaryExpr *bin);
   llvm::Value *emitNullish(BinaryExpr *bin);
@@ -15,7 +15,7 @@ public:
   llvm::Value *emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

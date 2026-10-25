@@ -1,20 +1,20 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The methods of arrays that take a callback, and sort with a comparator.
 class CallbackMethodLowerer {
 public:
-  explicit CallbackMethodLowerer(CodeGen &codegen);
+  explicit CallbackMethodLowerer(Lowering &lowering);
 
   // Methods of arrays that take a callback (codegen_array.cpp).
   llvm::Value *emitCallbackMethod(CallExpr *call);
   llvm::Function *sortComparator(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

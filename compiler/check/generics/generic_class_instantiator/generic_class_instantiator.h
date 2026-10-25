@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The instances of generic classes.
 class GenericClassInstantiator {
 public:
-  explicit GenericClassInstantiator(Sema &sema);
+  explicit GenericClassInstantiator(Checker &checker);
 
   // `Box<int>`: the instance of `generic` for these type arguments (those
   // left out take their defaults), or the generic class itself for its own
@@ -28,10 +28,10 @@ public:
   void markOverridden(FunctionDecl *fn);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   llvm::SmallPtrSet<const ClassDecl *, 2> endless_; // reported as such
   // The checks of the instances of generic classes, by class.
-  llvm::DenseMap<const ClassDecl *, Sema::Instance *> classChecks_;
+  llvm::DenseMap<const ClassDecl *, Checker::Instance *> classChecks_;
 };
 
 } // namespace tz

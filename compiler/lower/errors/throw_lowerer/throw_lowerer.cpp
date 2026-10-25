@@ -1,12 +1,12 @@
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -16,10 +16,10 @@
 #include <map>
 #include <optional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -35,9 +35,9 @@ std::u16string utf16(llvm::StringRef text) {
 
 } // namespace
 
-ThrowLowerer::ThrowLowerer(CodeGen &codegen) : codegen_(codegen) {}
+ThrowLowerer::ThrowLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// tz_thrown and the stack limit (TzThread in runtime/core/tzrt/tzrt.h): in a
+// tz_thrown and the stack limit (TzThread in runtime/core/parallel/parallel.h): in a
 // parallel program the thread's own, since code on the threads of the runtime
 // throws at the same time. Its address then goes through
 // llvm.threadlocal.address, which a coroutine does not keep across a
@@ -45,20 +45,21 @@ ThrowLowerer::ThrowLowerer(CodeGen &codegen) : codegen_(codegen) {}
 // that a function finds them from one address.
 llvm::GlobalVariable *ThrowLowerer::thrownGlobal() {
   if (!thrown_) {
-    auto *type = llvm::StructType::get(codegen_.ctx_, {codegen_.builder_.getPtrTy(), codegen_.builder_.getPtrTy()});
-    thrown_ = cast<llvm::GlobalVariable>(codegen_.module_->getOrInsertGlobal("tz_thread", type));
+    auto *type = llvm::StructType::get(
+        lowering_.ctx_, {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy()});
+    thrown_ = cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_thread", type));
     thrown_->setAlignment(llvm::Align(8));
-    thrown_->setThreadLocal(codegen_.parallel_);
+    thrown_->setThreadLocal(lowering_.parallel_);
   }
 
   return thrown_;
 }
 
-llvm::Value *ThrowLowerer::thrownSlot() { return thrownSlot(codegen_.builder_); }
+llvm::Value *ThrowLowerer::thrownSlot() { return thrownSlot(lowering_.builder_); }
 
 llvm::Value *ThrowLowerer::thrownSlot(llvm::IRBuilderBase &b) {
-  return codegen_.parallel_ ? b.CreateThreadLocalAddress(thrownGlobal())
-                   : static_cast<llvm::Value *>(thrownGlobal());
+  return lowering_.parallel_ ? b.CreateThreadLocalAddress(thrownGlobal())
+                             : static_cast<llvm::Value *>(thrownGlobal());
 }
 
 void ThrowLowerer::emitThrowCheck() {
@@ -66,48 +67,57 @@ void ThrowLowerer::emitThrowCheck() {
 }
 
 void ThrowLowerer::emitThrowCheckWith(llvm::function_ref<void()> release) {
-  llvm::Value *error = codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), thrownSlot(), "thrown");
-  llvm::BasicBlock *throwBlock = codegen_.functionFrame().newBlock("throw");
-  llvm::BasicBlock *goBlock = codegen_.functionFrame().newBlock("go");
-  codegen_.builder_.CreateCondBr(codegen_.builder_.CreateIsNotNull(error), throwBlock, goBlock,
-                        llvm::MDBuilder(codegen_.ctx_).createUnlikelyBranchWeights());
-  codegen_.functionFrame().switchTo(throwBlock);
+  llvm::Value *error =
+      lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), thrownSlot(), "thrown");
+  llvm::BasicBlock *throwBlock = lowering_.functionFrame().newBlock("throw");
+  llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("go");
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(error), throwBlock, goBlock,
+                                  llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
+  lowering_.functionFrame().switchTo(throwBlock);
   release();
   emitRuntimeThrow();
-  codegen_.functionFrame().switchTo(goBlock);
+  lowering_.functionFrame().switchTo(goBlock);
 }
 
 void ThrowLowerer::emitRuntimeThrow() {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy();
-  codegen_.builder_.CreateCall(codegen_.processLowerer().processFunction("tz_error_frame", codegen_.builder_.getVoidTy(), {ptr}),
-                      {codegen_.unwindLowerer().frameDescriptor(codegen_.loc_)});
-  codegen_.builder_.CreateBr(codegen_.unwindLowerer().unwindTarget());
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                    "tz_error_frame", lowering_.builder_.getVoidTy(), {ptr}),
+                                {lowering_.unwindLowerer().frameDescriptor(lowering_.loc_)});
+  lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
 }
 
 void ThrowLowerer::emitThrow(llvm::Value *error, llvm::SMLoc loc) {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy();
-  codegen_.builder_.CreateCall(codegen_.processLowerer().processFunction("tz_error_throw", codegen_.builder_.getVoidTy(), {ptr, ptr}),
-                      {error, codegen_.unwindLowerer().frameDescriptor(loc)});
-  codegen_.builder_.CreateBr(codegen_.unwindLowerer().unwindTarget());
-  codegen_.functionFrame().startDeadBlock();
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+                                    "tz_error_throw", lowering_.builder_.getVoidTy(), {ptr, ptr}),
+                                {error, lowering_.unwindLowerer().frameDescriptor(loc)});
+  lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
+  lowering_.functionFrame().startDeadBlock();
 }
 
 void ThrowLowerer::emitThrowNew(int kind, llvm::StringRef message) {
-  llvm::Value *text = codegen_.stringLowerer().stringLiteral(utf16(message));
-  llvm::Type *ptr = codegen_.builder_.getPtrTy(), *i64 = codegen_.builder_.getInt64Ty(), *i32 = codegen_.builder_.getInt32Ty();
+  llvm::Value *text = lowering_.stringLowerer().stringLiteral(utf16(message));
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty(),
+             *i32 = lowering_.builder_.getInt32Ty();
   auto *fn = cast<llvm::Function>(
-      codegen_.processLowerer().processFunction("tz_throw_str", codegen_.builder_.getVoidTy(), {i32, ptr, i64}).getCallee());
+      lowering_.processLowerer()
+          .processFunction("tz_throw_str", lowering_.builder_.getVoidTy(), {i32, ptr, i64})
+          .getCallee());
   fn->addFnAttr(llvm::Attribute::Cold);
-  codegen_.builder_.CreateCall(fn, {codegen_.builder_.getInt32(uint32_t(kind)), codegen_.stringLowerer().stringObj(text), codegen_.stringLowerer().stringMeta(text)});
+  lowering_.builder_.CreateCall(fn, {lowering_.builder_.getInt32(uint32_t(kind)),
+                                     lowering_.stringLowerer().stringObj(text),
+                                     lowering_.stringLowerer().stringMeta(text)});
   emitRuntimeThrow();
 }
 
 void ThrowLowerer::emitThrowStmt(ThrowStmt *stmt) {
-  llvm::Value *error = codegen_.exprLowerer().emitExpr(stmt->value);
+  llvm::Value *error = lowering_.exprLowerer().emitExpr(stmt->value);
   if (stmt->value->type->isUnknown()) { // an Error, or else a TypeError
-    error = codegen_.builder_.CreateCall(
-        codegen_.unknownLowerer().unknownFunction("tz_unknown_error", codegen_.builder_.getPtrTy(), {codegen_.builder_.getPtrTy()}), {error},
-        "error");
+    error = lowering_.builder_.CreateCall(
+        lowering_.unknownLowerer().unknownFunction(
+            "tz_unknown_error", lowering_.builder_.getPtrTy(), {lowering_.builder_.getPtrTy()}),
+        {error}, "error");
   }
   // `throw new Error(...)` throws from `new`, as V8 says (a NewExpr is at
   // the name of its class).
@@ -125,59 +135,63 @@ void ThrowLowerer::emitThrowStmt(ThrowStmt *stmt) {
 }
 
 void ThrowLowerer::emitStackCheck(llvm::SMLoc loc) {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy();
-  llvm::Value *top = codegen_.builder_.CreateIntrinsic(llvm::Intrinsic::stackaddress, {ptr}, {});
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *top = lowering_.builder_.CreateIntrinsic(llvm::Intrinsic::stackaddress, {ptr}, {});
   // Each thread has a stack of its own: TzThread::stack_limit.
-  llvm::Value *slot = codegen_.builder_.CreateConstInBoundsGEP1_64(codegen_.builder_.getInt8Ty(), thrownSlot(), 8);
-  llvm::Value *limit = codegen_.builder_.CreateLoad(ptr, slot, "stack.limit");
-  llvm::BasicBlock *overflowBlock = codegen_.functionFrame().newBlock("stack.overflow");
-  llvm::BasicBlock *goBlock = codegen_.functionFrame().newBlock("stack.ok");
-  codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpULT(top, limit), overflowBlock, goBlock,
-                        llvm::MDBuilder(codegen_.ctx_).createUnlikelyBranchWeights());
-  codegen_.functionFrame().switchTo(overflowBlock);
+  llvm::Value *slot = lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(),
+                                                                    thrownSlot(), 8);
+  llvm::Value *limit = lowering_.builder_.CreateLoad(ptr, slot, "stack.limit");
+  llvm::BasicBlock *overflowBlock = lowering_.functionFrame().newBlock("stack.overflow");
+  llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("stack.ok");
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(top, limit), overflowBlock,
+                                  goBlock,
+                                  llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
+  lowering_.functionFrame().switchTo(overflowBlock);
   auto *fn = cast<llvm::Function>(
-      codegen_.processLowerer().processFunction("tz_throw_stack_overflow", codegen_.builder_.getVoidTy(), {}).getCallee());
+      lowering_.processLowerer()
+          .processFunction("tz_throw_stack_overflow", lowering_.builder_.getVoidTy(), {})
+          .getCallee());
   fn->addFnAttr(llvm::Attribute::Cold);
-  codegen_.builder_.CreateCall(fn);
-  llvm::SMLoc outer = std::exchange(codegen_.loc_, loc);
+  lowering_.builder_.CreateCall(fn);
+  llvm::SMLoc outer = std::exchange(lowering_.loc_, loc);
   emitRuntimeThrow();
-  codegen_.loc_ = outer;
-  codegen_.functionFrame().switchTo(goBlock);
+  lowering_.loc_ = outer;
+  lowering_.functionFrame().switchTo(goBlock);
 }
 
-CodeGen::Held ThrowLowerer::hold(llvm::Value *value, const Type *type, bool needed) {
+Lowering::Held ThrowLowerer::hold(llvm::Value *value, const Type *type, bool needed) {
   if (!needed || !value || !type || !type->isManaged() || isa<llvm::Constant>(value)) {
     return {value, nullptr, type};
   }
-  llvm::Value *slot = codegen_.functionFrame().createManagedSlot(type, "held");
-  codegen_.builder_.CreateStore(value, slot);
+  llvm::Value *slot = lowering_.functionFrame().createManagedSlot(type, "held");
+  lowering_.builder_.CreateStore(value, slot);
 
   return {value, slot, type};
 }
 
-llvm::Value *ThrowLowerer::take(CodeGen::Held &held) {
+llvm::Value *ThrowLowerer::take(Lowering::Held &held) {
   if (!held.slot) {
     return held.value;
   }
-  llvm::Type *lowered = codegen_.moduleBuilder().lower(held.type);
-  held.value = codegen_.builder_.CreateLoad(lowered, held.slot);
-  codegen_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), held.slot);
+  llvm::Type *lowered = lowering_.moduleBuilder().lower(held.type);
+  held.value = lowering_.builder_.CreateLoad(lowered, held.slot);
+  lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), held.slot);
   held.slot = nullptr;
 
   return held.value;
 }
 
-void ThrowLowerer::holdOperand(CodeGen::Operand &operand, bool needed) {
+void ThrowLowerer::holdOperand(Lowering::Operand &operand, bool needed) {
   if (operand.owned) {
     operand.heldSlot = hold(operand.value, operand.type, needed).slot;
   }
 }
 
-void ThrowLowerer::takeOperand(CodeGen::Operand &operand) {
+void ThrowLowerer::takeOperand(Lowering::Operand &operand) {
   if (!operand.heldSlot) {
     return;
   }
-  CodeGen::Held held{operand.value, operand.heldSlot, operand.type};
+  Lowering::Held held{operand.value, operand.heldSlot, operand.type};
   operand.value = take(held);
   operand.heldSlot = nullptr;
 }
@@ -185,14 +199,15 @@ void ThrowLowerer::takeOperand(CodeGen::Operand &operand) {
 std::vector<llvm::Value *> ThrowLowerer::emitHeldValues(llvm::ArrayRef<Expr *> exprs) {
   std::vector<bool> laterThrows(exprs.size(), false);
   for (size_t i = exprs.size(); i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || codegen_.mayThrow().exprThrows(exprs[i - 1]);
+    laterThrows[i - 2] = laterThrows[i - 1] || lowering_.mayThrow().exprThrows(exprs[i - 1]);
   }
-  std::vector<CodeGen::Held> held;
+  std::vector<Lowering::Held> held;
   for (size_t i = 0; i < exprs.size(); ++i) {
-    held.push_back(hold(codegen_.exprLowerer().emitExpr(exprs[i]), exprs[i]->type, laterThrows[i]));
+    held.push_back(
+        hold(lowering_.exprLowerer().emitExpr(exprs[i]), exprs[i]->type, laterThrows[i]));
   }
   std::vector<llvm::Value *> values;
-  for (CodeGen::Held &h : held) {
+  for (Lowering::Held &h : held) {
     values.push_back(take(h));
   }
 

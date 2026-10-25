@@ -1,10 +1,14 @@
 #include "compiler/load/parser/parser.h"
+#include "compiler/load/call_parser/call_parser.h"
 #include "compiler/load/class_parser/class_parser.h"
 #include "compiler/load/decl_parser/decl_parser.h"
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
+#include "compiler/load/function_type_parser/function_type_parser.h"
 #include "compiler/load/module_parser/module_parser.h"
+#include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
+#include "compiler/load/primary_parser/primary_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
 #include "compiler/load/to_utf8/to_utf8.h"
@@ -110,12 +114,16 @@ Parser::Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library)
   vars_ = std::make_unique<VarParser>(*this);
   patterns_ = std::make_unique<PatternParser>(*this);
   exprs_ = std::make_unique<ExprParser>(*this);
+  calls_ = std::make_unique<CallParser>(*this);
+  primaries_ = std::make_unique<PrimaryParser>(*this);
   templates_ = std::make_unique<TemplateParser>(*this);
   functions_ = std::make_unique<FunctionParser>(*this);
   classes_ = std::make_unique<ClassParser>(*this);
   decls_ = std::make_unique<DeclParser>(*this);
   modules_ = std::make_unique<ModuleParser>(*this);
   types_ = std::make_unique<TypeParser>(*this);
+  objectTypes_ = std::make_unique<ObjectTypeParser>(*this);
+  functionTypes_ = std::make_unique<FunctionTypeParser>(*this);
   cursor().advance();
 }
 

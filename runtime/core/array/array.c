@@ -14,7 +14,21 @@
 // An array owns its elements: the ones that are strings, arrays or optionals
 // of those are reference counted, and released when the array dies.
 
+#include "runtime/core/array/array.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/publish/publish.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
+#include "runtime/library/date/date/date.h"
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/library/json/json/json.h"
+#include "runtime/library/regex/regex/regex.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -792,7 +806,7 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
     tz_buf_join(out, *(TzArray *const *)value, NULL);
     break;
   case TZ_T_OBJECT: {
-    // Only an Error, a date and a regex have a text of their own (Sema
+    // Only an Error, a date and a regex have a text of their own (Checker
     // rejects other objects): a date's is its toString(), in local time.
     const TzInstance *object = *(const TzInstance *const *)value;
     if (object && (object->layout->flags & TZ_LAYOUT_ERROR)) {

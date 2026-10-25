@@ -15,7 +15,8 @@ public:
   void applyPredicate(const CallExpr *call, State &whenTrue, State &whenFalse);
   void notePredicate(const FunctionDecl *fn, const State &whenTrue, const State &whenFalse);
   std::optional<OverflowCheck::Narrowable> narrowable(const Expr *expr, const State &st) const;
-  void constrain(State &s, const OverflowCheck::Narrowable &target, const Bound &lower, const Bound &upper);
+  void constrain(State &s, const OverflowCheck::Narrowable &target, const Bound &lower,
+                 const Bound &upper);
 
 private:
   OverflowCheck &check_;

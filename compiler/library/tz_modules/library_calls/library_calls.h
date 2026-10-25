@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The built-in modules written in tz: where they are, and their calls of the compiler.
 class LibraryCalls {
 public:
-  explicit LibraryCalls(Sema &sema);
+  explicit LibraryCalls(Checker &checker);
 
   // Events (sema_events.cpp, docs/events.md): node:events and the events of
   // the web platform, which tz has written in tz (library/), and what the
@@ -23,7 +23,7 @@ public:
   Expr *checkLibCall(CallExpr *call, NameExpr *name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   std::vector<std::pair<const char *, const char *>> libraryRanges_;
 };
 

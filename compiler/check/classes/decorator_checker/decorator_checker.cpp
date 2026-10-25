@@ -1,21 +1,21 @@
 #include "compiler/check/classes/decorator_checker/decorator_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/stmt/stmt_checker/stmt_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/check/stmt/stmt_checker/stmt_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/library/reflect/metadata_checker/metadata_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -100,7 +100,7 @@ bool decoratedParams(const FunctionDecl *fn) {
 
 } // namespace
 
-DecoratorChecker::DecoratorChecker(Sema &sema) : sema_(sema) {}
+DecoratorChecker::DecoratorChecker(Checker &checker) : checker_(checker) {}
 
 const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type *ret) {
   const Type *value =
@@ -112,7 +112,7 @@ const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type 
                     {"enumerable", flag, false},
                     {"configurable", flag, false}},
                    "MethodDescriptor<" + args->name().str() + ", " + ret->name().str() + ">");
-  sema_.descriptorOrigins_.try_emplace(type, args, ret);
+  checker_.descriptorOrigins_.try_emplace(type, args, ret);
 
   return type;
 }
@@ -120,7 +120,7 @@ const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type 
 bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &params) {
   const FuncSymbol *sym = nullptr;
   if (auto *name = dyn_cast<NameExpr>(callee)) {
-    Sema::ScopeEntry entry = sema_.scopes().lookup(name->name);
+    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
     if (entry.var) {
       const Type *type = entry.var->type;
       if (!type || !type->isFunction() || type->hasRest()) {
@@ -133,8 +133,9 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   } else if (auto *member = dyn_cast<MemberExpr>(callee)) {
     // A static method of a class.
     auto *object = dyn_cast<NameExpr>(member->object);
-    if (ClassDecl *cls = object ? sema_.scopes().lookup(object->name).cls : nullptr) {
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/true);
+    if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls : nullptr) {
+      std::vector<FunctionDecl *> methods =
+          ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/true);
       if (methods.size() == 1) {
         sym = methods[0]->sym;
       }
@@ -143,7 +144,7 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
   if (!sym) {
     return false;
   }
-  sema_.returnInferrer().resolveParams(const_cast<FuncSymbol *>(sym));
+  checker_.returnInferrer().resolveParams(const_cast<FuncSymbol *>(sym));
   if (sym->hasRest || llvm::is_contained(sym->params, nullptr)) {
     return false;
   }
@@ -201,11 +202,12 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
       }
       std::string records = shared.empty() ? "the records 'design:*' the compiler writes"
                                            : "the records of '@" + shared + "'";
-      sema_.diags_.error(b.loc, what + " of '" + cls->name.str() + "' are decorated, and " + records +
-                              " for both would be one: metadata is kept on the class "
-                              "itself, by the member's name (docs/decorators.md, section 3); "
-                              "give one of them another name");
-      sema_.diags_.note(a.loc, "the other one is here");
+      checker_.diags_.error(b.loc,
+                            what + " of '" + cls->name.str() + "' are decorated, and " + records +
+                                " for both would be one: metadata is kept on the class "
+                                "itself, by the member's name (docs/decorators.md, section 3); "
+                                "give one of them another name");
+      checker_.diags_.note(a.loc, "the other one is here");
       break;
     }
   }
@@ -221,12 +223,13 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
       first = ctor;
       continue;
     }
-    sema_.diags_.error(ctor->loc(), "two constructors of '" + cls->name.str() +
-                                  "' have decorated parameters, and the record "
-                                  "'design:paramtypes' the compiler writes for the class would be "
-                                  "one: metadata is kept on the class itself (docs/decorators.md, "
-                                  "section 3); decorate the parameters of one of them");
-    sema_.diags_.note(first->loc(), "the other one is here");
+    checker_.diags_.error(ctor->loc(),
+                          "two constructors of '" + cls->name.str() +
+                              "' have decorated parameters, and the record "
+                              "'design:paramtypes' the compiler writes for the class would be "
+                              "one: metadata is kept on the class itself (docs/decorators.md, "
+                              "section 3); decorate the parameters of one of them");
+    checker_.diags_.note(first->loc(), "the other one is here");
     break;
   }
 }
@@ -256,7 +259,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
     return std::make_pair(a.isStatic, a.at) < std::make_pair(b.isStatic, b.at);
   });
   for (Member &m : members) {
-    std::vector<Sema::DecoratorUse> uses;
+    std::vector<Checker::DecoratorUse> uses;
     for (const Decorator &d : m.field ? m.field->decorators : m.method->decorators) {
       uses.push_back({&d});
     }
@@ -270,7 +273,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
     decorate(cls, m.field, m.method, uses);
   }
   // The class gets the decorators of the parameters of its constructor.
-  std::vector<Sema::DecoratorUse> uses;
+  std::vector<Checker::DecoratorUse> uses;
   for (const Decorator &d : cls->decorators) {
     uses.push_back({&d});
   }
@@ -285,7 +288,7 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
 }
 
 void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl *method,
-                    llvm::ArrayRef<Sema::DecoratorUse> uses) {
+                                llvm::ArrayRef<Checker::DecoratorUse> uses) {
   if (uses.empty()) {
     return;
   }
@@ -294,19 +297,22 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   llvm::StringRef memberName = field ? field->name : method ? method->name : llvm::StringRef();
   llvm::SMLoc at = uses[0].decorator->loc;
   if (field && field->accessor) {
-    sema_.diags_.error(at, "a decorator cannot decorate an 'accessor' field: in tz it is an ordinary "
-                     "field, and reading or writing it never runs code");
+    checker_.diags_.error(
+        at, "a decorator cannot decorate an 'accessor' field: in tz it is an ordinary "
+            "field, and reading or writing it never runs code");
     return;
   }
   if (method && method->isAbstract) {
-    sema_.diags_.error(at, "a decorator cannot decorate an abstract method, which has no code; decorate "
-                     "the methods that implement it");
+    checker_.diags_.error(
+        at, "a decorator cannot decorate an abstract method, which has no code; decorate "
+            "the methods that implement it");
     return;
   }
   if (memberName.starts_with("#")) {
-    sema_.diags_.error(at, "a decorator cannot decorate a '#private' member, whose name is no key of "
-                     "the class; make it 'private " +
-                         memberName.drop_front(1) + "'");
+    checker_.diags_.error(
+        at, "a decorator cannot decorate a '#private' member, whose name is no key of "
+            "the class; make it 'private " +
+                memberName.drop_front(1) + "'");
     return;
   }
 
@@ -317,10 +323,11 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     auto *call = dyn_cast<CallExpr>(expr);
     auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
 
-    return member && member->name == "metadata" && sema_.callChecker().isGlobalName(member->object, "Reflect");
+    return member && member->name == "metadata" &&
+           checker_.callChecker().isGlobalName(member->object, "Reflect");
   };
   std::vector<Expr *> callees;
-  for (const Sema::DecoratorUse &use : uses) {
+  for (const Checker::DecoratorUse &use : uses) {
     Expr *expr = use.decorator->expr;
     if (isMetadata(expr)) {
       callees.push_back(nullptr);
@@ -330,16 +337,16 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       callees.push_back(expr);
       continue;
     }
-    llvm::StringRef hidden = sema_.ctx_.hiddenName();
-    auto *decl = sema_.ctx_.make<VarDeclStmt>(use.decorator->loc, /*isConst=*/true);
+    llvm::StringRef hidden = checker_.ctx_.hiddenName();
+    auto *decl = checker_.ctx_.make<VarDeclStmt>(use.decorator->loc, /*isConst=*/true);
     VarDeclarator d;
     d.name = hidden;
     d.loc = use.decorator->loc;
     d.init = expr;
     decl->decls.push_back(std::move(d));
-    sema_.stmtChecker().checkStmt(decl);
+    checker_.stmtChecker().checkStmt(decl);
     out.push_back(decl);
-    callees.push_back(sema_.ctx_.make<NameExpr>(use.decorator->loc, hidden));
+    callees.push_back(checker_.ctx_.make<NameExpr>(use.decorator->loc, hidden));
   }
 
   // What each takes: as many arguments as it declares, up to what its place
@@ -362,18 +369,20 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     llvm::SMLoc loc = uses[i].decorator->loc;
     const Type *third = known && params.size() >= 3 ? params[2]->nonOptional() : nullptr;
     if (count > given) {
-      sema_.diags_.error(loc, label + " cannot decorate " + placeText(place) + ": it takes " +
-                            std::to_string(count) + " arguments, and a decorator of " +
-                            placeText(place) + " gets " + std::to_string(given) + ", " +
-                            argumentsText(place));
+      checker_.diags_.error(loc, label + " cannot decorate " + placeText(place) + ": it takes " +
+                                     std::to_string(count) + " arguments, and a decorator of " +
+                                     placeText(place) + " gets " + std::to_string(given) + ", " +
+                                     argumentsText(place));
       ok = false;
     } else if (third && place == Place::Parameter && third->isObject() && third->field("value")) {
-      sema_.diags_.error(loc, label + " takes the descriptor of a method: it decorates methods, not "
-                                "parameters");
+      checker_.diags_.error(loc, label +
+                                     " takes the descriptor of a method: it decorates methods, not "
+                                     "parameters");
       ok = false;
     } else if (third && place == Place::Method && third->isNumeric()) {
-      sema_.diags_.error(loc, label + " takes the position of a parameter: it decorates parameters, not "
-                                "methods");
+      checker_.diags_.error(
+          loc, label + " takes the position of a parameter: it decorates parameters, not "
+                       "methods");
       ok = false;
     }
     takes.push_back(std::min(count, given));
@@ -385,11 +394,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   // A method of a generic class is a method of each of its instances, with
   // their own types: one descriptor cannot stand for them all.
   if (descriptor && cls->isGeneric()) {
-    sema_.diags_.error(at, "a decorator that takes the descriptor of a method of a generic class is not "
-                     "supported yet: each instance of '" +
-                         cls->name +
-                         "' has a method of its own; decorate a method of a class "
-                         "that is not generic, or take only the class and the name");
+    checker_.diags_.error(
+        at, "a decorator that takes the descriptor of a method of a generic class is not "
+            "supported yet: each instance of '" +
+                cls->name +
+                "' has a method of its own; decorate a method of a class "
+                "that is not generic, or take only the class and the name");
     return;
   }
 
@@ -399,24 +409,24 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   const Type *descType = nullptr;
   if (descriptor) {
     FuncSymbol *sym = method->sym;
-    sema_.returnInferrer().resolveParams(sym);
-    const Type *ret = sema_.returnInferrer().returnType(sym);
+    checker_.returnInferrer().resolveParams(sym);
+    const Type *ret = checker_.returnInferrer().returnType(sym);
     if (!ret || ret->isError() || llvm::is_contained(sym->params, nullptr)) {
       return;
     }
     descType = methodDescriptorType(Type::tuple(sym->params), ret);
-    VarSymbol *impl = sema_.ctx_.newVar();
-    impl->name = sema_.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() + "." +
-                               std::to_string(method->variant));
+    VarSymbol *impl = checker_.ctx_.newVar();
+    impl->name = checker_.ctx_.keepName("%" + cls->name.str() + "." + method->name.str() + "." +
+                                        std::to_string(method->variant));
     impl->loc = method->loc();
     impl->type = descType->field("value")->type;
     impl->isGlobal = true;
     impl->usedInFunction = true;
     impl->reassigned = true;
-    impl->declSeq = ++sema_.seq_;
-    sema_.scopes().declare(impl->name, impl->loc, {impl});
+    impl->declSeq = ++checker_.seq_;
+    checker_.scopes().declare(impl->name, impl->loc, {impl});
     method->impl = impl;
-    auto *lit = sema_.ctx_.make<ObjectLitExpr>(at);
+    auto *lit = checker_.ctx_.make<ObjectLitExpr>(at);
     auto prop = [&](llvm::StringRef name, Expr *value) {
       ObjectLitExpr::Property p;
       p.name = name;
@@ -424,14 +434,16 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       p.value = value;
       lit->props.push_back(p);
     };
-    prop("value", sema_.ctx_.make<NameExpr>(at, impl->name));
-    prop("writable", sema_.ctx_.make<BoolLitExpr>(at, true));
-    prop("enumerable", sema_.ctx_.make<BoolLitExpr>(at, false));
-    prop("configurable", sema_.ctx_.make<BoolLitExpr>(at, true));
-    Expr *init = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(lit, descType), descType);
-    descVar = sema_.scopes().declareVar(sema_.ctx_.hiddenName(), at, descType, /*isConst=*/false);
+    prop("value", checker_.ctx_.make<NameExpr>(at, impl->name));
+    prop("writable", checker_.ctx_.make<BoolLitExpr>(at, true));
+    prop("enumerable", checker_.ctx_.make<BoolLitExpr>(at, false));
+    prop("configurable", checker_.ctx_.make<BoolLitExpr>(at, true));
+    Expr *init =
+        checker_.typeRelations().coerce(checker_.exprChecker().checkExpr(lit, descType), descType);
+    descVar =
+        checker_.scopes().declareVar(checker_.ctx_.hiddenName(), at, descType, /*isConst=*/false);
     descVar->reassigned = true;
-    auto *decl = sema_.ctx_.make<VarDeclStmt>(at, /*isConst=*/false);
+    auto *decl = checker_.ctx_.make<VarDeclStmt>(at, /*isConst=*/false);
     VarDeclarator d;
     d.name = descVar->name;
     d.loc = at;
@@ -453,13 +465,13 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       }
     }
   }
-  sema_.metadataChecker().writeDesignRecords(cls, field, method, ctor, at);
+  checker_.metadataChecker().writeDesignRecords(cls, field, method, ctor, at);
 
   // Applied from the bottom up, the parameters' first. A class decorator
   // gets the class the one below it gave, if any.
   ClassDecl *current = cls;
   for (size_t i = uses.size(); i-- > 0;) {
-    const Sema::DecoratorUse &use = uses[i];
+    const Checker::DecoratorUse &use = uses[i];
     llvm::SMLoc loc = use.decorator->loc;
     Place place = use.param >= 0 ? Place::Parameter : own;
     if (!callees[i]) {
@@ -467,44 +479,50 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       // cls, name) right here.
       auto *metadata = cast<CallExpr>(use.decorator->expr);
       if (metadata->args.size() != 2 || metadata->hasSpread()) {
-        sema_.diags_.error(loc, "'Reflect.metadata' takes the key and the value of the record, e.g. "
-                          "'@Reflect.metadata(Role, \"admin\")'");
+        checker_.diags_.error(loc,
+                              "'Reflect.metadata' takes the key and the value of the record, e.g. "
+                              "'@Reflect.metadata(Role, \"admin\")'");
         continue;
       }
-      auto *callee =
-          sema_.ctx_.make<MemberExpr>(loc, sema_.ctx_.make<NameExpr>(loc, "Reflect"), "defineMetadata");
-      std::vector<Expr *> args{metadata->args[0], metadata->args[1], sema_.classValueChecker().classValueAt(cls, loc)};
+      auto *callee = checker_.ctx_.make<MemberExpr>(
+          loc, checker_.ctx_.make<NameExpr>(loc, "Reflect"), "defineMetadata");
+      std::vector<Expr *> args{metadata->args[0], metadata->args[1],
+                               checker_.classValueChecker().classValueAt(cls, loc)};
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (place != Place::Class && !(use.param >= 0 && use.owner->isConstructor)) {
-        args.push_back(sema_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
+        args.push_back(
+            checker_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
       }
-      out.push_back(sema_.ctx_.make<ExprStmt>(loc, sema_.exprChecker().checkExpr(sema_.ctx_.make<CallExpr>(loc, callee, args))));
+      out.push_back(checker_.ctx_.make<ExprStmt>(
+          loc, checker_.exprChecker().checkExpr(checker_.ctx_.make<CallExpr>(loc, callee, args))));
       continue;
     }
-    std::vector<Expr *> args{sema_.classValueChecker().classValueAt(place == Place::Class ? current : cls, loc)};
+    std::vector<Expr *> args{
+        checker_.classValueChecker().classValueAt(place == Place::Class ? current : cls, loc)};
     if (place != Place::Class) {
       llvm::StringRef name = use.param >= 0 ? use.owner->name : memberName;
       if (use.param >= 0 && use.owner->isConstructor) {
-        args.push_back(sema_.ctx_.make<UndefinedExpr>(loc));
+        args.push_back(checker_.ctx_.make<UndefinedExpr>(loc));
       } else {
-        args.push_back(sema_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
+        args.push_back(
+            checker_.ctx_.make<StringLitExpr>(loc, std::u16string(name.begin(), name.end())));
       }
     }
     if (place == Place::Parameter) {
-      args.push_back(sema_.ctx_.make<IntLitExpr>(loc, uint64_t(use.param)));
+      args.push_back(checker_.ctx_.make<IntLitExpr>(loc, uint64_t(use.param)));
     } else if (place == Place::Method && descVar) {
-      args.push_back(sema_.ctx_.make<NameExpr>(loc, descVar->name));
+      args.push_back(checker_.ctx_.make<NameExpr>(loc, descVar->name));
     }
     args.resize(std::min(args.size(), takes[i]));
-    auto *call = sema_.ctx_.make<CallExpr>(loc, callees[i], std::move(args));
-    Expr *applied = sema_.exprChecker().checkExpr(call);
+    auto *call = checker_.ctx_.make<CallExpr>(loc, callees[i], std::move(args));
+    Expr *applied = checker_.exprChecker().checkExpr(call);
     const Type *result = applied->type;
     if (descVar && place == Place::Method && result == descType) {
       // `return descriptor`: what it gives back is the descriptor from now on.
-      auto *target = sema_.ctx_.make<NameExpr>(loc, descVar->name);
+      auto *target = checker_.ctx_.make<NameExpr>(loc, descVar->name);
       target->var = descVar;
       target->type = descType;
-      auto *assign = sema_.ctx_.make<AssignExpr>(loc, std::nullopt, target, applied);
+      auto *assign = checker_.ctx_.make<AssignExpr>(loc, std::nullopt, target, applied);
       assign->type = descType;
       applied = assign;
     } else if (place == Place::Class && result->classRef() &&
@@ -512,41 +530,46 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       // A class that extends the one it got, or that one: the name means it
       // from here on (docs/decorators.md, section 5).
       if (ClassDecl *given = const_cast<ClassDecl *>(result->classRef()); given != current) {
-        sema_.lateClasses().replaceClass(current, given, loc);
+        checker_.lateClasses().replaceClass(current, given, loc);
         current = given;
       }
     } else if (!result->isVoid() && !result->isUndefined() && !result->isError()) {
       std::string name = decoratorName(use.decorator->expr);
       std::string label = name.empty() ? "the decorator" : "'" + name + "'";
       if (place == Place::Class && result->isConstructor()) {
-        sema_.diags_.error(loc, label + " returns '" + result->name().str() +
-                              "', some class known only when the program runs, and the class it "
-                              "gives in place of '" +
-                              current->name.str() +
-                              "' must be known when compiling: make the decorator generic, "
-                              "'<T extends Constructor>(cls: T)', and return 'cls' or a class "
-                              "that extends it");
+        checker_.diags_.error(
+            loc, label + " returns '" + result->name().str() +
+                     "', some class known only when the program runs, and the class it "
+                     "gives in place of '" +
+                     current->name.str() +
+                     "' must be known when compiling: make the decorator generic, "
+                     "'<T extends Constructor>(cls: T)', and return 'cls' or a class "
+                     "that extends it");
       } else if (place == Place::Class) {
-        sema_.diags_.error(loc, label + " returns '" + result->name().str() +
-                              "': a class decorator gives back nothing, the class it got, or a "
-                              "class that extends it, which then replaces it");
+        checker_.diags_.error(loc,
+                              label + " returns '" + result->name().str() +
+                                  "': a class decorator gives back nothing, the class it got, or a "
+                                  "class that extends it, which then replaces it");
       } else if (place == Place::Method && descVar) {
-        sema_.diags_.error(loc, label + " returns '" + result->name().str() +
-                              "': a decorator of a method returns nothing, or the descriptor "
-                              "it got");
+        checker_.diags_.error(loc,
+                              label + " returns '" + result->name().str() +
+                                  "': a decorator of a method returns nothing, or the descriptor "
+                                  "it got");
       } else {
-        sema_.diags_.error(loc, label + " returns '" + result->name().str() + "', which a decorator of " +
-                              placeText(place) + " cannot give back; return nothing");
+        checker_.diags_.error(loc, label + " returns '" + result->name().str() +
+                                       "', which a decorator of " + placeText(place) +
+                                       " cannot give back; return nothing");
       }
     }
-    out.push_back(sema_.ctx_.make<ExprStmt>(loc, applied));
+    out.push_back(checker_.ctx_.make<ExprStmt>(loc, applied));
   }
   if (descVar) {
     // What the calls of the method run from now on.
-    auto *target = sema_.ctx_.make<NameExpr>(at, method->impl->name);
-    auto *value = sema_.ctx_.make<MemberExpr>(at, sema_.ctx_.make<NameExpr>(at, descVar->name), "value");
-    auto *assign = sema_.ctx_.make<AssignExpr>(at, std::nullopt, target, value);
-    out.push_back(sema_.ctx_.make<ExprStmt>(at, sema_.exprChecker().checkExpr(assign)));
+    auto *target = checker_.ctx_.make<NameExpr>(at, method->impl->name);
+    auto *value = checker_.ctx_.make<MemberExpr>(
+        at, checker_.ctx_.make<NameExpr>(at, descVar->name), "value");
+    auto *assign = checker_.ctx_.make<AssignExpr>(at, std::nullopt, target, value);
+    out.push_back(checker_.ctx_.make<ExprStmt>(at, checker_.exprChecker().checkExpr(assign)));
   }
 }
 

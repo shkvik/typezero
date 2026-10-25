@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Tuples: literals, elements and methods.
 class TupleChecker {
 public:
-  explicit TupleChecker(Sema &sema);
+  explicit TupleChecker(Checker &checker);
 
   // Tuples: `t.length`, and the methods of arrays, which tuples lack.
   Expr *checkTupleMember(MemberExpr *member);
@@ -18,7 +18,7 @@ public:
   Expr *checkTupleJoin(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,19 +1,19 @@
 #include "compiler/library/result/result_method_checker/result_method_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
-#include "compiler/check/functions/callback_checker/callback_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -38,9 +38,10 @@ static std::string noUnion(const Type *a, const Type *b) {
   return problem.empty() ? "" : ": " + problem;
 }
 
-ResultMethodChecker::ResultMethodChecker(Sema &sema) : sema_(sema) {}
+ResultMethodChecker::ResultMethodChecker(Checker &checker) : checker_(checker) {}
 
-Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
+Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
+                                             const Type *expected) {
   const Type *type = member->object->type;
   const Type *value = type->okType(), *error = type->errType();
   // A variable narrowed by isOk() keeps the type of its error for the
@@ -58,16 +59,16 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   llvm::StringRef name = member->name;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (name == "_unsafeUnwrap" || name == "_unsafeUnwrapErr") {
     // The half asked for, or an Error thrown (neverthrow's ErrorConfig only
     // chooses whether its own error object has a stack; an Error always has).
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     bool unwrapErr = name == "_unsafeUnwrapErr";
@@ -76,17 +77,20 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   if (name == "asyncMap" || name == "asyncAndThen") {
-    return sema_.resultAsyncChecker().checkResultAsyncMethod(call, member, name); // sema_async.cpp
+    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member,
+                                                                name); // sema_async.cpp
   }
   if (name == "asyncAndThrough") {
-    sema_.diags_.error(member->loc(), "'asyncAndThrough' is not supported yet; use 'asyncAndThen', "
-                                "which gives the Result its function gives");
+    checker_.diags_.error(member->loc(),
+                          "'asyncAndThrough' is not supported yet; use 'asyncAndThen', "
+                          "which gives the Result its function gives");
     checkArgsLoosely();
     return call;
   }
   if (name == "safeUnwrap") {
-    sema_.diags_.error(member->loc(), "'safeUnwrap()' is needed only after 'yield*' in safeTry, where "
-                                "'yield* r' does the same");
+    checker_.diags_.error(member->loc(),
+                          "'safeUnwrap()' is needed only after 'yield*' in safeTry, where "
+                          "'yield* r' does the same");
     checkArgsLoosely();
     return call;
   }
@@ -115,12 +119,12 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
   }
   if (!method) {
-    sema_.diags_.error(member->loc(),
-                 "property '" + name + "' does not exist on type '" + type->name() + "'");
+    checker_.diags_.error(member->loc(),
+                          "property '" + name + "' does not exist on type '" + type->name() + "'");
     checkArgsLoosely();
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), method->args, method->args)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->args, method->args)) {
     return call;
   }
   Builtin builtin = method->builtin;
@@ -134,19 +138,19 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   if (builtin == Builtin::ResultUnwrapOr) {
     // The value of an Ok, or the argument.
     Expr *&arg = call->args[0];
-    arg = sema_.exprChecker().checkExpr(arg, givesType(value) ? value : nullptr);
+    arg = checker_.exprChecker().checkExpr(arg, givesType(value) ? value : nullptr);
     const Type *other = arg->type;
     if (other->isError()) {
       return call;
     }
     const Type *result = other->isVoid() ? nullptr : LiteralTypes::unionUnify(value, other);
     if (!result || result->isError()) {
-      sema_.diags_.error(arg->loc(),
-                   "'unwrapOr' gives '" + value->name() + "' for an Ok and '" + other->name() +
-                       "' otherwise, and no type holds both; say what each gives with 'match'");
+      checker_.diags_.error(
+          arg->loc(), "'unwrapOr' gives '" + value->name() + "' for an Ok and '" + other->name() +
+                          "' otherwise, and no type holds both; say what each gives with 'match'");
       return call;
     }
-    arg = sema_.typeRelations().convert(arg, result);
+    arg = checker_.typeRelations().convert(arg, result);
     call->type = result;
     return call;
   }
@@ -162,25 +166,25 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   auto check = [&](Expr *&arg, const Type *half, const Type *ret) -> const Type * {
     if (half->isNever() && !isa<FunctionExpr>(arg)) {
       // Never called, as the Result cannot have that half: any function
-      // will do (and CodeGen leaves the call out).
-      arg = sema_.exprChecker().checkExpr(arg);
+      // will do (and Lowering leaves the call out).
+      arg = checker_.exprChecker().checkExpr(arg);
       if (arg->type->isFunction()) {
         return arg->type->ret();
       }
       if (!arg->type->isError()) {
-        sema_.diags_.error(arg->loc(),
-                     "'" + name + "' needs a function, found '" + arg->type->name() + "'");
+        checker_.diags_.error(arg->loc(),
+                              "'" + name + "' needs a function, found '" + arg->type->name() + "'");
       }
       return nullptr;
     }
-    Sema::Signature sig;
+    Checker::Signature sig;
     sig.pad = false;
     sig.params = {halfParam(half)};
     sig.voidResult = builtin == Builtin::ResultAndTee || builtin == Builtin::ResultOrTee;
     if (isa<FunctionExpr>(arg) && !sig.voidResult) {
       sig.ret = ret;
     }
-    arg = sema_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
+    arg = checker_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
 
     return arg->type->isFunction() ? arg->type->ret() : nullptr;
   };
@@ -194,7 +198,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     const Type *half =
         wantedResult ? (onError ? wantedResult->errType() : wantedResult->okType()) : nullptr;
     ret = check(call->args[0], onError ? error : value,
-                half && (Sema::holdsObjects(half) || Sema::holdsResults(half)) ? half : nullptr);
+                half && (Checker::holdsObjects(half) || Checker::holdsResults(half)) ? half
+                                                                                     : nullptr);
     break;
   }
   case Builtin::ResultAndThen:
@@ -205,7 +210,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     const Type *both = wanted && !wanted->isVoid() ? wanted : nullptr;
     const Type *a = check(call->args[0], value, both);
     const Type *b = check(call->args[1], error, both);
-    sema_.flowChecker().calledFunction();
+    checker_.flowChecker().calledFunction();
     if (!a || !b) {
       return call;
     }
@@ -215,8 +220,8 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *result = a->isVoid() || b->isVoid() ? nullptr : LiteralTypes::unionUnify(a, b);
     if (!result || result->isError()) {
-      sema_.diags_.error(member->loc(), "the functions given to 'match' return '" + a->name() +
-                                      "' and '" + b->name() + "', and no type holds both");
+      checker_.diags_.error(member->loc(), "the functions given to 'match' return '" + a->name() +
+                                               "' and '" + b->name() + "', and no type holds both");
       return call;
     }
     call->type = result;
@@ -226,7 +231,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     ret = check(call->args[0], onError ? error : value, nullptr);
     break;
   }
-  sema_.flowChecker().calledFunction(); // the function may change anything
+  checker_.flowChecker().calledFunction(); // the function may change anything
   if (!ret) {
     return call;
   }
@@ -235,21 +240,22 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     if (ret->isResult()) {
       return true;
     }
-    sema_.diags_.error(call->args[0]->loc(),
-                 "the function given to '" + name +
-                     "' must return a Result, 'ok(...)' or 'err(...)', found '" + ret->name() +
-                     "'" +
-                     (builtin == Builtin::ResultAndThen ? "; to change the value, use 'map'" : ""));
+    checker_.diags_.error(
+        call->args[0]->loc(),
+        "the function given to '" + name +
+            "' must return a Result, 'ok(...)' or 'err(...)', found '" + ret->name() + "'" +
+            (builtin == Builtin::ResultAndThen ? "; to change the value, use 'map'" : ""));
 
     return false;
   };
   auto oneError = [&](const Type *a, const Type *b) {
     const Type *common = ResultTypes::unifyHalf(a, b);
     if (!common) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "the Result has errors of '" + a->name() + "' and the function given to '" +
-                       name + "' returns errors of '" + b->name() + "', which no union holds" +
-                       noUnion(a, b) + "; convert one with 'mapErr'");
+      checker_.diags_.error(call->args[0]->loc(), "the Result has errors of '" + a->name() +
+                                                      "' and the function given to '" + name +
+                                                      "' returns errors of '" + b->name() +
+                                                      "', which no union holds" + noUnion(a, b) +
+                                                      "; convert one with 'mapErr'");
     }
 
     return common;
@@ -283,11 +289,11 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
     const Type *common = ResultTypes::unifyHalf(value, ret->okType());
     if (!common) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "the Result has values of '" + value->name() +
-                       "' and the function given to 'orElse' returns values of '" +
-                       ret->okType()->name() + "', which no union holds" +
-                       noUnion(value, ret->okType()));
+      checker_.diags_.error(call->args[0]->loc(),
+                            "the Result has values of '" + value->name() +
+                                "' and the function given to 'orElse' returns values of '" +
+                                ret->okType()->name() + "', which no union holds" +
+                                noUnion(value, ret->okType()));
       return call;
     }
     call->type = Type::result(common, ret->errType());

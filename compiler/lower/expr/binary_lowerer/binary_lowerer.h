@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Arithmetic and comparisons.
 class BinaryLowerer {
 public:
-  explicit BinaryLowerer(CodeGen &codegen);
+  explicit BinaryLowerer(Lowering &lowering);
 
   llvm::Value *emitBinary(BinaryExpr *bin);
   llvm::Value *emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs, const Type *type);
@@ -15,7 +15,7 @@ public:
   llvm::Value *emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

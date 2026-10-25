@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Members of objects.
 class MemberLowerer {
 public:
-  explicit MemberLowerer(CodeGen &codegen);
+  explicit MemberLowerer(Lowering &lowering);
 
   llvm::Value *emitMember(MemberExpr *member);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

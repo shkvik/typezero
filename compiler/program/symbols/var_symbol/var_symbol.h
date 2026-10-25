@@ -21,7 +21,7 @@ struct FunctionDecl;
 class RegexLitExpr;
 class Type;
 
-// A variable, parameter or global. Created by Sema, shared by all its uses.
+// A variable, parameter or global. Created by Checker, shared by all its uses.
 struct VarSymbol {
   llvm::StringRef name;
   llvm::SMLoc loc;

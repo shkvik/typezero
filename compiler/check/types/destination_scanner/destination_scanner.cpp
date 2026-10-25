@@ -1,21 +1,21 @@
 #include "compiler/check/types/destination_scanner/destination_scanner.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/types/destination/destination.h"
-#include "compiler/check/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/shared_helpers/shared_helpers.h"
+#include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/destination_check_helpers/destination_check_helpers.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -31,9 +31,10 @@ static bool isResultLiteral(const CallExpr *call) {
          !call->hasSpread() && !call->optional;
 }
 
-DestinationScanner::DestinationScanner(Sema &sema) : sema_(sema) {}
+DestinationScanner::DestinationScanner(Checker &checker) : checker_(checker) {}
 
-bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, Sema::DestinationScan &scan) {
+bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts,
+                                          Checker::DestinationScan &scan) {
   // A function declared in a block is visible in all of it.
   for (const Stmt *stmt : stmts) {
     if (auto *fn = dyn_cast<FunctionDecl>(stmt); fn && fn->name == scan.name) {
@@ -43,7 +44,7 @@ bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, Sema::De
   scan.locals.emplace_back();
   for (const Stmt *stmt : stmts) {
     if (auto *fn = dyn_cast<FunctionDecl>(stmt)) {
-      scan.declare(fn->name, sema_.destination().declaredFunctionType(fn));
+      scan.declare(fn->name, checker_.destination().declaredFunctionType(fn));
     }
   }
   bool visible = true;
@@ -61,17 +62,20 @@ bool DestinationScanner::scanDestinations(llvm::ArrayRef<Stmt *> stmts, Sema::De
   return visible;
 }
 
-void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn, Sema::DestinationScan &scan) {
+void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn,
+                                                  Checker::DestinationScan &scan) {
   if (!fn->body || llvm::any_of(fn->params, [&](const Param &p) { return p.name == scan.name; })) {
     return;
   }
   const Type *outer = scan.returns;
   scan.returns =
-      fn->returnType ? sema_.predicateChecker().resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr) : nullptr;
+      fn->returnType
+          ? checker_.predicateChecker().resolveReturnType(const_cast<FunctionDecl *>(fn), nullptr)
+          : nullptr;
   scan.locals.emplace_back();
   for (const Param &param : fn->params) {
-    const Type *type = param.type && !sema_.iterableChecker().isIterableRef(*param.type)
-                           ? sema_.typeResolver().resolveType(*param.type, /*allowVoid=*/false)
+    const Type *type = param.type && !checker_.iterableChecker().isIterableRef(*param.type)
+                           ? checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false)
                            : nullptr;
     if (param.defaultValue) {
       scanDestinations(param.defaultValue, type, scan);
@@ -83,7 +87,7 @@ void DestinationScanner::scanFunctionDestinations(const FunctionDecl *fn, Sema::
   scan.returns = outer;
 }
 
-void DestinationScanner::scanDestinations(const Stmt *stmt, Sema::DestinationScan &scan) {
+void DestinationScanner::scanDestinations(const Stmt *stmt, Checker::DestinationScan &scan) {
   if (!stmt) {
     return;
   }
@@ -98,7 +102,9 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Sema::DestinationSca
     break;
   case Stmt::Kind::VarDecl:
     for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
-      const Type *type = d.typeAnn ? sema_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
+      const Type *type = d.typeAnn
+                             ? checker_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false)
+                             : nullptr;
       if (d.init) {
         scanDestinations(d.init, type, scan);
       }
@@ -190,7 +196,8 @@ void DestinationScanner::scanDestinations(const Stmt *stmt, Sema::DestinationSca
   }
 }
 
-void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink, Sema::DestinationScan &scan) {
+void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink,
+                                          Checker::DestinationScan &scan) {
   auto sub = [&](const Expr *e, const Type *to = nullptr) {
     if (e) {
       scanDestinations(e, to, scan);
@@ -304,7 +311,8 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink, Se
     // The arguments of the constructor of a class, if it has one variant.
     auto *create = cast<NewExpr>(expr);
     const FuncSymbol *ctor = nullptr;
-    if (ClassDecl *cls = scan.hidden(create->name) ? nullptr : sema_.scopes().lookup(create->name).cls) {
+    if (ClassDecl *cls =
+            scan.hidden(create->name) ? nullptr : checker_.scopes().lookup(create->name).cls) {
       if (cls->constructors.size() == 1 && cls->constructors[0]->sym &&
           !cls->constructors[0]->sym->pendingParams) {
         ctor = cls->constructors[0]->sym;
@@ -335,25 +343,27 @@ void DestinationScanner::scanDestinations(const Expr *expr, const Type *sink, Se
   }
 }
 
-const Type *DestinationScanner::peekName(llvm::StringRef name, const Sema::DestinationScan &scan) const {
+const Type *DestinationScanner::peekName(llvm::StringRef name,
+                                         const Checker::DestinationScan &scan) const {
   for (const llvm::StringMap<const Type *> &scope : llvm::reverse(scan.locals)) {
     if (auto found = scope.find(name); found != scope.end()) {
       return found->second;
     }
   }
-  VarSymbol *var = sema_.scopes().lookup(name).var;
+  VarSymbol *var = checker_.scopes().lookup(name).var;
 
   return var ? var->type : nullptr;
 }
 
-const Type *DestinationScanner::peekType(const Expr *expr, const Sema::DestinationScan &scan) const {
+const Type *DestinationScanner::peekType(const Expr *expr,
+                                         const Checker::DestinationScan &scan) const {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name == scan.name ? nullptr : peekName(name->name, scan);
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     // `crypto.subtle`: the SubtleCrypto of tz:webcrypto, whose methods take algorithms.
-    if (member->name == "subtle" && sema_.callChecker().isGlobalName(member->object, "crypto")) {
-      VarSymbol *subtle = sema_.scopes().lookup(kSubtleName).var;
+    if (member->name == "subtle" && checker_.callChecker().isGlobalName(member->object, "crypto")) {
+      VarSymbol *subtle = checker_.scopes().lookup(kSubtleName).var;
       return subtle ? subtle->type : nullptr;
     }
     const Type *object = peekType(member->object, scan);
@@ -395,7 +405,8 @@ const Type *DestinationScanner::peekType(const Expr *expr, const Sema::Destinati
   return nullptr;
 }
 
-std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call, const Sema::DestinationScan &scan) {
+std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
+                                                           const Checker::DestinationScan &scan) {
   // The parameters of a function type, the elements of a rest parameter
   // repeated for the arguments it takes.
   auto spread = [&](llvm::ArrayRef<const Type *> params, bool hasRest) {
@@ -416,7 +427,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return type && type->isFunction() ? spread(type->params(), type->hasRest())
                                         : std::vector<const Type *>{};
     }
-    Sema::ScopeEntry entry = sema_.scopes().lookup(name->name);
+    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
     FuncSymbol *func = entry.func;
     if (entry.var && entry.var->function) {
       func = entry.var->function->sym;
@@ -432,7 +443,8 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
   if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
     // A method of a class, or a static one: if it has one variant.
     auto variant = [&](const ClassDecl *cls, bool isStatic) -> std::vector<const Type *> {
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, isStatic);
+      std::vector<FunctionDecl *> methods =
+          ClassDeclarer::methodsNamed(cls, member->name, isStatic);
       if (methods.size() != 1 || !methods[0]->sym || methods[0]->sym->pendingParams) {
         return {};
       }
@@ -440,7 +452,7 @@ std::vector<const Type *> DestinationScanner::calleeParams(const CallExpr *call,
       return spread(methods[0]->sym->params, methods[0]->sym->hasRest);
     };
     if (auto *name = dyn_cast<NameExpr>(member->object); name && !scan.hidden(name->name)) {
-      if (ClassDecl *cls = sema_.scopes().lookup(name->name).cls) {
+      if (ClassDecl *cls = checker_.scopes().lookup(name->name).cls) {
         return variant(cls, /*isStatic=*/true);
       }
     }

@@ -1,16 +1,16 @@
 #include "compiler/check/types/template_types/template_types.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/check/types/conditional_check_helpers/conditional_check_helpers.h"
 #include "compiler/check/types/extends_relation/extends_relation.h"
 #include "compiler/check/types/type_operators/type_operators.h"
-#include "compiler/check/types/conditional_check_helpers/conditional_check_helpers.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <cmath>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -169,10 +169,10 @@ std::u16string changeCase(TypeOp op, const std::u16string &text) {
 
 } // namespace
 
-TemplateTypes::TemplateTypes(Sema &sema) : sema_(sema) {}
+TemplateTypes::TemplateTypes(Checker &checker) : checker_(checker) {}
 
 bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<const Type *> parts,
-                         Sema::InferMatch *inference) {
+                                  Checker::InferMatch *inference) {
   std::vector<std::u16string> texts;
   std::vector<const Type *> holes;
   for (size_t i = 0; i < parts.size(); ++i) {
@@ -209,7 +209,7 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
         piece = number->name() == utf8(pieces[k]) ? number : constraint->nonOptional();
       }
     }
-    if (!sema_.extendsRelation().extendsType(piece, hole, inference)) {
+    if (!checker_.extendsRelation().extendsType(piece, hole, inference)) {
       return false;
     }
   }
@@ -224,23 +224,24 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
     if (i >= ref.args.size()) {
       break;
     }
-    const Type *hole = sema_.typeResolver().resolveTypeInner(ref.args[i]);
+    const Type *hole = checker_.typeResolver().resolveTypeInner(ref.args[i]);
     if (hole->isError()) {
       return hole;
     }
     for (const Type *m : distributed(hole)) {
       if (!templateHole(m)) {
-        sema_.diags_.error(ref.args[i].loc,
-                     "a template literal type holds strings, numbers, booleans and "
-                     "undefined, not '" +
-                         m->name() + "'");
+        checker_.diags_.error(ref.args[i].loc,
+                              "a template literal type holds strings, numbers, booleans and "
+                              "undefined, not '" +
+                                  m->name() + "'");
         return Type::error();
       }
     }
     operands.push_back(hole);
   }
   templateLoc_ = ref.loc;
-  const Type *type = sema_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+  const Type *type =
+      checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
   templateLoc_ = llvm::SMLoc();
 
   return type;
@@ -282,11 +283,11 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
         made.texts.back() += after;
         next.push_back(std::move(made));
         if (next.size() > kMaxTemplateStrings) {
-          llvm::SMLoc loc = templateLoc_.isValid() ? templateLoc_ : sema_.instanceLoc_;
+          llvm::SMLoc loc = templateLoc_.isValid() ? templateLoc_ : checker_.instanceLoc_;
           if (loc.isValid()) {
-            sema_.diags_.error(loc, "this template literal type makes more than " +
-                                  std::to_string(kMaxTemplateStrings) +
-                                  " strings, the most TypeScript allows; use 'string'");
+            checker_.diags_.error(loc, "this template literal type makes more than " +
+                                           std::to_string(kMaxTemplateStrings) +
+                                           " strings, the most TypeScript allows; use 'string'");
           }
           return Type::error();
         }

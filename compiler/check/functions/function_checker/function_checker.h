@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Functions: their declarations and their bodies.
 class FunctionChecker {
 public:
-  explicit FunctionChecker(Sema &sema);
+  explicit FunctionChecker(Checker &checker);
 
   // Declarations and statements
   // `var` is the variable of a function declared in a block. Without
@@ -16,7 +16,7 @@ public:
   void checkFunctionBody(FunctionDecl *fn);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

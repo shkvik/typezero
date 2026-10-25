@@ -1,14 +1,14 @@
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
+#include "compiler/library/regex/matcher_analysis/matcher_analysis.h"
+#include "compiler/library/regex/matcher_chars/matcher_chars.h"
+#include "compiler/library/regex/matcher_head/matcher_head.h"
+#include "compiler/library/regex/matcher_instructions/matcher_instructions.h"
+#include "compiler/library/regex/matcher_memo/matcher_memo.h"
+#include "compiler/library/regex/matcher_repeats/matcher_repeats.h"
 #include "runtime/library/regex/regex/regex.h"
 #include <array>
 #include <map>
 #include <set>
-#include "compiler/library/regex/matcher_analysis/matcher_analysis.h"
-#include "compiler/library/regex/matcher_chars/matcher_chars.h"
-#include "compiler/library/regex/matcher_memo/matcher_memo.h"
-#include "compiler/library/regex/matcher_head/matcher_head.h"
-#include "compiler/library/regex/matcher_instructions/matcher_instructions.h"
-#include "compiler/library/regex/matcher_repeats/matcher_repeats.h"
 
 namespace tz {
 
@@ -393,13 +393,18 @@ MatcherBuilder::MatcherBuilder(llvm::Module &module, const uint32_t *program, bo
   matcherMemoPart_ = std::make_unique<MatcherMemo>(*this);
   matcherHeadPart_ = std::make_unique<MatcherHead>(*this);
   matcherInstructionsPart_ = std::make_unique<MatcherInstructions>(*this);
-  matcherRepeatsPart_ = std::make_unique<MatcherRepeats>(*this);}
+  matcherRepeatsPart_ = std::make_unique<MatcherRepeats>(*this);
+}
 
-llvm::BasicBlock *MatcherBuilder::newBlock(const llvm::Twine &name) { return llvm::BasicBlock::Create(ctx_, name, fn_); }
+llvm::BasicBlock *MatcherBuilder::newBlock(const llvm::Twine &name) {
+  return llvm::BasicBlock::Create(ctx_, name, fn_);
+}
 
 llvm::Value *MatcherBuilder::i32(uint32_t v) { return b_.getInt32(v); }
 
-llvm::Value *MatcherBuilder::load(llvm::AllocaInst *var) { return b_.CreateLoad(var->getAllocatedType(), var); }
+llvm::Value *MatcherBuilder::load(llvm::AllocaInst *var) {
+  return b_.CreateLoad(var->getAllocatedType(), var);
+}
 
 void MatcherBuilder::store(llvm::Value *v, llvm::AllocaInst *var) { b_.CreateStore(v, var); }
 
@@ -407,7 +412,9 @@ bool MatcherBuilder::open() { return b_.GetInsertBlock() && !b_.GetInsertBlock()
 
 llvm::Value *MatcherBuilder::slotAddress(uint32_t index) { return slotAddress(i32(index)); }
 
-llvm::Value *MatcherBuilder::loadSlot(uint32_t index) { return b_.CreateLoad(b_.getInt32Ty(), slotAddress(index)); }
+llvm::Value *MatcherBuilder::loadSlot(uint32_t index) {
+  return b_.CreateLoad(b_.getInt32Ty(), slotAddress(index));
+}
 
 void MatcherBuilder::setSlot(uint32_t index, llvm::Value *value) { setSlot(i32(index), value); }
 

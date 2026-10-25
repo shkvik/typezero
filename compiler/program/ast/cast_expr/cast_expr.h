@@ -5,10 +5,10 @@
 
 namespace tz {
 
-// A conversion inserted by Sema: a numeric widening, ToInt32 for an operand
+// A conversion inserted by Checker: a numeric widening, ToInt32 for an operand
 // of a bitwise operator, or turning a value into a string for `+` and
 // template literals. `target` is set only for `x as T` in the source, which
-// Sema rejects (see Sema::checkCast).
+// Checker rejects (see Checker::checkCast).
 class CastExpr : public Expr {
 public:
   CastExpr(llvm::SMLoc loc, Expr *operand, std::optional<TypeRef> target)
@@ -28,7 +28,7 @@ public:
   // A function value given a type whose result its own converts to, `(r:
   // Request) => Promise<Response>` where `(r: Request) => Response |
   // Promise<Response>` is expected: a function that calls it and converts
-  // what it gives (see Sema::adaptResult).
+  // what it gives (see Checker::adaptResult).
   bool adaptsResult = false;
 };
 

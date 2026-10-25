@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Error and its kinds: their classes and new.
 class ErrorLowerer {
 public:
-  explicit ErrorLowerer(CodeGen &codegen);
+  explicit ErrorLowerer(Lowering &lowering);
 
   // The class Error (ClassDecl::builtin): its constructor, its descriptor
   // for each kind, the function the runtime makes errors with, and what main
@@ -21,7 +21,7 @@ public:
   llvm::Value *emitErrorBuiltin(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Function *errorMaker_ = nullptr;
 };
 

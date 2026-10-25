@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Regular expressions: literals and the methods of RegExp (docs/regex.md).
 class RegexChecker {
 public:
-  explicit RegexChecker(Sema &sema);
+  explicit RegexChecker(Checker &checker);
 
   // Regular expressions (sema_regex.cpp). A literal is compiled here, so its
   // syntax errors are compile errors, and its groups and flags are known;
@@ -35,7 +35,7 @@ public:
   Expr *regexToString(Expr *regex);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

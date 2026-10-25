@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Unary operators, !, typeof and the names of enums.
 class UnaryLowerer {
 public:
-  explicit UnaryLowerer(CodeGen &codegen);
+  explicit UnaryLowerer(Lowering &lowering);
 
   llvm::Value *emitUnary(UnaryExpr *unary);
   llvm::Value *emitNonNull(UnaryExpr *unary);
@@ -15,7 +15,7 @@ public:
   llvm::Value *emitEnumName(IndexExpr *index);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

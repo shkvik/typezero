@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Unions: conversions, equality, typeof and the tests of members.
 class UnionLowerer {
 public:
-  explicit UnionLowerer(CodeGen &codegen);
+  explicit UnionLowerer(Lowering &lowering);
 
   llvm::Value *emitUnionConversion(llvm::Value *value, const Type *from, const Type *to);
   // Whether `to` holds only members of the union `from` (or of its
@@ -22,7 +22,7 @@ public:
   llvm::Value *emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Type *> types);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   // Objects of a union are told apart by the class number in their
   // descriptor; an object type that is no class has a number of its own,
   // from kPlainIdBase on, above those of every class.

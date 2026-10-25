@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The streams of files and of the process, and Readable.from.
 class StreamSources {
 public:
-  explicit StreamSources(Sema &sema);
+  explicit StreamSources(Checker &checker);
 
   // fs.createReadStream(path, options?) and createWriteStream(), which
   // `decl` of library/stream/fs_stream.tz declares: an encoding gives a stream
@@ -24,7 +24,7 @@ public:
   Expr *checkStreamFrom(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   VarSymbol *processStdin_ = nullptr;
 };
 

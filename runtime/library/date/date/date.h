@@ -96,4 +96,34 @@ double tz_date_time_clip(double time);
 }
 #endif
 
+// What follows is for the runtime only.
+#ifndef __cplusplus
+
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+
+// A Date: an object of the language whose one field is its time value, in
+// milliseconds since 1970 in UTC, NaN for an invalid date. The compiler makes
+// these objects and reads and writes the field. Must match Lowering
+// (compiler/library/date/codegen/codegen_date.cpp).
+typedef struct TzDate {
+  int64_t rc;
+  const TzLayout *layout; // with TZ_LAYOUT_DATE
+  double time;
+} TzDate;
+
+// How console.log shows a date.
+void tz_buf_date(TzBuf *out, double t);
+// toJSON(), as JSON.stringify writes a date: the ISO text, or 0 for an
+// invalid date (null).
+int32_t tz_date_json(TzStr *out, double t);
+// toString() and the like, in local time: `mode` is TZ_DATE_TEXT_* of date.h,
+// 0 for toString(), which join() writes.
+void tz_date_local_string(TzStr *out, double t, int32_t mode);
+
+// The same day and time in an equivalent year of 2008 to 2035 (date.c).
+double tz_date_equivalent_time(double t);
+
+#endif
+
 #endif

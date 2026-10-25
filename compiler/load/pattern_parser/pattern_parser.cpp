@@ -4,6 +4,7 @@
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
 #include "compiler/load/module_parser/module_parser.h"
+#include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
 #include "compiler/load/to_utf8/to_utf8.h"
@@ -100,7 +101,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
       if (parser_.cursor().accept(Tok::LBracket)) {
         e.keyExpr = parser_.exprs().parseExpr();
         parser_.cursor().expect(Tok::RBracket, "to close the key");
-      } else if (!parser_.types().parseFieldName(e.key)) {
+      } else if (!parser_.objectTypes().parseFieldName(e.key)) {
         parser_.cursor().skipToClosingBrace();
         return pattern;
       }

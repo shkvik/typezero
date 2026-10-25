@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The top-level code of each file, and the files a read loads early.
 class TopLevelChecker {
 public:
-  explicit TopLevelChecker(Sema &sema);
+  explicit TopLevelChecker(Checker &checker);
 
   // Checks the top-level code of `module` from where it stopped: to the end,
   // or to the declaration of the global `until`.
@@ -16,7 +16,7 @@ public:
   // an import cycle, that file is checked up to its declaration first, out
   // of turn, when the code here does not run as the file loads: an arrow
   // that uses it, or a function whose return type is needed.
-  Sema::ScopeEntry lookupValue(llvm::StringRef name);
+  Checker::ScopeEntry lookupValue(llvm::StringRef name);
   // The file that declares `name` if it is an import of module_ or a global
   // of module_ while another file loads, and its name there.
   Module *laterSource(llvm::StringRef name, llvm::StringRef &declared);
@@ -35,7 +35,7 @@ public:
   static std::string loadChain(const Module *reader, const Module *source);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

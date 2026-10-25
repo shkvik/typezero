@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {
 
 // Functions that several classes made from sema_destination.cpp use.
 
-struct Sema::DestinationScan {
+struct Checker::DestinationScan {
   llvm::StringRef name; // the variable
   std::vector<std::pair<const Type *, llvm::SMLoc>> found;
   // The names declared in the code scanned so far, which hide the variables

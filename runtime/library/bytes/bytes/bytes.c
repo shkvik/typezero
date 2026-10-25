@@ -1,17 +1,25 @@
 // Binary data (docs/bytes.md): ArrayBuffer, the typed arrays and DataView.
 //
 // An ArrayBuffer is the memory; a typed array, a Buffer or a DataView is a
-// window into it (TzBytes in tzrt.h) that holds a reference to its buffer.
+// window into it (TzBytes in bytes.h) that holds a reference to its buffer.
 // The code reads and writes elements itself, straight from `data` (see
 // compiler/library/bytes/codegen/codegen_bytes.cpp); the runtime makes the
 // objects and does what takes a loop: copies with conversions, fill, set, sort,
 // join...
 //
-// Sema checks that what is stored fits in the element (docs/bytes.md,
+// Checker checks that what is stored fits in the element (docs/bytes.md,
 // section 3), so the conversions here only need to agree with JavaScript
 // where JavaScript converts too: between the kinds of typed arrays, and from
 // doubles.
 
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
 #include <stdio.h>
@@ -697,7 +705,7 @@ void tz_bytes_sort(TzBytes *b) {
 
 // sort(compare): the values in the representation of the language (i32,
 // i64 or double, `size` bytes), which the comparison function the compiler
-// made reads (see CodeGen::sortComparator).
+// made reads (see Lowering::sortComparator).
 typedef int32_t (*TzCompare)(void *ctx, const void *x, const void *y);
 
 static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCompare compare,

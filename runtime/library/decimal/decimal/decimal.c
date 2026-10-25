@@ -1,7 +1,7 @@
 // decimal: exact decimal numbers of any length with the semantics of
 // BigNumber.js (docs/decimal.md), whose results programs are checked against.
 //
-// A value is two words (TzDec in tzrt.h). The short form is a number that
+// A value is two words (TzDec in decimal.h). The short form is a number that
 // fits in an int64 coefficient and a scale: `coef * 10^-scale`, the scale in
 // the low 32 bits of `meta`. It needs no memory, and prices and the like add,
 // subtract, multiply and compare with plain integer instructions: the TZ_HOT
@@ -18,7 +18,16 @@
 // BigNumber.js, a result whose leading digit is beyond 10^MAX_EXP is an
 // error (BigNumber.js gives Infinity) and one below 10^MIN_EXP is zero.
 
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unicode/unicode.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,7 +43,7 @@
 // The limit of the arguments of toFixed and the like, as in BigNumber.js.
 #define ARG_MAX 1000000000
 
-// The rounding modes, numbered as in BigNumber.js; CodeGen passes the number
+// The rounding modes, numbered as in BigNumber.js; Lowering passes the number
 // for a mode written as a string.
 enum {
   ROUND_UP,
@@ -2174,7 +2183,7 @@ double tz_dec_to_f64(int64_t a, uint64_t am) {
   return v;
 }
 
-// A rounding mode given as a string at run time; literals CodeGen maps itself.
+// A rounding mode given as a string at run time; literals Lowering maps itself.
 int32_t tz_dec_rounding_mode(void *obj, uint64_t meta) {
   static const char *const names[] = {"up",        "down",      "ceil",      "floor",     "half-up",
                                       "half-down", "half-even", "half-ceil", "half-floor"};

@@ -1,9 +1,9 @@
 #include "compiler/library/date/date_feature/date_feature.h"
-#include "compiler/check/sema/sema.h"
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
@@ -13,24 +13,23 @@ llvm::ArrayRef<llvm::StringLiteral> DateFeature::typeArgFreeGlobals() const {
   return globals;
 }
 
-Expr *DateFeature::checkMethodCall(Sema &sema, CallExpr *call, MemberExpr *member, const Type *expected) const {
+Expr *DateFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+                                   const Type * /*expected*/) const {
   const Type *receiver = member->object->type;
   if (receiver->isDate()) {
-    return sema.dateChecker().checkDateMethod(call, member);
+    return checker.dateChecker().checkDateMethod(call, member);
   }
   if (receiver->isDateFormat()) {
-    return sema.dateFormatChecker().checkDateFormatMethod(call, member);
+    return checker.dateFormatChecker().checkDateFormatMethod(call, member);
   }
 
   return nullptr;
 }
 
-bool DateFeature::lowers(Builtin builtin) const {
-  return isDateBuiltin(builtin);
-}
+bool DateFeature::lowers(Builtin builtin) const { return isDateBuiltin(builtin); }
 
-llvm::Value *DateFeature::lowerCall(CodeGen &codegen, CallExpr *call) const {
-  return codegen.dateLowerer().emitDateCall(call);
+llvm::Value *DateFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
+  return lowering.dateLowerer().emitDateCall(call);
 }
 
 } // namespace tz

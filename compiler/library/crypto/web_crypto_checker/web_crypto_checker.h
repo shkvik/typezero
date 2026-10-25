@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Web Crypto: the intrinsics of webcrypto.tz.
 class WebCryptoChecker {
 public:
-  explicit WebCryptoChecker(Sema &sema);
+  explicit WebCryptoChecker(Checker &checker);
 
   // Web Crypto (sema_webcrypto.cpp): the intrinsics __tz_subtle_* of
   // library/crypto/webcrypto.tz, the calls of the program on its SubtleCrypto
@@ -19,7 +19,7 @@ public:
   bool isSubtleClass(const Type *type, llvm::StringRef name) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

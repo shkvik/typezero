@@ -6,8 +6,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -47,7 +47,7 @@ const Type *listSlice(const Type *list, size_t begin, size_t end, bool last) {
 }
 
 Inference::Inference(llvm::ArrayRef<const Type *> params, const Origins &origins,
-          std::function<const Type *(const Type *)> elementOf)
+                     std::function<const Type *(const Type *)> elementOf)
     : params(params), candidates(params.size()), weakCandidates(params.size()),
       undefinedSeen(params.size(), false), origins(origins), elementOf(std::move(elementOf)) {}
 
@@ -248,7 +248,8 @@ void Inference::from(const Type *pattern, const Type *actual) {
   }
 }
 
-void Inference::matchList(const Type *pattern, const Type *actual, const std::vector<const Type *> *bound) {
+void Inference::matchList(const Type *pattern, const Type *actual,
+                          const std::vector<const Type *> *bound) {
   llvm::ArrayRef<Field> parts = pattern->fields();
   size_t count = actual->fields().size();
   // How many elements each part takes: one for a type, the length of a

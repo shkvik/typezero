@@ -19,7 +19,7 @@
 // systems posix_spawn starts the program and poll() does the same.
 //
 // What the call gives is made by functions of the program (TzMaker, see
-// CodeGen::spawnMaker): the result of spawnSync, an ExecSyncError, or a
+// Lowering::spawnMaker): the result of spawnSync, an ExecSyncError, or a
 // SystemError when the program could not start.
 
 #ifdef _WIN32
@@ -42,7 +42,17 @@
 #include <unistd.h>
 #endif
 
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -52,7 +62,7 @@
 // compiler/library/child_process/codegen/codegen_child.cpp)
 //===----------------------------------------------------------------------===//
 
-// The call, as Sema checked it (see ChildArg in compiler/program/ast/ast.h).
+// The call, as Checker checked it (see ChildArg in compiler/program/ast/ast.h).
 // Strings, the array, the map and the bytes are borrowed.
 typedef struct {
   TzStr file; // the program; the command of execSync

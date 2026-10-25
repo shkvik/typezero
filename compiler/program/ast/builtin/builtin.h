@@ -142,7 +142,7 @@ enum class Builtin {
   IterEvery,
   IterFind,
   // The functions of Math. The first four round, and give an integer where
-  // one is expected (see Sema::checkMathCall).
+  // one is expected (see Checker::checkMathCall).
   MathFloor,
   MathCeil,
   MathRound,
@@ -199,7 +199,7 @@ enum class Builtin {
   DecShiftedBy,
   DecToFraction,
   // Result of neverthrow (sema_result.cpp). ok(v) and err(e) take their
-  // value; safeTry the generator, which CodeGen calls at once.
+  // value; safeTry the generator, which Lowering calls at once.
   ResultOk,
   ResultErr,
   SafeTry,
@@ -334,7 +334,7 @@ enum class Builtin {
   // readLine(question?) of tz:io.
   ReadLine,
   // node:fs. The path (or the fd, an int, of readFileSync, writeFileSync and
-  // appendFileSync) first, then the options Sema took from the call, in the
+  // appendFileSync) first, then the options Checker took from the call, in the
   // order of the runtime function (see codegen_node.cpp).
   FsReadFile,  // path or fd, flag
   FsWriteFile, // path or fd, data, flag, mode
@@ -398,7 +398,7 @@ enum class Builtin {
   RlQuestionCallback, // query, callback
   RlClose,
   // The synchronous functions of node:child_process (sema_child.cpp,
-  // docs/process.md). Sema gives each call the same arguments, in the order
+  // docs/process.md). Checker gives each call the same arguments, in the order
   // of ChildArg: the program and its arguments, the options, then int
   // literals for what decides the types (stdio, encoding).
   ChildSpawnSync,
@@ -482,7 +482,7 @@ enum class Builtin {
   ResultAsyncUnwrapOr,
   ResultAsyncAndTee,
   ResultAsyncOrTee,
-  // The parts CodeGen adds: the Promise a callback gave settles the
+  // The parts Lowering adds: the Promise a callback gave settles the
   // ResultAsync as an Ok or an Err of its value; after the callback of a
   // tee, the Result kept goes on.
   ResultAsyncWrapOk,
@@ -550,7 +550,7 @@ enum class Builtin {
   TextEncoderNew,
   TextEncode,      // string?
   TextEncodeInto,  // string, destination
-  TextDecoderNew,  // label?, options?: the label is an int (the encoding Sema found) or a string
+  TextDecoderNew,  // label?, options?: the label is an int (the encoding Checker found) or a string
   TextDecode,      // input?
   TextDecoderInfo, // 0 encoding, 1 fatal, 2 ignoreBOM
   EmbedBytes,      // embedBytes(path): the bytes (one per code unit) and the path
@@ -581,7 +581,7 @@ enum class Builtin {
   // `__tz_as<C>(o)`, the object o as an instance of the class C, or undefined
   // if it is not one. The others are declared there, `function __tz_x(...)`
   // without a body, calls of the runtime's tz_x (sema_library.cpp). Then
-  // what Sema makes of the `signal` of a call (signalOption): the runtime's
+  // what Checker makes of the `signal` of a call (signalOption): the runtime's
   // side of the AbortSignal, or undefined.
   LibListener,
   LibAs,
@@ -669,7 +669,7 @@ inline bool isChildBuiltin(Builtin builtin) {
   return builtin >= Builtin::ChildSpawnSync && builtin <= Builtin::ChildExecSync;
 }
 
-// The arguments Sema gives a call of one of them. The program (the command
+// The arguments Checker gives a call of one of them. The program (the command
 // of execSync) is a string and its arguments a string[]; each option is
 // `T | undefined`, undefined when the call does not give it: input a string
 // or a view of bytes, killSignal a string or an int, shell a boolean or a

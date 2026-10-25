@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // new Map and new Set.
 class DictNewChecker {
 public:
-  explicit DictNewChecker(Sema &sema);
+  explicit DictNewChecker(Checker &checker);
 
   // `new Map(...)`, `new Set(...)`, Object.fromEntries, Map.groupBy and
   // Object.groupBy.
@@ -16,7 +16,7 @@ public:
   Expr *checkDictNew(NewExpr *expr, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

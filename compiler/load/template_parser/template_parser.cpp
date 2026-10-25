@@ -3,6 +3,7 @@
 #include "compiler/load/decl_parser/decl_parser.h"
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
+#include "compiler/load/literal_text/literal_text.h"
 #include "compiler/load/module_parser/module_parser.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include "compiler/check/facts/facts.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/decimal/decimal_literal/decimal_literal.h"
@@ -14,6 +13,7 @@
 #include "llvm/ADT/StringSet.h"
 #include <deque>
 #include <map>
+#include <memory>
 #include <optional>
 
 namespace tz {
@@ -43,7 +43,7 @@ enum class NodeModule {
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
 // The name a file that says `crypto.subtle` imports the SubtleCrypto of tz:webcrypto under
-// (compiler/load/loader/loader.cpp), which Sema reads it by (sema_webcrypto.cpp).
+// (compiler/load/loader/loader.cpp), which Checker reads it by (sema_webcrypto.cpp).
 inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
 
 // Why the built-in module `path` (see isBuiltinModule) cannot be imported:
@@ -51,8 +51,8 @@ inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
 // loader reports it.
 std::string builtinModuleProblem(llvm::StringRef path);
 
-// The values an integer expression may have, as far as Sema knows: the
-// bounds it found (see Sema::valueRange).
+// The values an integer expression may have, as far as Checker knows: the
+// bounds it found (see Checker::valueRange).
 struct ValueRange {
   std::optional<int64_t> lo, hi;
 };
@@ -64,7 +64,7 @@ struct ValueRange {
 // round records what the emits it checks pass, and gives the listeners of
 // the events known from the rounds before their types; once a round finds
 // nothing new, a last one checks the program with the maps as they are,
-// for real (see Sema::inferredEventMap).
+// for real (see Checker::inferredEventMap).
 struct EventInference {
   // A type as the next round makes it again: a class (and so a type that
   // has one in it) by its file and name, as each round has declarations
@@ -104,8 +104,8 @@ struct EventInference {
   // The events found so far, in the order found, by the place of the
   // emitter: `new EventEmitter()`, or the class that extends EventEmitter.
   std::map<std::string, std::vector<Event>> maps;
-  bool open = false;    // set by Sema: some emitter's map comes from here
-  bool changed = false; // set by Sema: the round found more
+  bool open = false;    // set by Checker: some emitter's map comes from here
+  bool changed = false; // set by Checker: the round found more
   bool final = false;   // set by EventRounds: the maps are complete
 };
 
@@ -119,7 +119,7 @@ struct EventInference {
 // the like where an integer is expected. There is no `as`. Integer literals
 // take the type the context expects (`let x: double = 1 / 2` divides floats).
 //
-// Sema also follows the flow of the program (see Flow): it narrows
+// Checker also follows the flow of the program (see Flow): it narrows
 // `T | undefined` after checks such as `x !== undefined`, and it proves
 // indices in range. A read `a[i]` it can prove has type `T` and needs no check
 // at run time; any other read has type `T | undefined`, as in JavaScript.
@@ -289,14 +289,15 @@ class StreamPipeline;
 class TzModulesChecker;
 class WeakRefChecker;
 
-class Sema {
+class Checker {
 public:
-  Sema(AstContext &ctx, Diagnostics &diags);
-  // What `await` of a value of `type` gives (see awaitedType), for CodeGen.
+  Checker(AstContext &ctx, Diagnostics &diags);
+  // What `await` of a value of `type` gives (see awaitedType), for Lowering.
   static const Type *awaitedTypeOf(const Type *type);
   // Where the event maps found from emit() calls are kept between rounds
   // (see EventInference); without it they are errors.
   void setEventInference(EventInference *inference) { inference_ = inference; }
+
 private:
   struct ScopeEntry {
     VarSymbol *var = nullptr;
@@ -389,7 +390,7 @@ private:
   // memory share one instance (see representation).
   struct Signature;
   struct Instance {
-    FunctionDecl *decl = nullptr; // the copy, which CodeGen emits
+    FunctionDecl *decl = nullptr; // the copy, which Lowering emits
     FuncSymbol *generic = nullptr;
     // An instance of a generic class instead (see instantiateClass): the
     // class made, whose bodies are checked as those of a copy of a function.
@@ -909,7 +910,7 @@ private:
   llvm::DenseMap<const VarSymbol *, std::string> constPrefixes_;
 
 public:
-  ~Sema();
+  ~Checker();
 
   Scopes &scopes() const { return *scopesPart_; }
   TypeResolver &typeResolver() const { return *typeResolverPart_; }
@@ -987,7 +988,9 @@ public:
   GenericInstantiator &genericInstantiator() const { return *genericInstantiatorPart_; }
   AliasInstantiator &aliasInstantiator() const { return *aliasInstantiatorPart_; }
   GenericClassChecker &genericClassChecker() const { return *genericClassCheckerPart_; }
-  GenericClassInstantiator &genericClassInstantiator() const { return *genericClassInstantiatorPart_; }
+  GenericClassInstantiator &genericClassInstantiator() const {
+    return *genericClassInstantiatorPart_;
+  }
   ReturnInferrer &returnInferrer() const { return *returnInferrerPart_; }
   ClassBases &classBases() const { return *classBasesPart_; }
   ClassLinks &classLinks() const { return *classLinksPart_; }

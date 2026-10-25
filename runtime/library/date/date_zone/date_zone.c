@@ -13,7 +13,12 @@
 // then local time there is UTC.
 
 #include "runtime/library/intl/icu/icu.h"
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/date/date_zone/date_zone.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
+#include "runtime/library/date/date/date.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

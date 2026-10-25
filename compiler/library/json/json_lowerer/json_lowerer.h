@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Json, JSON.parse and stringify, embedJson.
 class JsonLowerer {
 public:
-  explicit JsonLowerer(CodeGen &codegen);
+  explicit JsonLowerer(Lowering &lowering);
 
   // Json (codegen_json.cpp): a pointer to a node of the runtime
   // (runtime/library/json/json/json.c), counted as objects are; `Json |
@@ -31,7 +31,7 @@ public:
   llvm::Value *emitJsonObjectCall(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   // The values of embedJson, by the path of the file.
   std::map<std::u16string, llvm::GlobalVariable *> embedCaches_;
 };

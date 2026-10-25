@@ -18,7 +18,7 @@ public:
 
   Expr *value; // null for a bare `yield`
   bool delegate;
-  // Set by Sema. The statement drops the value of the `yield`, so what
+  // Set by Checker. The statement drops the value of the `yield`, so what
   // next() sends does not matter. For `yield*`, the type of the values the
   // iterable gives, which each become the generator's.
   bool discarded = false;

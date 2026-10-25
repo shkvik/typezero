@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // spawnSync, execFileSync and execSync of node:child_process (docs/process.md).
 class ChildChecker {
 public:
-  explicit ChildChecker(Sema &sema);
+  explicit ChildChecker(Checker &checker);
 
   // spawnSync, execFileSync and execSync of node:child_process
   // (sema_child.cpp).
@@ -16,7 +16,7 @@ public:
   void declareExecSyncError();
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

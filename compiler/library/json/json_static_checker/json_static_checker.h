@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // JSON.parse, JSON.stringify and embedJson.
 class JsonStaticChecker {
 public:
-  explicit JsonStaticChecker(Sema &sema);
+  explicit JsonStaticChecker(Checker &checker);
 
   // JSON.parse, JSON.parse<T> and JSON.stringify.
   Expr *checkJsonStatic(CallExpr *call, MemberExpr *member);
@@ -21,7 +21,7 @@ public:
                     std::string &full);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

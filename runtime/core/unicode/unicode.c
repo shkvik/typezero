@@ -1,7 +1,9 @@
 // Unicode case mapping for toUpperCase and toLowerCase, from the tables in
 // unicode_tables.h (see gen_unicode_tables.mjs).
 
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unicode/unicode.h"
+#include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
   uint32_t start, end;

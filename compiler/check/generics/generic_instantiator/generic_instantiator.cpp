@@ -1,15 +1,15 @@
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
-#include "compiler/instances/late_classes/late_classes.h"
-#include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
-#include "compiler/check/generics/generic_class_checker/generic_class_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/check/generics/generic_check_helpers/generic_check_helpers.h"
+#include "compiler/check/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/check/generics/inference/inference.h"
+#include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
+#include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -17,8 +17,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -102,12 +102,13 @@ std::string bindingList(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<cons
 
 } // namespace
 
-GenericInstantiator::GenericInstantiator(Sema &sema) : sema_(sema) {}
+GenericInstantiator::GenericInstantiator(Checker &checker) : checker_(checker) {}
 
-Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic, const Sema::Signature *expected) {
+Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic,
+                                             const Checker::Signature *expected) {
   name->type = Type::error();
-  sema_.returnInferrer().resolveParams(generic);
-  const Type *ret = sema_.returnInferrer().returnType(generic);
+  checker_.returnInferrer().resolveParams(generic);
+  const Type *ret = checker_.returnInferrer().returnType(generic);
   if (returnsOwnClass(generic, ret)) {
     ret = nullptr;
   }
@@ -115,21 +116,21 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
   std::vector<const Type *> bound(typeParams.size(), nullptr);
   if (!name->typeArgs.empty()) {
     if (name->typeArgs.size() > typeParams.size()) {
-      sema_.diags_.error(name->loc(), "'" + generic->name + "' takes " +
-                                    std::to_string(typeParams.size()) + " type argument" +
-                                    (typeParams.size() == 1 ? "" : "s") + ", but got " +
-                                    std::to_string(name->typeArgs.size()));
+      checker_.diags_.error(name->loc(), "'" + generic->name + "' takes " +
+                                             std::to_string(typeParams.size()) + " type argument" +
+                                             (typeParams.size() == 1 ? "" : "s") + ", but got " +
+                                             std::to_string(name->typeArgs.size()));
       return name;
     }
     for (size_t k = 0; k < name->typeArgs.size(); ++k) {
-      bound[k] = sema_.typeResolver().resolveType(name->typeArgs[k], /*allowVoid=*/false);
+      bound[k] = checker_.typeResolver().resolveType(name->typeArgs[k], /*allowVoid=*/false);
     }
   } else if (expected) {
     // `lists.map(first)`, `const f: (xs: int[]) => int | undefined = first`
     // From the parameters first; the result gives only what they do not
     // (a result that does not fit is reported where the value goes).
-    Inference fromParams(typeParams, sema_.aliasOrigins_, nullptr),
-        fromResult(typeParams, sema_.aliasOrigins_, nullptr);
+    Inference fromParams(typeParams, checker_.aliasOrigins_, nullptr),
+        fromResult(typeParams, checker_.aliasOrigins_, nullptr);
     for (size_t i = 0; i < generic->params.size() && i < expected->params.size(); ++i) {
       if (expected->params[i]) {
         fromParams.from(generic->params[i], expected->params[i]);
@@ -153,24 +154,27 @@ Expr *GenericInstantiator::checkGenericValue(NameExpr *name, FuncSymbol *generic
       }
     }
   } else {
-    sema_.diags_.error(name->loc(), "'" + generic->name +
-                                  "' is generic, so a value of it needs its type arguments, "
-                                  "e.g. '" +
-                                  generic->name + "<int>', or a function type where it goes");
+    checker_.diags_.error(name->loc(),
+                          "'" + generic->name +
+                              "' is generic, so a value of it needs its type arguments, "
+                              "e.g. '" +
+                              generic->name + "<int>', or a function type where it goes");
     return name;
   }
-  if (!sema_.typeArgInferrer().finishTypeArgs(generic, bound, name->loc(), /*call=*/false) || !ret) {
+  if (!checker_.typeArgInferrer().finishTypeArgs(generic, bound, name->loc(), /*call=*/false) ||
+      !ret) {
     return name;
   }
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
-    params.push_back(sema_.typeParams().substitute(p, typeParams, bound));
+    params.push_back(checker_.typeParams().substitute(p, typeParams, bound));
   }
   name->func = generic;
-  name->type = Type::function(params, generic->minArgs, generic->hasRest,
-                              sema_.typeParams().substitute(ret, typeParams, bound), generic->hasThis);
+  name->type =
+      Type::function(params, generic->minArgs, generic->hasRest,
+                     checker_.typeParams().substitute(ret, typeParams, bound), generic->hasThis);
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); });
-  if (concrete && !sema_.trial_ && !generic->inferring) {
+  if (concrete && !checker_.trial_ && !generic->inferring) {
     if (FuncSymbol *instance = instantiate(generic, bound, name->loc())) {
       name->func = instance;
     }
@@ -186,17 +190,18 @@ bool GenericInstantiator::returnsOwnClass(const FuncSymbol *generic, const Type 
     return false;
   }
   if (ownClassReturns_.insert(generic).second) {
-    sema_.diags_.error(cls->literal->loc(),
-                 "generic function '" + generic->name +
-                     "' cannot return an object literal with methods yet: each copy of "
-                     "it makes a class of its own; declare a class, or give the "
-                     "object function fields, 'f: () => ...'");
+    checker_.diags_.error(cls->literal->loc(),
+                          "generic function '" + generic->name +
+                              "' cannot return an object literal with methods yet: each copy of "
+                              "it makes a class of its own; declare a class, or give the "
+                              "object function fields, 'f: () => ...'");
   }
 
   return true;
 }
 
-std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call, const FuncSymbol *generic) {
+std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call,
+                                                              const FuncSymbol *generic) {
   std::vector<const Type *> exact;
   if (generic->hasRest) {
     return exact;
@@ -224,7 +229,7 @@ std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call, co
     call->args[i] = arg;
     // The class no longer becomes a Constructor here.
     for (const CastExpr *conv : dropped) {
-      sema_.constructorCasts_.erase(conv);
+      checker_.constructorCasts_.erase(conv);
     }
   }
 
@@ -232,13 +237,15 @@ std::vector<const Type *> GenericInstantiator::exactClassArgs(CallExpr *call, co
 }
 
 FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef<const Type *> args,
-                              llvm::SMLoc loc, llvm::ArrayRef<const Type *> exact) {
+                                             llvm::SMLoc loc, llvm::ArrayRef<const Type *> exact) {
   if (llvm::any_of(args, [](const Type *t) { return t->isError(); })) {
     return nullptr;
   }
   std::vector<const Type *> reps;
   for (size_t k = 0; k < args.size(); ++k) {
-    reps.push_back(sema_.typeParams().exactTypeParam(generic, k) ? args[k] : TypeParams::representation(args[k]));
+    reps.push_back(checker_.typeParams().exactTypeParam(generic, k)
+                       ? args[k]
+                       : TypeParams::representation(args[k]));
   }
   // A copy for classes known when compiling is one of its own.
   std::vector<const Type *> keyTypes = reps;
@@ -248,51 +255,51 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   }
   auto key = std::make_pair(static_cast<const FuncSymbol *>(generic), keyTypes);
   if (auto found = instances_.find(key); found != instances_.end()) {
-    Sema::Instance *instance = found->second;
+    Checker::Instance *instance = found->second;
     // From the body of another instance: that one fails if this one does.
-    if (sema_.checkingInstance_ && !instance->checked && !instance->checking) {
+    if (checker_.checkingInstance_ && !instance->checked && !instance->checking) {
       checkInstance(instance);
     }
-    if (sema_.checkingInstance_ && instance->failed) {
+    if (checker_.checkingInstance_ && instance->failed) {
       reportInstance(instance, loc, args);
     }
     return instance->decl->sym;
   }
   unsigned chain = 0;
-  for (const Sema::Instance *i = sema_.checkingInstance_; i; i = i->requester) {
+  for (const Checker::Instance *i = checker_.checkingInstance_; i; i = i->requester) {
     chain += i->generic == generic;
   }
   if (chain >= kMaxInstanceChain) {
-    sema_.diags_.error(loc,
-                 "calling '" + generic->name +
-                     "' here needs another copy of it for each copy of the "
-                     "functions that lead here, without end: its type arguments keep growing ('" +
-                     typeList(args) +
-                     "' by now); generic functions that call each other must pass "
-                     "their type parameters on unchanged");
+    checker_.diags_.error(
+        loc, "calling '" + generic->name +
+                 "' here needs another copy of it for each copy of the "
+                 "functions that lead here, without end: its type arguments keep growing ('" +
+                 typeList(args) +
+                 "' by now); generic functions that call each other must pass "
+                 "their type parameters on unchanged");
     return nullptr;
   }
 
   // The types of the copy: a computation over them that has no answer
   // (`keyof` of something that is no object) is reported here.
   for (const Type *t : generic->params) {
-    if (t && sema_.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
-      if (!sema_.checkingInstance_) {
-        sema_.diags_.error(loc, "cannot call '" + generic->name + "' with " +
-                              bindingList(generic->typeParams, args) +
-                              ": the types of its parameters, '" + t->name() +
-                              "', mean nothing for these types");
+    if (t && checker_.typeParams().substitute(t, generic->typeParams, reps)->isError()) {
+      if (!checker_.checkingInstance_) {
+        checker_.diags_.error(loc, "cannot call '" + generic->name + "' with " +
+                                       bindingList(generic->typeParams, args) +
+                                       ": the types of its parameters, '" + t->name() +
+                                       "', mean nothing for these types");
       }
       return nullptr;
     }
   }
-  Sema::Instance &instance = sema_.instanceStore_.emplace_back();
+  Checker::Instance &instance = checker_.instanceStore_.emplace_back();
   instance.generic = generic;
   instance.args = reps;
   instance.concrete.assign(args.begin(), args.end());
   instance.exact.assign(exact.begin(), exact.end());
   instance.callLoc = loc;
-  instance.requester = sema_.checkingInstance_;
+  instance.requester = checker_.checkingInstance_;
   instance.decl = instanceDecl(generic, reps, exact);
   instances_[key] = &instance;
   // A copy of a generic method takes `this`: it is emitted with the other
@@ -300,18 +307,18 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   if (ClassDecl *cls = generic->decl->cls; cls && !generic->decl->isStatic) {
     cls->methodInstances.push_back(instance.decl);
   } else {
-    sema_.file_->instances.push_back(instance.decl);
+    checker_.file_->instances.push_back(instance.decl);
   }
   // A copy of a template is checked right away: its body says what it
   // returns.
-  if (sema_.lateClasses().isTemplate(generic)) {
-    sema_.lateClasses().checkTemplateInstance(&instance);
+  if (checker_.lateClasses().isTemplate(generic)) {
+    checker_.lateClasses().checkTemplateInstance(&instance);
     if (instance.failed) {
       reportInstance(&instance, loc, args);
     }
     return instance.decl->sym;
   }
-  if (sema_.checkingInstance_) {
+  if (checker_.checkingInstance_) {
     checkInstance(&instance);
     if (instance.failed) {
       reportInstance(&instance, loc, args);
@@ -319,38 +326,40 @@ FuncSymbol *GenericInstantiator::instantiate(FuncSymbol *generic, llvm::ArrayRef
   } else {
     // Checked at the end, when every global is declared, as function bodies
     // are.
-    sema_.pendingInstances_.push_back(&instance);
+    checker_.pendingInstances_.push_back(&instance);
   }
 
   return instance.decl->sym;
 }
 
-FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic, llvm::ArrayRef<const Type *> args,
-                                 llvm::ArrayRef<const Type *> exact) {
+FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic,
+                                                llvm::ArrayRef<const Type *> args,
+                                                llvm::ArrayRef<const Type *> exact) {
   FunctionDecl *original = generic->decl;
-  FunctionDecl *copy = sema_.returnInferrer().freshCopy(original);
+  FunctionDecl *copy = checker_.returnInferrer().freshCopy(original);
   copy->isInstance = true;
   copy->typeArgs.assign(args.begin(), args.end());
   llvm::ArrayRef<const Type *> params = generic->typeParams;
-  FuncSymbol *sym = sema_.ctx_.newFunc();
+  FuncSymbol *sym = checker_.ctx_.newFunc();
   sym->name = generic->name;
   sym->loc = generic->loc;
   sym->decl = copy;
   for (const Type *p : generic->params) {
-    sym->params.push_back(sema_.typeParams().substitute(p, params, args));
+    sym->params.push_back(checker_.typeParams().substitute(p, params, args));
   }
   sym->minArgs = generic->minArgs;
   sym->hasRest = generic->hasRest;
   // A copy of a template finds its own, from its body.
-  sym->ret = generic->ret ? sema_.typeParams().substitute(generic->ret, params, args) : nullptr;
+  sym->ret = generic->ret ? checker_.typeParams().substitute(generic->ret, params, args) : nullptr;
   // `x is T` of the instance: of its type arguments.
   sym->predicateParam = generic->predicateParam;
   sym->asserts = generic->asserts;
   if (generic->predicateType) {
-    sym->predicateType = sema_.typeParams().substitute(generic->predicateType, params, args);
+    sym->predicateType = checker_.typeParams().substitute(generic->predicateType, params, args);
   }
   for (size_t i = 0; i < copy->params.size() && i < original->params.size(); ++i) {
-    copy->params[i].declaredType = sema_.typeParams().substitute(original->params[i].declaredType, params, args);
+    copy->params[i].declaredType =
+        checker_.typeParams().substitute(original->params[i].declaredType, params, args);
   }
   // The classes known when compiling it is made for (see exactClassArgs).
   for (size_t i = 0; i < exact.size() && i < sym->params.size() && i < copy->params.size(); ++i) {
@@ -360,26 +369,26 @@ FunctionDecl *GenericInstantiator::instanceDecl(FuncSymbol *generic, llvm::Array
   }
   copy->sym = sym;
   // `...args: A` with A an argument list: its parameters.
-  sema_.argListChecker().expandArgumentList(copy, sym);
+  checker_.argListChecker().expandArgumentList(copy, sym);
   // The copy sees the names of the file that declares the generic function.
-  if (Module *home = sema_.declModules_.lookup(original)) {
-    sema_.declModules_[copy] = home;
+  if (Module *home = checker_.declModules_.lookup(original)) {
+    checker_.declModules_[copy] = home;
   }
 
   return copy;
 }
 
-void GenericInstantiator::checkInstance(Sema::Instance *instance) {
+void GenericInstantiator::checkInstance(Checker::Instance *instance) {
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
   // A generic function with errors in its own body has them in every copy.
-  if (!sema_.brokenGenerics_.contains(instance->generic)) {
-    Sema::BodyState saved = sema_.returnInferrer().enterBody(instance->decl);
-    sema_.checkingInstance_ = instance;
-    sema_.diags_.setCapture(&errors);
-    sema_.flow_ = Sema::Flow();
-    sema_.functionChecker().checkFunctionBody(instance->decl);
-    sema_.returnInferrer().leaveBody(saved);
+  if (!checker_.brokenGenerics_.contains(instance->generic)) {
+    Checker::BodyState saved = checker_.returnInferrer().enterBody(instance->decl);
+    checker_.checkingInstance_ = instance;
+    checker_.diags_.setCapture(&errors);
+    checker_.flow_ = Checker::Flow();
+    checker_.functionChecker().checkFunctionBody(instance->decl);
+    checker_.returnInferrer().leaveBody(saved);
   }
   instance->checking = false;
   instance->checked = true;
@@ -396,57 +405,59 @@ void GenericInstantiator::checkInstance(Sema::Instance *instance) {
   // 'object' there), make a clearer message: the same check with them.
   std::vector<Diagnostics::Captured> precise;
   FunctionDecl *copy = instanceDecl(instance->generic, instance->concrete, instance->exact);
-  Sema::BodyState saved = sema_.returnInferrer().enterBody(copy);
-  sema_.checkingInstance_ = instance;
-  sema_.diags_.setCapture(&precise);
-  sema_.flow_ = Sema::Flow();
-  sema_.functionChecker().checkFunctionBody(copy);
-  sema_.returnInferrer().leaveBody(saved);
+  Checker::BodyState saved = checker_.returnInferrer().enterBody(copy);
+  checker_.checkingInstance_ = instance;
+  checker_.diags_.setCapture(&precise);
+  checker_.flow_ = Checker::Flow();
+  checker_.functionChecker().checkFunctionBody(copy);
+  checker_.returnInferrer().leaveBody(saved);
   if (!precise.empty()) {
     instance->message = precise.front().message;
     instance->errorLoc = precise.front().loc;
   }
 }
 
-void GenericInstantiator::reportInstance(Sema::Instance *instance, llvm::SMLoc callLoc,
-                          llvm::ArrayRef<const Type *> concrete) {
-  if (sema_.diags_.capture()) {
+void GenericInstantiator::reportInstance(Checker::Instance *instance, llvm::SMLoc callLoc,
+                                         llvm::ArrayRef<const Type *> concrete) {
+  if (checker_.diags_.capture()) {
     // In the body of another instance: this call is where that one fails.
-    sema_.failedCalls_[callLoc.getPointer()] = instance;
-    sema_.diags_.error(callLoc, instance->message);
+    checker_.failedCalls_[callLoc.getPointer()] = instance;
+    checker_.diags_.error(callLoc, instance->message);
     return;
   }
   const FuncSymbol *generic = instance->generic;
-  sema_.diags_.error(callLoc, "cannot call '" + generic->name + "' with " +
-                            bindingList(generic->typeParams, concrete) + ": " + instance->message);
+  checker_.diags_.error(callLoc, "cannot call '" + generic->name + "' with " +
+                                     bindingList(generic->typeParams, concrete) + ": " +
+                                     instance->message);
   // The calls that lead to the error, one instance into another, until
   // they go round.
   // An instance of a generic class is used rather than called.
-  auto nameOf = [](const Sema::Instance *i) { return i->cls ? i->cls->name : i->generic->name; };
-  const Sema::Instance *at = instance;
+  auto nameOf = [](const Checker::Instance *i) { return i->cls ? i->cls->name : i->generic->name; };
+  const Checker::Instance *at = instance;
   llvm::SmallPtrSet<const char *, 8> shown;
   while (at && at->errorLoc.isValid() && shown.insert(at->errorLoc.getPointer()).second) {
-    const Sema::Instance *next = sema_.failedCalls_.lookup(at->errorLoc.getPointer());
+    const Checker::Instance *next = checker_.failedCalls_.lookup(at->errorLoc.getPointer());
     if (next) {
-      sema_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', which " +
-                                    (next->cls ? "uses '" : "calls '") + nameOf(next) + "' here");
+      checker_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', which " +
+                                             (next->cls ? "uses '" : "calls '") + nameOf(next) +
+                                             "' here");
     } else {
-      sema_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
+      checker_.diags_.note(at->errorLoc, "in '" + nameOf(at) + "', here");
     }
     at = next;
   }
 }
 
 void GenericInstantiator::checkInstances() {
-  for (size_t i = 0; i < sema_.pendingInstances_.size(); ++i) {
-    Sema::Instance *instance = sema_.pendingInstances_[i];
+  for (size_t i = 0; i < checker_.pendingInstances_.size(); ++i) {
+    Checker::Instance *instance = checker_.pendingInstances_[i];
     if (instance->checked) {
       continue;
     }
     if (instance->cls) {
-      sema_.genericClassChecker().checkClassInstance(instance);
+      checker_.genericClassChecker().checkClassInstance(instance);
       if (instance->failed) {
-        sema_.genericClassChecker().reportClassInstance(instance, instance->callLoc);
+        checker_.genericClassChecker().reportClassInstance(instance, instance->callLoc);
       }
       continue;
     }
@@ -455,7 +466,7 @@ void GenericInstantiator::checkInstances() {
       reportInstance(instance, instance->callLoc, instance->concrete);
     }
   }
-  sema_.pendingInstances_.clear();
+  checker_.pendingInstances_.clear();
 }
 
 } // namespace tz

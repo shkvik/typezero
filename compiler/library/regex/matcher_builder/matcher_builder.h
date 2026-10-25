@@ -1,9 +1,9 @@
 #pragma once
 
-#include <memory>
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 #include <array>
 #include <map>
+#include <memory>
 #include <set>
 
 namespace tz {
@@ -77,6 +77,7 @@ public:
   MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal);
   // Null when the regex is too large for code of its own.
   llvm::Function *build();
+
 private:
   llvm::BasicBlock *newBlock(const llvm::Twine &name);
   llvm::BasicBlock *blockAt(uint32_t pc);
@@ -136,7 +137,7 @@ private:
   bool scanEmpty_ = false; // some offset has no byte at all: no match
   llvm::Function *fn_ = nullptr;
   llvm::Value *units_ = nullptr, *length_ = nullptr, *start_ = nullptr, *caps_ = nullptr,
-        *sticky_ = nullptr, *max_ = nullptr;
+              *sticky_ = nullptr, *max_ = nullptr;
   llvm::AllocaInst *pos_ = nullptr, *top_ = nullptr, *base_ = nullptr, *capacity_ = nullptr,
                    *value_ = nullptr, *attempt_ = nullptr, *next_ = nullptr, *skip_ = nullptr,
                    *slots_ = nullptr, *result_ = nullptr, *steps_ = nullptr, *search_ = nullptr,
@@ -184,7 +185,7 @@ private:
 };
 
 // The memo (TzReMemo in runtime/library/regex/regex/regex.h): its fields.
-inline enum { kMemoPages, kMemoRows, kMemoLength, kMemoLog, kMemoLogLength, kMemoLogCapacity };
+enum { kMemoPages, kMemoRows, kMemoLength, kMemoLog, kMemoLogLength, kMemoLogCapacity };
 
 // How many entries the code of the instruction at `pc` may push at most.
 uint32_t pushesOf(const uint32_t *code, uint32_t pc);

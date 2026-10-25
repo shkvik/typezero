@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Binary operators, equality and ??.
 class BinaryChecker {
 public:
-  explicit BinaryChecker(Sema &sema);
+  explicit BinaryChecker(Checker &checker);
 
   Expr *checkBinary(BinaryExpr *binary, const Type *expected, bool wraps);
   Expr *checkEquality(BinaryExpr *bin);
@@ -19,7 +19,7 @@ public:
   void reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs, const Type *rhs);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

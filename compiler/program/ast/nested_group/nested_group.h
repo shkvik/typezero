@@ -17,7 +17,7 @@ struct NestedGroup {
   // nothing mentions them.
   size_t firstUse = ~size_t(0);
   unsigned creationSeq = 0;
-  // Used by Sema while it checks the block: where the block's scope and
+  // Used by Checker while it checks the block: where the block's scope and
   // function are, the names the block declares and the names the functions
   // assign to.
   size_t scopeDepth = 0, functionDepth = 0;

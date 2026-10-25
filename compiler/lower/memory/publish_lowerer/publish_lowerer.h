@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Values published to other threads, and the values pinned for them.
 class PublishLowerer {
 public:
-  explicit PublishLowerer(CodeGen &codegen);
+  explicit PublishLowerer(Lowering &lowering);
 
   void pinValue(llvm::Value *value, const Type *type);
   void endValue(llvm::Value *value, const Type *type);
@@ -21,7 +21,7 @@ public:
                                   llvm::StringRef name);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

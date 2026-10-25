@@ -16,7 +16,7 @@ struct SwitchStmt : Stmt {
 
   Expr *discriminant;
   std::vector<SwitchCase> cases;
-  // Set by Sema: the cases handle every value of the literal type the switch
+  // Set by Checker: the cases handle every value of the literal type the switch
   // tests, so one of them always runs, as with a default.
   bool exhaustive = false;
 };

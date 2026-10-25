@@ -17,13 +17,13 @@ struct TypeAliasDecl : Stmt {
 
   llvm::StringRef name;
   // `type Pair<T> = ...`: a generic alias, which names a type for each list
-  // of type arguments (see Sema::instantiateAlias).
+  // of type arguments (see Checker::instantiateAlias).
   std::vector<TypeParamDecl> typeParams;
   TypeRef type;
   // `interface User extends Named, Dated { ... }`: the interfaces whose
   // fields User has too, and which it may be used as.
   std::vector<TypeRef> bases;
-  // Set by Sema.
+  // Set by Checker.
   const Type *resolved = nullptr;
   bool resolving = false; // catches an alias that refers to itself
   // An object type, or a union of them, may refer to itself through its

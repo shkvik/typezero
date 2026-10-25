@@ -3,7 +3,21 @@
 // formatting, panics, the debugger statement, startup and shutdown.
 // Strings live in string.c, the rest of process in process.c.
 
+#include "runtime/core/output/output.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/number/number.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/library/fs/readline/readline.h"
+#include "runtime/library/intl/intl/intl.h"
+#include "runtime/library/json/json/json.h"
+#include "runtime/library/process/process/process.h"
+#include "runtime/library/reflect/meta/meta.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>

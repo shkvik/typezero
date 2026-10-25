@@ -1,10 +1,15 @@
 // node:path (docs/io.md): the functions of path.posix and path.win32, which
 // compute what Node.js does, step by step as its path.js does, on the UTF-16
 // code units of the strings. `win32` picks the style; the default style of
-// node:path is the system's (CodeGen passes it). fs.c resolves paths with
+// node:path is the system's (Lowering passes it). fs.c resolves paths with
 // these functions too, as Node does on Windows before it calls the system.
 
+#include "runtime/library/path/path/path.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/process/process/process.h"
 #include <string.h>
 
 typedef struct {

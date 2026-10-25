@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // while, do while, for and for...of.
 class LoopChecker {
 public:
-  explicit LoopChecker(Sema &sema);
+  explicit LoopChecker(Checker &checker);
 
   void checkWhile(WhileStmt *stmt);
   void checkDoWhile(DoWhileStmt *stmt);
@@ -16,7 +16,7 @@ public:
   void checkLoopBody(Stmt *body);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

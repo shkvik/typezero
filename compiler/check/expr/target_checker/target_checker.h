@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // What may be assigned to.
 class TargetChecker {
 public:
-  explicit TargetChecker(Sema &sema);
+  explicit TargetChecker(Checker &checker);
 
   // Assignment targets: a mutable variable, an array element or the length of
   // an array. Returns the type the target holds.
@@ -16,7 +16,7 @@ public:
   VarSymbol *checkVarTarget(NameExpr *name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

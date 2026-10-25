@@ -19,12 +19,16 @@ class StmtParser;
 class VarParser;
 class PatternParser;
 class ExprParser;
+class CallParser;
+class PrimaryParser;
 class TemplateParser;
 class FunctionParser;
 class ClassParser;
 class DeclParser;
 class ModuleParser;
 class TypeParser;
+class ObjectTypeParser;
+class FunctionTypeParser;
 
 class Parser {
 public:
@@ -33,7 +37,7 @@ public:
   // FunctionDecl::external).
   Parser(Lexer &lexer, AstContext &ctx, Diagnostics &diags, bool library = false);
   SourceFile parseSourceFile();
-  // A function declaration, with the lexer at its `function`: Sema parses
+  // A function declaration, with the lexer at its `function`: Checker parses
   // FunctionDecl::source again to get a fresh copy.
   FunctionDecl *parseFunctionCopy();
   // The same for an arrow or a function expression.
@@ -117,12 +121,16 @@ public:
   VarParser &vars() const { return *vars_; }
   PatternParser &patterns() const { return *patterns_; }
   ExprParser &exprs() const { return *exprs_; }
+  CallParser &calls() const { return *calls_; }
+  PrimaryParser &primaries() const { return *primaries_; }
   TemplateParser &templates() const { return *templates_; }
   FunctionParser &functions() const { return *functions_; }
   ClassParser &classes() const { return *classes_; }
   DeclParser &decls() const { return *decls_; }
   ModuleParser &modules() const { return *modules_; }
   TypeParser &types() const { return *types_; }
+  ObjectTypeParser &objectTypes() const { return *objectTypes_; }
+  FunctionTypeParser &functionTypes() const { return *functionTypes_; }
 
 private:
   friend class TokenCursor;
@@ -130,23 +138,31 @@ private:
   friend class VarParser;
   friend class PatternParser;
   friend class ExprParser;
+  friend class CallParser;
+  friend class PrimaryParser;
   friend class TemplateParser;
   friend class FunctionParser;
   friend class ClassParser;
   friend class DeclParser;
   friend class ModuleParser;
   friend class TypeParser;
+  friend class ObjectTypeParser;
+  friend class FunctionTypeParser;
   std::unique_ptr<TokenCursor> cursor_;
   std::unique_ptr<StmtParser> stmts_;
   std::unique_ptr<VarParser> vars_;
   std::unique_ptr<PatternParser> patterns_;
   std::unique_ptr<ExprParser> exprs_;
+  std::unique_ptr<CallParser> calls_;
+  std::unique_ptr<PrimaryParser> primaries_;
   std::unique_ptr<TemplateParser> templates_;
   std::unique_ptr<FunctionParser> functions_;
   std::unique_ptr<ClassParser> classes_;
   std::unique_ptr<DeclParser> decls_;
   std::unique_ptr<ModuleParser> modules_;
   std::unique_ptr<TypeParser> types_;
+  std::unique_ptr<ObjectTypeParser> objectTypes_;
+  std::unique_ptr<FunctionTypeParser> functionTypes_;
 };
 
 } // namespace tz

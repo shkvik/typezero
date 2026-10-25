@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Reflect.get, apply and construct.
 class ReflectCallChecker {
 public:
-  explicit ReflectCallChecker(Sema &sema);
+  explicit ReflectCallChecker(Checker &checker);
 
   Expr *checkReflectArgs(Expr *args);
   // Reflection where the class is known when compiling (docs/decorators.md,
@@ -31,7 +31,7 @@ public:
   Expr *checkReflectCall(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

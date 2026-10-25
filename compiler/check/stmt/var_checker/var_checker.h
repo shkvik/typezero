@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // let and const, and the variables declared without a type.
 class VarChecker {
 public:
-  explicit VarChecker(Sema &sema);
+  explicit VarChecker(Checker &checker);
 
   void checkVarDecl(VarDeclStmt *decl);
   // `let x` without a type or a value, and `let x = undefined`: reported when
@@ -18,7 +18,7 @@ public:
   void reportUntyped();
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

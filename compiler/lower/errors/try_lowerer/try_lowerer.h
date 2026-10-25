@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // try, catch and finally.
 class TryLowerer {
 public:
-  explicit TryLowerer(CodeGen &codegen);
+  explicit TryLowerer(Lowering &lowering);
 
   void emitTry(TryStmt *stmt);
   // `return` and the jumps that may leave a `try` with a `finally`: they run
@@ -15,10 +15,10 @@ public:
   // type; null for none).
   void emitReturnOf(llvm::Value *value);
   void emitJumpTo(size_t target, bool isBreak);
-  CodeGen::TryContext *finallyBetween(size_t target);
+  Lowering::TryContext *finallyBetween(size_t target);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Type annotations to types.
 class TypeResolver {
 public:
-  explicit TypeResolver(Sema &sema);
+  explicit TypeResolver(Checker &checker);
 
   const Type *resolveType(const TypeRef &ref, bool allowVoid);
   const Type *resolveTypeInner(const TypeRef &ref);
@@ -17,7 +17,7 @@ public:
   std::vector<Field> resolveFields(const TypeRef &ref, std::vector<Overload> *overloads = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

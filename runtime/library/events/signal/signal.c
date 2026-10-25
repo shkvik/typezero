@@ -6,7 +6,7 @@
 // AbortController and AbortSignal themselves are classes of tz's library,
 // on EventTarget (library/events/web.tz, docs/events.md, section 4). Each
 // signal holds one of these, which the compiler passes where a call takes a
-// `signal` (Sema::signalOption): the runtime checks whether it is aborted, and
+// `signal` (Checker::signalOption): the runtime checks whether it is aborted, and
 // listens to its abort with a TzAbortListener. When the signal aborts,
 // abortSignal() of web.tz marks this one aborted with the reason first, and its
 // dispatch of the abort event runs the runtime's listeners here at the places
@@ -19,9 +19,14 @@
 // The intrinsics of tz's library that cross to C (`function __tz_net_connect(
 // ..., signal: AbortSignal | undefined)`, runtime/library/net/net/net.c and
 // http.c) get the same: the runtime's side of the signal
-// (CodeGen::emitExternal), which fetch and serve listen to with a
+// (Lowering::emitExternal), which fetch and serve listen to with a
 // TzAbortListener.
 
+#include "runtime/library/events/signal/signal.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 

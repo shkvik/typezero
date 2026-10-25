@@ -1,16 +1,16 @@
 #include "compiler/library/regex/matcher_head/matcher_head.h"
 #include "compiler/library/regex/matcher_chars/matcher_chars.h"
-#include "compiler/library/regex/matcher_memo/matcher_memo.h"
 #include "compiler/library/regex/matcher_instructions/matcher_instructions.h"
+#include "compiler/library/regex/matcher_memo/matcher_memo.h"
 #include "runtime/library/regex/regex/regex.h"
 #include <array>
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -35,15 +35,18 @@ void MatcherHead::emitWidth(bool wide) {
     Value *top = builder_.load(builder_.top_);
     BasicBlock *pop = builder_.newBlock("pop"), *undo = builder_.newBlock("undo.apply"),
                *resume = builder_.newBlock("dispatch");
-    builder_.b_.CreateCondBr(builder_.b_.CreateICmpEQ(top, builder_.i32(0)), builder_.attemptFail_, pop);
+    builder_.b_.CreateCondBr(builder_.b_.CreateICmpEQ(top, builder_.i32(0)), builder_.attemptFail_,
+                             pop);
     builder_.b_.SetInsertPoint(pop);
     Value *below = builder_.b_.CreateSub(top, builder_.i32(1));
     builder_.store(below, builder_.top_);
     llvm::Type *i64 = builder_.b_.getInt64Ty();
-    Value *entry =
-        builder_.b_.CreateLoad(i64, builder_.b_.CreateInBoundsGEP(i64, builder_.load(builder_.base_), builder_.b_.CreateZExt(below, i64)));
+    Value *entry = builder_.b_.CreateLoad(
+        i64, builder_.b_.CreateInBoundsGEP(i64, builder_.load(builder_.base_),
+                                           builder_.b_.CreateZExt(below, i64)));
     Value *code = builder_.b_.CreateTrunc(entry, builder_.b_.getInt32Ty());
-    Value *value = builder_.b_.CreateTrunc(builder_.b_.CreateLShr(entry, builder_.b_.getInt64(32)), builder_.b_.getInt32Ty());
+    Value *value = builder_.b_.CreateTrunc(builder_.b_.CreateLShr(entry, builder_.b_.getInt64(32)),
+                                           builder_.b_.getInt32Ty());
     builder_.b_.CreateCondBr(builder_.b_.CreateICmpSLT(code, builder_.i32(0)), undo, resume);
     builder_.b_.SetInsertPoint(undo);
     builder_.b_.CreateStore(value, builder_.slotAddress(builder_.b_.CreateNot(code)));
@@ -51,7 +54,8 @@ void MatcherHead::emitWidth(bool wide) {
     builder_.b_.SetInsertPoint(resume);
     builder_.store(value, builder_.value_);
     if (builder_.memo_) {
-      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)), builder_.steps_);
+      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)),
+                     builder_.steps_);
       builder_.matcherMemo().budgetCheck();
     }
     BasicBlock *never = builder_.newBlock("never");
@@ -72,7 +76,8 @@ void MatcherHead::emitWidth(bool wide) {
       }
       builder_.b_.SetInsertPoint(block);
       if (builder_.memo_) {
-        builder_.matcherMemo().memoCheck(builder_.blockRow_[pc], pc, builder_.load(builder_.pos_), builder_.fail_);
+        builder_.matcherMemo().memoCheck(builder_.blockRow_[pc], pc, builder_.load(builder_.pos_),
+                                         builder_.fail_);
       }
     } else if (!builder_.open()) {
       pc += instructionSize(builder_.code_, pc); // nothing gets here
@@ -104,9 +109,13 @@ void MatcherHead::emitHead() {
   builder_.store(builder_.i32(0), builder_.steps_);
   if (builder_.wide_ && builder_.unicode_) {
     // With u, a start inside a surrogate pair is the start of the pair.
-    Value *inside =
-        builder_.matcherChars().test(builder_.b_.CreateAnd(builder_.b_.CreateICmpSGT(start, builder_.i32(0)), builder_.b_.CreateICmpSLT(start, builder_.length_)), [&] {
-          return builder_.b_.CreateAnd(builder_.matcherChars().isTrail(builder_.unitAt(start)), builder_.matcherChars().isLead(builder_.unitAt(builder_.b_.CreateSub(start, builder_.i32(1)))));
+    Value *inside = builder_.matcherChars().test(
+        builder_.b_.CreateAnd(builder_.b_.CreateICmpSGT(start, builder_.i32(0)),
+                              builder_.b_.CreateICmpSLT(start, builder_.length_)),
+        [&] {
+          return builder_.b_.CreateAnd(builder_.matcherChars().isTrail(builder_.unitAt(start)),
+                                       builder_.matcherChars().isLead(builder_.unitAt(
+                                           builder_.b_.CreateSub(start, builder_.i32(1)))));
         });
     start = builder_.b_.CreateSelect(inside, builder_.b_.CreateSub(start, builder_.i32(1)), start);
   }
@@ -123,9 +132,11 @@ void MatcherHead::emitHead() {
   BasicBlock *attempt = builder_.newBlock("attempt");
   if (builder_.scanEmpty_ && !builder_.wide_) {
     builder_.b_.CreateBr(none);
-  } else if (!builder_.anchored_ && (filter || (!builder_.scan_.empty() && (!builder_.wide_ || builder_.scanUnits_)))) {
+  } else if (!builder_.anchored_ &&
+             (filter || (!builder_.scan_.empty() && (!builder_.wide_ || builder_.scanUnits_)))) {
     BasicBlock *scan = builder_.newBlock("scan");
-    builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(builder_.sticky_, builder_.i32(0)), attempt, scan);
+    builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(builder_.sticky_, builder_.i32(0)), attempt,
+                             scan);
     builder_.b_.SetInsertPoint(scan);
     if (!builder_.scan_.empty() && (!builder_.wide_ || builder_.scanUnits_)) {
       emitByteScan(i, attempt, builder_.next_, none);
@@ -165,7 +176,8 @@ void MatcherHead::emitHead() {
   builder_.b_.SetInsertPoint(attempt);
   i = builder_.load(builder_.next_);
   if (builder_.captures_ > 0) {
-    builder_.b_.CreateMemSet(builder_.slots_, builder_.b_.getInt8(0xFF), 8 * builder_.captures_, llvm::MaybeAlign(4));
+    builder_.b_.CreateMemSet(builder_.slots_, builder_.b_.getInt8(0xFF), 8 * builder_.captures_,
+                             llvm::MaybeAlign(4));
   }
   builder_.store(builder_.i32(0), builder_.top_);
   builder_.store(i, builder_.attempt_);
@@ -177,13 +189,16 @@ void MatcherHead::emitHead() {
   // No match from there: the next start, past a run the first repeat read.
   builder_.b_.SetInsertPoint(builder_.attemptFail_);
   BasicBlock *again = builder_.newBlock("attempt.next");
-  builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(builder_.sticky_, builder_.i32(0)), none, again);
+  builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(builder_.sticky_, builder_.i32(0)), none,
+                           again);
   builder_.b_.SetInsertPoint(again);
   Value *nextStart = builder_.b_.CreateAdd(builder_.load(builder_.attempt_), builder_.i32(1));
-  bool skips = builder_.skipRepeat_ >= 0 && !(builder_.wide_ && builder_.unicode_ && builder_.code_[builder_.skipRepeat_ + 1] == 0);
+  bool skips = builder_.skipRepeat_ >= 0 && !(builder_.wide_ && builder_.unicode_ &&
+                                              builder_.code_[builder_.skipRepeat_ + 1] == 0);
   if (skips) {
-    nextStart = builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::smax, nextStart,
-                                         builder_.b_.CreateAdd(builder_.load(builder_.skip_), builder_.i32(1)));
+    nextStart = builder_.b_.CreateBinaryIntrinsic(
+        llvm::Intrinsic::smax, nextStart,
+        builder_.b_.CreateAdd(builder_.load(builder_.skip_), builder_.i32(1)));
   }
   builder_.store(nextStart, builder_.next_);
   builder_.b_.CreateCondBr(builder_.b_.CreateICmpSGT(nextStart, builder_.length_), none, head);
@@ -195,15 +210,19 @@ void MatcherHead::emitHead() {
   builder_.b_.SetInsertPoint(builder_.success_);
   Value *found = builder_.load(builder_.found_);
   Value *matchStart = builder_.load(builder_.attempt_), *matchEnd = builder_.load(builder_.pos_);
-  Value *to =
-      builder_.b_.CreateInBoundsGEP(builder_.b_.getInt32Ty(), builder_.caps_,
-                           builder_.b_.CreateZExt(builder_.b_.CreateMul(found, builder_.i32(2 * builder_.captures_)), builder_.b_.getInt64Ty()));
+  Value *to = builder_.b_.CreateInBoundsGEP(
+      builder_.b_.getInt32Ty(), builder_.caps_,
+      builder_.b_.CreateZExt(builder_.b_.CreateMul(found, builder_.i32(2 * builder_.captures_)),
+                             builder_.b_.getInt64Ty()));
   builder_.b_.CreateStore(matchStart, to);
-  builder_.b_.CreateStore(matchEnd, builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), to, 1));
+  builder_.b_.CreateStore(matchEnd,
+                          builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), to, 1));
   if (builder_.captures_ > 1) {
-    builder_.b_.CreateMemCpy(builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), to, 2), llvm::MaybeAlign(4),
-                    builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), builder_.slots_, 2), llvm::MaybeAlign(4),
-                    8 * (builder_.captures_ - 1));
+    builder_.b_.CreateMemCpy(
+        builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), to, 2),
+        llvm::MaybeAlign(4),
+        builder_.b_.CreateConstInBoundsGEP1_32(builder_.b_.getInt32Ty(), builder_.slots_, 2),
+        llvm::MaybeAlign(4), 8 * (builder_.captures_ - 1));
   }
   Value *counted = builder_.b_.CreateAdd(found, builder_.i32(1));
   builder_.store(counted, builder_.found_);
@@ -223,12 +242,15 @@ void MatcherHead::emitHead() {
   }
   Value *after = builder_.b_.CreateAdd(matchEnd, builder_.i32(1));
   if (builder_.wide_ && builder_.unicode_) {
-    Value *pair = builder_.matcherChars().test(builder_.b_.CreateICmpSLT(after, builder_.length_), [&] {
-      return builder_.b_.CreateAnd(builder_.matcherChars().isLead(builder_.unitAt(matchEnd)), builder_.matcherChars().isTrail(builder_.unitAt(after)));
-    });
+    Value *pair =
+        builder_.matcherChars().test(builder_.b_.CreateICmpSLT(after, builder_.length_), [&] {
+          return builder_.b_.CreateAnd(builder_.matcherChars().isLead(builder_.unitAt(matchEnd)),
+                                       builder_.matcherChars().isTrail(builder_.unitAt(after)));
+        });
     after = builder_.b_.CreateSelect(pair, builder_.b_.CreateAdd(matchEnd, builder_.i32(2)), after);
   }
-  Value *from = builder_.b_.CreateSelect(builder_.b_.CreateICmpEQ(matchStart, matchEnd), after, matchEnd);
+  Value *from =
+      builder_.b_.CreateSelect(builder_.b_.CreateICmpEQ(matchStart, matchEnd), after, matchEnd);
   builder_.store(from, builder_.next_);
   BasicBlock *search = builder_.newBlock("batch.next");
   builder_.b_.CreateCondBr(builder_.b_.CreateICmpSGT(from, builder_.length_), full, search);
@@ -251,10 +273,10 @@ Value *MatcherHead::vectorIn(Value *v, const OffsetSet &units) {
       }
       x = folded;
     }
-    Value *one = t.lo == t.hi
-                     ? builder_.b_.CreateICmpEQ(x, llvm::ConstantInt::get(vecTy, t.lo))
-                     : builder_.b_.CreateICmpULE(builder_.b_.CreateSub(x, llvm::ConstantInt::get(vecTy, t.lo)),
-                                        llvm::ConstantInt::get(vecTy, t.hi - t.lo));
+    Value *one = t.lo == t.hi ? builder_.b_.CreateICmpEQ(x, llvm::ConstantInt::get(vecTy, t.lo))
+                              : builder_.b_.CreateICmpULE(
+                                    builder_.b_.CreateSub(x, llvm::ConstantInt::get(vecTy, t.lo)),
+                                    llvm::ConstantInt::get(vecTy, t.hi - t.lo));
     in = in ? builder_.b_.CreateOr(in, one) : one;
   }
 
@@ -266,17 +288,20 @@ Value *MatcherHead::vectorIn(Value *v, const OffsetSet &units) {
 Value *MatcherHead::unitMask(Value *at, const OffsetSet &units) {
   uint32_t lanes = builder_.wide_ ? 8 : 16;
   auto *vecTy = llvm::FixedVectorType::get(builder_.unitTy_, lanes);
-  Value *address = builder_.b_.CreateInBoundsGEP(builder_.unitTy_, builder_.units_, builder_.b_.CreateZExt(at, builder_.b_.getInt64Ty()));
+  Value *address = builder_.b_.CreateInBoundsGEP(
+      builder_.unitTy_, builder_.units_, builder_.b_.CreateZExt(at, builder_.b_.getInt64Ty()));
   Value *v = builder_.b_.CreateAlignedLoad(vecTy, address, llvm::Align(1));
 
-  return builder_.b_.CreateZExt(builder_.b_.CreateBitCast(vectorIn(v, units), builder_.b_.getIntNTy(lanes)), builder_.b_.getInt32Ty());
+  return builder_.b_.CreateZExt(
+      builder_.b_.CreateBitCast(vectorIn(v, units), builder_.b_.getIntNTy(lanes)),
+      builder_.b_.getInt32Ty());
 }
 
 // The scan for where a match may start: 32 bytes at a time for the units at
 // the offsets of `scan_`, then 16, then unit by unit at the end. Stores the
 // start found in `at` and goes to `found`, or to `none`.
 void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst *at,
-                                  BasicBlock *none) {
+                               BasicBlock *none) {
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   uint32_t reach = 0;
   for (const ScanOffset &s : builder_.scan_) {
@@ -294,16 +319,21 @@ void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst 
   };
   // Whether `width` more bytes and the offsets fit before the end.
   auto fits = [&](Value *i, uint32_t width) {
-    Value *end = builder_.b_.CreateAdd(builder_.b_.CreateSExt(i, i64), builder_.b_.getInt64(reach + width));
+    Value *end =
+        builder_.b_.CreateAdd(builder_.b_.CreateSExt(i, i64), builder_.b_.getInt64(reach + width));
 
     return builder_.b_.CreateICmpSLE(end, builder_.b_.CreateSExt(builder_.length_, i64));
   };
   builder_.store(from, builder_.scanAt_);
-  BasicBlock *wideHead = builder_.newBlock("scan.32"), *wideBody = builder_.newBlock("scan.32.body"),
-             *wideNext = builder_.newBlock("scan.32.next"), *vecHead = builder_.newBlock("scan.vec"),
-             *vecBody = builder_.newBlock("scan.vec.body"), *vecNext = builder_.newBlock("scan.vec.next"),
-             *hit = builder_.newBlock("scan.hit"), *tailHead = builder_.newBlock("scan.tail"),
-             *tailBody = builder_.newBlock("scan.tail.body"), *tailNext = builder_.newBlock("scan.tail.next");
+  BasicBlock *wideHead = builder_.newBlock("scan.32"),
+             *wideBody = builder_.newBlock("scan.32.body"),
+             *wideNext = builder_.newBlock("scan.32.next"),
+             *vecHead = builder_.newBlock("scan.vec"),
+             *vecBody = builder_.newBlock("scan.vec.body"),
+             *vecNext = builder_.newBlock("scan.vec.next"), *hit = builder_.newBlock("scan.hit"),
+             *tailHead = builder_.newBlock("scan.tail"),
+             *tailBody = builder_.newBlock("scan.tail.body"),
+             *tailNext = builder_.newBlock("scan.tail.next");
   llvm::AllocaInst *bitsVar = builder_.entryVar("scan.bits");
   builder_.b_.CreateBr(wideHead);
 
@@ -331,14 +361,17 @@ void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst 
   builder_.b_.CreateBr(vecHead);
 
   builder_.b_.SetInsertPoint(hit);
-  Value *first = builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::cttz, builder_.load(bitsVar), builder_.b_.getTrue());
+  Value *first = builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::cttz, builder_.load(bitsVar),
+                                                   builder_.b_.getTrue());
   builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.scanAt_), first), at);
   builder_.b_.CreateBr(found);
 
   // The last bytes, one at a time: a match needs room for its offsets.
   builder_.b_.SetInsertPoint(tailHead);
   i = builder_.load(builder_.scanAt_);
-  builder_.b_.CreateCondBr(builder_.b_.CreateICmpSLT(builder_.b_.CreateAdd(i, builder_.i32(reach)), builder_.length_), tailBody, none);
+  builder_.b_.CreateCondBr(
+      builder_.b_.CreateICmpSLT(builder_.b_.CreateAdd(i, builder_.i32(reach)), builder_.length_),
+      tailBody, none);
   builder_.b_.SetInsertPoint(tailBody);
   Value *in = nullptr;
   for (const ScanOffset &s : builder_.scan_) {

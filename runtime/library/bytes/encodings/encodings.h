@@ -248,6 +248,7 @@ static inline const char *tz_encoding_name(const char *label) {
   for (size_t i = 0; i < sizeof tz_encoding_labels / sizeof tz_encoding_labels[0]; ++i)
     if (strcmp(tz_encoding_labels[i][0], label) == 0)
       return tz_encoding_labels[i][1];
+
   return NULL;
 }
 
@@ -258,6 +259,7 @@ static inline int tz_encoding_multi_byte(const char *name) {
   for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i)
     if (strcmp(names[i], name) == 0)
       return 1;
+
   return 0;
 }
 

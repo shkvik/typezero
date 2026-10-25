@@ -9,6 +9,14 @@
 // The data of the languages is the ICU of the system (icu.h, intl.h).
 
 #include "runtime/library/intl/intl/intl.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/decimal/decimal/decimal.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

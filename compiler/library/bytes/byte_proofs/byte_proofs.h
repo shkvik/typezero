@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The proofs that a value written into a typed array fits it (docs/bytes.md).
 class ByteProofs {
 public:
-  explicit ByteProofs(Sema &sema);
+  explicit ByteProofs(Checker &checker);
 
   // What values an integer expression, checked, may have: from its form,
   // the elements it reads and the facts about the variables in it.
@@ -25,7 +25,7 @@ public:
   void checkByteCallbackResult(const FunctionDecl *fn, const Expr *value);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

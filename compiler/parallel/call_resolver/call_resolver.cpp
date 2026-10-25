@@ -1,14 +1,15 @@
 #include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/parallel/code_walk/code_walk.h"
-#include "compiler/parallel/expr_walk/expr_walk.h"
-#include "compiler/parallel/call_walk/call_walk.h"
-#include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
-#include "compiler/parallel/pieces/pieces.h"
+#include "compiler/parallel/call_walk/call_walk.h"
+#include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
 #include "compiler/parallel/explainer/explainer.h"
+#include "compiler/parallel/expr_walk/expr_walk.h"
+#include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +25,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -91,13 +91,15 @@ void CallResolver::resolve() {
         }
         if (rec.channel >= 0) {
           for (unsigned h : std::vector<unsigned>(analysis_.listeners_[rec.channel])) {
-            analysis_.callWalk().addCallee(rec, analysis_.fns_[h].decl, analysis_.classRefOrNone(analysis_.fns_[h]), true);
+            analysis_.callWalk().addCallee(rec, analysis_.fns_[h].decl,
+                                           analysis_.classRefOrNone(analysis_.fns_[h]), true);
           }
           for (const Type *t : analysis_.listenerTypes_[rec.channel]) {
             auto found = analysis_.values_.find(t->nonOptional());
             if (found != analysis_.values_.end()) {
               for (unsigned g : std::vector<unsigned>(found->second)) {
-                analysis_.callWalk().addCallee(rec, analysis_.fns_[g].decl, analysis_.classRefOrNone(analysis_.fns_[g]), true);
+                analysis_.callWalk().addCallee(rec, analysis_.fns_[g].decl,
+                                               analysis_.classRefOrNone(analysis_.fns_[g]), true);
               }
             }
           }
@@ -110,7 +112,8 @@ void CallResolver::resolve() {
           auto found = generators.find(rec.byType->nonOptional());
           if (found != generators.end()) {
             for (unsigned g : found->second) {
-              analysis_.callWalk().addCallee(rec, analysis_.fns_[g].decl, analysis_.classRefOrNone(analysis_.fns_[g]), true);
+              analysis_.callWalk().addCallee(rec, analysis_.fns_[g].decl,
+                                             analysis_.classRefOrNone(analysis_.fns_[g]), true);
             }
           }
           continue;
@@ -129,7 +132,8 @@ void CallResolver::resolve() {
           const Type *object = rec.byObject->nonOptional();
           for (size_t k = 0; k < analysis_.classes_.size(); ++k) {
             const ClassDecl *cls = analysis_.classes_[k];
-            if (!cls->type || !(cls->literal || analysis_.aliasAnalysis().typesMayAlias(cls->type, object))) {
+            if (!cls->type ||
+                !(cls->literal || analysis_.aliasAnalysis().typesMayAlias(cls->type, object))) {
               continue;
             }
             for (const FunctionDecl *method : cls->methods) {
@@ -148,8 +152,8 @@ void CallResolver::resolve() {
 }
 
 std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &callee,
-                                           const std::optional<Ref> &self,
-                                           const CallRec &rec) const {
+                                               const std::optional<Ref> &self,
+                                               const CallRec &rec) const {
   Access b = a;
   b.at = rec.loc;
   b.via = callee.decl;
@@ -230,7 +234,8 @@ void CallResolver::fold() {
   }
 }
 
-std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self, const Activation &caller) const {
+std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,
+                                      const Activation &caller) const {
   if (!self || self->kind != RefKind::This) {
     return self;
   }

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Generators as coroutines: their layout, next and return.
 class GeneratorLowerer {
 public:
-  explicit GeneratorLowerer(CodeGen &codegen);
+  explicit GeneratorLowerer(Lowering &lowering);
 
   // Coroutines.
   llvm::Constant *iteratorLayout(unsigned flags);
@@ -19,7 +19,7 @@ public:
   llvm::Function *iterCloseFunction();
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::tuple<Builtin, const Type *, const Type *, const Type *>, llvm::Function *>
       iteratorFunctions_;
   llvm::Function *iterDropFn_ = nullptr;

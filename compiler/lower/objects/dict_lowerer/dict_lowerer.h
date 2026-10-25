@@ -1,15 +1,15 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Record, Map and Set: layouts, lookups, iteration and literals.
 class DictLowerer {
 public:
-  explicit DictLowerer(CodeGen &codegen);
+  explicit DictLowerer(Lowering &lowering);
 
-  const CodeGen::DictLayout &dictLayout(const Type *type);
+  const Lowering::DictLayout &dictLayout(const Type *type);
   llvm::FunctionCallee dictFunction(llvm::StringRef name, llvm::Type *ret,
                                     llvm::ArrayRef<llvm::Type *> params);
   llvm::Value *dictField(llvm::Value *map, unsigned field);
@@ -31,8 +31,8 @@ public:
   // the iterator builtin `mode` gives them; `position` is the slot of the
   // position, if it must be one that the runtime sees (see
   // emitPendingIterators).
-  CodeGen::Producer dictProducer(llvm::Value *slot, const Type *type, Builtin mode,
-                        llvm::Value *position = nullptr);
+  Lowering::Producer dictProducer(llvm::Value *slot, const Type *type, Builtin mode,
+                                  llvm::Value *position = nullptr);
   // Calls `each` with each live entry of the dictionary in `slot`.
   void emitDictLoop(llvm::Value *slot, const Type *type, llvm::Value *position,
                     llvm::function_ref<void(llvm::Value *)> each);
@@ -40,10 +40,10 @@ public:
   llvm::Value *emitRecordLiteral(ObjectLitExpr *lit);
 
 private:
-  CodeGen &codegen_;
-  std::map<const Type *, CodeGen::DictLayout> dictLayouts_; // stable while more are added
-  llvm::StructType *mapTy_ = nullptr;              // TzMap
-  llvm::StructType *mapDescTy_ = nullptr;          // TzMapLayout
+  Lowering &lowering_;
+  std::map<const Type *, Lowering::DictLayout> dictLayouts_; // stable while more are added
+  llvm::StructType *mapTy_ = nullptr;                        // TzMap
+  llvm::StructType *mapDescTy_ = nullptr;                    // TzMapLayout
 };
 
 } // namespace tz

@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Calls of methods and new of a class.
 class MethodCallChecker {
 public:
-  explicit MethodCallChecker(Sema &sema);
+  explicit MethodCallChecker(Checker &checker);
 
   Expr *checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expected = nullptr);
   Expr *checkClassNew(NewExpr *expr, ClassDecl *cls, const Type *expected = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

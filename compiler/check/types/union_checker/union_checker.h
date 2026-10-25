@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The members and methods of unions.
 class UnionChecker {
 public:
-  explicit UnionChecker(Sema &sema);
+  explicit UnionChecker(Checker &checker);
 
   // `o.name` of a union of objects, whose object is checked: a field every
   // member has, of the union of their types.
@@ -27,7 +27,7 @@ public:
   std::optional<std::vector<const Type *>> unhandledCases(const SwitchStmt *stmt) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,14 +1,14 @@
 #include "compiler/check/expr/concat_checker/concat_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/errors/throw_checker/throw_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/shared_helpers/shared_helpers.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
-#include "compiler/check/shared_helpers/shared_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -17,8 +17,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -102,7 +102,7 @@ std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRe
 
 } // namespace
 
-ConcatChecker::ConcatChecker(Sema &sema) : sema_(sema) {}
+ConcatChecker::ConcatChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ConcatChecker::toStringOperand(Expr *expr) {
   const Type *type = expr->type;
@@ -110,41 +110,43 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return expr;
   }
   if (type->isVoid()) {
-    sema_.diags_.error(expr->loc(), "an expression of type 'void' cannot be converted to a string");
+    checker_.diags_.error(expr->loc(),
+                          "an expression of type 'void' cannot be converted to a string");
     return expr;
   }
   if (type->isRegExp()) {
-    return sema_.regexChecker().regexToString(expr);
+    return checker_.regexChecker().regexToString(expr);
   }
   // As in JavaScript: the text of toString(), in local time.
   if (type->isDate()) {
-    return sema_.dateChecker().dateToString(expr);
+    return checker_.dateChecker().dateToString(expr);
   }
   if (type->isBytes()) {
-    return sema_.bytesChecker().bytesToString(expr);
+    return checker_.bytesChecker().bytesToString(expr);
   }
   // As TypeScript allows; an instance for objects or functions reports it at
   // the call.
   if (type->nonOptional()->isParam()) {
-    sema_.genericChecker().noteForced(expr, Type::string());
-    return sema_.typeRelations().convert(expr, Type::string());
+    checker_.genericChecker().noteForced(expr, Type::string());
+    return checker_.typeRelations().convert(expr, Type::string());
   }
-  if (Sema::holdsFunctions(type)) {
+  if (Checker::holdsFunctions(type)) {
     // JavaScript would give the source code of the function.
-    sema_.diags_.error(expr->loc(), "a function cannot be converted to a string; print it with "
-                              "console.log, or use its name");
+    checker_.diags_.error(expr->loc(), "a function cannot be converted to a string; print it with "
+                                       "console.log, or use its name");
     return expr;
   }
   if (type->nonOptional()->isTuple()) {
-    sema_.diags_.error(expr->loc(),
-                 "a tuple cannot be converted to a string; print it with console.log, or build "
-                 "the text from its elements");
+    checker_.diags_.error(
+        expr->loc(), "a tuple cannot be converted to a string; print it with console.log, or build "
+                     "the text from its elements");
     return expr;
   }
-  if (Sema::holdsResults(type)) {
-    sema_.diags_.error(expr->loc(), "a Result cannot be converted to a string: JavaScript would give "
-                              "'[object Object]'; print it with console.log, or make the text with "
-                              "'match'");
+  if (Checker::holdsResults(type)) {
+    checker_.diags_.error(expr->loc(),
+                          "a Result cannot be converted to a string: JavaScript would give "
+                          "'[object Object]'; print it with console.log, or make the text with "
+                          "'match'");
     return expr;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type->nonOptional());
@@ -152,51 +154,55 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     // JavaScript would call it: tz calls no code by itself.
     auto *name = dyn_cast<NameExpr>(expr);
     std::string text = name ? name->name.str() : "o";
-    sema_.diags_.error(expr->loc(), "an object is not converted to a string by calling its toString(): "
-                              "tz calls no code by itself; call it, e.g. '${" +
-                                  text + ".toString()}'");
+    checker_.diags_.error(expr->loc(),
+                          "an object is not converted to a string by calling its toString(): "
+                          "tz calls no code by itself; call it, e.g. '${" +
+                              text + ".toString()}'");
     return expr;
   }
   if (const Type *dict = type->nonOptional(); dict->isDict()) {
     const char *kind = dict->isRecord() ? "Record" : dict->isMap() ? "Map" : "Set";
-    sema_.diags_.error(expr->loc(), std::string("a ") + kind +
-                                  " cannot be converted to a string: JavaScript would give "
-                                  "'[object " +
-                                  (dict->isRecord() ? "Object" : kind) +
-                                  "]'; print it with console.log, or build the text from its "
-                                  "entries");
+    checker_.diags_.error(expr->loc(),
+                          std::string("a ") + kind +
+                              " cannot be converted to a string: JavaScript would give "
+                              "'[object " +
+                              (dict->isRecord() ? "Object" : kind) +
+                              "]'; print it with console.log, or build the text from its "
+                              "entries");
     return expr;
   }
   if (type->nonOptional()->isIterator()) {
-    sema_.diags_.error(expr->loc(), "an iterator cannot be converted to a string: JavaScript would give "
-                              "'[object Generator]'; collect its values first, e.g. "
-                              "'[...it].join()'");
+    checker_.diags_.error(expr->loc(),
+                          "an iterator cannot be converted to a string: JavaScript would give "
+                          "'[object Generator]'; collect its values first, e.g. "
+                          "'[...it].join()'");
     return expr;
   }
   if (UnknownChecker::holdsUnknown(type)) {
-    sema_.diags_.error(expr->loc(), "an unknown value cannot be converted to a string: it may hold an "
-                              "object or a function; check what it holds first, e.g. 'typeof x == "
-                              "\"string\"'");
+    checker_.diags_.error(expr->loc(),
+                          "an unknown value cannot be converted to a string: it may hold an "
+                          "object or a function; check what it holds first, e.g. 'typeof x == "
+                          "\"string\"'");
     return expr;
   }
   if (JsonChecker::holdsJson(type)) {
     // An object would be "[object Object]" in JavaScript.
-    sema_.diags_.error(expr->loc(),
-                 "a Json cannot be converted to a string: it may hold an object; check what it "
-                 "holds first (e.g. 'typeof x == \"string\"'), or write it as JSON with "
-                 "'JSON.stringify(x)'");
+    checker_.diags_.error(
+        expr->loc(), "a Json cannot be converted to a string: it may hold an object; check what it "
+                     "holds first (e.g. 'typeof x == \"string\"'), or write it as JSON with "
+                     "'JSON.stringify(x)'");
     return expr;
   }
   // An Error gives "TypeError: message", as JavaScript's Error.prototype.toString.
-  if (sema_.throwChecker().isErrorType(type)) {
-    return sema_.typeRelations().convert(expr, Type::string());
+  if (checker_.throwChecker().isErrorType(type)) {
+    return checker_.typeRelations().convert(expr, Type::string());
   }
-  if (Sema::holdsObjects(type)) {
+  if (Checker::holdsObjects(type)) {
     // JavaScript would give "[object Object]", or call a toString method.
-    sema_.diags_.error(expr->loc(),
-                 "an object cannot be converted to a string: JavaScript would give "
-                 "'[object Object]'; print it with console.log, or build the text from "
-                 "its fields");
+    checker_.diags_.error(expr->loc(),
+                          "an object cannot be converted to a string: JavaScript would give "
+                          "'[object Object]'; print it with console.log, or build the text from "
+                          "its fields");
     return expr;
   }
   // A union: as the member it holds, each of which must convert (a union of
@@ -204,15 +210,16 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
   if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
     for (const Type *m : u->members()) {
       // A date, a regex and an Error have texts of their own, as alone.
-      if ((m->isObject() && !m->isDate() && !m->isRegExp() && !sema_.throwChecker().isErrorType(m)) || m->isDict() ||
-          m->isFunction() || m->isIterator()) {
-        sema_.diags_.error(expr->loc(), "a value of type '" + type->name() +
-                                      "' cannot be converted to a string: it may hold '" +
-                                      m->name() + "'; check what it holds first");
+      if ((m->isObject() && !m->isDate() && !m->isRegExp() &&
+           !checker_.throwChecker().isErrorType(m)) ||
+          m->isDict() || m->isFunction() || m->isIterator()) {
+        checker_.diags_.error(expr->loc(), "a value of type '" + type->name() +
+                                               "' cannot be converted to a string: it may hold '" +
+                                               m->name() + "'; check what it holds first");
         return expr;
       }
     }
-    auto *cast = dyn_cast<CastExpr>(sema_.typeRelations().convert(expr, Type::string()));
+    auto *cast = dyn_cast<CastExpr>(checker_.typeRelations().convert(expr, Type::string()));
     if (cast) {
       cast->text = true;
     }
@@ -221,7 +228,7 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
 
   // Numbers, booleans, undefined, arrays (joined with commas) and optionals of
   // those convert as in JavaScript.
-  return sema_.typeRelations().convert(expr, Type::string());
+  return checker_.typeRelations().convert(expr, Type::string());
 }
 
 void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed) {
@@ -234,11 +241,11 @@ void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *
   llvm::StringRef only;
   std::string joined = concatTemplate(parts, only);
   if (joined.empty()) {
-    sema_.diags_.error(mixed->loc(), message + "; use a template literal instead");
+    checker_.diags_.error(mixed->loc(), message + "; use a template literal instead");
     return;
   }
   if (!only.empty()) { // `"" + n`
-    sema_.diags_.error(mixed->loc(), message + "; convert it with 'String(" + only + ")'");
+    checker_.diags_.error(mixed->loc(), message + "; convert it with 'String(" + only + ")'");
     return;
   }
   // `count + input` may be meant as a sum: then the string needs Number().
@@ -255,12 +262,12 @@ void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *
       sum = ("Number(" + firstText + ") + " + secondText).str();
     }
     if (!sum.empty()) {
-      sema_.diags_.error(mixed->loc(), message + "; to add, convert the string: '" + sum +
-                                     "'; to join, use a template: '" + joined + "'");
+      checker_.diags_.error(mixed->loc(), message + "; to add, convert the string: '" + sum +
+                                              "'; to join, use a template: '" + joined + "'");
       return;
     }
   }
-  sema_.diags_.error(mixed->loc(), message + "; use a template: '" + joined + "'");
+  checker_.diags_.error(mixed->loc(), message + "; use a template: '" + joined + "'");
 }
 
 } // namespace tz

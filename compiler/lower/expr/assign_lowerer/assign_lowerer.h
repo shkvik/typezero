@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Assignments, ++ and --.
 class AssignLowerer {
 public:
-  explicit AssignLowerer(CodeGen &codegen);
+  explicit AssignLowerer(Lowering &lowering);
 
   llvm::Value *emitAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitNullishAssign(AssignExpr *assign, bool needResult);
@@ -16,7 +16,7 @@ public:
   static bool cannotAssign(const Expr *expr);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

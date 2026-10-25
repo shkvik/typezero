@@ -7,36 +7,37 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-ImportBinder::ImportBinder(Sema &sema) : sema_(sema) {}
+ImportBinder::ImportBinder(Checker &checker) : checker_(checker) {}
 
 void ImportBinder::resolveImports(Module *module) {
-  Sema::ModuleState &here = sema_.state(module);
+  Checker::ModuleState &here = checker_.state(module);
   for (const ImportDecl &decl : module->file.imports) {
     if (decl.path == "neverthrow") {
-      sema_.resultTypes().importNeverthrow(module, decl);
+      checker_.resultTypes().importNeverthrow(module, decl);
       continue;
     }
     // A built-in module written in tz (Module::builtin) is imported as any
     // file is.
     if (isBuiltinModule(decl.path) && !decl.from) {
-      sema_.builtinModuleChecker().importBuiltinModule(module, decl);
+      checker_.builtinModuleChecker().importBuiltinModule(module, decl);
       continue;
     }
-    // `import events from "node:events"`, which the parser leaves to Sema
+    // `import events from "node:events"`, which the parser leaves to Checker
     // for the modules built in.
     if (!decl.whole.empty() && decl.from && decl.from->builtin) {
-      sema_.diags_.error(decl.wholeLoc,
-                   std::string(decl.wholeIsDefault ? "default imports are not supported: there is "
-                                                     "no 'export default'"
-                                                   : "'import * as' is not supported") +
-                       "; import the names you need, e.g. 'import { EventEmitter, "
-                       "once } from \"" +
-                       decl.path + "\"'");
+      checker_.diags_.error(decl.wholeLoc,
+                            std::string(decl.wholeIsDefault
+                                            ? "default imports are not supported: there is "
+                                              "no 'export default'"
+                                            : "'import * as' is not supported") +
+                                "; import the names you need, e.g. 'import { EventEmitter, "
+                                "once } from \"" +
+                                decl.path + "\"'");
       here.badImports.insert(decl.whole);
     }
     for (const ModuleName &name : decl.names) {
@@ -44,72 +45,75 @@ void ImportBinder::resolveImports(Module *module) {
         here.badImports.insert(name.as); // the file is not loaded: reported
         continue;
       }
-      std::optional<Sema::Binding> target = sema_.moduleDeclarer().findExport(decl.from, decl.path, name);
+      std::optional<Checker::Binding> target =
+          checker_.moduleDeclarer().findExport(decl.from, decl.path, name);
       if (!target) {
         here.badImports.insert(name.as);
         continue;
       }
       if (auto own = here.declared.find(name.as); own != here.declared.end()) {
-        sema_.diags_.error(name.asLoc,
-                     "import '" + name.as + "' conflicts with the declaration of '" + name.as +
-                         "' in this file; import it under another name, e.g. 'import { " +
-                         name.name + " as " + name.name + "2 } from \"" + decl.path + "\"'");
-        sema_.diags_.note(own->second, "'" + name.as + "' is declared here");
+        checker_.diags_.error(
+            name.asLoc, "import '" + name.as + "' conflicts with the declaration of '" + name.as +
+                            "' in this file; import it under another name, e.g. 'import { " +
+                            name.name + " as " + name.name + "2 } from \"" + decl.path + "\"'");
+        checker_.diags_.note(own->second, "'" + name.as + "' is declared here");
         continue;
       }
-      auto [it, inserted] = here.imports.try_emplace(name.as, Sema::Import{*target, name.asLoc});
+      auto [it, inserted] = here.imports.try_emplace(name.as, Checker::Import{*target, name.asLoc});
       if (!inserted) {
-        sema_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
-        sema_.diags_.note(it->second.loc, "previously imported here");
+        checker_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
+        checker_.diags_.note(it->second.loc, "previously imported here");
       }
     }
   }
 }
 
 void ImportBinder::bindImports() {
-  Sema::ModuleState &here = sema_.state(sema_.module_);
+  Checker::ModuleState &here = checker_.state(checker_.module_);
   // The classes of node:fs, as types and for `instanceof`.
   for (const auto &entry : here.nodeNames) {
-    const Sema::NodeName &n = entry.getValue();
+    const Checker::NodeName &n = entry.getValue();
     ClassDecl *cls = n.module != NodeModule::Fs ? nullptr
-                     : n.name == "Stats"        ? sema_.statsClass_
-                     : n.name == "Dirent"       ? sema_.direntClass_
+                     : n.name == "Stats"        ? checker_.statsClass_
+                     : n.name == "Dirent"       ? checker_.direntClass_
                                                 : nullptr;
     if (!cls) {
       continue;
     }
-    sema_.typeScopes_[0].try_emplace(entry.getKey(), cls);
-    sema_.scopes_[0].try_emplace(entry.getKey(), Sema::ScopeEntry{nullptr, nullptr, nullptr, cls});
+    checker_.typeScopes_[0].try_emplace(entry.getKey(), cls);
+    checker_.scopes_[0].try_emplace(entry.getKey(),
+                                    Checker::ScopeEntry{nullptr, nullptr, nullptr, cls});
   }
   for (const auto &entry : here.imports) {
     llvm::StringRef alias = entry.getKey();
-    const Sema::Binding &target = entry.getValue().target;
+    const Checker::Binding &target = entry.getValue().target;
     Module *source = target.module;
     // As a type.
-    const llvm::StringMap<Stmt *> &types = source == sema_.module_ ? sema_.typeScopes_[0] : sema_.state(source).types;
-    if (!sema_.typeScopes_[0].count(alias)) {
+    const llvm::StringMap<Stmt *> &types =
+        source == checker_.module_ ? checker_.typeScopes_[0] : checker_.state(source).types;
+    if (!checker_.typeScopes_[0].count(alias)) {
       if (auto found = types.find(target.name); found != types.end()) {
         Stmt *type = found->second;
-        sema_.typeScopes_[0][alias] = type;
+        checker_.typeScopes_[0][alias] = type;
       }
     }
     // As a value: a function or an enum, or a variable once the code of its
     // file has declared it.
-    const llvm::StringMap<Sema::ScopeEntry> &values =
-        source == sema_.module_ ? sema_.scopes_[0] : sema_.state(source).values;
-    if (sema_.scopes_[0].count(alias)) {
+    const llvm::StringMap<Checker::ScopeEntry> &values =
+        source == checker_.module_ ? checker_.scopes_[0] : checker_.state(source).values;
+    if (checker_.scopes_[0].count(alias)) {
       continue;
     }
     auto found = values.find(target.name);
     if (found == values.end()) {
       continue;
     }
-    Sema::ScopeEntry value = found->second;
+    Checker::ScopeEntry value = found->second;
     if (!value.var && !value.func && !value.enumDecl && !value.cls) {
       continue;
     }
-    sema_.scopes_[0][alias] = value;
-    if (value.var && source != sema_.module_) {
+    checker_.scopes_[0][alias] = value;
+    if (value.var && source != checker_.module_) {
       here.importedVars.insert(value.var);
     }
   }
@@ -117,20 +121,21 @@ void ImportBinder::bindImports() {
 
 void ImportBinder::noteImportsInFunctions(SourceFile &program) {
   for (Module *module : program.modules) {
-    for (const auto &entry : sema_.state(module).imports) {
-      if (sema_.namesInFunctions_.contains(entry.getKey())) {
-        sema_.namesInFunctions_.insert(entry.getValue().target.name);
+    for (const auto &entry : checker_.state(module).imports) {
+      if (checker_.namesInFunctions_.contains(entry.getKey())) {
+        checker_.namesInFunctions_.insert(entry.getValue().target.name);
       }
     }
   }
 }
 
 FunctionDecl *ImportBinder::cycleCallee(FunctionDecl *fn, llvm::StringRef name) {
-  Module *home = sema_.declModules_.lookup(fn);
+  Module *home = checker_.declModules_.lookup(fn);
   if (!home) {
     return nullptr;
   }
-  const llvm::StringMap<Sema::ScopeEntry> &values = home == sema_.module_ ? sema_.scopes_[0] : sema_.state(home).values;
+  const llvm::StringMap<Checker::ScopeEntry> &values =
+      home == checker_.module_ ? checker_.scopes_[0] : checker_.state(home).values;
   auto found = values.find(name);
   if (found == values.end() || !found->second.func) {
     return nullptr;

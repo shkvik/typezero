@@ -4,10 +4,10 @@
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -41,29 +41,39 @@ Value *MatcherChars::test(Value *cond, const std::function<Value *()> &value) {
 }
 
 Value *MatcherChars::isLead(Value *u) {
-  return builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xD800)), builder_.i32(0x3FF));
+  return builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xD800)),
+                                   builder_.i32(0x3FF));
 }
 
 Value *MatcherChars::isTrail(Value *u) {
-  return builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xDC00)), builder_.i32(0x3FF));
+  return builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xDC00)),
+                                   builder_.i32(0x3FF));
 }
 
 Value *MatcherChars::isLineTerminator(Value *c) {
-  Value *lt = builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(c, builder_.i32('\n')), builder_.b_.CreateICmpEQ(c, builder_.i32('\r')));
+  Value *lt = builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(c, builder_.i32('\n')),
+                                   builder_.b_.CreateICmpEQ(c, builder_.i32('\r')));
   if (builder_.wide_) {
-    lt = builder_.b_.CreateOr(lt, builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(0x2028)), builder_.i32(1)));
+    lt = builder_.b_.CreateOr(
+        lt,
+        builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(0x2028)), builder_.i32(1)));
   }
 
   return lt;
 }
 
 Value *MatcherChars::isWordUnit(Value *u, bool folded) {
-  Value *letter = builder_.b_.CreateICmpULE(builder_.b_.CreateSub(builder_.b_.CreateOr(u, builder_.i32(0x20)), builder_.i32('a')), builder_.i32(25));
-  Value *digit = builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32('0')), builder_.i32(9));
-  Value *word = builder_.b_.CreateOr(builder_.b_.CreateOr(letter, digit), builder_.b_.CreateICmpEQ(u, builder_.i32('_')));
+  Value *letter = builder_.b_.CreateICmpULE(
+      builder_.b_.CreateSub(builder_.b_.CreateOr(u, builder_.i32(0x20)), builder_.i32('a')),
+      builder_.i32(25));
+  Value *digit =
+      builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32('0')), builder_.i32(9));
+  Value *word = builder_.b_.CreateOr(builder_.b_.CreateOr(letter, digit),
+                                     builder_.b_.CreateICmpEQ(u, builder_.i32('_')));
   if (folded && builder_.wide_) {
     word = builder_.b_.CreateOr(
-        word, builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(u, builder_.i32(0x017F)), builder_.b_.CreateICmpEQ(u, builder_.i32(0x212A))));
+        word, builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(u, builder_.i32(0x017F)),
+                                   builder_.b_.CreateICmpEQ(u, builder_.i32(0x212A))));
   }
 
   return word;
@@ -110,15 +120,18 @@ Value *MatcherChars::inByteSet(Value *c, const ByteSet &bits) {
     Value *in = nullptr;
     for (auto [lo, hi] : runs) {
       Value *one = lo == hi ? builder_.b_.CreateICmpEQ(c, builder_.i32(lo))
-                            : builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(lo)), builder_.i32(hi - lo));
+                            : builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(lo)),
+                                                        builder_.i32(hi - lo));
       in = in ? builder_.b_.CreateOr(in, one) : one;
     }
     return in;
   }
-  Value *index =
-      builder_.b_.CreateZExt(builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::umin, c, builder_.i32(255)), builder_.b_.getInt64Ty());
-  Value *entry =
-      builder_.b_.CreateLoad(builder_.b_.getInt8Ty(), builder_.b_.CreateInBoundsGEP(builder_.b_.getInt8Ty(), byteTable(bits), index));
+  Value *index = builder_.b_.CreateZExt(
+      builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::umin, c, builder_.i32(255)),
+      builder_.b_.getInt64Ty());
+  Value *entry = builder_.b_.CreateLoad(
+      builder_.b_.getInt8Ty(),
+      builder_.b_.CreateInBoundsGEP(builder_.b_.getInt8Ty(), byteTable(bits), index));
   Value *in = builder_.b_.CreateICmpNE(entry, builder_.b_.getInt8(0));
 
   return builder_.b_.CreateAnd(in, builder_.b_.CreateICmpULT(c, builder_.i32(256)));
@@ -138,8 +151,9 @@ Value *MatcherChars::inSet(Value *c, const uint32_t *set, bool bytesOnly) {
   const uint32_t *ranges = set + 9;
   if (n <= 4) {
     for (uint32_t i = 0; i < n; ++i) {
-      in = builder_.b_.CreateOr(in, builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(ranges[2 * i])),
-                                            builder_.i32(ranges[2 * i + 1] - ranges[2 * i])));
+      in = builder_.b_.CreateOr(
+          in, builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(ranges[2 * i])),
+                                        builder_.i32(ranges[2 * i + 1] - ranges[2 * i])));
     }
     return in;
   }
@@ -151,11 +165,13 @@ Value *MatcherChars::inSet(Value *c, const uint32_t *set, bool bytesOnly) {
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::FunctionCallee fn = builder_.module_.getOrInsertFunction(
       "tz_re_in_ranges",
-      llvm::FunctionType::get(builder_.b_.getInt32Ty(), {builder_.b_.getInt32Ty(), builder_.b_.getPtrTy(), builder_.b_.getInt32Ty()},
-                              false));
+      llvm::FunctionType::get(
+          builder_.b_.getInt32Ty(),
+          {builder_.b_.getInt32Ty(), builder_.b_.getPtrTy(), builder_.b_.getInt32Ty()}, false));
   // Below 256 the bits answer; the call is for the rest only.
   Value *high = test(builder_.b_.CreateICmpUGE(c, builder_.i32(256)), [&] {
-    return builder_.b_.CreateICmpNE(builder_.b_.CreateCall(fn, {c, global, builder_.i32(n)}), builder_.i32(0));
+    return builder_.b_.CreateICmpNE(builder_.b_.CreateCall(fn, {c, global, builder_.i32(n)}),
+                                    builder_.i32(0));
   });
 
   return builder_.b_.CreateOr(in, high);
@@ -186,21 +202,28 @@ std::pair<Value *, Value *> MatcherChars::readChar(Value *pos, bool back, BasicB
   BasicBlock *single = builder_.b_.GetInsertBlock(), *surrogate = builder_.newBlock("surrogate"),
              *done = builder_.newBlock("char");
   Value *singlePos = back ? at : builder_.b_.CreateAdd(pos, builder_.i32(1));
-  builder_.b_.CreateCondBr(builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(0xD800)), builder_.i32(0x7FF)), surrogate, done);
+  builder_.b_.CreateCondBr(builder_.b_.CreateICmpULE(builder_.b_.CreateSub(c, builder_.i32(0xD800)),
+                                                     builder_.i32(0x7FF)),
+                           surrogate, done);
   builder_.b_.SetInsertPoint(surrogate);
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   llvm::FunctionCallee readFn = builder_.module_.getOrInsertFunction(
       "tz_re_read_pair",
-      llvm::FunctionType::get(
-          i64, {builder_.b_.getPtrTy(), builder_.b_.getInt32Ty(), builder_.b_.getInt32Ty(), builder_.b_.getInt32Ty()}, false));
-  Value *read = builder_.b_.CreateCall(readFn, {builder_.units_, builder_.length_, pos, builder_.i32(back ? 1 : 0)});
+      llvm::FunctionType::get(i64,
+                              {builder_.b_.getPtrTy(), builder_.b_.getInt32Ty(),
+                               builder_.b_.getInt32Ty(), builder_.b_.getInt32Ty()},
+                              false));
+  Value *read = builder_.b_.CreateCall(
+      readFn, {builder_.units_, builder_.length_, pos, builder_.i32(back ? 1 : 0)});
   builder_.failUnless(builder_.b_.CreateICmpSGE(read, builder_.b_.getInt64(0)), fail);
   Value *code = builder_.b_.CreateTrunc(read, builder_.b_.getInt32Ty());
-  Value *pairPos = builder_.b_.CreateTrunc(builder_.b_.CreateLShr(read, builder_.b_.getInt64(32)), builder_.b_.getInt32Ty());
+  Value *pairPos = builder_.b_.CreateTrunc(builder_.b_.CreateLShr(read, builder_.b_.getInt64(32)),
+                                           builder_.b_.getInt32Ty());
   BasicBlock *slow = builder_.b_.GetInsertBlock();
   builder_.b_.CreateBr(done);
   builder_.b_.SetInsertPoint(done);
-  llvm::PHINode *cp = builder_.b_.CreatePHI(builder_.b_.getInt32Ty(), 2), *np = builder_.b_.CreatePHI(builder_.b_.getInt32Ty(), 2);
+  llvm::PHINode *cp = builder_.b_.CreatePHI(builder_.b_.getInt32Ty(), 2),
+                *np = builder_.b_.CreatePHI(builder_.b_.getInt32Ty(), 2);
   cp->addIncoming(c, single);
   cp->addIncoming(code, slow);
   np->addIncoming(singlePos, single);

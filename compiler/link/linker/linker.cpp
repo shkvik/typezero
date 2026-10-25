@@ -33,7 +33,7 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
   args.push_back("/defaultlib:libcmt");
   args.push_back("/defaultlib:kernel32");
   // For the developers of tz: a PDB next to the program, which
-  // llvm-symbolizer reads (see TZ_CRASH_TRACE in runtime/core/tzrt/tzrt.c).
+  // llvm-symbolizer reads (see TZ_CRASH_TRACE in runtime/core/output/output.c).
   if (std::getenv("TZ_LINK_DEBUG")) {
     args.push_back("/debug");
   }

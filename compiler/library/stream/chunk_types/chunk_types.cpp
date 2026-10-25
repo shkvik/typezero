@@ -1,8 +1,8 @@
 #include "compiler/library/stream/chunk_types/chunk_types.h"
-#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -10,21 +10,21 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-ChunkTypes::ChunkTypes(Sema &sema) : sema_(sema) {}
+ChunkTypes::ChunkTypes(Checker &checker) : checker_(checker) {}
 
 bool ChunkTypes::isStreamClass(const ClassDecl *cls) const {
-  ClassDecl *stream = sema_.libraryClass("Stream");
+  ClassDecl *stream = checker_.libraryClass("Stream");
 
   return cls && stream && cls->derivesFrom(stream);
 }
 
-Sema::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
-  Sema::StreamChunks chunks;
+Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
+  Checker::StreamChunks chunks;
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (!c->library || !c->generic || c->typeArgs.empty()) {
       continue;
@@ -47,15 +47,16 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
   // of Writable): their objects lie in memory as Stream's do (see
   // library/stream/stream.tz).
   ClassDecl *generic = inst->generic;
-  ClassDecl *writable = sema_.libraryClass("Writable");
+  ClassDecl *writable = checker_.libraryClass("Writable");
   if (!generic || !generic->library || generic->name != "Duplex" || !writable ||
       inst->typeArgs.size() != 2) {
     return;
   }
-  if (ClassDecl *side = sema_.genericClassInstantiator().instantiateClass(writable, {inst->typeArgs[0]}, loc)) {
-    sema_.classBases().addBase(inst->type, side->type);
-    if (inst->isEmitted() && !llvm::is_contained(sema_.file_->subtypes, inst->type)) {
-      sema_.file_->subtypes.push_back(inst->type);
+  if (ClassDecl *side = checker_.genericClassInstantiator().instantiateClass(
+          writable, {inst->typeArgs[0]}, loc)) {
+    checker_.classBases().addBase(inst->type, side->type);
+    if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
+      checker_.file_->subtypes.push_back(inst->type);
     }
   }
 }
@@ -91,7 +92,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
     return std::nullopt;
   }
   auto alias = [&](llvm::StringRef name) -> const Type * {
-    TypeAliasDecl *decl = sema_.libTypes_.lookup(name);
+    TypeAliasDecl *decl = checker_.libTypes_.lookup(name);
 
     return decl ? decl->resolved : nullptr;
   };
@@ -103,7 +104,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "_final" || name == "_construct") {
     params = {callback};
   } else if (name == "_destroy") {
-    params = {Type::optional(sema_.errorClass_->type), callback};
+    params = {Type::optional(checker_.errorClass_->type), callback};
   } else if (name == "_flush" && transform) {
     params = {alias("TransformCallback")};
   } else if (name == "_transform" && transform) {
@@ -111,8 +112,10 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "_write" && writable) {
     params = {writable, Type::string(), callback};
   } else if (name == "_writev" && writable) {
-    TypeAliasDecl *entry = sema_.libTypes_.lookup("WriteChunk");
-    if (const Type *type = entry ? sema_.aliasInstantiator().instantiateAlias(entry, {writable}, fn->loc()) : nullptr) {
+    TypeAliasDecl *entry = checker_.libTypes_.lookup("WriteChunk");
+    if (const Type *type =
+            entry ? checker_.aliasInstantiator().instantiateAlias(entry, {writable}, fn->loc())
+                  : nullptr) {
       params = {Type::array(type), callback};
     }
   }
@@ -132,7 +135,8 @@ bool ChunkTypes::isStreamHook(const FunctionDecl *fn, bool linked) const {
          llvm::is_contained(hooks, fn->name) && (!linked || isStreamClass(cls->parent));
 }
 
-void ChunkTypes::reportStreamHook(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> inherited) {
+void ChunkTypes::reportStreamHook(const FunctionDecl *fn,
+                                  llvm::ArrayRef<FunctionDecl *> inherited) {
   const FuncSymbol *hook = nullptr;
   for (const FunctionDecl *v : inherited) {
     if (v->sym && v->cls && v->cls->library) {
@@ -161,20 +165,20 @@ void ChunkTypes::reportStreamHook(const FunctionDecl *fn, llvm::ArrayRef<Functio
     chunks = "; for chunks of another type, give the class it extends type arguments, e.g. "
              "'extends Writable<string>'";
   }
-  sema_.diags_.error(fn->loc(), "'" + fn->name + "' is what node:stream calls, as '" + fn->name + "(" +
-                              params +
-                              ")', and a method with other parameters is another "
-                              "variant of the name, which it never calls; take those parameters, "
-                              "or leave out their types" +
-                              chunks);
+  checker_.diags_.error(
+      fn->loc(), "'" + fn->name + "' is what node:stream calls, as '" + fn->name + "(" + params +
+                     ")', and a method with other parameters is another "
+                     "variant of the name, which it never calls; take those parameters, "
+                     "or leave out their types" +
+                     chunks);
 }
 
 const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc loc) {
-  const Type *map = sema_.eventMapInference().inferredEventMap(site);
+  const Type *map = checker_.eventMapInference().inferredEventMap(site);
   if (!map) {
     return nullptr;
   }
-  if (sema_.openMaps_.count(map)) {
+  if (checker_.openMaps_.count(map)) {
     return map; // the placeholder of this round
   }
   const Field *chunk = map->field("chunk");
@@ -187,7 +191,7 @@ const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc l
 }
 
 void ChunkTypes::noteStreamCallback(CallExpr *call, const VarSymbol *var) {
-  for (const Sema::StreamCallbackSite &site : sema_.streamCallbacks_) {
+  for (const Checker::StreamCallbackSite &site : checker_.streamCallbacks_) {
     if (site.fn != var->owner || site.param != var->name || call->args.size() < 2) {
       continue;
     }
@@ -205,8 +209,8 @@ void ChunkTypes::noteStreamCallback(CallExpr *call, const VarSymbol *var) {
 }
 
 bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::SMLoc loc) {
-  auto open = sema_.openMaps_.find(chunk);
-  if (open == sema_.openMaps_.end()) {
+  auto open = checker_.openMaps_.find(chunk);
+  if (open == checker_.openMaps_.end()) {
     return false;
   }
   if (value->isError() || value->isVoid() || value->isUndefined() || mentionsParam(value)) {
@@ -218,14 +222,14 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   // `push(more ? x : undefined)`: undefined ends the stream.
   value = value->nonOptional();
   const Type *found = Type::tuple({value});
-  std::vector<EventInference::Event> &events = sema_.inference_->maps[open->second];
+  std::vector<EventInference::Event> &events = checker_.inference_->maps[open->second];
   for (EventInference::Event &e : events) {
     if (e.name != "chunk") {
       continue;
     }
     // Chunks of other types: one that holds both, as int and double make
     // double; the last round reports others.
-    const Type *before = sema_.eventMapInference().fromPortable(e.args, loc);
+    const Type *before = checker_.eventMapInference().fromPortable(e.args, loc);
     if (!before || before == found || before->fields().size() != 1) {
       return true;
     }
@@ -235,14 +239,15 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
     }
     if (const Type *now = Type::tuple({both}); now != before) {
       llvm::SmallPtrSet<const Type *, 8> seen;
-      e.args = sema_.eventMapInference().portable(now, seen);
-      sema_.inference_->changed = true;
+      e.args = checker_.eventMapInference().portable(now, seen);
+      checker_.inference_->changed = true;
     }
     return true;
   }
   llvm::SmallPtrSet<const Type *, 8> seen;
-  events.push_back({"chunk", sema_.eventMapInference().portable(found, seen), sema_.eventMapInference().placeOf(loc)});
-  sema_.inference_->changed = true;
+  events.push_back({"chunk", checker_.eventMapInference().portable(found, seen),
+                    checker_.eventMapInference().placeOf(loc)});
+  checker_.inference_->changed = true;
 
   return true;
 }

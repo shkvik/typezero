@@ -1,9 +1,9 @@
 #include "compiler/library/child_process/child_checker/child_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -11,8 +11,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -38,14 +38,14 @@ const Type *outputUnion() {
 
 } // namespace
 
-ChildChecker::ChildChecker(Sema &sema) : sema_(sema) {}
+ChildChecker::ChildChecker(Checker &checker) : checker_(checker) {}
 
 void ChildChecker::declareExecSyncError() {
-  auto *cls = sema_.ctx_.make<ClassDecl>(llvm::SMLoc(), "ExecSyncError");
+  auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), "ExecSyncError");
   cls->builtin = true;
   cls->resolved = cls->declared = true;
-  cls->parent = sema_.errorClass_;
-  sema_.errorClass_->children.push_back(cls);
+  cls->parent = checker_.errorClass_;
+  checker_.errorClass_->children.push_back(cls);
   Type *type = Type::classType("ExecSyncError", cls);
   cls->type = type;
   // The fields Node's error has, in the order it prints them. The first five
@@ -64,7 +64,7 @@ void ChildChecker::declareExecSyncError() {
       {"pid", Type::intTy()},
       {"stdout", outputUnion()},
       {"stderr", outputUnion()}};
-  const Type *error = sema_.errorClass_->type;
+  const Type *error = checker_.errorClass_->type;
   std::vector<Field> fields(error->fields().begin(), error->fields().end());
   for (const auto &[name, fieldType] : own) {
     ClassField f;
@@ -75,8 +75,8 @@ void ChildChecker::declareExecSyncError() {
     fields.push_back({name.str(), fieldType, false});
   }
   type->defineFields(std::move(fields));
-  sema_.classBases().addBase(type, error);
-  sema_.execSyncErrorClass_ = cls;
+  checker_.classBases().addBase(type, error);
+  checker_.execSyncErrorClass_ = cls;
 }
 
 Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
@@ -84,47 +84,49 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   if (fn != "spawnSync" && fn != "execFileSync" && fn != "execSync") {
     // Reported at the import.
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
   bool exec = fn == "execSync";
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, loc, 1, exec ? 2 : 3)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, loc, 1, exec ? 2 : 3)) {
     return call;
   }
   const Type *string = Type::string();
   auto intLit = [&](uint64_t value) {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(loc, value);
+    auto *lit = checker_.ctx_.make<IntLitExpr>(loc, value);
     lit->type = Type::intTy();
 
     return lit;
   };
   // An option the call does not give: undefined of its type.
   auto absent = [&](const Type *type) {
-    auto *none = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *none = checker_.ctx_.make<UndefinedExpr>(loc);
     none->type = Type::undefinedTy();
 
-    return sema_.typeRelations().convert(none, Type::optional(type));
+    return checker_.typeRelations().convert(none, Type::optional(type));
   };
 
   std::vector<Expr *> args(ChildArgCount, nullptr);
-  args[ChildFile] = call->args[0] = sema_.argumentChecker().checkArg(call->args[0], string);
+  args[ChildFile] = call->args[0] = checker_.argumentChecker().checkArg(call->args[0], string);
   // The arguments, which may be left out before the options, as in Node:
   // `execFileSync("git", { cwd })`.
   size_t optionsAt = 1;
   if (!exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1])) {
     if (!isa<UndefinedExpr>(call->args[1])) {
-      args[ChildArgs] = call->args[1] = sema_.argumentChecker().checkArg(call->args[1], Type::array(string));
+      args[ChildArgs] = call->args[1] =
+          checker_.argumentChecker().checkArg(call->args[1], Type::array(string));
     }
     optionsAt = 2;
   } else if (!exec && call->args.size() > 2) {
-    sema_.diags_.error(call->args[2]->loc(), "the options of '" + fn +
-                                           "' come after its arguments, e.g. '" + fn +
-                                           "(file, [\"--version\"], { cwd })'");
+    checker_.diags_.error(call->args[2]->loc(), "the options of '" + fn +
+                                                    "' come after its arguments, e.g. '" + fn +
+                                                    "(file, [\"--version\"], { cwd })'");
     return call;
   }
   if (!args[ChildArgs]) {
-    auto *none = sema_.ctx_.make<ArrayLitExpr>(loc);
+    auto *none = checker_.ctx_.make<ArrayLitExpr>(loc);
     none->type = Type::array(string);
     args[ChildArgs] = none;
   }
@@ -145,7 +147,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
                                             "argv0",
                                             "uid",
                                             "gid"};
-  if (!sema_.fsChecker().nodeOptions(call, optionsAt, fn, allowed, options)) {
+  if (!checker_.fsChecker().nodeOptions(call, optionsAt, fn, allowed, options)) {
     return call;
   }
 
@@ -155,14 +157,15 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   if (Expr *value = options.lookup("encoding"); value && !isa<UndefinedExpr>(value)) {
     auto *lit = dyn_cast<StringLitExpr>(value);
     if (!lit) {
-      sema_.diags_.error(value->loc(), "the option 'encoding' of '" + fn +
-                                     "' is written as a literal, e.g. 'utf8': it decides whether "
-                                     "the output is a string or a Buffer");
-      sema_.exprChecker().checkExpr(value);
+      checker_.diags_.error(value->loc(),
+                            "the option 'encoding' of '" + fn +
+                                "' is written as a literal, e.g. 'utf8': it decides whether "
+                                "the output is a string or a Buffer");
+      checker_.exprChecker().checkExpr(value);
       failed = true;
     } else if (lit->value != u"buffer") {
       lit->type = string;
-      Expr *number = sema_.bytesChecker().checkBufferEncoding(lit);
+      Expr *number = checker_.bytesChecker().checkBufferEncoding(lit);
       if (number->type->isError()) {
         failed = true;
       } else {
@@ -183,16 +186,17 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       if (auto *n = dyn_cast<IntLitExpr>(e)) {
         n->type = Type::intTy();
         if (n->value > 0x7fffffff) {
-          sema_.diags_.error(e->loc(), "there is no file descriptor " + std::to_string(n->value));
+          checker_.diags_.error(e->loc(),
+                                "there is no file descriptor " + std::to_string(n->value));
           return std::nullopt;
         }
         return ChildInherit + unsigned(n->value);
       }
       auto *lit = dyn_cast<StringLitExpr>(e);
       if (!lit) {
-        sema_.diags_.error(e->loc(), "each stream of 'stdio' is written as a literal: \"pipe\", "
-                               "\"inherit\", \"ignore\" or a file descriptor such as 2");
-        sema_.exprChecker().checkExpr(e);
+        checker_.diags_.error(e->loc(), "each stream of 'stdio' is written as a literal: \"pipe\", "
+                                        "\"inherit\", \"ignore\" or a file descriptor such as 2");
+        checker_.exprChecker().checkExpr(e);
         return std::nullopt;
       }
       lit->type = string;
@@ -207,28 +211,31 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         return ChildIgnore;
       }
       if (text == "ipc") {
-        sema_.diags_.error(e->loc(), "'ipc' is the channel to another Node that fork starts, which tz "
-                               "does not have (docs/process.md, section 4)");
+        checker_.diags_.error(e->loc(),
+                              "'ipc' is the channel to another Node that fork starts, which tz "
+                              "does not have (docs/process.md, section 4)");
       } else {
-        sema_.diags_.error(e->loc(), "unknown stdio '" + text +
-                                   "'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file "
-                                   "descriptor such as 2");
+        checker_.diags_.error(e->loc(),
+                              "unknown stdio '" + text +
+                                  "'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file "
+                                  "descriptor such as 2");
       }
 
       return std::nullopt;
     };
     if (auto *list = dyn_cast<ArrayLitExpr>(value)) {
       if (list->elements.size() > 3) {
-        sema_.diags_.error(list->elements[3].expr->loc(),
-                     "only stdin, stdout and stderr are supported in 'stdio'; more streams come "
-                     "with the async functions (docs/process.md, step 2)");
+        checker_.diags_.error(
+            list->elements[3].expr->loc(),
+            "only stdin, stdout and stderr are supported in 'stdio'; more streams come "
+            "with the async functions (docs/process.md, step 2)");
         failed = true;
       }
       for (size_t i = 0; i < list->elements.size() && i < 3; ++i) {
         const ArrayLitExpr::Element &element = list->elements[i];
         std::optional<unsigned> k = element.spread ? std::nullopt : kind(element.expr, unsigned(i));
         if (element.spread) {
-          sema_.diags_.error(element.expr->loc(), "write each stream of 'stdio' in the literal");
+          checker_.diags_.error(element.expr->loc(), "write each stream of 'stdio' in the literal");
         }
         if (!k) {
           failed = true;
@@ -246,11 +253,12 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
         stdio[i] = *k;
       }
     } else {
-      sema_.diags_.error(value->loc(), "the option 'stdio' of '" + fn +
-                                     "' is written as a literal, e.g. \"inherit\" or [\"pipe\", "
-                                     "\"inherit\", \"pipe\"]: whether there is output depends "
-                                     "on it");
-      sema_.exprChecker().checkExpr(value);
+      checker_.diags_.error(value->loc(),
+                            "the option 'stdio' of '" + fn +
+                                "' is written as a literal, e.g. \"inherit\" or [\"pipe\", "
+                                "\"inherit\", \"pipe\"]: whether there is output depends "
+                                "on it");
+      checker_.exprChecker().checkExpr(value);
       failed = true;
     }
   }
@@ -259,7 +267,7 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   auto option = [&](llvm::StringRef name, const Type *type) {
     Expr *value = options.lookup(name);
 
-    return value ? sema_.argumentChecker().checkArg(value, Type::optional(type)) : absent(type);
+    return value ? checker_.argumentChecker().checkArg(value, Type::optional(type)) : absent(type);
   };
   args[ChildCwd] = option("cwd", string);
   args[ChildEnv] = option("env", Type::dict(Type::DictKind::Record, string, string));
@@ -275,27 +283,29 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   // input: text, written in the encoding of the call as Node writes it, or
   // the bytes of a view.
   if (Expr *value = options.lookup("input")) {
-    Expr *input = sema_.exprChecker().checkExpr(value, string);
+    Expr *input = checker_.exprChecker().checkExpr(value, string);
     const Type *t = input->type->nonOptional();
     if (t->isStringLiteral()) {
-      input = sema_.typeRelations().coerce(input, string);
+      input = checker_.typeRelations().coerce(input, string);
     }
     t = input->type->nonOptional();
     if (t->isString() || t->isByteView()) {
-      args[ChildInput] = sema_.typeRelations().coerce(input, Type::optional(t));
+      args[ChildInput] = checker_.typeRelations().coerce(input, Type::optional(t));
       if (t->isString() && encoding == ChildBytes && options.lookup("encoding") &&
           !isa<UndefinedExpr>(options.lookup("encoding"))) {
         // Node encodes the text with the encoding, and 'buffer' is none.
-        sema_.diags_.error(input->loc(), "text input with the encoding 'buffer' is a TypeError in Node "
-                                   "(Unknown encoding: buffer); pass its bytes, "
-                                   "'Buffer.from(text)', or drop the encoding");
+        checker_.diags_.error(input->loc(),
+                              "text input with the encoding 'buffer' is a TypeError in Node "
+                              "(Unknown encoding: buffer); pass its bytes, "
+                              "'Buffer.from(text)', or drop the encoding");
         failed = true;
       }
     } else if (!t->isError()) {
-      sema_.diags_.error(input->loc(), "'input' of '" + fn +
-                                     "' is the text or the bytes the program reads (a string, a "
-                                     "Buffer or a Uint8Array); found '" +
-                                     input->type->name() + "'");
+      checker_.diags_.error(input->loc(),
+                            "'input' of '" + fn +
+                                "' is the text or the bytes the program reads (a string, a "
+                                "Buffer or a Uint8Array); found '" +
+                                input->type->name() + "'");
       failed = true;
     } else {
       failed = true;
@@ -306,17 +316,19 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   // killSignal: a name ("SIGKILL") or a number, checked when the program
   // runs, as in Node.
   if (Expr *value = options.lookup("killSignal")) {
-    Expr *signal = sema_.exprChecker().checkExpr(value, string);
+    Expr *signal = checker_.exprChecker().checkExpr(value, string);
     const Type *t = signal->type->nonOptional();
     if (t->isStringLiteral() || t->isString()) {
-      args[ChildKillSignal] = sema_.typeRelations().coerce(signal, Type::optional(string));
+      args[ChildKillSignal] = checker_.typeRelations().coerce(signal, Type::optional(string));
     } else if (t->isInt() || (t->isLiteral() && t->literalBase()->isInt())) {
-      args[ChildKillSignal] = sema_.typeRelations().coerce(signal, Type::optional(Type::intTy()));
+      args[ChildKillSignal] =
+          checker_.typeRelations().coerce(signal, Type::optional(Type::intTy()));
     } else {
       if (!t->isError()) {
-        sema_.diags_.error(signal->loc(), "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or "
-                                    "its number; found '" +
-                                        signal->type->name() + "'");
+        checker_.diags_.error(signal->loc(),
+                              "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or "
+                              "its number; found '" +
+                                  signal->type->name() + "'");
       }
       failed = true;
     }
@@ -326,26 +338,28 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   // shell: true for the system's (cmd.exe, /bin/sh), or the path of one.
   // execSync always goes through one: there it may only name it.
   if (Expr *value = options.lookup("shell")) {
-    Expr *shell = sema_.exprChecker().checkExpr(value, string);
+    Expr *shell = checker_.exprChecker().checkExpr(value, string);
     const Type *t = shell->type->nonOptional();
     bool isBool = t->isBool() || (t->isLiteral() && t->literalBase()->isBool());
     if (t->isStringLiteral() || t->isString()) {
-      args[ChildShell] = sema_.typeRelations().coerce(shell, Type::optional(string));
+      args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(string));
     } else if (isBool && exec) {
       if (auto *lit = dyn_cast<BoolLitExpr>(shell); lit && lit->value) {
         args[ChildShell] = absent(string);
       } else {
-        sema_.diags_.error(shell->loc(), "'execSync' always runs the command through a shell; "
-                                   "'shell' may name another one, e.g. shell: \"powershell.exe\", "
-                                   "and to run a program without one, use 'execFileSync'");
+        checker_.diags_.error(shell->loc(),
+                              "'execSync' always runs the command through a shell; "
+                              "'shell' may name another one, e.g. shell: \"powershell.exe\", "
+                              "and to run a program without one, use 'execFileSync'");
         failed = true;
       }
     } else if (isBool) {
-      args[ChildShell] = sema_.typeRelations().coerce(shell, Type::optional(Type::boolTy()));
+      args[ChildShell] = checker_.typeRelations().coerce(shell, Type::optional(Type::boolTy()));
     } else {
       if (!t->isError()) {
-        sema_.diags_.error(shell->loc(), "'shell' is true, false or the path of a shell; found '" +
-                                       shell->type->name() + "'");
+        checker_.diags_.error(shell->loc(),
+                              "'shell' is true, false or the path of a shell; found '" +
+                                  shell->type->name() + "'");
       }
       failed = true;
     }
@@ -372,15 +386,15 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     call->builtin = Builtin::ChildSpawnSync;
     // In the order Node prints them; `error` is there only when the program
     // could not start or did not end by itself.
-    const Type *t = Type::object({{"error", Type::optional(sema_.systemErrorClass_->type), false},
-                                  {"status", Type::optional(Type::intTy()), false},
-                                  {"signal", Type::optional(string), false},
-                                  {"output", Type::array(Type::optional(text)), false},
-                                  {"pid", Type::intTy(), false},
-                                  {"stdout", output(1), false},
-                                  {"stderr", output(2), false}},
-                                 encoding == ChildBytes ? "SpawnSyncReturns<Buffer>"
-                                                        : "SpawnSyncReturns<string>");
+    const Type *t = Type::object(
+        {{"error", Type::optional(checker_.systemErrorClass_->type), false},
+         {"status", Type::optional(Type::intTy()), false},
+         {"signal", Type::optional(string), false},
+         {"output", Type::array(Type::optional(text)), false},
+         {"pid", Type::intTy(), false},
+         {"stdout", output(1), false},
+         {"stderr", output(2), false}},
+        encoding == ChildBytes ? "SpawnSyncReturns<Buffer>" : "SpawnSyncReturns<string>");
     call->type = t;
   } else {
     call->builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync;

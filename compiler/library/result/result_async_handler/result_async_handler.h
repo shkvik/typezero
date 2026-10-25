@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The functions that run the methods of ResultAsync when its promise settles.
 class ResultAsyncHandler {
 public:
-  explicit ResultAsyncHandler(CodeGen &codegen);
+  explicit ResultAsyncHandler(Lowering &lowering);
 
   // ResultAsync: a Promise of a Result, and the reactions its functions and
   // methods make.
@@ -15,7 +15,7 @@ public:
                                      const Type *first, const Type *second);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

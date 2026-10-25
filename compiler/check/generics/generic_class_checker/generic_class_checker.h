@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Generic classes (docs/generics.md, section 5): their type parameters and new.
 class GenericClassChecker {
 public:
-  explicit GenericClassChecker(Sema &sema);
+  explicit GenericClassChecker(Checker &checker);
 
   // Generic classes (sema_generic_class.cpp, docs/generics.md, section 5).
   // The bodies of a generic class are checked once, with its type
@@ -16,7 +16,7 @@ public:
   // the text of the generic class, whose fields and signatures are those of
   // the generic class with the types substituted, and whose bodies are
   // checked with those types, as copies of generic functions are (an error
-  // there is reported where the instance is first used). CodeGen emits the
+  // there is reported where the instance is first used). Lowering emits the
   // instances as classes; of the generic class itself, only its static
   // members, which all instances share.
   //
@@ -29,14 +29,14 @@ public:
   const Type *instanceType(const ClassDecl *inst, const Type *type);
   // Checks the bodies of an instance, as checkInstance does those of a copy
   // of a generic function.
-  void checkClassInstance(Sema::Instance *instance);
-  void reportClassInstance(Sema::Instance *instance, llvm::SMLoc loc);
+  void checkClassInstance(Checker::Instance *instance);
+  void reportClassInstance(Checker::Instance *instance, llvm::SMLoc loc);
   // `new Box(1)`: the type arguments from those of the constructor, and from
   // the type expected, as for a call of a generic function.
   Expr *checkGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The functions `new` of a generic class infers its type arguments with:
   // one for each constructor it takes (or one for none).
   std::map<std::pair<const ClassDecl *, const FunctionDecl *>, FuncSymbol *> constructorFunctions_;

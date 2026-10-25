@@ -1,9 +1,9 @@
 #include "compiler/library/regex/regex_checker/regex_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "runtime/library/regex/regex/regex.h"
@@ -13,8 +13,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -57,7 +57,7 @@ bool isFlag(llvm::StringRef name, uint32_t &flag) {
 
 } // namespace
 
-RegexChecker::RegexChecker(Sema &sema) : sema_(sema) {}
+RegexChecker::RegexChecker(Checker &checker) : checker_(checker) {}
 
 Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
   lit->type = Type::regExp();
@@ -70,9 +70,10 @@ Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
     llvm::SMLoc at = lit->written
                          ? llvm::SMLoc::getFromPointer(source.end() - utf8(lit->flags).size())
                          : lit->loc();
-    sema_.diags_.error(at, "invalid regular expression flags '" + utf8(lit->flags) +
-                         "': the flags are d, g, i, m, s, u, v and y, each at most once, and not "
-                         "u with v");
+    checker_.diags_.error(
+        at, "invalid regular expression flags '" + utf8(lit->flags) +
+                "': the flags are d, g, i, m, s, u, v and y, each at most once, and not "
+                "u with v");
     return lit;
   }
   std::vector<uint16_t> pattern(lit->pattern.begin(), lit->pattern.end());
@@ -101,7 +102,7 @@ Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
     if (message == "nothing to repeat" || message == "lone quantifier brackets") {
       message += "; to match the character itself, escape it with '\\'";
     }
-    sema_.diags_.error(at, "invalid regular expression: " + message);
+    checker_.diags_.error(at, "invalid regular expression: " + message);
     return lit;
   }
   lit->program.assign(program, program + program[TZ_RE_H_SIZE]);
@@ -128,7 +129,7 @@ const RegexLitExpr *RegexChecker::knownRegex(const Expr *expr) {
 }
 
 void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isConst,
-                             llvm::ArrayRef<Stmt *> block, size_t index) {
+                                     llvm::ArrayRef<Stmt *> block, size_t index) {
   auto *lit = llvm::dyn_cast_or_null<RegexLitExpr>(init);
   if (!lit || lit->program.empty()) {
     return;
@@ -188,9 +189,10 @@ const Type *RegexChecker::matchType(const RegexLitExpr *regex) {
 }
 
 Expr *RegexChecker::regexToString(Expr *regex) {
-  auto *callee = sema_.ctx_.make<NameExpr>(regex->loc(), "String");
+  auto *callee = checker_.ctx_.make<NameExpr>(regex->loc(), "String");
 
-  return sema_.processChecker().builtinCall(regex->loc(), callee, Builtin::RegExpToString, {regex}, Type::string());
+  return checker_.processChecker().builtinCall(regex->loc(), callee, Builtin::RegExpToString,
+                                               {regex}, Type::string());
 }
 
 Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
@@ -198,19 +200,20 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
   const RegexLitExpr *regex = knownRegex(member->object);
   call->regex = regex;
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (name == "test" || name == "exec") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
-    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     uint32_t flags = regex ? tz_re_flags(regex->program.data()) : 0;
     if (name == "test" && (flags & TZ_RE_GLOBAL)) {
-      sema_.diags_.error(member->loc(),
-                   "'test' of a regex with the 'g' flag starts where the previous match ended "
-                   "(lastIndex), so the same call can give true and then false; remove 'g'");
+      checker_.diags_.error(
+          member->loc(),
+          "'test' of a regex with the 'g' flag starts where the previous match ended "
+          "(lastIndex), so the same call can give true and then false; remove 'g'");
       return call;
     }
     call->builtin = name == "test" ? Builtin::RegExpTest : Builtin::RegExpExec;
@@ -218,7 +221,7 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "toString") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     call->args.push_back(regexToString(member->object));
@@ -227,13 +230,14 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "compile") {
-    sema_.diags_.error(member->loc(), "'compile' is a legacy method that changes the regex in place; "
-                                "make a new one instead: 'new RegExp(pattern, flags)'");
+    checker_.diags_.error(member->loc(),
+                          "'compile' is a legacy method that changes the regex in place; "
+                          "make a new one instead: 'new RegExp(pattern, flags)'");
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'RegExp'");
+    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'RegExp'");
   }
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -244,23 +248,26 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
 Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "lastIndex") {
-    return sema_.objectChecker().checkField(member);
+    return checker_.objectChecker().checkField(member);
   }
   if (name == "source") {
-    return sema_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpSource, {}, Type::string());
+    return checker_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpSource, {},
+                                                 Type::string());
   }
   if (name == "flags") {
-    return sema_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpFlags, {}, Type::string());
+    return checker_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpFlags, {},
+                                                 Type::string());
   }
   uint32_t flag;
   if (isFlag(name, flag)) {
-    auto *bit = sema_.ctx_.make<IntLitExpr>(member->loc(), flag);
+    auto *bit = checker_.ctx_.make<IntLitExpr>(member->loc(), flag);
     bit->type = Type::intTy();
-    return sema_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpFlag, {bit}, Type::boolTy());
+    return checker_.processChecker().builtinCall(member->loc(), member, Builtin::RegExpFlag, {bit},
+                                                 Type::boolTy());
   }
-  sema_.diags_.error(member->loc(),
-               "property '" + name + "' does not exist on type 'RegExp'" +
-                   (name == "test" || name == "exec" ? "; methods must be called" : ""));
+  checker_.diags_.error(member->loc(),
+                        "property '" + name + "' does not exist on type 'RegExp'" +
+                            (name == "test" || name == "exec" ? "; methods must be called" : ""));
   member->type = Type::error();
 
   return member;
@@ -269,16 +276,16 @@ Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
 Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto loosely = [&] {
     for (Expr *&arg : args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
 
     return error;
   };
   if (args.empty() || args.size() > 2) {
-    sema_.diags_.error(loc,
-                 "expected " + argumentCount(1, 2) + ", but got " + std::to_string(args.size()));
+    checker_.diags_.error(loc, "expected " + argumentCount(1, 2) + ", but got " +
+                                   std::to_string(args.size()));
     return loosely();
   }
   // Text known when compiling: a literal, or a template without values.
@@ -296,23 +303,24 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   std::optional<std::u16string> flags = args.size() > 1 ? literal(args[1]) : std::u16string();
   if (pattern && flags) {
     // The same as a literal, compiled now.
-    auto *lit = sema_.ctx_.make<RegexLitExpr>(loc, *pattern, *flags);
+    auto *lit = checker_.ctx_.make<RegexLitExpr>(loc, *pattern, *flags);
     return checkRegexLit(lit);
   }
-  args[0] = sema_.exprChecker().checkExpr(args[0]);
+  args[0] = checker_.exprChecker().checkExpr(args[0]);
   if (args[0]->type->isRegExp()) {
-    sema_.diags_.error(args[0]->loc(), "'new RegExp' takes the pattern as a string; for a copy of a "
-                                 "regex with other flags write 'new RegExp(re.source, flags)'");
+    checker_.diags_.error(args[0]->loc(),
+                          "'new RegExp' takes the pattern as a string; for a copy of a "
+                          "regex with other flags write 'new RegExp(re.source, flags)'");
 
     return loosely();
   }
-  args[0] = sema_.typeRelations().coerce(args[0], Type::string());
+  args[0] = checker_.typeRelations().coerce(args[0], Type::string());
   if (args.size() > 1) {
-    args[1] = sema_.argumentChecker().checkArg(args[1], Type::string());
+    args[1] = checker_.argumentChecker().checkArg(args[1], Type::string());
   }
 
-  return sema_.processChecker().builtinCall(loc, sema_.ctx_.make<NameExpr>(loc, "RegExp"), Builtin::RegExpNew, args,
-                     Type::regExp());
+  return checker_.processChecker().builtinCall(loc, checker_.ctx_.make<NameExpr>(loc, "RegExp"),
+                                               Builtin::RegExpNew, args, Type::regExp());
 }
 
 Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
@@ -320,14 +328,15 @@ Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   if (member->name != "escape") {
     checkRegExpStaticMember(member);
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
     return call;
   }
-  call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+  call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
   call->builtin = Builtin::RegExpEscape;
   call->type = Type::string();
 
@@ -338,16 +347,17 @@ Expr *RegexChecker::checkRegExpStaticMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
   if (name == "escape") {
-    sema_.diags_.error(member->loc(), "'RegExp.escape' can be used as a value only where a function "
-                                "type is expected, e.g. as a callback");
+    checker_.diags_.error(member->loc(),
+                          "'RegExp.escape' can be used as a value only where a function "
+                          "type is expected, e.g. as a callback");
   } else if (name.starts_with("$") || name == "input" || name == "lastMatch" ||
              name == "lastParen" || name == "leftContext" || name == "rightContext") {
-    sema_.diags_.error(member->loc(),
-                 "'RegExp." + name +
-                     "' is a legacy property that holds what the last match of any regex "
-                     "found; read it from the match itself, e.g. 'm[1]'");
+    checker_.diags_.error(member->loc(),
+                          "'RegExp." + name +
+                              "' is a legacy property that holds what the last match of any regex "
+                              "found; read it from the match itself, e.g. 'm[1]'");
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on 'RegExp'");
+    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on 'RegExp'");
   }
 
   return member;

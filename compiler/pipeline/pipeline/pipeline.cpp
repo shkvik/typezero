@@ -1,5 +1,4 @@
 #include "compiler/pipeline/pipeline/pipeline.h"
-#include "compiler/library/feature_registry/feature_registry.h"
 #include "compiler/check/check_pass/check_pass.h"
 #include "compiler/check/event_rounds/event_rounds.h"
 #include "compiler/declare/declare_pass/declare_pass.h"
@@ -7,10 +6,12 @@
 #include "compiler/emit/ir_writer/ir_writer.h"
 #include "compiler/infer/infer_pass/infer_pass.h"
 #include "compiler/instances/instances_pass/instances_pass.h"
+#include "compiler/library/feature_registry/feature_registry.h"
 #include "compiler/link/licenses_pass/licenses_pass.h"
 #include "compiler/link/link_pass/link_pass.h"
 #include "compiler/load/load_pass/load_pass.h"
 #include "compiler/lower/lower_pass/lower_pass.h"
+#include "compiler/memory/memory_pass/memory_pass.h"
 #include "compiler/optimize/optimize_pass/optimize_pass.h"
 #include "compiler/optimize/target/target.h"
 #include "compiler/overflow/overflow_pass/overflow_pass.h"
@@ -66,10 +67,13 @@ Errors buildProgram(Program &program, const BuildOptions &options) {
   ParallelPass parallel;
   ParallelPlan plan = parallel.run(program);
 
+  MemoryPass memory;
+  MemoryPlan memoryPlan = memory.run(program);
+
   llvm::LLVMContext context;
   LowerPass lower(context, target.value(), llvm::sys::path::filename(options.input),
                   FeatureRegistry::standard());
-  Result<Lowered, Errors> lowered = lower.run(program, plan);
+  Result<Lowered, Errors> lowered = lower.run(program, plan, memoryPlan);
   if (lowered.isErr()) {
     return lowered.error();
   }

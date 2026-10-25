@@ -1,15 +1,15 @@
 #include "compiler/check/expr/truth_checker/truth_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/condition_facts/condition_facts.h"
+#include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -139,43 +139,46 @@ const Type *falsyType(const Type *type) {
 
 } // namespace
 
-TruthChecker::TruthChecker(Sema &sema) : sema_(sema) {}
+TruthChecker::TruthChecker(Checker &checker) : checker_(checker) {}
 
-Expr *TruthChecker::checkCondition(Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) {
-  return checkBranching(cond, whenTrue, whenFalse, Sema::TruthUse::Condition);
+Expr *TruthChecker::checkCondition(Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) {
+  return checkBranching(cond, whenTrue, whenFalse, Checker::TruthUse::Condition);
 }
 
 // Checks an expression whose truth matters, following `&&`, `||` and `!` so
 // that the right side of `i < a.length && a[i] > 0` knows `i < a.length`. Only
 // the truth of the result is used, so every operand becomes a boolean.
-Expr *TruthChecker::checkBranching(Expr *expr, Sema::Flow &whenTrue, Sema::Flow &whenFalse, Sema::TruthUse use) {
+Expr *TruthChecker::checkBranching(Expr *expr, Checker::Flow &whenTrue, Checker::Flow &whenFalse,
+                                   Checker::TruthUse use) {
   if (auto *bin = dyn_cast<BinaryExpr>(expr);
       bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    Sema::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
+    Checker::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
     bin->lhs = checkBranching(bin->lhs, lhsTrue, lhsFalse);
     // `typeof x == "string" && x.length > 0` in an instance where x is a
     // number: the right side never runs, and was written for other types.
-    if (std::optional<bool> constant =
-            sema_.checkingInstance_ ? sema_.genericChecker().constantCondition(bin->lhs) : std::nullopt;
+    if (std::optional<bool> constant = checker_.checkingInstance_
+                                           ? checker_.genericChecker().constantCondition(bin->lhs)
+                                           : std::nullopt;
         constant && *constant != isAnd) {
       whenTrue = lhsTrue;
       whenFalse = lhsFalse;
-      sema_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+      checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
 
       return bin->lhs;
     }
-    sema_.flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
+    checker_.flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
     bin->rhs = checkBranching(bin->rhs, rhsTrue, rhsFalse);
     whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
     whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-    sema_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+    checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
     bin->type = Type::boolTy();
     return bin;
   }
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Not) {
-    Sema::Flow operandTrue, operandFalse;
-    unary->operand = checkBranching(unary->operand, operandTrue, operandFalse, Sema::TruthUse::Not);
+    Checker::Flow operandTrue, operandFalse;
+    unary->operand =
+        checkBranching(unary->operand, operandTrue, operandFalse, Checker::TruthUse::Not);
     whenTrue = operandFalse;
     whenFalse = operandTrue;
     unary->type = Type::boolTy();
@@ -187,48 +190,49 @@ Expr *TruthChecker::checkBranching(Expr *expr, Sema::Flow &whenTrue, Sema::Flow 
   // `if (level = 0)`, also in double parentheses, which JavaScript linters
   // take as "I mean it".
   if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-    expr = sema_.exprChecker().checkExpr(assign);
-    whenTrue = sema_.flow_;
-    whenFalse = sema_.flow_;
+    expr = checker_.exprChecker().checkExpr(assign);
+    whenTrue = checker_.flow_;
+    whenFalse = checker_.flow_;
     reportAssignmentCondition(assign, use);
-    return sema_.typeRelations().convert(expr, Type::boolTy());
+    return checker_.typeRelations().convert(expr, Type::boolTy());
   }
 
-  expr = sema_.exprChecker().checkExpr(expr, Type::boolTy());
-  whenTrue = sema_.flow_;
-  whenFalse = sema_.flow_;
+  expr = checker_.exprChecker().checkExpr(expr, Type::boolTy());
+  whenTrue = checker_.flow_;
+  whenFalse = checker_.flow_;
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    sema_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
+    checker_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
   }
   if (!expr->type->isBool()) {
     checkTruthy(expr, use);
   }
 
   // A boolean even after an error, so that nothing else is reported.
-  return sema_.typeRelations().convert(expr, Type::boolTy());
+  return checker_.typeRelations().convert(expr, Type::boolTy());
 }
 
-Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Sema::Flow &whenTrue, Sema::Flow &whenFalse,
-                             Sema::TruthUse use) {
+Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Checker::Flow &whenTrue,
+                                     Checker::Flow &whenFalse, Checker::TruthUse use) {
   if (auto *bin = dyn_cast<BinaryExpr>(expr);
       bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
     return checkLogical(bin, expected, whenTrue, whenFalse, /*tested=*/true,
-                        bin->op == BinaryOp::LogAnd ? Sema::TruthUse::And : Sema::TruthUse::Or);
+                        bin->op == BinaryOp::LogAnd ? Checker::TruthUse::And
+                                                    : Checker::TruthUse::Or);
   }
   // A boolean anyway.
   if (auto *unary = dyn_cast<UnaryExpr>(expr);
       (unary && unary->op == UnaryOp::Not) || isBooleanCall(expr)) {
     return checkBranching(expr, whenTrue, whenFalse, use);
   }
-  expr = sema_.exprChecker().checkExpr(expr, expected);
-  whenTrue = sema_.flow_;
-  whenFalse = sema_.flow_;
+  expr = checker_.exprChecker().checkExpr(expr, expected);
+  whenTrue = checker_.flow_;
+  whenFalse = checker_.flow_;
   if (auto *lit = dyn_cast<BoolLitExpr>(expr)) {
     (lit->value ? whenFalse : whenTrue).unreachable = true;
   } else {
-    sema_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
+    checker_.conditionFacts().addConditionFacts(expr, whenTrue, whenFalse);
   }
 
   return expr;
@@ -238,34 +242,35 @@ Expr *TruthChecker::checkTestedValue(Expr *expr, const Type *expected, Sema::Flo
 // else b. b runs only when a does not decide. The result has the type that
 // holds both: `nick || "anon"` is a string, `items && items.length` an
 // `int | undefined`. Both booleans give a boolean, as before.
-Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Sema::Flow &whenTrue, Sema::Flow &whenFalse,
-                         bool tested, Sema::TruthUse use) {
+Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Checker::Flow &whenTrue,
+                                 Checker::Flow &whenFalse, bool tested, Checker::TruthUse use) {
   bool isAnd = bin->op == BinaryOp::LogAnd;
-  bool isAssign = use == Sema::TruthUse::OrAssign || use == Sema::TruthUse::AndAssign;
+  bool isAssign = use == Checker::TruthUse::OrAssign || use == Checker::TruthUse::AndAssign;
   const char *op = isAnd ? (isAssign ? "&&=" : "&&") : (isAssign ? "||=" : "||");
   // The value the hints about the left side mention: what `||=` assigns.
   const Expr *other = isAssign ? cast<AssignExpr>(bin->rhs)->value : bin->rhs;
 
-  Sema::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
+  Checker::Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
   // `T extends string` is tested, and given, as a string.
-  bin->lhs = sema_.genericChecker().apparent(checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
+  bin->lhs = checker_.genericChecker().apparent(
+      checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
   bool ok = checkTruthy(bin->lhs, use, other);
   const Type *l = bin->lhs->type;
-  sema_.flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
+  checker_.flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
   // Like `??`, `||` gives the right side where the left would be: an empty
   // array literal there takes the type of the left side.
   const Type *hint = isAnd || l->isError() || l->isUndefined() ? expected : l->nonOptional();
   if (tested) {
-    bin->rhs = checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, Sema::TruthUse::Condition);
-    ok &= checkTruthy(bin->rhs, Sema::TruthUse::Condition);
+    bin->rhs = checkTestedValue(bin->rhs, hint, rhsTrue, rhsFalse, Checker::TruthUse::Condition);
+    ok &= checkTruthy(bin->rhs, Checker::TruthUse::Condition);
   } else {
-    bin->rhs = sema_.exprChecker().checkExpr(bin->rhs, hint);
-    rhsTrue = sema_.flow_;
-    rhsFalse = sema_.flow_;
+    bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, hint);
+    rhsTrue = checker_.flow_;
+    rhsFalse = checker_.flow_;
   }
   whenTrue = isAnd ? rhsTrue : FlowChecker::join(lhsTrue, rhsTrue);
   whenFalse = isAnd ? FlowChecker::join(lhsFalse, rhsFalse) : rhsFalse;
-  sema_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+  checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
 
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
@@ -277,7 +282,7 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Sema::Fl
   if (l->isError() || r->isError()) {
     // A call in a cycle may have no type yet (see inferCycle): the other
     // side tells.
-    if (sema_.trial_ && l->isError() != r->isError()) {
+    if (checker_.trial_ && l->isError() != r->isError()) {
       bin->type = l->isError() ? r : kept;
     }
     return bin;
@@ -288,27 +293,29 @@ Expr *TruthChecker::checkLogical(BinaryExpr *bin, const Type *expected, Sema::Fl
   }
   if (r->isVoid()) {
     std::string test = hintText(bin->lhs);
-    sema_.diags_.error(bin->loc(),
-                 llvm::Twine("the right side of '") + op +
-                     "' returns nothing, so there is no value to give; call it with 'if': 'if (" +
-                     (isAnd ? "" : "!") + test + ") " + hintText(bin->rhs, "...") + "'");
+    checker_.diags_.error(
+        bin->loc(),
+        llvm::Twine("the right side of '") + op +
+            "' returns nothing, so there is no value to give; call it with 'if': 'if (" +
+            (isAnd ? "" : "!") + test + ") " + hintText(bin->rhs, "...") + "'");
     return bin;
   }
   const Type *result = TypeRelations::unify(kept, r);
   if (!result) {
-    sema_.diags_.error(bin->loc(),
-                 llvm::Twine("'") + op + "' gives '" + kept->name() + "' when its left side is " +
-                     (isAnd ? "falsy" : "truthy") + " and '" + r->name() +
-                     "' otherwise, and no type holds both; say what each case gives with '?:'");
+    checker_.diags_.error(
+        bin->loc(), llvm::Twine("'") + op + "' gives '" + kept->name() +
+                        "' when its left side is " + (isAnd ? "falsy" : "truthy") + " and '" +
+                        r->name() +
+                        "' otherwise, and no type holds both; say what each case gives with '?:'");
     return bin;
   }
-  bin->rhs = sema_.typeRelations().convert(bin->rhs, result);
+  bin->rhs = checker_.typeRelations().convert(bin->rhs, result);
   bin->type = result;
 
   return bin;
 }
 
-bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr *other) {
+bool TruthChecker::checkTruthy(const Expr *expr, Checker::TruthUse use, const Expr *other) {
   // A type parameter tests as its constraint: `T extends string` as a string.
   const Type *type = expr->type, *base = GenericChecker::apparentType(type->nonOptional());
   // Nothing but undefined, as an optional parameter of a type `never` in a copy of a generic
@@ -349,39 +356,40 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
       return true;
     }
     if (!number) {
-      sema_.diags_.error(expr->loc(), "a value of type '" + type->name().str() +
-                                    "' is always truthy, so the condition is always true");
+      checker_.diags_.error(expr->loc(), "a value of type '" + type->name().str() +
+                                             "' is always truthy, so the condition is always true");
       return false;
     }
-    sema_.diags_.error(expr->loc(), "a value of type '" + type->name().str() +
-                                  "' cannot be a condition: '" + number->name().str() +
-                                  "' is a number, and 0 would count as false; check what it "
-                                  "holds, e.g. 'typeof " +
-                                  hintText(expr) + " == \"string\"'");
+    checker_.diags_.error(expr->loc(),
+                          "a value of type '" + type->name().str() + "' cannot be a condition: '" +
+                              number->name().str() +
+                              "' is a number, and 0 would count as false; check what it "
+                              "holds, e.g. 'typeof " +
+                              hintText(expr) + " == \"string\"'");
     return false;
   }
 
   const char *op = nullptr;
   switch (use) {
-  case Sema::TruthUse::Condition:
+  case Checker::TruthUse::Condition:
     break;
-  case Sema::TruthUse::Not:
+  case Checker::TruthUse::Not:
     op = "!";
     break;
-  case Sema::TruthUse::Or:
+  case Checker::TruthUse::Or:
     op = "||";
     break;
-  case Sema::TruthUse::And:
+  case Checker::TruthUse::And:
     op = "&&";
     break;
-  case Sema::TruthUse::OrAssign:
+  case Checker::TruthUse::OrAssign:
     op = "||=";
     break;
-  case Sema::TruthUse::AndAssign:
+  case Checker::TruthUse::AndAssign:
     op = "&&=";
     break;
   }
-  bool negated = use == Sema::TruthUse::Not;
+  bool negated = use == Checker::TruthUse::Not;
   std::string x = hintText(expr), y = hintText(other, "...");
   std::string message;
 
@@ -395,11 +403,11 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
     message =
         op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
     message += ": '" + base->name().str() + "' may be a number, and 0 would count as false; ";
-    if (use == Sema::TruthUse::Or) {
+    if (use == Checker::TruthUse::Or) {
       message += "give a default with '??': '" + x + " ?? " + y + "'";
-    } else if (use == Sema::TruthUse::OrAssign) {
+    } else if (use == Checker::TruthUse::OrAssign) {
       message += "give a default with '??=': '" + x + " ??= " + y + "'";
-    } else if (use == Sema::TruthUse::AndAssign) {
+    } else if (use == Checker::TruthUse::AndAssign) {
       message += "check for undefined: 'if (" + x + " != undefined) " + x + " = " + y + "'";
     } else {
       message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
@@ -408,10 +416,10 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
     // Any value of JavaScript but undefined: 0, "", false and null are false.
     message = op ? "'" + std::string(op) + "' cannot test a Json" : "a Json cannot be a condition";
     message += ": it may hold 0, \"\", false or null, which would count as false; ";
-    if (use == Sema::TruthUse::Or) {
+    if (use == Checker::TruthUse::Or) {
       message +=
           "give a default with '??', which replaces null and undefined: '" + x + " ?? " + y + "'";
-    } else if (use == Sema::TruthUse::OrAssign) {
+    } else if (use == Checker::TruthUse::OrAssign) {
       message += "give a default with '??=': '" + x + " ??= " + y + "'";
     } else {
       message += "compare it as you mean, e.g. '" + x + (negated ? " == null'" : " != null'") +
@@ -423,9 +431,9 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
     message = op ? "'" + std::string(op) + "' cannot test an unknown value"
                  : "an unknown value cannot be a condition";
     message += ": it may hold 0, \"\" or false, which would count as false; ";
-    if (use == Sema::TruthUse::Or) {
+    if (use == Checker::TruthUse::Or) {
       message += "give a default with '??': '" + x + " ?? " + y + "'";
-    } else if (use == Sema::TruthUse::OrAssign) {
+    } else if (use == Checker::TruthUse::OrAssign) {
       message += "give a default with '??=': '" + x + " ??= " + y + "'";
     } else {
       message += "check what it holds, e.g. '" + x +
@@ -446,12 +454,12 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
     if (type->isOptional()) {
       message += " too; ";
       // `if (items?.length)` asks whether there are any.
-      if (isLength(expr) &&
-          (use == Sema::TruthUse::Condition || use == Sema::TruthUse::Not || use == Sema::TruthUse::And)) {
+      if (isLength(expr) && (use == Checker::TruthUse::Condition || use == Checker::TruthUse::Not ||
+                             use == Checker::TruthUse::And)) {
         message += "compare it: '(" + x + " ?? 0) " + (negated ? "== 0'" : "> 0'");
-      } else if (use == Sema::TruthUse::Or) {
+      } else if (use == Checker::TruthUse::Or) {
         message += "give a default with '??': '" + x + " ?? " + y + "'";
-      } else if (use == Sema::TruthUse::OrAssign) {
+      } else if (use == Checker::TruthUse::OrAssign) {
         message += "give a default with '??=': '" + x + " ??= " + y + "'";
       } else {
         message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
@@ -463,11 +471,11 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
     } else {
       // A length is never negative: `> 0` says what is meant.
       std::string test = negated ? x + " == 0" : isLength(expr) ? x + " > 0" : x + " != 0";
-      if (use == Sema::TruthUse::Or) {
+      if (use == Checker::TruthUse::Or) {
         message += "; compare it: '" + test + " ? " + x + " : " + y + "'";
-      } else if (use == Sema::TruthUse::OrAssign) {
+      } else if (use == Checker::TruthUse::OrAssign) {
         message += "; compare it: 'if (" + x + " == 0) " + x + " = " + y + "'";
-      } else if (use == Sema::TruthUse::AndAssign) {
+      } else if (use == Checker::TruthUse::AndAssign) {
         message += "; compare it: 'if (" + test + ") " + x + " = " + y + "'";
       } else {
         message += "; compare it: '" + test + "'";
@@ -498,36 +506,36 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
                         : std::string(what) + " is always truthy";
     }
     switch (use) {
-    case Sema::TruthUse::Condition:
+    case Checker::TruthUse::Condition:
       message += ", so the condition is always true";
       break;
-    case Sema::TruthUse::Not:
+    case Checker::TruthUse::Not:
       message += ", so '!' always gives false";
       break;
-    case Sema::TruthUse::Or:
+    case Checker::TruthUse::Or:
       message += ", so '||' never gives its right side";
       break;
-    case Sema::TruthUse::And:
+    case Checker::TruthUse::And:
       message += ", so '&&' always gives its right side";
       break;
-    case Sema::TruthUse::OrAssign:
+    case Checker::TruthUse::OrAssign:
       message += ", so '||=' never assigns";
       break;
-    case Sema::TruthUse::AndAssign:
+    case Checker::TruthUse::AndAssign:
       message += ", so '&&=' always assigns";
       break;
     }
     std::string length = x + (negated ? ".length == 0" : ".length > 0");
     std::string call =
         isObject ? "" : (negated ? "!" : "") + x + (base->minArgs() == 0 ? "()" : "(...)");
-    if (use == Sema::TruthUse::AndAssign) {
+    if (use == Checker::TruthUse::AndAssign) {
       message += "; use '='";
-    } else if (use == Sema::TruthUse::Or) {
+    } else if (use == Checker::TruthUse::Or) {
       message += "; drop '|| " + y + "'";
-    } else if (use == Sema::TruthUse::OrAssign) {
+    } else if (use == Checker::TruthUse::OrAssign) {
       message += isArray ? "; check its length: 'if (" + x + ".length == 0) " + x + " = " + y + "'"
                          : "; drop the assignment";
-    } else if ((narrowed || isObject) && use == Sema::TruthUse::And) {
+    } else if ((narrowed || isObject) && use == Checker::TruthUse::And) {
       message += "; drop '" + x + " &&'";
     } else if (narrowed || className) {
       message +=
@@ -541,7 +549,7 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
       message += "; call it: '" + call + "'";
     }
   }
-  sema_.diags_.error(expr->loc(), message);
+  checker_.diags_.error(expr->loc(), message);
 
   return false;
 }
@@ -549,8 +557,8 @@ bool TruthChecker::checkTruthy(const Expr *expr, Sema::TruthUse use, const Expr 
 // `if (level = 0)` is almost always `==` mistyped; `while (line = next())`
 // tests the assigned value, and would also stop at an empty line. The hint
 // depends on which it looks like.
-void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Sema::TruthUse use) {
-  bool negated = use == Sema::TruthUse::Not;
+void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Checker::TruthUse use) {
+  bool negated = use == Checker::TruthUse::Not;
   std::string target = hintText(assign->target), value = hintText(assign->value, "...");
   const Type *type = assign->type;
   std::string message = "an assignment cannot be a condition; ";
@@ -564,19 +572,20 @@ void TruthChecker::reportAssignmentCondition(const AssignExpr *assign, Sema::Tru
     message += "to test the assigned value, compare it: '(" + target + " = " + value + ") " +
                (negated ? "== " : "!= ") + empty + "'";
   }
-  sema_.diags_.error(assign->loc(), message);
+  checker_.diags_.error(assign->loc(), message);
 }
 
 bool TruthChecker::isBooleanCall(const Expr *expr) const {
   auto *call = dyn_cast<CallExpr>(expr);
 
   return call && !call->optional && call->args.size() == 1 && !call->hasSpread() &&
-         sema_.callChecker().isGlobalName(call->callee, "Boolean");
+         checker_.callChecker().isGlobalName(call->callee, "Boolean");
 }
 
 // `Boolean(x)` is `!!x`: x is tested as a condition would test it, and
 // narrows the same way.
-Expr *TruthChecker::checkBooleanCall(CallExpr *call, Sema::Flow &whenTrue, Sema::Flow &whenFalse) {
+Expr *TruthChecker::checkBooleanCall(CallExpr *call, Checker::Flow &whenTrue,
+                                     Checker::Flow &whenFalse) {
   return checkBranching(call->args[0], whenTrue, whenFalse);
 }
 

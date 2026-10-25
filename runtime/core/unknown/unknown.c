@@ -9,7 +9,15 @@
 // compiler/lower/codegen/codegen_unknown.cpp) and calls these functions for
 // what needs the type at run time: typeof, the values a check showed, equality.
 
+#include "runtime/core/unknown/unknown.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/library/json/json/json.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

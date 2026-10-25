@@ -8,11 +8,11 @@
 
 namespace tz {
 
-// What may run in parallel in a program checked by Sema (docs/async.md,
+// What may run in parallel in a program checked by Checker (docs/async.md,
 // sections 2-5): the pieces of its async code, what each reads and writes,
 // and which pieces keep node's order because they touch the same data. The
 // parallel runtime follows these decisions (runtime/core/parallel/parallel.c,
-// CodeGen: the pieces that may run ahead, and the places where they wait for
+// Lowering: the pieces that may run ahead, and the places where they wait for
 // their turn); tz build --explain-parallel explains them.
 struct ParallelPlan {
   // A task: the top-level code, a call of an async function that nothing

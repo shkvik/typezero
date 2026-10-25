@@ -1,14 +1,14 @@
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/classes/method_call_checker/method_call_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -35,23 +35,24 @@ bool isExternalValue(const Type *type) {
 
 } // namespace
 
-TzModulesChecker::TzModulesChecker(Sema &sema) : sema_(sema) {}
+TzModulesChecker::TzModulesChecker(Checker &checker) : checker_(checker) {}
 
 void TzModulesChecker::checkExternal(FunctionDecl *fn) {
   FuncSymbol *sym = fn->sym;
-  sema_.returnInferrer().resolveParams(sym);
+  checker_.returnInferrer().resolveParams(sym);
   fn->checked = true;
   if (!fn->typeParams.empty() || sym->hasRest) {
-    sema_.diags_.error(fn->loc(), "an intrinsic takes plain parameters: no type parameters, no rest");
+    checker_.diags_.error(fn->loc(),
+                          "an intrinsic takes plain parameters: no type parameters, no rest");
     return;
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Type *type = sym->params[i];
     if (fn->params[i].defaultValue || fn->params[i].optional) {
-      sema_.diags_.error(fn->params[i].loc, "an intrinsic has no optional parameters");
+      checker_.diags_.error(fn->params[i].loc, "an intrinsic has no optional parameters");
     } else if (!type->isError() && !isExternalValue(type)) {
-      sema_.diags_.error(fn->params[i].loc,
-                   "an intrinsic cannot take a value of type '" + type->name() + "'");
+      checker_.diags_.error(fn->params[i].loc,
+                            "an intrinsic cannot take a value of type '" + type->name() + "'");
     }
   }
   const Type *ret = sym->ret;
@@ -59,11 +60,12 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
     return;
   }
   if (ret->isPromise()) {
-    sema_.file_->usesAsync = true;
+    checker_.file_->usesAsync = true;
     ret = ret->promised();
   }
   if (!ret->isVoid() && !ret->isError() && !isExternalValue(ret)) {
-    sema_.diags_.error(fn->loc(), "an intrinsic cannot give a value of type '" + sym->ret->name() + "'");
+    checker_.diags_.error(fn->loc(),
+                          "an intrinsic cannot give a value of type '" + sym->ret->name() + "'");
   }
 }
 
@@ -80,17 +82,19 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
   bool fewer = mine.size() > given.size();
   const Type *got = from->ret(), *wanted = to->ret();
   if ((got == wanted && !fewer) || got->isVoid() || wanted->isVoid() || got->isError() ||
-      wanted->isError() || (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
+      wanted->isError() ||
+      (got != wanted && !TypeRelations::isImplicitlyConvertible(got, wanted))) {
     return nullptr;
   }
-  auto *cast = sema_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
+  auto *cast = checker_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
   cast->adaptsResult = true;
 
   return cast;
 }
 
-FunctionDecl *TzModulesChecker::accessorOf(ClassDecl *cls, llvm::StringRef name, FunctionDecl::Accessor kind) {
+FunctionDecl *TzModulesChecker::accessorOf(ClassDecl *cls, llvm::StringRef name,
+                                           FunctionDecl::Accessor kind) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
     for (FunctionDecl *fn : c->methods) {
       if (fn->name == name && !fn->isStatic && fn->accessor == kind) {
@@ -102,52 +106,55 @@ FunctionDecl *TzModulesChecker::accessorOf(ClassDecl *cls, llvm::StringRef name,
   return nullptr;
 }
 
-Expr *TzModulesChecker::checkAccessorRead(MemberExpr *member, ClassDecl *cls, const Type *expected) {
+Expr *TzModulesChecker::checkAccessorRead(MemberExpr *member, ClassDecl *cls,
+                                          const Type *expected) {
   if (!accessorOf(cls, member->name, FunctionDecl::Accessor::Getter)) {
     if (accessorOf(cls, member->name, FunctionDecl::Accessor::Setter)) {
-      sema_.diags_.error(member->loc(),
-                   "'" + member->name + "' of '" + cls->name + "' can only be assigned");
+      checker_.diags_.error(member->loc(),
+                            "'" + member->name + "' of '" + cls->name + "' can only be assigned");
       member->type = Type::error();
       return member;
     }
     return nullptr;
   }
-  auto *call = sema_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>());
+  auto *call = checker_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>());
   accessorCalls_.insert(call);
 
-  return sema_.methodCallChecker().checkMethodCall(call, member, expected);
+  return checker_.methodCallChecker().checkMethodCall(call, member, expected);
 }
 
-const Type *TzModulesChecker::checkAccessorTarget(MemberExpr *member, ClassDecl *cls, bool compound) {
+const Type *TzModulesChecker::checkAccessorTarget(MemberExpr *member, ClassDecl *cls,
+                                                  bool compound) {
   FunctionDecl *setter = accessorOf(cls, member->name, FunctionDecl::Accessor::Setter);
   if (!setter) {
     if (!accessorOf(cls, member->name, FunctionDecl::Accessor::Getter)) {
       return nullptr;
     }
-    sema_.diags_.error(member->loc(), "cannot assign to '" + member->name +
-                                    "' because it is a "
-                                    "read-only property of '" +
-                                    cls->name + "'");
+    checker_.diags_.error(member->loc(), "cannot assign to '" + member->name +
+                                             "' because it is a "
+                                             "read-only property of '" +
+                                             cls->name + "'");
     return Type::error();
   }
   if (compound) {
-    sema_.diags_.error(member->loc(), "'" + member->name + "' of '" + cls->name +
-                                    "' is assigned only with '=': write 'o." + member->name +
-                                    " = o." + member->name + " + value'");
+    checker_.diags_.error(member->loc(), "'" + member->name + "' of '" + cls->name +
+                                             "' is assigned only with '=': write 'o." +
+                                             member->name + " = o." + member->name + " + value'");
     return Type::error();
   }
-  sema_.pendingSetter_ = member;
-  sema_.returnInferrer().resolveParams(setter->sym);
+  checker_.pendingSetter_ = member;
+  checker_.returnInferrer().resolveParams(setter->sym);
 
   return setter->sym->params.empty() ? Type::error() : setter->sym->params[0];
 }
 
 Expr *TzModulesChecker::checkSetterCall(AssignExpr *assign) {
-  MemberExpr *member = std::exchange(sema_.pendingSetter_, nullptr);
-  auto *call = sema_.ctx_.make<CallExpr>(assign->loc(), member, std::vector<Expr *>{assign->value});
+  MemberExpr *member = std::exchange(checker_.pendingSetter_, nullptr);
+  auto *call =
+      checker_.ctx_.make<CallExpr>(assign->loc(), member, std::vector<Expr *>{assign->value});
   accessorCalls_.insert(call);
 
-  return sema_.methodCallChecker().checkMethodCall(call, member, nullptr);
+  return checker_.methodCallChecker().checkMethodCall(call, member, nullptr);
 }
 
 std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
@@ -178,8 +185,8 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
     return knownPrefix(bin->lhs);
   }
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    auto it = sema_.constPrefixes_.find(name->var);
-    return it == sema_.constPrefixes_.end() ? std::string() : it->second;
+    auto it = checker_.constPrefixes_.find(name->var);
+    return it == checker_.constPrefixes_.end() ? std::string() : it->second;
   }
   // `new URL(url)` and `new Request(url, init)`: the address they are made of.
   if (auto *made = dyn_cast<NewExpr>(expr);
@@ -195,16 +202,17 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
 }
 
 void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
-  if (!fn || sema_.file_->usesTls || call->args.empty() || sema_.libraryCalls().inLibrary(call->loc())) {
+  if (!fn || checker_.file_->usesTls || call->args.empty() ||
+      checker_.libraryCalls().inLibrary(call->loc())) {
     return;
   }
-  if (fn == sema_.libFunctions_.lookup("fetch")) {
+  if (fn == checker_.libFunctions_.lookup("fetch")) {
     std::string prefix = llvm::StringRef(knownPrefix(call->args[0])).lower();
     if (!llvm::StringRef(prefix).starts_with("http://") &&
         !llvm::StringRef(prefix).starts_with("data:")) {
-      sema_.file_->usesTls = true;
+      checker_.file_->usesTls = true;
     }
-  } else if (fn == sema_.libFunctions_.lookup("serve")) {
+  } else if (fn == checker_.libFunctions_.lookup("serve")) {
     // Options written out have `tls` or not (a spread may bring it); others, whatever their type
     // allows.
     const Expr *options = call->args[0];
@@ -212,19 +220,20 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
       options = cast->operand;
     }
     if (auto *lit = dyn_cast<ObjectLitExpr>(options)) {
-      sema_.file_->usesTls = llvm::any_of(
+      checker_.file_->usesTls = llvm::any_of(
           lit->props, [](const ObjectLitExpr::Property &p) { return p.spread || p.name == "tls"; });
     } else {
-      sema_.file_->usesTls =
+      checker_.file_->usesTls =
           !options->type || !options->type->isObject() || options->type->field("tls") != nullptr;
     }
   }
 }
 
 void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
-  if (fn && !sema_.libraryCalls().inLibrary(loc) &&
-      (fn == sema_.libFunctions_.lookup("fetch") || fn == sema_.libFunctions_.lookup("serve"))) {
-    sema_.file_->usesTls = true;
+  if (fn && !checker_.libraryCalls().inLibrary(loc) &&
+      (fn == checker_.libFunctions_.lookup("fetch") ||
+       fn == checker_.libFunctions_.lookup("serve"))) {
+    checker_.file_->usesTls = true;
   }
 }
 
@@ -233,10 +242,10 @@ bool TzModulesChecker::rejectAccessorCall(CallExpr *call, MemberExpr *member, Fu
       accessorCalls_.contains(call)) {
     return false;
   }
-  sema_.diags_.error(member->loc(),
-               "'" + member->name + "' is a property, not a method: " +
-                   (sym->decl->accessor == FunctionDecl::Accessor::Getter ? "read it without '()'"
-                                                                          : "assign to it"));
+  checker_.diags_.error(member->loc(), "'" + member->name + "' is a property, not a method: " +
+                                           (sym->decl->accessor == FunctionDecl::Accessor::Getter
+                                                ? "read it without '()'"
+                                                : "assign to it"));
 
   return true;
 }

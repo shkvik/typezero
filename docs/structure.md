@@ -3,10 +3,12 @@
 План переделки, принят 25 октября 2026 года. Работающий образец — игрушечный компилятор в
 [tmp/](../tmp/README.md): там всё устроено так, как здесь описано, на четырёх проходах и двух фичах.
 
-Первый шаг сделан 25 октября: код разложен по трём деревьям — `compiler/` (C++), `runtime/` (C) и
-`library/` (tz), темы библиотеки в них называются одинаково (вариант 2 из
-[tmp/layouts.md](../tmp/layouts.md)). Файлы перенесены как есть, логика не менялась: `Sema` и
-`CodeGen` пока прежние, их части лежат по проходам и темам. Где что лежит сейчас — раздел «Сейчас».
+Переделка сделана 25–26 октября: код разложен по трём деревьям — `compiler/` (C++), `runtime/` (C)
+и `library/` (tz), темы библиотеки в них называются одинаково (вариант 2 из
+[tmp/layouts.md](../tmp/layouts.md)); `Sema` и `CodeGen` разрезаны на проходы и маленькие классы, темы
+подключены через `Feature`. Поведение не менялось: все тесты проходят как до переделки. Где что
+лежит сейчас и что из плана ещё не так — раздел «Сейчас»; разделы после него — цель, как она была
+задумана.
 
 ## Зачем
 
@@ -84,78 +86,86 @@ tests/ docs/ bench/ examples/ third_party/
 
 ## Сейчас
 
-Так код лежит после первого шага: файлы те же, что были, каждый в папке с именем своего класса или
-модуля. Части `Sema` и `CodeGen`, которые относятся к теме, лежат в папках `sema/` и `codegen/`
-этой темы.
-
 ```
 compiler/
-  CMakeLists.txt          все .cpp под compiler/ по маске
-  cli/                    main.cpp; driver/ — команды, круги карт событий, оптимизация, объектный файл
-  program/                ast/, types/, diagnostics/
-  load/                   loader/, lexer/, token/, parser/
-  check/                  sema/ — Sema без тем (sema.h, sema.cpp и 27 sema_*.cpp); facts/,
-                          overflow/, parallel/
-  lower/                  codegen/ — CodeGen без тем (codegen.h, codegen.cpp и 16 codegen_*.cpp)
-  link/                   linker/, licenses/
-  packages/               commands/, fetch/, json/, net/, port/, project/, scan/, semver/
-  library/
-    bytes/                sema/, codegen/
-    child_process/        sema/, codegen/
-    crypto/               sema/ (sema_crypto, sema_webcrypto), codegen/, crypto_api/
-    date/                 sema/, codegen/, date_syntax/ (date_parse.c рантайма, собранный в tz)
-    decimal/              sema/, codegen/, decimal_literal/
-    events/               sema/, codegen/
-    intl/                 sema/, codegen/
-    json/                 sema/, codegen/
-    node/                 sema/ (sema_node, sema_async_io), codegen/ (codegen_node,
-                          codegen_async_io): node:fs, node:path, node:os, node:fs/promises,
-                          node:timers/promises, node:readline, tz:io
-    process/              sema/, codegen/
-    reflect/              sema/, codegen/
-    regex/                sema/, codegen/ (codegen_regex, codegen_regex_native), regex_syntax/
-                          (regex_compile.c рантайма, собранный в tz)
-    result/               sema/, codegen/
-    stream/               sema/, codegen/
-    tz_modules/           sema/ (sema_library), codegen/ (codegen_library)
-    weakref/              sema/
+  CMakeLists.txt     все .cpp под compiler/ по маске
+  pipeline/          pipeline/ — checkProgram и buildProgram; build_options/, runtime_files/
+  cli/               main.cpp, args/, command_line/, *_command/ (build, run, init, add, remove,
+                     update, port, licenses, version, explain), error_printer/
+  program/           program/, module/, source_file/, ast/ (по папке на узел; ast.h — все разом),
+                     symbols/, types/ (type/ — класс Type; type_op/, union_slot/, field/, overload/…
+                     и модули функций над типами), diagnostic/, diagnostics/, errors/
+  result/            result/, ok/, err/
+  load/              load_pass/, loader/, module_resolver/, library_modules/, lexer/, token/,
+                     literal_text/, parser/ и его части: token_cursor/, stmt_parser/, var_parser/,
+                     pattern_parser/, expr_parser/, call_parser/, primary_parser/, template_parser/,
+                     function_parser/, class_parser/, decl_parser/, module_parser/, type_parser/,
+                     object_type_parser/, function_type_parser/
+  declare/           declare_pass/, prelude/, module_declarer/, import_binder/, type_declarer/,
+                     constant_folder/, class_declarer/, function_names/
+  infer/             infer_pass/, call_cycles/, return_inferrer/
+  check/             check_pass/, checker/ (Checker), event_rounds/, scopes/, facts/,
+                     top_level_checker/; expr/ stmt/ flow/ types/ values/ objects/ functions/
+                     classes/ generics/ errors/ iterators/ async/ — по папке на класс
+  instances/         instances_pass/, late_classes/, constructor_calls/
+  whole_program/     whole_program_pass/, load_order/, unused/, wide_writes/, flows/, flow_*/
+  overflow/          overflow_pass/, overflow_check/ (общее), value_range/, program_scan/, slots/,
+                     executor/, evaluator/, assign_evaluator/, builtin_evaluator/, call_ranges/,
+                     loop_ranges/, narrowing/, overflow_warnings/
+  parallel/          parallel_pass/, analysis/ (общее), pieces/, code_walk/, expr_walk/, call_walk/,
+                     call_resolver/, alias_analysis/, escape_scan/, library_effects/,
+                     builtin_effects/, conflicts/, parallel_analysis/, explainer/,
+                     explain_names/, explain_titles/
+  memory/            memory_pass/, memory_plan/ (MemoryPlan), memory_analysis/, cycle_scanner/ (+
+                     cycle_exprs/, cycle_escapes/), cycle_finder/, held_members/, owner_scanner/,
+                     store_scanner/ (+ store_stmts/, store_exprs/, store_calls/)
+  lower/             lower_pass/, lowering/ (Lowering), module_builder/, runtime_functions/,
+                     function_builder/, function_frame/, layouts/; expr/ stmt/ values/ objects/
+                     functions/ classes/ types/ errors/ iterators/ async/ memory/
+  optimize/          optimize_pass/, runtime_linker/, target/
+  emit/              emit_pass/, object_file/, file_writer/, ir_writer/
+  link/              link_pass/, linker/, licenses/, licenses_pass/
+  packages/          по классу на папку: manifest/, lock/, resolver/, package_graph/, jsr_client/,
+                     git_client/, http_client/, json_parser/, scanner/, port/…
+  library/           feature/, feature_registry/; темы: builtin_modules bytes child_process
+                     console crypto date decimal events fs intl json math os path process
+                     reflect regex result stream tz_modules weakref — в каждой <тема>_feature/
+                     и классы проверки и IR
 runtime/
-  CMakeLists.txt          все .c под core/ и library/ по маске; crypto/ и tls/ — в tzcrypto.lib
-  core/                   tzrt/ alloc/ group/ publish/ string/ unicode/ number/ array/ object/ map/
-                          closure/ unknown/ error/ async/ io/ parallel/
-  library/
-    bytes/                bytes/ buffer/ encodings/ cjk/
-    child_process/        child/
-    console/              inspect/
-    crypto/               crypto/ crypto_md/ crypto_aes/ crypto_chacha/ crypto_scrypt/
-                          crypto_argon2/ crypto_evp/ crypto_keys/ crypto_x509/ crypto_subtle/
-                          crypto_subtle_kw/ crypto_subtle_keys/
-    date/                 date/ date_parse/ date_zone/ date_format/
-    decimal/ json/ math/ process/ stream/   по одному модулю с именем темы
-    events/               signal/
-    http/                 http/ decompress/
-    intl/                 intl/ intl_number/ intl_text/ intl_names/ icu/
-    net/                  net/
-    node/                 fs/ path/ os/
-    reflect/              reflect/ meta/
-    regex/                regex/ regex_compile/
-    tls/                  tls/ (с tls_roots.h)
-    tz_modules/           library/
-library/
-  CMakeLists.txt          копирует *.tz в bin/lib, рядом друг с другом
-  crypto/                 webcrypto.tz
-  events/                 events.tz, web.tz
-  http/                   http.tz, fetch.tz, url.tz
-  stream/                 stream.tz, stream_promises.tz, stream_consumers.tz, string_decoder.tz,
-                          fs_stream.tz
-editors/types/            tz.d.ts, tsconfig.json
+  core/              tzrt/ (только общее: TZ_HOT, дескрипторы типов, раскладки), output/ (← tzrt.c),
+                     alloc/ group/ publish/ closure/ string/ unicode/ number/ array/ object/ map/
+                     unknown/ error/ async/ io/ parallel/ — у каждого модуля свой заголовок, файл
+                     подключает те, чьи имена берёт
+  library/           темы: bytes child_process console crypto date decimal events fs http intl
+                     json math net os path process reflect regex stream tls tz_modules;
+                     fs/ — fs, fs_errors, fs_sync, fs_dirs, fs_async, fs_async_dirs, stdin,
+                     readline, fs_stream (← fs.c); json/ — json, json_values, json_parse,
+                     json_stringify, json_typed (← json.c)
+library/             по теме на папку; stream/stream.tz и его части stream_readable.tz,
+                     stream_writable.tz, stream_duplex.tz, stream_pipeline.tz
 ```
 
-Что не так, как в цели, и почему: темы, которые сейчас вписаны в общие файлы, остались в ядре —
-`console` проверяет `sema.cpp`, `Math` и `Number` — `sema_builtins.cpp`, а строит
-`codegen_builtins.cpp`, поэтому у `math` и `console` есть только C-часть. `node:fs`, `node:path` и `node:os` в C++ — один файл
-`sema_node.cpp` с общим списком модулей, поэтому их тема пока одна, `node`, и в рантайме
-`fs`, `path` и `os` — модули этой темы. Они разойдутся на шаге 5.
+Что не так, как в цели, и почему:
+
+- **`enum Builtin` остался.** Вызов темы несёт `call->builtin`, а не `call.feature` и `call.op`;
+  `LowerPass` находит тему вызова через `FeatureRegistry::lowering(builtin)`. Значения `Builtin`
+  встречаются в 147 файлах (2249 мест), по ним идут 71 `switch`, а несколько проверок сравнивают
+  значения по порядку (`b >= Builtin::ArrForEach && b <= Builtin::ArrSortWith`): заменить их на
+  списки операций тем — отдельный шаг со своей проверкой.
+- **`Checker` и `Lowering` держат общее состояние прохода** — поля, которые нужны многим классам
+  (`checker.h` — 1461 строка, `lowering.h` — 964), а не только ссылки.
+- **Крючки тем** — те, что понадобились: `prepare`, `declare`, `checkAnyCall`, `checkStaticCall`,
+  `checkMethodCall`, `methodReceiver`, `checkClassMethodCall`, `checkValueMethodCall`,
+  `checkFunctionCall`, `checkLibraryCall`, `lowers` и `lowerCall`. Свойства, операторы, литералы,
+  рантайм и библиотеки тем пока в ядре.
+- **`node:stream` — части одного модуля.** `stream.tz` разрезан на пять файлов, но загрузчик
+  читает их как один модуль (`kModuleParts` в `compiler/load/library_modules/`): у них одна область
+  видимости, как у одного файла, а компилятор узнаёт классы `node:stream` по модулю.
+- **Классы больше ~400 строк** ещё есть: `Type` (`type.cpp`, 1229 — его фабрики),
+  `FilePort` (883) и десяток файлов по 500–600 строк; функции по 200–450 строк — большие `switch`
+  по `Builtin`, которые уйдут вместе с ним.
+- **Конвейер** чуть другой, чем в разделе «Конвейер»: `checkProgram` отдаёт `Errors`, а круги
+  карт событий повторяют проходы от загрузки до `WholeProgramPass`.
 
 ## Конвейер
 
@@ -608,7 +618,7 @@ library/
 runtime/core/
   tzrt/             tzrt.h — только общее: TZ_HOT, дескрипторы типов, раскладки
                     (← tzrt.h, 1784 строки → по заголовку на модуль)
-  output/           вывод в stdout и stderr, граница стека, сбой (← tzrt.c)
+  output/           вывод в stdout и stderr, граница стека, сбой (← output.c)
   alloc/ group/ publish/                       память
   string/ unicode/ number/ array/ object/ map/ closure/ unknown/   значения и таблицы к ним
   error/                                       исключение в полёте, стек
@@ -666,24 +676,23 @@ cli/
 
 Шагами. После каждого шага все тесты проходят, и ты коммитишь.
 
-0. **Три дерева** (сделано 25 октября). `src/` и корневой `runtime/` разложены по `compiler/`,
+0. **Три дерева** — сделано 25 октября. `src/` и корневой `runtime/` разложены по `compiler/`,
    `runtime/core/`, `runtime/library/` и `library/`, по папке на класс или модуль; логика та же.
-1. **Основа.** `.clang-format` в корень; `Result`, `ok`, `err`, `Errors`, `Diagnostic`;
-   `pipeline.cpp`, который пока зовёт старые `Sema` и `CodeGen` как один проход.
-2. **`cli` и `packages`.** `driver.cpp` и файлы `packages/` — по классу в папку.
-3. **`load`.** `loader.cpp`, лексер и парсер — классы из списка выше.
-4. **Каркас тем.** `Feature` со всеми крючками, `FeatureRegistry`, `call.feature` и `call.op`
-   рядом со старым `call->builtin`; первая тема — `math`.
-5. **Остальные темы**, по одной: от простых (`console`, `path`, `os`, `process`) к сложным
-   (`crypto`, `stream`, `events`). Каждая уносит из `sema/` и `codegen/` своей папки свои значения
-   `Builtin`, свои ветки из `Sema::checkCall` и `switch` в `CodeGen`; `node` расходится на `fs`,
-   `path` и `os`.
-6. **Анализы, которые уже отдельны:** `overflow`, `parallel`, `memory` — разрезать на классы.
-7. **`Sema` → `declare`, `infer`, `check`, `instances`, `whole_program`.** Самый большой шаг;
-   идёт по папкам `check/` — `expr`, `stmt`, `classes`, `generics`… — каждая уносит свои методы
-   и поля `Sema`.
-8. **`CodeGen` → `lower`**, так же по папкам.
-9. **Уборка:** удалить `sema.h`, `codegen.h`, `enum Builtin`, пустые папки.
+1. **Основа** — сделано: `.clang-format` в корне (код отформатирован им), `Result`, `ok`, `err`,
+   `Errors`, `Diagnostic`, `pipeline.cpp`.
+2. **`cli` и `packages`** — сделано: по классу в папку (кроме `FilePort`, см. «Сейчас»).
+3. **`load`** — сделано: загрузчик, лексер и парсер — классы из списка, текст литералов отдельно.
+4. **Каркас тем** — сделано: `Feature`, `FeatureRegistry`; `call.feature` и `call.op` — нет, см.
+   «Сейчас».
+5. **Остальные темы** — сделано: части `Sema` и `CodeGen` ушли в классы тем, их ветки — в крючки;
+   `node` разошёлся на `fs`, `path` и `os` во всех деревьях.
+6. **`overflow`, `parallel`, `memory`** — сделано: классы; анализ памяти — свой проход
+   `MemoryPass` с `MemoryPlan`.
+7. **`Sema` → `declare`, `infer`, `check`, `instances`, `whole_program`** — сделано: пять
+   проходов и классы по папкам; `Sema` стал `Checker`.
+8. **`CodeGen` → `lower`** — сделано: классы по папкам; `CodeGen` стал `Lowering`.
+9. **Уборка** — сделано: `sema.h` и `codegen.h` ушли, пустых папок нет, `tzrt.h` и большие файлы
+   рантайма разрезаны; `enum Builtin` остался (см. «Сейчас»).
 
 ## Открытые вопросы
 

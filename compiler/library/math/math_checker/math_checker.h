@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The functions of Math.
 class MathChecker {
 public:
-  explicit MathChecker(Sema &sema);
+  explicit MathChecker(Checker &checker);
 
   Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkMinMaxSpread(CallExpr *call, const Type *hint);
@@ -15,7 +15,7 @@ public:
   Expr *numericArg(Expr *arg, const Type *hint = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

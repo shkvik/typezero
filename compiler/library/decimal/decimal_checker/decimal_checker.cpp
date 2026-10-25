@@ -1,17 +1,17 @@
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/check/expr/binary_checker/binary_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <cstring>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -98,7 +98,7 @@ std::string utf8(const std::u16string &text) {
 
 } // namespace
 
-DecimalChecker::DecimalChecker(Sema &sema) : sema_(sema) {}
+DecimalChecker::DecimalChecker(Checker &checker) : checker_(checker) {}
 
 bool DecimalChecker::isLiteralTree(const Expr *expr) {
   switch (expr->kind()) {
@@ -152,12 +152,13 @@ void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
     return literalHint(other, nullptr);
   };
   if (literal(bin->lhs) && !literal(bin->rhs)) {
-    bin->rhs = sema_.exprChecker().checkExpr(bin->rhs);
-    bin->lhs = sema_.exprChecker().checkExpr(bin->lhs, hint(bin->rhs));
+    bin->rhs = checker_.exprChecker().checkExpr(bin->rhs);
+    bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, hint(bin->rhs));
     return;
   }
-  bin->lhs = sema_.exprChecker().checkExpr(bin->lhs);
-  bin->rhs = sema_.exprChecker().checkExpr(bin->rhs, literal(bin->rhs) ? hint(bin->lhs) : nullptr);
+  bin->lhs = checker_.exprChecker().checkExpr(bin->lhs);
+  bin->rhs =
+      checker_.exprChecker().checkExpr(bin->rhs, literal(bin->rhs) ? hint(bin->lhs) : nullptr);
 }
 
 std::optional<DecimalLiteral> DecimalChecker::decimalLiteral(const Expr *expr) {
@@ -177,12 +178,13 @@ std::optional<DecimalLiteral> DecimalChecker::decimalLiteral(const Expr *expr) {
 void DecimalChecker::checkDecimalLiteralRange(const Expr *lit) {
   std::optional<DecimalLiteral> value = decimalLiteral(lit);
   if (!value) {
-    sema_.diags_.error(lit->loc(), "this number cannot be read as a decimal");
+    checker_.diags_.error(lit->loc(), "this number cannot be read as a decimal");
     return;
   }
   if (!value->isZero() && value->top() > kDecimalMaxExp) {
-    sema_.diags_.error(lit->loc(), "this decimal is out of range: a decimal has at most " +
-                                 std::to_string(kDecimalMaxExp + 1) + " digits before the point");
+    checker_.diags_.error(lit->loc(), "this decimal is out of range: a decimal has at most " +
+                                          std::to_string(kDecimalMaxExp + 1) +
+                                          " digits before the point");
   }
 }
 
@@ -191,7 +193,7 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
   bool leftDecimal = l->nonOptional()->isDecimal();
   const Type *other = leftDecimal ? r : l;
   if (!other->nonOptional()->isFloat()) {
-    sema_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+    checker_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     return;
   }
   std::string message = (llvm::Twine("operator '") + opSpelling(bin->op) +
@@ -207,7 +209,7 @@ void DecimalChecker::reportDecimalMix(const BinaryExpr *bin) {
   } else {
     message += " with 'decimal(x)'";
   }
-  sema_.diags_.error(bin->loc(), message);
+  checker_.diags_.error(bin->loc(), message);
 }
 
 Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
@@ -216,14 +218,14 @@ Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
   bin->type = Type::error();
   if (bin->op == BinaryOp::Pow) {
     if (!l->isDecimal()) {
-      sema_.binaryChecker().reportOperandTypes(bin->loc(), "**", l, r);
+      checker_.binaryChecker().reportOperandTypes(bin->loc(), "**", l, r);
       return bin;
     }
     if (!r->isInteger()) {
-      sema_.diags_.error(bin->rhs->loc(), exponentMessage(r));
+      checker_.diags_.error(bin->rhs->loc(), exponentMessage(r));
       return bin;
     }
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, Type::longTy());
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::longTy());
     bin->type = decimal;
     return bin;
   }
@@ -236,7 +238,7 @@ Expr *DecimalChecker::checkDecimalArithmetic(BinaryExpr *bin) {
       reportDecimalMix(bin);
       return bin;
     }
-    *side = sema_.typeRelations().convert(*side, decimal);
+    *side = checker_.typeRelations().convert(*side, decimal);
   }
   checkDecimalDivisor(bin->op, bin->rhs);
   bin->type = decimal;
@@ -255,7 +257,7 @@ Expr *DecimalChecker::checkDecimalComparison(BinaryExpr *bin) {
       reportDecimalMix(bin);
       return bin;
     }
-    *side = sema_.typeRelations().convert(*side, Type::decimalTy());
+    *side = checker_.typeRelations().convert(*side, Type::decimalTy());
   }
 
   return bin;
@@ -265,20 +267,20 @@ void DecimalChecker::checkDecimalAssign(AssignExpr *assign, BinaryOp op) {
   const Type *valueType = assign->value->type;
   if (op == BinaryOp::Pow) {
     if (!valueType->isInteger()) {
-      sema_.diags_.error(assign->value->loc(), exponentMessage(valueType));
+      checker_.diags_.error(assign->value->loc(), exponentMessage(valueType));
       return;
     }
-    assign->value = sema_.typeRelations().convert(assign->value, Type::longTy());
+    assign->value = checker_.typeRelations().convert(assign->value, Type::longTy());
     return;
   }
   bool arithmetic = op == BinaryOp::Add || op == BinaryOp::Sub || op == BinaryOp::Mul ||
                     op == BinaryOp::Div || op == BinaryOp::Rem;
   if (!arithmetic) {
-    sema_.binaryChecker().reportOperandTypes(assign->loc(), (std::string(opSpelling(op)) + "=").c_str(), assign->type,
-                       valueType);
+    checker_.binaryChecker().reportOperandTypes(
+        assign->loc(), (std::string(opSpelling(op)) + "=").c_str(), assign->type, valueType);
     return;
   }
-  assign->value = sema_.typeRelations().coerce(assign->value, Type::decimalTy());
+  assign->value = checker_.typeRelations().coerce(assign->value, Type::decimalTy());
   checkDecimalDivisor(op, assign->value);
 }
 
@@ -293,9 +295,10 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
     value = conv->operand;
   }
   std::optional<DecimalLiteral> literal = decimalLiteral(value);
-  bool zero = literal ? literal->isZero() : sema_.constantFolder().intConstant(value) == 0;
+  bool zero = literal ? literal->isZero() : checker_.constantFolder().intConstant(value) == 0;
   if (zero) {
-    sema_.diags_.error(divisor->loc(), "decimal division by zero; a decimal has no Infinity or NaN");
+    checker_.diags_.error(divisor->loc(),
+                          "decimal division by zero; a decimal has no Infinity or NaN");
   }
 }
 
@@ -304,25 +307,25 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
 // which keeps the error of `0.1 + 0.2` (BigNumber.js does the same).
 Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (!sema_.argumentChecker().checkArity(call, loc, 1, 1)) {
+  if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
     return call;
   }
   Expr *&arg = call->args[0];
   bool literal = decimalLiteral(arg).has_value();
-  arg = sema_.exprChecker().checkExpr(arg, literal ? Type::decimalTy() : nullptr);
+  arg = checker_.exprChecker().checkExpr(arg, literal ? Type::decimalTy() : nullptr);
   const Type *type = arg->type;
   if (type->isError()) {
     return call;
   }
   if (type->isInteger() || type->isDecimal()) {
-    arg = sema_.typeRelations().convert(arg, Type::decimalTy());
+    arg = checker_.typeRelations().convert(arg, Type::decimalTy());
   } else if (!type->isString() && !type->isFloat()) {
     std::string message =
         "decimal() takes a string, a number or a decimal, found '" + type->name().str() + "'";
     if (type->isOptional()) {
       message += "; the value may be undefined: check it first or give a default with '??'";
     }
-    sema_.diags_.error(arg->loc(), message);
+    checker_.diags_.error(arg->loc(), message);
     return call;
   }
   call->builtin = Builtin::DecimalOf;
@@ -348,9 +351,9 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
       message += ": there are no settings for all decimals; division takes its places and "
                  "rounding as arguments, 'a.div(b, places, mode)'";
     }
-    sema_.diags_.error(member->loc(), message);
+    checker_.diags_.error(member->loc(), message);
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
@@ -359,30 +362,31 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!call->spreads(i)) {
-      arg = sema_.argumentChecker().checkArg(arg, decimal);
+      arg = checker_.argumentChecker().checkArg(arg, decimal);
       someValue = true;
       continue;
     }
-    arg = sema_.exprChecker().checkExpr(arg, array);
+    arg = checker_.exprChecker().checkExpr(arg, array);
     if (arg->type != array && !arg->type->isError()) {
-      sema_.diags_.error(arg->loc(), "only an array of decimals can be spread here, found '" +
-                                   arg->type->name() + "'");
+      checker_.diags_.error(arg->loc(), "only an array of decimals can be spread here, found '" +
+                                            arg->type->name() + "'");
       ok = false;
     }
-    someValue |= sema_.indexProofs().provesNotEmpty(arg);
+    someValue |= checker_.indexProofs().provesNotEmpty(arg);
   }
   if (!ok) {
     return call;
   }
   if (!someValue && builtin != Builtin::DecSum) {
     if (call->args.empty()) {
-      sema_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
+      checker_.diags_.error(member->loc(), "decimal." + name + "() needs at least one value");
     } else {
-      sema_.diags_.error(call->loc(), "decimal." + name +
-                                    " of an array that may be empty has no value; "
-                                    "check that the array is not empty, or pass a first value: "
-                                    "'decimal." +
-                                    name + "(0, ...a)'");
+      checker_.diags_.error(call->loc(),
+                            "decimal." + name +
+                                " of an array that may be empty has no value; "
+                                "check that the array is not empty, or pass a first value: "
+                                "'decimal." +
+                                name + "(0, ...a)'");
     }
     return call;
   }
@@ -393,17 +397,17 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
-  arg = sema_.argumentChecker().checkArg(arg, Type::string());
+  arg = checker_.argumentChecker().checkArg(arg, Type::string());
   if (auto *lit = dyn_cast<StringLitExpr>(arg); lit && decimalRoundingMode(lit->value) < 0) {
-    sema_.diags_.error(arg->loc(), "unknown rounding mode '" + utf8(lit->value) + "'; the modes are " +
-                                 kRoundingModes);
+    checker_.diags_.error(arg->loc(), "unknown rounding mode '" + utf8(lit->value) +
+                                          "'; the modes are " + kRoundingModes);
   }
 
   return arg;
 }
 
 Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what) {
-  arg = sema_.exprChecker().checkExpr(arg, Type::longTy());
+  arg = checker_.exprChecker().checkExpr(arg, Type::longTy());
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
@@ -414,11 +418,11 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what) {
     if (type->isOptional()) {
       message += "; the value may be undefined: check it first or give a default with '??'";
     }
-    sema_.diags_.error(arg->loc(), message);
+    checker_.diags_.error(arg->loc(), message);
     return arg;
   }
 
-  return sema_.typeRelations().convert(arg, Type::longTy());
+  return checker_.typeRelations().convert(arg, Type::longTy());
 }
 
 // The methods of a decimal: those of BigNumber.js that operators do not
@@ -460,7 +464,7 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
   }
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   if (!method) {
@@ -473,24 +477,25 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
     if (name == "isNaN" || name == "isFinite") {
       message += "; a decimal is never NaN or infinite";
     }
-    sema_.diags_.error(member->loc(), message);
+    checker_.diags_.error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
   if (method->builtin == Builtin::DecDecimalPlaces && !call->args.empty()) {
-    sema_.diags_.error(member->loc(), "decimalPlaces() only counts the places; to round, use "
-                                "'x.round(places, mode)'");
+    checker_.diags_.error(member->loc(), "decimalPlaces() only counts the places; to round, use "
+                                         "'x.round(places, mode)'");
     checkArgsLoosely();
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), method->minArgs, method->maxArgs)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->minArgs,
+                                             method->maxArgs)) {
     return call;
   }
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     switch (method->args[i]) {
     case 'd':
-      arg = sema_.argumentChecker().checkArg(arg, decimal);
+      arg = checker_.argumentChecker().checkArg(arg, decimal);
       break;
     case 'p':
       arg = checkDecimalCount(arg, "the number of decimal places");
@@ -519,8 +524,9 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
 }
 
 void DecimalChecker::reportBigInt(llvm::SMLoc loc, llvm::StringRef what) {
-  sema_.diags_.error(loc, what + " is not supported, as there is no bigint: integers up to 9.2e18 fit in "
-                           "'long', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
+  checker_.diags_.error(
+      loc, what + " is not supported, as there is no bigint: integers up to 9.2e18 fit in "
+                  "'long', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
 }
 
 } // namespace tz

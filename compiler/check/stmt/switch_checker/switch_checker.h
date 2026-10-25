@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // switch.
 class SwitchChecker {
 public:
-  explicit SwitchChecker(Sema &sema);
+  explicit SwitchChecker(Checker &checker);
 
   void checkSwitch(SwitchStmt *stmt);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

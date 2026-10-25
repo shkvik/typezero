@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The proofs that an index is in bounds (docs/arrays.md).
 class IndexProofs {
 public:
-  explicit IndexProofs(Sema &sema);
+  explicit IndexProofs(Checker &checker);
 
   // Flow: facts, narrowing and proofs (sema_flow.cpp)
   // `expr` (checked, of an integer type) as `term + offset`, if it has that
@@ -25,7 +25,7 @@ public:
   bool provesNotEmpty(const Expr *object) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

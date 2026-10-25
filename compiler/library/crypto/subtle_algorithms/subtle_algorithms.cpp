@@ -7,8 +7,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -328,7 +328,7 @@ std::string exampleOf(llvm::StringRef member) {
 }
 
 std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRef op,
-                                    llvm::StringRef fallback, bool &bad) {
+                             llvm::StringRef fallback, bool &bad) {
   const ObjectLitExpr *lit = dyn_cast_or_null<ObjectLitExpr>(arg);
   const Expr *nameExpr = arg;
   if (lit) {

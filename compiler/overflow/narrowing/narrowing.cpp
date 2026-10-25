@@ -1,14 +1,15 @@
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +28,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -61,7 +61,7 @@ std::optional<double> literalValue(const Expr *expr) {
 Narrowing::Narrowing(OverflowCheck &check) : check_(check) {}
 
 void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
-                                  const State &whenFalse) {
+                              const State &whenFalse) {
   if (check_.quiet_) {
     return;
   }
@@ -87,7 +87,7 @@ void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
 }
 
 std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
-                                                                   const State &st) const {
+                                                               const State &st) const {
   // An int compared as a long or a double is the same value.
   while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
     if (!conv->isImplicit() || !conv->operand->type ||
@@ -103,7 +103,8 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
   if (auto *bin = dyn_cast<BinaryExpr>(expr);
       bin && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul)) {
     if (bin->op == BinaryOp::Mul) {
-      std::optional<OverflowCheck::Narrowable> a = narrowable(bin->lhs, st), b = narrowable(bin->rhs, st);
+      std::optional<OverflowCheck::Narrowable> a = narrowable(bin->lhs, st),
+                                               b = narrowable(bin->rhs, st);
       if (a && b && a->var == b->var && a->length == b->length && a->scale == 1 && a->offset == 0 &&
           b->scale == 1 && b->offset == 0 && !a->square && !b->square) {
         a->square = true;
@@ -174,7 +175,8 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     return std::nullopt;
   }
   auto info = check_.vars_.find(name->var);
-  if (info == check_.vars_.end() || info->second.owner != check_.owner_ || info->second.writtenElsewhere) {
+  if (info == check_.vars_.end() || info->second.owner != check_.owner_ ||
+      info->second.writtenElsewhere) {
     return std::nullopt;
   }
   if (!n.length && !isNumberType(name->var->type)) {
@@ -188,7 +190,7 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
 // Narrows what `target` reads in `s`, knowing that its value lies within
 // [lower, upper].
 void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, const Bound &lower,
-                              const Bound &upper) {
+                          const Bound &upper) {
   if (s.dead) {
     return;
   }
@@ -235,8 +237,8 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
   }
 }
 
-void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val &r,
-                                     State &whenTrue, State &whenFalse) {
+void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val &r, State &whenTrue,
+                                 State &whenFalse) {
   auto apply = [&](const Expr *side, const Num &other, BinaryOp op) {
     // side `op` other
     std::optional<OverflowCheck::Narrowable> target = narrowable(side, whenTrue);

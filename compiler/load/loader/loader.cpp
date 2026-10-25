@@ -1,5 +1,5 @@
 #include "compiler/load/loader/loader.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/module_resolver/module_resolver.h"

@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // console.log and its kin.
 class ConsoleLowerer {
 public:
-  explicit ConsoleLowerer(CodeGen &codegen);
+  explicit ConsoleLowerer(Lowering &lowering);
 
   void emitConsoleLog(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

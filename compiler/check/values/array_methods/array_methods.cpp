@@ -1,12 +1,12 @@
 #include "compiler/check/values/array_methods/array_methods.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
-#include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -14,8 +14,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -46,7 +46,7 @@ std::string argumentCount(unsigned min, unsigned max) {
   return text + (max == 1 && min == 1 ? " argument" : " arguments");
 }
 
-ArrayMethods::ArrayMethods(Sema &sema) : sema_(sema) {}
+ArrayMethods::ArrayMethods(Checker &checker) : checker_(checker) {}
 
 Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *arrayType = member->object->type;
@@ -57,25 +57,26 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
 
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   auto arity = [&](unsigned min, unsigned max) {
     if (count >= min && count <= max) {
       return true;
     }
-    sema_.diags_.error(member->loc(),
-                 "expected " + argumentCount(min, max) + ", but got " + llvm::Twine(count));
+    checker_.diags_.error(member->loc(), "expected " + argumentCount(min, max) + ", but got " +
+                                             llvm::Twine(count));
     checkArgsLoosely();
 
     return false;
   };
   auto elementArg = [&](size_t i) {
-    call->args[i] = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(call->args[i], element), element);
+    call->args[i] = checker_.typeRelations().coerce(
+        checker_.exprChecker().checkExpr(call->args[i], element), element);
   };
   auto positionArgs = [&](size_t from) {
     for (size_t i = from; i < count; ++i) {
-      call->args[i] = sema_.memberChecker().checkPosition(call->args[i]);
+      call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
     }
   };
 
@@ -83,17 +84,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                           "reduceRight", "find",    "findIndex", "some",
                                           "every",       "flatMap", "findLast",  "findLastIndex"};
   if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0)) {
-    return sema_.callbackChecker().checkCallbackMethod(call, member, expected);
+    return checker_.callbackChecker().checkCallbackMethod(call, member, expected);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    return sema_.iteratorMethods().checkArrayIterator(call, member);
+    return checker_.iteratorMethods().checkArrayIterator(call, member);
   }
 
   if (name == "push" || name == "unshift") {
     bool spreads = call->hasSpread();
     for (size_t i = 0; i < count; ++i) {
       if (call->spreads(i)) { // `a.push(...b)`: b has the same type as a
-        call->args[i] = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(call->args[i], arrayType), arrayType);
+        call->args[i] = checker_.typeRelations().coerce(
+            checker_.exprChecker().checkExpr(call->args[i], arrayType), arrayType);
       } else {
         elementArg(i);
       }
@@ -102,9 +104,10 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     call->type = Type::intTy();
     // The length grows by exactly `count`, unless arrays are spread.
     if (self && !spreads) {
-      sema_.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
+      checker_.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
     }
-    sema_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/false, spreads ? nullptr : self);
+    checker_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/false,
+                                        spreads ? nullptr : self);
     return call;
   }
 
@@ -113,17 +116,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     call->builtin = name == "pop" ? Builtin::ArrPop : Builtin::ArrShift;
-    bool notEmpty = sema_.indexProofs().provesNotEmpty(member->object);
+    bool notEmpty = checker_.indexProofs().provesNotEmpty(member->object);
     call->mayBeOutOfRange = !notEmpty;
     call->type = notEmpty ? element : Type::optional(element);
     if (self) {
       if (notEmpty) {
-        sema_.flow_.facts.shift(Term::lengthOf(self), -1);
+        checker_.flow_.facts.shift(Term::lengthOf(self), -1);
       } else {
-        sema_.flow_.facts.forgetIf([&](const Facts::Fact &f) { return f.rhs == Term::lengthOf(self); });
+        checker_.flow_.facts.forgetIf(
+            [&](const Facts::Fact &f) { return f.rhs == Term::lengthOf(self); });
       }
     }
-    sema_.flowChecker().arrayResized(arrayType, /*grew=*/false, /*shrank=*/true, self);
+    checker_.flowChecker().arrayResized(arrayType, /*grew=*/false, /*shrank=*/true, self);
     return call;
   }
 
@@ -133,7 +137,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     positionArgs(0);
     call->builtin = Builtin::ArrAt;
-    call->mayBeOutOfRange = !sema_.indexProofs().provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(element) : element;
     return call;
   }
@@ -151,9 +155,9 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   if (name == "concat") {
     // Each argument is an array of the same type or a single element.
     for (size_t i = 0; i < count; ++i) {
-      call->args[i] = sema_.exprChecker().checkExpr(call->args[i], arrayType);
+      call->args[i] = checker_.exprChecker().checkExpr(call->args[i], arrayType);
       if (call->args[i]->type != arrayType) {
-        call->args[i] = sema_.typeRelations().coerce(call->args[i], element);
+        call->args[i] = checker_.typeRelations().coerce(call->args[i], element);
       }
     }
     call->builtin = Builtin::ArrConcat;
@@ -165,16 +169,17 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     if (!arity(1, 2)) {
       return call;
     }
-    if (Sema::holdsResults(element)) {
-      sema_.diags_.error(member->loc(), "'" + name +
-                                      "' cannot compare Results: in JavaScript each Result is an "
-                                      "object of its own, equal to no other; search with a "
-                                      "function, e.g. 'some' or 'findIndex'");
+    if (Checker::holdsResults(element)) {
+      checker_.diags_.error(member->loc(),
+                            "'" + name +
+                                "' cannot compare Results: in JavaScript each Result is an "
+                                "object of its own, equal to no other; search with a "
+                                "function, e.g. 'some' or 'findIndex'");
       checkArgsLoosely();
       return call;
     }
     if (element->nonOptional()->isFunction()) {
-      sema_.file_->comparesFunctions = true;
+      checker_.file_->comparesFunctions = true;
     }
     elementArg(0);
     positionArgs(1);
@@ -185,40 +190,44 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     return call;
   }
 
-  if ((name == "join" || name == "toString") && Sema::holdsFunctions(element)) {
-    sema_.diags_.error(member->loc(), "functions cannot be converted to strings");
+  if ((name == "join" || name == "toString") && Checker::holdsFunctions(element)) {
+    checker_.diags_.error(member->loc(), "functions cannot be converted to strings");
     checkArgsLoosely();
     return call;
   }
-  if ((name == "join" || name == "toString") && Sema::holdsResults(element)) {
-    sema_.diags_.error(member->loc(), "Results cannot be converted to strings: JavaScript would give "
-                                "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
-                                "r.match(...))." +
-                                    name + "()'");
+  if ((name == "join" || name == "toString") && Checker::holdsResults(element)) {
+    checker_.diags_.error(member->loc(),
+                          "Results cannot be converted to strings: JavaScript would give "
+                          "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
+                          "r.match(...))." +
+                              name + "()'");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && UnknownChecker::holdsUnknown(element)) {
-    sema_.diags_.error(member->loc(), "unknown values cannot be converted to strings: one may hold an "
-                                "object; map them to text first, e.g. 'a.map(x => typeof x == "
-                                "\"string\" ? x : \"?\")." +
-                                    name + "()'");
+    checker_.diags_.error(member->loc(),
+                          "unknown values cannot be converted to strings: one may hold an "
+                          "object; map them to text first, e.g. 'a.map(x => typeof x == "
+                          "\"string\" ? x : \"?\")." +
+                              name + "()'");
     checkArgsLoosely();
     return call;
   }
   if ((name == "join" || name == "toString") && JsonChecker::holdsJson(element)) {
-    sema_.diags_.error(member->loc(), "Json values cannot be converted to strings: an object would be "
-                                "'[object Object]'; map them to text first, e.g. 'a.map(x => "
-                                "JSON.stringify(x))." +
-                                    name + "()'");
+    checker_.diags_.error(member->loc(),
+                          "Json values cannot be converted to strings: an object would be "
+                          "'[object Object]'; map them to text first, e.g. 'a.map(x => "
+                          "JSON.stringify(x))." +
+                              name + "()'");
     checkArgsLoosely();
     return call;
   }
-  if ((name == "join" || name == "toString") && Sema::holdsObjects(element) && !Sema::holdsDates(element)) {
-    sema_.diags_.error(member->loc(),
-                 "objects cannot be converted to strings: JavaScript would give "
-                 "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
-                     name + "()'");
+  if ((name == "join" || name == "toString") && Checker::holdsObjects(element) &&
+      !Checker::holdsDates(element)) {
+    checker_.diags_.error(member->loc(),
+                          "objects cannot be converted to strings: JavaScript would give "
+                          "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
+                              name + "()'");
     checkArgsLoosely();
     return call;
   }
@@ -227,7 +236,8 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
       return call;
     }
     if (count == 1) {
-      call->args[0] = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(call->args[0], Type::string()), Type::string());
+      call->args[0] = checker_.typeRelations().coerce(
+          checker_.exprChecker().checkExpr(call->args[0], Type::string()), Type::string());
     }
     call->builtin = Builtin::ArrJoin;
     call->type = Type::string();
@@ -255,35 +265,39 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   }
 
   if (name == "sort") {
-    if (Sema::holdsFunctions(element)) {
-      sema_.diags_.error(member->loc(), "sorting functions needs a comparison function: 'sort()' "
-                                  "without one compares their source code");
+    if (Checker::holdsFunctions(element)) {
+      checker_.diags_.error(member->loc(),
+                            "sorting functions needs a comparison function: 'sort()' "
+                            "without one compares their source code");
       return call;
     }
     if (UnknownChecker::holdsUnknown(element)) {
-      sema_.diags_.error(member->loc(), "sorting unknown values needs a comparison function: 'sort()' "
-                                  "without one compares them as strings, objects as '[object "
-                                  "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      checker_.diags_.error(member->loc(),
+                            "sorting unknown values needs a comparison function: 'sort()' "
+                            "without one compares them as strings, objects as '[object "
+                            "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
     if (JsonChecker::holdsJson(element)) {
-      sema_.diags_.error(member->loc(), "sorting Json values needs a comparison function: 'sort()' "
-                                  "without one compares them as strings, objects as '[object "
-                                  "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      checker_.diags_.error(member->loc(),
+                            "sorting Json values needs a comparison function: 'sort()' "
+                            "without one compares them as strings, objects as '[object "
+                            "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
-    if (Sema::holdsDates(element)) {
-      sema_.diags_.error(member->loc(), "sorting dates needs a comparison function: 'sort()' without one "
-                                  "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
-                                  "puts them in the order of the names of the days; pass one: "
-                                  "'sort((a, b) => a.getTime() - b.getTime())'");
+    if (Checker::holdsDates(element)) {
+      checker_.diags_.error(member->loc(),
+                            "sorting dates needs a comparison function: 'sort()' without one "
+                            "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
+                            "puts them in the order of the names of the days; pass one: "
+                            "'sort((a, b) => a.getTime() - b.getTime())'");
       return call;
     }
-    if (Sema::holdsObjects(element) || Sema::holdsResults(element)) {
-      sema_.diags_.error(member->loc(),
-                   "sorting objects needs a comparison function: 'sort()' without one "
-                   "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
-                   "=> a.x - b.x)'");
+    if (Checker::holdsObjects(element) || Checker::holdsResults(element)) {
+      checker_.diags_.error(member->loc(),
+                            "sorting objects needs a comparison function: 'sort()' without one "
+                            "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
+                            "=> a.x - b.x)'");
       return call;
     }
     // A union compares its values as strings too, numbers and objects among
@@ -295,11 +309,12 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     };
     if (const Type *u = element->nonOptional();
         u->isUnion() && !llvm::all_of(u->members(), textual)) {
-      sema_.diags_.error(member->loc(), "'sort()' without a comparison function compares the values "
-                                  "of '" +
-                                      u->name() +
-                                      "' as strings, numbers and objects among "
-                                      "them; pass one, e.g. 'sort((a, b) => ...)'");
+      checker_.diags_.error(member->loc(),
+                            "'sort()' without a comparison function compares the values "
+                            "of '" +
+                                u->name() +
+                                "' as strings, numbers and objects among "
+                                "them; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
     // JavaScript would sort numbers as strings; sorting them differently
@@ -307,11 +322,11 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     // elements go to the end without being compared.)
     if (element->nonOptional()->isNumeric() || element->nonOptional()->isDecimal() ||
         GenericChecker::apparentType(element->nonOptional())->isNumeric()) {
-      sema_.diags_.error(member->loc(), llvm::Twine("'sort()' without a comparison function compares "
-                                              "numbers as strings, as in JavaScript: [2, 10, 1] "
-                                              "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
-                                      (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") +
-                                      ")'");
+      checker_.diags_.error(member->loc(),
+                            llvm::Twine("'sort()' without a comparison function compares "
+                                        "numbers as strings, as in JavaScript: [2, 10, 1] "
+                                        "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
+                                (element->isOptional() ? "(x ?? 0) - (y ?? 0)" : "x - y") + ")'");
       return call;
     }
     call->builtin = Builtin::ArrSort;
@@ -327,18 +342,18 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     for (size_t i = 0; i < count; ++i) {
       if (i < 2) {
-        call->args[i] = sema_.memberChecker().checkPosition(call->args[i]);
+        call->args[i] = checker_.memberChecker().checkPosition(call->args[i]);
       } else {
         elementArg(i);
       }
     }
     call->builtin = Builtin::ArrSplice;
     call->type = arrayType;
-    sema_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/true);
+    checker_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/true);
     return call;
   }
-  sema_.diags_.error(member->loc(),
-               "property '" + name + "' does not exist on type '" + arrayType->name() + "'");
+  checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                           arrayType->name() + "'");
   checkArgsLoosely();
 
   return call;

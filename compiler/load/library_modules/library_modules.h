@@ -1,6 +1,9 @@
 #pragma once
 
 #include "compiler/load/loader/loader.h"
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace tz {
 
@@ -29,6 +32,12 @@ public:
   void importFsStreams(Module *module, llvm::StringRef text);
 
 private:
+  // A file of the directory lib, parsed as code of the module `name`; its full path goes to
+  // `fullPath`, and its buffer to `buffers`. Nothing after reporting an error at `loc`.
+  std::optional<SourceFile> parseLibraryFile(llvm::StringRef file, llvm::StringRef name,
+                                             llvm::SMLoc loc, std::string &fullPath,
+                                             std::vector<unsigned> &buffers);
+
   Loader &loader_;
 };
 

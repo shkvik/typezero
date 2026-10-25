@@ -1,0 +1,750 @@
+// A part of node:stream, read after stream.tz as one module with it
+// (compiler/load/library_modules/): the functions of the readable side
+// (lib/internal/streams/readable.js).
+
+//===----------------------------------------------------------------------===//
+// lib/internal/streams/readable.js
+//===----------------------------------------------------------------------===//
+
+function readableAddChunkUnshiftByteMode(stream: Stream, state: ReadableState, chunk: unknown,
+                                         encoding: string | undefined): boolean {
+  if (chunk == undefined) {
+    state.bits &= ~kReading
+    onEofChunk(stream, state)
+    return false
+  }
+  let value = chunk
+  if (typeof chunk == "string") {
+    const enc = encoding == undefined || encoding == "" ? state.defaultEncoding : encoding
+    if (state.encoding != normalizeEncoding(enc)) {
+      const encoded = Buffer.from(chunk, enc)
+      // When unshifting, if state.encoding is set, we have to save the string
+      // in the BufferList with the state encoding.
+      const stateEncoding = state.encoding
+      value = stateEncoding != undefined ? encoded.toString(stateEncoding) : encoded
+    }
+  } else if (chunk instanceof Uint8Array) {
+    value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length)
+  } else if (!(isBufferChunk(chunk))) {
+    errorOrDestroy(stream, invalidChunk(chunk))
+    return false
+  }
+  if (lengthOf(value) <= 0) return canPushMore(stream, state)
+  return readableAddChunkUnshiftValue(stream, state, value)
+}
+
+function readableAddChunkUnshiftObjectMode(stream: Stream, state: ReadableState,
+                                           chunk: unknown): boolean {
+  if (chunk == undefined) {
+    state.bits &= ~kReading
+    onEofChunk(stream, state)
+    return false
+  }
+  return readableAddChunkUnshiftValue(stream, state, chunk)
+}
+
+function readableAddChunkUnshiftValue(stream: Stream, state: ReadableState,
+                                      chunk: unknown): boolean {
+  if ((state.bits & kEndEmitted) != 0)
+    errorOrDestroy(
+      stream,
+      new StreamError("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event"),
+    )
+  else if ((state.bits & (kDestroyed | kErrored)) != 0) return false
+  else addChunk(stream, state, chunk, true)
+  return canPushMore(stream, state)
+}
+
+// Whether an unknown holds a Buffer.
+function isBufferChunk(chunk: unknown): boolean {
+  return __tz_isChunk<Buffer>(chunk)
+}
+
+function readableAddChunkPushByteMode(stream: Stream, state: ReadableState, chunk: unknown,
+                                      encoding: string | undefined): boolean {
+  if (chunk == undefined) {
+    state.bits &= ~kReading
+    onEofChunk(stream, state)
+    return false
+  }
+  let value = chunk
+  let enc = encoding ?? ""
+  if (typeof chunk == "string") {
+    if (enc == "") enc = state.defaultEncoding
+    if (state.encoding != normalizeEncoding(enc)) {
+      value = Buffer.from(chunk, enc)
+      enc = ""
+    }
+  } else if (isBufferChunk(chunk)) {
+    enc = ""
+  } else if (chunk instanceof Uint8Array) {
+    value = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length)
+    enc = ""
+  } else {
+    errorOrDestroy(stream, invalidChunk(chunk))
+    return false
+  }
+  if (lengthOf(value) <= 0) {
+    state.bits &= ~kReading
+    maybeReadMore(stream, state)
+    return canPushMore(stream, state)
+  }
+  if ((state.bits & kEnded) != 0) {
+    errorOrDestroy(stream, new StreamError("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
+    return false
+  }
+  if ((state.bits & (kDestroyed | kErrored)) != 0) return false
+  state.bits &= ~kReading
+  const decoder = state.decoder
+  if (decoder != undefined && enc == "") {
+    const text = decoder.write(bufferOf(value))
+    if (text.length == 0) {
+      maybeReadMore(stream, state)
+      return canPushMore(stream, state)
+    }
+    value = text
+  }
+  addChunk(stream, state, value, false)
+  return canPushMore(stream, state)
+}
+
+function readableAddChunkPushObjectMode(stream: Stream, state: ReadableState, chunk: unknown,
+                                        encoding: string | undefined): boolean {
+  if (chunk == undefined) {
+    state.bits &= ~kReading
+    onEofChunk(stream, state)
+    return false
+  }
+  if ((state.bits & kEnded) != 0) {
+    errorOrDestroy(stream, new StreamError("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
+    return false
+  }
+  if ((state.bits & (kDestroyed | kErrored)) != 0) return false
+  state.bits &= ~kReading
+  let value = chunk
+  const decoder = state.decoder
+  if (decoder != undefined && (encoding == undefined || encoding == "") && isBufferChunk(chunk))
+    value = decoder.write(bufferOf(chunk))
+  addChunk(stream, state, value, false)
+  return canPushMore(stream, state)
+}
+
+function canPushMore(stream: Stream, state: ReadableState): boolean {
+  // We can push more data if we are below the highWaterMark. Also, if we
+  // have no data yet, we can stand some more bytes. This is to work around
+  // cases where hwm=0, such as the repl.
+  return (state.bits & kEnded) == 0 &&
+    (stream.readableLength < stream.readableHighWaterMark || stream.readableLength == 0)
+}
+
+function clearAwaitDrain(state: ReadableState) {
+  if ((state.bits & kMultiAwaitDrain) != 0) state.awaitDrainWriters.clear()
+  else state.awaitDrainWriter = undefined
+}
+
+function addChunk(stream: Stream, state: ReadableState, chunk: unknown, addToFront: boolean) {
+  if ((state.bits & (kFlowing | kSync | kDataListening)) == (kFlowing | kDataListening) &&
+      stream.readableLength == 0) {
+    // Use the guard to avoid creating `Set()` repeatedly when we have
+    // multiple pipes.
+    clearAwaitDrain(state)
+    state.bits |= kDataEmitted
+    sync(stream)
+    stream._emitData(chunk)
+  } else {
+    // Update the buffer info.
+    stream.readableLength += (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk)
+    if (addToFront) {
+      const at = state.bufferIndex - 1
+      const buffer = state.buffer
+      if (at >= 0 && at < buffer.length) {
+        buffer[at] = chunk
+        state.bufferIndex = at
+      } else {
+        state.buffer.unshift(chunk) // Slow path
+      }
+    } else {
+      state.buffer.push(chunk)
+    }
+    if ((state.bits & kNeedReadable) != 0) emitReadable(stream)
+  }
+  maybeReadMore(stream, state)
+}
+
+// Don't raise the hwm > 1GB.
+const kMaxHwm = 0x40000000
+function computeNewHighWaterMark(size: int): int {
+  if (size > kMaxHwm)
+    throw new StreamRangeError(
+      "ERR_OUT_OF_RANGE",
+      `The value of "size" is out of range. It must be <= 1GiB. Received ${size}`,
+    )
+  // Get the next highest power of 2 to prevent increasing hwm excessively in
+  // tiny amounts.
+  let n = size - 1
+  n |= n >>> 1
+  n |= n >>> 2
+  n |= n >>> 4
+  n |= n >>> 8
+  n |= n >>> 16
+  return n + 1
+}
+
+// How much to read of `n`, -1 for node's NaN (as much as there is).
+function howMuchToRead(stream: Stream, n: int, state: ReadableState): int {
+  if ((n <= 0 && n != -1) || (stream.readableLength == 0 && (state.bits & kEnded) != 0)) return 0
+  if ((state.bits & kObjectMode) != 0) return 1
+  if (n == -1) {
+    // Only flow one buffer at a time.
+    if ((state.bits & kFlowing) != 0 && stream.readableLength != 0)
+      return lengthOf(state.buffer[state.bufferIndex])
+    return stream.readableLength
+  }
+  if (n <= stream.readableLength) return n
+  return (state.bits & kEnded) != 0 ? stream.readableLength : 0
+}
+
+// You can override either this method, or the async _read(n) below.
+function read(stream: Stream, state: ReadableState, size?: int): unknown {
+  let n = size ?? -1
+  const nOrig = n
+  // If we're asking for more than the current hwm, then raise the hwm.
+  if (n > stream.readableHighWaterMark) stream.readableHighWaterMark = computeNewHighWaterMark(n)
+  if (n != 0) state.bits &= ~kEmittedReadable
+  // If we're doing read(0) to trigger a readable event, but we already have
+  // a bunch of data in the buffer, then just trigger the 'readable' event
+  // and move on.
+  if (n == 0 && (state.bits & kNeedReadable) != 0 &&
+      ((stream.readableHighWaterMark != 0
+        ? stream.readableLength >= stream.readableHighWaterMark
+        : stream.readableLength > 0) ||
+        (state.bits & kEnded) != 0)) {
+    if (stream.readableLength == 0 && (state.bits & kEnded) != 0) endReadable(stream)
+    else emitReadable(stream)
+    return undefined
+  }
+  n = howMuchToRead(stream, n, state)
+  // If we've ended, and we're now clear, then finish it up.
+  if (n == 0 && (state.bits & kEnded) != 0) {
+    if (stream.readableLength == 0) endReadable(stream)
+    return undefined
+  }
+  // All the actual chunk generation logic needs to be *below* the call to
+  // _read. The reason is that in certain synthetic stream cases, such as
+  // passthrough streams, _read may be a completely synchronous operation
+  // which may change the state of the read buffer, providing enough data
+  // when before there was *not* enough.
+  //
+  // So, the steps are:
+  // 1. Figure out what the state of things will be after we do a read from
+  //    the buffer.
+  // 2. If that resulting state will trigger a _read, then call _read. Note
+  //    that this may be asynchronous, or synchronous. Yes, it is deeply ugly
+  //    to write APIs this way, but that still doesn't mean that the Readable
+  //    class should behave improperly, as streams are designed to be
+  //    sync/async agnostic. Take note if the _read call is sync or async (ie,
+  //    if the read call has returned yet), so that we know whether or not
+  //    it's safe to emit 'readable' etc.
+  // 3. Actually pull the requested chunks out of the buffer and return.
+
+  // if we need a readable event, then we need to do some reading.
+  let doRead = (state.bits & kNeedReadable) != 0
+  // If we currently have less than the highWaterMark, then also read some.
+  if (stream.readableLength == 0 ||
+      stream.readableLength - (n == -1 ? 0 : n) < stream.readableHighWaterMark)
+    doRead = true
+  // However, if we've ended, then there's no point, if we're already
+  // reading, then it's unnecessary, if we're constructing we have to wait,
+  // and if we're destroyed or errored, then it's not allowed,
+  if ((state.bits & (kReading | kEnded | kDestroyed | kErrored | kConstructed)) != kConstructed) {
+    doRead = false
+  } else if (doRead) {
+    state.bits |= kReading | kSync
+    // If the length is currently zero, then we *need* a readable event.
+    if (stream.readableLength == 0) state.bits |= kNeedReadable
+    // Call internal read method
+    try {
+      stream._read(stream.readableHighWaterMark)
+    } catch (err) {
+      errorOrDestroy(stream, err)
+    }
+    state.bits &= ~kSync
+    // If _read pushed data synchronously, then `reading` will be false, and
+    // we need to re-evaluate how much data we can return to the user.
+    if ((state.bits & kReading) == 0) n = howMuchToRead(stream, nOrig, state)
+  }
+  let ret: unknown = undefined
+  if (n > 0) ret = fromList(stream, n, state)
+  if (ret == undefined) {
+    state.bits |= stream.readableLength <= stream.readableHighWaterMark ? kNeedReadable : 0
+    n = 0
+  } else {
+    stream.readableLength -= n
+    clearAwaitDrain(state)
+  }
+  if (stream.readableLength == 0) {
+    // If we have nothing in the buffer, then we want to know as soon as we
+    // *do* get something into the buffer.
+    if ((state.bits & kEnded) == 0) state.bits |= kNeedReadable
+    // If we tried to read() past the EOF, then emit end on the next tick.
+    if (nOrig != n && (state.bits & kEnded) != 0) endReadable(stream)
+  }
+  if (ret != undefined && (state.bits & (kErrorEmitted | kCloseEmitted)) == 0) {
+    state.bits |= kDataEmitted
+    sync(stream)
+    stream._emitData(ret)
+  }
+  return ret
+}
+
+function onEofChunk(stream: Stream, state: ReadableState) {
+  if ((state.bits & kEnded) != 0) return
+  const decoder = state.decoder
+  if (decoder != undefined) {
+    const chunk = decoder.end()
+    if (chunk.length != 0) {
+      state.buffer.push(chunk)
+      stream.readableLength += (state.bits & kObjectMode) != 0 ? 1 : chunk.length
+    }
+  }
+  state.bits |= kEnded
+  if ((state.bits & kSync) != 0) {
+    // If we are sync, wait until next tick to emit the data. Otherwise we risk
+    // emitting data in the flow() the readable code triggers during a read()
+    // call.
+    emitReadable(stream)
+  } else {
+    // Emit 'readable' now to make sure it gets picked up.
+    state.bits &= ~kNeedReadable
+    state.bits |= kEmittedReadable
+    // We have to emit readable now that we are EOF. Modules in the ecosystem
+    // (e.g. dicer) rely on this event being sync.
+    emitReadableNow(stream)
+  }
+}
+
+// Don't emit readable right away in sync mode, because this can trigger
+// another read() call => stack overflow. This way, it might trigger a
+// nextTick recursion warning, but that's not so bad.
+function emitReadable(stream: Stream) {
+  const state = readableStateOf(stream)
+  state.bits &= ~kNeedReadable
+  if ((state.bits & kEmittedReadable) == 0) {
+    state.bits |= kEmittedReadable
+    process.nextTick(() => emitReadableNow(stream))
+  }
+}
+
+// node's emitReadable_.
+function emitReadableNow(stream: Stream) {
+  const state = readableStateOf(stream)
+  if ((state.bits & (kDestroyed | kErrored)) == 0 &&
+      (stream.readableLength != 0 || (state.bits & kEnded) != 0)) {
+    sync(stream)
+    stream.emit("readable")
+    state.bits &= ~kEmittedReadable
+  }
+  // The stream needs another readable event if:
+  // 1. It is not flowing, as the flow mechanism will take care of it.
+  // 2. It is not ended.
+  // 3. It is below the highWaterMark, so we can schedule another readable
+  //    later.
+  state.bits |=
+    (state.bits & (kFlowing | kEnded)) == 0 &&
+      stream.readableLength <= stream.readableHighWaterMark
+      ? kNeedReadable
+      : 0
+  flow(stream)
+}
+
+// At this point, the user has presumably seen the 'readable' event, and
+// called read() to consume some data. that may have triggered in turn
+// another _read(n) call, in which case reading = true if it's in progress.
+// However, if we're not ended, or reading, and the length < hwm, then go
+// ahead and try to read some more preemptively.
+function maybeReadMore(stream: Stream, state: ReadableState) {
+  if ((state.bits & (kReadingMore | kReading | kConstructed)) == kConstructed) {
+    state.bits |= kReadingMore
+    process.nextTick(() => maybeReadMoreNow(stream, state))
+  }
+}
+
+function maybeReadMoreNow(stream: Stream, state: ReadableState) {
+  // Attempt to read more data if we should.
+  //
+  // The conditions for reading more data are (one of):
+  // - Not enough data buffered (state.length < state.highWaterMark). The
+  //   loop is responsible for filling the buffer with enough data if such
+  //   data is available. If highWaterMark is 0 and we are not in the flowing
+  //   mode we should _not_ attempt to buffer any extra data. We'll get more
+  //   data when the stream consumer calls read() instead.
+  // - No data in the buffer, and the stream is in flowing mode. In this mode
+  //   the loop below is responsible for ensuring read() is called. Failing
+  //   to call read here would abort the flow and there's no other mechanism
+  //   for continuing the flow if the stream consumer has just subscribed to
+  //   the 'data' event.
+  //
+  // In addition to the above conditions to keep reading data, the following
+  // conditions prevent the data from being read:
+  // - The stream has ended (state.ended).
+  // - There is already a pending 'read' operation (state.reading). This is a
+  //   case where the stream has called the implementation defined _read()
+  //   method, but they are processing the call asynchronously and have _not_
+  //   called push() with new data. In this case we skip performing more
+  //   read()s. The execution ends in this method again after the _read()
+  //   ends up calling push() with more data.
+  while ((state.bits & (kReading | kEnded)) == 0 &&
+         (stream.readableLength < stream.readableHighWaterMark ||
+          ((state.bits & kFlowing) != 0 && stream.readableLength == 0))) {
+    const len = stream.readableLength
+    read(stream, state, 0)
+    // Didn't get any data, stop spinning.
+    if (len == stream.readableLength) break
+  }
+  state.bits &= ~kReadingMore
+  sync(stream)
+}
+
+function updateReadableListening(self: Stream) {
+  const state = readableStateOf(self)
+  if (self.listenerCount("readable") > 0) state.bits |= kReadableListening
+  else state.bits &= ~kReadableListening
+  if ((state.bits & (kHasPaused | kPaused | kResumeScheduled)) == (kHasPaused | kResumeScheduled)) {
+    // Flowing needs to be set to true now, otherwise the upcoming resume will
+    // not flow.
+    state.bits |= kHasFlowing | kFlowing
+    // Crude way to check if we should resume.
+  } else if ((state.bits & kDataListening) != 0) {
+    self.resume()
+  } else if ((state.bits & kReadableListening) == 0) {
+    state.bits &= ~(kHasFlowing | kFlowing)
+  }
+  sync(self)
+}
+
+function resume(stream: Stream, state: ReadableState) {
+  if ((state.bits & kResumeScheduled) == 0) {
+    state.bits |= kResumeScheduled
+    process.nextTick(() => resumeNow(stream, state))
+  }
+}
+
+function resumeNow(stream: Stream, state: ReadableState) {
+  if ((state.bits & kReading) == 0) read(stream, state, 0)
+  state.bits &= ~kResumeScheduled
+  sync(stream)
+  stream.emit("resume")
+  flow(stream)
+  if ((state.bits & (kFlowing | kReading)) == kFlowing) read(stream, state, 0)
+  sync(stream)
+}
+
+function flow(stream: Stream) {
+  const state = readableStateOf(stream)
+  while ((state.bits & kFlowing) != 0 && read(stream, state) != undefined) {}
+}
+
+// The chunk at `idx` of a buffer, which a read takes, or what is left of it.
+function setChunk(buf: unknown[], idx: int, chunk: unknown) {
+  if (idx >= 0 && idx < buf.length) buf[idx] = chunk
+}
+
+// Pluck off n bytes from an array of buffers. Length is the combined lengths
+// of all the buffers in the list.
+function fromList(stream: Stream, size: int, state: ReadableState): unknown {
+  // nothing buffered.
+  if (stream.readableLength == 0) return undefined
+  let n = size
+  let idx = state.bufferIndex
+  let ret: unknown
+  const buf = state.buffer
+  const len = buf.length
+  if ((state.bits & kObjectMode) != 0) {
+    ret = buf[idx]
+    setChunk(buf, idx++, undefined)
+  } else if (n == 0 || n >= stream.readableLength) {
+    // Read it all, truncate the list.
+    if ((state.bits & kDecoder) != 0) {
+      let text = ""
+      while (idx < len) {
+        text += textOf(buf[idx])
+        setChunk(buf, idx++, undefined)
+      }
+      ret = text
+    } else if (len - idx == 0) {
+      ret = Buffer.alloc(0)
+    } else if (len - idx == 1) {
+      ret = buf[idx]
+      setChunk(buf, idx++, undefined)
+    } else {
+      const out = Buffer.allocUnsafe(stream.readableLength)
+      let i = 0
+      while (idx < len) {
+        const data = bufferOf(buf[idx])
+        out.set(data, i)
+        i += data.length
+        setChunk(buf, idx++, undefined)
+      }
+      ret = out
+    }
+  } else if (n < lengthOf(buf[idx])) {
+    // `slice` is the same for buffers and strings.
+    const first = buf[idx]
+    if (typeof first == "string") {
+      ret = first.slice(0, n)
+      setChunk(buf, idx, first.slice(n))
+    } else {
+      const data = bufferOf(first)
+      ret = data.subarray(0, n)
+      setChunk(buf, idx, data.subarray(n))
+    }
+  } else if (n == lengthOf(buf[idx])) {
+    // First chunk is a perfect match.
+    ret = buf[idx]
+    setChunk(buf, idx++, undefined)
+  } else if ((state.bits & kDecoder) != 0) {
+    let text = ""
+    while (idx < len) {
+      const str = textOf(buf[idx])
+      if (n > str.length) {
+        text += str
+        n -= str.length
+        setChunk(buf, idx++, undefined)
+      } else {
+        if (n == buf.length) {
+          text += str
+          setChunk(buf, idx++, undefined)
+        } else {
+          text += str.slice(0, n)
+          setChunk(buf, idx, str.slice(n))
+        }
+        break
+      }
+    }
+    ret = text
+  } else {
+    const out = Buffer.allocUnsafe(n)
+    const retLen = n
+    while (idx < len) {
+      const data = bufferOf(buf[idx])
+      if (n > data.length) {
+        out.set(data, retLen - n)
+        n -= data.length
+        setChunk(buf, idx++, undefined)
+      } else {
+        if (n == data.length) {
+          out.set(data, retLen - n)
+          setChunk(buf, idx++, undefined)
+        } else {
+          out.set(data.subarray(0, n), retLen - n)
+          setChunk(buf, idx, data.subarray(n))
+        }
+        break
+      }
+    }
+    ret = out
+  }
+  if (idx == len) {
+    state.buffer = []
+    state.bufferIndex = 0
+  } else if (idx > 1024) {
+    state.buffer.splice(0, idx)
+    state.bufferIndex = 0
+  } else {
+    state.bufferIndex = idx
+  }
+  return ret
+}
+
+function textOf(chunk: unknown): string {
+  return typeof chunk == "string" ? chunk : ""
+}
+
+function endReadable(stream: Stream) {
+  const state = readableStateOf(stream)
+  if ((state.bits & kEndEmitted) == 0) {
+    state.bits |= kEnded
+    process.nextTick(() => endReadableNT(state, stream))
+  }
+}
+
+function endReadableNT(state: ReadableState, stream: Stream) {
+  // Check that we didn't get one last unshift.
+  if ((state.bits & (kErrored | kCloseEmitted | kEndEmitted)) == 0 &&
+      stream.readableLength == 0) {
+    state.bits |= kEndEmitted
+    sync(stream)
+    stream.emit("end")
+    const w = stream._writableState
+    if (stream.writable && !stream.allowHalfOpen) {
+      process.nextTick(() => endWritableNT(stream))
+    } else if ((state.bits & kAutoDestroy) != 0) {
+      // In case of duplex streams we need a way to detect if the writable side
+      // is ready for autoDestroy as well.
+      const autoDestroy =
+        w == undefined ||
+        ((w.bits & kAutoDestroy) != 0 &&
+          // We don't expect the writable to ever 'finish' if writable is
+          // explicitly set to false.
+          ((w.bits & kFinished) != 0 || w.writable == false))
+      if (autoDestroy) stream.destroy()
+    }
+  }
+}
+
+function endWritableNT(stream: Stream) {
+  const writable = stream.writable && !stream.writableEnded && !stream.destroyed
+  if (writable) stream._endWith(false, undefined, undefined, undefined)
+}
+
+// pipe() of node. Its listeners are functions of one block, which share
+// one environment and call each other without capturing each other: they
+// hold the source and the destination until cleanup() removes them.
+function pipe(src: Stream, dest: Stream, end: boolean) {
+  const state = readableStateOf(src)
+  let ondrain: (() => void) | undefined = undefined
+  let cleanedUp = false
+  if (state.pipes.length == 1) {
+    if ((state.bits & kMultiAwaitDrain) == 0) {
+      state.bits |= kMultiAwaitDrain
+      state.awaitDrainWriters = new Set<Stream>()
+      const writer = state.awaitDrainWriter
+      if (writer != undefined) state.awaitDrainWriters.add(writer)
+      state.awaitDrainWriter = undefined
+    }
+  }
+  state.pipes.push(dest)
+  const doEnd = end && !isStdio(dest)
+  if ((state.bits & kEndEmitted) != 0) {
+    if (doEnd) process.nextTick(onend)
+    else process.nextTick(unpipe)
+  } else if (doEnd) {
+    src.once("end", onend)
+  } else {
+    src.once("end", unpipe)
+  }
+  dest.on("unpipe", onunpipe)
+  function onunpipe(readable: Stream, unpipeInfo: { hasUnpiped: boolean }) {
+    if (readable == src && !unpipeInfo.hasUnpiped) {
+      unpipeInfo.hasUnpiped = true
+      cleanup()
+    }
+  }
+  function onend() {
+    dest._endWith(false, undefined, undefined, undefined)
+  }
+  function cleanup() {
+    // Cleanup event handlers once the pipe is broken.
+    dest.removeListener("close", onclose)
+    dest.removeListener("finish", onfinish)
+    if (ondrain != undefined) dest.removeListener("drain", ondrain)
+    dest.removeListener("error", onerror)
+    dest.removeListener("unpipe", onunpipe)
+    src.removeListener("end", onend)
+    src.removeListener("end", unpipe)
+    src.removeListener("data", ondata)
+    cleanedUp = true
+    // If the reader is waiting for a drain event from this specific writer,
+    // then it would cause it to never start flowing again. So, if this is
+    // awaiting a drain, then we just call it now. If we don't know, then
+    // assume that we are waiting for one.
+    const awaiting =
+      (state.bits & kMultiAwaitDrain) != 0 || state.awaitDrainWriter != undefined
+    const w = dest._writableState
+    if (ondrain != undefined && awaiting && (w == undefined || (w.bits & kNeedDrain) != 0))
+      ondrain()
+  }
+  function pause() {
+    // If the user unpiped during `dest.write()`, it is possible to get stuck
+    // in a permanently paused state if that write also returned false.
+    // => Check whether `dest` is still a piping destination.
+    if (!cleanedUp) {
+      if (state.pipes.length == 1 && state.pipes[0] == dest) {
+        state.awaitDrainWriter = dest
+        state.bits &= ~kMultiAwaitDrain
+      } else if (state.pipes.length > 1 && state.pipes.includes(dest)) {
+        state.awaitDrainWriters.add(dest)
+      }
+      src.pause()
+    }
+    if (ondrain == undefined) {
+      // When the dest drains, it reduces the awaitDrain counter on the
+      // source. This would be more elegant with a .once() handler in flow(),
+      // but adding and removing repeatedly is too slow.
+      const drained = pipeOnDrain(src, dest)
+      ondrain = drained
+      dest.on("drain", drained)
+    }
+  }
+  // The chunk as an unknown, whatever the type the source emits it with.
+  src.on("data", ondata, kUnknownArgListener)
+  function ondata(chunk: unknown) {
+    try {
+      const ret = dest._writeAny(chunk, undefined, nop)
+      if (ret != true) pause()
+    } catch (error) {
+      dest.destroy(error)
+    }
+  }
+  // If the dest has an error, then stop piping into it. However, don't
+  // suppress the throwing behavior for this.
+  function onerror(er: Error) {
+    unpipe()
+    dest.removeListener("error", onerror)
+    if (dest.listenerCount("error") == 0) {
+      const s = dest._writableState
+      const r = dest._readableState
+      const errorEmitted = s != undefined
+        ? (s.bits & kErrorEmitted) != 0
+        : r != undefined && (r.bits & kErrorEmitted) != 0
+      // User incorrectly emitted 'error' directly on the stream.
+      if ((s != undefined || r != undefined) && !errorEmitted) errorOrDestroy(dest, er)
+      else dest.emit("error", er)
+    }
+  }
+  // Make sure our error handler is attached before userland ones.
+  dest.prependListener("error", onerror)
+  // Both close and finish should trigger unpipe, but only once.
+  function onclose() {
+    dest.removeListener("finish", onfinish)
+    unpipe()
+  }
+  dest.once("close", onclose)
+  function onfinish() {
+    dest.removeListener("close", onclose)
+    unpipe()
+  }
+  dest.once("finish", onfinish)
+  function unpipe() {
+    src.unpipe(dest)
+  }
+  // Tell the dest that it's being piped to.
+  dest.emit("pipe", src)
+  // Start the flow if it hasn't been started already.
+  if (dest.writableNeedDrain) pause()
+  else if ((state.bits & kFlowing) == 0) src.resume()
+}
+
+function pipeOnDrain(src: Stream, dest: Stream): () => void {
+  return () => {
+    const state = readableStateOf(src)
+    // `ondrain` will call directly, `this` maybe not a reference to dest, so
+    // we use the real dest here.
+    if ((state.bits & kMultiAwaitDrain) == 0 && state.awaitDrainWriter == dest) {
+      state.awaitDrainWriter = undefined
+    } else if ((state.bits & kMultiAwaitDrain) != 0) {
+      state.awaitDrainWriters.delete(dest)
+    }
+    const empty = (state.bits & kMultiAwaitDrain) != 0
+      ? state.awaitDrainWriters.size == 0
+      : state.awaitDrainWriter == undefined
+    if (empty && (state.bits & kDataListening) != 0) src.resume()
+  }
+}
+
+// process.stdout and process.stderr, which pipe() does not end.
+let stdioStreams: Stream[] = []
+
+function isStdio(stream: Stream): boolean {
+  return stdioStreams.includes(stream)
+}

@@ -1,14 +1,14 @@
 #include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/classes/decorator_checker/decorator_checker.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
-#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/types/type_operators/type_operators.h"
 #include "compiler/check/generics/generic_check_helpers/generic_check_helpers.h"
+#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/check/generics/inference/inference.h"
+#include "compiler/check/types/type_operators/type_operators.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -16,8 +16,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -61,21 +61,21 @@ bool mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
 
 } // namespace
 
-TypeParams::TypeParams(Sema &sema) : sema_(sema) {}
+TypeParams::TypeParams(Checker &checker) : checker_(checker) {}
 
 std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
-                                                  std::vector<const Type *> *defaults) {
+                                                        std::vector<const Type *> *defaults) {
   std::vector<Type *> created;
   for (size_t i = 0; i < decls.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
       if (decls[j].name == decls[i].name) {
-        sema_.diags_.error(decls[i].loc, "duplicate type parameter '" + decls[i].name + "'");
+        checker_.diags_.error(decls[i].loc, "duplicate type parameter '" + decls[i].name + "'");
       }
     }
     if (Type::fromName(decls[i].name)) {
-      sema_.diags_.error(decls[i].loc, "'" + decls[i].name +
-                                     "' is a built-in type and cannot name a type "
-                                     "parameter");
+      checker_.diags_.error(decls[i].loc, "'" + decls[i].name +
+                                              "' is a built-in type and cannot name a type "
+                                              "parameter");
     }
     created.push_back(Type::param(decls[i].name));
   }
@@ -101,7 +101,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       } else if (ref.kind == TypeRef::Kind::Union) {
         // `T extends string | int`: an instance for each.
         for (const TypeRef &member : ref.args) {
-          const Type *type = sema_.typeResolver().resolveType(member, /*allowVoid=*/false);
+          const Type *type = checker_.typeResolver().resolveType(member, /*allowVoid=*/false);
           ok &= !type->isError();
           if (!llvm::is_contained(alternatives, type)) {
             alternatives.push_back(type);
@@ -113,7 +113,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
           constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
         }
       } else {
-        constraint = sema_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+        constraint = checker_.typeResolver().resolveType(ref, /*allowVoid=*/false);
         ok &= !constraint->isError();
       }
       llvm::ArrayRef<const Type *> all = constraint ? llvm::ArrayRef<const Type *>(constraint)
@@ -123,8 +123,8 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
           break;
         }
         if (type->isUndefined()) {
-          sema_.diags_.error(ref.loc,
-                       "the constraint of '" + decl.name + "' cannot be 'undefined' alone");
+          checker_.diags_.error(ref.loc, "the constraint of '" + decl.name +
+                                             "' cannot be 'undefined' alone");
           ok = false;
         }
       }
@@ -135,17 +135,18 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
     }
     const Type *fallback = nullptr;
     if (decl.defaultType) {
-      fallback = sema_.typeResolver().resolveType(*decl.defaultType, /*allowVoid=*/false);
+      fallback = checker_.typeResolver().resolveType(*decl.defaultType, /*allowVoid=*/false);
       if (!fallback->isError() && !satisfies(fallback, params[i])) {
-        sema_.diags_.error(decl.defaultType->loc, "the default '" + fallback->name() + "' of '" +
-                                                decl.name + "' does not satisfy its constraint '" +
-                                                constraintSpelling(params[i], &decl) + "'");
+        checker_.diags_.error(decl.defaultType->loc,
+                              "the default '" + fallback->name() + "' of '" + decl.name +
+                                  "' does not satisfy its constraint '" +
+                                  constraintSpelling(params[i], &decl) + "'");
         fallback = Type::error();
       }
       afterDefault = true;
     } else if (afterDefault) {
-      sema_.diags_.error(decl.loc, "type parameter '" + decl.name +
-                                 "' needs a default: it follows one that has one");
+      checker_.diags_.error(decl.loc, "type parameter '" + decl.name +
+                                          "' needs a default: it follows one that has one");
     }
     if (defaults) {
       defaults->push_back(fallback);
@@ -155,16 +156,17 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
   return params;
 }
 
-void TypeParams::bindTypeParams(llvm::ArrayRef<TypeParamDecl> decls, llvm::ArrayRef<const Type *> types) {
+void TypeParams::bindTypeParams(llvm::ArrayRef<TypeParamDecl> decls,
+                                llvm::ArrayRef<const Type *> types) {
   for (size_t i = 0; i < decls.size() && i < types.size(); ++i) {
-    auto *alias = sema_.ctx_.make<TypeAliasDecl>(decls[i].loc, decls[i].name, TypeRef());
+    auto *alias = checker_.ctx_.make<TypeAliasDecl>(decls[i].loc, decls[i].name, TypeRef());
     alias->resolved = types[i];
-    sema_.typeScopes_.back()[decls[i].name] = alias;
+    checker_.typeScopes_.back()[decls[i].name] = alias;
   }
 }
 
 const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *> params,
-                             llvm::ArrayRef<const Type *> args) {
+                                   llvm::ArrayRef<const Type *> args) {
   if (!mentionsAnyOf(type, params)) {
     return type;
   }
@@ -177,7 +179,7 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       for (const Type *t : type->operands()) {
         operands.push_back(t ? sub(t) : nullptr);
       }
-      return sema_.typeOperators().evalTypeOp(type, operands);
+      return checker_.typeOperators().evalTypeOp(type, operands);
     }
     const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
     return arg ? arg : type; // not known yet
@@ -215,9 +217,10 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       return Type::asyncIterator(sub(type->yielded()), sub(type->returned()), sub(type->sent()));
     }
     // `MethodDescriptor<A, R>` keeps its name.
-    if (auto origin = sema_.descriptorOrigins_.find(type); origin != sema_.descriptorOrigins_.end()) {
+    if (auto origin = checker_.descriptorOrigins_.find(type);
+        origin != checker_.descriptorOrigins_.end()) {
       auto [list, ret] = origin->second;
-      return sema_.decoratorChecker().methodDescriptorType(sub(list), sub(ret));
+      return checker_.decoratorChecker().methodDescriptorType(sub(list), sub(ret));
     }
     // A class made from a generic one is the instance for the other
     // arguments.
@@ -229,19 +232,20 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       // Where the instance is first needed in the program, if anywhere, is
       // where its errors are reported (see instantiateClass).
       auto *generic = const_cast<ClassDecl *>(cls->generic ? cls->generic : cls);
-      ClassDecl *inst = sema_.genericClassInstantiator().instantiateClass(generic, std::move(newArgs), sema_.instanceLoc_);
+      ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(
+          generic, std::move(newArgs), checker_.instanceLoc_);
       return inst ? inst->type : Type::error();
     }
     // An instance of a generic alias is that alias with other arguments; a
     // recursive one cannot be rebuilt field by field.
-    if (auto origin = sema_.aliasOrigins_.find(type); origin != sema_.aliasOrigins_.end()) {
+    if (auto origin = checker_.aliasOrigins_.find(type); origin != checker_.aliasOrigins_.end()) {
       // Copied: substituting may add entries.
       auto [alias, oldArgs] = origin->second;
       std::vector<const Type *> newArgs;
       for (const Type *a : oldArgs) {
         newArgs.push_back(sub(a));
       }
-      return sema_.aliasInstantiator().instantiateAlias(alias, std::move(newArgs), alias->loc());
+      return checker_.aliasInstantiator().instantiateAlias(alias, std::move(newArgs), alias->loc());
     }
     // `[int, T]` stays a tuple; `[int, ...A]` takes the types A stands for,
     // and an argument list keeps the elements that may be left out.
@@ -309,7 +313,7 @@ const Type *TypeParams::representation(const Type *type) {
 }
 
 bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<const Type *> params,
-                     llvm::ArrayRef<const Type *> args) {
+                           llvm::ArrayRef<const Type *> args) {
   if (arg->isError()) {
     return true;
   }
@@ -347,7 +351,7 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     return false;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(arg)) {
-    sema_.classDeclarer().completeClass(cls);
+    checker_.classDeclarer().completeClass(cls);
   }
   const ClassDecl *cls = arg->classDecl();
   for (const Field &f : constraint->fields()) {
@@ -363,7 +367,8 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     bool method = false;
     if (cls && f.readonly && f.type->isFunction()) {
       for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, f.name, /*isStatic=*/false)) {
-        method |= fn->sym && fn->typeParams.empty() && sema_.returnInferrer().functionType(fn->sym) == f.type;
+        method |= fn->sym && fn->typeParams.empty() &&
+                  checker_.returnInferrer().functionType(fn->sym) == f.type;
       }
     }
     if (!method && !f.type->isOptional()) {
@@ -374,10 +379,11 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     if (!cls) {
       return false;
     }
-    std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
+    std::vector<FunctionDecl *> methods =
+        ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
     for (const Type *signature : overload.signatures) {
       if (llvm::none_of(methods, [&](FunctionDecl *fn) {
-            return fn->sym && sema_.returnInferrer().functionType(fn->sym) == signature;
+            return fn->sym && checker_.returnInferrer().functionType(fn->sym) == signature;
           })) {
         return false;
       }
@@ -388,8 +394,8 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
 }
 
 bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
-  auto found = sema_.exactParams_.find(generic);
-  if (found == sema_.exactParams_.end()) {
+  auto found = checker_.exactParams_.find(generic);
+  if (found == checker_.exactParams_.end()) {
     llvm::ArrayRef<const Type *> params = generic->typeParams;
     std::vector<bool> exact(params.size(), false);
     for (size_t i = 0; i < params.size(); ++i) {
@@ -421,7 +427,7 @@ bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
         exact[i] = exact[i] || mentionsInObject(generic->ret, params[i], seen);
       }
     }
-    found = sema_.exactParams_.try_emplace(generic, std::move(exact)).first;
+    found = checker_.exactParams_.try_emplace(generic, std::move(exact)).first;
   }
 
   return k < found->second.size() && found->second[k];

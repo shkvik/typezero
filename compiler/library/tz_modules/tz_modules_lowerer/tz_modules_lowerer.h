@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Calls of the runtime from the built-in modules written in tz, their accessors.
 class TzModulesLowerer {
 public:
-  explicit TzModulesLowerer(CodeGen &codegen);
+  explicit TzModulesLowerer(Lowering &lowering);
 
   // An intrinsic of a built-in module written in tz (FunctionDecl::external,
   // codegen_library.cpp): a call of the runtime's function of its name.
@@ -22,7 +22,7 @@ public:
   llvm::Value *emitResultAdapter(CastExpr *cast);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::pair<const Type *, const Type *>, llvm::Constant *> resultAdapters_;
 };
 

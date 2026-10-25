@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // What converts to what: implicit conversions, the common type of two, coercions.
 class TypeRelations {
 public:
-  explicit TypeRelations(Sema &sema);
+  explicit TypeRelations(Checker &checker);
 
   // Wraps `expr` in an implicit conversion to `to` (no checks).
   Expr *convert(Expr *expr, const Type *to);
@@ -24,7 +24,7 @@ public:
   static const Type *comparisonType(const Type *a, const Type *b);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

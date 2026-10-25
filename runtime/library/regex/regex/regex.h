@@ -185,4 +185,95 @@ static inline uint16_t tz_re_name_unit(const uint32_t *program, uint32_t start, 
 }
 #endif
 
+// What follows is for the runtime only.
+#ifndef __cplusplus
+
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+
+// What looks for a match of a regex: in `units` (one byte or two each, by
+// `wide`) at or after `start`, or only at `start` when `sticky`. Fills `caps`
+// (two slots per capture of the program, -1 for undefined) and returns 1 if
+// there is one. With `max` above 1 it goes on as the loop of a global regex
+// does, each match from where the last one ended (past it, when it was
+// empty), and fills the slots of up to `max` matches one after the other;
+// it returns how many it found, fewer than `max` when there are no more. For
+// a literal it is the machine code the compiler made of it
+// (compiler/library/regex/codegen/codegen_regex_native.cpp); for `new
+// RegExp(s)`, the interpreter, tz_re_interpret.
+typedef int32_t (*TzReMatch)(const uint32_t *program, const void *units, int32_t wide,
+                             int32_t length, int32_t start, int32_t *caps, int32_t sticky,
+                             int32_t max);
+
+// A regex: an object of the language whose one field the compiler reads and
+// writes is lastIndex, right after the header. A literal without g and y is
+// a constant the compiler emits, never freed; the others the runtime makes.
+// Must match Lowering (compiler/library/regex/codegen/codegen_regex.cpp).
+typedef struct TzRegex {
+  int64_t rc;
+  const TzLayout *layout; // tz_re_layout
+  int32_t last_index;
+  uint32_t reserved;
+  const uint32_t *program; // see regex.h
+  uint32_t *owned;         // the program of `new RegExp`, freed with the regex
+  TzReMatch match;
+} TzRegex;
+
+extern const TzLayout tz_re_layout;
+
+// The named group of a match that a field of `groups` holds: the field's
+// offset, and a capture with that name (with several, one entry each).
+typedef struct {
+  uint32_t offset;
+  uint32_t capture;
+  uint32_t optional; // the field is `string | undefined`
+  uint32_t reserved;
+} TzMatchName;
+
+// How to build a match of a regex (RegExpMatchArray), which the compiler
+// lays out as an object: the array of the captures, index, input, groups
+// and, with the d flag, indices. The compiler emits one for each call that
+// makes matches.
+typedef struct {
+  const TzLayout *layout;
+  const TzType *item_type;       // `string | undefined`
+  const TzLayout *groups_layout; // NULL: groups is undefined
+  const TzMatchName *names;
+  const TzLayout *pair_layout; // of the `[int, int]` in indices
+  uint32_t size;
+  uint32_t items, index, input, groups, indices; // offsets; indices is 0 without d
+  uint32_t groups_size;
+  uint32_t name_count;
+  uint32_t pair_size;
+  uint32_t reserved;
+} TzMatchShape;
+
+// The elements of the indices of a match (`[int, int] | undefined`), with
+// their own descriptors: node shows those arrays with a `groups` property,
+// which is undefined for a regex without named groups.
+extern TzType tz_re_indices_type, tz_re_named_indices_type;
+
+// Appends `/source/flags`.
+void tz_buf_regex(TzBuf *out, const TzRegex *re);
+
+// replace() and replaceAll() with a function: the runtime finds all the
+// matches first, as JavaScript does, then the compiled code calls the
+// function for each and hands back what it returned. Lives on the stack of
+// the compiled code, which reserves TZ_REPLACER_SIZE bytes for it.
+typedef struct {
+  TzRegex *re;
+  TzStr input; // flat, borrowed
+  const void *units;
+  uint32_t length;
+  int32_t two;
+  int32_t *matches; // the captures of each match, two slots per capture
+  uint32_t count, capacity, next, captures, copied;
+  TzStr *pieces; // of the result, joined at the end
+  uint32_t piece_count, piece_capacity;
+} TzReplacer;
+
+#define TZ_REPLACER_SIZE 128
+
+#endif
+
 #endif

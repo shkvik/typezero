@@ -3,6 +3,9 @@
 // field that holds undefined is left out: a field that is not there and one
 // that holds undefined are the same.
 
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 

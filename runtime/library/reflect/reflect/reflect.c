@@ -11,7 +11,17 @@
 // is called through the invoker of its type, which checks the arguments
 // against its parameters.
 
+#include "runtime/library/reflect/reflect/reflect.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
+#include "runtime/library/json/json/json.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -323,7 +333,7 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
       invoke = tz_reflect_store.invokers[i].invoke;
     }
   }
-  if (!invoke) { // Sema gives one to each type of function that can be here
+  if (!invoke) { // Checker gives one to each type of function that can be here
     tz_throw(TZ_TYPE_ERROR, "Reflect.apply cannot call this function");
     return NULL;
   }

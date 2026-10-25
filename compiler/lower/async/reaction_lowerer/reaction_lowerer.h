@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // then, catch and finally: the reactions of promises.
 class ReactionLowerer {
 public:
-  explicit ReactionLowerer(CodeGen &codegen);
+  explicit ReactionLowerer(Lowering &lowering);
 
   llvm::Value *emitPromiseReaction(CallExpr *call);
   llvm::StructType *reactionType();
@@ -21,7 +21,7 @@ public:
                       llvm::Value *onFulfilled, llvm::Value *onRejected, bool later = false);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::StructType *reactionTy_ = nullptr;
   llvm::Function *reactionDropFn_ = nullptr;
 };

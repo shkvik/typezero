@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The constructors a program calls, checked once every class is known.
 class ConstructorCalls {
 public:
-  explicit ConstructorCalls(Sema &sema);
+  explicit ConstructorCalls(Checker &checker);
 
   // Reports a method that a constructor calls on `this` (directly or through
   // other methods) and that a class down the chain overrides: it would run
@@ -18,7 +18,7 @@ public:
                             llvm::SmallPtrSetImpl<const FunctionDecl *> &seen);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The calls of constructors reported by checkConstructorCalls.
   llvm::SmallPtrSet<const CallExpr *, 4> reportedCalls_;
 };

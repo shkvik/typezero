@@ -10,7 +10,13 @@
 // the target, as reflect-metadata walks prototypes: an object's class, then
 // the class that one extends, and so on.
 
+#include "runtime/library/reflect/meta/meta.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
 #include <string.h>
 
 typedef struct {

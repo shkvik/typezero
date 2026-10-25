@@ -1,9 +1,9 @@
 #pragma once
 
-#include "compiler/program/symbols/func_symbol/func_symbol.h"
-#include "compiler/program/module/module.h"
 #include "compiler/program/ast/nested_group/nested_group.h"
 #include "compiler/program/ast/node/node.h"
+#include "compiler/program/module/module.h"
+#include "compiler/program/symbols/func_symbol/func_symbol.h"
 #include "compiler/program/symbols/var_symbol/var_symbol.h"
 
 namespace tz {

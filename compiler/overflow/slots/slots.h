@@ -9,7 +9,8 @@ class Slots {
 public:
   explicit Slots(OverflowCheck &check);
 
-  bool mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from, const Type *type, bool narrowing);
+  bool mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from, const Type *type,
+                 bool narrowing);
   const Reason *paramReason(const FunctionDecl *fn, size_t index);
   Val readVar(const VarSymbol *var, const State &st);
   void writeVar(const VarSymbol *var, Val v, State &st);

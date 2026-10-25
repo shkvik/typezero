@@ -1,8 +1,8 @@
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "compiler/library/stream/stream_checker/stream_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -12,12 +12,12 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-LibraryCalls::LibraryCalls(Sema &sema) : sema_(sema) {}
+LibraryCalls::LibraryCalls(Checker &checker) : checker_(checker) {}
 
 void LibraryCalls::prepareLibraries(SourceFile &program) {
   for (Module *module : program.modules) {
@@ -27,23 +27,20 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
     // Their code finds a listener by what it is: every evaluation of a
     // function expression must give a function of its own.
     program.comparesFunctions = true;
-    if (!module->file.items.empty()) {
-      llvm::SourceMgr &sm = sema_.diags_.sourceMgr();
-      unsigned id = sm.FindBufferContainingLoc(module->file.items.front()->loc());
-      if (id) {
-        const llvm::MemoryBuffer *buffer = sm.getMemoryBuffer(id);
-        libraryRanges_.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
-        // Its warnings are not the program's author's to fix.
-        sema_.diags_.quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
-      }
+    llvm::SourceMgr &sm = checker_.diags_.sourceMgr();
+    for (unsigned id : module->buffers) {
+      const llvm::MemoryBuffer *buffer = sm.getMemoryBuffer(id);
+      libraryRanges_.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
+      // Its warnings are not the program's author's to fix.
+      checker_.diags_.quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
     }
     for (Stmt *item : module->file.items) {
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        sema_.libFunctions_[fn->name] = fn;
+        checker_.libFunctions_[fn->name] = fn;
         continue;
       }
       if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
-        sema_.libTypes_[alias->name] = alias;
+        checker_.libTypes_[alias->name] = alias;
         continue;
       }
       auto *cls = dyn_cast<ClassDecl>(item);
@@ -51,7 +48,7 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
         continue;
       }
       cls->library = true;
-      sema_.libClasses_[cls->name] = cls;
+      checker_.libClasses_[cls->name] = cls;
       // `@__tz_hidden x`: a field that is no key.
       for (ClassField &f : cls->fields) {
         llvm::erase_if(f.decorators, [&](const Decorator &d) {
@@ -83,21 +80,22 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   // A name of the program's own is that; anywhere else but the built-in
   // modules, these are no names.
-  if (Sema::ScopeEntry own = sema_.scopes().lookup(name->name); own.var || own.func || own.cls) {
+  if (Checker::ScopeEntry own = checker_.scopes().lookup(name->name);
+      own.var || own.func || own.cls) {
     return nullptr;
   }
   if (!inLibrary(call->loc())) {
-    sema_.diags_.error(name->loc(), "cannot find name '" + name->name + "'");
+    checker_.diags_.error(name->loc(), "cannot find name '" + name->name + "'");
     checkArgsLoosely();
     return call;
   }
   if (name->name.starts_with("__tz_subtle_")) {
-    return sema_.webCryptoChecker().checkSubtleIntrinsic(call, name);
+    return checker_.webCryptoChecker().checkSubtleIntrinsic(call, name);
   }
   struct Intrinsic {
     llvm::StringLiteral name;
@@ -125,12 +123,15 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == name->name; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
       name->typeArgs.size() != intrinsic->typeArgs || call->hasSpread()) {
-    sema_.diags_.error(name->loc(), "'" + name->name + "' is no intrinsic of tz, or is called wrongly");
+    checker_.diags_.error(name->loc(),
+                          "'" + name->name + "' is no intrinsic of tz, or is called wrongly");
     checkArgsLoosely();
     return call;
   }
   const Type *typeArg =
-      intrinsic->typeArgs ? sema_.typeResolver().resolveType(name->typeArgs[0], /*allowVoid=*/false) : nullptr;
+      intrinsic->typeArgs
+          ? checker_.typeResolver().resolveType(name->typeArgs[0], /*allowVoid=*/false)
+          : nullptr;
   call->builtin = intrinsic->builtin;
   switch (intrinsic->builtin) {
   case Builtin::LibListener: {
@@ -144,28 +145,28 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     if (fn->isFunction() && flattenArguments(fn->params(), minArgs, hasRest, flat)) {
       fn = Type::function(flat, minArgs, hasRest, fn->ret(), fn->hasThis());
     }
-    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::unknown());
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::unknown());
     call->type = fn;
     if (!fn->isFunction() && !fn->isParam() && !fn->isError()) {
-      sema_.diags_.error(name->loc(), "'__tz_listener' gives a function");
+      checker_.diags_.error(name->loc(), "'__tz_listener' gives a function");
     }
     break;
   }
   case Builtin::LibAs:
-    call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError()) {
-      sema_.diags_.error(name->loc(), "'__tz_as' takes a class");
+      checker_.diags_.error(name->loc(), "'__tz_as' takes a class");
     }
     call->type = Type::optional(typeArg);
     break;
   case Builtin::LibAhead:
-    call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     call->type = call->args[0]->type;
     if (!call->type->isPromise() && !call->type->isError()) {
-      sema_.diags_.error(name->loc(), "'__tz_ahead' takes the promise an await waits for");
+      checker_.diags_.error(name->loc(), "'__tz_ahead' takes the promise an await waits for");
     }
-    if (sema_.currentFunction_ && sema_.currentFunction_->decl) {
-      sema_.currentFunction_->decl->awaitsAhead = true;
+    if (checker_.currentFunction_ && checker_.currentFunction_->decl) {
+      checker_.currentFunction_->decl->awaitsAhead = true;
     }
     break;
   case Builtin::LibOrder:
@@ -182,7 +183,7 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk:
   case Builtin::LibStdWrite:
-    return sema_.streamChecker().checkStreamIntrinsic(call, name, typeArg);
+    return checker_.streamChecker().checkStreamIntrinsic(call, name, typeArg);
   default:
     break;
   }

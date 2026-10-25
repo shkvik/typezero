@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The functions of node:crypto (docs/crypto.md).
 class CryptoFunctionChecker {
 public:
-  explicit CryptoFunctionChecker(Sema &sema);
+  explicit CryptoFunctionChecker(Checker &checker);
 
   // node:crypto (sema_crypto.cpp, docs/crypto.md): the calls of its functions,
   // the methods and properties of its objects, `new X509Certificate`, the
@@ -17,7 +17,7 @@ public:
   Expr *checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

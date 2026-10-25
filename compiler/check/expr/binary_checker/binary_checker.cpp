@@ -1,14 +1,14 @@
 #include "compiler/check/expr/binary_checker/binary_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/unary_checker/unary_checker.h"
-#include "compiler/check/expr/concat_checker/concat_checker.h"
 #include "compiler/check/classes/instance_of_checker/instance_of_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/check/expr/concat_checker/concat_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/truth_checker/truth_checker.h"
+#include "compiler/check/expr/unary_checker/unary_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
-#include "compiler/check/expr/truth_checker/truth_checker.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
@@ -22,21 +22,22 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-BinaryChecker::BinaryChecker(Sema &sema) : sema_(sema) {}
+BinaryChecker::BinaryChecker(Checker &checker) : checker_(checker) {}
 
-void BinaryChecker::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs, const Type *rhs) {
+void BinaryChecker::reportOperandTypes(llvm::SMLoc loc, const char *op, const Type *lhs,
+                                       const Type *rhs) {
   std::string message = (llvm::Twine("operator '") + op + "' cannot be applied to types '" +
                          lhs->name() + "' and '" + rhs->name() + "'")
                             .str();
   if (lhs->isOptional() || rhs->isOptional() || lhs->isUndefined() || rhs->isUndefined()) {
     message += "; a value may be undefined: check it first or give a default with '??'";
   }
-  sema_.diags_.error(loc, message);
+  checker_.diags_.error(loc, message);
 }
 
 Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
@@ -46,17 +47,18 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   }
   switch (bin->op) {
   case BinaryOp::In:
-    return sema_.unaryChecker().checkIn(bin);
+    return checker_.unaryChecker().checkIn(bin);
 
   case BinaryOp::InstanceOf:
-    return sema_.instanceOfChecker().checkInstanceOf(bin);
+    return checker_.instanceOfChecker().checkInstanceOf(bin);
 
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
-    Sema::Flow whenTrue, whenFalse;
-    sema_.truthChecker().checkLogical(bin, expected, whenTrue, whenFalse, /*tested=*/false,
-                 bin->op == BinaryOp::LogAnd ? Sema::TruthUse::And : Sema::TruthUse::Or);
-    sema_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+    Checker::Flow whenTrue, whenFalse;
+    checker_.truthChecker().checkLogical(bin, expected, whenTrue, whenFalse, /*tested=*/false,
+                                         bin->op == BinaryOp::LogAnd ? Checker::TruthUse::And
+                                                                     : Checker::TruthUse::Or);
+    checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
     return bin;
   }
 
@@ -71,16 +73,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::Le:
   case BinaryOp::Gt:
   case BinaryOp::Ge: {
-    sema_.decimalChecker().checkComparisonOperands(bin);
-    sema_.resultTypes().neverOperands(bin);
+    checker_.decimalChecker().checkComparisonOperands(bin);
+    checker_.resultTypes().neverOperands(bin);
     bin->type = Type::boolTy();
     // Two values of one type parameter compare as TypeScript allows; each
     // instance checks its type (objects do not compare).
     if (bin->lhs->type->isParam() && bin->lhs->type == bin->rhs->type) {
       return bin;
     }
-    bin->lhs = sema_.genericChecker().apparent(bin->lhs);
-    bin->rhs = sema_.genericChecker().apparent(bin->rhs);
+    bin->lhs = checker_.genericChecker().apparent(bin->lhs);
+    bin->rhs = checker_.genericChecker().apparent(bin->rhs);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     if (l->isError() || r->isError()) {
       return bin;
@@ -89,16 +91,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (l->isString() && r->isString()) {
       return bin;
     }
-    if (Expr *dates = sema_.dateChecker().checkDateOperands(bin)) {
+    if (Expr *dates = checker_.dateChecker().checkDateOperands(bin)) {
       return dates;
     }
     if (l->isDecimal() || r->isDecimal()) {
-      return sema_.decimalChecker().checkDecimalComparison(bin);
+      return checker_.decimalChecker().checkDecimalComparison(bin);
     }
     if (l->isNumeric() && r->isNumeric()) {
       if (const Type *common = TypeRelations::commonNumericType(l, r)) {
-        bin->lhs = sema_.typeRelations().convert(bin->lhs, common);
-        bin->rhs = sema_.typeRelations().convert(bin->rhs, common);
+        bin->lhs = checker_.typeRelations().convert(bin->lhs, common);
+        bin->rhs = checker_.typeRelations().convert(bin->rhs, common);
         return bin;
       }
     }
@@ -113,8 +115,10 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     // takes no type from the context, as for `&` and `|`: `-1 >>> 0` is the
     // 4294967295 of JavaScript where a long is expected too, not a 64-bit
     // shift of a long -1.
-    bin->lhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->lhs, nullptr, /*wraps=*/true));
-    bin->rhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->rhs, nullptr, /*wraps=*/true));
+    bin->lhs = checker_.genericChecker().apparent(
+        checker_.exprChecker().checkExpr(bin->lhs, nullptr, /*wraps=*/true));
+    bin->rhs = checker_.genericChecker().apparent(
+        checker_.exprChecker().checkExpr(bin->rhs, nullptr, /*wraps=*/true));
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     bin->type = Type::error();
     if (l->isError() || r->isError()) {
@@ -135,23 +139,23 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     }
     // The result has the type of the left side. The shift count is masked to
     // the bit width, so converting it to that type loses nothing.
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, l);
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
     bin->type = l;
     // JavaScript's `x >>> n` is unsigned. Shifted by 1 to 31 bits an int
     // still fits in an int, but `-1 >>> 0` is 4294967295, so with a count
     // that may be 0 the result is a long, unless only its low 32 bits matter
     // (`(h >>> 0) | 0`) or it is a constant that fits.
     if (bin->op == BinaryOp::UShr && l->isInt() && !wraps) {
-      std::optional<int64_t> count = sema_.constantFolder().intConstant(bin->rhs);
+      std::optional<int64_t> count = checker_.constantFolder().intConstant(bin->rhs);
       if (!count || (*count & 31) == 0) {
-        std::optional<int64_t> value = sema_.constantFolder().intConstant(bin->lhs);
+        std::optional<int64_t> value = checker_.constantFolder().intConstant(bin->lhs);
         if (!value ||
             static_cast<uint32_t>(*value) > uint32_t(std::numeric_limits<int32_t>::max())) {
           bin->type = Type::longTy();
         }
       }
     }
-    sema_.constantFolder().foldBinary(bin, wraps);
+    checker_.constantFolder().foldBinary(bin, wraps);
     return bin;
   }
 
@@ -175,31 +179,37 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     bool operandsWrap = bitwise || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
     // In the chain `a + b + c` the last `+` is checked first; it reports
     // joining numbers with strings for the whole chain (see reportMixedConcat).
-    BinaryExpr *chain = std::exchange(sema_.concatChain_, nullptr);
+    BinaryExpr *chain = std::exchange(checker_.concatChain_, nullptr);
     bool chainEnd = bin->op == BinaryOp::Add && !chain;
-    const BinaryExpr *outerMixed = chainEnd ? std::exchange(sema_.mixedConcat_, nullptr) : nullptr;
+    const BinaryExpr *outerMixed =
+        chainEnd ? std::exchange(checker_.mixedConcat_, nullptr) : nullptr;
     if (auto *left = dyn_cast<BinaryExpr>(bin->lhs);
         bin->op == BinaryOp::Add && left && left->op == BinaryOp::Add) {
-      sema_.concatChain_ = chain ? chain : bin;
+      checker_.concatChain_ = chain ? chain : bin;
     }
     // Literals next to a decimal are decimals (see sema_decimal.cpp): a
     // literal left side waits for the right one.
     bool literals = !bitwise && !pow;
-    if (literals && DecimalChecker::isLiteralTree(bin->lhs) && !DecimalChecker::isLiteralTree(bin->rhs)) {
-      BinaryExpr *pending = std::exchange(sema_.concatChain_, nullptr);
-      bin->rhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
-      sema_.concatChain_ = pending;
-      bin->lhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->lhs, DecimalChecker::literalHint(bin->rhs, hint), operandsWrap));
-      sema_.concatChain_ = nullptr;
+    if (literals && DecimalChecker::isLiteralTree(bin->lhs) &&
+        !DecimalChecker::isLiteralTree(bin->rhs)) {
+      BinaryExpr *pending = std::exchange(checker_.concatChain_, nullptr);
+      bin->rhs = checker_.genericChecker().apparent(
+          checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
+      checker_.concatChain_ = pending;
+      bin->lhs = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(
+          bin->lhs, DecimalChecker::literalHint(bin->rhs, hint), operandsWrap));
+      checker_.concatChain_ = nullptr;
     } else {
-      bin->lhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->lhs, hint, operandsWrap));
-      sema_.concatChain_ = nullptr;
+      bin->lhs = checker_.genericChecker().apparent(
+          checker_.exprChecker().checkExpr(bin->lhs, hint, operandsWrap));
+      checker_.concatChain_ = nullptr;
       if (literals && DecimalChecker::isLiteralTree(bin->rhs)) {
         rhsHint = DecimalChecker::literalHint(bin->lhs, rhsHint);
       }
-      bin->rhs = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
+      bin->rhs = checker_.genericChecker().apparent(
+          checker_.exprChecker().checkExpr(bin->rhs, rhsHint, operandsWrap));
     }
-    sema_.resultTypes().neverOperands(bin);
+    checker_.resultTypes().neverOperands(bin);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     if (bin->op == BinaryOp::Add) {
       // JavaScript joins a number or a boolean with a string as text: `10 + "1"`
@@ -209,15 +219,15 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
 
         return base->isNumeric() || base->isDecimal() || base->isBool();
       };
-      if (!sema_.mixedConcat_ &&
+      if (!checker_.mixedConcat_ &&
           ((l->isString() && joinsAsText(r)) || (r->isString() && joinsAsText(l)))) {
-        sema_.mixedConcat_ = bin;
+        checker_.mixedConcat_ = bin;
       }
       if (chainEnd) {
-        if (sema_.mixedConcat_) {
-          sema_.concatChecker().reportMixedConcat(bin, sema_.mixedConcat_);
+        if (checker_.mixedConcat_) {
+          checker_.concatChecker().reportMixedConcat(bin, checker_.mixedConcat_);
         }
-        sema_.mixedConcat_ = outerMixed;
+        checker_.mixedConcat_ = outerMixed;
       }
     }
     bin->type = Type::error();
@@ -226,16 +236,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     }
     if (bin->op == BinaryOp::Add && (l->isString() || r->isString())) {
       // As in JavaScript, `+` concatenates when either side is a string.
-      bin->lhs = sema_.concatChecker().toStringOperand(bin->lhs);
-      bin->rhs = sema_.concatChecker().toStringOperand(bin->rhs);
+      bin->lhs = checker_.concatChecker().toStringOperand(bin->lhs);
+      bin->rhs = checker_.concatChecker().toStringOperand(bin->rhs);
       bin->type = Type::string();
       return bin;
     }
-    if (Expr *dates = sema_.dateChecker().checkDateOperands(bin)) {
+    if (Expr *dates = checker_.dateChecker().checkDateOperands(bin)) {
       return dates;
     }
     if (!bitwise && (l->isDecimal() || r->isDecimal())) {
-      return sema_.decimalChecker().checkDecimalArithmetic(bin);
+      return checker_.decimalChecker().checkDecimalArithmetic(bin);
     }
     if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat() || l != r)) {
       // As in JavaScript, both sides become 32-bit integers first, so `x | 0`
@@ -245,7 +255,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       bin->lhs = toInt32(bin->lhs);
       bin->rhs = toInt32(bin->rhs);
       bin->type = Type::intTy();
-      sema_.constantFolder().foldBinary(bin, wraps);
+      checker_.constantFolder().foldBinary(bin, wraps);
       return bin;
     }
     bool operandsOk = bitwise ? l->isInteger() && r->isInteger() : l->isNumeric() && r->isNumeric();
@@ -254,8 +264,8 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       reportOperandTypes(bin->loc(), op, l, r);
       return bin;
     }
-    bin->lhs = sema_.typeRelations().convert(bin->lhs, common);
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, common);
+    bin->lhs = checker_.typeRelations().convert(bin->lhs, common);
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, common);
     bin->type = common;
     if (!common->isInteger()) {
       return bin;
@@ -263,15 +273,17 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     // An integer to a negative power is a fraction (as with `/`, integers
     // stay integers); a negative constant exponent is surely a mistake.
     if (bin->op == BinaryOp::Pow) {
-      if (std::optional<int64_t> exponent = sema_.constantFolder().intConstant(bin->rhs); exponent && *exponent < 0) {
-        sema_.diags_.error(bin->rhs->loc(), "'" + common->name() +
-                                          "' raised to a negative power is a fraction, which an "
-                                          "integer cannot hold; use a double, e.g. '2.0 ** -1'");
+      if (std::optional<int64_t> exponent = checker_.constantFolder().intConstant(bin->rhs);
+          exponent && *exponent < 0) {
+        checker_.diags_.error(bin->rhs->loc(),
+                              "'" + common->name() +
+                                  "' raised to a negative power is a fraction, which an "
+                                  "integer cannot hold; use a double, e.g. '2.0 ** -1'");
         return bin;
       }
     }
-    sema_.constantFolder().checkDivisor(bin->op, bin->rhs);
-    sema_.constantFolder().foldBinary(bin, wraps);
+    checker_.constantFolder().checkDivisor(bin->op, bin->rhs);
+    checker_.constantFolder().foldBinary(bin, wraps);
     return bin;
   }
   }
@@ -280,10 +292,10 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
 // `==` and `!=` (the only equality operators; there is no null to convert). Any
 // value can be compared with undefined; `T | undefined` compares with `T`.
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
-  if (Expr *null = sema_.jsonChecker().checkNullEquality(bin)) {
+  if (Expr *null = checker_.jsonChecker().checkNullEquality(bin)) {
     return null;
   }
-  sema_.decimalChecker().checkComparisonOperands(bin);
+  checker_.decimalChecker().checkComparisonOperands(bin);
   const Type *l = bin->lhs->type, *r = bin->rhs->type;
   bin->type = Type::boolTy();
   // typeof never gives "bigint": there is none.
@@ -291,7 +303,7 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
     if (typeOf && typeOf->op == UnaryOp::TypeOf && text && text->value == u"bigint") {
-      sema_.decimalChecker().reportBigInt(text->loc(), "'typeof x == \"bigint\"'");
+      checker_.decimalChecker().reportBigInt(text->loc(), "'typeof x == \"bigint\"'");
     }
   }
   if (l->isError() || r->isError()) {
@@ -305,16 +317,16 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
     return bin;
   }
   if (l->nonOptional()->isJson() || r->nonOptional()->isJson()) {
-    return sema_.jsonChecker().checkJsonEquality(bin);
+    return checker_.jsonChecker().checkJsonEquality(bin);
   }
   // In JavaScript two Results are two objects, never equal; their values
   // cannot be compared for them.
   if (l->nonOptional()->isResult() || r->nonOptional()->isResult()) {
-    sema_.diags_.error(bin->loc(), llvm::Twine("Results cannot be compared with '") +
-                                 opSpelling(bin->op) +
-                                 "': in JavaScript 'ok(1) == ok(1)' is false, as they are two "
-                                 "objects; compare what they hold, with 'isOk()', 'match' or "
-                                 "'value'");
+    checker_.diags_.error(bin->loc(),
+                          llvm::Twine("Results cannot be compared with '") + opSpelling(bin->op) +
+                              "': in JavaScript 'ok(1) == ok(1)' is false, as they are two "
+                              "objects; compare what they hold, with 'isOk()', 'match' or "
+                              "'value'");
     return bin;
   }
   // TypeScript compares a value of a type parameter with anything; each
@@ -326,39 +338,39 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   const Type *common = TypeRelations::comparisonType(l, r);
   if (!common) {
     if (l->nonOptional()->isDecimal() || r->nonOptional()->isDecimal()) {
-      sema_.decimalChecker().reportDecimalMix(bin);
+      checker_.decimalChecker().reportDecimalMix(bin);
     } else {
       reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
     }
     return bin;
   }
   if (common->nonOptional()->isFunction()) {
-    sema_.file_->comparesFunctions = true;
+    checker_.file_->comparesFunctions = true;
   }
-  bin->lhs = sema_.typeRelations().convert(bin->lhs, common);
-  bin->rhs = sema_.typeRelations().convert(bin->rhs, common);
+  bin->lhs = checker_.typeRelations().convert(bin->lhs, common);
+  bin->rhs = checker_.typeRelations().convert(bin->rhs, common);
 
   return bin;
 }
 
 // `a ?? b`: b when a is undefined. When a cannot be undefined (for example an
-// index Sema proved in range), b is checked but never evaluated.
+// index Checker proved in range), b is checked but never evaluated.
 Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
-  bin->lhs = sema_.exprChecker().checkExpr(bin->lhs, expected);
+  bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, expected);
   // `s.match(re) ?? []`: the match is the array of its captures there, as
   // it is an array in JavaScript.
   if (bin->lhs->type->nonOptional()->isMatch() && isa<ArrayLitExpr>(bin->rhs)) {
-    bin->lhs = sema_.matchChecker().matchItems(bin->lhs);
+    bin->lhs = checker_.matchChecker().matchItems(bin->lhs);
   }
   const Type *l = bin->lhs->type;
-  Sema::Flow afterLhs = sema_.flow_;
+  Checker::Flow afterLhs = checker_.flow_;
   const Type *hint = l->isUndefined() || l->isError() ? expected : l->nonOptional();
-  bin->rhs = sema_.exprChecker().checkExpr(bin->rhs, hint);
-  sema_.flow_ = FlowChecker::join(afterLhs, sema_.flow_); // the right side may not run
+  bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, hint);
+  checker_.flow_ = FlowChecker::join(afterLhs, checker_.flow_); // the right side may not run
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
   if (l->isError() || r->isError()) {
-    if (sema_.trial_ && l->isError() != r->isError()) { // as in checkConditional
+    if (checker_.trial_ && l->isError() != r->isError()) { // as in checkConditional
       bin->type = l->isError() ? r : l->nonOptional();
     }
     return bin;
@@ -371,22 +383,26 @@ Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
     bin->type = r;
     return bin;
   }
-  const Type *base =
-      r->isUndefined() ? l->nonOptional() : LiteralTypes::unionUnify(l->nonOptional(), r->nonOptional());
+  const Type *base = r->isUndefined()
+                         ? l->nonOptional()
+                         : LiteralTypes::unionUnify(l->nonOptional(), r->nonOptional());
   if (!base || base->isError()) {
     reportOperandTypes(bin->loc(), "??", l, r);
     return bin;
   }
   const Type *result = r->isOptional() || r->isUndefined() ? Type::optional(base) : base;
-  bin->lhs = sema_.typeRelations().convert(bin->lhs, l->isOptional() ? Type::optional(base) : result);
-  bin->rhs = sema_.typeRelations().convert(bin->rhs, result);
+  bin->lhs =
+      checker_.typeRelations().convert(bin->lhs, l->isOptional() ? Type::optional(base) : result);
+  bin->rhs = checker_.typeRelations().convert(bin->rhs, result);
   bin->type = result;
 
   return bin;
 }
 
 Expr *BinaryChecker::toInt32(Expr *expr) {
-  return expr->type->isInt() || expr->type->isError() ? expr : sema_.typeRelations().convert(expr, Type::intTy());
+  return expr->type->isInt() || expr->type->isError()
+             ? expr
+             : checker_.typeRelations().convert(expr, Type::intTy());
 }
 
 } // namespace tz

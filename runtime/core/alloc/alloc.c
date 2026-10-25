@@ -16,7 +16,7 @@
 // for strings: a program creates millions of them, and the C library's
 // malloc costs several times more per call.
 //
-// Each thread has a heap of its own (TzHeap in tzrt.h): the segments it took
+// Each thread has a heap of its own (TzHeap in alloc.h): the segments it took
 // and their pages are its. In the parallel runtime (TZ_PARALLEL) a thread
 // may free a block of another's heap: the block goes onto that heap's list
 // of remote frees, a stack that others push onto with an atomic exchange,
@@ -24,6 +24,9 @@
 // in a page (or when its thread goes idle, parallel.c), freeing each block
 // as its own.
 
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 

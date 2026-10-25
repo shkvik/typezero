@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // process, Date.now() and performance.now().
 class ProcessChecker {
 public:
-  explicit ProcessChecker(Sema &sema);
+  explicit ProcessChecker(Checker &checker);
 
   // process, Date.now() and performance.now() (sema_process.cpp). Each
   // returns null if what it is given is not about them.
@@ -28,7 +28,7 @@ public:
                     const Type *type);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The methods of typed arrays that take a callback.
 class BytesCallbackLowerer {
 public:
-  explicit BytesCallbackLowerer(CodeGen &codegen);
+  explicit BytesCallbackLowerer(Lowering &lowering);
 
   // forEach, map, filter, reduce... of a typed array (see emitCallbackMethod).
   llvm::Value *emitBytesCallbackMethod(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

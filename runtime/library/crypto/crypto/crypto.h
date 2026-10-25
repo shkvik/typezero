@@ -24,7 +24,10 @@
 
 // Built once for both runtimes (see TZ_PARALLEL in tzrt.h).
 #define TZ_NO_THREAD_STATE
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/json/json/json.h"
 #include <stddef.h>
 #include <stdint.h>
 

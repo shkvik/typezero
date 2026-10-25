@@ -1,14 +1,15 @@
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
-#include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +28,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -218,8 +218,7 @@ State LoopRanges::onePass(const OverflowCheck::LoopSpec &spec, const State &head
   return s;
 }
 
-State LoopRanges::rebased(const State &state,
-                             llvm::DenseMap<const VarSymbol *, uint64_t> &bases) {
+State LoopRanges::rebased(const State &state, llvm::DenseMap<const VarSymbol *, uint64_t> &bases) {
   State r = state;
   for (auto &entry : r.vars) {
     uint64_t &base = bases[entry.first];
@@ -236,8 +235,8 @@ State LoopRanges::rebased(const State &state,
   return r;
 }
 
-Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entry, const State &head,
-                             const State &first, const State &firstEnd) {
+Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entry,
+                          const State &head, const State &first, const State &firstEnd) {
   if (firstEnd.dead) {
     return spec.passes;
   }
@@ -416,7 +415,8 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       return Bound{at, Origin::Trusted, nullptr};
     }
 
-    return Bound{at, Origin::Loop, check_.overflowWarnings().reason(Origin::Loop, spec.loc, "", unbounded)};
+    return Bound{at, Origin::Loop,
+                 check_.overflowWarnings().reason(Origin::Loop, spec.loc, "", unbounded)};
   };
   auto stepIn = [&](const VarSymbol *var, bool length) -> std::optional<std::pair<double, double>> {
     auto end = lastEnd.vars.find(var), from = lastHead.vars.find(var);

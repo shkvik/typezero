@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Matches: their captures and groups.
 class MatchChecker {
 public:
-  explicit MatchChecker(Sema &sema);
+  explicit MatchChecker(Checker &checker);
 
   // A match: index, input, groups and length; m[k]; and the match as the
   // array of its captures, for its methods, for...of, spreading and
@@ -17,7 +17,7 @@ public:
   Expr *matchItems(Expr *match);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

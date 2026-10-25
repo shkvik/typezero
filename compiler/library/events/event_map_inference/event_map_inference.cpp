@@ -9,8 +9,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -76,10 +76,10 @@ bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &see
 
 } // namespace
 
-EventMapInference::EventMapInference(Sema &sema) : sema_(sema) {}
+EventMapInference::EventMapInference(Checker &checker) : checker_(checker) {}
 
 std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
-  llvm::SourceMgr &sm = sema_.diags_.sourceMgr();
+  llvm::SourceMgr &sm = checker_.diags_.sourceMgr();
   unsigned id = loc.isValid() ? sm.FindBufferContainingLoc(loc) : 0;
   if (!id) {
     return "?";
@@ -91,7 +91,7 @@ std::string EventMapInference::placeOf(llvm::SMLoc loc) const {
 }
 
 EventInference::Portable EventMapInference::portable(const Type *type,
-                                        llvm::SmallPtrSetImpl<const Type *> &seen) {
+                                                     llvm::SmallPtrSetImpl<const Type *> &seen) {
   using Kind = EventInference::Portable::Kind;
   EventInference::Portable p;
   llvm::SmallPtrSet<const Type *, 8> visited;
@@ -220,18 +220,18 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
   case Kind::ClassRef: {
     ClassDecl *cls = nullptr;
     if (p.file.empty()) {
-      cls = sema_.throwChecker().errorKindClass(p.name);
-      if (!cls && sema_.systemErrorClass_ && p.name == sema_.systemErrorClass_->name) {
-        cls = sema_.systemErrorClass_;
+      cls = checker_.throwChecker().errorKindClass(p.name);
+      if (!cls && checker_.systemErrorClass_ && p.name == checker_.systemErrorClass_->name) {
+        cls = checker_.systemErrorClass_;
       }
-      if (!cls && sema_.statsClass_ && p.name == sema_.statsClass_->name) {
-        cls = sema_.statsClass_;
+      if (!cls && checker_.statsClass_ && p.name == checker_.statsClass_->name) {
+        cls = checker_.statsClass_;
       }
-      if (!cls && sema_.direntClass_ && p.name == sema_.direntClass_->name) {
-        cls = sema_.direntClass_;
+      if (!cls && checker_.direntClass_ && p.name == checker_.direntClass_->name) {
+        cls = checker_.direntClass_;
       }
     } else {
-      for (Module *module : sema_.file_->modules) {
+      for (Module *module : checker_.file_->modules) {
         for (Stmt *item : module->file.items) {
           if (auto *c = dyn_cast<ClassDecl>(item);
               c && !cls && c->name == p.name && fileOfPlace(placeOf(c->loc())) == p.file) {
@@ -247,7 +247,7 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
       return Type::classRef(cls, cls->name);
     }
     if (cls->isGeneric()) {
-      ClassDecl *inst = sema_.genericClassInstantiator().instantiateClass(cls, parts, loc);
+      ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(cls, parts, loc);
       return inst ? inst->type : nullptr;
     }
     return cls->type;
@@ -295,26 +295,26 @@ const Type *EventMapInference::inferredEventMap(const std::string &site) {
   if (auto found = siteMaps_.find(site); found != siteMaps_.end()) {
     return found->second;
   }
-  if (!sema_.inference_) {
+  if (!checker_.inference_) {
     return nullptr;
   }
-  sema_.inference_->open = true;
+  checker_.inference_->open = true;
   const Type *map;
-  if (!sema_.inference_->final) {
+  if (!checker_.inference_->final) {
     // Opaque, so that the calls on its emitters can tell it is this one.
     Type *opaque = Type::declareObject("the events of " + site);
     opaque->defineFields({});
-    sema_.openMaps_[opaque] = site;
+    checker_.openMaps_[opaque] = site;
     map = opaque;
   } else {
     std::vector<Field> fields;
-    for (const EventInference::Event &e : sema_.inference_->maps[site]) {
+    for (const EventInference::Event &e : checker_.inference_->maps[site]) {
       if (const Type *args = fromPortable(e.args, llvm::SMLoc())) {
         fields.push_back({e.name, args, false});
       }
     }
     map = Type::object(std::move(fields));
-    sema_.inferredMaps_[map] = site;
+    checker_.inferredMaps_[map] = site;
   }
   siteMaps_[site] = map;
 

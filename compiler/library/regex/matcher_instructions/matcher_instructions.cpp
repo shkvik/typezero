@@ -7,10 +7,10 @@
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -24,7 +24,8 @@ bool MatcherInstructions::literalUnit(uint32_t pc, uint32_t &unit, uint32_t &fol
   const uint32_t *op = builder_.code_ + pc;
   uint32_t limit = builder_.wide_ ? 0xFFFF : 0xFF;
   if (op[0] == RE_CHAR) {
-    if (op[1] > limit || (builder_.wide_ && builder_.unicode_ && op[1] >= 0xD800 && op[1] <= 0xDFFF)) {
+    if (op[1] > limit ||
+        (builder_.wide_ && builder_.unicode_ && op[1] >= 0xD800 && op[1] <= 0xDFFF)) {
       return false;
     }
     unit = op[1];
@@ -82,7 +83,8 @@ uint32_t MatcherInstructions::emitLiteralRun(uint32_t pc, uint32_t run) {
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   Value *pos = builder_.load(builder_.pos_);
   Value *end = builder_.b_.CreateAdd(builder_.b_.CreateSExt(pos, i64), builder_.b_.getInt64(run));
-  builder_.failUnless(builder_.b_.CreateICmpSLE(end, builder_.b_.CreateSExt(builder_.length_, i64)));
+  builder_.failUnless(
+      builder_.b_.CreateICmpSLE(end, builder_.b_.CreateSExt(builder_.length_, i64)));
   uint32_t width = builder_.wide_ ? 2 : 1, done = 0;
   while (done < run) {
     uint32_t n = 1;
@@ -95,8 +97,9 @@ uint32_t MatcherInstructions::emitLiteralRun(uint32_t pc, uint32_t run) {
       mask |= uint64_t(units[done + k].second) << (8 * width * k);
     }
     llvm::Type *chunk = builder_.b_.getIntNTy(8 * width * n);
-    Value *address =
-        builder_.b_.CreateInBoundsGEP(builder_.unitTy_, builder_.units_, builder_.b_.CreateZExt(builder_.b_.CreateAdd(pos, builder_.i32(done)), i64));
+    Value *address = builder_.b_.CreateInBoundsGEP(
+        builder_.unitTy_, builder_.units_,
+        builder_.b_.CreateZExt(builder_.b_.CreateAdd(pos, builder_.i32(done)), i64));
     Value *v = builder_.b_.CreateAlignedLoad(chunk, address, llvm::Align(1));
     if (mask) {
       v = builder_.b_.CreateOr(v, llvm::ConstantInt::get(chunk, mask));
@@ -134,16 +137,21 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
   case RE_ALL_BACK:
   case RE_SET:
   case RE_SET_BACK:
-    builder_.store(builder_.matcherChars().charStep(pc, builder_.load(builder_.pos_), nullptr), builder_.pos_);
+    builder_.store(builder_.matcherChars().charStep(pc, builder_.load(builder_.pos_), nullptr),
+                   builder_.pos_);
     return;
   case RE_LINE_START:
     builder_.failUnless(builder_.b_.CreateICmpEQ(builder_.load(builder_.pos_), builder_.i32(0)));
     return;
   case RE_LINE_START_M: {
     Value *pos = builder_.load(builder_.pos_);
-    Value *after = builder_.matcherChars().test(builder_.b_.CreateICmpSGT(pos, builder_.i32(0)),
-                        [&] { return builder_.matcherChars().isLineTerminator(builder_.unitAt(builder_.b_.CreateSub(pos, builder_.i32(1)))); });
-    builder_.failUnless(builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(pos, builder_.i32(0)), after));
+    Value *after =
+        builder_.matcherChars().test(builder_.b_.CreateICmpSGT(pos, builder_.i32(0)), [&] {
+          return builder_.matcherChars().isLineTerminator(
+              builder_.unitAt(builder_.b_.CreateSub(pos, builder_.i32(1))));
+        });
+    builder_.failUnless(
+        builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(pos, builder_.i32(0)), after));
     return;
   }
   case RE_LINE_END:
@@ -152,8 +160,11 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
   case RE_LINE_END_M: {
     Value *pos = builder_.load(builder_.pos_);
     Value *before =
-        builder_.matcherChars().test(builder_.b_.CreateICmpSLT(pos, builder_.length_), [&] { return builder_.matcherChars().isLineTerminator(builder_.unitAt(pos)); });
-    builder_.failUnless(builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(pos, builder_.length_), before));
+        builder_.matcherChars().test(builder_.b_.CreateICmpSLT(pos, builder_.length_), [&] {
+          return builder_.matcherChars().isLineTerminator(builder_.unitAt(pos));
+        });
+    builder_.failUnless(
+        builder_.b_.CreateOr(builder_.b_.CreateICmpEQ(pos, builder_.length_), before));
     return;
   }
   case RE_WORD_BOUNDARY:
@@ -163,17 +174,21 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     bool folded = op[0] == RE_WORD_BOUNDARY_I || op[0] == RE_NOT_WORD_BOUNDARY_I;
     bool boundary = op[0] == RE_WORD_BOUNDARY || op[0] == RE_WORD_BOUNDARY_I;
     Value *pos = builder_.load(builder_.pos_);
-    Value *a = builder_.matcherChars().test(builder_.b_.CreateICmpSGT(pos, builder_.i32(0)),
-                    [&] { return builder_.matcherChars().isWordUnit(builder_.unitAt(builder_.b_.CreateSub(pos, builder_.i32(1))), folded); });
-    Value *c =
-        builder_.matcherChars().test(builder_.b_.CreateICmpSLT(pos, builder_.length_), [&] { return builder_.matcherChars().isWordUnit(builder_.unitAt(pos), folded); });
+    Value *a = builder_.matcherChars().test(builder_.b_.CreateICmpSGT(pos, builder_.i32(0)), [&] {
+      return builder_.matcherChars().isWordUnit(
+          builder_.unitAt(builder_.b_.CreateSub(pos, builder_.i32(1))), folded);
+    });
+    Value *c = builder_.matcherChars().test(builder_.b_.CreateICmpSLT(pos, builder_.length_), [&] {
+      return builder_.matcherChars().isWordUnit(builder_.unitAt(pos), folded);
+    });
     Value *differ = builder_.b_.CreateXor(a, c);
     builder_.failUnless(boundary ? differ : builder_.b_.CreateNot(differ));
     return;
   }
   case RE_GOTO:
     if (op[1] <= pc && builder_.memo_) {
-      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)), builder_.steps_); // an iteration: work
+      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)),
+                     builder_.steps_); // an iteration: work
     }
     builder_.b_.CreateBr(builder_.blockAt(op[1]));
     return;
@@ -185,10 +200,12 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     uint32_t first = op[0] == RE_SPLIT_NEXT ? pc + 2 : op[1];
     uint32_t later = op[0] == RE_SPLIT_NEXT ? op[1] : pc + 2;
     Value *pos = builder_.load(builder_.pos_);
-    FirstUnits firstUnits = builder_.matcherRepeats().unitsFirst(first), laterUnits = builder_.matcherRepeats().unitsFirst(later);
+    FirstUnits firstUnits = builder_.matcherRepeats().unitsFirst(first),
+               laterUnits = builder_.matcherRepeats().unitsFirst(later);
     if (firstUnits.known) {
       BasicBlock *take = builder_.newBlock("split.first");
-      builder_.b_.CreateCondBr(builder_.matcherRepeats().startsWith(firstUnits, pos), take, builder_.blockAt(later));
+      builder_.b_.CreateCondBr(builder_.matcherRepeats().startsWith(firstUnits, pos), take,
+                               builder_.blockAt(later));
       builder_.b_.SetInsertPoint(take);
     }
     if (laterUnits.known) {
@@ -272,14 +289,18 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     // nothing fails.
     Value *n = builder_.loadSlot(slotBase + op[1]);
     if (op[2] != RE_INFINITY) {
-      Value *empty = builder_.b_.CreateICmpEQ(builder_.load(builder_.pos_), builder_.loadSlot(slotBase + op[3]));
-      builder_.failUnless(builder_.b_.CreateNot(builder_.b_.CreateAnd(builder_.b_.CreateICmpUGE(n, builder_.i32(op[2])), empty)));
+      Value *empty = builder_.b_.CreateICmpEQ(builder_.load(builder_.pos_),
+                                              builder_.loadSlot(slotBase + op[3]));
+      builder_.failUnless(builder_.b_.CreateNot(
+          builder_.b_.CreateAnd(builder_.b_.CreateICmpUGE(n, builder_.i32(op[2])), empty)));
     }
     Value *counted =
-        builder_.b_.CreateSelect(builder_.b_.CreateICmpULT(n, builder_.i32(RE_INFINITY - 1)), builder_.b_.CreateAdd(n, builder_.i32(1)), n);
+        builder_.b_.CreateSelect(builder_.b_.CreateICmpULT(n, builder_.i32(RE_INFINITY - 1)),
+                                 builder_.b_.CreateAdd(n, builder_.i32(1)), n);
     builder_.setSlot(slotBase + op[1], counted);
     if (builder_.memo_) {
-      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)), builder_.steps_);
+      builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)),
+                     builder_.steps_);
     }
     builder_.b_.CreateBr(builder_.blockAt(op[4]));
     return;
@@ -297,8 +318,10 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     llvm::FunctionCallee fn = builder_.module_.getOrInsertFunction(
         "tz_re_backref",
         llvm::FunctionType::get(i32Ty, {ptr, i32Ty, i32Ty, ptr, i32Ty, ptr, i32Ty}, false));
-    Value *next = builder_.b_.CreateCall(fn, {builder_.units_, builder_.i32(builder_.wide_ ? 1 : 0), builder_.length_, builder_.slots_, builder_.load(builder_.pos_),
-                                     global, builder_.i32(builder_.unicode_ ? 1 : 0)});
+    Value *next =
+        builder_.b_.CreateCall(fn, {builder_.units_, builder_.i32(builder_.wide_ ? 1 : 0),
+                                    builder_.length_, builder_.slots_, builder_.load(builder_.pos_),
+                                    global, builder_.i32(builder_.unicode_ ? 1 : 0)});
     builder_.failUnless(builder_.b_.CreateICmpSGE(next, builder_.i32(0)));
     builder_.store(next, builder_.pos_);
     return;
@@ -343,14 +366,16 @@ void MatcherInstructions::emitLook(uint32_t pc) {
   builder_.push(builder_.i32(label), pos);
   builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)), mark);
   if (builder_.memo_ && builder_.hasLook_) {
-    builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.depth_), builder_.i32(1)), builder_.depth_);
+    builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.depth_), builder_.i32(1)),
+                   builder_.depth_);
     builder_.store(builder_.matcherMemo().memoLogLength(), logMark);
   }
   {
     llvm::IRBuilderBase::InsertPointGuard guard(builder_.b_);
     builder_.b_.SetInsertPoint(failed);
     if (builder_.memo_ && builder_.hasLook_) {
-      builder_.store(builder_.b_.CreateSub(builder_.load(builder_.depth_), builder_.i32(1)), builder_.depth_);
+      builder_.store(builder_.b_.CreateSub(builder_.load(builder_.depth_), builder_.i32(1)),
+                     builder_.depth_);
     }
     if (negative) {
       builder_.store(builder_.load(builder_.value_), builder_.pos_);
@@ -368,14 +393,17 @@ void MatcherInstructions::emitLookSuccess(uint32_t look) {
   bool negative = (op[1] & RE_LOOK_NEGATIVE) != 0;
   llvm::Type *ptr = builder_.b_.getPtrTy(), *i32Ty = builder_.b_.getInt32Ty();
   if (builder_.memo_ && builder_.hasLook_) {
-    builder_.store(builder_.b_.CreateSub(builder_.load(builder_.depth_), builder_.i32(1)), builder_.depth_);
+    builder_.store(builder_.b_.CreateSub(builder_.load(builder_.depth_), builder_.i32(1)),
+                   builder_.depth_);
     // What the memo noted on the way may have led here: forgotten.
     builder_.matcherMemo().withMemo("tz_re_memo_forget", {builder_.load(logMark)});
   }
   if (!negative) {
     llvm::FunctionCallee drop = builder_.module_.getOrInsertFunction(
         "tz_re_bt_drop_choices", llvm::FunctionType::get(i32Ty, {ptr, i32Ty, i32Ty}, false));
-    builder_.store(builder_.b_.CreateCall(drop, {builder_.load(builder_.base_), builder_.load(mark), builder_.load(builder_.top_)}), builder_.top_);
+    builder_.store(builder_.b_.CreateCall(drop, {builder_.load(builder_.base_), builder_.load(mark),
+                                                 builder_.load(builder_.top_)}),
+                   builder_.top_);
     builder_.store(builder_.load(at), builder_.pos_);
     builder_.b_.CreateBr(builder_.blockAt(op[2]));
   } else {
@@ -383,7 +411,8 @@ void MatcherInstructions::emitLookSuccess(uint32_t look) {
         "tz_re_bt_unwind",
         llvm::FunctionType::get(builder_.b_.getVoidTy(), {ptr, i32Ty, i32Ty, ptr}, false));
     Value *m = builder_.load(mark);
-    builder_.b_.CreateCall(unwind, {builder_.load(builder_.base_), m, builder_.load(builder_.top_), builder_.slots_});
+    builder_.b_.CreateCall(
+        unwind, {builder_.load(builder_.base_), m, builder_.load(builder_.top_), builder_.slots_});
     builder_.store(m, builder_.top_);
     builder_.b_.CreateBr(builder_.fail_);
   }

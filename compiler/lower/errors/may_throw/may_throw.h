@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Which functions and calls may throw.
 class MayThrow {
 public:
-  explicit MayThrow(CodeGen &codegen);
+  explicit MayThrow(Lowering &lowering);
 
   // Exceptions (codegen_throw.cpp, docs/errors.md). The error in flight is
   // the runtime's tz_thrown: a function that throws stores its Error there
@@ -24,7 +24,7 @@ public:
   bool summaryThrows(const ThrowSummary &summary) const;
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::DenseMap<const Expr *, bool> exprThrows_;
 };
 

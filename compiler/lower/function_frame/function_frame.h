@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The function being built: its blocks, its scopes and their cleanups, its stack slots.
 class FunctionFrame {
 public:
-  explicit FunctionFrame(CodeGen &codegen);
+  explicit FunctionFrame(Lowering &lowering);
 
   // Blocks
   llvm::BasicBlock *newBlock(const llvm::Twine &name);
@@ -24,7 +24,7 @@ public:
   // Releases the variables of scopes_[depth..] without leaving them, before a
   // jump out of them (break, continue, return).
   void emitCleanups(size_t depth);
-  void emitScopeCleanup(const CodeGen::Scope &scope);
+  void emitScopeCleanup(const Lowering::Scope &scope);
   // A stack slot for a local variable or parameter; managed slots start empty
   // and are registered for release at the end of the current scope.
   llvm::Value *createLocal(const VarSymbol *var, llvm::StringRef name);
@@ -38,7 +38,7 @@ public:
   llvm::AllocaInst *createStackSlot(llvm::Type *type, const llvm::Twine &name);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

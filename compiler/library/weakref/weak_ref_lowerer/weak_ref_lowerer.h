@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // WeakRef.
 class WeakRefLowerer {
 public:
-  explicit WeakRefLowerer(CodeGen &codegen);
+  explicit WeakRefLowerer(Lowering &lowering);
 
   // `new WeakRef(x)` and `w.deref()`.
   llvm::Value *emitWeakRefCall(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

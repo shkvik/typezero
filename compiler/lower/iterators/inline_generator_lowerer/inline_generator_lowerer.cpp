@@ -1,27 +1,27 @@
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
-#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
-#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
-#include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/lower/iterators/iter_lower_helpers/iter_lower_helpers.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
+#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -50,7 +50,7 @@ unsigned countYields(const FunctionDecl *fn) {
 
 } // namespace
 
-InlineGeneratorLowerer::InlineGeneratorLowerer(CodeGen &codegen) : codegen_(codegen) {}
+InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
   if (!decl->isGenerator || decl->isClosure() || !decl->sym || !decl->sym->ret ||
@@ -65,7 +65,8 @@ bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
   // Not inside itself: a recursive generator would be emitted inside itself
   // without end.
   unsigned depth = 0;
-  for (const CodeGen::InlineGenerator *frame = codegen_.inline_; frame; frame = frame->consumerContext.inlined) {
+  for (const Lowering::InlineGenerator *frame = lowering_.inline_; frame;
+       frame = frame->consumerContext.inlined) {
     if (frame->decl == decl) {
       return false;
     }
@@ -77,13 +78,14 @@ bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
          inlineCopies_ * std::max(yields, 1u) <= kMaxInlineCopies;
 }
 
-CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *returnSlot) {
+Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *returnSlot) {
   const Type *type = source->type;
   auto hold = [&](Expr *expr) {
     const Type *t = expr->type;
-    llvm::Value *slot =
-        t->isManaged() ? codegen_.functionFrame().createManagedSlot(t, "operand") : codegen_.functionFrame().createStackSlot(codegen_.moduleBuilder().lower(t), "operand");
-    codegen_.builder_.CreateStore(codegen_.exprLowerer().emitExpr(expr), slot);
+    llvm::Value *slot = t->isManaged() ? lowering_.functionFrame().createManagedSlot(t, "operand")
+                                       : lowering_.functionFrame().createStackSlot(
+                                             lowering_.moduleBuilder().lower(t), "operand");
+    lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(expr), slot);
 
     return slot;
   };
@@ -97,24 +99,30 @@ CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *ret
       llvm::Value *text = hold(cast<MemberExpr>(call->callee)->object);
       llvm::Value *regex = hold(call->args[0]);
       if (!call->regex) {
-        codegen_.builder_.CreateCall(
-            codegen_.regexLowerer().regexFunction("tz_re_check_match_all", codegen_.builder_.getVoidTy(), {codegen_.builder_.getPtrTy()}),
-            {codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), regex, "regex")});
-        codegen_.throwLowerer().emitThrowCheck(); // a TypeError without the g flag
+        lowering_.builder_.CreateCall(
+            lowering_.regexLowerer().regexFunction("tz_re_check_match_all",
+                                                   lowering_.builder_.getVoidTy(),
+                                                   {lowering_.builder_.getPtrTy()}),
+            {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")});
+        lowering_.throwLowerer().emitThrowCheck(); // a TypeError without the g flag
       }
-      llvm::Value *lastSlot = codegen_.functionFrame().createStackSlot(codegen_.builder_.getInt32Ty(), "lastIndex");
-      codegen_.builder_.CreateStore(
-          codegen_.builder_.CreateCall(
-              codegen_.regexLowerer().regexFunction("tz_re_match_all_begin", codegen_.builder_.getInt32Ty(), {codegen_.builder_.getPtrTy()}),
-              {codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), regex, "regex")}),
+      llvm::Value *lastSlot =
+          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");
+      lowering_.builder_.CreateStore(
+          lowering_.builder_.CreateCall(
+              lowering_.regexLowerer().regexFunction("tz_re_match_all_begin",
+                                                     lowering_.builder_.getInt32Ty(),
+                                                     {lowering_.builder_.getPtrTy()}),
+              {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")}),
           lastSlot);
-      return codegen_.regexLowerer().matchAllProducer(text, regex, lastSlot, codegen_.regexLowerer().matchShape(type->yielded(), call->regex));
+      return lowering_.regexLowerer().matchAllProducer(
+          text, regex, lastSlot, lowering_.regexLowerer().matchShape(type->yielded(), call->regex));
     }
     case Builtin::ArrKeys:
     case Builtin::ArrValues:
     case Builtin::ArrEntries: {
       Expr *array = cast<MemberExpr>(call->callee)->object;
-      return codegen_.lazyChainLowerer().arrayProducer(hold(array), array->type, call->builtin);
+      return lowering_.lazyChainLowerer().arrayProducer(hold(array), array->type, call->builtin);
     }
     case Builtin::MapKeys:
     case Builtin::MapValues:
@@ -124,8 +132,8 @@ CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *ret
       // Its entries stay where they are while the loop runs.
       Expr *dict = cast<MemberExpr>(call->callee)->object;
       llvm::Value *slot = hold(dict);
-      codegen_.dictLowerer().beginDictIteration(slot);
-      return codegen_.dictLowerer().dictProducer(slot, dict->type, call->builtin);
+      lowering_.dictLowerer().beginDictIteration(slot);
+      return lowering_.dictLowerer().dictProducer(slot, dict->type, call->builtin);
     }
     case Builtin::IterMap:
     case Builtin::IterFilter:
@@ -135,14 +143,16 @@ CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *ret
       // The chain before it first, then its own argument, as JavaScript
       // evaluates them.
       Expr *receiver = cast<MemberExpr>(call->callee)->object;
-      CodeGen::Producer from = prepare(receiver);
+      Lowering::Producer from = prepare(receiver);
       llvm::Value *operand = hold(call->args[0]);
       Builtin stage = call->builtin;
       const Type *callback = call->args[0]->type->isFunction() ? call->args[0]->type : nullptr;
       const Type *element = receiver->type->yielded(), *result = call->type->yielded();
-      CodeGen::Producer producer;
-      producer.run = [this, from, stage, callback, element, result, operand](const CodeGen::Consumer &down) {
-        from.run(codegen_.lazyChainLowerer().stageConsumer(stage, callback, element, result, operand, down));
+      Lowering::Producer producer;
+      producer.run = [this, from, stage, callback, element, result,
+                      operand](const Lowering::Consumer &down) {
+        from.run(lowering_.lazyChainLowerer().stageConsumer(stage, callback, element, result,
+                                                            operand, down));
       };
       return producer;
     }
@@ -151,23 +161,25 @@ CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *ret
         // The generator's code goes where it is consumed. Its arguments are
         // evaluated and its parameters bound now, as when it is called.
         FunctionDecl *decl = call->func->decl;
-        auto snapshot = std::make_shared<std::tuple<decltype(codegen_.addresses_), decltype(codegen_.boxSlots_),
-                                                    decltype(codegen_.envBoxes_), decltype(codegen_.groupEnvs_)>>(
-            codegen_.addresses_, codegen_.boxSlots_, codegen_.envBoxes_, codegen_.groupEnvs_);
+        auto snapshot = std::make_shared<
+            std::tuple<decltype(lowering_.addresses_), decltype(lowering_.boxSlots_),
+                       decltype(lowering_.envBoxes_), decltype(lowering_.groupEnvs_)>>(
+            lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_, lowering_.groupEnvs_);
         std::vector<llvm::Value *> args;
         for (Expr *arg : call->args) {
-          args.push_back(codegen_.exprLowerer().emitExpr(arg));
+          args.push_back(lowering_.exprLowerer().emitExpr(arg));
         }
         for (size_t i = args.size(); i < call->func->params.size(); ++i) {
-          args.push_back(codegen_.optionalLowerer().undefinedValue(call->func->params[i]));
+          args.push_back(lowering_.optionalLowerer().undefinedValue(call->func->params[i]));
         }
-        codegen_.functionBuilder().emitParams(decl, args);
-        CodeGen::Producer producer;
-        producer.run = [this, decl, returnSlot, snapshot](const CodeGen::Consumer &consumer) {
+        lowering_.functionBuilder().emitParams(decl, args);
+        Lowering::Producer producer;
+        producer.run = [this, decl, returnSlot, snapshot](const Lowering::Consumer &consumer) {
           emitInlineGenerator(decl, consumer, returnSlot);
           // The same generator may be emitted inline again inside the
           // consumer: its variables are where they were for the rest.
-          std::tie(codegen_.addresses_, codegen_.boxSlots_, codegen_.envBoxes_, codegen_.groupEnvs_) = *snapshot;
+          std::tie(lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_,
+                   lowering_.groupEnvs_) = *snapshot;
         };
         return producer;
       }
@@ -177,105 +189,114 @@ CodeGen::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *ret
     }
   }
   assert((type->isArray() || type->isString() || type->isIterator() || type->isTypedArray()) &&
-         "Sema checks what is iterated");
+         "Checker checks what is iterated");
   llvm::Value *slot = hold(source);
   // An iterator stopped before its end is closed (iterCloseFunction) when
   // the iteration's scope ends, however it ends, even if it lives on in a
   // variable.
   if (type->isIterator()) {
-    codegen_.scopes_.back().iterators.push_back(slot);
+    lowering_.scopes_.back().iterators.push_back(slot);
   }
 
-  return codegen_.lazyChainLowerer().valueProducer(slot, type, returnSlot);
+  return lowering_.lazyChainLowerer().valueProducer(slot, type, returnSlot);
 }
 
 // The body of a generator in place, in a context of its own; at each `yield`
 // the consumer runs in the context the iteration started in.
-void InlineGeneratorLowerer::emitInlineGenerator(FunctionDecl *decl, const CodeGen::Consumer &consumer,
-                                  llvm::Value *returnSlot) {
-  CodeGen::InlineGenerator frame{decl,       consumer,      codegen_.coroutineLowerer().saveContext(), codegen_.functionFrame().newBlock("gen.done"),
-                        returnSlot, codegen_.scopes_.size()};
-  codegen_.currentFn_ = decl;
-  codegen_.envParam_ = nullptr;
-  codegen_.returnType_ = decl->sym->ret;
-  codegen_.tailGroup_ = nullptr;
-  codegen_.targets_.clear();
-  codegen_.inline_ = &frame;
+void InlineGeneratorLowerer::emitInlineGenerator(FunctionDecl *decl,
+                                                 const Lowering::Consumer &consumer,
+                                                 llvm::Value *returnSlot) {
+  Lowering::InlineGenerator frame{decl,
+                                  consumer,
+                                  lowering_.coroutineLowerer().saveContext(),
+                                  lowering_.functionFrame().newBlock("gen.done"),
+                                  returnSlot,
+                                  lowering_.scopes_.size()};
+  lowering_.currentFn_ = decl;
+  lowering_.envParam_ = nullptr;
+  lowering_.returnType_ = decl->sym->ret;
+  lowering_.tailGroup_ = nullptr;
+  lowering_.targets_.clear();
+  lowering_.inline_ = &frame;
   unsigned copies = inlineCopies_;
   inlineCopies_ *= std::max(countYields(decl), 1u);
-  codegen_.stmtLowerer().emitStmt(decl->body);
+  lowering_.stmtLowerer().emitStmt(decl->body);
   inlineCopies_ = copies;
-  codegen_.functionFrame().branchTo(frame.exit);
-  codegen_.functionFrame().switchTo(frame.exit);
-  codegen_.coroutineLowerer().restoreContext(frame.consumerContext);
+  lowering_.functionFrame().branchTo(frame.exit);
+  lowering_.functionFrame().switchTo(frame.exit);
+  lowering_.coroutineLowerer().restoreContext(frame.consumerContext);
 }
 
 llvm::Value *InlineGeneratorLowerer::emitYieldValue(llvm::Value *value, const Type *resultType) {
-  if (!codegen_.inline_) {
-    return codegen_.coroutineLowerer().emitCoroutineYield(value, resultType);
+  if (!lowering_.inline_) {
+    return lowering_.coroutineLowerer().emitCoroutineYield(value, resultType);
   }
-  CodeGen::InlineGenerator *frame = codegen_.inline_;
-  CodeGen::EmitContext generator = codegen_.coroutineLowerer().saveContext();
-  codegen_.coroutineLowerer().restoreContext(frame->consumerContext);
+  Lowering::InlineGenerator *frame = lowering_.inline_;
+  Lowering::EmitContext generator = lowering_.coroutineLowerer().saveContext();
+  lowering_.coroutineLowerer().restoreContext(frame->consumerContext);
   llvm::Value *sent = frame->consumer.each(value);
   const Type *sentType = frame->consumer.sent;
-  codegen_.coroutineLowerer().restoreContext(generator);
+  lowering_.coroutineLowerer().restoreContext(generator);
   // What the consumer gave back, as the `yield` wants it.
   if (!resultType || resultType->isUndefined()) {
     if (sent) {
-      codegen_.refCounts().releaseValue(sent, sentType);
+      lowering_.refCounts().releaseValue(sent, sentType);
     }
-    return resultType ? codegen_.builder_.getFalse() : nullptr;
+    return resultType ? lowering_.builder_.getFalse() : nullptr;
   }
   if (!sent) {
-    return codegen_.optionalLowerer().undefinedValue(resultType);
+    return lowering_.optionalLowerer().undefinedValue(resultType);
   }
 
-  return codegen_.exprLowerer().emitConversion(sent, sentType, resultType);
+  return lowering_.exprLowerer().emitConversion(sent, sentType, resultType);
 }
 
 llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
-  if (codegen_.async_ && codegen_.async_->generator) {
-    return codegen_.asyncGeneratorLowerer().emitAsyncYield(yield);
+  if (lowering_.async_ && lowering_.async_->generator) {
+    return lowering_.asyncGeneratorLowerer().emitAsyncYield(yield);
   }
-  const Type *generator = codegen_.currentFn_->sym->ret;
+  const Type *generator = lowering_.currentFn_->sym->ret;
   const Type *yielded = generator->yielded();
   if (!yield->delegate) {
-    llvm::Value *value = yield->value ? codegen_.exprLowerer().emitExpr(yield->value) : codegen_.optionalLowerer().undefinedValue(yielded);
+    llvm::Value *value = yield->value ? lowering_.exprLowerer().emitExpr(yield->value)
+                                      : lowering_.optionalLowerer().undefinedValue(yielded);
     return emitYieldValue(value, yield->type);
   }
   // `yield* xs`: each value of xs, and then what xs returns.
   const Type *iterable = yield->value->type;
   const Type *innerSent =
       iterable->isIterator() && !iterable->sent()->isVoid() ? iterable->sent() : nullptr;
-  codegen_.functionFrame().pushScope();
+  lowering_.functionFrame().pushScope();
   llvm::Value *returnSlot = nullptr;
   if (!yield->type->isUndefined()) {
-    returnSlot = codegen_.functionFrame().createManagedSlot(yield->type, "yield.result");
+    returnSlot = lowering_.functionFrame().createManagedSlot(yield->type, "yield.result");
   }
-  CodeGen::Producer producer = prepare(yield->value, returnSlot);
-  CodeGen::Consumer consumer;
+  Lowering::Producer producer = prepare(yield->value, returnSlot);
+  Lowering::Consumer consumer;
   consumer.sent = innerSent;
   const Type *element = yield->element;
   consumer.each = [this, element, yielded, innerSent](llvm::Value *value) {
-    return emitYieldValue(codegen_.exprLowerer().emitConversion(value, element, yielded), innerSent);
+    return emitYieldValue(lowering_.exprLowerer().emitConversion(value, element, yielded),
+                          innerSent);
   };
   // `yield* xs.take(2)` ends when take does.
-  size_t depth = codegen_.scopes_.size();
-  llvm::BasicBlock *endBlock = codegen_.functionFrame().newBlock("yield.all.end");
+  size_t depth = lowering_.scopes_.size();
+  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("yield.all.end");
   consumer.stop = [this, depth, endBlock] {
-    codegen_.functionFrame().emitCleanups(depth);
-    codegen_.builder_.CreateBr(endBlock);
+    lowering_.functionFrame().emitCleanups(depth);
+    lowering_.builder_.CreateBr(endBlock);
   };
   producer.run(consumer);
-  codegen_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = codegen_.builder_.getFalse(); // undefined
+  lowering_.functionFrame().emitBlock(endBlock);
+  llvm::Value *result = lowering_.builder_.getFalse(); // undefined
   if (returnSlot) {
     // Moved out of the slot, which the scope would release.
-    result = codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(yield->type), returnSlot);
-    codegen_.builder_.CreateStore(llvm::Constant::getNullValue(codegen_.moduleBuilder().lower(yield->type)), returnSlot);
+    result =
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(yield->type), returnSlot);
+    lowering_.builder_.CreateStore(
+        llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(yield->type)), returnSlot);
   }
-  codegen_.functionFrame().popScope();
+  lowering_.functionFrame().popScope();
 
   return result;
 }

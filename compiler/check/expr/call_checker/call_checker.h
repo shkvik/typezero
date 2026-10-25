@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Calls: which class checks a call of a function, a method or a value.
 class CallChecker {
 public:
-  explicit CallChecker(Sema &sema);
+  explicit CallChecker(Checker &checker);
 
   Expr *checkValueCall(CallExpr *call, const Type *fnType);
   Expr *checkCall(CallExpr *call, const Type *expected);
@@ -24,7 +24,7 @@ public:
   bool isGlobalName(const Expr *expr, llvm::StringRef name) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

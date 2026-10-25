@@ -36,6 +36,11 @@
 // runs first, as it always does in Node. A work may finish later, as the
 // system decides, which Node may as well.
 
+#include "runtime/core/io/io.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stdlib.h>
 #include <string.h>

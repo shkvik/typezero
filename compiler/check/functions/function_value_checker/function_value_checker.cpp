@@ -8,8 +8,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -45,11 +45,11 @@ const char *callbackArgName(llvm::StringRef method, size_t i) {
 
 } // namespace
 
-FunctionValueChecker::FunctionValueChecker(Sema &sema) : sema_(sema) {}
+FunctionValueChecker::FunctionValueChecker(Checker &checker) : checker_(checker) {}
 
 Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   const Type *from = expr->type;
-  if (!sema_.nestedFunctions().namedFunction(expr) || from->hasRest() || to->hasRest()) {
+  if (!checker_.nestedFunctions().namedFunction(expr) || from->hasRest() || to->hasRest()) {
     return nullptr;
   }
   llvm::ArrayRef<const Type *> params = from->params(), wanted = to->params();
@@ -65,14 +65,15 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
   if (!to->ret()->isVoid() && from->ret() != to->ret()) {
     return nullptr;
   }
-  auto *cast = sema_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
+  auto *cast = checker_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
 
   return cast;
 }
 
-FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Sema::Signature &expected, unsigned primary,
-                                         llvm::StringRef method) {
+FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
+                                                         const Checker::Signature &expected,
+                                                         unsigned primary, llvm::StringRef method) {
   constexpr unsigned kAny = ~0u;
   llvm::StringRef name;
   unsigned maxArgs = 0;
@@ -86,19 +87,20 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Sema::
         {"encodeURI", 1}, {"decodeURIComponent", 1},
         {"decodeURI", 1}};
     for (const auto &[global, count] : globals) {
-      if (sema_.callChecker().isGlobalName(n, global)) {
+      if (checker_.callChecker().isGlobalName(n, global)) {
         name = global;
         maxArgs = count;
       }
     }
     // `xs.map(ok)` makes a Result of each element.
-    if (llvm::StringRef result = sema_.resultTypes().neverthrowName(n->name); result == "ok" || result == "err") {
+    if (llvm::StringRef result = checker_.resultTypes().neverthrowName(n->name);
+        result == "ok" || result == "err") {
       name = n->name;
       maxArgs = 1;
     }
   } else if (auto *m = dyn_cast<MemberExpr>(arg)) {
     name = m->name;
-    if (sema_.callChecker().isGlobalName(m->object, "Math")) {
+    if (checker_.callChecker().isGlobalName(m->object, "Math")) {
       static const llvm::StringLiteral two[] = {"pow", "atan2", "imul"};
       static const llvm::StringLiteral any[] = {"min", "max", "hypot"};
       static const llvm::StringLiteral one[] = {
@@ -114,7 +116,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Sema::
       } else if (name != "random") {
         name = {};
       }
-    } else if (sema_.callChecker().isGlobalName(m->object, "Number")) {
+    } else if (checker_.callChecker().isGlobalName(m->object, "Number")) {
       if (name == "parseInt") {
         maxArgs = 2;
       } else if (name == "parseFloat" || name == "isNaN" || name == "isFinite" ||
@@ -123,13 +125,13 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Sema::
       } else {
         name = {};
       }
-    } else if (sema_.callChecker().isGlobalName(m->object, "String")) {
+    } else if (checker_.callChecker().isGlobalName(m->object, "String")) {
       if (name == "fromCharCode" || name == "fromCodePoint") {
         maxArgs = kAny;
       } else {
         name = {};
       }
-    } else if (sema_.callChecker().isGlobalName(m->object, "console") &&
+    } else if (checker_.callChecker().isGlobalName(m->object, "console") &&
                (name == "log" || name == "info" || name == "debug" || name == "error" ||
                 name == "warn")) {
       maxArgs = kAny;
@@ -149,36 +151,36 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg, const Sema::
     if (auto *m = dyn_cast<MemberExpr>(arg)) {
       qualified = cast<NameExpr>(m->object)->name.str() + "." + qualified;
     }
-    sema_.diags_.error(arg->loc(), "'" + qualified + "' would also get the " +
-                                 callbackArgName(method, primary) + " as its " + ordinal(primary) +
-                                 " argument: '" + method + "' calls it with " +
-                                 callbackArgs(method) + "; pass only what it needs: 'x => " +
-                                 qualified + "(x)'");
+    checker_.diags_.error(arg->loc(), "'" + qualified + "' would also get the " +
+                                          callbackArgName(method, primary) + " as its " +
+                                          ordinal(primary) + " argument: '" + method +
+                                          "' calls it with " + callbackArgs(method) +
+                                          "; pass only what it needs: 'x => " + qualified + "(x)'");
     count = primary;
   }
-  auto *fn = sema_.ctx_.make<FunctionDecl>(arg->loc(), name);
+  auto *fn = checker_.ctx_.make<FunctionDecl>(arg->loc(), name);
   fn->isExpression = fn->isArrow = fn->concise = true;
   std::vector<Expr *> args;
   for (size_t i = 0; i < count; ++i) {
     Param param;
-    param.name = sema_.ctx_.hiddenName();
+    param.name = checker_.ctx_.hiddenName();
     param.loc = arg->loc();
     fn->params.push_back(param);
-    args.push_back(sema_.ctx_.make<NameExpr>(arg->loc(), param.name));
+    args.push_back(checker_.ctx_.make<NameExpr>(arg->loc(), param.name));
   }
-  auto *call = sema_.ctx_.make<CallExpr>(arg->loc(), arg, std::move(args));
-  fn->body = sema_.ctx_.make<BlockStmt>(arg->loc());
+  auto *call = checker_.ctx_.make<CallExpr>(arg->loc(), arg, std::move(args));
+  fn->body = checker_.ctx_.make<BlockStmt>(arg->loc());
   if (returnsNothing) {
-    fn->body->body.push_back(sema_.ctx_.make<ExprStmt>(arg->loc(), call));
+    fn->body->body.push_back(checker_.ctx_.make<ExprStmt>(arg->loc(), call));
   } else {
-    fn->body->body.push_back(sema_.ctx_.make<ReturnStmt>(arg->loc(), call));
+    fn->body->body.push_back(checker_.ctx_.make<ReturnStmt>(arg->loc(), call));
   }
 
-  return sema_.ctx_.make<FunctionExpr>(arg->loc(), fn);
+  return checker_.ctx_.make<FunctionExpr>(arg->loc(), fn);
 }
 
-bool FunctionValueChecker::asyncCallbackProblem(const Expr *arg, const Sema::Signature &expected,
-                                llvm::StringRef method) {
+bool FunctionValueChecker::asyncCallbackProblem(const Expr *arg, const Checker::Signature &expected,
+                                                llvm::StringRef method) {
   const Type *type = arg->type;
   if (!type->isFunction() || !type->ret()->isPromise() || !expected.ret ||
       expected.ret->isPromise() || expected.voidResult || expected.ret->isError()) {
@@ -195,9 +197,9 @@ bool FunctionValueChecker::asyncCallbackProblem(const Expr *arg, const Sema::Sig
   } else {
     why = "; drop 'async', or await what the function needs before the call";
   }
-  sema_.diags_.error(arg->loc(), "'" + method + "' uses what the function returns as '" +
-                               expected.ret->name() + "', but an async function returns a Promise" +
-                               why);
+  checker_.diags_.error(arg->loc(), "'" + method + "' uses what the function returns as '" +
+                                        expected.ret->name() +
+                                        "', but an async function returns a Promise" + why);
 
   return true;
 }

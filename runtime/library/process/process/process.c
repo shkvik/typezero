@@ -1,12 +1,20 @@
 // The process and the clock: process.argv, process.env, process.exit and
 // process.exitCode, process.cwd(), process.execPath and process.platform,
 // Date.now() and performance.now(). Writing to stdout and stderr lives in
-// tzrt.c.
+// output.c.
 //
 // On Windows everything goes through the UTF-16 ("W") functions of the
 // system, so arguments, environment variables and paths in any language
 // arrive whole; the code pages of the console play no part.
 
+#include "runtime/library/process/process/process.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/publish/publish.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stdlib.h>
 #include <string.h>

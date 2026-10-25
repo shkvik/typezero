@@ -1,0 +1,628 @@
+// A part of node:stream, read after stream.tz as one module with it
+// (compiler/load/library_modules/): pipeline() and compose()
+// (lib/internal/streams/pipeline.js, compose.js).
+
+//===----------------------------------------------------------------------===//
+// lib/internal/streams/pipeline.js
+//===----------------------------------------------------------------------===//
+
+// A function among the streams of pipeline(), which the compiler gives in a
+// Stage: the source of the chunks (the first), a transform of the chunks
+// before it, which gives those after it, or the sink (the last), whose
+// Promise ends the pipeline.
+const kSourceStage = 0
+const kTransformStage = 1
+const kSinkStage = 2
+
+export class PipelineStage {
+  constructor(
+    readonly kind: int,
+    readonly source: ((signal: AbortSignal) => AsyncGenerator<unknown>) | undefined,
+    readonly transform:
+      | ((source: AsyncGenerator<unknown>, signal: AbortSignal) => AsyncGenerator<unknown>)
+      | undefined,
+    readonly sink: ((source: AsyncGenerator<unknown>, signal: AbortSignal) => Promise<unknown>) |
+      undefined,
+  ) {}
+}
+
+async function* chunksAs<A>(source: AsyncGenerator<unknown>): AsyncGenerator<A> {
+  for await (const chunk of source) yield __tz_chunk<A>(chunk)
+}
+
+async function* chunksOf<B>(source: AsyncGenerator<B>): AsyncGenerator<unknown> {
+  for await (const chunk of source) yield chunk
+}
+
+async function* iteratorChunks<B>(source: AsyncIterator<B>): AsyncGenerator<unknown> {
+  for await (const chunk of source) yield chunk
+}
+
+function* syncChunks<B>(source: Iterator<B>): Generator<unknown> {
+  while (true) {
+    const result = source.next()
+    if (result.done) return
+    yield result.value
+  }
+}
+
+async function* asyncChunks(source: Generator<unknown>): AsyncGenerator<unknown> {
+  for (const chunk of source) yield chunk
+}
+
+// The stages the compiler makes of the functions and iterables given to
+// pipeline().
+export function streamSourceStage<B>(fn: (options: { signal: AbortSignal }) => AsyncGenerator<B>):
+    PipelineStage {
+  return new PipelineStage(kSourceStage, (signal) => chunksOf<B>(fn({ signal })), undefined,
+                           undefined)
+}
+
+export function streamIterableStage<B>(iterator: Iterator<B>): PipelineStage {
+  const chunks = syncChunks<B>(iterator)
+  return new PipelineStage(kSourceStage, (signal) => {
+    void signal
+    return asyncChunks(chunks)
+  }, undefined, undefined)
+}
+
+export function streamAsyncIterableStage<B>(iterator: AsyncIterator<B>): PipelineStage {
+  return new PipelineStage(kSourceStage, (signal) => {
+    void signal
+    return iteratorChunks<B>(iterator)
+  }, undefined, undefined)
+}
+
+export function streamTransformStage<A, B>(
+  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => AsyncGenerator<B>,
+): PipelineStage {
+  return new PipelineStage(
+    kTransformStage,
+    undefined,
+    (source, signal) => chunksOf<B>(fn(chunksAs<A>(source), { signal })),
+    undefined,
+  )
+}
+
+export function streamSinkStage<A, V>(
+  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => Promise<V>,
+): PipelineStage {
+  return new PipelineStage(kSinkStage, undefined, undefined, async (source, signal) => {
+    const value: unknown = await fn(chunksAs<A>(source), { signal })
+    return value
+  })
+}
+
+export function streamVoidSinkStage<A>(
+  fn: (source: AsyncGenerator<A>, options: { signal: AbortSignal }) => Promise<void>,
+): PipelineStage {
+  return new PipelineStage(kSinkStage, undefined, undefined, async (source, signal) => {
+    await fn(chunksAs<A>(source), { signal })
+    const value: unknown = undefined
+    return value
+  })
+}
+
+// What one pipeline() keeps: node's closures share these.
+class PipelineState {
+  error: Error | undefined = undefined
+  value: unknown = undefined
+  destroys: ((err: Error | undefined) => void)[] = []
+  lastStreamCleanup: (() => void)[] = []
+  finishCount: int = 0
+  readonly ac = new AbortController()
+  constructor(public callback: ((err: Error | undefined, value: unknown) => void) | undefined) {}
+}
+
+// node's destroyer() of pipeline.js; gives the cleanup of its eos(). What
+// the listeners it leaves on the stream share holds no stream.
+class PipelineDestroyer {
+  finished = false
+}
+
+function pipelineDestroyer(stream: Stream, reading: boolean, writing: boolean,
+                           ps: PipelineState): () => void {
+  const d = new PipelineDestroyer()
+  stream.on("close", function (this: Stream) {
+    void this
+    d.finished = true
+  }, kThisListener)
+  const cleanup = eos(stream, { readable: reading, writable: writing }, (err?: Error) => {
+    d.finished = err == undefined
+  })
+  ps.destroys.push((err: Error | undefined) => {
+    if (d.finished) return
+    d.finished = true
+    destroyer(stream, err ?? streamDestroyed("pipe"))
+  })
+  return cleanup
+}
+
+function finishImpl(ps: PipelineState, err: Error | undefined, final: boolean) {
+  if (err != undefined && (ps.error == undefined || codeOf(ps.error) == "ERR_STREAM_PREMATURE_CLOSE"))
+    ps.error = err
+  if (ps.error == undefined && !final) return
+  while (ps.destroys.length > 0) {
+    const destroy = ps.destroys.shift()
+    if (destroy != undefined) destroy(ps.error)
+  }
+  ps.ac.abort()
+  if (final) {
+    if (ps.error == undefined) for (const fn of ps.lastStreamCleanup) fn()
+    ps.lastStreamCleanup = []
+    const callback = ps.callback
+    ps.callback = undefined
+    const error = ps.error
+    const value = ps.value
+    if (callback != undefined) {
+      const done = callback
+      process.nextTick(() => done(error, value))
+    }
+  }
+}
+
+function pipelineFinish(ps: PipelineState, err?: Error) {
+  finishImpl(ps, err, --ps.finishCount == 0)
+}
+
+// The chunks of a readable stream as an async iterator: makeAsyncIterable.
+function readableChunks(stream: Stream): AsyncGenerator<unknown> {
+  return createAsyncIterator<unknown>(stream, true)
+}
+
+// node's pumpToNode: writes the chunks of an iterator to a stream.
+async function pumpToNode(iterable: AsyncGenerator<unknown>, writable: Stream, ps: PipelineState,
+                          end: boolean) {
+  let error: Error | undefined = undefined
+  let onresolve: (() => void) | undefined = undefined
+  const resume = (err?: Error) => {
+    if (err != undefined) error = err
+    const callback = onresolve
+    if (callback != undefined) {
+      onresolve = undefined
+      callback()
+    }
+  }
+  const wait = () =>
+    new Promise<void>((resolve, reject) => {
+      const failed = error
+      if (failed != undefined) {
+        reject(failed)
+      } else {
+        onresolve = () => {
+          const failedNow = error
+          if (failedNow != undefined) reject(failedNow)
+          else resolve()
+        }
+      }
+    })
+  const ondrain = () => resume()
+  writable.on("drain", ondrain)
+  const cleanup = eos(writable, { readable: false }, resume)
+  try {
+    if (writable.writableNeedDrain) await wait()
+    for await (const chunk of iterable) {
+      if (writable._writeAny(chunk, undefined, nop) != true) await wait()
+    }
+    if (end) {
+      writable._endWith(false, undefined, undefined, undefined)
+      await wait()
+    }
+    pipelineFinish(ps)
+  } catch (err) {
+    pipelineFinish(ps, error != err ? aggregateTwoErrors(error, err) : err)
+  } finally {
+    cleanup()
+    writable.off("drain", ondrain)
+    onresolve = undefined
+  }
+}
+
+// pipe() of pipeline.js: src.pipe(dst) with what ends both.
+function pipelinePipe(src: Stream, dst: Stream, ps: PipelineState, end: boolean): () => void {
+  const pp = new PipelineDestroyer()
+  dst.on("close", function (this: Stream) {
+    void this
+    if (!pp.finished) finishImpl(ps, prematureClose(), false)
+  }, kThisListener)
+  // If end is true we already will have a listener to end dst.
+  src.pipe(dst, { end: false })
+  if (end) {
+    // Compat. Before node v10.12.0 stdio used to throw an error so pipe()
+    // did/does not end() stdio destinations. Now they allow it but "secretly"
+    // don't close the underlying fd.
+    const endFn = () => {
+      pp.finished = true
+      dst._endWith(false, undefined, undefined, undefined)
+    }
+    // End the destination if the source has already ended.
+    if (isReadableFinished(src, true)) process.nextTick(endFn)
+    else src.once("end", endFn)
+  } else {
+    pipelineFinish(ps)
+  }
+  eos(src, { readable: true, writable: false }, (err?: Error) => {
+    const rState = src._readableState
+    if (err != undefined && codeOf(err) == "ERR_STREAM_PREMATURE_CLOSE" && rState != undefined &&
+        (rState.bits & kEnded) != 0 && rState.errored == undefined &&
+        (rState.bits & kErrorEmitted) == 0) {
+      // Some readable streams will emit 'close' before 'end'. However, since
+      // this is on the readable side 'end' should still be emitted if the
+      // stream has been ended and no error emitted. This should be allowed in
+      // favor of backwards compatibility. Since the stream is piped to a
+      // destination this should not result in any observable difference. We
+      // don't need to check if this is a writable premature close since eos
+      // will only fail with premature close on the reading side for duplex
+      // streams.
+      const finishFn = () => pipelineFinish(ps)
+      src.once("end", finishFn)
+      src.once("error", (e: Error) => pipelineFinish(ps, e))
+    } else {
+      pipelineFinish(ps, err)
+    }
+  })
+  return eos(dst, { readable: false, writable: true }, (err?: Error) => pipelineFinish(ps, err))
+}
+
+// node's pipelineImpl, of streams and the stages of functions; gives the
+// last stream.
+function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end: boolean,
+                      outerSignal: AbortSignal | undefined): Stream | undefined {
+  if (stages.length < 2)
+    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+  const signal = ps.ac.signal
+  const abort = () => finishImpl(ps, new AbortError(undefined, errorOf(outerSignal?.reason)), false)
+  let onOuterAbort: ((event: Event) => void) | undefined = undefined
+  if (outerSignal != undefined) {
+    const listener = (_event: Event) => abort()
+    const outer = outerSignal
+    onOuterAbort = listener
+    outer.addFunctionListener<Event>("abort", listener, { once: true })
+    ps.destroys.push(() => outer.removeListenerOf("abort", listener, false))
+  }
+  void onOuterAbort
+  let retStream: Stream | undefined = undefined
+  let retIterable: AsyncGenerator<unknown> | undefined = undefined
+  for (let i = 0; i < stages.length; i++) {
+    const stage = stages[i]
+    const reading = i < stages.length - 1
+    const writing = i > 0
+    const next = i + 1 < stages.length ? stages[i + 1] : undefined
+    const stageEnd = reading || end
+    const isLastStream = i == stages.length - 1
+    if (stage instanceof Stream) {
+      const stream = stage
+      if (next instanceof Stream && (next.closed || next.destroyed))
+        throw new StreamError("ERR_STREAM_UNABLE_TO_PIPE",
+                              "Cannot pipe to a closed or destroyed stream")
+      if (stageEnd) {
+        const cleanup = pipelineDestroyer(stream, reading, writing, ps)
+        if (isReadable(stream) && isLastStream) ps.lastStreamCleanup.push(cleanup)
+      }
+      const onError = function (this: Stream, err: Error) {
+        void this
+        if (err.name != "AbortError" && codeOf(err) != "ERR_STREAM_PREMATURE_CLOSE")
+          finishImpl(ps, err, false)
+      }
+      stream.on("error", onError, kThisListener)
+      if (isReadable(stream) && isLastStream)
+        ps.lastStreamCleanup.push(() => stream.removeListener("error", onError))
+      if (i == 0) {
+        retStream = stream
+      } else if (retStream != undefined && isReadableNodeStream(retStream)) {
+        ps.finishCount += 2
+        const cleanup = pipelinePipe(retStream, stream, ps, stageEnd)
+        if (isReadable(stream) && isLastStream) ps.lastStreamCleanup.push(cleanup)
+        retStream = stream
+      } else if (retIterable != undefined) {
+        ps.finishCount++
+        void pumpToNode(retIterable, stream, ps, stageEnd)
+        retIterable = undefined
+        retStream = stream
+      } else {
+        throw new StreamTypeError(
+          "ERR_INVALID_ARG_TYPE",
+          'The "val" argument must be an instance of Readable, Iterable, or AsyncIterable.',
+        )
+      }
+      continue
+    }
+    // A function, or an iterable.
+    if (i == 0) {
+      const source = stage.source
+      if (source == undefined)
+        throw new StreamTypeError("ERR_INVALID_ARG_TYPE", "the first stage is no source")
+      retIterable = source(signal)
+      continue
+    }
+    const input = retIterable ?? (retStream != undefined ? readableChunks(retStream) : undefined)
+    if (input == undefined)
+      throw new StreamTypeError("ERR_INVALID_ARG_TYPE", "a stage has nothing before it")
+    retStream = undefined
+    const transform = stage.transform
+    if (transform != undefined && reading) {
+      retIterable = transform(input, signal)
+      continue
+    }
+    // The last function: its chunks or its Promise go to a PassThrough,
+    // which is the end of the pipeline.
+    const pt = new PassThrough<unknown>({ objectMode: true })
+    const sink = stage.sink
+    if (sink != undefined) {
+      ps.finishCount++
+      sink(input, signal).then(
+        (val: unknown) => {
+          ps.value = val
+          if (val != undefined) pt._writeAny(val, undefined, nop)
+          if (stageEnd) pt._endWith(false, undefined, undefined, undefined)
+          process.nextTick(() => pipelineFinish(ps))
+        },
+        (err: Error) => {
+          pt.destroy(err)
+          process.nextTick(() => pipelineFinish(ps, err))
+        },
+      )
+    } else if (transform != undefined) {
+      ps.finishCount++
+      void pumpToNode(transform(input, signal), pt, ps, stageEnd)
+    }
+    retIterable = undefined
+    retStream = pt
+    const cleanup = pipelineDestroyer(pt, false, true, ps)
+    if (isLastStream) ps.lastStreamCleanup.push(cleanup)
+  }
+  if (signal.aborted || (outerSignal != undefined && outerSignal.aborted)) process.nextTick(abort)
+  return retStream
+}
+
+// pipeline(...streams, callback) of node:stream (the compiler calls this):
+// gives the last stream.
+export function streamPipeline<S extends Stream>(stages: (Stream | PipelineStage)[], last: S,
+                                                 callback: StreamCallback): S {
+  const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+    void value
+    callback(err)
+  })
+  const lastStream: Stream = last
+  stages.push(lastStream)
+  pipelineImpl(stages, ps, true, undefined)
+  return last
+}
+
+// The same where the last is a function: gives the PassThrough its result
+// goes to.
+export function streamPipelineToStage(stages: (Stream | PipelineStage)[],
+                                      callback: StreamCallback): Stream {
+  const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+    void value
+    callback(err)
+  })
+  const last = pipelineImpl(stages, ps, true, undefined)
+  if (last == undefined) throw new StreamTypeError("ERR_INVALID_RETURN_VALUE", "no stream")
+  return last
+}
+
+// pipeline() of node:stream/promises.
+export function streamPipelinePromise(stages: (Stream | PipelineStage)[],
+                                      options?: { signal?: AbortSignal; end?: boolean }):
+    Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+      void value
+      if (err != undefined) reject(err)
+      else resolve()
+    })
+    pipelineImpl(stages, ps, options?.end ?? true, options?.signal)
+  })
+}
+
+// pipeline() of node:stream/promises whose last stage is a function: the
+// value its Promise gives.
+export function streamPipelineValue<V>(stages: (Stream | PipelineStage)[],
+                                       options?: { signal?: AbortSignal; end?: boolean }):
+    Promise<V> {
+  return new Promise<V>((resolve, reject) => {
+    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+      if (err != undefined) reject(err)
+      else resolve(__tz_chunk<V>(value))
+    })
+    pipelineImpl(stages, ps, options?.end ?? true, options?.signal)
+  })
+}
+
+// finished(stream, [options], callback) of node:stream (the compiler calls
+// this).
+export function streamFinished(stream: Stream, options: FinishedOptions | undefined,
+                               callback: StreamCallback): () => void {
+  return eos(stream, options, callback)
+}
+
+// destroy(stream, error) of node:stream.
+export function destroy(stream: Stream, error?: Error) {
+  destroyer(stream, error)
+}
+
+// Stream.isReadable() and the others of node:stream.
+export function isReadableStream(stream: Stream): boolean {
+  return isReadable(stream)
+}
+
+export function isWritableStream(stream: Stream): boolean {
+  return isWritable(stream)
+}
+
+export function isDestroyedStream(stream: Stream): boolean {
+  return isDestroyed(stream)
+}
+
+//===----------------------------------------------------------------------===//
+// lib/internal/streams/compose.js
+//===----------------------------------------------------------------------===//
+
+// The Duplex compose() makes: writes go to the first stream, reads come
+// from the last.
+class ComposedDuplex<W, R> extends Duplex<W, R> {
+  constructor(sides: DuplexSides) {
+    pendingSides = sides
+    super()
+  }
+
+
+  @__tz_hidden _head: Stream | undefined = undefined
+  @__tz_hidden _tail: Stream | undefined = undefined
+  @__tz_hidden _ondrain: StreamCallback | undefined = undefined
+  @__tz_hidden _onfinish: StreamCallback | undefined = undefined
+  @__tz_hidden _onreadable: (() => void) | undefined = undefined
+  @__tz_hidden _onclose: StreamCallback | undefined = undefined
+  @__tz_hidden _closing = true
+  @__tz_hidden _composeListeners: (() => void)[] = []
+
+  _write(chunk: W, encoding: string, callback: StreamCallback): void {
+    const head = this._head
+    if (head == undefined) return
+    if (head._writeAny(chunk, encoding, nop) == true) callback()
+    else this._ondrain = callback
+  }
+
+  _final(callback: StreamCallback): void {
+    const head = this._head
+    if (head != undefined) head._endWith(false, undefined, undefined, undefined)
+    this._onfinish = callback
+  }
+
+  _read(size: int): void {
+    void size
+    const tail = this._tail
+    if (tail == undefined) return
+    while (true) {
+      const buf = tail._readChunk()
+      if (buf == undefined) {
+        this._onreadable = () => this._read(0)
+        return
+      }
+      if (!this._pushChunk(buf)) return
+    }
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    let err = error
+    if (err == undefined && this._closing) err = new AbortError()
+    this._onreadable = undefined
+    this._ondrain = undefined
+    this._onfinish = undefined
+    // node leaves its listeners on the first and the last stream; they go
+    // here, so that those do not hold this one.
+    const listeners = this._composeListeners
+    this._composeListeners = []
+    for (const remove of listeners) remove()
+    const tail = this._tail
+    if (tail != undefined) destroyer(tail, err)
+    if (!this._closing) callback(err)
+    else this._onclose = callback
+  }
+}
+
+// compose(...streams) of node:stream, of streams (the compiler calls this).
+export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
+  if (streams.length == 0)
+    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+  for (let n = 0; n < streams.length; ++n) {
+    const stream = streams[n]
+    if (stream == undefined) continue
+    if (n < streams.length - 1 && !isReadable(stream))
+      throw new StreamTypeError(
+        "ERR_INVALID_ARG_VALUE",
+        `The argument 'streams[${n}]' must be readable. Received ${__tz_lib_class_name(stream)}`,
+      )
+    if (n > 0 && !isWritable(stream))
+      throw new StreamTypeError(
+        "ERR_INVALID_ARG_VALUE",
+        `The argument 'streams[${n}]' must be writable. Received ${__tz_lib_class_name(stream)}`,
+      )
+  }
+  const first = streams[0]
+  const lastOne = streams[streams.length - 1]
+  if (first == undefined || lastOne == undefined)
+    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+  const head = first
+  const tail = lastOne
+  const writable = isWritable(head)
+  const readable = isReadable(tail)
+  const sides = new DuplexSides()
+  sides.writableObjectMode = head.writableObjectMode
+  sides.readableObjectMode = tail.readableObjectMode
+  sides.writable = writable
+  sides.readable = readable
+  sides.hasFinal = true
+  const d = new ComposedDuplex<W, R>(sides)
+  d._head = head
+  d._tail = tail
+  const onfinished = (err?: Error) => {
+    const cb = d._onclose
+    d._closing = false
+    d._onclose = undefined
+    if (cb != undefined) cb(err)
+    else if (err != undefined) d.destroy(err)
+    else if (!readable && !writable) d.destroy()
+  }
+  if (streams.length == 1) {
+    onfinished()
+  } else {
+    // Not streamPipeline(), whose copy for Stream code that no copy of this
+    // one reaches would call into code left out.
+    const stages: (Stream | PipelineStage)[] = []
+    for (const stream of streams) stages.push(stream)
+    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+      void value
+      onfinished(err)
+    })
+    pipelineImpl(stages, ps, true, undefined)
+  }
+  if (writable) {
+    const ondrain = function (this: Stream) {
+      void this
+      const cb = d._ondrain
+      if (cb != undefined) {
+        d._ondrain = undefined
+        cb()
+      }
+    }
+    head.on("drain", ondrain, kThisListener)
+    d._composeListeners.push(() => head.removeListener("drain", ondrain))
+    const cleanup = eos(tail, undefined, () => {
+      const cb = d._onfinish
+      if (cb != undefined) {
+        d._onfinish = undefined
+        cb()
+      }
+    })
+    d._composeListeners.push(cleanup)
+  }
+  if (readable) {
+    const onreadable = function (this: Stream) {
+      void this
+      const cb = d._onreadable
+      if (cb != undefined) {
+        d._onreadable = undefined
+        cb()
+      }
+    }
+    const onend = function (this: Stream) {
+      void this
+      d._pushChunk(undefined)
+    }
+    tail.on("readable", onreadable, kThisListener)
+    tail.on("end", onend, kThisListener)
+    d._composeListeners.push(() => {
+      tail.removeListener("readable", onreadable)
+      tail.removeListener("end", onend)
+    })
+  }
+  return d
+}
+
+// The chunks of a readable stream as they are: what node:stream/consumers
+// reads.
+export function streamChunks(stream: Stream): AsyncGenerator<unknown> {
+  return createAsyncIterator<unknown>(stream, true)
+}

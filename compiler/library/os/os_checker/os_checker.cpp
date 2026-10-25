@@ -1,7 +1,7 @@
 #include "compiler/library/os/os_checker/os_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/TargetParser/Host.h"
@@ -9,8 +9,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -39,22 +39,23 @@ const Type *userInfoType() {
 
 } // namespace
 
-OsChecker::OsChecker(Sema &sema) : sema_(sema) {}
+OsChecker::OsChecker(Checker &checker) : checker_(checker) {}
 
 Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (fn == "EOL" || fn == "devNull") {
-    sema_.diags_.error(loc, "'" + fn + "' is a string, not a function");
+    checker_.diags_.error(loc, "'" + fn + "' is a string, not a function");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, loc, 0, 0)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
     return call;
   }
   auto which = [&](int value) {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(loc, uint64_t(value));
+    auto *lit = checker_.ctx_.make<IntLitExpr>(loc, uint64_t(value));
     lit->type = Type::intTy();
     call->args = {lit};
   };
@@ -80,7 +81,7 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   }
   if (fn == "endianness") {
     // Every system tz builds for is little-endian.
-    auto *lit = sema_.ctx_.make<StringLitExpr>(loc, u"LE");
+    auto *lit = checker_.ctx_.make<StringLitExpr>(loc, u"LE");
     lit->type = Type::string();
     return lit;
   }
@@ -104,7 +105,7 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     call->type = userInfoType();
     return call;
   }
-  sema_.diags_.error(loc, "'" + fn + "' of 'node:os' is not supported yet");
+  checker_.diags_.error(loc, "'" + fn + "' of 'node:os' is not supported yet");
 
   return call;
 }

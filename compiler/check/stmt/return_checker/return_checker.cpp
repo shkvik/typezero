@@ -1,14 +1,14 @@
 #include "compiler/check/stmt/return_checker/return_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/async/async_checker/async_checker.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
-#include "compiler/check/types/destination/destination.h"
-#include "compiler/check/flow/flow_checker/flow_checker.h"
-#include "compiler/check/flow/condition_facts/condition_facts.h"
 #include "compiler/check/classes/class_links/class_links.h"
-#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/truth_checker/truth_checker.h"
+#include "compiler/check/flow/condition_facts/condition_facts.h"
+#include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/types/destination/destination.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -19,15 +19,10 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
-
-static bool isLoop(const Stmt *stmt) {
-  return isa<WhileStmt>(stmt) || isa<DoWhileStmt>(stmt) || isa<ForStmt>(stmt) ||
-         isa<ForOfStmt>(stmt);
-}
 
 static bool isTrueLiteral(const Expr *expr) {
   auto *lit = llvm::dyn_cast_or_null<BoolLitExpr>(expr);
@@ -159,54 +154,55 @@ bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
 
 } // namespace
 
-ReturnChecker::ReturnChecker(Sema &sema) : sema_(sema) {}
+ReturnChecker::ReturnChecker(Checker &checker) : checker_(checker) {}
 
 // The value of a return: of a function that returns a boolean, checked as a
 // condition, so that the function's summary knows what it shows (see
 // sema_predicate.cpp).
 Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested) {
-  if (sema_.predicateBuilds_.empty() || !sema_.predicateBuilds_.back().fn) {
-    return sema_.exprChecker().checkExpr(ret->value, hint);
+  if (checker_.predicateBuilds_.empty() || !checker_.predicateBuilds_.back().fn) {
+    return checker_.exprChecker().checkExpr(ret->value, hint);
   }
   if (!tested) {
     // A boolean all the same, such as what a function that tests returns:
     // what it says as a condition.
-    Expr *value = sema_.exprChecker().checkExpr(ret->value, hint);
+    Expr *value = checker_.exprChecker().checkExpr(ret->value, hint);
     if (value->type->isBool()) {
-      Sema::Flow whenTrue = sema_.flow_, whenFalse = sema_.flow_;
-      sema_.conditionFacts().addConditionFacts(value, whenTrue, whenFalse);
-      sema_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+      Checker::Flow whenTrue = checker_.flow_, whenFalse = checker_.flow_;
+      checker_.conditionFacts().addConditionFacts(value, whenTrue, whenFalse);
+      checker_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
     }
     return value;
   }
-  Sema::Flow whenTrue, whenFalse;
-  Expr *value = sema_.truthChecker().checkBranching(ret->value, whenTrue, whenFalse);
-  sema_.flow_ = FlowChecker::join(whenTrue, whenFalse);
-  sema_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
+  Checker::Flow whenTrue, whenFalse;
+  Expr *value = checker_.truthChecker().checkBranching(ret->value, whenTrue, whenFalse);
+  checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
+  checker_.predicateChecker().notePredicateExit(whenTrue, whenFalse, ret->value->loc());
 
   return value;
 }
 
 void ReturnChecker::checkReturn(ReturnStmt *ret) {
-  if (!sema_.currentFunction_) {
-    sema_.diags_.error(ret->loc(), "'return' can only be used inside a function");
+  if (!checker_.currentFunction_) {
+    checker_.diags_.error(ret->loc(), "'return' can only be used inside a function");
     if (ret->value) {
-      ret->value = sema_.exprChecker().checkExpr(ret->value);
+      ret->value = checker_.exprChecker().checkExpr(ret->value);
     }
     return;
   }
 
-  const FuncSymbol *fn = sema_.currentFunction_;
+  const FuncSymbol *fn = checker_.currentFunction_;
   if (fn->decl && fn->decl->isConstructor) {
     if (ret->value) {
-      ret->value = sema_.exprChecker().checkExpr(ret->value);
-      sema_.diags_.error(ret->value->loc(),
-                   "a constructor cannot return a value: 'new' gives the object");
-    } else if (sema_.initFn_ == fn->decl && sema_.flow_.beforeSuper) {
-      sema_.diags_.error(ret->loc(), "the constructor returns before 'super(...)', which makes the "
-                               "object (JavaScript throws a ReferenceError there)");
-    } else if (sema_.initFn_ == fn->decl) {
-      sema_.classChecker().checkFieldsSet(ret->loc());
+      ret->value = checker_.exprChecker().checkExpr(ret->value);
+      checker_.diags_.error(ret->value->loc(),
+                            "a constructor cannot return a value: 'new' gives the object");
+    } else if (checker_.initFn_ == fn->decl && checker_.flow_.beforeSuper) {
+      checker_.diags_.error(ret->loc(),
+                            "the constructor returns before 'super(...)', which makes the "
+                            "object (JavaScript throws a ReferenceError there)");
+    } else if (checker_.initFn_ == fn->decl) {
+      checker_.classChecker().checkFieldsSet(ret->loc());
     }
     return;
   }
@@ -223,9 +219,9 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     // the type of an object an earlier one gave.
     const Type *hint = nullptr;
     if (ret->value && Destination::literalShaped(ret->value)) {
-      for (const ReturnStmt *earlier : *sema_.returns_) {
+      for (const ReturnStmt *earlier : *checker_.returns_) {
         if (earlier->value && !earlier->value->type->isError() &&
-            (Sema::holdsObjects(earlier->value->type) || earlier->value->type->isResult())) {
+            (Checker::holdsObjects(earlier->value->type) || earlier->value->type->isResult())) {
           hint = earlier->value->type;
           break;
         }
@@ -234,28 +230,31 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     if (ret->value) {
       ret->value = checkReturnValue(ret, hint, PredicateChecker::looksBoolean(ret->value));
     }
-    sema_.returns_->push_back(ret);
+    checker_.returns_->push_back(ret);
     return;
   }
   if (!ret->value) {
     if (fn->asserts) {
-      sema_.predicateChecker().notePredicateExit(sema_.flow_, Sema::Flow(), ret->loc());
+      checker_.predicateChecker().notePredicateExit(checker_.flow_, Checker::Flow(), ret->loc());
     }
     if (!returned->isVoid() && !returned->isError() && !returned->isOptional()) {
-      sema_.diags_.error(ret->loc(), functionLabel(fn->name) + " must return a value of type '" +
-                                   returned->name() + "'");
+      checker_.diags_.error(ret->loc(), functionLabel(fn->name) + " must return a value of type '" +
+                                            returned->name() + "'");
     }
     return;
   }
 
   // `return p` in an async generator awaits p.
   if (fn->decl && fn->decl->isAsync && fn->decl->isGenerator) {
-    ret->value = sema_.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
-    const Type *given = ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
+    ret->value =
+        checker_.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
+    const Type *given =
+        ret->value->type->isError() ? nullptr : AsyncChecker::awaitedType(ret->value->type);
     if (given && !given->isUndefined() && !given->isVoid() &&
         (returned->isVoid() || !TypeRelations::isImplicitlyConvertible(given, returned))) {
-      sema_.diags_.error(ret->value->loc(), functionLabel(fn->name) + " returns '" + returned->name() +
-                                          "', found '" + given->name() + "'");
+      checker_.diags_.error(ret->value->loc(), functionLabel(fn->name) + " returns '" +
+                                                   returned->name() + "', found '" + given->name() +
+                                                   "'");
     }
     return;
   }
@@ -264,9 +263,10 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
   if (fn->decl && fn->decl->isAsync && fn->ret->isPromise() && ret->value->type->isPromise()) {
     const Type *given = ret->value->type->promised();
     if (given != returned && !given->isNever()) {
-      sema_.diags_.error(ret->value->loc(), "this Promise gives '" + given->name() + "', but " +
-                                          functionLabel(fn->name) + " gives '" + returned->name() +
-                                          "'; await it and convert the value");
+      checker_.diags_.error(ret->value->loc(), "this Promise gives '" + given->name() + "', but " +
+                                                   functionLabel(fn->name) + " gives '" +
+                                                   returned->name() +
+                                                   "'; await it and convert the value");
     }
     return;
   }
@@ -276,22 +276,22 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     // whose result is dropped.
     const Type *type = ret->value->type;
     if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult) {
-      sema_.diags_.error(ret->value->loc(), functionLabel(fn->name) +
-                                          " is declared to return 'void', "
-                                          "but returns '" +
-                                          type->name() + "'");
-      sema_.classLinks().noteInheritedReturn(fn->decl);
+      checker_.diags_.error(ret->value->loc(), functionLabel(fn->name) +
+                                                   " is declared to return 'void', "
+                                                   "but returns '" +
+                                                   type->name() + "'");
+      checker_.classLinks().noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
-      sema_.resultChecker().checkDiscarded(ret->value, /*callback=*/true);
+      checker_.resultChecker().checkDiscarded(ret->value, /*callback=*/true);
     }
     return;
   }
-  unsigned errors = sema_.diags_.errorCount();
-  ret->value = sema_.typeRelations().coerce(ret->value, returned);
-  if (sema_.diags_.errorCount() > errors) {
-    sema_.classLinks().noteInheritedReturn(fn->decl);
+  unsigned errors = checker_.diags_.errorCount();
+  ret->value = checker_.typeRelations().coerce(ret->value, returned);
+  if (checker_.diags_.errorCount() > errors) {
+    checker_.classLinks().noteInheritedReturn(fn->decl);
   } else if (fn->decl) {
-    sema_.byteProofs().checkByteCallbackResult(fn->decl, ret->value);
+    checker_.byteProofs().checkByteCallbackResult(fn->decl, ret->value);
   }
 }
 

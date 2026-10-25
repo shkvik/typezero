@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Overrides, tables of methods and the numbers of classes.
 class ClassLinks {
 public:
-  explicit ClassLinks(Sema &sema);
+  explicit ClassLinks(Checker &checker);
 
   // Numbers the classes for instanceof, so that a class is followed by the
   // classes down its chain; again at the end, with the instances made late.
@@ -42,7 +42,7 @@ public:
   static const Type *commonClass(const Type *a, const Type *b);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

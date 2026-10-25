@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // EventTarget, AbortSignal and the functions of node:events.
 class EventTargetChecker {
 public:
-  explicit EventTargetChecker(Sema &sema);
+  explicit EventTargetChecker(Checker &checker);
 
   // `signal.onabort = handler` of the program, with both checked: a call of
   // setOnabort (library/events/web.tz), as node's event handlers listen from
@@ -31,7 +31,7 @@ public:
                             llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

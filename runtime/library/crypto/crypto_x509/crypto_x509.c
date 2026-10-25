@@ -2,6 +2,12 @@
 // OpenSSL and words what it finds in them.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>

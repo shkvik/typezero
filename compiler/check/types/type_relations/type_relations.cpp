@@ -1,18 +1,18 @@
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/functions/function_value_checker/function_value_checker.h"
-#include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
-#include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
+#include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
-#include "compiler/whole_program/wide_writes/wide_writes.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/whole_program/flows/flows.h"
+#include "compiler/whole_program/wide_writes/wide_writes.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -21,8 +21,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -31,7 +31,7 @@ static const char kUnsignedShift[] =
     "'>>>' is unsigned in JavaScript, and with a count of 0 a negative int becomes a number above "
     "int: keep the result in a long";
 
-TypeRelations::TypeRelations(Sema &sema) : sema_(sema) {}
+TypeRelations::TypeRelations(Checker &checker) : checker_(checker) {}
 
 bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   if (from == to) {
@@ -60,8 +60,9 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
     return !from->isVoid();
   }
   if (to->isAnyObject()) {
-    return UnknownChecker::isObjectReference(from) || (from->isParam() && from->constraint() &&
-                                       isImplicitlyConvertible(from->constraint(), to));
+    return UnknownChecker::isObjectReference(from) ||
+           (from->isParam() && from->constraint() &&
+            isImplicitlyConvertible(from->constraint(), to));
   }
   // A class as a value is a Constructor of what its objects are, and a
   // Constructor of a narrower type one of a wider type (docs/decorators.md,
@@ -89,7 +90,8 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   // members (docs/objects.md, section 7).
   if (to->isUnion()) {
     if (from->isUnion()) {
-      return llvm::all_of(from->members(), [&](const Type *m) { return LiteralTypes::unionMemberFor(m, to); });
+      return llvm::all_of(from->members(),
+                          [&](const Type *m) { return LiteralTypes::unionMemberFor(m, to); });
     }
     return LiteralTypes::unionMemberFor(from, to) != nullptr;
   }
@@ -154,7 +156,7 @@ bool TypeRelations::isImplicitlyConvertible(const Type *from, const Type *to) {
   }
   // An object may be seen through a type that makes some of its fields
   // read-only, or lets code change those that are; the fields are the same,
-  // so nothing changes in memory (see Sema::convert for where they lie).
+  // so nothing changes in memory (see Checker::convert for where they lie).
   // Code that changes a read-only one is found by the check of the whole
   // program (sema_widen.cpp). A class is only itself.
   if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
@@ -296,7 +298,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
                   (reflected->isArray() && reflected->inner()->isUnknown());
   // Generic code converts a value of type T here; instances will too.
   if (expr->type->isParam() && !mentionsParam(to)) {
-    sema_.genericChecker().noteForced(expr, to);
+    checker_.genericChecker().noteForced(expr, to);
   }
   // An integer literal becomes a literal of the wider type, so that `-0` in
   // `[1.5, -0]` stays a negative zero (and a decimal one is a constant).
@@ -312,7 +314,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
       return expr;
     }
   }
-  // An object seen through a type with read-only fields: CodeGen reads them
+  // An object seen through a type with read-only fields: Lowering reads them
   // as through an interface that the object's type implements, since the
   // types may lie out differently (see SourceFile::views). A Buffer is a
   // Uint8Array as it is.
@@ -325,19 +327,20 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   if (from->isObject() && target->isObject() && from != target && !from->isClass() &&
       !target->isClass() && !from->isAnyObject() && !target->isAnyObject() && !from->isBytes() &&
       !from->isSubtypeOf(target) &&
-      !llvm::is_contained(sema_.file_->views, std::pair<const Type *, const Type *>(from, target))) {
-    sema_.file_->views.push_back({from, target});
+      !llvm::is_contained(checker_.file_->views,
+                          std::pair<const Type *, const Type *>(from, target))) {
+    checker_.file_->views.push_back({from, target});
   }
-  auto *cast = sema_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
+  auto *cast = checker_.ctx_.make<CastExpr>(expr->loc(), expr, std::nullopt);
   cast->type = to;
   // A conversion that lets code write what the value's type does not, as
   // `Dog[]` to `Animal[]`: checked against the writes of the program once it
   // is all checked (sema_widen.cpp).
-  if (sema_.wideWrites().widensWrites(expr->type, to)) {
-    sema_.widenings_.insert(cast);
+  if (checker_.wideWrites().widensWrites(expr->type, to)) {
+    checker_.widenings_.insert(cast);
   }
   if (reflects) {
-    sema_.reflectChecker().noteReflectedConversion(expr->type, to, cast);
+    checker_.reflectChecker().noteReflectedConversion(expr->type, to, cast);
   }
 
   return cast;
@@ -353,15 +356,15 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   }
   // Generic code may give a value of either branch where a conditional type
   // that waits is expected; each copy checks the branch it chooses.
-  if (sema_.conditionalTypes().fitsConditional(from, to)) {
+  if (checker_.conditionalTypes().fitsConditional(from, to)) {
     return convert(expr, to);
   }
   // An iterator written by hand (an object with next()), or an object with
   // `[Symbol.iterator]()`, where an iterator is expected.
   if (to->nonOptional()->isIterator() && from->isObject()) {
-    Expr *iterator = sema_.iterableChecker().iteratorOf(expr);
+    Expr *iterator = checker_.iterableChecker().iteratorOf(expr);
     if (!iterator) {
-      iterator = sema_.iterableChecker().userIterator(expr);
+      iterator = checker_.iterableChecker().userIterator(expr);
     }
     if (iterator && iterator->type->isIterator() && isImplicitlyConvertible(iterator->type, to)) {
       return convert(iterator, to);
@@ -370,8 +373,9 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   // An object with `[Symbol.asyncIterator]()` where an async iterator is
   // expected, as an `AsyncIterable<T>` parameter.
   if (to->nonOptional()->isAsyncIterator() && from->isObject() && !from->isAsyncIterator()) {
-    if (Expr *iterator = sema_.iterableChecker().asyncUserIterator(expr); iterator && iterator->type->isAsyncIterator() &&
-                                                  isImplicitlyConvertible(iterator->type, to)) {
+    if (Expr *iterator = checker_.iterableChecker().asyncUserIterator(expr);
+        iterator && iterator->type->isAsyncIterator() &&
+        isImplicitlyConvertible(iterator->type, to)) {
       return convert(iterator, to);
     }
   }
@@ -379,10 +383,10 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   // arguments.
   const Type *function = to->isOptional() && to->inner()->isFunction() ? to->inner() : to;
   if (from->isFunction() && function->isFunction()) {
-    if (Expr *adapted = sema_.functionValueChecker().adaptFunction(expr, function)) {
+    if (Expr *adapted = checker_.functionValueChecker().adaptFunction(expr, function)) {
       return function == to ? adapted : convert(adapted, to);
     }
-    if (Expr *adapted = sema_.tzModulesChecker().adaptResult(expr, function)) {
+    if (Expr *adapted = checker_.tzModulesChecker().adaptResult(expr, function)) {
       return function == to ? adapted : convert(adapted, to);
     }
   }
@@ -407,7 +411,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   const std::vector<std::pair<const Type *, llvm::SMLoc>> *places = nullptr;
   const Type *otherPlace = nullptr;
   if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
-    if (auto found = sema_.destinations_.find(name->var); found != sema_.destinations_.end()) {
+    if (auto found = checker_.destinations_.find(name->var);
+        found != checker_.destinations_.end()) {
       places = &found->second;
       for (auto [type, loc] : *places) {
         if (type->nonOptional() != toObject && !otherPlace) {
@@ -428,7 +433,7 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
                "give a class that extends it, e.g. '" +
                example + "', or take the class as an 'object'";
   } else if (from->isUnknown() || from->isAnyObject()) {
-    message += sema_.unknownChecker().unknownHint(expr, to);
+    message += checker_.unknownChecker().unknownHint(expr, to);
   } else if (fromObject->isObject() && toObject->isClass() && (!fromClass || fromClass->literal)) {
     message += "; an object literal is never an instance of a class: create one with 'new " +
                toObject->name().str() + "(...)'";
@@ -463,7 +468,8 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
         "'[...t]'";
   } else if (fromObject->isObject() && toObject->isObject() &&
              !isImplicitlyConvertible(fromObject, toObject)) {
-    message += sema_.objectChecker().objectMismatch(fromObject, toObject, /*conflict=*/otherPlace != nullptr) +
+    message += checker_.objectChecker().objectMismatch(fromObject, toObject,
+                                                       /*conflict=*/otherPlace != nullptr) +
                (otherPlace ? "; the same object also goes where '" + otherPlace->name().str() +
                                  "' is expected, and one object cannot be both"
                            : "");
@@ -500,11 +506,11 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
   } else if (from->isInteger() && to->isInteger()) {
     message += "; Math.trunc(x) converts it and checks that it fits";
   }
-  sema_.diags_.error(expr->loc(), message);
+  checker_.diags_.error(expr->loc(), message);
   if (otherPlace) {
     for (auto [type, loc] : *places) {
       if (type->nonOptional() == otherPlace) {
-        sema_.diags_.note(loc, "the object also goes here, as '" + otherPlace->name() + "'");
+        checker_.diags_.note(loc, "the object also goes here, as '" + otherPlace->name() + "'");
         break;
       }
     }

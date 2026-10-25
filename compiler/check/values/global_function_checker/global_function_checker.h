@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // parseInt, parseFloat, isNaN, isFinite, the functions of URIs and the legacy escapes.
 class GlobalFunctionChecker {
 public:
-  explicit GlobalFunctionChecker(Sema &sema);
+  explicit GlobalFunctionChecker(Checker &checker);
 
   // String(x), Number(x), parseInt... (sema_builtins.cpp); null if `name` is
   // not one of them.
@@ -19,7 +19,7 @@ public:
   Expr *reportLegacyEscape(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

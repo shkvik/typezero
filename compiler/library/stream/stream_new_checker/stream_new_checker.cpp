@@ -1,19 +1,19 @@
 #include "compiler/library/stream/stream_new_checker/stream_new_checker.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/classes/method_call_checker/method_call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -57,7 +57,7 @@ struct StreamOptionFlags {
 
 } // namespace
 
-StreamNewChecker::StreamNewChecker(Sema &sema) : sema_(sema) {}
+StreamNewChecker::StreamNewChecker(Checker &checker) : checker_(checker) {}
 
 Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   llvm::StringRef name = generic->name;
@@ -67,7 +67,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (!readable && !writable && !duplex) {
     return nullptr;
   }
-  if (!expr->typeArgs.empty() || sema_.libraryCalls().inLibrary(expr->loc())) {
+  if (!expr->typeArgs.empty() || checker_.libraryCalls().inLibrary(expr->loc())) {
     return nullptr;
   }
   // `const r: Readable<string> = new Readable({...})`: the types of the place
@@ -96,7 +96,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
                                ? fe->fn->params[1]
                                : fe->fn->params[0];
       if (param.type) {
-        return sema_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+        return checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
       }
     }
 
@@ -105,19 +105,20 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   // The chunk type of a side: of an object-mode side what the program puts
   // into it (see inferredChunkType); a string where it decodes text, a
   // Buffer otherwise.
-  std::string site = "stream " + sema_.eventMapInference().placeOf(expr->loc());
+  std::string site = "stream " + checker_.eventMapInference().placeOf(expr->loc());
   auto side = [&](bool objectMode, bool text, llvm::StringRef key, const Type *fallback,
                   llvm::StringRef what) -> const Type * {
     if (!objectMode) {
       return text ? Type::string() : buffer;
     }
-    if (const Type *found = sema_.chunkTypes().inferredChunkType(site + " " + key.str(), expr->loc())) {
+    if (const Type *found =
+            checker_.chunkTypes().inferredChunkType(site + " " + key.str(), expr->loc())) {
       return found;
     }
     if (fallback) {
       return fallback;
     }
-    sema_.diags_.error(
+    checker_.diags_.error(
         expr->loc(),
         "cannot infer the type of the " + what.str() + " of this object-mode " + name.str() +
             ": no code of the program " + (key == "R" ? "pushes into it" : "writes to it") +
@@ -129,7 +130,7 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   auto failed = [&] {
     expr->type = Type::error();
     for (Expr *&arg : expr->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
 
     return expr;
@@ -167,23 +168,24 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     if (!r) {
       return failed();
     }
-    if (sema_.openMaps_.count(r) && options.lit) {
+    if (checker_.openMaps_.count(r) && options.lit) {
       for (const ObjectLitExpr::Property &prop : options.lit->props) {
         auto *fe = dyn_cast<FunctionExpr>(prop.value);
         size_t at = prop.name == "transform" ? 2 : prop.name == "flush" ? 0 : ~size_t(0);
         if (fe && at < fe->fn->params.size()) {
-          sema_.streamCallbacks_.push_back({fe->fn, fe->fn->params[at].name, r});
+          checker_.streamCallbacks_.push_back({fe->fn, fe->fn->params[at].name, r});
         }
       }
     }
     args = {w, r};
   }
-  ClassDecl *inst = sema_.genericClassInstantiator().instantiateClass(generic, std::move(args), expr->loc());
+  ClassDecl *inst =
+      checker_.genericClassInstantiator().instantiateClass(generic, std::move(args), expr->loc());
   if (!inst) {
     return nullptr;
   }
 
-  return sema_.methodCallChecker().checkClassNew(expr, inst, expected);
+  return checker_.methodCallChecker().checkClassNew(expr, inst, expected);
 }
 
 } // namespace tz

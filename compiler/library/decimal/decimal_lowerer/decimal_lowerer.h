@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // decimal.
 class DecimalLowerer {
 public:
-  explicit DecimalLowerer(CodeGen &codegen);
+  explicit DecimalLowerer(Lowering &lowering);
 
   // Decimals (codegen_decimal.cpp). The runtime takes a decimal as its two
   // words and returns one through a pointer passed first, as for strings.
@@ -36,7 +36,7 @@ public:
   llvm::Function *decimalRefCount(bool retain);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Function *decRetainFn_ = nullptr;
   llvm::Function *decReleaseFn_ = nullptr;
 };

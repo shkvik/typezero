@@ -1,15 +1,15 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Result, its methods and yield*.
 class ResultLowerer {
 public:
-  explicit ResultLowerer(CodeGen &codegen);
+  explicit ResultLowerer(Lowering &lowering);
 
-  CodeGen::ResultLayout resultLayout(const Type *type);
+  Lowering::ResultLayout resultLayout(const Type *type);
   llvm::Type *lowerHalf(const Type *half);
   llvm::Constant *resultDescriptor(const Type *type);
   llvm::Value *resultIsOk(llvm::Value *result, const Type *type);
@@ -31,8 +31,8 @@ public:
   llvm::Value *emitSafeTryYield(YieldExpr *yield);
 
 private:
-  CodeGen &codegen_;
-  llvm::DenseMap<const Type *, CodeGen::ResultLayout> resultLayouts_;
+  Lowering &lowering_;
+  llvm::DenseMap<const Type *, Lowering::ResultLayout> resultLayouts_;
 };
 
 } // namespace tz

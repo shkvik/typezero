@@ -1,27 +1,27 @@
 #include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
-#include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/function_builder/function_builder.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
-#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
-#include "compiler/lower/layouts/object_layouts/object_layouts.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
+#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/function_builder/function_builder.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <vector>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -74,16 +74,17 @@ bool isNestedPart(const Type *type) { return type->isObject() && !type->isClass(
 
 } // namespace
 
-BuiltinModuleLowerer::BuiltinModuleLowerer(CodeGen &codegen) : codegen_(codegen) {}
+BuiltinModuleLowerer::BuiltinModuleLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::StructType *BuiltinModuleLowerer::makerParts(const Type *type) {
   std::vector<llvm::Type *> elements;
   for (llvm::StringRef name : makerOrder(type)) {
     const Type *field = type->field(name)->type;
-    elements.push_back(isNestedPart(field) ? makerParts(field) : codegen_.moduleBuilder().lower(field));
+    elements.push_back(isNestedPart(field) ? makerParts(field)
+                                           : lowering_.moduleBuilder().lower(field));
   }
 
-  return llvm::StructType::get(codegen_.ctx_, elements);
+  return llvm::StructType::get(lowering_.ctx_, elements);
 }
 
 llvm::Function *BuiltinModuleLowerer::objectMaker(const Type *type) {
@@ -91,144 +92,153 @@ llvm::Function *BuiltinModuleLowerer::objectMaker(const Type *type) {
   if (maker) {
     return maker;
   }
-  llvm::Type *ptr = codegen_.builder_.getPtrTy();
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
   const ClassDecl *cls = type->classDecl();
   std::string name = cls                             ? cls->name.str()
                      : type->name().starts_with("{") ? "object"
                                                      : type->name().str();
-  maker =
-      llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
-                             llvm::GlobalValue::InternalLinkage, "tz.make." + name, codegen_.module_.get());
-  codegen_.functionBuilder().setFunctionAttributes(maker);
-  llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(codegen_.function_, maker);
-  codegen_.builder_.SetInsertPoint(llvm::BasicBlock::Create(codegen_.ctx_, "entry", maker));
+  maker = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
+                                 llvm::GlobalValue::InternalLinkage, "tz.make." + name,
+                                 lowering_.module_.get());
+  lowering_.functionBuilder().setFunctionAttributes(maker);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  llvm::Function *outer = std::exchange(lowering_.function_, maker);
+  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", maker));
 
   const std::vector<llvm::StringRef> &order = makerOrder(type);
   llvm::Value *object;
   if (cls) {
-    object = codegen_.classLowerer().allocInstance(cls);
+    object = lowering_.classLowerer().allocInstance(cls);
   } else {
     // The keys in the order Node prints them, which is that of the parts.
     std::vector<unsigned> keys;
     for (llvm::StringRef field : order) {
       keys.push_back(ObjectLayouts::fieldIndex(type, field));
     }
-    object = codegen_.objectLayouts().allocObject(type, keys);
+    object = lowering_.objectLayouts().allocObject(type, keys);
   }
   llvm::StructType *parts = makerParts(type);
   for (size_t i = 0; i < order.size(); ++i) {
     const Type *field = type->field(order[i])->type;
-    llvm::Value *address = codegen_.builder_.CreateStructGEP(parts, maker->getArg(0), unsigned(i));
-    llvm::Value *value =
-        isNestedPart(field)
-            ? static_cast<llvm::Value *>(codegen_.builder_.CreateCall(objectMaker(field), {address}))
-            : codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(field), address, order[i]);
-    codegen_.builder_.CreateStore(value, codegen_.objectLayouts().fieldAddress(object, type, order[i], /*exact=*/true));
+    llvm::Value *address = lowering_.builder_.CreateStructGEP(parts, maker->getArg(0), unsigned(i));
+    llvm::Value *value = isNestedPart(field)
+                             ? static_cast<llvm::Value *>(
+                                   lowering_.builder_.CreateCall(objectMaker(field), {address}))
+                             : lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(field),
+                                                             address, order[i]);
+    lowering_.builder_.CreateStore(
+        value, lowering_.objectLayouts().fieldAddress(object, type, order[i], /*exact=*/true));
   }
-  codegen_.groupLowerer().adoptFields(object, type);
-  codegen_.builder_.CreateRet(object);
-  codegen_.function_ = outer;
-  codegen_.builder_.restoreIP(point);
+  lowering_.groupLowerer().adoptFields(object, type);
+  lowering_.builder_.CreateRet(object);
+  lowering_.function_ = outer;
+  lowering_.builder_.restoreIP(point);
 
   return maker;
 }
 
 llvm::Function *BuiltinModuleLowerer::systemErrorMaker() {
-  for (const ClassDecl *child : codegen_.errorClass_->children) {
+  for (const ClassDecl *child : lowering_.errorClass_->children) {
     if (child->builtin && child->name == "SystemError") {
       return objectMaker(child->type);
     }
   }
-  llvm_unreachable("Sema declares SystemError");
+  llvm_unreachable("Checker declares SystemError");
 }
 
 llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
   if (isFspBuiltin(call->builtin)) {
-    return codegen_.fsPromisesLowerer().emitFsPromise(call);
+    return lowering_.fsPromisesLowerer().emitFsPromise(call);
   }
   if (call->builtin >= Builtin::RlCreate && call->builtin <= Builtin::RlClose) {
-    return codegen_.fsPromisesLowerer().emitReadlineBuiltin(call);
+    return lowering_.fsPromisesLowerer().emitReadlineBuiltin(call);
   }
-  llvm::Type *voidTy = codegen_.builder_.getVoidTy(), *i32 = codegen_.builder_.getInt32Ty();
-  llvm::Type *i64 = codegen_.builder_.getInt64Ty(), *f64 = codegen_.builder_.getDoubleTy(),
-             *ptr = codegen_.builder_.getPtrTy();
+  llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy(),
+             *ptr = lowering_.builder_.getPtrTy();
 
   if (call->builtin == Builtin::FsStatsDate) {
     // dateFromMs of Node: the milliseconds rounded, as Math.round does.
     auto *member = cast<MemberExpr>(call->callee);
-    CodeGen::Operand stats = codegen_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
-    llvm::Value *ms = codegen_.builder_.CreateLoad(
-        f64, codegen_.objectLayouts().fieldAddress(stats.value, stats.type, (member->name + "Ms").str()), "ms");
-    codegen_.refCounts().dropOperand(stats);
-    llvm::Value *rounded = codegen_.builder_.CreateUnaryIntrinsic(
-        llvm::Intrinsic::floor, codegen_.builder_.CreateFAdd(ms, llvm::ConstantFP::get(f64, 0.5)));
-    return codegen_.dateLowerer().newDate(codegen_.builder_.CreateCall(codegen_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {rounded}));
+    Lowering::Operand stats = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    llvm::Value *ms =
+        lowering_.builder_.CreateLoad(f64,
+                                      lowering_.objectLayouts().fieldAddress(
+                                          stats.value, stats.type, (member->name + "Ms").str()),
+                                      "ms");
+    lowering_.refCounts().dropOperand(stats);
+    llvm::Value *rounded = lowering_.builder_.CreateUnaryIntrinsic(
+        llvm::Intrinsic::floor, lowering_.builder_.CreateFAdd(ms, llvm::ConstantFP::get(f64, 0.5)));
+    return lowering_.dateLowerer().newDate(lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_date_clip", f64, {f64}), {rounded}));
   }
 
   if (call->builtin == Builtin::FsIsKind) {
     // The kind of file is in the bits of the mode of a Stats, and in the
     // hidden field of a Dirent.
     auto *member = cast<MemberExpr>(call->callee);
-    CodeGen::Operand object = codegen_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand object =
+        lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
     const Type *type = object.type;
     bool stats = type->field("mode") != nullptr;
     llvm::StringRef field = stats ? "mode" : "#type";
-    llvm::Value *bits =
-        codegen_.builder_.CreateLoad(stats ? f64 : i32, codegen_.objectLayouts().fieldAddress(object.value, type, field));
+    llvm::Value *bits = lowering_.builder_.CreateLoad(
+        stats ? f64 : i32, lowering_.objectLayouts().fieldAddress(object.value, type, field));
     if (stats) {
-      bits = codegen_.builder_.CreateFPToSI(bits, i32);
+      bits = lowering_.builder_.CreateFPToSI(bits, i32);
     }
-    codegen_.refCounts().dropOperand(object);
-    llvm::Value *kind = codegen_.exprLowerer().emitExpr(call->args[0]);
-    return codegen_.builder_.CreateICmpEQ(codegen_.builder_.CreateAnd(bits, codegen_.builder_.getInt32(0170000)), kind);
+    lowering_.refCounts().dropOperand(object);
+    llvm::Value *kind = lowering_.exprLowerer().emitExpr(call->args[0]);
+    return lowering_.builder_.CreateICmpEQ(
+        lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt32(0170000)), kind);
   }
 
   // The arguments, owned, released after the call: the runtime borrows them.
-  std::vector<llvm::Value *> values = codegen_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
   auto release = [&] {
     for (size_t i = 0; i < values.size(); ++i) {
-      codegen_.refCounts().releaseValue(values[i], call->args[i]->type);
+      lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }
   };
-  auto obj = [&](size_t i) { return codegen_.stringLowerer().stringObj(values[i]); };
-  auto meta = [&](size_t i) { return codegen_.stringLowerer().stringMeta(values[i]); };
-  auto flag = [&](size_t i) { return codegen_.builder_.CreateZExt(values[i], i32); };
+  auto obj = [&](size_t i) { return lowering_.stringLowerer().stringObj(values[i]); };
+  auto meta = [&](size_t i) { return lowering_.stringLowerer().stringMeta(values[i]); };
+  auto flag = [&](size_t i) { return lowering_.builder_.CreateZExt(values[i], i32); };
   auto fn = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {
-    return codegen_.processLowerer().processFunction(name, ret, params);
+    return lowering_.processLowerer().processFunction(name, ret, params);
   };
   // A runtime function that may throw a SystemError, with its maker last.
   auto fsCall = [&](llvm::StringRef name, llvm::Type *ret, std::vector<llvm::Type *> params,
                     std::vector<llvm::Value *> args) -> llvm::Value * {
     params.push_back(ptr);
     args.push_back(systemErrorMaker());
-    llvm::Value *result = codegen_.builder_.CreateCall(fn(name, ret, params), args);
+    llvm::Value *result = lowering_.builder_.CreateCall(fn(name, ret, params), args);
     release();
-    codegen_.throwLowerer().emitThrowCheck();
+    lowering_.throwLowerer().emitThrowCheck();
 
     return result;
   };
   auto fsString = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
                       std::vector<llvm::Value *> args) {
-    llvm::AllocaInst *out = codegen_.functionFrame().createStackSlot(codegen_.strTy_, "fs.out");
+    llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "fs.out");
     params.insert(params.begin(), ptr);
     args.insert(args.begin(), out);
     fsCall(name, voidTy, params, args);
 
-    return codegen_.builder_.CreateLoad(codegen_.strTy_, out);
+    return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
   };
   // A string or undefined, from a runtime function that says whether there
   // is one.
   auto optionalString = [&](llvm::Value *out, llvm::Value *found) {
-    return codegen_.optionalLowerer().makeOptional(codegen_.builder_.CreateLoad(codegen_.strTy_, out),
-                        codegen_.builder_.CreateICmpNE(found, codegen_.builder_.getInt32(0)), call->type);
+    return lowering_.optionalLowerer().makeOptional(
+        lowering_.builder_.CreateLoad(lowering_.strTy_, out),
+        lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0)), call->type);
   };
 
   llvm::Value *result = nullptr;
   switch (call->builtin) {
   case Builtin::PathJoin:
   case Builtin::PathResolve:
-    result = codegen_.stringLowerer().callReturningString(
+    result = lowering_.stringLowerer().callReturningString(
         fn(call->builtin == Builtin::PathJoin ? "tz_path_join" : "tz_path_resolve", voidTy,
            {ptr, ptr, i32}),
         {values[1], values[0]});
@@ -241,86 +251,97 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
                        : call->builtin == Builtin::PathDirname ? "tz_path_dirname"
                        : call->builtin == Builtin::PathExtname ? "tz_path_extname"
                                                                : "tz_path_to_namespaced";
-    result =
-        codegen_.stringLowerer().callReturningString(fn(name, voidTy, {ptr, ptr, i64, i32}), {obj(1), meta(1), values[0]});
+    result = lowering_.stringLowerer().callReturningString(fn(name, voidTy, {ptr, ptr, i64, i32}),
+                                                           {obj(1), meta(1), values[0]});
     break;
   }
   case Builtin::PathIsAbsolute:
-    result =
-        codegen_.builder_.CreateICmpNE(codegen_.builder_.CreateCall(fn("tz_path_is_absolute", i32, {ptr, i64, i32}),
-                                                  {obj(1), meta(1), values[0]}),
-                              codegen_.builder_.getInt32(0));
+    result = lowering_.builder_.CreateICmpNE(
+        lowering_.builder_.CreateCall(fn("tz_path_is_absolute", i32, {ptr, i64, i32}),
+                                      {obj(1), meta(1), values[0]}),
+        lowering_.builder_.getInt32(0));
     break;
   case Builtin::PathBasename: {
     bool suffix = values.size() > 2;
-    llvm::Value *null = llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy());
-    result = codegen_.stringLowerer().callReturningString(
+    llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+    result = lowering_.stringLowerer().callReturningString(
         fn("tz_path_basename", voidTy, {ptr, ptr, i64, ptr, i64, i32, i32}),
-        {obj(1), meta(1), suffix ? obj(2) : null, suffix ? meta(2) : codegen_.builder_.getInt64(0),
-         codegen_.builder_.getInt32(suffix ? 1 : 0), values[0]});
+        {obj(1), meta(1), suffix ? obj(2) : null, suffix ? meta(2) : lowering_.builder_.getInt64(0),
+         lowering_.builder_.getInt32(suffix ? 1 : 0), values[0]});
     break;
   }
   case Builtin::PathRelative:
-    result = codegen_.stringLowerer().callReturningString(fn("tz_path_relative", voidTy, {ptr, ptr, i64, ptr, i64, i32}),
-                                 {obj(1), meta(1), obj(2), meta(2), values[0]});
+    result = lowering_.stringLowerer().callReturningString(
+        fn("tz_path_relative", voidTy, {ptr, ptr, i64, ptr, i64, i32}),
+        {obj(1), meta(1), obj(2), meta(2), values[0]});
     break;
   case Builtin::PathParse:
-    result = codegen_.builder_.CreateCall(fn("tz_path_parse", ptr, {ptr, i64, i32, ptr}),
-                                 {obj(1), meta(1), values[0], objectMaker(call->type)});
+    result = lowering_.builder_.CreateCall(fn("tz_path_parse", ptr, {ptr, i64, i32, ptr}),
+                                           {obj(1), meta(1), values[0], objectMaker(call->type)});
     break;
   case Builtin::PathFormat: {
     // The five parts as `string | undefined`, from the fields the object has.
     const Type *object = call->args[1]->type;
     const Type *optional = Type::optional(Type::string());
-    llvm::Type *part = codegen_.moduleBuilder().lower(optional);
+    llvm::Type *part = lowering_.moduleBuilder().lower(optional);
     auto *partsType = llvm::ArrayType::get(part, 5);
-    llvm::AllocaInst *parts = codegen_.functionFrame().createStackSlot(partsType, "format.parts");
+    llvm::AllocaInst *parts = lowering_.functionFrame().createStackSlot(partsType, "format.parts");
     static const llvm::StringLiteral names[] = {"root", "dir", "base", "ext", "name"};
     for (unsigned i = 0; i < 5; ++i) {
       const Field *field = object->field(names[i]);
       llvm::Value *value;
       if (!field) {
-        value = codegen_.optionalLowerer().undefinedValue(optional);
+        value = lowering_.optionalLowerer().undefinedValue(optional);
       } else {
-        value = codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(field->type), codegen_.objectLayouts().fieldAddress(values[1], object, names[i]));
+        value = lowering_.builder_.CreateLoad(
+            lowering_.moduleBuilder().lower(field->type),
+            lowering_.objectLayouts().fieldAddress(values[1], object, names[i]));
         if (!field->type->isOptional()) {
-          value = codegen_.optionalLowerer().makeOptional(value, codegen_.builder_.getTrue(), optional);
+          value = lowering_.optionalLowerer().makeOptional(value, lowering_.builder_.getTrue(),
+                                                           optional);
         }
       }
-      codegen_.builder_.CreateStore(value, codegen_.builder_.CreateConstInBoundsGEP2_32(partsType, parts, 0, i));
+      lowering_.builder_.CreateStore(
+          value, lowering_.builder_.CreateConstInBoundsGEP2_32(partsType, parts, 0, i));
     }
-    result = codegen_.stringLowerer().callReturningString(fn("tz_path_format", voidTy, {ptr, ptr, i32}), {parts, values[0]});
+    result = lowering_.stringLowerer().callReturningString(
+        fn("tz_path_format", voidTy, {ptr, ptr, i32}), {parts, values[0]});
     break;
   }
   case Builtin::OsString:
-    result = codegen_.stringLowerer().callReturningString(fn("tz_os_string", voidTy, {ptr, i32}), {values[0]});
+    result = lowering_.stringLowerer().callReturningString(fn("tz_os_string", voidTy, {ptr, i32}),
+                                                           {values[0]});
     break;
   case Builtin::OsNumber:
-    result = codegen_.builder_.CreateCall(fn("tz_os_number", f64, {i32}), {values[0]});
+    result = lowering_.builder_.CreateCall(fn("tz_os_number", f64, {i32}), {values[0]});
     break;
   case Builtin::OsAvailableParallelism:
-    result = codegen_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {}));
+    result = lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {}));
     break;
   case Builtin::OsCpus: {
     const Type *element = call->type->inner();
-    result = codegen_.builder_.CreateCall(fn("tz_os_cpus", ptr, {ptr, ptr}),
-                                 {codegen_.typeDescriptors().typeDescriptor(element), objectMaker(element)});
+    result = lowering_.builder_.CreateCall(
+        fn("tz_os_cpus", ptr, {ptr, ptr}),
+        {lowering_.typeDescriptors().typeDescriptor(element), objectMaker(element)});
     break;
   }
   case Builtin::OsLoadavg:
-    result =
-        codegen_.builder_.CreateCall(fn("tz_os_loadavg", ptr, {ptr}), {codegen_.typeDescriptors().typeDescriptor(Type::doubleTy())});
+    result = lowering_.builder_.CreateCall(
+        fn("tz_os_loadavg", ptr, {ptr}),
+        {lowering_.typeDescriptors().typeDescriptor(Type::doubleTy())});
     break;
   case Builtin::OsUserInfo:
-    result = codegen_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {objectMaker(call->type)});
+    result =
+        lowering_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {objectMaker(call->type)});
     break;
   case Builtin::ReadLine: {
     bool question = !values.empty();
-    llvm::AllocaInst *out = codegen_.functionFrame().createStackSlot(codegen_.strTy_, "line");
-    llvm::Value *found = codegen_.builder_.CreateCall(
+    llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "line");
+    llvm::Value *found = lowering_.builder_.CreateCall(
         fn("tz_io_read_line", i32, {ptr, ptr, i64, i32}),
-        {out, question ? obj(0) : llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()),
-         question ? meta(0) : codegen_.builder_.getInt64(0), codegen_.builder_.getInt32(question ? 1 : 0)});
+        {out, question ? obj(0) : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+         question ? meta(0) : lowering_.builder_.getInt64(0),
+         lowering_.builder_.getInt32(question ? 1 : 0)});
     release();
     return optionalString(out, found);
   }
@@ -356,9 +377,9 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
     }
     return nullptr;
   case Builtin::FsExists:
-    result = codegen_.builder_.CreateICmpNE(
-        codegen_.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}), {obj(0), meta(0)}),
-        codegen_.builder_.getInt32(0));
+    result = lowering_.builder_.CreateICmpNE(
+        lowering_.builder_.CreateCall(fn("tz_fs_exists", i32, {ptr, i64}), {obj(0), meta(0)}),
+        lowering_.builder_.getInt32(0));
     break;
   case Builtin::FsAccess:
   case Builtin::FsChmod:
@@ -373,13 +394,16 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
                   {obj(0), meta(0), flag(1), flag(2), objectMaker(call->type->nonOptional())});
   case Builtin::FsReaddir: {
     const Type *element = call->type->inner();
-    llvm::Value *dirent = element->isClass() ? static_cast<llvm::Value *>(objectMaker(element))
-                                             : llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy());
-    return fsCall("tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
-                  {obj(0), meta(0), flag(1), codegen_.typeDescriptors().typeDescriptor(element), dirent});
+    llvm::Value *dirent = element->isClass()
+                              ? static_cast<llvm::Value *>(objectMaker(element))
+                              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+    return fsCall(
+        "tz_fs_readdir", ptr, {ptr, i64, i32, ptr, ptr},
+        {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
   }
   case Builtin::FsMkdir: {
-    llvm::AllocaInst *out = codegen_.functionFrame().createStackSlot(codegen_.strTy_, "mkdir.first");
+    llvm::AllocaInst *out =
+        lowering_.functionFrame().createStackSlot(lowering_.strTy_, "mkdir.first");
     llvm::Value *made = fsCall("tz_fs_mkdir", i32, {ptr, ptr, i64, i32, i32},
                                {out, obj(0), meta(0), flag(1), values[2]});
     return optionalString(out, made);

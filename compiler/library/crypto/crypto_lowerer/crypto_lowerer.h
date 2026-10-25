@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // node:crypto: calls of the functions of the runtime by their description.
 class CryptoLowerer {
 public:
-  explicit CryptoLowerer(CodeGen &codegen);
+  explicit CryptoLowerer(Lowering &lowering);
 
   // node:crypto (codegen_crypto.cpp): a call of runtime/library/crypto/, and
   // generateKeyPairSync.
@@ -15,7 +15,7 @@ public:
   llvm::Value *emitCryptoKeyPair(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

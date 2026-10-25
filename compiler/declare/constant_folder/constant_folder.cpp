@@ -11,8 +11,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -91,17 +91,18 @@ std::string constantText(std::optional<int64_t> exact, double value) {
 
 } // namespace
 
-ConstantFolder::ConstantFolder(Sema &sema) : sema_(sema) {}
+ConstantFolder::ConstantFolder(Checker &checker) : checker_(checker) {}
 
-std::optional<Sema::Constant> ConstantFolder::evalConstant(const Expr *expr, EnumDecl *self, size_t defined) {
+std::optional<Checker::Constant> ConstantFolder::evalConstant(const Expr *expr, EnumDecl *self,
+                                                              size_t defined) {
   auto number = [](double value) {
-    Sema::Constant c;
+    Checker::Constant c;
     c.number = value;
 
     return c;
   };
   auto string = [](std::u16string text) {
-    Sema::Constant c;
+    Checker::Constant c;
     c.isString = true;
     c.text = std::move(text);
 
@@ -125,7 +126,7 @@ std::optional<Sema::Constant> ConstantFolder::evalConstant(const Expr *expr, Enu
   }
   case Expr::Kind::Unary: {
     auto *unary = cast<UnaryExpr>(expr);
-    std::optional<Sema::Constant> v = evalConstant(unary->operand, self, defined);
+    std::optional<Checker::Constant> v = evalConstant(unary->operand, self, defined);
     if (!v || v->isString) {
       return std::nullopt;
     }
@@ -142,8 +143,8 @@ std::optional<Sema::Constant> ConstantFolder::evalConstant(const Expr *expr, Enu
   }
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
-    std::optional<Sema::Constant> l = evalConstant(bin->lhs, self, defined);
-    std::optional<Sema::Constant> r = evalConstant(bin->rhs, self, defined);
+    std::optional<Checker::Constant> l = evalConstant(bin->lhs, self, defined);
+    std::optional<Checker::Constant> r = evalConstant(bin->rhs, self, defined);
     if (!l || !r) {
       return std::nullopt;
     }
@@ -198,7 +199,7 @@ std::optional<Sema::Constant> ConstantFolder::evalConstant(const Expr *expr, Enu
     // `E.X`, of this enum or another one.
     auto *access = cast<MemberExpr>(expr);
     auto *object = dyn_cast<NameExpr>(access->object);
-    EnumDecl *decl = object ? sema_.scopes().lookup(object->name).enumDecl : nullptr;
+    EnumDecl *decl = object ? checker_.scopes().lookup(object->name).enumDecl : nullptr;
     if (!decl) {
       return std::nullopt;
     }
@@ -210,7 +211,7 @@ std::optional<Sema::Constant> ConstantFolder::evalConstant(const Expr *expr, Enu
       }
       return std::nullopt;
     }
-    sema_.typeDeclarer().resolveEnum(decl);
+    checker_.typeDeclarer().resolveEnum(decl);
     if (const EnumMember *m = decl->find(access->name)) {
       return member(*m);
     }
@@ -236,8 +237,8 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
     return static_cast<int64_t>(value);
   }
   case Expr::Kind::Name: {
-    auto found = sema_.constVars_.find(cast<NameExpr>(expr)->var);
-    if (found == sema_.constVars_.end()) {
+    auto found = checker_.constVars_.find(cast<NameExpr>(expr)->var);
+    if (found == checker_.constVars_.end()) {
       return std::nullopt;
     }
     return found->second;
@@ -339,7 +340,7 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
     }
     int64_t min =
         bits == 32 ? std::numeric_limits<int32_t>::min() : std::numeric_limits<int64_t>::min();
-    if (b == -1) { // MIN / -1 wraps around to MIN (see CodeGen::emitIntDivRem)
+    if (b == -1) { // MIN / -1 wraps around to MIN (see Lowering::emitIntDivRem)
       exact = bin->op == BinaryOp::Rem ? 0 : llvm::checkedSub(int64_t(0), a);
       wrapped = bin->op == BinaryOp::Rem ? 0 : (a == min ? min : -a);
       value = -static_cast<double>(a);
@@ -370,7 +371,7 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    // As CodeGen does it: the count masked to the width, `>>>` on the bits.
+    // As Lowering does it: the count masked to the width, `>>>` on the bits.
     // An int's `>>>` may give a long (see checkBinary), which holds the
     // unsigned 32-bit result.
     unsigned width = bin->lhs->type->bitWidth();
@@ -398,28 +399,30 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
 
 void ConstantFolder::checkDivisor(BinaryOp op, const Expr *divisor) {
   if ((op == BinaryOp::Div || op == BinaryOp::Rem) && intConstant(divisor) == 0) {
-    sema_.diags_.error(divisor->loc(), "integer division by zero; to get Infinity or NaN as in "
-                                 "JavaScript, divide doubles, e.g. '1.0 / 0'");
+    checker_.diags_.error(divisor->loc(), "integer division by zero; to get Infinity or NaN as in "
+                                          "JavaScript, divide doubles, e.g. '1.0 / 0'");
   }
 }
 
 void ConstantFolder::reportOverflow(const Expr *expr, const Type *type, const std::string &value,
-                          int64_t wrapped, bool wraps) {
+                                    int64_t wrapped, bool wraps) {
   if (wraps) {
-    sema_.diags_.error(expr->loc(), "this constant is " + value +
-                                  ", beyond 2^53, where JavaScript rounds it before taking its "
-                                  "low bits; for a 32-bit product use Math.imul");
+    checker_.diags_.error(expr->loc(),
+                          "this constant is " + value +
+                              ", beyond 2^53, where JavaScript rounds it before taking its "
+                              "low bits; for a 32-bit product use Math.imul");
     return;
   }
   bool isInt = type->bitWidth() == 32;
-  sema_.diags_.error(expr->loc(), "this constant is " + value + ", which does not fit in '" +
-                                type->name() + "' and would wrap around to " +
-                                std::to_string(wrapped) + "; compute it as a " +
-                                (isInt ? "'long' or a 'double', e.g. 'const x: long = ...'"
-                                       : "'double', e.g. 'const x: double = ...'"));
+  checker_.diags_.error(expr->loc(), "this constant is " + value + ", which does not fit in '" +
+                                         type->name() + "' and would wrap around to " +
+                                         std::to_string(wrapped) + "; compute it as a " +
+                                         (isInt ? "'long' or a 'double', e.g. 'const x: long = ...'"
+                                                : "'double', e.g. 'const x: double = ...'"));
 }
 
-Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name, llvm::SMLoc loc) {
+Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef name,
+                                     llvm::SMLoc loc) {
   constexpr double kInfinity = std::numeric_limits<double>::infinity();
   struct Entry {
     llvm::StringLiteral object, name;
@@ -447,7 +450,7 @@ Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef nam
   };
   for (const Entry &entry : constants) {
     if (entry.object == object && entry.name == name) {
-      auto *lit = sema_.ctx_.make<FloatLitExpr>(loc, entry.value);
+      auto *lit = checker_.ctx_.make<FloatLitExpr>(loc, entry.value);
       lit->type = Type::doubleTy();
       return lit;
     }

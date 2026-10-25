@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The objects the runtime makes: their members and methods.
 class RuntimeObjectChecker {
 public:
-  explicit RuntimeObjectChecker(Sema &sema);
+  explicit RuntimeObjectChecker(Checker &checker);
 
   // The option `signal` of a call, an AbortSignal of the library
   // (library/events/web.tz) or undefined, or undefined for none: what the
@@ -21,7 +21,7 @@ public:
   static std::string runtimeMembers(const Type *type);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

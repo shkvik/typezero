@@ -1,27 +1,27 @@
 #include "compiler/library/crypto/crypto_checker/crypto_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/library/crypto/crypto_args/crypto_args.h"
-#include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
-#include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
-#include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
-#include "compiler/library/crypto/crypto_names/crypto_names.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/library/crypto/crypto_args/crypto_args.h"
+#include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
+#include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
+#include "compiler/library/crypto/crypto_names/crypto_names.h"
+#include "compiler/library/crypto/web_crypto_checker/web_crypto_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-CryptoChecker::CryptoChecker(Sema &sema) : sema_(sema) {}
+CryptoChecker::CryptoChecker(Checker &checker) : checker_(checker) {}
 
 const Type *CryptoChecker::cryptoTypeNamed(llvm::StringRef name) const {
-  const Sema::NodeName *n = sema_.builtinModuleChecker().nodeName(name);
+  const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(name);
   if (!n || n->module != NodeModule::Crypto) {
     return nullptr;
   }
@@ -51,18 +51,20 @@ Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
       {"POINT_CONVERSION_HYBRID", 6}};
   for (const auto &[name, value] : constants) {
     if (name == member->name) {
-      Expr *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value < 0 ? -value : value));
+      Expr *lit =
+          checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value < 0 ? -value : value));
       lit->type = Type::intTy();
       if (value >= 0) {
         return lit;
       }
-      auto *negated = sema_.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
-      return sema_.exprChecker().checkExpr(negated);
+      auto *negated = checker_.ctx_.make<UnaryExpr>(member->loc(), UnaryOp::Neg, lit);
+      return checker_.exprChecker().checkExpr(negated);
     }
   }
-  sema_.diags_.error(member->loc(), "'constants." + member->name +
-                                  "' of 'node:crypto' is not supported yet; tz has the RSA_ and "
-                                  "POINT_CONVERSION_ ones");
+  checker_.diags_.error(member->loc(),
+                        "'constants." + member->name +
+                            "' of 'node:crypto' is not supported yet; tz has the RSA_ and "
+                            "POINT_CONVERSION_ ones");
   member->type = Type::error();
 
   return member;
@@ -75,8 +77,8 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
   llvm::SMLoc loc = member->loc();
   auto read = [&](CryptoFn fn, const Type *result, std::vector<Expr *> args = {}) {
     args.insert(args.begin(), member->object);
-    auto *call = sema_.ctx_.make<CallExpr>(loc, member, std::vector<Expr *>{});
-    return sema_.cryptoArgs().cryptoCall(call, fn, std::move(args), result);
+    auto *call = checker_.ctx_.make<CallExpr>(loc, member, std::vector<Expr *>{});
+    return checker_.cryptoArgs().cryptoCall(call, fn, std::move(args), result);
   };
   if (kind == Crypto::KeyObject) {
     if (name == "type") {
@@ -89,8 +91,9 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
       return read(CryptoFn::KeySymmetricSize, Type::optional(Type::intTy()));
     }
     if (name == "asymmetricKeyDetails") {
-      sema_.diags_.error(loc, "'asymmetricKeyDetails' is not supported yet: node gives the exponent of "
-                        "RSA as a bigint, which tz has not");
+      checker_.diags_.error(
+          loc, "'asymmetricKeyDetails' is not supported yet: node gives the exponent of "
+               "RSA as a bigint, which tz has not");
       member->type = Type::error();
       return member;
     }
@@ -133,18 +136,18 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
           : p.fn == CryptoFn::X509PublicKey ? Type::cryptoType(Crypto::KeyObject)
                                             : Type::string();
       if (p.bits) {
-        return read(p.fn, result, {sema_.cryptoArgs().cryptoInt(loc, p.bits)});
+        return read(p.fn, result, {checker_.cryptoArgs().cryptoInt(loc, p.bits)});
       }
       return read(p.fn, result);
     }
     if (name == "issuerCertificate") {
-      sema_.diags_.error(loc, "'issuerCertificate' comes only with TLS (docs/net.md)");
+      checker_.diags_.error(loc, "'issuerCertificate' comes only with TLS (docs/net.md)");
       member->type = Type::error();
       return member;
     }
   }
-  sema_.diags_.error(loc, "property '" + name + "' of " + type->name() + " can only be called; it has " +
-                        methodsOf(kind));
+  checker_.diags_.error(loc, "property '" + name + "' of " + type->name() +
+                                 " can only be called; it has " + methodsOf(kind));
   member->type = Type::error();
 
   return member;
@@ -154,53 +157,55 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
   expr->type = Type::error();
   if (cls != "X509Certificate") {
-    sema_.diags_.error(expr->loc(), "'new " + cls + "' is not how node makes one: " +
-                                  (cls == "KeyObject" ? "use 'createSecretKey', 'createPublicKey' "
-                                                        "or 'createPrivateKey'"
-                                   : cls == "ECDH"    ? "use 'createECDH(curve)'"
-                                   : cls == "Sign" || cls == "Verify"
-                                       ? "use 'create" + cls.str() + "(algorithm)'"
-                                   : cls == "Hash" || cls == "Hmac"
-                                       ? "use 'create" + cls.str() + "(algorithm)'"
-                                       : "use 'create" + cls.str() + "(algorithm, key, iv)'"));
+    checker_.diags_.error(expr->loc(),
+                          "'new " + cls + "' is not how node makes one: " +
+                              (cls == "KeyObject" ? "use 'createSecretKey', 'createPublicKey' "
+                                                    "or 'createPrivateKey'"
+                               : cls == "ECDH"    ? "use 'createECDH(curve)'"
+                               : cls == "Sign" || cls == "Verify"
+                                   ? "use 'create" + cls.str() + "(algorithm)'"
+                               : cls == "Hash" || cls == "Hmac"
+                                   ? "use 'create" + cls.str() + "(algorithm)'"
+                                   : "use 'create" + cls.str() + "(algorithm, key, iv)'"));
     for (Expr *&arg : expr->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return expr;
   }
   if (expr->args.size() != 1) {
-    sema_.diags_.error(expr->loc(), "'new X509Certificate' takes the certificate, PEM or DER");
+    checker_.diags_.error(expr->loc(), "'new X509Certificate' takes the certificate, PEM or DER");
     for (Expr *&arg : expr->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return expr;
   }
-  Expr *data = sema_.cryptoArgs().cryptoData(expr->args[0], "certificate", true, false, true);
+  Expr *data = checker_.cryptoArgs().cryptoData(expr->args[0], "certificate", true, false, true);
   if (data->type->isError()) {
     return expr;
   }
-  auto *callee = sema_.ctx_.make<NameExpr>(expr->loc(), "X509Certificate");
-  auto *call = sema_.ctx_.make<CallExpr>(expr->loc(), callee, std::vector<Expr *>{});
+  auto *callee = checker_.ctx_.make<NameExpr>(expr->loc(), "X509Certificate");
+  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), callee, std::vector<Expr *>{});
 
-  return sema_.cryptoArgs().cryptoCall(call, CryptoFn::X509New, {data}, Type::cryptoType(Crypto::X509));
+  return checker_.cryptoArgs().cryptoCall(call, CryptoFn::X509New, {data},
+                                          Type::cryptoType(Crypto::X509));
 }
 
 Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "randomUUID" || name == "getRandomValues") {
-    return sema_.cryptoFunctionChecker().checkCryptoCall(call, name, member->loc());
+    return checker_.cryptoFunctionChecker().checkCryptoCall(call, name, member->loc());
   }
   call->type = Type::error();
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
   if (name == "subtle") {
-    sema_.diags_.error(member->loc(), "'crypto.subtle' is an object, not a function");
+    checker_.diags_.error(member->loc(), "'crypto.subtle' is an object, not a function");
   } else {
-    sema_.diags_.error(member->loc(), "'crypto." + name +
-                                    "' does not exist; the global crypto has "
-                                    "'randomUUID', 'getRandomValues' and "
-                                    "'subtle'");
+    checker_.diags_.error(member->loc(), "'crypto." + name +
+                                             "' does not exist; the global crypto has "
+                                             "'randomUUID', 'getRandomValues' and "
+                                             "'subtle'");
   }
 
   return call;
@@ -209,15 +214,15 @@ Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
 Expr *CryptoChecker::checkWebCryptoMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->name == "subtle") {
-    return sema_.webCryptoChecker().subtleObject(member);
+    return checker_.webCryptoChecker().subtleObject(member);
   }
   if (member->name == "randomUUID" || member->name == "getRandomValues") {
-    sema_.diags_.error(member->loc(), "'crypto." + member->name + "' can only be called");
+    checker_.diags_.error(member->loc(), "'crypto." + member->name + "' can only be called");
   } else {
-    sema_.diags_.error(member->loc(), "'crypto." + member->name +
-                                    "' does not exist; the global crypto "
-                                    "has 'randomUUID', 'getRandomValues' "
-                                    "and 'subtle'");
+    checker_.diags_.error(member->loc(), "'crypto." + member->name +
+                                             "' does not exist; the global crypto "
+                                             "has 'randomUUID', 'getRandomValues' "
+                                             "and 'subtle'");
   }
 
   return member;

@@ -1,6 +1,6 @@
-#include "compiler/lower/memory/cycle_scanner/cycle_scanner.h"
-#include "compiler/lower/memory/cycle_exprs/cycle_exprs.h"
-#include "compiler/lower/memory/cycle_escapes/cycle_escapes.h"
+#include "compiler/memory/cycle_scanner/cycle_scanner.h"
+#include "compiler/memory/cycle_escapes/cycle_escapes.h"
+#include "compiler/memory/cycle_exprs/cycle_exprs.h"
 
 namespace tz {
 
@@ -238,7 +238,8 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
       return;
     }
     if (auto *fe = llvm::dyn_cast<FunctionExpr>(e)) {
-      escapes = llvm::is_contained(fe->fn->captures, self) || CycleEscapes::mentionsIn(fe->fn->body, self);
+      escapes = llvm::is_contained(fe->fn->captures, self) ||
+                CycleEscapes::mentionsIn(fe->fn->body, self);
       return;
     }
     CycleEscapes::forEachChild(e, visit);
@@ -250,7 +251,8 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
 
 CycleScanner::CycleScanner() {
   cycleExprsPart_ = std::make_unique<CycleExprs>(*this);
-  cycleEscapesPart_ = std::make_unique<CycleEscapes>(*this);}
+  cycleEscapesPart_ = std::make_unique<CycleEscapes>(*this);
+}
 
 CycleScanner::~CycleScanner() = default;
 } // namespace tz

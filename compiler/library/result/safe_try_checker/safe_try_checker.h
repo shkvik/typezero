@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // safeTry and yield* of results.
 class SafeTryChecker {
 public:
-  explicit SafeTryChecker(Sema &sema);
+  explicit SafeTryChecker(Checker &checker);
 
   Expr *checkSafeTry(CallExpr *call, const Type *expected);
   // `yield* r` in the generator of safeTry.
@@ -21,7 +21,7 @@ public:
   void checkYieldPlacement(const Expr *expr, bool safe);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

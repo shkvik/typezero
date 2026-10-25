@@ -24,34 +24,34 @@ struct SourceFile {
   llvm::StringSet<> fieldNames;
   // The strings of the constants declared with a string literal, by name
   // (in any scope), and of the members of string enums, as "Enum.Member":
-  // the fields `o[key] = v` may assign to, which Sema must know before it
-  // checks the program (see Sema::keyNames).
+  // the fields `o[key] = v` may assign to, which Checker must know before it
+  // checks the program (see Checker::keyNames).
   llvm::StringMap<std::vector<std::string>> stringConstants;
-  // Set by Sema: the program uses promises, timers or the queues, so main
+  // Set by Checker: the program uses promises, timers or the queues, so main
   // runs the event loop after the top-level code (docs/async.md); and its
   // top-level code awaits, so it is a coroutine itself.
   bool usesAsync = false;
   bool topLevelAwait = false;
-  // Set by Sema: the program compares functions (`==`, indexOf...), so every
+  // Set by Checker: the program compares functions (`==`, indexOf...), so every
   // evaluation of a function expression must give a distinct value.
   bool comparesFunctions = false;
-  // Set by Sema: the program may use https (a fetch of a URL not known to be
+  // Set by Checker: the program may use https (a fetch of a URL not known to be
   // http://, serve with `tls`), so it gets TLS (docs/net.md, section 4).
   bool usesTls = false;
-  // Set by Sema: the functions of imported files that the program never
+  // Set by Checker: the functions of imported files that the program never
   // uses, which are left out of it.
   llvm::SmallPtrSet<const FunctionDecl *, 8> unusedFunctions;
-  // Set by Sema: the copies of the generic functions that the program calls,
-  // one for each representation of their type arguments in memory. CodeGen
+  // Set by Checker: the copies of the generic functions that the program calls,
+  // one for each representation of their type arguments in memory. Lowering
   // emits them as top-level functions, and no generic function itself.
   std::vector<FunctionDecl *> instances;
-  // Set by Sema: the object types declared to be others too (Type::bases):
+  // Set by Checker: the object types declared to be others too (Type::bases):
   // classes that extend a class or implement interfaces, and interfaces that
-  // extend interfaces. CodeGen lays out and describes their objects so that
+  // extend interfaces. Lowering lays out and describes their objects so that
   // code that knows them by a base type works on them.
   std::vector<const Type *> subtypes;
-  // Set by Sema: the object types whose objects code sees as another type
-  // with the same fields, some of them read-only there: CodeGen treats the
+  // Set by Checker: the object types whose objects code sees as another type
+  // with the same fields, some of them read-only there: Lowering treats the
   // second as an interface that the first implements.
   std::vector<std::pair<const Type *, const Type *>> views;
 };

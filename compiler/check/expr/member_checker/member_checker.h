@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Members and indices: o.x, a[i], and where a field is.
 class MemberChecker {
 public:
-  explicit MemberChecker(Sema &sema);
+  explicit MemberChecker(Checker &checker);
 
   Expr *checkMember(MemberExpr *member, const Type *expected);
   Expr *checkIndex(IndexExpr *index);
@@ -15,7 +15,7 @@ public:
   Expr *checkPosition(Expr *expr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

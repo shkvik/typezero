@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
@@ -8,7 +8,7 @@ namespace tz {
 // together (Tarjan).
 class CallCycles {
 public:
-  explicit CallCycles(Sema &sema);
+  explicit CallCycles(Checker &checker);
 
   // Finds those cycles among the functions without a return type. A name in
   // a body may call the function of that name among them, or the one
@@ -18,7 +18,7 @@ public:
              llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)> resolve = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // new: which class checks the construction.
 class NewChecker {
 public:
-  explicit NewChecker(Sema &sema);
+  explicit NewChecker(Checker &checker);
 
   Expr *checkNew(NewExpr *expr, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

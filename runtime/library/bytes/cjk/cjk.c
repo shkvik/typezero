@@ -2,7 +2,7 @@
 // gb18030, Big5, EUC-JP, ISO-2022-JP, Shift_JIS and EUC-KR, as the WHATWG
 // Encoding Standard decodes them, with its indexes (cjk_tables.h).
 //
-// Each encoding is a TzCjkEncoding (tzrt.h) that names its indexes. A program
+// Each encoding is a TzCjkEncoding (cjk.h) that names its indexes. A program
 // that names an encoding in its code refers to that one, so the linker puts
 // into the exe only the indexes it needs (cjk_tables.h holds 173 KB of them),
 // and the decoders, which TextDecoder calls through the encoding, only with
@@ -12,7 +12,10 @@
 // true })`) goes on where the last chunk ended. "Restore to the queue" puts
 // bytes back in front of the rest.
 
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/cjk/cjk.h"
+#include "runtime/core/string/string.h"
+#include <stddef.h>
+#include <stdint.h>
 #include "runtime/library/bytes/cjk/cjk_tables.h"
 
 // What a handler of the standard gives back for a byte: go on to the next
@@ -497,7 +500,7 @@ int32_t tz_cjk_decode(const TzCjkEncoding *e, uint32_t *state, TzBuf *out, const
 // The encodings, which name their indexes
 //===----------------------------------------------------------------------===//
 
-// Not static: see the rules in tzrt.h. CodeGen refers to each by its name.
+// Not static: see the rules in tzrt.h. Lowering refers to each by its name.
 #define INDEX(name) TZ_CJK_##name##_FIRST, TZ_CJK_##name##_COUNT
 #define RANGES tz_cjk_gb18030_ranges, TZ_CJK_GB18030_RANGES
 const TzCjkEncoding tz_cjk_encoding_gbk = {

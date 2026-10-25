@@ -1,17 +1,17 @@
 #include "compiler/library/process/process_checker/process_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/async/timer_checker/timer_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -26,18 +26,18 @@ std::u16string toUtf16(llvm::StringRef text) {
 
 } // namespace
 
-ProcessChecker::ProcessChecker(Sema &sema) : sema_(sema) {}
+ProcessChecker::ProcessChecker(Checker &checker) : checker_(checker) {}
 
 bool ProcessChecker::isProcessMember(const Expr *expr, llvm::StringRef name) const {
   auto *member = dyn_cast<MemberExpr>(expr);
 
   return member && !member->optional && member->name == name &&
-         sema_.callChecker().isGlobalName(member->object, "process");
+         checker_.callChecker().isGlobalName(member->object, "process");
 }
 
-Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin, std::vector<Expr *> args,
-                        const Type *type) {
-  auto *call = sema_.ctx_.make<CallExpr>(loc, callee, std::move(args));
+Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin,
+                                  std::vector<Expr *> args, const Type *type) {
+  auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::move(args));
   call->builtin = builtin;
   call->type = type;
 
@@ -46,12 +46,13 @@ Expr *ProcessChecker::builtinCall(llvm::SMLoc loc, Expr *callee, Builtin builtin
 
 Expr *ProcessChecker::checkExitCode(Expr *code) {
   const Type *optionalInt = Type::optional(Type::intTy());
-  code = sema_.exprChecker().checkExpr(code, Type::intTy());
+  code = checker_.exprChecker().checkExpr(code, Type::intTy());
   if (code->type->isOptional() || code->type->isUndefined()) {
-    return sema_.typeRelations().coerce(code, optionalInt);
+    return checker_.typeRelations().coerce(code, optionalInt);
   }
 
-  return sema_.typeRelations().convert(sema_.typeRelations().coerce(code, Type::intTy()), optionalInt);
+  return checker_.typeRelations().convert(checker_.typeRelations().coerce(code, Type::intTy()),
+                                          optionalInt);
 }
 
 // process.exit(), process.cwd(), process.stdout.write(), Date.now() and
@@ -59,24 +60,27 @@ Expr *ProcessChecker::checkExitCode(Expr *code) {
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   llvm::StringRef name = member->name;
 
-  bool isDate = sema_.callChecker().isGlobalName(member->object, "Date");
+  bool isDate = checker_.callChecker().isGlobalName(member->object, "Date");
   if (isDate && name != "now") {
-    return sema_.dateChecker().checkDateStatic(call, member); // Date.UTC, Date.parse (sema_date.cpp)
+    return checker_.dateChecker().checkDateStatic(call,
+                                                  member); // Date.UTC, Date.parse (sema_date.cpp)
   }
-  if (isDate || sema_.callChecker().isGlobalName(member->object, "performance")) {
+  if (isDate || checker_.callChecker().isGlobalName(member->object, "performance")) {
     llvm::StringRef object = isDate ? "Date" : "performance";
     if (name != "now") {
-      sema_.diags_.error(member->loc(), "'" + object + "." + name + "' is not supported yet; only '" +
-                                      object + ".now()' is");
+      checker_.diags_.error(member->loc(), "'" + object + "." + name +
+                                               "' is not supported yet; only '" + object +
+                                               ".now()' is");
       checkArgsLoosely();
       return call;
     }
-    if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (checker_.callChecker().rejectSpread(call) ||
+        !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     // Date.now() gives whole milliseconds, performance.now() fractions too.
@@ -90,31 +94,32 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
     // The stream of node:stream, where the program uses it as one
     // (sema_stream.cpp): it writes at once too.
-    if (name != "isTTY" && sema_.libFunctions_.lookup("processStdout")) {
+    if (name != "isTTY" && checker_.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
     if (name != "write") {
       if (name == "isTTY") {
-        sema_.diags_.error(member->loc(), "'" + stream + ".isTTY' is a boolean, not a function");
+        checker_.diags_.error(member->loc(), "'" + stream + ".isTTY' is a boolean, not a function");
       } else {
-        sema_.diags_.error(member->loc(),
-                     "'" + stream + "." + name +
-                         "' is not supported yet; only 'write(text)' and 'isTTY' are");
+        checker_.diags_.error(member->loc(),
+                              "'" + stream + "." + name +
+                                  "' is not supported yet; only 'write(text)' and 'isTTY' are");
       }
       checkArgsLoosely();
       return call;
     }
-    if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (checker_.callChecker().rejectSpread(call) ||
+        !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     // Text, or the bytes of a Buffer or a Uint8Array as they are; the result
     // is always true, as nothing waits to be written. A write with the
     // encoding or the callback of node is one of the stream of node:stream,
     // which the loader brings then.
-    Expr *chunk = sema_.exprChecker().checkExpr(call->args[0], Type::string());
+    Expr *chunk = checker_.exprChecker().checkExpr(call->args[0], Type::string());
     const Type *type = chunk->type;
     if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
-      chunk = sema_.typeRelations().coerce(chunk, Type::string());
+      chunk = checker_.typeRelations().coerce(chunk, Type::string());
     }
     call->args[0] = chunk;
     call->builtin = isStdout ? Builtin::ProcessStdoutWrite : Builtin::ProcessStderrWrite;
@@ -122,20 +127,20 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  if (!sema_.callChecker().isGlobalName(member->object, "process")) {
+  if (!checker_.callChecker().isGlobalName(member->object, "process")) {
     return nullptr;
   }
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (name == "nextTick") {
-    return sema_.timerChecker().checkNextTick(call, member); // sema_async.cpp
+    return checker_.timerChecker().checkNextTick(call, member); // sema_async.cpp
   }
   if (name == "exit") {
     // The program ends here, as in Node: `finally` blocks do not run, and
     // what is printed so far is written out. Without a code it ends with
     // process.exitCode.
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
     if (!call->args.empty()) {
@@ -146,7 +151,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "cwd") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     call->builtin = Builtin::ProcessCwd;
@@ -156,9 +161,9 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   static const llvm::StringLiteral properties[] = {"argv",     "env",    "exitCode", "execPath",
                                                    "platform", "stdout", "stderr"};
   if (llvm::is_contained(properties, name)) {
-    sema_.diags_.error(member->loc(), "'process." + name + "' is not a function");
+    checker_.diags_.error(member->loc(), "'process." + name + "' is not a function");
   } else {
-    sema_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
+    checker_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
   }
   checkArgsLoosely();
 
@@ -172,7 +177,7 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (isProcessMember(member->object, "env")) {
     // `string | undefined`, as in Node.
-    auto *key = sema_.ctx_.make<StringLitExpr>(member->loc(), toUtf16(name));
+    auto *key = checker_.ctx_.make<StringLitExpr>(member->loc(), toUtf16(name));
     key->type = Type::string();
     return builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
                        Type::optional(Type::string()));
@@ -184,47 +189,50 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     // A field of the stream of node:stream (sema_stream.cpp); a terminal
     // has none of its own yet.
     if (name != "isTTY" && name != "columns" && name != "rows" &&
-        sema_.libFunctions_.lookup("processStdout")) {
+        checker_.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
     if (name == "isTTY") {
       // Whether the stream is a terminal. A boolean, as the types of Node
       // say; Node itself has undefined instead of false.
-      auto *fd = sema_.ctx_.make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
+      auto *fd = checker_.ctx_.make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
       fd->type = Type::intTy();
       return builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
     }
     if (name == "write") {
-      sema_.diags_.error(member->loc(),
-                   "'" + stream + ".write' can only be called: '" + stream + ".write(text)'");
+      checker_.diags_.error(member->loc(), "'" + stream + ".write' can only be called: '" + stream +
+                                               ".write(text)'");
     } else {
-      sema_.diags_.error(member->loc(), "'" + stream + "." + name + "' is not supported yet; only " +
-                                      "'isTTY', 'write()' and the rest of a Writable of " +
-                                      "node:stream are");
+      checker_.diags_.error(member->loc(), "'" + stream + "." + name +
+                                               "' is not supported yet; only " +
+                                               "'isTTY', 'write()' and the rest of a Writable of " +
+                                               "node:stream are");
     }
     member->type = Type::error();
     return member;
   }
 
-  if (sema_.callChecker().isGlobalName(member->object, "Date")) {
-    return sema_.dateChecker().checkDateStaticMember(member); // sema_date.cpp
+  if (checker_.callChecker().isGlobalName(member->object, "Date")) {
+    return checker_.dateChecker().checkDateStaticMember(member); // sema_date.cpp
   }
-  if (sema_.callChecker().isGlobalName(member->object, "performance")) {
+  if (checker_.callChecker().isGlobalName(member->object, "performance")) {
     if (name == "now") {
-      sema_.diags_.error(member->loc(), "'performance.now' can only be called: 'performance.now()'");
+      checker_.diags_.error(member->loc(),
+                            "'performance.now' can only be called: 'performance.now()'");
     } else {
-      sema_.diags_.error(member->loc(),
-                   "'performance." + name + "' is not supported yet; only 'performance.now()' is");
+      checker_.diags_.error(member->loc(),
+                            "'performance." + name +
+                                "' is not supported yet; only 'performance.now()' is");
     }
     member->type = Type::error();
     return member;
   }
 
-  if (!sema_.callChecker().isGlobalName(member->object, "process")) {
+  if (!checker_.callChecker().isGlobalName(member->object, "process")) {
     return nullptr;
   }
   if (name == "stdin" || name == "stdout" || name == "stderr") {
-    if (Expr *stream = sema_.streamSources().processStream(member)) {
+    if (Expr *stream = checker_.streamSources().processStream(member)) {
       return stream;
     }
   }
@@ -250,13 +258,14 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   }
   member->type = Type::error();
   if (name == "exit" || name == "cwd") {
-    sema_.diags_.error(member->loc(), "'process." + name + "' can only be called: 'process." + name +
-                                    (name == "exit" ? "(code)'" : "()'"));
+    checker_.diags_.error(member->loc(), "'process." + name + "' can only be called: 'process." +
+                                             name + (name == "exit" ? "(code)'" : "()'"));
   } else if (name == "stdout" || name == "stderr") {
-    sema_.diags_.error(member->loc(), "'process." + name + "' can only be used as 'process." + name +
-                                    ".write(text)' or 'process." + name + ".isTTY'");
+    checker_.diags_.error(member->loc(), "'process." + name + "' can only be used as 'process." +
+                                             name + ".write(text)' or 'process." + name +
+                                             ".isTTY'");
   } else {
-    sema_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
+    checker_.diags_.error(member->loc(), "'process." + name + "' is not supported yet");
   }
 
   return member;
@@ -267,7 +276,7 @@ Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
   if (!isProcessMember(index->object, "env")) {
     return nullptr;
   }
-  Expr *key = sema_.argumentChecker().checkArg(index->index, Type::string());
+  Expr *key = checker_.argumentChecker().checkArg(index->index, Type::string());
 
   return builtinCall(index->loc(), index->object, Builtin::ProcessEnv, {key},
                      Type::optional(Type::string()));
@@ -286,7 +295,7 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
     return nullptr;
   }
   bool isEnv = isProcessMember(object, "env");
-  bool isProcess = sema_.callChecker().isGlobalName(object, "process") && !name.empty();
+  bool isProcess = checker_.callChecker().isGlobalName(object, "process") && !name.empty();
   bool isStream = isProcessMember(object, "stdout") || isProcessMember(object, "stderr");
   if (!isEnv && !isProcess && !isStream) {
     return nullptr;
@@ -304,14 +313,14 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
     return nullptr;
   }
   if (isProcess && name == "exitCode") {
-    sema_.diags_.error(assign->loc(), "only '=' can set 'process.exitCode'");
+    checker_.diags_.error(assign->loc(), "only '=' can set 'process.exitCode'");
   } else if (isProcess) {
-    sema_.diags_.error(assign->target->loc(), "'process." + name + "' cannot be assigned to");
+    checker_.diags_.error(assign->target->loc(), "'process." + name + "' cannot be assigned to");
   } else {
-    sema_.diags_.error(assign->target->loc(),
-                 "'process." + cast<MemberExpr>(object)->name + "' cannot be changed");
+    checker_.diags_.error(assign->target->loc(),
+                          "'process." + cast<MemberExpr>(object)->name + "' cannot be changed");
   }
-  assign->value = sema_.exprChecker().checkExpr(assign->value);
+  assign->value = checker_.exprChecker().checkExpr(assign->value);
   assign->type = Type::error();
 
   return assign;

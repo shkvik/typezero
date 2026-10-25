@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Array literals and their spreads.
 class ArrayLiteralChecker {
 public:
-  explicit ArrayLiteralChecker(Sema &sema);
+  explicit ArrayLiteralChecker(Checker &checker);
 
   Expr *checkArrayLit(ArrayLitExpr *lit, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

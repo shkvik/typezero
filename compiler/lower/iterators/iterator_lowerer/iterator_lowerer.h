@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Iterators: for...of, spreads, next and the built-ins of iterators.
 class IteratorLowerer {
 public:
-  explicit IteratorLowerer(CodeGen &codegen);
+  explicit IteratorLowerer(Lowering &lowering);
 
   void emitIteratorForOf(ForOfStmt *stmt);
   void emitIteratorSpread(llvm::Value *array, Expr *source, const Type *element);
@@ -18,7 +18,7 @@ public:
   llvm::Value *emitIteratorObject(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

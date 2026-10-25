@@ -21,14 +21,14 @@ public:
   llvm::StringRef member;
   std::vector<TypeRef> typeArgs;
   std::vector<Expr *> args;
-  // Set by Sema for a class: the class, and the call of the constructor
+  // Set by Checker for a class: the class, and the call of the constructor
   // variant chosen (its `func`, null when the class has no constructor),
   // which holds the checked arguments.
   ClassDecl *cls = nullptr;
   CallExpr *ctor = nullptr;
   // `new route.cls()`, `new (Mixin(User))()`: a class as a value
   // (docs/decorators.md, sections 5 and 6), evaluated first. The parser sets
-  // it for anything but a name, Sema for a name of a variable too. Of a
+  // it for anything but a name, Checker for a name of a variable too. Of a
   // class known when compiling it is evaluated and dropped, and `cls` is
   // made; of a `Constructor<T>` (`reflect` set) the class makes the object
   // through its description, from `args` as unknowns.

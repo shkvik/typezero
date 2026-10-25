@@ -1,7 +1,8 @@
 // The functions of Math that are not single LLVM instructions (see
-// CodeGen::emitMathCall). The small ones are TZ_HOT, so that tz inlines
+// Lowering::emitMathCall). The small ones are TZ_HOT, so that tz inlines
 // them, and with them the call to the C library.
 
+#include "runtime/core/error/error.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
 

@@ -1,8 +1,10 @@
 #include "compiler/load/class_parser/class_parser.h"
+#include "compiler/load/call_parser/call_parser.h"
 #include "compiler/load/decl_parser/decl_parser.h"
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
 #include "compiler/load/module_parser/module_parser.h"
+#include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
@@ -27,7 +29,7 @@ namespace tz {
 ClassParser::ClassParser(Parser &parser) : parser_(parser) {}
 
 // `class Name<T> extends Base implements A, B { members }`. The text of a
-// generic class is kept, for Sema to parse a copy of it for each list of type
+// generic class is kept, for Checker to parse a copy of it for each list of type
 // arguments.
 ClassDecl *ClassParser::parseClass(bool expression) {
   const char *start = parser_.tok_.text.data();
@@ -55,7 +57,7 @@ ClassDecl *ClassParser::parseClass(bool expression) {
     bool value = !parser_.tok_.is(Tok::Identifier) || next.is(Tok::LParen) || next.is(Tok::Dot) ||
                  next.is(Tok::LBracket);
     if (value) {
-      cls->baseExpr = parser_.exprs().parseCallOrMember();
+      cls->baseExpr = parser_.calls().parseCallOrMember();
     } else {
       llvm::SMLoc baseLoc = parser_.tok_.loc();
       llvm::StringRef baseName = parser_.tok_.text;
@@ -326,7 +328,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   llvm::SMLoc nameLoc = parser_.tok_.loc();
   bool plainName = parser_.tok_.is(Tok::Identifier);
   llvm::StringRef name;
-  if (!parser_.types().parseFieldName(name)) {
+  if (!parser_.objectTypes().parseFieldName(name)) {
     return;
   }
   if (name.starts_with("#")) {

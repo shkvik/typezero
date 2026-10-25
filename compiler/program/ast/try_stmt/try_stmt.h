@@ -16,7 +16,7 @@ struct TryStmt : Stmt {
   BlockStmt *block = nullptr;
   BlockStmt *handler = nullptr;   // null without `catch`
   BlockStmt *finalizer = nullptr; // null without `finally`
-  VarDeclarator param;            // `catch (e)`, or `catch (e: unknown)`; sym set by Sema
+  VarDeclarator param;            // `catch (e)`, or `catch (e: unknown)`; sym set by Checker
 };
 
 } // namespace tz

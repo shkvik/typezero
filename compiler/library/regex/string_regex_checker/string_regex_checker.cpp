@@ -1,10 +1,10 @@
 #include "compiler/library/regex/string_regex_checker/string_regex_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
-#include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/functions/callback_checker/callback_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "runtime/library/regex/regex/regex.h"
 #include "llvm/ADT/STLExtras.h"
@@ -13,8 +13,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -72,7 +72,7 @@ const char kUnknownRegex[] =
 
 } // namespace
 
-StringRegexChecker::StringRegexChecker(Sema &sema) : sema_(sema) {}
+StringRegexChecker::StringRegexChecker(Checker &checker) : checker_(checker) {}
 
 Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
@@ -84,18 +84,18 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   call->type = Type::error();
   bool replace = name == "replace" || name == "replaceAll";
   unsigned min = replace ? 2 : name == "split" ? 0 : 1, max = name == "split" ? 2 : replace ? 2 : 1;
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), min, max)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), min, max)) {
     return call;
   }
   auto restLoosely = [&] {
     for (size_t i = 1; i < call->args.size(); ++i) {
-      call->args[i] = sema_.exprChecker().checkExpr(call->args[i]);
+      call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
     }
 
     return call;
   };
   Expr *&pattern = call->args[0];
-  pattern = sema_.exprChecker().checkExpr(pattern);
+  pattern = checker_.exprChecker().checkExpr(pattern);
   const Type *type = pattern->type;
   if (type->isError()) {
     return restLoosely();
@@ -111,32 +111,35 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     bool global = flags && (*flags & TZ_RE_GLOBAL);
     if (name == "match") {
       if (!flags) {
-        sema_.diags_.error(member->loc(),
-                     std::string("what 'match' gives depends on the g flag (all the texts that "
-                                 "match, or one match with its groups), and ") +
-                         kUnknownRegex +
-                         "; for one match write 're.exec(s)', for all of them "
-                         "'s.matchAll(re)'");
+        checker_.diags_.error(
+            member->loc(),
+            std::string("what 'match' gives depends on the g flag (all the texts that "
+                        "match, or one match with its groups), and ") +
+                kUnknownRegex +
+                "; for one match write 're.exec(s)', for all of them "
+                "'s.matchAll(re)'");
         return call;
       }
       call->builtin = global ? Builtin::StrMatchGlobal : Builtin::StrMatch;
-      call->type = Type::optional(global ? Type::array(Type::string()) : sema_.regexChecker().matchType(regex));
+      call->type = Type::optional(global ? Type::array(Type::string())
+                                         : checker_.regexChecker().matchType(regex));
       return call;
     }
     if (name == "matchAll" || name == "replaceAll") {
       if (flags && !global) {
         std::string source = "/" + utf8(regex->pattern) + "/" + utf8(regex->flags) + "g";
-        sema_.diags_.error(pattern->loc(), "'" + name +
-                                         "' needs a regex with the g flag (JavaScript throws a "
-                                         "TypeError without it), e.g. '" +
-                                         source + "'");
+        checker_.diags_.error(pattern->loc(),
+                              "'" + name +
+                                  "' needs a regex with the g flag (JavaScript throws a "
+                                  "TypeError without it), e.g. '" +
+                                  source + "'");
         return restLoosely();
       }
       if (name == "matchAll") {
         // A lazy iterator, as in JavaScript: each match is found when it is
         // asked for.
         call->builtin = Builtin::StrMatchAll;
-        call->type = Type::iterator(sema_.regexChecker().matchType(regex));
+        call->type = Type::iterator(checker_.regexChecker().matchType(regex));
         return call;
       }
     }
@@ -147,7 +150,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = sema_.memberChecker().checkPosition(call->args[1]);
+        call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
       }
       // A group that may not take part in a match gives undefined.
       bool undefinedGroups = !regex;
@@ -168,7 +171,7 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         lit ? escapedLiteral(lit->value) : "new RegExp(RegExp.escape(" + text + "))";
     if (name == "split") {
       if (call->args.size() == 2) {
-        call->args[1] = sema_.memberChecker().checkPosition(call->args[1]);
+        call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
       }
       call->builtin = Builtin::StrSplit;
       call->type = Type::array(Type::string());
@@ -177,32 +180,33 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     if (name == "replaceAll") {
       Expr *&replacement = call->args[1];
       if (isa<FunctionExpr>(replacement)) {
-        sema_.diags_.error(replacement->loc(),
-                     "a function as the replacement needs a regex: 'replaceAll(" +
-                         (lit ? escapedLiteral(lit->value) + "g"
-                              : "new RegExp(RegExp.escape(" + text + "), \"g\")") +
-                         ", ...)'");
+        checker_.diags_.error(replacement->loc(),
+                              "a function as the replacement needs a regex: 'replaceAll(" +
+                                  (lit ? escapedLiteral(lit->value) + "g"
+                                       : "new RegExp(RegExp.escape(" + text + "), \"g\")") +
+                                  ", ...)'");
         return restLoosely();
       }
-      replacement = sema_.argumentChecker().checkArg(replacement, Type::string());
+      replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
       call->builtin = Builtin::StrReplaceAll;
       call->type = Type::string();
       return call;
     }
     if (name == "replace") {
-      sema_.diags_.error(
+      checker_.diags_.error(
           member->loc(),
           "'replace' with a string replaces only the first occurrence (\"a-b-c\".replace(\"-\", "
           "\"+\") is \"a+b-c\" in JavaScript); to replace all of them write 'replaceAll(" +
               text + ", ...)', for only the first one a regex: 'replace(" + regexText + ", ...)'");
     } else if (name == "search") {
-      sema_.diags_.error(member->loc(), "'search' takes a regex, and JavaScript makes one of a string, "
-                                  "where '.' matches any character; to find the text write "
-                                  "'indexOf(" +
-                                      text + ")', for a regex '" +
-                                      (lit ? regexText : "search(" + regexText + ")") + "'");
+      checker_.diags_.error(member->loc(),
+                            "'search' takes a regex, and JavaScript makes one of a string, "
+                            "where '.' matches any character; to find the text write "
+                            "'indexOf(" +
+                                text + ")', for a regex '" +
+                                (lit ? regexText : "search(" + regexText + ")") + "'");
     } else {
-      sema_.diags_.error(
+      checker_.diags_.error(
           member->loc(),
           "'" + name +
               "' takes a regex, and JavaScript makes one of a string, where "
@@ -214,25 +218,27 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
     }
     return restLoosely();
   }
-  sema_.diags_.error(pattern->loc(), "'" + name + "' takes a regex" +
-                                   (name == "split" || name == "replaceAll" ? " or a string" : "") +
-                                   ", found '" + type->name() + "'");
+  checker_.diags_.error(pattern->loc(),
+                        "'" + name + "' takes a regex" +
+                            (name == "split" || name == "replaceAll" ? " or a string" : "") +
+                            ", found '" + type->name() + "'");
 
   return restLoosely();
 }
 
 // replace(re, x) and replaceAll(re, x): x is the text that replaces each
 // match, with its patterns ($1, $<name>, $&...), or a function that gives it.
-Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex) {
+Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
+                                           const RegexLitExpr *regex) {
   Expr *&replacement = call->args[1];
   bool function = isa<FunctionExpr>(replacement);
   if (auto *name = dyn_cast<NameExpr>(replacement)) {
-    Sema::ScopeEntry entry = sema_.scopes().lookup(name->name);
+    Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
     function = entry.func ||
                (entry.var && entry.var->type && entry.var->type->nonOptional()->isFunction());
   }
   if (!function) {
-    replacement = sema_.argumentChecker().checkArg(replacement, Type::string());
+    replacement = checker_.argumentChecker().checkArg(replacement, Type::string());
     call->builtin = Builtin::StrReplaceRegex;
     call->type = Type::string();
     auto *text = dyn_cast<StringLitExpr>(replacement);
@@ -262,11 +268,11 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member, c
         if ((two && two <= groups) || one <= groups) {
           continue;
         }
-        sema_.diags_.error(text->loc(),
-                     "the regex has " + std::to_string(groups) + " group" +
-                         (groups == 1 ? "" : "s") + ", so there is no group " +
-                         std::to_string(one) + " for '$" + std::to_string(one) +
-                         "' (JavaScript would insert it as it is); write '$$' for '$'");
+        checker_.diags_.error(text->loc(),
+                              "the regex has " + std::to_string(groups) + " group" +
+                                  (groups == 1 ? "" : "s") + ", so there is no group " +
+                                  std::to_string(one) + " for '$" + std::to_string(one) +
+                                  "' (JavaScript would insert it as it is); write '$$' for '$'");
         return call;
       } else if (c == u'<') {
         size_t close = value.find(u'>', i + 2);
@@ -280,7 +286,7 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member, c
         if (found) {
           continue;
         }
-        sema_.diags_.error(
+        checker_.diags_.error(
             text->loc(),
             named ? "the regex has no group named '" + groupName + "' for '$<" + groupName + ">'"
                   : "the regex has no named groups, so JavaScript would insert '$<" + groupName +
@@ -293,11 +299,11 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member, c
 
   // The function gets the match, each group, the offset of the match, the
   // whole string and, with named groups, the object of them.
-  Sema::Signature sig;
+  Checker::Signature sig;
   sig.pad = false;
   sig.ret = Type::string();
   sig.params.push_back(Type::string());
-  const Type *match = sema_.regexChecker().matchType(regex);
+  const Type *match = checker_.regexChecker().matchType(regex);
   if (regex) {
     for (int k = 1; k <= match->matchGroups(); ++k) {
       sig.params.push_back(match->captureMandatory(unsigned(k)) ? Type::string()
@@ -312,30 +318,33 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member, c
   if (auto *fe = dyn_cast<FunctionExpr>(replacement);
       fe && fe->fn->params.size() > sig.params.size()) {
     if (!regex) {
-      sema_.diags_.error(fe->fn->params[1].loc, std::string("the function gets only the match: ") +
-                                              kUnknownRegex +
-                                              ", so its groups are not known when compiling");
+      checker_.diags_.error(fe->fn->params[1].loc,
+                            std::string("the function gets only the match: ") + kUnknownRegex +
+                                ", so its groups are not known when compiling");
     } else {
-      sema_.diags_.error(fe->fn->params[sig.params.size()].loc,
-                   "'" + member->name + "' passes " + std::to_string(sig.params.size()) +
-                       " arguments: the match, " + std::to_string(match->matchGroups()) + " group" +
-                       (match->matchGroups() == 1 ? "" : "s") + ", the offset and the string" +
-                       (sig.params.back()->isObject() ? ", and the named groups" : ""));
+      checker_.diags_.error(fe->fn->params[sig.params.size()].loc,
+                            "'" + member->name + "' passes " + std::to_string(sig.params.size()) +
+                                " arguments: the match, " + std::to_string(match->matchGroups()) +
+                                " group" + (match->matchGroups() == 1 ? "" : "s") +
+                                ", the offset and the string" +
+                                (sig.params.back()->isObject() ? ", and the named groups" : ""));
     }
     // Checked all the same, as if it got strings there.
     while (sig.params.size() < fe->fn->params.size()) {
       sig.params.push_back(Type::string());
     }
-    replacement = sema_.callbackChecker().checkFunctionArg(replacement, sig, unsigned(sig.params.size()), member->name);
+    replacement = checker_.callbackChecker().checkFunctionArg(
+        replacement, sig, unsigned(sig.params.size()), member->name);
     return call;
   }
-  replacement = sema_.callbackChecker().checkFunctionArg(replacement, sig, unsigned(sig.params.size()), member->name);
+  replacement = checker_.callbackChecker().checkFunctionArg(
+      replacement, sig, unsigned(sig.params.size()), member->name);
   if (!replacement->type->isFunction()) {
     return call;
   }
   call->builtin = Builtin::StrReplaceRegexFn;
   call->type = Type::string();
-  sema_.flowChecker().calledFunction(); // the function may change anything
+  checker_.flowChecker().calledFunction(); // the function may change anything
 
   return call;
 }

@@ -1,14 +1,14 @@
 #include "compiler/check/types/literal_types/literal_types.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/conditional_types/conditional_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/union_check_helpers/union_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -43,7 +43,7 @@ const Type *literalPart(const Type *expected, UnionSlot slot) {
 
 } // namespace
 
-LiteralTypes::LiteralTypes(Sema &sema) : sema_(sema) {}
+LiteralTypes::LiteralTypes(Checker &checker) : checker_(checker) {}
 
 const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
   for (const Type *m : to->members()) {
@@ -101,7 +101,8 @@ const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned dept
   }
   // A conditional type that waits: what its branches expect.
   std::vector<const Type *> branches;
-  for (const Type *branch : sema_.conditionalTypes().conditionalBranches(expected->nonOptional())) {
+  for (const Type *branch :
+       checker_.conditionalTypes().conditionalBranches(expected->nonOptional())) {
     branches.push_back(literalExpectation(branch, depth + 1));
   }
 
@@ -200,7 +201,8 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
       }
       const Type *field = f->type->nonOptional();
       if (TypeRelations::isImplicitlyConvertible(tag, field) ||
-          (tag->literalBase()->isInt() && TypeRelations::isImplicitlyConvertible(tag->literalBase(), field))) {
+          (tag->literalBase()->isInt() &&
+           TypeRelations::isImplicitlyConvertible(tag->literalBase(), field))) {
         score +=
             isLiteralSet(field) || (field->isUnion() && field->slotPart(UnionSlot::Atom)) ? 1 : 0;
       } else if (isLiteralSet(field) || field->isUnion()) {
@@ -222,7 +224,7 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
   return ambiguous ? nullptr : best;
 }
 
-const Type *LiteralTypes::typeIn(const Sema::Flow &flow, const VarSymbol *var) const {
+const Type *LiteralTypes::typeIn(const Checker::Flow &flow, const VarSymbol *var) const {
   for (const auto &[narrowed, type] : flow.narrowed) {
     if (narrowed == var) {
       return type;

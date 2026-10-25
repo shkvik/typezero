@@ -8,15 +8,16 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-CallCycles::CallCycles(Sema &sema) : sema_(sema) {}
+CallCycles::CallCycles(Checker &checker) : checker_(checker) {}
 
-void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions,
-                      llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)> resolve) {
+void CallCycles::findCycles(
+    llvm::ArrayRef<FunctionDecl *> functions,
+    llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)> resolve) {
   // Tarjan's algorithm over the calls between functions without a return
   // type. A name that only looks like such a call (a variable with the same
   // name) costs a few more checks, nothing else.
@@ -24,7 +25,8 @@ void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions,
   llvm::StringMap<size_t> byName;
   llvm::DenseMap<const FunctionDecl *, size_t> byDecl;
   for (FunctionDecl *fn : functions) {
-    if (fn->sym && !fn->sym->ret && !sema_.inheritsReturn_.count(fn) && !sema_.returnSources_.count(fn)) {
+    if (fn->sym && !fn->sym->ret && !checker_.inheritsReturn_.count(fn) &&
+        !checker_.returnSources_.count(fn)) {
       byName[fn->name] = nodes.size();
       byDecl[fn] = nodes.size();
       nodes.push_back(fn);
@@ -93,9 +95,9 @@ void CallCycles::findCycles(llvm::ArrayRef<FunctionDecl *> functions,
       return; // not recursive
     }
     for (FuncSymbol *fn : cycle) {
-      sema_.cycleOf_[fn] = static_cast<unsigned>(sema_.cycles_.size());
+      checker_.cycleOf_[fn] = static_cast<unsigned>(checker_.cycles_.size());
     }
-    sema_.cycles_.push_back(std::move(cycle));
+    checker_.cycles_.push_back(std::move(cycle));
   };
   for (size_t v = 0; v < nodes.size(); ++v) {
     if (index[v] < 0) {

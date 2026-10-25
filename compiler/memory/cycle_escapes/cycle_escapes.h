@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/lower/memory/cycle_scanner/cycle_scanner.h"
+#include "compiler/memory/cycle_scanner/cycle_scanner.h"
 
 namespace tz {
 

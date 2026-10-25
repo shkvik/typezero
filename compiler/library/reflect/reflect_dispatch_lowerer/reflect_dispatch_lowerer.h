@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The tables through which reflection calls methods.
 class ReflectDispatchLowerer {
 public:
-  explicit ReflectDispatchLowerer(CodeGen &codegen);
+  explicit ReflectDispatchLowerer(Lowering &lowering);
 
   // The function value Reflect.get gives of a method of several variants:
   // of `type`, `(this: unknown, ...args: unknown[]) => unknown`, which chooses
@@ -18,7 +18,7 @@ public:
   llvm::Function *invokerFor(const Type *fnType);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::pair<const ClassDecl *, std::string>, llvm::Constant *> reflectDispatchers_;
   llvm::DenseMap<const Type *, llvm::Function *> invokers_;
 };

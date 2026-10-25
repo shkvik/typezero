@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The methods of Map and Set, Object.fromEntries and groupBy.
 class DictMethods {
 public:
-  explicit DictMethods(Sema &sema);
+  explicit DictMethods(Checker &checker);
 
   // The methods of Map and Set, whose receiver is checked.
   Expr *checkDictMethod(CallExpr *call, MemberExpr *member);
@@ -19,7 +19,7 @@ public:
   Expr *checkDictObjectCall(CallExpr *call, llvm::StringRef fn);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

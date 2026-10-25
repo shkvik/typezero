@@ -4,7 +4,7 @@
 
 namespace tz {
 
-// `/pattern/flags`. Sema compiles it (docs/regex.md): the program, a
+// `/pattern/flags`. Checker compiles it (docs/regex.md): the program, a
 // constant in the executable, says what its groups are.
 class RegexLitExpr : public Expr {
 public:
@@ -18,7 +18,7 @@ public:
   // The length of the literal in the source, from loc(); 0 for one that
   // `new RegExp("...")` stands for.
   size_t written = 0;
-  // Set by Sema (see runtime/library/regex/regex/regex.h); empty after an
+  // Set by Checker (see runtime/library/regex/regex/regex.h); empty after an
   // error.
   std::vector<uint32_t> program;
 };

@@ -2,7 +2,12 @@
 // text string.c hands them, x.toFixed(digits), and the shortest digits of a
 // double, which String(x) writes.
 
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/number/number.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

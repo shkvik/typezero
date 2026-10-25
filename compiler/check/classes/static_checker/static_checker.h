@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Static members and static calls.
 class StaticChecker {
 public:
-  explicit StaticChecker(Sema &sema);
+  explicit StaticChecker(Checker &checker);
 
   // `C.x` and `C.m`: static fields are globals, static methods functions.
   Expr *checkStaticMember(MemberExpr *member, ClassDecl *cls, const Type *expected);
@@ -17,7 +17,7 @@ public:
                              const Type *expected = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

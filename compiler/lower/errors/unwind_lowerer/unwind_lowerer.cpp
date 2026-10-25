@@ -1,8 +1,8 @@
 #include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/async/async_lowerer/async_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -12,20 +12,20 @@
 #include <map>
 #include <optional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
 
-UnwindLowerer::UnwindLowerer(CodeGen &codegen) : codegen_(codegen) {}
+UnwindLowerer::UnwindLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 // As V8 names them: `f`, `Point.length`, `new Point`; nothing for top-level
 // code and a function without a name.
 std::string UnwindLowerer::frameFunctionName() const {
-  const FunctionDecl *fn = codegen_.currentFn_;
+  const FunctionDecl *fn = lowering_.currentFn_;
   if (!fn) {
     return "";
   }
@@ -40,7 +40,7 @@ std::string UnwindLowerer::frameFunctionName() const {
 }
 
 // { ptr function, i32 length, i32 line, ptr file, i32 length, i32 column }:
-// TzFrame in runtime/core/tzrt/tzrt.h.
+// TzFrame in runtime/core/error/error.h.
 llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::string *name) {
   std::string function = name ? *name : frameFunctionName();
   auto key = std::make_pair(function, loc.getPointer());
@@ -49,10 +49,10 @@ llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::strin
   }
   std::string file;
   unsigned line = 0, column = 0;
-  if (codegen_.sourceMgr_ && loc.isValid()) {
-    if (unsigned buffer = codegen_.sourceMgr_->FindBufferContainingLoc(loc)) {
-      std::tie(line, column) = codegen_.sourceMgr_->getLineAndColumn(loc, buffer);
-      llvm::StringRef id = codegen_.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
+  if (lowering_.sourceMgr_ && loc.isValid()) {
+    if (unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc)) {
+      std::tie(line, column) = lowering_.sourceMgr_->getLineAndColumn(loc, buffer);
+      llvm::StringRef id = lowering_.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
       // The full path, as Node shows it.
       auto [it, inserted] = filePaths_.try_emplace(id);
       // A built-in module written in tz is named as node names its own,
@@ -69,13 +69,15 @@ llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::strin
       file = it->second;
     }
   }
-  llvm::Type *ptr = codegen_.builder_.getPtrTy(), *i32 = codegen_.builder_.getInt32Ty();
-  auto *type = llvm::StructType::get(codegen_.ctx_, {ptr, i32, i32, ptr, i32, i32});
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  auto *type = llvm::StructType::get(lowering_.ctx_, {ptr, i32, i32, ptr, i32, i32});
   llvm::Constant *init = llvm::ConstantStruct::get(
-      type, {codegen_.stringLowerer().utf8Constant(function), codegen_.builder_.getInt32(uint32_t(function.size())),
-             codegen_.builder_.getInt32(line), codegen_.stringLowerer().utf8Constant(file), codegen_.builder_.getInt32(uint32_t(file.size())),
-             codegen_.builder_.getInt32(column)});
-  auto *global = new llvm::GlobalVariable(*codegen_.module_, type, /*isConstant=*/true,
+      type,
+      {lowering_.stringLowerer().utf8Constant(function),
+       lowering_.builder_.getInt32(uint32_t(function.size())), lowering_.builder_.getInt32(line),
+       lowering_.stringLowerer().utf8Constant(file),
+       lowering_.builder_.getInt32(uint32_t(file.size())), lowering_.builder_.getInt32(column)});
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.frame");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   frames_[key] = global;
@@ -84,15 +86,15 @@ llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::strin
 }
 
 llvm::BasicBlock *UnwindLowerer::unwindTarget() {
-  assert(!codegen_.scopes_.empty() && "code that may throw runs in a scope");
+  assert(!lowering_.scopes_.empty() && "code that may throw runs in a scope");
 
-  return unwindBlock(codegen_.scopes_.size() - 1);
+  return unwindBlock(lowering_.scopes_.size() - 1);
 }
 
 llvm::BasicBlock *UnwindLowerer::unwindBlock(size_t i) {
-  CodeGen::Scope &scope = codegen_.scopes_[i];
+  Lowering::Scope &scope = lowering_.scopes_[i];
   if (!scope.unwind) {
-    scope.unwind = codegen_.functionFrame().newBlock("unwind");
+    scope.unwind = lowering_.functionFrame().newBlock("unwind");
   }
 
   return scope.unwind;
@@ -101,70 +103,70 @@ llvm::BasicBlock *UnwindLowerer::unwindBlock(size_t i) {
 // After scope `i`: the `catch` or `finally` of a `try` whose block (or
 // `catch`) it is, or the scope around it, or the way out of the function.
 llvm::BasicBlock *UnwindLowerer::outerUnwind(size_t i) {
-  for (CodeGen::TryContext &t : llvm::reverse(codegen_.tries_)) {
+  for (Lowering::TryContext &t : llvm::reverse(lowering_.tries_)) {
     if (t.scopeDepth != i) {
       continue;
     }
-    if (t.phase == CodeGen::TryContext::Phase::Block) {
+    if (t.phase == Lowering::TryContext::Phase::Block) {
       return t.handler ? t.handler : t.throwEntry;
     }
-    if (t.phase == CodeGen::TryContext::Phase::Handler && t.throwEntry) {
+    if (t.phase == Lowering::TryContext::Phase::Handler && t.throwEntry) {
       return t.throwEntry;
     }
   }
   if (i > 0) {
     return unwindBlock(i - 1);
   }
-  if (!codegen_.unwindExit_) {
-    codegen_.unwindExit_ = codegen_.functionFrame().newBlock("unwind.exit");
+  if (!lowering_.unwindExit_) {
+    lowering_.unwindExit_ = lowering_.functionFrame().newBlock("unwind.exit");
   }
 
-  return codegen_.unwindExit_;
+  return lowering_.unwindExit_;
 }
 
 void UnwindLowerer::finishScopeUnwind(size_t i) {
-  CodeGen::Scope &scope = codegen_.scopes_[i];
+  Lowering::Scope &scope = lowering_.scopes_[i];
   llvm::BasicBlock *unwind = std::exchange(scope.unwind, nullptr);
   if (!unwind) {
     return;
   }
-  llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
-  codegen_.function_->insert(codegen_.function_->end(), unwind);
-  codegen_.builder_.SetInsertPoint(unwind);
-  codegen_.functionFrame().emitScopeCleanup(scope);
-  codegen_.builder_.CreateBr(outerUnwind(i));
-  codegen_.builder_.restoreIP(point);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  lowering_.function_->insert(lowering_.function_->end(), unwind);
+  lowering_.builder_.SetInsertPoint(unwind);
+  lowering_.functionFrame().emitScopeCleanup(scope);
+  lowering_.builder_.CreateBr(outerUnwind(i));
+  lowering_.builder_.restoreIP(point);
 }
 
 // Out of the function: a generator is done, top-level code reports the
 // error, and anything else returns zero, which its caller drops.
 void UnwindLowerer::finishFunctionUnwind() {
-  llvm::BasicBlock *exit = std::exchange(codegen_.unwindExit_, nullptr);
+  llvm::BasicBlock *exit = std::exchange(lowering_.unwindExit_, nullptr);
   if (!exit) {
     return;
   }
-  llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
-  codegen_.function_->insert(codegen_.function_->end(), exit);
-  codegen_.builder_.SetInsertPoint(exit);
-  llvm::Type *ret = codegen_.function_->getReturnType();
-  if (codegen_.async_) {
-    codegen_.asyncLowerer().emitAsyncUnwind();
-  } else if (codegen_.coro_) {
-    codegen_.builder_.CreateBr(codegen_.coro_->finalBlock);
-  } else if (codegen_.function_->hasExternalLinkage()) { // main
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  lowering_.function_->insert(lowering_.function_->end(), exit);
+  lowering_.builder_.SetInsertPoint(exit);
+  llvm::Type *ret = lowering_.function_->getReturnType();
+  if (lowering_.async_) {
+    lowering_.asyncLowerer().emitAsyncUnwind();
+  } else if (lowering_.coro_) {
+    lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
+  } else if (lowering_.function_->hasExternalLinkage()) { // main
     // Node reports the error of an ES module a few turns of the microtask
     // queue later (runtime/core/async/async.c).
-    llvm::CallInst *call = codegen_.builder_.CreateCall(
-        codegen_.processLowerer().processFunction(codegen_.usesAsync_ && codegen_.esModule_ ? "tz_async_main_failed" : "tz_uncaught",
-                        codegen_.builder_.getVoidTy(), {}));
+    llvm::CallInst *call = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
+        lowering_.usesAsync_ && lowering_.esModule_ ? "tz_async_main_failed" : "tz_uncaught",
+        lowering_.builder_.getVoidTy(), {}));
     call->setDoesNotReturn();
-    codegen_.builder_.CreateUnreachable();
+    lowering_.builder_.CreateUnreachable();
   } else if (ret->isVoidTy()) {
-    codegen_.builder_.CreateRetVoid();
+    lowering_.builder_.CreateRetVoid();
   } else {
-    codegen_.builder_.CreateRet(llvm::Constant::getNullValue(ret));
+    lowering_.builder_.CreateRet(llvm::Constant::getNullValue(ret));
   }
-  codegen_.builder_.restoreIP(point);
+  lowering_.builder_.restoreIP(point);
 }
 
 } // namespace tz

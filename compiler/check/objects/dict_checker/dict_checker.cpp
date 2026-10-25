@@ -1,21 +1,21 @@
 #include "compiler/check/objects/dict_checker/dict_checker.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
+#include "compiler/check/objects/dict_check_helpers/dict_check_helpers.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
-#include "compiler/check/objects/dict_check_helpers/dict_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -41,16 +41,17 @@ const llvm::StringLiteral kSetMethods[] = {"add",          "has",          "dele
 
 } // namespace
 
-DictChecker::DictChecker(Sema &sema) : sema_(sema) {}
+DictChecker::DictChecker(Checker &checker) : checker_(checker) {}
 
 const Type *DictChecker::resolveDictType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
   if (name == "WeakRef") {
-    return sema_.weakRefChecker().resolveWeakRefType(ref);
+    return checker_.weakRefChecker().resolveWeakRefType(ref);
   }
   if (name == "WeakMap" || name == "WeakSet") {
-    sema_.diags_.error(ref.loc, "'" + name + "' is not supported yet; a '" + name.drop_front(4).str() +
-                              "' holds its keys, and frees them with itself");
+    checker_.diags_.error(ref.loc, "'" + name + "' is not supported yet; a '" +
+                                       name.drop_front(4).str() +
+                                       "' holds its keys, and frees them with itself");
     return Type::error();
   }
   bool record = name == "Record";
@@ -61,16 +62,17 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
   }
   size_t wanted = set ? 1 : 2;
   if (ref.kind != TypeRef::Kind::Generic || ref.args.size() != wanted) {
-    sema_.diags_.error(ref.loc,
-                 set   ? "'" + name + "' needs the type of its elements, e.g. '" + name + "<int>'"
+    checker_.diags_.error(
+        ref.loc, set   ? "'" + name + "' needs the type of its elements, e.g. '" + name + "<int>'"
                  : map ? "'" + name + "' needs the types of its keys and values, e.g. '" + name +
                              "<string, int>'"
                        : std::string("'Record' needs the types of its keys and values, "
                                      "e.g. 'Record<string, int>'"));
     return Type::error();
   }
-  const Type *key = sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
-  const Type *value = set ? Type::voidTy() : sema_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
+  const Type *key = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *value =
+      set ? Type::voidTy() : checker_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
   if (key->isError() || value->isError()) {
     return Type::error();
   }
@@ -96,15 +98,17 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
     }
     if (!key->isString()) {
       if (key->nonOptional()->isNumeric()) {
-        sema_.diags_.error(ref.args[0].loc,
-                     "the keys of a Record are strings: JavaScript would turn a number key into a "
-                     "string, so 'r[1]' and 'r[\"1\"]' would be one; for numbers use a Map, e.g. "
-                     "'Map<" +
-                         key->name() + ", " + value->name() + ">'");
+        checker_.diags_.error(
+            ref.args[0].loc,
+            "the keys of a Record are strings: JavaScript would turn a number key into a "
+            "string, so 'r[1]' and 'r[\"1\"]' would be one; for numbers use a Map, e.g. "
+            "'Map<" +
+                key->name() + ", " + value->name() + ">'");
       } else {
-        sema_.diags_.error(ref.args[0].loc, "the keys of a Record are strings, found '" + key->name() +
-                                          "'; for other keys use a Map, e.g. 'Map<" + key->name() +
-                                          ", " + value->name() + ">'");
+        checker_.diags_.error(ref.args[0].loc, "the keys of a Record are strings, found '" +
+                                                   key->name() +
+                                                   "'; for other keys use a Map, e.g. 'Map<" +
+                                                   key->name() + ", " + value->name() + ">'");
       }
       return Type::error();
     }
@@ -119,14 +123,16 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
 
 bool DictChecker::checkKeyType(const Type *type, llvm::SMLoc loc) {
   if (type->isUnknown()) {
-    sema_.diags_.error(loc, "an unknown cannot be a key: a key is found by its value, and what an "
-                      "unknown holds is known only when the program runs; use keys of one type, "
-                      "e.g. 'Map<string, unknown>'");
+    checker_.diags_.error(
+        loc, "an unknown cannot be a key: a key is found by its value, and what an "
+             "unknown holds is known only when the program runs; use keys of one type, "
+             "e.g. 'Map<string, unknown>'");
     return false;
   }
   if (type->nonOptional()->isResult()) {
-    sema_.diags_.error(loc, "a Result cannot be a key: Results are not compared, as in JavaScript each "
-                      "is an object of its own, equal to no other; use what it holds");
+    checker_.diags_.error(
+        loc, "a Result cannot be a key: Results are not compared, as in JavaScript each "
+             "is an object of its own, equal to no other; use what it holds");
     return false;
   }
 
@@ -134,10 +140,10 @@ bool DictChecker::checkKeyType(const Type *type, llvm::SMLoc loc) {
 }
 
 Expr *DictChecker::dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef name, Builtin builtin,
-                     std::vector<Expr *> args, const Type *type) {
-  auto *member = sema_.ctx_.make<MemberExpr>(loc, receiver, name);
+                            std::vector<Expr *> args, const Type *type) {
+  auto *member = checker_.ctx_.make<MemberExpr>(loc, receiver, name);
   member->type = type;
-  auto *call = sema_.ctx_.make<CallExpr>(loc, member, std::move(args));
+  auto *call = checker_.ctx_.make<CallExpr>(loc, member, std::move(args));
   call->builtin = builtin;
   call->type = type;
 
@@ -148,18 +154,19 @@ Expr *DictChecker::iterableOf(Expr *expr) {
   const Type *type = expr->type;
   // An object with `[Symbol.iterator]()` (sema_iterable.cpp); in generic
   // code, `xs: Iterable<int>` as some iterator of ints.
-  if (Expr *iterator = sema_.iterableChecker().userIterator(expr)) {
+  if (Expr *iterator = checker_.iterableChecker().userIterator(expr)) {
     return iterator;
   }
   if (type && type->isParam() && type->iterated()) {
-    return sema_.typeRelations().convert(expr, Type::iterator(type->iterated()));
+    return checker_.typeRelations().convert(expr, Type::iterator(type->iterated()));
   }
   // `args` of a list of types: some types.
   if (type && type->isListParam()) {
-    return sema_.typeRelations().convert(expr, Type::iterator(sema_.argListChecker().listElement(type)));
+    return checker_.typeRelations().convert(
+        expr, Type::iterator(checker_.argListChecker().listElement(type)));
   }
   if (type && type->intlKind() == IntlKind::Segments) {
-    return sema_.intlChecker().segmentsArray(expr);
+    return checker_.intlChecker().segmentsArray(expr);
   }
   if (!type || (!type->isMap() && !type->isSet())) {
     return expr;
@@ -174,7 +181,7 @@ Expr *DictChecker::iterableOf(Expr *expr) {
 }
 
 Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
-  auto *key = sema_.ctx_.make<StringLitExpr>(loc, toUtf16(name));
+  auto *key = checker_.ctx_.make<StringLitExpr>(loc, toUtf16(name));
   key->type = Type::string();
 
   return key;
@@ -182,17 +189,18 @@ Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
 
 // The key of a Record, `r[key]`: a string.
 Expr *DictChecker::checkRecordKey(Expr *key) {
-  key = sema_.exprChecker().checkExpr(key, Type::string());
+  key = checker_.exprChecker().checkExpr(key, Type::string());
   const Type *type = key->type;
   if (type->nonOptional()->isNumeric()) {
-    sema_.diags_.error(key->loc(), "the keys of a Record are strings, and JavaScript would turn this '" +
-                                 type->name() +
-                                 "' into one, so 1 and \"1\" would be one key; convert it, "
-                                 "'String(i)', or use a Map, whose keys may be numbers");
+    checker_.diags_.error(key->loc(),
+                          "the keys of a Record are strings, and JavaScript would turn this '" +
+                              type->name() +
+                              "' into one, so 1 and \"1\" would be one key; convert it, "
+                              "'String(i)', or use a Map, whose keys may be numbers");
     return key;
   }
 
-  return sema_.typeRelations().coerce(key, Type::string(), "the key");
+  return checker_.typeRelations().coerce(key, Type::string(), "the key");
 }
 
 Expr *DictChecker::checkDictMember(MemberExpr *member) {
@@ -212,15 +220,15 @@ Expr *DictChecker::checkDictMember(MemberExpr *member) {
   bool method = type->isMap() ? llvm::is_contained(kMapMethods, member->name)
                               : llvm::is_contained(kSetMethods, member->name);
   if (method) {
-    sema_.diags_.error(loc, "'" + text + "." + member->name + "' can only be called, e.g. '" + text +
-                          "." + member->name +
-                          "(...)'; pass an arrow that calls it where a function is "
-                          "expected");
+    checker_.diags_.error(loc, "'" + text + "." + member->name + "' can only be called, e.g. '" +
+                                   text + "." + member->name +
+                                   "(...)'; pass an arrow that calls it where a function is "
+                                   "expected");
   } else {
-    sema_.diags_.error(loc,
-                 "property '" + member->name + "' does not exist on type '" + type->name() + "'" +
-                     (member->name == "length" ? "; the number of entries is '" + text + ".size'"
-                                               : std::string()));
+    checker_.diags_.error(
+        loc, "property '" + member->name + "' does not exist on type '" + type->name() + "'" +
+                 (member->name == "length" ? "; the number of entries is '" + text + ".size'"
+                                           : std::string()));
   }
   member->type = Type::error();
 
@@ -234,16 +242,18 @@ Expr *DictChecker::checkDictIndex(IndexExpr *index) {
     return dictCall(index->loc(), index->object, "get", Builtin::MapGet, {key},
                     Type::optional(type->valueType()));
   }
-  index->index = sema_.exprChecker().checkExpr(index->index);
+  index->index = checker_.exprChecker().checkExpr(index->index);
   std::string text = dictText(index->object, type);
   if (type->isMap()) {
-    sema_.diags_.error(index->loc(), "'" + text +
-                                   "[key]' reads a property of the Map object in "
-                                   "JavaScript, not one of its entries; read an entry with '" +
-                                   text + ".get(key)'");
+    checker_.diags_.error(index->loc(),
+                          "'" + text +
+                              "[key]' reads a property of the Map object in "
+                              "JavaScript, not one of its entries; read an entry with '" +
+                              text + ".get(key)'");
   } else {
-    sema_.diags_.error(index->loc(), "a Set has no elements by position; check one with '" + text +
-                                   ".has(value)', or copy them into an array, '[..." + text + "]'");
+    checker_.diags_.error(index->loc(),
+                          "a Set has no elements by position; check one with '" + text +
+                              ".has(value)', or copy them into an array, '[..." + text + "]'");
   }
   index->type = Type::error();
 
@@ -259,19 +269,21 @@ const Type *DictChecker::checkDictTarget(Expr *target, bool compound) {
   std::string text = dictText(object, type);
   if (!type->isRecord()) {
     if (index) {
-      index->index = sema_.exprChecker().checkExpr(index->index);
+      index->index = checker_.exprChecker().checkExpr(index->index);
     }
     if (type->isMap()) {
-      sema_.diags_.error(target->loc(), "'" + text + (index ? "[key]" : "." + member->name.str()) +
-                                      " = ...' sets a property of the Map object in JavaScript, "
-                                      "not one of its entries; set an entry with '" +
-                                      text + ".set(key, value)'");
+      checker_.diags_.error(target->loc(),
+                            "'" + text + (index ? "[key]" : "." + member->name.str()) +
+                                " = ...' sets a property of the Map object in JavaScript, "
+                                "not one of its entries; set an entry with '" +
+                                text + ".set(key, value)'");
     } else if (member && member->name == "size") {
-      sema_.diags_.error(target->loc(), "the size of a Set cannot be assigned to; add elements with '" +
-                                      text + ".add(value)'");
+      checker_.diags_.error(target->loc(),
+                            "the size of a Set cannot be assigned to; add elements with '" + text +
+                                ".add(value)'");
     } else {
-      sema_.diags_.error(target->loc(),
-                   "a Set has no elements by position; add one with '" + text + ".add(value)'");
+      checker_.diags_.error(target->loc(), "a Set has no elements by position; add one with '" +
+                                               text + ".add(value)'");
     }
     return Type::error();
   }
@@ -285,10 +297,11 @@ const Type *DictChecker::checkDictTarget(Expr *target, bool compound) {
                            ? ", e.g. '" + key + " = (" + key + " ?? 0) + 1'"
                        : value->isString() ? ", e.g. '" + key + " = (" + key + " ?? \"\") + s'"
                                            : "";
-    sema_.diags_.error(target->loc(), "'" + key +
-                                    "' may be undefined, as a key may be missing: give it a "
-                                    "default with '??'" +
-                                    hint);
+    checker_.diags_.error(target->loc(),
+                          "'" + key +
+                              "' may be undefined, as a key may be missing: give it a "
+                              "default with '??'" +
+                              hint);
     return Type::error();
   }
   target->type = type->valueType();
@@ -314,42 +327,44 @@ Expr *DictChecker::recordAssign(AssignExpr *assign) {
 
 // `r[k] ??= v`: v is evaluated and stored only when r has no value at k.
 Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index) {
-  index->object = sema_.exprChecker().checkExpr(index->object);
+  index->object = checker_.exprChecker().checkExpr(index->object);
   const Type *type = index->object->type;
   if (!type->isRecord()) {
     return nullptr;
   }
   Expr *key = checkRecordKey(index->index);
   const Type *valueType = type->valueType();
-  Sema::Flow before = sema_.flow_;
-  Expr *value = sema_.exprChecker().checkExpr(assign->value, valueType);
-  sema_.flow_ = FlowChecker::join(before, sema_.flow_);
+  Checker::Flow before = checker_.flow_;
+  Expr *value = checker_.exprChecker().checkExpr(assign->value, valueType);
+  checker_.flow_ = FlowChecker::join(before, checker_.flow_);
   bool definite = !value->type->isOptional() && !value->type->isUndefined();
-  value = sema_.typeRelations().coerce(value, valueType);
+  value = checker_.typeRelations().coerce(value, valueType);
 
   return dictCall(assign->loc(), index->object, "set", Builtin::RecordNullishSet, {key, value},
                   definite ? valueType->nonOptional() : valueType);
 }
 
-Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr, llvm::StringRef name) {
+Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr,
+                                   llvm::StringRef name) {
   const Type *type = object->type;
   unary->type = Type::boolTy();
   if (!type->isRecord()) {
     std::string text = dictText(object, type);
     if (keyExpr) {
-      keyExpr = sema_.exprChecker().checkExpr(keyExpr);
+      keyExpr = checker_.exprChecker().checkExpr(keyExpr);
     }
-    sema_.diags_.error(unary->loc(), "'delete' removes a property of the " +
-                                   std::string(type->isMap() ? "Map" : "Set") +
-                                   " object in JavaScript, not an entry; remove one with '" + text +
-                                   ".delete(" + (type->isMap() ? "key" : "value") + ")'");
+    checker_.diags_.error(unary->loc(),
+                          "'delete' removes a property of the " +
+                              std::string(type->isMap() ? "Map" : "Set") +
+                              " object in JavaScript, not an entry; remove one with '" + text +
+                              ".delete(" + (type->isMap() ? "key" : "value") + ")'");
     return unary;
   }
   Expr *key = keyExpr ? checkRecordKey(keyExpr) : keyLiteral(unary->loc(), name);
   // As in JavaScript, `delete` is true even for a key that was not there.
-  auto *yes = sema_.ctx_.make<BoolLitExpr>(unary->loc(), true);
+  auto *yes = checker_.ctx_.make<BoolLitExpr>(unary->loc(), true);
   yes->type = Type::boolTy();
-  auto *seq = sema_.ctx_.make<SequenceExpr>(
+  auto *seq = checker_.ctx_.make<SequenceExpr>(
       unary->loc(), std::vector<Expr *>{dictCall(unary->loc(), object, "delete", Builtin::MapDelete,
                                                  {key}, Type::boolTy()),
                                         yes});
@@ -361,24 +376,26 @@ Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr
 Expr *DictChecker::checkDictIn(BinaryExpr *bin) {
   const Type *type = bin->rhs->type->nonOptional();
   if (bin->rhs->type->isOptional()) {
-    sema_.diags_.error(bin->rhs->loc(), "the dictionary may be undefined; check it first");
+    checker_.diags_.error(bin->rhs->loc(), "the dictionary may be undefined; check it first");
     return bin;
   }
   if (!type->isRecord()) {
     std::string text = dictText(bin->rhs, type);
-    sema_.diags_.error(bin->loc(), "'in' asks for a property of the " +
-                                 std::string(type->isMap() ? "Map" : "Set") +
-                                 " object in JavaScript, not for an entry; ask with '" + text +
-                                 ".has(" + (type->isMap() ? "key" : "value") + ")'");
+    checker_.diags_.error(bin->loc(), "'in' asks for a property of the " +
+                                          std::string(type->isMap() ? "Map" : "Set") +
+                                          " object in JavaScript, not for an entry; ask with '" +
+                                          text + ".has(" + (type->isMap() ? "key" : "value") +
+                                          ")'");
     return bin;
   }
   Expr *key = bin->lhs;
   if (key->type->nonOptional()->isNumeric()) {
-    sema_.diags_.error(key->loc(), "the keys of a Record are strings, and JavaScript would turn this '" +
-                                 key->type->name() + "' into one; convert it, 'String(i)'");
+    checker_.diags_.error(key->loc(),
+                          "the keys of a Record are strings, and JavaScript would turn this '" +
+                              key->type->name() + "' into one; convert it, 'String(i)'");
     return bin;
   }
-  key = sema_.typeRelations().coerce(key, Type::string(), "the key");
+  key = checker_.typeRelations().coerce(key, Type::string(), "the key");
 
   return dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
 }

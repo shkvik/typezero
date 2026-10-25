@@ -1,16 +1,16 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Coroutines: their frames, suspension and resumption.
 class CoroutineLowerer {
 public:
-  explicit CoroutineLowerer(CodeGen &codegen);
+  explicit CoroutineLowerer(Lowering &lowering);
 
-  CodeGen::EmitContext saveContext();
-  void restoreContext(const CodeGen::EmitContext &context);
+  Lowering::EmitContext saveContext();
+  void restoreContext(const Lowering::EmitContext &context);
   // Resumes the iterator `it`: true if it gave a value, which is in `out`.
   llvm::Value *emitResume(llvm::Value *it, llvm::Value *out, llvm::Value *in, llvm::Value *ret);
   // `promise`, if given, is the type of a promise that holds more than
@@ -25,7 +25,7 @@ public:
   llvm::Function *coroIntrinsic(llvm::Intrinsic::ID id, llvm::ArrayRef<llvm::Type *> types = {});
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

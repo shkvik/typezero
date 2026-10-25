@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Classes: their fields and methods, the variants of overloaded methods.
 class ClassDeclarer {
 public:
-  explicit ClassDeclarer(Sema &sema);
+  explicit ClassDeclarer(Checker &checker);
 
   // Classes (sema_class.cpp). A class is a type that is only itself; its
   // methods are functions that take the object as `this`. Classes are
@@ -37,7 +37,7 @@ public:
                                                   bool isStatic);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   llvm::SmallPtrSet<const ClassDecl *, 2> completing_;
 };
 

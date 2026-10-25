@@ -9,29 +9,29 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-ConsoleChecker::ConsoleChecker(Sema &sema) : sema_(sema) {}
+ConsoleChecker::ConsoleChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
   call->builtin = Builtin::ConsoleLog;
   call->type = Type::voidTy();
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
     if (arg->type->isVoid()) {
-      sema_.diags_.error(arg->loc(), "an expression of type 'void' cannot be printed");
+      checker_.diags_.error(arg->loc(), "an expression of type 'void' cannot be printed");
     }
     // `console.log(...xs)`: each element as an argument of its own; in
     // generic code, `...args` of a list of types.
     const Type *type = arg->type;
     if (call->spreads(i) && !type->isArray() && !type->isListParam() && !spreadsLists(type) &&
         !type->isError()) {
-      sema_.diags_.error(arg->loc(),
-                   "only an array can be spread into console.log, found '" + type->name() + "'");
+      checker_.diags_.error(arg->loc(), "only an array can be spread into console.log, found '" +
+                                            type->name() + "'");
     }
   }
 
@@ -39,7 +39,7 @@ Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
 }
 
 Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
-  if (!sema_.callChecker().isGlobalName(member->object, "console")) {
+  if (!checker_.callChecker().isGlobalName(member->object, "console")) {
     return nullptr;
   }
   // info and debug print to stdout, as log does; error and warn the same
@@ -52,11 +52,11 @@ Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
     }
     return call;
   }
-  sema_.diags_.error(member->loc(), "'console." + member->name +
-                                        "' is not supported yet; only 'console.log', 'info', "
-                                        "'debug', 'error' and 'warn' are");
+  checker_.diags_.error(member->loc(), "'console." + member->name +
+                                           "' is not supported yet; only 'console.log', 'info', "
+                                           "'debug', 'error' and 'warn' are");
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;

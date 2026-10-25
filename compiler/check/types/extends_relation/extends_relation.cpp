@@ -1,10 +1,10 @@
 #include "compiler/check/types/extends_relation/extends_relation.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/types/template_types/template_types.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/check/types/conditional_check_helpers/conditional_check_helpers.h"
+#include "compiler/check/types/template_types/template_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/unknown_checker/unknown_checker.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -12,8 +12,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -30,9 +30,10 @@ std::vector<const Type *> distributed(const Type *type) {
 
 } // namespace
 
-ExtendsRelation::ExtendsRelation(Sema &sema) : sema_(sema) {}
+ExtendsRelation::ExtendsRelation(Checker &checker) : checker_(checker) {}
 
-bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, Sema::InferMatch *inference) {
+bool ExtendsRelation::extendsType(const Type *type, const Type *pattern,
+                                  Checker::InferMatch *inference) {
   // `infer U`: what stands in its place, which must meet its constraint.
   if (inference) {
     auto found = llvm::find(inference->params, pattern);
@@ -80,8 +81,8 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, Sema::I
   }
   // Strings and their patterns.
   if (pattern->typeOp() == TypeOp::Template) {
-    return type->isStringLiteral() &&
-           sema_.templateTypes().matchTemplate(type->literalText(), pattern->operands(), inference);
+    return type->isStringLiteral() && checker_.templateTypes().matchTemplate(
+                                          type->literalText(), pattern->operands(), inference);
   }
   if (pattern->isPattern()) {
     return type->isStringLiteral() && matchesPattern(type->literalText(), pattern);
@@ -139,10 +140,12 @@ bool ExtendsRelation::extendsType(const Type *type, const Type *pattern, Sema::I
   }
 
   // Numbers and the other values: as they convert, `int extends number`.
-  return !pattern->isObject() && !type->isObject() && TypeRelations::isImplicitlyConvertible(type, pattern);
+  return !pattern->isObject() && !type->isObject() &&
+         TypeRelations::isImplicitlyConvertible(type, pattern);
 }
 
-bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern, Sema::InferMatch *inference) {
+bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern,
+                                   Checker::InferMatch *inference) {
   std::vector<const Type *> mine, theirs;
   for (const Field &f : type->fields()) {
     mine.push_back(f.type);
@@ -207,7 +210,8 @@ bool ExtendsRelation::extendsTuple(const Type *type, const Type *pattern, Sema::
   return extendsType(Type::tuple(middle), theirs[spread], inference);
 }
 
-bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern, Sema::InferMatch *inference) {
+bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern,
+                                      Checker::InferMatch *inference) {
   // What the function returns; anything goes where void is expected.
   if (!pattern->ret()->isVoid() && !extendsType(type->ret(), pattern->ret(), inference)) {
     return false;
@@ -269,7 +273,8 @@ bool ExtendsRelation::extendsFunction(const Type *type, const Type *pattern, Sem
   return true;
 }
 
-bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern, Sema::InferMatch *inference) {
+bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
+                                    Checker::InferMatch *inference) {
   if (type->isSubtypeOf(pattern)) {
     return true;
   }
@@ -308,16 +313,17 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern, Sema:
   // a built-in module, `status` of a Response) one of what it gives.
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (cls) {
-    sema_.classDeclarer().completeClass(cls);
+    checker_.classDeclarer().completeClass(cls);
   }
   for (const Field &f : pattern->fields()) {
     const Type *own = nullptr;
     if (const Field *have = type->field(f.name)) {
       own = have->type;
     } else if (cls) {
-      if (std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, f.name, /*isStatic=*/false);
+      if (std::vector<FunctionDecl *> methods =
+              ClassDeclarer::methodsNamed(cls, f.name, /*isStatic=*/false);
           !methods.empty() && methods.back()->sym && methods.back()->typeParams.empty()) {
-        own = sema_.returnInferrer().functionType(methods.back()->sym);
+        own = checker_.returnInferrer().functionType(methods.back()->sym);
         if (methods.back()->accessor == FunctionDecl::Accessor::Getter) {
           own = own->ret();
         } else if (methods.back()->accessor == FunctionDecl::Accessor::Setter) {

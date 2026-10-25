@@ -1,15 +1,15 @@
 #include "compiler/library/result/result_types/result_types.h"
 #include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -45,15 +45,16 @@ llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::String
 
 } // namespace
 
-ResultTypes::ResultTypes(Sema &sema) : sema_(sema) {}
+ResultTypes::ResultTypes(Checker &checker) : checker_(checker) {}
 
 llvm::StringRef ResultTypes::neverthrowName(llvm::StringRef name) const {
-  Sema::ScopeEntry entry = sema_.scopes().lookup(name);
+  Checker::ScopeEntry entry = checker_.scopes().lookup(name);
   if (entry.var || entry.func || entry.enumDecl || entry.cls) {
     return {};
   }
-  if (sema_.module_) {
-    const llvm::StringMap<llvm::StringRef> &imported = sema_.moduleStates_[sema_.module_->order].neverthrow;
+  if (checker_.module_) {
+    const llvm::StringMap<llvm::StringRef> &imported =
+        checker_.moduleStates_[checker_.module_->order].neverthrow;
     if (auto found = imported.find(name); found != imported.end()) {
       return found->second;
     }
@@ -63,11 +64,12 @@ llvm::StringRef ResultTypes::neverthrowName(llvm::StringRef name) const {
 }
 
 llvm::StringRef ResultTypes::neverthrowTypeName(llvm::StringRef name) const {
-  if (sema_.typeDeclarer().lookupType(name)) {
+  if (checker_.typeDeclarer().lookupType(name)) {
     return {};
   }
-  if (sema_.module_) {
-    const llvm::StringMap<llvm::StringRef> &imported = sema_.moduleStates_[sema_.module_->order].neverthrow;
+  if (checker_.module_) {
+    const llvm::StringMap<llvm::StringRef> &imported =
+        checker_.moduleStates_[checker_.module_->order].neverthrow;
     if (auto found = imported.find(name); found != imported.end()) {
       return findName(kResultTypes, found->second);
     }
@@ -77,34 +79,34 @@ llvm::StringRef ResultTypes::neverthrowTypeName(llvm::StringRef name) const {
 }
 
 void ResultTypes::importNeverthrow(Module *module, const ImportDecl &decl) {
-  Sema::ModuleState &here = sema_.state(module);
+  Checker::ModuleState &here = checker_.state(module);
   for (const ModuleName &name : decl.names) {
     llvm::StringRef known = findName(kNeverthrowNames, name.name);
     if (known.empty()) {
-      sema_.diags_.error(name.loc, "'neverthrow' has no export named '" + name.name + "'");
+      checker_.diags_.error(name.loc, "'neverthrow' has no export named '" + name.name + "'");
       continue;
     }
     if (auto own = here.declared.find(name.as); own != here.declared.end()) {
-      sema_.diags_.error(name.asLoc, "import '" + name.as + "' conflicts with the declaration of '" +
-                                   name.as +
-                                   "' in this file; import it under another name, e.g. "
-                                   "'import { " +
-                                   name.name + " as " + name.name + "2 } from \"neverthrow\"'");
-      sema_.diags_.note(own->second, "'" + name.as + "' is declared here");
+      checker_.diags_.error(
+          name.asLoc, "import '" + name.as + "' conflicts with the declaration of '" + name.as +
+                          "' in this file; import it under another name, e.g. "
+                          "'import { " +
+                          name.name + " as " + name.name + "2 } from \"neverthrow\"'");
+      checker_.diags_.note(own->second, "'" + name.as + "' is declared here");
       continue;
     }
     auto [it, inserted] = here.neverthrow.try_emplace(name.as, known);
     if (!inserted) {
-      sema_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
+      checker_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
     }
   }
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef name) {
   if (ref.args.size() != 2) {
-    sema_.diags_.error(ref.loc, "'" + ref.name +
-                              "' takes two type arguments, the value and the error, e.g. '" +
-                              ref.name + "<int, string>'");
+    checker_.diags_.error(
+        ref.loc, "'" + ref.name + "' takes two type arguments, the value and the error, e.g. '" +
+                     ref.name + "<int, string>'");
     return Type::error();
   }
   auto half = [&](const TypeRef &arg) -> const Type * {
@@ -112,7 +114,8 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
       return Type::never();
     }
 
-    return sema_.typeResolver().resolveTypeInner(arg); // void and undefined are halves without a value
+    return checker_.typeResolver().resolveTypeInner(
+        arg); // void and undefined are halves without a value
   };
   const Type *value = half(ref.args[0]), *error = half(ref.args[1]);
   // An Ok is a Result that cannot be an Err, and an Err one that cannot be an
@@ -149,12 +152,12 @@ const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) {
 void ResultTypes::neverOperands(BinaryExpr *bin) {
   const Type *l = bin->lhs->type, *r = bin->rhs->type;
   if (l->isNever() && r->isNever()) {
-    bin->lhs = sema_.typeRelations().convert(bin->lhs, Type::doubleTy());
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, Type::doubleTy());
+    bin->lhs = checker_.typeRelations().convert(bin->lhs, Type::doubleTy());
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, Type::doubleTy());
   } else if (l->isNever() && !r->isError() && !r->isVoid()) {
-    bin->lhs = sema_.typeRelations().convert(bin->lhs, r);
+    bin->lhs = checker_.typeRelations().convert(bin->lhs, r);
   } else if (r->isNever() && !l->isError() && !l->isVoid()) {
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, l);
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
   }
 }
 

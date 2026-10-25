@@ -1,13 +1,11 @@
-#include "compiler/lower/memory/store_scanner/store_scanner.h"
+#include "compiler/memory/store_scanner/store_scanner.h"
+#include "compiler/memory/store_calls/store_calls.h"
+#include "compiler/memory/store_exprs/store_exprs.h"
+#include "compiler/memory/store_stmts/store_stmts.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <functional>
 #include <map>
 #include <set>
-#include "compiler/lower/memory/store_stmts/store_stmts.h"
-#include "compiler/lower/memory/store_exprs/store_exprs.h"
-#include "compiler/lower/memory/store_calls/store_calls.h"
 
 namespace tz {
 
@@ -16,10 +14,6 @@ using llvm::cast;
 using llvm::dyn_cast;
 
 using llvm::isa;
-
-using llvm::BasicBlock;
-
-using llvm::Value;
 
 void forEachOverride(const FunctionDecl *fn, llvm::function_ref<void(const FunctionDecl *)> visit) {
   if (!fn->isAbstract) {

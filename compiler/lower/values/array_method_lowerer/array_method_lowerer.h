@@ -1,20 +1,20 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The methods of arrays.
 class ArrayMethodLowerer {
 public:
-  explicit ArrayMethodLowerer(CodeGen &codegen);
+  explicit ArrayMethodLowerer(Lowering &lowering);
 
   llvm::Value *emitArrayMethod(CallExpr *call);
   // A value converted to a string by the runtime, for arrays and optionals.
   llvm::Value *emitValueToString(llvm::Value *value, const Type *type);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

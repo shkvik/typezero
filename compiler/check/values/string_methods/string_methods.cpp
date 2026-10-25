@@ -1,7 +1,7 @@
 #include "compiler/check/values/string_methods/string_methods.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/concat_checker/concat_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/concat_checker/concat_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/library/regex/string_regex_checker/string_regex_checker.h"
@@ -10,15 +10,15 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-StringMethods::StringMethods(Sema &sema) : sema_(sema) {}
+StringMethods::StringMethods(Checker &checker) : checker_(checker) {}
 
 Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
-  if (Expr *regex = sema_.stringRegexChecker().checkStringRegexMethod(call, member)) {
+  if (Expr *regex = checker_.stringRegexChecker().checkStringRegexMethod(call, member)) {
     return regex;
   }
   struct Method {
@@ -65,13 +65,15 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
     }
   }
   if (!method) {
-    sema_.diags_.error(member->loc(), "property '" + member->name + "' does not exist on type 'string'");
+    checker_.diags_.error(member->loc(),
+                          "property '" + member->name + "' does not exist on type 'string'");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), method->minArgs, method->maxArgs)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->minArgs,
+                                             method->maxArgs)) {
     return call;
   }
 
@@ -80,13 +82,13 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
     Expr *&arg = call->args[i];
     switch (method->args[std::min(i, kinds - 1)]) {
     case 's':
-      arg = sema_.argumentChecker().checkArg(arg, Type::string());
+      arg = checker_.argumentChecker().checkArg(arg, Type::string());
       break;
     case 'p':
-      arg = sema_.memberChecker().checkPosition(arg);
+      arg = checker_.memberChecker().checkPosition(arg);
       break;
     default:
-      arg = sema_.concatChecker().toStringOperand(sema_.exprChecker().checkExpr(arg));
+      arg = checker_.concatChecker().toStringOperand(checker_.exprChecker().checkExpr(arg));
       break;
     }
   }
@@ -95,14 +97,16 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
 
   if (method->builtin == Builtin::StrCharCodeAt) {
     // Out of range, JavaScript returns NaN, which only a double can hold.
-    call->mayBeOutOfRange = !sema_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
+    call->mayBeOutOfRange =
+        !checker_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
     call->type = call->mayBeOutOfRange ? Type::doubleTy() : Type::intTy();
   } else if (method->builtin == Builtin::StrCodePointAt) {
     // Out of range, JavaScript returns undefined.
-    call->mayBeOutOfRange = !sema_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
+    call->mayBeOutOfRange =
+        !checker_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrAt) {
-    call->mayBeOutOfRange = !sema_.indexProofs().provesAtInBounds(member->object, call->args[0]);
+    call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::string()) : Type::string();
   }
 

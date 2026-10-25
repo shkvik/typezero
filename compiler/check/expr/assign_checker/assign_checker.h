@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Assignments: plain, compound and logical, ++ and --.
 class AssignChecker {
 public:
-  explicit AssignChecker(Sema &sema);
+  explicit AssignChecker(Checker &checker);
 
   Expr *checkAssign(AssignExpr *assign);
   Expr *checkLogicalAssign(AssignExpr *assign);
@@ -17,7 +17,7 @@ public:
   Expr *checkFieldLogicalAssign(AssignExpr *assign);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   bool logicalAssign_ = false; // the next assignment checked is that of `o.x ??= v`
 };
 

@@ -8,10 +8,10 @@
 #include <map>
 #include <optional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -141,9 +141,8 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     scanner_.expr(member->object, caught);
   }
   // asyncMap and asyncAndThen of a Result call their function now.
-  bool ofResult =
-      (builtin == Builtin::ResultAsyncMap || builtin == Builtin::ResultAsyncAndThen) && member &&
-      member->object->type && member->object->type->isResult();
+  bool ofResult = (builtin == Builtin::ResultAsyncMap || builtin == Builtin::ResultAsyncAndThen) &&
+                  member && member->object->type && member->object->type->isResult();
   bool callbacks = (builtin >= Builtin::ArrForEach && builtin <= Builtin::ArrSortWith) ||
                    isResultCallback(builtin) || isIteratorSink(builtin) ||
                    (isIteratorStage(builtin) && c->fused) ||
@@ -266,7 +265,8 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::MetaDefine:
     // A key `design:*` that the program wrote, which only the compiler
     // writes (runtime/library/reflect/meta/meta.c).
-    if (!c->metaKey && !c->designRecord && !c->args.empty() && !llvm::isa<StringLitExpr>(c->args[0])) {
+    if (!c->metaKey && !c->designRecord && !c->args.empty() &&
+        !llvm::isa<StringLitExpr>(c->args[0])) {
       intrinsic(caught);
     }
     break;

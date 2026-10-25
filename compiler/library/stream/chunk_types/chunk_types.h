@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The types of the chunks of streams, from their classes and hooks.
 class ChunkTypes {
 public:
-  explicit ChunkTypes(Sema &sema);
+  explicit ChunkTypes(Checker &checker);
 
   // Streams (sema_stream.cpp, docs/streams.md): node:stream, which tz has
   // written in tz (library/stream/stream.tz), and what the compiler adds to it.
@@ -15,7 +15,7 @@ public:
   // A class of node:stream or one that extends it; the chunk types its
   // readable and writable sides have (null for a side it has not).
   bool isStreamClass(const ClassDecl *cls) const;
-  Sema::StreamChunks streamChunksOf(const ClassDecl *cls) const;
+  Checker::StreamChunks streamChunksOf(const ClassDecl *cls) const;
   // The parameters of the method of node:stream that a method of the
   // program's own stream class overrides by its name, a hook the stream
   // calls (`_read`, `_write`, `_transform`...); none for another method.
@@ -40,7 +40,7 @@ public:
   void noteStreamCallback(CallExpr *call, const VarSymbol *var);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Classes as values: typeof C, Constructor<T>, new of a class value, mixins.
 class ClassValueChecker {
 public:
-  explicit ClassValueChecker(Sema &sema);
+  explicit ClassValueChecker(Checker &checker);
 
   // `C.name` and the like of a class as a value, whose object is checked.
   Expr *checkClassRefMember(MemberExpr *member);
@@ -16,7 +16,7 @@ public:
   // of it makes a C, and its static members are C's. `Constructor<T>` is
   // some class whose objects are T, known only when the program runs: `new`
   // of it goes through the description of the class (see reflection). A
-  // class expression makes a class when Sema checks it, once for each copy
+  // class expression makes a class when Checker checks it, once for each copy
   // of a generic function that has it; such a function is a template, whose
   // body is checked only in its copies (see isTemplate).
   //
@@ -41,7 +41,7 @@ public:
   Expr *classValueAt(ClassDecl *cls, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

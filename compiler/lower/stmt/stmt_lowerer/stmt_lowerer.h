@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Which code a statement becomes; blocks, let, if and return.
 class StmtLowerer {
 public:
-  explicit StmtLowerer(CodeGen &codegen);
+  explicit StmtLowerer(Lowering &lowering);
 
   // Statements
   void emitStmt(Stmt *stmt);
@@ -28,7 +28,7 @@ public:
   static const CallExpr *returnedCall(const Expr *value);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

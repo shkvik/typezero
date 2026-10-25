@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Fields of objects, Object.keys and its kin, for...in.
 class ObjectChecker {
 public:
-  explicit ObjectChecker(Sema &sema);
+  explicit ObjectChecker(Checker &checker);
 
   // Object.keys, Object.values and Object.entries, and for dictionaries
   // Object.fromEntries and Object.groupBy.
@@ -25,7 +25,7 @@ public:
   std::string objectMismatch(const Type *from, const Type *to, bool conflict = false) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

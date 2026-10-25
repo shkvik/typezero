@@ -1,4 +1,5 @@
 #include "compiler/lower/errors/throw_scanner/throw_scanner.h"
+#include "compiler/lower/errors/throw_calls/throw_calls.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -7,7 +8,6 @@
 #include <functional>
 #include <map>
 #include <optional>
-#include "compiler/lower/errors/throw_calls/throw_calls.h"
 
 namespace tz {
 
@@ -77,7 +77,8 @@ const FunctionDecl *namedFunction(const Expr *expr) {
 }
 
 ThrowScanner::ThrowScanner(ThrowSummary &out) : out_(out) {
-  throwCallsPart_ = std::make_unique<ThrowCalls>(*this);}
+  throwCallsPart_ = std::make_unique<ThrowCalls>(*this);
+}
 
 void ThrowScanner::stmt(const Stmt *stmt, bool caught) {
   if (!stmt) {
@@ -226,8 +227,9 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     // A method as a value: through the method table, any that overrides it.
     if (member->method && member->type) {
       if (member->virtualCall) {
-        forEachImplementation(member->method->decl,
-                              [&](const FunctionDecl *fn) { throwCalls().value(member->type, fn); });
+        forEachImplementation(member->method->decl, [&](const FunctionDecl *fn) {
+          throwCalls().value(member->type, fn);
+        });
       } else {
         throwCalls().value(member->type, member->method->decl);
       }

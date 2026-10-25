@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Result of neverthrow, built in (docs/errors.md).
 class ResultChecker {
 public:
-  explicit ResultChecker(Sema &sema);
+  explicit ResultChecker(Checker &checker);
 
   // ok(v), err(e) and safeTry(...); null if `name` is none of them.
   Expr *checkResultCall(CallExpr *call, NameExpr *name, const Type *expected);
@@ -24,13 +24,13 @@ public:
   void checkDiscarded(const Expr *expr, bool callback = false, llvm::SMLoc at = {});
   // `r.isOk()` and `r.isErr()` of a Result variable: what holds when it is
   // true and when it is false.
-  void addResultFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const;
+  void addResultFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
   // Result.fromThrowable(f, toError?) and neverthrow's fromThrowable
   // (sema_result.cpp); `loc` is where the callee is.
   Expr *checkFromThrowable(CallExpr *call, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

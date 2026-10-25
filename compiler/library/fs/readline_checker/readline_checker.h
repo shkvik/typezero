@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // node:readline.
 class ReadlineChecker {
 public:
-  explicit ReadlineChecker(Sema &sema);
+  explicit ReadlineChecker(Checker &checker);
 
   Expr *checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -5,6 +5,12 @@
 // (122 KB) too.
 
 #include "runtime/library/net/net/net.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <string.h>
 #include "zlib.h"
 #include <brotli/decode.h>

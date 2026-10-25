@@ -6,35 +6,36 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-FsPromisesChecker::FsPromisesChecker(Sema &sema) : sema_(sema) {}
+FsPromisesChecker::FsPromisesChecker(Checker &checker) : checker_(checker) {}
 
 Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
-  sema_.file_->usesAsync = true;
+  checker_.file_->usesAsync = true;
   call->type = Type::error();
   if (fn == "constants") {
-    sema_.diags_.error(loc, "'constants' of 'node:fs/promises' is not a function");
+    checker_.diags_.error(loc, "'constants' of 'node:fs/promises' is not a function");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
   if (fn == "open") {
-    sema_.diags_.error(loc, "'open' of 'node:fs/promises' is not supported yet: there is no FileHandle; "
-                      "use 'readFile', 'writeFile' or 'appendFile', which read and write "
-                      "Buffers too");
+    checker_.diags_.error(
+        loc, "'open' of 'node:fs/promises' is not supported yet: there is no FileHandle; "
+             "use 'readFile', 'writeFile' or 'appendFile', which read and write "
+             "Buffers too");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
   {
-    llvm::SaveAndRestore<bool> async(sema_.fsAsync_, true);
-    sema_.fsChecker().checkFsCall(call, fn, loc);
+    llvm::SaveAndRestore<bool> async(checker_.fsAsync_, true);
+    checker_.fsChecker().checkFsCall(call, fn, loc);
   }
   if (call->type->isError()) {
     return call;
@@ -55,7 +56,7 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
   }
-  sema_.diags_.error(loc, "'" + fn + "' of 'node:fs/promises' is not supported yet");
+  checker_.diags_.error(loc, "'" + fn + "' of 'node:fs/promises' is not supported yet");
   call->type = Type::error();
 
   return call;

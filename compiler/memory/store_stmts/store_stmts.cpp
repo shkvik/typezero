@@ -1,8 +1,6 @@
-#include "compiler/lower/memory/store_stmts/store_stmts.h"
-#include "compiler/lower/memory/store_exprs/store_exprs.h"
+#include "compiler/memory/store_stmts/store_stmts.h"
+#include "compiler/memory/store_exprs/store_exprs.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <functional>
 #include <map>
 #include <set>
@@ -10,8 +8,6 @@
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
-using llvm::Value;
 
 namespace tz {
 

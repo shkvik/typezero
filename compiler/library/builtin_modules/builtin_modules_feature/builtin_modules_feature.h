@@ -10,10 +10,11 @@ class BuiltinModulesFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "builtin_modules"; }
 
-  Expr *checkAnyCall(Sema &sema, CallExpr *call, const Type *expected) const override;
-  Expr *checkMethodCall(Sema &sema, CallExpr *call, MemberExpr *member, const Type *expected) const override;
+  Expr *checkAnyCall(Checker &checker, CallExpr *call, const Type *expected) const override;
+  Expr *checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+                        const Type *expected) const override;
   bool lowers(Builtin builtin) const override;
-  llvm::Value *lowerCall(CodeGen &codegen, CallExpr *call) const override;
+  llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
 } // namespace tz

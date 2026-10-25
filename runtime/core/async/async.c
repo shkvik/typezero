@@ -25,7 +25,19 @@
 // jobs of the runtime take as many turns of the queue as V8's do, so that the
 // output interleaves as in Node.
 
+#include "runtime/core/async/async.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/io/io.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/publish/publish.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/events/signal/signal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,7 +166,7 @@ static const TzType *value_type(const TzPromise *p) {
 static void *value_of(const TzPromise *p) { return (char *)p + TZ_PROMISE_VALUE; }
 
 // A promise whose value or error may be a member of a group is one itself
-// (TZ_LAYOUT_GROUP, which CodeGen::promiseLayout sets): `resolve` of `new
+// (TZ_LAYOUT_GROUP, which Lowering::promiseLayout sets): `resolve` of `new
 // Promise`, whose environment is the promise, may be held inside the group
 // of what it settles the promise with, and a promise outside it would count
 // that from outside, so that neither could ever be freed.
@@ -1743,7 +1755,7 @@ static void fulfill_after(TzPromise *p, int32_t turns) {
 // in the queue, as AsyncGeneratorEnqueue says.
 enum { AGEN_START, AGEN_YIELD, AGEN_RUNNING, AGEN_RETURNING, AGEN_DONE };
 _Static_assert(offsetof(TzAsyncGen, reactor) == 40 && sizeof(TzAsyncGen) == 80,
-               "TzAsyncGen must match kAgenReactor and kAgenHeader of CodeGen");
+               "TzAsyncGen must match kAgenReactor and kAgenHeader of Lowering");
 
 static void agen_enqueue(TzAsyncGen *g, TzPromise *p, int32_t close) {
   TzAgenStep *s = (TzAgenStep *)tz_alloc(sizeof(TzAgenStep));

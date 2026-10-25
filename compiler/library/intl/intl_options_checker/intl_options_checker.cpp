@@ -1,7 +1,7 @@
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/whole_program/flows/flows.h"
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
+#include "compiler/whole_program/flows/flows.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -10,8 +10,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -137,7 +137,7 @@ bool isStringLike(const Type *type) {
 
 } // namespace
 
-IntlOptionsChecker::IntlOptionsChecker(Sema &sema) : sema_(sema) {}
+IntlOptionsChecker::IntlOptionsChecker(Checker &checker) : checker_(checker) {}
 
 // The locale and the options at args[from] and args[from + 1], both
 // optional. The locale is a string or undefined; the options an object
@@ -145,13 +145,13 @@ IntlOptionsChecker::IntlOptionsChecker(Sema &sema) : sema_(sema) {}
 // undefined. What JavaScript rejects with an exception and is written in the
 // code is an error. False after an error.
 bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind,
-                         llvm::StringRef what) {
+                                       llvm::StringRef what) {
   const IntlService *service = kind == IntlKind::None ? &kSupported : serviceOf(kind);
   bool ok = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
     std::optional<std::u16string> tag = literalText(locale);
-    locale = sema_.exprChecker().checkExpr(locale);
+    locale = checker_.exprChecker().checkExpr(locale);
     const Type *type = locale->type;
     if (type->isError()) {
       ok = false;
@@ -163,12 +163,13 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
       if (type->isArray()) {
         message += "; pass one language";
       }
-      sema_.diags_.error(locale->loc(), message);
+      checker_.diags_.error(locale->loc(), message);
       ok = false;
     } else if (tag && !isLanguageTag(utf8(*tag))) {
-      sema_.diags_.error(locale->loc(), "'" + utf8(*tag) +
-                                      "' is not a language tag, and JavaScript would throw a "
-                                      "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
+      checker_.diags_.error(locale->loc(),
+                            "'" + utf8(*tag) +
+                                "' is not a language tag, and JavaScript would throw a "
+                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
       ok = false;
     }
   }
@@ -176,26 +177,28 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     return ok;
   }
   Expr *&options = args[from + 1];
-  options = sema_.exprChecker().checkExpr(options);
+  options = checker_.exprChecker().checkExpr(options);
   const Type *type = options->type;
   if (type->isError()) {
     return false;
   }
   if (type->isUndefined()) {
     if (kind == IntlKind::DisplayNames) {
-      sema_.diags_.error(options->loc(), "Intl.DisplayNames needs the option 'type', e.g. '{ type: "
-                                   "\"region\" }', which JavaScript would throw a TypeError "
-                                   "without");
+      checker_.diags_.error(options->loc(),
+                            "Intl.DisplayNames needs the option 'type', e.g. '{ type: "
+                            "\"region\" }', which JavaScript would throw a TypeError "
+                            "without");
       return false;
     }
     return ok;
   }
   if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
       type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
-    sema_.diags_.error(options->loc(), what.str() +
-                                     " takes its options as an object, e.g. '{ style: \"percent\" "
-                                     "}', found '" +
-                                     type->name().str() + "'");
+    checker_.diags_.error(options->loc(),
+                          what.str() +
+                              " takes its options as an object, e.g. '{ style: \"percent\" "
+                              "}', found '" +
+                              type->name().str() + "'");
     return false;
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
@@ -224,7 +227,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   };
   auto report = [&](llvm::StringRef name, const std::string &message) {
     Expr *value = valueOf(name);
-    sema_.diags_.error(value ? value->loc() : options->loc(), message);
+    checker_.diags_.error(value ? value->loc() : options->loc(), message);
     ok = false;
   };
 

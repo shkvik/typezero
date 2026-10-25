@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Promises: their layout, new Promise, resolve and reject.
 class PromiseLowerer {
 public:
-  explicit PromiseLowerer(CodeGen &codegen);
+  explicit PromiseLowerer(Lowering &lowering);
 
   // The bytes the value of a Promise<value> takes, a multiple of 8.
   uint64_t promiseValueSize(const Type *value);
@@ -28,7 +28,7 @@ public:
   llvm::Constant *rejecterInfo();
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Constant *rejecterInfo_ = nullptr;
 };
 

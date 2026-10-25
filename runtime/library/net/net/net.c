@@ -29,6 +29,18 @@
 // has no libc resolver to rely on.
 
 #include "runtime/library/net/net/net.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/io/io.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/events/signal/signal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -292,7 +304,7 @@ double net_now(void) {
 }
 
 // What a call of TLS (`__tz_tls_*`) is in a program that tz built without
-// it (CodeGen::emitExternal): its fetch calls name only http:// URLs, which
+// it (Lowering::emitExternal): its fetch calls name only http:// URLs, which
 // redirected it to https://. Rejects `p`, or throws without one.
 void tz_net_no_tls(TzPromise *p, TzMaker make) {
   TZ_ORDERED();

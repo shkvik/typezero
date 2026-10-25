@@ -1,7 +1,7 @@
 #pragma once
 
-#include "compiler/program/ast/operators/operators.h"
 #include "compiler/program/ast/expr/expr.h"
+#include "compiler/program/ast/operators/operators.h"
 
 namespace tz {
 
@@ -15,7 +15,7 @@ public:
   Expr *lhs;
   Expr *rhs;
   // The source text of the whole expression (loc() is the operator), for
-  // hints that rewrite it. Empty for one Sema made.
+  // hints that rewrite it. Empty for one Checker made.
   llvm::StringRef source;
 };
 

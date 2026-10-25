@@ -11,12 +11,12 @@ struct VarDeclarator {
   llvm::SMLoc loc;
   std::optional<TypeRef> typeAnn;
   Expr *init = nullptr;
-  VarSymbol *sym = nullptr; // set by Sema
+  VarSymbol *sym = nullptr; // set by Checker
   // A hidden variable holding the array a pattern destructures (see Parser),
   // or with `objectPattern` the object.
   bool destructured = false;
   bool objectPattern = false;
-  // Set by Sema for `const f = genericFunction`: f is another name for the
+  // Set by Checker for `const f = genericFunction`: f is another name for the
   // function, not a variable, and sym stays null.
   bool alias = false;
   // An array pattern: how many elements it names, and whether it ends with

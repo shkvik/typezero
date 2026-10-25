@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // process and the clock.
 class ProcessLowerer {
 public:
-  explicit ProcessLowerer(CodeGen &codegen);
+  explicit ProcessLowerer(Lowering &lowering);
 
   // process, Date.now() and performance.now() (codegen_process.cpp).
   llvm::Value *emitProcessBuiltin(CallExpr *call);
@@ -17,7 +17,7 @@ public:
                                        llvm::ArrayRef<llvm::Type *> params);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

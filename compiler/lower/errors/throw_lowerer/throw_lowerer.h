@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // throw, the check after a call that may throw, and the check of the stack.
 class ThrowLowerer {
 public:
-  explicit ThrowLowerer(CodeGen &codegen);
+  explicit ThrowLowerer(Lowering &lowering);
 
   // A stack slot for the error in flight and the stack limit, the runtime's.
   llvm::GlobalVariable *thrownGlobal();
@@ -31,16 +31,16 @@ public:
   // At the start of a function that may recurse: RangeError if the stack is
   // too low.
   void emitStackCheck(llvm::SMLoc loc);
-  CodeGen::Held hold(llvm::Value *value, const Type *type, bool needed);
-  llvm::Value *take(CodeGen::Held &held);
-  void holdOperand(CodeGen::Operand &operand, bool needed);
-  void takeOperand(CodeGen::Operand &operand);
+  Lowering::Held hold(llvm::Value *value, const Type *type, bool needed);
+  llvm::Value *take(Lowering::Held &held);
+  void holdOperand(Lowering::Operand &operand, bool needed);
+  void takeOperand(Lowering::Operand &operand);
   // Evaluates `exprs` in order, owned; each managed one is held while one
   // after it that may throw runs.
   std::vector<llvm::Value *> emitHeldValues(llvm::ArrayRef<Expr *> exprs);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::GlobalVariable *thrown_ = nullptr; // tz_thread
 };
 

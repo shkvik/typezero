@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Arguments against the parameters they go to.
 class ArgumentChecker {
 public:
-  explicit ArgumentChecker(Sema &sema);
+  explicit ArgumentChecker(Checker &checker);
 
   // `checked` marks the arguments checked already (a generic call infers
   // its type arguments from them first, chooseVariant checks them to choose
@@ -20,7 +20,7 @@ public:
   bool checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, unsigned max);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

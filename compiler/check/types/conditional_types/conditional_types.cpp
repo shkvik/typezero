@@ -1,14 +1,14 @@
 #include "compiler/check/types/conditional_types/conditional_types.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/types/extends_relation/extends_relation.h"
-#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/check/top_level_checker/top_level_checker.h"
-#include "compiler/check/types/type_operators/type_operators.h"
 #include "compiler/check/types/conditional_check_helpers/conditional_check_helpers.h"
+#include "compiler/check/types/extends_relation/extends_relation.h"
+#include "compiler/check/types/type_operators/type_operators.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -16,14 +16,14 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
 namespace {
 
-// A name bound to a type, as a type parameter is (Sema::bindTypeParams),
+// A name bound to a type, as a type parameter is (Checker::bindTypeParams),
 // rather than declared.
 bool isBinding(const Stmt *decl) {
   auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(decl);
@@ -189,22 +189,24 @@ bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed
   return mentionsOtherParams(type, allowed, seen);
 }
 
-ConditionalTypes::ConditionalTypes(Sema &sema) : sema_(sema) {}
+ConditionalTypes::ConditionalTypes(Checker &checker) : checker_(checker) {}
 
 void ConditionalTypes::bindType(llvm::StringRef name, const Type *type, llvm::SMLoc loc) {
-  auto *alias = sema_.ctx_.make<TypeAliasDecl>(loc, name, TypeRef());
+  auto *alias = checker_.ctx_.make<TypeAliasDecl>(loc, name, TypeRef());
   alias->resolved = type;
-  sema_.typeScopes_.back()[name] = alias;
+  checker_.typeScopes_.back()[name] = alias;
 }
 
-const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) { return sema_.typeResolver().resolveTypeInner(ref); }
+const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
+  return checker_.typeResolver().resolveTypeInner(ref);
+}
 
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
-  bool tail = std::exchange(sema_.tailAllowed_, false);
+  bool tail = std::exchange(checker_.tailAllowed_, false);
   if (ref.args.size() != 4) {
     return Type::error(); // the parser reported it
   }
-  const Type *check = sema_.typeResolver().resolveTypeInner(ref.args[0]);
+  const Type *check = checker_.typeResolver().resolveTypeInner(ref.args[0]);
   if (check->isError()) {
     return check;
   }
@@ -214,7 +216,7 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   std::vector<bool> lists;
   collectInfers(ref.args[1], inferRefs, lists);
   std::vector<const Type *> infers;
-  sema_.typeScopes_.emplace_back();
+  checker_.typeScopes_.emplace_back();
   for (size_t i = 0; i < inferRefs.size(); ++i) {
     Type *param = Type::param(inferRefs[i]->name);
     if (lists[i]) {
@@ -227,17 +229,17 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     if (inferRefs[i]->args.empty()) {
       continue;
     }
-    const Type *constraint = sema_.typeResolver().resolveTypeInner(inferRefs[i]->args[0]);
+    const Type *constraint = checker_.typeResolver().resolveTypeInner(inferRefs[i]->args[0]);
     if (constraint->isError()) {
-      sema_.typeScopes_.pop_back();
+      checker_.typeScopes_.pop_back();
       return constraint;
     }
     const_cast<Type *>(infers[i])->setConstraint(constraint, {});
   }
-  ++sema_.extendsClause_;
-  const Type *pattern = sema_.typeResolver().resolveTypeInner(ref.args[1]);
-  --sema_.extendsClause_;
-  sema_.typeScopes_.pop_back();
+  ++checker_.extendsClause_;
+  const Type *pattern = checker_.typeResolver().resolveTypeInner(ref.args[1]);
+  --checker_.extendsClause_;
+  checker_.typeScopes_.pop_back();
   if (pattern->isError()) {
     return pattern;
   }
@@ -248,15 +250,16 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   // A type parameter that stands for a union gives the union of what each
   // of its members gives, as in TypeScript; the check of a type parameter
   // that stands for never gives never.
-  if (ref.args[0].kind == TypeRef::Kind::Name && isBinding(sema_.typeDeclarer().lookupType(ref.args[0].name))) {
+  if (ref.args[0].kind == TypeRef::Kind::Name &&
+      isBinding(checker_.typeDeclarer().lookupType(ref.args[0].name))) {
     std::vector<const Type *> members = distributed(check);
     if (members.size() != 1) {
       std::vector<const Type *> results;
       for (const Type *m : members) {
-        sema_.typeScopes_.emplace_back();
+        checker_.typeScopes_.emplace_back();
         bindType(ref.args[0].name, m, ref.loc);
         const Type *result = resolveConditional(ref);
-        sema_.typeScopes_.pop_back();
+        checker_.typeScopes_.pop_back();
         if (result->isError()) {
           return result;
         }
@@ -265,9 +268,9 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
       return results.empty() ? Type::never() : Type::unionOf(results);
     }
   }
-  Sema::InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
-  bool yes = sema_.extendsRelation().extendsType(check, pattern, &inference);
-  sema_.typeScopes_.emplace_back();
+  Checker::InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
+  bool yes = checker_.extendsRelation().extendsType(check, pattern, &inference);
+  checker_.typeScopes_.emplace_back();
   // What `infer` matched; one that matched nothing is its constraint, or
   // unknown.
   for (size_t i = 0; yes && i < infers.size(); ++i) {
@@ -280,10 +283,11 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   const TypeRef &branch = ref.args[yes ? 2 : 3];
   const Type *result = nullptr;
   if (tail && branch.kind == TypeRef::Kind::Conditional) {
-    sema_.tailAllowed_ = true;
-    result = sema_.typeResolver().resolveTypeInner(branch);
+    checker_.tailAllowed_ = true;
+    result = checker_.typeResolver().resolveTypeInner(branch);
   } else if (auto *alias = tail && branch.kind == TypeRef::Kind::Generic
-                               ? llvm::dyn_cast_or_null<TypeAliasDecl>(sema_.typeDeclarer().lookupType(branch.name))
+                               ? llvm::dyn_cast_or_null<TypeAliasDecl>(
+                                     checker_.typeDeclarer().lookupType(branch.name))
                                : nullptr;
              alias && !alias->typeParams.empty()) {
     // A tail call: instantiateAlias goes on with it.
@@ -291,22 +295,22 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
     for (const TypeRef &arg : branch.args) {
       args.push_back(resolveTypeArgument(arg));
       if (args.back()->isError()) {
-        sema_.typeScopes_.pop_back();
+        checker_.typeScopes_.pop_back();
 
         return args.back();
       }
     }
-    sema_.tailCall_ = Sema::TailCall{alias, std::move(args)};
+    checker_.tailCall_ = Checker::TailCall{alias, std::move(args)};
   } else {
-    result = sema_.typeResolver().resolveTypeInner(branch);
+    result = checker_.typeResolver().resolveTypeInner(branch);
   }
-  sema_.typeScopes_.pop_back();
+  checker_.typeScopes_.pop_back();
 
   return result;
 }
 
 const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
-  Sema::ConditionalInfo &info = conditionals_[&ref];
+  Checker::ConditionalInfo &info = conditionals_[&ref];
   if (!info.tag) {
     info.ref = &ref;
     // Named by its text, the spaces in it collapsed.
@@ -328,7 +332,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
     std::vector<llvm::StringRef> names;
     collectNames(ref, names);
     for (llvm::StringRef name : names) {
-      Stmt *decl = sema_.typeDeclarer().lookupType(name);
+      Stmt *decl = checker_.typeDeclarer().lookupType(name);
       if (!decl) {
         continue;
       }
@@ -341,7 +345,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
   }
   std::vector<const Type *> operands{info.tag};
   for (llvm::StringRef name : info.bound) {
-    auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(sema_.typeDeclarer().lookupType(name));
+    auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(checker_.typeDeclarer().lookupType(name));
     operands.push_back(alias && alias->resolved ? alias->resolved : Type::error());
   }
 
@@ -349,7 +353,7 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
 }
 
 const Type *ConditionalTypes::evalConditional(llvm::ArrayRef<const Type *> operands) {
-  const Sema::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
+  const Checker::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
   if (!info) {
     return Type::error();
   }
@@ -358,17 +362,17 @@ const Type *ConditionalTypes::evalConditional(llvm::ArrayRef<const Type *> opera
       return t;
     }
   }
-  sema_.typeScopes_.emplace_back();
+  checker_.typeScopes_.emplace_back();
   for (const auto &[name, decl] : info->decls) {
-    sema_.typeScopes_.back()[name] = decl;
+    checker_.typeScopes_.back()[name] = decl;
   }
   for (size_t i = 0; i < info->bound.size() && i + 1 < operands.size(); ++i) {
     bindType(info->bound[i], operands[i + 1], info->ref->loc);
   }
-  bool tail = std::exchange(sema_.tailAllowed_, false);
+  bool tail = std::exchange(checker_.tailAllowed_, false);
   const Type *result = resolveConditional(*info->ref);
-  sema_.tailAllowed_ = tail;
-  sema_.typeScopes_.pop_back();
+  checker_.tailAllowed_ = tail;
+  checker_.typeScopes_.pop_back();
 
   return result ? result : Type::error();
 }
@@ -378,13 +382,13 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
     return {};
   }
   llvm::ArrayRef<const Type *> operands = conditional->operands();
-  const Sema::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
+  const Checker::ConditionalInfo *info = conditionalTags_.lookup(operands[0]);
   if (!info) {
     return {};
   }
-  sema_.typeScopes_.emplace_back();
+  checker_.typeScopes_.emplace_back();
   for (const auto &[name, decl] : info->decls) {
-    sema_.typeScopes_.back()[name] = decl;
+    checker_.typeScopes_.back()[name] = decl;
   }
   for (size_t i = 0; i < info->bound.size() && i + 1 < operands.size(); ++i) {
     bindType(info->bound[i], operands[i + 1], info->ref->loc);
@@ -400,16 +404,16 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
     }
     bindType(inferRefs[i]->name, param, inferRefs[i]->loc);
   }
-  bool muted = sema_.diags_.setMuted(true);
+  bool muted = checker_.diags_.setMuted(true);
   std::vector<const Type *> branches;
   for (size_t i : {2, 3}) {
-    const Type *branch = sema_.typeResolver().resolveTypeInner(info->ref->args[i]);
+    const Type *branch = checker_.typeResolver().resolveTypeInner(info->ref->args[i]);
     if (branch && !branch->isError()) {
       branches.push_back(branch);
     }
   }
-  sema_.diags_.setMuted(muted);
-  sema_.typeScopes_.pop_back();
+  checker_.diags_.setMuted(muted);
+  checker_.typeScopes_.pop_back();
 
   return branches;
 }
@@ -424,7 +428,8 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
                         [&](const Type *m) { return fitsConditional(m, to, depth + 1); });
   }
   for (const Type *branch : conditionalBranches(to)) {
-    if (TypeRelations::isImplicitlyConvertible(from, branch) || fitsConditional(from, branch, depth + 1)) {
+    if (TypeRelations::isImplicitlyConvertible(from, branch) ||
+        fitsConditional(from, branch, depth + 1)) {
       return true;
     }
     // Or it fits for some types of the type parameters the branch mentions:
@@ -432,8 +437,8 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
     std::vector<const Type *> params;
     llvm::SmallPtrSet<const Type *, 8> seen;
     collectParams(branch, params, seen);
-    Sema::InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
-    if (!params.empty() && sema_.extendsRelation().extendsType(from, branch, &match)) {
+    Checker::InferMatch match{params, std::vector<const Type *>(params.size(), nullptr)};
+    if (!params.empty() && checker_.extendsRelation().extendsType(from, branch, &match)) {
       return true;
     }
   }
@@ -444,7 +449,7 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
 const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
   std::vector<const Type *> parts;
   for (const TypeRef &arg : ref.args) {
-    parts.push_back(sema_.typeResolver().resolveTypeInner(arg));
+    parts.push_back(checker_.typeResolver().resolveTypeInner(arg));
     if (parts.back()->isError()) {
       return parts.back();
     }
@@ -461,16 +466,18 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
       const Type *other = parts[1 - i];
       // `K & string`: what of K is a string, as `Extract<K, string>`.
       if (primitive(parts[i])) {
-        return sema_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Extract, {other, parts[i]}), {other, parts[i]});
+        return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Extract, {other, parts[i]}),
+                                                   {other, parts[i]});
       }
       // `T & {}`: T without undefined, as `NonNullable<T>`.
       if (emptyObject(parts[i])) {
-        return sema_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}), {other});
+        return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}),
+                                                   {other});
       }
     }
   }
-  sema_.diags_.error(ref.loc,
-               "intersection types are not supported: a value has exactly the fields of its one "
+  checker_.diags_.error(
+      ref.loc, "intersection types are not supported: a value has exactly the fields of its one "
                "type; of TypeScript's idioms with '&', 'K & string' (what of K is a string) and "
                "'T & {}' (T without undefined) work");
 
@@ -484,7 +491,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   // Each type parameter as its constraint, or unknown, as TypeScript
   // instantiates a generic signature here.
   auto erased = [&](FuncSymbol *fn) {
-    const Type *type = sema_.returnInferrer().functionType(fn);
+    const Type *type = checker_.returnInferrer().functionType(fn);
     std::vector<const Type *> args;
     for (const Type *p : fn->typeParams) {
       if (p->constraint()) {
@@ -498,10 +505,10 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
       }
     }
 
-    return sema_.typeParams().substitute(type, fn->typeParams, args);
+    return checker_.typeParams().substitute(type, fn->typeParams, args);
   };
   if (ref.names.size() == 1) {
-    Sema::ScopeEntry entry = sema_.topLevelChecker().lookupValue(ref.names.front());
+    Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(ref.names.front());
     if (entry.func && entry.func->isGeneric()) {
       return erased(entry.func);
     }
@@ -512,7 +519,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (ref.names.size() != 2) {
     return nullptr;
   }
-  VarSymbol *var = sema_.topLevelChecker().lookupValue(ref.names.front()).var;
+  VarSymbol *var = checker_.topLevelChecker().lookupValue(ref.names.front()).var;
   if (!var || !var->type) {
     return nullptr;
   }
@@ -524,8 +531,9 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (!cls || object->field(ref.names[1])) {
     return nullptr;
   }
-  sema_.classDeclarer().completeClass(cls);
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names[1], /*isStatic=*/false);
+  checker_.classDeclarer().completeClass(cls);
+  std::vector<FunctionDecl *> methods =
+      ClassDeclarer::methodsNamed(cls, ref.names[1], /*isStatic=*/false);
   if (methods.empty() || !methods.back()->sym) {
     return nullptr;
   }

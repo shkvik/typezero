@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // extends and implements: the bases of classes and the fields of interfaces.
 class ClassBases {
 public:
-  explicit ClassBases(Sema &sema);
+  explicit ClassBases(Checker &checker);
 
   // Inheritance and interfaces (sema_inherit.cpp). A class extends one class
   // and implements interfaces; an interface extends interfaces. Those are
@@ -30,7 +30,7 @@ public:
                                      const ClassDecl **owner = nullptr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

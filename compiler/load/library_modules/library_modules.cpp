@@ -1,5 +1,5 @@
 #include "compiler/load/library_modules/library_modules.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/module_resolver/module_resolver.h"
 #include "compiler/load/parser/parser.h"
@@ -99,37 +99,91 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"HkdfParams", "webcrypto.tz", "tz:webcrypto"},
 };
 
+// The modules whose code is in several files: the files after the first, read in this order as
+// one module with it, in one scope.
+struct ModuleParts {
+  llvm::StringLiteral file;
+  std::vector<llvm::StringLiteral> parts;
+};
+const ModuleParts kModuleParts[] = {
+    {"stream.tz",
+     {"stream_readable.tz", "stream_writable.tz", "stream_duplex.tz", "stream_pipeline.tz"}},
+};
+
+// The statements and names of a part, after those of the module.
+void appendPart(SourceFile &file, SourceFile &part) {
+  llvm::append_range(file.items, part.items);
+  llvm::append_range(file.imports, part.imports);
+  llvm::append_range(file.exports, part.exports);
+  for (const auto &name : part.fieldNames) {
+    file.fieldNames.insert(name.getKey());
+  }
+  for (auto &entry : part.stringConstants) {
+    llvm::append_range(file.stringConstants[entry.getKey()], entry.getValue());
+  }
+}
+
 } // namespace
 
 LibraryModules::LibraryModules(Loader &loader) : loader_(loader) {}
+
+std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
+                                                           llvm::StringRef name, llvm::SMLoc loc,
+                                                           std::string &fullPath,
+                                                           std::vector<unsigned> &buffers) {
+  std::string self = llvm::sys::fs::getMainExecutable(nullptr, (void *)(intptr_t)&loadProgram);
+  llvm::SmallString<256> path(path::parent_path(self));
+  path::append(path, "lib", file);
+  fullPath = std::string(path);
+  auto buffer = llvm::MemoryBuffer::getFile(path);
+  if (!buffer) {
+    loader_.diags_.error(loc, "cannot read '" + std::string(path) + "', the code of '" + name +
+                                  "' that tz has built in: " + buffer.getError().message() +
+                                  "; reinstall tz");
+    return std::nullopt;
+  }
+  // Errors and the places of stack traces name the module as node names
+  // its own, `node:events:12:5`, `tz:http:12:5`.
+  unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
+      llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
+  buffers.push_back(id);
+  llvm::StringRef text = loader_.sourceMgr_.getMemoryBuffer(id)->getBuffer();
+  Lexer lexer(text, loader_.diags_);
+
+  return Parser(lexer, loader_.ctx_, loader_.diags_, /*library=*/true).parseSourceFile();
+}
 
 Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name, llvm::SMLoc loc) {
   auto [it, inserted] = loader_.libraries_.try_emplace(name, nullptr);
   if (!inserted) {
     return it->second;
   }
-  std::string self = llvm::sys::fs::getMainExecutable(nullptr, (void *)(intptr_t)&loadProgram);
-  llvm::SmallString<256> path(path::parent_path(self));
-  path::append(path, "lib", file);
-  auto buffer = llvm::MemoryBuffer::getFile(path);
-  if (!buffer) {
-    loader_.diags_.error(loc, "cannot read '" + std::string(path) + "', the code of '" + name +
-                                  "' that tz has built in: " + buffer.getError().message() +
-                                  "; reinstall tz");
+  std::string path;
+  std::vector<unsigned> buffers;
+  std::optional<SourceFile> parsed = parseLibraryFile(file, name, loc, path, buffers);
+  if (!parsed) {
     return nullptr;
   }
-  // Errors and the places of stack traces name the module as node names
-  // its own, `node:events:12:5`, `tz:http:12:5`.
-  unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
-      llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
-  llvm::StringRef text = loader_.sourceMgr_.getMemoryBuffer(id)->getBuffer();
+  for (const ModuleParts &m : kModuleParts) {
+    if (m.file != file) {
+      continue;
+    }
+    for (llvm::StringRef part : m.parts) {
+      std::string partPath;
+      std::optional<SourceFile> rest = parseLibraryFile(part, name, loc, partPath, buffers);
+      if (!rest) {
+        return nullptr;
+      }
+      appendPart(*parsed, *rest);
+    }
+  }
   Module *module = loader_.ctx_.newModule();
-  module->path = std::string(path);
+  module->path = path;
   module->name = name.str();
   module->builtin = true;
-  Lexer lexer(text, loader_.diags_);
-  module->file = Parser(lexer, loader_.ctx_, loader_.diags_, /*library=*/true).parseSourceFile();
-  loader_.realPaths_[module] = std::string(path);
+  module->buffers = std::move(buffers);
+  module->file = std::move(*parsed);
+  loader_.realPaths_[module] = path;
   loader_.states_[module] = Loader::State::New;
   it->second = module;
 
@@ -140,7 +194,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
   // Where the file first names each, as an identifier of its code (not in
   // a comment or a string, nor a property after `.`): the tokens tell, and
   // the parser reported the syntax. `crypto.subtle` names the object of
-  // tz:webcrypto too, which Sema reads under a name of its own.
+  // tz:webcrypto too, which Checker reads under a name of its own.
   llvm::StringMap<const char *> mentions;
   const char *subtle = nullptr;
   bool muted = loader_.diags_.setMuted(true);
@@ -219,7 +273,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
       decl->names.push_back({global.name, loc, global.name, loc});
     }
   }
-  // `crypto.subtle`: the object of tz:webcrypto, which Sema reads under a
+  // `crypto.subtle`: the object of tz:webcrypto, which Checker reads under a
   // name of its own.
   if (subtle) {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);

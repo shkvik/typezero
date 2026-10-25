@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The functions of node:fs (docs/io.md).
 class FsChecker {
 public:
-  explicit FsChecker(Sema &sema);
+  explicit FsChecker(Checker &checker);
 
   Expr *checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   // The properties of the literal of options at `call->args[index]` of the
@@ -24,7 +24,7 @@ public:
   Expr *checkEncoding(Expr *encoding, llvm::StringRef fn, bool any);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

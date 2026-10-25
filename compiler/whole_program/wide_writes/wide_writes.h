@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Writes through a wider type, which the whole program shows (docs/objects.md, section 2).
 class WideWrites {
 public:
-  explicit WideWrites(Sema &sema);
+  explicit WideWrites(Checker &checker);
 
   // Writes through a wider type (sema_widen.cpp, docs/objects.md section 2):
   // whether a conversion lets code write what the value's own type does
@@ -24,7 +24,7 @@ public:
                       const Type *owner, int depth);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   std::map<std::pair<const Type *, const Type *>, bool> widens_;
 };
 

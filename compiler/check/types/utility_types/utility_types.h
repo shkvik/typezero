@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The utility types, getters of types and indices of generic types.
 class UtilityTypes {
 public:
-  explicit UtilityTypes(Sema &sema);
+  explicit UtilityTypes(Checker &checker);
 
   // What reading the getter `name` of the class gives; null without one.
   const Type *getterType(ClassDecl *cls, llvm::StringRef name);
@@ -25,7 +25,7 @@ public:
   Expr *checkGenericIndex(IndexExpr *index);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The methods of strings.
 class StringMethods {
 public:
-  explicit StringMethods(Sema &sema);
+  explicit StringMethods(Checker &checker);
 
   Expr *checkStringMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

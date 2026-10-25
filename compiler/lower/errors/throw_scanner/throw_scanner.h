@@ -1,7 +1,6 @@
 #pragma once
 
-#include <memory>
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -9,6 +8,7 @@
 #include "llvm/Support/Path.h"
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 
 namespace tz {
@@ -65,6 +65,7 @@ public:
   explicit ThrowScanner(ThrowSummary &out);
   void stmt(const Stmt *stmt, bool caught);
   void expr(const Expr *expr, bool caught);
+
 private:
   ThrowSummary &out_;
 

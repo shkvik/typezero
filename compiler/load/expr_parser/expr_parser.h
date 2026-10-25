@@ -20,13 +20,6 @@ public:
   Expr *parseBinary(int minPrec);
   Expr *parseUnary();
   Expr *parsePostfix();
-  Expr *parseCallOrMember();
-  Expr *parsePrimary();
-  Expr *parseArrayLiteral();
-  Expr *parseObjectLiteral();
-  Expr *parseNew();
-  Expr *parseIntLiteral();
-  Expr *parseFloatLiteral();
 
 private:
   Parser &parser_;

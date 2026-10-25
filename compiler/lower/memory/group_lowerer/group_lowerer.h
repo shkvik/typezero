@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Groups of objects in cycles: their code.
 class GroupLowerer {
 public:
-  explicit GroupLowerer(CodeGen &codegen);
+  explicit GroupLowerer(Lowering &lowering);
 
   llvm::FunctionCallee groupFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
@@ -35,7 +35,7 @@ public:
   void noteUnstored(llvm::Value *object, const Expr *site);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::pair<llvm::Constant *, std::string>, llvm::Constant *> groupSites_;
   llvm::DenseMap<llvm::Function *, llvm::Function *> groupReleases_;
 };

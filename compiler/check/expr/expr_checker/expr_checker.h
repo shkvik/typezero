@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Which class an expression goes to; sequences, optional chains, conditionals and casts.
 class ExprChecker {
 public:
-  explicit ExprChecker(Sema &sema);
+  explicit ExprChecker(Checker &checker);
 
   // Expressions. Each returns the expression to use in place of the argument,
   // which differs when a conversion was inserted. `wraps`: only the low bits
@@ -24,7 +24,7 @@ public:
   Expr *checkCast(CastExpr *cast);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <memory>
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_analysis/parallel_analysis.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -12,14 +13,12 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
-#include "compiler/parallel/parallel_analysis/parallel_analysis.h"
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 namespace tz::parallel {
 
@@ -27,17 +26,22 @@ class CodeWalk;
 class ExprWalk;
 class CallWalk;
 class LibraryEffects;
+class BuiltinEffects;
 class AliasAnalysis;
+class EscapeScan;
 class CallResolver;
 class Pieces;
 class Conflicts;
 class Explainer;
+class ExplainNames;
+class ExplainTitles;
 
 class Analysis {
 public:
   Analysis(const SourceFile &program, const llvm::SourceMgr &sources);
   void run();
   ParallelPlan plan() const;
+
 private:
   bool isLibrary(const FunctionDecl *fn) const;
   void resource(Res res, bool write, llvm::SMLoc at);
@@ -190,31 +194,43 @@ public:
   ExprWalk &exprWalk() const { return *exprWalkPart_; }
   CallWalk &callWalk() const { return *callWalkPart_; }
   LibraryEffects &libraryEffects() const { return *libraryEffectsPart_; }
+  BuiltinEffects &builtinCalls() const { return *builtinCallsPart_; }
   AliasAnalysis &aliasAnalysis() const { return *aliasAnalysisPart_; }
+  EscapeScan &escapeScan() const { return *escapeScanPart_; }
   CallResolver &callResolver() const { return *callResolverPart_; }
   Pieces &pieces() const { return *piecesPart_; }
   Conflicts &conflicts() const { return *conflictsPart_; }
   Explainer &explainer() const { return *explainerPart_; }
+  ExplainNames &explainNames() const { return *explainNamesPart_; }
+  ExplainTitles &explainTitles() const { return *explainTitlesPart_; }
 
 private:
   friend class CodeWalk;
   friend class ExprWalk;
   friend class CallWalk;
   friend class LibraryEffects;
+  friend class BuiltinEffects;
   friend class AliasAnalysis;
+  friend class EscapeScan;
   friend class CallResolver;
   friend class Pieces;
   friend class Conflicts;
   friend class Explainer;
+  friend class ExplainNames;
+  friend class ExplainTitles;
   std::unique_ptr<CodeWalk> codeWalkPart_;
   std::unique_ptr<ExprWalk> exprWalkPart_;
   std::unique_ptr<CallWalk> callWalkPart_;
   std::unique_ptr<LibraryEffects> libraryEffectsPart_;
+  std::unique_ptr<BuiltinEffects> builtinCallsPart_;
   std::unique_ptr<AliasAnalysis> aliasAnalysisPart_;
+  std::unique_ptr<EscapeScan> escapeScanPart_;
   std::unique_ptr<CallResolver> callResolverPart_;
   std::unique_ptr<Pieces> piecesPart_;
   std::unique_ptr<Conflicts> conflictsPart_;
   std::unique_ptr<Explainer> explainerPart_;
+  std::unique_ptr<ExplainNames> explainNamesPart_;
+  std::unique_ptr<ExplainTitles> explainTitlesPart_;
 };
 
 } // namespace tz::parallel

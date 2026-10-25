@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // new of typed arrays, DataView and Buffer.
 class BytesNewChecker {
 public:
-  explicit BytesNewChecker(Sema &sema);
+  explicit BytesNewChecker(Checker &checker);
 
   Expr *checkBytesNew(NewExpr *expr, const Type *type);
   // The values of `new Uint8Array([1, 2])` and Uint8Array.of(1, 2), each
@@ -18,7 +18,7 @@ public:
   bool checkBytesSource(Expr *source, const Type *target);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

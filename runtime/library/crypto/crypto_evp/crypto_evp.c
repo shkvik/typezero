@@ -4,6 +4,11 @@
 // program, so that the functions of crypto.c work on them as on those of the direct layer.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <openssl/core_names.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>

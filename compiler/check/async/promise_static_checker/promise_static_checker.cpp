@@ -1,20 +1,20 @@
 #include "compiler/check/async/promise_static_checker/promise_static_checker.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/async/async_checker/async_checker.h"
 #include "compiler/check/async/promise_checker/promise_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -26,20 +26,22 @@ const Type *awaited(const Type *type) { return type->isPromise() ? type->promise
 
 } // namespace
 
-PromiseStaticChecker::PromiseStaticChecker(Sema &sema) : sema_(sema) {}
+PromiseStaticChecker::PromiseStaticChecker(Checker &checker) : checker_(checker) {}
 
 // The promises (or values) Promise.all and the like take: an array, or an
 // array literal whose elements differ, which then is a tuple. `element`
 // gets the type of what each gives, `tuple` the types for a tuple.
-bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElement, const Type *&element,
-                            std::vector<const Type *> &tuple, llvm::StringRef fn) {
+bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElement,
+                                            const Type *&element, std::vector<const Type *> &tuple,
+                                            llvm::StringRef fn) {
   // A union that may hold a Promise, which JavaScript would wait for.
   auto mayBePromise = [&](const Type *t, llvm::SMLoc loc) {
     if (t->isPromise() || AsyncChecker::awaitedType(t) == t) {
       return false;
     }
-    sema_.diags_.error(loc, "'" + fn + "' of values that may be promises ('" + t->name() +
-                          "') is not supported yet; await each first, or make each a Promise");
+    checker_.diags_.error(loc,
+                          "'" + fn + "' of values that may be promises ('" + t->name() +
+                              "') is not supported yet; await each first, or make each a Promise");
 
     return true;
   };
@@ -48,9 +50,10 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
                            [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
     if (lit->elements.empty()) {
       if (!wantedElement) {
-        sema_.diags_.error(lit->loc(), "'" + fn +
-                                     "' of no promises needs the type of their values; "
-                                     "give the array a type, e.g. 'const ps: Promise<int>[] = []'");
+        checker_.diags_.error(lit->loc(),
+                              "'" + fn +
+                                  "' of no promises needs the type of their values; "
+                                  "give the array a type, e.g. 'const ps: Promise<int>[] = []'");
         return false;
       }
       lit->type = Type::array(Type::promise(wantedElement));
@@ -60,12 +63,14 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     std::vector<const Type *> types;
     bool same = true;
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = sema_.exprChecker().checkExpr(e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement : nullptr);
+      e.expr = checker_.exprChecker().checkExpr(
+          e.expr, wantedElement && Destination::literalShaped(e.expr) ? wantedElement : nullptr);
       if (e.expr->type->isError()) {
         return false;
       }
       if (e.expr->type->isVoid()) {
-        sema_.diags_.error(e.expr->loc(), "a value of type 'void' cannot be given to '" + fn + "'");
+        checker_.diags_.error(e.expr->loc(),
+                              "a value of type 'void' cannot be given to '" + fn + "'");
         return false;
       }
       if (mayBePromise(e.expr->type, e.expr->loc())) {
@@ -86,7 +91,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     if (!same && common && !common->isError()) {
       for (ArrayLitExpr::Element &e : lit->elements) {
-        e.expr = sema_.typeRelations().convert(e.expr, common);
+        e.expr = checker_.typeRelations().convert(e.expr, common);
       }
       types.assign(types.size(), common);
       same = true;
@@ -102,7 +107,7 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     return true;
   }
-  arg = sema_.exprChecker().checkExpr(arg);
+  arg = checker_.exprChecker().checkExpr(arg);
   const Type *type = arg->type;
   if (type->isError()) {
     return false;
@@ -129,28 +134,30 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
                            ? "; make an array of them: '" + fn.str() + "([..." +
                                  (name ? name->name.str() : std::string("values")) + "])'"
                            : "";
-  sema_.diags_.error(arg->loc(),
-               "'" + fn + "' needs an array of promises, found '" + type->name() + "'" + spread);
+  checker_.diags_.error(arg->loc(), "'" + fn + "' needs an array of promises, found '" +
+                                        type->name() + "'" + spread);
 
   return false;
 }
 
-Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
+Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *member,
+                                               const Type *expected) {
   llvm::StringRef name = member->name;
-  sema_.file_->usesAsync = true;
+  checker_.file_->usesAsync = true;
   call->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (!member->typeArgs.empty() && name != "withResolvers") {
-    sema_.diags_.error(member->loc(), "type arguments can be given to 'Promise.withResolvers<T>()'; "
-                                "the other functions of Promise take their types from what they "
-                                "get");
+    checker_.diags_.error(member->loc(),
+                          "type arguments can be given to 'Promise.withResolvers<T>()'; "
+                          "the other functions of Promise take their types from what they "
+                          "get");
     member->typeArgs.clear();
   }
   const Type *wanted = expected && expected->nonOptional()->isPromise()
@@ -162,7 +169,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   std::string fn = "Promise." + name.str();
 
   if (name == "resolve") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
     call->builtin = Builtin::PromiseResolve;
@@ -171,7 +178,8 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     Expr *&arg = call->args[0];
-    arg = sema_.exprChecker().checkExpr(arg, wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
+    arg = checker_.exprChecker().checkExpr(arg,
+                                           wanted && !isa<UndefinedExpr>(arg) ? wanted : nullptr);
     const Type *type = arg->type;
     if (type->isError()) {
       return call;
@@ -185,34 +193,36 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (type->isVoid()) {
-      sema_.diags_.error(arg->loc(), "a value of type 'void' cannot be given to 'Promise.resolve'");
+      checker_.diags_.error(arg->loc(),
+                            "a value of type 'void' cannot be given to 'Promise.resolve'");
       return call;
     }
     call->type = Type::promise(type);
     return call;
   }
   if (name == "reject") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     call->builtin = Builtin::PromiseReject;
-    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], sema_.errorClass_->type);
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], checker_.errorClass_->type);
     call->type = Type::promise(wanted ? wanted : Type::never());
     return call;
   }
   if (name == "withResolvers") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     call->builtin = Builtin::PromiseWithResolvers;
     const Type *value = nullptr;
     if (member->typeArgs.size() > 1) {
-      sema_.diags_.error(member->loc(), "'Promise.withResolvers' takes one type argument, the type of "
-                                  "the value");
+      checker_.diags_.error(member->loc(),
+                            "'Promise.withResolvers' takes one type argument, the type of "
+                            "the value");
       return call;
     }
     if (member->typeArgs.size() == 1) {
-      value = awaited(sema_.typeResolver().resolveType(member->typeArgs[0], /*allowVoid=*/true));
+      value = awaited(checker_.typeResolver().resolveType(member->typeArgs[0], /*allowVoid=*/true));
     } else if (expected && expected->isObject()) {
       if (const Field *promise = expected->field("promise");
           promise && promise->type->isPromise()) {
@@ -221,8 +231,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     member->typeArgs.clear();
     if (!value) {
-      sema_.diags_.error(member->loc(), "'Promise.withResolvers' needs the type of the value; write it, "
-                                  "e.g. 'Promise.withResolvers<int>()'");
+      checker_.diags_.error(member->loc(),
+                            "'Promise.withResolvers' needs the type of the value; write it, "
+                            "e.g. 'Promise.withResolvers<int>()'");
       return call;
     }
     if (value->isError()) {
@@ -230,7 +241,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     call->type = Type::object({{"promise", Type::promise(value), false},
                                {"resolve", PromiseChecker::resolverType(value), false},
-                               {"reject", sema_.promiseChecker().rejecterType(), false}});
+                               {"reject", checker_.promiseChecker().rejecterType(), false}});
     return call;
   }
   static const std::pair<llvm::StringLiteral, Builtin> lists[] = {
@@ -242,7 +253,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (name != listName) {
       continue;
     }
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     call->builtin = builtin;
@@ -264,11 +275,11 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       for (const Type *t : tuple) {
         const Type *common = LiteralTypes::unionUnify(element, t);
         if (!common || common->isError()) {
-          sema_.diags_.error(call->args[0]->loc(), "'" + fn +
-                                                 "' gives a value of one of the promises, "
-                                                 "but they give '" +
-                                                 element->name() + "' and '" + t->name() +
-                                                 "'; make them give one type");
+          checker_.diags_.error(call->args[0]->loc(), "'" + fn +
+                                                          "' gives a value of one of the promises, "
+                                                          "but they give '" +
+                                                          element->name() + "' and '" + t->name() +
+                                                          "'; make them give one type");
           return call;
         }
         element = common;
@@ -282,8 +293,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       if (!tuple.empty()) {
         for (const Type *t : tuple) {
           if (t->isVoid()) {
-            sema_.diags_.error(call->args[0]->loc(), "'Promise.all' collects the values, and a "
-                                               "Promise<void> has none; await it on its own");
+            checker_.diags_.error(call->args[0]->loc(),
+                                  "'Promise.all' collects the values, and a "
+                                  "Promise<void> has none; await it on its own");
             return call;
           }
         }
@@ -301,11 +313,13 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
         // A tuple of results, each of its own type, as in TypeScript.
         std::vector<const Type *> results;
         for (const Type *t : tuple) {
-          results.push_back(sema_.promiseChecker().settledResultType(t->isNever() ? Type::voidTy() : t));
+          results.push_back(
+              checker_.promiseChecker().settledResultType(t->isNever() ? Type::voidTy() : t));
         }
         call->type = Type::promise(Type::tuple(results));
       } else {
-        call->type = Type::promise(Type::array(sema_.promiseChecker().settledResultType(element)));
+        call->type =
+            Type::promise(Type::array(checker_.promiseChecker().settledResultType(element)));
       }
       break;
     default:
@@ -314,10 +328,11 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     return call;
   }
-  sema_.diags_.error(member->loc(), "'Promise." + name +
-                                  "' is not supported; the functions of Promise "
-                                  "are 'resolve', 'reject', 'all', 'allSettled', 'race', 'any' and "
-                                  "'withResolvers'");
+  checker_.diags_.error(member->loc(),
+                        "'Promise." + name +
+                            "' is not supported; the functions of Promise "
+                            "are 'resolve', 'reject', 'all', 'allSettled', 'race', 'any' and "
+                            "'withResolvers'");
   checkArgsLoosely();
 
   return call;

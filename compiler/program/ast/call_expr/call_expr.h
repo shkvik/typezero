@@ -2,8 +2,8 @@
 
 #include "compiler/program/ast/builtin/builtin.h"
 #include "compiler/program/ast/expr/expr.h"
-#include "compiler/program/symbols/func_symbol/func_symbol.h"
 #include "compiler/program/ast/regex_lit_expr/regex_lit_expr.h"
+#include "compiler/program/symbols/func_symbol/func_symbol.h"
 
 namespace tz {
 
@@ -25,13 +25,13 @@ public:
   // A tagged template, tag`a${x}b`: the first argument is the array of the
   // texts, ["a", "b"], and the values follow.
   bool tagged = false;
-  // Set by Sema: exactly one of these describes the callee.
+  // Set by Checker: exactly one of these describes the callee.
   FuncSymbol *func = nullptr;
   Builtin builtin = Builtin::None;
-  // Set by Sema for charCodeAt, at, pop and shift: the position may be out of
+  // Set by Checker for charCodeAt, at, pop and shift: the position may be out of
   // range (or the array empty), so the result type admits that case.
   bool mayBeOutOfRange = false;
-  // Set by Sema for a call of a method of a class: the variant called. The
+  // Set by Checker for a call of a method of a class: the variant called. The
   // object it is called on is the object of the callee MemberExpr.
   FuncSymbol *method = nullptr;
   // The method is overridden in some class the object may belong to: the
@@ -46,19 +46,19 @@ public:
   // initializers of the fields; or `super.m(args)`, a direct call of the
   // method `method` of that class.
   bool superCall = false;
-  // Set by Sema for a stage of a lazy chain (`xs.values().map(f)`) that a
+  // Set by Checker for a stage of a lazy chain (`xs.values().map(f)`) that a
   // consumer takes apart where it is written: the chain runs as one loop
   // there, and its callbacks are called only during it (see
-  // Sema::markFused).
+  // Checker::markFused).
   bool fused = false;
-  // Set by Sema for a call that takes a regex known when compiling (a
+  // Set by Checker for a call that takes a regex known when compiling (a
   // literal, or a variable that holds one): where its groups are.
   const RegexLitExpr *regex = nullptr;
   // The Object.keys that `for...in` walks: of a Json that is null or
   // undefined, no keys rather than a TypeError, as in JavaScript.
   bool forIn = false;
-  // Set by Sema for a method called on a union of objects that no type of
-  // them all declares (see Sema::checkUnionMethodCall): for each member, the
+  // Set by Checker for a method called on a union of objects that no type of
+  // them all declares (see Checker::checkUnionMethodCall): for each member, the
   // method that runs, through the method table with `virtualCall`; or null
   // for a function in a field.
   struct UnionMethod {
@@ -67,7 +67,7 @@ public:
     bool virtualCall;
   };
   std::vector<UnionMethod> unionMethods;
-  // Metadata (Builtin::MetaDefine...): the object key, a declaration Sema
+  // Metadata (Builtin::MetaDefine...): the object key, a declaration Checker
   // knows (a function, a class, a constant), or null for a string key; and
   // a record `design:*` the compiler writes.
   const void *metaKey = nullptr;

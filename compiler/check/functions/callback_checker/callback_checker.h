@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Callbacks: the functions given to calls and the array methods that take them.
 class CallbackChecker {
 public:
-  explicit CallbackChecker(Sema &sema);
+  explicit CallbackChecker(Checker &checker);
 
   // An argument where a function of the signature is expected. `primary` is
   // the number of arguments a built-in callback is meant to use; a function
   // passed by name must not take the others (the index, the array) into
   // optional parameters, as parseInt would take the index as its radix.
-  Expr *checkFunctionArg(Expr *arg, const Sema::Signature &expected, unsigned primary,
+  Expr *checkFunctionArg(Expr *arg, const Checker::Signature &expected, unsigned primary,
                          llvm::StringRef method);
   // `expected` is the type wanted of the result: an array of objects that
   // map's callback returns, `xs.map(x => ({ x, y: 0 }))`, gives the objects
@@ -24,7 +24,7 @@ public:
   bool keepsDefined(const Expr *callback) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

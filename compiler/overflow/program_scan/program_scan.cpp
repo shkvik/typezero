@@ -1,14 +1,15 @@
 #include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +28,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -471,7 +471,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   }
 }
 
-// Literals and operators on them, and constants of those: Sema computes such
+// Literals and operators on them, and constants of those: Checker computes such
 // values when compiling and reports those that do not fit.
 bool ProgramScan::isConstantTree(const Expr *expr) const {
   expr = stripCasts(expr);

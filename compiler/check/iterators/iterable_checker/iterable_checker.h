@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The collections of the program: classes with [Symbol.iterator]().
 class IterableChecker {
 public:
-  explicit IterableChecker(Sema &sema);
+  explicit IterableChecker(Checker &checker);
 
   // Collections of the program (sema_iterable.cpp, docs/iterators.md,
   // section 2): an object whose class (or literal) has a method
@@ -49,7 +49,7 @@ public:
   bool isIterableRef(const TypeRef &ref) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   FuncSymbol *iterate_ = nullptr;
 };
 

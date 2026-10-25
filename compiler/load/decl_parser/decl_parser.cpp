@@ -3,6 +3,7 @@
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
 #include "compiler/load/module_parser/module_parser.h"
+#include "compiler/load/object_type_parser/object_type_parser.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
@@ -69,7 +70,7 @@ Stmt *DeclParser::parseInterface() {
             tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
-  auto *decl = parser_.ctx_.make<TypeAliasDecl>(loc, name, parser_.types().parseObjectType());
+  auto *decl = parser_.ctx_.make<TypeAliasDecl>(loc, name, parser_.objectTypes().parseObjectType());
   decl->bases = std::move(bases);
   decl->typeParams = std::move(typeParams);
   parser_.cursor().accept(Tok::Semi);

@@ -1,25 +1,25 @@
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
+#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
+#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
+#include "compiler/lower/memory/memory_debug/memory_debug.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
-#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
-#include "compiler/lower/memory/memory_analysis/memory_analysis.h"
-#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
-#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
-#include "compiler/lower/memory/memory_debug/memory_debug.h"
-#include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <numeric>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -35,7 +35,7 @@ std::string layoutName(const Type *type) {
 
 } // namespace
 
-ObjectLayouts::ObjectLayouts(CodeGen &codegen) : codegen_(codegen) {}
+ObjectLayouts::ObjectLayouts(Lowering &lowering) : lowering_(lowering) {}
 
 unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
   llvm::ArrayRef<Field> fields = type->fields();
@@ -44,12 +44,12 @@ unsigned ObjectLayouts::fieldIndex(const Type *type, llvm::StringRef name) {
       return i;
     }
   }
-  llvm_unreachable("Sema checked that the field exists");
+  llvm_unreachable("Checker checked that the field exists");
 }
 
-const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
+const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
   auto [it, inserted] = objectLayouts_.try_emplace(type);
-  CodeGen::ObjectLayout &layout = it->second;
+  Lowering::ObjectLayout &layout = it->second;
   if (!inserted) {
     return layout;
   }
@@ -58,11 +58,11 @@ const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
   // that code that knows the object by that class reads them at the same
   // offsets; the same, if it can, for an interface it implements.
   llvm::ArrayRef<Field> fields = type->fields();
-  const llvm::DataLayout &data = codegen_.module_->getDataLayout();
+  const llvm::DataLayout &data = lowering_.module_->getDataLayout();
   std::vector<unsigned> order;
   std::vector<bool> placed(fields.size(), false);
-  if (const Type *prefix = codegen_.inheritLowerer().layoutPrefix(type)) {
-    const CodeGen::ObjectLayout &base = objectLayout(prefix);
+  if (const Type *prefix = lowering_.inheritLowerer().layoutPrefix(type)) {
+    const Lowering::ObjectLayout &base = objectLayout(prefix);
     llvm::ArrayRef<Field> baseFields = prefix->fields();
     std::vector<unsigned> baseOrder(baseFields.size());
     std::iota(baseOrder.begin(), baseOrder.end(), 0u);
@@ -74,7 +74,8 @@ const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
       for (unsigned i = 0; i < fields.size(); ++i) {
         if (!placed[i] && fields[i].name == baseFields[b].name &&
             (fields[i].type == baseFields[b].type ||
-             codegen_.moduleBuilder().lower(fields[i].type) == codegen_.moduleBuilder().lower(baseFields[b].type))) {
+             lowering_.moduleBuilder().lower(fields[i].type) ==
+                 lowering_.moduleBuilder().lower(baseFields[b].type))) {
           placed[i] = true;
           order.push_back(i);
         }
@@ -105,30 +106,34 @@ const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
     if (f != g) {
       return g;
     }
-    uint64_t x = data.getABITypeAlign(codegen_.moduleBuilder().lower(fields[a].type)).value();
-    uint64_t y = data.getABITypeAlign(codegen_.moduleBuilder().lower(fields[b].type)).value();
+    uint64_t x = data.getABITypeAlign(lowering_.moduleBuilder().lower(fields[a].type)).value();
+    uint64_t y = data.getABITypeAlign(lowering_.moduleBuilder().lower(fields[b].type)).value();
 
     return x != y ? x > y : fields[a].name < fields[b].name;
   });
   order.insert(order.end(), rest.begin(), rest.end());
-  std::vector<llvm::Type *> elements{codegen_.builder_.getInt64Ty(), codegen_.builder_.getPtrTy()};
+  std::vector<llvm::Type *> elements{lowering_.builder_.getInt64Ty(),
+                                     lowering_.builder_.getPtrTy()};
   layout.elements.resize(fields.size());
   for (unsigned i : order) {
     layout.elements[i] = unsigned(elements.size());
-    elements.push_back(codegen_.moduleBuilder().lower(fields[i].type));
+    elements.push_back(lowering_.moduleBuilder().lower(fields[i].type));
   }
   layout.captures = unsigned(elements.size());
   if (const ClassDecl *cls = type->classDecl(); cls && cls->group) {
     for (const VarSymbol *var : cls->group->captures) {
-      elements.push_back(var->boxed() ? codegen_.builder_.getPtrTy() : codegen_.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
+      elements.push_back(var->boxed()
+                             ? lowering_.builder_.getPtrTy()
+                             : lowering_.moduleBuilder().lower(ClosureLowerer::typeOf(var)));
     }
   }
-  layout.type = llvm::StructType::get(codegen_.ctx_, elements);
+  layout.type = llvm::StructType::get(lowering_.ctx_, elements);
 
-  auto *fnType = llvm::FunctionType::get(codegen_.builder_.getVoidTy(), {codegen_.builder_.getPtrTy()}, false);
+  auto *fnType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
+                                         {lowering_.builder_.getPtrTy()}, false);
   std::string name = layoutName(type);
   // The runtime makes regexes, and frees them (see TzRegex in
-  // runtime/core/tzrt/tzrt.h); so with formatters of dates, the other objects
+  // runtime/library/regex/regex/regex.h); so with formatters of dates, the other objects
   // of Intl (which the object's own layout frees, tz_intl_drop) and the objects
   // of binary data.
   llvm::StringRef runtimeDrop = type->isRegExp()                            ? "tz_re_drop"
@@ -141,30 +146,31 @@ const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
                                 : type->isBytes()                           ? "tz_bytes_object_drop"
                                                                             : "";
   if (!runtimeDrop.empty()) {
-    layout.drop =
-        cast<llvm::Function>(codegen_.module_->getOrInsertFunction(runtimeDrop, fnType).getCallee());
+    layout.drop = cast<llvm::Function>(
+        lowering_.module_->getOrInsertFunction(runtimeDrop, fnType).getCallee());
   } else {
     layout.drop = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
-                                         "tz." + name + ".drop", codegen_.module_.get());
+                                         "tz." + name + ".drop", lowering_.module_.get());
   }
   layout.drop->addFnAttr(llvm::Attribute::NoUnwind);
 
   // The release: the count is the first word; the last reference drops the
   // object. Undefined (null) holds nothing.
   layout.release = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
-                                          "tz." + name + ".release", codegen_.module_.get());
+                                          "tz." + name + ".release", lowering_.module_.get());
   layout.release->addFnAttr(llvm::Attribute::AlwaysInline);
   layout.release->addFnAttr(llvm::Attribute::NoUnwind);
-  llvm::IRBuilder<> b(llvm::BasicBlock::Create(codegen_.ctx_, "entry", layout.release));
-  auto *countedBlock = llvm::BasicBlock::Create(codegen_.ctx_, "counted", layout.release);
-  auto *dropBlock = llvm::BasicBlock::Create(codegen_.ctx_, "drop", layout.release);
-  auto *doneBlock = llvm::BasicBlock::Create(codegen_.ctx_, "done", layout.release);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", layout.release));
+  auto *countedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "counted", layout.release);
+  auto *dropBlock = llvm::BasicBlock::Create(lowering_.ctx_, "drop", layout.release);
+  auto *doneBlock = llvm::BasicBlock::Create(lowering_.ctx_, "done", layout.release);
   llvm::Value *object = layout.release->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(object), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *objectCount = b.CreateLoad(b.getInt64Ty(), object, "rc");
-  if (codegen_.parallel_) {
-    codegen_.runtimeFunctions().countShared(b, object, objectCount, /*retain=*/false, dropBlock, doneBlock);
+  if (lowering_.parallel_) {
+    lowering_.runtimeFunctions().countShared(b, object, objectCount, /*retain=*/false, dropBlock,
+                                             doneBlock);
   }
   llvm::Value *left = b.CreateSub(objectCount, b.getInt64(1));
   b.CreateStore(left, object);
@@ -188,35 +194,35 @@ const CodeGen::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
 // again: freeing a long list takes no stack. If the field may hold objects of
 // other types too (a class up the chain, or one with subclasses), it goes
 // round again for the next object whose drop function is this one.
-void ObjectLayouts::emitObjectDrop(const Type *type, CodeGen::ObjectLayout &layout) {
-  llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
+void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &layout) {
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
   llvm::Function *drop = layout.drop;
-  if (codegen_.isCyclic(type)) {
-    codegen_.storeLowerer().emitMemberDrop(type, layout);
-    codegen_.builder_.restoreIP(point);
+  if (lowering_.isCyclic(type)) {
+    lowering_.storeLowerer().emitMemberDrop(type, layout);
+    lowering_.builder_.restoreIP(point);
     return;
   }
-  auto *entry = llvm::BasicBlock::Create(codegen_.ctx_, "entry", drop);
-  auto *loopBlock = llvm::BasicBlock::Create(codegen_.ctx_, "object", drop);
-  codegen_.builder_.SetInsertPoint(entry);
-  codegen_.builder_.CreateBr(loopBlock);
-  codegen_.builder_.SetInsertPoint(loopBlock);
-  llvm::PHINode *object = codegen_.builder_.CreatePHI(codegen_.builder_.getPtrTy(), 2, "object");
+  auto *entry = llvm::BasicBlock::Create(lowering_.ctx_, "entry", drop);
+  auto *loopBlock = llvm::BasicBlock::Create(lowering_.ctx_, "object", drop);
+  lowering_.builder_.SetInsertPoint(entry);
+  lowering_.builder_.CreateBr(loopBlock);
+  lowering_.builder_.SetInsertPoint(loopBlock);
+  llvm::PHINode *object = lowering_.builder_.CreatePHI(lowering_.builder_.getPtrTy(), 2, "object");
   object->addIncoming(drop->getArg(0), entry);
-  if (codegen_.isWeakTarget(type)) {
-    codegen_.storeLowerer().forgetWeakRefs(object);
+  if (lowering_.isWeakTarget(type)) {
+    lowering_.storeLowerer().forgetWeakRefs(object);
   }
 
   llvm::ArrayRef<Field> fields = type->fields();
   int next = -1; // the field of the same type, released last
   for (unsigned i = 0; i < fields.size(); ++i) {
     if (const Type *t = fields[i].type->nonOptional();
-        t->isObject() && type->isSubtypeOf(t) && !codegen_.memoryAnalysis().refMayBeMember(t)) {
+        t->isObject() && type->isSubtypeOf(t) && !lowering_.memory().refMayBeMember(t)) {
       next = int(i);
     }
   }
-  bool exact =
-      next >= 0 && fields[unsigned(next)].type->nonOptional() == type && !codegen_.hasSubtypes(type);
+  bool exact = next >= 0 && fields[unsigned(next)].type->nonOptional() == type &&
+               !lowering_.hasSubtypes(type);
   std::vector<std::pair<llvm::Value *, const Type *>> values;
   llvm::Value *nextValue = nullptr;
   for (unsigned i = 0; i < fields.size(); ++i) {
@@ -224,13 +230,15 @@ void ObjectLayouts::emitObjectDrop(const Type *type, CodeGen::ObjectLayout &layo
     if (!fieldType->isManaged()) {
       continue;
     }
-    llvm::Value *address = codegen_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]);
-    llvm::Value *value = codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(fieldType), address, fields[i].name);
-    if (codegen_.debugMemory_) {
-      llvm::Function *saved = codegen_.function_;
-      codegen_.function_ = drop;
-      codegen_.memoryDebug().checkOwned(type, fields[i].name, value, fieldType);
-      codegen_.function_ = saved;
+    llvm::Value *address =
+        lowering_.builder_.CreateStructGEP(layout.type, object, layout.elements[i]);
+    llvm::Value *value = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(fieldType),
+                                                       address, fields[i].name);
+    if (lowering_.debugMemory_) {
+      llvm::Function *saved = lowering_.function_;
+      lowering_.function_ = drop;
+      lowering_.memoryDebug().checkOwned(type, fields[i].name, value, fieldType);
+      lowering_.function_ = saved;
     }
     if (int(i) == next) {
       nextValue = value;
@@ -245,65 +253,76 @@ void ObjectLayouts::emitObjectDrop(const Type *type, CodeGen::ObjectLayout &layo
     for (size_t i = 0; i < captures.size(); ++i) {
       const VarSymbol *var = captures[i];
       llvm::Value *address =
-          codegen_.builder_.CreateStructGEP(layout.type, object, unsigned(layout.captures + i));
+          lowering_.builder_.CreateStructGEP(layout.type, object, unsigned(layout.captures + i));
       if (var->boxed()) {
-        boxes.push_back(codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), address, var->name + ".box"));
+        boxes.push_back(lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), address,
+                                                      var->name + ".box"));
       } else if (ClosureLowerer::typeOf(var)->isManaged()) {
         const Type *varType = ClosureLowerer::typeOf(var);
-        values.push_back({codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(varType), address, var->name), varType});
+        values.push_back({lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(varType),
+                                                        address, var->name),
+                          varType});
       }
     }
   }
-  codegen_.builder_.CreateCall(codegen_.rt_.objFree, {object});
+  lowering_.builder_.CreateCall(lowering_.rt_.objFree, {object});
   for (auto [value, fieldType] : values) {
-    codegen_.refCounts().releaseValue(value, fieldType);
+    lowering_.refCounts().releaseValue(value, fieldType);
   }
   for (llvm::Value *box : boxes) {
-    codegen_.builder_.CreateCall(codegen_.objReleaseFn_, {box});
+    lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {box});
   }
   if (nextValue) {
-    auto *countedBlock = llvm::BasicBlock::Create(codegen_.ctx_, "next", drop);
-    auto *doneBlock = llvm::BasicBlock::Create(codegen_.ctx_, "done", drop);
-    codegen_.builder_.CreateCondBr(codegen_.builder_.CreateIsNotNull(nextValue), countedBlock, doneBlock);
-    codegen_.builder_.SetInsertPoint(countedBlock);
-    llvm::Value *count = codegen_.builder_.CreateLoad(codegen_.builder_.getInt64Ty(), nextValue, "rc");
+    auto *countedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next", drop);
+    auto *doneBlock = llvm::BasicBlock::Create(lowering_.ctx_, "done", drop);
+    lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(nextValue), countedBlock,
+                                    doneBlock);
+    lowering_.builder_.SetInsertPoint(countedBlock);
+    llvm::Value *count =
+        lowering_.builder_.CreateLoad(lowering_.builder_.getInt64Ty(), nextValue, "rc");
     // The next object dies with this one when this held its last reference:
     // a shared one's count goes atomically (runtime/core/publish/publish.c).
-    auto *deadBlock = llvm::BasicBlock::Create(codegen_.ctx_, "next.dead", drop);
-    if (codegen_.parallel_) {
-      llvm::IRBuilder<> b(codegen_.builder_.GetInsertBlock());
-      codegen_.runtimeFunctions().countShared(b, nextValue, count, /*retain=*/false, deadBlock, doneBlock);
-      codegen_.builder_.SetInsertPoint(b.GetInsertBlock());
+    auto *deadBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next.dead", drop);
+    if (lowering_.parallel_) {
+      llvm::IRBuilder<> b(lowering_.builder_.GetInsertBlock());
+      lowering_.runtimeFunctions().countShared(b, nextValue, count, /*retain=*/false, deadBlock,
+                                               doneBlock);
+      lowering_.builder_.SetInsertPoint(b.GetInsertBlock());
     }
-    llvm::Value *left = codegen_.builder_.CreateSub(count, codegen_.builder_.getInt64(1));
-    codegen_.builder_.CreateStore(left, nextValue);
-    codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpEQ(left, codegen_.builder_.getInt64(0)), deadBlock, doneBlock);
-    codegen_.builder_.SetInsertPoint(deadBlock);
+    llvm::Value *left = lowering_.builder_.CreateSub(count, lowering_.builder_.getInt64(1));
+    lowering_.builder_.CreateStore(left, nextValue);
+    lowering_.builder_.CreateCondBr(
+        lowering_.builder_.CreateICmpEQ(left, lowering_.builder_.getInt64(0)), deadBlock,
+        doneBlock);
+    lowering_.builder_.SetInsertPoint(deadBlock);
     if (exact) {
       object->addIncoming(nextValue, deadBlock);
-      codegen_.builder_.CreateBr(loopBlock);
+      lowering_.builder_.CreateBr(loopBlock);
     } else {
       // The drop function of the next object's own descriptor.
-      auto *otherBlock = llvm::BasicBlock::Create(codegen_.ctx_, "next.other", drop);
-      llvm::Value *descriptor = codegen_.builder_.CreateLoad(
-          codegen_.builder_.getPtrTy(),
-          codegen_.builder_.CreateConstInBoundsGEP1_64(codegen_.builder_.getInt8Ty(), nextValue, 8));
-      llvm::Value *nextDrop = codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), descriptor, "drop");
+      auto *otherBlock = llvm::BasicBlock::Create(lowering_.ctx_, "next.other", drop);
+      llvm::Value *descriptor = lowering_.builder_.CreateLoad(
+          lowering_.builder_.getPtrTy(), lowering_.builder_.CreateConstInBoundsGEP1_64(
+                                             lowering_.builder_.getInt8Ty(), nextValue, 8));
+      llvm::Value *nextDrop =
+          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), descriptor, "drop");
       object->addIncoming(nextValue, deadBlock);
-      codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpEQ(nextDrop, drop), loopBlock, otherBlock);
+      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpEQ(nextDrop, drop), loopBlock,
+                                      otherBlock);
       // Another type's drop, as a tail call even without optimizations: a
       // list of objects of mixed types takes no stack either.
-      codegen_.builder_.SetInsertPoint(otherBlock);
-      llvm::CallInst *call = codegen_.builder_.CreateCall(
-          llvm::FunctionType::get(codegen_.builder_.getVoidTy(), {codegen_.builder_.getPtrTy()}, false), nextDrop,
-          {nextValue});
+      lowering_.builder_.SetInsertPoint(otherBlock);
+      llvm::CallInst *call = lowering_.builder_.CreateCall(
+          llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()},
+                                  false),
+          nextDrop, {nextValue});
       call->setTailCallKind(llvm::CallInst::TCK_MustTail);
-      codegen_.builder_.CreateRetVoid();
+      lowering_.builder_.CreateRetVoid();
     }
-    codegen_.builder_.SetInsertPoint(doneBlock);
+    lowering_.builder_.SetInsertPoint(doneBlock);
   }
-  codegen_.builder_.CreateRetVoid();
-  codegen_.builder_.restoreIP(point);
+  lowering_.builder_.CreateRetVoid();
+  lowering_.builder_.restoreIP(point);
 }
 
 llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys) {
@@ -317,28 +336,31 @@ llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef
 }
 
 llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys,
-                                          uint32_t flags) {
+                                                uint32_t flags) {
   std::vector<unsigned> key(keys.begin(), keys.end());
   key.push_back(~flags); // apart from the keys, which are field positions
-  llvm::Constant *&descriptor = codegen_.layoutDescriptors_[{type, std::move(key)}];
+  llvm::Constant *&descriptor = lowering_.layoutDescriptors_[{type, std::move(key)}];
   if (descriptor) {
     return descriptor;
   }
-  const CodeGen::ObjectLayout &layout = objectLayout(type);
-  const llvm::StructLayout *offsets = codegen_.module_->getDataLayout().getStructLayout(layout.type);
+  const Lowering::ObjectLayout &layout = objectLayout(type);
+  const llvm::StructLayout *offsets =
+      lowering_.module_->getDataLayout().getStructLayout(layout.type);
   std::vector<llvm::Constant *> entries;
   for (unsigned k : keys) {
     const Field &field = type->fields()[k];
     uint64_t offset = offsets->getElementOffset(layout.elements[k]);
     entries.push_back(llvm::ConstantStruct::get(
-        codegen_.fieldDescTy_, {codegen_.stringLowerer().utf8Constant(field.name), codegen_.builder_.getInt32(uint32_t(field.name.size())),
-                       codegen_.builder_.getInt32(uint32_t(offset)), codegen_.typeDescriptors().typeDescriptor(field.type)}));
+        lowering_.fieldDescTy_, {lowering_.stringLowerer().utf8Constant(field.name),
+                                 lowering_.builder_.getInt32(uint32_t(field.name.size())),
+                                 lowering_.builder_.getInt32(uint32_t(offset)),
+                                 lowering_.typeDescriptors().typeDescriptor(field.type)}));
   }
-  llvm::Constant *fields = llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy());
+  llvm::Constant *fields = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (!entries.empty()) {
-    auto *arrayType = llvm::ArrayType::get(codegen_.fieldDescTy_, entries.size());
+    auto *arrayType = llvm::ArrayType::get(lowering_.fieldDescTy_, entries.size());
     auto *global = new llvm::GlobalVariable(
-        *codegen_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(arrayType, entries), "tz.fields." + layoutName(type));
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
@@ -346,20 +368,25 @@ llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef
   // The number that tells objects of this type apart from those of the
   // other members of a union (see codegen_union.cpp). A WeakRef prints as
   // node prints one, `WeakRef {}`.
-  llvm::Constant *name = type->isWeakRef() ? codegen_.stringLowerer().utf8Constant("WeakRef")
-                                           : llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy());
+  llvm::Constant *name = type->isWeakRef()
+                             ? lowering_.stringLowerer().utf8Constant("WeakRef")
+                             : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   llvm::Constant *init = llvm::ConstantStruct::get(
-      codegen_.layoutDescTy_, {layout.drop, fields, codegen_.builder_.getInt32(uint32_t(entries.size())),
-                      codegen_.builder_.getInt32(flags), name, codegen_.builder_.getInt32(type->isWeakRef() ? 7 : 0),
-                      codegen_.builder_.getInt32(type->isClass() ? 0 : codegen_.unionLowerer().plainTypeId(type))});
+      lowering_.layoutDescTy_,
+      {layout.drop, fields, lowering_.builder_.getInt32(uint32_t(entries.size())),
+       lowering_.builder_.getInt32(flags), name,
+       lowering_.builder_.getInt32(type->isWeakRef() ? 7 : 0),
+       lowering_.builder_.getInt32(type->isClass() ? 0
+                                                   : lowering_.unionLowerer().plainTypeId(type))});
   // An object of a type that implements interfaces with tables: then the
   // tables (see codegen_inherit.cpp).
-  llvm::Constant *itables = codegen_.inheritLowerer().itablesOf(type);
+  llvm::Constant *itables = lowering_.inheritLowerer().itablesOf(type);
   if (!itables->isNullValue()) {
-    auto *descType = llvm::StructType::get(codegen_.ctx_, {codegen_.layoutDescTy_, codegen_.builder_.getPtrTy()});
+    auto *descType = llvm::StructType::get(
+        lowering_.ctx_, {lowering_.layoutDescTy_, lowering_.builder_.getPtrTy()});
     init = llvm::ConstantStruct::get(descType, {init, itables});
   }
-  auto *global = new llvm::GlobalVariable(*codegen_.module_, init->getType(), /*isConstant=*/true,
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, init->getType(), /*isConstant=*/true,
                                           llvm::GlobalValue::PrivateLinkage, init,
                                           "tz.layout." + layoutName(type));
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -368,41 +395,49 @@ llvm::Constant *ObjectLayouts::layoutDescriptor(const Type *type, llvm::ArrayRef
   return descriptor;
 }
 
-llvm::Value *ObjectLayouts::fieldAddress(llvm::Value *object, const Type *type, llvm::StringRef name,
-                                   bool exact) {
+llvm::Value *ObjectLayouts::fieldAddress(llvm::Value *object, const Type *type,
+                                         llvm::StringRef name, bool exact) {
   if (type->isUnion()) { // in each member, where it is there (codegen_union.cpp)
-    return codegen_.unionMemberLowerer().unionFieldAddress(object, type, name);
+    return lowering_.unionMemberLowerer().unionFieldAddress(object, type, name);
   }
   // Through an interface whose implementers put the field elsewhere: at the
   // offset the object's table gives.
-  if (const CodeGen::InterfaceMember *member = exact ? nullptr : codegen_.inheritLowerer().dispatchedMember(type, name)) {
+  if (const Lowering::InterfaceMember *member =
+          exact ? nullptr : lowering_.inheritLowerer().dispatchedMember(type, name)) {
     assert(!member->callable && "a method is called or bound, not read");
-    llvm::Value *offset = codegen_.builder_.CreateLoad(
-        codegen_.builder_.getInt64Ty(), codegen_.inheritLowerer().tableEntry(object, type, unsigned(member->entry)), name + ".offset");
-    return codegen_.builder_.CreateInBoundsGEP(codegen_.builder_.getInt8Ty(), object, offset, name + ".addr");
+    llvm::Value *offset = lowering_.builder_.CreateLoad(
+        lowering_.builder_.getInt64Ty(),
+        lowering_.inheritLowerer().tableEntry(object, type, unsigned(member->entry)),
+        name + ".offset");
+    return lowering_.builder_.CreateInBoundsGEP(lowering_.builder_.getInt8Ty(), object, offset,
+                                                name + ".addr");
   }
-  const CodeGen::ObjectLayout &layout = objectLayout(type);
+  const Lowering::ObjectLayout &layout = objectLayout(type);
 
-  return codegen_.builder_.CreateStructGEP(layout.type, object, layout.elements[fieldIndex(type, name)],
-                                  name + ".addr");
+  return lowering_.builder_.CreateStructGEP(
+      layout.type, object, layout.elements[fieldIndex(type, name)], name + ".addr");
 }
 
 llvm::Value *ObjectLayouts::allocObject(const Type *type, llvm::ArrayRef<unsigned> keys) {
-  return allocObject(type, keys, codegen_.isCyclic(type));
+  return allocObject(type, keys, lowering_.isCyclic(type));
 }
 
-llvm::Value *ObjectLayouts::allocObject(const Type *type, llvm::ArrayRef<unsigned> keys, bool member) {
-  const CodeGen::ObjectLayout &layout = objectLayout(type);
+llvm::Value *ObjectLayouts::allocObject(const Type *type, llvm::ArrayRef<unsigned> keys,
+                                        bool member) {
+  const Lowering::ObjectLayout &layout = objectLayout(type);
   llvm::Constant *descriptor = layoutDescriptor(type, keys);
-  uint64_t size = codegen_.module_->getDataLayout().getTypeAllocSize(layout.type);
+  uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(layout.type);
   llvm::Value *object;
   if (member) {
-    object = codegen_.groupLowerer().allocMember(size, "object"); // counted by its group
+    object = lowering_.groupLowerer().allocMember(size, "object"); // counted by its group
   } else {
-    object = codegen_.builder_.CreateCall(codegen_.rt_.objAlloc, {codegen_.builder_.getInt64(size)}, "object");
-    codegen_.builder_.CreateStore(codegen_.builder_.getInt64(1), codegen_.builder_.CreateStructGEP(layout.type, object, 0));
+    object = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
+                                           {lowering_.builder_.getInt64(size)}, "object");
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1),
+                                   lowering_.builder_.CreateStructGEP(layout.type, object, 0));
   }
-  codegen_.builder_.CreateStore(descriptor, codegen_.builder_.CreateStructGEP(layout.type, object, 1));
+  lowering_.builder_.CreateStore(descriptor,
+                                 lowering_.builder_.CreateStructGEP(layout.type, object, 1));
 
   return object;
 }

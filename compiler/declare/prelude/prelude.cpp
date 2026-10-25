@@ -7,8 +7,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -26,18 +26,18 @@ type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
 
 } // namespace
 
-Prelude::Prelude(Sema &sema) : sema_(sema) {}
+Prelude::Prelude(Checker &checker) : checker_(checker) {}
 
 void Prelude::declarePrelude() {
   std::unique_ptr<llvm::MemoryBuffer> buffer = llvm::MemoryBuffer::getMemBuffer(kPrelude, "<tz>");
   llvm::StringRef text = buffer->getBuffer();
-  sema_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
-  Lexer lexer(text, sema_.diags_);
-  Parser parser(lexer, sema_.ctx_, sema_.diags_);
+  checker_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
+  Lexer lexer(text, checker_.diags_);
+  Parser parser(lexer, checker_.ctx_, checker_.diags_);
   SourceFile prelude = parser.parseSourceFile();
   for (Stmt *item : prelude.items) {
     if (auto *alias = dyn_cast<TypeAliasDecl>(item)) {
-      sema_.builtinAliases_[alias->name] = alias;
+      checker_.builtinAliases_[alias->name] = alias;
     }
   }
 }

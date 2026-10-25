@@ -1,17 +1,17 @@
 #include "compiler/instances/late_classes/late_classes.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/functions/function_checker/function_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
+#include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
 #include "compiler/check/classes/decorator_checker/decorator_checker.h"
-#include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
-#include "compiler/check/classes/class_links/class_links.h"
+#include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -20,8 +20,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -54,7 +54,7 @@ bool holdsType(const Type *type, const Type *target, llvm::SmallPtrSetImpl<const
 
 } // namespace
 
-LateClasses::LateClasses(Sema &sema) : sema_(sema) {}
+LateClasses::LateClasses(Checker &checker) : checker_(checker) {}
 
 Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   (void)expected;
@@ -70,12 +70,12 @@ Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   if (!cls->declared) {
     checkStaticFields(cls);
     if (ClassChecker::hasDecorators(cls)) {
-      ClassDecl *outer = std::exchange(sema_.currentClass_, cls);
-      sema_.decoratorChecker().decorateClass(cls);
-      sema_.currentClass_ = outer;
+      ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
+      checker_.decoratorChecker().decorateClass(cls);
+      checker_.currentClass_ = outer;
     }
   }
-  expr->type = sema_.classValueChecker().classValueType(cls);
+  expr->type = checker_.classValueChecker().classValueType(cls);
 
   return expr;
 }
@@ -83,27 +83,27 @@ Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
 void LateClasses::makeLateClass(ClassDecl *cls) {
   // In generic code that is no copy (a generic class, a trial copy of a
   // function), the class is only checked.
-  cls->checkOnly = sema_.reflectChecker().onlyChecked();
+  cls->checkOnly = checker_.reflectChecker().onlyChecked();
   // A class expression is declared here; a declaration with a value as its
   // base (`class A extends Mixin(B)`) was, with the types.
   if (!cls->type) {
-    cls->id = ++sema_.classCount_;
+    cls->id = ++checker_.classCount_;
     cls->type = Type::classType(cls->name.empty() ? "(anonymous class)" : cls->name, cls);
-    sema_.classes_.push_back(cls);
+    checker_.classes_.push_back(cls);
   }
-  if (sema_.module_ && !sema_.declModules_.count(cls)) {
-    sema_.declModules_[cls] = sema_.module_;
+  if (checker_.module_ && !checker_.declModules_.count(cls)) {
+    checker_.declModules_[cls] = checker_.module_;
   }
   // The copy of a generic function around it, whose type parameters it
   // sees, and the variables of the functions around it, which it cannot.
-  for (FunctionDecl *fn : llvm::reverse(sema_.functions_)) {
+  for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
     if (fn->isInstance && !fn->typeArgs.empty()) {
       cls->outer = fn;
       break;
     }
   }
-  for (size_t i = 1; i < sema_.scopes_.size(); ++i) {
-    for (const auto &entry : sema_.scopes_[i]) {
+  for (size_t i = 1; i < checker_.scopes_.size(); ++i) {
+    for (const auto &entry : checker_.scopes_[i]) {
       if (entry.second.var) {
         cls->locals.push_back(entry.second.var->name);
       }
@@ -112,43 +112,46 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
 
   // The class it extends, which must be known when compiling.
   if (cls->baseExpr) {
-    cls->baseExpr = sema_.exprChecker().checkExpr(cls->baseExpr);
+    cls->baseExpr = checker_.exprChecker().checkExpr(cls->baseExpr);
     const Type *type = cls->baseExpr->type;
     ClassDecl *parent = const_cast<ClassDecl *>(type->classRef());
     llvm::SMLoc loc = cls->baseExpr->loc();
     if (type->isError()) {
       // Reported.
     } else if (type->isConstructor()) {
-      sema_.diags_.error(loc, "the class extended must be known when compiling: the fields of an object "
-                        "lie at places fixed then, and '" +
-                            type->name().str() +
-                            "' is some class known only when the program runs (docs/decorators.md, "
-                            "section 5); extend a class by its name, or take it in a generic "
-                            "function, 'function Mixin<B extends Constructor>(Base: B)'");
+      checker_.diags_.error(
+          loc, "the class extended must be known when compiling: the fields of an object "
+               "lie at places fixed then, and '" +
+                   type->name().str() +
+                   "' is some class known only when the program runs (docs/decorators.md, "
+                   "section 5); extend a class by its name, or take it in a generic "
+                   "function, 'function Mixin<B extends Constructor>(Base: B)'");
     } else if (!type->isClassRef()) {
-      sema_.diags_.error(loc, "a class can extend only a class, and this is a '" + type->name() + "'");
+      checker_.diags_.error(loc, "a class can extend only a class, and this is a '" + type->name() +
+                                     "'");
     } else if (!parent->type) {
-      sema_.diags_.error(loc, "a class cannot extend '" + parent->name +
-                            "' of JavaScript; extend a class of the program");
+      checker_.diags_.error(loc, "a class cannot extend '" + parent->name +
+                                     "' of JavaScript; extend a class of the program");
       parent = nullptr;
     } else if (parent->isGeneric()) {
-      sema_.diags_.error(loc, "'" + parent->name + "' is generic; extend one of its instances, e.g. '" +
-                            parent->name + "<int>'");
+      checker_.diags_.error(loc, "'" + parent->name +
+                                     "' is generic; extend one of its instances, e.g. '" +
+                                     parent->name + "<int>'");
       parent = nullptr;
-    } else if (sema_.fsDeclarer().isRuntimeClass(parent)) {
-      sema_.diags_.error(loc, "a class cannot extend '" + parent->name +
-                            "': only the functions of node:fs make its objects");
+    } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
+      checker_.diags_.error(loc, "a class cannot extend '" + parent->name +
+                                     "': only the functions of node:fs make its objects");
       parent = nullptr;
     }
     // A class only checked is no class down the chain of its parent, and
-    // CodeGen lays out no type of it.
+    // Lowering lays out no type of it.
     if (parent) {
       cls->parent = parent;
       if (cls->checkOnly) {
         const_cast<Type *>(cls->type)->addBase(parent->type);
       } else {
         parent->children.push_back(cls);
-        sema_.classBases().addBase(cls->type, parent->type);
+        checker_.classBases().addBase(cls->type, parent->type);
       }
     }
     cls->base.reset();
@@ -158,12 +161,12 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
                                           ")");
   }
 
-  ClassDecl *outerDeclaring = std::exchange(sema_.declaringClass_, cls);
-  ClassDecl *outerClass = std::exchange(sema_.currentClass_, cls);
-  sema_.classDeclarer().resolveClass(cls);
-  sema_.classDeclarer().declareMethods(cls);
-  sema_.currentClass_ = outerClass;
-  sema_.declaringClass_ = outerDeclaring;
+  ClassDecl *outerDeclaring = std::exchange(checker_.declaringClass_, cls);
+  ClassDecl *outerClass = std::exchange(checker_.currentClass_, cls);
+  checker_.classDeclarer().resolveClass(cls);
+  checker_.classDeclarer().declareMethods(cls);
+  checker_.currentClass_ = outerClass;
+  checker_.declaringClass_ = outerDeclaring;
   // Its methods are functions of the file it is in.
   std::vector<FunctionDecl *> methods = cls->methods;
   methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
@@ -175,29 +178,29 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
       methods.push_back(f.method);
     }
   }
-  if (Module *home = sema_.declModules_.lookup(cls)) {
+  if (Module *home = checker_.declModules_.lookup(cls)) {
     for (FunctionDecl *fn : methods) {
-      sema_.declModules_[fn] = home;
+      checker_.declModules_[fn] = home;
     }
   }
   // Linked as an instance of a generic class is, after the others: a class
   // made later still may override its methods.
   markLateOverrides(cls);
-  if (sema_.classesLinked_) {
-    sema_.classLinks().linkOverrides(cls);
-    sema_.classLinks().buildVtable(cls);
+  if (checker_.classesLinked_) {
+    checker_.classLinks().linkOverrides(cls);
+    checker_.classLinks().buildVtable(cls);
   }
-  if (sema_.checkingInstance_ && sema_.checkingInstance_->generic) {
-    sema_.lateOwners_[cls] = sema_.checkingInstance_;
+  if (checker_.checkingInstance_ && checker_.checkingInstance_->generic) {
+    checker_.lateOwners_[cls] = checker_.checkingInstance_;
   }
-  sema_.lateClasses_.push_back(cls);
+  checker_.lateClasses_.push_back(cls);
 }
 
 void LateClasses::checkStaticFields(ClassDecl *cls) {
-  ClassDecl *outer = std::exchange(sema_.currentClass_, cls);
-  bool outerStatic = std::exchange(sema_.staticInit_, true);
+  ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
+  bool outerStatic = std::exchange(checker_.staticInit_, true);
   cls->declared = true;
-  sema_.staticsSet_.clear();
+  checker_.staticsSet_.clear();
   for (ClassField &f : cls->fields) {
     if (!f.isStatic || !f.var) {
       continue;
@@ -206,64 +209,66 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
       if (!f.var->type) {
         f.var->type = Type::error();
       }
-      sema_.staticsSet_.insert(f.var);
+      checker_.staticsSet_.insert(f.var);
       continue;
     }
     const Type *declared = f.var->type;
     if (declared && f.resolved && !f.type && !f.optional) {
       declared = nullptr; // the type of a literal, which the value gives again
     }
-    f.init = sema_.exprChecker().checkExpr(f.init, declared && !declared->isError() ? declared : nullptr);
-    sema_.staticsSet_.insert(f.var);
+    f.init = checker_.exprChecker().checkExpr(f.init, declared && !declared->isError() ? declared
+                                                                                       : nullptr);
+    checker_.staticsSet_.insert(f.var);
     if (declared) {
-      f.init = sema_.typeRelations().coerce(f.init, declared, "static field '" + f.name.str() + "'");
+      f.init =
+          checker_.typeRelations().coerce(f.init, declared, "static field '" + f.name.str() + "'");
       continue;
     }
     const Type *type = f.init->type;
     if (type->isVoid() || type->isUndefined()) {
-      sema_.diags_.error(f.init->loc(), "cannot infer the type of static field '" + f.name +
-                                      "' from this value; declare it, e.g. 'static " + f.name +
-                                      ": int | undefined = undefined'");
+      checker_.diags_.error(f.init->loc(), "cannot infer the type of static field '" + f.name +
+                                               "' from this value; declare it, e.g. 'static " +
+                                               f.name + ": int | undefined = undefined'");
       type = Type::error();
     }
     f.var->type = f.resolved = type;
   }
-  sema_.staticInit_ = outerStatic;
-  sema_.currentClass_ = outer;
+  checker_.staticInit_ = outerStatic;
+  checker_.currentClass_ = outer;
 }
 
 void LateClasses::checkLateClasses() {
-  for (; sema_.lateChecked_ < sema_.lateClasses_.size(); ++sema_.lateChecked_) {
-    ClassDecl *cls = sema_.lateClasses_[sema_.lateChecked_];
+  for (; checker_.lateChecked_ < checker_.lateClasses_.size(); ++checker_.lateChecked_) {
+    ClassDecl *cls = checker_.lateClasses_[checker_.lateChecked_];
     if (cls->checkOnly) {
       continue;
     }
-    if (Module *home = sema_.declModules_.lookup(cls); home && sema_.scopes_.size() == 1) {
-      sema_.moduleDeclarer().useModule(home);
+    if (Module *home = checker_.declModules_.lookup(cls); home && checker_.scopes_.size() == 1) {
+      checker_.moduleDeclarer().useModule(home);
     }
     // The code of a class a copy of a template made: its errors are the
     // copy's.
-    Sema::Instance *owner = sema_.lateOwners_.lookup(cls);
-    Sema::Instance *outerInstance = sema_.checkingInstance_;
-    std::vector<Diagnostics::Captured> *outerCapture = sema_.diags_.capture();
+    Checker::Instance *owner = checker_.lateOwners_.lookup(cls);
+    Checker::Instance *outerInstance = checker_.checkingInstance_;
+    std::vector<Diagnostics::Captured> *outerCapture = checker_.diags_.capture();
     if (owner) {
-      sema_.checkingInstance_ = owner;
-      sema_.diags_.setCapture(&sema_.lateErrors_[owner]);
+      checker_.checkingInstance_ = owner;
+      checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
     }
-    sema_.flow_ = Sema::Flow();
-    sema_.classChecker().checkClassBodies(cls);
-    sema_.checkingInstance_ = outerInstance;
-    sema_.diags_.setCapture(outerCapture);
+    checker_.flow_ = Checker::Flow();
+    checker_.classChecker().checkClassBodies(cls);
+    checker_.checkingInstance_ = outerInstance;
+    checker_.diags_.setCapture(outerCapture);
   }
   // Reported at the calls that made the copies, once each.
-  for (auto &[instance, errors] : sema_.lateErrors_) {
+  for (auto &[instance, errors] : checker_.lateErrors_) {
     if (errors.empty() || instance->failed) {
       continue;
     }
     instance->failed = true;
     instance->message = errors.front().message;
     instance->errorLoc = errors.front().loc;
-    sema_.genericInstantiator().reportInstance(instance, instance->callLoc, instance->concrete);
+    checker_.genericInstantiator().reportInstance(instance, instance->callLoc, instance->concrete);
   }
 }
 
@@ -291,7 +296,7 @@ void LateClasses::markLateOverrides(SourceFile &program) {
       }
     });
   }
-  for (ClassDecl *cls : sema_.classes_) {
+  for (ClassDecl *cls : checker_.classes_) {
     markLateOverrides(cls);
   }
 }
@@ -310,7 +315,7 @@ void LateClasses::markLateOverrides(ClassDecl *cls) {
 
 void LateClasses::bindOuterTypeParams(const ClassDecl *cls) {
   if (const FunctionDecl *outer = cls ? cls->outer : nullptr) {
-    sema_.typeParams().bindTypeParams(outer->typeParams, outer->typeArgs);
+    checker_.typeParams().bindTypeParams(outer->typeParams, outer->typeArgs);
   }
 }
 
@@ -334,25 +339,25 @@ bool LateClasses::isTemplate(const FuncSymbol *generic) {
          hasClassExpr(generic->decl);
 }
 
-void LateClasses::checkTemplateInstance(Sema::Instance *instance) {
+void LateClasses::checkTemplateInstance(Checker::Instance *instance) {
   instance->checking = true;
   std::vector<Diagnostics::Captured> errors;
   FunctionDecl *decl = instance->decl;
-  Sema::BodyState saved = sema_.returnInferrer().enterBody(decl);
-  sema_.checkingInstance_ = instance;
-  sema_.diags_.setCapture(&errors);
+  Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
+  checker_.checkingInstance_ = instance;
+  checker_.diags_.setCapture(&errors);
   // The call runs it now: in top-level code, the globals declared later are
   // not there yet.
-  if (!sema_.topLevelDone_) {
-    sema_.early_ = decl->sym;
+  if (!checker_.topLevelDone_) {
+    checker_.early_ = decl->sym;
   }
-  sema_.flow_ = Sema::Flow();
+  checker_.flow_ = Checker::Flow();
   if (decl->sym->ret) {
-    sema_.functionChecker().checkFunctionBody(decl);
+    checker_.functionChecker().checkFunctionBody(decl);
   } else {
-    sema_.returnInferrer().checkAndInfer(decl);
+    checker_.returnInferrer().checkAndInfer(decl);
   }
-  sema_.returnInferrer().leaveBody(saved);
+  checker_.returnInferrer().leaveBody(saved);
   instance->checking = false;
   instance->checked = true;
   if (errors.empty()) {
@@ -370,14 +375,15 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   for (const ClassField &f : cls->fields) {
     llvm::SmallPtrSet<const Type *, 8> seen;
     if (f.isStatic && f.var && f.var->type && holdsType(f.var->type, mine, seen)) {
-      sema_.diags_.error(f.loc, "the decorator gives '" + cls->name +
-                              "' another class in its place, "
-                              "and static field '" +
-                              f.name +
-                              "' holds an object made before, of the "
-                              "class as declared; make that object where it is used, or keep it "
-                              "outside the class");
-      sema_.diags_.note(loc, "the decorator is here");
+      checker_.diags_.error(f.loc,
+                            "the decorator gives '" + cls->name +
+                                "' another class in its place, "
+                                "and static field '" +
+                                f.name +
+                                "' holds an object made before, of the "
+                                "class as declared; make that object where it is used, or keep it "
+                                "outside the class");
+      checker_.diags_.note(loc, "the decorator is here");
       return;
     }
   }
@@ -390,8 +396,8 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   cls->type = theirs;
   replacement->type = mine;
   theirs->rename(name + " (as declared)");
-  if (!llvm::is_contained(sema_.file_->subtypes, mine)) {
-    sema_.file_->subtypes.push_back(mine);
+  if (!llvm::is_contained(checker_.file_->subtypes, mine)) {
+    checker_.file_->subtypes.push_back(mine);
   }
   std::vector<ClassDecl *> declared;
   for (ClassDecl *child : cls->children) {
@@ -411,10 +417,10 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   // table are found again.
   std::function<void(ClassDecl *)> again = [&](ClassDecl *c) {
     const_cast<Type *>(c->type)->forgetFields();
-    bool muted = sema_.diags_.setMuted(true);
-    sema_.classLinks().linkOverrides(c);
-    sema_.diags_.setMuted(muted);
-    sema_.classLinks().buildVtable(c);
+    bool muted = checker_.diags_.setMuted(true);
+    checker_.classLinks().linkOverrides(c);
+    checker_.diags_.setMuted(muted);
+    checker_.classLinks().buildVtable(c);
     for (ClassDecl *child : c->children) {
       again(child);
     }
@@ -422,12 +428,12 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   for (ClassDecl *child : declared) {
     for (const ClassField &f : child->fields) {
       if (!f.isStatic && replacement->field(f.name)) {
-        sema_.diags_.error(f.loc, "'" + child->name + "' extends '" + cls->name +
-                                "', whose decorator "
-                                "gives a class with a field '" +
-                                f.name +
-                                "' of its own in its "
-                                "place; give this field another name");
+        checker_.diags_.error(f.loc, "'" + child->name + "' extends '" + cls->name +
+                                         "', whose decorator "
+                                         "gives a class with a field '" +
+                                         f.name +
+                                         "' of its own in its "
+                                         "place; give this field another name");
         return;
       }
     }

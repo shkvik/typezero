@@ -1,13 +1,13 @@
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/classes/static_checker/static_checker.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
+#include "compiler/check/classes/static_checker/static_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -48,7 +48,7 @@ std::string hintName(const Expr *expr) {
 
 } // namespace
 
-UnknownChecker::UnknownChecker(Sema &sema) : sema_(sema) {}
+UnknownChecker::UnknownChecker(Checker &checker) : checker_(checker) {}
 
 bool UnknownChecker::isObjectReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
@@ -99,28 +99,30 @@ void UnknownChecker::reportUnknownUse(const Expr *object, const std::string &wha
   const Type *type = object->type;
   std::string x = hintName(object);
   if (type->isAnyObject()) {
-    sema_.diags_.error(object->loc(),
-                 "an object " + (what.empty() ? "cannot be indexed" : "has no " + what) +
-                     " until 'instanceof' shows its class, e.g. 'if (" + x + " instanceof C) ...'");
+    checker_.diags_.error(object->loc(),
+                          "an object " + (what.empty() ? "cannot be indexed" : "has no " + what) +
+                              " until 'instanceof' shows its class, e.g. 'if (" + x +
+                              " instanceof C) ...'");
     return;
   }
   std::string example = what.empty() ? "Array.isArray(" + x + ")" : x + " instanceof C";
-  sema_.diags_.error(object->loc(), "an unknown value " +
-                                  (what.empty() ? "cannot be indexed" : "has no " + what) +
-                                  " until a check shows what it holds, e.g. 'if (" + example +
-                                  ") ...' or 'typeof " + x + " == \"string\"'");
+  checker_.diags_.error(object->loc(), "an unknown value " +
+                                           (what.empty() ? "cannot be indexed" : "has no " + what) +
+                                           " until a check shows what it holds, e.g. 'if (" +
+                                           example + ") ...' or 'typeof " + x + " == \"string\"'");
 }
 
 Expr *UnknownChecker::checkUnknownMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->object->type->isClassRef()) {
-    return sema_.classValueChecker().checkClassRefMember(member);
+    return checker_.classValueChecker().checkClassRefMember(member);
   }
   // In TypeScript a decorator of a member gets the prototype, whose
   // constructor is the class; here it gets the class.
   if (member->name == "constructor") {
-    sema_.diags_.error(member->loc(), "'constructor' is not supported: an object has no prototype in tz; "
-                                "a decorator gets the class itself, use it as it is");
+    checker_.diags_.error(member->loc(),
+                          "'constructor' is not supported: an object has no prototype in tz; "
+                          "a decorator gets the class itself, use it as it is");
     return member;
   }
   reportUnknownUse(member->object, "property '" + member->name.str() + "'");
@@ -138,37 +140,39 @@ Expr *UnknownChecker::checkUnknownMethod(CallExpr *call, MemberExpr *member) {
   // compiling; its value is evaluated first.
   if (ClassDecl *cls = const_cast<ClassDecl *>(receiver->classRef()); cls && cls->type) {
     Expr *object = member->object;
-    Expr *result = sema_.staticChecker().checkClassStaticCall(call, member, cls);
+    Expr *result = checker_.staticChecker().checkClassStaticCall(call, member, cls);
     if (isa<NameExpr>(object)) {
       return result;
     }
-    auto *seq = sema_.ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{object, result});
+    auto *seq = checker_.ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{object, result});
     seq->type = result->type;
     return seq;
   }
   if (receiver->isConstructor()) {
-    sema_.diags_.error(member->loc(), "'" + receiver->name() +
-                                    "' is some class known only when the "
-                                    "program runs, whose static members are not known; call its "
-                                    "methods through reflection (docs/decorators.md, section 6)");
+    checker_.diags_.error(member->loc(),
+                          "'" + receiver->name() +
+                              "' is some class known only when the "
+                              "program runs, whose static members are not known; call its "
+                              "methods through reflection (docs/decorators.md, section 6)");
   } else if (receiver->isClassRef()) {
-    sema_.diags_.error(member->loc(), "'" + receiver->classRef()->name +
-                                    "' as a value has no methods "
-                                    "in tz");
+    checker_.diags_.error(member->loc(), "'" + receiver->classRef()->name +
+                                             "' as a value has no methods "
+                                             "in tz");
   } else {
     reportUnknownUse(member->object, "method '" + member->name.str() + "'");
   }
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;
 }
 
-void UnknownChecker::addUnknownFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
+void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
+                                     Checker::Flow &whenFalse) const {
   // A variable gets the type a check showed, in place of what an earlier one
   // showed (`typeof x == "object"`, then `x instanceof C`).
-  auto narrow = [](Sema::Flow &flow, const VarSymbol *var, const Type *type) {
+  auto narrow = [](Checker::Flow &flow, const VarSymbol *var, const Type *type) {
     llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
     flow.narrowed.push_back({var, type});
   };
@@ -199,7 +203,7 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Sema::Flow &whenTrue, Sem
   if (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne) {
     return;
   }
-  Sema::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
+  Checker::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);

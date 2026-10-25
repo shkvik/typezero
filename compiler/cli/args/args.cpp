@@ -37,7 +37,7 @@ options:
 )";
 // Not in the usage: -O0 turns optimization off, runtime inlining included.
 // The tests run every program both ways, and with --emit-llvm it shows the IR
-// as CodeGen emits it, except that generators are split into the functions
+// as Lowering emits it, except that generators are split into the functions
 // of their coroutines (LLVM has to do that at any level).
 
 } // namespace

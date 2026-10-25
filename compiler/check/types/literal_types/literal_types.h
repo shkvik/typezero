@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Literal types and the member of a union a value is.
 class LiteralTypes {
 public:
-  explicit LiteralTypes(Sema &sema);
+  explicit LiteralTypes(Checker &checker);
 
   // Unions and literal types (sema_union.cpp, docs/objects.md section 7).
   //
@@ -32,14 +32,14 @@ public:
   // gives (`kind: "circle"`); null if none or several fit.
   const Type *literalMember(const ObjectLitExpr *lit, const Type *target) const;
   // The type of `var` in `flow`: narrowed, or holding a value, or declared.
-  const Type *typeIn(const Sema::Flow &flow, const VarSymbol *var) const;
+  const Type *typeIn(const Checker::Flow &flow, const VarSymbol *var) const;
   // What a literal written where `expected` is expected looks at: of a
   // conditional type that waits, the union of its branches, so that `return
   // "text"` takes the literal type a branch has.
   const Type *literalExpectation(const Type *expected, unsigned depth = 0);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

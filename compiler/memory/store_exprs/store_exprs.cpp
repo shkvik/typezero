@@ -1,9 +1,7 @@
-#include "compiler/lower/memory/store_exprs/store_exprs.h"
-#include "compiler/lower/memory/store_stmts/store_stmts.h"
-#include "compiler/lower/memory/store_calls/store_calls.h"
+#include "compiler/memory/store_exprs/store_exprs.h"
+#include "compiler/memory/store_calls/store_calls.h"
+#include "compiler/memory/store_stmts/store_stmts.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <functional>
 #include <map>
 #include <set>
@@ -11,8 +9,6 @@
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
-using llvm::Value;
 
 namespace tz {
 
@@ -103,7 +99,8 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
       scanner_.store(object);
       scanner_.escapes(member->method->decl);
     }
-    if (member->type && member->type->nonOptional()->isFunction() && !scanner_.callee_.contains(e)) {
+    if (member->type && member->type->nonOptional()->isFunction() &&
+        !scanner_.callee_.contains(e)) {
       scanner_.store(object);
     }
     out.clear(); // a field read: anything
@@ -127,9 +124,9 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Binary: {
     auto *bin = llvm::cast<BinaryExpr>(e);
     StoreScanner::Sources lhs = expr(bin->lhs);
-    StoreScanner::Sources rhs = bin->op == BinaryOp::InstanceOf ? StoreScanner::Sources{} : expr(bin->rhs);
-    if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr ||
-        bin->op == BinaryOp::Nullish) {
+    StoreScanner::Sources rhs =
+        bin->op == BinaryOp::InstanceOf ? StoreScanner::Sources{} : expr(bin->rhs);
+    if (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr || bin->op == BinaryOp::Nullish) {
       out.insert(out.end(), lhs.begin(), lhs.end());
       out.insert(out.end(), rhs.begin(), rhs.end());
     }

@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Names in expressions: variables, functions, globals.
 class NameChecker {
 public:
-  explicit NameChecker(Sema &sema);
+  explicit NameChecker(Checker &checker);
 
   Expr *checkName(NameExpr *name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

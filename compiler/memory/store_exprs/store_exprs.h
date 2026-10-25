@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/lower/memory/store_scanner/store_scanner.h"
+#include "compiler/memory/store_scanner/store_scanner.h"
 
 namespace tz {
 

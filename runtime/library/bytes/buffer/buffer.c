@@ -8,7 +8,17 @@
 // that is not base64, where hex stops), the algorithms are node's (those of
 // its deps/nbytes).
 
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/bytes/cjk/cjk.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include <stdio.h>
 #include <string.h>
@@ -20,7 +30,7 @@ extern const TzLayout tz_bytes_layouts[];
 
 #define MAX_LENGTH ((int64_t)(1 << 30) - 1)
 
-// Buffer's encodings, as Sema numbers them
+// Buffer's encodings, as Checker numbers them
 // (compiler/library/bytes/sema/sema_bytes.cpp).
 enum { ENC_UTF8, ENC_UTF16LE, ENC_LATIN1, ENC_ASCII, ENC_BASE64, ENC_BASE64URL, ENC_HEX };
 
@@ -1141,7 +1151,7 @@ void tz_text_decoder_encoding(TzStr *out, const void *decoder) {
   *out = tz_str_from_ascii(name, strlen(name));
 }
 
-// A decoder of an encoding Sema found by its label: TEXT_* and, for an old
+// A decoder of an encoding Checker found by its label: TEXT_* and, for an old
 // encoding, its table.
 void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal, int32_t ignore_bom) {
   TzTextDecoder *d = (TzTextDecoder *)tz_obj_alloc(sizeof(TzTextDecoder));

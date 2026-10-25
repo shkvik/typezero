@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Classes with decorators: stubs and adapters of methods, metadata.
 class DecoratorLowerer {
 public:
-  explicit DecoratorLowerer(CodeGen &codegen);
+  explicit DecoratorLowerer(Lowering &lowering);
 
   // Decorators (codegen_decorate.cpp). A class declaration sets the static
   // fields, gives the methods that decorators may replace (FunctionDecl::impl)
@@ -30,7 +30,7 @@ public:
   // Classes as values and reflection (codegen_reflect.cpp, docs/decorators.md
   // sections 5 and 6). A class expression is its class's object, after its
   // static fields get their values. The classes reflection reaches get a
-  // description (TzClassInfo in runtime/core/tzrt/tzrt.h) that the object of
+  // description (TzClassInfo in runtime/library/reflect/reflect/reflect.h) that the object of
   // the class points to: the function that makes an object from arguments as
   // unknowns, the one that makes it from a Json, and its methods as functions
   // that take their `this`. A function value in an unknown is called through
@@ -38,7 +38,7 @@ public:
   llvm::Value *emitClassExpr(ClassExpr *expr);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::DenseMap<const FunctionDecl *, llvm::Function *> originals_;
   llvm::DenseMap<const FunctionDecl *, llvm::Constant *> adapterInfos_;
   llvm::DenseMap<const void *, llvm::Constant *> metaKeys_;

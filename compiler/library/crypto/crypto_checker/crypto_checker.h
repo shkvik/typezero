@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // node:crypto: its types, constants and members, and the global crypto.
 class CryptoChecker {
 public:
-  explicit CryptoChecker(Sema &sema);
+  explicit CryptoChecker(Checker &checker);
 
   Expr *checkCryptoMember(MemberExpr *member);
   Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
@@ -18,7 +18,7 @@ public:
   const Type *cryptoTypeNamed(llvm::StringRef name) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Date (docs/date.md).
 class DateChecker {
 public:
-  explicit DateChecker(Sema &sema);
+  explicit DateChecker(Checker &checker);
 
   // Dates (sema_date.cpp, docs/date.md). A date is a reference to an object
   // that holds its time value, as in JavaScript. What goes wrong in
@@ -37,7 +37,7 @@ public:
   void checkDateFields(std::vector<Expr *> &args);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

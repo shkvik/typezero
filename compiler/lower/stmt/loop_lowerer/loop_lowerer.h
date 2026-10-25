@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Loops, break, continue and labels.
 class LoopLowerer {
 public:
-  explicit LoopLowerer(CodeGen &codegen);
+  explicit LoopLowerer(Lowering &lowering);
 
   void emitWhile(WhileStmt *stmt);
   void emitDoWhile(DoWhileStmt *stmt);
@@ -18,7 +18,7 @@ public:
   void pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget, size_t scopeDepth);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

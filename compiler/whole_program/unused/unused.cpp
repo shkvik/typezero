@@ -4,12 +4,12 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-Unused::Unused(Sema &sema) : sema_(sema) {}
+Unused::Unused(Checker &checker) : checker_(checker) {}
 
 // The entry file is compiled whole; of the files it imports, only the
 // functions the program reaches.

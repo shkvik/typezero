@@ -24,7 +24,7 @@ enum class UnaryOp {
   BitNot,
   TypeOf,
   Void,    // `void x`: evaluates x; the value is undefined
-  Delete,  // `delete x`: Sema rejects it, since objects and arrays always have their fields
+  Delete,  // `delete x`: Checker rejects it, since objects and arrays always have their fields
   NonNull, // postfix `x!`
 };
 
@@ -50,7 +50,7 @@ enum class BinaryOp {
   LogAnd,
   LogOr,
   Nullish,    // `a ?? b`
-  In,         // `key in object`: Sema rejects it until unions come
+  In,         // `key in object`: Checker rejects it until unions come
   InstanceOf, // `x instanceof C`: compares the class number in x's descriptor
 };
 

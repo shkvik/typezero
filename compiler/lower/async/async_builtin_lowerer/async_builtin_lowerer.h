@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Timers, queueMicrotask, nextTick and the other built-ins of async code.
 class AsyncBuiltinLowerer {
 public:
-  explicit AsyncBuiltinLowerer(CodeGen &codegen);
+  explicit AsyncBuiltinLowerer(Lowering &lowering);
 
   llvm::Value *emitAsyncBuiltin(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

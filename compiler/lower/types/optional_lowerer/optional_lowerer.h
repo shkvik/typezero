@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Optionals: T | undefined.
 class OptionalLowerer {
 public:
-  explicit OptionalLowerer(CodeGen &codegen);
+  explicit OptionalLowerer(Lowering &lowering);
 
   // `T | undefined`: whether it holds a value, and the value (zero when it
   // does not).
@@ -17,7 +17,7 @@ public:
   llvm::Value *optionalValue(llvm::Value *value, const Type *optionalType);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

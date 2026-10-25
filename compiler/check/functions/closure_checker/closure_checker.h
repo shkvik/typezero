@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Arrows and function expressions, and the variables they capture.
 class ClosureChecker {
 public:
-  explicit ClosureChecker(Sema &sema);
+  explicit ClosureChecker(Checker &checker);
 
-  static Sema::Signature signatureOf(const Type *fnType);
+  static Checker::Signature signatureOf(const Type *fnType);
   // `self`: the constant the function is assigned to (`const f = () => ...`),
   // through which it calls itself.
-  Expr *checkFunctionExpr(FunctionExpr *fe, const Sema::Signature *expected);
+  Expr *checkFunctionExpr(FunctionExpr *fe, const Checker::Signature *expected);
   void checkClosureBody(FunctionDecl *fn);
   // `function f() {}` as an expression: f is visible in its body, in a scope
   // of its own.
@@ -21,7 +21,7 @@ public:
   void checkStatements(BlockStmt *block);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

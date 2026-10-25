@@ -1,11 +1,11 @@
 #include "compiler/check/objects/object_literal_checker/object_literal_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/classes/method_literal_checker/method_literal_checker.h"
-#include "compiler/check/objects/record_literal_checker/record_literal_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/objects/record_literal_checker/record_literal_checker.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -14,8 +14,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -43,14 +43,14 @@ const char kRuntimeKeys[] =
 
 } // namespace
 
-ObjectLiteralChecker::ObjectLiteralChecker(Sema &sema) : sema_(sema) {}
+ObjectLiteralChecker::ObjectLiteralChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expected) {
   if (expected && expected->nonOptional()->isJson()) {
-    return sema_.jsonChecker().checkJsonObjectLit(lit);
+    return checker_.jsonChecker().checkJsonObjectLit(lit);
   }
   if (expected && expected->nonOptional()->isRecord()) {
-    return sema_.recordLiteralChecker().checkRecordLit(lit, expected->nonOptional());
+    return checker_.recordLiteralChecker().checkRecordLit(lit, expected->nonOptional());
   }
   // A literal is never an instance of a class: where one is expected, the
   // literal keeps its own type, and the place reports the difference.
@@ -75,11 +75,12 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     named[i] = !prop.spread;
     if (prop.defaulted) {
       // `{ x = 1 }` belongs to destructuring patterns.
-      sema_.diags_.error(prop.loc, "'" + prop.name +
-                                 " = ...' gives a default value, which only a destructuring "
-                                 "pattern such as '({ " +
-                                 prop.name + " = 1 } = o)' has; in an object literal write '" +
-                                 prop.name + ": ...'");
+      checker_.diags_.error(prop.loc,
+                            "'" + prop.name +
+                                " = ...' gives a default value, which only a destructuring "
+                                "pattern such as '({ " +
+                                prop.name + " = 1 } = o)' has; in an object literal write '" +
+                                prop.name + ": ...'");
       prop.value = cast<AssignExpr>(prop.value)->value;
       prop.defaulted = false;
       ok = false;
@@ -88,11 +89,11 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       continue;
     }
     // `[key]: value`: the key must name the field when compiling.
-    prop.key = sema_.exprChecker().checkExpr(prop.key);
+    prop.key = checker_.exprChecker().checkExpr(prop.key);
     const Type *keyType = prop.key->type;
-    if (std::optional<std::string> name = sema_.keyedFieldChecker().constantKey(prop.key)) {
-      prop.name = sema_.ctx_.keepName(std::move(*name));
-      sema_.file_->fieldNames.insert(prop.name);
+    if (std::optional<std::string> name = checker_.keyedFieldChecker().constantKey(prop.key)) {
+      prop.name = checker_.ctx_.keepName(std::move(*name));
+      checker_.file_->fieldNames.insert(prop.name);
       continue;
     }
     ok = false;
@@ -101,31 +102,34 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       continue;
     }
     if (keyType->nonOptional()->isNumeric()) {
-      sema_.diags_.error(prop.key->loc(),
-                   "a number cannot name a field; an object with numbered entries is an array");
+      checker_.diags_.error(
+          prop.key->loc(),
+          "a number cannot name a field; an object with numbered entries is an array");
     } else if (keyType->isString()) {
-      sema_.diags_.error(prop.key->loc(),
-                   std::string("a key in brackets must be known when compiling: a string "
-                               "literal, or a constant declared with one, such as 'const key = "
-                               "\"name\"'; ") +
-                       kRuntimeKeys);
+      checker_.diags_.error(
+          prop.key->loc(),
+          std::string("a key in brackets must be known when compiling: a string "
+                      "literal, or a constant declared with one, such as 'const key = "
+                      "\"name\"'; ") +
+              kRuntimeKeys);
     } else {
-      sema_.diags_.error(prop.key->loc(), "a key must be a string, found '" + keyType->name() + "'");
+      checker_.diags_.error(prop.key->loc(),
+                            "a key must be a string, found '" + keyType->name() + "'");
     }
   }
 
   for (size_t i = 0; i < lit->props.size(); ++i) {
     for (size_t j = 0; j < i && named[i]; ++j) {
       if (named[j] && lit->props[j].name == lit->props[i].name) {
-        sema_.diags_.error(lit->props[i].loc,
-                     "duplicate field '" + lit->props[i].name + "' in the object literal");
+        checker_.diags_.error(lit->props[i].loc,
+                              "duplicate field '" + lit->props[i].name + "' in the object literal");
         ok = false;
         break;
       }
     }
   }
   if (expectedUnion) {
-    target = sema_.literalTypes().literalMember(lit, expectedUnion);
+    target = checker_.literalTypes().literalMember(lit, expectedUnion);
     if (!usable(target)) {
       target = nullptr;
     }
@@ -134,7 +138,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (!target) {
       for (const Type *m : expectedUnion->members()) {
         if (m->isRecord()) {
-          return sema_.recordLiteralChecker().checkRecordLit(lit, m);
+          return checker_.recordLiteralChecker().checkRecordLit(lit, m);
         }
       }
     }
@@ -152,7 +156,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     }
   }
   if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; })) {
-    return sema_.methodLiteralChecker().checkMethodLiteral(lit, target);
+    return checker_.methodLiteralChecker().checkMethodLiteral(lit, target);
   }
   if (lit->hasSpread()) {
     return checkSpreadLit(lit, target, named, ok);
@@ -162,7 +166,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
     if (!named[i]) { // a key in brackets that names nothing
-      prop.value = sema_.exprChecker().checkExpr(prop.value);
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
       continue;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
@@ -172,29 +176,32 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (target) {
       const Field *field = target->field(prop.name);
       if (!field) {
-        prop.value = sema_.exprChecker().checkExpr(prop.value);
+        prop.value = checker_.exprChecker().checkExpr(prop.value);
         if (!target->overload(prop.name)) { // reported below
-          sema_.diags_.error(prop.loc, "type '" + target->name() + "' has no field '" + prop.name +
-                                     "'; an object must have exactly the fields of its type");
+          checker_.diags_.error(prop.loc,
+                                "type '" + target->name() + "' has no field '" + prop.name +
+                                    "'; an object must have exactly the fields of its type");
         }
         continue;
       }
-      prop.value = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(prop.value, field->type), field->type, what);
+      prop.value = checker_.typeRelations().coerce(
+          checker_.exprChecker().checkExpr(prop.value, field->type), field->type, what);
       continue;
     }
-    prop.value = sema_.exprChecker().checkExpr(prop.value);
+    prop.value = checker_.exprChecker().checkExpr(prop.value);
     const Type *type = prop.value->type;
     if (type->isError()) {
       ok = false;
     } else if (type->isVoid()) {
-      sema_.diags_.error(prop.value->loc(),
-                   "an expression of type 'void' cannot be the value of " + what);
+      checker_.diags_.error(prop.value->loc(),
+                            "an expression of type 'void' cannot be the value of " + what);
       ok = false;
     } else if (type->isUndefined()) {
-      sema_.diags_.error(prop.value->loc(), "cannot infer the type of " + what +
-                                          " from 'undefined'; declare the type of the object, e.g. "
-                                          "'const o: { " +
-                                          prop.name + "?: int } = ...'");
+      checker_.diags_.error(prop.value->loc(),
+                            "cannot infer the type of " + what +
+                                " from 'undefined'; declare the type of the object, e.g. "
+                                "'const o: { " +
+                                prop.name + "?: int } = ...'");
       ok = false;
     }
     fields.push_back({prop.name.str(), type, false});
@@ -205,15 +212,15 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       bool given = llvm::any_of(lit->props,
                                 [&](const ObjectLitExpr::Property &p) { return p.name == f.name; });
       if (!given && !f.type->isOptional()) {
-        sema_.diags_.error(lit->loc(), "field '" + f.name + "' is missing; type '" + target->name() +
-                                     "' requires it");
+        checker_.diags_.error(lit->loc(), "field '" + f.name + "' is missing; type '" +
+                                              target->name() + "' requires it");
       }
     }
     for (const Overload &o : target->overloads()) {
-      sema_.diags_.error(lit->loc(), "an object literal cannot be of type '" + target->name() +
-                                   "': its method '" + o.name +
-                                   "' has several signatures, and only a class implements "
-                                   "those, each with a variant of its own");
+      checker_.diags_.error(lit->loc(), "an object literal cannot be of type '" + target->name() +
+                                            "': its method '" + o.name +
+                                            "' has several signatures, and only a class implements "
+                                            "those, each with a variant of its own");
     }
     lit->type = target;
     return lit;
@@ -228,8 +235,8 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
 // holds undefined is not copied, so `{ ...defaults, ...options }` keeps the
 // defaults that the options leave out. The field then holds a value if any
 // part gave it one.
-Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *target, llvm::ArrayRef<bool> named,
-                           bool ok) {
+Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *target,
+                                           llvm::ArrayRef<bool> named, bool ok) {
   // Spreading a Record makes a Record, as its keys are known only when the
   // program runs.
   bool records = false;
@@ -247,14 +254,14 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     ObjectLitExpr::Property &prop = lit->props[i];
     if (!prop.spread) {
       if (!named[i]) {
-        prop.value = sema_.exprChecker().checkExpr(prop.value);
+        prop.value = checker_.exprChecker().checkExpr(prop.value);
         continue;
       }
       if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
         fe->fn->name = prop.name;
       }
       const Field *wanted = target ? target->field(prop.name) : nullptr;
-      prop.value = sema_.exprChecker().checkExpr(prop.value, wanted ? wanted->type : nullptr);
+      prop.value = checker_.exprChecker().checkExpr(prop.value, wanted ? wanted->type : nullptr);
       const Type *type = prop.value->type;
       Field *field = slot(prop.name);
       std::string what = ("field '" + prop.name + "'").str();
@@ -263,18 +270,18 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
         continue;
       }
       if (type->isVoid()) {
-        sema_.diags_.error(prop.value->loc(),
-                     "an expression of type 'void' cannot be the value of " + what);
+        checker_.diags_.error(prop.value->loc(),
+                              "an expression of type 'void' cannot be the value of " + what);
         ok = false;
         continue;
       }
       if (type->isUndefined()) {
         if (!field) {
-          sema_.diags_.error(prop.value->loc(),
-                       "cannot infer the type of " + what +
-                           " from 'undefined'; declare the type of the object, e.g. "
-                           "'const o: { " +
-                           prop.name + "?: int } = ...'");
+          checker_.diags_.error(prop.value->loc(),
+                                "cannot infer the type of " + what +
+                                    " from 'undefined'; declare the type of the object, e.g. "
+                                    "'const o: { " +
+                                    prop.name + "?: int } = ...'");
           ok = false;
           continue;
         }
@@ -288,7 +295,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       continue;
     }
 
-    prop.value = sema_.exprChecker().checkExpr(prop.value);
+    prop.value = checker_.exprChecker().checkExpr(prop.value);
     const Type *type = prop.value->type;
     if (type->isError()) {
       ok = false;
@@ -299,7 +306,8 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       continue;
     }
     if (type->isOptional() && type->inner()->isObject() && !type->inner()->isTuple()) {
-      sema_.diags_.error(prop.value->loc(), "the object may be undefined; check it before spreading it");
+      checker_.diags_.error(prop.value->loc(),
+                            "the object may be undefined; check it before spreading it");
       ok = false;
       continue;
     }
@@ -310,7 +318,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       if (type->nonOptional()->isArray() || type->nonOptional()->isTuple() || type->isString()) {
         message += "; JavaScript would make its indices the keys";
       }
-      sema_.diags_.error(prop.value->loc(), message);
+      checker_.diags_.error(prop.value->loc(), message);
       ok = false;
       continue;
     }
@@ -324,15 +332,16 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     }
     prop.omitKeys.clear();
     if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
-      sema_.classDeclarer().completeClass(cls);
+      checker_.classDeclarer().completeClass(cls);
       for (const Field &f : type->fields()) {
         if (llvm::StringRef(f.name).starts_with("#")) {
-          prop.omit.push_back(sema_.ctx_.keepName(f.name));
+          prop.omit.push_back(checker_.ctx_.keepName(f.name));
         }
       }
       if (hasMethodFields(cls)) {
-        sema_.diags_.error(prop.value->loc(), "an object with methods cannot be spread into an object "
-                                        "literal yet; copy the fields by name");
+        checker_.diags_.error(prop.value->loc(),
+                              "an object with methods cannot be spread into an object "
+                              "literal yet; copy the fields by name");
         ok = false;
         continue;
       }
@@ -353,9 +362,9 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       // Undefined is not copied: the earlier value may stay.
       const Type *base = TypeRelations::unify(field->type->nonOptional(), f.type->inner());
       if (!base || base->isError()) {
-        sema_.diags_.error(prop.loc, "field '" + f.name + "' is '" + field->type->name() +
-                                   "' before the spread and '" + f.type->name() + "' in '" +
-                                   type->name() + "'; a field has one type");
+        checker_.diags_.error(prop.loc, "field '" + f.name + "' is '" + field->type->name() +
+                                            "' before the spread and '" + f.type->name() +
+                                            "' in '" + type->name() + "'; a field has one type");
         ok = false;
         continue;
       }
@@ -363,7 +372,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     }
   }
   if (records && ok) {
-    return sema_.recordLiteralChecker().recordFromSpreads(lit);
+    return checker_.recordLiteralChecker().recordFromSpreads(lit);
   }
   if (!ok) {
     lit->type = Type::error();
@@ -410,7 +419,7 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       if (replacedLater(prop.name)) {
         prop.replaced = true;
       } else {
-        prop.value = sema_.typeRelations().convert(prop.value, result->field(prop.name)->type);
+        prop.value = checker_.typeRelations().convert(prop.value, result->field(prop.name)->type);
       }
       continue;
     }

@@ -1,15 +1,15 @@
 #include "compiler/check/functions/callback_checker/callback_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/functions/closure_checker/closure_checker.h"
-#include "compiler/check/functions/nested_functions/nested_functions.h"
-#include "compiler/check/functions/function_value_checker/function_value_checker.h"
-#include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/condition_facts/condition_facts.h"
+#include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/functions/function_value_checker/function_value_checker.h"
+#include "compiler/check/functions/nested_functions/nested_functions.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
-#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -17,8 +17,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -54,45 +54,48 @@ const char *callbackArgName(llvm::StringRef method, size_t i) {
 
 } // namespace
 
-CallbackChecker::CallbackChecker(Sema &sema) : sema_(sema) {}
+CallbackChecker::CallbackChecker(Checker &checker) : checker_(checker) {}
 
-Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Sema::Signature &expected, unsigned primary,
-                             llvm::StringRef method) {
+Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &expected,
+                                        unsigned primary, llvm::StringRef method) {
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     // The method only calls it, during the call.
     fe->fn->nonEscaping = true;
-    Expr *checked = sema_.closureChecker().checkFunctionExpr(fe, &expected);
-    if (sema_.functionValueChecker().asyncCallbackProblem(checked, expected, method)) {
+    Expr *checked = checker_.closureChecker().checkFunctionExpr(fe, &expected);
+    if (checker_.functionValueChecker().asyncCallbackProblem(checked, expected, method)) {
       checked->type = Type::error();
     }
     return checked;
   }
-  if (FunctionExpr *wrapper = sema_.functionValueChecker().builtinFunctionValue(arg, expected, primary, method)) {
+  if (FunctionExpr *wrapper =
+          checker_.functionValueChecker().builtinFunctionValue(arg, expected, primary, method)) {
     wrapper->fn->nonEscaping = true;
-    return sema_.closureChecker().checkFunctionExpr(wrapper, &expected);
+    return checker_.closureChecker().checkFunctionExpr(wrapper, &expected);
   }
   // `lists.map(first)`: the instance for what the method passes.
-  const Sema::Signature *outerCallback =
-      std::exchange(sema_.callback_, isa<MemberExpr>(arg) ? &expected : nullptr);
+  const Checker::Signature *outerCallback =
+      std::exchange(checker_.callback_, isa<MemberExpr>(arg) ? &expected : nullptr);
   auto *named = dyn_cast<NameExpr>(arg);
-  if (FuncSymbol *generic = named ? sema_.genericChecker().genericNamed(named) : nullptr) {
-    arg = sema_.genericInstantiator().checkGenericValue(named, generic, &expected);
+  if (FuncSymbol *generic = named ? checker_.genericChecker().genericNamed(named) : nullptr) {
+    arg = checker_.genericInstantiator().checkGenericValue(named, generic, &expected);
   } else {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
-  sema_.callback_ = outerCallback;
+  checker_.callback_ = outerCallback;
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
   if (!type->isFunction()) {
-    sema_.diags_.error(arg->loc(), "'" + method + "' needs a function, found '" + type->name() + "'");
+    checker_.diags_.error(arg->loc(),
+                          "'" + method + "' needs a function, found '" + type->name() + "'");
     return arg;
   }
-  FunctionDecl *known = sema_.nestedFunctions().namedFunction(arg);
+  FunctionDecl *known = checker_.nestedFunctions().namedFunction(arg);
   std::string name = known && !known->name.empty() ? "'" + known->name.str() + "'" : "the function";
   if (type->hasRest()) {
-    sema_.diags_.error(arg->loc(), name + " takes a rest parameter; pass an arrow that calls it instead");
+    checker_.diags_.error(arg->loc(),
+                          name + " takes a rest parameter; pass an arrow that calls it instead");
     return arg;
   }
   llvm::ArrayRef<const Type *> params = type->params();
@@ -100,9 +103,9 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Sema::Signature &expect
   for (size_t i = 0; i < passed; ++i) {
     const Type *param = params[i], *given = expected.params[i];
     if (param != given && !(param->isOptional() && param->inner() == given)) {
-      sema_.diags_.error(arg->loc(), name + " takes '" + param->name() + "' as its " + ordinal(i) +
-                                   " argument, but '" + method + "' passes '" + given->name() +
-                                   "'");
+      checker_.diags_.error(arg->loc(), name + " takes '" + param->name() + "' as its " +
+                                            ordinal(i) + " argument, but '" + method +
+                                            "' passes '" + given->name() + "'");
       return arg;
     }
     // `map(parseInt)`: the index would land in an optional parameter, which
@@ -110,42 +113,45 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Sema::Signature &expect
     if (i >= primary && i >= type->minArgs()) {
       std::string paramName =
           known && i < known->params.size() ? " '" + known->params[i].name.str() + "'" : "";
-      sema_.diags_.error(arg->loc(), name + " would also get the " + callbackArgName(method, i) +
-                                   " in its optional parameter" + paramName + ": '" + method +
-                                   "' calls it with " + callbackArgs(method) +
-                                   "; pass an arrow that gives it only what it needs");
+      checker_.diags_.error(arg->loc(), name + " would also get the " + callbackArgName(method, i) +
+                                            " in its optional parameter" + paramName + ": '" +
+                                            method + "' calls it with " + callbackArgs(method) +
+                                            "; pass an arrow that gives it only what it needs");
       return arg;
     }
   }
   if (type->minArgs() > expected.params.size()) {
-    sema_.diags_.error(arg->loc(), "'" + method + "' passes " +
-                                 argumentCount(unsigned(expected.params.size()),
-                                               unsigned(expected.params.size())) +
-                                 ", but " + name + " needs " + std::to_string(type->minArgs()));
+    checker_.diags_.error(arg->loc(), "'" + method + "' passes " +
+                                          argumentCount(unsigned(expected.params.size()),
+                                                        unsigned(expected.params.size())) +
+                                          ", but " + name + " needs " +
+                                          std::to_string(type->minArgs()));
     return arg;
   }
-  if (sema_.functionValueChecker().asyncCallbackProblem(arg, expected, method)) {
+  if (checker_.functionValueChecker().asyncCallbackProblem(arg, expected, method)) {
     arg->type = Type::error();
     return arg;
   }
   if (expected.ret && type->ret() != expected.ret && !expected.voidResult) {
-    sema_.diags_.error(arg->loc(), "'" + method + "' needs a function that returns '" +
-                                 expected.ret->name() + "', but " + name + " returns '" +
-                                 type->ret()->name() + "'");
+    checker_.diags_.error(arg->loc(), "'" + method + "' needs a function that returns '" +
+                                          expected.ret->name() + "', but " + name + " returns '" +
+                                          type->ret()->name() + "'");
     return arg;
   }
   // `names.forEach(store.save)`: what it returns is dropped, a Result too.
   if (expected.voidResult && type->ret()->isResult()) {
-    sema_.diags_.error(arg->loc(), name + " returns a Result that '" + method +
-                                 "' drops, so an error in it would go unchecked; pass an arrow "
-                                 "that handles it, e.g. with '.match(...)'");
+    checker_.diags_.error(arg->loc(),
+                          name + " returns a Result that '" + method +
+                              "' drops, so an error in it would go unchecked; pass an arrow "
+                              "that handles it, e.g. with '.match(...)'");
   }
   // And a Promise, which nothing would wait for.
   if (expected.voidResult && !expected.asyncVoid && type->ret()->isPromise()) {
-    sema_.diags_.error(arg->loc(), name + " returns a Promise that '" + method +
-                                 "' drops, so nothing waits for it to finish; loop with 'for "
-                                 "(const x of xs) await f(x)', or wait for all with 'await "
-                                 "Promise.all(xs.map(...))'");
+    checker_.diags_.error(arg->loc(),
+                          name + " returns a Promise that '" + method +
+                              "' drops, so nothing waits for it to finish; loop with 'for "
+                              "(const x of xs) await f(x)', or wait for all with 'await "
+                              "Promise.all(xs.map(...))'");
   }
 
   return arg;
@@ -187,8 +193,8 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
     if (auto *conv = dyn_cast<CastExpr>(cond); conv && conv->isImplicit() && conv->type->isBool()) {
       cond = conv->operand;
     }
-    Sema::Flow whenTrue, whenFalse;
-    sema_.conditionFacts().addConditionFacts(cond, whenTrue, whenFalse);
+    Checker::Flow whenTrue, whenFalse;
+    checker_.conditionFacts().addConditionFacts(cond, whenTrue, whenFalse);
 
     return value ? whenTrue.defined : whenFalse.defined;
   };
@@ -196,7 +202,8 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
   return defined(ret->value, true).contains(fe->fn->params[0].sym);
 }
 
-Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
+Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
+                                           const Type *expected) {
   enum Kind { ForEach, Map, FlatMap, Filter, Reduce, Find, FindIndex, Test, Sort };
   struct Method {
     llvm::StringLiteral name;
@@ -232,31 +239,31 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
   size_t count = call->args.size();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   size_t maxArgs = kind == Reduce ? 2 : 1;
   if (count == 0) {
-    sema_.diags_.error(member->loc(), "'" + name + "' needs a function");
+    checker_.diags_.error(member->loc(), "'" + name + "' needs a function");
     return call;
   }
   if (count > maxArgs) {
     if (count == 2 && kind != Reduce) {
-      sema_.diags_.error(call->args[1]->loc(),
-                   "the second argument of '" + name +
-                       "' sets 'this' for the callback, which is not supported");
+      checker_.diags_.error(call->args[1]->loc(),
+                            "the second argument of '" + name +
+                                "' sets 'this' for the callback, which is not supported");
     } else {
-      sema_.diags_.error(member->loc(), "expected " + argumentCount(1, unsigned(maxArgs)) + ", but got " +
-                                      llvm::Twine(count));
+      checker_.diags_.error(member->loc(), "expected " + argumentCount(1, unsigned(maxArgs)) +
+                                               ", but got " + llvm::Twine(count));
     }
     for (size_t i = maxArgs; i < count; ++i) {
-      call->args[i] = sema_.exprChecker().checkExpr(call->args[i]);
+      call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
     }
     call->args.resize(maxArgs);
     count = maxArgs;
   }
 
-  Sema::Signature sig;
+  Checker::Signature sig;
   sig.pad = false;
   unsigned primary = 1;
   const Type *accumulator = element;
@@ -271,7 +278,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
     // stores the results in a new one of its kind.
     if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
         wanted && wanted->isArray() &&
-        (Sema::holdsObjects(wanted->inner()) || Sema::holdsResults(wanted->inner()))) {
+        (Checker::holdsObjects(wanted->inner()) || Checker::holdsResults(wanted->inner()))) {
       sig.ret = kind == Map ? wanted->inner() : wanted;
     }
     if (typed) {
@@ -295,14 +302,14 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
                      (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
       const Type *elementType = GenericChecker::apparentType(element);
       bool decimalStart = elementType->isDecimal() && DecimalChecker::isLiteralTree(init);
-      init = sema_.exprChecker().checkExpr(init, decimalStart || (literal && elementType->isNumeric()) ? elementType
-                                                                                   : nullptr);
+      init = checker_.exprChecker().checkExpr(
+          init, decimalStart || (literal && elementType->isNumeric()) ? elementType : nullptr);
       accumulator = init->type;
       if (accumulator->isUndefined() || accumulator->isVoid()) {
-        sema_.diags_.error(init->loc(),
-                     "the initial value of '" + name +
-                         "' needs a type; declare it in a "
-                         "variable first, e.g. 'const start: int | undefined = undefined'");
+        checker_.diags_.error(
+            init->loc(), "the initial value of '" + name +
+                             "' needs a type; declare it in a "
+                             "variable first, e.g. 'const start: int | undefined = undefined'");
         accumulator = Type::error();
       }
     }
@@ -313,7 +320,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
     break;
   }
   if (accumulator->isError()) {
-    call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
   if (kind == Sort) {
@@ -324,22 +331,22 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
     sig.params = {element, Type::intTy(), arrayType};
   }
 
-  bool isBoolean = sema_.callChecker().isGlobalName(call->args[0], "Boolean");
+  bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
   // The callback of a typed array knows the range of its element; that of
   // map must give what fits in the new one.
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && typed) {
-    Sema::ByteCallback info;
+    Checker::ByteCallback info;
     info.param = kind == Reduce ? 1 : 0;
     arrayType->elementRange(info.lo, info.hi);
     if (kind == Map) {
       info.target = arrayType;
     }
-    sema_.byteCallbacks_[fe->fn] = info;
+    checker_.byteCallbacks_[fe->fn] = info;
   }
   call->args[0] = checkFunctionArg(call->args[0], sig, primary, name);
   const Type *callback = call->args[0]->type;
   call->builtin = method ? method->builtin : Builtin::ArrSortWith;
-  sema_.flowChecker().calledFunction(); // the callback may change anything
+  checker_.flowChecker().calledFunction(); // the callback may change anything
   if (!callback->isFunction()) {
     return call;
   }
@@ -351,7 +358,8 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
   case Map:
   case FlatMap:
     if (result->isVoid() || result->isUndefined()) {
-      sema_.diags_.error(call->args[0]->loc(), "the callback of '" + name + "' must return a value");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "the callback of '" + name + "' must return a value");
       return call;
     }
     if (typed) { // see checkBytesMethod
@@ -363,7 +371,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
   case Filter:
     // `filter(Boolean)` and `filter(x => x != undefined)` keep only the
     // elements that hold a value: `(T | undefined)[]` becomes `T[]`.
-    if (const Type *kept = sema_.predicateChecker().filteredType(call->args[0], element)) {
+    if (const Type *kept = checker_.predicateChecker().filteredType(call->args[0], element)) {
       call->type = Type::array(kept); // what a function that tests keeps
     } else {
       call->type = element->isOptional() && (isBoolean || keepsDefined(call->args[0]))
@@ -374,7 +382,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
   case Reduce:
     call->type = accumulator;
     if (count == 2 && call->args.size() == 2) {
-      call->args[1] = sema_.typeRelations().coerce(call->args[1], accumulator);
+      call->args[1] = checker_.typeRelations().coerce(call->args[1], accumulator);
     }
     break;
   case Find:
@@ -388,10 +396,10 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member, c
     break;
   case Sort:
     if (!result->isNumeric() && !result->isDecimal()) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "a comparison function must return a number (negative, zero "
-                   "or positive), found '" +
-                       result->name() + "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "a comparison function must return a number (negative, zero "
+                            "or positive), found '" +
+                                result->name() + "'");
       return call;
     }
     call->type = arrayType;

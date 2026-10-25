@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Record, Map and Set (docs/objects.md, section 9): their types, members and keys.
 class DictChecker {
 public:
-  explicit DictChecker(Sema &sema);
+  explicit DictChecker(Checker &checker);
 
   // Dictionaries (sema_dict.cpp, docs/objects.md section 9): Record<string,
   // V>, also written `{ [key: string]: V }`, read and written as an object
@@ -44,7 +44,7 @@ public:
   Expr *checkDictIn(BinaryExpr *bin);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

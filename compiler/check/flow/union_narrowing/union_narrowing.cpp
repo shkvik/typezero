@@ -1,15 +1,15 @@
 #include "compiler/check/flow/union_narrowing/union_narrowing.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/union_check_helpers/union_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -30,7 +30,7 @@ llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-// The variable `expr` reads, through the conversions Sema adds where it is
+// The variable `expr` reads, through the conversions Checker adds where it is
 // narrowed.
 const VarSymbol *readVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
@@ -65,9 +65,9 @@ static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const T
   return keepsUndefined ? Type::optional(result) : result;
 }
 
-UnionNarrowing::UnionNarrowing(Sema &sema) : sema_(sema) {}
+UnionNarrowing::UnionNarrowing(Checker &checker) : checker_(checker) {}
 
-void UnionNarrowing::narrowVariable(Sema::Flow &flow, const VarSymbol *var, const Type *type) {
+void UnionNarrowing::narrowVariable(Checker::Flow &flow, const VarSymbol *var, const Type *type) {
   llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
   if (!type) { // no member is left: nothing reaches here
     flow.narrowed.push_back({var, Type::never()});
@@ -86,9 +86,9 @@ void UnionNarrowing::narrowVariable(Sema::Flow &flow, const VarSymbol *var, cons
   }
 }
 
-std::optional<Sema::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const {
+std::optional<Checker::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const {
   const Type *declared = nullptr;
-  Sema::NarrowTarget target;
+  Checker::NarrowTarget target;
   if (const VarSymbol *var = readVariable(expr); var && var->type) {
     target.var = var;
     declared = var->type;
@@ -102,7 +102,8 @@ std::optional<Sema::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr)
       read = conv->operand;
     }
     auto *member = dyn_cast<MemberExpr>(read);
-    std::optional<Sema::FieldPath> path = member ? sema_.fieldFacts().fieldPath(member) : std::nullopt;
+    std::optional<Checker::FieldPath> path =
+        member ? checker_.fieldFacts().fieldPath(member) : std::nullopt;
     if (!path) {
       return std::nullopt;
     }
@@ -118,9 +119,10 @@ std::optional<Sema::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr)
   return target;
 }
 
-const Type *UnionNarrowing::targetType(const Sema::Flow &flow, const Sema::NarrowTarget &target) const {
+const Type *UnionNarrowing::targetType(const Checker::Flow &flow,
+                                       const Checker::NarrowTarget &target) const {
   if (target.var) {
-    return sema_.literalTypes().typeIn(flow, target.var);
+    return checker_.literalTypes().typeIn(flow, target.var);
   }
   for (const auto &[path, type] : flow.narrowedFields) {
     if (path == *target.path) {
@@ -134,12 +136,13 @@ const Type *UnionNarrowing::targetType(const Sema::Flow &flow, const Sema::Narro
   return target.declared;
 }
 
-void UnionNarrowing::narrowTargetTo(Sema::Flow &flow, const Sema::NarrowTarget &target, const Type *type) const {
+void UnionNarrowing::narrowTargetTo(Checker::Flow &flow, const Checker::NarrowTarget &target,
+                                    const Type *type) const {
   if (target.var) {
     narrowVariable(flow, target.var, type);
     return;
   }
-  const Sema::FieldPath &path = *target.path;
+  const Checker::FieldPath &path = *target.path;
   llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
   if (type && !type->isOptional()) {
     FieldFacts::defineField(flow, path);
@@ -151,8 +154,9 @@ void UnionNarrowing::narrowTargetTo(Sema::Flow &flow, const Sema::NarrowTarget &
   flow.narrowedFields.push_back({path, type ? type : Type::never()});
 }
 
-void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
-  auto narrow = [&](Sema::Flow &flow, const Sema::NarrowTarget &target,
+void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
+                                   Checker::Flow &whenFalse) const {
+  auto narrow = [&](Checker::Flow &flow, const Checker::NarrowTarget &target,
                     llvm::function_ref<bool(const Type *)> keep) {
     const Type *now = targetType(flow, target);
     if (now->isNever()) {
@@ -163,7 +167,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
 
   // `Array.isArray(x)`
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
-    if (std::optional<Sema::NarrowTarget> target = narrowTarget(call->args[0])) {
+    if (std::optional<Checker::NarrowTarget> target = narrowTarget(call->args[0])) {
       narrow(whenTrue, *target, [](const Type *m) { return m->isArray(); });
       narrow(whenFalse, *target, [](const Type *m) { return !m->isArray(); });
     }
@@ -173,7 +177,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
   // `if (r.ok)`): the members whose tag `keep` accepts.
   // With `s?.kind`, undefined gives undefined, which `undefinedKept` says
   // whether to keep.
-  auto narrowByTag = [&](const MemberExpr *member, Sema::Flow &flow,
+  auto narrowByTag = [&](const MemberExpr *member, Checker::Flow &flow,
                          llvm::function_ref<bool(const Type *)> keep, bool undefinedKept = true) {
     const Expr *object = member->object;
     if (member->optional) {
@@ -183,7 +187,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
       }
       object = link->operand;
     }
-    std::optional<Sema::NarrowTarget> target = narrowTarget(object);
+    std::optional<Checker::NarrowTarget> target = narrowTarget(object);
     if (!target || !target->declared->nonOptional()->isUnion()) {
       return false;
     }
@@ -229,7 +233,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
   // what C extends.
   if (bin->op == BinaryOp::InstanceOf) {
     const Type *cls = bin->rhs->type;
-    std::optional<Sema::NarrowTarget> target = narrowTarget(bin->lhs);
+    std::optional<Checker::NarrowTarget> target = narrowTarget(bin->lhs);
     if (!target || !cls) {
       return;
     }
@@ -253,7 +257,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
       narrow(whenFalse, *target, [&](const Type *m) { return !m->isBuffer(); });
       return;
     }
-    // `x instanceof Date` (or Map, Set, Uint8Array...): the members Sema
+    // `x instanceof Date` (or Map, Set, Uint8Array...): the members Checker
     // gave the right side.
     if (!cls->isClass()) {
       const Type *those = cls;
@@ -279,7 +283,7 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
 
   // `"radius" in s`
   if (bin->op == BinaryOp::In) {
-    std::optional<Sema::NarrowTarget> target = narrowTarget(bin->rhs);
+    std::optional<Checker::NarrowTarget> target = narrowTarget(bin->rhs);
     auto *key = dyn_cast<StringLitExpr>(bin->lhs);
     if (!target || !key) {
       return;
@@ -294,13 +298,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
   if (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne) {
     return;
   }
-  Sema::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
-  Sema::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
+  Checker::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
+  Checker::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     // `typeof x == "string"`
     if (auto *typeOf = dyn_cast<UnaryExpr>(side); typeOf && typeOf->op == UnaryOp::TypeOf) {
       auto *text = dyn_cast<StringLitExpr>(other);
-      std::optional<Sema::NarrowTarget> target = text ? narrowTarget(typeOf->operand) : std::nullopt;
+      std::optional<Checker::NarrowTarget> target =
+          text ? narrowTarget(typeOf->operand) : std::nullopt;
       if (!target || !target->declared->nonOptional()->isUnion()) {
         continue;
       }
@@ -327,13 +332,14 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema:
     }
     if (member &&
         narrowByTag(
-            member, equal, [&](const Type *t) { return TypeRelations::isImplicitlyConvertible(literal, t); },
+            member, equal,
+            [&](const Type *t) { return TypeRelations::isImplicitlyConvertible(literal, t); },
             /*undefinedKept=*/false)) {
       narrowByTag(member, different, [&](const Type *t) { return t != literal; });
       continue;
     }
     // `x == "up"`, of a union holding that literal.
-    if (std::optional<Sema::NarrowTarget> target = narrowTarget(side)) {
+    if (std::optional<Checker::NarrowTarget> target = narrowTarget(side)) {
       const Type *now = targetType(equal, *target)->nonOptional();
       if (llvm::is_contained(membersOf(now), literal)) {
         narrowTargetTo(equal, *target, literal);

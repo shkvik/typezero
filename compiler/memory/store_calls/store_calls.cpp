@@ -1,9 +1,7 @@
-#include "compiler/lower/memory/store_calls/store_calls.h"
-#include "compiler/lower/memory/store_stmts/store_stmts.h"
-#include "compiler/lower/memory/store_exprs/store_exprs.h"
+#include "compiler/memory/store_calls/store_calls.h"
+#include "compiler/memory/store_exprs/store_exprs.h"
+#include "compiler/memory/store_stmts/store_stmts.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
 #include <functional>
 #include <map>
 #include <set>
@@ -11,8 +9,6 @@
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
-using llvm::Value;
 
 namespace tz {
 
@@ -66,9 +62,13 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     // initializers, with this object.
     const FunctionDecl *ctor = c->method ? c->method->decl : nullptr;
     scanner_.storeStmts().bindArgs(ctor, args);
-    StoreScanner::Sources self = scanner_.current_ && scanner_.current_->thisVar ? StoreScanner::Sources{scanner_.var(scanner_.current_->thisVar)} : StoreScanner::Sources{};
-    for (const ClassDecl *cls = scanner_.current_ && scanner_.current_->cls ? scanner_.current_->cls->parent : nullptr; cls;
-         cls = cls->parent) {
+    StoreScanner::Sources self =
+        scanner_.current_ && scanner_.current_->thisVar
+            ? StoreScanner::Sources{scanner_.var(scanner_.current_->thisVar)}
+            : StoreScanner::Sources{};
+    for (const ClassDecl *cls =
+             scanner_.current_ && scanner_.current_->cls ? scanner_.current_->cls->parent : nullptr;
+         cls; cls = cls->parent) {
       if (cls->init && cls->init->thisVar) {
         scanner_.flowInto(scanner_.var(cls->init->thisVar), self);
       }
@@ -78,7 +78,8 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
         }
       }
     }
-    if (scanner_.current_ && scanner_.current_->cls && scanner_.current_->cls->init && scanner_.current_->cls->init->thisVar) {
+    if (scanner_.current_ && scanner_.current_->cls && scanner_.current_->cls->init &&
+        scanner_.current_->cls->init->thisVar) {
       scanner_.flowInto(scanner_.var(scanner_.current_->cls->init->thisVar), self);
     }
     return out;
@@ -109,7 +110,8 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
   return out;
 }
 
-StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner::Sources &receiver, const std::vector<StoreScanner::Sources> &args) {
+StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner::Sources &receiver,
+                                          const std::vector<StoreScanner::Sources> &args) {
   StoreScanner::Sources out;
   if (scanner_.isSite_(c)) {
     out.push_back(scanner_.node({StoreScanner::Kind::Site, c}));

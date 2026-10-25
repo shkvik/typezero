@@ -1,10 +1,10 @@
 #include "compiler/check/generics/generic_checker/generic_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/concat_checker/concat_checker.h"
-#include "compiler/check/shared_helpers/shared_helpers.h"
 #include "compiler/check/generics/generic_check_helpers/generic_check_helpers.h"
 #include "compiler/check/generics/inference/inference.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/check/shared_helpers/shared_helpers.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
@@ -12,8 +12,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -23,7 +23,7 @@ bool typeMentions(const Type *type, llvm::ArrayRef<const Type *> params) {
   return mentionsAnyOf(type, params);
 }
 
-GenericChecker::GenericChecker(Sema &sema) : sema_(sema) {}
+GenericChecker::GenericChecker(Checker &checker) : checker_(checker) {}
 
 const Type *GenericChecker::apparentType(const Type *type) {
   if (type->isParam() && type->constraint() && !type->isListParam()) {
@@ -45,11 +45,11 @@ const Type *GenericChecker::apparentType(const Type *type) {
 Expr *GenericChecker::apparent(Expr *expr) {
   const Type *type = apparentType(expr->type);
 
-  return type == expr->type ? expr : sema_.typeRelations().convert(expr, type);
+  return type == expr->type ? expr : checker_.typeRelations().convert(expr, type);
 }
 
 FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
-  Sema::ScopeEntry entry = sema_.scopes().lookup(name->name);
+  Checker::ScopeEntry entry = checker_.scopes().lookup(name->name);
 
   return entry.func && !entry.var && entry.func->isGeneric() ? entry.func : nullptr;
 }
@@ -74,7 +74,7 @@ const Type *GenericChecker::numberParam(const Type *param) const {
 }
 
 const Type *GenericChecker::narrowedType(const VarSymbol *var) const {
-  for (const auto &[narrowed, type] : sema_.flow_.narrowed) {
+  for (const auto &[narrowed, type] : checker_.flow_.narrowed) {
     if (narrowed == var) {
       return type;
     }
@@ -90,7 +90,7 @@ void GenericChecker::noteForced(const Expr *expr, const Type *to) {
     }
     expr = conv->operand;
   }
-  sema_.forced_[{expr->loc().getPointer(), unsigned(expr->kind())}] = to;
+  checker_.forced_[{expr->loc().getPointer(), unsigned(expr->kind())}] = to;
 }
 
 Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
@@ -99,10 +99,10 @@ Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
     return expr;
   }
   if (to->isString()) {
-    return sema_.concatChecker().toStringOperand(expr); // reports an object or a function
+    return checker_.concatChecker().toStringOperand(expr); // reports an object or a function
   }
   if (TypeRelations::isImplicitlyConvertible(type, to)) {
-    return sema_.typeRelations().convert(expr, to);
+    return checker_.typeRelations().convert(expr, to);
   }
 
   return expr;

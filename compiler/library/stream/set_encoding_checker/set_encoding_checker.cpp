@@ -1,22 +1,22 @@
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
-#include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "compiler/library/stream/stream_pipeline/stream_pipeline.h"
+#include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -31,10 +31,11 @@ struct StreamEscape {
 
 } // namespace
 
-SetEncodingChecker::SetEncodingChecker(Sema &sema) : sema_(sema) {}
+SetEncodingChecker::SetEncodingChecker(Checker &checker) : checker_(checker) {}
 
-const Type *SetEncodingChecker::streamViewOf(const Sema::FieldPath &path, llvm::SMLoc loc) const {
-  for (auto it = sema_.streamViews_.rbegin(); it != sema_.streamViews_.rend(); ++it) {
+const Type *SetEncodingChecker::streamViewOf(const Checker::FieldPath &path,
+                                             llvm::SMLoc loc) const {
+  for (auto it = checker_.streamViews_.rbegin(); it != checker_.streamViews_.rend(); ++it) {
     if (it->path == path && it->from.getPointer() < loc.getPointer()) {
       return it->type;
     }
@@ -62,7 +63,9 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
     } else {
       continue;
     }
-    if (ClassDecl *inst = generic ? sema_.genericClassInstantiator().instantiateClass(generic, args, loc) : nullptr) {
+    if (ClassDecl *inst =
+            generic ? checker_.genericClassInstantiator().instantiateClass(generic, args, loc)
+                    : nullptr) {
       return inst->type;
     }
     return nullptr;
@@ -73,10 +76,11 @@ const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc lo
 
 Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
   const Type *receiver = member->object->type;
-  Sema::StreamChunks chunks = sema_.chunkTypes().streamChunksOf(cls);
+  Checker::StreamChunks chunks = checker_.chunkTypes().streamChunksOf(cls);
   llvm::SMLoc loc = member->loc();
   auto plainCall = [&]() -> Expr * {
-    sema_.emitterChecker().callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr, false);
+    checker_.emitterChecker().callLibraryMethod(call, member, cls, "setEncoding", {}, nullptr,
+                                                false);
     if (!call->type->isError()) {
       call->type = receiver;
     }
@@ -84,7 +88,8 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return call;
   };
   if (!chunks.readable) {
-    sema_.diags_.error(loc, "'" + receiver->name() + "' has no setEncoding(): it is not readable");
+    checker_.diags_.error(loc,
+                          "'" + receiver->name() + "' has no setEncoding(): it is not readable");
     return call;
   }
   // A stream of strings already: another encoding, the same type.
@@ -92,14 +97,15 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return plainCall();
   }
   if (!chunks.readable->isBuffer()) {
-    sema_.diags_.error(loc, "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
-                      "object-mode stream of " +
-                          chunks.readable->name().str() + "; push strings into it instead");
+    checker_.diags_.error(loc,
+                          "setEncoding() decodes the Buffers of a stream of bytes, and this is an "
+                          "object-mode stream of " +
+                              chunks.readable->name().str() + "; push strings into it instead");
     return call;
   }
   // The stream must be known by a constant, or a read-only field of one,
   // whose type changes from here on (docs/streams.md, section 2).
-  std::optional<Sema::FieldPath> path;
+  std::optional<Checker::FieldPath> path;
   const Expr *object = member->object;
   while (auto *conv = dyn_cast<CastExpr>(object)) {
     if (!conv->isImplicit()) {
@@ -111,28 +117,31 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   // top-level code may set the encoding of.
   bool stdinStream = false;
   if (auto *c = dyn_cast<CallExpr>(object); c && c->func && c->func->name == "processStdin") {
-    if (!sema_.module_ || !sema_.module_->isEntry || !sema_.functions_.empty() || sema_.scopes_.size() != 1) {
-      sema_.diags_.error(loc, "'process.stdin.setEncoding()' changes the type of the chunks of stdin for "
-                        "the code after it, so it goes in the top-level code of the program's "
-                        "main file, before any other use of process.stdin");
+    if (!checker_.module_ || !checker_.module_->isEntry || !checker_.functions_.empty() ||
+        checker_.scopes_.size() != 1) {
+      checker_.diags_.error(
+          loc, "'process.stdin.setEncoding()' changes the type of the chunks of stdin for "
+               "the code after it, so it goes in the top-level code of the program's "
+               "main file, before any other use of process.stdin");
       return call;
     }
     stdinStream = true;
-    path = Sema::FieldPath{};
-    path->var = sema_.streamSources().processStdinVar();
+    path = Checker::FieldPath{};
+    path->var = checker_.streamSources().processStdinVar();
   } else if (auto *name = dyn_cast<NameExpr>(object); name && name->var) {
-    path = Sema::FieldPath{};
+    path = Checker::FieldPath{};
     path->var = name->var;
   } else {
-    path = sema_.fieldFacts().fieldPath(object);
+    path = checker_.fieldFacts().fieldPath(object);
   }
   auto reject = [&](const std::string &why) {
-    sema_.diags_.error(loc, "setEncoding() makes the chunks of the stream strings from here on, so its "
-                      "type changes here; " +
-                          why +
-                          ": give the stream its encoding where it is "
-                          "created, e.g. 'createReadStream(path, \"utf8\")' or 'new Readable({ "
-                          "encoding: \"utf8\", ... })'");
+    checker_.diags_.error(
+        loc, "setEncoding() makes the chunks of the stream strings from here on, so its "
+             "type changes here; " +
+                 why +
+                 ": give the stream its encoding where it is "
+                 "created, e.g. 'createReadStream(path, \"utf8\")' or 'new Readable({ "
+                 "encoding: \"utf8\", ... })'");
 
     return call;
   };
@@ -157,18 +166,18 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   // In the block that declares it, not in an if or a loop: after a
   // setEncoding() that may not run, the type of the chunks is not known.
-  size_t declared = stdinStream ? 0 : sema_.scopes_.size();
-  for (size_t i = sema_.scopes_.size(); i-- > 0 && !stdinStream;) {
-    auto found = sema_.scopes_[i].find(root->name);
-    if (found != sema_.scopes_[i].end() && found->second.var == root) {
+  size_t declared = stdinStream ? 0 : checker_.scopes_.size();
+  for (size_t i = checker_.scopes_.size(); i-- > 0 && !stdinStream;) {
+    auto found = checker_.scopes_[i].find(root->name);
+    if (found != checker_.scopes_[i].end() && found->second.var == root) {
       declared = i;
       break;
     }
   }
-  bool branched =
-      stdinStream ? sema_.branchDepth_ != 0
-                  : declared < sema_.scopeBranches_.size() && sema_.scopeBranches_[declared] != sema_.branchDepth_;
-  if (declared + 1 != sema_.scopes_.size() || branched) {
+  bool branched = stdinStream ? checker_.branchDepth_ != 0
+                              : declared < checker_.scopeBranches_.size() &&
+                                    checker_.scopeBranches_[declared] != checker_.branchDepth_;
+  if (declared + 1 != checker_.scopes_.size() || branched) {
     return reject("but this setEncoding() is in a block of its own (an if, a loop, a function) "
                   "and '" +
                   root->name.str() +
@@ -207,13 +216,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       if (auto *c = dyn_cast<CallExpr>(e)) {
         return c->func && c->func->name == "processStdin";
       }
-      return sema_.processChecker().isProcessMember(e, "stdin");
+      return checker_.processChecker().isProcessMember(e, "stdin");
     }
     if (path->names.empty()) {
       auto *name = dyn_cast<NameExpr>(e);
       return name && (name->var == root || (!name->var && name->name == root->name));
     }
-    std::optional<Sema::FieldPath> p = sema_.fieldFacts().fieldPath(e);
+    std::optional<Checker::FieldPath> p = checker_.fieldFacts().fieldPath(e);
 
     return p && *p == *path;
   };
@@ -252,8 +261,8 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   std::vector<const Stmt *> body;
   if (FunctionDecl *owner = stdinStream ? nullptr : root->owner; owner && owner->body) {
     body.push_back(owner->body);
-  } else if (sema_.module_) {
-    for (const Stmt *item : sema_.module_->file.items) {
+  } else if (checker_.module_) {
+    for (const Stmt *item : checker_.module_->file.items) {
       body.push_back(item);
     }
   }
@@ -284,12 +293,13 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
         first = &e;
       }
     }
-    sema_.diags_.error(loc, "setEncoding() on a stream that is used elsewhere already, which sees its "
-                      "chunks as Buffers, but strings would come: " +
-                          first->how +
-                          " before this; give the stream its encoding where it is created, e.g. "
-                          "'createReadStream(path, \"utf8\")', or call setEncoding() first");
-    sema_.diags_.note(first->loc, "the stream is used here");
+    checker_.diags_.error(
+        loc, "setEncoding() on a stream that is used elsewhere already, which sees its "
+             "chunks as Buffers, but strings would come: " +
+                 first->how +
+                 " before this; give the stream its encoding where it is created, e.g. "
+                 "'createReadStream(path, \"utf8\")', or call setEncoding() first");
+    checker_.diags_.note(first->loc, "the stream is used here");
     return call;
   }
   const Type *view = encodedStreamType(cls, loc);
@@ -299,49 +309,51 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   }
   call->type = view;
   // From this call on: the constant is not seen outside its block.
-  sema_.streamViews_.push_back({*path, llvm::SMLoc::getFromPointer(here), view});
+  checker_.streamViews_.push_back({*path, llvm::SMLoc::getFromPointer(here), view});
 
   return call;
 }
 
 Expr *SetEncodingChecker::checkStreamPipe(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
     return call;
   }
-  call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+  call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
   Expr *dest = call->args[0];
   if (dest->type->isError()) {
     return call;
   }
   ClassDecl *destClass = ClassDeclarer::classOf(dest->type);
-  if (!destClass || !sema_.chunkTypes().isStreamClass(destClass) || dest->type->isOptional()) {
-    sema_.diags_.error(dest->loc(),
-                 "pipe() takes the stream to write to, and this is '" + dest->type->name() + "'");
+  if (!destClass || !checker_.chunkTypes().isStreamClass(destClass) || dest->type->isOptional()) {
+    checker_.diags_.error(dest->loc(), "pipe() takes the stream to write to, and this is '" +
+                                           dest->type->name() + "'");
     return call;
   }
-  Sema::StreamChunks from = sema_.chunkTypes().streamChunksOf(cls);
-  Sema::StreamChunks to = sema_.chunkTypes().streamChunksOf(destClass);
+  Checker::StreamChunks from = checker_.chunkTypes().streamChunksOf(cls);
+  Checker::StreamChunks to = checker_.chunkTypes().streamChunksOf(destClass);
   if (!from.readable) {
-    sema_.diags_.error(member->loc(),
-                 "'" + member->object->type->name() + "' has no pipe(): it is not readable");
+    checker_.diags_.error(member->loc(), "'" + member->object->type->name() +
+                                             "' has no pipe(): it is not readable");
     return call;
   }
   if (!to.writable) {
-    sema_.diags_.error(dest->loc(), "pipe() writes to the stream it takes, but '" + dest->type->name() +
-                                  "' is not writable");
+    checker_.diags_.error(dest->loc(), "pipe() writes to the stream it takes, but '" +
+                                           dest->type->name() + "' is not writable");
     return call;
   }
   // A writable side whose type a round looks for gets these chunks.
-  if (!sema_.chunkTypes().recordStreamChunk(to.writable, from.readable, dest->loc()) &&
-      !sema_.openMaps_.count(from.readable) && !sema_.streamPipeline().streamTakes(to.writable, from.readable)) {
-    sema_.diags_.error(dest->loc(), "pipe() writes chunks of " + from.readable->name().str() + " to '" +
-                                  dest->type->name().str() + "', which takes " +
-                                  to.writable->name().str());
+  if (!checker_.chunkTypes().recordStreamChunk(to.writable, from.readable, dest->loc()) &&
+      !checker_.openMaps_.count(from.readable) &&
+      !checker_.streamPipeline().streamTakes(to.writable, from.readable)) {
+    checker_.diags_.error(dest->loc(), "pipe() writes chunks of " + from.readable->name().str() +
+                                           " to '" + dest->type->name().str() + "', which takes " +
+                                           to.writable->name().str());
     return call;
   }
   std::vector<bool> given(call->args.size(), false);
   given[0] = true;
-  sema_.emitterChecker().callLibraryMethod(call, member, cls, "pipe", {dest->type}, &given, false);
+  checker_.emitterChecker().callLibraryMethod(call, member, cls, "pipe", {dest->type}, &given,
+                                              false);
   if (!call->type->isError()) {
     call->type = dest->type;
   }

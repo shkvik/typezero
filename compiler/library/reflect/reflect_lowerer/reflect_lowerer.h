@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Reflect.get, apply and construct, and fromJson of classes.
 class ReflectLowerer {
 public:
-  explicit ReflectLowerer(CodeGen &codegen);
+  explicit ReflectLowerer(Lowering &lowering);
 
   llvm::Value *emitReflectNew(NewExpr *expr);
   llvm::Value *emitReflectCall(CallExpr *call);
@@ -25,7 +25,7 @@ public:
   void finishReflection(SourceFile &file, llvm::Instruction *init);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::DenseMap<const ClassDecl *, llvm::Function *> classConverters_;
   std::vector<const ClassDecl *> pendingConverters_;
   // Of Builtin::ReflectMethod: the box of each method's function, by its

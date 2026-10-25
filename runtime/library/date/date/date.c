@@ -1,6 +1,6 @@
 // Dates (docs/date.md). A Date is an object of the language whose one field
 // is its time value: milliseconds since 1970 in UTC, NaN for an invalid date
-// (see TzDate in tzrt.h). The compiler makes and changes the objects; here is
+// (see TzDate in date.h). The compiler makes and changes the objects; here is
 // the arithmetic of time values, as V8 computes it (src/date, and
 // builtins-date.cc): taking them apart into fields, the setters, the strings
 // of toISOString, toUTCString and toString, and reading strings.
@@ -10,7 +10,12 @@
 // that uses only UTC (and Date.now()) never loads them.
 
 #include "runtime/library/date/date/date.h"
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
+#include "runtime/library/date/date_zone/date_zone.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdio.h>
 

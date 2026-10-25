@@ -15,7 +15,7 @@ namespace tz {
 class Type;
 
 // `class Name { members }` (docs/objects.md, section 6), only at the top level
-// of a file; also the class Sema makes for an object literal with methods.
+// of a file; also the class Checker makes for an object literal with methods.
 struct ClassDecl : Stmt {
   ClassDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Class, loc), name(name) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Class; }
@@ -51,7 +51,7 @@ struct ClassDecl : Stmt {
   // name, `class extends Base`, since that is usually a parameter.
   Expr *baseExpr = nullptr;
   std::vector<TypeRef> interfaces;
-  // Set by Sema (sema_inherit.cpp): the class extended and the classes that
+  // Set by Checker (sema_inherit.cpp): the class extended and the classes that
   // extend this one; the interfaces it implements, as types; the last number
   // among those of the classes down its chain, which follow its own; and
   // the methods its method table holds, by slot (null for an abstract one).
@@ -66,7 +66,7 @@ struct ClassDecl : Stmt {
   std::vector<ClassField> fields;
   std::vector<FunctionDecl *> methods; // static or not, in the order declared
   std::vector<FunctionDecl *> constructors;
-  // Set by Sema. The type of the instances, unique to the class; the method
+  // Set by Checker. The type of the instances, unique to the class; the method
   // that runs the initializers of the fields before any constructor, if a
   // field has one; the number of the class, for `instanceof`.
   const Type *type = nullptr;
@@ -80,23 +80,23 @@ struct ClassDecl : Stmt {
   ObjectLitExpr *literal = nullptr;
   NestedGroup *group = nullptr;
   // A class of the language itself, which no file declares: Error and the
-  // kinds derived from it (see Sema::declareErrorClass). CodeGen emits the
+  // kinds derived from it (see Checker::declareErrorClass). Lowering emits the
   // constructor of Error, which the kinds take.
   bool builtin = false;
   // Declared by a built-in module of tz written in tz (see Module::builtin),
   // such as EventEmitter of node:events, or Response of the globals of fetch.
   bool library = false;
   // `@Table("users") class User`, top to bottom (docs/decorators.md). Set by
-  // Sema: the statements that apply the decorators of the class and of its
+  // Checker: the statements that apply the decorators of the class and of its
   // members, which run when the declaration does, after the static fields
   // get their values.
   std::vector<Decorator> decorators;
   std::vector<Stmt *> decorations;
-  // Set by Sema: code uses the class as a value, whose object then holds the
+  // Set by Checker: code uses the class as a value, whose object then holds the
   // static fields (they print with it, as in node).
   bool usedAsValue = false;
   // Classes as values (sema_classvalue.cpp). A class that a class
-  // expression makes: Sema makes it while it checks code, and its static
+  // expression makes: Checker makes it while it checks code, and its static
   // fields get their values where the expression is evaluated. `outer` is
   // the copy of a generic function whose body has it, whose type parameters
   // it sees; `locals` the names of the variables of the functions around it,
@@ -123,13 +123,13 @@ struct ClassDecl : Stmt {
 
   // `class Box<T> { ... }`: a generic class (docs/generics.md, section 5). It
   // is a pattern for a class for each list of type arguments, an instance
-  // (`Box<int>`), which Sema makes from `source`, the text of the
-  // declaration parsed again (see Sema::instantiateClass). Only its static
+  // (`Box<int>`), which Checker makes from `source`, the text of the
+  // declaration parsed again (see Checker::instantiateClass). Only its static
   // members, which no type parameter may appear in, belong to the generic
   // class itself.
   std::vector<TypeParamDecl> typeParams;
   llvm::StringRef source;
-  // Set by Sema. What the type parameters stand for in the code of this
+  // Set by Checker. What the type parameters stand for in the code of this
   // class: for the generic class itself, opaque type parameters
   // (Type::Kind::Param), with which its bodies are checked once; for an
   // instance, the types it is made for. An instance knows its generic
@@ -141,11 +141,11 @@ struct ClassDecl : Stmt {
   // generic code uses: it is checked with them, and not emitted.
   bool checkOnly = false;
   // The copies of its generic methods that calls need (see
-  // Sema::instantiate), emitted with its other methods.
+  // Checker::instantiate), emitted with its other methods.
   std::vector<FunctionDecl *> methodInstances;
   // The generic class itself, rather than an instance of it.
   bool isGeneric() const { return !typeParams.empty() && !generic; }
-  // A class whose code CodeGen emits: not a generic class (only its static
+  // A class whose code Lowering emits: not a generic class (only its static
   // methods are) and not an instance that only generic code checks.
   bool isEmitted() const { return !isGeneric() && !checkOnly; }
   // The class the static members of this one belong to.

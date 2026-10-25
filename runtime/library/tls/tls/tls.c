@@ -41,6 +41,17 @@
 #include <string.h>
 #include <zlib.h>
 #include "runtime/library/tls/tls/tls_roots.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/events/signal/signal.h"
 
 // node 24's tls.DEFAULT_CIPHERS: the suites of TLS 1.3, and the ciphers of TLS 1.2.
 static const char kSuites[] =
@@ -77,7 +88,7 @@ typedef struct Tls {
   char host[256];
 } Tls;
 
-// What console.error prints between these goes to stderr (tzrt.c).
+// What console.error prints between these goes to stderr (output.c).
 void tz_err_begin(void);
 void tz_err_end(void);
 

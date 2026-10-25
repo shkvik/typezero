@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/lower/memory/store_scanner/store_scanner.h"
+#include "compiler/memory/store_scanner/store_scanner.h"
 
 namespace tz {
 
@@ -11,7 +11,8 @@ public:
 
   StoreScanner::Sources call(const CallExpr *c);
   // The built-ins that keep none of their operands: the others may.
-  StoreScanner::Sources builtin(const CallExpr *c, const StoreScanner::Sources &receiver, const std::vector<StoreScanner::Sources> &args);
+  StoreScanner::Sources builtin(const CallExpr *c, const StoreScanner::Sources &receiver,
+                                const std::vector<StoreScanner::Sources> &args);
 
 private:
   StoreScanner &scanner_;

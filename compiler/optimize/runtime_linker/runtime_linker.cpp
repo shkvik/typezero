@@ -58,7 +58,7 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     llvm::Function *def = decl.isDeclaration() ? (*runtime)->getFunction(decl.getName()) : nullptr;
     if (def && def->getFunctionType() != decl.getFunctionType()) {
       errors.tool("internal error: " + decl.getName() +
-                  " is declared differently in CodeGen and in the runtime");
+                  " is declared differently in Lowering and in the runtime");
       return errors;
     }
   }
@@ -81,7 +81,7 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     }
   }
 
-  // CodeGen declares every runtime function; only those the program calls
+  // Lowering declares every runtime function; only those the program calls
   // are to be linked.
   for (llvm::Function &fn : llvm::make_early_inc_range(module)) {
     if (fn.isDeclaration() && fn.use_empty()) {

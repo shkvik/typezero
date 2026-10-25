@@ -12,16 +12,18 @@ namespace tz {
 class FeatureRegistry;
 
 class Target;
+struct MemoryPlan;
 struct ParallelPlan;
 struct Program;
 
-// CodeGen, for now as one pass: the checked program to verified LLVM IR.
+// The checked program to verified LLVM IR, by the plans of ParallelPass and MemoryPass.
 class LowerPass {
 public:
   LowerPass(llvm::LLVMContext &context, const Target &target, llvm::StringRef moduleName,
             const FeatureRegistry &features);
 
-  Result<Lowered, Errors> run(Program &program, const ParallelPlan &plan) const;
+  Result<Lowered, Errors> run(Program &program, const ParallelPlan &plan,
+                              const MemoryPlan &memory) const;
 
 private:
   llvm::LLVMContext &context_;

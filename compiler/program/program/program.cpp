@@ -1,5 +1,5 @@
 #include "compiler/program/program/program.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 

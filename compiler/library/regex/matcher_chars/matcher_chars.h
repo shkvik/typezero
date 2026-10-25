@@ -11,7 +11,8 @@ public:
 
   // A character at a position: the code point and the position past it (or
   // before it, back), or a jump to `fail`.
-  std::pair<llvm::Value *, llvm::Value *> readChar(llvm::Value *pos, bool back, llvm::BasicBlock *fail);
+  std::pair<llvm::Value *, llvm::Value *> readChar(llvm::Value *pos, bool back,
+                                                   llvm::BasicBlock *fail);
   llvm::Value *charStep(uint32_t atom, llvm::Value *pos, llvm::BasicBlock *fail);
   llvm::Value *inSet(llvm::Value *c, const uint32_t *set, bool bytesOnly);
   llvm::Value *inByteSet(llvm::Value *c, const ByteSet &bits);

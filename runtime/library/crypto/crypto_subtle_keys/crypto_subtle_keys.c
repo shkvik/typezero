@@ -5,6 +5,15 @@
 // system; the main thread holds each EVP_PKEY while its job runs and makes the results.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/io/io.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ec.h>

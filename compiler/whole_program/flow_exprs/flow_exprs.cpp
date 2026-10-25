@@ -1,6 +1,6 @@
 #include "compiler/whole_program/flow_exprs/flow_exprs.h"
-#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "compiler/whole_program/flow_calls/flow_calls.h"
+#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -12,8 +12,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -170,10 +170,11 @@ Refs FlowExprs::exprRefs(Expr *e) {
     if (target->thisVar) {
       out.push_back({flows_.var(target->thisVar), 0, 0});
       if (n->cls && target->cls && target->cls != n->cls) {
-        flows_.flowCalls().passThis(flows_.flowCalls().receiverConversion(n, n->cls->type, target, {}, target->thisVar,
-                                    "as 'this' of the constructor of '" +
-                                        target->cls->name.str() + "'"),
-                 target);
+        flows_.flowCalls().passThis(
+            flows_.flowCalls().receiverConversion(n, n->cls->type, target, {}, target->thisVar,
+                                                  "as 'this' of the constructor of '" +
+                                                      target->cls->name.str() + "'"),
+            target);
       }
     }
     return out;
@@ -192,8 +193,8 @@ Refs FlowExprs::exprRefs(Expr *e) {
       int at = flows_.node(NodeKind::Conversion, conv, "");
       auto *n = llvm::dyn_cast<NameExpr>(ownExpr(conv->operand));
       flows_.conversions.push_back({at, conv->operand->type, conv->type, conv->loc(),
-                             flows_.narrowings_(conv->operand->type, conv->type), -1, "",
-                             n ? n->name : llvm::StringRef()});
+                                    flows_.narrowings_(conv->operand->type, conv->type), -1, "",
+                                    n ? n->name : llvm::StringRef()});
       out.push_back({at, 0, 0});
     }
     return out;

@@ -5,8 +5,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -89,7 +89,7 @@ std::string calleeName(const FunctionDecl *fn) {
 
 } // namespace
 
-LoadOrder::LoadOrder(Sema &sema) : sema_(sema) {}
+LoadOrder::LoadOrder(Checker &checker) : checker_(checker) {}
 
 // What the code that runs at some point may read: of the globals it uses,
 // directly or through the functions it calls, the one set last. Functions
@@ -143,7 +143,7 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
   for (Module *module : program.modules) {
     auto visit = [&](const Expr *e) {
       if (auto *name = dyn_cast<NameExpr>(e)) {
-        // A global of a file that loads later, which Sema saw because that
+        // A global of a file that loads later, which Checker saw because that
         // file was checked out of turn (see loadEarly).
         auto found = name->var ? setAt.find(name->var) : setAt.end();
         if (found == setAt.end() || found->second <= time) {
@@ -157,9 +157,10 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
           what += " of " + home->name;
         }
         if (home == module) {
-          sema_.diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
+          checker_.diags_.error(name->loc(), "'" + name->name + "' is used before it is declared");
         } else {
-          sema_.diags_.error(name->loc(), TopLevelChecker::readBeforeLoad(module, what, home, name->var->name));
+          checker_.diags_.error(
+              name->loc(), TopLevelChecker::readBeforeLoad(module, what, home, name->var->name));
         }
         return;
       }
@@ -257,21 +258,22 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       Module *home = homes.lookup(use.var);
       std::string var = use.var->name.str();
       if (home == site.module) {
-        sema_.diags_.error(site.call->loc(),
-                     calleeName(fn) + " uses '" + var +
-                         "' before it is declared: JavaScript would throw a "
-                         "ReferenceError when it runs here; move the declaration of '" +
-                         var + "' up");
+        checker_.diags_.error(site.call->loc(),
+                              calleeName(fn) + " uses '" + var +
+                                  "' before it is declared: JavaScript would throw a "
+                                  "ReferenceError when it runs here; move the declaration of '" +
+                                  var + "' up");
       } else {
-        sema_.diags_.error(site.call->loc(),
-                     site.module->name + " calls " + calleeName(fn) +
-                         " while it loads, and it reads '" + var + "' of " + home->name +
-                         ", which is not loaded yet: " + TopLevelChecker::loadChain(site.module, home) +
-                         "; make the call inside a function, or move '" + var +
-                         "' to a file outside the cycle");
+        checker_.diags_.error(
+            site.call->loc(),
+            site.module->name + " calls " + calleeName(fn) + " while it loads, and it reads '" +
+                var + "' of " + home->name +
+                ", which is not loaded yet: " + TopLevelChecker::loadChain(site.module, home) +
+                "; make the call inside a function, or move '" + var +
+                "' to a file outside the cycle");
       }
-      sema_.diags_.note(use.loc, "'" + var + "' is used here");
-      sema_.diags_.note(use.var->loc, "'" + var + "' is declared here");
+      checker_.diags_.note(use.loc, "'" + var + "' is used here");
+      checker_.diags_.note(use.var->loc, "'" + var + "' is declared here");
       break; // one message for the call
     }
   }

@@ -24,7 +24,7 @@ struct EnumDecl : Stmt {
 
   llvm::StringRef name;
   std::vector<EnumMember> members;
-  // Set by Sema.
+  // Set by Checker.
   bool isString = false;
   bool resolved = false;
   bool resolving = false;

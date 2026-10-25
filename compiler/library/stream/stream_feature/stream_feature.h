@@ -9,7 +9,8 @@ class StreamFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "stream"; }
 
-  Expr *checkLibraryCall(Sema &sema, CallExpr *call, NameExpr *name, FuncSymbol *func) const override;
+  Expr *checkLibraryCall(Checker &checker, CallExpr *call, NameExpr *name,
+                         FuncSymbol *func) const override;
 };
 
 } // namespace tz

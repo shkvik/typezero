@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // generateKeyPair and generateKeyPairSync.
 class KeyPairChecker {
 public:
-  explicit KeyPairChecker(Sema &sema);
+  explicit KeyPairChecker(Checker &checker);
 
   Expr *checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

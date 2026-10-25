@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The functions of node:os.
 class OsChecker {
 public:
-  explicit OsChecker(Sema &sema);
+  explicit OsChecker(Checker &checker);
 
   Expr *checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

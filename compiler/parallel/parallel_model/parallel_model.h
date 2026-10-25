@@ -1,12 +1,14 @@
 #pragma once
 
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/ast/ast.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/Support/SMLoc.h"
 #include <algorithm>
 #include <deque>
 #include <functional>
@@ -16,8 +18,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/program/ast/ast.h"
-#include "llvm/Support/SMLoc.h"
 
 namespace tz::parallel {
 

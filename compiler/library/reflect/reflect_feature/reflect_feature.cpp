@@ -1,19 +1,20 @@
 #include "compiler/library/reflect/reflect_feature/reflect_feature.h"
-#include "compiler/check/sema/sema.h"
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/library/reflect/reflect_call_checker/reflect_call_checker.h"
-#include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
+#include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
-Expr *ReflectFeature::checkStaticCall(Sema &sema, CallExpr *call, MemberExpr *member, const Type *expected) const {
-  if (!sema.callChecker().isGlobalName(member->object, "Reflect")) {
+Expr *ReflectFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+                                      const Type *expected) const {
+  if (!checker.callChecker().isGlobalName(member->object, "Reflect")) {
     return nullptr;
   }
 
-  return sema.reflectCallChecker().checkReflectCall(call, member, expected);
+  return checker.reflectCallChecker().checkReflectCall(call, member, expected);
 }
 
 bool ReflectFeature::lowers(Builtin builtin) const {
@@ -36,12 +37,12 @@ bool ReflectFeature::lowers(Builtin builtin) const {
   }
 }
 
-llvm::Value *ReflectFeature::lowerCall(CodeGen &codegen, CallExpr *call) const {
+llvm::Value *ReflectFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   if (isMetaBuiltin(call->builtin)) {
-    return codegen.decoratorLowerer().emitMetaCall(call);
+    return lowering.decoratorLowerer().emitMetaCall(call);
   }
 
-  return codegen.reflectLowerer().emitReflectCall(call);
+  return lowering.reflectLowerer().emitReflectCall(call);
 }
 
 } // namespace tz

@@ -33,7 +33,7 @@ struct Linear {
 };
 
 // Facts `lhs < rhs + offset` known to hold at some point of the program, such
-// as `i < s.length` or `0 < i + 1` (that is, i >= 0). Sema collects them from
+// as `i < s.length` or `0 < i + 1` (that is, i >= 0). Checker collects them from
 // conditions, declarations and assignments, and uses them to prove that an
 // index is in range.
 class Facts {

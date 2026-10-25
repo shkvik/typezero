@@ -1,17 +1,17 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The copies of generic functions made for their type arguments.
 class GenericInstantiator {
 public:
-  explicit GenericInstantiator(Sema &sema);
+  explicit GenericInstantiator(Checker &checker);
 
   // A generic function as a value: its type arguments come from the
   // function type expected there, or are written (`first<int>`).
-  Expr *checkGenericValue(NameExpr *name, FuncSymbol *generic, const Sema::Signature *expected);
+  Expr *checkGenericValue(NameExpr *name, FuncSymbol *generic, const Checker::Signature *expected);
   // Whether `ret`, the return type of `generic`, holds the type of an object
   // literal with methods, which each instance makes anew: such a result is
   // not supported yet (reported once).
@@ -32,17 +32,18 @@ public:
   // signature from the generic one, the body parsed again.
   FunctionDecl *instanceDecl(FuncSymbol *generic, llvm::ArrayRef<const Type *> args,
                              llvm::ArrayRef<const Type *> exact = {});
-  void checkInstance(Sema::Instance *instance);
+  void checkInstance(Checker::Instance *instance);
   // Reports an instance whose body has an error at the call that needs it.
-  void reportInstance(Sema::Instance *instance, llvm::SMLoc callLoc,
+  void reportInstance(Checker::Instance *instance, llvm::SMLoc callLoc,
                       llvm::ArrayRef<const Type *> concrete);
   void checkInstances();
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // Generics: the instances, by generic function and representations; those
   // waiting for their bodies to be checked; the one being checked.
-  std::map<std::pair<const FuncSymbol *, std::vector<const Type *>>, Sema::Instance *> instances_;
+  std::map<std::pair<const FuncSymbol *, std::vector<const Type *>>, Checker::Instance *>
+      instances_;
   // Generic functions reported by returnsOwnClass.
   llvm::SmallPtrSet<const FuncSymbol *, 2> ownClassReturns_;
 };

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // throw, try, catch and finally, and the class Error (docs/errors.md).
 class ThrowChecker {
 public:
-  explicit ThrowChecker(Sema &sema);
+  explicit ThrowChecker(Checker &checker);
 
   // Exceptions (sema_error.cpp, docs/errors.md). Error is a class of the
   // language that every file sees, declared before them (declareErrorClass).
@@ -24,12 +24,12 @@ public:
   // `e.toString()`; null if `member` is not that.
   Expr *checkErrorMethod(CallExpr *call, MemberExpr *member);
   // `flow` without what code `scan` scanned may change.
-  Sema::Flow withoutChanges(const Sema::Flow &flow, const Sema::LoopScan &scan);
+  Checker::Flow withoutChanges(const Checker::Flow &flow, const Checker::LoopScan &scan);
   // The class of the built-in kind `name` (Error, TypeError...), or null.
   ClassDecl *errorKindClass(llvm::StringRef name) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // unknown as T: the tests of the classes a value may be.
 class UnknownCastLowerer {
 public:
-  explicit UnknownCastLowerer(CodeGen &codegen);
+  explicit UnknownCastLowerer(Lowering &lowering);
 
   // `u`, an unknown (borrowed), as an owned value of `to`; control goes to
   // `fail`, with nothing owned, if it holds no such value.
@@ -27,7 +27,7 @@ public:
   llvm::Value *emitUnknownFit(llvm::Value *u, const Type *to);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

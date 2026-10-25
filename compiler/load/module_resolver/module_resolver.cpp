@@ -1,5 +1,5 @@
 #include "compiler/load/module_resolver/module_resolver.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/parser/parser.h"
@@ -55,7 +55,7 @@ std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringR
 ModuleResolver::ModuleResolver(Loader &loader) : loader_(loader) {}
 
 Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
-  // Built into tz (docs/io.md) or into the language (docs/errors.md): Sema
+  // Built into tz (docs/io.md) or into the language (docs/errors.md): Checker
   // binds the names they give.
   if (spec == "neverthrow") {
     return nullptr;

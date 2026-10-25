@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The arguments of Reflect.apply and construct, and the variant they choose.
 class ReflectArgsLowerer {
 public:
-  explicit ReflectArgsLowerer(CodeGen &codegen);
+  explicit ReflectArgsLowerer(Lowering &lowering);
 
   // The position among `variants` of the one the arguments `args[0..count)`
   // (unknowns, borrowed) fit best, as a call that compiles chooses: each
@@ -31,7 +31,7 @@ public:
                            llvm::Value *got);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

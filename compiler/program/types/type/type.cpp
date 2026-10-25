@@ -1,8 +1,8 @@
 #include "compiler/program/types/type/type.h"
-#include "compiler/program/types/union_slots/union_slots.h"
 #include "compiler/program/types/argument_lists/argument_lists.h"
-#include "compiler/program/types/type_spelling/type_spelling.h"
 #include "compiler/program/types/template_patterns/template_patterns.h"
+#include "compiler/program/types/type_spelling/type_spelling.h"
+#include "compiler/program/types/union_slots/union_slots.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -823,7 +823,7 @@ const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
       name = "NonNullable<" + of(0) + ">";
       break;
     // Named by the text written, which the tag carries (see
-    // Sema::resolveConditional).
+    // Checker::resolveConditional).
     case TypeOp::Conditional:
       name = of(0);
       break;
@@ -1010,7 +1010,7 @@ const Type *Type::intl(IntlKind kind) {
 }
 
 // The timers of the runtime: their objects hold what the program does not
-// see (TzTimer in runtime/core/tzrt/tzrt.h).
+// see (TzTimer in runtime/core/async/async.h).
 const Type *Type::timeout() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Timeout")).get();

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // new Promise and the methods of promises.
 class PromiseChecker {
 public:
-  explicit PromiseChecker(Sema &sema);
+  explicit PromiseChecker(Checker &checker);
 
   // What Promise.allSettled gives for each: `{ status, value?, reason? }`.
   const Type *settledResultType(const Type *value);
@@ -20,7 +20,7 @@ public:
   Expr *checkPromiseMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

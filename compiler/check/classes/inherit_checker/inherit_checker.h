@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // super, abstract and implements.
 class InheritChecker {
 public:
-  explicit InheritChecker(Sema &sema);
+  explicit InheritChecker(Checker &checker);
 
   // What `cls` must implement: the abstract methods up its chain, and the
   // members of the interfaces it implements.
@@ -18,7 +18,7 @@ public:
   Expr *checkSuperMethodCall(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

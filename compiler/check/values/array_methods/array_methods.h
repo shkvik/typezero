@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The methods of arrays.
 class ArrayMethods {
 public:
-  explicit ArrayMethods(Sema &sema);
+  explicit ArrayMethods(Checker &checker);
 
   Expr *checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

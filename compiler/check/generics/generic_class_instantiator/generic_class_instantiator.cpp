@@ -1,9 +1,9 @@
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/check/generics/generic_class_checker/generic_class_checker.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/classes/class_links/class_links.h"
+#include "compiler/check/generics/generic_class_checker/generic_class_checker.h"
+#include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/load/lexer/lexer.h"
@@ -12,8 +12,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -36,30 +36,32 @@ std::string typeNames(llvm::ArrayRef<const Type *> types) {
 
 } // namespace
 
-GenericClassInstantiator::GenericClassInstantiator(Sema &sema) : sema_(sema) {}
+GenericClassInstantiator::GenericClassInstantiator(Checker &checker) : checker_(checker) {}
 
-ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::vector<const Type *> args,
-                                  llvm::SMLoc use) {
-  sema_.genericClassChecker().declareClassTypeParams(generic);
+ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
+                                                      std::vector<const Type *> args,
+                                                      llvm::SMLoc use) {
+  checker_.genericClassChecker().declareClassTypeParams(generic);
   // Without a place of its own (a type that substitute makes), errors are
   // reported at the generic class.
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
   // Copied: making instances below may add entries.
   std::vector<const Type *> params = generic->typeArgs;
-  std::vector<const Type *> defaults = sema_.classDefaults_.lookup(generic);
+  std::vector<const Type *> defaults = checker_.classDefaults_.lookup(generic);
   std::string name = generic->name.str();
   if (args.size() > params.size()) {
-    sema_.diags_.error(loc, "'" + name + "' takes " + std::to_string(params.size()) + " type argument" +
-                          (params.size() == 1 ? "" : "s") + ", but got " +
-                          std::to_string(args.size()));
+    checker_.diags_.error(loc, "'" + name + "' takes " + std::to_string(params.size()) +
+                                   " type argument" + (params.size() == 1 ? "" : "s") +
+                                   ", but got " + std::to_string(args.size()));
     return nullptr;
   }
   bool emitter = generic->library && generic->name == "EventEmitter";
   for (size_t k = args.size(); k < params.size(); ++k) {
     if (emitter) {
-      sema_.diags_.error(loc, "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: "
-                        "[chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof "
-                        "bus'");
+      checker_.diags_.error(loc,
+                            "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: "
+                            "[chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof "
+                            "bus'");
       return nullptr;
     }
     if (k >= defaults.size() || !defaults[k]) {
@@ -67,26 +69,27 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::v
       for (size_t i = 0; i < params.size(); ++i) {
         ints += i == 0 ? "int" : ", int";
       }
-      sema_.diags_.error(loc, "'" + name + "' needs " + std::to_string(params.size()) + " type argument" +
-                            (params.size() == 1 ? "" : "s") + ", e.g. '" + name + "<" + ints +
-                            ">'");
+      checker_.diags_.error(loc, "'" + name + "' needs " + std::to_string(params.size()) +
+                                     " type argument" + (params.size() == 1 ? "" : "s") +
+                                     ", e.g. '" + name + "<" + ints + ">'");
       return nullptr;
     }
     // A default may use the type parameters before it.
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
-    args.push_back(sema_.typeParams().substitute(defaults[k], params, known));
+    args.push_back(checker_.typeParams().substitute(defaults[k], params, known));
   }
   for (size_t k = 0; k < params.size(); ++k) {
     if (args[k]->isError()) {
       return nullptr;
     }
     if (args[k]->isVoid() || args[k]->isUndefined()) {
-      sema_.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" + name + "'");
+      checker_.diags_.error(loc, "'" + args[k]->name() + "' cannot be a type argument of '" + name +
+                                     "'");
 
       return nullptr;
     }
-    if (!sema_.typeParams().satisfies(args[k], params[k], params, args)) {
+    if (!checker_.typeParams().satisfies(args[k], params[k], params, args)) {
       const TypeParamDecl &decl = generic->typeParams[k];
       std::string constraint = params[k]->constraint() ? params[k]->constraint()->name().str() : "";
       for (const Type *t : params[k]->alternatives()) {
@@ -95,43 +98,45 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::v
       if (decl.constraint && decl.constraint->kind == TypeRef::Kind::Name) {
         constraint = decl.constraint->name.str();
       }
-      sema_.diags_.error(loc, "type '" + args[k]->name() + "' does not satisfy the constraint '" +
-                            constraint + "' of '" + params[k]->name() + "' in '" + name + "'");
+      checker_.diags_.error(loc, "type '" + args[k]->name() +
+                                     "' does not satisfy the constraint '" + constraint + "' of '" +
+                                     params[k]->name() + "' in '" + name + "'");
       return nullptr;
     }
   }
   // The event map of an emitter (sema_events.cpp).
-  if (emitter && !sema_.eventMaps().checkEventMap(args[0], loc)) {
+  if (emitter && !checker_.eventMaps().checkEventMap(args[0], loc)) {
     return nullptr;
   }
   auto key = std::make_pair(static_cast<const ClassDecl *>(generic), args);
-  if (auto found = sema_.classInstances_.find(key); found != sema_.classInstances_.end()) {
+  if (auto found = checker_.classInstances_.find(key); found != checker_.classInstances_.end()) {
     // The first place in the program that names the instance is where its
     // errors are reported.
-    if (Sema::Instance *check = classChecks_.lookup(found->second); check && !check->callLoc.isValid()) {
+    if (Checker::Instance *check = classChecks_.lookup(found->second);
+        check && !check->callLoc.isValid()) {
       check->callLoc = use;
     }
     return found->second;
   }
-  if (llvm::count_if(sema_.filling_, [&](const ClassDecl *c) { return c->generic == generic; }) >=
-      kMaxClassChain) {
+  if (llvm::count_if(checker_.filling_,
+                     [&](const ClassDecl *c) { return c->generic == generic; }) >= kMaxClassChain) {
     if (endless_.insert(generic).second) {
-      sema_.diags_.error(generic->loc(),
-                   "generic class '" + name +
-                       "' uses itself with type arguments that keep "
-                       "growing, so each instance of it needs another, without end; a "
-                       "generic class can use itself only with its own type parameters");
+      checker_.diags_.error(generic->loc(),
+                            "generic class '" + name +
+                                "' uses itself with type arguments that keep "
+                                "growing, so each instance of it needs another, without end; a "
+                                "generic class can use itself only with its own type parameters");
     }
 
     return nullptr;
   }
 
   // A copy of the declaration. It was parsed once without errors.
-  bool muted = sema_.diags_.setMuted(true);
-  Lexer lexer(generic->source, sema_.diags_);
-  Parser parser(lexer, sema_.ctx_, sema_.diags_, /*library=*/generic->library);
+  bool muted = checker_.diags_.setMuted(true);
+  Lexer lexer(generic->source, checker_.diags_);
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, /*library=*/generic->library);
   ClassDecl *inst = parser.parseClassCopy();
-  sema_.diags_.setMuted(muted);
+  checker_.diags_.setMuted(muted);
   inst->generic = generic;
   inst->typeArgs = args;
   inst->isAbstract = generic->isAbstract;
@@ -139,54 +144,55 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic, std::v
   inst->checkOnly = llvm::any_of(args, [](const Type *t) { return mentionsParam(t); });
   inst->resolved = true;
   inst->declared = true;
-  inst->id = ++sema_.classCount_;
+  inst->id = ++checker_.classCount_;
   Type *type = Type::classType(name + "<" + typeNames(args) + ">", inst);
   type->setTypeArgs(args);
   inst->type = type;
-  sema_.classes_.push_back(inst);
+  checker_.classes_.push_back(inst);
   generic->instances.push_back(inst);
-  sema_.classInstances_[key] = inst;
-  if (Module *home = sema_.declModules_.lookup(generic)) {
-    sema_.declModules_[inst] = home;
+  checker_.classInstances_[key] = inst;
+  if (Module *home = checker_.declModules_.lookup(generic)) {
+    checker_.declModules_[inst] = home;
   }
 
   // The check of its bodies, by the place that first needs it.
-  Sema::Instance *check = nullptr;
+  Checker::Instance *check = nullptr;
   if (!inst->checkOnly) {
-    check = &sema_.instanceStore_.emplace_back();
+    check = &checker_.instanceStore_.emplace_back();
     check->cls = inst;
     check->callLoc = use;
-    check->requester = sema_.checkingInstance_;
+    check->requester = checker_.checkingInstance_;
     classChecks_[inst] = check;
   }
-  if (!sema_.methodsDeclared_) {
-    sema_.unfilled_.push_back(inst); // its generic class may not have its methods yet
+  if (!checker_.methodsDeclared_) {
+    checker_.unfilled_.push_back(inst); // its generic class may not have its methods yet
   } else {
-    sema_.filling_.push_back(inst);
+    checker_.filling_.push_back(inst);
     fillInstance(inst);
-    sema_.filling_.pop_back();
-    if (sema_.classesLinked_) {
+    checker_.filling_.pop_back();
+    if (checker_.classesLinked_) {
       linkInstance(inst);
     }
   }
   if (check) {
     // From the body of another instance: that one fails if this one does.
-    if (sema_.checkingInstance_) {
-      sema_.genericClassChecker().checkClassInstance(check);
+    if (checker_.checkingInstance_) {
+      checker_.genericClassChecker().checkClassInstance(check);
       if (check->failed) {
-        sema_.genericClassChecker().reportClassInstance(check, loc);
+        checker_.genericClassChecker().reportClassInstance(check, loc);
       }
     } else {
-      sema_.pendingInstances_.push_back(check);
+      checker_.pendingInstances_.push_back(check);
     }
   }
 
   return inst;
 }
 
-void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDecl *fn, FunctionDecl *generic) {
+void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDecl *fn,
+                                                     FunctionDecl *generic) {
   FuncSymbol *of = generic->sym;
-  FuncSymbol *sym = sema_.ctx_.newFunc();
+  FuncSymbol *sym = checker_.ctx_.newFunc();
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
@@ -198,7 +204,7 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   if (!of) {
     return; // an error in the generic class
   }
-  auto sub = [&](const Type *t) { return sema_.genericClassChecker().instanceType(inst, t); };
+  auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
   // A generic method keeps its own type parameters; one that a parameter
   // `xs: Iterable<T>` makes is one of the values of this instance.
   std::vector<const Type *> own = of->typeParams, mine = of->typeParams;
@@ -209,7 +215,9 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
       p = param;
     }
   }
-  auto sub2 = [&](const Type *t) { return t ? sema_.typeParams().substitute(sub(t), own, mine) : nullptr; };
+  auto sub2 = [&](const Type *t) {
+    return t ? checker_.typeParams().substitute(sub(t), own, mine) : nullptr;
+  };
   fn->typeArgs = mine;
   sym->typeParams = mine;
   for (const Type *d : of->typeDefaults) {
@@ -239,20 +247,20 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   sym->predicateParam = of->predicateParam;
   sym->asserts = of->asserts;
   sym->predicateType = sub2(of->predicateType);
-  if (Module *home = sema_.declModules_.lookup(generic)) {
-    sema_.declModules_[fn] = home;
+  if (Module *home = checker_.declModules_.lookup(generic)) {
+    checker_.declModules_[fn] = home;
   }
 }
 
 void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   ClassDecl *generic = inst->generic;
-  auto sub = [&](const Type *t) { return sema_.genericClassChecker().instanceType(inst, t); };
-  // Its bases, whatever code makes the instance: CodeGen lays out the
+  auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
+  // Its bases, whatever code makes the instance: Lowering lays out the
   // objects of every instance it emits (see addBase).
   auto addInstanceBase = [&](const Type *base) {
-    sema_.classBases().addBase(inst->type, base);
-    if (inst->isEmitted() && !llvm::is_contained(sema_.file_->subtypes, inst->type)) {
-      sema_.file_->subtypes.push_back(inst->type);
+    checker_.classBases().addBase(inst->type, base);
+    if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
+      checker_.file_->subtypes.push_back(inst->type);
     }
   };
   // The class it extends and the interfaces it implements, those of the
@@ -273,7 +281,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     }
   }
   // A Duplex of node:stream is a Writable too (sema_stream.cpp).
-  sema_.chunkTypes().addStreamBases(inst, inst->loc());
+  checker_.chunkTypes().addStreamBases(inst, inst->loc());
   // The fields, in the order of the generic class: the copy is parsed from
   // its text. The static ones are the generic class's.
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
@@ -315,13 +323,14 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       if (f.isStatic || !f.init || f.method) {
         continue;
       }
-      auto *target = sema_.ctx_.make<MemberExpr>(f.loc, sema_.ctx_.make<NameExpr>(f.loc, "this"), f.name);
-      auto *set = sema_.ctx_.make<AssignExpr>(f.loc, std::nullopt, target, f.init);
-      sets.push_back(sema_.ctx_.make<ExprStmt>(f.loc, set));
+      auto *target = checker_.ctx_.make<MemberExpr>(
+          f.loc, checker_.ctx_.make<NameExpr>(f.loc, "this"), f.name);
+      auto *set = checker_.ctx_.make<AssignExpr>(f.loc, std::nullopt, target, f.init);
+      sets.push_back(checker_.ctx_.make<ExprStmt>(f.loc, set));
     }
-    auto *init = sema_.ctx_.make<FunctionDecl>(inst->loc(), "init");
+    auto *init = checker_.ctx_.make<FunctionDecl>(inst->loc(), "init");
     init->cls = inst;
-    init->body = sema_.ctx_.make<BlockStmt>(inst->loc());
+    init->body = checker_.ctx_.make<BlockStmt>(inst->loc());
     init->body->body = std::move(sets);
     declareInstanceMember(inst, init, generic->init);
     init->sym->ret = Type::voidTy();
@@ -330,11 +339,11 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   // Variants that these types make the same (`add(x: T)` and `add(x:
   // string)` with T = string): the check of the instance reports them.
   std::vector<Diagnostics::Captured> errors;
-  std::vector<Diagnostics::Captured> *outer = sema_.diags_.setCapture(&errors);
-  sema_.classDeclarer().checkVariants(inst);
-  sema_.diags_.setCapture(outer);
+  std::vector<Diagnostics::Captured> *outer = checker_.diags_.setCapture(&errors);
+  checker_.classDeclarer().checkVariants(inst);
+  checker_.diags_.setCapture(outer);
   if (!errors.empty()) {
-    if (Sema::Instance *check = classChecks_.lookup(inst); check && !check->failed) {
+    if (Checker::Instance *check = classChecks_.lookup(inst); check && !check->failed) {
       check->failed = true;
       check->message = errors.front().message;
       check->errorLoc = errors.front().loc;
@@ -344,10 +353,10 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
 
 void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
   // What the generic class reported is not reported again.
-  bool muted = sema_.diags_.setMuted(true);
-  sema_.classLinks().linkOverrides(inst);
-  sema_.diags_.setMuted(muted);
-  sema_.classLinks().buildVtable(inst);
+  bool muted = checker_.diags_.setMuted(true);
+  checker_.classLinks().linkOverrides(inst);
+  checker_.diags_.setMuted(muted);
+  checker_.classLinks().buildVtable(inst);
 }
 
 void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {

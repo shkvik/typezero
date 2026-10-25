@@ -5,6 +5,10 @@
 // `__tz_lib_inspect`, is tz_lib_inspect in inspect.c. Each takes the maker of
 // SystemError last, which these do not use.
 
+#include "runtime/library/tz_modules/library/library.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 
 #ifdef _WIN32

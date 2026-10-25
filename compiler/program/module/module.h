@@ -17,6 +17,9 @@ struct Module {
   // globals of the web platform such as EventTarget, URL and fetch. Only its
   // code may declare and call the intrinsics `__tz_*`.
   bool builtin = false;
+  // The buffers of the source manager that hold the code of a built-in module: one per file of
+  // it (node:stream has several, see compiler/load/library_modules/).
+  std::vector<unsigned> buffers;
   unsigned order = 0; // in the order files load
   // The files that were loading when this one started to, from the entry
   // on, this one last: the chain an import cycle shows.

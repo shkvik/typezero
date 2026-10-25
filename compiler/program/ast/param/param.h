@@ -28,7 +28,7 @@ struct Param {
   llvm::StringRef pattern;
   std::vector<Decorator> decorators;
   llvm::StringRef label() const { return pattern.empty() ? name : pattern; }
-  // Set by Sema: the type of the parameter inside the function, and its
+  // Set by Checker: the type of the parameter inside the function, and its
   // variable.
   const Type *declaredType = nullptr;
   VarSymbol *sym = nullptr;

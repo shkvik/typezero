@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Conditional types, infer, intersections and the utility types of functions.
 class ConditionalTypes {
 public:
-  explicit ConditionalTypes(Sema &sema);
+  explicit ConditionalTypes(Checker &checker);
 
   // Conditional types, `infer`, template literal types and the intrinsic
   // string types (sema_conditional.cpp, docs/generics.md section 10).
@@ -39,9 +39,9 @@ public:
   const Type *signatureForUtility(const TypeRef &ref);
 
 private:
-  Sema &sema_;
-  std::map<const TypeRef *, Sema::ConditionalInfo> conditionals_;
-  llvm::DenseMap<const Type *, const Sema::ConditionalInfo *> conditionalTags_;
+  Checker &checker_;
+  std::map<const TypeRef *, Checker::ConditionalInfo> conditionals_;
+  llvm::DenseMap<const Type *, const Checker::ConditionalInfo *> conditionalTags_;
 };
 
 } // namespace tz

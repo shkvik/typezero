@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // WeakRef (docs/objects.md, section 11).
 class WeakRefChecker {
 public:
-  explicit WeakRefChecker(Sema &sema);
+  explicit WeakRefChecker(Checker &checker);
 
   // WeakRef (sema_weak.cpp, docs/objects.md section 11): `WeakRef<T>` of an
   // object type T, `new WeakRef(x)` and `w.deref()`.
@@ -17,7 +17,7 @@ public:
   Expr *checkWeakRefMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

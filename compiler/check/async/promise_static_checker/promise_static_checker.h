@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Promise.all, allSettled, race, any, resolve, reject and withResolvers.
 class PromiseStaticChecker {
 public:
-  explicit PromiseStaticChecker(Sema &sema);
+  explicit PromiseStaticChecker(Checker &checker);
 
   bool checkPromiseList(Expr *&arg, const Type *wantedElement, const Type *&element,
                         std::vector<const Type *> &tuple, llvm::StringRef fn);
@@ -15,7 +15,7 @@ public:
   Expr *checkPromiseStatic(CallExpr *call, MemberExpr *member, const Type *expected);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

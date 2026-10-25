@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The methods of Intl objects, toLocaleString and localeCompare.
 class IntlMethodChecker {
 public:
-  explicit IntlMethodChecker(Sema &sema);
+  explicit IntlMethodChecker(Checker &checker);
 
   Expr *checkIntlMethod(CallExpr *call, MemberExpr *member);
   Expr *checkNumberLocale(CallExpr *call, MemberExpr *member);
@@ -15,7 +15,7 @@ public:
   Expr *checkIntlNumber(Expr *arg, llvm::StringRef method);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

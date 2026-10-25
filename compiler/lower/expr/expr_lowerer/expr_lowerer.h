@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Which code an expression becomes; optional chains, conditionals and conversions.
 class ExprLowerer {
 public:
-  explicit ExprLowerer(CodeGen &codegen);
+  explicit ExprLowerer(Lowering &lowering);
 
   // Expressions
   llvm::Value *emitExpr(Expr *expr);
@@ -19,7 +19,7 @@ public:
   llvm::Value *emitConversion(llvm::Value *value, const Type *from, const Type *to);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

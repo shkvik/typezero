@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Typed arrays, DataView and Buffer: their types, indices and members.
 class BytesChecker {
 public:
-  explicit BytesChecker(Sema &sema);
+  explicit BytesChecker(Checker &checker);
 
   // Binary data (sema_bytes.cpp, docs/bytes.md): typed arrays, Buffer,
   // ArrayBuffer, DataView, TextEncoder and TextDecoder, objects the runtime
@@ -37,7 +37,7 @@ public:
   Expr *bytesToString(Expr *expr);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

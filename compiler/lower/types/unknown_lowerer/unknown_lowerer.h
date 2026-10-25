@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // unknown, classes as values and join of tuples.
 class UnknownLowerer {
 public:
-  explicit UnknownLowerer(CodeGen &codegen);
+  explicit UnknownLowerer(Lowering &lowering);
 
   // unknown, object and classes as values (codegen_unknown.cpp). An unknown
   // is a pointer, null for undefined: an object of the language as it is,
@@ -30,7 +30,7 @@ public:
   llvm::Value *emitTupleJoin(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::DenseMap<const ClassDecl *, llvm::StructType *> classObjectTypes_;
   llvm::DenseMap<const ClassDecl *, llvm::Constant *> classObjects_;
 };

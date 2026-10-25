@@ -1,14 +1,17 @@
 #include "compiler/parallel/call_walk/call_walk.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/alias_analysis/alias_analysis.h"
+#include "compiler/parallel/builtin_effects/builtin_effects.h"
+#include "compiler/parallel/call_resolver/call_resolver.h"
 #include "compiler/parallel/code_walk/code_walk.h"
+#include "compiler/parallel/conflicts/conflicts.h"
+#include "compiler/parallel/escape_scan/escape_scan.h"
+#include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/expr_walk/expr_walk.h"
 #include "compiler/parallel/library_effects/library_effects.h"
-#include "compiler/parallel/alias_analysis/alias_analysis.h"
-#include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/parallel/pieces/pieces.h"
-#include "compiler/parallel/conflicts/conflicts.h"
-#include "compiler/parallel/explainer/explainer.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +27,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -311,7 +313,8 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     if (c->method) {
       addCallee(rec, c->method->decl, self);
     }
-    for (const ClassDecl *k = analysis_.fn_->decl ? analysis_.fn_->decl->cls : nullptr; k; k = k->parent) {
+    for (const ClassDecl *k = analysis_.fn_->decl ? analysis_.fn_->decl->cls : nullptr; k;
+         k = k->parent) {
       if (k->init) {
         addCallee(rec, k->init, self);
       }
@@ -401,7 +404,7 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
   if (mayThrow(b)) {
     analysis_.codeWalk().throwPoint();
   }
-  analysis_.libraryEffects().builtinEffects(c, recv);
+  analysis_.builtinCalls().builtinEffects(c, recv);
 }
 
 void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, const Use &use) {
@@ -447,7 +450,9 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
 
 // The functions that `f`, given to be called, may be: (the strip of `arg`).
 void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind) {
-  CallRec &rec = analysis_.fn_->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+  CallRec &rec =
+      analysis_.fn_
+          ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     analysis_.codeWalk().discover(fe->fn);
     addCallee(rec, fe->fn, closureSelf(fe->fn, *analysis_.fn_));
@@ -461,14 +466,16 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
   } else if (auto *mem = dyn_cast<MemberExpr>(f); mem && mem->method) {
     analysis_.exprWalk().expr(mem->object);
     CallRec &again =
-        analysis_.fn_->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+        analysis_.fn_
+            ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
     for (const FunctionDecl *fn : methodTargets(mem->method->decl, mem->virtualCall)) {
       addCallee(again, fn, analysis_.aliasAnalysis().receiverRef(mem->object));
     }
   } else {
     analysis_.exprWalk().expr(arg);
     CallRec &again =
-        analysis_.fn_->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
+        analysis_.fn_
+            ->calls[analysis_.fn_->callOf.lookup(std::make_pair((const void *)f, unsigned(kind)))];
     again.byType = arg->type;
   }
 }
@@ -496,8 +503,9 @@ void CallWalk::newExpr(const NewExpr *n) {
   CallRec &rec = analysis_.codeWalk().record(n, CallKind::Call, {}, n->loc());
   // Until the constructors give the object away, it is nobody else's: what
   // they do to it is not shared.
-  std::optional<Ref> self =
-      analysis_.aliasAnalysis().constructorLeaks(n->cls) ? Ref{RefKind::Site, n} : Ref{RefKind::Local, nullptr};
+  std::optional<Ref> self = analysis_.escapeScan().constructorLeaks(n->cls)
+                                ? Ref{RefKind::Site, n}
+                                : Ref{RefKind::Local, nullptr};
   if (n->ctor && n->ctor->func) {
     addCallee(rec, n->ctor->func->decl, self);
   } else {

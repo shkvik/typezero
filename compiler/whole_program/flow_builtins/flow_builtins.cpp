@@ -1,7 +1,7 @@
 #include "compiler/whole_program/flow_builtins/flow_builtins.h"
-#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "compiler/whole_program/flow_calls/flow_calls.h"
 #include "compiler/whole_program/flow_exprs/flow_exprs.h"
+#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -13,15 +13,15 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
 FlowBuiltins::FlowBuiltins(Flows &flows) : flows_(flows) {}
 
 Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver,
-             const std::vector<Refs> &args) {
+                           const std::vector<Refs> &args) {
   const Type *receiverType = member ? member->object->type : nullptr;
   int held = flows_.contents(receiverType);
   Refs parts = shifted(receiver, 1);
@@ -33,7 +33,8 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       // `a.push(...b)`: the elements of b.
       Refs value = c->spreads(i) ? shifted(args[i], 1) : args[i];
       flows_.flowStmts().recordWrite(receiver, true, "", c->spreads(i) ? nullptr : c->args[i],
-                  receiverType ? receiverType->nonOptional() : nullptr, c->loc());
+                                     receiverType ? receiverType->nonOptional() : nullptr,
+                                     c->loc());
       if (held >= 0) {
         flows_.flow(value, held);
       }

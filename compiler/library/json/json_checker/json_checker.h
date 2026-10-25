@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Json and null (docs/modules.md, section 5).
 class JsonChecker {
 public:
-  explicit JsonChecker(Sema &sema);
+  explicit JsonChecker(Checker &checker);
 
   // Json (sema_json.cpp, docs/modules.md section 5). A Json is read as
   // JavaScript reads what JSON.parse gives: `j.name`, `j["name"]` and `j[0]`
@@ -40,11 +40,11 @@ public:
   Expr *checkJsonEquality(BinaryExpr *bin);
   // What `typeof j == "string"`, `Array.isArray(j)` and `j != null` say
   // about a Json variable j.
-  void addJsonFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const;
+  void addJsonFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
   Expr *checkArrayIsArray(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

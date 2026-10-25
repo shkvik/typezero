@@ -1,5 +1,5 @@
 // Dictionaries: Record, Map and Set (docs/objects.md, section 9), which are
-// one hash table (TzMap in tzrt.h) that keeps its keys in the order they
+// one hash table (TzMap in map.h) that keeps its keys in the order they
 // were added.
 //
 // Keys compare as JavaScript's Map compares them (SameValueZero): strings
@@ -14,7 +14,18 @@
 // (one that lives in its value) is inlined into the program. It stores the
 // values itself, at the offset the layout gives.
 
+#include "runtime/core/map/map.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/publish/publish.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/library/json/json/json.h"
+#include "runtime/library/process/process/process.h"
 #include <math.h>
 #include <string.h>
 

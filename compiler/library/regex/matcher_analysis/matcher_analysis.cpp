@@ -4,10 +4,10 @@
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -58,7 +58,8 @@ void MatcherAnalysis::analyze() {
       builder_.targets_.insert(op[5]);
       builder_.targets_.insert(op[6]);
       const uint32_t *end = builder_.code_ + op[6] - 5; // its RE_LOOP_END
-      builder_.loops_.push_back({pc, op[1], op[2], op[3], op[5], op[6], end[3], end[2] != RE_INFINITY});
+      builder_.loops_.push_back(
+          {pc, op[1], op[2], op[3], op[5], op[6], end[3], end[2] != RE_INFINITY});
       builder_.hasLoops_ = true;
       break;
     }
@@ -105,8 +106,9 @@ void MatcherAnalysis::analyze() {
   while (pc < builder_.codeSize_ && builder_.code_[pc] == RE_SET_POSITION) {
     pc += 2;
   }
-  if (pc < builder_.codeSize_ && builder_.code_[pc] == RE_REPEAT && builder_.code_[pc + 3] && builder_.code_[pc + 2] == RE_INFINITY &&
-      !builder_.hasBackref_ && !isBack(builder_.code_[pc + 5]) && (pc == 0 || !builder_.targets_.count(pc))) {
+  if (pc < builder_.codeSize_ && builder_.code_[pc] == RE_REPEAT && builder_.code_[pc + 3] &&
+      builder_.code_[pc + 2] == RE_INFINITY && !builder_.hasBackref_ &&
+      !isBack(builder_.code_[pc + 5]) && (pc == 0 || !builder_.targets_.count(pc))) {
     builder_.skipRepeat_ = pc;
   }
 }

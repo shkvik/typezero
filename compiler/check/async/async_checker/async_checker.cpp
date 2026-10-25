@@ -1,26 +1,26 @@
 #include "compiler/check/async/async_checker/async_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/stmt/loop_checker/loop_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
-#include "compiler/check/flow/loop_scanner/loop_scanner.h"
 #include "compiler/check/flow/loop_bounds/loop_bounds.h"
+#include "compiler/check/flow/loop_scanner/loop_scanner.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
-#include "compiler/check/iterators/iterator_methods/iterator_methods.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
-#include "compiler/check/types/literal_types/literal_types.h"
-#include "compiler/library/regex/match_checker/match_checker.h"
+#include "compiler/check/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/check/objects/dict_checker/dict_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/shared_helpers/shared_helpers.h"
+#include "compiler/check/stmt/loop_checker/loop_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/library/regex/match_checker/match_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -56,19 +56,19 @@ std::string statementText(llvm::SMLoc at) {
 
 } // namespace
 
-AsyncChecker::AsyncChecker(Sema &sema) : sema_(sema) {}
+AsyncChecker::AsyncChecker(Checker &checker) : checker_(checker) {}
 
 const Type *AsyncChecker::resolvePromiseType(const TypeRef &ref) {
   if (ref.name != "Promise" && ref.name != "PromiseLike") {
     return nullptr;
   }
   if (ref.args.size() != 1) {
-    sema_.diags_.error(ref.loc, "'" + ref.name +
-                              "' takes one type argument, the type of its value, e.g. '" +
-                              ref.name + "<int>'");
+    checker_.diags_.error(ref.loc, "'" + ref.name +
+                                       "' takes one type argument, the type of its value, e.g. '" +
+                                       ref.name + "<int>'");
     return Type::error();
   }
-  const Type *value = sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/true);
+  const Type *value = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/true);
 
   // A Promise of a Promise is a Promise of its value in JavaScript.
   return Type::promise(awaited(value));
@@ -78,15 +78,16 @@ const Type *AsyncChecker::asyncReturnType(const FunctionDecl *fn, const Type *de
   if (!fn->isAsync || fn->isGenerator || declared->isError() || declared->isPromise()) {
     return declared;
   }
-  sema_.diags_.error(fn->returnType->loc, "an async function returns a Promise: declare its type as "
-                                    "'Promise<" +
-                                        declared->name().str() + ">'");
+  checker_.diags_.error(fn->returnType->loc,
+                        "an async function returns a Promise: declare its type as "
+                        "'Promise<" +
+                            declared->name().str() + ">'");
 
   return Type::promise(declared);
 }
 
 const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns,
-                                 bool fallsOff, bool report) {
+                                         bool fallsOff, bool report) {
   const Type *type = nullptr;
   bool undefined = fallsOff, unknown = false;
   for (ReturnStmt *ret : returns) {
@@ -106,9 +107,10 @@ const Type *AsyncChecker::inferAsyncType(const FuncSymbol *fn, llvm::ArrayRef<Re
     const Type *common = type ? TypeRelations::unify(type, t) : t;
     if (!common || common->isError()) {
       if (report) {
-        sema_.diags_.error(ret->value->loc(), quotedName(fn->name) + " returns '" + t->name() +
-                                            "' here and '" + type->name() +
-                                            "' elsewhere; a function returns values of one type");
+        checker_.diags_.error(ret->value->loc(),
+                              quotedName(fn->name) + " returns '" + t->name() + "' here and '" +
+                                  type->name() +
+                                  "' elsewhere; a function returns values of one type");
       }
       return Type::error();
     }
@@ -140,33 +142,35 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
     if (t->isPromise()) {
       // `return p`: the Promise of the function follows p.
       if (t->promised() != value && !t->promised()->isNever()) {
-        sema_.diags_.error(ret->value->loc(), "this Promise gives '" + t->promised()->name() + "', but " +
-                                            quotedName(fn->name) + " gives '" + value->name() +
-                                            "'; await it and convert the value");
+        checker_.diags_.error(ret->value->loc(), "this Promise gives '" + t->promised()->name() +
+                                                     "', but " + quotedName(fn->name) + " gives '" +
+                                                     value->name() +
+                                                     "'; await it and convert the value");
       }
       continue;
     }
     if (!value->isVoid()) {
-      ret->value = sema_.typeRelations().convert(ret->value, value);
+      ret->value = checker_.typeRelations().convert(ret->value, value);
     }
   }
 }
 
 Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   await->type = Type::error();
-  sema_.file_->usesAsync = true;
-  FuncSymbol *fn = sema_.currentFunction_;
+  checker_.file_->usesAsync = true;
+  FuncSymbol *fn = checker_.currentFunction_;
   if (fn && !(fn->decl && fn->decl->isAsync)) {
     FunctionDecl *decl = fn->decl;
     std::string hint = decl && decl->isArrow         ? "'async (...) => ...'"
                        : decl && decl->cls           ? "'async " + decl->name.str() + "() { ... }'"
                        : decl && !decl->name.empty() ? "'async function " + decl->name.str() + "'"
                                                      : "'async function'";
-    sema_.diags_.error(await->loc(), "'await' can only be used in an async function or in top-level "
-                               "code; make the function async: " +
-                                   hint);
+    checker_.diags_.error(await->loc(),
+                          "'await' can only be used in an async function or in top-level "
+                          "code; make the function async: " +
+                              hint);
   } else if (!fn) {
-    sema_.file_->topLevelAwait = true;
+    checker_.file_->topLevelAwait = true;
   }
   // `await new Promise(...)` where an int is expected waits for a
   // Promise<int>.
@@ -175,19 +179,20 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
       (isa<NewExpr>(await->value) || isa<CallExpr>(await->value))) {
     hint = Type::promise(expected);
   }
-  await->value = sema_.exprChecker().checkExpr(await->value, hint);
+  await->value = checker_.exprChecker().checkExpr(await->value, hint);
   const Type *type = await->value->type;
   // Other tasks run while this one waits: they may change anything.
-  sema_.flowChecker().calledFunction();
+  checker_.flowChecker().calledFunction();
   if (type->isError()) {
     return await;
   }
   const Type *result = awaitedType(type);
   if (!result) {
-    sema_.diags_.error(await->value->loc(),
-                 "'await' of '" + type->name() +
-                     "' gives the value of the Promise or the value itself, which make no one "
-                     "type; check what it holds first");
+    checker_.diags_.error(
+        await->value->loc(),
+        "'await' of '" + type->name() +
+            "' gives the value of the Promise or the value itself, which make no one "
+            "type; check what it holds first");
     return await;
   }
   await->type = result;
@@ -227,70 +232,75 @@ const Type *AsyncChecker::awaitedType(const Type *type) {
 // or an iterator, each awaited. It waits, as `await` does, so it goes where
 // `await` goes.
 void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
-  sema_.file_->usesAsync = true;
-  FuncSymbol *fn = sema_.currentFunction_;
+  checker_.file_->usesAsync = true;
+  FuncSymbol *fn = checker_.currentFunction_;
   if (fn && !(fn->decl && fn->decl->isAsync)) {
-    sema_.diags_.error(stmt->loc(), "'for await' can only be used in an async function or in top-level "
-                              "code; make the function async");
+    checker_.diags_.error(stmt->loc(),
+                          "'for await' can only be used in an async function or in top-level "
+                          "code; make the function async");
   } else if (!fn) {
-    sema_.file_->topLevelAwait = true;
+    checker_.file_->topLevelAwait = true;
   }
-  sema_.iteratorMethods().markFused(stmt->iterable);
-  stmt->iterable = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(stmt->iterable));
+  checker_.iteratorMethods().markFused(stmt->iterable);
+  stmt->iterable =
+      checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(stmt->iterable));
   // An object with `[Symbol.asyncIterator]()` gives what that gives; one
   // with `[Symbol.iterator]()`, its iterator.
-  if (Expr *iterator = sema_.iterableChecker().asyncUserIterator(stmt->iterable)) {
+  if (Expr *iterator = checker_.iterableChecker().asyncUserIterator(stmt->iterable)) {
     stmt->iterable = iterator;
   } else {
-    stmt->iterable = sema_.dictChecker().iterableOf(stmt->iterable);
+    stmt->iterable = checker_.dictChecker().iterableOf(stmt->iterable);
   }
   if (stmt->iterable->type->isMatch()) { // the captures
-    stmt->iterable = sema_.matchChecker().matchItems(stmt->iterable);
+    stmt->iterable = checker_.matchChecker().matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
-  const Type *element = sema_.generatorChecker().asyncIteratedType(type);
+  const Type *element = checker_.generatorChecker().asyncIteratedType(type);
   if (!element) {
-    if (type->isOptional() && sema_.generatorChecker().asyncIteratedType(type->inner())) {
-      sema_.diags_.error(stmt->iterable->loc(),
-                   "'" + type->name() + "' may be undefined; check it before iterating");
+    if (type->isOptional() && checker_.generatorChecker().asyncIteratedType(type->inner())) {
+      checker_.diags_.error(stmt->iterable->loc(),
+                            "'" + type->name() + "' may be undefined; check it before iterating");
     } else if (type->isRecord()) {
-      sema_.diags_.error(stmt->iterable->loc(),
-                   "a Record is not iterable, as an object is not in JavaScript; walk its keys "
-                   "with 'for...in', or its entries with 'for (const [k, v] of "
-                   "Object.entries(r))'");
+      checker_.diags_.error(
+          stmt->iterable->loc(),
+          "a Record is not iterable, as an object is not in JavaScript; walk its keys "
+          "with 'for...in', or its entries with 'for (const [k, v] of "
+          "Object.entries(r))'");
     } else if (!type->isError()) {
-      sema_.diags_.error(stmt->iterable->loc(), "'for await' needs an async iterator, an array or an "
-                                          "iterator, found '" +
-                                              type->name() + "'");
+      checker_.diags_.error(stmt->iterable->loc(),
+                            "'for await' needs an async iterator, an array or an "
+                            "iterator, found '" +
+                                type->name() + "'");
     }
     element = Type::error();
   } else if (type->isIterator()) {
-    sema_.generatorChecker().checkSendsNothing(type, stmt->iterable->loc(), "'for await'");
+    checker_.generatorChecker().checkSendsNothing(type, stmt->iterable->loc(), "'for await'");
   }
   if (stmt->binding.typeAnn) {
-    sema_.diags_.error(stmt->binding.typeAnn->loc,
-                 "a 'for await' variable cannot have a type annotation");
+    checker_.diags_.error(stmt->binding.typeAnn->loc,
+                          "a 'for await' variable cannot have a type annotation");
   }
   if (stmt->binding.destructured && !stmt->binding.objectPattern && !element->isArray() &&
       !element->isTuple() && !element->isMatch() && !element->isError()) {
-    sema_.diags_.error(stmt->binding.loc,
-                 "only arrays can be destructured; the elements are '" + element->name() + "'");
+    checker_.diags_.error(stmt->binding.loc, "only arrays can be destructured; the elements are '" +
+                                                 element->name() + "'");
     element = Type::error();
   }
   // Other tasks run while it waits: they may change anything, as the
   // iterator itself may.
-  sema_.flowChecker().calledFunction();
-  Sema::LoopScan scan = sema_.loopScanner().scanLoop({stmt->body}, {});
+  checker_.flowChecker().calledFunction();
+  Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {});
   scan.callsFunctions = true;
   stmt->borrowElements = false;
-  Sema::Flow head = sema_.loopBounds().loopHead(scan, nullptr, /*induction=*/false);
-  sema_.flow_ = head;
-  sema_.pushScope();
-  stmt->binding.sym = sema_.scopes().declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
-  sema_.loopChecker().checkLoopBody(stmt->body);
-  sema_.popScope();
-  sema_.flow_ = head;
-  sema_.flowChecker().calledFunction();
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, /*induction=*/false);
+  checker_.flow_ = head;
+  checker_.pushScope();
+  stmt->binding.sym =
+      checker_.scopes().declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
+  checker_.loopChecker().checkLoopBody(stmt->body);
+  checker_.popScope();
+  checker_.flow_ = head;
+  checker_.flowChecker().calledFunction();
 }
 
 bool AsyncChecker::isHandledPromise(const Expr *expr) const {
@@ -325,9 +335,10 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
   }
   if (!type->nonOptional()->isPromise()) {
     if (call && (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrFlatMap)) {
-      sema_.diags_.error(expr->loc(), "the Promises are not awaited, so nothing waits for them and an "
-                                "error in one would end the program; wait for all of them with "
-                                "'await Promise.all(...)', or keep them in a variable");
+      checker_.diags_.error(expr->loc(),
+                            "the Promises are not awaited, so nothing waits for them and an "
+                            "error in one would end the program; wait for all of them with "
+                            "'await Promise.all(...)', or keep them in a variable");
     }
     return;
   }
@@ -335,20 +346,23 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
     return;
   }
   if (callback) {
-    sema_.diags_.error(expr->loc(), "the function returns a Promise that its caller drops, so nothing "
-                              "waits for it to finish; loop with 'for (const x of xs) await "
-                              "f(x)', or wait for all with 'await Promise.all(xs.map(...))'");
+    checker_.diags_.error(expr->loc(),
+                          "the function returns a Promise that its caller drops, so nothing "
+                          "waits for it to finish; loop with 'for (const x of xs) await "
+                          "f(x)', or wait for all with 'await Promise.all(xs.map(...))'");
     return;
   }
   std::string text = statementText(at);
   if (text.empty()) {
-    sema_.diags_.error(expr->loc(), "the Promise is not awaited, so nothing waits for it and an error in "
-                              "it would end the program later; write 'await' before it, or "
-                              "'void' to let it run on its own");
+    checker_.diags_.error(expr->loc(),
+                          "the Promise is not awaited, so nothing waits for it and an error in "
+                          "it would end the program later; write 'await' before it, or "
+                          "'void' to let it run on its own");
   } else {
-    sema_.diags_.error(expr->loc(), "the Promise is not awaited, so nothing waits for it and an error in "
-                              "it would end the program later; write 'await " +
-                                  text + "', or 'void " + text + "' to let it run on its own");
+    checker_.diags_.error(expr->loc(),
+                          "the Promise is not awaited, so nothing waits for it and an error in "
+                          "it would end the program later; write 'await " +
+                              text + "', or 'void " + text + "' to let it run on its own");
   }
 }
 

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The descriptors of classes and their tables of methods.
 class ClassDescriptors {
 public:
-  explicit ClassDescriptors(CodeGen &codegen);
+  explicit ClassDescriptors(Lowering &lowering);
 
   // Classes (codegen_class.cpp). A method is a function (ptr this,
   // params...) -> ret, the shape of the code of a closure: the object is its
@@ -26,7 +26,7 @@ public:
   llvm::Constant *dropDescriptor(llvm::Function *drop);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

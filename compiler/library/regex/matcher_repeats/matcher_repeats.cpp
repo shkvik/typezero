@@ -7,10 +7,10 @@
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -85,7 +85,9 @@ Value *MatcherRepeats::startsWith(const FirstUnits &units, Value *pos) {
     if (builder_.wide_ && units.wide) {
       in = builder_.b_.CreateOr(in, builder_.b_.CreateICmpUGE(u, builder_.i32(256)));
     } else if (builder_.wide_ && builder_.unicode_) {
-      in = builder_.b_.CreateOr(in, builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xD800)), builder_.i32(0x7FF)));
+      in = builder_.b_.CreateOr(
+          in, builder_.b_.CreateICmpULE(builder_.b_.CreateSub(u, builder_.i32(0xD800)),
+                                        builder_.i32(0x7FF)));
     }
 
     return in;
@@ -121,7 +123,8 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   llvm::Type *i64 = builder_.b_.getInt64Ty();
   Value *start = builder_.load(builder_.pos_);
   llvm::AllocaInst *at = builder_.entryVar("repeat.at"), *count = builder_.entryVar("repeat.count");
-  llvm::AllocaInst *minAt = builder_.entryVar("repeat.min"), *last = builder_.entryVar("repeat.last");
+  llvm::AllocaInst *minAt = builder_.entryVar("repeat.min"),
+                   *last = builder_.entryVar("repeat.last");
   builder_.store(start, at);
   builder_.store(builder_.i32(0), count);
   builder_.store(start, minAt);
@@ -130,9 +133,11 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
     // By code units, up to the limit.
     Value *limit = builder_.length_;
     if (max != RE_INFINITY) {
-      Value *bound = builder_.b_.CreateAdd(builder_.b_.CreateSExt(start, i64), builder_.b_.getInt64(max));
+      Value *bound =
+          builder_.b_.CreateAdd(builder_.b_.CreateSExt(start, i64), builder_.b_.getInt64(max));
       limit = builder_.b_.CreateTrunc(
-          builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::smin, bound, builder_.b_.CreateSExt(builder_.length_, i64)),
+          builder_.b_.CreateBinaryIntrinsic(llvm::Intrinsic::smin, bound,
+                                            builder_.b_.CreateSExt(builder_.length_, i64)),
           builder_.b_.getInt32Ty());
     }
     BasicBlock *loop = builder_.newBlock("repeat.loop"), *read = builder_.newBlock("repeat.read"),
@@ -151,7 +156,8 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
     if (int64_t(pc) == builder_.skipRepeat_) {
       builder_.store(end, builder_.skip_);
     }
-    builder_.failUnless(builder_.b_.CreateICmpUGE(builder_.b_.CreateSub(end, start), builder_.i32(min)));
+    builder_.failUnless(
+        builder_.b_.CreateICmpUGE(builder_.b_.CreateSub(end, start), builder_.i32(min)));
     builder_.store(builder_.b_.CreateAdd(start, builder_.i32(min)), minAt);
   } else if (!memo) {
     // Character by character.
@@ -184,7 +190,8 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   } else {
     // With the memo: `min` characters, then a note at each position.
     if (min > 0) {
-      BasicBlock *loop = builder_.newBlock("repeat.first"), *read = builder_.newBlock("repeat.first.read");
+      BasicBlock *loop = builder_.newBlock("repeat.first"),
+                 *read = builder_.newBlock("repeat.first.read");
       BasicBlock *reached = builder_.newBlock("repeat.first.done");
       builder_.b_.CreateBr(loop);
       builder_.b_.SetInsertPoint(loop);
@@ -232,15 +239,18 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
       builder_.b_.CreateBr(builder_.fail_);
       builder_.b_.SetInsertPoint(builder_.newBlock("never"));
     } else {
-      BasicBlock *loop = builder_.newBlock("repeat.back"), *step = builder_.newBlock("repeat.back.step"),
+      BasicBlock *loop = builder_.newBlock("repeat.back"),
+                 *step = builder_.newBlock("repeat.back.step"),
                  *found = builder_.newBlock("repeat.back.done");
       Value *minPos = builder_.load(minAt);
       builder_.b_.CreateBr(loop);
       builder_.b_.SetInsertPoint(loop);
       Value *q = builder_.load(at);
       builder_.failUnless(builder_.b_.CreateICmpSGE(q, minPos));
-      Value *there = builder_.matcherChars().test(builder_.b_.CreateICmpSLT(q, builder_.length_),
-                          [&] { return builder_.b_.CreateICmpEQ(builder_.unitAt(q), builder_.i32(uint32_t(hint))); });
+      Value *there =
+          builder_.matcherChars().test(builder_.b_.CreateICmpSLT(q, builder_.length_), [&] {
+            return builder_.b_.CreateICmpEQ(builder_.unitAt(q), builder_.i32(uint32_t(hint)));
+          });
       builder_.b_.CreateCondBr(there, found, step);
       builder_.b_.SetInsertPoint(step);
       builder_.store(builder_.b_.CreateSub(q, builder_.i32(1)), at);
@@ -285,10 +295,13 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
     q = builder_.b_.CreateSub(p, builder_.i32(1));
     if (builder_.wide_ && builder_.unicode_) {
       // Back over a whole pair.
-      Value *pair = builder_.matcherChars().test(builder_.b_.CreateICmpSGE(builder_.b_.CreateSub(p, builder_.i32(2)), minPos), [&] {
-        return builder_.b_.CreateAnd(builder_.matcherChars().isTrail(builder_.unitAt(builder_.b_.CreateSub(p, builder_.i32(1)))),
-                            builder_.matcherChars().isLead(builder_.unitAt(builder_.b_.CreateSub(p, builder_.i32(2)))));
-      });
+      Value *pair = builder_.matcherChars().test(
+          builder_.b_.CreateICmpSGE(builder_.b_.CreateSub(p, builder_.i32(2)), minPos), [&] {
+            return builder_.b_.CreateAnd(builder_.matcherChars().isTrail(builder_.unitAt(
+                                             builder_.b_.CreateSub(p, builder_.i32(1)))),
+                                         builder_.matcherChars().isLead(builder_.unitAt(
+                                             builder_.b_.CreateSub(p, builder_.i32(2)))));
+          });
       q = builder_.b_.CreateSelect(pair, builder_.b_.CreateSub(p, builder_.i32(2)), q);
     }
     int64_t hint = followingChar(builder_.code_, after, builder_.unicode_);
@@ -305,23 +318,28 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
         builder_.b_.CreateBr(loop);
         builder_.b_.SetInsertPoint(loop);
         Value *x = builder_.load(at);
-        Value *more = builder_.matcherChars().test(builder_.b_.CreateICmpSGT(x, minPos),
-                           [&] { return builder_.b_.CreateICmpNE(builder_.unitAt(x), builder_.i32(uint32_t(hint))); });
+        Value *more = builder_.matcherChars().test(builder_.b_.CreateICmpSGT(x, minPos), [&] {
+          return builder_.b_.CreateICmpNE(builder_.unitAt(x), builder_.i32(uint32_t(hint)));
+        });
         builder_.b_.CreateCondBr(more, step, found);
         builder_.b_.SetInsertPoint(step);
         builder_.store(builder_.b_.CreateSub(x, builder_.i32(1)), at);
         builder_.b_.CreateBr(loop);
         builder_.b_.SetInsertPoint(found);
         q = builder_.load(at);
-        builder_.failUnless(builder_.b_.CreateICmpEQ(builder_.unitAt(q), builder_.i32(uint32_t(hint))), drop);
+        builder_.failUnless(
+            builder_.b_.CreateICmpEQ(builder_.unitAt(q), builder_.i32(uint32_t(hint))), drop);
       }
     }
   } else {
     q = builder_.b_.CreateAdd(p, builder_.i32(1));
     if (builder_.wide_ && builder_.unicode_) {
-      Value *pair = builder_.matcherChars().test(builder_.b_.CreateICmpSLE(builder_.b_.CreateAdd(p, builder_.i32(2)), minPos), [&] {
-        return builder_.b_.CreateAnd(builder_.matcherChars().isLead(builder_.unitAt(p)), builder_.matcherChars().isTrail(builder_.unitAt(builder_.b_.CreateAdd(p, builder_.i32(1)))));
-      });
+      Value *pair = builder_.matcherChars().test(
+          builder_.b_.CreateICmpSLE(builder_.b_.CreateAdd(p, builder_.i32(2)), minPos), [&] {
+            return builder_.b_.CreateAnd(builder_.matcherChars().isLead(builder_.unitAt(p)),
+                                         builder_.matcherChars().isTrail(builder_.unitAt(
+                                             builder_.b_.CreateAdd(p, builder_.i32(1)))));
+          });
       q = builder_.b_.CreateSelect(pair, builder_.b_.CreateAdd(p, builder_.i32(2)), q);
     }
   }
@@ -332,17 +350,20 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
     builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(q, minPos), keep, last);
     builder_.b_.SetInsertPoint(keep);
     builder_.putEntry(builder_.load(builder_.top_), builder_.i32(label), q);
-    builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.top_), builder_.i32(1)), builder_.top_);
+    builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.top_), builder_.i32(1)),
+                   builder_.top_);
     builder_.b_.CreateBr(go);
     builder_.b_.SetInsertPoint(last);
-    builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)), builder_.top_);
+    builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)),
+                   builder_.top_);
     builder_.b_.CreateBr(go);
     builder_.b_.SetInsertPoint(go);
     builder_.store(q, builder_.pos_);
     builder_.b_.CreateBr(builder_.blockAt(after));
   }
   builder_.b_.SetInsertPoint(drop);
-  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)), builder_.top_);
+  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)),
+                 builder_.top_);
   builder_.b_.CreateBr(builder_.fail_);
 
   return label;
@@ -358,7 +379,8 @@ void MatcherRepeats::emitRepeatLazy(uint32_t pc) {
   builder_.store(builder_.load(builder_.pos_), at);
   builder_.store(builder_.i32(0), count);
   if (min > 0) {
-    BasicBlock *loop = builder_.newBlock("lazy.first"), *read = builder_.newBlock("lazy.first.read");
+    BasicBlock *loop = builder_.newBlock("lazy.first"),
+               *read = builder_.newBlock("lazy.first.read");
     BasicBlock *reached = builder_.newBlock("lazy.first.done");
     builder_.b_.CreateBr(loop);
     builder_.b_.SetInsertPoint(loop);
@@ -411,13 +433,15 @@ uint32_t MatcherRepeats::lazyLabel(uint32_t pc) {
   builder_.store(builder_.b_.CreateAdd(top, builder_.i32(1)), builder_.top_);
   builder_.b_.CreateBr(go);
   builder_.b_.SetInsertPoint(last);
-  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)), builder_.top_);
+  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)),
+                 builder_.top_);
   builder_.b_.CreateBr(go);
   builder_.b_.SetInsertPoint(go);
   builder_.store(np, builder_.pos_);
   builder_.b_.CreateBr(builder_.blockAt(after));
   builder_.b_.SetInsertPoint(drop);
-  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)), builder_.top_);
+  builder_.store(builder_.b_.CreateSub(builder_.load(builder_.top_), builder_.i32(1)),
+                 builder_.top_);
   builder_.b_.CreateBr(builder_.fail_);
 
   return label;

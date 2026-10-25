@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The conversions of + to strings, and the concatenations of numbers and strings.
 class ConcatChecker {
 public:
-  explicit ConcatChecker(Sema &sema);
+  explicit ConcatChecker(Checker &checker);
 
   // Converts a value to a string for `+` and template literals.
   Expr *toStringOperand(Expr *expr);
@@ -16,7 +16,7 @@ public:
   void reportMixedConcat(const BinaryExpr *root, const BinaryExpr *mixed);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

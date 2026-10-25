@@ -1,4 +1,8 @@
 #include "compiler/whole_program/flows/flows.h"
+#include "compiler/whole_program/flow_builtins/flow_builtins.h"
+#include "compiler/whole_program/flow_calls/flow_calls.h"
+#include "compiler/whole_program/flow_exprs/flow_exprs.h"
+#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -7,10 +11,6 @@
 #include <map>
 #include <set>
 #include <tuple>
-#include "compiler/whole_program/flow_stmts/flow_stmts.h"
-#include "compiler/whole_program/flow_calls/flow_calls.h"
-#include "compiler/whole_program/flow_builtins/flow_builtins.h"
-#include "compiler/whole_program/flow_exprs/flow_exprs.h"
 
 namespace tz {
 
@@ -75,8 +75,8 @@ const Type *ownType(const Expr *expr) {
 }
 
 Flows::Flows(const llvm::DenseSet<const CastExpr *> &widenings,
-      llvm::function_ref<std::vector<Narrowing>(const Type *, const Type *)> narrowings,
-      llvm::function_ref<bool(const Type *, const Type *)> convertible)
+             llvm::function_ref<std::vector<Narrowing>(const Type *, const Type *)> narrowings,
+             llvm::function_ref<bool(const Type *, const Type *)> convertible)
     : widenings_(widenings), narrowings_(narrowings), convertible_(convertible) {
   flowStmtsPart_ = std::make_unique<FlowStmts>(*this);
   flowCallsPart_ = std::make_unique<FlowCalls>(*this);

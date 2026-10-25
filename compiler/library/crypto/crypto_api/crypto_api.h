@@ -1,8 +1,8 @@
 #pragma once
 
-// The functions of runtime/library/crypto/ that calls of node:crypto become (docs/crypto.md). Sema
-// checks a call and gives it Builtin::Crypto with the number of the function first, as an int
-// literal, and the arguments in the order the function takes them; CodeGen passes each as its
+// The functions of runtime/library/crypto/ that calls of node:crypto become (docs/crypto.md).
+// Checker checks a call and gives it Builtin::Crypto with the number of the function first, as an
+// int literal, and the arguments in the order the function takes them; Lowering passes each as its
 // kind says and makes the result of what the function gives (codegen_crypto.cpp). The receiver
 // of a method is the object of the callee MemberExpr, the first argument of the function.
 //
@@ -24,7 +24,7 @@
 //      the function returns whether there is one
 //   b  a boolean; i an int; j an int, undefined when negative; f a double; t a Date from a
 //      time in milliseconds
-//   P  a Promise of the type Sema gave, which CodeGen makes and passes first; the function
+//   P  a Promise of the type Checker gave, which Lowering makes and passes first; the function
 //      settles it later, from a job of the pool (Web Crypto, crypto_subtle*.c of the runtime),
 //      and never throws
 

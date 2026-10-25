@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Buffer.from, alloc, concat and the statics of typed arrays; embedBytes.
 class BufferStaticChecker {
 public:
-  explicit BufferStaticChecker(Sema &sema);
+  explicit BufferStaticChecker(Checker &checker);
 
   // `Uint8Array.from(xs, f)`, whose source and callback are args.
   Expr *checkBytesFromWith(CallExpr *call, const Type *type, const std::string &what);
@@ -18,7 +18,7 @@ public:
   Expr *checkEmbedBytes(CallExpr *call, NameExpr *name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,19 +1,20 @@
 #include "compiler/library/regex/regex_feature/regex_feature.h"
-#include "compiler/check/sema/sema.h"
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/regex/match_checker/match_checker.h"
+#include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
-Expr *RegexFeature::checkStaticCall(Sema &sema, CallExpr *call, MemberExpr *member, const Type *expected) const {
-  if (!sema.callChecker().isGlobalName(member->object, "RegExp")) {
+Expr *RegexFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
+                                    const Type * /*expected*/) const {
+  if (!checker.callChecker().isGlobalName(member->object, "RegExp")) {
     return nullptr;
   }
 
-  return sema.regexChecker().checkRegExpStatic(call, member);
+  return checker.regexChecker().checkRegExpStatic(call, member);
 }
 
 llvm::ArrayRef<llvm::StringLiteral> RegexFeature::typeArgFreeGlobals() const {
@@ -22,30 +23,29 @@ llvm::ArrayRef<llvm::StringLiteral> RegexFeature::typeArgFreeGlobals() const {
   return globals;
 }
 
-Expr *RegexFeature::checkMethodCall(Sema &sema, CallExpr *call, MemberExpr *member, const Type *expected) const {
+Expr *RegexFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
+                                    const Type * /*expected*/) const {
   const Type *receiver = member->object->type;
   if (!receiver->isRegExp()) {
     return nullptr;
   }
 
-  return sema.regexChecker().checkRegexMethod(call, member);
+  return checker.regexChecker().checkRegexMethod(call, member);
 }
 
-Expr *RegexFeature::methodReceiver(Sema &sema, Expr *object) const {
+Expr *RegexFeature::methodReceiver(Checker &checker, Expr *object) const {
   // The methods of arrays work on a match: its captures are an array.
   if (!object->type->isMatch()) {
     return nullptr;
   }
 
-  return sema.matchChecker().matchItems(object);
+  return checker.matchChecker().matchItems(object);
 }
 
-bool RegexFeature::lowers(Builtin builtin) const {
-  return isRegexBuiltin(builtin);
-}
+bool RegexFeature::lowers(Builtin builtin) const { return isRegexBuiltin(builtin); }
 
-llvm::Value *RegexFeature::lowerCall(CodeGen &codegen, CallExpr *call) const {
-  return codegen.regexLowerer().emitRegexCall(call);
+llvm::Value *RegexFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
+  return lowering.regexLowerer().emitRegexCall(call);
 }
 
 } // namespace tz

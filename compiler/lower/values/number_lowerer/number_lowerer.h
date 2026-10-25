@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Number, parseInt and the like, String.fromCharCode and toFixed.
 class NumberLowerer {
 public:
-  explicit NumberLowerer(CodeGen &codegen);
+  explicit NumberLowerer(Lowering &lowering);
 
   llvm::Value *emitNumberBuiltin(CallExpr *call);
   // Number(s) of a string; `str` is borrowed.
@@ -17,7 +17,7 @@ public:
   llvm::Value *emitCheckedInteger(llvm::Value *value, const Type *to);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

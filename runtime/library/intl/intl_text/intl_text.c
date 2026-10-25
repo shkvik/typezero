@@ -8,6 +8,12 @@
 // system (icu.h, intl.h).
 
 #include "runtime/library/intl/intl/intl.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
 #include <string.h>
 

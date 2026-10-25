@@ -1,15 +1,15 @@
 #include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
+#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "runtime/library/regex/regex/regex.h"
 #include <array>
 #include <map>
 #include <set>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -34,21 +34,23 @@ uint64_t counterRange(const CountedLoop &loop) {
 
 } // namespace
 
-RegexNativeLowerer::RegexNativeLowerer(CodeGen &codegen) : codegen_(codegen) {}
+RegexNativeLowerer::RegexNativeLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Constant *RegexNativeLowerer::regexMatcher(const RegexLitExpr *lit) {
   llvm::Constant *&matcher = regexMatchers_[lit->program];
   if (matcher) {
     return matcher;
   }
-  MatcherBuilder builder(*codegen_.module_, lit->program.data(), codegen_.parallel_);
+  MatcherBuilder builder(*lowering_.module_, lit->program.data(), lowering_.parallel_);
   matcher = builder.build();
   if (!matcher) {
     matcher = cast<llvm::Function>(
-        codegen_.regexLowerer().regexFunction("tz_re_interpret", codegen_.builder_.getInt32Ty(),
-                      {codegen_.builder_.getPtrTy(), codegen_.builder_.getPtrTy(), codegen_.builder_.getInt32Ty(),
-                       codegen_.builder_.getInt32Ty(), codegen_.builder_.getInt32Ty(), codegen_.builder_.getPtrTy(),
-                       codegen_.builder_.getInt32Ty(), codegen_.builder_.getInt32Ty()})
+        lowering_.regexLowerer()
+            .regexFunction("tz_re_interpret", lowering_.builder_.getInt32Ty(),
+                           {lowering_.builder_.getPtrTy(), lowering_.builder_.getPtrTy(),
+                            lowering_.builder_.getInt32Ty(), lowering_.builder_.getInt32Ty(),
+                            lowering_.builder_.getInt32Ty(), lowering_.builder_.getPtrTy(),
+                            lowering_.builder_.getInt32Ty(), lowering_.builder_.getInt32Ty()})
             .getCallee());
   }
 

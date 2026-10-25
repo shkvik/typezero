@@ -35,7 +35,7 @@ enum {
   TZ_INTL_SEGMENTS = 8, // what segment(text) gives
 };
 
-// The options of all of them, by the place each has in TzIntlOptions. Sema
+// The options of all of them, by the place each has in TzIntlOptions. Checker
 // checks which a kind takes and of what type (sema_intl.cpp); a value is a
 // string, a number, or a boolean as the number 0 or 1, and useGrouping is a
 // string or a boolean.
@@ -103,10 +103,12 @@ enum { TZ_IN_DOUBLE = 0, TZ_IN_INTEGER = 1, TZ_IN_DECIMAL = 2 };
 #ifndef __cplusplus
 
 #include "runtime/library/intl/icu/icu.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 
 // The locale and the options as the compiled code passes them
-// (CodeGen::emitIntlOptions); the strings are borrowed.
+// (Lowering::emitIntlOptions); the strings are borrowed.
 typedef struct {
   TzStr locale;
   TzStr text[TZ_IO_COUNT];
@@ -127,7 +129,7 @@ typedef struct {
 // How the program lays out an object that the runtime makes for it: what
 // an array of them holds, its layout and size, and the offset of each of
 // its fields (TZ_IF_*), -1 for those it does not have. A constant the
-// compiler emits (CodeGen::intlShape).
+// compiler emits (Lowering::intlShape).
 typedef struct {
   const TzType *type;
   const TzLayout *layout;
@@ -236,6 +238,10 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
 // UFormattedNumber.
 void tz_nf_format_into(const void *formatter, const TzIntlNumber *n, void *result,
                        TzUErrorCode *status);
+
+// Releases the objects of Intl that toLocaleString and localeCompare keep
+// (intl.c), before the leak check.
+void tz_intl_shutdown(void);
 
 #endif
 

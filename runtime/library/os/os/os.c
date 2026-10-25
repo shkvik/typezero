@@ -11,7 +11,12 @@
 #define _DEFAULT_SOURCE // gethostname, getloadavg and the like, which -std=c17 hides
 #endif
 
+#include "runtime/library/os/os/os.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/process/process/process.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

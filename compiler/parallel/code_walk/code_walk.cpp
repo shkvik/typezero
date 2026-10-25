@@ -1,14 +1,15 @@
 #include "compiler/parallel/code_walk/code_walk.h"
-#include "compiler/parallel/expr_walk/expr_walk.h"
-#include "compiler/parallel/call_walk/call_walk.h"
-#include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/parallel/pieces/pieces.h"
+#include "compiler/parallel/call_walk/call_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
 #include "compiler/parallel/explainer/explainer.h"
+#include "compiler/parallel/expr_walk/expr_walk.h"
+#include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +25,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -107,8 +107,8 @@ unsigned CodeWalk::segment(const Node *at, SegKind kind, llvm::SMLoc loc) {
 }
 
 CallRec &CodeWalk::record(const void *key, CallKind kind, const Use &use, llvm::SMLoc loc) {
-  auto [it, inserted] =
-      analysis_.fn_->callOf.try_emplace(std::make_pair(key, unsigned(kind)), unsigned(analysis_.fn_->calls.size()));
+  auto [it, inserted] = analysis_.fn_->callOf.try_emplace(std::make_pair(key, unsigned(kind)),
+                                                          unsigned(analysis_.fn_->calls.size()));
   if (inserted) {
     CallRec &rec = analysis_.fn_->calls.emplace_back();
     rec.kind = kind;
@@ -277,19 +277,25 @@ void CodeWalk::stmt(const Stmt *s) {
   }
   case Stmt::Kind::While: {
     auto *w = cast<WhileStmt>(s);
-    loop(std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); }, [&] { stmt(w->body); }, {}, true);
+    loop(
+        std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        [&] { stmt(w->body); }, {}, true);
     return;
   }
   case Stmt::Kind::DoWhile: {
     auto *w = cast<DoWhileStmt>(s);
-    loop(std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); }, [&] { stmt(w->body); }, {}, false);
+    loop(
+        std::exchange(analysis_.label_, {}), [&] { analysis_.exprWalk().expr(w->cond); },
+        [&] { stmt(w->body); }, {}, false);
     return;
   }
   case Stmt::Kind::For: {
     auto *f = cast<ForStmt>(s);
     llvm::StringRef label = std::exchange(analysis_.label_, {});
     stmt(f->init);
-    loop(label, [&] { analysis_.exprWalk().expr(f->cond); }, [&] { stmt(f->body); }, [&] { analysis_.exprWalk().expr(f->step); }, true);
+    loop(
+        label, [&] { analysis_.exprWalk().expr(f->cond); }, [&] { stmt(f->body); },
+        [&] { analysis_.exprWalk().expr(f->step); }, true);
     return;
   }
   case Stmt::Kind::ForOf:
@@ -376,7 +382,8 @@ void CodeWalk::stmt(const Stmt *s) {
     return;
   case Stmt::Kind::Try: {
     auto *t = cast<TryStmt>(s);
-    analysis_.tries_.push_back({Analysis::Phase::Block, t->handler != nullptr, t->finalizer != nullptr, {}, {}});
+    analysis_.tries_.push_back(
+        {Analysis::Phase::Block, t->handler != nullptr, t->finalizer != nullptr, {}, {}});
     stmt(t->block);
     merge(analysis_.tries_.back().finallyEntry, analysis_.cur_);
     Active normal = analysis_.cur_;
@@ -484,7 +491,9 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && c->method) {
-        analysis_.libraryEffects().libraryState(libraryClassName(lib->cls), lib->name, analysis_.aliasAnalysis().receiverRef(m->object), true, at);
+        analysis_.libraryEffects().libraryState(libraryClassName(lib->cls), lib->name,
+                                                analysis_.aliasAnalysis().receiverRef(m->object),
+                                                true, at);
       }
       return;
     }
@@ -492,11 +501,16 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       // A generator called right here: its iterator is no one else's.
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (c->method) {
-        for (const FunctionDecl *fn : analysis_.callWalk().methodTargets(c->method->decl, c->virtualCall)) {
-          analysis_.callWalk().addCallee(rec, fn, m ? std::optional<Ref>(analysis_.aliasAnalysis().receiverRef(m->object)) : std::nullopt);
+        for (const FunctionDecl *fn :
+             analysis_.callWalk().methodTargets(c->method->decl, c->virtualCall)) {
+          analysis_.callWalk().addCallee(
+              rec, fn,
+              m ? std::optional<Ref>(analysis_.aliasAnalysis().receiverRef(m->object))
+                : std::nullopt);
         }
       } else {
-        analysis_.callWalk().addCallee(rec, c->func->decl, analysis_.callWalk().closureSelf(c->func->decl, *analysis_.fn_));
+        analysis_.callWalk().addCallee(
+            rec, c->func->decl, analysis_.callWalk().closureSelf(c->func->decl, *analysis_.fn_));
       }
       return;
     }

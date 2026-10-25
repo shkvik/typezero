@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The methods of strings that take a regular expression, and their replacements.
 class StringRegexChecker {
 public:
-  explicit StringRegexChecker(Sema &sema);
+  explicit StringRegexChecker(Checker &checker);
 
   // The methods of strings that take a regex: match, matchAll, search,
   // replace, replaceAll and split. Null for other methods.
@@ -15,7 +15,7 @@ public:
   Expr *checkReplacement(CallExpr *call, MemberExpr *member, const RegexLitExpr *regex);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

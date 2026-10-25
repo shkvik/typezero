@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The members of instances: reads, writes and access.
 class ClassMemberChecker {
 public:
-  explicit ClassMemberChecker(Sema &sema);
+  explicit ClassMemberChecker(Checker &checker);
 
   // Reports a private or protected member used outside its class.
   bool checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name, llvm::SMLoc loc);
@@ -18,7 +18,7 @@ public:
   const Type *checkFieldTarget(MemberExpr *member, bool compound = false);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

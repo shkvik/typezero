@@ -1,0 +1,896 @@
+// A part of node:stream, read after stream.tz as one module with it
+// (compiler/load/library_modules/): the classes of the program, Readable, Writable,
+// Duplex, Transform and PassThrough, and Readable.from() (lib/internal/streams/from.js).
+
+//===----------------------------------------------------------------------===//
+// The classes of the program: Readable, Writable, Duplex, Transform and
+// PassThrough, which give the chunks their types
+//===----------------------------------------------------------------------===//
+
+// The events of every stream; 'data' gives a chunk of T.
+export type StreamEvents<T> = {
+  close: []
+  data: [chunk: T]
+  end: []
+  error: [err: Error]
+  pause: []
+  readable: []
+  resume: []
+  drain: []
+  finish: []
+  prefinish: []
+  pipe: [src: Stream]
+  unpipe: [src: Stream, info: { hasUnpiped: boolean }]
+  // Of the streams of files (node:fs).
+  open: [fd: int]
+  ready: []
+}
+
+// What gives the classes their event map: the compiler finds it here as it
+// finds that of EventEmitter (compiler/library/events/sema/sema_events.cpp).
+export class StreamEmitter<Events> extends Stream {}
+
+// The sides a Duplex is being made with, which the constructors up its
+// chain take instead of options of their own: a class has one constructor,
+// so that the type of its options gives the literal written in `new` its
+// types. A class down the chain of Duplex sets it before `super()`.
+let pendingSides: DuplexSides | undefined = undefined
+
+// The kinds of chunk types (__tz_chunkKind): a Buffer, a string, anything
+// else.
+const kStringChunks = 1
+
+export interface ReadableOptions<T> {
+  highWaterMark?: double
+  encoding?: string
+  objectMode?: boolean
+  emitClose?: boolean
+  autoDestroy?: boolean
+  signal?: AbortSignal
+  read?: (this: Readable<T>, size: int) => void
+  destroy?: (this: Readable<T>, error: Error | undefined, callback: StreamCallback) => void
+  construct?: (this: Readable<T>, callback: StreamCallback) => void
+}
+
+// A stream of strings without an encoding decodes UTF-8, so that its chunks
+// are strings; one of Buffers has none.
+function chunkEncoding(kind: int, objectMode: boolean, encoding: string | undefined) {
+  if (objectMode || kind != kStringChunks) return encoding
+  return encoding ?? "utf8"
+}
+
+export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
+  #readOption: ((this: Readable<T>, size: int) => void) | undefined
+  #destroyOption:
+    | ((this: Readable<T>, error: Error | undefined, callback: StreamCallback) => void)
+    | undefined
+  #constructOption: ((this: Readable<T>, callback: StreamCallback) => void) | undefined
+
+  constructor(options?: ReadableOptions<T>) {
+    super()
+    this.#readOption = options?.read
+    this.#destroyOption = options?.destroy
+    this.#constructOption = options?.construct
+    // A Duplex makes both sides itself.
+    if (pendingSides != undefined) return
+    this._initReadable(
+      {
+        highWaterMark: options?.highWaterMark,
+        objectMode: options?.objectMode,
+        encoding: chunkEncoding(__tz_chunkKind<T>(), options?.objectMode ?? false,
+                                options?.encoding),
+        emitClose: options?.emitClose,
+        autoDestroy: options?.autoDestroy,
+      },
+      false,
+    )
+    this._hasConstruct = options?.construct != undefined || __tz_overrides(this, "_construct")
+    this._initEnd(options?.signal)
+  }
+
+  _read(size: int): void {
+    const read = this.#readOption
+    if (read == undefined) throw methodNotImplemented("_read()")
+    read.call(this, size)
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    const destroy = this.#destroyOption
+    if (destroy == undefined) callback(error)
+    else destroy.call(this, error, callback)
+  }
+
+  _construct(callback: StreamCallback): void {
+    const construct = this.#constructOption
+    if (construct == undefined) callback()
+    else construct.call(this, callback)
+  }
+
+  // A chunk goes to the listeners of 'data' as what they take: a T in
+  // object mode; otherwise a string once the stream has an encoding, or a
+  // Buffer.
+  _emitData(chunk: unknown): void {
+    const state = this._readableState
+    if (state == undefined || (state.bits & kObjectMode) != 0)
+      this.emitWithUnknown("data", chunk, __tz_chunk<T>(chunk))
+    else if (typeof chunk == "string") this.emitWithUnknown("data", chunk, chunk)
+    else this.emitWithUnknown("data", chunk, __tz_chunk<Buffer>(chunk))
+  }
+
+  // read(size) of node, which gives undefined where node gives null.
+  read(size?: int): T | undefined {
+    const chunk = this._readChunk(size)
+    return chunk == undefined ? undefined : __tz_chunk<T>(chunk)
+  }
+
+  [Symbol.asyncIterator](): AsyncGenerator<T> {
+    return createAsyncIterator<T>(this, true)
+  }
+
+  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<T> {
+    return createAsyncIterator<T>(this, options?.destroyOnReturn ?? true)
+  }
+}
+
+// What one `for await` over a stream waits on: node's createAsyncIterator.
+class IteratorWait {
+  callback: () => void = noWait
+  // The end of the stream: `ended` without an error, or the error.
+  ended = false
+  error: Error | undefined = undefined
+
+  wake() {
+    const callback = this.callback
+    this.callback = noWait
+    callback()
+  }
+}
+
+function noWait() {}
+
+async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean):
+    AsyncGenerator<T> {
+  const wait = new IteratorWait()
+  const next = function (this: Stream) {
+    void this
+    wait.wake()
+  }
+  stream.on("readable", next, kThisListener)
+  const cleanup = eos(stream, { writable: false }, (err?: Error) => {
+    if (err != undefined) wait.error = aggregateTwoErrors(wait.error, err)
+    else wait.ended = true
+    wait.wake()
+  })
+  let failed = false
+  try {
+    while (true) {
+      const chunk = stream.destroyed ? undefined : stream._readChunk()
+      if (chunk != undefined) {
+        yield __tz_chunk<T>(chunk)
+      } else {
+        const error = wait.error
+        if (error != undefined) throw error
+        if (wait.ended) return
+        await new Promise<void>((resolve) => {
+          wait.callback = resolve
+        })
+      }
+    }
+  } catch (err) {
+    failed = true
+    const error = aggregateTwoErrors(wait.error, err) ?? err
+    wait.error = error
+    throw error
+  } finally {
+    // The listeners hold what the iterator waits on, not the iterator: those
+    // left on a stream it destroys, as node leaves them, make no cycle.
+    const r = stream._readableState
+    if ((failed || destroyOnReturn) &&
+        ((!failed && !wait.ended) || (r != undefined && (r.bits & kAutoDestroy) != 0))) {
+      destroyer(stream, undefined)
+    } else {
+      stream.removeListener("readable", next)
+      cleanup()
+    }
+  }
+}
+
+export interface WriteChunk<T> {
+  chunk: T
+  encoding: string
+}
+
+export interface WritableOptions<T> {
+  highWaterMark?: double
+  decodeStrings?: boolean
+  defaultEncoding?: string
+  objectMode?: boolean
+  emitClose?: boolean
+  autoDestroy?: boolean
+  signal?: AbortSignal
+  write?: (this: Writable<T>, chunk: T, encoding: string, callback: StreamCallback) => void
+  writev?: (this: Writable<T>, chunks: WriteChunk<T>[], callback: StreamCallback) => void
+  final?: (this: Writable<T>, callback: StreamCallback) => void
+  destroy?: (this: Writable<T>, error: Error | undefined, callback: StreamCallback) => void
+  construct?: (this: Writable<T>, callback: StreamCallback) => void
+}
+
+// The chunks of a writev() as their type.
+function typedChunks<T>(chunks: BufferedWrite[]): WriteChunk<T>[] {
+  const out: WriteChunk<T>[] = []
+  for (const c of chunks) out.push({ chunk: __tz_chunk<T>(c.chunk), encoding: c.encoding })
+  return out
+}
+
+// A stream of strings keeps the strings written; one of Buffers gets them as
+// Buffers.
+function decodesStrings(kind: int, objectMode: boolean) {
+  return objectMode || kind != kStringChunks
+}
+
+export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
+  // A Duplex works where a Writable is expected (see the top of this file):
+  // only the methods that replace those of Stream use these fields, and in a
+  // Duplex those are the Duplex's own.
+  #writeOption:
+    | ((this: Writable<T>, chunk: T, encoding: string, callback: StreamCallback) => void)
+    | undefined
+  #writevOption:
+    | ((this: Writable<T>, chunks: WriteChunk<T>[], callback: StreamCallback) => void)
+    | undefined
+  #finalOption: ((this: Writable<T>, callback: StreamCallback) => void) | undefined
+  #destroyOption:
+    | ((this: Writable<T>, error: Error | undefined, callback: StreamCallback) => void)
+    | undefined
+  #constructOption: ((this: Writable<T>, callback: StreamCallback) => void) | undefined
+
+  constructor(options?: WritableOptions<T>) {
+    super()
+    this.#writeOption = options?.write
+    this.#writevOption = options?.writev
+    this.#finalOption = options?.final
+    this.#destroyOption = options?.destroy
+    this.#constructOption = options?.construct
+    this._initWritable(
+      {
+        highWaterMark: options?.highWaterMark,
+        objectMode: options?.objectMode,
+        decodeStrings: decodesStrings(__tz_chunkKind<T>(), options?.objectMode ?? false),
+        defaultEncoding: options?.defaultEncoding,
+        emitClose: options?.emitClose,
+        autoDestroy: options?.autoDestroy,
+      },
+      false,
+    )
+    this._hasWritev = options?.writev != undefined || __tz_overrides(this, "_writev")
+    this._hasFinal = options?.final != undefined || __tz_overrides(this, "_final")
+    this._hasConstruct = options?.construct != undefined || __tz_overrides(this, "_construct")
+    this._initEnd(options?.signal)
+  }
+
+  _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
+    this._write(__tz_chunk<T>(chunk), encoding, callback)
+  }
+
+  _writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
+    this._writev(typedChunks<T>(chunks), callback)
+  }
+
+  _write(chunk: T, encoding: string, callback: StreamCallback): void {
+    const write = this.#writeOption
+    if (write != undefined) write.call(this, chunk, encoding, callback)
+    else if (this._hasWritev) this._writev([{ chunk, encoding }], callback)
+    else throw methodNotImplemented("_write()")
+  }
+
+  _writev(chunks: WriteChunk<T>[], callback: StreamCallback): void {
+    const writev = this.#writevOption
+    if (writev == undefined) throw methodNotImplemented("_writev()")
+    writev.call(this, chunks, callback)
+  }
+
+  _final(callback: StreamCallback): void {
+    const final = this.#finalOption
+    if (final == undefined) callback()
+    else final.call(this, callback)
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    const destroy = this.#destroyOption
+    if (destroy == undefined) callback(error)
+    else destroy.call(this, error, callback)
+  }
+
+  _construct(callback: StreamCallback): void {
+    const construct = this.#constructOption
+    if (construct == undefined) callback()
+    else construct.call(this, callback)
+  }
+}
+
+export interface DuplexOptions<W, R> {
+  allowHalfOpen?: boolean
+  readable?: boolean
+  writable?: boolean
+  highWaterMark?: double
+  readableHighWaterMark?: double
+  writableHighWaterMark?: double
+  objectMode?: boolean
+  readableObjectMode?: boolean
+  writableObjectMode?: boolean
+  encoding?: string
+  decodeStrings?: boolean
+  defaultEncoding?: string
+  emitClose?: boolean
+  autoDestroy?: boolean
+  signal?: AbortSignal
+  read?: (this: Duplex<W, R>, size: int) => void
+  write?: (this: Duplex<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
+  writev?: (this: Duplex<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
+  final?: (this: Duplex<W, R>, callback: StreamCallback) => void
+  destroy?: (this: Duplex<W, R>, error: Error | undefined, callback: StreamCallback) => void
+  construct?: (this: Duplex<W, R>, callback: StreamCallback) => void
+}
+
+// What a Duplex and the classes down its chain give the constructor of
+// Duplex: the options for the sides, without the functions.
+class DuplexSides {
+  allowHalfOpen: boolean | undefined = undefined
+  readable: boolean | undefined = undefined
+  writable: boolean | undefined = undefined
+  highWaterMark: double | undefined = undefined
+  readableHighWaterMark: double | undefined = undefined
+  writableHighWaterMark: double | undefined = undefined
+  objectMode: boolean | undefined = undefined
+  readableObjectMode: boolean | undefined = undefined
+  writableObjectMode: boolean | undefined = undefined
+  encoding: string | undefined = undefined
+  decodeStrings: boolean | undefined = undefined
+  defaultEncoding: string | undefined = undefined
+  emitClose: boolean | undefined = undefined
+  autoDestroy: boolean | undefined = undefined
+  signal: AbortSignal | undefined = undefined
+  hasWritev = false
+  hasFinal = false
+  hasConstruct = false
+  // A Transform, whose constructor ends the making itself (see _initEnd).
+  transform = false
+}
+
+// A Duplex<W, R> takes chunks of W and gives chunks of R.
+export class Duplex<W = Buffer, R = W> extends Readable<R> {
+  @__tz_hidden _duplexRead: ((this: Duplex<W, R>, size: int) => void) | undefined
+  @__tz_hidden _duplexWrite:
+    | ((this: Duplex<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _duplexWritev:
+    | ((this: Duplex<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _duplexFinal: ((this: Duplex<W, R>, callback: StreamCallback) => void) | undefined
+  @__tz_hidden _duplexDestroy:
+    | ((this: Duplex<W, R>, error: Error | undefined, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _duplexConstruct:
+    | ((this: Duplex<W, R>, callback: StreamCallback) => void)
+    | undefined
+
+  constructor(options?: DuplexOptions<W, R>) {
+    // The sides of a class down the chain, or those of the options.
+    const given = pendingSides
+    if (given == undefined) pendingSides = new DuplexSides()
+    super()
+    pendingSides = undefined
+    this._duplexRead = options?.read
+    this._duplexWrite = options?.write
+    this._duplexWritev = options?.writev
+    this._duplexFinal = options?.final
+    this._duplexDestroy = options?.destroy
+    this._duplexConstruct = options?.construct
+    if (given != undefined) {
+      this._initDuplex(given)
+      return
+    }
+    const sides = new DuplexSides()
+    sides.allowHalfOpen = options?.allowHalfOpen
+    sides.readable = options?.readable
+    sides.writable = options?.writable
+    sides.highWaterMark = options?.highWaterMark
+    sides.readableHighWaterMark = options?.readableHighWaterMark
+    sides.writableHighWaterMark = options?.writableHighWaterMark
+    sides.objectMode = options?.objectMode
+    sides.readableObjectMode = options?.readableObjectMode
+    sides.writableObjectMode = options?.writableObjectMode
+    sides.encoding = options?.encoding
+    sides.decodeStrings = options?.decodeStrings
+    sides.defaultEncoding = options?.defaultEncoding
+    sides.emitClose = options?.emitClose
+    sides.autoDestroy = options?.autoDestroy
+    sides.signal = options?.signal
+    sides.hasWritev = options?.writev != undefined
+    sides.hasFinal = options?.final != undefined
+    sides.hasConstruct = options?.construct != undefined
+    this._initDuplex(sides)
+  }
+
+  // node's Duplex constructor.
+  _initDuplex(sides: DuplexSides) {
+    const readableObjectMode = sides.objectMode == true || sides.readableObjectMode == true
+    const writableObjectMode = sides.objectMode == true || sides.writableObjectMode == true
+    this._initReadable(
+      {
+        highWaterMark: sides.highWaterMark,
+        sideHighWaterMark: sides.readableHighWaterMark,
+        objectMode: sides.objectMode,
+        sideObjectMode: sides.readableObjectMode,
+        encoding: chunkEncoding(__tz_chunkKind<R>(), readableObjectMode, sides.encoding),
+        defaultEncoding: sides.defaultEncoding,
+        emitClose: sides.emitClose,
+        autoDestroy: sides.autoDestroy,
+      },
+      true,
+    )
+    this._initWritable(
+      {
+        highWaterMark: sides.highWaterMark,
+        sideHighWaterMark: sides.writableHighWaterMark,
+        objectMode: sides.objectMode,
+        sideObjectMode: sides.writableObjectMode,
+        decodeStrings: decodesStrings(__tz_chunkKind<W>(), writableObjectMode),
+        defaultEncoding: sides.defaultEncoding,
+        emitClose: sides.emitClose,
+        autoDestroy: sides.autoDestroy,
+      },
+      true,
+    )
+    this.allowHalfOpen = sides.allowHalfOpen != false
+    const r = readableStateOf(this)
+    const w = writableStateOf(this)
+    if (sides.readable == false) {
+      r.readable = false
+      r.bits |= kEnded | kEndEmitted
+    }
+    if (sides.writable == false) {
+      w.writable = false
+      w.bits |= kEnding | kWEnded | kFinished
+    }
+    sync(this)
+    // Whether the hooks are there: the program's class replaces those of
+    // Duplex. A Transform replaces them itself, and asks again.
+    if (sides.transform) return
+    this._hasWritev = sides.hasWritev || __tz_overrides(this, "_writev")
+    this._hasFinal = sides.hasFinal || __tz_overrides(this, "_final")
+    this._hasConstruct = sides.hasConstruct || __tz_overrides(this, "_construct")
+    this._initEnd(sides.signal)
+  }
+
+  _read(size: int): void {
+    const read = this._duplexRead
+    if (read == undefined) throw methodNotImplemented("_read()")
+    read.call(this, size)
+  }
+
+  _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
+    this._write(__tz_chunk<W>(chunk), encoding, callback)
+  }
+
+  _writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
+    this._writev(typedChunks<W>(chunks), callback)
+  }
+
+  _write(chunk: W, encoding: string, callback: StreamCallback): void {
+    const write = this._duplexWrite
+    if (write != undefined) write.call(this, chunk, encoding, callback)
+    else if (this._hasWritev) this._writev([{ chunk, encoding }], callback)
+    else throw methodNotImplemented("_write()")
+  }
+
+  _writev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
+    const writev = this._duplexWritev
+    if (writev == undefined) throw methodNotImplemented("_writev()")
+    writev.call(this, chunks, callback)
+  }
+
+  _final(callback: StreamCallback): void {
+    const final = this._duplexFinal
+    if (final == undefined) callback()
+    else final.call(this, callback)
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    const destroy = this._duplexDestroy
+    if (destroy == undefined) callback(error)
+    else destroy.call(this, error, callback)
+  }
+
+  _construct(callback: StreamCallback): void {
+    const construct = this._duplexConstruct
+    if (construct == undefined) callback()
+    else construct.call(this, callback)
+  }
+}
+
+export interface TransformOptions<W, R> {
+  allowHalfOpen?: boolean
+  readable?: boolean
+  writable?: boolean
+  highWaterMark?: double
+  readableHighWaterMark?: double
+  writableHighWaterMark?: double
+  objectMode?: boolean
+  readableObjectMode?: boolean
+  writableObjectMode?: boolean
+  encoding?: string
+  decodeStrings?: boolean
+  defaultEncoding?: string
+  emitClose?: boolean
+  autoDestroy?: boolean
+  signal?: AbortSignal
+  read?: (this: Transform<W, R>, size: int) => void
+  write?: (this: Transform<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
+  writev?: (this: Transform<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
+  final?: (this: Transform<W, R>, callback: StreamCallback) => void
+  destroy?: (this: Transform<W, R>, error: Error | undefined, callback: StreamCallback) => void
+  construct?: (this: Transform<W, R>, callback: StreamCallback) => void
+  transform?: (this: Transform<W, R>, chunk: W, encoding: string,
+               callback: TransformCallback) => void
+  flush?: (this: Transform<W, R>, callback: TransformCallback) => void
+}
+
+// The sides of a Transform: a readable side that buffers nothing makes the
+// writable one buffer nothing either, unless it is told otherwise.
+function transformSides<W, R>(options: TransformOptions<W, R> | undefined): DuplexSides {
+  const sides = new DuplexSides()
+  const hwm = options?.highWaterMark ?? options?.readableHighWaterMark
+  const zero = hwm == 0
+  sides.allowHalfOpen = options?.allowHalfOpen
+  sides.readable = options?.readable
+  sides.writable = options?.writable
+  sides.highWaterMark = zero ? undefined : options?.highWaterMark
+  sides.readableHighWaterMark = zero ? 0 : options?.readableHighWaterMark
+  sides.writableHighWaterMark = zero
+    ? options?.writableHighWaterMark ?? 0
+    : options?.writableHighWaterMark
+  sides.objectMode = options?.objectMode
+  sides.readableObjectMode = options?.readableObjectMode
+  sides.writableObjectMode = options?.writableObjectMode
+  sides.encoding = options?.encoding
+  sides.decodeStrings = options?.decodeStrings
+  sides.defaultEncoding = options?.defaultEncoding
+  sides.emitClose = options?.emitClose
+  sides.autoDestroy = options?.autoDestroy
+  sides.signal = options?.signal
+  sides.hasWritev = options?.writev != undefined
+  // Transform.prototype._final of node.
+  sides.hasFinal = true
+  sides.hasConstruct = options?.construct != undefined
+  sides.transform = true
+  return sides
+}
+
+// lib/internal/streams/transform.js: a Duplex whose readable side gives
+// what _transform() makes of what is written.
+export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
+  @__tz_hidden _transformRead: ((this: Transform<W, R>, size: int) => void) | undefined
+  @__tz_hidden _transformWrite:
+    | ((this: Transform<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _transformWritev:
+    | ((this: Transform<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _transformFinal:
+    | ((this: Transform<W, R>, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _transformDestroy:
+    | ((this: Transform<W, R>, error: Error | undefined, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _transformConstruct:
+    | ((this: Transform<W, R>, callback: StreamCallback) => void)
+    | undefined
+  @__tz_hidden _transformOption:
+    | ((this: Transform<W, R>, chunk: W, encoding: string, callback: TransformCallback) => void)
+    | undefined
+  @__tz_hidden _flushOption: ((this: Transform<W, R>, callback: TransformCallback) => void) |
+    undefined
+
+  constructor(options?: TransformOptions<W, R>) {
+    pendingSides = transformSides(options)
+    super()
+    this._transformRead = options?.read
+    this._transformWrite = options?.write
+    this._transformWritev = options?.writev
+    this._transformFinal = options?.final
+    this._transformDestroy = options?.destroy
+    this._transformConstruct = options?.construct
+    this._transformOption = options?.transform
+    this._flushOption = options?.flush
+    this._isTransform = true
+    readableStateOf(this).bits &= ~kSync
+    this._hasWritev = options?.writev != undefined || __tz_overrides(this, "_writev")
+    this._hasFinal = true
+    this._hasConstruct = options?.construct != undefined || __tz_overrides(this, "_construct")
+    this._hasFlush = options?.flush != undefined || __tz_overrides(this, "_flush")
+    // node's prefinish listener, which takes the stream as `this`.
+    this.on("prefinish", transformPrefinish, kThisListener)
+    this._initEnd(options?.signal)
+  }
+
+  _read(size: int): void {
+    const read = this._transformRead
+    if (read != undefined) {
+      read.call(this, size)
+      return
+    }
+    const callback = this._transformCallback
+    if (callback != undefined) {
+      this._transformCallback = undefined
+      callback()
+    }
+  }
+
+  _write(chunk: W, encoding: string, callback: StreamCallback): void {
+    const write = this._transformWrite
+    if (write != undefined) {
+      write.call(this, chunk, encoding, callback)
+      return
+    }
+    transformWrite<W, R>(this, chunk, encoding, callback)
+  }
+
+  _writev(chunks: WriteChunk<W>[], callback: StreamCallback): void {
+    const writev = this._transformWritev
+    if (writev == undefined) throw methodNotImplemented("_writev()")
+    writev.call(this, chunks, callback)
+  }
+
+  _final(callback: StreamCallback): void {
+    const final = this._transformFinal
+    if (final != undefined) {
+      final.call(this, callback)
+      return
+    }
+    transformFinal(this, callback)
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    const destroy = this._transformDestroy
+    if (destroy == undefined) callback(error)
+    else destroy.call(this, error, callback)
+  }
+
+  _construct(callback: StreamCallback): void {
+    const construct = this._transformConstruct
+    if (construct == undefined) callback()
+    else construct.call(this, callback)
+  }
+
+  _transform(chunk: W, encoding: string, callback: TransformCallback): void {
+    const transform = this._transformOption
+    if (transform == undefined) throw methodNotImplemented("_transform()")
+    transform.call(this, chunk, encoding, callback)
+  }
+
+  _flush(callback: TransformCallback): void {
+    const flush = this._flushOption
+    if (flush == undefined) callback()
+    else flush.call(this, callback)
+  }
+
+  _ownTransformFinal(): boolean {
+    return this._transformFinal == undefined && !__tz_overrides(this, "_final")
+  }
+}
+
+// node's final() of Transform: flushes, then ends the readable side. With
+// no callback it is the prefinish listener's, whose error destroys.
+function transformFinal(stream: Stream, cb: StreamCallback | undefined) {
+  if (stream._hasFlush && !stream.destroyed) {
+    stream._flush((er?: Error, data?: unknown) => {
+      if (er != undefined) {
+        if (cb != undefined) cb(er)
+        else stream.destroy(er)
+        return
+      }
+      if (data != undefined) stream._pushChunk(data)
+      stream._pushChunk(undefined)
+      if (cb != undefined) cb()
+    })
+  } else {
+    stream._pushChunk(undefined)
+    if (cb != undefined) cb()
+  }
+}
+
+// The prefinish listener of a Transform: final() of node, unless _final is
+// Transform's own, which Writable calls itself.
+function transformPrefinish(this: Stream) {
+  if (!this._ownTransformFinal()) transformFinal(this, undefined)
+}
+
+function transformWrite<W, R>(stream: Transform<W, R>, chunk: W, encoding: string,
+                              callback: StreamCallback) {
+  const rState = readableStateOf(stream)
+  const wState = writableStateOf(stream)
+  const length = stream.readableLength
+  stream._transform(chunk, encoding, (err?: Error, val?: unknown) => {
+    if (err != undefined) {
+      callback(err)
+      return
+    }
+    if (val != undefined) stream._pushChunk(val)
+    if ((rState.bits & kEnded) != 0) {
+      process.nextTick(() => callback())
+    } else if ((wState.bits & kWEnded) != 0 || // Backwards compat.
+               length == stream.readableLength || // Backwards compat.
+               stream.readableLength < stream.readableHighWaterMark) {
+      callback()
+    } else {
+      stream._transformCallback = callback
+    }
+  })
+}
+
+// lib/internal/streams/passthrough.js: a Transform that gives what it gets
+// (as strings, with an encoding of its readable side).
+export class PassThrough<W = Buffer, R = W> extends Transform<W, R> {
+  constructor(options?: TransformOptions<W, R>) {
+    super(options)
+  }
+
+  _transform(chunk: W, encoding: string, callback: TransformCallback): void {
+    void encoding
+    callback(undefined, chunk)
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// lib/internal/streams/from.js: Readable.from()
+//===----------------------------------------------------------------------===//
+
+// The options of Readable.from(), which those of a Readable are.
+export interface ReadableFromOptions {
+  objectMode?: boolean
+  highWaterMark?: double
+  encoding?: string
+  emitClose?: boolean
+  autoDestroy?: boolean
+  signal?: AbortSignal
+}
+
+function fromOptions<U>(options: ReadableFromOptions | undefined, hwm: double | undefined):
+    ReadableOptions<U> {
+  return {
+    objectMode: options?.objectMode ?? true,
+    highWaterMark: options?.highWaterMark ?? hwm,
+    encoding: options?.encoding,
+    emitClose: options?.emitClose,
+    autoDestroy: options?.autoDestroy,
+    signal: options?.signal,
+  }
+}
+
+// Readable.from(text) and Readable.from(buffer): one chunk, the value
+// itself (the compiler calls this).
+export function streamFromValue<U>(value: U, options?: ReadableFromOptions): Readable<U> {
+  return new FromValue<U>(value, fromOptions<U>(options, undefined))
+}
+
+class FromValue<U> extends Readable<U> {
+  #value: U | undefined
+  constructor(value: U, options: ReadableOptions<U>) {
+    super(options)
+    this.#value = value
+  }
+
+  _read(size: int): void {
+    void size
+    const value = this.#value
+    this.#value = undefined
+    if (value != undefined) this._pushChunk(value)
+    this._pushChunk(undefined)
+  }
+}
+
+// Readable.from(iterable) of an iterable that is not async.
+export function streamFromIterator<U>(iterator: Iterator<U>, options?: ReadableFromOptions):
+    Readable<U> {
+  return new FromIterator<U>(iterator, fromOptions<U>(options, 1))
+}
+
+class FromIterator<U> extends Readable<U> {
+  #iterator: Iterator<U>
+  #reading = false
+  constructor(iterator: Iterator<U>, options: ReadableOptions<U>) {
+    super(options)
+    this.#iterator = iterator
+  }
+
+  _read(size: int): void {
+    void size
+    if (!this.#reading) {
+      this.#reading = true
+      this.#next()
+    }
+  }
+
+  #next() {
+    for (;;) {
+      try {
+        const result = this.#iterator.next()
+        if (result.done) {
+          this._pushChunk(undefined)
+          return
+        }
+        const value: unknown = result.value
+        if (value == undefined) {
+          this.#reading = false
+          throw nullValues()
+        }
+        if (this._pushChunk(value)) continue
+        this.#reading = false
+      } catch (err) {
+        this.destroy(err)
+      }
+      break
+    }
+  }
+}
+
+// Readable.from(iterable) of an async iterable.
+export function streamFromAsyncIterator<U>(iterator: AsyncIterator<U>,
+                                           options?: ReadableFromOptions): Readable<U> {
+  return new FromAsyncIterator<U>(iterator, fromOptions<U>(options, 1))
+}
+
+// node takes the values one at a time, with `await iterator.next()` as
+// _read() asks; here a `for await` over the iterator waits for _read()
+// where node would stop asking, and leaving it (on destroy) closes the
+// iterator, as node's return() does.
+class FromAsyncIterator<U> extends Readable<U> {
+  #iterator: AsyncIterator<U>
+  #started = false
+  #wake: (() => void) | undefined = undefined
+  constructor(iterator: AsyncIterator<U>, options: ReadableOptions<U>) {
+    super(options)
+    this.#iterator = iterator
+  }
+
+  _read(size: int): void {
+    void size
+    if (!this.#started) {
+      this.#started = true
+      void this.#run()
+      return
+    }
+    this.#resume()
+  }
+
+  #resume() {
+    const wake = this.#wake
+    this.#wake = undefined
+    if (wake != undefined) wake()
+  }
+
+  async #run() {
+    try {
+      for await (const value of this.#iterator) {
+        const chunk: unknown = value
+        if (chunk == undefined) throw nullValues()
+        if (!this._pushChunk(chunk))
+          await new Promise<void>((resolve) => {
+            this.#wake = resolve
+          })
+        if (this.destroyed) return
+      }
+      this._pushChunk(undefined)
+    } catch (err) {
+      this.destroy(err)
+    }
+  }
+
+  _destroy(error: Error | undefined, callback: StreamCallback): void {
+    // The loop ends, which closes the iterator; then the callback, on the
+    // next tick in case it throws.
+    this.#resume()
+    process.nextTick(() => callback(error))
+  }
+}

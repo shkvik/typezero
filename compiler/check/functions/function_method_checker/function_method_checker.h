@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
@@ -8,7 +8,7 @@ namespace tz {
 // lists.
 class FunctionMethodChecker {
 public:
-  explicit FunctionMethodChecker(Sema &sema);
+  explicit FunctionMethodChecker(Checker &checker);
 
   // Decorators (sema_decorate.cpp, docs/decorators.md), and what they need:
   // functions with a `this` parameter, called with `f.call(obj, ...)` and
@@ -20,7 +20,7 @@ public:
   Expr *checkListMethod(CallExpr *call, MemberExpr *member);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

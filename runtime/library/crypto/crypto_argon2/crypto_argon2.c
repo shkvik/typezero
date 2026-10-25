@@ -3,6 +3,10 @@
 // lanes are filled one after another; the result does not depend on that.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <string.h>
 
 // The BLAKE2b of OpenSSL (see crypto_md.c).

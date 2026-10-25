@@ -1,21 +1,21 @@
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
-#include "compiler/check/functions/callback_checker/callback_checker.h"
-#include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
-#include "compiler/check/flow/predicate_checker/predicate_checker.h"
+#include "compiler/check/objects/dict_checker/dict_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -26,7 +26,7 @@ const llvm::StringLiteral kStages[] = {"map", "filter", "take", "drop", "flatMap
 
 } // namespace
 
-IteratorMethods::IteratorMethods(Sema &sema) : sema_(sema) {}
+IteratorMethods::IteratorMethods(Checker &checker) : checker_(checker) {}
 
 void IteratorMethods::markFused(Expr *expr) const {
   while (auto *call = dyn_cast<CallExpr>(expr)) {
@@ -35,7 +35,7 @@ void IteratorMethods::markFused(Expr *expr) const {
       return;
     }
     // `Iterator.from(x)` of an iterator is the iterator itself.
-    if (sema_.callChecker().isGlobalName(member->object, "Iterator") && member->name == "from" &&
+    if (checker_.callChecker().isGlobalName(member->object, "Iterator") && member->name == "from" &&
         call->args.size() == 1) {
       expr = call->args[0];
       continue;
@@ -51,7 +51,7 @@ void IteratorMethods::markFused(Expr *expr) const {
 Expr *IteratorMethods::checkArrayIterator(CallExpr *call, MemberExpr *member) {
   const Type *element = member->object->type->inner();
   llvm::StringRef name = member->name;
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
     return call;
   }
   if (name == "keys") {
@@ -69,28 +69,30 @@ Expr *IteratorMethods::checkArrayIterator(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *IteratorMethods::checkIteratorFrom(CallExpr *call, MemberExpr *member) {
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (member->name != "from") {
-    sema_.diags_.error(member->loc(), "'Iterator." + member->name +
-                                    "' is not supported; of Iterator only 'Iterator.from' is");
+    checker_.diags_.error(member->loc(),
+                          "'Iterator." + member->name +
+                              "' is not supported; of Iterator only 'Iterator.from' is");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
     return call;
   }
-  call->args[0] = sema_.dictChecker().iterableOf(sema_.exprChecker().checkExpr(call->args[0]));
+  call->args[0] =
+      checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
   const Type *element = GeneratorChecker::iteratedType(type);
   if (!element) {
     if (!type->isError()) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "'Iterator.from' needs an array, a string or an iterator, found '" +
-                       type->name() + "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "'Iterator.from' needs an array, a string or an iterator, found '" +
+                                type->name() + "'");
     }
     return call;
   }
@@ -102,60 +104,63 @@ Expr *IteratorMethods::checkIteratorFrom(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (member->name != "from") {
-    sema_.diags_.error(member->loc(),
-                 "'Array." + member->name +
-                     "' is not supported; of Array only 'Array.from' and 'new Array' are");
+    checker_.diags_.error(member->loc(),
+                          "'Array." + member->name +
+                              "' is not supported; of Array only 'Array.from' and 'new Array' are");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
     return call;
   }
   markFused(call->args[0]);
-  call->args[0] = sema_.dictChecker().iterableOf(sema_.exprChecker().checkExpr(call->args[0]));
+  call->args[0] =
+      checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(call->args[0]));
   const Type *type = call->args[0]->type;
   const Type *element = GeneratorChecker::iteratedType(type);
   if (!element) {
     if (!type->isError()) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "'Array.from' needs an array, a string or an iterator, found '" + type->name() +
-                       "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "'Array.from' needs an array, a string or an iterator, found '" +
+                                type->name() + "'");
     }
     if (call->args.size() == 2) {
-      call->args[1] = sema_.exprChecker().checkExpr(call->args[1]);
+      call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
     }
     return call;
   }
   if (type->isIterator()) {
-    sema_.generatorChecker().checkSendsNothing(type, call->args[0]->loc(), "'Array.from'");
+    checker_.generatorChecker().checkSendsNothing(type, call->args[0]->loc(), "'Array.from'");
   }
   call->builtin = Builtin::ArrayFrom;
   call->type = Type::array(element);
   if (call->args.size() == 2) {
     // `Array.from(xs, (x, i) => ...)`: each value through the function.
-    Sema::Signature sig;
+    Checker::Signature sig;
     sig.pad = false;
     sig.params = {element, Type::intTy()};
-    call->args[1] = sema_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, "Array.from");
+    call->args[1] =
+        checker_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, "Array.from");
     const Type *callback = call->args[1]->type;
     if (!callback->isFunction()) {
       return call;
     }
     const Type *result = callback->ret();
     if (result->isVoid() || result->isUndefined()) {
-      sema_.diags_.error(call->args[1]->loc(), "the callback of 'Array.from' must return a value");
+      checker_.diags_.error(call->args[1]->loc(),
+                            "the callback of 'Array.from' must return a value");
       call->type = Type::error();
       return call;
     }
     call->type = Type::array(result);
   }
-  sema_.flowChecker().calledFunction(); // a generator or the callback may change anything
+  checker_.flowChecker().calledFunction(); // a generator or the callback may change anything
 
   return call;
 }
@@ -167,12 +172,12 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   size_t count = call->args.size();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
 
   if (name == "next") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
     // The value is undefined when the iterator is done, or what a generator
@@ -180,29 +185,32 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     const Type *returned = iterator->returned();
     const Type *value = returned->isVoid() ? element : Type::unionOf({element, returned});
     if (std::string problem = unionProblem(value); !problem.empty()) {
-      sema_.diags_.error(member->loc(),
-                   "next() of '" + iterator->name() + "' gives '" + element->name() + "', or '" +
-                       returned->name() + "' when it is done, and no union holds both: " + problem +
-                       "; iterate it with 'for...of', which ignores what it returns");
+      checker_.diags_.error(member->loc(),
+                            "next() of '" + iterator->name() + "' gives '" + element->name() +
+                                "', or '" + returned->name() +
+                                "' when it is done, and no union holds both: " + problem +
+                                "; iterate it with 'for...of', which ignores what it returns");
       checkArgsLoosely();
       return call;
     }
     if (count == 1) {
       // What a generator that ignores it gets is evaluated and dropped.
       const Type *sent = iterator->sent();
-      call->args[0] = sent->isVoid() ? sema_.exprChecker().checkExpr(call->args[0]) : sema_.argumentChecker().checkArg(call->args[0], sent);
+      call->args[0] = sent->isVoid() ? checker_.exprChecker().checkExpr(call->args[0])
+                                     : checker_.argumentChecker().checkArg(call->args[0], sent);
     }
     call->builtin = Builtin::IterNext;
     call->type =
         Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
                      "IteratorResult<" + value->name().str() + ">");
-    sema_.flowChecker().calledFunction(); // the generator runs
+    checker_.flowChecker().calledFunction(); // the generator runs
     return call;
   }
   if (name == "return" || name == "throw") {
-    sema_.diags_.error(member->loc(), "'" + name +
-                                    "()' of an iterator is not supported yet: it comes with "
-                                    "exceptions");
+    checker_.diags_.error(member->loc(),
+                          "'" + name +
+                              "()' of an iterator is not supported yet: it comes with "
+                              "exceptions");
     checkArgsLoosely();
     return call;
   }
@@ -232,50 +240,51 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       message +=
           "; an iterator does not know how many values it gives: collect them with '[...it]'";
     }
-    sema_.diags_.error(member->loc(), message);
+    checker_.diags_.error(member->loc(), message);
     checkArgsLoosely();
     return call;
   }
   Builtin builtin = helper->builtin;
   // The helpers call next() without a value.
-  if (!sema_.generatorChecker().checkSendsNothing(iterator, member->loc(), "'" + name.str() + "'")) {
+  if (!checker_.generatorChecker().checkSendsNothing(iterator, member->loc(),
+                                                     "'" + name.str() + "'")) {
     checkArgsLoosely();
     return call;
   }
 
   if (builtin == Builtin::IterTake || builtin == Builtin::IterDrop) {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
-    call->args[0] = sema_.memberChecker().checkPosition(call->args[0]);
+    call->args[0] = checker_.memberChecker().checkPosition(call->args[0]);
     call->builtin = builtin;
     call->type = Type::iterator(element);
     return call;
   }
   if (builtin == Builtin::IterToArray) {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     call->builtin = builtin;
     call->type = Type::array(element);
-    sema_.flowChecker().calledFunction(); // the iterator runs
+    checker_.flowChecker().calledFunction(); // the iterator runs
     return call;
   }
 
   bool reduce = builtin == Builtin::IterReduce;
   if (count == 0) {
-    sema_.diags_.error(member->loc(), "'" + name + "' needs a function");
+    checker_.diags_.error(member->loc(), "'" + name + "' needs a function");
     return call;
   }
   if (count > (reduce ? 2u : 1u)) {
-    sema_.diags_.error(member->loc(), "expected " + argumentCount(1, reduce ? 2 : 1) + ", but got " +
-                                    llvm::Twine(count));
+    checker_.diags_.error(member->loc(), "expected " + argumentCount(1, reduce ? 2 : 1) +
+                                             ", but got " + llvm::Twine(count));
     checkArgsLoosely();
     return call;
   }
   // The callback gets the value and a counter (and first the accumulator
   // for reduce), not an index and an array as for arrays.
-  Sema::Signature sig;
+  Checker::Signature sig;
   sig.pad = false;
   unsigned primary = 1;
   const Type *accumulator = element;
@@ -296,13 +305,15 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       auto *unary = dyn_cast<UnaryExpr>(init);
       bool literal = isa<IntLitExpr>(init) ||
                      (unary && unary->op == UnaryOp::Neg && isa<IntLitExpr>(unary->operand));
-      init = sema_.exprChecker().checkExpr(init, literal && GenericChecker::apparentType(element)->isNumeric() ? GenericChecker::apparentType(element)
-                                                                           : nullptr);
+      init = checker_.exprChecker().checkExpr(
+          init, literal && GenericChecker::apparentType(element)->isNumeric()
+                    ? GenericChecker::apparentType(element)
+                    : nullptr);
       accumulator = init->type;
       if (accumulator->isUndefined() || accumulator->isVoid()) {
-        sema_.diags_.error(init->loc(),
-                     "the initial value of 'reduce' needs a type; declare it in a variable "
-                     "first, e.g. 'const start: int | undefined = undefined'");
+        checker_.diags_.error(
+            init->loc(), "the initial value of 'reduce' needs a type; declare it in a variable "
+                         "first, e.g. 'const start: int | undefined = undefined'");
         accumulator = Type::error();
       }
     }
@@ -312,13 +323,13 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     break;
   }
   if (accumulator->isError()) {
-    call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
   sig.params = reduce ? std::vector<const Type *>{accumulator, element, Type::intTy()}
                       : std::vector<const Type *>{element, Type::intTy()};
-  bool isBoolean = sema_.callChecker().isGlobalName(call->args[0], "Boolean");
-  call->args[0] = sema_.callbackChecker().checkFunctionArg(call->args[0], sig, primary, name);
+  bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
+  call->args[0] = checker_.callbackChecker().checkFunctionArg(call->args[0], sig, primary, name);
   // A stage that is not consumed where it is written keeps its callback.
   if (isIteratorStage(builtin)) {
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
@@ -327,7 +338,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   }
   call->builtin = builtin;
   if (isIteratorSink(builtin)) {
-    sema_.flowChecker().calledFunction(); // the callback may change anything
+    checker_.flowChecker().calledFunction(); // the callback may change anything
   }
   const Type *callback = call->args[0]->type;
   if (!callback->isFunction()) {
@@ -337,7 +348,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   switch (builtin) {
   case Builtin::IterMap:
     if (result->isVoid() || result->isUndefined()) {
-      sema_.diags_.error(call->args[0]->loc(), "the callback of 'map' must return a value");
+      checker_.diags_.error(call->args[0]->loc(), "the callback of 'map' must return a value");
       return call;
     }
     call->type = Type::iterator(result);
@@ -346,13 +357,14 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     // Each result is iterated in turn. JavaScript rejects a string here.
     const Type *inner = result->isString() ? nullptr : GeneratorChecker::iteratedType(result);
     if (!inner) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "the callback of 'flatMap' must return an array or an iterator, "
-                   "found '" +
-                       result->name() + "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "the callback of 'flatMap' must return an array or an iterator, "
+                            "found '" +
+                                result->name() + "'");
       return call;
     }
-    if (result->isIterator() && !sema_.generatorChecker().checkSendsNothing(result, call->args[0]->loc(), "'flatMap'")) {
+    if (result->isIterator() &&
+        !checker_.generatorChecker().checkSendsNothing(result, call->args[0]->loc(), "'flatMap'")) {
       return call;
     }
     call->type = Type::iterator(inner);
@@ -360,12 +372,14 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   }
   case Builtin::IterFilter:
     // `filter(x => x != undefined)` keeps only the values that hold one.
-    if (const Type *kept = sema_.predicateChecker().filteredType(call->args[0], element)) {
+    if (const Type *kept = checker_.predicateChecker().filteredType(call->args[0], element)) {
       call->type = Type::iterator(kept);
     } else {
       call->type = Type::iterator(
-          element->isOptional() && (isBoolean || sema_.callbackChecker().keepsDefined(call->args[0])) ? element->inner()
-                                                                              : element);
+          element->isOptional() &&
+                  (isBoolean || checker_.callbackChecker().keepsDefined(call->args[0]))
+              ? element->inner()
+              : element);
     }
     break;
   case Builtin::IterForEach:
@@ -374,7 +388,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   case Builtin::IterReduce:
     call->type = accumulator;
     if (count == 2 && call->args.size() == 2) {
-      call->args[1] = sema_.typeRelations().coerce(call->args[1], accumulator);
+      call->args[1] = checker_.typeRelations().coerce(call->args[1], accumulator);
     }
     break;
   case Builtin::IterSome:

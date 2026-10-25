@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Values of type parameters: their apparent types and the conversions they force.
 class GenericChecker {
 public:
-  explicit GenericChecker(Sema &sema);
+  explicit GenericChecker(Checker &checker);
 
   // The type whose operations a value of `type` has: the constraint of a
   // type parameter, `T extends number` is a number; `type` itself otherwise.
@@ -37,7 +37,7 @@ public:
   const Type *numberParam(const Type *param) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   mutable llvm::DenseMap<const Type *, const Type *> numberParams_;
 };
 

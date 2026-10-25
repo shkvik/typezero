@@ -3,6 +3,7 @@
 #include "compiler/load/decl_parser/decl_parser.h"
 #include "compiler/load/expr_parser/expr_parser.h"
 #include "compiler/load/function_parser/function_parser.h"
+#include "compiler/load/literal_text/literal_text.h"
 #include "compiler/load/pattern_parser/pattern_parser.h"
 #include "compiler/load/stmt_parser/stmt_parser.h"
 #include "compiler/load/template_parser/template_parser.h"
@@ -112,7 +113,7 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   }
   parser_.cursor().expectSemicolon();
   if (form != Form::Named && isBuiltinModule(decl.path) && !defaultName.empty()) {
-    // Sema reports it with the names the file uses: `fs.readFileSync`.
+    // Checker reports it with the names the file uses: `fs.readFileSync`.
     decl.whole = defaultName;
     decl.wholeLoc = formLoc;
     decl.wholeIsDefault = form == Form::Default;

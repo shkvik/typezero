@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Intl.DateTimeFormat and the locales and options of dates.
 class DateFormatChecker {
 public:
-  explicit DateFormatChecker(Sema &sema);
+  explicit DateFormatChecker(Checker &checker);
 
   // The locale and the options of toLocaleString and the like and of
   // Intl.DateTimeFormat (`kind` is TZ_DATE_LOCALE_*); false after an error.
@@ -23,7 +23,7 @@ public:
   static const Type *dateOptionsType();
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

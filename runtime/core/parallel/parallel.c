@@ -1,5 +1,5 @@
 // The threads of the program (docs/async.md, section 8): what each has of
-// its own (TzThread in tzrt.h), the list of them, for the counts summed over
+// its own (TzThread in parallel.h), the list of them, for the counts summed over
 // all of them, and in the parallel runtime the pool that runs pieces of
 // async code ahead of their turn.
 //
@@ -43,6 +43,12 @@
 // TZ_THREADS sets how many threads run code, the main one among them: the
 // number of processors by default; 1 runs everything on the main thread.
 
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/io/io.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stddef.h>
 #include <stdio.h>
@@ -468,7 +474,7 @@ void tz_parallel_init(void) { tz_ahead_on = pool_size() > 0; }
 
 // Handing a piece to another thread costs microseconds; a piece that runs
 // ahead for less does better on the main thread. Each await after which
-// pieces may run ahead is a site (CodeGen numbers them from 1, and the
+// pieces may run ahead is a site (Lowering numbers them from 1, and the
 // reactor's `ahead` is the number): it learns how long its pieces run before
 // their first ordered access, an average that leans on the last ones. A site
 // whose pieces are short gives one to a thread now and then only, to see

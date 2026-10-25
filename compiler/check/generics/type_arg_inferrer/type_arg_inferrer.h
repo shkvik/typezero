@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The type arguments of a generic call, from its arguments (docs/generics.md).
 class TypeArgInferrer {
 public:
-  explicit TypeArgInferrer(Sema &sema);
+  explicit TypeArgInferrer(Checker &checker);
 
   // Calls of generic functions (and of the constructors of generic
   // classes): infers or resolves the type arguments into `bound` and checks
@@ -28,7 +28,7 @@ public:
                           std::vector<const Type *> &bound);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

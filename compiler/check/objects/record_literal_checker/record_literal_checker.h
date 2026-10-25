@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Literals of Record and their spreads.
 class RecordLiteralChecker {
 public:
-  explicit RecordLiteralChecker(Sema &sema);
+  explicit RecordLiteralChecker(Checker &checker);
 
   // An object literal where a Record is expected, and one whose spreads
   // make it a Record (`{ ...a, ...b }` of Records).
@@ -16,7 +16,7 @@ public:
   Expr *recordFromSpreads(ObjectLitExpr *lit);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

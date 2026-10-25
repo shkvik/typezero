@@ -1,14 +1,16 @@
 #include "compiler/parallel/conflicts/conflicts.h"
-#include "compiler/parallel/code_walk/code_walk.h"
-#include "compiler/parallel/expr_walk/expr_walk.h"
-#include "compiler/parallel/call_walk/call_walk.h"
-#include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/parallel/pieces/pieces.h"
+#include "compiler/parallel/call_walk/call_walk.h"
+#include "compiler/parallel/code_walk/code_walk.h"
+#include "compiler/parallel/explain_names/explain_names.h"
 #include "compiler/parallel/explainer/explainer.h"
+#include "compiler/parallel/expr_walk/expr_walk.h"
+#include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +26,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -212,10 +213,12 @@ void Conflicts::decide() {
       auto extend = [&](Analysis::Decision &d, const std::vector<const Touch *> &mine) {
         for (const Touch *t : mine) {
           for (const auto &[at, via] : t->ats) {
-            if (!d.from.isValid() || analysis_.explainer().posOf(at) < analysis_.explainer().posOf(d.from)) {
+            if (!d.from.isValid() ||
+                analysis_.explainNames().posOf(at) < analysis_.explainNames().posOf(d.from)) {
               d.from = at;
             }
-            if (!d.to.isValid() || analysis_.explainer().posOf(d.to) < analysis_.explainer().posOf(at)) {
+            if (!d.to.isValid() ||
+                analysis_.explainNames().posOf(d.to) < analysis_.explainNames().posOf(at)) {
               d.to = at;
             }
             if (!llvm::is_contained(d.ats, at)) {

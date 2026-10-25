@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Generic type aliases.
 class AliasInstantiator {
 public:
-  explicit AliasInstantiator(Sema &sema);
+  explicit AliasInstantiator(Checker &checker);
 
   // `Pair<int>`: the type a generic alias names for these type arguments.
   // Those left out take their defaults.
@@ -17,8 +17,8 @@ public:
   std::vector<const Type *> aliasTypeParams(TypeAliasDecl *alias);
 
 private:
-  Sema &sema_;
-  std::map<std::pair<const TypeAliasDecl *, std::vector<const Type *>>, Sema::AliasInstance>
+  Checker &checker_;
+  std::map<std::pair<const TypeAliasDecl *, std::vector<const Type *>>, Checker::AliasInstance>
       aliasInstances_;
   llvm::DenseMap<const TypeAliasDecl *,
                  std::pair<std::vector<const Type *>, std::vector<const Type *>>>

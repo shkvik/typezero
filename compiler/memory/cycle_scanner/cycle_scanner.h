@@ -1,12 +1,17 @@
 #pragma once
 
-#include <memory>
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSet.h"
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 
 namespace tz {
@@ -63,7 +68,7 @@ public:
   std::map<const Type *, std::set<const Type *>> boundOf;
   std::set<std::pair<const Type *, const Type *>> fnCasts; // from, to
   // The types of the callbacks given to promises and ResultAsync, which a
-  // reaction holds (CodeGen::attachReaction).
+  // reaction holds (Lowering::attachReaction).
   std::set<const Type *> reactionCallbacks;
   // The arrays and dictionaries that code adds to after they are made (by
   // static type): only their elements may close a cycle.
@@ -78,12 +83,15 @@ public:
   // A class's static fields and decorations, where it is declared.
   void classDecl(const ClassDecl *cls);
   void stmt(const Stmt *stmt);
+
 private:
   static const Type *functionType(const FunctionDecl *fn);
+
 public:
   // Whether `self` is used in `stmt` for anything but a field: as an
   // argument, a value, a method's object, or captured by a closure.
   static bool thisEscapes(const Stmt *stmt, const VarSymbol *self);
+
 private:
   llvm::DenseSet<const FunctionDecl *> scanned_;
   llvm::DenseSet<const Expr *> callee_;

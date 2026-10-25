@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Stats, Dirent and SystemError, and their methods.
 class FsDeclarer {
 public:
-  explicit FsDeclarer(Sema &sema);
+  explicit FsDeclarer(Checker &checker);
 
   // The classes Stats and Dirent of node:fs.
   void declareFsClasses();
@@ -18,7 +18,7 @@ public:
   bool isRuntimeClass(const ClassDecl *cls) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The way of an error up: the frames of functions and the cleanups on the way.
 class UnwindLowerer {
 public:
-  explicit UnwindLowerer(CodeGen &codegen);
+  explicit UnwindLowerer(Lowering &lowering);
 
   // A constant TzFrame for `loc` in the function being emitted, or named
   // `function`.
@@ -24,7 +24,7 @@ public:
   void finishFunctionUnwind();
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::pair<std::string, const char *>, llvm::Constant *> frames_;
   llvm::StringMap<std::string> filePaths_;
 };

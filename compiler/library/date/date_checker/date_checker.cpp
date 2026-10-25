@@ -1,13 +1,13 @@
 #include "compiler/library/date/date_checker/date_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/library/math/math_checker/math_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
+#include "compiler/library/math/math_checker/math_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "runtime/library/date/date/date.h"
 #include "llvm/ADT/STLExtras.h"
@@ -17,8 +17,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -136,20 +136,22 @@ std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day) 
 
 } // namespace
 
-DateChecker::DateChecker(Sema &sema) : sema_(sema) {}
+DateChecker::DateChecker(Checker &checker) : checker_(checker) {}
 
 Expr *DateChecker::dateTime(Expr *date) {
-  auto *callee = sema_.ctx_.make<MemberExpr>(date->loc(), date, "getTime");
+  auto *callee = checker_.ctx_.make<MemberExpr>(date->loc(), date, "getTime");
 
-  return sema_.processChecker().builtinCall(date->loc(), callee, Builtin::DateGetTime, {}, Type::doubleTy());
+  return checker_.processChecker().builtinCall(date->loc(), callee, Builtin::DateGetTime, {},
+                                               Type::doubleTy());
 }
 
 Expr *DateChecker::dateToString(Expr *date) {
-  auto *callee = sema_.ctx_.make<MemberExpr>(date->loc(), date, "toString");
-  auto *mode = sema_.ctx_.make<IntLitExpr>(date->loc(), TZ_DATE_TEXT_FULL);
+  auto *callee = checker_.ctx_.make<MemberExpr>(date->loc(), date, "toString");
+  auto *mode = checker_.ctx_.make<IntLitExpr>(date->loc(), TZ_DATE_TEXT_FULL);
   mode->type = Type::intTy();
 
-  return sema_.processChecker().builtinCall(date->loc(), callee, Builtin::DateToLocalString, {mode}, Type::string());
+  return checker_.processChecker().builtinCall(date->loc(), callee, Builtin::DateToLocalString,
+                                               {mode}, Type::string());
 }
 
 void DateChecker::checkDateLiteral(const Expr *arg) {
@@ -161,26 +163,27 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
   TzDateFields fields;
   std::string shown = utf8(*text);
   if (!tz_date_parse_fields(units.data(), units.size(), &fields)) {
-    sema_.diags_.error(arg->loc(), "'" + shown +
-                                 "' is not a date JavaScript can read, and would be an Invalid "
-                                 "Date; write it as 'YYYY-MM-DDTHH:mm' (local time) or "
-                                 "'YYYY-MM-DDTHH:mmZ' (UTC), e.g. '2026-10-23T10:00'");
+    checker_.diags_.error(arg->loc(),
+                          "'" + shown +
+                              "' is not a date JavaScript can read, and would be an Invalid "
+                              "Date; write it as 'YYYY-MM-DDTHH:mm' (local time) or "
+                              "'YYYY-MM-DDTHH:mmZ' (UTC), e.g. '2026-10-23T10:00'");
     return;
   }
   if (fields.date_only) {
     // "2026-10-23" is midnight UTC: in UTC+6 its getHours() is 6.
-    sema_.diags_.error(arg->loc(), "a date without a time is read as midnight UTC, while the same date "
-                             "with a time is local; write '" +
-                                 shown + "T00:00' for local midnight or '" + shown +
-                                 "T00:00Z' for UTC");
+    checker_.diags_.error(
+        arg->loc(), "a date without a time is read as midnight UTC, while the same date "
+                    "with a time is local; write '" +
+                        shown + "T00:00' for local midnight or '" + shown + "T00:00Z' for UTC");
     return;
   }
   // "2026-02-30T10:00" is March 2.
   int64_t month = int64_t(fields.month), dayOfMonth = int64_t(fields.day);
   if (dayOfMonth > daysInMonth(int64_t(fields.year), month)) {
-    sema_.diags_.error(arg->loc(), "'" + shown +
-                                 "': " + missingDay(int64_t(fields.year), month, dayOfMonth) +
-                                 "; write the date that is meant");
+    checker_.diags_.error(
+        arg->loc(), "'" + shown + "': " + missingDay(int64_t(fields.year), month, dayOfMonth) +
+                        "; write the date that is meant");
     return;
   }
   double day = tz_date_make_day(fields.year, fields.month, fields.day);
@@ -193,25 +196,26 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
     value -= fields.offset * 1000;
   }
   if (!(value >= -limit && value <= limit)) {
-    sema_.diags_.error(arg->loc(), "'" + shown +
-                                 "' is outside the dates JavaScript has (100 million days around "
-                                 "1970), and would be an Invalid Date");
+    checker_.diags_.error(arg->loc(),
+                          "'" + shown +
+                              "' is outside the dates JavaScript has (100 million days around "
+                              "1970), and would be an Invalid Date");
   }
 }
 
 void DateChecker::checkDateFields(std::vector<Expr *> &args) {
   std::optional<int64_t> constant[7];
   for (size_t i = 0; i < args.size(); ++i) {
-    args[i] = sema_.mathChecker().numericArg(args[i]);
+    args[i] = checker_.mathChecker().numericArg(args[i]);
     if (args[i]->type->isInteger()) {
-      constant[i] = sema_.constantFolder().intConstant(args[i]);
+      constant[i] = checker_.constantFolder().intConstant(args[i]);
     }
     if (args[i]->type->isNumeric()) {
-      args[i] = sema_.typeRelations().convert(args[i], Type::doubleTy());
+      args[i] = checker_.typeRelations().convert(args[i], Type::doubleTy());
     }
   }
   auto report = [&](size_t i, const std::string &message) {
-    sema_.diags_.error(args[i]->loc(), message);
+    checker_.diags_.error(args[i]->loc(), message);
   };
   if (std::optional<int64_t> year = constant[0]; year && *year >= 0 && *year <= 99) {
     report(0, "the year " + std::to_string(*year) + " is " + std::to_string(1900 + *year) +
@@ -270,40 +274,43 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
 // new Date(), new Date(ms), new Date(s), new Date(date) and new Date(y, m,
 // d?, h?, min?, s?, ms?), the last in local time.
 Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
-  auto *callee = sema_.ctx_.make<NameExpr>(loc, "Date");
+  auto *callee = checker_.ctx_.make<NameExpr>(loc, "Date");
   auto failed = [&] {
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
 
     return error;
   };
   if (args.size() > 7) {
-    sema_.diags_.error(loc,
-                 "expected " + argumentCount(0, 7) + ", but got " + std::to_string(args.size()));
+    checker_.diags_.error(loc, "expected " + argumentCount(0, 7) + ", but got " +
+                                   std::to_string(args.size()));
     for (Expr *&arg : args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return failed();
   }
   if (args.empty()) {
-    return sema_.processChecker().builtinCall(loc, callee, Builtin::DateNew, {}, Type::date());
+    return checker_.processChecker().builtinCall(loc, callee, Builtin::DateNew, {}, Type::date());
   }
   if (args.size() == 1) {
     checkDateLiteral(args[0]);
-    Expr *arg = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(args[0]));
+    Expr *arg = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(args[0]));
     const Type *type = arg->type;
     if (type->isError()) {
       return failed();
     }
     if (type->isDate()) {
-      return sema_.processChecker().builtinCall(loc, callee, Builtin::DateCopy, {arg}, Type::date());
+      return checker_.processChecker().builtinCall(loc, callee, Builtin::DateCopy, {arg},
+                                                   Type::date());
     }
     if (type->isString()) {
-      return sema_.processChecker().builtinCall(loc, callee, Builtin::DateFromString, {arg}, Type::date());
+      return checker_.processChecker().builtinCall(loc, callee, Builtin::DateFromString, {arg},
+                                                   Type::date());
     }
     if (type->isNumeric()) {
-      return sema_.processChecker().builtinCall(loc, callee, Builtin::DateNew, {sema_.typeRelations().convert(arg, Type::doubleTy())},
-                         Type::date());
+      return checker_.processChecker().builtinCall(
+          loc, callee, Builtin::DateNew, {checker_.typeRelations().convert(arg, Type::doubleTy())},
+          Type::date());
     }
     std::string message = "'new Date' takes a time in milliseconds, a string or a date, found '" +
                           type->name().str() + "'";
@@ -312,26 +319,28 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
     } else if (type->isDecimal()) {
       message += "; convert it with 'Number(x)'";
     }
-    sema_.diags_.error(arg->loc(), message);
+    checker_.diags_.error(arg->loc(), message);
     return failed();
   }
   checkDateFields(args);
 
-  return sema_.processChecker().builtinCall(loc, callee, Builtin::DateFromFields, args, Type::date());
+  return checker_.processChecker().builtinCall(loc, callee, Builtin::DateFromFields, args,
+                                               Type::date());
 }
 
 // `Date()` without `new`: the text of now, as toString() writes it.
 Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (!call->args.empty()) {
     // JavaScript ignores them, which hides what was meant.
-    sema_.diags_.error(name->loc(), "'Date()' without 'new' gives the text of the current time and "
-                              "ignores its arguments; write 'new Date(...)'");
+    checker_.diags_.error(name->loc(),
+                          "'Date()' without 'new' gives the text of the current time and "
+                          "ignores its arguments; write 'new Date(...)'");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
@@ -344,12 +353,12 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
 // Date.UTC and Date.parse; Date.now is with the clocks (checkProcessCall).
 Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   llvm::StringRef name = member->name;
   if (name == "UTC") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 7)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 7)) {
       return call;
     }
     checkDateFields(call->args);
@@ -358,18 +367,18 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "parse") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     checkDateLiteral(call->args[0]);
-    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     call->builtin = Builtin::DateParse;
     call->type = Type::doubleTy();
     return call;
   }
   checkDateStaticMember(member);
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -379,12 +388,12 @@ Expr *DateChecker::checkDateStaticMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
   if (name == "now" || name == "UTC" || name == "parse") {
-    sema_.diags_.error(member->loc(), "'Date." + name + "' can only be called: 'Date." + name +
-                                    (name == "now"   ? "()'"
-                                     : name == "UTC" ? "(y, m, d)'"
-                                                     : "(s)'"));
+    checker_.diags_.error(member->loc(), "'Date." + name + "' can only be called: 'Date." + name +
+                                             (name == "now"   ? "()'"
+                                              : name == "UTC" ? "(y, m, d)'"
+                                                              : "(s)'"));
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on 'Date'");
+    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on 'Date'");
   }
 
   return member;
@@ -395,12 +404,12 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
 
     return call;
   };
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   const DateMethod *method = nullptr;
@@ -411,24 +420,26 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   }
   if (!method) {
     if (name == "getYear") {
-      sema_.diags_.error(member->loc(), "'getYear' gives the year minus 1900 (126 for 2026); use "
-                                  "'getFullYear()'");
+      checker_.diags_.error(member->loc(),
+                            "'getYear' gives the year minus 1900 (126 for 2026); use "
+                            "'getFullYear()'");
     } else if (name == "setYear") {
-      sema_.diags_.error(member->loc(), "'setYear' takes the year minus 1900, and reads 0 to 99 as "
-                                  "1900 to 1999; use 'setFullYear(year)'");
+      checker_.diags_.error(member->loc(),
+                            "'setYear' takes the year minus 1900, and reads 0 to 99 as "
+                            "1900 to 1999; use 'setFullYear(year)'");
     } else if (name == "toGMTString") {
-      sema_.diags_.error(member->loc(), "'toGMTString' is the old name of 'toUTCString'; use "
-                                  "'toUTCString()'");
+      checker_.diags_.error(member->loc(), "'toGMTString' is the old name of 'toUTCString'; use "
+                                           "'toUTCString()'");
     } else {
-      sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'Date'");
+      checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'Date'");
     }
     return loosely();
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), method->min, method->max)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), method->min, method->max)) {
     return call;
   }
   auto field = [&](int value) {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value));
+    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value));
     lit->type = Type::intTy();
 
     return lit;
@@ -447,9 +458,9 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
     for (Expr *&arg : call->args) {
-      arg = sema_.mathChecker().numericArg(arg);
+      arg = checker_.mathChecker().numericArg(arg);
       if (arg->type->isNumeric()) {
-        arg = sema_.typeRelations().convert(arg, Type::doubleTy());
+        arg = checker_.typeRelations().convert(arg, Type::doubleTy());
       }
     }
     if (method->builtin != Builtin::DateSetTime) {
@@ -460,7 +471,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
   case Builtin::DateToJSON:
     // The key JSON.stringify passes, which a date ignores.
     if (!call->args.empty()) {
-      call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+      call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     }
     // null in JavaScript for an invalid date: there is no null.
     call->type = Type::optional(Type::string());
@@ -470,7 +481,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::string();
     break;
   case Builtin::DateToLocale:
-    if (!sema_.dateFormatChecker().checkLocaleArgs(call->args, method->field)) {
+    if (!checker_.dateFormatChecker().checkLocaleArgs(call->args, method->field)) {
       return call;
     }
     call->args.insert(call->args.begin(), field(method->field));
@@ -488,12 +499,13 @@ Expr *DateChecker::checkDateMember(MemberExpr *member) {
   member->type = Type::error();
   llvm::StringRef name = member->name;
   if (llvm::any_of(kMethods, [&](const DateMethod &m) { return m.name == name; })) {
-    sema_.diags_.error(member->loc(),
-                 "'" + name + "' of a date can only be called, e.g. 'd." + name + "()'");
+    checker_.diags_.error(member->loc(),
+                          "'" + name + "' of a date can only be called, e.g. 'd." + name + "()'");
   } else if (name == "getYear") {
-    sema_.diags_.error(member->loc(), "'getYear' gives the year minus 1900; use 'getFullYear()'");
+    checker_.diags_.error(member->loc(),
+                          "'getYear' gives the year minus 1900; use 'getFullYear()'");
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'Date'");
+    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'Date'");
   }
 
   return member;
@@ -517,20 +529,22 @@ Expr *DateChecker::checkDateOperands(BinaryExpr *bin) {
   }
   const char *op = opSpelling(bin->op);
   if (bin->op == BinaryOp::Add) {
-    sema_.diags_.error(bin->loc(), "'+' with a date joins texts in JavaScript (the date as toString() "
-                             "writes it); to move a date by milliseconds write 'new "
-                             "Date(d.getTime() + ms)'");
+    checker_.diags_.error(bin->loc(),
+                          "'+' with a date joins texts in JavaScript (the date as toString() "
+                          "writes it); to move a date by milliseconds write 'new "
+                          "Date(d.getTime() + ms)'");
   } else if (bin->op == BinaryOp::Sub) {
-    sema_.diags_.error(bin->loc(), "a date minus a number is a number of milliseconds in JavaScript, "
-                             "not a date; write 'd.getTime() - ms', or 'new Date(d.getTime() - "
-                             "ms)' for a date");
+    checker_.diags_.error(bin->loc(),
+                          "a date minus a number is a number of milliseconds in JavaScript, "
+                          "not a date; write 'd.getTime() - ms', or 'new Date(d.getTime() - "
+                          "ms)' for a date");
   } else if (compare) {
-    sema_.diags_.error(bin->loc(), llvm::Twine("a date is compared with '") + op +
-                                 "' only with another date; compare the times: "
-                                 "'d.getTime() " +
-                                 op + " ms'");
+    checker_.diags_.error(bin->loc(), llvm::Twine("a date is compared with '") + op +
+                                          "' only with another date; compare the times: "
+                                          "'d.getTime() " +
+                                          op + " ms'");
   } else {
-    sema_.binaryChecker().reportOperandTypes(bin->loc(), op, l, r);
+    checker_.binaryChecker().reportOperandTypes(bin->loc(), op, l, r);
   }
 
   return bin;

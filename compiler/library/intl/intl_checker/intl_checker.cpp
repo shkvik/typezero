@@ -1,12 +1,12 @@
 #include "compiler/library/intl/intl_checker/intl_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
+#include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
-#include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -15,8 +15,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -78,7 +78,7 @@ static Expr *kindArg(AstContext &ctx, llvm::SMLoc loc, int kind) {
   return lit;
 }
 
-IntlChecker::IntlChecker(Sema &sema) : sema_(sema) {}
+IntlChecker::IntlChecker(Checker &checker) : checker_(checker) {}
 
 const Type *IntlChecker::segmentDataType() {
   return Type::object({{"segment", Type::string(), false},
@@ -218,50 +218,52 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {
 }
 
 Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vector<Expr *> &args,
-                         bool withNew) {
+                                bool withNew) {
   auto failed = [&] {
     for (Expr *&arg : args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
 
     return error;
   };
   const IntlService *service = serviceNamed(name);
   if (!service) {
-    sema_.diags_.error(loc, "'Intl." + name +
-                          "' is not supported yet; Intl has DateTimeFormat, NumberFormat, "
-                          "Collator, PluralRules, RelativeTimeFormat, ListFormat, DisplayNames "
-                          "and Segmenter");
+    checker_.diags_.error(loc,
+                          "'Intl." + name +
+                              "' is not supported yet; Intl has DateTimeFormat, NumberFormat, "
+                              "Collator, PluralRules, RelativeTimeFormat, ListFormat, DisplayNames "
+                              "and Segmenter");
     return failed();
   }
   if (!withNew && !service->callable) {
-    sema_.diags_.error(loc, "'Intl." + name + "' is made with 'new': 'new Intl." + name +
-                          "(...)', and JavaScript would throw a TypeError without it");
+    checker_.diags_.error(loc, "'Intl." + name + "' is made with 'new': 'new Intl." + name +
+                                   "(...)', and JavaScript would throw a TypeError without it");
     return failed();
   }
   if (args.size() > 2) {
-    sema_.diags_.error(loc,
-                 "expected " + argumentCount(0, 2) + ", but got " + std::to_string(args.size()));
+    checker_.diags_.error(loc, "expected " + argumentCount(0, 2) + ", but got " +
+                                   std::to_string(args.size()));
     return failed();
   }
   if (service->kind == IntlKind::DisplayNames && args.size() < 2) {
-    sema_.diags_.error(loc, "Intl.DisplayNames needs the option 'type', e.g. 'new "
-                      "Intl.DisplayNames(\"ru\", { type: \"region\" })', which JavaScript "
-                      "would throw a TypeError without");
+    checker_.diags_.error(loc, "Intl.DisplayNames needs the option 'type', e.g. 'new "
+                               "Intl.DisplayNames(\"ru\", { type: \"region\" })', which JavaScript "
+                               "would throw a TypeError without");
     return failed();
   }
-  if (!sema_.intlOptionsChecker().checkIntlArgs(args, 0, service->kind, "Intl." + name.str())) {
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+  if (!checker_.intlOptionsChecker().checkIntlArgs(args, 0, service->kind, "Intl." + name.str())) {
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
     return error;
   }
-  std::vector<Expr *> all{kindArg(sema_.ctx_, loc, service->runtimeKind)};
+  std::vector<Expr *> all{kindArg(checker_.ctx_, loc, service->runtimeKind)};
   all.insert(all.end(), args.begin(), args.end());
 
-  return sema_.processChecker().builtinCall(loc, sema_.ctx_.make<NameExpr>(loc, "Intl"), Builtin::IntlNew, std::move(all),
-                     Type::intl(service->kind));
+  return checker_.processChecker().builtinCall(loc, checker_.ctx_.make<NameExpr>(loc, "Intl"),
+                                               Builtin::IntlNew, std::move(all),
+                                               Type::intl(service->kind));
 }
 
 // The locales of getCanonicalLocales and supportedLocalesOf: a string, an
@@ -276,21 +278,23 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
   } else {
     tags.push_back(literalText(arg));
   }
-  arg = sema_.exprChecker().checkExpr(arg, Type::array(Type::string()));
+  arg = checker_.exprChecker().checkExpr(arg, Type::array(Type::string()));
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
   if (type != Type::string() && type != Type::array(Type::string()) && !type->isUndefined()) {
-    sema_.diags_.error(arg->loc(), what.str() + " takes a language or an array of them, found '" +
-                                 type->name().str() + "'");
+    checker_.diags_.error(arg->loc(), what.str() +
+                                          " takes a language or an array of them, found '" +
+                                          type->name().str() + "'");
     return arg;
   }
   for (const std::optional<std::u16string> &tag : tags) {
     if (tag && !isLanguageTag(utf8(*tag))) {
-      sema_.diags_.error(arg->loc(), "'" + utf8(*tag) +
-                                   "' is not a language tag, and JavaScript would throw a "
-                                   "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
+      checker_.diags_.error(arg->loc(),
+                            "'" + utf8(*tag) +
+                                "' is not a language tag, and JavaScript would throw a "
+                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
     }
   }
 
@@ -300,11 +304,11 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
 // `Intl.X(...)` without `new`, and Intl.getCanonicalLocales.
 Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (member->name == "getCanonicalLocales") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
     if (!call->args.empty()) {
@@ -315,9 +319,9 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (member->name == "supportedValuesOf") {
-    sema_.diags_.error(member->loc(), "'Intl.supportedValuesOf' is not supported yet");
+    checker_.diags_.error(member->loc(), "'Intl.supportedValuesOf' is not supported yet");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
@@ -329,21 +333,21 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
 Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto *service = cast<MemberExpr>(member->object);
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   std::string what = "Intl." + service->name.str() + "." + member->name.str();
   if ((service->name != "DateTimeFormat" && !serviceNamed(service->name)) ||
       member->name != "supportedLocalesOf") {
-    sema_.diags_.error(member->loc(), "'" + what +
-                                    "' is not supported; of the classes of Intl, only "
-                                    "'supportedLocalesOf' is");
+    checker_.diags_.error(member->loc(), "'" + what +
+                                             "' is not supported; of the classes of Intl, only "
+                                             "'supportedLocalesOf' is");
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     return call;
   }
-  if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+  if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
     return call;
   }
   call->args[0] = checkLocaleList(call->args[0], what);
@@ -352,14 +356,15 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   }
   // The options alone (checkIntlArgs takes a locale first, here none).
   if (call->args.size() == 2) {
-    std::vector<Expr *> pair{sema_.ctx_.make<UndefinedExpr>(member->loc()), call->args[1]};
-    if (!sema_.intlOptionsChecker().checkIntlArgs(pair, 0, IntlKind::None, what)) {
+    std::vector<Expr *> pair{checker_.ctx_.make<UndefinedExpr>(member->loc()), call->args[1]};
+    if (!checker_.intlOptionsChecker().checkIntlArgs(pair, 0, IntlKind::None, what)) {
       return call;
     }
     call->args[1] = pair[1];
   }
   // The name of the method, for the message of a bad localeMatcher.
-  call->args.insert(call->args.begin(), sema_.ctx_.make<StringLitExpr>(member->loc(), utf16(what)));
+  call->args.insert(call->args.begin(),
+                    checker_.ctx_.make<StringLitExpr>(member->loc(), utf16(what)));
   call->args[0]->type = Type::string();
   call->builtin = Builtin::IntlSupportedLocales;
   call->type = Type::array(Type::string());
@@ -377,9 +382,9 @@ Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
   // The function type the place wants: what a method passes its callback,
   // or a declared one.
   const Type *wantedParam = nullptr, *wantedRet = nullptr;
-  if (sema_.callback_ && !sema_.callback_->params.empty()) {
-    wantedParam = sema_.callback_->params[0];
-    wantedRet = sema_.callback_->ret;
+  if (checker_.callback_ && !checker_.callback_->params.empty()) {
+    wantedParam = checker_.callback_->params[0];
+    wantedRet = checker_.callback_->ret;
   } else if (expected && expected->nonOptional()->isFunction()) {
     const Type *fn = expected->nonOptional();
     wantedParam = fn->params().empty() ? nullptr : fn->params()[0];
@@ -404,30 +409,33 @@ Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
   }
   if (!fnType) {
     if (kind == IntlKind::DateTimeFormat) {
-      sema_.diags_.error(member->loc(), "property '" + name +
-                                      "' of Intl.DateTimeFormat can only be called: 'format(d)', "
-                                      "'formatToParts(d)' or 'resolvedOptions()'");
+      checker_.diags_.error(member->loc(),
+                            "property '" + name +
+                                "' of Intl.DateTimeFormat can only be called: 'format(d)', "
+                                "'formatToParts(d)' or 'resolvedOptions()'");
     } else {
-      sema_.diags_.error(member->loc(), "property '" + name + "' of " +
-                                      member->object->type->name().str() +
-                                      " can only be called, '" + name +
-                                      "(...)'; as values there are only 'format' of "
-                                      "Intl.NumberFormat and Intl.DateTimeFormat and 'compare' "
-                                      "of Intl.Collator");
+      checker_.diags_.error(member->loc(),
+                            "property '" + name + "' of " + member->object->type->name().str() +
+                                " can only be called, '" + name +
+                                "(...)'; as values there are only 'format' of "
+                                "Intl.NumberFormat and Intl.DateTimeFormat and 'compare' "
+                                "of Intl.Collator");
     }
     return member;
   }
   member->type = fnType;
 
-  return sema_.processChecker().builtinCall(member->loc(), member, Builtin::IntlBound, {}, fnType);
+  return checker_.processChecker().builtinCall(member->loc(), member, Builtin::IntlBound, {},
+                                               fnType);
 }
 
 Expr *IntlChecker::segmentsArray(Expr *segments) {
-  auto *member = sema_.ctx_.make<MemberExpr>(segments->loc(), segments, "%segments");
+  auto *member = checker_.ctx_.make<MemberExpr>(segments->loc(), segments, "%segments");
   const Type *type = Type::array(segmentDataType());
   member->type = type;
 
-  return sema_.processChecker().builtinCall(segments->loc(), member, Builtin::SegmentsArray, {}, type);
+  return checker_.processChecker().builtinCall(segments->loc(), member, Builtin::SegmentsArray, {},
+                                               type);
 }
 
 } // namespace tz

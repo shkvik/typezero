@@ -1,5 +1,5 @@
 #include "compiler/lower/lower_pass/lower_pass.h"
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/optimize/target/target.h"
 #include "compiler/program/program/program.h"
@@ -12,14 +12,15 @@ LowerPass::LowerPass(llvm::LLVMContext &context, const Target &target, llvm::Str
                      const FeatureRegistry &features)
     : context_(context), target_(target), moduleName_(moduleName.str()), features_(features) {}
 
-Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &plan) const {
+Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &plan,
+                                       const MemoryPlan &memory) const {
   llvm::DataLayout layout = target_.machine().createDataLayout();
-  CodeGen codegen(context_, moduleName_, layout);
-  codegen.setSourceMgr(&program.sourceMgr);
-  codegen.setParallelPlan(&plan);
-  codegen.setFeatures(&features_);
-  codegen.setFeatures(&features_);
-  std::unique_ptr<llvm::Module> module = codegen.moduleBuilder().generate(program.file);
+  Lowering lowering(context_, moduleName_, layout);
+  lowering.setSourceMgr(&program.sourceMgr);
+  lowering.setParallelPlan(&plan);
+  lowering.setMemoryPlan(&memory);
+  lowering.setFeatures(&features_);
+  std::unique_ptr<llvm::Module> module = lowering.moduleBuilder().generate(program.file);
   std::string problems;
   llvm::raw_string_ostream out(problems);
   if (llvm::verifyModule(*module, &out)) {
@@ -30,7 +31,7 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
   }
   module->setTargetTriple(target_.triple());
 
-  return ok(Lowered{std::move(module), codegen.parallel()});
+  return ok(Lowered{std::move(module), lowering.parallel()});
 }
 
 } // namespace tz

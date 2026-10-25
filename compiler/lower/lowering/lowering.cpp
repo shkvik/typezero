@@ -1,102 +1,102 @@
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
+#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
+#include "compiler/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
+#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
+#include "compiler/library/child_process/child_lowerer/child_lowerer.h"
+#include "compiler/library/console/console_lowerer/console_lowerer.h"
+#include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
+#include "compiler/library/date/date_lowerer/date_lowerer.h"
+#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
+#include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
+#include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
+#include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
+#include "compiler/library/json/json_lowerer/json_lowerer.h"
+#include "compiler/library/math/math_lowerer/math_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
+#include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
+#include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
+#include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
+#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
+#include "compiler/library/result/from_throwable_lowerer/from_throwable_lowerer.h"
+#include "compiler/library/result/result_async_handler/result_async_handler.h"
+#include "compiler/library/result/result_async_lowerer/result_async_lowerer.h"
+#include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
+#include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
+#include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
+#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
+#include "compiler/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
+#include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
+#include "compiler/lower/async/async_lowerer/async_lowerer.h"
+#include "compiler/lower/async/promise_combine_lowerer/promise_combine_lowerer.h"
+#include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
+#include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
+#include "compiler/lower/classes/class_descriptors/class_descriptors.h"
+#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
+#include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
+#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
+#include "compiler/lower/errors/may_throw/may_throw.h"
+#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
+#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
+#include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
+#include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
+#include "compiler/lower/expr/call_lowerer/call_lowerer.h"
+#include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/expr/member_lowerer/member_lowerer.h"
+#include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
+#include "compiler/lower/expr/unary_lowerer/unary_lowerer.h"
+#include "compiler/lower/function_builder/function_builder.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
+#include "compiler/lower/functions/env_lowerer/env_lowerer.h"
+#include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
+#include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
+#include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
+#include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
+#include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
+#include "compiler/lower/iterators/iterator_lowerer/iterator_lowerer.h"
+#include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
+#include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
+#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
+#include "compiler/lower/memory/memory_debug/memory_debug.h"
+#include "compiler/lower/memory/publish_lowerer/publish_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
+#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
+#include "compiler/lower/objects/dict_method_lowerer/dict_method_lowerer.h"
+#include "compiler/lower/objects/object_lowerer/object_lowerer.h"
+#include "compiler/lower/runtime_functions/runtime_functions.h"
+#include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
+#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
+#include "compiler/lower/types/union_layout/union_layout.h"
+#include "compiler/lower/types/union_lowerer/union_lowerer.h"
+#include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
+#include "compiler/lower/types/unknown_cast_lowerer/unknown_cast_lowerer.h"
+#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
+#include "compiler/lower/values/array_lowerer/array_lowerer.h"
+#include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
+#include "compiler/lower/values/callback_method_lowerer/callback_method_lowerer.h"
+#include "compiler/lower/values/number_lowerer/number_lowerer.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
+#include "compiler/lower/values/string_method_lowerer/string_method_lowerer.h"
+#include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
-#include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/function_builder/function_builder.h"
-#include "compiler/lower/runtime_functions/runtime_functions.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
-#include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/expr/unary_lowerer/unary_lowerer.h"
-#include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
-#include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
-#include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
-#include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
-#include "compiler/lower/expr/call_lowerer/call_lowerer.h"
-#include "compiler/library/console/console_lowerer/console_lowerer.h"
-#include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/values/string_method_lowerer/string_method_lowerer.h"
-#include "compiler/lower/expr/member_lowerer/member_lowerer.h"
-#include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
-#include "compiler/lower/values/array_lowerer/array_lowerer.h"
-#include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
-#include "compiler/lower/values/callback_method_lowerer/callback_method_lowerer.h"
-#include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/lower/async/async_lowerer/async_lowerer.h"
-#include "compiler/lower/async/promise_combine_lowerer/promise_combine_lowerer.h"
-#include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
-#include "compiler/library/result/result_async_handler/result_async_handler.h"
-#include "compiler/library/result/result_async_lowerer/result_async_lowerer.h"
-#include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
-#include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
-#include "compiler/library/math/math_lowerer/math_lowerer.h"
-#include "compiler/lower/values/number_lowerer/number_lowerer.h"
-#include "compiler/lower/classes/class_descriptors/class_descriptors.h"
-#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
-#include "compiler/lower/functions/env_lowerer/env_lowerer.h"
-#include "compiler/lower/memory/memory_analysis/memory_analysis.h"
-#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
-#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
-#include "compiler/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
-#include "compiler/lower/memory/memory_debug/memory_debug.h"
-#include "compiler/lower/memory/publish_lowerer/publish_lowerer.h"
-#include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
-#include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
-#include "compiler/lower/objects/dict_method_lowerer/dict_method_lowerer.h"
-#include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
-#include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
-#include "compiler/lower/iterators/lazy_chain_lowerer/lazy_chain_lowerer.h"
-#include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
-#include "compiler/lower/iterators/iterator_lowerer/iterator_lowerer.h"
-#include "compiler/lower/layouts/object_layouts/object_layouts.h"
-#include "compiler/lower/objects/object_lowerer/object_lowerer.h"
-#include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
-#include "compiler/library/result/from_throwable_lowerer/from_throwable_lowerer.h"
-#include "compiler/lower/types/union_layout/union_layout.h"
-#include "compiler/lower/types/union_lowerer/union_lowerer.h"
-#include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
-#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
-#include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
-#include "compiler/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
-#include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
-#include "compiler/library/child_process/child_lowerer/child_lowerer.h"
-#include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
-#include "compiler/library/date/date_lowerer/date_lowerer.h"
-#include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
-#include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
-#include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
-#include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
-#include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
-#include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/types/unknown_cast_lowerer/unknown_cast_lowerer.h"
-#include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
-#include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
-#include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
-#include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
-#include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
-#include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
-#include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
-#include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 
 namespace tz {
 
@@ -106,7 +106,8 @@ using llvm::dyn_cast;
 
 using llvm::isa;
 
-CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout)
+Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
+                   const llvm::DataLayout &layout)
     : ctx_(ctx), module_(std::make_unique<llvm::Module>(moduleName, ctx)), builder_(ctx) {
   moduleBuilderPart_ = std::make_unique<ModuleBuilder>(*this);
   functionBuilderPart_ = std::make_unique<FunctionBuilder>(*this);
@@ -146,7 +147,6 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
   classLowererPart_ = std::make_unique<ClassLowerer>(*this);
   closureLowererPart_ = std::make_unique<ClosureLowerer>(*this);
   envLowererPart_ = std::make_unique<EnvLowerer>(*this);
-  memoryAnalysisPart_ = std::make_unique<MemoryAnalysis>(*this);
   groupLowererPart_ = std::make_unique<GroupLowerer>(*this);
   storeLowererPart_ = std::make_unique<StoreLowerer>(*this);
   weakRefLowererPart_ = std::make_unique<WeakRefLowerer>(*this);
@@ -216,7 +216,7 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
   promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
-void CodeGen::setParallelPlan(const ParallelPlan *plan) {
+void Lowering::setParallelPlan(const ParallelPlan *plan) {
   plan_ = plan;
   parallel_ =
       plan && llvm::any_of(plan->pieces, [](const ParallelPlan::Piece &p) { return !p.alone; });
@@ -243,24 +243,18 @@ void CodeGen::setParallelPlan(const ParallelPlan *plan) {
   }
 }
 
-void CodeGen::orderAt(llvm::SMLoc loc) {
+void Lowering::orderAt(llvm::SMLoc loc) {
   if (!parallel_ || !function_ || !orderedLocs_.contains(loc.getPointer())) {
     return;
   }
   builder_.CreateCall(processLowerer().processFunction("tz_order_enter", builder_.getVoidTy(), {}));
 }
 
-void CodeGen::emitThrowCheckIf(bool throws) {
+void Lowering::emitThrowCheckIf(bool throws) {
   if (throws) {
     throwLowerer().emitThrowCheck();
   }
 }
 
-bool CodeGen::ownerMayBeMember(const Type *type) { return memoryAnalysis().refMayBeMember(type); }
-
-bool CodeGen::promiseIsMember(const Type *value) {
-  return hasCycles_ && (anyCyclicObject_ || (value && memoryAnalysis().mayHoldMember(value)));
-}
-
-CodeGen::~CodeGen() = default;
+Lowering::~Lowering() = default;
 } // namespace tz

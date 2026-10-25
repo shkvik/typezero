@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The functions of the runtime that programs call, and the helpers of reference counts.
 class RuntimeFunctions {
 public:
-  explicit RuntimeFunctions(CodeGen &codegen);
+  explicit RuntimeFunctions(Lowering &lowering);
 
   // Module structure
   void declareRuntime();
@@ -16,7 +16,7 @@ public:
                    llvm::BasicBlock *freeBlock, llvm::BasicBlock *doneBlock);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

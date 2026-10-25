@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The types of neverthrow and their names in a program.
 class ResultTypes {
 public:
-  explicit ResultTypes(Sema &sema);
+  explicit ResultTypes(Checker &checker);
 
   // Result of neverthrow (sema_result.cpp). The names of neverthrow are
   // built in: what `name` stands for where it is used, "ok" or "Result" (also
@@ -27,7 +27,7 @@ public:
   void neverOperands(BinaryExpr *bin);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

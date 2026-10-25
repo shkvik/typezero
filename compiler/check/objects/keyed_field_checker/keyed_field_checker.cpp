@@ -1,10 +1,10 @@
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/objects/object_checker/object_checker.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
-#include "compiler/check/objects/object_checker/object_checker.h"
-#include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -12,8 +12,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -55,7 +55,7 @@ const char kRuntimeKeys[] =
 
 } // namespace
 
-KeyedFieldChecker::KeyedFieldChecker(Sema &sema) : sema_(sema) {}
+KeyedFieldChecker::KeyedFieldChecker(Checker &checker) : checker_(checker) {}
 
 std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const {
   if (auto *lit = dyn_cast<StringLitExpr>(key)) {
@@ -65,7 +65,7 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
     return toUtf8(tmpl->quasis[0]);
   }
   if (auto *name = dyn_cast<NameExpr>(key); name && name->var) {
-    if (auto found = sema_.constKeys_.find(name->var); found != sema_.constKeys_.end()) {
+    if (auto found = checker_.constKeys_.find(name->var); found != checker_.constKeys_.end()) {
       return found->second;
     }
   }
@@ -73,7 +73,8 @@ std::optional<std::string> KeyedFieldChecker::constantKey(const Expr *key) const
   return std::nullopt;
 }
 
-void KeyedFieldChecker::keyNames(const Expr *key, llvm::function_ref<void(llvm::StringRef)> each) const {
+void KeyedFieldChecker::keyNames(const Expr *key,
+                                 llvm::function_ref<void(llvm::StringRef)> each) const {
   if (auto *lit = dyn_cast<StringLitExpr>(key)) {
     each(toUtf8(lit->value));
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
@@ -81,13 +82,13 @@ void KeyedFieldChecker::keyNames(const Expr *key, llvm::function_ref<void(llvm::
   } else if (auto *number = dyn_cast<IntLitExpr>(key)) {
     each(std::to_string(number->value)); // an element of a tuple
   } else if (auto *name = dyn_cast<NameExpr>(key)) {
-    for (const std::string &text : sema_.file_->stringConstants.lookup(name->name)) {
+    for (const std::string &text : checker_.file_->stringConstants.lookup(name->name)) {
       each(text);
     }
   } else if (auto *member = dyn_cast<MemberExpr>(key)) {
     if (auto *object = dyn_cast<NameExpr>(member->object)) {
       for (const std::string &text :
-           sema_.file_->stringConstants.lookup((object->name + "." + member->name).str())) {
+           checker_.file_->stringConstants.lookup((object->name + "." + member->name).str())) {
         each(text);
       }
     }
@@ -134,35 +135,36 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
   std::string name;
   if (type->isTuple()) {
     // Each element has its own type, so the position must be a constant.
-    index->index = sema_.exprChecker().checkExpr(index->index, Type::intTy());
+    index->index = checker_.exprChecker().checkExpr(index->index, Type::intTy());
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return index;
     }
     std::optional<int64_t> position =
-        keyType->isInteger() ? sema_.constantFolder().intConstant(index->index) : std::nullopt;
+        keyType->isInteger() ? checker_.constantFolder().intConstant(index->index) : std::nullopt;
     size_t count = type->fields().size();
     if (!keyType->isInteger()) {
-      sema_.diags_.error(index->index->loc(),
-                   "a tuple is indexed by a number, found '" + keyType->name() + "'");
+      checker_.diags_.error(index->index->loc(),
+                            "a tuple is indexed by a number, found '" + keyType->name() + "'");
       return index;
     }
     if (!position) {
-      sema_.diags_.error(index->loc(),
-                   "a tuple can be indexed only by a constant, such as '[0]': each element has "
-                   "its own type; or destructure it: 'const [a, b] = t'");
+      checker_.diags_.error(
+          index->loc(),
+          "a tuple can be indexed only by a constant, such as '[0]': each element has "
+          "its own type; or destructure it: 'const [a, b] = t'");
       return index;
     }
     if (*position < 0 || uint64_t(*position) >= count) {
-      sema_.diags_.error(index->index->loc(), "tuple '" + type->name() + "' has " +
-                                            std::to_string(count) + " element" +
-                                            (count == 1 ? "" : "s") + "; there is no element " +
-                                            std::to_string(*position));
+      checker_.diags_.error(index->index->loc(),
+                            "tuple '" + type->name() + "' has " + std::to_string(count) +
+                                " element" + (count == 1 ? "" : "s") + "; there is no element " +
+                                std::to_string(*position));
       return index;
     }
     name = std::to_string(*position);
   } else {
-    index->index = sema_.exprChecker().checkExpr(index->index);
+    index->index = checker_.exprChecker().checkExpr(index->index);
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
       return index;
@@ -173,19 +175,20 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
       llvm::ArrayRef<const Type *> names =
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
       if (write) {
-        // What Sema knows of a field (narrowed, defined) it learns from
+        // What Checker knows of a field (narrowed, defined) it learns from
         // assignments by name.
         if (field->isOptional() || field->isUnion() || field->isLiteral() ||
             llvm::any_of(names, [&](const Type *n) {
               return type->field(toUtf8(n->literalText()))->readonly;
             })) {
-          sema_.diags_.error(index->loc(), "fields of type '" + field->name() +
-                                         "' are assigned by name, as in 'o.name = v'; through a "
-                                         "key of literals only fields of a plain type are");
+          checker_.diags_.error(index->loc(),
+                                "fields of type '" + field->name() +
+                                    "' are assigned by name, as in 'o.name = v'; through a "
+                                    "key of literals only fields of a plain type are");
           return index;
         }
         for (const Type *n : names) {
-          sema_.fieldFacts().fieldsAssigned(sema_.ctx_.keepName(toUtf8(n->literalText())));
+          checker_.fieldFacts().fieldsAssigned(checker_.ctx_.keepName(toUtf8(n->literalText())));
         }
       }
       index->keyed = true;
@@ -194,44 +197,46 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
     }
     if (!key) {
       if (keyType->nonOptional()->isNumeric()) {
-        sema_.diags_.error(index->loc(), "type '" + type->name() +
-                                       "' has no numbered fields; read a field by its "
-                                       "name, e.g. 'o.name'");
+        checker_.diags_.error(index->loc(), "type '" + type->name() +
+                                                "' has no numbered fields; read a field by its "
+                                                "name, e.g. 'o.name'");
       } else if (keyType->isString()) {
-        sema_.diags_.error(index->loc(),
-                     "type '" + type->name() +
-                         "' can be indexed only by a key known when compiling: a string literal, "
-                         "or a constant declared with one, such as 'const key = \"name\"'; " +
-                         kRuntimeKeys);
+        checker_.diags_.error(
+            index->loc(),
+            "type '" + type->name() +
+                "' can be indexed only by a key known when compiling: a string literal, "
+                "or a constant declared with one, such as 'const key = \"name\"'; " +
+                kRuntimeKeys);
       } else {
-        sema_.diags_.error(index->index->loc(),
-                     "a key must be a string, found '" + keyType->name() + "'");
+        checker_.diags_.error(index->index->loc(),
+                              "a key must be a string, found '" + keyType->name() + "'");
       }
       return index;
     }
     if (!type->isClass() && !type->field(*key)) {
-      sema_.diags_.error(index->loc(), noField(type, *key));
+      checker_.diags_.error(index->loc(), noField(type, *key));
       return index;
     }
     name = std::move(*key);
   }
   // The program is scanned for the fields it assigns before it is checked
   // (see keyNames): a key it could not tell there cannot be written through.
-  if (write && !sema_.assignedFields_.contains(name)) {
-    sema_.diags_.error(index->index->loc(),
-                 type->isTuple() ? "an element of a tuple is assigned by its number: 't[0] = ...'"
-                                 : "a field assigned through a key in brackets must be "
-                                   "named by a string literal, or a constant declared with "
-                                   "one, such as 'const key = \"name\"'");
+  if (write && !checker_.assignedFields_.contains(name)) {
+    checker_.diags_.error(index->index->loc(),
+                          type->isTuple()
+                              ? "an element of a tuple is assigned by its number: 't[0] = ...'"
+                              : "a field assigned through a key in brackets must be "
+                                "named by a string literal, or a constant declared with "
+                                "one, such as 'const key = \"name\"'");
     return index;
   }
-  index->field = sema_.ctx_.keepName(name);
-  auto *member = sema_.ctx_.make<MemberExpr>(index->loc(), index->object, index->field);
+  index->field = checker_.ctx_.keepName(name);
+  auto *member = checker_.ctx_.make<MemberExpr>(index->loc(), index->object, index->field);
   if (write) {
     return member;
   }
 
-  return sema_.objectChecker().checkField(member);
+  return checker_.objectChecker().checkField(member);
 }
 
 } // namespace tz

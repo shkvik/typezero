@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The representation of unions: tags, slots and descriptors.
 class UnionLayout {
 public:
-  explicit UnionLayout(CodeGen &codegen);
+  explicit UnionLayout(Lowering &lowering);
 
   // Unions and literal types (codegen_union.cpp): how their values lie is
   // described there. A string literal type or a union of them is an atom.
@@ -38,7 +38,7 @@ public:
   void countTagged(llvm::Value *value, const Type *type, bool retain);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::GlobalVariable *atomTable_ = nullptr;
   llvm::Constant *atomDescriptor_ = nullptr;
 };

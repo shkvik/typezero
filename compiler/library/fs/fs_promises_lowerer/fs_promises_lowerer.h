@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // node:fs/promises, node:readline, node:timers/promises and AbortSignal.
 class FsPromisesLowerer {
 public:
-  explicit FsPromisesLowerer(CodeGen &codegen);
+  explicit FsPromisesLowerer(Lowering &lowering);
 
   // node:fs/promises and node:readline; node:timers/promises
   // (codegen_async_io.cpp).
@@ -16,7 +16,7 @@ public:
   llvm::Value *emitAsyncIoBuiltin(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // return, and whether a function always returns.
 class ReturnChecker {
 public:
-  explicit ReturnChecker(Sema &sema);
+  explicit ReturnChecker(Checker &checker);
 
   void checkReturn(ReturnStmt *ret);
   Expr *checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested);
@@ -17,7 +17,7 @@ public:
   static bool isExit(const Stmt *stmt);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

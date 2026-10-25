@@ -1,18 +1,18 @@
 #include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/types/utility_types/utility_types.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -70,9 +70,11 @@ bool spreadsLists(const Type *type) {
          llvm::any_of(type->fields(), [](const Field &f) { return f.type->isListParam(); });
 }
 
-ArgListChecker::ArgListChecker(Sema &sema) : sema_(sema) {}
+ArgListChecker::ArgListChecker(Checker &checker) : checker_(checker) {}
 
-const Type *ArgListChecker::listElement(const Type *list) { return Type::indexedAccess(list, Type::intTy()); }
+const Type *ArgListChecker::listElement(const Type *list) {
+  return Type::indexedAccess(list, Type::intTy());
+}
 
 const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
   // Of a tuple, an element by its number, or any of them.
@@ -105,7 +107,7 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
   // names.
   if (object->isObject() && !object->isTuple()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(object)) {
-      sema_.classDeclarer().completeClass(cls);
+      checker_.classDeclarer().completeClass(cls);
     }
     llvm::ArrayRef<const Type *> names =
         key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
@@ -115,8 +117,9 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
         return nullptr;
       }
       const Field *field = object->field(utf8(name->literalText()));
-      const Type *got =
-          field ? field->type : sema_.utilityTypes().getterType(ClassDeclarer::classOf(object), utf8(name->literalText()));
+      const Type *got = field ? field->type
+                              : checker_.utilityTypes().getterType(ClassDeclarer::classOf(object),
+                                                                   utf8(name->literalText()));
       if (!got) {
         return nullptr;
       }
@@ -149,7 +152,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
   fn->listType = list;
   for (size_t k = 0; k < list->fields().size(); ++k) {
     Param param;
-    param.name = sema_.ctx_.keepName("%" + rest.name.str() + "." + std::to_string(k));
+    param.name = checker_.ctx_.keepName("%" + rest.name.str() + "." + std::to_string(k));
     param.loc = rest.loc;
     param.optional = k >= list->tupleMin();
     param.declaredType = list->fields()[k].type;
@@ -158,7 +161,7 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
   // The rest of the list stays a rest parameter, of its array.
   if (const Type *more = list->tupleRest()) {
     Param param;
-    param.name = sema_.ctx_.keepName("%" + rest.name.str() + ".rest");
+    param.name = checker_.ctx_.keepName("%" + rest.name.str() + ".rest");
     param.loc = rest.loc;
     param.rest = true;
     param.declaredType = more;
@@ -185,25 +188,26 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   if (!usedAsValue(fn->body, fn->listName, !fn->listType->tupleRest())) {
     // Every use spreads it: no tuple, only its parameters (see
     // expandListSpreads).
-    VarSymbol *var = sema_.scopes().declareVar(fn->listName, loc, Type::tuple(elements), /*isConst=*/true);
+    VarSymbol *var =
+        checker_.scopes().declareVar(fn->listName, loc, Type::tuple(elements), /*isConst=*/true);
     argumentLists_[var] = std::move(parts);
     return;
   }
   if (fn->listType->tupleRest()) {
-    sema_.diags_.error(loc, "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
-                          "', which end with a rest parameter, can only be spread, '..." +
-                          fn->listName + "'");
-    sema_.scopes().declareVar(fn->listName, loc, Type::error(), /*isConst=*/true);
+    checker_.diags_.error(loc, "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
+                                   "', which end with a rest parameter, can only be spread, '..." +
+                                   fn->listName + "'");
+    checker_.scopes().declareVar(fn->listName, loc, Type::error(), /*isConst=*/true);
     return;
   }
   // `const args: [int, int] = [a0, a1]` before the body, by a name of its
   // type that no program can write.
-  auto *alias = sema_.ctx_.make<TypeAliasDecl>(loc, sema_.ctx_.hiddenName(), TypeRef());
+  auto *alias = checker_.ctx_.make<TypeAliasDecl>(loc, checker_.ctx_.hiddenName(), TypeRef());
   alias->resolved = Type::tuple(elements);
-  sema_.typeScopes_.back()[alias->name] = alias;
-  auto *tuple = sema_.ctx_.make<ArrayLitExpr>(loc);
+  checker_.typeScopes_.back()[alias->name] = alias;
+  auto *tuple = checker_.ctx_.make<ArrayLitExpr>(loc);
   for (llvm::StringRef part : parts) {
-    tuple->elements.push_back({sema_.ctx_.make<NameExpr>(loc, part), /*spread=*/false});
+    tuple->elements.push_back({checker_.ctx_.make<NameExpr>(loc, part), /*spread=*/false});
   }
   VarDeclarator d;
   d.name = fn->listName;
@@ -213,7 +217,7 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   ref.loc = loc;
   d.typeAnn = ref;
   d.init = tuple;
-  auto *decl = sema_.ctx_.make<VarDeclStmt>(loc, /*isConst=*/true);
+  auto *decl = checker_.ctx_.make<VarDeclStmt>(loc, /*isConst=*/true);
   decl->decls.push_back(d);
   fn->body->body.insert(fn->body->body.begin(), decl);
 }
@@ -228,13 +232,13 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
   for (size_t i = 0; i < args.size(); ++i) {
     bool spreads = i < spread.size() && spread[i];
     auto *name = dyn_cast<NameExpr>(args[i]);
-    VarSymbol *var = spreads && name ? sema_.scopes().lookup(name->name).var : nullptr;
+    VarSymbol *var = spreads && name ? checker_.scopes().lookup(name->name).var : nullptr;
     auto found = var ? argumentLists_.find(var) : argumentLists_.end();
     if (found != argumentLists_.end()) {
       // `...args`: the parameters of the list, one by one.
       changed = true;
       for (llvm::StringRef part : found->second) {
-        out.push_back(sema_.ctx_.make<NameExpr>(name->loc(), part));
+        out.push_back(checker_.ctx_.make<NameExpr>(name->loc(), part));
         outSpread.push_back(part.ends_with(".rest"));
       }
       continue;
@@ -244,9 +248,9 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
         llvm::none_of(var->type->fields(), [](const Field &f) { return f.type->isListParam(); })) {
       changed = true;
       for (size_t k = 0; k < var->type->fields().size(); ++k) {
-        auto *index = sema_.ctx_.make<IntLitExpr>(name->loc(), k);
-        out.push_back(
-            sema_.ctx_.make<IndexExpr>(name->loc(), sema_.ctx_.make<NameExpr>(name->loc(), name->name), index));
+        auto *index = checker_.ctx_.make<IntLitExpr>(name->loc(), k);
+        out.push_back(checker_.ctx_.make<IndexExpr>(
+            name->loc(), checker_.ctx_.make<NameExpr>(name->loc(), name->name), index));
         outSpread.push_back(false);
       }
       continue;
@@ -265,7 +269,7 @@ Expr *ArgListChecker::listPart(Expr *expr) {
   auto *member = dyn_cast<MemberExpr>(expr);
   auto *index = dyn_cast<IndexExpr>(expr);
   auto *name = dyn_cast<NameExpr>(member ? member->object : index ? index->object : expr);
-  VarSymbol *var = name && (member || index) ? sema_.scopes().lookup(name->name).var : nullptr;
+  VarSymbol *var = name && (member || index) ? checker_.scopes().lookup(name->name).var : nullptr;
   auto found = var ? argumentLists_.find(var) : argumentLists_.end();
   if (found == argumentLists_.end()) {
     return nullptr;
@@ -273,7 +277,7 @@ Expr *ArgListChecker::listPart(Expr *expr) {
   const std::vector<llvm::StringRef> &parts = found->second;
   // `args.length`: how many parameters the list has, which is known.
   if (member && member->name == "length") {
-    auto *count = sema_.ctx_.make<IntLitExpr>(member->loc(), parts.size());
+    auto *count = checker_.ctx_.make<IntLitExpr>(member->loc(), parts.size());
     count->type = Type::intTy();
     return count;
   }
@@ -283,11 +287,12 @@ Expr *ArgListChecker::listPart(Expr *expr) {
     return nullptr;
   }
 
-  return sema_.exprChecker().checkExpr(sema_.ctx_.make<NameExpr>(index->loc(), parts[size_t(k->value)]));
+  return checker_.exprChecker().checkExpr(
+      checker_.ctx_.make<NameExpr>(index->loc(), parts[size_t(k->value)]));
 }
 
-bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type *list, llvm::SMLoc loc,
-                              const std::vector<bool> *checked) {
+bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type *list,
+                                        llvm::SMLoc loc, const std::vector<bool> *checked) {
   // What the list is made of: itself, or the elements of a tuple of lists.
   std::vector<const Type *> parts;
   if (list->isListParam()) {
@@ -302,46 +307,48 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
   for (size_t i = fixed; i < call->args.size(); ++i) {
     Expr *&arg = call->args[i];
     if (!checked || i >= checked->size() || !(*checked)[i]) {
-      arg = sema_.exprChecker().checkExpr(arg, !call->spreads(i) && k < parts.size() && !parts[k]->isListParam()
-                               ? parts[k]
-                               : nullptr);
+      arg = checker_.exprChecker().checkExpr(
+          arg,
+          !call->spreads(i) && k < parts.size() && !parts[k]->isListParam() ? parts[k] : nullptr);
     }
     if (arg->type->isError()) {
       ok = false;
       continue;
     }
     if (k >= parts.size()) {
-      sema_.diags_.error(arg->loc(), "too many arguments for the parameters '" + list->name() + "'");
+      checker_.diags_.error(arg->loc(),
+                            "too many arguments for the parameters '" + list->name() + "'");
       return false;
     }
     if (call->spreads(i)) {
       if (arg->type != parts[k]) {
-        sema_.diags_.error(arg->loc(), "'..." + arg->type->name() + "' is spread where the parameters '" +
-                                     list->name() + "' take " +
-                                     (parts[k]->isListParam() ? "'..." : "'") + parts[k]->name() +
-                                     "'");
+        checker_.diags_.error(arg->loc(), "'..." + arg->type->name() +
+                                              "' is spread where the parameters '" + list->name() +
+                                              "' take " + (parts[k]->isListParam() ? "'..." : "'") +
+                                              parts[k]->name() + "'");
         return false;
       }
       ++k;
       continue;
     }
     if (parts[k]->isListParam()) {
-      sema_.diags_.error(arg->loc(), "the arguments for the parameters '" + parts[k]->name() +
-                                   "' of some function are spread from a list of them, e.g. "
-                                   "'...args'");
+      checker_.diags_.error(arg->loc(),
+                            "the arguments for the parameters '" + parts[k]->name() +
+                                "' of some function are spread from a list of them, e.g. "
+                                "'...args'");
 
       return false;
     }
-    arg = sema_.typeRelations().coerce(arg, parts[k]);
+    arg = checker_.typeRelations().coerce(arg, parts[k]);
     ++k;
   }
   if (ok && k < parts.size()) {
-    sema_.diags_.error(loc, "the parameters '" + list->name() + "' take " +
-                          (parts[k]->isListParam() ? "'..." : "'") + parts[k]->name() +
-                          "' too, after these arguments");
+    checker_.diags_.error(loc, "the parameters '" + list->name() + "' take " +
+                                   (parts[k]->isListParam() ? "'..." : "'") + parts[k]->name() +
+                                   "' too, after these arguments");
     return false;
   }
-  sema_.flowChecker().calledFunction();
+  checker_.flowChecker().calledFunction();
 
   return ok;
 }

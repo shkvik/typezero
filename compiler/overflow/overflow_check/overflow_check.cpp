@@ -1,6 +1,6 @@
 // Warnings where int arithmetic may overflow (docs/small.md, section 6).
 //
-// The pass runs after Sema, over the checked program, and runs every function
+// The pass runs after Checker, over the checked program, and runs every function
 // abstractly: a number is a range [lo, hi] together with where its bounds come
 // from, a string or an array has a range for its length, and an array a value
 // for its elements. Conditions narrow the ranges (`if (x < 100)`), loops are
@@ -20,8 +20,20 @@
 // every `node.count + 1` would be noise.
 
 #include "compiler/overflow/overflow_check/overflow_check.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/assign_evaluator/assign_evaluator.h"
+#include "compiler/overflow/builtin_evaluator/builtin_evaluator.h"
+#include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
+#include "compiler/overflow/executor/executor.h"
+#include "compiler/overflow/loop_ranges/loop_ranges.h"
+#include "compiler/overflow/narrowing/narrowing.h"
+#include "compiler/overflow/overflow_helpers/overflow_helpers.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -40,16 +52,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
-#include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
-#include "compiler/overflow/call_ranges/call_ranges.h"
-#include "compiler/overflow/executor/executor.h"
-#include "compiler/overflow/loop_ranges/loop_ranges.h"
-#include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
-#include "compiler/overflow/overflow_helpers/overflow_helpers.h"
 
 namespace tz {
 
@@ -134,7 +136,8 @@ void checkIntOverflow(SourceFile &program, Diagnostics &diags) {
   OverflowCheck(program, diags).run();
 }
 
-OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags) : program_(program), diags_(diags) {
+OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
+    : program_(program), diags_(diags) {
   programScanPart_ = std::make_unique<ProgramScan>(*this);
   slotsPart_ = std::make_unique<Slots>(*this);
   callRangesPart_ = std::make_unique<CallRanges>(*this);
@@ -142,7 +145,10 @@ OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags) : program_
   loopRangesPart_ = std::make_unique<LoopRanges>(*this);
   narrowingPart_ = std::make_unique<Narrowing>(*this);
   evaluatorPart_ = std::make_unique<Evaluator>(*this);
-  overflowWarningsPart_ = std::make_unique<OverflowWarnings>(*this);}
+  assignEvaluatorPart_ = std::make_unique<AssignEvaluator>(*this);
+  builtinEvaluatorPart_ = std::make_unique<BuiltinEvaluator>(*this);
+  overflowWarningsPart_ = std::make_unique<OverflowWarnings>(*this);
+}
 
 OverflowCheck::~OverflowCheck() = default;
 } // namespace tz

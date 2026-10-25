@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The fields and methods of unions, and in.
 class UnionMemberLowerer {
 public:
-  explicit UnionMemberLowerer(CodeGen &codegen);
+  explicit UnionMemberLowerer(Lowering &lowering);
 
   llvm::Value *emitUnionFieldRead(MemberExpr *member);
   // The address of field `name` of an object of the union `type`, a field of
@@ -19,7 +19,7 @@ public:
   llvm::Value *emitUnionMethodCall(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

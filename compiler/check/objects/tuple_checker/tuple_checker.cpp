@@ -1,10 +1,10 @@
 #include "compiler/check/objects/tuple_checker/tuple_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -12,22 +12,23 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-TupleChecker::TupleChecker(Sema &sema) : sema_(sema) {}
+TupleChecker::TupleChecker(Checker &checker) : checker_(checker) {}
 
 // `t.join(sep)`: the elements of the tuple as String() makes them (an
 // undefined one empty, as join does), with sep between them.
 Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
     return call;
   }
   if (!call->args.empty()) {
-    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
   }
   const Type *tuple = member->object->type;
   for (size_t i = 0; i < tuple->fields().size(); ++i) {
@@ -36,10 +37,10 @@ Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
         element->isUndefined()) {
       continue;
     }
-    sema_.diags_.error(member->loc(), "'join' turns each element into a string, and element " +
-                                    std::to_string(i) + " of '" + tuple->name() + "' is '" +
-                                    element->name() +
-                                    "', which cannot be one; build the text from the elements");
+    checker_.diags_.error(
+        member->loc(), "'join' turns each element into a string, and element " + std::to_string(i) +
+                           " of '" + tuple->name() + "' is '" + element->name() +
+                           "', which cannot be one; build the text from the elements");
 
     return call;
   }
@@ -65,17 +66,18 @@ const Type *TupleChecker::tupleElement(const Type *tuple) {
 Expr *TupleChecker::checkTupleMember(MemberExpr *member) {
   const Type *type = member->object->type;
   if (member->name != "length") {
-    sema_.diags_.error(member->loc(),
-                 "property '" + member->name + "' does not exist on type '" + type->name() + "'");
+    checker_.diags_.error(member->loc(), "property '" + member->name +
+                                             "' does not exist on type '" + type->name() + "'");
     member->type = Type::error();
     return member;
   }
-  auto *length = sema_.ctx_.make<IntLitExpr>(member->loc(), type->fields().size());
+  auto *length = checker_.ctx_.make<IntLitExpr>(member->loc(), type->fields().size());
   length->type = Type::intTy();
   if (isa<NameExpr>(member->object)) {
     return length;
   }
-  auto *seq = sema_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, length});
+  auto *seq =
+      checker_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, length});
   seq->type = Type::intTy();
 
   return seq;
@@ -93,23 +95,23 @@ Expr *TupleChecker::checkTupleMethod(CallExpr *call, MemberExpr *member) {
     return checkTupleJoin(call, member);
   }
   if (llvm::is_contained(resizing, name)) {
-    sema_.diags_.error(member->loc(),
-                 "a tuple has a fixed length, and '" + name +
-                     "' would change it; to change the length, copy it into an array: '[..." +
-                     text + "]'");
+    checker_.diags_.error(
+        member->loc(), "a tuple has a fixed length, and '" + name +
+                           "' would change it; to change the length, copy it into an array: '[..." +
+                           text + "]'");
   } else if (tupleElement(type)) {
-    sema_.diags_.error(member->loc(),
-                 "'" + name +
-                     "' is not supported on tuples; copy the tuple into an array first: '[..." +
-                     text + "]." + name + "(...)'");
+    checker_.diags_.error(
+        member->loc(),
+        "'" + name + "' is not supported on tuples; copy the tuple into an array first: '[..." +
+            text + "]." + name + "(...)'");
   } else {
-    sema_.diags_.error(member->loc(),
-                 "'" + name +
-                     "' is not supported on tuples; destructure it instead, e.g. 'const [a, b] = " +
-                     text + "'");
+    checker_.diags_.error(
+        member->loc(),
+        "'" + name + "' is not supported on tuples; destructure it instead, e.g. 'const [a, b] = " +
+            text + "'");
   }
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
   call->type = Type::error();
 
@@ -124,22 +126,24 @@ Expr *TupleChecker::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
       llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
   if (spread != lit->elements.end() || lit->elements.size() != fields.size()) {
     if (spread != lit->elements.end()) {
-      sema_.diags_.error(spread->expr->loc(), "a tuple cannot take spread values: type '" +
-                                            tuple->name() +
-                                            "' has a fixed length; write each element");
+      checker_.diags_.error(spread->expr->loc(), "a tuple cannot take spread values: type '" +
+                                                     tuple->name() +
+                                                     "' has a fixed length; write each element");
     } else {
-      sema_.diags_.error(lit->loc(), "type '" + tuple->name() + "' has " + std::to_string(fields.size()) +
-                                   " elements, and this literal has " +
-                                   std::to_string(lit->elements.size()));
+      checker_.diags_.error(lit->loc(), "type '" + tuple->name() + "' has " +
+                                            std::to_string(fields.size()) +
+                                            " elements, and this literal has " +
+                                            std::to_string(lit->elements.size()));
     }
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = sema_.exprChecker().checkExpr(e.expr);
+      e.expr = checker_.exprChecker().checkExpr(e.expr);
     }
     return lit;
   }
   for (size_t i = 0; i < fields.size(); ++i) {
     Expr *&e = lit->elements[i].expr;
-    e = sema_.typeRelations().coerce(sema_.exprChecker().checkExpr(e, fields[i].type), fields[i].type, "element " + std::to_string(i));
+    e = checker_.typeRelations().coerce(checker_.exprChecker().checkExpr(e, fields[i].type),
+                                        fields[i].type, "element " + std::to_string(i));
   }
   lit->type = tuple;
 

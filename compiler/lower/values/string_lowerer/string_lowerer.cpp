@@ -1,12 +1,12 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
-#include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
-#include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
+#include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -14,10 +14,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -68,46 +68,52 @@ void collectConcat(Expr *expr, std::vector<Expr *> &parts) {
 
 } // namespace
 
-StringLowerer::StringLowerer(CodeGen &codegen) : codegen_(codegen) {}
+StringLowerer::StringLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Constant *StringLowerer::utf8Constant(llvm::StringRef text) {
   auto [it, inserted] = utf8Constants_.try_emplace(text, nullptr);
   if (inserted) {
-    it->second = codegen_.builder_.CreateGlobalString(text, ".msg", 0, codegen_.module_.get());
+    it->second = lowering_.builder_.CreateGlobalString(text, ".msg", 0, lowering_.module_.get());
   }
 
   return it->second;
 }
 
-llvm::Value *StringLowerer::stringObj(llvm::Value *str) { return codegen_.builder_.CreateExtractValue(str, 0); }
+llvm::Value *StringLowerer::stringObj(llvm::Value *str) {
+  return lowering_.builder_.CreateExtractValue(str, 0);
+}
 
-llvm::Value *StringLowerer::stringMeta(llvm::Value *str) { return codegen_.builder_.CreateExtractValue(str, 1); }
+llvm::Value *StringLowerer::stringMeta(llvm::Value *str) {
+  return lowering_.builder_.CreateExtractValue(str, 1);
+}
 
 llvm::Value *StringLowerer::stringLength(llvm::Value *str) {
-  return codegen_.builder_.CreateAnd(stringMeta(str), codegen_.builder_.getInt64(kStrLengthMask), "length");
+  return lowering_.builder_.CreateAnd(stringMeta(str), lowering_.builder_.getInt64(kStrLengthMask),
+                                      "length");
 }
 
 llvm::Value *StringLowerer::callReturningString(llvm::FunctionCallee fn,
-                                          llvm::ArrayRef<llvm::Value *> args) {
-  llvm::AllocaInst *out = codegen_.functionFrame().createStackSlot(codegen_.strTy_, "str.out");
+                                                llvm::ArrayRef<llvm::Value *> args) {
+  llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "str.out");
   std::vector<llvm::Value *> all{out};
   all.insert(all.end(), args.begin(), args.end());
-  codegen_.builder_.CreateCall(fn, all);
+  lowering_.builder_.CreateCall(fn, all);
 
-  return codegen_.builder_.CreateLoad(codegen_.strTy_, out);
+  return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
 }
 
-llvm::Value *StringLowerer::concatOperands(llvm::ArrayRef<CodeGen::Operand> operands) {
-  auto *arrayTy = llvm::ArrayType::get(codegen_.strTy_, operands.size());
-  llvm::AllocaInst *array = codegen_.functionFrame().createStackSlot(arrayTy, "concat.parts");
+llvm::Value *StringLowerer::concatOperands(llvm::ArrayRef<Lowering::Operand> operands) {
+  auto *arrayTy = llvm::ArrayType::get(lowering_.strTy_, operands.size());
+  llvm::AllocaInst *array = lowering_.functionFrame().createStackSlot(arrayTy, "concat.parts");
   for (size_t i = 0; i < operands.size(); ++i) {
-    codegen_.builder_.CreateStore(operands[i].value, codegen_.builder_.CreateConstInBoundsGEP2_32(
-                                                arrayTy, array, 0, static_cast<unsigned>(i)));
+    lowering_.builder_.CreateStore(
+        operands[i].value,
+        lowering_.builder_.CreateConstInBoundsGEP2_32(arrayTy, array, 0, static_cast<unsigned>(i)));
   }
-  llvm::Value *result =
-      callReturningString(codegen_.rt_.strConcatN, {array, codegen_.builder_.getInt64(operands.size())});
-  for (const CodeGen::Operand &operand : operands) {
-    codegen_.refCounts().dropOperand(operand);
+  llvm::Value *result = callReturningString(lowering_.rt_.strConcatN,
+                                            {array, lowering_.builder_.getInt64(operands.size())});
+  for (const Lowering::Operand &operand : operands) {
+    lowering_.refCounts().dropOperand(operand);
   }
 
   return result;
@@ -124,15 +130,15 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
 
   std::vector<bool> laterThrows(parts.size(), false);
   for (size_t i = parts.size() - 1; i > 0; --i) {
-    laterThrows[i - 1] = laterThrows[i] || codegen_.mayThrow().exprThrows(parts[i]);
+    laterThrows[i - 1] = laterThrows[i] || lowering_.mayThrow().exprThrows(parts[i]);
   }
-  std::vector<CodeGen::Operand> operands;
+  std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i < parts.size(); ++i) {
     operands.push_back(emitConcatPart(parts[i], laterCannotAssign[i]));
-    codegen_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
+    lowering_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
   }
-  for (CodeGen::Operand &operand : operands) {
-    codegen_.throwLowerer().takeOperand(operand);
+  for (Lowering::Operand &operand : operands) {
+    lowering_.throwLowerer().takeOperand(operand);
   }
 
   return concatOperands(operands);
@@ -141,19 +147,22 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
 // A part of a concatenation. A number converted to a string goes to the
 // runtime as it is, which writes its digits straight into the result instead
 // of making a string for them first.
-CodeGen::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
+Lowering::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
   auto *conv = dyn_cast<CastExpr>(expr);
   const Type *from = conv && conv->isImplicit() ? conv->operand->type : nullptr;
   if (!from || !(from->isInteger() || from->isFloat())) {
-    return codegen_.refCounts().emitOperand(expr, canBorrow);
+    return lowering_.refCounts().emitOperand(expr, canBorrow);
   }
-  llvm::Value *value = codegen_.exprLowerer().emitExpr(conv->operand);
-  llvm::Value *bits = from->isFloat() ? codegen_.builder_.CreateBitCast(value, codegen_.builder_.getInt64Ty())
-                                      : codegen_.builder_.CreateSExt(value, codegen_.builder_.getInt64Ty());
-  llvm::Value *part = llvm::UndefValue::get(codegen_.strTy_);
-  part = codegen_.builder_.CreateInsertValue(part, codegen_.builder_.CreateIntToPtr(bits, codegen_.builder_.getPtrTy()), 0);
-  part = codegen_.builder_.CreateInsertValue(
-      part, codegen_.builder_.getInt64(kNumberPart | (from->isFloat() ? kNumberDouble : kNumberInt)), 1);
+  llvm::Value *value = lowering_.exprLowerer().emitExpr(conv->operand);
+  llvm::Value *bits = from->isFloat()
+                          ? lowering_.builder_.CreateBitCast(value, lowering_.builder_.getInt64Ty())
+                          : lowering_.builder_.CreateSExt(value, lowering_.builder_.getInt64Ty());
+  llvm::Value *part = llvm::UndefValue::get(lowering_.strTy_);
+  part = lowering_.builder_.CreateInsertValue(
+      part, lowering_.builder_.CreateIntToPtr(bits, lowering_.builder_.getPtrTy()), 0);
+  part = lowering_.builder_.CreateInsertValue(
+      part,
+      lowering_.builder_.getInt64(kNumberPart | (from->isFloat() ? kNumberDouble : kNumberInt)), 1);
 
   return {part, /*owned=*/false, Type::string()};
 }
@@ -162,29 +171,30 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
   size_t count = tmpl->exprs.size();
   std::vector<bool> laterCannotAssign(count, true);
   for (size_t i = count; i > 1; --i) {
-    laterCannotAssign[i - 2] = laterCannotAssign[i - 1] && AssignLowerer::cannotAssign(tmpl->exprs[i - 1]);
+    laterCannotAssign[i - 2] =
+        laterCannotAssign[i - 1] && AssignLowerer::cannotAssign(tmpl->exprs[i - 1]);
   }
 
   // `${x}` alone is just x as a string.
   if (count == 1 && tmpl->quasis[0].empty() && tmpl->quasis[1].empty()) {
-    return codegen_.exprLowerer().emitExpr(tmpl->exprs[0]);
+    return lowering_.exprLowerer().emitExpr(tmpl->exprs[0]);
   }
   std::vector<bool> laterThrows(count, false);
   for (size_t i = count; i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || codegen_.mayThrow().exprThrows(tmpl->exprs[i - 1]);
+    laterThrows[i - 2] = laterThrows[i - 1] || lowering_.mayThrow().exprThrows(tmpl->exprs[i - 1]);
   }
-  std::vector<CodeGen::Operand> operands;
+  std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i <= count; ++i) {
     if (!tmpl->quasis[i].empty()) {
       operands.push_back({stringLiteral(tmpl->quasis[i]), false, Type::string()});
     }
     if (i < count) {
       operands.push_back(emitConcatPart(tmpl->exprs[i], laterCannotAssign[i]));
-      codegen_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
+      lowering_.throwLowerer().holdOperand(operands.back(), laterThrows[i]);
     }
   }
-  for (CodeGen::Operand &operand : operands) {
-    codegen_.throwLowerer().takeOperand(operand);
+  for (Lowering::Operand &operand : operands) {
+    lowering_.throwLowerer().takeOperand(operand);
   }
   if (operands.empty()) {
     return stringLiteral(u"");
@@ -197,61 +207,68 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
 }
 
 llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
-  CodeGen::Operand lhs = codegen_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
-  codegen_.throwLowerer().holdOperand(lhs, codegen_.mayThrow().exprThrows(bin->rhs));
-  CodeGen::Operand rhs = codegen_.refCounts().emitOperand(bin->rhs, /*canBorrow=*/true);
-  codegen_.throwLowerer().takeOperand(lhs);
+  Lowering::Operand lhs =
+      lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
+  lowering_.throwLowerer().holdOperand(lhs, lowering_.mayThrow().exprThrows(bin->rhs));
+  Lowering::Operand rhs = lowering_.refCounts().emitOperand(bin->rhs, /*canBorrow=*/true);
+  lowering_.throwLowerer().takeOperand(lhs);
   llvm::Value *args[] = {stringObj(lhs.value), stringMeta(lhs.value), stringObj(rhs.value),
                          stringMeta(rhs.value)};
-  llvm::Value *zero = codegen_.builder_.getInt32(0);
+  llvm::Value *zero = lowering_.builder_.getInt32(0);
   llvm::Value *result;
   switch (bin->op) {
   case BinaryOp::Eq:
-    result = codegen_.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string());
+    result = lowering_.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string());
     break;
   case BinaryOp::Ne:
-    result = codegen_.builder_.CreateNot(codegen_.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string()));
+    result = lowering_.builder_.CreateNot(
+        lowering_.equalityLowerer().emitValuesEqual(lhs.value, rhs.value, Type::string()));
     break;
   case BinaryOp::Lt:
-    result = codegen_.builder_.CreateICmpSLT(codegen_.builder_.CreateCall(codegen_.rt_.strCompare, args), zero);
+    result = lowering_.builder_.CreateICmpSLT(
+        lowering_.builder_.CreateCall(lowering_.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Le:
-    result = codegen_.builder_.CreateICmpSLE(codegen_.builder_.CreateCall(codegen_.rt_.strCompare, args), zero);
+    result = lowering_.builder_.CreateICmpSLE(
+        lowering_.builder_.CreateCall(lowering_.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Gt:
-    result = codegen_.builder_.CreateICmpSGT(codegen_.builder_.CreateCall(codegen_.rt_.strCompare, args), zero);
+    result = lowering_.builder_.CreateICmpSGT(
+        lowering_.builder_.CreateCall(lowering_.rt_.strCompare, args), zero);
     break;
   case BinaryOp::Ge:
-    result = codegen_.builder_.CreateICmpSGE(codegen_.builder_.CreateCall(codegen_.rt_.strCompare, args), zero);
+    result = lowering_.builder_.CreateICmpSGE(
+        lowering_.builder_.CreateCall(lowering_.rt_.strCompare, args), zero);
     break;
   default:
     llvm_unreachable("not a string comparison");
   }
-  codegen_.refCounts().dropOperand(lhs);
-  codegen_.refCounts().dropOperand(rhs);
+  lowering_.refCounts().dropOperand(lhs);
+  lowering_.refCounts().dropOperand(rhs);
 
   return result;
 }
 
-// `s[i]`: a string of one code unit; `undefined` out of range unless Sema
+// `s[i]`: a string of one code unit; `undefined` out of range unless Checker
 // proved the index in range.
 llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
-  CodeGen::Operand object = codegen_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
-  codegen_.throwLowerer().holdOperand(object, codegen_.mayThrow().exprThrows(index->index));
-  llvm::Value *position = codegen_.exprLowerer().emitExpr(index->index);
-  codegen_.throwLowerer().takeOperand(object);
+  Lowering::Operand object =
+      lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
+  lowering_.throwLowerer().holdOperand(object, lowering_.mayThrow().exprThrows(index->index));
+  llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
+  lowering_.throwLowerer().takeOperand(object);
   auto read = [&] {
-    return callReturningString(codegen_.rt_.strCharAt,
+    return callReturningString(lowering_.rt_.strCharAt,
                                {stringObj(object.value), stringMeta(object.value), position});
   };
   llvm::Value *result;
   if (!index->mayBeOutOfRange) {
     result = read();
   } else {
-    result = codegen_.arrayLowerer().emitCheckedRead(codegen_.builder_.CreateICmpULT(position, stringLength(object.value)),
-                             index->type, read);
+    result = lowering_.arrayLowerer().emitCheckedRead(
+        lowering_.builder_.CreateICmpULT(position, stringLength(object.value)), index->type, read);
   }
-  codegen_.refCounts().dropOperand(object);
+  lowering_.refCounts().dropOperand(object);
 
   return result;
 }
@@ -269,45 +286,49 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
   bool ascii = llvm::all_of(text, [](char16_t c) { return c < 0x80; });
   llvm::Constant *value;
   if (text.empty()) {
-    value = llvm::ConstantStruct::get(codegen_.strTy_, {llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()),
-                                               codegen_.builder_.getInt64(kStrAscii)});
+    value = llvm::ConstantStruct::get(
+        lowering_.strTy_, {llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+                           lowering_.builder_.getInt64(kStrAscii)});
   } else if (!twoByte && text.size() <= kInlineMax) {
     // The first code unit goes to the lowest address, zeros after the last.
-    bool little = codegen_.module_->getDataLayout().isLittleEndian();
+    bool little = lowering_.module_->getDataLayout().isLittleEndian();
     uint64_t bits = 0;
     for (size_t i = 0; i < text.size(); ++i) {
       bits |= uint64_t(static_cast<uint8_t>(text[i])) << (8 * (little ? i : 7 - i));
     }
     uint64_t meta = text.size() | kStrRope | (ascii ? kStrAscii : 0);
     value = llvm::ConstantStruct::get(
-        codegen_.strTy_, {llvm::ConstantExpr::getIntToPtr(codegen_.builder_.getInt64(bits), codegen_.builder_.getPtrTy()),
-                 codegen_.builder_.getInt64(meta)});
+        lowering_.strTy_, {llvm::ConstantExpr::getIntToPtr(lowering_.builder_.getInt64(bits),
+                                                           lowering_.builder_.getPtrTy()),
+                           lowering_.builder_.getInt64(meta)});
   } else {
     llvm::Constant *data;
     if (twoByte) {
       std::vector<uint16_t> units(text.begin(), text.end());
-      data = llvm::ConstantDataArray::get(codegen_.ctx_, units);
+      data = llvm::ConstantDataArray::get(lowering_.ctx_, units);
     } else {
       std::vector<uint8_t> units;
       for (char16_t c : text) {
         units.push_back(static_cast<uint8_t>(c));
       }
-      data = llvm::ConstantDataArray::get(codegen_.ctx_, units);
+      data = llvm::ConstantDataArray::get(lowering_.ctx_, units);
     }
-    llvm::Type *i32 = codegen_.builder_.getInt32Ty();
-    auto *layout =
-        llvm::StructType::get(codegen_.ctx_, {codegen_.builder_.getInt64Ty(), i32, i32, i32, i32, data->getType()});
+    llvm::Type *i32 = lowering_.builder_.getInt32Ty();
+    auto *layout = llvm::StructType::get(
+        lowering_.ctx_, {lowering_.builder_.getInt64Ty(), i32, i32, i32, i32, data->getType()});
     auto length = static_cast<uint32_t>(text.size());
     llvm::Constant *init = llvm::ConstantStruct::get(
-        layout, {codegen_.builder_.getInt64(kLiteralRefCount),
-                 codegen_.builder_.getInt32(twoByte ? kKindBuffer2 : kKindBuffer1), codegen_.builder_.getInt32(0),
-                 codegen_.builder_.getInt32(length), codegen_.builder_.getInt32(length), data});
-    auto *global = new llvm::GlobalVariable(*codegen_.module_, layout, /*isConstant=*/true,
+        layout, {lowering_.builder_.getInt64(kLiteralRefCount),
+                 lowering_.builder_.getInt32(twoByte ? kKindBuffer2 : kKindBuffer1),
+                 lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(length),
+                 lowering_.builder_.getInt32(length), data});
+    auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, /*isConstant=*/true,
                                             llvm::GlobalValue::PrivateLinkage, init, ".str");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     global->setAlignment(llvm::Align(8));
     uint64_t meta = length | (twoByte ? kStrTwoByte : 0) | (ascii ? kStrAscii : 0);
-    value = llvm::ConstantStruct::get(codegen_.strTy_, {global, codegen_.builder_.getInt64(meta)});
+    value =
+        llvm::ConstantStruct::get(lowering_.strTy_, {global, lowering_.builder_.getInt64(meta)});
   }
   literals_.emplace(text, value);
 

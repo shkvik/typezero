@@ -32,7 +32,9 @@ static void *re_alloc(size_t size) {
 }
 static void re_dealloc(void *p) { free(p); }
 #else
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/alloc/alloc.h"
+#include <stddef.h>
+#include <stdint.h>
 static void *re_alloc(size_t size) { return tz_alloc(size ? size : 1); }
 static void re_dealloc(void *p) { tz_free(p); }
 #endif

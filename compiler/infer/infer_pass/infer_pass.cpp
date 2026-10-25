@@ -1,5 +1,5 @@
 #include "compiler/infer/infer_pass/infer_pass.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/declare/import_binder/import_binder.h"
 #include "compiler/infer/call_cycles/call_cycles.h"
 #include "compiler/program/program/program.h"
@@ -16,9 +16,11 @@ using llvm::isa;
 namespace tz {
 
 Errors InferPass::run(Program &program) const {
-  Sema &sema = *program.checker;
-  sema.callCycles().findCycles(sema.declaredFunctions_,
-             [&](FunctionDecl *fn, llvm::StringRef name) { return sema.importBinder().cycleCallee(fn, name); });
+  Checker &checker = *program.checker;
+  checker.callCycles().findCycles(checker.declaredFunctions_,
+                                  [&](FunctionDecl *fn, llvm::StringRef name) {
+                                    return checker.importBinder().cycleCallee(fn, name);
+                                  });
 
   return program.diags->take();
 }

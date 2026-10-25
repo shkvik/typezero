@@ -1,27 +1,27 @@
 #include "compiler/check/classes/inherit_checker/inherit_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/check/classes/class_bases/class_bases.h"
+#include "compiler/check/classes/class_check_helpers/class_check_helpers.h"
 #include "compiler/check/classes/class_checker/class_checker.h"
+#include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/classes/class_member_checker/class_member_checker.h"
 #include "compiler/check/classes/overload_resolver/overload_resolver.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
-#include "compiler/check/classes/class_links/class_links.h"
-#include "compiler/whole_program/wide_writes/wide_writes.h"
-#include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
-#include "compiler/check/classes/class_check_helpers/class_check_helpers.h"
+#include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/whole_program/flows/flows.h"
+#include "compiler/whole_program/wide_writes/wide_writes.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -63,7 +63,7 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
 
 } // namespace
 
-InheritChecker::InheritChecker(Sema &sema) : sema_(sema) {}
+InheritChecker::InheritChecker(Checker &checker) : checker_(checker) {}
 
 void InheritChecker::checkAbstract(ClassDecl *cls) {
   if (cls->literal) {
@@ -71,11 +71,11 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
   }
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     if (fn->isAbstract && !cls->isAbstract) {
-      sema_.diags_.error(fn->loc(), "abstract method '" + fn->name + "' needs an abstract class: '" +
-                                  cls->name +
-                                  "' can be created with 'new', and the method would "
-                                  "have no body; write 'abstract class " +
-                                  cls->name + "'");
+      checker_.diags_.error(fn->loc(), "abstract method '" + fn->name +
+                                           "' needs an abstract class: '" + cls->name +
+                                           "' can be created with 'new', and the method would "
+                                           "have no body; write 'abstract class " +
+                                           cls->name + "'");
     }
   }
   if (cls->isAbstract) {
@@ -103,9 +103,10 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
     }
   }
   for (FunctionDecl *fn : missing) {
-    sema_.diags_.error(cls->loc(), "class '" + cls->name + "' does not implement the abstract method " +
-                                 variantText(fn) + " of '" + fn->cls->name +
-                                 "'; implement it, or make '" + cls->name + "' abstract too");
+    checker_.diags_.error(cls->loc(),
+                          "class '" + cls->name + "' does not implement the abstract method " +
+                              variantText(fn) + " of '" + fn->cls->name +
+                              "'; implement it, or make '" + cls->name + "' abstract too");
   }
 }
 
@@ -131,38 +132,40 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
         // the whole program (sema_widen.cpp).
         llvm::SMLoc loc = cls->field(member.name) ? field->loc : cls->loc();
         if (actual->type != member.type && !WideWrites::sameReference(actual->type, member.type)) {
-          sema_.diags_.error(loc, prefix + ", whose field '" + member.name + "' is '" +
-                                member.type->name() + "', but in '" + cls->name + "' it is '" +
-                                actual->type->name() +
-                                "'; the types must be the same, or objects "
-                                "of a type down the chain of the interface's, such as 'Dog' for "
-                                "'Animal'");
+          checker_.diags_.error(
+              loc, prefix + ", whose field '" + member.name + "' is '" + member.type->name() +
+                       "', but in '" + cls->name + "' it is '" + actual->type->name() +
+                       "'; the types must be the same, or objects "
+                       "of a type down the chain of the interface's, such as 'Dog' for "
+                       "'Animal'");
         }
         continue;
       }
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member.name, /*isStatic=*/false);
+      std::vector<FunctionDecl *> methods =
+          ClassDeclarer::methodsNamed(cls, member.name, /*isStatic=*/false);
       if (methods.empty()) {
         std::string type = member.type->isOptional() ? member.type->inner()->name().str()
                                                      : member.type->name().str();
-        sema_.diags_.error(cls->loc(), prefix + ", but has no '" + member.name + "'; declare it, e.g. '" +
-                                     member.name + (member.type->isOptional() ? "?" : "") + ": " +
-                                     type + "'");
+        checker_.diags_.error(cls->loc(), prefix + ", but has no '" + member.name +
+                                              "'; declare it, e.g. '" + member.name +
+                                              (member.type->isOptional() ? "?" : "") + ": " + type +
+                                              "'");
         continue;
       }
       if (!member.type->isFunction()) {
-        sema_.diags_.error(methods[0]->loc(), "'" + member.name + "' is a field of type '" +
-                                            member.type->name() + "' in '" + iface->name() +
-                                            "', which '" + cls->name +
-                                            "' implements, so it cannot be a method");
+        checker_.diags_.error(methods[0]->loc(), "'" + member.name + "' is a field of type '" +
+                                                     member.type->name() + "' in '" +
+                                                     iface->name() + "', which '" + cls->name +
+                                                     "' implements, so it cannot be a method");
         continue;
       }
       if (!member.readonly && llvm::none_of(methods, isArrowMethod)) {
-        sema_.diags_.error(methods[0]->loc(), "'" + member.name + "' is a field in '" + iface->name() +
-                                            "' that code may replace, so in '" + cls->name +
-                                            "', which implements it, it must be a field too: '" +
-                                            member.name + " = (...) => ...'; or declare it in '" +
-                                            iface->name() + "' as a method, '" + member.name +
-                                            "(...): ...'");
+        checker_.diags_.error(methods[0]->loc(),
+                              "'" + member.name + "' is a field in '" + iface->name() +
+                                  "' that code may replace, so in '" + cls->name +
+                                  "', which implements it, it must be a field too: '" +
+                                  member.name + " = (...) => ...'; or declare it in '" +
+                                  iface->name() + "' as a method, '" + member.name + "(...): ...'");
         continue;
       }
       bool found = false;
@@ -171,40 +174,42 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
           continue;
         }
         found = true;
-        const Type *ret = sema_.returnInferrer().returnType(fn->sym);
+        const Type *ret = checker_.returnInferrer().returnType(fn->sym);
         if (ret && !ret->isError() && ret != member.type->ret()) {
-          sema_.diags_.error(fn->loc(), "'" + fn->name + "' returns '" + ret->name() + "', and '" +
-                                      iface->name() + "', which '" + cls->name +
-                                      "' implements, says it returns '" +
-                                      member.type->ret()->name() + "'");
+          checker_.diags_.error(fn->loc(), "'" + fn->name + "' returns '" + ret->name() +
+                                               "', and '" + iface->name() + "', which '" +
+                                               cls->name + "' implements, says it returns '" +
+                                               member.type->ret()->name() + "'");
         }
       }
       if (!found) {
-        sema_.diags_.error(methods[0]->loc(), prefix + ", whose '" + member.name + "' is '" +
-                                            member.type->name() + "', but '" + cls->name + "." +
-                                            member.name +
-                                            "' takes other parameters: " + variantList(methods));
+        checker_.diags_.error(methods[0]->loc(),
+                              prefix + ", whose '" + member.name + "' is '" + member.type->name() +
+                                  "', but '" + cls->name + "." + member.name +
+                                  "' takes other parameters: " + variantList(methods));
       }
     }
     // Each signature of a method with several, by a variant of its own.
     for (const Overload &overload : iface->overloads()) {
-      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
+      std::vector<FunctionDecl *> methods =
+          ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
       for (const Type *signature : overload.signatures) {
         auto fn = llvm::find_if(methods, [&](const FunctionDecl *m) {
           return m->sym && takesParams(signature, m->sym);
         });
         if (fn == methods.end()) {
-          sema_.diags_.error(cls->loc(), prefix + ", but has no variant of '" + overload.name +
-                                       "' for its signature '" + signature->name() +
-                                       "'; each signature needs a variant with these parameters");
+          checker_.diags_.error(cls->loc(),
+                                prefix + ", but has no variant of '" + overload.name +
+                                    "' for its signature '" + signature->name() +
+                                    "'; each signature needs a variant with these parameters");
           continue;
         }
-        const Type *ret = sema_.returnInferrer().returnType((*fn)->sym);
+        const Type *ret = checker_.returnInferrer().returnType((*fn)->sym);
         if (ret && !ret->isError() && ret != signature->ret()) {
-          sema_.diags_.error((*fn)->loc(), "'" + overload.name + "' returns '" + ret->name() +
-                                         "', and '" + iface->name() + "', which '" + cls->name +
-                                         "' implements, says it returns '" +
-                                         signature->ret()->name() + "'");
+          checker_.diags_.error((*fn)->loc(), "'" + overload.name + "' returns '" + ret->name() +
+                                                  "', and '" + iface->name() + "', which '" +
+                                                  cls->name + "' implements, says it returns '" +
+                                                  signature->ret()->name() + "'");
         }
       }
     }
@@ -221,65 +226,71 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   call->superCall = true;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  FunctionDecl *ctor = sema_.currentDecl();
+  FunctionDecl *ctor = checker_.currentDecl();
   if (!ctor || !ctor->isConstructor || !ctor->cls) {
-    sema_.diags_.error(call->loc(), "'super(...)' can be called only in the constructor of a class that "
-                              "extends another");
+    checker_.diags_.error(call->loc(),
+                          "'super(...)' can be called only in the constructor of a class that "
+                          "extends another");
     checkArgsLoosely();
     return call;
   }
   ClassDecl *cls = ctor->cls;
   if (!cls->parent) {
     if (!cls->base) { // with an error in `extends`, it was reported there
-      sema_.diags_.error(call->loc(), "'super(...)' calls the constructor of the class that '" +
-                                    cls->name + "' extends, and it extends none");
+      checker_.diags_.error(call->loc(), "'super(...)' calls the constructor of the class that '" +
+                                             cls->name + "' extends, and it extends none");
     }
     checkArgsLoosely();
     return call;
   }
-  if (!sema_.rootSupers_.contains(call)) {
-    sema_.diags_.error(call->loc(), "'super(...)' must be a statement of its own in the body of the "
-                              "constructor, not inside a block, a condition, a loop or another "
-                              "expression: the fields are set right after it");
+  if (!checker_.rootSupers_.contains(call)) {
+    checker_.diags_.error(call->loc(),
+                          "'super(...)' must be a statement of its own in the body of the "
+                          "constructor, not inside a block, a condition, a loop or another "
+                          "expression: the fields are set right after it");
     checkArgsLoosely();
     return call;
   }
-  if (!sema_.flow_.beforeSuper) {
-    sema_.diags_.error(call->loc(), "'super(...)' is called a second time; the constructor of '" +
-                                  cls->parent->name + "' runs once");
+  if (!checker_.flow_.beforeSuper) {
+    checker_.diags_.error(call->loc(),
+                          "'super(...)' is called a second time; the constructor of '" +
+                              cls->parent->name + "' runs once");
     checkArgsLoosely();
     return call;
   }
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls->parent);
   if (ctors.empty()) {
     if (!call->args.empty()) {
-      sema_.diags_.error(call->loc(), "class '" + cls->parent->name +
-                                    "' has no constructor, so "
-                                    "'super()' takes no arguments");
+      checker_.diags_.error(call->loc(), "class '" + cls->parent->name +
+                                             "' has no constructor, so "
+                                             "'super()' takes no arguments");
     }
     checkArgsLoosely();
   } else {
-    sema_.classMemberChecker().checkAccess(ctors[0]->cls, ctors[0]->access, "constructor", call->loc());
+    checker_.classMemberChecker().checkAccess(ctors[0]->cls, ctors[0]->access, "constructor",
+                                              call->loc());
     bool checked = false;
-    if (FuncSymbol *sym = sema_.overloadResolver().chooseVariant(ctors, call->args, call->spread, call->loc(), checked)) {
-      sema_.returnInferrer().resolveParams(sym);
+    if (FuncSymbol *sym = checker_.overloadResolver().chooseVariant(ctors, call->args, call->spread,
+                                                                    call->loc(), checked)) {
+      checker_.returnInferrer().resolveParams(sym);
       call->method = sym;
       std::vector<bool> given(checked ? call->args.size() : 0, true);
-      sema_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest, call->loc(), &given);
+      checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                                call->loc(), &given);
     }
   }
   // The fields up the chain are set now, and so are those with initializers.
-  sema_.flow_.beforeSuper = false;
+  checker_.flow_.beforeSuper = false;
   for (const ClassField &f : cls->fields) {
     if (!f.isStatic && ((f.init && !f.method) || f.redeclared) &&
-        !llvm::is_contained(sema_.flow_.setFields, f.name)) {
-      sema_.flow_.setFields.push_back(f.name);
+        !llvm::is_contained(checker_.flow_.setFields, f.name)) {
+      checker_.flow_.setFields.push_back(f.name);
     }
   }
-  sema_.flowChecker().calledFunction(); // the constructors run
+  checker_.flowChecker().calledFunction(); // the constructors run
 
   return call;
 }
@@ -291,12 +302,12 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   member->type = Type::error();
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
   // An arrow sees the `super` of the method around it.
   FunctionDecl *method = nullptr;
-  for (FunctionDecl *fn : llvm::reverse(sema_.functions_)) {
+  for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
     if (fn->isArrow) {
       continue;
     }
@@ -307,82 +318,91 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   }
   if (!method || !method->cls->parent) {
     if (!method || !method->cls->base) {
-      sema_.diags_.error(member->object->loc(), "'super' is the class that the class of the method "
-                                          "extends; it exists in the methods of a class that "
-                                          "extends another");
+      checker_.diags_.error(member->object->loc(),
+                            "'super' is the class that the class of the method "
+                            "extends; it exists in the methods of a class that "
+                            "extends another");
     }
     checkArgsLoosely();
     return call;
   }
   ClassDecl *parent = method->cls->parent;
   // The object is `this`, with its rules while the constructor sets fields.
-  auto *self = sema_.ctx_.make<NameExpr>(member->object->loc(), "this");
-  sema_.thisMember_ = member->name;
-  member->object = sema_.classChecker().checkThis(self);
-  sema_.thisMember_ = {};
+  auto *self = checker_.ctx_.make<NameExpr>(member->object->loc(), "this");
+  checker_.thisMember_ = member->name;
+  member->object = checker_.classChecker().checkThis(self);
+  checker_.thisMember_ = {};
   if (member->object->type->isError()) {
     checkArgsLoosely();
     return call;
   }
-  if (sema_.classChecker().isInitThis(member->object) && !sema_.flow_.beforeSuper && !sema_.classChecker().thisReady(sema_.flow_)) {
-    sema_.diags_.error(member->loc(),
-                 "'super." + member->name + "()' is called before every field is set: field '" +
-                     sema_.classChecker().firstUnset(sema_.flow_) + "' is not set yet, and the method may read it");
+  if (checker_.classChecker().isInitThis(member->object) && !checker_.flow_.beforeSuper &&
+      !checker_.classChecker().thisReady(checker_.flow_)) {
+    checker_.diags_.error(member->loc(), "'super." + member->name +
+                                             "()' is called before every field is set: field '" +
+                                             checker_.classChecker().firstUnset(checker_.flow_) +
+                                             "' is not set yet, and the method may read it");
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(parent, member->name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods =
+      ClassDeclarer::methodsNamed(parent, member->name, /*isStatic=*/false);
   if (methods.empty()) {
     if (ClassBases::findField(parent, member->name)) {
-      sema_.diags_.error(member->loc(), "'" + member->name + "' is a field of '" + parent->name +
-                                      "'; call the function it holds as 'this." + member->name +
-                                      "(...)'");
+      checker_.diags_.error(member->loc(), "'" + member->name + "' is a field of '" + parent->name +
+                                               "'; call the function it holds as 'this." +
+                                               member->name + "(...)'");
     } else {
-      sema_.diags_.error(member->loc(),
-                   "class '" + parent->name + "' has no method '" + member->name + "'");
+      checker_.diags_.error(member->loc(),
+                            "class '" + parent->name + "' has no method '" + member->name + "'");
     }
     checkArgsLoosely();
     return call;
   }
-  sema_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, member->name, member->loc());
+  checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, member->name,
+                                            member->loc());
   // `super.on(...)` of an emitter, checked against its event map.
-  if (sema_.eventMaps().isEmitterClass(parent)) {
-    if (Expr *checked = sema_.emitterChecker().checkEmitterCall(call, member, parent, /*super=*/true)) {
+  if (checker_.eventMaps().isEmitterClass(parent)) {
+    if (Expr *checked =
+            checker_.emitterChecker().checkEmitterCall(call, member, parent, /*super=*/true)) {
       return checked;
     }
   }
   bool checked = false;
   std::vector<const Type *> bound;
-  FuncSymbol *sym =
-      sema_.overloadResolver().chooseVariant(methods, call->args, call->spread, member->loc(), checked, &bound);
+  FuncSymbol *sym = checker_.overloadResolver().chooseVariant(methods, call->args, call->spread,
+                                                              member->loc(), checked, &bound);
   if (!sym) {
     return call;
   }
   if (sym->decl->isAbstract) {
-    sema_.diags_.error(member->loc(), "'" + member->name + "' is abstract in '" + sym->decl->cls->name +
-                                    "': it has no body to call");
+    checker_.diags_.error(member->loc(), "'" + member->name + "' is abstract in '" +
+                                             sym->decl->cls->name + "': it has no body to call");
     checkArgsLoosely();
     return call;
   }
-  sema_.returnInferrer().resolveParams(sym);
+  checker_.returnInferrer().resolveParams(sym);
   call->superCall = true;
   // A generic method of the class extended: the copy for these types.
   if (sym->isGeneric() && checked) {
-    return sema_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), /*method=*/true);
+    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
+                                                          /*method=*/true);
   }
   if (sym->isGeneric()) {
-    sema_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), nullptr, member->typeArgs);
+    checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), nullptr,
+                                                member->typeArgs);
     call->method = call->func;
     call->func = nullptr;
     if (call->method) {
-      member->type = sema_.returnInferrer().functionType(call->method);
+      member->type = checker_.returnInferrer().functionType(call->method);
     }
     return call;
   }
   call->method = sym;
-  member->type = sema_.returnInferrer().functionType(sym);
-  call->type = sema_.returnInferrer().returnType(sym);
+  member->type = checker_.returnInferrer().functionType(sym);
+  call->type = checker_.returnInferrer().returnType(sym);
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return sema_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                                   member->loc(), &given);
 }
 
 } // namespace tz

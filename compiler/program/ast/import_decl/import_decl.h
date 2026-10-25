@@ -15,7 +15,7 @@ struct ImportDecl {
   llvm::SMLoc pathLoc;
   Module *from = nullptr; // set by the loader
   // `import fs from "node:fs"` or `import * as fs from "node:fs"` of a
-  // built-in module: errors, which Sema reports with the names the file uses
+  // built-in module: errors, which Checker reports with the names the file uses
   // of it (the parser reports those of the program's files).
   llvm::StringRef whole;
   llvm::SMLoc wholeLoc;

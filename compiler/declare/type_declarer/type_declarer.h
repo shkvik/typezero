@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Type aliases, interfaces and enums.
 class TypeDeclarer {
 public:
-  explicit TypeDeclarer(Sema &sema);
+  explicit TypeDeclarer(Checker &checker);
 
   // Type aliases and enums (sema_decls.cpp). They are visible in the whole
   // block that declares them, so each block declares them before anything
@@ -22,7 +22,7 @@ public:
   Expr *checkEnumIndex(EnumDecl *decl, IndexExpr *index);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

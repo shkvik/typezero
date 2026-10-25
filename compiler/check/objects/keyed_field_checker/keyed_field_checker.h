@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Keys in brackets: o[k] of objects.
 class KeyedFieldChecker {
 public:
-  explicit KeyedFieldChecker(Sema &sema);
+  explicit KeyedFieldChecker(Checker &checker);
 
   // Keys in brackets: the field a constant key names (a string literal, a
   // template without values, an enum member or a constant holding one of
@@ -24,7 +24,7 @@ public:
   static const Type *keyedFieldType(const Type *type, const Type *keyType);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

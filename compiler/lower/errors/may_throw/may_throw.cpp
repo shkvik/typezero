@@ -1,7 +1,7 @@
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "compiler/lower/errors/throw_scanner/throw_scanner.h"
+#include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -11,21 +11,21 @@
 #include <map>
 #include <optional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
 
-MayThrow::MayThrow(CodeGen &codegen) : codegen_(codegen) {}
+MayThrow::MayThrow(Lowering &lowering) : lowering_(lowering) {}
 
 void MayThrow::analyzeThrows(SourceFile &file) {
   for (Stmt *item : file.items) {
     if (auto *cls = dyn_cast<ClassDecl>(item);
         cls && cls->builtin && !cls->parent && cls->name == "Error") {
-      codegen_.errorClass_ = cls;
+      lowering_.errorClass_ = cls;
     }
   }
 
@@ -109,7 +109,7 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     summaries[fn] = std::move(summary);
     // The tail calls of a closure that are jumps, which do not recurse.
     if (fn->isClosure() && !fn->isGenerator && fn->sym && fn->sym->ret) {
-      codegen_.tailCallLowerer().findTailGroups(const_cast<FunctionDecl *>(fn));
+      lowering_.tailCallLowerer().findTailGroups(const_cast<FunctionDecl *>(fn));
     }
   }
 
@@ -119,7 +119,7 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     if (fn->impl) {
       summaries[fn].valueCalls.push_back(fn->impl->type);
       summaries[fn].allValueCalls.push_back(fn->impl->type);
-      codegen_.throwingTypes_.insert(fn->impl->type);
+      lowering_.throwingTypes_.insert(fn->impl->type);
     }
   }
 
@@ -156,14 +156,15 @@ void MayThrow::analyzeThrows(SourceFile &file) {
   }
   // A call through an interface runs the method of a class that implements
   // it (see emitInterfaceCall): such methods are values of the member's type.
-  for (const auto &[iface, info] : codegen_.interfaces_) {
+  for (const auto &[iface, info] : lowering_.interfaces_) {
     for (const Type *implementer : info.implementers) {
       const ClassDecl *cls = implementer->classDecl();
       if (!cls || cls->literal) {
         continue;
       }
       auto implemented = [&](llvm::StringRef name, const Type *fnType) {
-        if (const FunctionDecl *fn = codegen_.inheritLowerer().implementingMethod(cls, name, fnType)) {
+        if (const FunctionDecl *fn =
+                lowering_.inheritLowerer().implementingMethod(cls, name, fnType)) {
           forEachImplementation(fn, [&](const FunctionDecl *m) { valuesOf[fnType].push_back(m); });
         }
       };
@@ -195,7 +196,7 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       }
     };
     for (const auto &[to, site] : summary.allCalls) {
-      if (!site || !codegen_.tailJumps_.contains(site)) {
+      if (!site || !lowering_.tailJumps_.contains(site)) {
         edge(to);
       }
     }
@@ -241,7 +242,7 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       // A generator runs its body when resumed, where the stack is checked
       // by nothing (see README); calling it only makes it.
       if (!functions[member]->isGenerator) {
-        codegen_.recursive_.insert(functions[member]);
+        lowering_.recursive_.insert(functions[member]);
       }
     }
   };
@@ -257,39 +258,42 @@ void MayThrow::analyzeThrows(SourceFile &file) {
   // rejects the promise it gives.
   for (const FunctionDecl *fn : functions) {
     const ThrowSummary &summary = summaries[fn];
-    if ((summary.intrinsic || summary.resumes || codegen_.recursive_.contains(fn)) && !fn->isAsync) {
-      codegen_.throwing_.insert(fn);
+    if ((summary.intrinsic || summary.resumes || lowering_.recursive_.contains(fn)) &&
+        !fn->isAsync) {
+      lowering_.throwing_.insert(fn);
     }
   }
   for (bool changed = true; changed;) {
     changed = false;
     for (const auto &[type, fns] : valuesOf) {
-      if (!codegen_.throwingTypes_.contains(type) &&
-          llvm::any_of(fns, [&](const FunctionDecl *fn) { return codegen_.throwing_.contains(fn); })) {
-        codegen_.throwingTypes_.insert(type);
+      if (!lowering_.throwingTypes_.contains(type) &&
+          llvm::any_of(fns,
+                       [&](const FunctionDecl *fn) { return lowering_.throwing_.contains(fn); })) {
+        lowering_.throwingTypes_.insert(type);
         changed = true;
       }
     }
     for (const auto &[type, toError] : fromThrowables) {
-      if (!toError || codegen_.throwingTypes_.contains(type)) {
+      if (!toError || lowering_.throwingTypes_.contains(type)) {
         continue;
       }
       auto *fe = dyn_cast<FunctionExpr>(toError);
-      bool throws = fe ? codegen_.throwing_.contains(fe->fn) : codegen_.typeThrows(toError->type);
+      bool throws = fe ? lowering_.throwing_.contains(fe->fn) : lowering_.typeThrows(toError->type);
       if (throws) {
-        codegen_.throwingTypes_.insert(type);
+        lowering_.throwingTypes_.insert(type);
         changed = true;
       }
     }
     for (const FunctionDecl *fn : functions) {
-      if (codegen_.throwing_.contains(fn) || fn->isAsync) {
+      if (lowering_.throwing_.contains(fn) || fn->isAsync) {
         continue;
       }
       const ThrowSummary &summary = summaries[fn];
       if (llvm::any_of(summary.calls,
-                       [&](const FunctionDecl *to) { return codegen_.throwing_.contains(to); }) ||
-          llvm::any_of(summary.valueCalls, [&](const Type *type) { return codegen_.typeThrows(type); })) {
-        codegen_.throwing_.insert(fn);
+                       [&](const FunctionDecl *to) { return lowering_.throwing_.contains(to); }) ||
+          llvm::any_of(summary.valueCalls,
+                       [&](const Type *type) { return lowering_.typeThrows(type); })) {
+        lowering_.throwing_.insert(fn);
         changed = true;
       }
     }
@@ -298,18 +302,20 @@ void MayThrow::analyzeThrows(SourceFile &file) {
 
 bool MayThrow::callMayThrow(const FunctionDecl *fn, bool virtualCall) const {
   if (!virtualCall) {
-    return codegen_.mayThrow(fn);
+    return lowering_.mayThrow(fn);
   }
   bool throws = false;
-  forEachImplementation(fn, [&](const FunctionDecl *impl) { throws |= codegen_.mayThrow(impl); });
+  forEachImplementation(fn, [&](const FunctionDecl *impl) { throws |= lowering_.mayThrow(impl); });
 
   return throws;
 }
 
 bool MayThrow::summaryThrows(const ThrowSummary &summary) const {
   return summary.intrinsic || summary.resumes ||
-         llvm::any_of(summary.calls, [&](const FunctionDecl *fn) { return codegen_.mayThrow(fn); }) ||
-         llvm::any_of(summary.valueCalls, [&](const Type *type) { return codegen_.typeThrows(type); });
+         llvm::any_of(summary.calls,
+                      [&](const FunctionDecl *fn) { return lowering_.mayThrow(fn); }) ||
+         llvm::any_of(summary.valueCalls,
+                      [&](const Type *type) { return lowering_.typeThrows(type); });
 }
 
 bool MayThrow::exprThrows(const Expr *expr) {

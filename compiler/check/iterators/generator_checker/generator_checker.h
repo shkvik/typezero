@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Generators: function*, yield, and the types of iterators (docs/iterators.md).
 class GeneratorChecker {
 public:
-  explicit GeneratorChecker(Sema &sema);
+  explicit GeneratorChecker(Checker &checker);
 
   // Generators and iterators (sema_iter.cpp). A generator function returns
   // `Generator<T, R, N>`: declared, or found from its `yield` and `return`
@@ -38,7 +38,7 @@ public:
   const Type *asyncIteratedType(const Type *type);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

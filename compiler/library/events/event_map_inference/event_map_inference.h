@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The event maps inferred from emit(), carried from one round of the check to the next.
 class EventMapInference {
 public:
-  explicit EventMapInference(Sema &sema);
+  explicit EventMapInference(Checker &checker);
 
   // Event maps found from emit() calls (see EventInference). The map of the
   // emitter at `site` ("new main.tz:3:13", "class main.tz:Server"): in a
@@ -21,7 +21,7 @@ public:
   const Type *fromPortable(const EventInference::Portable &p, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   std::map<std::string, const Type *> siteMaps_;
 };
 

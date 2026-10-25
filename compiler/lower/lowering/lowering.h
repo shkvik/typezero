@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/memory/memory_plan/memory_plan.h"
 #include "compiler/parallel/parallel_analysis/parallel_analysis.h"
 #include "compiler/program/ast/ast.h"
 #include "compiler/program/types/types.h"
@@ -121,7 +122,6 @@ class ClassDescriptors;
 class ClassLowerer;
 class ClosureLowerer;
 class EnvLowerer;
-class MemoryAnalysis;
 class GroupLowerer;
 class StoreLowerer;
 class WeakRefLowerer;
@@ -177,9 +177,9 @@ class StreamLowerer;
 class TzModulesLowerer;
 
 class FeatureRegistry;
-class CodeGen {
+class Lowering {
 public:
-  CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout);
+  Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout);
   // Where the files of the program are, for the places in the stacks of
   // errors (file, line and column).
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
@@ -188,10 +188,12 @@ public:
   // runtime, tzrt_mt (see TZ_PARALLEL in runtime/core/tzrt/tzrt.h).
   void setFeatures(const FeatureRegistry *features) { features_ = features; }
   void setParallelPlan(const ParallelPlan *plan);
+  void setMemoryPlan(const MemoryPlan *memory) { memory_ = memory; }
   bool parallel() const { return parallel_; }
   // Before a place where async code touches what keeps node's order, the
   // piece it is in waits for its turn on the thread that runs it ahead.
   void orderAt(llvm::SMLoc loc);
+
 private:
   struct JumpTarget;
   struct TailGroup;
@@ -293,12 +295,12 @@ private:
     std::vector<llvm::BasicBlock *> starts;
   };
   llvm::DenseMap<const Type *, llvm::Function *> unionRetains_, unionReleases_;
-  std::vector<const Type *> subtypes_; // see SourceFile::subtypes
+  std::vector<const Type *> subtypes_;     // see SourceFile::subtypes
   llvm::StructType *jsonPathTy_ = nullptr; // { ptr parent, string key, i64 index }
   // Generators and iterators (codegen_iter.cpp). An iterator is an object of
   // the runtime, { i64 rc, ptr layout }, followed by the frame of an LLVM
   // coroutine that gives its values: a generator function, or one that
-  // CodeGen makes for the iterator of an array or a helper such as map.
+  // Lowering makes for the iterator of an array or a helper such as map.
   //
   // Where values are consumed right where the iterator is made (`for...of`,
   // a spread, toArray...), nothing of that is made: the chain of helpers
@@ -379,7 +381,7 @@ private:
     const Type *type;
   };
   // Async (codegen_async.cpp, docs/async.md). A Promise is an object of the
-  // runtime (TzPromise in runtime/core/tzrt/tzrt.h) with its value after the
+  // runtime (TzPromise in runtime/core/async/async.h) with its value after the
   // header; an async function is a coroutine whose frame follows its promise
   // and the reactor it awaits with.
   struct AsyncState {
@@ -420,38 +422,19 @@ private:
     int kind;
     llvm::Value *d, *integer, *meta;
   };
-  // Objects of this object, array or dictionary type are made as members.
-  bool isCyclic(const Type *type) const { return cyclicTypes_.contains(type); }
-  // The same for the environments of closures (by the key of envLayouts_)
-  // and the boxes of variables of a type.
-  bool isCyclicEnv(const void *key) const { return cyclicEnvs_.contains(key); }
-  bool isCyclicBox(const Type *type) const { return cyclicBoxes_.contains(type); }
-  // Objects of this type may have weak references (WeakRef<T> of it or of a
-  // type up its chain), which their drop forgets.
-  bool isWeakTarget(const Type *type) const { return weakTargets_.contains(type); }
-  // Whether the allocation `site` of `type` makes a member: the type may
-  // form cycles, and what it makes may be stored somewhere (layer 1, see
-  // StoreScanner).
+  // What MemoryPass found (see MemoryPlan).
+  const MemoryPlan &memory() const { return *memory_; }
+  bool isCyclic(const Type *type) const { return memory_->isCyclic(type); }
+  bool isCyclicEnv(const void *key) const { return memory_->isCyclicEnv(key); }
+  bool isCyclicBox(const Type *type) const { return memory_->isCyclicBox(type); }
+  bool isWeakTarget(const Type *type) const { return memory_->isWeakTarget(type); }
   bool makesMember(const Expr *site, const Type *type) const {
-    return isCyclic(type) && !unstoredSites_.contains(site);
+    return memory_->makesMember(site, type);
   }
-  llvm::DenseSet<const Expr *> unstoredSites_;
-  // Whether objects of the static type `type` (an object, array or
-  // dictionary type, or a box or environment) may be members whose slots
-  // need storeIn: refMayBeMember of it.
-  bool ownerMayBeMember(const Type *type);
-  // A global that is never assigned again holds its value for good: the
-  // groups in it are eternal (tz_group_pin_value), and at the end of a
-  // program checked for leaks it lets them go (tz_group_end_value).
-  bool isEternal(const VarSymbol *var) const { return eternals_.contains(var); }
-  llvm::DenseSet<const Type *> cyclicTypes_, cyclicBoxes_, weakTargets_;
-  llvm::DenseSet<const void *> cyclicEnvs_;
-  llvm::DenseSet<const VarSymbol *> eternals_;
-  // Layer 2: the captures of closures (by the key of their environment)
-  // that are not counted, as the closure lives in an object its owner made
-  // and holds alone; and those fields of the owners, by type and name.
-  std::set<std::pair<const void *, const VarSymbol *>> uncounted_;
-  std::set<std::pair<const Type *, std::string>> ownedFields_, backRefFields_;
+  // Whether objects of the static type `type` (an object, array or dictionary type, or a box or
+  // environment) may be members whose slots need storeIn: refMayBeMember of it.
+  bool ownerMayBeMember(const Type *type) const { return memory_->refMayBeMember(type); }
+  bool isEternal(const VarSymbol *var) const { return memory_->isEternal(var); }
   // Debug mode (a program compiled with TZ_CHECK_LEAKS set, as the tests
   // are): the proofs of layers 1 and 2 are checked when the program runs,
   // and large groups are walked (runtime/core/group/group.c).
@@ -475,8 +458,8 @@ private:
   std::vector<std::pair<llvm::Constant *, const Type *>> boxDescriptors_;
   // The slots in main of those that no function uses.
   llvm::DenseSet<llvm::Value *> eternalSlots_;
-  bool hasCycles_ = false; // some type, environment or box is cyclic
   const ParallelPlan *plan_ = nullptr;
+  const MemoryPlan *memory_ = nullptr;
   // The topics of the library, which the calls of built-ins go to (see compiler/library).
   const FeatureRegistry *features_ = nullptr;
   bool parallel_ = false; // runs on the threads of tzrt_mt
@@ -486,13 +469,8 @@ private:
   llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
   llvm::DenseSet<const char *> orderedLocs_;
   llvm::DenseSet<const VarSymbol *> libraryState_; // see addressOf
-  bool anyCyclicObject_ = false;                   // some object or dictionary type is
   llvm::Function *refRetainFn_ = nullptr;          // tz.ref.retain
   llvm::Function *plainInstanceReleaseFn_ = nullptr;
-  // A promise of `value` is a member of a group: what it settles with may be
-  // one (its value, or its error when an Error may be), see
-  // runtime/core/async/async.c.
-  bool promiseIsMember(const Type *value);
   llvm::Function *plainObjReleaseFn_ = nullptr;
   llvm::Function *plainObjRetainFn_ = nullptr;
   llvm::LLVMContext &ctx_;
@@ -558,7 +536,7 @@ private:
   };
   std::vector<JumpTarget> targets_;
   // Generators and iterators: the generator emitted inline whose code is
-  // being emitted, the coroutine being emitted, and the functions CodeGen
+  // being emitted, the coroutine being emitted, and the functions Lowering
   // makes for the iterators of arrays and helpers, emitted after the others.
   InlineGenerator *inline_ = nullptr;
   Coroutine *coro_ = nullptr;
@@ -698,7 +676,7 @@ private:
   ClassDecl *errorClass_ = nullptr;
 
 public:
-  ~CodeGen();
+  ~Lowering();
 
   ModuleBuilder &moduleBuilder() const { return *moduleBuilderPart_; }
   FunctionBuilder &functionBuilder() const { return *functionBuilderPart_; }
@@ -738,7 +716,6 @@ public:
   ClassLowerer &classLowerer() const { return *classLowererPart_; }
   ClosureLowerer &closureLowerer() const { return *closureLowererPart_; }
   EnvLowerer &envLowerer() const { return *envLowererPart_; }
-  MemoryAnalysis &memoryAnalysis() const { return *memoryAnalysisPart_; }
   GroupLowerer &groupLowerer() const { return *groupLowererPart_; }
   StoreLowerer &storeLowerer() const { return *storeLowererPart_; }
   WeakRefLowerer &weakRefLowerer() const { return *weakRefLowererPart_; }
@@ -832,7 +809,6 @@ private:
   friend class ClassLowerer;
   friend class ClosureLowerer;
   friend class EnvLowerer;
-  friend class MemoryAnalysis;
   friend class GroupLowerer;
   friend class StoreLowerer;
   friend class WeakRefLowerer;
@@ -863,6 +839,12 @@ private:
   friend class BytesLowerer;
   friend class BytesCallbackLowerer;
   friend class BytesCallLowerer;
+  friend class BytesCallSite;
+  friend class BytesMakeCalls;
+  friend class TypedArrayCalls;
+  friend class NumberAccessCalls;
+  friend class BufferCalls;
+  friend class TextCodecCalls;
   friend class ChildLowerer;
   friend class CryptoLowerer;
   friend class DateLowerer;
@@ -924,7 +906,6 @@ private:
   std::unique_ptr<ClassLowerer> classLowererPart_;
   std::unique_ptr<ClosureLowerer> closureLowererPart_;
   std::unique_ptr<EnvLowerer> envLowererPart_;
-  std::unique_ptr<MemoryAnalysis> memoryAnalysisPart_;
   std::unique_ptr<GroupLowerer> groupLowererPart_;
   std::unique_ptr<StoreLowerer> storeLowererPart_;
   std::unique_ptr<WeakRefLowerer> weakRefLowererPart_;

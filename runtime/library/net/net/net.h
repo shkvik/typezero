@@ -4,7 +4,14 @@
 #ifndef TZ_NET_H
 #define TZ_NET_H
 
+#include "runtime/core/array/array.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/io/io.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/events/signal/signal.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

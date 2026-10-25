@@ -1,7 +1,9 @@
 // Loading the ICU of the system (see icu.h).
 
 #include "runtime/library/intl/icu/icu.h"
-#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/parallel/parallel.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifdef _WIN32

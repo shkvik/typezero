@@ -4,6 +4,9 @@
 // covers the AAD and the ciphertext, each padded to 16 bytes, and their lengths.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/error/error.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <openssl/crypto.h>
 #include <string.h>
 #include "crypto/poly1305.h"

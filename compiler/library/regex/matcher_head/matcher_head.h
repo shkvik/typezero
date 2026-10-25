@@ -12,7 +12,8 @@ public:
   // Emitting
   void emitWidth(bool wide);
   void emitHead();
-  void emitByteScan(llvm::Value *from, llvm::BasicBlock *found, llvm::AllocaInst *at, llvm::BasicBlock *none);
+  void emitByteScan(llvm::Value *from, llvm::BasicBlock *found, llvm::AllocaInst *at,
+                    llvm::BasicBlock *none);
   llvm::Value *vectorIn(llvm::Value *v, const OffsetSet &units);
   llvm::Value *unitMask(llvm::Value *at, const OffsetSet &units);
 

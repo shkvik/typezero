@@ -1,14 +1,14 @@
 #include "compiler/library/crypto/subtle_call_checker/subtle_call_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/check/classes/method_call_checker/method_call_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/library/events/event_target_checker/event_target_checker.h"
-#include "compiler/library/crypto/subtle_algorithms/subtle_algorithms.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/library/crypto/subtle_algorithms/subtle_algorithms.h"
+#include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -16,8 +16,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -57,7 +57,7 @@ const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRe
 
 } // namespace
 
-SubtleCallChecker::SubtleCallChecker(Sema &sema) : sema_(sema) {}
+SubtleCallChecker::SubtleCallChecker(Checker &checker) : checker_(checker) {}
 
 Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef method = member->name;
@@ -71,8 +71,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   auto algorithm = [&](size_t i) -> const Expr * {
     Expr *e = arg(i);
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      if (VarSymbol *var = sema_.scopes().lookup(name->name).var) {
-        if (const Expr *lit = sema_.constLiterals_.lookup(var)) {
+      if (VarSymbol *var = checker_.scopes().lookup(name->name).var) {
+        if (const Expr *lit = checker_.constLiterals_.lookup(var)) {
           return lit;
         }
       }
@@ -91,8 +91,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     static const llvm::StringLiteral formats[] = {"raw", "pkcs8", "spki", "jwk"};
     if (!llvm::is_contained(formats, *f)) {
       bad = true;
-      sema_.diags_.error(arg(i)->loc(),
-                   "unknown key format '" + *f + "'; it is 'raw', 'pkcs8', 'spki' or 'jwk'");
+      checker_.diags_.error(arg(i)->loc(), "unknown key format '" + *f +
+                                               "'; it is 'raw', 'pkcs8', 'spki' or 'jwk'");
       return "";
     }
 
@@ -126,8 +126,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       }
       if (!llvm::is_contained(kUsages, *u)) {
         bad = true;
-        sema_.diags_.error(e.expr->loc(), "usage '" + *u + "' does not exist; the usages are " +
-                                        quotedList(kUsages, "and"));
+        checker_.diags_.error(e.expr->loc(), "usage '" + *u + "' does not exist; the usages are " +
+                                                 quotedList(kUsages, "and"));
         return;
       }
       if (!name.empty() && !llvm::is_contained(allowed, *u)) {
@@ -139,10 +139,10 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
             : isPublic == 0 && name != "HMAC" && familyOf(name) != "Aes" && familyOf(name) != "Kdf"
                 ? "a private " + name.str() + " key"
                 : an + name.str() + " key";
-        sema_.diags_.error(e.expr->loc(),
-                     "'" + *u + "' is no usage of " + what + "; " +
-                         (allowed.empty() ? std::string("it takes none: pass []")
-                                          : "it takes " + quotedList(allowed, "and")));
+        checker_.diags_.error(e.expr->loc(),
+                              "'" + *u + "' is no usage of " + what + "; " +
+                                  (allowed.empty() ? std::string("it takes none: pass []")
+                                                   : "it takes " + quotedList(allowed, "and")));
         return;
       }
     }
@@ -160,13 +160,14 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     bad = true;
     if (lit->elements.empty() || isPublic == 0) {
-      sema_.diags_.error(lit->loc(), "a key without usages can do nothing, and node rejects it "
-                               "('Usages cannot be empty'); give its usages, e.g. " +
-                                   quotedList(own, "and"));
+      checker_.diags_.error(lit->loc(), "a key without usages can do nothing, and node rejects it "
+                                        "('Usages cannot be empty'); give its usages, e.g. " +
+                                            quotedList(own, "and"));
     } else {
-      sema_.diags_.error(lit->loc(), "the private key of the pair would have no usages, which node "
-                               "rejects ('Usages cannot be empty'); add " +
-                                   quotedList(own, "or"));
+      checker_.diags_.error(lit->loc(),
+                            "the private key of the pair would have no usages, which node "
+                            "rejects ('Usages cannot be empty'); add " +
+                                quotedList(own, "or"));
     }
   };
 
@@ -191,17 +192,17 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     bool bytes = type->isBytes() ||
                  (type->isUnion() &&
                   llvm::all_of(type->members(), [](const Type *t) { return t->isBytes(); }));
-    bool jwk = !type->isBytes() && type->isObject() && !ClassDeclarer::classOf(type) && !type->isArray() &&
-               !type->isTuple();
+    bool jwk = !type->isBytes() && type->isObject() && !ClassDeclarer::classOf(type) &&
+               !type->isArray() && !type->isTuple();
     if (keyFormat == "jwk" && bytes) {
-      sema_.diags_.error(data->loc(),
-                   "the key data of 'jwk' is a JsonWebKey; found '" + type->name().str() + "'");
+      checker_.diags_.error(data->loc(), "the key data of 'jwk' is a JsonWebKey; found '" +
+                                             type->name().str() + "'");
       return false;
     }
     if (keyFormat != "jwk" && jwk) {
-      sema_.diags_.error(data->loc(), "the key data of '" + keyFormat +
-                                    "' is bytes (a BufferSource); found '" + type->name().str() +
-                                    "'");
+      checker_.diags_.error(data->loc(), "the key data of '" + keyFormat +
+                                             "' is bytes (a BufferSource); found '" +
+                                             type->name().str() + "'");
       return false;
     }
 
@@ -214,7 +215,7 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   // JSON.parse(text).
   std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
-      VarSymbol *var = sema_.scopes().lookup(name->name).var;
+      VarSymbol *var = checker_.scopes().lookup(name->name).var;
       return var && var->type && var->type->nonOptional()->isJson();
     }
     if (auto *m = dyn_cast_or_null<MemberExpr>(e)) {
@@ -225,16 +226,17 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     if (auto *c = dyn_cast_or_null<CallExpr>(e)) {
       if (auto *m = dyn_cast<MemberExpr>(c->callee)) {
-        return m->name == "parse" && m->typeArgs.empty() && sema_.callChecker().isGlobalName(m->object, "JSON");
+        return m->name == "parse" && m->typeArgs.empty() &&
+               checker_.callChecker().isGlobalName(m->object, "JSON");
       }
     }
 
     return false;
   };
   if (method == "digest") {
-    literalAlgorithm(sema_.diags_, algorithm(0), "digest", "", bad);
+    literalAlgorithm(checker_.diags_, algorithm(0), "digest", "", bad);
   } else if (method == "generateKey") {
-    std::string name = literalAlgorithm(sema_.diags_, algorithm(0), "generateKey", "", bad);
+    std::string name = literalAlgorithm(checker_.diags_, algorithm(0), "generateKey", "", bad);
     // A pair: the usages of both keys, of which the private one needs some.
     llvm::StringRef family = familyOf(name);
     usages(2, name, family == "Hmac" || family == "Aes" ? 0 : -1, true);
@@ -243,14 +245,15 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "importKey") {
     std::string f = format(0);
-    std::string name = literalAlgorithm(sema_.diags_, algorithm(2), "importKey", "", bad);
+    std::string name = literalAlgorithm(checker_.diags_, algorithm(2), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
       std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        sema_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
-                                        "' (node: 'Unable to import " + name + " using " + f +
-                                        " format'); it takes " + quotedList(formats, "or"));
+        checker_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
+                                                 "' (node: 'Unable to import " + name + " using " +
+                                                 f + " format'); it takes " +
+                                                 quotedList(formats, "or"));
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
@@ -264,11 +267,12 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     // A JWK as JSON, as JSON.parse gives it, is read as a JsonWebKey, which in node it is.
     if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
-        sema_.libFunctions_.lookup("subtleJwkOf")) {
-      Expr *json = sema_.exprChecker().checkExpr(arg(1));
-      auto *callee = sema_.ctx_.make<NameExpr>(json->loc(), "subtleJwkOf");
-      auto *wrap = sema_.ctx_.make<CallExpr>(json->loc(), callee, std::vector<Expr *>{json});
-      args[1] = sema_.eventTargetChecker().callLibraryFunction(wrap, "subtleJwkOf", {}, {true}, json->loc());
+        checker_.libFunctions_.lookup("subtleJwkOf")) {
+      Expr *json = checker_.exprChecker().checkExpr(arg(1));
+      auto *callee = checker_.ctx_.make<NameExpr>(json->loc(), "subtleJwkOf");
+      auto *wrap = checker_.ctx_.make<CallExpr>(json->loc(), callee, std::vector<Expr *>{json});
+      args[1] = checker_.eventTargetChecker().callLibraryFunction(wrap, "subtleJwkOf", {}, {true},
+                                                                  json->loc());
       checkedArgs[1] = true;
       if (target.empty()) {
         target = "subtleImportAny";
@@ -281,20 +285,21 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "sign" || method == "verify" || method == "encrypt" || method == "decrypt" ||
              method == "deriveBits") {
-    literalAlgorithm(sema_.diags_, algorithm(0), method, "", bad);
+    literalAlgorithm(checker_.diags_, algorithm(0), method, "", bad);
   } else if (method == "deriveKey") {
-    literalAlgorithm(sema_.diags_, algorithm(0), "deriveBits", "", bad);
-    std::string name = literalAlgorithm(sema_.diags_, algorithm(2), "importKey", "", bad);
+    literalAlgorithm(checker_.diags_, algorithm(0), "deriveBits", "", bad);
+    std::string name = literalAlgorithm(checker_.diags_, algorithm(2), "importKey", "", bad);
     if (!name.empty()) {
       llvm::StringRef family = familyOf(name);
       if (family != "Hmac" && family != "Aes" && family != "Kdf") {
         bad = true;
-        sema_.diags_.error(arg(2)->loc(), "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, "
-                                    "not '" +
-                                        name + "'");
+        checker_.diags_.error(arg(2)->loc(),
+                              "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, "
+                              "not '" +
+                                  name + "'");
       } else {
         if (family != "Kdf") {
-          literalAlgorithm(sema_.diags_, algorithm(2), "get key length", "", bad);
+          literalAlgorithm(checker_.diags_, algorithm(2), "get key length", "", bad);
         }
         usages(4, name, 0, true);
         target = "subtleDeriveKey" + family.str();
@@ -302,17 +307,17 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   } else if (method == "wrapKey") {
     format(0);
-    literalAlgorithm(sema_.diags_, algorithm(3), "wrapKey", "encrypt", bad);
+    literalAlgorithm(checker_.diags_, algorithm(3), "wrapKey", "encrypt", bad);
   } else if (method == "unwrapKey") {
     std::string f = format(0);
-    literalAlgorithm(sema_.diags_, algorithm(3), "unwrapKey", "decrypt", bad);
-    std::string name = literalAlgorithm(sema_.diags_, algorithm(4), "importKey", "", bad);
+    literalAlgorithm(checker_.diags_, algorithm(3), "unwrapKey", "decrypt", bad);
+    std::string name = literalAlgorithm(checker_.diags_, algorithm(4), "importKey", "", bad);
     if (!f.empty() && !name.empty()) {
       std::vector<llvm::StringLiteral> formats = formatsOf(familyOf(name));
       if (!llvm::is_contained(formats, f)) {
         bad = true;
-        sema_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
-                                        "'; it takes " + quotedList(formats, "or"));
+        checker_.diags_.error(arg(0)->loc(), "'" + name + "' keys are not imported as '" + f +
+                                                 "'; it takes " + quotedList(formats, "or"));
       }
     }
     int isPublic = f == "spki" || f == "raw" ? 1 : f == "pkcs8" ? 0 : -1;
@@ -331,16 +336,17 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     // The arguments are still checked, as the method takes them (an empty array of usages
     // is one of KeyUsage).
     call->type = Type::error();
-    std::vector<FunctionDecl *> methods =
-        ClassDeclarer::methodsNamed(sema_.libraryClass("SubtleCrypto"), method, /*isStatic=*/false);
+    std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(
+        checker_.libraryClass("SubtleCrypto"), method, /*isStatic=*/false);
     FuncSymbol *sym = methods.size() == 1 ? methods[0]->sym : nullptr;
     if (sym) {
-      sema_.returnInferrer().resolveParams(sym);
+      checker_.returnInferrer().resolveParams(sym);
     }
     for (size_t i = 0; i < args.size(); ++i) {
       if (!checkedArgs[i]) {
-        args[i] =
-            sym && i < sym->params.size() ? sema_.argumentChecker().checkArg(args[i], sym->params[i]) : sema_.exprChecker().checkExpr(args[i]);
+        args[i] = sym && i < sym->params.size()
+                      ? checker_.argumentChecker().checkArg(args[i], sym->params[i])
+                      : checker_.exprChecker().checkExpr(args[i]);
       }
     }
     return call;
@@ -348,10 +354,11 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   // The function of the family takes the arguments of the method; the receiver, crypto.subtle
   // or a variable, has nothing to evaluate.
   Expr *checked;
-  if (!target.empty() && sema_.libFunctions_.lookup(target) && isa<NameExpr>(member->object)) {
-    checked = sema_.eventTargetChecker().callLibraryFunction(call, target, {}, checkedArgs, member->loc());
+  if (!target.empty() && checker_.libFunctions_.lookup(target) && isa<NameExpr>(member->object)) {
+    checked = checker_.eventTargetChecker().callLibraryFunction(call, target, {}, checkedArgs,
+                                                                member->loc());
   } else {
-    checked = sema_.methodCallChecker().checkMethodCall(call, member, expected);
+    checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
   }
   if (!keyDataFits()) {
     checked->type = Type::error();

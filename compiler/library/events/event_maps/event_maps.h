@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Event maps: the events of an emitter and their listeners.
 class EventMaps {
 public:
-  explicit EventMaps(Sema &sema);
+  explicit EventMaps(Checker &checker);
 
   // An emitter: an object of EventEmitter of node:events or of a class
   // that extends it.
@@ -27,14 +27,14 @@ public:
   // `ret`.
   static const Type *listenerType(const Type *args, const Type *ret);
   Expr *checkListener(Expr *arg, const Type *args, llvm::StringRef event, const Type *receiver,
-                      Sema::ListenerKind &kind);
+                      Checker::ListenerKind &kind);
   // The type of the object `create` makes, before it is checked: an
   // instance of a class (of EventEmitter with the map found for its place);
   // null if that is not known from its form.
   const Type *createdType(const NewExpr *create);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -11,8 +11,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -57,7 +57,8 @@ void FlowStmts::classDecl(ClassDecl *cls) {
   }
   for (ClassField &f : cls->fields) {
     if (f.init) {
-      flows_.flow(flows_.flowExprs().expr(f.init), f.var ? flows_.var(f.var) : flows_.fieldNode(f.name));
+      flows_.flow(flows_.flowExprs().expr(f.init),
+                  f.var ? flows_.var(f.var) : flows_.fieldNode(f.name));
     }
   }
   for (Stmt *s : cls->decorations) {
@@ -208,8 +209,8 @@ Refs FlowStmts::name(const NameExpr *n) {
   return {};
 }
 
-void FlowStmts::recordWrite(const Refs &target, bool element, llvm::StringRef field, const Expr *value,
-                 const Type *through, llvm::SMLoc loc) {
+void FlowStmts::recordWrite(const Refs &target, bool element, llvm::StringRef field,
+                            const Expr *value, const Type *through, llvm::SMLoc loc) {
   flows_.writes.push_back(
       {target, element, field.str(), value ? ownType(value) : nullptr, through, loc});
 }
@@ -244,8 +245,7 @@ void FlowStmts::assignTo(Expr *target, const Refs &value, const Expr *valueExpr,
           key && objectType && objectType->isTuple()) {
         field = std::to_string(key->value);
       }
-      recordWrite(object, false, field, compound ? nullptr : valueExpr, objectType,
-                  target->loc());
+      recordWrite(object, false, field, compound ? nullptr : valueExpr, objectType, target->loc());
       flows_.flow(value, field == "*" ? flows_.unknown_ : flows_.fieldNode(field));
     }
     return;

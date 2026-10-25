@@ -1,7 +1,7 @@
 #pragma once
 
+#include "compiler/check/checker/checker.h"
 #include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"

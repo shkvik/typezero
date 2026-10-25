@@ -1,12 +1,11 @@
-#include "compiler/lower/memory/cycle_escapes/cycle_escapes.h"
-
+#include "compiler/memory/cycle_escapes/cycle_escapes.h"
 
 namespace tz {
 
 CycleEscapes::CycleEscapes(CycleScanner &scanner) : scanner_(scanner) {}
 
 void CycleEscapes::ordered(const Stmt *stmt, const VarSymbol *self, bool &escaped, bool afterSuper,
-                    llvm::DenseSet<const AssignExpr *> &safe) {
+                           llvm::DenseSet<const AssignExpr *> &safe) {
   if (!stmt) {
     return;
   }
@@ -65,7 +64,7 @@ void CycleEscapes::ordered(const Stmt *stmt, const VarSymbol *self, bool &escape
 }
 
 void CycleEscapes::orderedExpr(const Expr *e, const VarSymbol *self, bool &escaped, bool afterSuper,
-                        llvm::DenseSet<const AssignExpr *> &safe) {
+                               llvm::DenseSet<const AssignExpr *> &safe) {
   if (!e) {
     return;
   }

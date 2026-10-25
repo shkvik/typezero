@@ -5,12 +5,12 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-ConstructorCalls::ConstructorCalls(Sema &sema) : sema_(sema) {}
+ConstructorCalls::ConstructorCalls(Checker &checker) : checker_(checker) {}
 
 // A call `this.m()` in a constructor (or in the initializers of the fields)
 // runs before the classes down the chain have set their fields: if one of
@@ -18,7 +18,7 @@ ConstructorCalls::ConstructorCalls(Sema &sema) : sema_(sema) {}
 // undefined, or throws a TypeError). The same through the methods the
 // constructor calls on `this`.
 void ConstructorCalls::checkConstructorCalls() {
-  for (ClassDecl *cls : sema_.classes_) {
+  for (ClassDecl *cls : checker_.classes_) {
     // An instance of a generic class: its generic class reports.
     if (cls->literal || cls->children.empty() || cls->generic) {
       continue;
@@ -35,8 +35,8 @@ void ConstructorCalls::checkConstructorCalls() {
 }
 
 void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassDecl *cls,
-                                const CallExpr *origin, const FunctionDecl *ctor,
-                                llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
+                                            const CallExpr *origin, const FunctionDecl *ctor,
+                                            llvm::SmallPtrSetImpl<const FunctionDecl *> &seen) {
   if (!fn->body || !fn->thisVar || !seen.insert(fn).second) {
     return;
   }
@@ -86,13 +86,13 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
           std::string what = ctor->isConstructor
                                  ? "the constructor of '" + cls->name.str() + "'"
                                  : "the initializers of the fields of '" + cls->name.str() + "'";
-          sema_.diags_.error(site->loc(),
-                       what + " calls '" + target->name.str() + "'" +
-                           (site == call ? std::string() : " (through the methods it calls)") +
-                           ", which '" + by->name +
-                           "' overrides: it would run "
-                           "before the fields of '" +
-                           by->name + "' are set; call it once the object is made");
+          checker_.diags_.error(
+              site->loc(), what + " calls '" + target->name.str() + "'" +
+                               (site == call ? std::string() : " (through the methods it calls)") +
+                               ", which '" + by->name +
+                               "' overrides: it would run "
+                               "before the fields of '" +
+                               by->name + "' are set; call it once the object is made");
           reportedCalls_.insert(site);
           return;
         }

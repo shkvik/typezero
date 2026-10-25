@@ -1,20 +1,20 @@
 #include "compiler/check/stmt/var_checker/var_checker.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/infer/call_cycles/call_cycles.h"
-#include "compiler/check/functions/function_checker/function_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/async/timer_checker/timer_checker.h"
-#include "compiler/check/functions/closure_checker/closure_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
-#include "compiler/check/types/destination/destination.h"
-#include "compiler/check/objects/dict_checker/dict_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/functions/function_checker/function_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/check/types/destination/destination.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/infer/call_cycles/call_cycles.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -25,26 +25,27 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-VarChecker::VarChecker(Sema &sema) : sema_(sema) {}
+VarChecker::VarChecker(Checker &checker) : checker_(checker) {}
 
 void VarChecker::checkVarDecl(VarDeclStmt *decl) {
-  llvm::ArrayRef<Stmt *> block = sema_.block_;
-  size_t index = sema_.blockIndex_;
-  sema_.block_ = {};
+  llvm::ArrayRef<Stmt *> block = checker_.block_;
+  size_t index = checker_.blockIndex_;
+  checker_.block_ = {};
   for (size_t k = 0; k < decl->decls.size(); ++k) {
     VarDeclarator &d = decl->decls[k];
-    const Type *declared = d.typeAnn ? sema_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
+    const Type *declared =
+        d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
     // `const f = first` with a generic `first`: another name for it, as
     // generic as it is.
     if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
         name && decl->isConst && !declared && !d.destructured && name->typeArgs.empty()) {
-      if (FuncSymbol *generic = sema_.genericChecker().genericNamed(name)) {
-        sema_.scopes().declare(d.name, d.loc, {nullptr, generic});
+      if (FuncSymbol *generic = checker_.genericChecker().genericNamed(name)) {
+        checker_.scopes().declare(d.name, d.loc, {nullptr, generic});
         d.alias = true;
         continue;
       }
@@ -54,14 +55,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     // are globals). Unlike a declaration, it exists from here on.
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
         fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured &&
-        sema_.scopes_.size() == 1) {
+        checker_.scopes_.size() == 1) {
       FunctionDecl *fn = fe->fn;
       fn->isExpression = false;
       fn->lifted = true;
       fn->name = d.name;
-      sema_.functionChecker().declareFunction(fn);
-      sema_.callCycles().findCycles({fn});
-      sema_.lifted_.push_back(fn);
+      checker_.functionChecker().declareFunction(fn);
+      checker_.callCycles().findCycles({fn});
+      checker_.lifted_.push_back(fn);
       d.alias = true;
       continue;
     }
@@ -72,15 +73,16 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       if (decl->isConst && !d.destructured) {
         // The constant exists while its function is checked, so that the
         // function can call itself through it.
-        VarSymbol *var = sema_.scopes().declareVar(d.name, d.loc, nullptr, /*isConst=*/true);
+        VarSymbol *var = checker_.scopes().declareVar(d.name, d.loc, nullptr, /*isConst=*/true);
         var->lambda = fe->fn;
         d.sym = var;
         const Type *function =
             declared && declared->nonOptional()->isFunction() ? declared->nonOptional() : nullptr;
-        Sema::Signature sig = function ? ClosureChecker::signatureOf(function) : Sema::Signature();
-        d.init = sema_.closureChecker().checkFunctionExpr(fe, function ? &sig : nullptr);
+        Checker::Signature sig =
+            function ? ClosureChecker::signatureOf(function) : Checker::Signature();
+        d.init = checker_.closureChecker().checkFunctionExpr(fe, function ? &sig : nullptr);
         if (declared) {
-          d.init = sema_.typeRelations().coerce(d.init, declared);
+          d.init = checker_.typeRelations().coerce(d.init, declared);
         }
         // A function of another result is called through what adapts it.
         if (auto *cast = dyn_cast<CastExpr>(d.init); cast && cast->adaptsResult) {
@@ -97,53 +99,58 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     const Type *hint = declared;
     std::vector<std::pair<const Type *, llvm::SMLoc>> places;
     if (!declared && d.init && !d.destructured && Destination::literalShaped(d.init)) {
-      sema_.following_ = block.empty() ? std::vector<const Stmt *>() : followingStatements(block, index);
-      hint = sema_.destination().literalDestination(d, llvm::ArrayRef(decl->decls).drop_front(k + 1));
-      places = std::move(sema_.destinationConflict_);
-      sema_.destinationConflict_.clear();
+      checker_.following_ =
+          block.empty() ? std::vector<const Stmt *>() : followingStatements(block, index);
+      hint = checker_.destination().literalDestination(
+          d, llvm::ArrayRef(decl->decls).drop_front(k + 1));
+      places = std::move(checker_.destinationConflict_);
+      checker_.destinationConflict_.clear();
     }
     // `const t = setInterval(() => { ... clearInterval(t) }, 10)`: the
     // callback of a timer runs later, when t holds the timer, so it may use
     // t; through a box, as a closure created before its variable does.
     VarSymbol *early = nullptr;
-    if (const Type *timer = d.init && !d.destructured ? sema_.timerChecker().timerCallType(d.init) : nullptr) {
-      early = sema_.scopes().declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
+    if (const Type *timer =
+            d.init && !d.destructured ? checker_.timerChecker().timerCallType(d.init) : nullptr) {
+      early =
+          checker_.scopes().declareVar(d.name, d.loc, declared ? declared : timer, decl->isConst);
       early->declSeq = ~0u;
     }
     if (d.init) {
       if (!early) {
-        sema_.initializing_.push_back(d.name);
+        checker_.initializing_.push_back(d.name);
       }
       if (d.destructured && !d.objectPattern) {
-        sema_.iteratorMethods().markFused(d.init);
+        checker_.iteratorMethods().markFused(d.init);
       }
-      d.init = value = sema_.exprChecker().checkExpr(d.init, hint);
+      d.init = value = checker_.exprChecker().checkExpr(d.init, hint);
       if (d.destructured && !d.objectPattern) {
-        d.init = value = sema_.dictChecker().iterableOf(d.init);
+        d.init = value = checker_.dictChecker().iterableOf(d.init);
       }
       if (!early) {
-        sema_.initializing_.pop_back();
+        checker_.initializing_.pop_back();
       }
       if (declared) {
-        d.init = sema_.typeRelations().coerce(d.init, declared);
+        d.init = checker_.typeRelations().coerce(d.init, declared);
       } else {
         type = d.init->type;
         if (type->isVoid()) {
-          sema_.diags_.error(d.init->loc(), "an expression of type 'void' cannot initialize a variable");
+          checker_.diags_.error(d.init->loc(),
+                                "an expression of type 'void' cannot initialize a variable");
           type = Type::error();
         } else if (type->isUndefined() && !decl->isConst && !d.destructured) {
           untyped = true;
           type = Type::error();
         } else if (type->isUndefined()) {
-          sema_.diags_.error(d.init->loc(),
-                       llvm::Twine("cannot infer a type from 'undefined'; add one, e.g. '") +
-                           (decl->isConst ? "const " : "let ") + d.name +
-                           ": int | undefined = undefined'");
+          checker_.diags_.error(
+              d.init->loc(), llvm::Twine("cannot infer a type from 'undefined'; add one, e.g. '") +
+                                 (decl->isConst ? "const " : "let ") + d.name +
+                                 ": int | undefined = undefined'");
           type = Type::error();
         }
       }
     } else if (decl->isConst) {
-      sema_.diags_.error(d.loc, "'const' declarations must be initialized");
+      checker_.diags_.error(d.loc, "'const' declarations must be initialized");
       if (!type) {
         type = Type::error();
       }
@@ -158,14 +165,14 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       // A string destructures into its characters, as JavaScript's iterator
       // gives them: `[...s]`; a typed array into its elements, and `...rest`
       // is an array of them, as in JavaScript.
-      auto *chars = sema_.ctx_.make<ArrayLitExpr>(d.init->loc());
+      auto *chars = checker_.ctx_.make<ArrayLitExpr>(d.init->loc());
       chars->elements.push_back({d.init, /*spread=*/true});
       chars->type = Type::array(type->isString() ? Type::string() : type->elementType());
       d.init = value = chars;
       type = chars->type;
     } else if (d.destructured && type->isIterator() && !declared) {
       // `const [a, b] = it` takes the first two values of the iterator.
-      d.init = value = sema_.generatorChecker().destructuredIterator(d.init, d);
+      d.init = value = checker_.generatorChecker().destructuredIterator(d.init, d);
       type = d.init->type;
     } else if (d.destructured && !type->isArray() && !type->isTuple() && !type->isMatch() &&
                !type->isError() &&
@@ -174,63 +181,64 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       if (type->isOptional() && type->inner()->isArray()) {
         message += "; the array may be undefined: check it first";
       }
-      sema_.diags_.error(d.init ? d.init->loc() : d.loc, message);
+      checker_.diags_.error(d.init ? d.init->loc() : d.loc, message);
       type = Type::error();
     }
 
     if (early) {
-      early->declSeq = ++sema_.seq_;
+      early->declSeq = ++checker_.seq_;
       d.sym = early;
     } else {
-      d.sym = sema_.scopes().declareVar(d.name, d.loc, type, decl->isConst);
+      d.sym = checker_.scopes().declareVar(d.name, d.loc, type, decl->isConst);
     }
-    sema_.regexChecker().noteRegexVariable(d.sym, value, decl->isConst, block, index);
+    checker_.regexChecker().noteRegexVariable(d.sym, value, decl->isConst, block, index);
     // `const m = Reflect.get(user, "save")`: the method it holds.
     if (decl->isConst && !d.destructured) {
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
-          got && got->builtin == Builtin::ReflectMethod && !sema_.severalVariants_.contains(got)) {
+          got && got->builtin == Builtin::ReflectMethod &&
+          !checker_.severalVariants_.contains(got)) {
         d.sym->reflectMethod = got->method->decl;
       }
     }
     if (decl->isConst && value && (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value))) {
-      sema_.constLiterals_[d.sym] = value;
+      checker_.constLiterals_[d.sym] = value;
     }
     if (!places.empty()) {
-      sema_.destinations_[d.sym] = std::move(places);
+      checker_.destinations_[d.sym] = std::move(places);
     }
     if (untyped) {
       noteUntyped(d.sym, d.init != nullptr);
     }
     if (value) {
-      sema_.flowChecker().assigned(d.sym, value);
+      checker_.flowChecker().assigned(d.sym, value);
     }
     if (decl->isConst && d.init && type->isInteger()) {
-      if (std::optional<int64_t> constant = sema_.constantFolder().intConstant(d.init)) {
-        sema_.constVars_[d.sym] = *constant;
+      if (std::optional<int64_t> constant = checker_.constantFolder().intConstant(d.init)) {
+        checker_.constVars_[d.sym] = *constant;
       }
     }
     // A string constant may name a field: `o[key]`.
     if (decl->isConst && d.init && type->isString()) {
-      if (std::optional<std::string> key = sema_.keyedFieldChecker().constantKey(d.init)) {
-        sema_.constKeys_[d.sym] = std::move(*key);
+      if (std::optional<std::string> key = checker_.keyedFieldChecker().constantKey(d.init)) {
+        checker_.constKeys_[d.sym] = std::move(*key);
       }
       // And how it starts, which tells whether a fetch of it is of http:// (noteHttpsCall).
-      if (std::string prefix = sema_.tzModulesChecker().knownPrefix(d.init); !prefix.empty()) {
-        sema_.constPrefixes_[d.sym] = std::move(prefix);
+      if (std::string prefix = checker_.tzModulesChecker().knownPrefix(d.init); !prefix.empty()) {
+        checker_.constPrefixes_[d.sym] = std::move(prefix);
       }
     }
   }
 }
 
 // As in TypeScript, the type of a variable is where it is declared; unlike
-// tsc, Sema does not take it from the assignments that follow. It looks at
+// tsc, Checker does not take it from the assignments that follow. It looks at
 // them only for the hint, so the error waits for the end of the scope.
 void VarChecker::noteUntyped(VarSymbol *var, bool initUndefined) {
-  sema_.untyped_.push_back({var, initUndefined, {}});
+  checker_.untyped_.push_back({var, initUndefined, {}});
 }
 
 void VarChecker::assignedUntyped(const VarSymbol *var, const Type *type) {
-  for (Sema::Untyped &u : sema_.untyped_) {
+  for (Checker::Untyped &u : checker_.untyped_) {
     if (u.var == var && !type->isError() && !type->isVoid()) {
       u.assigned.push_back(type);
     }
@@ -239,9 +247,9 @@ void VarChecker::assignedUntyped(const VarSymbol *var, const Type *type) {
 
 // Reports the variables declared in the innermost scope, which is ending.
 void VarChecker::reportUntyped() {
-  llvm::erase_if(sema_.untyped_, [&](const Sema::Untyped &u) {
-    auto found = sema_.scopes_.back().find(u.var->name);
-    if (found == sema_.scopes_.back().end() || found->second.var != u.var) {
+  llvm::erase_if(checker_.untyped_, [&](const Checker::Untyped &u) {
+    auto found = checker_.scopes_.back().find(u.var->name);
+    if (found == checker_.scopes_.back().end() || found->second.var != u.var) {
       return false;
     }
     // The type that holds every value assigned, if there is one.
@@ -260,10 +268,10 @@ void VarChecker::reportUntyped() {
       hint = "e.g. 'let " + name + ": int' or 'let " + name + " = 0'";
     }
     if (u.initUndefined) {
-      sema_.diags_.error(u.var->loc, "cannot infer a type from 'undefined'; " + hint);
+      checker_.diags_.error(u.var->loc, "cannot infer a type from 'undefined'; " + hint);
     } else {
-      sema_.diags_.error(u.var->loc,
-                   "variable '" + name + "' needs a type annotation or an initializer; " + hint);
+      checker_.diags_.error(u.var->loc, "variable '" + name +
+                                            "' needs a type annotation or an initializer; " + hint);
     }
 
     return true;

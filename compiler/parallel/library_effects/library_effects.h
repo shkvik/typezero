@@ -23,7 +23,6 @@ public:
   void libraryState(llvm::StringRef cls, llvm::StringRef name, std::optional<Ref> self, bool write,
                     llvm::SMLoc at);
   bool librarySetter(const MemberExpr *m, const Expr *value);
-  void builtinEffects(const CallExpr *c, const Expr *recv);
 
 private:
   Analysis &analysis_;

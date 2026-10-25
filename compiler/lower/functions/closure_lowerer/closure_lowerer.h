@@ -1,15 +1,15 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Function values and the calls through them.
 class ClosureLowerer {
 public:
-  explicit ClosureLowerer(CodeGen &codegen);
+  explicit ClosureLowerer(Lowering &lowering);
 
-  // The type of a variable, also of a function's while Sema left it unset.
+  // The type of a variable, also of a function's while Checker left it unset.
   static const Type *typeOf(const VarSymbol *var);
   static const Type *functionTypeOf(const FuncSymbol *fn);
   // (ptr env, params...) -> ret: how a function value of `fnType` is called.
@@ -31,7 +31,7 @@ public:
   void emitPendingClosures();
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::DenseMap<const FunctionDecl *, llvm::Function *> closureCode_;
   llvm::DenseMap<const FunctionDecl *, llvm::Constant *> infos_;
   std::map<std::pair<const FunctionDecl *, const Type *>, llvm::Constant *> adapters_;

@@ -1,21 +1,21 @@
 #include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
-#include "compiler/library/crypto/key_pair_checker/key_pair_checker.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/library/crypto/key_pair_checker/key_pair_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -47,29 +47,30 @@ std::optional<std::string> literalOf(const Expr *e) {
 
 } // namespace
 
-CryptoFunctionChecker::CryptoFunctionChecker(Sema &sema) : sema_(sema) {}
+CryptoFunctionChecker::CryptoFunctionChecker(Checker &checker) : checker_(checker) {}
 
 Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   auto loosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
 
     return call;
   };
   if (llvm::is_contained(kClasses, fn)) {
-    sema_.diags_.error(loc,
-                 "'" + fn + "' of 'node:crypto' is a class, not a function" +
-                     (fn == "X509Certificate" ? "; make one with 'new X509Certificate(pem)'" : ""));
+    checker_.diags_.error(
+        loc, "'" + fn + "' of 'node:crypto' is a class, not a function" +
+                 (fn == "X509Certificate" ? "; make one with 'new X509Certificate(pem)'" : ""));
     return loosely();
   }
   if (fn == "constants") {
-    sema_.diags_.error(loc, "'constants' of 'node:crypto' is used as 'constants.RSA_PKCS1_PSS_PADDING' "
-                      "and the like");
+    checker_.diags_.error(
+        loc, "'constants' of 'node:crypto' is used as 'constants.RSA_PKCS1_PSS_PADDING' "
+             "and the like");
     return loosely();
   }
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
@@ -78,90 +79,101 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   auto present = [&](size_t i) { return i < args.size() && !isa<UndefinedExpr>(args[i]); };
   llvm::StringMap<Expr *> options;
   auto optionsAt = [&](size_t i, llvm::ArrayRef<llvm::StringRef> allowed) {
-    return !present(i) || sema_.cryptoArgs().cryptoOptions(args[i], fn, allowed, options);
+    return !present(i) || checker_.cryptoArgs().cryptoOptions(args[i], fn, allowed, options);
   };
 
   if (fn == "createHash") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
       return call;
     }
-    Expr *md = sema_.cryptoArgs().cryptoMd(args[0], false);
+    Expr *md = checker_.cryptoArgs().cryptoMd(args[0], false);
     if (!optionsAt(1, {"outputLength"}) || !md) {
       return call;
     }
     Expr *length = options.lookup("outputLength");
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::HashNew,
-                      {md, length ? sema_.cryptoArgs().cryptoNumber(length) : sema_.cryptoArgs().cryptoDouble(loc, -1)},
-                      Type::cryptoType(Crypto::Hash));
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashNew,
+                                            {md, length
+                                                     ? checker_.cryptoArgs().cryptoNumber(length)
+                                                     : checker_.cryptoArgs().cryptoDouble(loc, -1)},
+                                            Type::cryptoType(Crypto::Hash));
   }
   if (fn == "createHmac") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
-    Expr *md = sema_.cryptoArgs().cryptoMd(args[0], true);
-    Expr *key = sema_.cryptoArgs().cryptoData(args[1], "key", true, true, true);
+    Expr *md = checker_.cryptoArgs().cryptoMd(args[0], true);
+    Expr *key = checker_.cryptoArgs().cryptoData(args[1], "key", true, true, true);
     if (!md || key->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::HmacNew, {md, key, sema_.cryptoArgs().cryptoInt(loc, 0)},
-                      Type::cryptoType(Crypto::Hmac));
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HmacNew,
+                                            {md, key, checker_.cryptoArgs().cryptoInt(loc, 0)},
+                                            Type::cryptoType(Crypto::Hmac));
   }
   if (fn == "hash") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 2, 3)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
       return call;
     }
-    Expr *md = sema_.cryptoArgs().cryptoMd(args[0], false);
-    Expr *data = sema_.cryptoArgs().cryptoData(args[1], "data", true, false, false);
-    Expr *encoding = sema_.cryptoArgs().cryptoEncoding(call, 2, fn, 6); // hex
+    Expr *md = checker_.cryptoArgs().cryptoMd(args[0], false);
+    Expr *data = checker_.cryptoArgs().cryptoData(args[1], "data", true, false, false);
+    Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, 2, fn, 6); // hex
     if (!md || data->type->isError() || !encoding) {
       return call;
     }
     if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
-      return sema_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnce, {md, data}, buffer);
+      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnce, {md, data}, buffer);
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnceText, {md, data, encoding}, Type::string());
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnceText, {md, data, encoding},
+                                            Type::string());
   }
   if (fn == "randomBytes") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 2) ||
-        sema_.cryptoArgs().rejectCryptoCallback(call, 1, fn, "'const bytes = randomBytes(n)'")) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) ||
+        checker_.cryptoArgs().rejectCryptoCallback(call, 1, fn, "'const bytes = randomBytes(n)'")) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::RandomBytes, {sema_.cryptoArgs().cryptoNumber(args[0])}, buffer);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomBytes,
+                                            {checker_.cryptoArgs().cryptoNumber(args[0])}, buffer);
   }
   if (fn == "randomUUID") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 0, 1) || !optionsAt(0, {"disableEntropyCache"})) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 0, 1) ||
+        !optionsAt(0, {"disableEntropyCache"})) {
       return call;
     }
     if (Expr *cache = options.lookup("disableEntropyCache")) {
-      sema_.argumentChecker().checkArg(cache, Type::boolTy());
+      checker_.argumentChecker().checkArg(cache, Type::boolTy());
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::RandomUuid, {}, Type::string());
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomUuid, {}, Type::string());
   }
   if (fn == "randomInt") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 3)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
       return call;
     }
     size_t last = args.size() - 1;
-    if (args.size() > 1 && sema_.cryptoArgs().rejectCryptoCallback(call, last, fn, "'const n = randomInt(max)'")) {
+    if (args.size() > 1 &&
+        checker_.cryptoArgs().rejectCryptoCallback(call, last, fn, "'const n = randomInt(max)'")) {
       return call;
     }
     if (args.size() == 3) {
-      sema_.diags_.error(args[2]->loc(), "'randomInt' takes a minimum and a maximum");
+      checker_.diags_.error(args[2]->loc(), "'randomInt' takes a minimum and a maximum");
       return loosely();
     }
-    Expr *min = args.size() == 2 ? sema_.exprChecker().checkExpr(args[0], Type::intTy()) : sema_.cryptoArgs().cryptoInt(loc, 0);
-    Expr *max = sema_.exprChecker().checkExpr(args.back(), Type::intTy());
+    Expr *min = args.size() == 2 ? checker_.exprChecker().checkExpr(args[0], Type::intTy())
+                                 : checker_.cryptoArgs().cryptoInt(loc, 0);
+    Expr *max = checker_.exprChecker().checkExpr(args.back(), Type::intTy());
     if (min->type->isInt() && max->type->isInt()) {
-      return sema_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max}, Type::intTy());
+      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max},
+                                              Type::intTy());
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt, {sema_.cryptoArgs().cryptoNumber(min), sema_.cryptoArgs().cryptoNumber(max)},
-                      Type::doubleTy());
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::RandomInt,
+        {checker_.cryptoArgs().cryptoNumber(min), checker_.cryptoArgs().cryptoNumber(max)},
+        Type::doubleTy());
   }
   if (fn == "randomFillSync" || fn == "getRandomValues") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, fn == "randomFillSync" ? 3 : 1)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, fn == "randomFillSync" ? 3 : 1)) {
       return call;
     }
-    Expr *target = sema_.exprChecker().checkExpr(args[0]);
+    Expr *target = checker_.exprChecker().checkExpr(args[0]);
     const Type *type = target->type;
     if (type->isError()) {
       return call;
@@ -170,71 +182,79 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       static const Type::Bytes floats[] = {Type::Bytes::Float16, Type::Bytes::Float32,
                                            Type::Bytes::Float64};
       if (!type->isTypedArray() || llvm::is_contained(floats, type->bytes())) {
-        sema_.diags_.error(target->loc(), "'getRandomValues' fills an array of integers (a Uint8Array, "
-                                    "an Int32Array, a Buffer...); found '" +
-                                        type->name() + "'");
+        checker_.diags_.error(target->loc(),
+                              "'getRandomValues' fills an array of integers (a Uint8Array, "
+                              "an Int32Array, a Buffer...); found '" +
+                                  type->name() + "'");
         return call;
       }
-      return sema_.cryptoArgs().cryptoCall(call, CryptoFn::GetRandomValues, {target}, type);
+      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::GetRandomValues, {target}, type);
     }
     if (!type->isByteView() && type->bytes() != Type::Bytes::ArrayBuffer) {
-      sema_.diags_.error(target->loc(), "'randomFillSync' fills bytes (a Buffer, a typed array, a "
-                                  "DataView or an ArrayBuffer); found '" +
-                                      type->name() + "'");
+      checker_.diags_.error(target->loc(),
+                            "'randomFillSync' fills bytes (a Buffer, a typed array, a "
+                            "DataView or an ArrayBuffer); found '" +
+                                type->name() + "'");
       return call;
     }
     int has = (present(1) ? 1 : 0) | (present(2) ? 2 : 0);
-    Expr *offset = present(1) ? sema_.cryptoArgs().cryptoNumber(args[1]) : sema_.cryptoArgs().cryptoDouble(loc, 0);
-    Expr *size = present(2) ? sema_.cryptoArgs().cryptoNumber(args[2]) : sema_.cryptoArgs().cryptoDouble(loc, 0);
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::RandomFill, {target, offset, size, sema_.cryptoArgs().cryptoInt(loc, has)},
-                      type);
+    Expr *offset = present(1) ? checker_.cryptoArgs().cryptoNumber(args[1])
+                              : checker_.cryptoArgs().cryptoDouble(loc, 0);
+    Expr *size = present(2) ? checker_.cryptoArgs().cryptoNumber(args[2])
+                            : checker_.cryptoArgs().cryptoDouble(loc, 0);
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::RandomFill,
+        {target, offset, size, checker_.cryptoArgs().cryptoInt(loc, has)}, type);
   }
   if (fn == "timingSafeEqual") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
-    Expr *a = sema_.cryptoArgs().cryptoData(args[0], "first argument", false, false, true);
-    Expr *b = sema_.cryptoArgs().cryptoData(args[1], "second argument", false, false, true);
+    Expr *a = checker_.cryptoArgs().cryptoData(args[0], "first argument", false, false, true);
+    Expr *b = checker_.cryptoArgs().cryptoData(args[1], "second argument", false, false, true);
     if (a->type->isError() || b->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::TimingSafeEqual, {a, b}, Type::boolTy());
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::TimingSafeEqual, {a, b},
+                                            Type::boolTy());
   }
   if (fn == "pbkdf2Sync") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 5, 5)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 5, 5)) {
       return call;
     }
-    Expr *password = sema_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
-    Expr *salt = sema_.cryptoArgs().cryptoData(args[1], "salt", true, false, true);
-    Expr *iterations = sema_.cryptoArgs().cryptoNumber(args[2]), *keylen = sema_.cryptoArgs().cryptoNumber(args[3]);
-    Expr *md = sema_.cryptoArgs().cryptoMd(args[4], true);
+    Expr *password = checker_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
+    Expr *salt = checker_.cryptoArgs().cryptoData(args[1], "salt", true, false, true);
+    Expr *iterations = checker_.cryptoArgs().cryptoNumber(args[2]),
+         *keylen = checker_.cryptoArgs().cryptoNumber(args[3]);
+    Expr *md = checker_.cryptoArgs().cryptoMd(args[4], true);
     if (!md || password->type->isError() || salt->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::Pbkdf2, {password, salt, iterations, keylen, md}, buffer);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Pbkdf2,
+                                            {password, salt, iterations, keylen, md}, buffer);
   }
   if (fn == "hkdfSync") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 5, 5)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 5, 5)) {
       return call;
     }
-    Expr *md = sema_.cryptoArgs().cryptoMd(args[0], true);
-    Expr *key = sema_.cryptoArgs().cryptoData(args[1], "ikm", true, true, true);
-    Expr *salt = sema_.cryptoArgs().cryptoData(args[2], "salt", true, false, true);
-    Expr *info = sema_.cryptoArgs().cryptoData(args[3], "info", true, false, true);
-    Expr *keylen = sema_.cryptoArgs().cryptoNumber(args[4]);
+    Expr *md = checker_.cryptoArgs().cryptoMd(args[0], true);
+    Expr *key = checker_.cryptoArgs().cryptoData(args[1], "ikm", true, true, true);
+    Expr *salt = checker_.cryptoArgs().cryptoData(args[2], "salt", true, false, true);
+    Expr *info = checker_.cryptoArgs().cryptoData(args[3], "info", true, false, true);
+    Expr *keylen = checker_.cryptoArgs().cryptoNumber(args[4]);
     if (!md || key->type->isError() || salt->type->isError() || info->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
-                      Type::bytesType(Type::Bytes::ArrayBuffer));
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
+                                            Type::bytesType(Type::Bytes::ArrayBuffer));
   }
   if (fn == "scryptSync") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 3, 4)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 3, 4)) {
       return call;
     }
-    Expr *password = sema_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
-    Expr *salt = sema_.cryptoArgs().cryptoData(args[1], "salt", true, false, true);
-    Expr *keylen = sema_.cryptoArgs().cryptoNumber(args[2]);
+    Expr *password = checker_.cryptoArgs().cryptoData(args[0], "password", true, true, true);
+    Expr *salt = checker_.cryptoArgs().cryptoData(args[1], "salt", true, false, true);
+    Expr *keylen = checker_.cryptoArgs().cryptoNumber(args[2]);
     if (!optionsAt(3, {"N", "r", "p", "maxmem", "cost", "blockSize", "parallelization"})) {
       return call;
     }
@@ -245,213 +265,237 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     for (int i = 0; i < 3; ++i) {
       Expr *a = options.lookup(pairs[i].first), *b = options.lookup(pairs[i].second);
       if (a && b) {
-        sema_.diags_.error(b->loc(), "option '" + pairs[i].first + "' cannot be used together with '" +
-                                   pairs[i].second + "': they are one option");
+        checker_.diags_.error(b->loc(), "option '" + pairs[i].first +
+                                            "' cannot be used together with '" + pairs[i].second +
+                                            "': they are one option");
         return call;
       }
-      values[i] = a || b ? sema_.cryptoArgs().cryptoNumber(a ? a : b) : sema_.cryptoArgs().cryptoDouble(loc, 0);
+      values[i] = a || b ? checker_.cryptoArgs().cryptoNumber(a ? a : b)
+                         : checker_.cryptoArgs().cryptoDouble(loc, 0);
     }
     Expr *maxmem = options.lookup("maxmem");
     if (password->type->isError() || salt->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::Scrypt,
-                      {password, salt, keylen, values[0], values[1], values[2],
-                       maxmem ? sema_.cryptoArgs().cryptoNumber(maxmem) : sema_.cryptoArgs().cryptoDouble(loc, 0)},
-                      buffer);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Scrypt,
+                                            {password, salt, keylen, values[0], values[1],
+                                             values[2],
+                                             maxmem ? checker_.cryptoArgs().cryptoNumber(maxmem)
+                                                    : checker_.cryptoArgs().cryptoDouble(loc, 0)},
+                                            buffer);
   }
   if (fn == "argon2Sync") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
     Expr *type, *name;
     if (literalOf(args[0])) {
-      int which = sema_.cryptoArgs().cryptoChoice(args[0], "algorithm of Argon2", {"argon2d", "argon2i", "argon2id"});
+      int which = checker_.cryptoArgs().cryptoChoice(args[0], "algorithm of Argon2",
+                                                     {"argon2d", "argon2i", "argon2id"});
       if (which < 0) {
         return call;
       }
-      type = sema_.cryptoArgs().cryptoInt(loc, which);
-      name = sema_.cryptoArgs().cryptoString(loc, "");
+      type = checker_.cryptoArgs().cryptoInt(loc, which);
+      name = checker_.cryptoArgs().cryptoString(loc, "");
     } else {
-      type = sema_.cryptoArgs().cryptoInt(loc, 0xffffffff); // -1: the name is known only now
-      name = sema_.argumentChecker().checkArg(args[0], Type::string());
+      type = checker_.cryptoArgs().cryptoInt(loc, 0xffffffff); // -1: the name is known only now
+      name = checker_.argumentChecker().checkArg(args[0], Type::string());
     }
-    if (!sema_.cryptoArgs().cryptoOptions(args[1], fn,
-                       {"message", "nonce", "parallelism", "tagLength", "memory", "passes",
-                        "secret", "associatedData"},
-                       options)) {
+    if (!checker_.cryptoArgs().cryptoOptions(args[1], fn,
+                                             {"message", "nonce", "parallelism", "tagLength",
+                                              "memory", "passes", "secret", "associatedData"},
+                                             options)) {
       return call;
     }
     for (llvm::StringRef required :
          {"message", "nonce", "parallelism", "tagLength", "memory", "passes"}) {
       if (!options.lookup(required)) {
-        sema_.diags_.error(args[1]->loc(), "the parameters of 'argon2Sync' need '" + required + "'");
+        checker_.diags_.error(args[1]->loc(),
+                              "the parameters of 'argon2Sync' need '" + required + "'");
         return call;
       }
     }
-    Expr *message = sema_.cryptoArgs().cryptoData(options["message"], "message", true, false, true);
-    Expr *nonce = sema_.cryptoArgs().cryptoData(options["nonce"], "nonce", true, false, true);
-    Expr *parallelism = sema_.cryptoArgs().cryptoNumber(options["parallelism"]);
-    Expr *tagLength = sema_.cryptoArgs().cryptoNumber(options["tagLength"]);
-    Expr *memory = sema_.cryptoArgs().cryptoNumber(options["memory"]);
-    Expr *passes = sema_.cryptoArgs().cryptoNumber(options["passes"]);
-    Expr *secret = options.lookup("secret")
-                       ? sema_.cryptoArgs().cryptoData(options["secret"], "secret", true, false, true)
-                       : sema_.cryptoArgs().cryptoUndefined(loc);
+    Expr *message =
+        checker_.cryptoArgs().cryptoData(options["message"], "message", true, false, true);
+    Expr *nonce = checker_.cryptoArgs().cryptoData(options["nonce"], "nonce", true, false, true);
+    Expr *parallelism = checker_.cryptoArgs().cryptoNumber(options["parallelism"]);
+    Expr *tagLength = checker_.cryptoArgs().cryptoNumber(options["tagLength"]);
+    Expr *memory = checker_.cryptoArgs().cryptoNumber(options["memory"]);
+    Expr *passes = checker_.cryptoArgs().cryptoNumber(options["passes"]);
+    Expr *secret =
+        options.lookup("secret")
+            ? checker_.cryptoArgs().cryptoData(options["secret"], "secret", true, false, true)
+            : checker_.cryptoArgs().cryptoUndefined(loc);
     Expr *data = options.lookup("associatedData")
-                     ? sema_.cryptoArgs().cryptoData(options["associatedData"], "associatedData", true, false, true)
-                     : sema_.cryptoArgs().cryptoUndefined(loc);
+                     ? checker_.cryptoArgs().cryptoData(options["associatedData"], "associatedData",
+                                                        true, false, true)
+                     : checker_.cryptoArgs().cryptoUndefined(loc);
     for (Expr *e : {message, nonce, secret, data}) {
       if (e->type->isError()) {
         return call;
       }
     }
-    return sema_.cryptoArgs().cryptoCall(
+    return checker_.cryptoArgs().cryptoCall(
         call, CryptoFn::Argon2,
         {type, name, message, nonce, parallelism, tagLength, memory, passes, secret, data}, buffer);
   }
   if (fn == "createCipheriv" || fn == "createDecipheriv") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 3, 4)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 3, 4)) {
       return call;
     }
     std::optional<std::string> name = literalOf(args[0]);
-    Expr *cipher = sema_.cryptoArgs().cryptoCipher(args[0]);
-    Expr *key = sema_.cryptoArgs().cryptoData(args[1], "key", true, true, true);
-    Expr *iv = sema_.cryptoArgs().cryptoData(args[2], "iv", true, false, true);
+    Expr *cipher = checker_.cryptoArgs().cryptoCipher(args[0]);
+    Expr *key = checker_.cryptoArgs().cryptoData(args[1], "key", true, true, true);
+    Expr *iv = checker_.cryptoArgs().cryptoData(args[2], "iv", true, false, true);
     if (!optionsAt(3, {"authTagLength"}) || !cipher || key->type->isError() ||
         iv->type->isError()) {
       return call;
     }
     Expr *tag = options.lookup("authTagLength");
     if (!tag && name && llvm::StringRef(*name).lower().find("ccm") != std::string::npos) {
-      sema_.diags_.error(args[0]->loc(), "'" + *name +
-                                       "' needs the length of its tag: '{ "
-                                       "authTagLength: 16 }'");
+      checker_.diags_.error(args[0]->loc(), "'" + *name +
+                                                "' needs the length of its tag: '{ "
+                                                "authTagLength: 16 }'");
       return call;
     }
     bool decrypt = fn == "createDecipheriv";
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::CipherNew,
-                      {cipher, key, iv, tag ? sema_.cryptoArgs().cryptoNumber(tag) : sema_.cryptoArgs().cryptoDouble(loc, -1),
-                       sema_.cryptoArgs().cryptoBool(loc, decrypt)},
-                      Type::cryptoType(decrypt ? Crypto::Decipheriv : Crypto::Cipheriv));
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::CipherNew,
+        {cipher, key, iv,
+         tag ? checker_.cryptoArgs().cryptoNumber(tag)
+             : checker_.cryptoArgs().cryptoDouble(loc, -1),
+         checker_.cryptoArgs().cryptoBool(loc, decrypt)},
+        Type::cryptoType(decrypt ? Crypto::Decipheriv : Crypto::Cipheriv));
   }
   if (fn == "getHashes" || fn == "getCiphers" || fn == "getCurves") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call,
-                      fn == "getHashes"    ? CryptoFn::GetHashes
-                      : fn == "getCiphers" ? CryptoFn::GetCiphers
-                                           : CryptoFn::GetCurves,
-                      {}, Type::array(Type::string()));
+    return checker_.cryptoArgs().cryptoCall(call,
+                                            fn == "getHashes"    ? CryptoFn::GetHashes
+                                            : fn == "getCiphers" ? CryptoFn::GetCiphers
+                                                                 : CryptoFn::GetCurves,
+                                            {}, Type::array(Type::string()));
   }
   if (fn == "createSecretKey") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
       return call;
     }
-    Expr *key = sema_.cryptoArgs().cryptoData(args[0], "key", true, false, true);
-    Expr *encoding = sema_.cryptoArgs().cryptoEncoding(call, 1, fn, 0);
+    Expr *key = checker_.cryptoArgs().cryptoData(args[0], "key", true, false, true);
+    Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, 1, fn, 0);
     if (key->type->isError() || !encoding) {
       return call;
     }
     if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
-      encoding = sema_.cryptoArgs().cryptoInt(loc, 0);
+      encoding = checker_.cryptoArgs().cryptoInt(loc, 0);
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::SecretKey, {key, encoding}, keyObject);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::SecretKey, {key, encoding}, keyObject);
   }
   if (fn == "createPublicKey" || fn == "createPrivateKey") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
     bool priv = fn == "createPrivateKey";
-    Expr *key, *encoding = sema_.cryptoArgs().cryptoInt(loc, 0), *type = sema_.cryptoArgs().cryptoString(loc, "");
-    Expr *passphrase = sema_.cryptoArgs().cryptoUndefined(loc);
+    Expr *key, *encoding = checker_.cryptoArgs().cryptoInt(loc, 0),
+               *type = checker_.cryptoArgs().cryptoString(loc, "");
+    Expr *passphrase = checker_.cryptoArgs().cryptoUndefined(loc);
     int format = 0, has = 0;
     if (isa<ObjectLitExpr>(args[0])) {
-      if (!sema_.cryptoArgs().cryptoOptions(args[0], fn, {"key", "format", "type", "passphrase", "encoding"},
-                         options)) {
+      if (!checker_.cryptoArgs().cryptoOptions(
+              args[0], fn, {"key", "format", "type", "passphrase", "encoding"}, options)) {
         return call;
       }
       if (Expr *f = options.lookup("format")) {
-        if ((format = sema_.cryptoArgs().cryptoChoice(f, "format of the key", {"pem", "der", "jwk"})) < 0) {
+        if ((format = checker_.cryptoArgs().cryptoChoice(f, "format of the key",
+                                                         {"pem", "der", "jwk"})) < 0) {
           return call;
         }
       }
       if (!options.lookup("key")) {
-        sema_.diags_.error(args[0]->loc(), "the options of '" + fn + "' need 'key'");
+        checker_.diags_.error(args[0]->loc(), "the options of '" + fn + "' need 'key'");
         return call;
       }
-      key = format == 2 ? sema_.argumentChecker().checkArg(options["key"], Type::json())
-                        : sema_.cryptoArgs().cryptoData(options["key"], "key", true, !priv, true);
+      key = format == 2
+                ? checker_.argumentChecker().checkArg(options["key"], Type::json())
+                : checker_.cryptoArgs().cryptoData(options["key"], "key", true, !priv, true);
       if (Expr *t = options.lookup("type")) {
-        int which = sema_.cryptoArgs().cryptoChoice(t, "type of the key", {"pkcs1", "spki", "pkcs8", "sec1"});
+        int which = checker_.cryptoArgs().cryptoChoice(t, "type of the key",
+                                                       {"pkcs1", "spki", "pkcs8", "sec1"});
         if (which < 0) {
           return call;
         }
         static const char *const types[] = {"pkcs1", "spki", "pkcs8", "sec1"};
-        type = sema_.cryptoArgs().cryptoString(t->loc(), types[which]);
+        type = checker_.cryptoArgs().cryptoString(t->loc(), types[which]);
         has |= 1;
       }
       if (Expr *p = options.lookup("passphrase")) {
-        passphrase = sema_.cryptoArgs().cryptoData(p, "passphrase", true, false, true);
+        passphrase = checker_.cryptoArgs().cryptoData(p, "passphrase", true, false, true);
         has |= 2;
       }
       if (Expr *e = options.lookup("encoding")) {
-        Expr *number = literalOf(e) ? sema_.bytesChecker().checkBufferEncoding(e) : nullptr;
+        Expr *number = literalOf(e) ? checker_.bytesChecker().checkBufferEncoding(e) : nullptr;
         if (!number || !isa<IntLitExpr>(number)) {
-          sema_.diags_.error(e->loc(), "the encoding of the key is written as a literal, e.g. 'hex'");
+          checker_.diags_.error(e->loc(),
+                                "the encoding of the key is written as a literal, e.g. 'hex'");
           return call;
         }
         encoding = number;
       }
     } else {
-      key = sema_.cryptoArgs().cryptoData(args[0], "key", true, !priv, true);
+      key = checker_.cryptoArgs().cryptoData(args[0], "key", true, !priv, true);
     }
     if (key->type->isError() || passphrase->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::CreateKey,
-                      {sema_.cryptoArgs().cryptoBool(loc, priv), key, encoding, sema_.cryptoArgs().cryptoInt(loc, format),
-                       sema_.cryptoArgs().cryptoInt(loc, has), type, passphrase},
-                      keyObject);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::CreateKey,
+                                            {checker_.cryptoArgs().cryptoBool(loc, priv), key,
+                                             encoding, checker_.cryptoArgs().cryptoInt(loc, format),
+                                             checker_.cryptoArgs().cryptoInt(loc, has), type,
+                                             passphrase},
+                                            keyObject);
   }
   if (fn == "generateKeyPairSync") {
-    return sema_.keyPairChecker().checkGenerateKeyPair(call, loc);
+    return checker_.keyPairChecker().checkGenerateKeyPair(call, loc);
   }
   if (fn == "generateKeySync") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 2, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
       return call;
     }
-    int which = sema_.cryptoArgs().cryptoChoice(args[0], "type of the key", {"hmac", "aes"});
-    if (which < 0 || !sema_.cryptoArgs().cryptoOptions(args[1], fn, {"length"}, options)) {
+    int which = checker_.cryptoArgs().cryptoChoice(args[0], "type of the key", {"hmac", "aes"});
+    if (which < 0 || !checker_.cryptoArgs().cryptoOptions(args[1], fn, {"length"}, options)) {
       return call;
     }
     if (!options.lookup("length")) {
-      sema_.diags_.error(args[1]->loc(), "'generateKeySync' needs the length of the key in bits: '{ "
-                                   "length: 256 }'");
+      checker_.diags_.error(args[1]->loc(),
+                            "'generateKeySync' needs the length of the key in bits: '{ "
+                            "length: 256 }'");
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::GenerateSecretKey,
-                      {sema_.cryptoArgs().cryptoBool(loc, which == 1), sema_.cryptoArgs().cryptoNumber(options["length"])}, keyObject);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::GenerateSecretKey,
+                                            {checker_.cryptoArgs().cryptoBool(loc, which == 1),
+                                             checker_.cryptoArgs().cryptoNumber(options["length"])},
+                                            keyObject);
   }
   if (fn == "sign" || fn == "verify") {
     bool verify = fn == "verify";
     size_t count = verify ? 4 : 3;
-    if (!sema_.argumentChecker().checkArity(call, loc, unsigned(count), unsigned(count + 1)) ||
-        sema_.cryptoArgs().rejectCryptoCallback(call, count, fn,
-                             verify ? "'const ok = verify(algorithm, data, key, signature)'"
-                                    : "'const signature = sign(algorithm, data, key)'")) {
+    if (!checker_.argumentChecker().checkArity(call, loc, unsigned(count), unsigned(count + 1)) ||
+        checker_.cryptoArgs().rejectCryptoCallback(
+            call, count, fn,
+            verify ? "'const ok = verify(algorithm, data, key, signature)'"
+                   : "'const signature = sign(algorithm, data, key)'")) {
       return call;
     }
-    Expr *algorithm =
-        isa<UndefinedExpr>(args[0]) ? sema_.cryptoArgs().cryptoUndefined(loc) : sema_.argumentChecker().checkArg(args[0], Type::string());
-    Expr *data = sema_.cryptoArgs().cryptoData(args[1], "data", true, false, true);
+    Expr *algorithm = isa<UndefinedExpr>(args[0])
+                          ? checker_.cryptoArgs().cryptoUndefined(loc)
+                          : checker_.argumentChecker().checkArg(args[0], Type::string());
+    Expr *data = checker_.cryptoArgs().cryptoData(args[1], "data", true, false, true);
     std::vector<Expr *> signArgs = {algorithm, data};
-    if (!sema_.cryptoArgs().cryptoSignKey(args[2], fn, !verify, signArgs)) {
+    if (!checker_.cryptoArgs().cryptoSignKey(args[2], fn, !verify, signArgs)) {
       return call;
     }
     if (verify) {
-      Expr *signature = sema_.cryptoArgs().cryptoData(args[3], "signature", true, false, true);
+      Expr *signature = checker_.cryptoArgs().cryptoData(args[3], "signature", true, false, true);
       if (signature->type->isError()) {
         return call;
       }
@@ -460,46 +504,49 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (data->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, verify ? CryptoFn::Verify : CryptoFn::Sign, std::move(signArgs),
-                      verify ? Type::boolTy() : buffer);
+    return checker_.cryptoArgs().cryptoCall(call, verify ? CryptoFn::Verify : CryptoFn::Sign,
+                                            std::move(signArgs), verify ? Type::boolTy() : buffer);
   }
   if (fn == "createSign" || fn == "createVerify") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
     Expr *name = args[0];
-    if (literalOf(name) && !sema_.cryptoArgs().cryptoMd(name, true)) {
+    if (literalOf(name) && !checker_.cryptoArgs().cryptoMd(name, true)) {
       return call;
     }
     bool verify = fn == "createVerify";
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::SignNew,
-                      {sema_.argumentChecker().checkArg(name, Type::string()), sema_.cryptoArgs().cryptoBool(loc, verify)},
-                      Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign));
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::SignNew,
+        {checker_.argumentChecker().checkArg(name, Type::string()),
+         checker_.cryptoArgs().cryptoBool(loc, verify)},
+        Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign));
   }
   if (fn == "createECDH") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::EcdhNew, {sema_.argumentChecker().checkArg(args[0], Type::string())},
-                      Type::cryptoType(Crypto::Ecdh));
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::EcdhNew, {checker_.argumentChecker().checkArg(args[0], Type::string())},
+        Type::cryptoType(Crypto::Ecdh));
   }
   if (fn == "diffieHellman") {
-    if (!sema_.argumentChecker().checkArity(call, loc, 1, 1) ||
-        !sema_.cryptoArgs().cryptoOptions(args[0], fn, {"privateKey", "publicKey"}, options)) {
+    if (!checker_.argumentChecker().checkArity(call, loc, 1, 1) ||
+        !checker_.cryptoArgs().cryptoOptions(args[0], fn, {"privateKey", "publicKey"}, options)) {
       return call;
     }
     if (!options.lookup("privateKey") || !options.lookup("publicKey")) {
-      sema_.diags_.error(args[0]->loc(), "'diffieHellman' needs '{ privateKey, publicKey }'");
+      checker_.diags_.error(args[0]->loc(), "'diffieHellman' needs '{ privateKey, publicKey }'");
       return call;
     }
-    Expr *priv = sema_.cryptoArgs().cryptoKeyObject(options["privateKey"], "private key");
-    Expr *pub = sema_.cryptoArgs().cryptoKeyObject(options["publicKey"], "public key");
+    Expr *priv = checker_.cryptoArgs().cryptoKeyObject(options["privateKey"], "private key");
+    Expr *pub = checker_.cryptoArgs().cryptoKeyObject(options["publicKey"], "public key");
     if (priv->type->isError() || pub->type->isError()) {
       return call;
     }
-    return sema_.cryptoArgs().cryptoCall(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
   }
-  sema_.diags_.error(loc, cryptoExportProblem(fn, "node:crypto"));
+  checker_.diags_.error(loc, cryptoExportProblem(fn, "node:crypto"));
 
   return loosely();
 }

@@ -1,7 +1,7 @@
 #include "compiler/whole_program/flow_calls/flow_calls.h"
-#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "compiler/whole_program/flow_builtins/flow_builtins.h"
 #include "compiler/whole_program/flow_exprs/flow_exprs.h"
+#include "compiler/whole_program/flow_stmts/flow_stmts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
@@ -13,8 +13,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -33,8 +33,7 @@ bool FlowCalls::mayCall(const Type *type, const FunctionDecl *fn) const {
         q->isError() || p->isError()) {
       continue;
     }
-    if ((type->hasRest() && i + 1 == given.size()) ||
-        (fn->sym->hasRest && i + 1 == takes.size())) {
+    if ((type->hasRest() && i + 1 == given.size()) || (fn->sym->hasRest && i + 1 == takes.size())) {
       continue;
     }
     if (!flows_.convertible_(q, p)) {
@@ -52,7 +51,8 @@ void FlowCalls::functionValue(const FunctionDecl *fn) {
 }
 
 Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const FunctionDecl *method,
-                        const Refs &refs, const VarSymbol *initializes, std::string role) {
+                                   const Refs &refs, const VarSymbol *initializes,
+                                   std::string role) {
   if (!method || !method->cls || !method->cls->type || !from) {
     return refs;
   }
@@ -67,8 +67,8 @@ Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const Funct
   }
   int conv = flows_.node(NodeKind::Conversion, at, method->name);
   flows_.conversions.push_back({conv, from, to, at->loc(), std::move(found),
-                         initializes ? flows_.var(initializes) : -1, std::move(role),
-                         llvm::StringRef()});
+                                initializes ? flows_.var(initializes) : -1, std::move(role),
+                                llvm::StringRef()});
   Refs out = refs;
   out.push_back({conv, 0, 0});
 
@@ -76,7 +76,7 @@ Refs FlowCalls::receiverConversion(const Expr *at, const Type *from, const Funct
 }
 
 void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
-                   const std::vector<Refs> &args) {
+                              const std::vector<Refs> &args) {
   if (!target) {
     for (const Refs &a : args) {
       flows_.escape(a);
@@ -177,7 +177,8 @@ Refs FlowCalls::call(CallExpr *c) {
     receiverType = member->object->type;
   } else if (callee && callee->name == "super") {
     receiver = flows_.flowStmts().name(callee);
-    receiverType = flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
+    receiverType =
+        flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
     superCtor = true;
   } else if (!callee || !(callee->func || (callee->var && callee->var->lambda))) {
     flows_.flowExprs().expr(c->callee); // a function value

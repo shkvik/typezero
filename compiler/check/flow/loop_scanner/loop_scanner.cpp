@@ -1,14 +1,14 @@
 #include "compiler/check/flow/loop_scanner/loop_scanner.h"
-#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -22,11 +22,11 @@ const llvm::StringRef kGlobalFunctions[] = {
 
 } // namespace
 
-LoopScanner::LoopScanner(Sema &sema) : sema_(sema) {}
+LoopScanner::LoopScanner(Checker &checker) : checker_(checker) {}
 
-Sema::LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
-                              llvm::ArrayRef<const Expr *> exprs) const {
-  Sema::LoopScan scan;
+Checker::LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
+                                        llvm::ArrayRef<const Expr *> exprs) const {
+  Checker::LoopScan scan;
   for (const Stmt *stmt : stmts) {
     if (stmt) {
       scanStmt(stmt, scan, 0);
@@ -45,13 +45,13 @@ Sema::LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
 // the code of a generator or the callbacks of helpers.
 bool LoopScanner::namesIterator(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
-  const VarSymbol *var = name ? sema_.scopes().lookup(name->name).var : nullptr;
+  const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
 
   return var && var->type && var->type->nonOptional()->isIterator();
 }
 
 // `depth` counts the loops nested inside the scanned one.
-void LoopScanner::scanStmt(const Stmt *stmt, Sema::LoopScan &scan, unsigned depth) const {
+void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned depth) const {
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
     for (const Stmt *s : cast<BlockStmt>(stmt)->body) {
@@ -183,13 +183,13 @@ void LoopScanner::scanStmt(const Stmt *stmt, Sema::LoopScan &scan, unsigned dept
   }
 }
 
-void LoopScanner::scanExpr(const Expr *expr, Sema::LoopScan &scan, unsigned depth) const {
+void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned depth) const {
   auto change = [&](const Expr *target, int64_t delta) {
     auto *name = dyn_cast<NameExpr>(target);
     if (!name) {
       return;
     }
-    Sema::LoopScan::Change &c = scan.changes[name->name];
+    Checker::LoopScan::Change &c = scan.changes[name->name];
     c.delta = ++c.count == 1 ? delta : 0;
     c.nested |= depth > 0;
   };
@@ -211,7 +211,8 @@ void LoopScanner::scanExpr(const Expr *expr, Sema::LoopScan &scan, unsigned dept
       scan.growsArrays = true; // `a[a.length] = x` appends
       scan.releasesElements = true;
       // `o[key] = x` assigns the field the key names.
-      sema_.keyedFieldChecker().keyNames(index->index, [&](llvm::StringRef name) { scan.fieldWrites.insert(name); });
+      checker_.keyedFieldChecker().keyNames(
+          index->index, [&](llvm::StringRef name) { scan.fieldWrites.insert(name); });
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       scanExpr(member->object, scan, depth);
       scan.fieldWrites.insert(member->name);
@@ -304,13 +305,14 @@ void LoopScanner::scanExpr(const Expr *expr, Sema::LoopScan &scan, unsigned dept
       scanExpr(arg, scan, depth);
     }
     if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
-      if (sema_.callChecker().isGlobalName(member->object, "console") || sema_.callChecker().isGlobalName(member->object, "Math")) {
+      if (checker_.callChecker().isGlobalName(member->object, "console") ||
+          checker_.callChecker().isGlobalName(member->object, "Math")) {
         break;
       }
       scanExpr(member->object, scan, depth);
       llvm::StringRef method = member->name;
       // `o.run()` calls the function in a field: any code.
-      if (sema_.file_->fieldNames.contains(method)) {
+      if (checker_.file_->fieldNames.contains(method)) {
         scan.callsFunctions = true;
       }
       if (method == "push" || method == "unshift") {
@@ -332,12 +334,12 @@ void LoopScanner::scanExpr(const Expr *expr, Sema::LoopScan &scan, unsigned dept
       }
       // An iterator runs a generator's code or the callbacks of helpers.
       if (method == "next" || method == "toArray" ||
-          (method == "from" &&
-           (sema_.callChecker().isGlobalName(member->object, "Array") || sema_.callChecker().isGlobalName(member->object, "Iterator")))) {
+          (method == "from" && (checker_.callChecker().isGlobalName(member->object, "Array") ||
+                                checker_.callChecker().isGlobalName(member->object, "Iterator")))) {
         scan.callsFunctions = true;
       }
     } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
-                 return sema_.callChecker().isGlobalName(call->callee, name);
+                 return checker_.callChecker().isGlobalName(call->callee, name);
                })) {
       scan.callsFunctions = true;
     }

@@ -5,13 +5,18 @@
 // Error in tz_thrown and returns from the function, and every caller of a
 // function that may throw checks tz_thrown after the call, releasing what it
 // holds and returning in turn, until a `catch` takes the error. The class
-// Error is the program's (CodeGen declares it); the runtime makes Errors for
+// Error is the program's (Lowering declares it); the runtime makes Errors for
 // its own failures through the function the program gives it.
 //
 // The stack of an error is collected on the way: the function that throws
 // and each one the error passes add their place, up to Node's default of ten
 // (Error.stackTraceLimit). Places cost nothing until something throws.
 
+#include "runtime/core/error/error.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/parallel/parallel.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <stdarg.h>
 #include <stdio.h>

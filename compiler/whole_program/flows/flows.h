@@ -1,13 +1,13 @@
 #pragma once
 
-#include <memory>
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
 #include <cctype>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <tuple>
 
@@ -96,7 +96,7 @@ void append(Refs &to, const Refs &from);
 // objects), which no conversion widens.
 bool holdsReferences(const Type *type);
 
-// The type of a value before the conversions Sema added to it.
+// The type of a value before the conversions Checker added to it.
 const Type *ownType(const Expr *expr);
 
 // The program as a graph of flows (see the top of the file).
@@ -120,6 +120,7 @@ public:
   std::vector<const Type *> types;
   // What `throw` throws and what a promise is rejected with.
   int thrown_ = 0;
+
 private:
   int node(NodeKind kind, const void *key, llvm::StringRef name);
   int var(const VarSymbol *v);

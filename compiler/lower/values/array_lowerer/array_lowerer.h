@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Arrays: literals, elements, length and for...of.
 class ArrayLowerer {
 public:
-  explicit ArrayLowerer(CodeGen &codegen);
+  explicit ArrayLowerer(Lowering &lowering);
 
   llvm::Value *emitElementAssign(AssignExpr *assign, bool needResult);
   llvm::Value *emitLengthAssign(AssignExpr *assign, bool needResult);
@@ -32,7 +32,7 @@ public:
                       llvm::BasicBlock *bodyBlock, llvm::BasicBlock *endBlock);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

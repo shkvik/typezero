@@ -8,8 +8,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -143,9 +143,9 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
 
 } // namespace
 
-JsonTypeChecker::JsonTypeChecker(Sema &sema) : sema_(sema) {}
+JsonTypeChecker::JsonTypeChecker(Checker &checker) : checker_(checker) {}
 
-std::string JsonTypeChecker::jsonProblem(const Type *type, Sema::ClassProblem classProblem) {
+std::string JsonTypeChecker::jsonProblem(const Type *type, Checker::ClassProblem classProblem) {
   llvm::SmallPtrSet<const Type *, 8> seen;
 
   return fromJsonProblem(type, seen, classProblem);
@@ -160,8 +160,8 @@ bool JsonTypeChecker::checkFromJsonType(const Type *type, llvm::SMLoc loc, llvm:
   if (problem.empty()) {
     return true;
   }
-  sema_.diags_.error(loc,
-               fn + "<" + type->name() + "> cannot build a '" + type->name() + "': " + problem);
+  checker_.diags_.error(loc, fn + "<" + type->name() + "> cannot build a '" + type->name() +
+                                 "': " + problem);
 
   return false;
 }

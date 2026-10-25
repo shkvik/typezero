@@ -1,30 +1,30 @@
 #include "compiler/check/types/type_operators/type_operators.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/classes/class_value_checker/class_value_checker.h"
+#include "compiler/check/generics/arg_list_checker/arg_list_checker.h"
+#include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/generics/type_params/type_params.h"
+#include "compiler/check/top_level_checker/top_level_checker.h"
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/extends_relation/extends_relation.h"
 #include "compiler/check/types/template_types/template_types.h"
-#include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/check/generics/generic_checker/generic_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
-#include "compiler/check/top_level_checker/top_level_checker.h"
-#include "compiler/check/types/utility_types/utility_types.h"
-#include "compiler/library/events/event_maps/event_maps.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/check/types/typeops_check_helpers/typeops_check_helpers.h"
-#include "compiler/whole_program/flows/flows.h"
+#include "compiler/check/types/utility_types/utility_types.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "compiler/library/events/event_maps/event_maps.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
+#include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -52,7 +52,7 @@ llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
 
 } // namespace
 
-TypeOperators::TypeOperators(Sema &sema) : sema_(sema) {}
+TypeOperators::TypeOperators(Checker &checker) : checker_(checker) {}
 
 const Type *TypeOperators::keysOf(const Type *type) {
   type = type->nonOptional();
@@ -86,7 +86,7 @@ const Type *TypeOperators::keysOf(const Type *type) {
   // it can use.
   ClassDecl *cls = ClassDeclarer::classOf(type);
   if (cls) {
-    sema_.classDeclarer().completeClass(cls);
+    checker_.classDeclarer().completeClass(cls);
   }
   std::vector<const Type *> keys;
   for (const Field &f : type->fields()) {
@@ -120,7 +120,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   TypeOp kind = op->typeOp();
   // A conditional type is resolved again with what its names stand for.
   if (kind == TypeOp::Conditional) {
-    return sema_.conditionalTypes().evalConditional(operands);
+    return checker_.conditionalTypes().evalConditional(operands);
   }
   // A mapped type is open while its keys, or its values or new names for
   // some key, are.
@@ -143,7 +143,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
         return Type::error();
       }
       std::string text = utf8(name->literalText());
-      const Type *type = sema_.typeParams().substitute(value, {key}, {name});
+      const Type *type = checker_.typeParams().substitute(value, {key}, {name});
       if (type->isError()) {
         return type;
       }
@@ -161,7 +161,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
       // TypeScript.
       std::vector<std::string> names{text};
       if (rename) {
-        const Type *renamed = sema_.typeParams().substitute(rename, {key}, {name});
+        const Type *renamed = checker_.typeParams().substitute(rename, {key}, {name});
         if (renamed->isError()) {
           return renamed;
         }
@@ -211,7 +211,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
 
       return Type::intTy();
     }
-    const Type *member = sema_.argListChecker().memberType(operands[0], operands[1]);
+    const Type *member = checker_.argListChecker().memberType(operands[0], operands[1]);
     return member ? member : Type::error();
   }
   case TypeOp::Exclude:
@@ -222,14 +222,14 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
     // that field.
     std::vector<const Type *> kept;
     for (const Type *m : distributedMembers(operands[0])) {
-      if (sema_.extendsRelation().extendsType(m, operands[1]) == (kind == TypeOp::Extract)) {
+      if (checker_.extendsRelation().extendsType(m, operands[1]) == (kind == TypeOp::Extract)) {
         kept.push_back(m);
       }
     }
     return kept.empty() ? Type::never() : Type::unionOf(kept);
   }
   case TypeOp::Template:
-    return sema_.templateTypes().evalTemplate(operands);
+    return checker_.templateTypes().evalTemplate(operands);
   case TypeOp::Spread: {
     std::vector<const Type *> elements;
     std::vector<bool> spread;
@@ -245,7 +245,7 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
   case TypeOp::Lowercase:
   case TypeOp::Capitalize:
   case TypeOp::Uncapitalize:
-    return sema_.templateTypes().evalStringCase(kind, operands[0]);
+    return checker_.templateTypes().evalStringCase(kind, operands[0]);
   case TypeOp::NonNullable:
     return operands[0]->nonOptional();
   case TypeOp::ReturnType:
@@ -270,26 +270,27 @@ const Type *TypeOperators::evalTypeOp(const Type *op, llvm::ArrayRef<const Type 
 const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
   switch (ref.kind) {
   case TypeRef::Kind::KeyOf: {
-    const Type *type = sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+    const Type *type = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
     if (type->isError()) {
       return type;
     }
     const Type *keys = evalTypeOp(Type::typeOp(TypeOp::KeyOf, {type}), {type});
     if (keys->isError()) {
-      sema_.diags_.error(ref.loc, "'keyof' takes an object type, whose fields it names, not '" +
-                                type->name() + "'");
+      checker_.diags_.error(ref.loc, "'keyof' takes an object type, whose fields it names, not '" +
+                                         type->name() + "'");
     }
     return keys;
   }
   case TypeRef::Kind::Indexed: {
-    const Type *object = sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
-    const Type *key = sema_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
+    const Type *object = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+    const Type *key = checker_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
     if (object->isError() || key->isError()) {
       return Type::error();
     }
     const Type *member = evalTypeOp(Type::indexedAccess(object, key), {object, key});
     if (member->isError()) {
-      sema_.diags_.error(ref.loc, "'" + object->name() + "' has no member '" + key->name() + "'");
+      checker_.diags_.error(ref.loc,
+                            "'" + object->name() + "' has no member '" + key->name() + "'");
     }
     return member;
   }
@@ -297,25 +298,26 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
     // The type of the value: a variable, then its fields.
     llvm::StringRef name = ref.names.front();
     const Type *type = nullptr;
-    Sema::ScopeEntry entry = sema_.topLevelChecker().lookupValue(name);
+    Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name);
     if (VarSymbol *var = entry.var) {
       type = var->type;
     } else if (entry.cls && !entry.cls->isGeneric()) {
-      type = sema_.classValueChecker().classValueType(entry.cls); // of a class, the class as a value
+      type = checker_.classValueChecker().classValueType(
+          entry.cls); // of a class, the class as a value
     } else if (entry.func && !entry.func->isGeneric()) {
-      type = sema_.returnInferrer().functionType(entry.func); // of a function, its type
+      type = checker_.returnInferrer().functionType(entry.func); // of a function, its type
     }
     // A top-level constant not checked yet: the type its declaration says,
     // or that of its literal; a function not declared yet: the types it
     // declares.
-    for (Stmt *item : sema_.module_ ? sema_.module_->file.items : std::vector<Stmt *>()) {
+    for (Stmt *item : checker_.module_ ? checker_.module_->file.items : std::vector<Stmt *>()) {
       if (type) {
         break;
       }
       if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
         for (const VarDeclarator &d : decl->decls) {
           if (d.name == name && !type) {
-            type = d.typeAnn ? sema_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false)
+            type = d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false)
                    : d.init  ? GenericChecker::literalShape(d.init)
                              : nullptr;
           }
@@ -325,7 +327,7 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       if (auto *decl = dyn_cast<VarDeclStmt>(item); decl && !type) {
         for (const VarDeclarator &d : decl->decls) {
           if (auto *create = d.name == name ? llvm::dyn_cast_or_null<NewExpr>(d.init) : nullptr) {
-            type = sema_.eventMaps().createdType(create);
+            type = checker_.eventMaps().createdType(create);
           }
         }
       }
@@ -341,32 +343,33 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
           written = false;
           break;
         }
-        const Type *t = sema_.typeResolver().resolveType(*p.type, /*allowVoid=*/false);
+        const Type *t = checker_.typeResolver().resolveType(*p.type, /*allowVoid=*/false);
         params.push_back(p.optional || p.defaultValue ? Type::optional(t) : t);
         if (!p.optional && !p.defaultValue && !p.rest) {
           minArgs = params.size();
         }
       }
       if (written) {
-        type = Type::function(params, minArgs, !fn->params.empty() && fn->params.back().rest,
-                              sema_.typeResolver().resolveType(*fn->returnType, /*allowVoid=*/true));
+        type = Type::function(
+            params, minArgs, !fn->params.empty() && fn->params.back().rest,
+            checker_.typeResolver().resolveType(*fn->returnType, /*allowVoid=*/true));
       }
     }
     // A name the file imports from one that loaded before it, while its
     // imports are not bound yet (the types of its declarations come first):
     // what that file declares, `typeof fetch` of the web's fetch.
     for (const ImportDecl &decl :
-         sema_.module_ && !type ? sema_.module_->file.imports : std::vector<ImportDecl>()) {
+         checker_.module_ && !type ? checker_.module_->file.imports : std::vector<ImportDecl>()) {
       for (const ModuleName &imported : decl.names) {
         if (imported.as == name && decl.from && !type) {
-          type = sema_.utilityTypes().importedValueType(decl.from, imported.name);
+          type = checker_.utilityTypes().importedValueType(decl.from, imported.name);
         }
       }
     }
     if (!type) {
-      sema_.diags_.error(ref.loc, "'typeof " + name + "' needs the type of '" + name +
-                                "', which is not known here; declare it, e.g. 'const " + name +
-                                ": T = ...'");
+      checker_.diags_.error(ref.loc, "'typeof " + name + "' needs the type of '" + name +
+                                         "', which is not known here; declare it, e.g. 'const " +
+                                         name + ": T = ...'");
       return Type::error();
     }
     for (size_t i = 1; i < ref.names.size(); ++i) {
@@ -374,20 +377,22 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       // A method of a class, as a function; a getter (of a class of a
       // built-in module), what it gives.
       if (ClassDecl *cls = field ? nullptr : ClassDeclarer::classOf(type)) {
-        sema_.classDeclarer().completeClass(cls);
-        std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names[i], /*isStatic=*/false);
+        checker_.classDeclarer().completeClass(cls);
+        std::vector<FunctionDecl *> methods =
+            ClassDeclarer::methodsNamed(cls, ref.names[i], /*isStatic=*/false);
         if (!methods.empty() && methods.back()->sym &&
             methods.back()->accessor == FunctionDecl::Accessor::Getter) {
-          type = sema_.returnInferrer().functionType(methods.back()->sym)->ret();
+          type = checker_.returnInferrer().functionType(methods.back()->sym)->ret();
           continue;
         }
         if (methods.size() == 1 && methods[0]->sym && methods[0]->typeParams.empty()) {
-          type = sema_.returnInferrer().functionType(methods[0]->sym);
+          type = checker_.returnInferrer().functionType(methods[0]->sym);
           continue;
         }
       }
       if (!field) {
-        sema_.diags_.error(ref.loc, "'" + type->name() + "' has no field '" + ref.names[i] + "'");
+        checker_.diags_.error(ref.loc,
+                              "'" + type->name() + "' has no field '" + ref.names[i] + "'");
         return Type::error();
       }
       type = field->type;
@@ -397,13 +402,13 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
   case TypeRef::Kind::Mapped: {
     // The keys, before the name of the key is visible; then the values with
     // it, a type parameter of the mapped type.
-    const Type *keys = sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+    const Type *keys = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
     if (keys->isError()) {
       return keys;
     }
     const Type *source = nullptr;
     if (ref.args[0].kind == TypeRef::Kind::KeyOf) {
-      source = sema_.typeResolver().resolveType(ref.args[0].args[0], /*allowVoid=*/false);
+      source = checker_.typeResolver().resolveType(ref.args[0].args[0], /*allowVoid=*/false);
     }
     // `[P in K]` with `K extends keyof T`, and `[P in Exclude<keyof T, K>]`:
     // the fields of T keep their `?` and `readonly` too.
@@ -420,14 +425,16 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
     }
     Type *key = Type::param(ref.name);
     key->setConstraint(keys, {});
-    sema_.typeScopes_.emplace_back();
-    auto *alias = sema_.ctx_.make<TypeAliasDecl>(ref.loc, ref.name, TypeRef());
+    checker_.typeScopes_.emplace_back();
+    auto *alias = checker_.ctx_.make<TypeAliasDecl>(ref.loc, ref.name, TypeRef());
     alias->resolved = key;
-    sema_.typeScopes_.back()[ref.name] = alias;
-    const Type *value = sema_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
+    checker_.typeScopes_.back()[ref.name] = alias;
+    const Type *value = checker_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
     // `as`: the name each key gives instead (none for never).
-    const Type *rename = ref.args.size() > 2 ? sema_.conditionalTypes().resolveTypeArgument(ref.args[2]) : nullptr;
-    sema_.typeScopes_.pop_back();
+    const Type *rename = ref.args.size() > 2
+                             ? checker_.conditionalTypes().resolveTypeArgument(ref.args[2])
+                             : nullptr;
+    checker_.typeScopes_.pop_back();
     if (value->isError()) {
       return value;
     }
@@ -437,20 +444,20 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
     if (rename && !mentionsParam(rename)) {
       for (const Type *n : distributedMembers(rename)) {
         if (!n->isStringLiteral()) {
-          sema_.diags_.error(ref.args[2].loc,
-                       "a mapped type renames its keys to names of fields, string literal "
-                       "types such as `get${Capitalize<K>}`, not '" +
-                           n->name() + "'");
+          checker_.diags_.error(ref.args[2].loc,
+                                "a mapped type renames its keys to names of fields, string literal "
+                                "types such as `get${Capitalize<K>}`, not '" +
+                                    n->name() + "'");
           return Type::error();
         }
       }
     }
     for (const Type *k : mentionsParam(keys) ? llvm::ArrayRef<const Type *>() : membersOf(keys)) {
       if (!k->isStringLiteral() && !k->isNever()) {
-        sema_.diags_.error(ref.args[0].loc,
-                     "the keys of a mapped type are names of fields, string literal types "
-                     "such as '\"id\" | \"name\"' or 'keyof T', not '" +
-                         k->name() + "'");
+        checker_.diags_.error(ref.args[0].loc,
+                              "the keys of a mapped type are names of fields, string literal types "
+                              "such as '\"id\" | \"name\"' or 'keyof T', not '" +
+                                  k->name() + "'");
         return Type::error();
       }
     }

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The functions of Math.
 class MathLowerer {
 public:
-  explicit MathLowerer(CodeGen &codegen);
+  explicit MathLowerer(Lowering &lowering);
 
   // Math, Number, parseInt, String.fromCharCode... (codegen_builtins.cpp)
   llvm::Value *emitMathCall(CallExpr *call);
@@ -17,7 +17,7 @@ public:
   llvm::FunctionCallee mathFunction(llvm::StringRef name, unsigned params);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

@@ -1,18 +1,18 @@
 #include "compiler/library/result/result_async_checker/result_async_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/functions/callback_checker/callback_checker.h"
-#include "compiler/library/result/result_types/result_types.h"
+#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/result/result_checker/result_checker.h"
+#include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -34,11 +34,11 @@ const Type *halfOf(const Type *half) { return half->isVoid() ? Type::undefinedTy
 
 } // namespace
 
-ResultAsyncChecker::ResultAsyncChecker(Sema &sema) : sema_(sema) {}
+ResultAsyncChecker::ResultAsyncChecker(Checker &checker) : checker_(checker) {}
 
-Expr *ResultAsyncChecker::checkResultAsyncCall(CallExpr *call, NameExpr *name, llvm::StringRef which,
-                                 const Type *expected) {
-  sema_.file_->usesAsync = true;
+Expr *ResultAsyncChecker::checkResultAsyncCall(CallExpr *call, NameExpr *name,
+                                               llvm::StringRef which, const Type *expected) {
+  checker_.file_->usesAsync = true;
   if (which == "fromPromise" || which == "fromSafePromise") {
     return checkResultFromPromise(call, name->loc(), which == "fromSafePromise", expected);
   }
@@ -46,23 +46,27 @@ Expr *ResultAsyncChecker::checkResultAsyncCall(CallExpr *call, NameExpr *name, l
     return checkResultAsyncThrowable(call, name->loc());
   }
   // okAsync(v) and errAsync(e): ok(v) and err(e) in a Promise settled now.
-  Expr *made = sema_.resultChecker().checkOkErr(call, name, which == "okAsync", wantedResult(expected));
+  Expr *made =
+      checker_.resultChecker().checkOkErr(call, name, which == "okAsync", wantedResult(expected));
   if (!made->type->isResult()) {
     return made;
   }
-  auto *resolve = sema_.ctx_.make<CallExpr>(call->loc(), call->callee, std::vector<Expr *>{made});
+  auto *resolve =
+      checker_.ctx_.make<CallExpr>(call->loc(), call->callee, std::vector<Expr *>{made});
   resolve->builtin = Builtin::PromiseResolve;
   resolve->type = Type::promise(made->type);
 
   return resolve;
 }
 
-Expr *ResultAsyncChecker::checkResultAsyncStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
+Expr *ResultAsyncChecker::checkResultAsyncStatic(CallExpr *call, MemberExpr *member,
+                                                 const Type *expected) {
   auto *name = dyn_cast<NameExpr>(member->object);
-  if (!name || call->optional || member->optional || sema_.resultTypes().neverthrowName(name->name) != "ResultAsync") {
+  if (!name || call->optional || member->optional ||
+      checker_.resultTypes().neverthrowName(name->name) != "ResultAsync") {
     return nullptr;
   }
-  sema_.file_->usesAsync = true;
+  checker_.file_->usesAsync = true;
   llvm::StringRef method = member->name;
   if (method == "fromPromise" || method == "fromSafePromise") {
     return checkResultFromPromise(call, member->loc(), method == "fromSafePromise", expected);
@@ -74,12 +78,12 @@ Expr *ResultAsyncChecker::checkResultAsyncStatic(CallExpr *call, MemberExpr *mem
   if (method == "combine" || method == "combineWithAllErrors") {
     hint = "; await them with 'Promise.all' and use 'Result." + method.str() + "'";
   }
-  sema_.diags_.error(member->loc(), "'" + name->name + "." + method +
-                                  "' is not supported; ResultAsync has 'fromPromise', "
-                                  "'fromSafePromise' and 'fromThrowable'" +
-                                  hint);
+  checker_.diags_.error(member->loc(), "'" + name->name + "." + method +
+                                           "' is not supported; ResultAsync has 'fromPromise', "
+                                           "'fromSafePromise' and 'fromThrowable'" +
+                                           hint);
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -89,32 +93,34 @@ Expr *ResultAsyncChecker::checkResultAsyncStatic(CallExpr *call, MemberExpr *mem
 // an Err of what toError makes of its error (fromSafePromise lets the error
 // reject the ResultAsync).
 Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc, bool safe,
-                                   const Type *expected) {
+                                                 const Type *expected) {
   call->type = Type::error();
   llvm::StringRef fn = safe ? "fromSafePromise" : "fromPromise";
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, loc, safe ? 1 : 2, safe ? 1 : 2)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, loc, safe ? 1 : 2, safe ? 1 : 2)) {
     return call;
   }
   const Type *wanted = wantedResult(expected);
   Expr *&promise = call->args[0];
   const Type *wantedValue = wanted && !wanted->okType()->isNever() ? wanted->okType() : nullptr;
-  promise = sema_.exprChecker().checkExpr(promise, wantedValue && (isa<NewExpr>(promise) || isa<CallExpr>(promise))
-                                   ? Type::promise(wantedValue)
-                                   : nullptr);
+  promise = checker_.exprChecker().checkExpr(
+      promise, wantedValue && (isa<NewExpr>(promise) || isa<CallExpr>(promise))
+                   ? Type::promise(wantedValue)
+                   : nullptr);
   if (promise->type->isError()) {
     return call;
   }
   if (!promise->type->isPromise()) {
-    sema_.diags_.error(promise->loc(),
-                 "'" + fn + "' takes a Promise, found '" + promise->type->name() + "'");
+    checker_.diags_.error(promise->loc(),
+                          "'" + fn + "' takes a Promise, found '" + promise->type->name() + "'");
     return call;
   }
   const Type *value = promise->type->promised(), *error = Type::never();
   if (!safe) {
-    Sema::Signature sig;
-    sig.params = {sema_.errorClass_->type};
+    Checker::Signature sig;
+    sig.params = {checker_.errorClass_->type};
     sig.pad = false;
-    call->args[1] = sema_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, fn);
+    call->args[1] = checker_.callbackChecker().checkFunctionArg(call->args[1], sig, 1, fn);
     if (!call->args[1]->type->isFunction()) {
       return call;
     }
@@ -123,8 +129,9 @@ Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc
     }
     error = call->args[1]->type->ret();
     if (error->isVoid()) {
-      sema_.diags_.error(call->args[1]->loc(), "the function that turns the Error into the error of the "
-                                         "Result must return it");
+      checker_.diags_.error(call->args[1]->loc(),
+                            "the function that turns the Error into the error of the "
+                            "Result must return it");
       return call;
     }
   }
@@ -145,44 +152,49 @@ Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc
 // or its Promise is rejected with, as toError makes it.
 Expr *ResultAsyncChecker::checkResultAsyncThrowable(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, loc, 1, 2)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
     return call;
   }
   Expr *&fn = call->args[0];
-  fn = sema_.exprChecker().checkExpr(fn);
+  fn = checker_.exprChecker().checkExpr(fn);
   const Type *fnType = fn->type;
   if (fnType->isError()) {
     return call;
   }
   if (!fnType->isFunction() || !fnType->ret()->isPromise()) {
-    sema_.diags_.error(fn->loc(), "'fromThrowable' of ResultAsync takes a function that gives a Promise, "
-                            "found '" +
-                                fnType->name() + "'");
+    checker_.diags_.error(fn->loc(),
+                          "'fromThrowable' of ResultAsync takes a function that gives a Promise, "
+                          "found '" +
+                              fnType->name() + "'");
     return call;
   }
-  const Type *error = sema_.errorClass_->type;
+  const Type *error = checker_.errorClass_->type;
   if (call->args.size() > 1) {
-    Sema::Signature sig;
-    sig.params = {sema_.errorClass_->type};
+    Checker::Signature sig;
+    sig.params = {checker_.errorClass_->type};
     sig.minArgs = 1;
     Expr *&toError = call->args[1];
-    toError = isa<FunctionExpr>(toError) ? sema_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(toError), &sig)
-                                         : sema_.exprChecker().checkExpr(toError);
+    toError = isa<FunctionExpr>(toError)
+                  ? checker_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(toError), &sig)
+                  : checker_.exprChecker().checkExpr(toError);
     const Type *toType = toError->type;
     if (toType->isError()) {
       return call;
     }
     if (!toType->isFunction() || toType->minArgs() > 1 ||
-        (!toType->params().empty() && toType->params()[0] != sema_.errorClass_->type)) {
-      sema_.diags_.error(toError->loc(), "the second argument of 'fromThrowable' turns the Error into "
-                                   "the error of the Result: a function that takes an Error, e.g. "
-                                   "'(e) => e.message'");
+        (!toType->params().empty() && toType->params()[0] != checker_.errorClass_->type)) {
+      checker_.diags_.error(toError->loc(),
+                            "the second argument of 'fromThrowable' turns the Error into "
+                            "the error of the Result: a function that takes an Error, e.g. "
+                            "'(e) => e.message'");
       return call;
     }
     error = toType->ret();
     if (error->isVoid()) {
-      sema_.diags_.error(toError->loc(), "the function that turns the Error into the error of the "
-                                   "Result must return it");
+      checker_.diags_.error(toError->loc(),
+                            "the function that turns the Error into the error of the "
+                            "Result must return it");
       return call;
     }
   }
@@ -193,15 +205,16 @@ Expr *ResultAsyncChecker::checkResultAsyncThrowable(CallExpr *call, llvm::SMLoc 
   return call;
 }
 
-Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *member, llvm::StringRef name) {
+Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *member,
+                                                 llvm::StringRef name) {
   call->type = Type::error();
-  sema_.file_->usesAsync = true;
+  checker_.file_->usesAsync = true;
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   // asyncMap and asyncAndThen of a Result: map and andThen of a ResultAsync
@@ -215,10 +228,10 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
   const Type *value = result->okType(), *error = result->errType();
   // A callback: what it gets, and what it gives, as `await` would.
   auto callback = [&](Expr *&arg, const Type *half) -> const Type * {
-    Sema::Signature sig;
+    Checker::Signature sig;
     sig.pad = false;
     sig.params = {halfOf(half)};
-    arg = sema_.callbackChecker().checkFunctionArg(arg, sig, 1, given);
+    arg = checker_.callbackChecker().checkFunctionArg(arg, sig, 1, given);
     if (!arg->type->isFunction()) {
       return nullptr;
     }
@@ -226,19 +239,19 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
       fe->fn->nonEscaping = false; // it runs later
     }
     if (ofResult && !arg->type->ret()->isPromise()) {
-      sema_.diags_.error(arg->loc(), "the function of '" + given + "' must give a " +
-                                   (given == "asyncMap" ? "Promise" : "ResultAsync") + ", found '" +
-                                   arg->type->ret()->name() + "'; use '" + name +
-                                   "' for a function that gives " +
-                                   (given == "asyncMap" ? "a value" : "a Result"));
+      checker_.diags_.error(arg->loc(), "the function of '" + given + "' must give a " +
+                                            (given == "asyncMap" ? "Promise" : "ResultAsync") +
+                                            ", found '" + arg->type->ret()->name() + "'; use '" +
+                                            name + "' for a function that gives " +
+                                            (given == "asyncMap" ? "a value" : "a Result"));
       return nullptr;
     }
 
     return awaited(arg->type->ret());
   };
   if (name == "andThrough") {
-    sema_.diags_.error(member->loc(), "'andThrough' of a ResultAsync is not supported yet; use "
-                                "'andThen', which gives the Result its function gives");
+    checker_.diags_.error(member->loc(), "'andThrough' of a ResultAsync is not supported yet; use "
+                                         "'andThen', which gives the Result its function gives");
     if (call->args.size() == 1) {
       callback(call->args[0], value); // for the errors in it
     } else {
@@ -262,7 +275,8 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
       method = &m;
     }
   }
-  if (!method || !sema_.argumentChecker().checkArity(call, member->loc(), method->args, method->args)) {
+  if (!method ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), method->args, method->args)) {
     return call;
   }
   call->builtin = method->builtin;
@@ -286,14 +300,15 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
       return call;
     }
     if (!made->isResult()) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   "the function of '" + given + "' must give a " +
-                       (ofResult ? "ResultAsync" : "Result or a ResultAsync") + ", found '" +
-                       call->args[0]->type->ret()->name() + "'; to give a value, use '" +
-                       (onError    ? "mapErr"
-                        : ofResult ? "asyncMap"
-                                   : "map") +
-                       "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            "the function of '" + given + "' must give a " +
+                                (ofResult ? "ResultAsync" : "Result or a ResultAsync") +
+                                ", found '" + call->args[0]->type->ret()->name() +
+                                "'; to give a value, use '" +
+                                (onError    ? "mapErr"
+                                 : ofResult ? "asyncMap"
+                                            : "map") +
+                                "'");
       return call;
     }
     // The halves the other way meet those of the Result the function gives.
@@ -302,11 +317,11 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
     const Type *theirs = onError ? made->okType() : made->errType();
     const Type *other = ResultTypes::unifyHalf(mine, theirs);
     if (!other) {
-      sema_.diags_.error(call->args[0]->loc(),
-                   std::string("the ") + (onError ? "values" : "errors") + " '" +
-                       mine->name().str() + "' and '" + theirs->name().str() +
-                       "' do not go into one type; make them one, e.g. with '" +
-                       (onError ? "map" : "mapErr") + "'");
+      checker_.diags_.error(call->args[0]->loc(),
+                            std::string("the ") + (onError ? "values" : "errors") + " '" +
+                                mine->name().str() + "' and '" + theirs->name().str() +
+                                "' do not go into one type; make them one, e.g. with '" +
+                                (onError ? "map" : "mapErr") + "'");
       return call;
     }
     type = onError ? Type::result(other, kept) : Type::result(kept, other);
@@ -318,10 +333,12 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
       return call;
     }
     bool voids = a->isVoid() && b->isVoid();
-    const Type *both = voids ? a : a->isVoid() || b->isVoid() ? nullptr : TypeRelations::unify(a, b);
+    const Type *both = voids                        ? a
+                       : a->isVoid() || b->isVoid() ? nullptr
+                                                    : TypeRelations::unify(a, b);
     if (!both || both->isError()) {
-      sema_.diags_.error(call->loc(), "'match' gives '" + a->name() + "' for an Ok and '" + b->name() +
-                                    "' for an Err, and no type holds both");
+      checker_.diags_.error(call->loc(), "'match' gives '" + a->name() + "' for an Ok and '" +
+                                             b->name() + "' for an Err, and no type holds both");
       return call;
     }
     call->type = Type::promise(both);
@@ -329,16 +346,18 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
   }
   case Builtin::ResultAsyncUnwrapOr: {
     Expr *&arg = call->args[0];
-    arg = sema_.exprChecker().checkExpr(arg, !value->isNever() && !value->isVoid() ? value : nullptr);
+    arg = checker_.exprChecker().checkExpr(arg,
+                                           !value->isNever() && !value->isVoid() ? value : nullptr);
     const Type *both = arg->type->isError() ? nullptr : TypeRelations::unify(value, arg->type);
     if (!both || both->isError()) {
       if (!arg->type->isError()) {
-        sema_.diags_.error(arg->loc(), "'unwrapOr' gives '" + value->name() + "' for an Ok and '" +
-                                     arg->type->name() + "' otherwise, and no type holds both");
+        checker_.diags_.error(arg->loc(), "'unwrapOr' gives '" + value->name() +
+                                              "' for an Ok and '" + arg->type->name() +
+                                              "' otherwise, and no type holds both");
       }
       return call;
     }
-    arg = sema_.typeRelations().convert(arg, both);
+    arg = checker_.typeRelations().convert(arg, both);
     call->type = Type::promise(both);
     return call;
   }

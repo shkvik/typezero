@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // keyof, T[K], mapped types and typeof in types.
 class TypeOperators {
 public:
-  explicit TypeOperators(Sema &sema);
+  explicit TypeOperators(Checker &checker);
 
   // `keyof type`: the names of its fields, as a union of string literal
   // types; null if it is no object type.
@@ -20,7 +20,7 @@ public:
   const Type *resolveTypeOp(const TypeRef &ref);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

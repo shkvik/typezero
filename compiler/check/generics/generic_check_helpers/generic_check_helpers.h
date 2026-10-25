@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "compiler/check/generics/inference/inference.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>

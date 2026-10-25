@@ -6,7 +6,7 @@ add_executable(tz ${TZ_SOURCES} ${TZ_HEADERS})
 
 set_target_properties(tz PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TZ_OUTPUT_DIR})
 
-# Includes name files from the root of the repository: "compiler/check/sema/sema.h", and the
+# Includes name files from the root of the repository: "compiler/check/checker/checker.h", and the
 # headers of the runtime that tz shares, "runtime/library/regex/regex/regex.h".
 target_include_directories(tz PRIVATE ${PROJECT_SOURCE_DIR})
 # The version of OpenSSL, which `tz licenses` names (link/licenses/licenses.cpp).

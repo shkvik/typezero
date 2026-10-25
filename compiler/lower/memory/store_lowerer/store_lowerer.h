@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Stores of references: into groups, across threads, and the drops of members.
 class StoreLowerer {
 public:
-  explicit StoreLowerer(CodeGen &codegen);
+  explicit StoreLowerer(Lowering &lowering);
 
   // After `owner` took over the owned `value` of `type` into a slot of its:
   // joins the groups of what it refers to (tz_group_store).
@@ -32,14 +32,14 @@ public:
   void storeVar(const VarSymbol *var, llvm::Value *address, llvm::Value *value, bool replacing);
   // The drop function of the objects of a cyclic type: what the fields hold
   // goes as from a member (releaseIn), and the memory unless it is one.
-  void emitMemberDrop(const Type *type, CodeGen::ObjectLayout &layout);
+  void emitMemberDrop(const Type *type, Lowering::ObjectLayout &layout);
   // At the start of the drop of an object that may have weak references.
   void forgetWeakRefs(llvm::Value *object);
   // releaseIn of a box or an environment that `owner` held.
   void releaseObjectIn(llvm::Value *owner, llvm::Value *object);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

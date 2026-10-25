@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The built-in modules written in tz: their externals and accessors.
 class TzModulesChecker {
 public:
-  explicit TzModulesChecker(Sema &sema);
+  explicit TzModulesChecker(Checker &checker);
 
   // Any function value where a function type with the same parameters and
   // a result its own converts to is expected, as TypeScript allows: an
@@ -42,7 +42,7 @@ public:
   std::string knownPrefix(const Expr *expr) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The calls of accessors that reading and assigning made.
   llvm::SmallPtrSet<const CallExpr *, 8> accessorCalls_;
 };

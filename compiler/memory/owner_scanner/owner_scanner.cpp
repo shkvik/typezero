@@ -1,6 +1,5 @@
-#include "compiler/lower/memory/owner_scanner/owner_scanner.h"
+#include "compiler/memory/owner_scanner/owner_scanner.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <functional>
 #include <map>
@@ -9,8 +8,6 @@
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
-using llvm::Value;
 
 namespace tz {
 
@@ -55,7 +52,8 @@ void OwnerScanner::topLevel(const Stmt *s) {
   stmt(s);
 }
 
-std::vector<OwnerScanner::BackRef> OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) const {
+std::vector<OwnerScanner::BackRef>
+OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) const {
   std::vector<BackRef> out;
   for (const BackRef &b : candidates_) {
     if (valueReads_.contains(b.field) || nonCallReads_.contains(b.callback) ||
@@ -95,8 +93,7 @@ std::vector<OwnerScanner::BackRef> OwnerScanner::proven(const std::function<bool
 const ClassDecl *OwnerScanner::madeBy(llvm::StringRef field) const {
   auto writes = writes_.find(field);
 
-  return writes == writes_.end() || writes->second.empty() ? nullptr
-                                                           : writes->second.front().made;
+  return writes == writes_.end() || writes->second.empty() ? nullptr : writes->second.front().made;
 }
 
 void OwnerScanner::stmt(const Stmt *stmt) {
@@ -194,7 +191,8 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   }
   switch (e->kind()) {
   case Expr::Kind::Cast:
-    expr(llvm::cast<CastExpr>(e)->operand, llvm::cast<CastExpr>(e)->isImplicit() ? use : Use::Value);
+    expr(llvm::cast<CastExpr>(e)->operand,
+         llvm::cast<CastExpr>(e)->isImplicit() ? use : Use::Value);
     return;
   case Expr::Kind::Unary: {
     auto *unary = llvm::cast<UnaryExpr>(e);

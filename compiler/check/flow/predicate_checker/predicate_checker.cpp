@@ -1,17 +1,17 @@
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
-#include "compiler/check/functions/function_checker/function_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
-#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/flow/union_narrowing/union_narrowing.h"
+#include "compiler/check/functions/function_checker/function_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -57,19 +57,19 @@ std::optional<Linear> argumentTerm(const Expr *expr) {
 
 } // namespace
 
-PredicateChecker::PredicateChecker(Sema &sema) : sema_(sema) {}
+PredicateChecker::PredicateChecker(Checker &checker) : checker_(checker) {}
 
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
   if (ref.kind != TypeRef::Kind::Predicate) {
-    return sema_.typeResolver().resolveType(ref, /*allowVoid=*/true);
+    return checker_.typeResolver().resolveType(ref, /*allowVoid=*/true);
   }
   int param = -2;
   if (ref.name == "this") {
     if (fn->cls && !fn->isStatic && !fn->isConstructor) {
       param = -1;
     } else if (sym) {
-      sema_.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
+      checker_.diags_.error(ref.loc, "'this is T' can only be the return type of a method");
     }
   } else {
     for (size_t i = 0; i < fn->params.size(); ++i) {
@@ -78,11 +78,13 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
       }
     }
     if (param == -2 && sym) {
-      sema_.diags_.error(ref.loc, "a type predicate names a parameter of the function, and '" + ref.name +
-                                "' is none");
+      checker_.diags_.error(ref.loc, "a type predicate names a parameter of the function, and '" +
+                                         ref.name + "' is none");
     }
   }
-  const Type *type = ref.args.empty() ? nullptr : sema_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *type = ref.args.empty()
+                         ? nullptr
+                         : checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
   if (sym && param != -2 && (!type || !type->isError())) {
     sym->predicateParam = param;
     sym->predicateType = type;
@@ -125,20 +127,21 @@ void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
   bool boolean = !sym->ret || sym->ret->isBool() || sym->asserts;
   if (!boolean || fn->isGenerator || fn->isConstructor || fn->safeTry) {
-    sema_.predicateBuilds_.push_back({nullptr, fn, Sema::Flow(), Sema::Flow()});
+    checker_.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
     return;
   }
-  Sema::PredicateBuild build{sym, fn, Sema::Flow(), Sema::Flow()};
+  Checker::PredicateBuild build{sym, fn, Checker::Flow(), Checker::Flow()};
   build.whenTrue.unreachable = true;
   build.whenFalse.unreachable = true;
-  sema_.predicateBuilds_.push_back(std::move(build));
+  checker_.predicateBuilds_.push_back(std::move(build));
 }
 
-void PredicateChecker::notePredicateExit(const Sema::Flow &whenTrue, const Sema::Flow &whenFalse, llvm::SMLoc loc) {
-  if (sema_.predicateBuilds_.empty() || !sema_.predicateBuilds_.back().fn) {
+void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
+                                         const Checker::Flow &whenFalse, llvm::SMLoc loc) {
+  if (checker_.predicateBuilds_.empty() || !checker_.predicateBuilds_.back().fn) {
     return;
   }
-  Sema::PredicateBuild &build = sema_.predicateBuilds_.back();
+  Checker::PredicateBuild &build = checker_.predicateBuilds_.back();
   const FuncSymbol *sym = build.fn;
   build.whenTrue = FlowChecker::join(build.whenTrue, whenTrue);
   build.whenFalse = FlowChecker::join(build.whenFalse, whenFalse);
@@ -154,29 +157,31 @@ void PredicateChecker::notePredicateExit(const Sema::Flow &whenTrue, const Sema:
   if (!var) {
     return;
   }
-  const Type *shown = sema_.literalTypes().typeIn(whenTrue, var);
-  if (shown->isError() || shown->isNever() || TypeRelations::isImplicitlyConvertible(shown, sym->predicateType)) {
+  const Type *shown = checker_.literalTypes().typeIn(whenTrue, var);
+  if (shown->isError() || shown->isNever() ||
+      TypeRelations::isImplicitlyConvertible(shown, sym->predicateType)) {
     return;
   }
   std::string what = sym->asserts ? "'asserts " : "'";
-  sema_.diags_.error(loc, functionLabel(sym->name) + " says " + what + var->name.str() + " is " +
-                        sym->predicateType->name().str() + "', but " +
-                        (sym->asserts ? "it may end here" : "this may give true") + " while '" +
-                        var->name.str() + "' is only known to be '" + shown->name().str() +
-                        "'; show it with what narrows types: a union's tag, 'typeof', "
-                        "'instanceof', '!= undefined', 'Array.isArray' or a function that tests "
-                        "it (checks of fields alone do not make an object of a type)");
+  checker_.diags_.error(
+      loc, functionLabel(sym->name) + " says " + what + var->name.str() + " is " +
+               sym->predicateType->name().str() + "', but " +
+               (sym->asserts ? "it may end here" : "this may give true") + " while '" +
+               var->name.str() + "' is only known to be '" + shown->name().str() +
+               "'; show it with what narrows types: a union's tag, 'typeof', "
+               "'instanceof', '!= undefined', 'Array.isArray' or a function that tests "
+               "it (checks of fields alone do not make an object of a type)");
 }
 
 void PredicateChecker::endPredicate(FunctionDecl *fn) {
-  Sema::PredicateBuild build = std::move(sema_.predicateBuilds_.back());
-  sema_.predicateBuilds_.pop_back();
+  Checker::PredicateBuild build = std::move(checker_.predicateBuilds_.back());
+  checker_.predicateBuilds_.pop_back();
   if (!build.fn) {
     return;
   }
   // Facts about what the function's parameters are, as they were passed: a
   // parameter assigned to in the body is something else by its returns.
-  Sema::Predicate summary;
+  Checker::Predicate summary;
   auto position = [&](const VarSymbol *var) -> int {
     if (!var || var->reassigned) {
       return -2;
@@ -192,7 +197,7 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
 
     return -2;
   };
-  auto project = [&](const Sema::Flow &flow, Sema::PredicateSide &side) {
+  auto project = [&](const Checker::Flow &flow, Checker::PredicateSide &side) {
     side.unreachable = flow.unreachable;
     if (flow.unreachable) {
       return;
@@ -207,7 +212,7 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
         side.defined.push_back(i);
       }
     }
-    for (const Sema::FieldPath &path : flow.definedFields) {
+    for (const Checker::FieldPath &path : flow.definedFields) {
       if (int i = position(path.var); i != -2) {
         side.fields.push_back({i, path.names});
       }
@@ -228,7 +233,7 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
   predicates_[build.fn] = std::move(summary);
 }
 
-const Sema::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
+const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const {
   if (auto found = predicates_.find(fn); found != predicates_.end()) {
     return &found->second;
   }
@@ -239,18 +244,19 @@ const Sema::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) const
       (fn->ret && !fn->ret->isBool() && !fn->asserts) || !summarizing_.insert(fn).second) {
     return nullptr;
   }
-  Sema::BodyState saved = sema_.returnInferrer().enterBody(decl);
-  bool muted = sema_.diags_.setMuted(true);
-  FunctionDecl *copy = sema_.returnInferrer().freshCopy(decl);
-  sema_.functionChecker().checkFunctionBody(copy);
-  sema_.diags_.setMuted(muted);
-  sema_.returnInferrer().leaveBody(saved);
+  Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
+  bool muted = checker_.diags_.setMuted(true);
+  FunctionDecl *copy = checker_.returnInferrer().freshCopy(decl);
+  checker_.functionChecker().checkFunctionBody(copy);
+  checker_.diags_.setMuted(muted);
+  checker_.returnInferrer().leaveBody(saved);
   auto found = predicates_.find(fn);
 
   return found == predicates_.end() ? nullptr : &found->second;
 }
 
-void PredicateChecker::applyPredicate(const CallExpr *call, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
+void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenTrue,
+                                      Checker::Flow &whenFalse) const {
   const FuncSymbol *fn = call->func ? call->func : call->method;
   if (!fn || call->virtualCall || !call->unionMethods.empty()) {
     return;
@@ -269,10 +275,10 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Sema::Flow &whenTrue
     const VarSymbol *var = arg ? argumentVariable(arg) : nullptr;
 
     // What it holds now is what was passed, unless the call changed it.
-    return var && !sema_.flowChecker().changedByCalls(var) ? var : nullptr;
+    return var && !checker_.flowChecker().changedByCalls(var) ? var : nullptr;
   };
-  auto narrowTo = [&](Sema::Flow &flow, const VarSymbol *var, const Type *type) {
-    const Type *now = sema_.literalTypes().typeIn(flow, var);
+  auto narrowTo = [&](Checker::Flow &flow, const VarSymbol *var, const Type *type) {
+    const Type *now = checker_.literalTypes().typeIn(flow, var);
     if (TypeRelations::isImplicitlyConvertible(now, type)) {
       return; // nothing new
     }
@@ -293,8 +299,8 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Sema::Flow &whenTrue
     }
   };
 
-  const Sema::Predicate *summary = predicateOf(fn);
-  auto apply = [&](const Sema::PredicateSide &side, Sema::Flow &flow) {
+  const Checker::Predicate *summary = predicateOf(fn);
+  auto apply = [&](const Checker::PredicateSide &side, Checker::Flow &flow) {
     if (side.unreachable) {
       flow.unreachable = true;
       return;
@@ -311,7 +317,7 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Sema::Flow &whenTrue
     }
     for (const auto &[i, names] : side.fields) {
       if (const VarSymbol *var = variable(i)) {
-        FieldFacts::defineField(flow, Sema::FieldPath{var, names});
+        FieldFacts::defineField(flow, Checker::FieldPath{var, names});
       }
     }
     // The facts, with each parameter replaced by its argument.
@@ -340,7 +346,7 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Sema::Flow &whenTrue
         return Linear{Term::lengthOf(var), 0};
       }
       std::optional<Linear> value = argumentTerm(arg);
-      if (value && value->term.var && sema_.flowChecker().changedByCalls(value->term.var)) {
+      if (value && value->term.var && checker_.flowChecker().changedByCalls(value->term.var)) {
         return std::nullopt;
       }
 
@@ -382,8 +388,8 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
   if (fn->predicateParam == 0 && fn->predicateType && !fn->asserts) {
     kept = fn->predicateType;
   }
-  if (const Sema::Predicate *summary = predicateOf(fn); summary && !kept) {
-    const Sema::PredicateSide &side = summary->whenTrue;
+  if (const Checker::Predicate *summary = predicateOf(fn); summary && !kept) {
+    const Checker::PredicateSide &side = summary->whenTrue;
     if (side.unreachable) {
       return nullptr;
     }

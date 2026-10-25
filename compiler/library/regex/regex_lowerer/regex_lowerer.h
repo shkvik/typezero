@@ -1,22 +1,22 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Regular expressions, the descriptions of matches, replace with a function.
 class RegexLowerer {
 public:
-  explicit RegexLowerer(CodeGen &codegen);
+  explicit RegexLowerer(Lowering &lowering);
 
   // `s.matchAll(re)` (codegen_regex.cpp): the matches of the regex held in
   // `regexSlot` over the string in `textSlot`, as a copy of the regex whose
   // lastIndex is in `lastSlot` finds them; `shape` builds each.
-  CodeGen::Producer matchAllProducer(llvm::Value *textSlot, llvm::Value *regexSlot, llvm::Value *lastSlot,
-                            llvm::Value *shape);
+  Lowering::Producer matchAllProducer(llvm::Value *textSlot, llvm::Value *regexSlot,
+                                      llvm::Value *lastSlot, llvm::Value *shape);
   // Regular expressions (codegen_regex.cpp). A literal's program is a
   // constant; a literal without g and y is a constant object too (see
-  // TzRegex in runtime/core/tzrt/tzrt.h).
+  // TzRegex in runtime/library/regex/regex/regex.h).
   llvm::FunctionCallee regexFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
   llvm::Constant *regexProgram(const RegexLitExpr *lit);
@@ -30,7 +30,7 @@ public:
   llvm::Value *emitReplaceWith(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::vector<uint32_t>, llvm::Constant *> regexPrograms_;
   std::map<std::pair<const Type *, std::vector<uint32_t>>, llvm::Constant *> matchShapes_;
 };

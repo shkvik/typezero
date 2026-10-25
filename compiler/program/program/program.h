@@ -8,7 +8,7 @@
 
 namespace tz {
 
-class Sema;
+class Checker;
 
 // What goes from pass to pass: the files of the program, the trees of each round of loading
 // (see EventRounds), what the passes report, the state of the check, and the program they built.
@@ -22,7 +22,7 @@ struct Program {
   SourceFile file;
   // The symbols, scopes and types of the round being checked: from DeclarePass to
   // WholeProgramPass.
-  std::unique_ptr<Sema> checker;
+  std::unique_ptr<Checker> checker;
 };
 
 } // namespace tz

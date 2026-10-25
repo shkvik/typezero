@@ -1,10 +1,10 @@
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -16,8 +16,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -105,7 +105,7 @@ bool isLanguageTag(const std::string &tag) {
   return length && llvm::all_of(language, alpha);
 }
 
-DateFormatChecker::DateFormatChecker(Sema &sema) : sema_(sema) {}
+DateFormatChecker::DateFormatChecker(Checker &checker) : checker_(checker) {}
 
 // The locale and the options, both optional, of toLocaleString and the like
 // and of Intl.DateTimeFormat. The locale is a string or undefined; the
@@ -117,7 +117,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   bool ok = true;
   if (!args.empty()) {
     std::optional<std::u16string> tag = literalText(args[0]);
-    args[0] = sema_.exprChecker().checkExpr(args[0]);
+    args[0] = checker_.exprChecker().checkExpr(args[0]);
     const Type *type = args[0]->type;
     if (type->isError()) {
       ok = false;
@@ -129,12 +129,13 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       if (type->isArray()) {
         message += "; pass one language";
       }
-      sema_.diags_.error(args[0]->loc(), message);
+      checker_.diags_.error(args[0]->loc(), message);
       ok = false;
     } else if (tag && !isLanguageTag(utf8(*tag))) {
-      sema_.diags_.error(args[0]->loc(), "'" + utf8(*tag) +
-                                       "' is not a language tag, and JavaScript would throw a "
-                                       "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
+      checker_.diags_.error(args[0]->loc(),
+                            "'" + utf8(*tag) +
+                                "' is not a language tag, and JavaScript would throw a "
+                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
       ok = false;
     }
   }
@@ -142,7 +143,7 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     return ok;
   }
   Expr *&options = args[1];
-  options = sema_.exprChecker().checkExpr(options);
+  options = checker_.exprChecker().checkExpr(options);
   const Type *type = options->type;
   if (type->isError()) {
     return false;
@@ -152,10 +153,11 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   }
   if (!type->isObject() || type->isTuple() || type->isClass() || type->isRegExp() ||
       type->isMatch() || type->isDate() || type->isIntl() || type->isCrypto() || type->isBytes()) {
-    sema_.diags_.error(options->loc(), std::string(methodName(kind)) +
-                                     " takes its options as an object, e.g. '{ month: \"long\" "
-                                     "}', found '" +
-                                     type->name().str() + "'");
+    checker_.diags_.error(options->loc(),
+                          std::string(methodName(kind)) +
+                              " takes its options as an object, e.g. '{ month: \"long\" "
+                              "}', found '" +
+                              type->name().str() + "'");
     return false;
   }
   auto *literal = dyn_cast<ObjectLitExpr>(options);
@@ -169,21 +171,22 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     } else if (field.name == "fractionalSecondDigits") {
       wanted = value->isNumeric() ? value : Type::intTy();
     } else if (found == std::end(kOptions)) {
-      sema_.diags_.error(options->loc(), "'" + field.name + "' is not an option of " + methodName(kind) +
-                                       "; the options are weekday, era, year, month, day, "
-                                       "dayPeriod, hour, minute, second, fractionalSecondDigits, "
-                                       "timeZoneName, timeZone, hour12, hourCycle, dateStyle, "
-                                       "timeStyle, calendar, numberingSystem, localeMatcher and "
-                                       "formatMatcher");
+      checker_.diags_.error(options->loc(),
+                            "'" + field.name + "' is not an option of " + methodName(kind) +
+                                "; the options are weekday, era, year, month, day, "
+                                "dayPeriod, hour, minute, second, fractionalSecondDigits, "
+                                "timeZoneName, timeZone, hour12, hourCycle, dateStyle, "
+                                "timeStyle, calendar, numberingSystem, localeMatcher and "
+                                "formatMatcher");
       ok = false;
       continue;
     }
     if (value != wanted) {
-      sema_.diags_.error(options->loc(), "the option '" + field.name + "' is " +
-                                       (wanted == Type::boolTy() ? "a boolean"
-                                        : wanted->isNumeric()    ? "a number"
-                                                                 : "a string") +
-                                       ", found '" + field.type->name().str() + "'");
+      checker_.diags_.error(options->loc(), "the option '" + field.name + "' is " +
+                                                (wanted == Type::boolTy() ? "a boolean"
+                                                 : wanted->isNumeric()    ? "a number"
+                                                                          : "a string") +
+                                                ", found '" + field.type->name().str() + "'");
       ok = false;
       continue;
     }
@@ -193,10 +196,10 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       hasStyle |= present;
       if (present && ((kind == TZ_DATE_LOCALE_DATE && field.name == "timeStyle") ||
                       (kind == TZ_DATE_LOCALE_TIME && field.name == "dateStyle"))) {
-        sema_.diags_.error(options->loc(), "'" + field.name + "' is not an option of " +
-                                         methodName(kind) +
-                                         ", which JavaScript would throw a "
-                                         "TypeError for; use toLocaleString");
+        checker_.diags_.error(options->loc(), "'" + field.name + "' is not an option of " +
+                                                  methodName(kind) +
+                                                  ", which JavaScript would throw a "
+                                                  "TypeError for; use toLocaleString");
         ok = false;
       }
     } else if (field.name != "hour12" && field.name != "hourCycle" && field.name != "timeZone" &&
@@ -206,10 +209,10 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     }
   }
   if (hasStyle && hasComponent) {
-    sema_.diags_.error(options->loc(),
-                 "dateStyle and timeStyle cannot go with weekday, year, month, day, "
-                 "hour and the other parts, which JavaScript would throw a "
-                 "TypeError for; use either the styles or the parts");
+    checker_.diags_.error(options->loc(),
+                          "dateStyle and timeStyle cannot go with weekday, year, month, day, "
+                          "hour and the other parts, which JavaScript would throw a "
+                          "TypeError for; use either the styles or the parts");
     ok = false;
   }
   // The values written in a literal.
@@ -230,18 +233,19 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
                                                      : ", '") +
                     found->values[i].str() + "'";
         }
-        sema_.diags_.error(prop.value->loc(), "'" + utf8(*text) + "' is not a value of the option '" +
-                                            prop.name +
-                                            "', and JavaScript would throw a "
-                                            "RangeError; it is " +
-                                            values);
+        checker_.diags_.error(prop.value->loc(),
+                              "'" + utf8(*text) + "' is not a value of the option '" + prop.name +
+                                  "', and JavaScript would throw a "
+                                  "RangeError; it is " +
+                                  values);
         ok = false;
       }
       if (prop.name == "fractionalSecondDigits" && prop.value) {
-        if (std::optional<int64_t> digits = sema_.constantFolder().intConstant(prop.value);
+        if (std::optional<int64_t> digits = checker_.constantFolder().intConstant(prop.value);
             digits && (*digits < 1 || *digits > 3)) {
-          sema_.diags_.error(prop.value->loc(), "fractionalSecondDigits is from 1 to 3, and JavaScript "
-                                          "would throw a RangeError");
+          checker_.diags_.error(prop.value->loc(),
+                                "fractionalSecondDigits is from 1 to 3, and JavaScript "
+                                "would throw a RangeError");
           ok = false;
         }
       }
@@ -296,58 +300,60 @@ const Type *DateFormatChecker::resolvedDateOptionsType() {
 
 // new Intl.DateTimeFormat(locale?, options?), also without `new`.
 Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
-  auto *callee = sema_.ctx_.make<NameExpr>(loc, "Intl");
+  auto *callee = checker_.ctx_.make<NameExpr>(loc, "Intl");
   if (args.size() > 2) {
-    sema_.diags_.error(loc,
-                 "expected " + argumentCount(0, 2) + ", but got " + std::to_string(args.size()));
+    checker_.diags_.error(loc, "expected " + argumentCount(0, 2) + ", but got " +
+                                   std::to_string(args.size()));
     for (Expr *&arg : args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
     return error;
   }
   if (!checkLocaleArgs(args, TZ_DATE_LOCALE_FORMAT)) {
-    auto *error = sema_.ctx_.make<UndefinedExpr>(loc);
+    auto *error = checker_.ctx_.make<UndefinedExpr>(loc);
     error->type = Type::error();
     return error;
   }
 
-  return sema_.processChecker().builtinCall(loc, callee, Builtin::DtfNew, args, Type::dateFormat());
+  return checker_.processChecker().builtinCall(loc, callee, Builtin::DtfNew, args,
+                                               Type::dateFormat());
 }
 
 // `Intl.DateTimeFormat(...)` without `new`; the rest of Intl is in
 // sema_intl.cpp.
 Expr *DateFormatChecker::checkIntlCall(CallExpr *call, MemberExpr *member) {
   if (member->name == "DateTimeFormat") {
-    if (sema_.callChecker().rejectSpread(call)) {
+    if (checker_.callChecker().rejectSpread(call)) {
       return call;
     }
     return checkDateFormatNew(member->loc(), call->args);
   }
 
-  return sema_.intlChecker().checkIntlFunction(call, member);
+  return checker_.intlChecker().checkIntlFunction(call, member);
 }
 
 Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (name == "format" || name == "formatToParts") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
     // The date, or its time in milliseconds; now without one.
     if (!call->args.empty()) {
       Expr *&arg = call->args[0];
-      arg = sema_.genericChecker().apparent(sema_.exprChecker().checkExpr(arg));
+      arg = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(arg));
       if (arg->type->isNumeric()) {
-        arg = sema_.typeRelations().convert(arg, Type::doubleTy());
+        arg = checker_.typeRelations().convert(arg, Type::doubleTy());
       } else if (!arg->type->isDate() && !arg->type->isError()) {
-        sema_.diags_.error(arg->loc(), "'" + name + "' takes a date or a time in milliseconds, found '" +
-                                     arg->type->name() + "'");
+        checker_.diags_.error(arg->loc(), "'" + name +
+                                              "' takes a date or a time in milliseconds, found '" +
+                                              arg->type->name() + "'");
         return call;
       }
     }
@@ -356,7 +362,7 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "resolvedOptions") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
     call->builtin = Builtin::DtfResolvedOptions;
@@ -364,14 +370,14 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     return call;
   }
   if (name == "formatRange" || name == "formatRangeToParts") {
-    sema_.diags_.error(member->loc(), "'" + name + "' is not supported yet; format both dates");
+    checker_.diags_.error(member->loc(), "'" + name + "' is not supported yet; format both dates");
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name +
-                                    "' does not exist on type "
-                                    "'Intl.DateTimeFormat'");
+    checker_.diags_.error(member->loc(), "property '" + name +
+                                             "' does not exist on type "
+                                             "'Intl.DateTimeFormat'");
   }
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // unknown and object, and what narrows them.
 class UnknownChecker {
 public:
-  explicit UnknownChecker(Sema &sema);
+  explicit UnknownChecker(Checker &checker);
 
   // unknown and object (sema_unknown.cpp, docs/decorators.md section 4).
   // An object of the language (an instance, a literal, a date, a
@@ -29,10 +29,10 @@ public:
   Expr *checkUnknownMethod(CallExpr *call, MemberExpr *member);
   // What `typeof x == "string"`, `x instanceof C` and `Array.isArray(x)` say
   // about an unknown or object variable x.
-  void addUnknownFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const;
+  void addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

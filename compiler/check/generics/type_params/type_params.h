@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Type parameters: their declarations, bindings, constraints and substitution.
 class TypeParams {
 public:
-  explicit TypeParams(Sema &sema);
+  explicit TypeParams(Checker &checker);
 
   // The type parameters of a generic function or alias: new opaque types
   // with their constraints, visible by name in the innermost type scope.
@@ -40,7 +40,7 @@ public:
   bool exactTypeParam(FuncSymbol *generic, size_t k);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The object types substitute is rebuilding: a recursive one that no alias
   // made stays as it is.
   llvm::SmallPtrSet<const Type *, 4> substituting_;

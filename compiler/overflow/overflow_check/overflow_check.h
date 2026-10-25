@@ -1,9 +1,9 @@
 #pragma once
 
-#include <memory>
-#include "compiler/program/ast/ast.h"
 #include "compiler/overflow/value_range/value_range.h"
+#include "compiler/program/ast/ast.h"
 #include "compiler/program/diagnostics/diagnostics.h"
+#include <memory>
 
 namespace tz {
 
@@ -12,7 +12,7 @@ namespace tz {
 // compiler points at the operations whose values it cannot keep within the
 // int range: values from input, files, JSON or parseInt and what is computed
 // from them, and counters of loops without a bound. It follows the ranges of
-// values through the whole program checked by Sema; the warnings do not stop
+// values through the whole program checked by Checker; the warnings do not stop
 // the build.
 void checkIntOverflow(SourceFile &program, Diagnostics &diags);
 
@@ -23,12 +23,15 @@ class Executor;
 class LoopRanges;
 class Narrowing;
 class Evaluator;
+class AssignEvaluator;
+class BuiltinEvaluator;
 class OverflowWarnings;
 
 class OverflowCheck {
 public:
   OverflowCheck(SourceFile &program, Diagnostics &diags);
   void run();
+
 private:
   struct VarInfo {
     // The function, run on its own, that declares the variable; null for
@@ -56,7 +59,7 @@ private:
   // Functions used as values: any code may call them, with anything.
   llvm::DenseSet<const FunctionDecl *> unknownCallers_;
   llvm::DenseMap<const VarSymbol *, VarInfo> vars_;
-  // Constants whose initializers are constants: Sema computes and checks
+  // Constants whose initializers are constants: Checker computes and checks
   // the operations of those.
   llvm::DenseSet<const VarSymbol *> constants_;
   // For hints: the declarator an expression initializes, and the variable
@@ -202,6 +205,8 @@ public:
   LoopRanges &loopRanges() const { return *loopRangesPart_; }
   Narrowing &narrowing() const { return *narrowingPart_; }
   Evaluator &evaluator() const { return *evaluatorPart_; }
+  AssignEvaluator &assignEvaluator() const { return *assignEvaluatorPart_; }
+  BuiltinEvaluator &builtinEvaluator() const { return *builtinEvaluatorPart_; }
   OverflowWarnings &overflowWarnings() const { return *overflowWarningsPart_; }
 
 private:
@@ -212,6 +217,8 @@ private:
   friend class LoopRanges;
   friend class Narrowing;
   friend class Evaluator;
+  friend class AssignEvaluator;
+  friend class BuiltinEvaluator;
   friend class OverflowWarnings;
   std::unique_ptr<ProgramScan> programScanPart_;
   std::unique_ptr<Slots> slotsPart_;
@@ -220,6 +227,8 @@ private:
   std::unique_ptr<LoopRanges> loopRangesPart_;
   std::unique_ptr<Narrowing> narrowingPart_;
   std::unique_ptr<Evaluator> evaluatorPart_;
+  std::unique_ptr<AssignEvaluator> assignEvaluatorPart_;
+  std::unique_ptr<BuiltinEvaluator> builtinEvaluatorPart_;
   std::unique_ptr<OverflowWarnings> overflowWarningsPart_;
 };
 

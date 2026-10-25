@@ -1,23 +1,23 @@
 #include "compiler/check/async/promise_checker/promise_checker.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
-#include "compiler/check/functions/closure_checker/closure_checker.h"
-#include "compiler/check/functions/callback_checker/callback_checker.h"
-#include "compiler/check/types/destination/destination.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "compiler/check/functions/callback_checker/callback_checker.h"
+#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -29,14 +29,14 @@ const Type *awaited(const Type *type) { return type->isPromise() ? type->promise
 
 } // namespace
 
-PromiseChecker::PromiseChecker(Sema &sema) : sema_(sema) {}
+PromiseChecker::PromiseChecker(Checker &checker) : checker_(checker) {}
 
 const Type *PromiseChecker::settledResultType(const Type *value) {
   std::vector<Field> fields{{"status", Type::string(), false}};
   if (!value->isVoid() && !value->isNever()) {
     fields.push_back({"value", Type::optional(value), false});
   }
-  fields.push_back({"reason", Type::optional(sema_.errorClass_->type), false});
+  fields.push_back({"reason", Type::optional(checker_.errorClass_->type), false});
 
   return Type::object(std::move(fields), "PromiseSettledResult<" + value->name().str() + ">");
 }
@@ -51,7 +51,7 @@ const Type *PromiseChecker::resolverType(const Type *value) {
 }
 
 const Type *PromiseChecker::rejecterType() {
-  return Type::function({sema_.errorClass_->type}, 1, false, Type::voidTy());
+  return Type::function({checker_.errorClass_->type}, 1, false, Type::voidTy());
 }
 
 // The type of the value of `new Promise(executor)` without one written or
@@ -80,19 +80,19 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   }
   // On a copy, with `resolve` of no type, so that anything goes to it, and
   // without messages: the executor itself is checked after.
-  FunctionDecl *copy = sema_.returnInferrer().freshCopy(fe->fn);
+  FunctionDecl *copy = checker_.returnInferrer().freshCopy(fe->fn);
   copy->sym = nullptr;
-  auto *trial = sema_.ctx_.make<FunctionExpr>(fe->loc(), copy);
-  Sema::Flow saved = sema_.flow_;
-  bool muted = sema_.diags_.setMuted(true);
-  Sema::Signature sig;
+  auto *trial = checker_.ctx_.make<FunctionExpr>(fe->loc(), copy);
+  Checker::Flow saved = checker_.flow_;
+  bool muted = checker_.diags_.setMuted(true);
+  Checker::Signature sig;
   sig.params = {Type::error(), Type::error()};
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  sema_.closureChecker().checkFunctionExpr(trial, &sig);
-  sema_.diags_.setMuted(muted);
-  sema_.flow_ = std::move(saved);
+  checker_.closureChecker().checkFunctionExpr(trial, &sig);
+  checker_.diags_.setMuted(muted);
+  checker_.flow_ = std::move(saved);
   const Type *found = nullptr;
   bool unknown = false;
   visitExprs(copy->body, [&](const Expr *e) {
@@ -118,48 +118,50 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
 }
 
 Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
-  sema_.file_->usesAsync = true;
-  auto *call = sema_.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
+  checker_.file_->usesAsync = true;
+  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), expr, expr->args);
   call->builtin = Builtin::PromiseNew;
   call->type = Type::error();
   const Type *value = nullptr;
   if (expr->typeArgs.size() > 1) {
-    sema_.diags_.error(expr->loc(), "'Promise' takes one type argument, the type of its value");
+    checker_.diags_.error(expr->loc(), "'Promise' takes one type argument, the type of its value");
     value = Type::error();
   } else if (expr->typeArgs.size() == 1) {
-    value = awaited(sema_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/true));
+    value = awaited(checker_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/true));
   } else if (expected && expected->nonOptional()->isPromise() &&
              !expected->nonOptional()->promised()->isNever()) {
     value = expected->nonOptional()->promised();
   } else if (call->args.size() == 1) {
     value = executorValueType(call->args[0]);
     if (!value) {
-      sema_.diags_.error(expr->loc(), "cannot tell the type of the Promise's value from what is given "
-                                "to 'resolve'; write it, e.g. 'new Promise<int>(...)'");
+      checker_.diags_.error(expr->loc(),
+                            "cannot tell the type of the Promise's value from what is given "
+                            "to 'resolve'; write it, e.g. 'new Promise<int>(...)'");
       value = Type::error();
     }
   }
-  if (!sema_.argumentChecker().checkArity(call, expr->loc(), 1, 1)) {
+  if (!checker_.argumentChecker().checkArity(call, expr->loc(), 1, 1)) {
     return call;
   }
   if (value->isError()) {
-    Sema::Signature loose;
+    Checker::Signature loose;
     loose.params = {Type::error(), Type::error()};
     loose.pad = false;
-    call->args[0] = isa<FunctionExpr>(call->args[0])
-                        ? sema_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(call->args[0]), &loose)
-                        : sema_.exprChecker().checkExpr(call->args[0]);
+    call->args[0] =
+        isa<FunctionExpr>(call->args[0])
+            ? checker_.closureChecker().checkFunctionExpr(cast<FunctionExpr>(call->args[0]), &loose)
+            : checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
   // The executor runs now, with the functions that settle the Promise.
-  Sema::Signature sig;
+  Checker::Signature sig;
   sig.params = {resolverType(value), rejecterType()};
   sig.minArgs = 2;
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  call->args[0] = sema_.callbackChecker().checkFunctionArg(call->args[0], sig, 2, "new Promise");
-  sema_.flowChecker().calledFunction();
+  call->args[0] = checker_.callbackChecker().checkFunctionArg(call->args[0], sig, 2, "new Promise");
+  checker_.flowChecker().calledFunction();
   call->type = Type::promise(value);
 
   return call;
@@ -174,17 +176,17 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   static const llvm::StringLiteral resultMethods[] = {
       "map", "mapErr", "andThen", "orElse", "match", "unwrapOr", "andTee", "orTee", "andThrough"};
   if (value->isResult() && llvm::is_contained(resultMethods, name)) {
-    return sema_.resultAsyncChecker().checkResultAsyncMethod(call, member, name);
+    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member, name);
   }
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
-  sema_.file_->usesAsync = true;
+  checker_.file_->usesAsync = true;
   const Type *wanted = expected && expected->nonOptional()->isPromise()
                            ? expected->nonOptional()->promised()
                            : nullptr;
@@ -193,10 +195,10 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   bool failed = false;
   auto callback = [&](Expr *&arg, const Type *param) -> const Type * {
     if (isa<UndefinedExpr>(arg)) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
       return nullptr;
     }
-    Sema::Signature sig;
+    Checker::Signature sig;
     sig.pad = false;
     if (param && !param->isVoid()) {
       sig.params = {param};
@@ -205,7 +207,7 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     if (wanted && isa<FunctionExpr>(arg) && Destination::literalShaped(arg)) {
       sig.ret = wanted;
     }
-    arg = sema_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
+    arg = checker_.callbackChecker().checkFunctionArg(arg, sig, 1, name);
     if (!arg->type->isFunction()) {
       failed = true;
       return nullptr;
@@ -230,8 +232,9 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     }
     const Type *common = TypeRelations::unify(a, b);
     if (!common || common->isError()) {
-      sema_.diags_.error(loc, "'" + name + "' gives '" + a->name() + "' one way and '" + b->name() +
-                            "' the other, and no type holds both; make them give one type");
+      checker_.diags_.error(loc,
+                            "'" + name + "' gives '" + a->name() + "' one way and '" + b->name() +
+                                "' the other, and no type holds both; make them give one type");
       return Type::error();
     }
 
@@ -240,30 +243,30 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
 
   const Type *result = nullptr;
   if (name == "then") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
       return call;
     }
     call->builtin = Builtin::PromiseThen;
     const Type *onFulfilled = callback(call->args[0], value);
     const Type *onRejected =
-        call->args.size() > 1 ? callback(call->args[1], sema_.errorClass_->type) : nullptr;
+        call->args.size() > 1 ? callback(call->args[1], checker_.errorClass_->type) : nullptr;
     if (failed) {
       return call;
     }
     const Type *fulfilled = onFulfilled ? onFulfilled : value;
     result = onRejected ? both(fulfilled, onRejected, call->loc()) : fulfilled;
   } else if (name == "catch") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     call->builtin = Builtin::PromiseCatch;
-    const Type *onRejected = callback(call->args[0], sema_.errorClass_->type);
+    const Type *onRejected = callback(call->args[0], checker_.errorClass_->type);
     if (failed) {
       return call;
     }
     result = onRejected ? both(value, onRejected, call->loc()) : value;
   } else if (name == "finally") {
-    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     call->builtin = Builtin::PromiseFinally;
@@ -273,9 +276,10 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
     }
     result = value;
   } else {
-    sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" + type->name() +
-                                    "'; a Promise has 'then', 'catch' and "
-                                    "'finally'");
+    checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                             type->name() +
+                                             "'; a Promise has 'then', 'catch' and "
+                                             "'finally'");
     checkArgsLoosely();
     return call;
   }

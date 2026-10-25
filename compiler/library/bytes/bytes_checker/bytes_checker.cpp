@@ -1,15 +1,15 @@
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
-#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
-#include "compiler/library/bytes/byte_proofs/byte_proofs.h"
-#include "compiler/library/bytes/typed_array_checker/typed_array_checker.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/bytes/buffer_checker/buffer_checker.h"
-#include "compiler/library/process/process_checker/process_checker.h"
+#include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/library/bytes/typed_array_checker/typed_array_checker.h"
+#include "compiler/library/process/process_checker/process_checker.h"
 #include "runtime/library/bytes/encodings/encodings.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -19,8 +19,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -99,7 +99,7 @@ const llvm::StringLiteral kTypedMethods[] = {
 
 } // namespace
 
-BytesChecker::BytesChecker(Sema &sema) : sema_(sema) {}
+BytesChecker::BytesChecker(Checker &checker) : checker_(checker) {}
 
 const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
   for (const auto &[n, kind] : kNames) {
@@ -113,22 +113,23 @@ const Type *BytesChecker::bytesTypeNamed(llvm::StringRef name) {
 
 Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   const Type *type = index->object->type;
-  index->index = sema_.memberChecker().checkPosition(index->index);
+  index->index = checker_.memberChecker().checkPosition(index->index);
   if (!type->isTypedArray()) {
-    sema_.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed; " +
-                                   (type->bytes() == Bytes::DataView
-                                        ? "read its bytes with getUint8(i) and the like"
-                                    : type->bytes() == Bytes::ArrayBuffer
-                                        ? "read its bytes through a view, e.g. 'new "
-                                          "Uint8Array(buffer)[i]'"
-                                        : "it holds no elements"));
+    checker_.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed; " +
+                                            (type->bytes() == Bytes::DataView
+                                                 ? "read its bytes with getUint8(i) and the like"
+                                             : type->bytes() == Bytes::ArrayBuffer
+                                                 ? "read its bytes through a view, e.g. 'new "
+                                                   "Uint8Array(buffer)[i]'"
+                                                 : "it holds no elements"));
     return index;
   }
   if (index->index->type->isError()) {
     return index;
   }
   // Proved in range: a plain read. Otherwise JavaScript yields undefined.
-  bool inRange = sema_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false);
+  bool inRange =
+      checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false);
   index->mayBeOutOfRange = !inRange;
   index->type = inRange ? type->elementType() : Type::optional(type->elementType());
 
@@ -136,25 +137,26 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
 }
 
 void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::optional<BinaryOp> op,
-                           llvm::SMLoc loc) {
+                                   llvm::SMLoc loc) {
   const Type *target = index->object->type;
   if (index->index->type->isError() || (value && value->type->isError())) {
     return;
   }
   std::string object = valueText(index->object), position = valueText(index->index);
-  if (!sema_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false)) {
-    std::optional<int64_t> at = sema_.constantFolder().intConstant(index->index);
+  if (!checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false)) {
+    std::optional<int64_t> at = checker_.constantFolder().intConstant(index->index);
     std::string check = at ? object + ".length > " + std::to_string(*at)
                            : position + " >= 0 && " + position + " < " + object + ".length";
-    sema_.diags_.error(index->loc(), "cannot prove that the index is within the " + target->name() +
-                                   " (0 <= index < length): it never grows, and JavaScript would "
-                                   "drop the write; check the index first, e.g. 'if (" +
-                                   check + ")'");
+    checker_.diags_.error(index->loc(),
+                          "cannot prove that the index is within the " + target->name() +
+                              " (0 <= index < length): it never grows, and JavaScript would "
+                              "drop the write; check the index first, e.g. 'if (" +
+                              check + ")'");
     return;
   }
   std::string what = "an element of '" + target->name().str() + "'";
   if (!op) {
-    sema_.byteProofs().checkFits(value, target, what);
+    checker_.byteProofs().checkFits(value, target, what);
     return;
   }
   // `u[i] op= v` stores `u[i] op v`, and `u[i]++` stores u[i] + 1.
@@ -163,43 +165,47 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::opt
       target->bytes() == Bytes::Int32) {
     return;
   }
-  Range result = operate(*op, Range{lo, hi}, value ? sema_.byteProofs().valueRange(value) : exact(1),
-                         target->elementType()->isInt());
+  Range result =
+      operate(*op, Range{lo, hi}, value ? checker_.byteProofs().valueRange(value) : exact(1),
+              target->elementType()->isInt());
   if (result.lo && result.hi && *result.lo >= lo && *result.hi <= hi) {
     return;
   }
   std::string element = object + "[" + position + "]";
   std::string written = value ? element + " " + opSpelling(*op) + " " + valueText(value)
                               : element + (*op == BinaryOp::Add ? " + 1" : " - 1");
-  sema_.diags_.error(loc, "cannot prove that the result fits in " + what + " (" + rangeText(lo, hi) +
-                        "), and JavaScript would cut it without a word; cut it explicitly: '" +
-                        element + " = " + wrapHint(target->bytes(), "(" + written + ")") + "'");
+  checker_.diags_.error(loc,
+                        "cannot prove that the result fits in " + what + " (" + rangeText(lo, hi) +
+                            "), and JavaScript would cut it without a word; cut it explicitly: '" +
+                            element + " = " + wrapHint(target->bytes(), "(" + written + ")") + "'");
 }
 
 Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
   auto read = [&](Builtin builtin, const Type *result, std::vector<Expr *> args = {}) {
-    return sema_.processChecker().builtinCall(member->loc(), member, builtin, std::move(args), result);
+    return checker_.processChecker().builtinCall(member->loc(), member, builtin, std::move(args),
+                                                 result);
   };
   // A constant, after the object for what evaluating it does.
   auto constant = [&](Expr *value) -> Expr * {
     if (isa<NameExpr>(member->object)) {
       return value;
     }
-    auto *seq = sema_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, value});
+    auto *seq =
+        checker_.ctx_.make<SequenceExpr>(member->loc(), std::vector<Expr *>{member->object, value});
     seq->type = value->type;
 
     return seq;
   };
   auto intLit = [&](int64_t v) {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(v));
+    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(v));
     lit->type = Type::intTy();
 
     return lit;
   };
   auto boolLit = [&](bool v) {
-    auto *lit = sema_.ctx_.make<BoolLitExpr>(member->loc(), v);
+    auto *lit = checker_.ctx_.make<BoolLitExpr>(member->loc(), v);
     lit->type = Type::boolTy();
 
     return lit;
@@ -207,7 +213,7 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   switch (type->bytes()) {
   case Bytes::ArrayBuffer:
     if (name == "byteLength") {
-      member->type = Type::intTy(); // read by CodeGen, and a length for the proofs
+      member->type = Type::intTy(); // read by Lowering, and a length for the proofs
       return member;
     }
     if (name == "maxByteLength") {
@@ -231,7 +237,7 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
     break;
   case Bytes::TextEncoder:
     if (name == "encoding") {
-      auto *lit = sema_.ctx_.make<StringLitExpr>(member->loc(), u"utf-8");
+      auto *lit = checker_.ctx_.make<StringLitExpr>(member->loc(), u"utf-8");
       lit->type = Type::string();
       return constant(lit);
     }
@@ -262,27 +268,27 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
       return constant(intLit(type->elementSize()));
     }
     if (type->isBuffer() && (name == "parent" || name == "offset")) {
-      sema_.diags_.error(member->loc(), "'" + name +
-                                      "' of a Buffer is deprecated in node and not "
-                                      "supported; use '" +
-                                      (name == "parent" ? "buffer" : "byteOffset") + "'");
+      checker_.diags_.error(member->loc(), "'" + name +
+                                               "' of a Buffer is deprecated in node and not "
+                                               "supported; use '" +
+                                               (name == "parent" ? "buffer" : "byteOffset") + "'");
       return member;
     }
     if (llvm::is_contained(kTypedMethods, name)) {
-      sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
-                                      type->name() + "'; methods must be called");
+      checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
+                                               type->name() + "'; methods must be called");
       return member;
     }
     break;
   }
-  sema_.diags_.error(member->loc(),
-               "property '" + name + "' does not exist on type '" + type->name() + "'");
+  checker_.diags_.error(member->loc(),
+                        "property '" + name + "' does not exist on type '" + type->name() + "'");
 
   return member;
 }
 
 // The properties lie at the same place in every view (TzBytes), and the
-// length of an ArrayBuffer where a view keeps its length: CodeGen reads them
+// length of an ArrayBuffer where a view keeps its length: Lowering reads them
 // the same way whatever the member is, and finds the size of an element by
 // the member's class number where the members' differ.
 Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
@@ -302,8 +308,8 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
                                                "detached",          "encoding",      "fatal",
                                                "ignoreBOM"};
   if (llvm::is_contained(others, name)) {
-    sema_.diags_.error(member->loc(), "property '" + name + "' of '" + type->name() +
-                                    "' is not supported yet; narrow it first");
+    checker_.diags_.error(member->loc(), "property '" + name + "' of '" + type->name() +
+                                             "' is not supported yet; narrow it first");
     return member;
   }
   llvm::ArrayRef<const Type *> members = type->members();
@@ -314,26 +320,27 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     if (const Type *const *with = llvm::find_if(members, has); with != members.end()) {
       message += ", e.g. 'if (x instanceof " + (*with)->name().str() + ")'";
     }
-    sema_.diags_.error(member->loc(), message);
+    checker_.diags_.error(member->loc(), message);
     return member;
   }
   if (name == "length") {
-    member->type = Type::intTy(); // read by CodeGen, as of each member
+    member->type = Type::intTy(); // read by Lowering, as of each member
     return member;
   }
   if (name == "buffer") {
-    return sema_.processChecker().builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
-                       Type::bytesType(Bytes::ArrayBuffer));
+    return checker_.processChecker().builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
+                                                 Type::bytesType(Bytes::ArrayBuffer));
   }
 
-  return sema_.processChecker().builtinCall(member->loc(), member,
-                     name == "byteLength" ? Builtin::BytesByteLength : Builtin::BytesByteOffset, {},
-                     Type::intTy());
+  return checker_.processChecker().builtinCall(member->loc(), member,
+                                               name == "byteLength" ? Builtin::BytesByteLength
+                                                                    : Builtin::BytesByteOffset,
+                                               {}, Type::intTy());
 }
 
 Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
   auto *object = dyn_cast<NameExpr>(member->object);
-  if (!object || !sema_.callChecker().isGlobalName(object, object->name)) {
+  if (!object || !checker_.callChecker().isGlobalName(object, object->name)) {
     return nullptr;
   }
   const Type *type = bytesTypeNamed(object->name);
@@ -342,19 +349,19 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
   }
   member->type = Type::error();
   if (type->isTypedArray() && member->name == "BYTES_PER_ELEMENT") {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), type->elementSize());
+    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), type->elementSize());
     lit->type = Type::intTy();
     return lit;
   }
   // The size of the pool of Buffer.allocUnsafe in node, which tz has none of.
   if (type->isBuffer() && member->name == "poolSize") {
-    auto *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), 8192);
+    auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), 8192);
     lit->type = Type::intTy();
     return lit;
   }
-  sema_.diags_.error(member->loc(), "'" + object->name + "." + member->name +
-                                  "' can be used only in a call, e.g. '" + object->name + "." +
-                                  member->name + "(...)'");
+  checker_.diags_.error(member->loc(), "'" + object->name + "." + member->name +
+                                           "' can be used only in a call, e.g. '" + object->name +
+                                           "." + member->name + "(...)'");
 
   return member;
 }
@@ -362,21 +369,23 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
 Expr *BytesChecker::bytesToString(Expr *expr) {
   const Type *type = expr->type;
   if (type->isTypedArray()) {
-    auto *callee = sema_.ctx_.make<MemberExpr>(expr->loc(), expr, "toString");
+    auto *callee = checker_.ctx_.make<MemberExpr>(expr->loc(), expr, "toString");
     if (type->isBuffer()) {
-      auto *encoding = sema_.ctx_.make<IntLitExpr>(expr->loc(), Utf8);
+      auto *encoding = checker_.ctx_.make<IntLitExpr>(expr->loc(), Utf8);
       encoding->type = Type::intTy();
-      return sema_.processChecker().builtinCall(expr->loc(), callee, Builtin::BufferToString, {encoding}, Type::string());
+      return checker_.processChecker().builtinCall(expr->loc(), callee, Builtin::BufferToString,
+                                                   {encoding}, Type::string());
     }
-    return sema_.processChecker().builtinCall(expr->loc(), callee, Builtin::BytesJoin, {}, Type::string());
+    return checker_.processChecker().builtinCall(expr->loc(), callee, Builtin::BytesJoin, {},
+                                                 Type::string());
   }
-  sema_.diags_.error(expr->loc(),
-               "a value of type '" + type->name() +
-                   "' cannot be converted to a string: JavaScript would give '[object " +
-                   type->name() + "]'; print it with console.log" +
-                   (type->bytes() == Bytes::ArrayBuffer
-                        ? ", or the text of its bytes with 'new TextDecoder().decode(buffer)'"
-                        : ""));
+  checker_.diags_.error(
+      expr->loc(), "a value of type '" + type->name() +
+                       "' cannot be converted to a string: JavaScript would give '[object " +
+                       type->name() + "]'; print it with console.log" +
+                       (type->bytes() == Bytes::ArrayBuffer
+                            ? ", or the text of its bytes with 'new TextDecoder().decode(buffer)'"
+                            : ""));
 
   return expr;
 }
@@ -385,68 +394,70 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
   if (std::optional<std::u16string> text = literalText(arg)) {
     std::optional<int> encoding = encodingNamed(utf8(*text));
     if (!encoding) {
-      sema_.diags_.error(arg->loc(), "unknown encoding '" + utf8(*text) +
-                                   "' (node throws a TypeError); Buffer knows utf8, utf16le, "
-                                   "latin1, ascii, base64, base64url and hex");
+      checker_.diags_.error(arg->loc(),
+                            "unknown encoding '" + utf8(*text) +
+                                "' (node throws a TypeError); Buffer knows utf8, utf16le, "
+                                "latin1, ascii, base64, base64url and hex");
       arg->type = Type::error();
       return arg;
     }
-    auto *lit = sema_.ctx_.make<IntLitExpr>(arg->loc(), uint64_t(*encoding));
+    auto *lit = checker_.ctx_.make<IntLitExpr>(arg->loc(), uint64_t(*encoding));
     lit->type = Type::intTy();
     return lit;
   }
 
   // Checked when the program runs: an unknown one is a TypeError.
-  return sema_.argumentChecker().checkArg(arg, Type::string());
+  return checker_.argumentChecker().checkArg(arg, Type::string());
 }
 
 Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call)) {
+  if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   switch (type->bytes()) {
   case Bytes::ArrayBuffer: {
     llvm::StringRef name = member->name;
     if (name == "slice") {
-      if (!sema_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
+      if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
         return call;
       }
       for (Expr *&arg : call->args) {
-        arg = sema_.memberChecker().checkPosition(arg);
+        arg = checker_.memberChecker().checkPosition(arg);
       }
       call->builtin = Builtin::ArrayBufferSlice;
       call->type = type;
       return call;
     }
     for (Expr *&arg : call->args) {
-      arg = sema_.exprChecker().checkExpr(arg);
+      arg = checker_.exprChecker().checkExpr(arg);
     }
     if (name == "resize" || name == "transfer" || name == "transferToFixedLength") {
-      sema_.diags_.error(member->loc(), "'" + name +
-                                      "' is not supported yet: an ArrayBuffer keeps its "
-                                      "size and its memory (docs/bytes.md, section 7)");
+      checker_.diags_.error(member->loc(), "'" + name +
+                                               "' is not supported yet: an ArrayBuffer keeps its "
+                                               "size and its memory (docs/bytes.md, section 7)");
     } else {
-      sema_.diags_.error(member->loc(), "property '" + name + "' does not exist on type 'ArrayBuffer'");
+      checker_.diags_.error(member->loc(),
+                            "property '" + name + "' does not exist on type 'ArrayBuffer'");
     }
     return call;
   }
   case Bytes::DataView:
-    return sema_.typedArrayChecker().checkDataViewMethod(call, member);
+    return checker_.typedArrayChecker().checkDataViewMethod(call, member);
   case Bytes::TextEncoder:
   case Bytes::TextDecoder:
-    return sema_.bufferChecker().checkTextMethod(call, member);
+    return checker_.bufferChecker().checkTextMethod(call, member);
   default:
     break;
   }
   if (type->isBuffer()) {
-    if (Expr *result = sema_.bufferChecker().checkBufferMethod(call, member)) {
+    if (Expr *result = checker_.bufferChecker().checkBufferMethod(call, member)) {
       return result;
     }
   }
 
-  return sema_.typedArrayChecker().checkTypedArrayMethod(call, member, expected);
+  return checker_.typedArrayChecker().checkTypedArrayMethod(call, member, expected);
 }
 
 } // namespace tz

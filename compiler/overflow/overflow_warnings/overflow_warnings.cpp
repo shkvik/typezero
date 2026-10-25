@@ -1,14 +1,15 @@
 #include "compiler/overflow/overflow_warnings/overflow_warnings.h"
-#include "compiler/overflow/program_scan/program_scan.h"
-#include "compiler/overflow/slots/slots.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/slots/slots.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +28,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -125,7 +125,7 @@ std::string numberText(double v) {
 OverflowWarnings::OverflowWarnings(OverflowCheck &check) : check_(check) {}
 
 const Reason *OverflowWarnings::reason(Origin origin, llvm::SMLoc loc, std::string what,
-                                    bool unbounded) {
+                                       bool unbounded) {
   auto key = std::make_pair(loc.getPointer(),
                             what + (unbounded ? "!" : "") + char('0' + static_cast<int>(origin)));
   auto found = check_.reasonIndex_.find(key);
@@ -250,7 +250,8 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
     auto info = check_.vars_.find(accum);
     const VarDeclarator *decl = info != check_.vars_.end() ? info->second.decl : nullptr;
     if (decl && !decl->typeAnn && decl->init && !info->second.isConst) {
-      std::string init = check_.programScan().isConstantTree(decl->init) ? exprText(decl->init) : "...";
+      std::string init =
+          check_.programScan().isConstantTree(decl->init) ? exprText(decl->init) : "...";
       return "declare it as 'let " + accum->name.str() + ": long = " + init + "', or as a double";
     }
     if (decl && decl->typeAnn) {
@@ -281,7 +282,7 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
 }
 
 void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const Expr *lhs,
-                         const Expr *rhs, const Num &exceeding, const VarSymbol *accum) {
+                            const Expr *rhs, const Num &exceeding, const VarSymbol *accum) {
   if (!check_.reporting_ || check_.quiet_) {
     return;
   }

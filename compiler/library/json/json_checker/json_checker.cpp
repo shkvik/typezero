@@ -1,9 +1,9 @@
 #include "compiler/library/json/json_checker/json_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/values/array_literal_checker/array_literal_checker.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -13,8 +13,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -45,7 +45,7 @@ bool isNothing(const Expr *expr) {
 
 } // namespace
 
-JsonChecker::JsonChecker(Sema &sema) : sema_(sema) {}
+JsonChecker::JsonChecker(Checker &checker) : checker_(checker) {}
 
 bool JsonChecker::holdsJson(const Type *type) {
   while (type->isOptional() || type->isArray()) {
@@ -75,18 +75,18 @@ Expr *JsonChecker::checkJsonMember(MemberExpr *member) {
 // A key is a string, or a number, which JavaScript turns into its text:
 // `j[1]` of an object reads "1".
 Expr *JsonChecker::checkJsonIndex(IndexExpr *index) {
-  index->index = sema_.exprChecker().checkExpr(index->index);
+  index->index = checker_.exprChecker().checkExpr(index->index);
   index->type = Type::optional(Type::json());
   const Type *key = index->index->type;
   if (key->isError() || key->isString()) {
     return index;
   }
   if (key->isNumeric()) {
-    index->index = sema_.typeRelations().convert(index->index, Type::doubleTy());
+    index->index = checker_.typeRelations().convert(index->index, Type::doubleTy());
     return index;
   }
-  sema_.diags_.error(index->index->loc(),
-               "a key of a Json is a string or a number, found '" + key->name() + "'");
+  checker_.diags_.error(index->index->loc(),
+                        "a key of a Json is a string or a number, found '" + key->name() + "'");
   index->type = Type::error();
 
   return index;
@@ -121,9 +121,9 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
                "(Array.isArray(items)) items" +
                call_ + "'";
   }
-  sema_.diags_.error(member->loc(), message);
+  checker_.diags_.error(member->loc(), message);
   for (Expr *&arg : call->args) {
-    arg = sema_.exprChecker().checkExpr(arg);
+    arg = checker_.exprChecker().checkExpr(arg);
   }
 
   return call;
@@ -136,32 +136,33 @@ Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
   const Type *json = Type::json();
   for (ObjectLitExpr::Property &prop : lit->props) {
     if (prop.spread || prop.method) {
-      sema_.diags_.error(prop.loc, prop.spread ? "a spread is not supported in a Json literal; write the "
-                                           "keys one by one"
-                                         : "a Json holds no functions");
-      prop.value = sema_.exprChecker().checkExpr(prop.value);
+      checker_.diags_.error(prop.loc,
+                            prop.spread ? "a spread is not supported in a Json literal; write the "
+                                          "keys one by one"
+                                        : "a Json holds no functions");
+      prop.value = checker_.exprChecker().checkExpr(prop.value);
       continue;
     }
     if (prop.defaulted) {
-      sema_.diags_.error(prop.loc, "'" + prop.name +
-                                 " = ...' belongs to a destructuring pattern; write '" + prop.name +
-                                 ": ...'");
-      prop.value = sema_.exprChecker().checkExpr(cast<AssignExpr>(prop.value)->value);
+      checker_.diags_.error(prop.loc, "'" + prop.name +
+                                          " = ...' belongs to a destructuring pattern; write '" +
+                                          prop.name + ": ...'");
+      prop.value = checker_.exprChecker().checkExpr(cast<AssignExpr>(prop.value)->value);
       prop.defaulted = false;
       continue;
     }
     if (prop.key) {
-      prop.key = sema_.exprChecker().checkExpr(prop.key);
+      prop.key = checker_.exprChecker().checkExpr(prop.key);
       if (!prop.key->type->isString() && !prop.key->type->isError()) {
-        sema_.diags_.error(prop.key->loc(),
-                     "a key of a Json is a string, found '" + prop.key->type->name() + "'");
+        checker_.diags_.error(prop.key->loc(), "a key of a Json is a string, found '" +
+                                                   prop.key->type->name() + "'");
       }
     }
-    Expr *value = sema_.exprChecker().checkExpr(prop.value, json);
+    Expr *value = checker_.exprChecker().checkExpr(prop.value, json);
     const Type *type = value->type;
-    prop.value =
-        sema_.typeRelations().coerce(value, type->isOptional() || type->isUndefined() ? Type::optional(json) : json,
-               "key '" + prop.name.str() + "'");
+    prop.value = checker_.typeRelations().coerce(
+        value, type->isOptional() || type->isUndefined() ? Type::optional(json) : json,
+        "key '" + prop.name.str() + "'");
   }
   lit->type = json;
 
@@ -170,12 +171,12 @@ Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
 
 // `[1, "a", null]` where a Json is expected: a Json[], which becomes the Json.
 Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
-  Expr *array = sema_.arrayLiteralChecker().checkArrayLit(lit, Type::array(Type::json()));
+  Expr *array = checker_.arrayLiteralChecker().checkArrayLit(lit, Type::array(Type::json()));
   if (array->type->isError()) {
     return array;
   }
 
-  return sema_.typeRelations().coerce(array, Type::json());
+  return checker_.typeRelations().coerce(array, Type::json());
 }
 
 // `x == null` is true for null and undefined, as in JavaScript, and only a
@@ -190,17 +191,17 @@ Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
   Expr *&other = lhsNull ? bin->rhs : bin->lhs;
   const Type *type = Type::undefinedTy();
   if (!(lhsNull && rhsNull)) {
-    other = sema_.exprChecker().checkExpr(other);
+    other = checker_.exprChecker().checkExpr(other);
     type = other->type;
   }
   null->type = Type::json();
   if (type->isError() || type->nonOptional()->isJson()) {
     return bin;
   }
-  sema_.diags_.error(null->loc(), "'null' exists only in Json values, and a value of type '" +
-                                type->name() +
-                                "' is never null; the one value for nothing is 'undefined': '" +
-                                opSpelling(bin->op) + " undefined'");
+  checker_.diags_.error(null->loc(),
+                        "'null' exists only in Json values, and a value of type '" + type->name() +
+                            "' is never null; the one value for nothing is 'undefined': '" +
+                            opSpelling(bin->op) + " undefined'");
   null->type = Type::error();
 
   return bin;
@@ -212,8 +213,8 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
   const Type *json =
       l->isOptional() || r->isOptional() ? Type::optional(Type::json()) : Type::json();
   if (lhsJson && rhsJson) {
-    bin->lhs = sema_.typeRelations().convert(bin->lhs, json);
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, json);
+    bin->lhs = checker_.typeRelations().convert(bin->lhs, json);
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, json);
     return bin;
   }
   // `j == "admin"`, `j.count == 3`: as `===`, true for a Json of that kind
@@ -224,20 +225,21 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
     return bin;
   }
   if (type->isNumeric()) {
-    other = sema_.typeRelations().convert(other, Type::doubleTy());
+    other = checker_.typeRelations().convert(other, Type::doubleTy());
     return bin;
   }
   if (type->isOptional() && TypeRelations::isImplicitlyConvertible(type->inner(), Type::json())) {
-    bin->lhs = sema_.typeRelations().convert(bin->lhs, json);
-    bin->rhs = sema_.typeRelations().convert(bin->rhs, json);
+    bin->lhs = checker_.typeRelations().convert(bin->lhs, json);
+    bin->rhs = checker_.typeRelations().convert(bin->rhs, json);
     return bin;
   }
-  sema_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
+  checker_.binaryChecker().reportOperandTypes(bin->loc(), opSpelling(bin->op), l, r);
 
   return bin;
 }
 
-void JsonChecker::addJsonFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
+void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
+                               Checker::Flow &whenFalse) const {
   // `Array.isArray(x)`: x is a Json[].
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
     if (const VarSymbol *var = jsonVariable(call->args[0])) {
@@ -252,8 +254,8 @@ void JsonChecker::addJsonFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flo
   if (!bin || (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne)) {
     return;
   }
-  Sema::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
-  Sema::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
+  Checker::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
+  Checker::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     // `x != null`, `x != undefined`: neither, so not undefined.
     if (isNothing(other)) {
@@ -291,12 +293,14 @@ void JsonChecker::addJsonFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flo
 
 Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
     return call;
   }
-  call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+  call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
   if (call->args[0]->type->isVoid()) {
-    sema_.diags_.error(call->args[0]->loc(), "an expression of type 'void' has no value to test");
+    checker_.diags_.error(call->args[0]->loc(),
+                          "an expression of type 'void' has no value to test");
     return call;
   }
   call->builtin = Builtin::ArrayIsArray;

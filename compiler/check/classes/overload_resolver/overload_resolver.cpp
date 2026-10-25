@@ -1,21 +1,21 @@
 #include "compiler/check/classes/overload_resolver/overload_resolver.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/classes/class_check_helpers/class_check_helpers.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
-#include "compiler/check/generics/type_params/type_params.h"
-#include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
+#include "compiler/check/generics/type_arg_inferrer/type_arg_inferrer.h"
+#include "compiler/check/generics/type_params/type_params.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
-#include "compiler/check/classes/class_check_helpers/class_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -163,16 +163,17 @@ bool hasFloatLiteral(const Expr *expr) {
 
 } // namespace
 
-OverloadResolver::OverloadResolver(Sema &sema) : sema_(sema) {}
+OverloadResolver::OverloadResolver(Checker &checker) : checker_(checker) {}
 
-FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants, std::vector<Expr *> &args,
-                                const std::vector<bool> &spread, llvm::SMLoc loc, bool &checked,
-                                std::vector<const Type *> *bound) {
+FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> variants,
+                                            std::vector<Expr *> &args,
+                                            const std::vector<bool> &spread, llvm::SMLoc loc,
+                                            bool &checked, std::vector<const Type *> *bound) {
   checked = false;
   auto checkLoosely = [&] {
     for (Expr *&arg : args) {
       if (!arg->type) {
-        arg = sema_.exprChecker().checkExpr(arg);
+        arg = checker_.exprChecker().checkExpr(arg);
       }
     }
   };
@@ -183,11 +184,11 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
   std::string what = first->isConstructor ? "the constructor of '" + first->cls->name.str() + "'"
                                           : "'" + first->name.str() + "'";
   for (FunctionDecl *v : variants) {
-    sema_.returnInferrer().resolveParams(v->sym);
+    checker_.returnInferrer().resolveParams(v->sym);
   }
   if (llvm::is_contained(spread, true)) {
-    sema_.diags_.error(loc, "a spread argument cannot choose among the variants of " + what +
-                          "; pass the arguments one by one");
+    checker_.diags_.error(loc, "a spread argument cannot choose among the variants of " + what +
+                                   "; pass the arguments one by one");
     checkLoosely();
     return nullptr;
   }
@@ -200,8 +201,9 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   }
   if (fit.empty()) {
-    sema_.diags_.error(loc, "no variant of " + what + " takes " + std::to_string(count) + " argument" +
-                          (count == 1 ? "" : "s") + ": there are " + variantList(variants));
+    checker_.diags_.error(loc, "no variant of " + what + " takes " + std::to_string(count) +
+                                   " argument" + (count == 1 ? "" : "s") + ": there are " +
+                                   variantList(variants));
     checkLoosely();
     return nullptr;
   }
@@ -233,7 +235,8 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
         expected = Type::decimalTy();
       }
     }
-    args[i] = sema_.exprChecker().checkExpr(args[i], expected && !expected->isError() ? expected : nullptr);
+    args[i] = checker_.exprChecker().checkExpr(args[i], expected && !expected->isError() ? expected
+                                                                                         : nullptr);
   }
   checked = true;
   if (llvm::any_of(args, [](const Expr *arg) { return arg->type->isError(); })) {
@@ -252,7 +255,8 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
     // A generic variant takes the types its arguments give its type
     // parameters.
-    if (v->sym->isGeneric() && !sema_.typeArgInferrer().inferFromArguments(v->sym, args, c.typeArgs)) {
+    if (v->sym->isGeneric() &&
+        !checker_.typeArgInferrer().inferFromArguments(v->sym, args, c.typeArgs)) {
       why += "; " + variantText(v) + " cannot take these arguments for its type parameters";
       continue;
     }
@@ -260,7 +264,7 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     for (size_t i = 0; i < count && mismatch.empty(); ++i) {
       const Type *param = parameterAt(v->sym, i);
       if (v->sym->isGeneric()) {
-        param = sema_.typeParams().substitute(param, v->sym->typeParams, c.typeArgs);
+        param = checker_.typeParams().substitute(param, v->sym->typeParams, c.typeArgs);
       }
       int rank = conversionRank(args[i]->type, param);
       if (rank < 0) {
@@ -276,7 +280,7 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     }
   }
   if (applicable.empty()) {
-    sema_.diags_.error(loc, "no variant of " + what + " fits these arguments" + why);
+    checker_.diags_.error(loc, "no variant of " + what + " fits these arguments" + why);
     return nullptr;
   }
   auto better = [&](const Candidate &a, const Candidate &b) {
@@ -296,8 +300,8 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
                      [&](const Candidate &other) { return &other == &c || better(c, other); })) {
       if (c.fn->sym->isGeneric()) {
         if (!bound) {
-          sema_.diags_.error(loc, "the call chooses " + variantText(c.fn) +
-                                ", a generic variant, which " + "cannot be chosen here");
+          checker_.diags_.error(loc, "the call chooses " + variantText(c.fn) +
+                                         ", a generic variant, which " + "cannot be chosen here");
           return nullptr;
         }
         *bound = c.typeArgs;
@@ -309,42 +313,45 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
   for (const Candidate &c : applicable) {
     tied.push_back(c.fn);
   }
-  sema_.diags_.error(loc, "the call fits several variants of " + what + " equally well: " +
-                        variantList(tied) + "; convert an argument to choose one");
+  checker_.diags_.error(loc, "the call fits several variants of " + what + " equally well: " +
+                                 variantList(tied) + "; convert an argument to choose one");
 
   return nullptr;
 }
 
-Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym, llvm::ArrayRef<const Type *> bound,
-                               llvm::SMLoc loc, bool method) {
+Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
+                                           llvm::ArrayRef<const Type *> bound, llvm::SMLoc loc,
+                                           bool method) {
   llvm::ArrayRef<const Type *> typeParams = sym->typeParams;
   std::vector<const Type *> params;
-  llvm::SMLoc outerLoc = std::exchange(sema_.instanceLoc_, loc);
+  llvm::SMLoc outerLoc = std::exchange(checker_.instanceLoc_, loc);
   for (const Type *p : sym->params) {
-    params.push_back(sema_.typeParams().substitute(p, typeParams, bound));
+    params.push_back(checker_.typeParams().substitute(p, typeParams, bound));
   }
-  const Type *ret = sema_.returnInferrer().returnType(sym);
-  call->type = ret ? sema_.typeParams().substitute(ret, typeParams, bound) : Type::error();
-  sema_.instanceLoc_ = outerLoc;
+  const Type *ret = checker_.returnInferrer().returnType(sym);
+  call->type = ret ? checker_.typeParams().substitute(ret, typeParams, bound) : Type::error();
+  checker_.instanceLoc_ = outerLoc;
   FuncSymbol *callee = sym;
   const ClassDecl *cls = sym->decl->cls;
-  if (!sema_.trial_ && !sym->inferring && sym->ret && (!cls || sym->decl->isStatic || cls->isEmitted())) {
-    if (FuncSymbol *instance = sema_.genericInstantiator().instantiate(sym, bound, loc)) {
+  if (!checker_.trial_ && !sym->inferring && sym->ret &&
+      (!cls || sym->decl->isStatic || cls->isEmitted())) {
+    if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(sym, bound, loc)) {
       callee = instance;
     }
   }
   (method ? call->method : call->func) = callee;
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && method) {
-    member->type = sema_.returnInferrer().functionType(callee);
+    member->type = checker_.returnInferrer().functionType(callee);
   }
   // The arguments chooseVariant checked are only converted.
   std::vector<bool> given(call->args.size(), true);
 
-  return sema_.argumentChecker().checkArguments(call, params, sym->minArgs, sym->hasRest, loc, &given);
+  return checker_.argumentChecker().checkArguments(call, params, sym->minArgs, sym->hasRest, loc,
+                                                   &given);
 }
 
-FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants, const Type *expected,
-                                 const MemberExpr *member) {
+FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> variants,
+                                             const Type *expected, const MemberExpr *member) {
   if (variants.size() == 1) {
     return variants[0]->sym;
   }
@@ -352,19 +359,19 @@ FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> vari
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   if (wanted && wanted->isFunction()) {
     for (FunctionDecl *v : variants) {
-      if (sema_.returnInferrer().functionType(v->sym) == wanted) {
+      if (checker_.returnInferrer().functionType(v->sym) == wanted) {
         matching.push_back(v);
       }
     }
-  } else if (sema_.callback_) {
+  } else if (checker_.callback_) {
     // A callback, `[1, 2].map(v.add)`: the variant that takes what the
     // method passes.
     for (FunctionDecl *v : variants) {
       const FuncSymbol *sym = v->sym;
-      bool fits = !sym->hasRest && sym->minArgs <= sema_.callback_->params.size() &&
-                  sym->params.size() <= sema_.callback_->params.size();
+      bool fits = !sym->hasRest && sym->minArgs <= checker_.callback_->params.size() &&
+                  sym->params.size() <= checker_.callback_->params.size();
       for (size_t i = 0; i < sym->params.size() && fits; ++i) {
-        const Type *param = sym->params[i], *given = sema_.callback_->params[i];
+        const Type *param = sym->params[i], *given = checker_.callback_->params[i];
         fits = param == given || (param->isOptional() && param->inner() == given);
       }
       if (fits) {
@@ -381,28 +388,30 @@ FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> vari
     type += (i == 0 ? "" : ", ") + last->params[i].label().str() + ": " +
             last->sym->params[i]->name().str();
   }
-  type += ") => " + sema_.returnInferrer().returnType(last->sym)->name().str();
+  type += ") => " + checker_.returnInferrer().returnType(last->sym)->name().str();
   std::string object = "o";
   if (auto *name = dyn_cast<NameExpr>(member->object)) {
     object = name->name.str();
   }
-  sema_.diags_.error(member->loc(), "'" + member->name + "' has several variants, " +
-                                  variantList(variants) +
-                                  ": say which one with the type of the place it goes, e.g. "
-                                  "'const f: " +
-                                  type + " = " + object + "." + member->name + "'");
+  checker_.diags_.error(member->loc(),
+                        "'" + member->name + "' has several variants, " + variantList(variants) +
+                            ": say which one with the type of the place it goes, e.g. "
+                            "'const f: " +
+                            type + " = " + object + "." + member->name + "'");
 
   return nullptr;
 }
 
-std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *iface, const Overload &overload) {
+std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *iface,
+                                                                const Overload &overload) {
   std::vector<FunctionDecl *> &variants = signatureVariants_[{iface, overload.name}];
   if (!variants.empty()) {
     return variants;
   }
   for (const Type *signature : overload.signatures) {
-    auto *fn = sema_.ctx_.make<FunctionDecl>(llvm::SMLoc(), sema_.ctx_.keepName(overload.name));
-    FuncSymbol *sym = sema_.ctx_.newFunc();
+    auto *fn =
+        checker_.ctx_.make<FunctionDecl>(llvm::SMLoc(), checker_.ctx_.keepName(overload.name));
+    FuncSymbol *sym = checker_.ctx_.newFunc();
     sym->name = fn->name;
     sym->decl = fn;
     sym->params.assign(signature->params().begin(), signature->params().end());
@@ -411,7 +420,7 @@ std::vector<FunctionDecl *> OverloadResolver::signatureVariants(const Type *ifac
     sym->ret = signature->ret();
     for (size_t i = 0; i < signature->params().size(); ++i) {
       Param param;
-      param.name = sema_.ctx_.keepName(std::string(1, char('a' + i % 26)));
+      param.name = checker_.ctx_.keepName(std::string(1, char('a' + i % 26)));
       param.rest = sym->hasRest && i + 1 == signature->params().size();
       param.optional = i >= sym->minArgs && !param.rest;
       param.declaredType = signature->params()[i];
@@ -438,10 +447,11 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   call->signature = int(found - variants.begin());
   member->type = overload.signatures[size_t(call->signature)];
   call->type = sym->ret;
-  sema_.flowChecker().calledFunction(); // a method runs
+  checker_.flowChecker().calledFunction(); // a method runs
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
-  return sema_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest, member->loc(), &given);
+  return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
+                                                   member->loc(), &given);
 }
 
 Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expected) {

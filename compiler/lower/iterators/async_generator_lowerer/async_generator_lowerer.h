@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Async generators and for await.
 class AsyncGeneratorLowerer {
 public:
-  explicit AsyncGeneratorLowerer(CodeGen &codegen);
+  explicit AsyncGeneratorLowerer(Lowering &lowering);
 
   // Async generators and `for await` (codegen_async_iter.cpp).
   llvm::Constant *asyncGeneratorLayout();
@@ -28,7 +28,7 @@ public:
   void emitAsyncGeneratorReturn(ReturnStmt *stmt);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   llvm::Constant *agenLayout_ = nullptr;
 };
 

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The type of a literal from where it goes.
 class Destination {
 public:
-  explicit Destination(Sema &sema);
+  explicit Destination(Checker &checker);
 
   // The type for the literal that initializes `d`, or null. `later` are the
   // declarators after it in the same declaration.
@@ -24,7 +24,7 @@ public:
   const Type *declaredFunctionType(const FunctionDecl *fn);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

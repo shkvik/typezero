@@ -1,15 +1,15 @@
 #pragma once
 
+#include "compiler/program/types/field/field.h"
+#include "compiler/program/types/intl_kind/intl_kind.h"
+#include "compiler/program/types/overload/overload.h"
+#include "compiler/program/types/type_op/type_op.h"
+#include "compiler/program/types/union_slot/union_slot.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "compiler/program/types/type_op/type_op.h"
-#include "compiler/program/types/union_slot/union_slot.h"
-#include "compiler/program/types/intl_kind/intl_kind.h"
-#include "compiler/program/types/field/field.h"
-#include "compiler/program/types/overload/overload.h"
 
 namespace tz {
 
@@ -396,7 +396,7 @@ public:
   void setConstraint(const Type *constraint, std::vector<const Type *> alternatives);
   // Some object, of a type the code does not know: the type parameter of a
   // copy of a generic function that serves every object type (see
-  // Sema::representation). It has no fields, and is released through the
+  // Checker::representation). It has no fields, and is released through the
   // descriptor the object points at.
   static const Type *anyObject();
   static const Type *never();

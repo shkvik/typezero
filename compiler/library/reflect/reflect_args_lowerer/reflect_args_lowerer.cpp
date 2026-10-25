@@ -1,18 +1,18 @@
 #include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
-#include "compiler/lower/values/array_lowerer/array_lowerer.h"
-#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/types/unknown_cast_lowerer/unknown_cast_lowerer.h"
+#include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
+#include "compiler/lower/values/array_lowerer/array_lowerer.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -53,22 +53,24 @@ bool narrower(const Type *a, const Type *b) {
 
 } // namespace
 
-ReflectArgsLowerer::ReflectArgsLowerer(CodeGen &codegen) : codegen_(codegen) {}
+ReflectArgsLowerer::ReflectArgsLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const FunctionDecl *> variants,
-                                        llvm::Value *selfId, llvm::Value *args,
-                                        llvm::Value *count) {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy(), *i32 = codegen_.builder_.getInt32Ty();
+                                                   llvm::Value *selfId, llvm::Value *args,
+                                                   llvm::Value *count) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   // args[i], or undefined past the end, read from a slot that holds it then.
-  llvm::Value *missing = codegen_.functionFrame().createStackSlot(ptr, "variant.missing");
-  codegen_.builder_.CreateStore(llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()), missing);
+  llvm::Value *missing = lowering_.functionFrame().createStackSlot(ptr, "variant.missing");
+  lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+                                 missing);
   auto given = [&](size_t i) {
-    return codegen_.builder_.CreateICmpULT(codegen_.builder_.getInt32(uint32_t(i)), count);
+    return lowering_.builder_.CreateICmpULT(lowering_.builder_.getInt32(uint32_t(i)), count);
   };
   auto argAt = [&](size_t i) {
-    llvm::Value *at = codegen_.builder_.CreateGEP(ptr, args, codegen_.builder_.getInt64(i));
+    llvm::Value *at = lowering_.builder_.CreateGEP(ptr, args, lowering_.builder_.getInt64(i));
 
-    return codegen_.builder_.CreateLoad(ptr, codegen_.builder_.CreateSelect(given(i), at, missing), "arg");
+    return lowering_.builder_.CreateLoad(
+        ptr, lowering_.builder_.CreateSelect(given(i), at, missing), "arg");
   };
   struct Variant {
     const FuncSymbol *sym;
@@ -93,13 +95,16 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
   for (const FunctionDecl *fn : variants) {
     const FuncSymbol *sym = fn->sym;
     Variant v{sym, sym->hasRest ? sym->params.size() - 1 : sym->params.size(), nullptr, {}};
-    llvm::Value *ok = codegen_.builder_.CreateICmpUGE(count, codegen_.builder_.getInt32(uint32_t(sym->minArgs)));
+    llvm::Value *ok = lowering_.builder_.CreateICmpUGE(
+        count, lowering_.builder_.getInt32(uint32_t(sym->minArgs)));
     if (!sym->hasRest) {
-      ok = codegen_.builder_.CreateAnd(ok,
-                              codegen_.builder_.CreateICmpULE(count, codegen_.builder_.getInt32(uint32_t(v.fixed))));
+      ok = lowering_.builder_.CreateAnd(
+          ok,
+          lowering_.builder_.CreateICmpULE(count, lowering_.builder_.getInt32(uint32_t(v.fixed))));
     }
     if (selfId) {
-      ok = codegen_.builder_.CreateAnd(ok, codegen_.unknownCastLowerer().classIdIn(selfId, {fn->cls}));
+      ok = lowering_.builder_.CreateAnd(
+          ok, lowering_.unknownCastLowerer().classIdIn(selfId, {fn->cls}));
     }
     for (size_t i = 0; i < compared; ++i) {
       const Type *param = v.param(i);
@@ -108,37 +113,44 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
         continue;
       }
       // Left out, a parameter that may be: no worse than given.
-      llvm::Value *fit =
-          codegen_.builder_.CreateSelect(given(i), codegen_.unknownCastLowerer().emitUnknownFit(argAt(i), param), codegen_.builder_.getInt32(3));
+      llvm::Value *fit = lowering_.builder_.CreateSelect(
+          given(i), lowering_.unknownCastLowerer().emitUnknownFit(argAt(i), param),
+          lowering_.builder_.getInt32(3));
       if (i < v.fixed) {
-        ok = codegen_.builder_.CreateAnd(ok, codegen_.builder_.CreateICmpNE(fit, codegen_.builder_.getInt32(0)));
+        ok = lowering_.builder_.CreateAnd(
+            ok, lowering_.builder_.CreateICmpNE(fit, lowering_.builder_.getInt32(0)));
       }
       v.fits.push_back(fit);
     }
     if (sym->hasRest) {
       // Each of the rest fits the element.
       const Type *element = sym->params.back()->inner();
-      llvm::BasicBlock *entry = codegen_.builder_.GetInsertBlock();
-      llvm::BasicBlock *loopBlock = codegen_.functionFrame().newBlock("variant.rest");
-      llvm::BasicBlock *bodyBlock = codegen_.functionFrame().newBlock("variant.rest.body");
-      llvm::BasicBlock *doneBlock = codegen_.functionFrame().newBlock("variant.rest.done");
-      codegen_.builder_.CreateBr(loopBlock);
-      codegen_.functionFrame().switchTo(loopBlock);
-      llvm::PHINode *i = codegen_.builder_.CreatePHI(i32, 2, "i");
-      llvm::PHINode *fits = codegen_.builder_.CreatePHI(codegen_.builder_.getInt1Ty(), 2, "fits");
-      i->addIncoming(codegen_.builder_.getInt32(uint32_t(v.fixed)), entry);
-      fits->addIncoming(codegen_.builder_.getTrue(), entry);
-      codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpULT(i, count), bodyBlock, doneBlock);
-      codegen_.functionFrame().switchTo(bodyBlock);
-      llvm::Value *at = codegen_.builder_.CreateZExt(i, codegen_.builder_.getInt64Ty());
-      llvm::Value *u = codegen_.builder_.CreateLoad(ptr, codegen_.builder_.CreateInBoundsGEP(ptr, args, at));
-      llvm::Value *fit = codegen_.unknownCastLowerer().emitUnknownFit(u, element);
-      i->addIncoming(codegen_.builder_.CreateAdd(i, codegen_.builder_.getInt32(1)), codegen_.builder_.GetInsertBlock());
-      fits->addIncoming(codegen_.builder_.CreateAnd(fits, codegen_.builder_.CreateICmpNE(fit, codegen_.builder_.getInt32(0))),
-                        codegen_.builder_.GetInsertBlock());
-      codegen_.builder_.CreateBr(loopBlock);
-      codegen_.functionFrame().switchTo(doneBlock);
-      ok = codegen_.builder_.CreateAnd(ok, fits);
+      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
+      llvm::BasicBlock *loopBlock = lowering_.functionFrame().newBlock("variant.rest");
+      llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("variant.rest.body");
+      llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("variant.rest.done");
+      lowering_.builder_.CreateBr(loopBlock);
+      lowering_.functionFrame().switchTo(loopBlock);
+      llvm::PHINode *i = lowering_.builder_.CreatePHI(i32, 2, "i");
+      llvm::PHINode *fits = lowering_.builder_.CreatePHI(lowering_.builder_.getInt1Ty(), 2, "fits");
+      i->addIncoming(lowering_.builder_.getInt32(uint32_t(v.fixed)), entry);
+      fits->addIncoming(lowering_.builder_.getTrue(), entry);
+      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(i, count), bodyBlock,
+                                      doneBlock);
+      lowering_.functionFrame().switchTo(bodyBlock);
+      llvm::Value *at = lowering_.builder_.CreateZExt(i, lowering_.builder_.getInt64Ty());
+      llvm::Value *u =
+          lowering_.builder_.CreateLoad(ptr, lowering_.builder_.CreateInBoundsGEP(ptr, args, at));
+      llvm::Value *fit = lowering_.unknownCastLowerer().emitUnknownFit(u, element);
+      i->addIncoming(lowering_.builder_.CreateAdd(i, lowering_.builder_.getInt32(1)),
+                     lowering_.builder_.GetInsertBlock());
+      fits->addIncoming(
+          lowering_.builder_.CreateAnd(
+              fits, lowering_.builder_.CreateICmpNE(fit, lowering_.builder_.getInt32(0))),
+          lowering_.builder_.GetInsertBlock());
+      lowering_.builder_.CreateBr(loopBlock);
+      lowering_.functionFrame().switchTo(doneBlock);
+      ok = lowering_.builder_.CreateAnd(ok, fits);
     }
     v.ok = ok;
     all.push_back(std::move(v));
@@ -146,8 +158,8 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
   // Whether `a` fits better than `b`: each argument no worse, one better;
   // or the same, and `a` takes no rest where `b` does.
   auto better = [&](const Variant &a, const Variant &b) {
-    llvm::Value *noWorse = codegen_.builder_.getTrue(), *anyBetter = codegen_.builder_.getFalse(),
-                *anyWorse = codegen_.builder_.getFalse();
+    llvm::Value *noWorse = lowering_.builder_.getTrue(), *anyBetter = lowering_.builder_.getFalse(),
+                *anyWorse = lowering_.builder_.getFalse();
     for (size_t i = 0; i < compared; ++i) {
       const Type *pa = a.param(i), *pb = b.param(i);
       if (!pa || !pb) {
@@ -155,50 +167,58 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
       }
       bool toB = narrower(pa, pb), toA = narrower(pb, pa);
       llvm::Value *fa = a.fits[i], *fb = b.fits[i];
-      llvm::Value *same = codegen_.builder_.CreateICmpEQ(fa, fb);
-      llvm::Value *higher = codegen_.builder_.CreateICmpUGT(fa, fb), *lower = codegen_.builder_.CreateICmpULT(fa, fb);
-      llvm::Value *ge = toB ? codegen_.builder_.CreateOr(higher, same) : higher;
-      llvm::Value *gt = toB && !toA ? codegen_.builder_.CreateOr(higher, same) : higher;
-      llvm::Value *lt = toA && !toB ? codegen_.builder_.CreateOr(lower, same) : lower;
+      llvm::Value *same = lowering_.builder_.CreateICmpEQ(fa, fb);
+      llvm::Value *higher = lowering_.builder_.CreateICmpUGT(fa, fb),
+                  *lower = lowering_.builder_.CreateICmpULT(fa, fb);
+      llvm::Value *ge = toB ? lowering_.builder_.CreateOr(higher, same) : higher;
+      llvm::Value *gt = toB && !toA ? lowering_.builder_.CreateOr(higher, same) : higher;
+      llvm::Value *lt = toA && !toB ? lowering_.builder_.CreateOr(lower, same) : lower;
       llvm::Value *in = given(i);
-      noWorse = codegen_.builder_.CreateAnd(noWorse, codegen_.builder_.CreateOr(codegen_.builder_.CreateNot(in), ge));
-      anyBetter = codegen_.builder_.CreateOr(anyBetter, codegen_.builder_.CreateAnd(in, gt));
-      anyWorse = codegen_.builder_.CreateOr(anyWorse, codegen_.builder_.CreateAnd(in, lt));
+      noWorse = lowering_.builder_.CreateAnd(
+          noWorse, lowering_.builder_.CreateOr(lowering_.builder_.CreateNot(in), ge));
+      anyBetter = lowering_.builder_.CreateOr(anyBetter, lowering_.builder_.CreateAnd(in, gt));
+      anyWorse = lowering_.builder_.CreateOr(anyWorse, lowering_.builder_.CreateAnd(in, lt));
     }
-    llvm::Value *plainer = codegen_.builder_.getInt1(!a.sym->hasRest && b.sym->hasRest);
+    llvm::Value *plainer = lowering_.builder_.getInt1(!a.sym->hasRest && b.sym->hasRest);
 
-    return codegen_.builder_.CreateAnd(
-        noWorse,
-        codegen_.builder_.CreateOr(anyBetter, codegen_.builder_.CreateAnd(codegen_.builder_.CreateNot(anyWorse), plainer)));
+    return lowering_.builder_.CreateAnd(
+        noWorse, lowering_.builder_.CreateOr(
+                     anyBetter, lowering_.builder_.CreateAnd(lowering_.builder_.CreateNot(anyWorse),
+                                                             plainer)));
   };
-  llvm::Value *anyOk = codegen_.builder_.getFalse();
+  llvm::Value *anyOk = lowering_.builder_.getFalse();
   for (const Variant &v : all) {
-    anyOk = codegen_.builder_.CreateOr(anyOk, v.ok);
+    anyOk = lowering_.builder_.CreateOr(anyOk, v.ok);
   }
-  llvm::Value *chosen = codegen_.builder_.CreateSelect(anyOk, codegen_.builder_.getInt32(uint32_t(-2)),
-                                              codegen_.builder_.getInt32(uint32_t(-1)));
+  llvm::Value *chosen = lowering_.builder_.CreateSelect(
+      anyOk, lowering_.builder_.getInt32(uint32_t(-2)), lowering_.builder_.getInt32(uint32_t(-1)));
   for (size_t a = all.size(); a-- > 0;) {
     llvm::Value *best = all[a].ok;
     for (size_t b = 0; b < all.size(); ++b) {
       if (b != a) {
-        best = codegen_.builder_.CreateAnd(
-            best, codegen_.builder_.CreateOr(codegen_.builder_.CreateNot(all[b].ok), better(all[a], all[b])));
+        best = lowering_.builder_.CreateAnd(
+            best, lowering_.builder_.CreateOr(lowering_.builder_.CreateNot(all[b].ok),
+                                              better(all[a], all[b])));
       }
     }
-    chosen = codegen_.builder_.CreateSelect(best, codegen_.builder_.getInt32(uint32_t(a)), chosen, "variant");
+    chosen = lowering_.builder_.CreateSelect(best, lowering_.builder_.getInt32(uint32_t(a)), chosen,
+                                             "variant");
   }
 
   return chosen;
 }
 
-void ReflectArgsLowerer::emitReflectMismatch(llvm::StringRef what, llvm::Value *index, const Type *expected,
-                                  llvm::Value *got) {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy(), *i32 = codegen_.builder_.getInt32Ty();
+void ReflectArgsLowerer::emitReflectMismatch(llvm::StringRef what, llvm::Value *index,
+                                             const Type *expected, llvm::Value *got) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::StringRef name = expected->name();
-  codegen_.builder_.CreateCall(
-      codegen_.unknownLowerer().unknownFunction("tz_reflect_mismatch", codegen_.builder_.getVoidTy(), {ptr, i32, i32, ptr, i32, ptr}),
-      {codegen_.stringLowerer().utf8Constant(what), codegen_.builder_.getInt32(uint32_t(what.size())), index, codegen_.stringLowerer().utf8Constant(name),
-       codegen_.builder_.getInt32(uint32_t(name.size())), got});
+  lowering_.builder_.CreateCall(
+      lowering_.unknownLowerer().unknownFunction(
+          "tz_reflect_mismatch", lowering_.builder_.getVoidTy(), {ptr, i32, i32, ptr, i32, ptr}),
+      {lowering_.stringLowerer().utf8Constant(what),
+       lowering_.builder_.getInt32(uint32_t(what.size())), index,
+       lowering_.stringLowerer().utf8Constant(name),
+       lowering_.builder_.getInt32(uint32_t(name.size())), got});
 }
 
 // The arguments `args[from..count)` as the parameters `params` take them,
@@ -210,79 +230,85 @@ void ReflectArgsLowerer::emitReflectArgs(
     llvm::Value *args, llvm::Value *count, size_t min, llvm::ArrayRef<const Type *> params,
     const Type *rest, std::vector<llvm::Value *> &values,
     llvm::function_ref<void(llvm::Value *, const Type *, llvm::Value *)> onFail) {
-  llvm::Type *ptr = codegen_.builder_.getPtrTy(), *i64 = codegen_.builder_.getInt64Ty();
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
   size_t before = values.size();
   auto releaseMade = [&](size_t upTo) {
     for (size_t k = before; k < upTo; ++k) {
-      codegen_.refCounts().releaseValue(values[k], params[k - before]);
+      lowering_.refCounts().releaseValue(values[k], params[k - before]);
     }
   };
   auto argAt = [&](llvm::Value *i) {
-    return codegen_.builder_.CreateLoad(ptr, codegen_.builder_.CreateInBoundsGEP(ptr, args, i), "arg");
+    return lowering_.builder_.CreateLoad(ptr, lowering_.builder_.CreateInBoundsGEP(ptr, args, i),
+                                         "arg");
   };
   for (size_t i = 0; i < params.size(); ++i) {
     llvm::Value *u;
     if (i < min) {
-      u = argAt(codegen_.builder_.getInt64(i));
+      u = argAt(lowering_.builder_.getInt64(i));
     } else {
       // Left out: undefined.
-      llvm::BasicBlock *entry = codegen_.builder_.GetInsertBlock();
-      llvm::BasicBlock *givenBlock = codegen_.functionFrame().newBlock("reflect.given");
-      llvm::BasicBlock *endBlock = codegen_.functionFrame().newBlock("reflect.arg");
-      codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpULT(codegen_.builder_.getInt32(uint32_t(i)), count),
-                            givenBlock, endBlock);
-      codegen_.functionFrame().switchTo(givenBlock);
-      llvm::Value *given = argAt(codegen_.builder_.getInt64(i));
-      llvm::BasicBlock *givenEnd = codegen_.builder_.GetInsertBlock();
-      codegen_.builder_.CreateBr(endBlock);
-      codegen_.functionFrame().switchTo(endBlock);
-      llvm::PHINode *phi = codegen_.builder_.CreatePHI(ptr, 2);
-      phi->addIncoming(llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()), entry);
+      llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
+      llvm::BasicBlock *givenBlock = lowering_.functionFrame().newBlock("reflect.given");
+      llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("reflect.arg");
+      lowering_.builder_.CreateCondBr(
+          lowering_.builder_.CreateICmpULT(lowering_.builder_.getInt32(uint32_t(i)), count),
+          givenBlock, endBlock);
+      lowering_.functionFrame().switchTo(givenBlock);
+      llvm::Value *given = argAt(lowering_.builder_.getInt64(i));
+      llvm::BasicBlock *givenEnd = lowering_.builder_.GetInsertBlock();
+      lowering_.builder_.CreateBr(endBlock);
+      lowering_.functionFrame().switchTo(endBlock);
+      llvm::PHINode *phi = lowering_.builder_.CreatePHI(ptr, 2);
+      phi->addIncoming(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), entry);
       phi->addIncoming(given, givenEnd);
       u = phi;
     }
-    llvm::BasicBlock *failBlock = codegen_.functionFrame().newBlock("reflect.mismatch");
-    values.push_back(codegen_.unknownCastLowerer().emitUnknownAs(u, params[i], failBlock));
-    llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
-    codegen_.functionFrame().switchTo(failBlock);
+    llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("reflect.mismatch");
+    values.push_back(lowering_.unknownCastLowerer().emitUnknownAs(u, params[i], failBlock));
+    llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+    lowering_.functionFrame().switchTo(failBlock);
     releaseMade(before + i);
-    onFail(codegen_.builder_.getInt32(uint32_t(i)), params[i], u);
-    codegen_.builder_.restoreIP(point);
+    onFail(lowering_.builder_.getInt32(uint32_t(i)), params[i], u);
+    lowering_.builder_.restoreIP(point);
   }
   if (!rest) {
     return;
   }
   // The rest, as an array of its elements.
   const Type *element = rest->inner();
-  llvm::Value *from = codegen_.builder_.getInt32(uint32_t(params.size()));
-  llvm::Value *more = codegen_.builder_.CreateSelect(codegen_.builder_.CreateICmpUGT(count, from),
-                                            codegen_.builder_.CreateSub(count, from), codegen_.builder_.getInt32(0));
-  llvm::Value *array = codegen_.builder_.CreateCall(
-      codegen_.rt_.arrNew, {codegen_.typeDescriptors().typeDescriptor(element), codegen_.builder_.getInt64(0), codegen_.builder_.CreateZExt(more, i64)},
+  llvm::Value *from = lowering_.builder_.getInt32(uint32_t(params.size()));
+  llvm::Value *more = lowering_.builder_.CreateSelect(lowering_.builder_.CreateICmpUGT(count, from),
+                                                      lowering_.builder_.CreateSub(count, from),
+                                                      lowering_.builder_.getInt32(0));
+  llvm::Value *array = lowering_.builder_.CreateCall(
+      lowering_.rt_.arrNew,
+      {lowering_.typeDescriptors().typeDescriptor(element), lowering_.builder_.getInt64(0),
+       lowering_.builder_.CreateZExt(more, i64)},
       "rest");
-  llvm::BasicBlock *entry = codegen_.builder_.GetInsertBlock();
-  llvm::BasicBlock *loopBlock = codegen_.functionFrame().newBlock("reflect.rest");
-  llvm::BasicBlock *bodyBlock = codegen_.functionFrame().newBlock("reflect.rest.body");
-  llvm::BasicBlock *doneBlock = codegen_.functionFrame().newBlock("reflect.rest.done");
-  codegen_.builder_.CreateBr(loopBlock);
-  codegen_.functionFrame().switchTo(loopBlock);
-  llvm::PHINode *i = codegen_.builder_.CreatePHI(codegen_.builder_.getInt32Ty(), 2, "i");
+  llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
+  llvm::BasicBlock *loopBlock = lowering_.functionFrame().newBlock("reflect.rest");
+  llvm::BasicBlock *bodyBlock = lowering_.functionFrame().newBlock("reflect.rest.body");
+  llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("reflect.rest.done");
+  lowering_.builder_.CreateBr(loopBlock);
+  lowering_.functionFrame().switchTo(loopBlock);
+  llvm::PHINode *i = lowering_.builder_.CreatePHI(lowering_.builder_.getInt32Ty(), 2, "i");
   i->addIncoming(from, entry);
-  codegen_.builder_.CreateCondBr(codegen_.builder_.CreateICmpULT(i, count), bodyBlock, doneBlock);
-  codegen_.functionFrame().switchTo(bodyBlock);
-  llvm::Value *u = argAt(codegen_.builder_.CreateZExt(i, i64));
-  llvm::BasicBlock *failBlock = codegen_.functionFrame().newBlock("reflect.mismatch");
-  llvm::Value *value = codegen_.unknownCastLowerer().emitUnknownAs(u, element, failBlock);
-  codegen_.arrayLowerer().emitPush(array, {value}, element);
-  i->addIncoming(codegen_.builder_.CreateAdd(i, codegen_.builder_.getInt32(1)), codegen_.builder_.GetInsertBlock());
-  codegen_.builder_.CreateBr(loopBlock);
-  llvm::IRBuilderBase::InsertPoint point = codegen_.builder_.saveIP();
-  codegen_.functionFrame().switchTo(failBlock);
-  codegen_.refCounts().releaseValue(array, rest);
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(i, count), bodyBlock, doneBlock);
+  lowering_.functionFrame().switchTo(bodyBlock);
+  llvm::Value *u = argAt(lowering_.builder_.CreateZExt(i, i64));
+  llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("reflect.mismatch");
+  llvm::Value *value = lowering_.unknownCastLowerer().emitUnknownAs(u, element, failBlock);
+  lowering_.arrayLowerer().emitPush(array, {value}, element);
+  i->addIncoming(lowering_.builder_.CreateAdd(i, lowering_.builder_.getInt32(1)),
+                 lowering_.builder_.GetInsertBlock());
+  lowering_.builder_.CreateBr(loopBlock);
+  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
+  lowering_.functionFrame().switchTo(failBlock);
+  lowering_.refCounts().releaseValue(array, rest);
   releaseMade(before + params.size());
   onFail(i, element, u);
-  codegen_.builder_.restoreIP(point);
-  codegen_.functionFrame().switchTo(doneBlock);
+  lowering_.builder_.restoreIP(point);
+  lowering_.functionFrame().switchTo(doneBlock);
   values.push_back(array);
 }
 

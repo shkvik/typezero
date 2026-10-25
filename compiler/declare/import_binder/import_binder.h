@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Imports to the exports they name.
 class ImportBinder {
 public:
-  explicit ImportBinder(Sema &sema);
+  explicit ImportBinder(Checker &checker);
 
   void resolveImports(Module *module);
   // Binds the imports of module_ whose declarations are there: types and
@@ -21,7 +21,7 @@ public:
   FunctionDecl *cycleCallee(FunctionDecl *fn, llvm::StringRef name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

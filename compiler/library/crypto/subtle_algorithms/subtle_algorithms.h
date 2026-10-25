@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -46,12 +46,12 @@ std::string verbOf(llvm::StringRef op);
 std::string exampleOf(llvm::StringRef member);
 
 inline const llvm::StringLiteral kUsages[] = {"encrypt",   "decrypt",    "sign",    "verify",
-                                       "deriveKey", "deriveBits", "wrapKey", "unwrapKey"};
+                                              "deriveKey", "deriveBits", "wrapKey", "unwrapKey"};
 
 // An algorithm written in the call: its canonical name, or "" when the call does not write one
 // (or after an error, `bad`). `op` is what node normalizes it for; `fallback` the operation
 // node tries after it (encrypt for wrapKey).
 std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRef op,
-                                    llvm::StringRef fallback, bool &bad);
+                             llvm::StringRef fallback, bool &bad);
 
 } // namespace tz

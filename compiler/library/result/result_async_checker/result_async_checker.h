@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // ResultAsync of neverthrow.
 class ResultAsyncChecker {
 public:
-  explicit ResultAsyncChecker(Sema &sema);
+  explicit ResultAsyncChecker(Checker &checker);
 
   // ResultAsync (sema_async.cpp): okAsync, errAsync, fromPromise,
   // fromSafePromise and fromAsyncThrowable, called by the name `which`
@@ -22,7 +22,7 @@ public:
   Expr *checkResultAsyncMethod(CallExpr *call, MemberExpr *member, llvm::StringRef name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

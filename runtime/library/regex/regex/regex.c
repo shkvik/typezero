@@ -11,6 +11,11 @@
 // the pattern.
 
 #include "runtime/library/regex/regex/regex.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 
@@ -743,7 +748,7 @@ static int32_t advance_units(const void *units, int32_t wide, int32_t length, in
   return index + 1;
 }
 
-// The interpreter as a matcher (TzReMatch in tzrt.h): the regexes of
+// The interpreter as a matcher (TzReMatch in regex.h): the regexes of
 // `new RegExp(s)`. Only they refer to it, so a program without them has
 // no interpreter in it.
 int32_t tz_re_interpret(const uint32_t *program, const void *units, int32_t wide, int32_t length,

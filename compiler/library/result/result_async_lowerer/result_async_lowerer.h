@@ -1,20 +1,20 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // ResultAsync of neverthrow.
 class ResultAsyncLowerer {
 public:
-  explicit ResultAsyncLowerer(CodeGen &codegen);
+  explicit ResultAsyncLowerer(Lowering &lowering);
 
   llvm::Value *emitResultAsync(CallExpr *call);
   llvm::Value *emitResultAsyncOf(CallExpr *call, llvm::ArrayRef<llvm::Value *> values);
   llvm::Value *emitResultAsyncThrowable(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

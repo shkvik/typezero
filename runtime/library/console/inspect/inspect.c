@@ -9,7 +9,23 @@
 // One difference is deliberate: an optional field that holds undefined is
 // not shown, since in tz a missing field and an undefined one are the same.
 
+#include "runtime/library/console/inspect/inspect.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/date/date/date.h"
+#include "runtime/library/json/json/json.h"
+#include "runtime/library/regex/regex/regex.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,14 +1,15 @@
 #include "compiler/overflow/slots/slots.h"
-#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/check/checker/checker.h"
+#include "compiler/check/facts/facts.h"
 #include "compiler/overflow/call_ranges/call_ranges.h"
+#include "compiler/overflow/evaluator/evaluator.h"
 #include "compiler/overflow/executor/executor.h"
 #include "compiler/overflow/loop_ranges/loop_ranges.h"
 #include "compiler/overflow/narrowing/narrowing.h"
-#include "compiler/overflow/evaluator/evaluator.h"
-#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
 #include "compiler/overflow/overflow_helpers/overflow_helpers.h"
-#include "compiler/check/facts/facts.h"
-#include "compiler/check/sema/sema.h"
+#include "compiler/overflow/overflow_warnings/overflow_warnings.h"
+#include "compiler/overflow/program_scan/program_scan.h"
+#include "compiler/overflow/value_range/value_range.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -27,7 +28,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "compiler/overflow/value_range/value_range.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -48,8 +48,8 @@ Slots::Slots(OverflowCheck &check) : check_(check) {}
 
 Val Slots::readVar(const VarSymbol *var, const State &st) {
   auto info = check_.vars_.find(var);
-  bool own = info != check_.vars_.end() && info->second.declared && info->second.owner == check_.owner_ &&
-             !info->second.writtenElsewhere;
+  bool own = info != check_.vars_.end() && info->second.declared &&
+             info->second.owner == check_.owner_ && !info->second.writtenElsewhere;
   Val v;
   bool found = false;
   if (own) {
@@ -61,7 +61,8 @@ Val Slots::readVar(const VarSymbol *var, const State &st) {
   }
   if (!found) {
     std::optional<Val> s = check_.summary(check_.cur_.vars, var);
-    v = s ? check_.overflowWarnings().fitVal(*s, var->type) : check_.overflowWarnings().trusted(var->type);
+    v = s ? check_.overflowWarnings().fitVal(*s, var->type)
+          : check_.overflowWarnings().trusted(var->type);
   }
 
   return v;
@@ -86,7 +87,8 @@ Val Slots::readField(const Type *objectType, llvm::StringRef field, const Type *
   if (!tracked(type)) {
     return Val();
   }
-  if (std::optional<Val> v = check_.summary(check_.cur_.fields, std::make_pair(objectType, field.str()))) {
+  if (std::optional<Val> v =
+          check_.summary(check_.cur_.fields, std::make_pair(objectType, field.str()))) {
     return check_.overflowWarnings().fitVal(*v, type);
   }
 
@@ -94,7 +96,7 @@ Val Slots::readField(const Type *objectType, llvm::StringRef field, const Type *
 }
 
 void Slots::storeField(const Type *objectType, llvm::StringRef field, const Type *type,
-                               const Val &v) {
+                       const Val &v) {
   if (check_.quiet_ || !objectType || !tracked(type)) {
     return;
   }
@@ -167,8 +169,7 @@ Val Slots::elementsOf(const Expr *arrayExpr, const Val &array, const Type *array
   return check_.overflowWarnings().fitVal(v, element);
 }
 
-void Slots::storeElements(const Expr *arrayExpr, const Type *arrayType, const Val &v,
-                                  State &st) {
+void Slots::storeElements(const Expr *arrayExpr, const Type *arrayType, const Val &v, State &st) {
   if (!arrayType || !arrayType->nonOptional()->isArray()) {
     return;
   }
@@ -204,7 +205,8 @@ const Reason *Slots::paramReason(const FunctionDecl *fn, size_t index) {
   return &r;
 }
 
-bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from, const Type *type, bool narrowing) {
+bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from, const Type *type,
+                      bool narrowing) {
   if (narrowing) {
     // What the settled summaries give again, within them.
     if (!from) {

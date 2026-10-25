@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The classes of class expressions, made once the function they are in is known.
 class LateClasses {
 public:
-  explicit LateClasses(Sema &sema);
+  explicit LateClasses(Checker &checker);
 
   // `class extends Base { ... }` as an expression: the class it makes.
   Expr *checkClassExpr(ClassExpr *expr, const Type *expected);
@@ -36,13 +36,13 @@ public:
   bool hasClassExpr(const FunctionDecl *fn);
   // Checks the body of a copy of a template right away, finding its return
   // type; an error is the copy's, reported where it is called.
-  void checkTemplateInstance(Sema::Instance *instance);
+  void checkTemplateInstance(Checker::Instance *instance);
   // A class decorator gave `replacement`, a class that extends `cls`, in
   // its place (docs/decorators.md, section 5).
   void replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   llvm::StringSet<> lateMethodNames_;
   llvm::DenseMap<const FunctionDecl *, bool> templates_;
 };

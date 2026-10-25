@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // A function: its declaration, attributes, parameters and body.
 class FunctionBuilder {
 public:
-  explicit FunctionBuilder(CodeGen &codegen);
+  explicit FunctionBuilder(Lowering &lowering);
 
   void declareFunction(FunctionDecl *fn);
   void emitFunction(FunctionDecl *fn);
@@ -22,7 +22,7 @@ public:
   void setFunctionAttributes(llvm::Function *fn);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

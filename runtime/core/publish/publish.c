@@ -1,5 +1,5 @@
 // Shared objects of the parallel runtime (docs/async.md, section 8;
-// TZ_RC_SHARED in tzrt.h).
+// TZ_RC_SHARED in group.h).
 //
 // Reference counts are plain, as fast as they can be, while one thread at a
 // time can reach an object: a piece of async code runs on one thread, and
@@ -20,10 +20,22 @@
 // in the link of each member then says, and what the members hold.
 //
 // The fields of an object are found by the function the compiler makes for
-// its descriptor (CodeGen::publishTable), which calls tz_publish_value for
+// its descriptor (Lowering::publishTable), which calls tz_publish_value for
 // each; the objects of the runtime by their kinds here.
 
+#include "runtime/core/publish/publish.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/async/async.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/map/map.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unknown/unknown.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/decimal/decimal/decimal.h"
+#include "runtime/library/json/json/json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

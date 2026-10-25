@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The descriptors of types the runtime reads: how to release and print a value.
 class TypeDescriptors {
 public:
-  explicit TypeDescriptors(CodeGen &codegen);
+  explicit TypeDescriptors(Lowering &lowering);
 
   // Arrays (codegen_array.cpp)
   llvm::Constant *typeDescriptor(const Type *type);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

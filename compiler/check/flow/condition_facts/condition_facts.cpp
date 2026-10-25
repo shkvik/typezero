@@ -1,9 +1,9 @@
 #include "compiler/check/flow/condition_facts/condition_facts.h"
-#include "compiler/check/flow/index_proofs/index_proofs.h"
-#include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/predicate_checker/predicate_checker.h"
 #include "compiler/check/flow/union_narrowing/union_narrowing.h"
+#include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
@@ -12,14 +12,14 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
 namespace {
 
-// The variable `expr` reads, looking through the conversion Sema inserts for
+// The variable `expr` reads, looking through the conversion Checker inserts for
 // a narrowed `T | undefined` variable.
 const VarSymbol *variableOf(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr);
@@ -48,16 +48,17 @@ void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
 
 } // namespace
 
-ConditionFacts::ConditionFacts(Sema &sema) : sema_(sema) {}
+ConditionFacts::ConditionFacts(Checker &checker) : checker_(checker) {}
 
-void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
-  sema_.resultChecker().addResultFacts(cond, whenTrue, whenFalse);
-  sema_.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
-  sema_.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
-  sema_.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
+void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue,
+                                       Checker::Flow &whenFalse) const {
+  checker_.resultChecker().addResultFacts(cond, whenTrue, whenFalse);
+  checker_.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
+  checker_.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
+  checker_.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
   // `if (isCircle(s))`: what the function's body shows (sema_predicate.cpp).
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::None) {
-    sema_.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
+    checker_.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
     return;
   }
   // `if (x)`: a `T | undefined` that is truthy holds a value.
@@ -66,14 +67,14 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
     return;
   }
   // The same for a field, `if (q.limit)`.
-  auto optionalField = [&](const Expr *expr) -> std::optional<Sema::FieldPath> {
+  auto optionalField = [&](const Expr *expr) -> std::optional<Checker::FieldPath> {
     if (!expr->type || !expr->type->isOptional()) {
       return std::nullopt;
     }
 
-    return sema_.fieldFacts().fieldPath(expr);
+    return checker_.fieldFacts().fieldPath(expr);
   };
-  if (std::optional<Sema::FieldPath> path = optionalField(cond)) {
+  if (std::optional<Checker::FieldPath> path = optionalField(cond)) {
     FieldFacts::defineField(whenTrue, *path);
     return;
   }
@@ -87,7 +88,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
   if (op == BinaryOp::InstanceOf) {
     if (const NameExpr *name = optionalVariable(bin->lhs)) {
       whenTrue.defined.insert(name->var);
-    } else if (std::optional<Sema::FieldPath> path = optionalField(bin->lhs)) {
+    } else if (std::optional<Checker::FieldPath> path = optionalField(bin->lhs)) {
       FieldFacts::defineField(whenTrue, *path);
     }
     const Type *cls = bin->rhs->type;
@@ -114,7 +115,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
       if (const NameExpr *name = optionalVariable(side)) {
         (op == BinaryOp::Ne ? whenTrue : whenFalse).defined.insert(name->var);
-      } else if (std::optional<Sema::FieldPath> path = optionalField(side)) {
+      } else if (std::optional<Checker::FieldPath> path = optionalField(side)) {
         FieldFacts::defineField(op == BinaryOp::Ne ? whenTrue : whenFalse, *path);
       }
       return;
@@ -155,9 +156,9 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
           narrowed = Type::boolTy();
         } else if (text->value == u"number" && !param->constraint() &&
                    admits([](const Type *t) { return t->isNumeric(); })) {
-          narrowed = sema_.genericChecker().numberParam(param);
+          narrowed = checker_.genericChecker().numberParam(param);
         }
-        Sema::Flow &holds = op == BinaryOp::Eq ? whenTrue : whenFalse;
+        Checker::Flow &holds = op == BinaryOp::Eq ? whenTrue : whenFalse;
         if (narrowed) {
           holds.narrowed.push_back({var, narrowed});
           if (var->type->isOptional()) {
@@ -178,7 +179,7 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
           const Type *rest = !same               ? nullptr
                              : kind == "string"  ? Type::string()
                              : kind == "boolean" ? Type::boolTy()
-                             : kind == "number"  ? sema_.genericChecker().numberParam(param)
+                             : kind == "number"  ? checker_.genericChecker().numberParam(param)
                                                  : nullptr;
           if (rest) {
             (op == BinaryOp::Eq ? whenFalse : whenTrue).narrowed.push_back({var, rest});
@@ -210,7 +211,8 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
   default:
     return;
   }
-  std::optional<Linear> l = sema_.indexProofs().linear(bin->lhs), r = sema_.indexProofs().linear(bin->rhs);
+  std::optional<Linear> l = checker_.indexProofs().linear(bin->lhs),
+                        r = checker_.indexProofs().linear(bin->rhs);
   if (!l || !r) {
     return;
   }
@@ -221,9 +223,9 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Sema::Flow &whenTrue, S
   if ((op == BinaryOp::Ne || op == BinaryOp::Eq) && (l->term.isZero() || r->term.isZero())) {
     const Linear &x = l->term.isZero() ? *r : *l, &c = l->term.isZero() ? *l : *r;
     Facts &differ = op == BinaryOp::Ne ? t : f;
-    if (sema_.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) { // c <= x
+    if (checker_.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) { // c <= x
       addLess(differ, c, x, false);
-    } else if (sema_.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) { // x <= c
+    } else if (checker_.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) { // x <= c
       addLess(differ, x, c, false);
     }
   }

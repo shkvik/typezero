@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Intl beyond dates (docs/intl.md): types and new.
 class IntlChecker {
 public:
-  explicit IntlChecker(Sema &sema);
+  explicit IntlChecker(Checker &checker);
 
   // The rest of Intl (sema_intl.cpp, docs/intl.md): Intl.NumberFormat,
   // Collator, PluralRules, RelativeTimeFormat, ListFormat, DisplayNames and
@@ -34,7 +34,7 @@ public:
   static const Type *intlTypeNamed(llvm::StringRef name);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

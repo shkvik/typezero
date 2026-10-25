@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
@@ -8,7 +8,7 @@ namespace tz {
 // any function, and the functions that wrap others.
 class ArgListChecker {
 public:
-  explicit ArgListChecker(Sema &sema);
+  explicit ArgListChecker(Checker &checker);
 
   // Argument lists (sema_generic.cpp, docs/generics.md section 9). A rest
   // parameter whose type is an argument list (`...args: [int, string]`, what
@@ -38,7 +38,7 @@ public:
   const Type *memberType(const Type *object, const Type *key);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The parameters each list variable stands for (see expandArgumentList).
   llvm::DenseMap<const VarSymbol *, std::vector<llvm::StringRef>> argumentLists_;
 };

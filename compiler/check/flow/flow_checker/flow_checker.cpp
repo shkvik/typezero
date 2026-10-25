@@ -1,15 +1,15 @@
 #include "compiler/check/flow/flow_checker/flow_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/flow/union_narrowing/union_narrowing.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -28,7 +28,7 @@ bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional(
 
 } // namespace
 
-FlowChecker::FlowChecker(Sema &sema) : sema_(sema) {}
+FlowChecker::FlowChecker(Checker &checker) : checker_(checker) {}
 
 // Whether a call to a user function may change the value of `var`: a global
 // some function uses, a variable a closure uses (the closures checked so far
@@ -45,26 +45,26 @@ bool FlowChecker::changedByCalls(const VarSymbol *var) const {
     return true;
   }
 
-  return llvm::any_of(sema_.groups_, [&](const NestedGroup *g) {
+  return llvm::any_of(checker_.groups_, [&](const NestedGroup *g) {
     return llvm::is_contained(g->assignedNames, var->name);
   });
 }
 
-Sema::Flow FlowChecker::join(const Sema::Flow &a, const Sema::Flow &b) {
+Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) {
   if (a.unreachable) {
     return b;
   }
   if (b.unreachable) {
     return a;
   }
-  Sema::Flow result;
+  Checker::Flow result;
   result.facts = Facts::meet(a.facts, b.facts);
   for (const VarSymbol *var : a.defined) {
     if (b.defined.contains(var)) {
       result.defined.insert(var);
     }
   }
-  for (const Sema::FieldPath &path : a.definedFields) {
+  for (const Checker::FieldPath &path : a.definedFields) {
     if (llvm::is_contained(b.definedFields, path)) {
       result.definedFields.push_back(path);
     }
@@ -118,9 +118,9 @@ Sema::Flow FlowChecker::join(const Sema::Flow &a, const Sema::Flow &b) {
 
 void FlowChecker::setDefined(const VarSymbol *var, bool defined) {
   if (defined) {
-    sema_.flow_.defined.insert(var);
+    checker_.flow_.defined.insert(var);
   } else {
-    sema_.flow_.defined.erase(var);
+    checker_.flow_.defined.erase(var);
   }
 }
 
@@ -129,13 +129,14 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isError()) {
     return;
   }
-  FieldFacts::forgetFieldsOf(sema_.flow_, var); // it holds another object now
-  llvm::erase_if(sema_.flow_.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
+  FieldFacts::forgetFieldsOf(checker_.flow_, var); // it holds another object now
+  llvm::erase_if(checker_.flow_.narrowed,
+                 [&](const auto &narrowed) { return narrowed.first == var; });
   // A union holds the member assigned: after `s = circle`, s is a Circle.
-  if (const Type *base = type->nonOptional(); base->isUnion() && value->type &&
-                                              !value->type->isError() && value->type != type &&
-                                              TypeRelations::isImplicitlyConvertible(value->type, base)) {
-    UnionNarrowing::narrowVariable(sema_.flow_, var, value->type);
+  if (const Type *base = type->nonOptional();
+      base->isUnion() && value->type && !value->type->isError() && value->type != type &&
+      TypeRelations::isImplicitlyConvertible(value->type, base)) {
+    UnionNarrowing::narrowVariable(checker_.flow_, var, value->type);
   }
   if (type->isOptional()) {
     setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
@@ -143,25 +144,25 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isResult()) {
     // `r = ok(1)` holds an Ok, as its type says.
     const Type *given = value->type;
-    sema_.flow_.okResults.erase(var);
-    sema_.flow_.errResults.erase(var);
+    checker_.flow_.okResults.erase(var);
+    checker_.flow_.errResults.erase(var);
     if (given->isResult() && given->errType()->isNever()) {
-      sema_.flow_.okResults.insert(var);
+      checker_.flow_.okResults.insert(var);
     } else if (given->isResult() && given->okType()->isNever()) {
-      sema_.flow_.errResults.insert(var);
+      checker_.flow_.errResults.insert(var);
     }
     return;
   }
 
   if (type->isInt()) {
-    std::optional<Linear> v = sema_.indexProofs().linear(value);
+    std::optional<Linear> v = checker_.indexProofs().linear(value);
     if (v && v->term == Term::of(var)) { // `i = i + k`
       incremented(var, v->offset);
       return;
     }
-    sema_.flow_.facts.forget(var);
+    checker_.flow_.facts.forget(var);
     if (v) {
-      sema_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
+      checker_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
     }
     // `n = Math.min(a.length, b.length)` is at most each, and Math.max at
     // least each: `for (let i = 0; i < n; i++) a[i] = b[i]`.
@@ -169,11 +170,11 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
         call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
         !call->hasSpread()) {
       for (const Expr *arg : call->args) {
-        if (std::optional<Linear> bound = sema_.indexProofs().linear(arg)) {
+        if (std::optional<Linear> bound = checker_.indexProofs().linear(arg)) {
           if (call->builtin == Builtin::MathMin) {
-            addLess(sema_.flow_.facts, Linear{Term::of(var), 0}, *bound, /*orEqual=*/true);
+            addLess(checker_.flow_.facts, Linear{Term::of(var), 0}, *bound, /*orEqual=*/true);
           } else {
-            addLess(sema_.flow_.facts, *bound, Linear{Term::of(var), 0}, /*orEqual=*/true);
+            addLess(checker_.flow_.facts, *bound, Linear{Term::of(var), 0}, /*orEqual=*/true);
           }
         }
       }
@@ -181,7 +182,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     return;
   }
 
-  sema_.flow_.facts.forget(var); // its length
+  checker_.flow_.facts.forget(var); // its length
   const Type *base = type->nonOptional();
   if (!base->isString() && !base->isArray() && !base->isByteView() &&
       base->bytes() != Type::Bytes::ArrayBuffer) {
@@ -190,9 +191,9 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (value->type->isOptional() || value->type->isUndefined()) {
     return;
   }
-  if (std::optional<Linear> length = sema_.indexProofs().knownLength(value)) {
+  if (std::optional<Linear> length = checker_.indexProofs().knownLength(value)) {
     if (length->term != Term::lengthOf(var)) {
-      sema_.flow_.facts.addEqual(Term::lengthOf(var), length->term, length->offset);
+      checker_.flow_.facts.addEqual(Term::lengthOf(var), length->term, length->offset);
     }
   }
 }
@@ -203,16 +204,16 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
   }
   Term t = Term::of(var);
   // Wrapping around would break every fact, so shift them only if it cannot.
-  bool safe = delta >= 0 ? sema_.flow_.facts.proves(t, Term::zero(), kIntMax - delta + 1)
-                         : sema_.flow_.facts.proves(Term::zero(), t, delta - kIntMin + 1);
+  bool safe = delta >= 0 ? checker_.flow_.facts.proves(t, Term::zero(), kIntMax - delta + 1)
+                         : checker_.flow_.facts.proves(Term::zero(), t, delta - kIntMin + 1);
   if (safe) {
-    sema_.flow_.facts.shift(t, delta);
+    checker_.flow_.facts.shift(t, delta);
   } else {
-    sema_.flow_.facts.forget(var);
+    checker_.flow_.facts.forget(var);
   }
 }
 
-void FlowChecker::forgetCallEffects(Sema::Flow &flow) const {
+void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
   // The length of any array may change too: arrays are shared by reference.
   auto changed = [&](const Term &t) {
     return t.var && (isArrayLength(t) || changedByCalls(t.var));
@@ -234,16 +235,16 @@ void FlowChecker::forgetCallEffects(Sema::Flow &flow) const {
   }
   // A field of any object, since objects are shared by reference, that some
   // code assigns to; or one reached from a variable a call may change.
-  auto fieldChanged = [&](const Sema::FieldPath &path) {
+  auto fieldChanged = [&](const Checker::FieldPath &path) {
     return changedByCalls(path.var) || llvm::any_of(path.names, [&](llvm::StringRef field) {
-             return sema_.assignedFields_.contains(field);
+             return checker_.assignedFields_.contains(field);
            });
   };
   llvm::erase_if(flow.definedFields, fieldChanged);
   llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return fieldChanged(entry.first); });
 }
 
-void FlowChecker::calledFunction() { forgetCallEffects(sema_.flow_); }
+void FlowChecker::calledFunction() { forgetCallEffects(checker_.flow_); }
 
 void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except) {
   type = type->nonOptional();
@@ -251,7 +252,7 @@ void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const V
   auto affected = [&](const Term &t) {
     return t.length && t.var != except && t.var->type->nonOptional() == type;
   };
-  sema_.flow_.facts.forgetIf([&](const Facts::Fact &f) {
+  checker_.flow_.facts.forgetIf([&](const Facts::Fact &f) {
     return (grew && affected(f.lhs)) || (shrank && affected(f.rhs));
   });
 }

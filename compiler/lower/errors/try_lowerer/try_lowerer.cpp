@@ -1,14 +1,14 @@
 #include "compiler/lower/errors/try_lowerer/try_lowerer.h"
-#include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
-#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
-#include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
+#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -18,10 +18,10 @@
 #include <map>
 #include <optional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -40,14 +40,14 @@ static const Type *returnedType(const FunctionDecl *fn, const Type *returnType) 
   return returnType;
 }
 
-TryLowerer::TryLowerer(CodeGen &codegen) : codegen_(codegen) {}
+TryLowerer::TryLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-CodeGen::TryContext *TryLowerer::finallyBetween(size_t target) {
-  for (CodeGen::TryContext &t : llvm::reverse(codegen_.tries_)) {
+Lowering::TryContext *TryLowerer::finallyBetween(size_t target) {
+  for (Lowering::TryContext &t : llvm::reverse(lowering_.tries_)) {
     if (target != ~size_t(0) && t.targetsDepth <= target) {
       return nullptr; // the target is inside this `try`, and so inside the rest
     }
-    if (t.finally && t.phase != CodeGen::TryContext::Phase::Finally) {
+    if (t.finally && t.phase != Lowering::TryContext::Phase::Finally) {
       return &t;
     }
   }
@@ -56,7 +56,7 @@ CodeGen::TryContext *TryLowerer::finallyBetween(size_t target) {
 }
 
 void TryLowerer::emitJumpTo(size_t target, bool isBreak) {
-  if (CodeGen::TryContext *t = finallyBetween(target)) {
+  if (Lowering::TryContext *t = finallyBetween(target)) {
     size_t k = 0;
     while (k < t->exits.size() &&
            (t->exits[k].target != target || t->exits[k].isBreak != isBreak)) {
@@ -65,57 +65,59 @@ void TryLowerer::emitJumpTo(size_t target, bool isBreak) {
     if (k == t->exits.size()) {
       t->exits.push_back({target, isBreak});
     }
-    codegen_.builder_.CreateStore(codegen_.builder_.getInt32(uint32_t(3 + k)), t->completion);
-    codegen_.functionFrame().emitCleanups(t->scopeDepth);
-    codegen_.builder_.CreateBr(t->finally);
-    codegen_.functionFrame().startDeadBlock();
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(uint32_t(3 + k)), t->completion);
+    lowering_.functionFrame().emitCleanups(t->scopeDepth);
+    lowering_.builder_.CreateBr(t->finally);
+    lowering_.functionFrame().startDeadBlock();
     return;
   }
-  const CodeGen::JumpTarget &jt = codegen_.targets_[target];
+  const Lowering::JumpTarget &jt = lowering_.targets_[target];
   bool inGenerator = !isBreak && jt.continueDepth != ~size_t(0);
-  codegen_.functionFrame().emitCleanups(inGenerator ? jt.continueDepth : jt.scopeDepth);
-  codegen_.builder_.CreateBr(isBreak ? jt.breakTarget : jt.continueTarget);
-  codegen_.functionFrame().startDeadBlock();
+  lowering_.functionFrame().emitCleanups(inGenerator ? jt.continueDepth : jt.scopeDepth);
+  lowering_.builder_.CreateBr(isBreak ? jt.breakTarget : jt.continueTarget);
+  lowering_.functionFrame().startDeadBlock();
 }
 
 void TryLowerer::emitReturnOf(llvm::Value *value) {
-  const Type *type = returnedType(codegen_.currentFn_, codegen_.returnType_);
-  if (CodeGen::TryContext *t = finallyBetween(~size_t(0))) {
+  const Type *type = returnedType(lowering_.currentFn_, lowering_.returnType_);
+  if (Lowering::TryContext *t = finallyBetween(~size_t(0))) {
     if (value) {
       if (!t->pendingValue) {
         // Empty until a `return` fills it (see emitTry).
-        llvm::Type *lowered = codegen_.moduleBuilder().lower(type);
-        llvm::AllocaInst *slot = codegen_.functionFrame().createStackSlot(lowered, "pending.value");
+        llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
+        llvm::AllocaInst *slot =
+            lowering_.functionFrame().createStackSlot(lowered, "pending.value");
         llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
         init.CreateStore(llvm::Constant::getNullValue(lowered), slot);
         t->pendingValue = slot;
       }
-      codegen_.builder_.CreateStore(value, t->pendingValue);
+      lowering_.builder_.CreateStore(value, t->pendingValue);
     }
     t->returns = true;
-    codegen_.builder_.CreateStore(codegen_.builder_.getInt32(2), t->completion);
-    codegen_.functionFrame().emitCleanups(t->scopeDepth);
-    codegen_.builder_.CreateBr(t->finally);
-    codegen_.functionFrame().startDeadBlock();
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(2), t->completion);
+    lowering_.functionFrame().emitCleanups(t->scopeDepth);
+    lowering_.builder_.CreateBr(t->finally);
+    lowering_.functionFrame().startDeadBlock();
     return;
   }
-  if (codegen_.coro_ && codegen_.currentFn_ && codegen_.currentFn_->isGenerator) {
-    codegen_.coroutineLowerer().emitCoroutineReturn(value, value ? type : nullptr);
+  if (lowering_.coro_ && lowering_.currentFn_ && lowering_.currentFn_->isGenerator) {
+    lowering_.coroutineLowerer().emitCoroutineReturn(value, value ? type : nullptr);
     return;
   }
-  if (codegen_.async_) {
-    codegen_.asyncLowerer().emitAsyncReturn(value);
+  if (lowering_.async_) {
+    lowering_.asyncLowerer().emitAsyncReturn(value);
     return;
   }
-  codegen_.functionFrame().emitCleanups(0);
+  lowering_.functionFrame().emitCleanups(0);
   if (value) {
-    codegen_.builder_.CreateRet(value);
-  } else if (codegen_.returnType_ && codegen_.returnType_->isOptional()) {
-    codegen_.builder_.CreateRet(codegen_.optionalLowerer().undefinedValue(codegen_.returnType_)); // `return;`
+    lowering_.builder_.CreateRet(value);
+  } else if (lowering_.returnType_ && lowering_.returnType_->isOptional()) {
+    lowering_.builder_.CreateRet(
+        lowering_.optionalLowerer().undefinedValue(lowering_.returnType_)); // `return;`
   } else {
-    codegen_.builder_.CreateRetVoid();
+    lowering_.builder_.CreateRetVoid();
   }
-  codegen_.functionFrame().startDeadBlock();
+  lowering_.functionFrame().startDeadBlock();
 }
 
 // The block runs; an error from it goes to the `catch`, which takes it from
@@ -125,131 +127,141 @@ void TryLowerer::emitReturnOf(llvm::Value *value) {
 // return) waits in slots of its scope, which a way out of the `finally` of
 // its own (a return, a jump, an error) releases.
 void TryLowerer::emitTry(TryStmt *stmt) {
-  size_t depth = codegen_.scopes_.size();
+  size_t depth = lowering_.scopes_.size();
   {
-    CodeGen::TryContext t;
+    Lowering::TryContext t;
     t.stmt = stmt;
     t.scopeDepth = depth;
-    t.targetsDepth = codegen_.targets_.size();
+    t.targetsDepth = lowering_.targets_.size();
     if (stmt->handler) {
-      t.handler = codegen_.functionFrame().newBlock("catch");
+      t.handler = lowering_.functionFrame().newBlock("catch");
     }
     if (stmt->finalizer) {
-      t.finally = codegen_.functionFrame().newBlock("finally");
-      t.throwEntry = codegen_.functionFrame().newBlock("finally.throw");
-      t.completion = codegen_.functionFrame().createStackSlot(codegen_.builder_.getInt32Ty(), "completion");
-      llvm::AllocaInst *slot = codegen_.functionFrame().createStackSlot(codegen_.builder_.getPtrTy(), "pending.error");
+      t.finally = lowering_.functionFrame().newBlock("finally");
+      t.throwEntry = lowering_.functionFrame().newBlock("finally.throw");
+      t.completion =
+          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "completion");
+      llvm::AllocaInst *slot =
+          lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(), "pending.error");
       llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
-      init.CreateStore(llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()), slot);
+      init.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), slot);
       t.pendingError = slot;
     }
-    codegen_.tries_.push_back(std::move(t));
+    lowering_.tries_.push_back(std::move(t));
   }
-  size_t index = codegen_.tries_.size() - 1;
-  llvm::BasicBlock *endBlock = codegen_.functionFrame().newBlock("try.end");
+  size_t index = lowering_.tries_.size() - 1;
+  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("try.end");
   // The block or the `catch` ended normally.
   auto leave = [&] {
-    if (!codegen_.functionFrame().blockIsOpen()) {
+    if (!lowering_.functionFrame().blockIsOpen()) {
       return;
     }
     if (stmt->finalizer) {
-      codegen_.builder_.CreateStore(codegen_.builder_.getInt32(0), codegen_.tries_[index].completion);
-      codegen_.builder_.CreateBr(codegen_.tries_[index].finally);
+      lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0),
+                                     lowering_.tries_[index].completion);
+      lowering_.builder_.CreateBr(lowering_.tries_[index].finally);
     } else {
-      codegen_.builder_.CreateBr(endBlock);
+      lowering_.builder_.CreateBr(endBlock);
     }
   };
   // Takes the error in flight.
   auto takeError = [&] {
-    llvm::Value *error = codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), codegen_.throwLowerer().thrownSlot(), "error");
-    codegen_.builder_.CreateStore(llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()), codegen_.throwLowerer().thrownSlot());
+    llvm::Value *error = lowering_.builder_.CreateLoad(
+        lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "error");
+    lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+                                   lowering_.throwLowerer().thrownSlot());
 
     return error;
   };
 
-  codegen_.stmtLowerer().emitStmt(stmt->block);
+  lowering_.stmtLowerer().emitStmt(stmt->block);
   leave();
 
   if (stmt->handler) {
-    codegen_.tries_[index].phase = CodeGen::TryContext::Phase::Handler;
-    codegen_.functionFrame().switchTo(codegen_.tries_[index].handler);
+    lowering_.tries_[index].phase = Lowering::TryContext::Phase::Handler;
+    lowering_.functionFrame().switchTo(lowering_.tries_[index].handler);
     llvm::Value *error = takeError();
-    codegen_.functionFrame().pushScope();
+    lowering_.functionFrame().pushScope();
     if (const VarSymbol *var = stmt->param.sym) {
-      codegen_.storeLowerer().storeVar(var, codegen_.functionFrame().createLocal(var, stmt->param.name), error, /*replacing=*/false);
+      lowering_.storeLowerer().storeVar(
+          var, lowering_.functionFrame().createLocal(var, stmt->param.name), error,
+          /*replacing=*/false);
     } else {
-      codegen_.refCounts().releaseValue(error, codegen_.errorClass_->type);
+      lowering_.refCounts().releaseValue(error, lowering_.errorClass_->type);
     }
-    codegen_.stmtLowerer().emitStmt(stmt->handler);
-    codegen_.functionFrame().popScope();
+    lowering_.stmtLowerer().emitStmt(stmt->handler);
+    lowering_.functionFrame().popScope();
     leave();
   }
 
   if (stmt->finalizer) {
-    CodeGen::TryContext *t = &codegen_.tries_[index];
-    t->phase = CodeGen::TryContext::Phase::Finally;
-    codegen_.functionFrame().switchTo(t->throwEntry);
-    codegen_.builder_.CreateStore(takeError(), t->pendingError);
-    codegen_.builder_.CreateStore(codegen_.builder_.getInt32(1), t->completion);
-    codegen_.builder_.CreateBr(t->finally);
+    Lowering::TryContext *t = &lowering_.tries_[index];
+    t->phase = Lowering::TryContext::Phase::Finally;
+    lowering_.functionFrame().switchTo(t->throwEntry);
+    lowering_.builder_.CreateStore(takeError(), t->pendingError);
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(1), t->completion);
+    lowering_.builder_.CreateBr(t->finally);
 
-    codegen_.functionFrame().switchTo(t->finally);
-    codegen_.functionFrame().pushScope();
-    const Type *valueType = returnedType(codegen_.currentFn_, codegen_.returnType_);
-    codegen_.scopes_.back().slots.push_back({t->pendingError, codegen_.errorClass_->type});
+    lowering_.functionFrame().switchTo(t->finally);
+    lowering_.functionFrame().pushScope();
+    const Type *valueType = returnedType(lowering_.currentFn_, lowering_.returnType_);
+    lowering_.scopes_.back().slots.push_back({t->pendingError, lowering_.errorClass_->type});
     if (t->pendingValue && valueType->isManaged()) {
-      codegen_.scopes_.back().slots.push_back({t->pendingValue, valueType});
+      lowering_.scopes_.back().slots.push_back({t->pendingValue, valueType});
     }
-    codegen_.stmtLowerer().emitStmt(stmt->finalizer);
-    t = &codegen_.tries_[index];
-    if (!codegen_.functionFrame().blockIsOpen()) {
-      codegen_.functionFrame().popScope();
+    lowering_.stmtLowerer().emitStmt(stmt->finalizer);
+    t = &lowering_.tries_[index];
+    if (!lowering_.functionFrame().blockIsOpen()) {
+      lowering_.functionFrame().popScope();
     } else {
       // Ended normally: go on as the block or the `catch` did.
-      llvm::Value *completion =
-          codegen_.builder_.CreateLoad(codegen_.builder_.getInt32Ty(), t->completion, "completion");
-      llvm::Value *error = codegen_.builder_.CreateLoad(codegen_.builder_.getPtrTy(), t->pendingError);
-      codegen_.builder_.CreateStore(llvm::ConstantPointerNull::get(codegen_.builder_.getPtrTy()), t->pendingError);
+      llvm::Value *completion = lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(),
+                                                              t->completion, "completion");
+      llvm::Value *error =
+          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), t->pendingError);
+      lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+                                     t->pendingError);
       llvm::Value *value = nullptr;
       if (t->pendingValue) {
-        llvm::Type *lowered = codegen_.moduleBuilder().lower(valueType);
-        value = codegen_.builder_.CreateLoad(lowered, t->pendingValue);
-        codegen_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), t->pendingValue);
+        llvm::Type *lowered = lowering_.moduleBuilder().lower(valueType);
+        value = lowering_.builder_.CreateLoad(lowered, t->pendingValue);
+        lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), t->pendingValue);
       }
-      codegen_.functionFrame().popScope();
-      std::vector<CodeGen::TryContext::Exit> exits = codegen_.tries_[index].exits;
-      bool returns = codegen_.tries_[index].returns;
-      llvm::BasicBlock *rethrowBlock = codegen_.functionFrame().newBlock("finally.rethrow");
-      llvm::BasicBlock *returnBlock = returns ? codegen_.functionFrame().newBlock("finally.return") : nullptr;
+      lowering_.functionFrame().popScope();
+      std::vector<Lowering::TryContext::Exit> exits = lowering_.tries_[index].exits;
+      bool returns = lowering_.tries_[index].returns;
+      llvm::BasicBlock *rethrowBlock = lowering_.functionFrame().newBlock("finally.rethrow");
+      llvm::BasicBlock *returnBlock =
+          returns ? lowering_.functionFrame().newBlock("finally.return") : nullptr;
       llvm::SwitchInst *dispatch =
-          codegen_.builder_.CreateSwitch(completion, endBlock, unsigned(exits.size() + 2));
-      dispatch->addCase(codegen_.builder_.getInt32(1), rethrowBlock);
+          lowering_.builder_.CreateSwitch(completion, endBlock, unsigned(exits.size() + 2));
+      dispatch->addCase(lowering_.builder_.getInt32(1), rethrowBlock);
       if (returns) {
-        dispatch->addCase(codegen_.builder_.getInt32(2), returnBlock);
+        dispatch->addCase(lowering_.builder_.getInt32(2), returnBlock);
       }
       std::vector<llvm::BasicBlock *> exitBlocks;
       for (size_t k = 0; k < exits.size(); ++k) {
-        exitBlocks.push_back(codegen_.functionFrame().newBlock("finally.exit"));
-        dispatch->addCase(codegen_.builder_.getInt32(uint32_t(3 + k)), exitBlocks.back());
+        exitBlocks.push_back(lowering_.functionFrame().newBlock("finally.exit"));
+        dispatch->addCase(lowering_.builder_.getInt32(uint32_t(3 + k)), exitBlocks.back());
       }
       // The error goes on up, its places kept.
-      codegen_.functionFrame().switchTo(rethrowBlock);
-      codegen_.builder_.CreateStore(error, codegen_.throwLowerer().thrownSlot());
-      codegen_.builder_.CreateBr(codegen_.unwindLowerer().unwindTarget());
+      lowering_.functionFrame().switchTo(rethrowBlock);
+      lowering_.builder_.CreateStore(error, lowering_.throwLowerer().thrownSlot());
+      lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
       if (returns) {
-        codegen_.functionFrame().switchTo(returnBlock);
+        lowering_.functionFrame().switchTo(returnBlock);
         emitReturnOf(value);
-        codegen_.builder_.CreateUnreachable(); // ends the dead block after it
+        lowering_.builder_.CreateUnreachable(); // ends the dead block after it
       }
       for (size_t k = 0; k < exits.size(); ++k) {
-        codegen_.functionFrame().switchTo(exitBlocks[k]);
+        lowering_.functionFrame().switchTo(exitBlocks[k]);
         emitJumpTo(exits[k].target, exits[k].isBreak);
-        codegen_.builder_.CreateUnreachable();
+        lowering_.builder_.CreateUnreachable();
       }
     }
   }
-  codegen_.tries_.pop_back();
-  codegen_.functionFrame().switchTo(endBlock);
+  lowering_.tries_.pop_back();
+  lowering_.functionFrame().switchTo(endBlock);
 }
 
 } // namespace tz

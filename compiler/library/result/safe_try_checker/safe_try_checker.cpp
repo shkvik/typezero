@@ -1,15 +1,15 @@
 #include "compiler/library/result/safe_try_checker/safe_try_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
+#include "compiler/check/functions/closure_checker/closure_checker.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -18,7 +18,7 @@ namespace {
 // What a function given to a method gets for a half: `ok()` holds undefined.
 const Type *halfParam(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
 
-// The value of an expression strips the conversion Sema adds to a narrowed
+// The value of an expression strips the conversion Checker adds to a narrowed
 // variable or to a value given where another type is expected.
 const Expr *unconverted(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
@@ -44,49 +44,51 @@ static std::string noUnion(const Type *a, const Type *b) {
   return problem.empty() ? "" : ": " + problem;
 }
 
-SafeTryChecker::SafeTryChecker(Sema &sema) : sema_(sema) {}
+SafeTryChecker::SafeTryChecker(Checker &checker) : checker_(checker) {}
 
 Expr *SafeTryChecker::checkSafeTry(CallExpr *call, const Type *expected) {
   auto *fe = call->args.size() == 1 && !call->hasSpread() ? dyn_cast<FunctionExpr>(call->args[0])
                                                           : nullptr;
   if (!fe || !(fe->fn->isGenerator || fe->fn->safeTry)) {
-    sema_.diags_.error(call->args.empty() ? call->loc() : call->args[0]->loc(),
-                 "safeTry takes a generator function written in the call: 'safeTry(function* () "
-                 "{ ... })'");
+    checker_.diags_.error(
+        call->args.empty() ? call->loc() : call->args[0]->loc(),
+        "safeTry takes a generator function written in the call: 'safeTry(function* () "
+        "{ ... })'");
     for (Expr *&arg : call->args) {
       if (!isa<FunctionExpr>(arg)) {
-        arg = sema_.exprChecker().checkExpr(arg);
+        arg = checker_.exprChecker().checkExpr(arg);
       }
     }
     return call;
   }
   FunctionDecl *fn = fe->fn;
   if (!fn->params.empty()) {
-    sema_.diags_.error(fn->params[0].loc, "the generator of safeTry takes no parameters");
+    checker_.diags_.error(fn->params[0].loc, "the generator of safeTry takes no parameters");
   }
   // What it returns is the Result of safeTry.
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
-  Sema::Signature sig;
+  Checker::Signature sig;
   sig.pad = false;
   sig.ret = wanted && wanted->isResult() ? wanted : nullptr;
   fn->nonEscaping = true; // called during the call, once
   // Not a generator: it runs to its end at once (see FunctionDecl::safeTry).
   fn->safeTry = true;
   fn->isGenerator = false;
-  call->args[0] = sema_.closureChecker().checkFunctionExpr(fe, sig.ret ? &sig : nullptr);
+  call->args[0] = checker_.closureChecker().checkFunctionExpr(fe, sig.ret ? &sig : nullptr);
   call->builtin = Builtin::SafeTry;
-  sema_.flowChecker().calledFunction();
+  checker_.flowChecker().calledFunction();
 
   const Type *ret = fn->sym->ret;
   if (!ret || ret->isError()) {
     return call;
   }
   if (!ret->isResult()) {
-    sema_.diags_.error(fn->loc(), ret->isOptional() && ret->inner()->isResult()
-                                ? "the generator of safeTry must return a Result on every path, "
-                                  "e.g. 'return ok(value)' at its end"
-                                : "the generator of safeTry must return a Result, e.g. 'return "
-                                  "ok(value)'");
+    checker_.diags_.error(fn->loc(),
+                          ret->isOptional() && ret->inner()->isResult()
+                              ? "the generator of safeTry must return a Result on every path, "
+                                "e.g. 'return ok(value)' at its end"
+                              : "the generator of safeTry must return a Result, e.g. 'return "
+                                "ok(value)'");
     return call;
   }
   call->type = ret;
@@ -110,11 +112,11 @@ const Type *SafeTryChecker::generatorResult(const FunctionDecl *fn, const Type *
         const Type *error = yield->value->type->errType();
         const Type *common = ResultTypes::unifyHalf(result->errType(), error);
         if (!common) {
-          sema_.diags_.error(yield->loc(),
-                       "'yield*' returns the error '" + error->name() +
-                           "' here, and the generator returns errors of '" +
-                           result->errType()->name() + "' elsewhere, which no union holds" +
-                           noUnion(result->errType(), error) + "; convert one with 'mapErr'");
+          checker_.diags_.error(
+              yield->loc(), "'yield*' returns the error '" + error->name() +
+                                "' here, and the generator returns errors of '" +
+                                result->errType()->name() + "' elsewhere, which no union holds" +
+                                noUnion(result->errType(), error) + "; convert one with 'mapErr'");
           result = nullptr;
           return;
         }
@@ -127,13 +129,14 @@ const Type *SafeTryChecker::generatorResult(const FunctionDecl *fn, const Type *
 
 Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
   yield->type = Type::error();
-  const FuncSymbol *fn = sema_.currentFunction_;
+  const FuncSymbol *fn = checker_.currentFunction_;
   if (!yield->delegate) {
     if (yield->value) {
-      yield->value = sema_.exprChecker().checkExpr(yield->value);
+      yield->value = checker_.exprChecker().checkExpr(yield->value);
     }
-    sema_.diags_.error(yield->loc(), "the generator of safeTry gives no values: 'yield x' has no one to "
-                               "take x; 'yield* r' takes the value of the Result r");
+    checker_.diags_.error(yield->loc(),
+                          "the generator of safeTry gives no values: 'yield x' has no one to "
+                          "take x; 'yield* r' takes the value of the Result r");
     return yield;
   }
   // `yield* r.safeUnwrap()`, as neverthrow wrote it before, is `yield* r`.
@@ -143,28 +146,30 @@ Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
       yield->value = member->object;
     }
   }
-  yield->value = sema_.exprChecker().checkExpr(yield->value);
+  yield->value = checker_.exprChecker().checkExpr(yield->value);
   const Type *type = yield->value->type;
   if (type->isError()) {
     return yield;
   }
   if (!type->isResult()) {
-    sema_.diags_.error(yield->value->loc(),
-                 "'yield*' in the generator of safeTry takes a Result, found '" + type->name() +
-                     "'; a generator that gives values is called directly, not by safeTry");
+    checker_.diags_.error(
+        yield->value->loc(),
+        "'yield*' in the generator of safeTry takes a Result, found '" + type->name() +
+            "'; a generator that gives values is called directly, not by safeTry");
     return yield;
   }
   // An Err returns from the generator: its error must fit what it returns.
   if (const Type *ret = fn->ret;
       ret && ret->isResult() &&
       !TypeRelations::isImplicitlyConvertible(Type::result(Type::never(), type->errType()), ret)) {
-    sema_.diags_.error(yield->loc(), "'yield*' returns the error '" + type->errType()->name() +
-                                   "' when the Result is an Err, but the generator returns '" +
-                                   ret->name() + "'; convert the error with 'mapErr'");
+    checker_.diags_.error(yield->loc(),
+                          "'yield*' returns the error '" + type->errType()->name() +
+                              "' when the Result is an Err, but the generator returns '" +
+                              ret->name() + "'; convert the error with 'mapErr'");
   }
   // `yield* err(e)` always returns, as `return err(e)` does.
   if (type->okType()->isNever()) {
-    sema_.flow_.unreachable = true;
+    checker_.flow_.unreachable = true;
   }
   yield->type = halfParam(type->okType());
 
@@ -283,11 +288,11 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
   case Expr::Kind::Yield: {
     auto *yield = cast<YieldExpr>(expr);
     if (yield->delegate && !safe) {
-      sema_.diags_.error(yield->loc(),
-                   "'yield*' cannot be used here: when the Result is an Err it returns "
-                   "from the generator, and a value computed before it in this "
-                   "statement would be lost; take the value first, as in 'const x = "
-                   "yield* r'");
+      checker_.diags_.error(yield->loc(),
+                            "'yield*' cannot be used here: when the Result is an Err it returns "
+                            "from the generator, and a value computed before it in this "
+                            "statement would be lost; take the value first, as in 'const x = "
+                            "yield* r'");
     }
     sub(yield->value, safe);
     break;

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // decimal: literals, operators and methods (docs/decimal.md).
 class DecimalChecker {
 public:
-  explicit DecimalChecker(Sema &sema);
+  explicit DecimalChecker(Checker &checker);
 
   // decimal (sema_decimal.cpp). A number literal, or an expression made only
   // of literals, read where a decimal is expected or next to a decimal
@@ -43,7 +43,7 @@ public:
   void reportBigInt(llvm::SMLoc loc, llvm::StringRef what);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "compiler/program/ast/operators/operators.h"
 #include "compiler/program/ast/expr/expr.h"
+#include "compiler/program/ast/operators/operators.h"
 
 namespace tz {
 

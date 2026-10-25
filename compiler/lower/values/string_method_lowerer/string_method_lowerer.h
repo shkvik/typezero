@@ -1,18 +1,18 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The methods of strings.
 class StringMethodLowerer {
 public:
-  explicit StringMethodLowerer(CodeGen &codegen);
+  explicit StringMethodLowerer(Lowering &lowering);
 
   llvm::Value *emitStringMethod(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

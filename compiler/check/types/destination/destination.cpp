@@ -1,18 +1,18 @@
 #include "compiler/check/types/destination/destination.h"
-#include "compiler/check/scopes/scopes.h"
-#include "compiler/check/types/type_resolver/type_resolver.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/types/destination_scanner/destination_scanner.h"
 #include "compiler/check/iterators/iterable_checker/iterable_checker.h"
-#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/destination_check_helpers/destination_check_helpers.h"
+#include "compiler/check/types/destination_scanner/destination_scanner.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -102,7 +102,7 @@ static const Type *writable(const Type *type) {
   return Type::object(std::move(fields));
 }
 
-Destination::Destination(Sema &sema) : sema_(sema) {}
+Destination::Destination(Checker &checker) : checker_(checker) {}
 
 bool Destination::literalShaped(const Expr *expr) {
   // An array literal too: `[1, 2]` that goes to a `double[]` holds doubles,
@@ -141,7 +141,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
   // Into a union: as the member it is written for (see literalMember).
   if (type->isUnion()) {
     if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
-      if (const Type *member = sema_.literalTypes().literalMember(lit, type)) {
+      if (const Type *member = checker_.literalTypes().literalMember(lit, type)) {
         return literalFits(expr, member);
       }
     }
@@ -159,7 +159,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
       if (prop.spread) {
         // The fields of the object spread, if its type is known.
         auto *name = dyn_cast<NameExpr>(prop.value);
-        const VarSymbol *var = name ? sema_.scopes().lookup(name->name).var : nullptr;
+        const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
         if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
           return false;
         }
@@ -238,24 +238,28 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
   return true;
 }
 
-const Type *Destination::literalDestination(const VarDeclarator &d, llvm::ArrayRef<VarDeclarator> later) {
-  Sema::DestinationScan scan;
+const Type *Destination::literalDestination(const VarDeclarator &d,
+                                            llvm::ArrayRef<VarDeclarator> later) {
+  Checker::DestinationScan scan;
   scan.name = d.name;
-  scan.returns = sema_.currentFunction_ ? sema_.currentFunction_->ret : nullptr;
+  scan.returns = checker_.currentFunction_ ? checker_.currentFunction_->ret : nullptr;
   scan.locals.emplace_back();
-  bool muted = sema_.diags_.setMuted(true); // types are resolved again where they are written
+  bool muted = checker_.diags_.setMuted(true); // types are resolved again where they are written
   bool visible = true;
   for (const VarDeclarator &next : later) {
     if (next.init) {
-      sema_.destinationScanner().scanDestinations(next.init, next.typeAnn ? sema_.typeResolver().resolveType(*next.typeAnn, false) : nullptr, scan);
+      checker_.destinationScanner().scanDestinations(
+          next.init,
+          next.typeAnn ? checker_.typeResolver().resolveType(*next.typeAnn, false) : nullptr, scan);
     }
     if (next.name == d.name) {
       visible = false;
     }
-    scan.declare(next.name, next.typeAnn ? sema_.typeResolver().resolveType(*next.typeAnn, false) : nullptr);
+    scan.declare(next.name, next.typeAnn ? checker_.typeResolver().resolveType(*next.typeAnn, false)
+                                         : nullptr);
   }
-  std::vector<const Stmt *> following = std::move(sema_.following_);
-  sema_.following_.clear();
+  std::vector<const Stmt *> following = std::move(checker_.following_);
+  checker_.following_.clear();
   for (const Stmt *stmt : following) {
     if (!visible && !isa<FunctionDecl>(stmt)) {
       continue;
@@ -265,9 +269,9 @@ const Type *Destination::literalDestination(const VarDeclarator &d, llvm::ArrayR
         llvm::any_of(decl->decls, [&](const VarDeclarator &v) { return v.name == d.name; })) {
       visible = false;
     }
-    sema_.destinationScanner().scanDestinations(stmt, scan);
+    checker_.destinationScanner().scanDestinations(stmt, scan);
   }
-  sema_.diags_.setMuted(muted);
+  checker_.diags_.setMuted(muted);
 
   // The places the literal fits, and one type that suits them all. A
   // parameter of a generic function takes whatever comes, so it says nothing
@@ -302,7 +306,7 @@ const Type *Destination::literalDestination(const VarDeclarator &d, llvm::ArrayR
     }
   }
   if (!chosen && !places.empty()) {
-    sema_.destinationConflict_ = std::move(places);
+    checker_.destinationConflict_ = std::move(places);
   }
 
   return chosen;
@@ -312,10 +316,10 @@ const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
   std::vector<const Type *> params;
   for (const Param &param : fn->params) {
     // `Iterable<T>` makes it generic: no one type.
-    if (!param.type || sema_.iterableChecker().isIterableRef(*param.type)) {
+    if (!param.type || checker_.iterableChecker().isIterableRef(*param.type)) {
       return nullptr;
     }
-    const Type *type = sema_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+    const Type *type = checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
     params.push_back(param.optional || param.defaultValue ? Type::optional(type) : type);
   }
   bool hasRest = !fn->params.empty() && fn->params.back().rest;

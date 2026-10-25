@@ -13,8 +13,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -69,7 +69,7 @@ void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<
 
 } // namespace
 
-WideWrites::WideWrites(Sema &sema) : sema_(sema) {}
+WideWrites::WideWrites(Checker &checker) : checker_(checker) {}
 
 bool WideWrites::widensWrites(const Type *from, const Type *to) {
   const Type *a = from->nonOptional(), *b = to->nonOptional();
@@ -93,7 +93,7 @@ bool WideWrites::widensWrites(const Type *from, const Type *to) {
 }
 
 void WideWrites::checkWidenings(SourceFile &file) {
-  if (sema_.widenings_.empty() && !sema_.narrowedFields_) {
+  if (checker_.widenings_.empty() && !checker_.narrowedFields_) {
     return;
   }
   auto narrowings = [](const Type *from, const Type *to) {
@@ -106,7 +106,7 @@ void WideWrites::checkWidenings(SourceFile &file) {
   auto convertible = [](const Type *from, const Type *to) {
     return TypeRelations::isImplicitlyConvertible(from, to);
   };
-  Flows flows(sema_.widenings_, narrowings, convertible);
+  Flows flows(checker_.widenings_, narrowings, convertible);
   flows.walkProgram(file);
 
   // The writes by the nodes they write to.
@@ -284,7 +284,7 @@ void WideWrites::checkWidenings(SourceFile &file) {
     // make, and what reaches them they follow.
     if (!found && unknown) {
       for (const Write &write : flows.writes) {
-        if (sema_.libraryCalls().inLibrary(write.loc)) {
+        if (checker_.libraryCalls().inLibrary(write.loc)) {
           continue;
         }
         for (const Narrowing &n : conv.narrowings) {
@@ -348,12 +348,13 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   });
 }
 
-void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at, llvm::StringRef role,
-                          llvm::StringRef name, llvm::SMLoc write, const Type *value,
-                          const Type *through, bool element, llvm::StringRef field,
-                          const Type *narrow, const Type *owner, int depth) {
+void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at,
+                                llvm::StringRef role, llvm::StringRef name, llvm::SMLoc write,
+                                const Type *value, const Type *through, bool element,
+                                llvm::StringRef field, const Type *narrow, const Type *owner,
+                                int depth) {
   // "line 12", or "line 12 of shapes.tz" in another file.
-  llvm::SourceMgr &sources = sema_.diags_.sourceMgr();
+  llvm::SourceMgr &sources = checker_.diags_.sourceMgr();
   unsigned id = sources.FindBufferContainingLoc(write);
   std::string line =
       id ? "line " + std::to_string(sources.getLineAndColumn(write, id).first) : "a line";
@@ -388,8 +389,8 @@ void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at
                  owner->name().str() + "'";
     }
   }
-  sema_.diags_.error(at, message);
-  sema_.diags_.note(write, "the write, through '" + (through ? through : to)->name() + "'");
+  checker_.diags_.error(at, message);
+  checker_.diags_.note(write, "the write, through '" + (through ? through : to)->name() + "'");
 }
 
 } // namespace tz

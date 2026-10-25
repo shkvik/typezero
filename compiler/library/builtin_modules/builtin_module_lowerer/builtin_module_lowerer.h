@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
@@ -8,7 +8,7 @@ namespace tz {
 // makes objects.
 class BuiltinModuleLowerer {
 public:
-  explicit BuiltinModuleLowerer(CodeGen &codegen);
+  explicit BuiltinModuleLowerer(Lowering &lowering);
 
   // The built-in modules: node:path, node:os, node:fs and tz:io
   // (codegen_node.cpp).
@@ -23,7 +23,7 @@ public:
   llvm::Function *systemErrorMaker();
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<const Type *, llvm::Function *> objectMakers_;
 };
 

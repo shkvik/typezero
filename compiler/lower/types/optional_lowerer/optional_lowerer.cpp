@@ -8,10 +8,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <array>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -28,7 +28,7 @@ bool isReference(const Type *type) {
 
 } // namespace
 
-OptionalLowerer::OptionalLowerer(CodeGen &codegen) : codegen_(codegen) {}
+OptionalLowerer::OptionalLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 // An unknown holds undefined itself: it is its own `T | undefined`, null for
 // undefined.
@@ -37,34 +37,36 @@ llvm::Value *OptionalLowerer::makeOptional(llvm::Value *value, llvm::Value *has,
     if (auto *always = dyn_cast<llvm::ConstantInt>(has); always && always->isOne()) {
       return value;
     }
-    return codegen_.builder_.CreateSelect(has, value, llvm::Constant::getNullValue(value->getType()));
+    return lowering_.builder_.CreateSelect(has, value,
+                                           llvm::Constant::getNullValue(value->getType()));
   }
-  llvm::Value *result = llvm::UndefValue::get(codegen_.moduleBuilder().lower(type));
-  result = codegen_.builder_.CreateInsertValue(result, value, 0);
+  llvm::Value *result = llvm::UndefValue::get(lowering_.moduleBuilder().lower(type));
+  result = lowering_.builder_.CreateInsertValue(result, value, 0);
 
-  return codegen_.builder_.CreateInsertValue(result, has, 1);
+  return lowering_.builder_.CreateInsertValue(result, has, 1);
 }
 
 llvm::Value *OptionalLowerer::undefinedValue(const Type *optionalType) {
-  return llvm::Constant::getNullValue(codegen_.moduleBuilder().lower(optionalType));
+  return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(optionalType));
 }
 
 llvm::Value *OptionalLowerer::optionalHas(llvm::Value *value, const Type *optionalType) {
   if (optionalType->isUnknown()) {
-    return codegen_.builder_.CreateIsNotNull(value);
+    return lowering_.builder_.CreateIsNotNull(value);
   }
   const Type *inner = optionalType->inner();
   if (isReference(inner)) {
-    return codegen_.builder_.CreateIsNotNull(value);
+    return lowering_.builder_.CreateIsNotNull(value);
   }
   if (UnionLayout::isAtomType(inner)) { // atoms start at 1
-    return codegen_.builder_.CreateICmpNE(value, codegen_.builder_.getInt32(0));
+    return lowering_.builder_.CreateICmpNE(value, lowering_.builder_.getInt32(0));
   }
   if (inner->isTagged()) { // tags too
-    return codegen_.builder_.CreateICmpNE(codegen_.unionLayout().unionTag(value), codegen_.builder_.getInt32(0));
+    return lowering_.builder_.CreateICmpNE(lowering_.unionLayout().unionTag(value),
+                                           lowering_.builder_.getInt32(0));
   }
 
-  return codegen_.builder_.CreateExtractValue(value, 1);
+  return lowering_.builder_.CreateExtractValue(value, 1);
 }
 
 llvm::Value *OptionalLowerer::optionalValue(llvm::Value *value, const Type *optionalType) {
@@ -72,7 +74,7 @@ llvm::Value *OptionalLowerer::optionalValue(llvm::Value *value, const Type *opti
     return value;
   }
 
-  return codegen_.builder_.CreateExtractValue(value, 0);
+  return lowering_.builder_.CreateExtractValue(value, 0);
 }
 
 } // namespace tz

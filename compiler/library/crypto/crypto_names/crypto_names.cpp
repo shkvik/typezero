@@ -1,14 +1,14 @@
 #include "compiler/library/crypto/crypto_names/crypto_names.h"
-#include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 

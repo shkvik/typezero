@@ -3,6 +3,10 @@
 // that OpenSSL makes (EVP_PBE_scrypt_ex), which node reports.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/bytes/bytes.h"
 #include <limits.h>
 #include <string.h>
 

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // pipeline and the functions of node:stream/promises.
 class StreamPipeline {
 public:
-  explicit StreamPipeline(Sema &sema);
+  explicit StreamPipeline(Checker &checker);
 
   // pipeline(), finished() and compose() of node:stream, and pipeline() of
   // node:stream/promises, which `decl` declares; null for other functions.
@@ -29,7 +29,7 @@ public:
   Expr *valuesIteratorOf(Expr *collection);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

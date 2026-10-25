@@ -1,13 +1,13 @@
 #include "compiler/check/values/array_literal_checker/array_literal_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
-#include "compiler/check/types/destination/destination.h"
-#include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/check/objects/dict_checker/dict_checker.h"
 #include "compiler/check/objects/tuple_checker/tuple_checker.h"
+#include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
@@ -18,16 +18,16 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-ArrayLiteralChecker::ArrayLiteralChecker(Sema &sema) : sema_(sema) {}
+ArrayLiteralChecker::ArrayLiteralChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
   if (expected && expected->nonOptional()->isJson()) {
-    return sema_.jsonChecker().checkJsonArrayLit(lit);
+    return checker_.jsonChecker().checkJsonArrayLit(lit);
   }
   // Where an unknown is expected, the elements may be of any types too.
   if (expected && expected->isUnknown()) {
@@ -48,15 +48,16 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   if (auto hole =
           llvm::find_if(lit->elements, [](const ArrayLitExpr::Element &e) { return e.hole; });
       hole != lit->elements.end()) {
-    sema_.diags_.error(hole->expr->loc(), "arrays cannot have holes; write the element explicitly");
+    checker_.diags_.error(hole->expr->loc(),
+                          "arrays cannot have holes; write the element explicitly");
     for (ArrayLitExpr::Element &e : lit->elements) {
-      e.expr = sema_.exprChecker().checkExpr(e.expr);
+      e.expr = checker_.exprChecker().checkExpr(e.expr);
     }
     lit->type = Type::error();
     return lit;
   }
   if (expected && expected->nonOptional()->isTuple()) {
-    return sema_.tupleChecker().checkTupleLit(lit, expected->nonOptional());
+    return checker_.tupleChecker().checkTupleLit(lit, expected->nonOptional());
   }
 
   // The element types: of the values, or of the arrays spread into this one.
@@ -75,10 +76,10 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       // `[p, { x: 1, y: 2 }]`: a literal takes the type of the objects
       // before it.
       const Type *hint = expectedElement;
-      if (!hint && seen && Sema::holdsObjects(seen) && Destination::literalShaped(e.expr)) {
+      if (!hint && seen && Checker::holdsObjects(seen) && Destination::literalShaped(e.expr)) {
         hint = seen;
       }
-      e.expr = sema_.exprChecker().checkExpr(e.expr, hint);
+      e.expr = checker_.exprChecker().checkExpr(e.expr, hint);
       types[i] = e.expr->type;
       someDecimal |= types[i]->nonOptional()->isDecimal();
       if (!e.expr->type->isError() && seen != Type::error()) {
@@ -89,11 +90,11 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       }
       continue;
     }
-    sema_.iteratorMethods().markFused(e.expr);
-    e.expr =
-        sema_.dictChecker().iterableOf(sema_.exprChecker().checkExpr(e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
+    checker_.iteratorMethods().markFused(e.expr);
+    e.expr = checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(
+        e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
     if (e.expr->type->isMatch()) { // `[...m]`: the captures
-      e.expr = sema_.matchChecker().matchItems(e.expr);
+      e.expr = checker_.matchChecker().matchItems(e.expr);
     }
     const Type *type = e.expr->type;
     if (type->isString()) {
@@ -102,8 +103,8 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     }
     // `[...gen()]`: the values of the iterator, one after another.
     if (type->isIterator()) {
-      sema_.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
-      sema_.flowChecker().calledFunction(); // a generator runs
+      checker_.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
+      checker_.flowChecker().calledFunction(); // a generator runs
       types[i] = type->yielded();
       someDecimal |= types[i]->nonOptional()->isDecimal();
       continue;
@@ -111,9 +112,9 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (type->isTuple()) {
       const Type *element = TupleChecker::tupleElement(type);
       if (!element) {
-        sema_.diags_.error(e.expr->loc(),
-                     "the elements of '" + type->name() +
-                         "' have different types, and an array holds elements of one type");
+        checker_.diags_.error(
+            e.expr->loc(), "the elements of '" + type->name() +
+                               "' have different types, and an array holds elements of one type");
       }
       types[i] = element ? element : Type::error();
       continue;
@@ -124,12 +125,13 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       continue;
     }
     if (!type->isArray() && !type->isError()) {
-      sema_.diags_.error(e.expr->loc(), "only arrays, strings, iterators, Maps and Sets can be spread "
-                                  "here, found '" +
-                                      type->name() + "'" +
-                                      (type->isRecord() ? "; for the entries of a Record, spread "
-                                                          "'Object.entries(r)'"
-                                                        : ""));
+      checker_.diags_.error(e.expr->loc(),
+                            "only arrays, strings, iterators, Maps and Sets can be spread "
+                            "here, found '" +
+                                type->name() + "'" +
+                                (type->isRecord() ? "; for the entries of a Record, spread "
+                                                    "'Object.entries(r)'"
+                                                  : ""));
       type = Type::error();
     }
     types[i] = type->isError() ? type : type->inner();
@@ -140,7 +142,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     if (types[i]) {
       continue;
     }
-    e.expr = sema_.exprChecker().checkExpr(e.expr, someDecimal ? Type::decimalTy() : nullptr);
+    e.expr = checker_.exprChecker().checkExpr(e.expr, someDecimal ? Type::decimalTy() : nullptr);
     types[i] = e.expr->type;
   }
 
@@ -148,8 +150,9 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   const Type *element = expectedElement;
   if (!element) {
     if (lit->elements.empty()) {
-      sema_.diags_.error(lit->loc(), "cannot infer the element type of an empty array; add a type, "
-                               "e.g. 'let a: int[] = []'");
+      checker_.diags_.error(lit->loc(),
+                            "cannot infer the element type of an empty array; add a type, "
+                            "e.g. 'let a: int[] = []'");
       return lit;
     }
     for (size_t i = 0; i < types.size(); ++i) {
@@ -182,14 +185,15 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
                      "'const t: [" +
                      tuple + "] = ...'";
         }
-        sema_.diags_.error(lit->elements[i].expr->loc(), message);
+        checker_.diags_.error(lit->elements[i].expr->loc(), message);
         return lit;
       }
       element = next;
     }
     if (element->isUndefined() || element->isVoid()) {
-      sema_.diags_.error(lit->loc(), "cannot infer the element type from '" + element->name() +
-                                   "' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'");
+      checker_.diags_.error(lit->loc(),
+                            "cannot infer the element type from '" + element->name() +
+                                "' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'");
       return lit;
     }
   }
@@ -200,7 +204,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   const Type *arrayType = Type::array(element);
   for (ArrayLitExpr::Element &e : lit->elements) {
     if (!e.spread) {
-      e.expr = sema_.typeRelations().coerce(e.expr, element);
+      e.expr = checker_.typeRelations().coerce(e.expr, element);
     } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
                !(e.expr->type->isString() && element->isString()) &&
                // `[...dogs]` as Animal[]: the same references, copied; also of
@@ -220,8 +224,8 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
                    return TypeRelations::isImplicitlyConvertible(f.type, element);
                  }))) {
       // Arrays of different types have different layouts, so no conversion.
-      sema_.diags_.error(e.expr->loc(),
-                   "cannot spread '" + e.expr->type->name() + "' into '" + arrayType->name() + "'");
+      checker_.diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() + "' into '" +
+                                               arrayType->name() + "'");
     }
   }
   lit->type = arrayType;

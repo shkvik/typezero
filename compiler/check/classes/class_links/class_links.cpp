@@ -1,8 +1,8 @@
 #include "compiler/check/classes/class_links/class_links.h"
-#include "compiler/declare/class_declarer/class_declarer.h"
-#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
+#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -10,8 +10,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -81,7 +81,7 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
 
 } // namespace
 
-ClassLinks::ClassLinks(Sema &sema) : sema_(sema) {}
+ClassLinks::ClassLinks(Checker &checker) : checker_(checker) {}
 
 std::vector<FunctionDecl *> ClassLinks::constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
@@ -176,7 +176,7 @@ void ClassLinks::linkClasses() {
       visit(child);
     }
   };
-  for (ClassDecl *cls : sema_.classes_) {
+  for (ClassDecl *cls : checker_.classes_) {
     if (!cls->parent && !cls->literal) {
       visit(cls);
     }
@@ -193,7 +193,7 @@ void ClassLinks::linkClasses() {
   for (ClassDecl *cls : order) {
     buildVtable(cls);
   }
-  sema_.classesLinked_ = true;
+  checker_.classesLinked_ = true;
 
   // The return types that methods take from what they override or
   // implement, when they declare none. An abstract method without one takes
@@ -222,7 +222,7 @@ void ClassLinks::linkClasses() {
         };
         find(cls);
         fn->sym->ret = nullptr;
-        sema_.returnSources_[fn] = source;
+        checker_.returnSources_[fn] = source;
         if (source) {
           sources.insert(source);
         }
@@ -234,7 +234,7 @@ void ClassLinks::linkClasses() {
           fn->sym->ret = base->sym->ret;
         } else {
           fn->sym->ret = nullptr;
-          sema_.inheritsReturn_[fn] = base;
+          checker_.inheritsReturn_[fn] = base;
         }
         continue;
       }
@@ -270,7 +270,7 @@ void ClassLinks::numberClasses() {
       visit(child);
     }
   };
-  for (ClassDecl *cls : sema_.classes_) {
+  for (ClassDecl *cls : checker_.classes_) {
     if (!cls->parent && !cls->literal) {
       visit(cls);
     }
@@ -287,12 +287,12 @@ void ClassLinks::numberClasses() {
       cls->lastId = std::max(cls->lastId, child->lastId);
     }
   }
-  for (ClassDecl *cls : sema_.classes_) {
+  for (ClassDecl *cls : checker_.classes_) {
     if (cls->literal) {
       cls->id = cls->lastId = ++next;
     }
   }
-  sema_.classCount_ = next;
+  checker_.classCount_ = next;
 }
 
 void ClassLinks::buildVtable(ClassDecl *cls) {
@@ -315,8 +315,8 @@ void ClassLinks::buildVtable(ClassDecl *cls) {
 void ClassLinks::linkOverrides(ClassDecl *cls) {
   // What an instance of a generic class would report, the generic class
   // reports.
-  bool muted = sema_.diags_.setMuted(false);
-  sema_.diags_.setMuted(muted || cls->generic != nullptr);
+  bool muted = checker_.diags_.setMuted(false);
+  checker_.diags_.setMuted(muted || cls->generic != nullptr);
   for (FunctionDecl *fn : ownMethods(cls)) {
     if (!fn->sym) {
       continue;
@@ -332,84 +332,91 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
       }
     }
     const ClassDecl *owner = nullptr;
-    const ClassField *field = cls->parent ? ClassBases::findField(cls->parent, fn->name, &owner) : nullptr;
+    const ClassField *field =
+        cls->parent ? ClassBases::findField(cls->parent, fn->name, &owner) : nullptr;
     if (field && !field->method) {
-      sema_.diags_.error(fn->loc(), "'" + fn->name + "' is a field of '" + owner->name +
-                                  "', so a class that extends it cannot have a method of that "
-                                  "name");
+      checker_.diags_.error(fn->loc(),
+                            "'" + fn->name + "' is a field of '" + owner->name +
+                                "', so a class that extends it cannot have a method of that "
+                                "name");
       continue;
     }
     if (!base) {
       if (fn->isOverride) {
         if (!cls->parent) {
-          sema_.diags_.error(fn->loc(), "'override' says that '" + fn->name +
-                                      "' replaces a method of the class that '" + cls->name +
-                                      "' extends, and it extends none");
+          checker_.diags_.error(fn->loc(), "'override' says that '" + fn->name +
+                                               "' replaces a method of the class that '" +
+                                               cls->name + "' extends, and it extends none");
         } else if (inherited.empty()) {
-          sema_.diags_.error(fn->loc(), "'" + fn->name + "' is marked 'override', but '" +
-                                      cls->parent->name + "' has no method '" + fn->name + "'");
+          checker_.diags_.error(fn->loc(), "'" + fn->name + "' is marked 'override', but '" +
+                                               cls->parent->name + "' has no method '" + fn->name +
+                                               "'");
         } else {
-          sema_.diags_.error(fn->loc(), "'" + fn->name + "' is marked 'override', but no method of '" +
-                                      cls->parent->name + "' has its parameters: there " +
-                                      (inherited.size() == 1 ? "is " : "are ") +
-                                      variantList(inherited) +
-                                      "; an override takes the same parameters");
+          checker_.diags_.error(
+              fn->loc(), "'" + fn->name + "' is marked 'override', but no method of '" +
+                             cls->parent->name + "' has its parameters: there " +
+                             (inherited.size() == 1 ? "is " : "are ") + variantList(inherited) +
+                             "; an override takes the same parameters");
         }
       }
       // A hook of node:stream with other parameters (sema_stream.cpp).
-      if (!inherited.empty() && sema_.chunkTypes().isStreamHook(fn, /*linked=*/true)) {
-        sema_.chunkTypes().reportStreamHook(fn, inherited);
+      if (!inherited.empty() && checker_.chunkTypes().isStreamHook(fn, /*linked=*/true)) {
+        checker_.chunkTypes().reportStreamHook(fn, inherited);
         continue;
       }
       // One more variant of the name: it must differ from the inherited ones.
       for (FunctionDecl *v : inherited) {
-        sema_.classDeclarer().checkVariantPair(v, fn);
+        checker_.classDeclarer().checkVariantPair(v, fn);
       }
       continue;
     }
     // An arrow in a field is a field of each object in JavaScript, which a
     // method of a subclass would not replace.
     if (isArrowMethod(base) && !isArrowMethod(fn)) {
-      sema_.diags_.error(fn->loc(), "'" + fn->name + "' is an arrow in a field of '" + base->cls->name +
-                                  "', which each object holds itself in JavaScript, so a method of "
-                                  "a class that extends it would never run; override it with a "
-                                  "field too: '" +
-                                  fn->name + " = (...) => ...'");
+      checker_.diags_.error(fn->loc(),
+                            "'" + fn->name + "' is an arrow in a field of '" + base->cls->name +
+                                "', which each object holds itself in JavaScript, so a method of "
+                                "a class that extends it would never run; override it with a "
+                                "field too: '" +
+                                fn->name + " = (...) => ...'");
       continue;
     }
     if (base->access == Access::Private) {
-      sema_.diags_.error(fn->loc(), "'" + fn->name + "' is private in class '" + base->cls->name +
-                                  "', so a class that extends it cannot override it");
+      checker_.diags_.error(fn->loc(), "'" + fn->name + "' is private in class '" +
+                                           base->cls->name +
+                                           "', so a class that extends it cannot override it");
       continue;
     }
     if (fn->access > base->access) {
-      sema_.diags_.error(fn->loc(), "'" + fn->name + "' is " + accessName(base->access) + " in '" +
-                                  base->cls->name + "', so its override cannot be " +
-                                  accessName(fn->access));
+      checker_.diags_.error(fn->loc(), "'" + fn->name + "' is " + accessName(base->access) +
+                                           " in '" + base->cls->name +
+                                           "', so its override cannot be " +
+                                           accessName(fn->access));
     }
     if (fn->isAbstract && !base->isAbstract) {
-      sema_.diags_.error(fn->loc(), "'" + fn->name + "' has a body in '" + base->cls->name +
-                                  "', so it cannot be abstract again in '" + cls->name + "'");
+      checker_.diags_.error(fn->loc(), "'" + fn->name + "' has a body in '" + base->cls->name +
+                                           "', so it cannot be abstract again in '" + cls->name +
+                                           "'");
     }
     fn->overrides = base;
     for (FunctionDecl *p = base; p; p = p->overrides) {
       // After the classes are linked, only an instance comes; that its
       // method overrides one that no other class overrides means the
       // method tables would be laid out again.
-      if (sema_.classesLinked_ && !p->overridden && p->slot < 0) {
-        bool outer = sema_.diags_.setMuted(false);
-        sema_.diags_.error(fn->loc(),
-                     "'" + fn->name + "' of '" + cls->type->name() + "' overrides '" +
-                         p->cls->type->name() + "." + p->name +
-                         "' only with these type arguments, which is not supported; give "
-                         "the method the same parameters in '" +
-                         p->cls->name + "'");
-        sema_.diags_.setMuted(outer);
+      if (checker_.classesLinked_ && !p->overridden && p->slot < 0) {
+        bool outer = checker_.diags_.setMuted(false);
+        checker_.diags_.error(fn->loc(),
+                              "'" + fn->name + "' of '" + cls->type->name() + "' overrides '" +
+                                  p->cls->type->name() + "." + p->name +
+                                  "' only with these type arguments, which is not supported; give "
+                                  "the method the same parameters in '" +
+                                  p->cls->name + "'");
+        checker_.diags_.setMuted(outer);
       }
-      sema_.genericClassInstantiator().markOverridden(p);
+      checker_.genericClassInstantiator().markOverridden(p);
     }
   }
-  sema_.diags_.setMuted(muted);
+  checker_.diags_.setMuted(muted);
 }
 
 const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {
@@ -417,11 +424,12 @@ const Type *ClassLinks::inheritedReturnType(FuncSymbol *fn) {
   if (!decl) {
     return nullptr;
   }
-  if (auto found = sema_.returnSources_.find(decl); found != sema_.returnSources_.end()) {
-    return found->second ? sema_.returnInferrer().returnType(found->second->sym) : Type::voidTy();
+  if (auto found = checker_.returnSources_.find(decl); found != checker_.returnSources_.end()) {
+    return found->second ? checker_.returnInferrer().returnType(found->second->sym)
+                         : Type::voidTy();
   }
-  if (auto found = sema_.inheritsReturn_.find(decl); found != sema_.inheritsReturn_.end()) {
-    return sema_.returnInferrer().returnType(found->second->sym);
+  if (auto found = checker_.inheritsReturn_.find(decl); found != checker_.inheritsReturn_.end()) {
+    return checker_.returnInferrer().returnType(found->second->sym);
   }
 
   return nullptr;
@@ -433,11 +441,11 @@ void ClassLinks::noteInheritedReturn(const FunctionDecl *fn) {
   }
   std::string type = fn->sym->ret->name().str();
   if (const FunctionDecl *base = fn->overrides) {
-    sema_.diags_.note(base->loc(), "'" + fn->name + "' overrides '" + base->cls->name + "." + fn->name +
-                                 "', so it returns '" + type +
-                                 "' too; to return another type, "
-                                 "declare it in '" +
-                                 base->cls->name + "'");
+    checker_.diags_.note(base->loc(), "'" + fn->name + "' overrides '" + base->cls->name + "." +
+                                          fn->name + "', so it returns '" + type +
+                                          "' too; to return another type, "
+                                          "declare it in '" +
+                                          base->cls->name + "'");
   }
 }
 

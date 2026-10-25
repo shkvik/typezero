@@ -1,24 +1,24 @@
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
-#include "compiler/lower/module_builder/module_builder.h"
-#include "compiler/lower/function_builder/function_builder.h"
-#include "compiler/lower/function_frame/function_frame.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
-#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
-#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
-#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
-#include "compiler/lower/functions/env_lowerer/env_lowerer.h"
+#include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
-#include "compiler/library/regex/matcher_builder/matcher_builder.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
+#include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
+#include "compiler/lower/function_builder/function_builder.h"
+#include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
+#include "compiler/lower/functions/env_lowerer/env_lowerer.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include <functional>
 
+using llvm::BasicBlock;
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
-using llvm::BasicBlock;
 using llvm::Value;
 
 namespace tz {
@@ -133,7 +133,7 @@ std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn) {
 
 } // namespace
 
-TailCallLowerer::TailCallLowerer(CodeGen &codegen) : codegen_(codegen) {}
+TailCallLowerer::TailCallLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
   // The tail calls between them, to a function with the same return type:
@@ -194,18 +194,18 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       return;
     }
     llvm::sort(cycle);
-    CodeGen::TailGroup &group = tailGroups_.emplace_back();
+    Lowering::TailGroup &group = tailGroups_.emplace_back();
     for (size_t member : cycle) {
       group.members.push_back(functions[member]);
-      codegen_.tailGroupOf_[functions[member]] = &group;
+      lowering_.tailGroupOf_[functions[member]] = &group;
     }
     // The tail calls between them are jumps, which do not grow the stack
-    // (see CodeGen::analyzeThrows).
+    // (see Lowering::analyzeThrows).
     for (FunctionDecl *member : group.members) {
       for (CallExpr *call : tailCallsIn(member)) {
         if (llvm::is_contained(group.members, call->func->decl) &&
             call->func->ret == member->sym->ret) {
-          codegen_.tailJumps_.insert(call);
+          lowering_.tailJumps_.insert(call);
         }
       }
     }
@@ -229,7 +229,7 @@ void TailCallLowerer::findTailGroups(FunctionDecl *closure) {
   }
 }
 
-void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
+void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
   if (group.emitted) {
     return;
   }
@@ -239,34 +239,36 @@ void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
   bool merged = group.members.size() > 1;
   llvm::Function *function;
   if (!merged) {
-    function = closure ? codegen_.closureLowerer().closureCode(first) : codegen_.functions_.lookup(first->sym);
+    function = closure ? lowering_.closureLowerer().closureCode(first)
+                       : lowering_.functions_.lookup(first->sym);
   } else {
     // (env, which, the parameters of every member) -> the return type.
     std::vector<llvm::Type *> params;
     if (closure) {
-      params.push_back(codegen_.builder_.getPtrTy());
+      params.push_back(lowering_.builder_.getPtrTy());
     }
-    params.push_back(codegen_.builder_.getInt32Ty());
+    params.push_back(lowering_.builder_.getInt32Ty());
     for (FunctionDecl *member : group.members) {
       for (const Type *param : member->sym->params) {
-        params.push_back(codegen_.moduleBuilder().lower(param));
+        params.push_back(lowering_.moduleBuilder().lower(param));
       }
     }
-    auto *type = llvm::FunctionType::get(codegen_.moduleBuilder().lower(first->sym->ret), params, false);
+    auto *type =
+        llvm::FunctionType::get(lowering_.moduleBuilder().lower(first->sym->ret), params, false);
     std::string name = "tz";
     for (FunctionDecl *member : group.members) {
       name += "." + member->name.str();
     }
     function = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name + ".cycle",
-                                      codegen_.module_.get());
-    codegen_.functionBuilder().setFunctionAttributes(function);
+                                      lowering_.module_.get());
+    lowering_.functionBuilder().setFunctionAttributes(function);
   }
 
-  codegen_.functionBuilder().beginFunction(function, first);
+  lowering_.functionBuilder().beginFunction(function, first);
   unsigned next = 0;
   if (closure) {
-    codegen_.envParam_ = function->getArg(next++);
-    codegen_.envLowerer().bindCaptures(first);
+    lowering_.envParam_ = function->getArg(next++);
+    lowering_.envLowerer().bindCaptures(first);
   }
   llvm::Value *which = merged ? function->getArg(next++) : nullptr;
   // The arguments live in slots, which a tail call fills before it jumps.
@@ -275,49 +277,51 @@ void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
     for (const Type *param : member->sym->params) {
-      llvm::AllocaInst *slot = codegen_.functionFrame().createStackSlot(codegen_.moduleBuilder().lower(param), member->name + ".arg");
-      codegen_.builder_.CreateStore(function->getArg(next++), slot);
+      llvm::AllocaInst *slot = lowering_.functionFrame().createStackSlot(
+          lowering_.moduleBuilder().lower(param), member->name + ".arg");
+      lowering_.builder_.CreateStore(function->getArg(next++), slot);
       group.slots[k].push_back(slot);
     }
-    group.starts.push_back(codegen_.functionFrame().newBlock(member->name + ".start"));
+    group.starts.push_back(lowering_.functionFrame().newBlock(member->name + ".start"));
   }
   if (merged) {
     llvm::SwitchInst *dispatch =
-        codegen_.builder_.CreateSwitch(which, group.starts[0], unsigned(group.members.size()));
+        lowering_.builder_.CreateSwitch(which, group.starts[0], unsigned(group.members.size()));
     for (size_t k = 1; k < group.members.size(); ++k) {
-      dispatch->addCase(codegen_.builder_.getInt32(uint32_t(k)), group.starts[k]);
+      dispatch->addCase(lowering_.builder_.getInt32(uint32_t(k)), group.starts[k]);
     }
   } else {
-    codegen_.builder_.CreateBr(group.starts[0]);
+    lowering_.builder_.CreateBr(group.starts[0]);
   }
 
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
-    codegen_.tailGroup_ = &group;
-    codegen_.currentFn_ = member;
-    codegen_.returnType_ = member->sym->ret;
-    codegen_.tailStatements_.clear();
-    if (codegen_.returnType_->isVoid()) {
+    lowering_.tailGroup_ = &group;
+    lowering_.currentFn_ = member;
+    lowering_.returnType_ = member->sym->ret;
+    lowering_.tailStatements_.clear();
+    if (lowering_.returnType_->isVoid()) {
       std::vector<Stmt *> stmts;
       tailStatementsOf(member->body, true, stmts);
       for (Stmt *stmt : stmts) {
         if (tailCall(cast<ExprStmt>(stmt)->expr)) {
-          codegen_.tailStatements_.insert(stmt);
+          lowering_.tailStatements_.insert(stmt);
         }
       }
     }
-    codegen_.functionFrame().switchTo(group.starts[k]);
+    lowering_.functionFrame().switchTo(group.starts[k]);
     std::vector<llvm::Value *> args;
     for (size_t i = 0; i < group.slots[k].size(); ++i) {
-      args.push_back(codegen_.builder_.CreateLoad(codegen_.moduleBuilder().lower(member->sym->params[i]), group.slots[k][i]));
+      args.push_back(lowering_.builder_.CreateLoad(
+          lowering_.moduleBuilder().lower(member->sym->params[i]), group.slots[k][i]));
     }
-    codegen_.functionBuilder().emitParamsAndBody(member, args);
-    codegen_.functionBuilder().closeBody();
+    lowering_.functionBuilder().emitParamsAndBody(member, args);
+    lowering_.functionBuilder().closeBody();
   }
-  codegen_.unwindLowerer().finishFunctionUnwind();
-  codegen_.tailGroup_ = nullptr;
-  codegen_.tailStatements_.clear();
-  codegen_.function_ = nullptr;
+  lowering_.unwindLowerer().finishFunctionUnwind();
+  lowering_.tailGroup_ = nullptr;
+  lowering_.tailStatements_.clear();
+  lowering_.function_ = nullptr;
   if (!merged) {
     return;
   }
@@ -325,8 +329,9 @@ void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
   // Each member's own function calls the cycle's.
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
-    llvm::Function *own = closure ? codegen_.closureLowerer().closureCode(member) : codegen_.functions_.lookup(member->sym);
-    llvm::IRBuilder<> b(llvm::BasicBlock::Create(codegen_.ctx_, "entry", own));
+    llvm::Function *own = closure ? lowering_.closureLowerer().closureCode(member)
+                                  : lowering_.functions_.lookup(member->sym);
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", own));
     std::vector<llvm::Value *> args;
     unsigned arg = 0;
     if (closure) {
@@ -336,7 +341,7 @@ void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
     for (size_t j = 0; j < group.members.size(); ++j) {
       for (const Type *param : group.members[j]->sym->params) {
         args.push_back(j == k ? static_cast<llvm::Value *>(own->getArg(arg++))
-                              : llvm::PoisonValue::get(codegen_.moduleBuilder().lower(param)));
+                              : llvm::PoisonValue::get(lowering_.moduleBuilder().lower(param)));
       }
     }
     llvm::CallInst *result = b.CreateCall(function, args);
@@ -350,11 +355,11 @@ void TailCallLowerer::emitTailGroup(CodeGen::TailGroup &group) {
 
 CallExpr *TailCallLowerer::tailCall(Expr *value) const {
   auto *call = dyn_cast<CallExpr>(value);
-  if (!call || !call->func || call->builtin != Builtin::None || !codegen_.tailGroup_) {
+  if (!call || !call->func || call->builtin != Builtin::None || !lowering_.tailGroup_) {
     return nullptr;
   }
-  if (!llvm::is_contained(codegen_.tailGroup_->members, call->func->decl) ||
-      call->func->ret != codegen_.returnType_) {
+  if (!llvm::is_contained(lowering_.tailGroup_->members, call->func->decl) ||
+      call->func->ret != lowering_.returnType_) {
     return nullptr;
   }
 
@@ -376,81 +381,84 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     return;
   }
   if (!hasTailCall(value)) {
-    codegen_.stmtLowerer().emitReturnValue(value);
+    lowering_.stmtLowerer().emitReturnValue(value);
     return;
   }
   if (auto *cond = dyn_cast<ConditionalExpr>(value)) {
-    llvm::Value *test = codegen_.exprLowerer().emitExpr(cond->cond);
-    llvm::BasicBlock *thenBlock = codegen_.functionFrame().newBlock("tail.then");
-    llvm::BasicBlock *elseBlock = codegen_.functionFrame().newBlock("tail.else");
-    codegen_.builder_.CreateCondBr(test, thenBlock, elseBlock);
-    codegen_.functionFrame().switchTo(thenBlock);
+    llvm::Value *test = lowering_.exprLowerer().emitExpr(cond->cond);
+    llvm::BasicBlock *thenBlock = lowering_.functionFrame().newBlock("tail.then");
+    llvm::BasicBlock *elseBlock = lowering_.functionFrame().newBlock("tail.else");
+    lowering_.builder_.CreateCondBr(test, thenBlock, elseBlock);
+    lowering_.functionFrame().switchTo(thenBlock);
     emitTailReturn(cond->thenExpr);
-    codegen_.builder_.CreateUnreachable(); // ends the dead block after the return
-    codegen_.functionFrame().switchTo(elseBlock);
+    lowering_.builder_.CreateUnreachable(); // ends the dead block after the return
+    lowering_.functionFrame().switchTo(elseBlock);
     emitTailReturn(cond->elseExpr);
     return;
   }
   if (auto *seq = dyn_cast<SequenceExpr>(value)) {
     for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
-      codegen_.stmtLowerer().emitDiscarded(seq->exprs[i]);
+      lowering_.stmtLowerer().emitDiscarded(seq->exprs[i]);
     }
     emitTailReturn(seq->exprs.back());
     return;
   }
   auto *bin = cast<BinaryExpr>(value);
-  llvm::BasicBlock *decidedBlock = codegen_.functionFrame().newBlock("tail.decided");
-  llvm::BasicBlock *restBlock = codegen_.functionFrame().newBlock("tail.rest");
+  llvm::BasicBlock *decidedBlock = lowering_.functionFrame().newBlock("tail.decided");
+  llvm::BasicBlock *restBlock = lowering_.functionFrame().newBlock("tail.rest");
   bool logical = bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
   llvm::Value *lhs = nullptr;
   if (logical) {
     // The left side decides when falsy for `&&`, truthy for `||`, and is
     // then the result.
     bool isAnd = bin->op == BinaryOp::LogAnd;
-    lhs = codegen_.exprLowerer().emitExpr(bin->lhs);
-    llvm::Value *truth = codegen_.truthLowerer().emitTruth(lhs, bin->lhs->type);
-    codegen_.builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
-                          isAnd ? decidedBlock : restBlock);
-    codegen_.functionFrame().switchTo(decidedBlock);
-    llvm::Value *result = codegen_.truthLowerer().decidedValue(bin, lhs);
-    codegen_.functionFrame().emitCleanups(0);
-    codegen_.builder_.CreateRet(result);
+    lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
+    llvm::Value *truth = lowering_.truthLowerer().emitTruth(lhs, bin->lhs->type);
+    lowering_.builder_.CreateCondBr(truth, isAnd ? restBlock : decidedBlock,
+                                    isAnd ? decidedBlock : restBlock);
+    lowering_.functionFrame().switchTo(decidedBlock);
+    llvm::Value *result = lowering_.truthLowerer().decidedValue(bin, lhs);
+    lowering_.functionFrame().emitCleanups(0);
+    lowering_.builder_.CreateRet(result);
   } else if (bin->lhs->type->isOptional()) {
     // `a ?? f(x)`: a when it holds a value.
-    lhs = codegen_.exprLowerer().emitExpr(bin->lhs);
-    codegen_.builder_.CreateCondBr(codegen_.optionalLowerer().optionalHas(lhs, bin->lhs->type), decidedBlock, restBlock);
-    codegen_.functionFrame().switchTo(decidedBlock);
-    llvm::Value *result = bin->type->isOptional() ? lhs : codegen_.optionalLowerer().optionalValue(lhs, bin->lhs->type);
-    codegen_.functionFrame().emitCleanups(0);
-    codegen_.builder_.CreateRet(result);
+    lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
+    lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(lhs, bin->lhs->type),
+                                    decidedBlock, restBlock);
+    lowering_.functionFrame().switchTo(decidedBlock);
+    llvm::Value *result = bin->type->isOptional()
+                              ? lhs
+                              : lowering_.optionalLowerer().optionalValue(lhs, bin->lhs->type);
+    lowering_.functionFrame().emitCleanups(0);
+    lowering_.builder_.CreateRet(result);
   } else {
     // The left side is never undefined.
-    codegen_.stmtLowerer().emitReturnValue(value);
+    lowering_.stmtLowerer().emitReturnValue(value);
     return;
   }
-  codegen_.functionFrame().switchTo(restBlock);
+  lowering_.functionFrame().switchTo(restBlock);
   if (logical) { // undefined after `??` holds nothing to release
-    codegen_.refCounts().releaseValue(lhs, bin->lhs->type);
+    lowering_.refCounts().releaseValue(lhs, bin->lhs->type);
   }
   emitTailReturn(bin->rhs);
 }
 
 void TailCallLowerer::emitTailJump(CallExpr *call) {
-  size_t k =
-      size_t(llvm::find(codegen_.tailGroup_->members, call->func->decl) - codegen_.tailGroup_->members.begin());
+  size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func->decl) -
+                    lowering_.tailGroup_->members.begin());
   // The callee owns its arguments, as for any call; then this call is done
   // with its own variables.
-  std::vector<llvm::Value *> args = codegen_.throwLowerer().emitHeldValues(call->args);
+  std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
   const FuncSymbol *func = call->func;
   for (size_t i = args.size(); i < func->params.size(); ++i) {
-    args.push_back(codegen_.optionalLowerer().undefinedValue(func->params[i]));
+    args.push_back(lowering_.optionalLowerer().undefinedValue(func->params[i]));
   }
-  codegen_.functionFrame().emitCleanups(0);
+  lowering_.functionFrame().emitCleanups(0);
   for (size_t i = 0; i < args.size(); ++i) {
-    codegen_.builder_.CreateStore(args[i], codegen_.tailGroup_->slots[k][i]);
+    lowering_.builder_.CreateStore(args[i], lowering_.tailGroup_->slots[k][i]);
   }
-  codegen_.builder_.CreateBr(codegen_.tailGroup_->starts[k]);
-  codegen_.functionFrame().startDeadBlock();
+  lowering_.builder_.CreateBr(lowering_.tailGroup_->starts[k]);
+  lowering_.functionFrame().startDeadBlock();
 }
 
 } // namespace tz

@@ -1,14 +1,15 @@
 #include "compiler/parallel/expr_walk/expr_walk.h"
-#include "compiler/parallel/code_walk/code_walk.h"
-#include "compiler/parallel/call_walk/call_walk.h"
-#include "compiler/parallel/library_effects/library_effects.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/parallel/alias_analysis/alias_analysis.h"
 #include "compiler/parallel/call_resolver/call_resolver.h"
-#include "compiler/parallel/pieces/pieces.h"
+#include "compiler/parallel/call_walk/call_walk.h"
+#include "compiler/parallel/code_walk/code_walk.h"
 #include "compiler/parallel/conflicts/conflicts.h"
 #include "compiler/parallel/explainer/explainer.h"
+#include "compiler/parallel/library_effects/library_effects.h"
 #include "compiler/parallel/parallel_helpers/parallel_helpers.h"
-#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/parallel/parallel_model/parallel_model.h"
+#include "compiler/parallel/pieces/pieces.h"
 #include "compiler/program/types/types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -24,7 +25,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "compiler/parallel/parallel_model/parallel_model.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -159,7 +159,8 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::Cast: {
     auto *c = cast<CastExpr>(e);
     // A function known by name, adapted to another type of function.
-    if (c->type && c->type->isFunction() && analysis_.callWalk().functionRef(c->operand, use, c->type)) {
+    if (c->type && c->type->isFunction() &&
+        analysis_.callWalk().functionRef(c->operand, use, c->type)) {
       expr(c->operand, use);
       return;
     }
@@ -226,9 +227,11 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     // The length is apart from the elements: a task that writes an element
     // of its own does not change it.
     if (name == "length") {
-      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object), analysis_.length_, write, at);
+      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
+                                 analysis_.length_, write, at);
       if (write) {
-        analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object), nullptr, true, at);
+        analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object),
+                                   nullptr, true, at);
       }
     }
     return;
@@ -237,7 +240,8 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return; // its length never changes
   }
   if (type->isJson()) {
-    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object), nullptr, write, at);
+    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object), nullptr,
+                               write, at);
     return;
   }
   const Field *field = nullptr;
@@ -258,7 +262,8 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   if (!write && (field->readonly || (field->type && field->type->isLiteral()))) {
     return;
   }
-  analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object), analysis_.intern(name), write, at);
+  analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
+                             analysis_.intern(name), write, at);
 }
 
 void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
@@ -271,7 +276,8 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   }
   const Type *type = ix->object->type->nonOptional();
   if (ix->keyed) {
-    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object), analysis_.star_, write, ix->loc());
+    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
+                               analysis_.star_, write, ix->loc());
     return;
   }
   if (type->isString()) {
@@ -280,22 +286,26 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
   if (type->isArray()) {
     // The index a callback of map gets: each call its own element.
     auto *index = dyn_cast<NameExpr>(strip(ix->index));
-    if (index && index->var && analysis_.ownIndex_.contains(index->var) && !index->var->reassigned &&
-        !ix->mayAppend) {
-      analysis_.codeWalk().touch(LocKind::OwnCell, analysis_.aliasAnalysis().refOf(ix->object), index->var->owner, write, ix->loc());
+    if (index && index->var && analysis_.ownIndex_.contains(index->var) &&
+        !index->var->reassigned && !ix->mayAppend) {
+      analysis_.codeWalk().touch(LocKind::OwnCell, analysis_.aliasAnalysis().refOf(ix->object),
+                                 index->var->owner, write, ix->loc());
       return;
     }
     // A write past the end makes the array longer.
     if (write && ix->mayAppend) {
-      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object), analysis_.length_, true, ix->loc());
+      analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
+                                 analysis_.length_, true, ix->loc());
     }
   }
-  analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(ix->object), nullptr, write, ix->loc());
+  analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(ix->object),
+                             nullptr, write, ix->loc());
 }
 
 void ExprWalk::elements(const Expr *e, bool write, llvm::SMLoc at) {
   if (e && holdsReferences(e->type)) {
-    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(e), nullptr, write, at);
+    analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(e), nullptr,
+                               write, at);
   }
 }
 
@@ -330,7 +340,8 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
   }
   const Type *type = e->type->nonOptional();
   if (llvm::any_of(analysis_.aliasAnalysis().inside(type), holdsReferences)) {
-    analysis_.codeWalk().touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner_, write, at);
+    analysis_.codeWalk().touch(LocKind::Contents, Ref{RefKind::Type, type}, analysis_.inner_, write,
+                               at);
   }
 }
 
@@ -344,7 +355,8 @@ void ExprWalk::readSpread(const Expr *e, bool object, llvm::SMLoc at) {
     return;
   }
   if (object && type->isObject()) {
-    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(e), analysis_.star_, false, at);
+    analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(e), analysis_.star_,
+                               false, at);
     return;
   }
   elements(e, false, at);
@@ -448,7 +460,8 @@ void ExprWalk::yieldExpr(const YieldExpr *y) {
   // An async generator gives its value and waits: the loop that iterates
   // it resumes it, inside its own piece. Each step of a `yield*` awaits the
   // other iterator first.
-  unsigned seg = analysis_.codeWalk().segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
+  unsigned seg =
+      analysis_.codeWalk().segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
   analysis_.fn_->segs[seg].delegate = y->delegate;
   analysis_.codeWalk().moveTo(seg);
 }

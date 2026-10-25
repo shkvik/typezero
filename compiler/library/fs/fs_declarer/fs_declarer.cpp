@@ -1,6 +1,6 @@
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
@@ -10,8 +10,8 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
@@ -47,15 +47,15 @@ std::optional<int> fileKind(llvm::StringRef method) {
 
 } // namespace
 
-FsDeclarer::FsDeclarer(Sema &sema) : sema_(sema) {}
+FsDeclarer::FsDeclarer(Checker &checker) : checker_(checker) {}
 
 void FsDeclarer::declareFsClasses() {
   auto declare = [&](llvm::StringRef name,
                      llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields) {
-    auto *cls = sema_.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
+    auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
     cls->builtin = true;
     cls->resolved = cls->declared = true;
-    sema_.classes_.push_back(cls);
+    checker_.classes_.push_back(cls);
     Type *type = Type::classType(name, cls);
     cls->type = type;
     std::vector<Field> typeFields;
@@ -75,23 +75,23 @@ void FsDeclarer::declareFsClasses() {
   // (`mtime`...) are made from them when read, as Node's getters make them,
   // and so are no fields: Node prints none (see checkStatsDate).
   const Type *d = Type::doubleTy();
-  sema_.statsClass_ = declare("Stats", {{"dev", d},
-                                  {"mode", d},
-                                  {"nlink", d},
-                                  {"uid", d},
-                                  {"gid", d},
-                                  {"rdev", d},
-                                  {"blksize", d},
-                                  {"ino", d},
-                                  {"size", d},
-                                  {"blocks", d},
-                                  {"atimeMs", d},
-                                  {"mtimeMs", d},
-                                  {"ctimeMs", d},
-                                  {"birthtimeMs", d}});
+  checker_.statsClass_ = declare("Stats", {{"dev", d},
+                                           {"mode", d},
+                                           {"nlink", d},
+                                           {"uid", d},
+                                           {"gid", d},
+                                           {"rdev", d},
+                                           {"blksize", d},
+                                           {"ino", d},
+                                           {"size", d},
+                                           {"blocks", d},
+                                           {"atimeMs", d},
+                                           {"mtimeMs", d},
+                                           {"ctimeMs", d},
+                                           {"birthtimeMs", d}});
   // A Dirent keeps the kind of the file as the bits of a mode, which only
   // its tests read.
-  sema_.direntClass_ =
+  checker_.direntClass_ =
       declare("Dirent",
               {{"name", Type::string()}, {"parentPath", Type::string()}, {"#type", Type::intTy()}});
 }
@@ -100,30 +100,32 @@ void FsDeclarer::declareFsClasses() {
 // the number of milliseconds next to it; null for another name.
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
   static const llvm::StringLiteral dates[] = {"atime", "mtime", "ctime", "birthtime"};
-  if (cls != sema_.statsClass_ || !llvm::is_contained(dates, member->name)) {
+  if (cls != checker_.statsClass_ || !llvm::is_contained(dates, member->name)) {
     return nullptr;
   }
 
-  return sema_.processChecker().builtinCall(member->loc(), member, Builtin::FsStatsDate, {}, Type::date());
+  return checker_.processChecker().builtinCall(member->loc(), member, Builtin::FsStatsDate, {},
+                                               Type::date());
 }
 
 bool FsDeclarer::isRuntimeClass(const ClassDecl *cls) const {
-  return cls && (cls == sema_.systemErrorClass_ || cls == sema_.statsClass_ || cls == sema_.direntClass_ ||
-                 cls == sema_.execSyncErrorClass_);
+  return cls && (cls == checker_.systemErrorClass_ || cls == checker_.statsClass_ ||
+                 cls == checker_.direntClass_ || cls == checker_.execSyncErrorClass_);
 }
 
 Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls) {
-  if (cls != sema_.statsClass_ && cls != sema_.direntClass_) {
+  if (cls != checker_.statsClass_ && cls != checker_.direntClass_) {
     return nullptr;
   }
   std::optional<int> kind = fileKind(member->name);
   if (!kind) {
     return nullptr;
   }
-  if (sema_.callChecker().rejectSpread(call) || !sema_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
     return call;
   }
-  auto *lit = sema_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));
+  auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(*kind));
   lit->type = Type::intTy();
   call->args = {lit};
   call->builtin = Builtin::FsIsKind;

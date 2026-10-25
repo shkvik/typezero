@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // node:stream (docs/streams.md): its intrinsics and calls.
 class StreamChecker {
 public:
-  explicit StreamChecker(Sema &sema);
+  explicit StreamChecker(Checker &checker);
 
   // `__tz_chunk<T>(u)` and the other intrinsics of node:stream.
   Expr *checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg);
@@ -24,7 +24,7 @@ public:
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

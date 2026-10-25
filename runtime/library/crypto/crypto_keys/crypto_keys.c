@@ -3,6 +3,15 @@
 // generateKeyPairSync, ECDH and diffieHellman, as node does them over OpenSSL.
 
 #include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/closure/closure.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/string/string.h"
+#include "runtime/core/tzrt/tzrt.h"
+#include "runtime/library/bytes/buffer/buffer.h"
+#include "runtime/library/bytes/bytes/bytes.h"
+#include "runtime/library/json/json/json.h"
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/decoder.h>

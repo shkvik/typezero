@@ -1,9 +1,9 @@
 #include "compiler/check/expr/literal_checker/literal_checker.h"
-#include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/concat_checker/concat_checker.h"
-#include "compiler/check/types/type_operators/type_operators.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_operators/type_operators.h"
+#include "compiler/check/types/type_relations/type_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -12,12 +12,12 @@
 
 using llvm::cast;
 using llvm::dyn_cast;
-using llvm::isa;
 using llvm::dyn_cast_or_null;
+using llvm::isa;
 
 namespace tz {
 
-LiteralChecker::LiteralChecker(Sema &sema) : sema_(sema) {}
+LiteralChecker::LiteralChecker(Checker &checker) : checker_(checker) {}
 
 // An integer literal takes the numeric type the context expects; otherwise
 // int, or long if it does not fit.
@@ -31,7 +31,8 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   if (expected) {
     // `0 | 1`, or a union with a number type: that type.
     double value = negated ? -double(lit->value) : double(lit->value);
-    if (const Type *literal = sema_.literalTypes().numberLiteralFor(expected, value, /*fraction=*/false);
+    if (const Type *literal =
+            checker_.literalTypes().numberLiteralFor(expected, value, /*fraction=*/false);
         literal && (!negated || value != 0)) {
       lit->type = literal;
       return lit;
@@ -44,7 +45,8 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   if (expected && (expected->isNumeric() || expected->isDecimal())) {
     lit->type = expected;
     if (expected->isInteger() && !fits(expected->bitWidth())) {
-      sema_.diags_.error(lit->loc(), "integer literal does not fit in type '" + expected->name() + "'");
+      checker_.diags_.error(lit->loc(),
+                            "integer literal does not fit in type '" + expected->name() + "'");
     }
   } else if (fits(32)) {
     lit->type = Type::intTy();
@@ -57,10 +59,12 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   // (`reduce(f, 0)` over `T extends number` starts from a double); an
   // instance gives it the same.
   std::pair<const char *, unsigned> key{lit->loc().getPointer(), unsigned(Expr::Kind::IntLit)};
-  if (!sema_.functions_.empty() && sema_.functions_.front()->sym && sema_.functions_.front()->sym->isGeneric()) {
-    sema_.forced_[key] = lit->type;
-  } else if (sema_.checkingInstance_) {
-    if (const Type *type = sema_.forced_.lookup(key); type && TypeRelations::isImplicitlyConvertible(lit->type, type)) {
+  if (!checker_.functions_.empty() && checker_.functions_.front()->sym &&
+      checker_.functions_.front()->sym->isGeneric()) {
+    checker_.forced_[key] = lit->type;
+  } else if (checker_.checkingInstance_) {
+    if (const Type *type = checker_.forced_.lookup(key);
+        type && TypeRelations::isImplicitlyConvertible(lit->type, type)) {
       lit->type = type;
     }
   }
@@ -72,7 +76,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   std::vector<const Type *> parts;
   bool constant = true;
   for (Expr *&e : tmpl->exprs) {
-    e = sema_.exprChecker().checkExpr(e);
+    e = checker_.exprChecker().checkExpr(e);
     // A copy of generic code converts a value of a type parameter to a string
     // here, as the generic check did (noteForced): the type it had.
     const Expr *part = e;
@@ -82,7 +86,7 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     parts.push_back(part->type);
     constant &= isa<NameExpr>(part) || isa<StringLitExpr>(part) || isa<IntLitExpr>(part) ||
                 isa<BoolLitExpr>(part);
-    e = sema_.concatChecker().toStringOperand(e);
+    e = checker_.concatChecker().toStringOperand(e);
   }
   tmpl->type = Type::string();
   // Where a template literal type is expected, the type the parts make, as
@@ -108,12 +112,13 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
       operands.push_back(part);
     }
   }
-  const Type *type = sema_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
+  const Type *type =
+      checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Template, operands), operands);
   if (type->isPattern() ||
       (type->typeOp() == TypeOp::Template && TypeRelations::isImplicitlyConvertible(type, want))) {
     tmpl->type = type;
   } else if (type->isStringLiteral() && constant) {
-    auto *literal = sema_.ctx_.make<StringLitExpr>(tmpl->loc(), type->literalText());
+    auto *literal = checker_.ctx_.make<StringLitExpr>(tmpl->loc(), type->literalText());
     literal->type = type;
     return literal;
   }

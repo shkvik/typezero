@@ -1,19 +1,19 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Tables of methods and of interfaces, and the calls through them.
 class InheritLowerer {
 public:
-  explicit InheritLowerer(CodeGen &codegen);
+  explicit InheritLowerer(Lowering &lowering);
 
   void prepareDispatch(SourceFile &file);
   // How code reaches member `name` of objects of `type`, if through a table;
   // `signature` picks one of a method with several signatures.
-  const CodeGen::InterfaceMember *dispatchedMember(const Type *type, llvm::StringRef name,
-                                          int signature = -1);
+  const Lowering::InterfaceMember *dispatchedMember(const Type *type, llvm::StringRef name,
+                                                    int signature = -1);
   // The address of entry `entry` of the table of `iface` in `object`'s
   // descriptor.
   llvm::Value *tableEntry(llvm::Value *object, const Type *iface, unsigned entry);
@@ -35,7 +35,7 @@ public:
   const Type *layoutPrefix(const Type *type) const;
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<const Type *, std::vector<const Type *>> tablesOf_;
   unsigned colors_ = 0;
   std::map<const Type *, llvm::Constant *> itables_;

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // EventEmitter: new, on, emit and the other methods (docs/events.md).
 class EmitterChecker {
 public:
-  explicit EmitterChecker(Sema &sema);
+  explicit EmitterChecker(Checker &checker);
 
   // A call of the program of a method of node's EventEmitter on an emitter
   // of class `cls` (with `super`, `super.m()` in a class down its chain):
@@ -32,7 +32,7 @@ public:
   Expr *collectEmitterCall(CallExpr *call, MemberExpr *member, const std::string &site);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

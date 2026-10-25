@@ -7,7 +7,7 @@ namespace tz {
 struct ClassDecl;
 
 // `class extends Base { ... }` as an expression (docs/decorators.md, section
-// 5): its value is the class, which Sema makes when it checks the
+// 5): its value is the class, which Checker makes when it checks the
 // expression, once for each copy of a generic function that has it. Its
 // static fields get their values each time it is evaluated.
 class ClassExpr : public Expr {

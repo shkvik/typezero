@@ -13,21 +13,21 @@ class IndexExpr;
 class ObjectLitExpr : public Expr {
 public:
   struct Property {
-    llvm::StringRef name; // set by Sema for a key in brackets; empty for a spread
+    llvm::StringRef name; // set by Checker for a key in brackets; empty for a spread
     llvm::SMLoc loc;
     Expr *value; // the object spread, for a spread
     bool spread = false;
-    // `[key]: value`: a key that must be a constant (see Sema::constantKey).
+    // `[key]: value`: a key that must be a constant (see Checker::constantKey).
     Expr *key = nullptr;
     // `{ x = 1 }`, which only a destructuring pattern may contain: value is
     // the default.
     bool defaulted = false;
     // A spread that leaves out some fields: the rest of an object pattern,
     // `{ a, [k]: b, ...rest }`. The fields named, and the reads by a key in
-    // brackets, whose fields Sema finds (IndexExpr::field).
+    // brackets, whose fields Checker finds (IndexExpr::field).
     std::vector<llvm::StringRef> omit;
     std::vector<const IndexExpr *> omitKeys;
-    // Set by Sema in a literal with spreads: a later property replaces this
+    // Set by Checker in a literal with spreads: a later property replaces this
     // value, which is only evaluated; or of a spread, the fields that a later
     // property replaces, which are not copied.
     bool replaced = false;
@@ -40,7 +40,7 @@ public:
   static bool classof(const Expr *e) { return e->kind() == Kind::ObjectLit; }
 
   std::vector<Property> props;
-  // Set by Sema for a literal with methods: the class of its own that the
+  // Set by Checker for a literal with methods: the class of its own that the
   // object is an instance of (see ClassDecl::literal).
   ClassDecl *cls = nullptr;
   bool hasSpread() const {

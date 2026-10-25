@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Functions declared inside functions: hoisting, and the groups that capture each other.
 class NestedFunctions {
 public:
-  explicit NestedFunctions(Sema &sema);
+  explicit NestedFunctions(Checker &checker);
 
   NestedGroup *declareNested(BlockStmt *block);
   void finishGroup(NestedGroup *group);
@@ -17,7 +17,7 @@ public:
   FunctionDecl *namedFunction(const Expr *expr) const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

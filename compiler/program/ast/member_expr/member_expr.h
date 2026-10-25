@@ -1,8 +1,8 @@
 #pragma once
 
 #include "compiler/program/ast/expr/expr.h"
-#include "compiler/program/symbols/func_symbol/func_symbol.h"
 #include "compiler/program/ast/type_ref/type_ref.h"
+#include "compiler/program/symbols/func_symbol/func_symbol.h"
 
 namespace tz {
 
@@ -15,7 +15,7 @@ public:
   Expr *object;
   llvm::StringRef name;
   bool optional = false; // `object?.name`
-  // Set by Sema for a method read as a value: a function bound to the object.
+  // Set by Checker for a method read as a value: a function bound to the object.
   // With `virtualCall`, the method of the object's class at the slot of
   // `method`, as for CallExpr.
   FuncSymbol *method = nullptr;

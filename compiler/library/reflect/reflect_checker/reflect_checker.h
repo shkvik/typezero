@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // The classes reflection reaches, and fromJson of classes (docs/decorators.md, section 6).
 class ReflectChecker {
 public:
-  explicit ReflectChecker(Sema &sema);
+  explicit ReflectChecker(Checker &checker);
 
   // Reflection (sema_reflect.cpp, docs/decorators.md section 6).
   // Reflect.get, Reflect.apply and Reflect.construct, with unknowns for the
@@ -29,7 +29,7 @@ public:
   bool onlyChecked() const;
 
 private:
-  Sema &sema_;
+  Checker &checker_;
   // The classes whose objects become objects or unknowns, those whose objects
   // Reflect.get looks into by their type, and whether it looks into any.
   llvm::SmallPtrSet<ClassDecl *, 8> escaped_;

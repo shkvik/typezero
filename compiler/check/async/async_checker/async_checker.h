@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/check/sema/sema.h"
+#include "compiler/check/checker/checker.h"
 
 namespace tz {
 
 // Async functions, await, for await, and the promises nothing waits for (docs/async.md).
 class AsyncChecker {
 public:
-  explicit AsyncChecker(Sema &sema);
+  explicit AsyncChecker(Checker &checker);
 
   void checkForAwait(ForOfStmt *stmt);
   // Async (sema_async.cpp, docs/async.md). `Promise<T>` in an annotation, or
@@ -33,7 +33,7 @@ public:
   void checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at);
 
 private:
-  Sema &sema_;
+  Checker &checker_;
 };
 
 } // namespace tz

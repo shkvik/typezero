@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The intrinsics __tz_* of the built-in modules written in tz, and AbortSignal.
 class LibraryCallLowerer {
 public:
-  explicit LibraryCallLowerer(CodeGen &codegen);
+  explicit LibraryCallLowerer(Lowering &lowering);
 
   // The intrinsics of the built-in modules written in tz, `__tz_*`
   // (codegen_events.cpp).
@@ -19,7 +19,7 @@ public:
   static bool isAbortSignal(const Type *type);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz

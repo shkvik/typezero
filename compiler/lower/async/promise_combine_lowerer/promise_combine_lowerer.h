@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // Promise.all, allSettled, race and any.
 class PromiseCombineLowerer {
 public:
-  explicit PromiseCombineLowerer(CodeGen &codegen);
+  explicit PromiseCombineLowerer(Lowering &lowering);
 
   llvm::Value *emitPromiseCombine(CallExpr *call);
   // void (ptr dst, ptr src): the value of type `from` at src, made a `to`
@@ -15,7 +15,7 @@ public:
   llvm::Function *combineConverter(const Type *from, const Type *to);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<std::pair<const Type *, const Type *>, llvm::Function *> combineConverters_;
 };
 

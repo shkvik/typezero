@@ -16,8 +16,8 @@
 //                     characters (without HEAP, see below)
 //         bit  63     HEAP: obj is reference counted (literals are not)
 //
-// The layout must match CodeGen (kStr* constants in
-// compiler/lower/codegen/codegen.cpp).
+// The layout must match Lowering (kStr* constants in
+// compiler/lower/lowering/lowering.cpp).
 //
 // Representations:
 //   inline        a one-byte string of up to 8 code units lives in `obj`, the
@@ -45,7 +45,16 @@
 // with a compare-and-swap of `used`, and a shared rope is flattened under a
 // lock, its flat result published before anyone reads it.
 
+#include "runtime/core/string/string.h"
+#include "runtime/core/alloc/alloc.h"
+#include "runtime/core/array/array.h"
+#include "runtime/core/error/error.h"
+#include "runtime/core/group/group.h"
+#include "runtime/core/number/number.h"
+#include "runtime/core/output/output.h"
+#include "runtime/core/parallel/parallel.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include "runtime/core/unicode/unicode.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -791,7 +800,7 @@ static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t t
 // A number the compiler passes to tz_str_concat_n as it is, so that `"x" + i`
 // needs no temporary string: `meta` has the ROPE and TWO_BYTE flags without
 // HEAP, which no real string has, and NUMBER_INT or NUMBER_DOUBLE in its low
-// bits; `obj` holds the bits of the value. Must match kNumberPart in CodeGen.
+// bits; `obj` holds the bits of the value. Must match kNumberPart in Lowering.
 #define NUMBER_INT 1
 #define NUMBER_DOUBLE 2
 

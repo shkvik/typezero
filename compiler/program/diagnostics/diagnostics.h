@@ -24,8 +24,8 @@ public:
   // `tz: message`: an error of tz itself, at no place of the program.
   void tool(const llvm::Twine &message);
 
-  // While muted, diagnostics are dropped: Sema checks copies of code that it
-  // checks again for real (see Sema::inferCycle). Returns the old setting.
+  // While muted, diagnostics are dropped: Checker checks copies of code that it
+  // checks again for real (see Checker::inferCycle). Returns the old setting.
   bool setMuted(bool muted) {
     bool old = muted_;
     muted_ = muted;
@@ -34,7 +34,7 @@ public:
   }
 
   // While capturing, errors are collected instead of printed (and notes
-  // dropped): Sema reports an error in a copy of a generic function at the
+  // dropped): Checker reports an error in a copy of a generic function at the
   // call that needs the copy. Returns the old setting.
   struct Captured {
     llvm::SMLoc loc;
@@ -54,7 +54,7 @@ public:
   // would tell the program's author about code that is not theirs.
   void quietRange(const char *begin, const char *end) { quiet_.push_back({begin, end}); }
 
-  // The files of the program, and those it embeds (see Sema::readEmbedded).
+  // The files of the program, and those it embeds (see Checker::readEmbedded).
   llvm::SourceMgr &sourceMgr() const { return sourceMgr_; }
 
   bool hasErrors() const { return errorCount_ != 0; }

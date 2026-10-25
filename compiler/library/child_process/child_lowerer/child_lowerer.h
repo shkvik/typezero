@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // spawnSync, execFileSync and execSync: a call of tz_child_run.
 class ChildLowerer {
 public:
-  explicit ChildLowerer(CodeGen &codegen);
+  explicit ChildLowerer(Lowering &lowering);
 
   // spawnSync, execFileSync and execSync of node:child_process
   // (codegen_child.cpp).
@@ -23,7 +23,7 @@ public:
   llvm::Value *spawnStream(llvm::Value *parts, unsigned stream, const Type *to, bool retain);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
   std::map<const Type *, llvm::Function *> spawnMakers_;
 };
 

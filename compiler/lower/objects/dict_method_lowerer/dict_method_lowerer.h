@@ -1,13 +1,13 @@
 #pragma once
 
-#include "compiler/lower/codegen/codegen.h"
+#include "compiler/lower/lowering/lowering.h"
 
 namespace tz {
 
 // The methods of Map and Set, new Map, groupBy and Object.fromEntries.
 class DictMethodLowerer {
 public:
-  explicit DictMethodLowerer(CodeGen &codegen);
+  explicit DictMethodLowerer(Lowering &lowering);
 
   llvm::Value *emitDictCall(CallExpr *call);
   llvm::Value *emitDictNew(CallExpr *call);
@@ -15,7 +15,7 @@ public:
   llvm::Value *emitDictObjectCall(CallExpr *call);
 
 private:
-  CodeGen &codegen_;
+  Lowering &lowering_;
 };
 
 } // namespace tz
