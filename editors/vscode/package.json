@@ -1,21 +1,26 @@
 {
   "name": "tz",
-  "displayName": "typezero",
-  "description": "Highlighting of typezero programs (.tz files)",
-  "version": "0.1.0",
+  "displayName": "TypeZero",
+  "description": "Highlighting and formatting of TypeZero programs (.tz files)",
+  "version": "0.2.0",
   "publisher": "typezero",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:tz"
   ],
   "contributes": {
     "languages": [
       {
         "id": "tz",
         "aliases": [
-          "typezero",
+          "TypeZero",
           "tz"
         ],
         "extensions": [
@@ -45,6 +50,14 @@
           "variable.other.jsdoc": "other"
         }
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[tz]": {
+        "editor.defaultFormatter": "typezero.tz",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false
+      }
+    }
   }
 }

@@ -149,7 +149,13 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 скобки и отступы как у TS. Ставится копией в каталог расширений
 (`editors\vscode\install.ps1`).
 
-- **Только подсветка.** Проверки типов, подсказок и перехода к определению в редакторе нет —
+- **Форматирование** — Prettier в расширении ([third_party/prettier](../third_party/prettier/README.md)):
+  синтаксис у tz тот же, что у TypeScript, и Prettier читает файл `.tz` как TypeScript. Его
+  настройки по умолчанию: отступ 2 пробела, точки с запятой, двойные кавычки, строки до 80
+  знаков; концы строк остаются, как в файле. Только по команде (Alt+Shift+F, Format Selection),
+  не при сохранении. Тест `tests/cli/format.cmake` проверяет, что Prettier разбирает все файлы
+  `.tz` репозитория, кроме `tests/errors`.
+- **Проверок нет.** Проверки типов, подсказок и перехода к определению в редакторе нет —
   ошибки показывает `tz build`. Их даст свой языковой сервер или плагин tsserver, который
   отдаёт файлы `.tz` проверке TypeScript.
 - **Для плагина всё готово** рядом с tz, в `types/`: настройки tsc для программ tz,
@@ -186,7 +192,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
    `JSON.parse` и `JSON.stringify` — после исключений ([errors.md](errors.md), шаг 2): разбор
    бросает `SyntaxError`.
 4. **Редактор** (сделано 25 октября). Файлы `.tz`: загрузчик, `tz init`, пакеты и `tz port`,
-   ошибки с подсказкой на `.ts` и `.js`, все тесты и примеры. Расширение VS Code с подсветкой
-   ([editors/vscode](../editors/vscode/README.md)). `tz.d.ts` и настройки tsc рядом с tz,
+   ошибки с подсказкой на `.ts` и `.js`, все тесты и примеры. Расширение VS Code с подсветкой и
+   форматированием Prettier'ом ([editors/vscode](../editors/vscode/README.md)). `tz.d.ts` и настройки tsc рядом с tz,
    `@types/node`, undici-types и neverthrow в [third_party/types](../third_party/types/README.md),
    тест `tests/cli/types.cmake` — для будущего плагина tsserver; его самого нет.

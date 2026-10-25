@@ -15,7 +15,10 @@ Get-ChildItem $extensions -Directory -Filter "$name-*" | Remove-Item -Recurse -F
 
 $target = Join-Path $extensions "$name-$($manifest.version)"
 New-Item -ItemType Directory -Force $target | Out-Null
-foreach ($item in "package.json", "language-configuration.json", "syntaxes", "README.md") {
+foreach ($item in "package.json", "language-configuration.json", "syntaxes", "extension.js",
+                  "format.js", "README.md") {
   Copy-Item -Recurse (Join-Path $PSScriptRoot $item) $target
 }
+# The formatter (format.js) needs Prettier next to it.
+Copy-Item -Recurse (Join-Path $PSScriptRoot "..\..\third_party\prettier") (Join-Path $target "prettier")
 Write-Output "installed $name $($manifest.version) into $target; reload VS Code (Developer: Reload Window)"
