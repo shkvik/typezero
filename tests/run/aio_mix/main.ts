@@ -1,0 +1,90 @@
+// Waiting for I/O with the rest of the language, across files: node:fs/promises
+// with Buffers and encodings and its SystemError rejections, cancelled with an
+// AbortController; node:timers/promises; a class with
+// [Symbol.asyncIterator]() and an AsyncIterable parameter; async generators
+// in a decorated method, in a generic class and of unknown values; and the
+// overflow warnings across awaits.
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { setInterval, setTimeout } from "node:timers/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Journal, LineFeed, Queue, calls, collect } from "./feeds.ts"
+
+const dir = await mkdtemp(join(tmpdir(), "tz-aio-mix-"))
+const file = join(dir, "data.bin")
+
+// 1. Bytes and text through node:fs/promises.
+await writeFile(file, new Uint8Array([0x68, 0x69, 0xe9]))
+await appendFile(file, Buffer.from("!"))
+const bytes = await readFile(file)
+console.log(bytes, bytes.length, await readFile(file, "latin1"), await readFile(file, { encoding: "hex" }))
+await writeFile(file, "café", "latin1")
+console.log(await readFile(file), await readFile(file, "base64"))
+try {
+  await readFile(join(dir, "missing.txt"))
+} catch (e: unknown) {
+  if (e instanceof SystemError)
+    console.log("missing:", e.code, e.syscall)
+}
+const controller = new AbortController()
+controller.abort()
+try {
+  await readFile(file, { signal: controller.signal })
+} catch (e: unknown) {
+  if (e instanceof Error)
+    console.log("cancelled:", e.name)
+}
+
+// 2. Timers that give promises and an async iterator.
+console.log(await setTimeout(2, "later"))
+let ticks = 0
+for await (const tick of setInterval(1, "tick")) {
+  ticks++
+  if (ticks == 3) {
+    console.log(tick, ticks)
+    break
+  }
+}
+const stop = new AbortController()
+const waiting = setTimeout(10000, "never", { signal: stop.signal })
+stop.abort()
+console.log(await waiting.catch(e => `stopped: ${e.name}`))
+
+// 3. A class that `for await` iterates, and an AsyncIterable parameter.
+const lines = join(dir, "lines.txt")
+await writeFile(lines, "alpha\nbeta\ngamma\n")
+for await (const line of new LineFeed(lines))
+  console.log("line", line)
+console.log(await collect(new LineFeed(lines)))
+
+// 4. Async generators: a decorated method, a generic class, unknown values.
+const journal = new Journal()
+journal.add("one")
+journal.add("two")
+journal.add("three")
+for await (const entry of journal.since(1))
+  console.log("entry", entry)
+console.log(calls)
+const queue = new Queue<int>()
+queue.push(1)
+queue.push(2)
+console.log(await collect(queue.drain()))
+async function* mixed(): AsyncGenerator<unknown> {
+  yield 1
+  yield "two"
+  yield await readFile(lines)
+}
+for await (const v of mixed())
+  console.log(typeof v, v instanceof Buffer ? v.length : v)
+
+// 5. A number read from a file stays a value from outside across awaits.
+await writeFile(lines, "12\n30\n")
+let sum = 0
+for await (const line of new LineFeed(lines)) {
+  const n: int = parseInt(line)
+  await setTimeout(1)
+  // expect-warning: 'sum += n' may overflow int: 'n' comes from parseInt
+  sum += n
+}
+console.log(sum)
+await rm(dir, { recursive: true })

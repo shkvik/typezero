@@ -1,0 +1,21 @@
+timeout 10
+timeout 40
+tick after timeout 40
+promise after timeout 40
+immediate after timeout 40
+timeout 0 after timeout 40
+timeout 70
+interval 1
+interval 2
+interval 3
+first of two
+promise of the first
+second of two
+has ref: true
+has ref: false
+immediate 1
+immediate 2
+immediate 4, unref'd, runs with the others
+immediate 3
+refreshed
+refreshed timer

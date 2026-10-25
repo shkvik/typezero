@@ -1,0 +1,6 @@
+20 { limit: 20, text: 'dogs' }
+21 { text: 'dogs', limit: 5 }
+[ 'text' ] 1
+text
+dogs {} []
+-1

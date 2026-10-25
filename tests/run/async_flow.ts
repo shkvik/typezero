@@ -1,0 +1,76 @@
+// same-as-node
+// `await` anywhere in the code: in arguments (what they computed before is
+// released when the Promise is rejected), conditions, loops with labels,
+// switch, a loop over a generator; deep chains of awaits; many tasks.
+async function value<T>(x: T): Promise<T> {
+  await undefined
+  return x
+}
+async function fail(msg: string): Promise<string> {
+  await undefined
+  throw new Error(msg)
+}
+function* naturals() {
+  let n = 0
+  while (true) yield n++
+}
+async function main() {
+  // Temporaries held across an await that throws are released.
+  const s = "held"
+  try {
+    console.log(`${s}-${s}`, await fail("in args"))
+  } catch (e) {
+    console.log("caught", e.message)
+  }
+  try {
+    const parts = [s + "!", await fail("in array")]
+    console.log(parts)
+  } catch (e) {
+    console.log("caught", e.message)
+  }
+  // await in conditions, logical operators and loops.
+  let count = 0
+  while ((await value(count)) < 3) count++
+  console.log("count", count)
+  const name = (await value("")) || (await value("default"))
+  console.log(name)
+  outer: for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      if ((await value(j)) == 1) continue outer
+      if (i == 2) break outer
+      console.log(i, j)
+    }
+  }
+  switch (await value(2)) {
+    case 1:
+      console.log("one")
+      break
+    case 2:
+      console.log("two", await value("!"))
+      break
+  }
+  for (const n of naturals()) {
+    if (n > 2) break
+    console.log("gen", await value(n * 10))
+  }
+  const strings = [await value("x"), await value("y")]
+  console.log(strings, strings.length)
+  return count
+}
+console.log("result", await main())
+
+async function depth(n: int): Promise<int> {
+  if (n == 0) return 0
+  return 1 + (await depth(n - 1))
+}
+console.log(await depth(1000))
+
+let done = 0
+const tasks: Promise<void>[] = []
+for (let i = 0; i < 10000; i++)
+  tasks.push((async () => {
+    await value(i)
+    done++
+  })())
+await Promise.all(tasks)
+console.log("done", done)

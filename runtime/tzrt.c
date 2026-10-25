@@ -1,7 +1,7 @@
 // The core of the typezero runtime, linked into every program: buffered
-// output for console.log, number formatting, panics, the debugger statement,
-// startup and shutdown.
-// Strings live in string.c.
+// output for console.log, console.error and process.stdout.write, number
+// formatting, panics, the debugger statement, startup and shutdown.
+// Strings live in string.c, the rest of process in process.c.
 
 #include "tzrt.h"
 
@@ -110,16 +110,36 @@ static void stream_write(Stream *s, const char *data, size_t len) {
 
 #endif
 
-// stdout is buffered; a console gets every line as soon as it is complete.
+// stdout is buffered: a file or a pipe gets it in large pieces, a console
+// every line as soon as it is complete.
+//
+// stderr is not buffered, but its text is put together in the same buffer:
+// console.error and the like write out what stdout holds first, switch the
+// buffer to stderr, print as console.log does and write out their text. So
+// with `prog > out.txt 2>&1` the lines of both streams come in the order the
+// program printed them, as in Node.
 char tz_out_buf[8192]; // not static: see the rules in tzrt.h
 size_t tz_out_len;
+Stream *tz_out_target = &tz_out_stream; // where the buffer goes
 
 // Writes out the buffer, or with `all` unset, only its complete characters.
 TZ_NOINLINE void tz_out_flush(int all) {
   size_t n = all ? tz_out_len : utf8_complete_prefix(tz_out_buf, tz_out_len);
-  stream_write(&tz_out_stream, tz_out_buf, n);
+  stream_write(tz_out_target, tz_out_buf, n);
   memmove(tz_out_buf, tz_out_buf + n, tz_out_len - n);
   tz_out_len -= n;
+}
+
+// What console.error, console.warn and process.stderr.write print between
+// these goes to stderr.
+void tz_err_begin(void) {
+  tz_out_flush(1);
+  tz_out_target = &tz_err_stream;
+}
+
+void tz_err_end(void) {
+  tz_out_flush(1);
+  tz_out_target = &tz_out_stream;
 }
 
 static void out_flush_all(void) { tz_out_flush(1); }
@@ -144,14 +164,21 @@ void tz_out_write(const char *data, size_t len) {
   tz_out_len += len;
 }
 
+// What a function that may recurse leaves on the stack below its check for
+// the code that runs without one: the runtime's functions, and the program's
+// functions that do not recurse.
+#define STACK_MARGIN (256 * 1024)
+
 #ifdef _WIN32
-// Recursion that runs out of stack stops the program with a panic, as
-// JavaScript throws a RangeError, instead of crashing. The handler runs on
-// the little stack Windows keeps for it (SetThreadStackGuarantee).
+// The functions of the program that may recurse check the stack and throw
+// RangeError (tz_stack_limit). Running out of it elsewhere, as in deep
+// recursion of the runtime's own code, stops the program as a failure of the
+// runtime, instead of crashing. The handler runs on the little stack Windows
+// keeps for it (SetThreadStackGuarantee).
 static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
   if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
     return EXCEPTION_CONTINUE_SEARCH;
-  static const char message[] = "panic: RangeError: Maximum call stack size exceeded\n";
+  static const char message[] = "tz: the runtime ran out of stack (Maximum call stack size exceeded)\n";
   tz_out_flush(1);
   stream_write(&tz_err_stream, message, sizeof message - 1);
   TerminateProcess(GetCurrentProcess(), 2);
@@ -159,18 +186,31 @@ static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
 }
 #endif
 
+extern int32_t tz_group_listing; // group.c
+
 void tz_rt_init(void) {
+  // A program checked for leaks lists the members of groups, to report those
+  // left at the end (group.c).
+  tz_group_listing = getenv("TZ_CHECK_LEAKS") != NULL;
 #ifdef _WIN32
   stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
   stream_init(&tz_err_stream, STD_ERROR_HANDLE);
   ULONG guarantee = 64 * 1024;
   SetThreadStackGuarantee(&guarantee);
   AddVectoredExceptionHandler(1, on_exception);
+  ULONG_PTR low, high;
+  GetCurrentThreadStackLimits(&low, &high);
+  tz_stack_limit = (char *)low + STACK_MARGIN;
 #else
   stream_init(&tz_out_stream, 1);
   stream_init(&tz_err_stream, 2);
+  // The 8 MB that Linux gives the main thread, from about here.
+  char here;
+  tz_stack_limit = &here - 8 * 1024 * 1024 + STACK_MARGIN;
 #endif
+  // Any exit, process.exit() included, writes out what is printed.
   atexit(out_flush_all);
+  tz_clock_init();
 }
 
 // Called when the top-level code has finished. Freeing every object one by
@@ -180,25 +220,36 @@ void tz_rt_init(void) {
 void tz_rt_main_done(void) {
   if (!getenv("TZ_CHECK_LEAKS")) {
     tz_out_flush(1);
-    exit(0);
+    exit(tz_process_exit_status());
   }
 }
 
 // Called when main returns normally. With TZ_CHECK_LEAKS set, reports objects
 // that are still alive: after main has released its globals, every reference
-// count should be back to zero.
+// count should be back to zero. Then the program ends with process.exitCode.
 void tz_rt_shutdown(void) {
+  tz_process_shutdown();
+  tz_meta_shutdown();
+  tz_json_shutdown();
+  tz_fs_shutdown();
+  tz_intl_shutdown();
+  tz_out_flush(1);
+  tz_group_shutdown();
   int64_t strings = tz_str_live_objects(), arrays = tz_arr_live_objects();
-  int64_t objects = tz_obj_live_objects();
-  if ((strings != 0 || arrays != 0 || objects != 0) && getenv("TZ_CHECK_LEAKS")) {
-    char message[192];
+  // Json values count as objects.
+  int64_t objects = tz_obj_live_objects() + tz_json_live_objects();
+  int64_t decimals = tz_dec_live_objects();
+  if ((strings != 0 || arrays != 0 || objects != 0 || decimals != 0) && getenv("TZ_CHECK_LEAKS")) {
+    char message[224];
     int len = snprintf(message, sizeof message,
-                       "tz: %lld string object(s), %lld array(s) and %lld object(s) or closure "
-                       "environment(s) leaked\n",
-                       (long long)strings, (long long)arrays, (long long)objects);
+                       "tz: %lld string object(s), %lld array(s), %lld long decimal(s) and %lld "
+                       "object(s) or closure environment(s) leaked\n",
+                       (long long)strings, (long long)arrays, (long long)decimals,
+                       (long long)objects);
     tz_out_flush(1);
     stream_write(&tz_err_stream, message, (size_t)len);
   }
+  exit(tz_process_exit_status());
 }
 
 //===----------------------------------------------------------------------===//
@@ -208,9 +259,39 @@ void tz_rt_shutdown(void) {
 void tz_print_char(int32_t c) {
   char ch = (char)c;
   tz_out_write(&ch, 1);
-  if (c == '\n' && tz_out_stream.isConsole)
+  if (c == '\n' && tz_out_target->isConsole)
     tz_out_flush(0);
 }
+
+// process.stdout.write(text). A console shows the text at once, as Node does,
+// line or not: it may be a prompt.
+int32_t tz_stdout_write(void *obj, uint64_t meta) {
+  tz_print_string(obj, meta);
+  if (tz_out_target->isConsole)
+    tz_out_flush(0);
+  return 1;
+}
+
+void tz_std_write_bytes(int32_t fd, const uint8_t *data, size_t len) {
+  if (fd == 2)
+    tz_err_begin();
+  tz_out_write((const char *)data, len);
+  if (fd == 2)
+    tz_err_end();
+  else if (tz_out_target->isConsole)
+    tz_out_flush(0);
+}
+
+// process.stderr.write(text)
+int32_t tz_stderr_write(void *obj, uint64_t meta) {
+  tz_err_begin();
+  tz_print_string(obj, meta);
+  tz_err_end();
+  return 1;
+}
+
+// process.stdout.isTTY and process.stderr.isTTY.
+int32_t tz_is_tty(int32_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->isConsole; }
 
 static void print_u64(uint64_t value, int negative) {
   char buf[24];
@@ -262,26 +343,12 @@ size_t tz_format_f64(double value, char *out) {
     return 1;
   }
 
-  char sci[32];
-  for (int precision = 1; precision <= 17; ++precision) {
-    snprintf(sci, sizeof sci, "%.*e", precision - 1, value);
-    if (strtod(sci, NULL) == value)
-      break;
-  }
-
-  // `sci` is "d.ddde+XX" or "de+XX". Collect the digits and the exponent.
+  // value = digits * 10^exponent, with as few digits as possible.
   char digits[20];
-  int k = 0;
-  const char *s = sci;
-  digits[k++] = *s++;
-  if (*s == '.')
-    for (++s; *s != 'e'; ++s)
-      digits[k++] = *s;
-  int exponent = atoi(s + 1);
-  while (k > 1 && digits[k - 1] == '0')
-    --k;
+  int32_t exponent;
+  int k = tz_f64_digits(value, digits, &exponent);
 
-  int n = exponent + 1; // position of the decimal point relative to the digits
+  int n = exponent + k; // position of the decimal point relative to the digits
   if (k <= n && n <= 21) {
     memcpy(p, digits, (size_t)k);
     p += k;
@@ -307,7 +374,14 @@ size_t tz_format_f64(double value, char *out) {
       memcpy(p, digits + 1, (size_t)(k - 1));
       p += k - 1;
     }
-    p += snprintf(p, 8, "e%c%d", n - 1 < 0 ? '-' : '+', abs(n - 1));
+    *p++ = 'e';
+    *p++ = n - 1 < 0 ? '-' : '+';
+    int e = abs(n - 1); // 7 to 324
+    if (e >= 100)
+      *p++ = (char)('0' + e / 100);
+    if (e >= 10)
+      *p++ = (char)('0' + e / 10 % 10);
+    *p++ = (char)('0' + e % 10);
   }
   return (size_t)(p - out);
 }
@@ -356,31 +430,25 @@ TZ_HOT int32_t tz_to_int32(double x) {
   return tz_to_int32_slow(x);
 }
 
-TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, const char *type) {
+// A whole number where an int (`bits` 32) or a long is expected, from
+// Math.floor and the like, that does not fit: JavaScript would go on with a
+// number the type cannot hold, so this is a RangeError instead. The program
+// checks the range itself and calls this to throw.
+TZ_COLD void tz_throw_does_not_fit(double x, int32_t bits) {
   char text[32];
   text[tz_format_f64(x, text)] = 0;
-  tz_panicf("the number %s does not fit in %s", text, type);
+  tz_throw(TZ_RANGE_ERROR, "%s does not fit in %s", text, bits == 32 ? "int" : "long");
 }
 
-// A whole number where an int or a long is expected (Math.floor and the
-// like). JavaScript would go on with a number the type cannot hold; the
-// program stops instead of going on with a different one.
-TZ_HOT int32_t tz_checked_int32(double x) {
-  if (x >= -2147483648.0 && x <= 2147483647.0)
-    return (int32_t)x;
-  tz_panic_does_not_fit(x, "int");
+TZ_COLD int32_t tz_checked_int32_of_long(int64_t x) {
+  tz_throw(TZ_RANGE_ERROR, "%lld does not fit in int", (long long)x);
+  return 0;
 }
 
-TZ_HOT int64_t tz_checked_int64(double x) {
-  if (x >= -9223372036854775808.0 && x < 9223372036854775808.0)
-    return (int64_t)x;
-  tz_panic_does_not_fit(x, "long");
-}
-
-TZ_HOT int32_t tz_checked_int32_of_long(int64_t x) {
-  if (x >= INT32_MIN && x <= INT32_MAX)
-    return (int32_t)x;
-  tz_panicf("the number %lld does not fit in int", (long long)x);
+// take() and drop() of an iterator with a negative count: the RangeError
+// JavaScript throws.
+TZ_COLD void tz_iter_bad_count(int64_t count) {
+  tz_throw(TZ_RANGE_ERROR, "%lld must be positive", (long long)count);
 }
 
 //===----------------------------------------------------------------------===//

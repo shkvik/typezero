@@ -1,0 +1,32 @@
+// expect-stderr: tz: group of Player: 4094 of 4097 objects cannot be reached, held by Player.opponent at cycles_report.ts:20
+// A program compiled with TZ_CHECK_LEAKS set walks a group that has grown
+// large (docs/objects.md, section 11): players who played each other are in
+// one group, which only grows as long as one of them is still in the lobby,
+// and the report names the reference that holds the ones that have left.
+class Player {
+  opponent?: Player
+  wins = 0
+  constructor(public name: string) {}
+}
+
+function serve(days: number): number {
+  const lobby: Player[] = []
+  let made = 0
+  for (let i = 0; i < 10; i++) lobby.push(new Player(`p${made++}`))
+  let games = 0
+  for (let day = 0; day < days; day++) {
+    const a = lobby[day % lobby.length], b = lobby[(day * 7 + 3) % lobby.length]
+    if (a != undefined && b != undefined && a != b) {
+      a.opponent = b
+      b.opponent = a
+      a.wins++
+      games++
+    }
+    // One leaves, a new one comes.
+    lobby.splice(day % lobby.length, 1)
+    lobby.push(new Player(`p${made++}`))
+  }
+  return games
+}
+
+console.log(serve(20000))

@@ -1,0 +1,17 @@
+hero 100 slime 5
+{ x: 3, y: 4 } { name: 'hero', tags: [ 'a', 'b' ] } [ 'name', 'tags' ]
+3 4 a [ 'b' ]
+text/plain 7
+hero { x: 0, y: 1 }
+-1 5 1
+hero at 13,4 #
+42 [ 7, 1 ]
+[ 'slime' ]
+hero 0
+slime 5
+3
+3 4
+{ x: 8, y: 0 } [ 0, 9 ]
+slime { pos: { x: 0, y: 1 }, tags: [], hp: 5 }
+1
+11 12

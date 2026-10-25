@@ -48,6 +48,14 @@ void collectConcat(Expr *expr, std::vector<Expr *> &parts) {
   }
 }
 
+// A value held as a pointer, null for undefined in `T | undefined`: an
+// object, an iterator, a Json, a dictionary or a Promise.
+bool isReference(const Type *type) {
+  return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
+         type->isPromise() || type->isUnknown() || type->isClassRef() ||
+         (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
+}
+
 } // namespace
 
 CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm::DataLayout &layout)
@@ -61,28 +69,92 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
   typeDescTy_ = llvm::StructType::create(ctx, {i32, i32, ptr}, "tz.type");
   fnTy_ = llvm::StructType::create(ctx, {ptr, ptr}, "tz.fn");
   fnInfoTy_ = llvm::StructType::create(ctx, {ptr, strTy_}, "tz.fninfo");
+  decTy_ = llvm::StructType::create(ctx, {i64, i64}, "tz.decimal");
   fieldDescTy_ = llvm::StructType::create(ctx, {ptr, i32, i32, ptr}, "tz.field");
-  layoutDescTy_ = llvm::StructType::create(ctx, {ptr, ptr, i32}, "tz.layout");
+  layoutDescTy_ = llvm::StructType::create(ctx, {ptr, ptr, i32, i32, ptr, i32, i32}, "tz.layout");
+  promiseTy_ = llvm::StructType::create(ctx, {ptr, ptr, ptr, i32, i32}, "tz.promise");
+  promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
 std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
   comparesFunctions_ = file.comparesFunctions;
+  subtypes_ = file.subtypes;
+  usesAsync_ = file.usesAsync;
+  // Node runs a file with `import`, `export` or top-level `await` as an ES
+  // module, inside a microtask, and any other as CommonJS, before the
+  // microtasks; the order of what follows depends on it (runtime/async.c).
+  esModule_ = file.topLevelAwait;
+  for (const Module *module : file.modules)
+    if (module->isEntry && (llvm::any_of(module->file.imports,
+                                         [](const ImportDecl &i) { return !i.implicit; }) ||
+                            !module->file.exports.empty()))
+      esModule_ = true;
   declareRuntime();
+  // Debug mode: a program compiled to check itself for leaks, as the tests
+  // are, also checks what the compiler proved of its memory.
+  debugMemory_ = getenv("TZ_CHECK_LEAKS") != nullptr;
+  analyzeCycles(file); // the counting of members of groups depends on it
   defineRefCountHelpers();
+  prepareDispatch(file);
+  // The functions and globals of imported files are named after the file
+  // too: "tz.geometry.circle.area".
+  for (const Module *module : file.modules) {
+    if (module->isEntry)
+      continue;
+    std::string prefix;
+    llvm::StringRef name(module->name);
+    name.consume_back(".ts");
+    llvm::SmallVector<llvm::StringRef, 4> parts;
+    name.split(parts, '/');
+    for (llvm::StringRef part : parts)
+      prefix += (part == ".." ? std::string("up") : part.str()) + ".";
+    for (const Stmt *item : module->file.items)
+      symbolPrefixes_[item] = prefix;
+  }
+  // A generic function is emitted as its instances, which are top-level
+  // functions like the others.
   std::vector<FunctionDecl *> functions;
-  for (Stmt *item : file.items)
-    if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-      declareFunction(fn);
+  std::vector<ClassDecl *> classes;
+  for (Stmt *item : file.items) {
+    if (auto *fn = dyn_cast<FunctionDecl>(item);
+        fn && fn->typeParams.empty() && !file.unusedFunctions.contains(fn))
       functions.push_back(fn);
+    if (auto *cls = dyn_cast<ClassDecl>(item)) {
+      // A generic class is emitted as its instances, which share its static
+      // methods.
+      if (cls->isEmitted())
+        classes.push_back(cls);
+      // Static methods are plain functions; the others take `this`. A
+      // generic method is emitted as its copies.
+      if (!cls->generic)
+        for (FunctionDecl *fn : cls->methods)
+          if (fn->isStatic && fn->typeParams.empty())
+            functions.push_back(fn);
     }
+  }
+  functions.insert(functions.end(), file.instances.begin(), file.instances.end());
+  emittedClasses_.assign(classes.begin(), classes.end());
+  for (FunctionDecl *fn : functions)
+    declareFunction(fn);
+  for (ClassDecl *cls : classes)
+    declareMethods(cls);
   findTailGroups(functions);
+  analyzeThrows(file);
   declareGlobals(file);
-  for (Stmt *item : file.items)
-    if (auto *fn = dyn_cast<FunctionDecl>(item))
-      emitFunction(fn);
+  for (FunctionDecl *fn : functions)
+    emitFunction(fn);
+  for (ClassDecl *cls : classes)
+    emitMethods(cls);
   emitMain(file);
-  // The closures each function creates come after it.
-  emitPendingClosures();
+  // The closures each function creates come after it, and the iterators of
+  // arrays and helpers it makes; each may need more of the other.
+  while (!pendingClosures_.empty() || !pendingIterators_.empty()) {
+    emitPendingClosures();
+    emitPendingIterators();
+  }
+  finishReflection(file, mainInit_);
+  finishMetadata(file, mainInit_);
+  finishGroupDebug(mainInit_);
   return std::move(module_);
 }
 
@@ -94,14 +166,25 @@ llvm::Type *CodeGen::lower(const Type *type) {
   case Type::Kind::Int: return builder_.getInt32Ty();
   case Type::Kind::Long: return builder_.getInt64Ty();
   case Type::Kind::Double: return builder_.getDoubleTy();
+  case Type::Kind::Decimal: return decTy_;
   case Type::Kind::String: return strTy_;
   case Type::Kind::Array: return builder_.getPtrTy();
   case Type::Kind::Optional:
-    if (type->inner()->isObject()) // null is undefined
-      return builder_.getPtrTy();
+    if (zeroIsUndefined(type->inner())) // null (or zero) is undefined
+      return lower(type->inner());
     return llvm::StructType::get(ctx_, {lower(type->inner()), builder_.getInt1Ty()});
+  case Type::Kind::Literal:
+  case Type::Kind::Union: return lowerUnion(type);
   case Type::Kind::Function: return fnTy_;
   case Type::Kind::Object: return builder_.getPtrTy();
+  case Type::Kind::Result: return resultLayout(type).type;
+  case Type::Kind::Never: return llvm::StructType::get(ctx_); // never holds anything
+  case Type::Kind::Iterator: return builder_.getPtrTy();
+  case Type::Kind::Json: return builder_.getPtrTy();
+  case Type::Kind::Dict: return builder_.getPtrTy();
+  case Type::Kind::Promise: return builder_.getPtrTy();
+  case Type::Kind::Unknown: return builder_.getPtrTy(); // null for undefined
+  case Type::Kind::ClassRef: return builder_.getPtrTy();
   case Type::Kind::Error: break;
   }
   llvm_unreachable("an erroneous type reached code generation");
@@ -134,7 +217,6 @@ void CodeGen::declareRuntime() {
   rt_.printChar = declare("tz_print_char", voidTy, {i32});
   rt_.printString = declare("tz_print_string", voidTy, {ptr, i64});
   rt_.printValue = declare("tz_print_value", voidTy, {ptr, ptr});
-  rt_.panic = declare("tz_panic", voidTy, {ptr, i64});
   rt_.debugger = declare("tz_debugger", voidTy, {});
   // Numbers (runtime/tzrt.c, number.c and math.c).
   rt_.toInt32 = declare("tz_to_int32", i32, {f64});
@@ -143,8 +225,6 @@ void CodeGen::declareRuntime() {
   rt_.mathPowLong = declare("tz_math_pow_long", i64, {i64, i64});
   rt_.mathHypot = declare("tz_math_hypot", f64, {ptr, i64});
   rt_.mathRandom = declare("tz_math_random", f64, {});
-  rt_.checkedInt32 = declare("tz_checked_int32", i32, {f64});
-  rt_.checkedInt64 = declare("tz_checked_int64", i64, {f64});
   rt_.checkedInt32OfLong = declare("tz_checked_int32_of_long", i32, {i64});
   rt_.strToNumber = declare("tz_str_to_number", f64, {ptr, i64});
   rt_.parseInt = declare("tz_parse_int", f64, {ptr, i64, i32});
@@ -205,14 +285,16 @@ void CodeGen::declareRuntime() {
   // The objects of closures (runtime/closure.c).
   rt_.objAlloc = declare("tz_obj_alloc", ptr, {i64});
   rt_.objFree = declare("tz_obj_free", voidTy, {ptr});
+  // Object.keys and the like (runtime/object.c).
+  rt_.objKeys = declare("tz_obj_keys", ptr, {ptr, ptr});
+  rt_.objValues = declare("tz_obj_values", ptr, {ptr, ptr});
+  rt_.objEntries = declare("tz_obj_entries", ptr, {ptr, ptr, ptr, i64});
 
   // Functions that return memory nothing else points to yet.
-  for (llvm::FunctionCallee fresh : {rt_.arrNew, rt_.arrNewLength, rt_.arrSlice, rt_.arrCopy, rt_.objAlloc})
+  for (llvm::FunctionCallee fresh : {rt_.arrNew, rt_.arrNewLength, rt_.arrSlice, rt_.arrCopy,
+                                     rt_.objAlloc, rt_.objKeys, rt_.objValues, rt_.objEntries})
     cast<llvm::Function>(fresh.getCallee())->addRetAttr(llvm::Attribute::NoAlias);
 
-  auto *panic = cast<llvm::Function>(rt_.panic.getCallee());
-  panic->addFnAttr(llvm::Attribute::NoReturn);
-  panic->addFnAttr(llvm::Attribute::Cold);
   cast<llvm::Function>(rt_.arrGrow.getCallee())->addFnAttr(llvm::Attribute::Cold);
 }
 
@@ -272,7 +354,9 @@ void CodeGen::defineRefCountHelpers() {
   }
 
   // tz.obj.retain / tz.obj.release: the objects of closures, which start with
-  // { i64 rc, ptr drop }; the last release calls their drop function.
+  // { i64 rc, ptr descriptor }, where the descriptor starts with the drop
+  // function; the last release calls it. Objects of the language start the
+  // same way, so a function value's environment may be one (a bound method).
   auto *objHeader = llvm::StructType::get(ctx_, {builder_.getInt64Ty(), builder_.getPtrTy()});
   auto *type = llvm::FunctionType::get(builder_.getVoidTy(), {builder_.getPtrTy()}, false);
   for (bool isRetain : {true, false}) {
@@ -296,7 +380,9 @@ void CodeGen::defineRefCountHelpers() {
       auto *dropBlock = llvm::BasicBlock::Create(ctx_, "drop", fn);
       b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), dropBlock, doneBlock);
       b.SetInsertPoint(dropBlock);
-      llvm::Value *drop = b.CreateLoad(b.getPtrTy(), b.CreateStructGEP(objHeader, obj, 1), "drop");
+      llvm::Value *descriptor =
+          b.CreateLoad(b.getPtrTy(), b.CreateStructGEP(objHeader, obj, 1), "descriptor");
+      llvm::Value *drop = b.CreateLoad(b.getPtrTy(), descriptor, "drop");
       b.CreateCall(type, drop, {obj});
       b.CreateBr(doneBlock);
     }
@@ -304,6 +390,69 @@ void CodeGen::defineRefCountHelpers() {
     b.CreateRetVoid();
     (isRetain ? objRetainFn_ : objReleaseFn_) = fn;
   }
+  plainObjRetainFn_ = objRetainFn_;
+  plainObjReleaseFn_ = objReleaseFn_;
+
+  // tz.ref.retain: a reference that may point at a member of a group, whose
+  // count is negative (see runtime/group.c): its group's count goes up.
+  refRetainFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.ref.retain",
+                                        module_.get());
+  refRetainFn_->addFnAttr(llvm::Attribute::AlwaysInline);
+  refRetainFn_->addFnAttr(llvm::Attribute::NoUnwind);
+  {
+    llvm::IRBuilder<> b(llvm::BasicBlock::Create(ctx_, "entry", refRetainFn_));
+    auto *countedBlock = llvm::BasicBlock::Create(ctx_, "counted", refRetainFn_);
+    auto *memberBlock = llvm::BasicBlock::Create(ctx_, "member", refRetainFn_);
+    auto *plainBlock = llvm::BasicBlock::Create(ctx_, "plain", refRetainFn_);
+    auto *doneBlock = llvm::BasicBlock::Create(ctx_, "done", refRetainFn_);
+    llvm::Value *obj = refRetainFn_->getArg(0);
+    b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
+    b.SetInsertPoint(countedBlock);
+    llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
+    b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), memberBlock, plainBlock);
+    b.SetInsertPoint(memberBlock);
+    b.CreateCall(groupFunction("tz_group_retain", b.getVoidTy(), {b.getPtrTy()}), {obj});
+    b.CreateBr(doneBlock);
+    b.SetInsertPoint(plainBlock);
+    b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);
+    b.CreateBr(doneBlock);
+    b.SetInsertPoint(doneBlock);
+    b.CreateRetVoid();
+  }
+  // Environments, boxes and objects that code counts without knowing their
+  // types may be members when the program has any.
+  if (hasCycles_) {
+    objRetainFn_ = refRetainFn_;
+    objReleaseFn_ = groupAwareRelease(plainObjReleaseFn_);
+  }
+
+  // tz.instance.release: an object of the language whose type the code does
+  // not know (Type::anyObject); its header { i64 rc, ptr layout } leads to
+  // the drop function, the first word of the layout.
+  instanceReleaseFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.instance.release",
+                                              module_.get());
+  instanceReleaseFn_->addFnAttr(llvm::Attribute::AlwaysInline);
+  instanceReleaseFn_->addFnAttr(llvm::Attribute::NoUnwind);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(ctx_, "entry", instanceReleaseFn_));
+  auto *countedBlock = llvm::BasicBlock::Create(ctx_, "counted", instanceReleaseFn_);
+  auto *dropBlock = llvm::BasicBlock::Create(ctx_, "drop", instanceReleaseFn_);
+  auto *doneBlock = llvm::BasicBlock::Create(ctx_, "done", instanceReleaseFn_);
+  llvm::Value *obj = instanceReleaseFn_->getArg(0);
+  b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
+  b.SetInsertPoint(countedBlock);
+  llvm::Value *left = b.CreateSub(b.CreateLoad(b.getInt64Ty(), obj, "rc"), b.getInt64(1));
+  b.CreateStore(left, obj);
+  b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), dropBlock, doneBlock);
+  b.SetInsertPoint(dropBlock);
+  llvm::Value *layout = b.CreateLoad(b.getPtrTy(), b.CreateStructGEP(objHeader, obj, 1), "layout");
+  llvm::Value *drop = b.CreateLoad(b.getPtrTy(), layout, "drop");
+  b.CreateCall(type, drop, {obj});
+  b.CreateBr(doneBlock);
+  b.SetInsertPoint(doneBlock);
+  b.CreateRetVoid();
+  plainInstanceReleaseFn_ = instanceReleaseFn_;
+  if (hasCycles_)
+    instanceReleaseFn_ = groupAwareRelease(plainInstanceReleaseFn_);
 }
 
 void CodeGen::setFunctionAttributes(llvm::Function *fn) {
@@ -320,27 +469,71 @@ void CodeGen::declareFunction(FunctionDecl *fn) {
     params.push_back(lower(param));
   auto *type = llvm::FunctionType::get(lower(sym->ret), params, false);
   // The whole program is one module, so everything but `main` is internal and
-  // LLVM is free to inline or drop it.
-  auto *function = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
-                                          "tz." + fn->name, module_.get());
+  // LLVM is free to inline or drop it. An instance of a generic function is
+  // named with its type arguments, as Sema made them (see
+  // Sema::representation): `tz.first<int>`, `tz.first<object>`.
+  std::string name = "tz." + symbolPrefixes_.lookup(fn) + fn->name.str();
+  if (fn->cls) // a static method
+    name = "tz." + symbolPrefixes_.lookup(fn->cls) + fn->cls->name.str() + "." + fn->name.str() +
+           (fn->variant ? "." + std::to_string(fn->variant) : "");
+  if (fn->isInstance) {
+    name += "<";
+    for (size_t i = 0; i < fn->typeArgs.size(); ++i) {
+      const Type *arg = fn->typeArgs[i];
+      name += (i > 0 ? ", " : "") + (arg->isFunction() ? std::string("function") : arg->name().str());
+    }
+    name += ">";
+  }
+  auto *function = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, name, module_.get());
   setFunctionAttributes(function);
   functions_[sym] = function;
 }
 
 void CodeGen::declareGlobals(SourceFile &file) {
   for (Stmt *item : file.items) {
+    if (auto *cls = dyn_cast<ClassDecl>(item)) {
+      for (const ClassField &f : cls->fields) {
+        if (!f.isStatic || !f.var)
+          continue;
+        // In the object of a class used as a value, which shows them.
+        llvm::Type *type = lower(f.var->type);
+        globals_[f.var] = cls->usedAsValue
+                              ? staticFieldAddress(cls, f.var)
+                              : new llvm::GlobalVariable(*module_, type, /*isConstant=*/false,
+                                                         llvm::GlobalValue::InternalLinkage,
+                                                         llvm::Constant::getNullValue(type),
+                                                         "tz." + symbolPrefixes_.lookup(cls) +
+                                                             f.var->name);
+        if (f.var->type->isManaged())
+          managedGlobals_.push_back(f.var);
+      }
+      // What the methods that decorators may replace run: their own code
+      // until the decorators run, and also before, as in JavaScript.
+      for (FunctionDecl *fn : cls->methods)
+        if (const VarSymbol *impl = fn->impl) {
+          llvm::Constant *adapter = cast<llvm::Constant>(makeFunctionValue(
+              implAdapterInfo(fn), llvm::ConstantPointerNull::get(builder_.getPtrTy())));
+          globals_[impl] = new llvm::GlobalVariable(
+              *module_, lower(impl->type), /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+              adapter,
+              "tz." + symbolPrefixes_.lookup(cls) + cls->name.str() + "." + fn->name.str() + ".impl");
+          managedGlobals_.push_back(impl);
+        }
+      continue;
+    }
     auto *decl = dyn_cast<VarDeclStmt>(item);
     if (!decl)
       continue;
     for (VarDeclarator &d : decl->decls) {
-      if (!d.sym->usedInFunction)
-        continue; // a local of main
+      if (d.alias || !d.sym->usedInFunction)
+        continue; // another name for a generic function, or a local of main
       llvm::Type *type = lower(d.sym->type);
       // Holds zero (or the empty string) until the top-level code that
       // declares it runs.
       globals_[d.sym] = new llvm::GlobalVariable(*module_, type, /*isConstant=*/false,
                                                  llvm::GlobalValue::InternalLinkage,
-                                                 llvm::Constant::getNullValue(type), "tz." + d.name);
+                                                 llvm::Constant::getNullValue(type),
+                                                 "tz." + symbolPrefixes_.lookup(decl) + d.name);
       if (d.sym->type->isManaged())
         managedGlobals_.push_back(d.sym);
     }
@@ -352,6 +545,7 @@ void CodeGen::beginFunction(llvm::Function *function, FunctionDecl *fn) {
   currentFn_ = fn;
   returnType_ = fn ? fn->sym->ret : nullptr;
   envParam_ = nullptr;
+  unwindExit_ = nullptr;
   addresses_.clear();
   boxSlots_.clear();
   envBoxes_.clear();
@@ -360,6 +554,22 @@ void CodeGen::beginFunction(llvm::Function *function, FunctionDecl *fn) {
 }
 
 void CodeGen::emitFunction(FunctionDecl *fn) {
+  if (fn->external) {
+    emitExternal(fn);
+    return;
+  }
+  if (fn->impl) { // a static method a decorator may replace
+    emitDecoratedMethod(fn);
+    return;
+  }
+  if (fn->isGenerator) {
+    emitGenerator(fn, functions_.lookup(fn->sym));
+    return;
+  }
+  if (fn->isAsync) {
+    emitAsyncFunction(fn, functions_.lookup(fn->sym));
+    return;
+  }
   if (TailGroup *group = tailGroupOf_.lookup(fn)) {
     emitTailGroup(*group);
     return;
@@ -375,6 +585,33 @@ void CodeGen::emitFunction(FunctionDecl *fn) {
 // The parameters, from the arguments given, and the body.
 void CodeGen::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
   pushScope(); // parameters: the callee owns its arguments
+  emitParams(fn, args);
+  // An owner its environment refers to without counting (layer 2 of
+  // docs/objects.md, section 11) stays while the closure runs, even if what
+  // it runs lets the owner go.
+  if (fn && fn->isClosure() && !fn->group)
+    for (const VarSymbol *var : fn->captures)
+      if (uncounted_.count({fn, var})) {
+        const Type *type = typeOf(var);
+        llvm::Value *owner = builder_.CreateLoad(lower(type), addressOf(var), var->name);
+        retainValue(owner, type);
+        builder_.CreateStore(owner, createManagedSlot(type, var->name + ".held"));
+      }
+  // A function that may recurse checks the stack first (docs/errors.md).
+  if (recursive_.contains(fn))
+    emitStackCheck(fn->loc());
+  emitStmt(fn->body);
+  popScope();
+}
+
+void CodeGen::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
+  if (fn->thisVar) {
+    // A method's object, the environment it gets: borrowed, as the caller
+    // keeps it alive during the call.
+    llvm::Value *slot = createStackSlot(builder_.getPtrTy(), "this");
+    builder_.CreateStore(envParam_, slot);
+    addresses_[fn->thisVar] = slot;
+  }
   for (size_t i = 0; i < fn->params.size(); ++i) {
     const Param &param = fn->params[i];
     llvm::Value *arg = args[i];
@@ -383,7 +620,7 @@ void CodeGen::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> 
     // Parameters can be assigned to, so they live in stack slots like locals.
     llvm::Value *slot = createLocal(param.sym, param.name);
     if (!param.defaultValue) {
-      builder_.CreateStore(arg, slot);
+      storeVar(param.sym, slot, arg, /*replacing=*/false);
       continue;
     }
     // The argument is `T | undefined`; undefined takes the default value.
@@ -403,22 +640,35 @@ void CodeGen::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> 
     llvm::PHINode *value = builder_.CreatePHI(lower(param.sym->type), 2);
     value->addIncoming(given, givenBlock);
     value->addIncoming(fallback, defaultEnd);
-    builder_.CreateStore(value, slot);
+    storeVar(param.sym, slot, value, /*replacing=*/false);
   }
-  emitStmt(fn->body);
-  popScope();
 }
 
 void CodeGen::emitMain(SourceFile &file) {
+  // Top-level code that awaits is a coroutine of its own (codegen_async.cpp).
+  llvm::Function *asyncMain = file.topLevelAwait ? emitAsyncMain(file) : nullptr;
   auto *type = llvm::FunctionType::get(builder_.getInt32Ty(), false);
   auto *main = llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, "main", module_.get());
   setFunctionAttributes(main);
   beginFunction(main, nullptr);
-  builder_.CreateCall(rt_.init);
+  mainInit_ = builder_.CreateCall(rt_.init);
+  emitErrorSupport();
   pushScope();
-  for (Stmt *item : file.items)
-    if (!isa<FunctionDecl>(item))
-      emitStmt(item);
+  llvm::Type *voidTy = builder_.getVoidTy(), *ptr = builder_.getPtrTy();
+  if (asyncMain) {
+    // The runtime runs the loop until nothing is left to do.
+    llvm::Value *promise = builder_.CreateCall(asyncMain, {}, "main");
+    builder_.CreateCall(asyncFunction("tz_async_main", voidTy, {ptr}), {promise});
+    builder_.CreateCall(instanceReleaseFn_, {promise});
+  } else {
+    for (Stmt *item : file.items)
+      if (!isa<FunctionDecl>(item))
+        emitStmt(item);
+    // Then the timers, the promises and the queues the code started.
+    if (usesAsync_ && blockIsOpen())
+      builder_.CreateCall(asyncFunction("tz_async_run", voidTy, {builder_.getInt32Ty()}),
+                          {builder_.getInt32(esModule_)});
+  }
   // Exits right away unless a leak check wants everything released.
   if (blockIsOpen())
     builder_.CreateCall(rt_.mainDone);
@@ -430,8 +680,13 @@ void CodeGen::emitMain(SourceFile &file) {
       llvm::Value *address = addressOf(var);
       llvm::Value *value = builder_.CreateLoad(lowered, address);
       builder_.CreateStore(llvm::Constant::getNullValue(lowered), address);
-      releaseValue(value, var->type);
+      if (isEternal(var))
+        endValue(value, var->type); // its eternal groups go whatever their counts
+      else
+        releaseValue(value, var->type);
     }
+    if (usesAsync_)
+      builder_.CreateCall(asyncFunction("tz_async_shutdown", voidTy, {}));
     builder_.CreateCall(rt_.shutdown);
   }
   finishFunction();
@@ -439,6 +694,7 @@ void CodeGen::emitMain(SourceFile &file) {
 
 void CodeGen::finishFunction() {
   closeBody();
+  finishFunctionUnwind();
   function_ = nullptr;
 }
 
@@ -450,7 +706,7 @@ void CodeGen::closeBody() {
       builder_.CreateRetVoid();
     else if (function_->hasExternalLinkage()) // main
       builder_.CreateRet(builder_.getInt32(0));
-    else if (returnType_ && returnType_->isOptional()) // falls off the end: undefined
+    else if (returnType_ && (returnType_->isOptional() || returnType_->isUnknown())) // undefined
       builder_.CreateRet(undefinedValue(returnType_));
     else // Sema proved that every path returns
       builder_.CreateUnreachable();
@@ -489,6 +745,7 @@ void CodeGen::pushScope() { scopes_.emplace_back(); }
 void CodeGen::popScope() {
   if (blockIsOpen())
     emitScopeCleanup(scopes_.back());
+  finishScopeUnwind(scopes_.size() - 1);
   scopes_.pop_back();
 }
 
@@ -498,6 +755,32 @@ void CodeGen::emitCleanups(size_t depth) {
 }
 
 void CodeGen::emitScopeCleanup(const Scope &scope) {
+  // The iterations of dictionaries end, before the slots let them go.
+  for (llvm::Value *slot : llvm::reverse(scope.dicts)) {
+    llvm::Value *map = builder_.CreateLoad(builder_.getPtrTy(), slot, "map");
+    llvm::BasicBlock *endBlock = newBlock("dict.iterated");
+    llvm::BasicBlock *nextBlock = newBlock("dict.iteration.end");
+    builder_.CreateCondBr(builder_.CreateIsNotNull(map), endBlock, nextBlock);
+    switchTo(endBlock);
+    llvm::Value *count = dictField(map, 8); // TzMap::iterating
+    builder_.CreateStore(
+        builder_.CreateSub(builder_.CreateLoad(builder_.getInt32Ty(), count), builder_.getInt32(1)),
+        count);
+    builder_.CreateBr(nextBlock);
+    switchTo(nextBlock);
+  }
+  for (llvm::Value *slot : llvm::reverse(scope.asyncIterators))
+    closeAsyncIterator(slot);
+  for (llvm::Value *slot : llvm::reverse(scope.iterators)) {
+    llvm::Value *it = builder_.CreateLoad(builder_.getPtrTy(), slot, "iterator");
+    llvm::BasicBlock *closeBlock = newBlock("iter.close");
+    llvm::BasicBlock *nextBlock = newBlock("iter.closed");
+    builder_.CreateCondBr(builder_.CreateIsNotNull(it), closeBlock, nextBlock);
+    switchTo(closeBlock);
+    builder_.CreateCall(iterCloseFunction(), {it});
+    builder_.CreateBr(nextBlock);
+    switchTo(nextBlock);
+  }
   for (const auto &[slot, type] : llvm::reverse(scope.slots)) {
     if (!type) { // a box or an environment
       llvm::Value *object = builder_.CreateLoad(builder_.getPtrTy(), slot);
@@ -510,7 +793,10 @@ void CodeGen::emitScopeCleanup(const Scope &scope) {
     // Emptied, so that a second cleanup of the same slot (a loop that leaves
     // early on the next iteration) does nothing.
     builder_.CreateStore(llvm::Constant::getNullValue(lowered), slot);
-    releaseValue(value, type);
+    if (eternalSlots_.contains(slot)) // a global of main's, at the end
+      endValue(value, type);
+    else
+      releaseValue(value, type);
   }
 }
 
@@ -591,18 +877,40 @@ void CodeGen::retainValue(llvm::Value *value, const Type *type) {
     builder_.CreateCall(retainFn_, {value});
     break;
   case Type::Kind::Array:
-    builder_.CreateCall(arrRetainFn_, {value});
+    builder_.CreateCall(refMayBeMember(type) ? refRetainFn_ : arrRetainFn_, {value});
     break;
   case Type::Kind::Function:
-    builder_.CreateCall(objRetainFn_, {builder_.CreateExtractValue(value, 1)});
+    builder_.CreateCall(refMayBeMember(type) ? refRetainFn_ : plainObjRetainFn_,
+                        {builder_.CreateExtractValue(value, 1)});
     break;
   case Type::Kind::Object: // the count is the first word, as for arrays
-    builder_.CreateCall(arrRetainFn_, {value});
+  case Type::Kind::Iterator:
+  case Type::Kind::Json:
+  case Type::Kind::Dict:
+  case Type::Kind::Promise:
+  case Type::Kind::Unknown:
+    builder_.CreateCall(refMayBeMember(type) ? refRetainFn_ : arrRetainFn_, {value});
+    break;
+  case Type::Kind::Decimal:
+    builder_.CreateCall(decimalRefCount(/*retain=*/true), {value});
+    break;
+  case Type::Kind::Union:
+    if (isObjectUnion(type))
+      builder_.CreateCall(refMayBeMember(type) ? refRetainFn_ : arrRetainFn_, {value});
+    else if (type->isTagged())
+      countTagged(value, type, /*retain=*/true);
     break;
   case Type::Kind::Optional:
     // Undefined holds the zero value, which needs no counting.
     if (type->inner()->isManaged())
       retainValue(optionalValue(value, type), type->inner());
+    break;
+  case Type::Kind::Result:
+    // So does the half not in use.
+    if (!type->isManaged())
+      break;
+    retainValue(resultHalf(value, type, /*error=*/false), type->okType());
+    retainValue(resultHalf(value, type, /*error=*/true), type->errType());
     break;
   default:
     break;
@@ -617,17 +925,59 @@ void CodeGen::releaseValue(llvm::Value *value, const Type *type) {
     builder_.CreateCall(releaseFn_, {value});
     break;
   case Type::Kind::Array:
-    builder_.CreateCall(arrReleaseFn_, {value});
+    builder_.CreateCall(refMayBeMember(type) ? groupAwareRelease(arrReleaseFn_) : arrReleaseFn_,
+                        {value});
     break;
   case Type::Kind::Function:
-    builder_.CreateCall(objReleaseFn_, {builder_.CreateExtractValue(value, 1)});
+    builder_.CreateCall(refMayBeMember(type) ? groupAwareRelease(plainObjReleaseFn_)
+                                             : plainObjReleaseFn_,
+                        {builder_.CreateExtractValue(value, 1)});
     break;
-  case Type::Kind::Object:
-    builder_.CreateCall(objectLayout(type).release, {value});
+  case Type::Kind::Object: {
+    // An object of any type, in an instance of a generic function, one that
+    // may be of a type down the declared chain, and an Error, which may be of
+    // a class derived from it: through the drop function of its own layout.
+    llvm::Function *release = type->isAnyObject() || hasSubtypes(type) || type->isTimer() ||
+                                      type->isRuntimeObject() || type->isCrypto() ||
+                                      (type->classDecl() && type->classDecl()->builtin)
+                                  ? plainInstanceReleaseFn_
+                                  : objectLayout(type).release;
+    builder_.CreateCall(refMayBeMember(type) ? groupAwareRelease(release) : release, {value});
+    break;
+  }
+  case Type::Kind::Decimal:
+    builder_.CreateCall(decimalRefCount(/*retain=*/false), {value});
+    break;
+  case Type::Kind::Iterator: // through the drop function of its layout
+  case Type::Kind::Dict:
+  case Type::Kind::Promise:
+  case Type::Kind::Unknown: // an object, or a box, which is one too
+    builder_.CreateCall(refMayBeMember(type) ? groupAwareRelease(plainInstanceReleaseFn_)
+                                             : plainInstanceReleaseFn_,
+                        {value});
+    break;
+  case Type::Kind::Union:
+    if (isObjectUnion(type)) // of any of the types: through its own layout
+      builder_.CreateCall(refMayBeMember(type) ? groupAwareRelease(plainInstanceReleaseFn_)
+                                               : plainInstanceReleaseFn_,
+                          {value});
+    else if (type->isTagged())
+      countTagged(value, type, /*retain=*/false);
+    break;
+  case Type::Kind::Json:
+    builder_.CreateCall(
+        jsonFunction("tz_json_release_value", builder_.getVoidTy(), {builder_.getPtrTy()}),
+        {value});
     break;
   case Type::Kind::Optional:
     if (type->inner()->isManaged())
       releaseValue(optionalValue(value, type), type->inner());
+    break;
+  case Type::Kind::Result:
+    if (!type->isManaged())
+      break;
+    releaseValue(resultHalf(value, type, /*error=*/false), type->okType());
+    releaseValue(resultHalf(value, type, /*error=*/true), type->errType());
     break;
   default:
     break;
@@ -638,11 +988,13 @@ void CodeGen::retainString(llvm::Value *str) { retainValue(str, Type::string());
 
 void CodeGen::releaseString(llvm::Value *str) { releaseValue(str, Type::string()); }
 
+// An unknown holds undefined itself: it is its own `T | undefined`, null for
+// undefined.
 llvm::Value *CodeGen::makeOptional(llvm::Value *value, llvm::Value *has, const Type *type) {
-  if (type->inner()->isObject()) {
+  if (type->isUnknown() || zeroIsUndefined(type->inner())) {
     if (auto *always = dyn_cast<llvm::ConstantInt>(has); always && always->isOne())
       return value;
-    return builder_.CreateSelect(has, value, llvm::ConstantPointerNull::get(builder_.getPtrTy()));
+    return builder_.CreateSelect(has, value, llvm::Constant::getNullValue(value->getType()));
   }
   llvm::Value *result = llvm::UndefValue::get(lower(type));
   result = builder_.CreateInsertValue(result, value, 0);
@@ -654,13 +1006,20 @@ llvm::Value *CodeGen::undefinedValue(const Type *optionalType) {
 }
 
 llvm::Value *CodeGen::optionalHas(llvm::Value *value, const Type *optionalType) {
-  if (optionalType->inner()->isObject())
+  if (optionalType->isUnknown())
     return builder_.CreateIsNotNull(value);
+  const Type *inner = optionalType->inner();
+  if (isReference(inner))
+    return builder_.CreateIsNotNull(value);
+  if (isAtomType(inner)) // atoms start at 1
+    return builder_.CreateICmpNE(value, builder_.getInt32(0));
+  if (inner->isTagged()) // tags too
+    return builder_.CreateICmpNE(unionTag(value), builder_.getInt32(0));
   return builder_.CreateExtractValue(value, 1);
 }
 
 llvm::Value *CodeGen::optionalValue(llvm::Value *value, const Type *optionalType) {
-  if (optionalType->inner()->isObject())
+  if (optionalType->isUnknown() || zeroIsUndefined(optionalType->inner()))
     return value;
   return builder_.CreateExtractValue(value, 0);
 }
@@ -682,11 +1041,49 @@ llvm::Value *CodeGen::emitBorrowed(Expr *expr) {
                                              conv->operand->type->isOptional() &&
                                              conv->type == conv->operand->type->inner()) {
     llvm::Value *value = emitBorrowed(conv->operand);
-    return value ? optionalValue(value, conv->operand->type) : nullptr;
+    if (!value)
+      return nullptr;
+    // A `string | undefined` made a string (a part of a template or of `+`)
+    // looks the same, and may not hold one: then it is "undefined", as in
+    // JavaScript (see emitConversion).
+    if (conv->type->isString())
+      return builder_.CreateSelect(optionalHas(value, conv->operand->type),
+                                   optionalValue(value, conv->operand->type),
+                                   stringLiteral(u"undefined"));
+    return optionalValue(value, conv->operand->type);
+  }
+  // An object seen as a type up or down its declared chain (narrowed by
+  // instanceof): the same reference.
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
+                                             conv->type->isObject() &&
+                                             conv->operand->type->nonOptional()->isObject()) {
+    llvm::Value *value = emitBorrowed(conv->operand);
+    if (value && conv->operand->type->isOptional())
+      value = optionalValue(value, conv->operand->type);
+    return value;
+  }
+  // A variable or a field of a union narrowed to some of its members: the
+  // same value, or the part of it that holds them, without counting.
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && !conv->shortCircuit &&
+                                             narrowsUnion(conv->operand->type, conv->type)) {
+    llvm::Value *value = emitBorrowed(conv->operand);
+    return value ? emitConversion(value, conv->operand->type, conv->type) : nullptr;
+  }
+  // A Result variable narrowed to an Ok or an Err: the same halves, one of
+  // them known to be empty.
+  if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit() && conv->type->isResult() &&
+                                             conv->operand->type->isResult()) {
+    llvm::Value *value = emitBorrowed(conv->operand);
+    return value ? emitConversion(value, conv->operand->type, conv->type) : nullptr;
   }
   auto *member = dyn_cast<MemberExpr>(expr);
-  if (!member || !member->object->type->isObject())
+  if (!member || !member->object->type->isObject() || member->object->type->isBytes() ||
+      member->method)
     return nullptr;
+  if (const InterfaceMember *method =
+          dispatchedMember(member->object->type, member->name, member->signature);
+      method && method->callable)
+    return nullptr; // a method of an interface, bound to the object when read
   llvm::Value *object = emitBorrowed(member->object);
   if (!object)
     return nullptr;
@@ -753,8 +1150,20 @@ void CodeGen::emitStmt(Stmt *stmt) {
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
     break;
+  case Stmt::Kind::Class:
+    // The class of a class expression gets its static fields where the
+    // expression is.
+    if (!cast<ClassDecl>(stmt)->expression)
+      emitClassDeclaration(cast<ClassDecl>(stmt));
+    break;
   case Stmt::Kind::Debugger:
     builder_.CreateCall(rt_.debugger);
+    break;
+  case Stmt::Kind::Throw:
+    emitThrowStmt(cast<ThrowStmt>(stmt));
+    break;
+  case Stmt::Kind::Try:
+    emitTry(cast<TryStmt>(stmt));
     break;
   }
 }
@@ -778,20 +1187,17 @@ void CodeGen::pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continue
 void CodeGen::emitJump(Stmt *stmt) {
   bool isBreak = isa<BreakStmt>(stmt);
   llvm::StringRef label = isBreak ? cast<BreakStmt>(stmt)->label : cast<ContinueStmt>(stmt)->label;
-  const JumpTarget *target = nullptr;
-  for (const JumpTarget &t : llvm::reverse(targets_)) {
+  for (size_t i = targets_.size(); i > 0; --i) {
+    const JumpTarget &t = targets_[i - 1];
     bool matches = !label.empty() ? llvm::is_contained(t.labels, label)
                    : isBreak      ? t.isLoop || t.isSwitch
                                   : t.isLoop;
     if (matches) {
-      target = &t;
-      break;
+      emitJumpTo(i - 1, isBreak);
+      return;
     }
   }
-  assert(target && "Sema checks every break and continue");
-  emitCleanups(target->scopeDepth);
-  builder_.CreateBr(isBreak ? target->breakTarget : target->continueTarget);
-  startDeadBlock();
+  llvm_unreachable("Sema checks every break and continue");
 }
 
 void CodeGen::emitLabeled(LabeledStmt *stmt) {
@@ -887,13 +1293,21 @@ void CodeGen::storeReplacing(llvm::Value *address, llvm::Value *value, const Typ
 
 void CodeGen::emitVarDecl(VarDeclStmt *decl) {
   for (VarDeclarator &d : decl->decls) {
+    if (d.alias) // another name for a generic function
+      continue;
     const VarSymbol *var = d.sym;
     llvm::Type *type = lower(var->type);
     bool global = var->isGlobal && var->usedInFunction;
     llvm::Value *address = global ? addressOf(var) : createLocal(var, d.name);
     llvm::Value *value = d.init ? emitExpr(d.init) : llvm::Constant::getNullValue(type);
     // The slot may still hold a value from an earlier run of this declaration.
-    storeReplacing(address, value, var->type);
+    storeVar(var, address, value, /*replacing=*/true);
+    // A global that keeps its value for good: the groups in it are eternal.
+    if (isEternal(var)) {
+      pinValue(value, var->type);
+      if (!global)
+        eternalSlots_.insert(address);
+    }
   }
 }
 
@@ -980,7 +1394,7 @@ void CodeGen::emitFor(ForStmt *stmt) {
   // copy.
   if (auto *decl = llvm::dyn_cast_or_null<VarDeclStmt>(stmt->init))
     for (VarDeclarator &d : decl->decls) {
-      if (!d.sym->boxed())
+      if (d.alias || !d.sym->boxed())
         continue;
       const Type *type = typeOf(d.sym);
       llvm::Value *slot = boxSlots_.lookup(d.sym);
@@ -989,6 +1403,8 @@ void CodeGen::emitFor(ForStmt *stmt) {
       llvm::Value *value = builder_.CreateLoad(lower(type), builder_.CreateStructGEP(boxType(type), old, 2));
       retainValue(value, type);
       builder_.CreateStore(value, builder_.CreateStructGEP(boxType(type), box, 2));
+      if (isCyclicBox(type))
+        groupStore(box, value, type); // inside the group of the box now
       builder_.CreateStore(box, slot);
       builder_.CreateCall(objReleaseFn_, {old});
     }
@@ -1004,6 +1420,14 @@ void CodeGen::emitFor(ForStmt *stmt) {
 // hidden slot; each step reads the current length, as JavaScript's iterators
 // do, so elements pushed by the body are visited too.
 void CodeGen::emitForOf(ForOfStmt *stmt) {
+  if (stmt->isAwait) {
+    emitForAwait(stmt);
+    return;
+  }
+  if (stmt->iterable->type->isIterator() || stmt->iterable->type->isTypedArray()) {
+    emitIteratorForOf(stmt);
+    return;
+  }
   pushScope(); // the hidden iterable
   const Type *iterableType = stmt->iterable->type;
   llvm::Value *iterableSlot = createManagedSlot(iterableType, "for.iterable");
@@ -1018,11 +1442,82 @@ void CodeGen::emitForOf(ForOfStmt *stmt) {
 }
 
 void CodeGen::emitReturn(ReturnStmt *stmt) {
-  if (stmt->value && tailGroup_ && hasTailCall(stmt->value)) {
+  // A generator emitted inline finishes, and one emitted as a coroutine
+  // gives what it returns to whoever resumed it.
+  if (inline_) {
+    llvm::Value *value = stmt->value ? emitExpr(stmt->value) : nullptr;
+    if (value && inline_->returnSlot)
+      storeReplacing(inline_->returnSlot, value, stmt->value->type);
+    else if (value)
+      releaseValue(value, stmt->value->type);
+    emitCleanups(inline_->scopeDepth);
+    builder_.CreateBr(inline_->exit);
+    startDeadBlock();
+    return;
+  }
+  if (coro_ && currentFn_ && currentFn_->isGenerator && async_) {
+    emitAsyncGeneratorReturn(stmt);
+    return;
+  }
+  if (coro_ && currentFn_ && currentFn_->isGenerator) {
+    emitReturnOf(stmt->value ? emitExpr(stmt->value) : nullptr);
+    return;
+  }
+  if (async_) { // an async function fulfills its promise
+    emitAsyncReturnStmt(stmt);
+    return;
+  }
+  // Not out of a `try` with a `finally`, which must run first.
+  if (stmt->value && tailGroup_ && hasTailCall(stmt->value) && !finallyBetween(~size_t(0))) {
     emitTailReturn(stmt->value);
     return;
   }
+  // In a function that recurses, the call a return gives (with numbers
+  // added to it) is left unchecked: what it threw stays in tz_thrown, and
+  // the caller checks. Then LLVM can turn `return f(n - 1) + f(n - 2)` into
+  // a loop over the second call, at the price of that frame in the stack
+  // of an error.
+  const CallExpr *outer = returnCall_;
+  if (stmt->value && currentFn_ && recursive_.contains(currentFn_) && !inline_ && !coro_ &&
+      !finallyBetween(~size_t(0)))
+    returnCall_ = returnedCall(stmt->value);
   emitReturnValue(stmt->value);
+  returnCall_ = outer;
+}
+
+const CallExpr *CodeGen::returnedCall(const Expr *value) {
+  if (!value->type || !(value->type->isNumeric() || value->type->isBool()))
+    return nullptr;
+  if (auto *call = dyn_cast<CallExpr>(value))
+    return call->builtin == Builtin::None && (call->func || call->method) ? call : nullptr;
+  if (auto *conv = dyn_cast<CastExpr>(value))
+    return conv->isImplicit() && !conv->shortCircuit && conv->operand->type->isNumeric()
+               ? returnedCall(conv->operand)
+               : nullptr;
+  if (auto *unary = dyn_cast<UnaryExpr>(value))
+    return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Not || unary->op == UnaryOp::BitNot
+               ? returnedCall(unary->operand)
+               : nullptr;
+  auto *bin = dyn_cast<BinaryExpr>(value);
+  if (!bin || !bin->lhs->type->isNumeric())
+    return nullptr;
+  switch (bin->op) {
+  case BinaryOp::Add:
+  case BinaryOp::Sub:
+  case BinaryOp::Mul:
+  case BinaryOp::BitAnd:
+  case BinaryOp::BitOr:
+  case BinaryOp::BitXor:
+  case BinaryOp::Lt:
+  case BinaryOp::Le:
+  case BinaryOp::Gt:
+  case BinaryOp::Ge:
+  case BinaryOp::Eq:
+  case BinaryOp::Ne:
+    return returnedCall(bin->rhs);
+  default:
+    return nullptr;
+  }
 }
 
 // `return value`, or `return` without one (null).
@@ -1033,14 +1528,7 @@ void CodeGen::emitReturnValue(Expr *expr) {
     releaseValue(value, expr->type);
     value = nullptr;
   }
-  emitCleanups(0);
-  if (value && !expr->type->isVoid())
-    builder_.CreateRet(value);
-  else if (returnType_ && returnType_->isOptional())
-    builder_.CreateRet(undefinedValue(returnType_)); // `return;`
-  else
-    builder_.CreateRetVoid();
-  startDeadBlock();
+  emitReturnOf(value && !expr->type->isVoid() ? value : nullptr);
 }
 
 void CodeGen::emitDiscarded(Expr *expr) {
@@ -1062,20 +1550,37 @@ void CodeGen::emitDiscarded(Expr *expr) {
 // Expressions
 //===----------------------------------------------------------------------===//
 
+// A built-in that fails in it throws from where the expression is (loc_).
 llvm::Value *CodeGen::emitExpr(Expr *expr) {
+  llvm::SMLoc outer = std::exchange(loc_, expr->loc());
+  llvm::Value *value = emitExprKind(expr);
+  loc_ = outer;
+  return value;
+}
+
+llvm::Value *CodeGen::emitExprKind(Expr *expr) {
   switch (expr->kind()) {
   case Expr::Kind::IntLit: {
     auto *lit = cast<IntLitExpr>(expr);
-    if (lit->type->isFloat())
+    const Type *type = storedType(lit->type); // `0 | 1` holds an int
+    if (type->isFloat())
       return llvm::ConstantFP::get(builder_.getDoubleTy(), static_cast<double>(lit->value));
-    return llvm::ConstantInt::get(lower(lit->type), lit->value);
+    if (type->isDecimal())
+      return emitDecimalLiteral(lit);
+    return llvm::ConstantInt::get(lower(type), lit->value);
   }
   case Expr::Kind::FloatLit:
+    if (expr->type->isDecimal())
+      return emitDecimalLiteral(expr);
     return llvm::ConstantFP::get(builder_.getDoubleTy(), cast<FloatLitExpr>(expr)->value);
   case Expr::Kind::BoolLit:
     return builder_.getInt1(cast<BoolLitExpr>(expr)->value);
   case Expr::Kind::StringLit:
+    if (expr->type->isStringLiteral()) // a literal type: its atom
+      return builder_.getInt32(expr->type->atom());
     return stringLiteral(cast<StringLitExpr>(expr)->value);
+  case Expr::Kind::RegexLit:
+    return emitRegexLiteral(cast<RegexLitExpr>(expr));
   case Expr::Kind::Undefined:
     return builder_.getFalse(); // conversions and printing handle it
   case Expr::Kind::Template:
@@ -1089,6 +1594,10 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     if (name->func) // a top-level function as a value
       return makeFunctionValue(functionInfo(name->func->decl),
                                llvm::ConstantPointerNull::get(builder_.getPtrTy()));
+    if (!name->var && name->type->isJson()) // `null`, which only a Json holds
+      return emitJsonNull();
+    if (name->cls) // a class as a value
+      return classObject(name->cls);
     return emitVarValue(name->var, /*borrow=*/false);
   }
   case Expr::Kind::Function:
@@ -1099,8 +1608,22 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     auto *index = cast<IndexExpr>(expr);
     if (index->enumDecl)
       return emitEnumName(index);
+    if (index->object->type->nonOptional()->isJson())
+      return emitJsonIndex(index);
     if (index->object->type->isString())
       return emitStringIndex(index);
+    if (index->keyed) { // `o[k]` with a key of literals
+      Operand object = emitOperand(index->object, cannotAssign(index->index));
+      llvm::Value *key = emitExpr(index->index);
+      llvm::Value *value = builder_.CreateLoad(
+          lower(index->type),
+          keyedFieldAddress(object.value, object.type, key, index->index->type), "field");
+      retainValue(value, index->type);
+      dropOperand(object);
+      return value;
+    }
+    if (index->object->type->isTypedArray())
+      return emitBytesIndex(index);
     return emitArrayIndex(index);
   }
   case Expr::Kind::Unary:
@@ -1113,17 +1636,36 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
     return emitUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
     return emitCall(cast<CallExpr>(expr));
-  case Expr::Kind::New:
-    return emitNewArray(cast<NewExpr>(expr));
+  case Expr::Kind::New: {
+    auto *create = cast<NewExpr>(expr);
+    if (create->reflect)
+      return emitReflectNew(create);
+    if (create->cls)
+      return emitNew(create);
+    return emitNewArray(create);
+  }
+  case Expr::Kind::Class:
+    return emitClassExpr(cast<ClassExpr>(expr));
   case Expr::Kind::Conditional:
     return emitConditional(cast<ConditionalExpr>(expr));
   case Expr::Kind::Cast: {
     auto *c = cast<CastExpr>(expr);
     if (c->shortCircuit)
       return emitChainLink(c);
+    if (c->adaptsResult)
+      return emitResultAdapter(c);
     if (c->type->isFunction() && c->operand->type->isFunction())
       return emitFunctionAdapter(c);
-    if (c->type->isBool() && !c->operand->type->isBool())
+    // The text of a value of a union, whatever member it holds.
+    if (c->text) {
+      llvm::Value *value = emitExpr(c->operand);
+      llvm::Value *text = emitValueToString(value, c->operand->type);
+      releaseValue(value, c->operand->type);
+      return text;
+    }
+    // A Json known to be a boolean is that boolean, not a truth to test.
+    if (c->type->isBool() && !c->operand->type->isBool() &&
+        !c->operand->type->nonOptional()->isJson() && !c->operand->type->isUnknown())
       return emitTruthOf(c->operand);
     return emitConversion(emitExpr(c->operand), c->operand->type, c->type);
   }
@@ -1135,6 +1677,14 @@ llvm::Value *CodeGen::emitExpr(Expr *expr) {
   }
   case Expr::Kind::OptionalChain:
     return emitOptionalChain(cast<OptionalChainExpr>(expr));
+  case Expr::Kind::Yield:
+    // In the generator of safeTry, which is no generator, `yield* r` takes
+    // the value of the Result r or returns its Err.
+    if (currentFn_ && currentFn_->safeTry)
+      return emitSafeTryYield(cast<YieldExpr>(expr));
+    return emitYield(cast<YieldExpr>(expr));
+  case Expr::Kind::Await:
+    return emitAwait(cast<AwaitExpr>(expr));
   }
   llvm_unreachable("unknown expression kind");
 }
@@ -1167,6 +1717,8 @@ llvm::Value *CodeGen::emitOptionalChain(OptionalChainExpr *chain) {
 
 llvm::Value *CodeGen::emitChainLink(CastExpr *link) {
   const Type *type = link->operand->type;
+  if (type->nonOptional()->isJson())
+    return emitJsonChainLink(link);
   llvm::Value *value = emitExpr(link->operand);
   llvm::BasicBlock *valueBlock = newBlock("chain.link");
   // Undefined holds nothing to release.
@@ -1192,12 +1744,24 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
     dropOperand(str);
     return unary->op == UnaryOp::Neg ? builder_.CreateFNeg(number) : number;
   }
+  if (type->isDecimal()) { // Sema allows only `-x` and `+literal`
+    if (unary->op == UnaryOp::Plus)
+      return emitExpr(unary->operand);
+    if (llvm::isa<IntLitExpr>(unary->operand) || llvm::isa<FloatLitExpr>(unary->operand))
+      return emitDecimalLiteral(unary);
+    Operand value = emitOperand(unary->operand, /*canBorrow=*/true);
+    llvm::Value *negated =
+        callReturningDecimal("tz_dec_neg", {decimalCoef(value.value), decimalMeta(value.value)});
+    dropOperand(value);
+    return negated;
+  }
   llvm::Value *operand = emitExpr(unary->operand);
   switch (unary->op) {
   case UnaryOp::Neg:
     if (type->isBool()) // `-true` is -1
       return builder_.CreateFNeg(builder_.CreateUIToFP(operand, builder_.getDoubleTy()));
-    return unary->type->isFloat() ? builder_.CreateFNeg(operand) : builder_.CreateNeg(operand);
+    return storedType(unary->type)->isFloat() ? builder_.CreateFNeg(operand)
+                                              : builder_.CreateNeg(operand);
   case UnaryOp::Plus:
     return type->isBool() ? builder_.CreateUIToFP(operand, builder_.getDoubleTy()) : operand;
   case UnaryOp::Not:
@@ -1212,18 +1776,42 @@ llvm::Value *CodeGen::emitUnary(UnaryExpr *unary) {
   llvm_unreachable("unknown unary operator");
 }
 
-// `x!`: the program stops if x is undefined.
+// The text of a name or a field read through names, for messages; empty for
+// anything else.
+static std::string valueText(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit())
+      return "";
+    expr = conv->operand;
+  }
+  if (auto *name = dyn_cast<NameExpr>(expr))
+    return name->name.str();
+  if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    std::string object = valueText(member->object);
+    return object.empty() ? "" : object + (member->optional ? "?." : ".") + member->name.str();
+  }
+  if (auto *index = dyn_cast<IndexExpr>(expr)) {
+    std::string object = valueText(index->object), position = valueText(index->index);
+    if (auto *lit = dyn_cast<IntLitExpr>(index->index))
+      position = std::to_string(lit->value);
+    return object.empty() || position.empty() ? "" : object + "[" + position + "]";
+  }
+  return "";
+}
+
+// `x!`: TypeError if x is undefined (undefined holds nothing to release).
 llvm::Value *CodeGen::emitNonNull(UnaryExpr *unary) {
   const Type *type = unary->operand->type;
   llvm::Value *value = emitExpr(unary->operand);
   if (!type->isOptional())
     return value;
-  llvm::BasicBlock *panicBlock = newBlock("nonnull.undefined");
+  llvm::BasicBlock *throwBlock = newBlock("nonnull.undefined");
   llvm::BasicBlock *okBlock = newBlock("nonnull.ok");
-  builder_.CreateCondBr(builder_.CreateNot(optionalHas(value, type)), panicBlock, okBlock,
+  builder_.CreateCondBr(builder_.CreateNot(optionalHas(value, type)), throwBlock, okBlock,
                         llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
-  switchTo(panicBlock);
-  emitPanic("TypeError: the value asserted with '!' is undefined");
+  switchTo(throwBlock);
+  std::string text = valueText(unary->operand);
+  emitThrowNew(1, (text.empty() ? "the value" : text) + " is undefined");
   switchTo(okBlock);
   return optionalValue(value, type);
 }
@@ -1233,6 +1821,17 @@ static std::u16string ascii16(llvm::StringRef text) { return std::u16string(text
 // `typeof x` follows from the type of x, except for `T | undefined`.
 llvm::Value *CodeGen::emitTypeOf(Expr *operand) {
   const Type *type = operand->type;
+  if (type->nonOptional()->isJson())
+    return emitJsonTypeOf(operand);
+  if (type->isUnknown() || type->isAnyObject())
+    return emitUnknownTypeOf(operand);
+  // A tagged union: by its tag, which is 0 for undefined.
+  if (type->nonOptional()->isTagged()) {
+    Operand value = emitOperand(operand, /*canBorrow=*/true);
+    llvm::Value *name = emitUnionTypeOf(value.value, type->nonOptional());
+    dropOperand(value);
+    return name;
+  }
   if (type->isOptional()) {
     Operand value = emitOperand(operand, /*canBorrow=*/true);
     llvm::Value *has = optionalHas(value.value, type);
@@ -1273,6 +1872,10 @@ llvm::Value *CodeGen::emitBinary(BinaryExpr *bin) {
   case BinaryOp::Eq:
   case BinaryOp::Ne:
     return emitEquality(bin);
+  case BinaryOp::InstanceOf:
+    return emitInstanceOf(bin);
+  case BinaryOp::In: // of a union, which Sema allows
+    return emitObjectIn(bin);
   default:
     break;
   }
@@ -1280,6 +1883,8 @@ llvm::Value *CodeGen::emitBinary(BinaryExpr *bin) {
     return emitConcat(bin);
   if (bin->lhs->type->isString())
     return emitStringComparison(bin);
+  if (bin->lhs->type->isDecimal())
+    return emitDecimalBinary(bin);
 
   llvm::Value *lhs = emitExpr(bin->lhs);
   llvm::Value *rhs = emitExpr(bin->rhs);
@@ -1337,7 +1942,7 @@ llvm::Value *CodeGen::decidedValue(BinaryExpr *bin, llvm::Value *lhs) {
   const Type *base = from->nonOptional();
   // A falsy array, function or object is undefined, which holds nothing to
   // release.
-  if (isAnd && (base->isArray() || base->isFunction() || base->isObject()))
+  if (isAnd && (base->isArray() || base->isFunction() || isReference(base)))
     return undefinedValue(to);
   if (from == to)
     return lhs;
@@ -1351,12 +1956,16 @@ llvm::Value *CodeGen::emitTruth(llvm::Value *value, const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Bool:
     return value;
+  case Type::Kind::Literal:
+  case Type::Kind::Union:
+    return emitUnionTruth(value, type);
   case Type::Kind::String:
     return builder_.CreateICmpNE(stringLength(value), builder_.getInt64(0));
   case Type::Kind::Optional: {
     llvm::Value *has = optionalHas(value, type);
     const Type *inner = type->inner();
-    if (!inner->isBool() && !inner->isString())
+    if (!inner->isBool() && !inner->isString() && !inner->isLiteral() &&
+        !(inner->isUnion() && !isObjectUnion(inner)))
       return has; // an array, a function or an object is always truthy
     return builder_.CreateAnd(has, emitTruth(optionalValue(value, type), inner));
   }
@@ -1379,6 +1988,18 @@ llvm::Value *CodeGen::emitTruthOf(Expr *expr) {
 }
 
 llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
+  type = storedType(type);
+  // Atoms are numbers, a union of objects a reference.
+  if (isAtomType(type) || isObjectUnion(type))
+    return builder_.CreateICmpEQ(a, b);
+  if (type->isTagged())
+    return emitUnionEqual(a, b, type);
+  if (type->nonOptional()->isJson()) { // as `===`, which a switch uses
+    llvm::Type *ptr = builder_.getPtrTy();
+    llvm::Value *equal = builder_.CreateCall(
+        jsonFunction("tz_json_strict_equal", builder_.getInt32Ty(), {ptr, ptr}), {a, b});
+    return builder_.CreateICmpNE(equal, builder_.getInt32(0));
+  }
   switch (type->kind()) {
   case Type::Kind::String: {
     // Comparing with a literal needs no call when the literal is empty or
@@ -1401,15 +2022,33 @@ llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type
   }
   case Type::Kind::Array: // the same array
   case Type::Kind::Object: // the same object
+  case Type::Kind::Iterator:
+  case Type::Kind::Dict:
   case Type::Kind::Bool:
+  case Type::Kind::ClassRef:
     return builder_.CreateICmpEQ(a, b);
+  case Type::Kind::Unknown: { // as `===`
+    llvm::Type *ptr = builder_.getPtrTy();
+    llvm::Value *equal = builder_.CreateCall(
+        unknownFunction("tz_unknown_equal", builder_.getInt32Ty(), {ptr, ptr}), {a, b});
+    return builder_.CreateICmpNE(equal, builder_.getInt32(0));
+  }
+  case Type::Kind::Decimal: { // the same value: 0.30 == 0.3
+    llvm::Type *i64 = builder_.getInt64Ty();
+    llvm::Value *equal = builder_.CreateCall(
+        decimalFunction("tz_dec_equal", builder_.getInt32Ty(), {i64, i64, i64, i64}),
+        {decimalCoef(a), decimalMeta(a), decimalCoef(b), decimalMeta(b)});
+    return builder_.CreateICmpNE(equal, builder_.getInt32(0));
+  }
   case Type::Kind::Function: // the same function with the same environment
     return builder_.CreateAnd(
         builder_.CreateICmpEQ(builder_.CreateExtractValue(a, 0), builder_.CreateExtractValue(b, 0)),
         builder_.CreateICmpEQ(builder_.CreateExtractValue(a, 1), builder_.CreateExtractValue(b, 1)));
   case Type::Kind::Optional: {
-    if (type->inner()->isObject()) // both null, or the same object
+    if (isReference(type->inner()) || isAtomType(type->inner())) // both null, or the same object
       return builder_.CreateICmpEQ(a, b);
+    if (type->inner()->isTagged()) // a tag 0 is undefined
+      return emitUnionEqual(a, b, type->inner());
     llvm::Value *hasA = builder_.CreateExtractValue(a, 1), *hasB = builder_.CreateExtractValue(b, 1);
     llvm::Value *values = emitValuesEqual(builder_.CreateExtractValue(a, 0),
                                           builder_.CreateExtractValue(b, 0), type->inner());
@@ -1429,6 +2068,8 @@ llvm::Value *CodeGen::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type
 llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
   bool isEq = bin->op == BinaryOp::Eq;
   Expr *lhs = bin->lhs, *rhs = bin->rhs;
+  if (lhs->type->nonOptional()->isJson() || rhs->type->nonOptional()->isJson())
+    return emitJsonEquality(bin);
   if (lhs->type->isUndefined() || rhs->type->isUndefined()) {
     // A side that is always undefined, such as `void f()`, still runs, in
     // its turn.
@@ -1442,7 +2083,9 @@ llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
     Operand value = emitOperand(other, /*canBorrow=*/other == rhs || cannotAssign(rhs));
     if (rhs->type->isUndefined())
       emitDiscarded(rhs);
-    llvm::Value *has = other->type->isOptional() ? optionalHas(value.value, other->type) : builder_.getTrue();
+    llvm::Value *has = other->type->isOptional() || other->type->isUnknown()
+                           ? optionalHas(value.value, other->type)
+                           : builder_.getTrue();
     dropOperand(value);
     return isEq ? builder_.CreateNot(has) : has;
   }
@@ -1450,7 +2093,9 @@ llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
     return emitStringComparison(bin);
 
   Operand a = emitOperand(lhs, cannotAssign(rhs));
+  holdOperand(a, exprThrows(rhs));
   Operand b = emitOperand(rhs, /*canBorrow=*/true);
+  takeOperand(a);
   llvm::Value *equal = emitValuesEqual(a.value, b.value, lhs->type);
   dropOperand(a);
   dropOperand(b);
@@ -1460,11 +2105,13 @@ llvm::Value *CodeGen::emitEquality(BinaryExpr *bin) {
 // `a ?? b`: b is evaluated only when a is undefined.
 llvm::Value *CodeGen::emitNullish(BinaryExpr *bin) {
   const Type *lhsType = bin->lhs->type;
+  if (lhsType->nonOptional()->isJson())
+    return emitJsonNullish(bin);
   if (lhsType->isUndefined()) {
     emitDiscarded(bin->lhs); // `void f() ?? x` still runs f
     return emitExpr(bin->rhs);
   }
-  if (!lhsType->isOptional()) // never undefined
+  if (!lhsType->isOptional() && !lhsType->isUnknown()) // never undefined
     return emitExpr(bin->lhs);
 
   llvm::Value *lhs = emitExpr(bin->lhs);
@@ -1529,6 +2176,7 @@ llvm::Value *CodeGen::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value 
     llvm::Type *i64 = builder_.getInt64Ty();
     llvm::Value *result = builder_.CreateCall(
         rt_.mathPowLong, {builder_.CreateSExt(lhs, i64), builder_.CreateSExt(rhs, i64)});
+    emitThrowCheck(); // 0 ** -1
     return builder_.CreateTrunc(result, lhs->getType());
   }
   case BinaryOp::BitAnd:
@@ -1582,8 +2230,9 @@ llvm::Value *CodeGen::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::Value 
   llvm_unreachable("not a comparison operator");
 }
 
-// Dividing by zero panics, as in Go. MIN / -1 wraps around to MIN (and
-// MIN % -1 is 0) where the machine instruction would trap.
+// Dividing by zero throws RangeError, as JavaScript's `1n / 0n`. MIN / -1
+// wraps around to MIN (and MIN % -1 is 0) where the machine instruction
+// would trap.
 llvm::Value *CodeGen::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs) {
   bool isRem = op == BinaryOp::Rem;
   if (auto *divisor = dyn_cast<llvm::ConstantInt>(rhs);
@@ -1592,12 +2241,12 @@ llvm::Value *CodeGen::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *
 
   llvm::Type *type = lhs->getType();
   llvm::Value *isZero = builder_.CreateICmpEQ(rhs, llvm::ConstantInt::get(type, 0));
-  llvm::BasicBlock *panicBlock = newBlock("div.zero");
+  llvm::BasicBlock *throwBlock = newBlock("div.zero");
   llvm::BasicBlock *okBlock = newBlock("div.ok");
-  builder_.CreateCondBr(isZero, panicBlock, okBlock,
+  builder_.CreateCondBr(isZero, throwBlock, okBlock,
                         llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
-  switchTo(panicBlock);
-  emitPanic("integer divide by zero");
+  switchTo(throwBlock);
+  emitThrowNew(2, "Division by zero");
 
   switchTo(okBlock);
   llvm::Value *isMinusOne = builder_.CreateICmpEQ(rhs, llvm::ConstantInt::getSigned(type, -1));
@@ -1608,20 +2257,25 @@ llvm::Value *CodeGen::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *
   return builder_.CreateSelect(isMinusOne, builder_.CreateNeg(lhs), quotient);
 }
 
-void CodeGen::emitPanic(llvm::StringRef message) {
-  llvm::CallInst *call =
-      builder_.CreateCall(rt_.panic, {utf8Constant(message), builder_.getInt64(message.size())});
-  call->setDoesNotReturn();
-  builder_.CreateUnreachable();
-}
-
 llvm::Value *CodeGen::emitAssign(AssignExpr *assign, bool needResult) {
   if (assign->op && *assign->op == BinaryOp::Nullish)
     return emitNullishAssign(assign, needResult);
+  if (auto *index = dyn_cast<IndexExpr>(assign->target);
+      index && index->object->type->nonOptional()->isJson())
+    return emitJsonAssign(assign, needResult);
+  if (auto *member = dyn_cast<MemberExpr>(assign->target);
+      member && member->object->type->nonOptional()->isJson())
+    return emitJsonAssign(assign, needResult);
+  if (auto *index = dyn_cast<IndexExpr>(assign->target); index && index->keyed)
+    return emitFieldAssign(assign, needResult);
+  if (auto *index = dyn_cast<IndexExpr>(assign->target);
+      index && index->object->type->isTypedArray())
+    return emitBytesElementAssign(assign, needResult);
   if (isa<IndexExpr>(assign->target))
     return emitElementAssign(assign, needResult);
   if (auto *member = dyn_cast<MemberExpr>(assign->target))
-    return member->object->type->isObject() ? emitFieldAssign(assign, needResult)
+    return member->object->type->isObject() || member->object->type->isUnion()
+               ? emitFieldAssign(assign, needResult)
                                             : emitLengthAssign(assign, needResult);
 
   const VarSymbol *var = cast<NameExpr>(assign->target)->var;
@@ -1640,13 +2294,23 @@ llvm::Value *CodeGen::emitAssign(AssignExpr *assign, bool needResult) {
     }
     Operand rhs = emitConcatPart(assign->value, /*canBorrow=*/false);
     value = concatOperands({old, rhs});
+  } else if (type->isDecimal()) {
+    // As for strings, the old value is borrowed unless evaluating the right
+    // side could reassign the variable.
+    llvm::Value *old = builder_.CreateLoad(decTy_, address);
+    bool hold = !cannotAssign(assign->value);
+    if (hold)
+      retainValue(old, type);
+    value = emitDecimalCompound(*assign->op, old, assign->value);
+    if (hold)
+      releaseValue(old, type);
   } else {
     // As in JavaScript, the old value is read before the right side runs.
     llvm::Value *old = builder_.CreateLoad(lower(type), address);
     llvm::Value *rhs = emitExpr(assign->value);
     value = emitArithmetic(*assign->op, old, rhs, type);
   }
-  storeReplacing(address, value, type);
+  storeVar(var, address, value, /*replacing=*/true);
   if (!needResult)
     return nullptr;
   retainValue(value, type);
@@ -1662,7 +2326,10 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
   llvm::BasicBlock *keepBlock = newBlock("nullish.keep");
   llvm::BasicBlock *assignBlock = newBlock("nullish.assign");
   llvm::BasicBlock *endBlock = newBlock("nullish.end");
-  builder_.CreateCondBr(optionalHas(old, varType), keepBlock, assignBlock);
+  // A Json that holds null is replaced too, as in JavaScript.
+  llvm::Value *has =
+      varType->nonOptional()->isJson() ? jsonPresent(old) : optionalHas(old, varType);
+  builder_.CreateCondBr(has, keepBlock, assignBlock);
 
   const Type *resultType = assign->type;
   switchTo(keepBlock);
@@ -1678,7 +2345,7 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
   llvm::Value *value = emitExpr(assign->value);
   const Type *valueType = assign->value->type;
   llvm::Value *stored = valueType->isOptional() ? value : makeOptional(value, builder_.getTrue(), varType);
-  storeReplacing(address, stored, varType);
+  storeVar(var, address, stored, /*replacing=*/true);
   llvm::Value *assigned = nullptr;
   if (needResult) {
     retainValue(stored, varType);
@@ -1697,9 +2364,17 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
 }
 
 llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
+  if (auto *index = dyn_cast<IndexExpr>(update->target);
+      index && index->object->type->isTypedArray())
+    return emitBytesUpdate(update);
   llvm::Value *address;
   Operand holder{nullptr, false, nullptr};
-  if (auto *index = dyn_cast<IndexExpr>(update->target)) {
+  if (auto *keyed = dyn_cast<IndexExpr>(update->target); keyed && keyed->keyed) {
+    // `o[k]++` with a key of literals.
+    holder = emitOperand(keyed->object, cannotAssign(keyed->index));
+    address = keyedFieldAddress(holder.value, keyed->object->type, emitExpr(keyed->index),
+                                keyed->index->type);
+  } else if (auto *index = dyn_cast<IndexExpr>(update->target)) {
     // `a[i]++`: Sema proved the index in range.
     holder = emitOperand(index->object, cannotAssign(index->index));
     llvm::Value *position = emitExpr(index->index);
@@ -1710,6 +2385,12 @@ llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
     address = fieldAddress(holder.value, member->object->type, member->name);
   } else {
     address = addressOf(cast<NameExpr>(update->target)->var);
+  }
+  if (update->type->isDecimal()) {
+    llvm::Value *result = emitDecimalUpdate(update, address);
+    if (holder.value)
+      dropOperand(holder);
+    return result;
   }
   llvm::Type *type = lower(update->type);
   llvm::Value *old = builder_.CreateLoad(type, address);
@@ -1730,6 +2411,7 @@ llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
 llvm::Value *CodeGen::emitCall(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::ConsoleLog:
+  case Builtin::ConsoleError:
     emitConsoleLog(call);
     return nullptr;
   case Builtin::StringOf:
@@ -1748,6 +2430,24 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
     return emitNumberBuiltin(call);
   case Builtin::None:
     break;
+  case Builtin::TupleJoin:
+    return emitTupleJoin(call);
+  case Builtin::WeakRefNew:
+  case Builtin::WeakRefDeref:
+    return emitWeakRefCall(call);
+  case Builtin::MetaDefine:
+  case Builtin::MetaGet:
+  case Builtin::MetaGetOwn:
+  case Builtin::MetaHas:
+  case Builtin::MetaHasOwn:
+  case Builtin::MetaDelete:
+    return emitMetaCall(call);
+  case Builtin::ClassName:
+  case Builtin::ReflectGet:
+  case Builtin::ReflectApply:
+  case Builtin::ReflectConstruct:
+  case Builtin::FromJsonClass:
+    return emitReflectCall(call);
   case Builtin::ArrForEach:
   case Builtin::ArrMap:
   case Builtin::ArrFilter:
@@ -1762,32 +2462,90 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
   case Builtin::ArrEvery:
   case Builtin::ArrSortWith:
     return emitCallbackMethod(call);
+  case Builtin::ObjectKeys:
+  case Builtin::ObjectValues:
+  case Builtin::ObjectEntries:
+    return emitObjectCall(call);
+  case Builtin::ArrKeys:
+  case Builtin::ArrValues:
+  case Builtin::ArrEntries:
+  case Builtin::IterFrom:
+  case Builtin::ArrayFrom:
+  case Builtin::IterNext:
+  case Builtin::IterMap:
+  case Builtin::IterFilter:
+  case Builtin::IterTake:
+  case Builtin::IterDrop:
+  case Builtin::IterFlatMap:
+  case Builtin::IterToArray:
+  case Builtin::IterForEach:
+  case Builtin::IterReduce:
+  case Builtin::IterSome:
+  case Builtin::IterEvery:
+  case Builtin::IterFind:
+    return emitIteratorBuiltin(call);
   default:
+    if (isLibBuiltin(call->builtin))
+      return emitLibBuiltin(call);
+    if (isCryptoBuiltin(call->builtin))
+      return emitCryptoCall(call);
+    if (isAsyncBuiltin(call->builtin))
+      return emitAsyncBuiltin(call);
+    if (isDateBuiltin(call->builtin))
+      return emitDateCall(call);
+    if (isIntlBuiltin(call->builtin))
+      return emitIntlCall(call);
+    if (isDictBuiltin(call->builtin))
+      return emitDictCall(call);
+    if (isBytesBuiltin(call->builtin))
+      return emitBytesCall(call);
+    if (isRegexBuiltin(call->builtin))
+      return emitRegexCall(call);
+    if (isJsonBuiltin(call->builtin))
+      return emitJsonCall(call);
+    if (isProcessBuiltin(call->builtin))
+      return emitProcessBuiltin(call);
+    if (isNodeBuiltin(call->builtin))
+      return emitNodeBuiltin(call);
+    if (isChildBuiltin(call->builtin))
+      return emitChildBuiltin(call);
     if (isMathBuiltin(call->builtin))
       return emitMathCall(call);
+    if (isDecimalBuiltin(call->builtin))
+      return emitDecimalCall(call);
+    if (isResultBuiltin(call->builtin))
+      return emitResultCall(call);
+    if (call->builtin == Builtin::ErrorStack || call->builtin == Builtin::ErrorToString)
+      return emitErrorBuiltin(call);
     if (cast<MemberExpr>(call->callee)->object->type->isArray())
       return emitArrayMethod(call);
     return emitStringMethod(call);
   }
 
+  if (call->superCall && !isa<MemberExpr>(call->callee))
+    return emitSuperCall(call);
+  if (call->method)
+    return emitMethodCall(call);
+  if (!call->unionMethods.empty())
+    return emitUnionMethodCall(call);
   if (!call->func)
     return emitValueCall(call);
   // The callee takes ownership of its arguments. Parameters left out get
   // undefined (and then their default values).
   const FuncSymbol *func = call->func;
-  std::vector<llvm::Value *> args;
-  for (Expr *arg : call->args)
-    args.push_back(emitExpr(arg));
+  std::vector<llvm::Value *> args = emitHeldValues(call->args);
   for (size_t i = args.size(); i < func->params.size(); ++i)
     args.push_back(undefinedValue(func->params[i]));
+  llvm::CallInst *result;
   if (func->decl->isClosure()) {
     // A function declared in a block, or a constant arrow: its code is
     // known, its environment comes from where it is called.
     args.insert(args.begin(), closureEnv(call));
-    llvm::CallInst *result = builder_.CreateCall(closureCode(func->decl), args);
-    return result->getType()->isVoidTy() ? nullptr : result;
+    result = builder_.CreateCall(closureCode(func->decl), args);
+  } else {
+    result = builder_.CreateCall(functions_.lookup(func), args);
   }
-  llvm::CallInst *result = builder_.CreateCall(functions_.lookup(func), args);
+  emitThrowCheckIf(mayThrow(func->decl) && call != returnCall_);
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
@@ -1795,58 +2553,135 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
 // Strings print as they are; arrays and optionals the way Node.js shows them.
 // As in JavaScript, all arguments are evaluated before anything is printed:
 // `console.log(a.pop(), a)` shows the array without the popped element.
+// console.error prints the same way to stderr (see tz_err_begin in
+// runtime/tzrt.c).
 void CodeGen::emitConsoleLog(CallExpr *call) {
   size_t count = call->args.size();
   std::vector<bool> laterCannotAssign(count, true);
   for (size_t i = count; i > 1; --i)
     laterCannotAssign[i - 2] = laterCannotAssign[i - 1] && cannotAssign(call->args[i - 1]);
+  std::vector<bool> laterThrows(count, false);
+  for (size_t i = count; i > 1; --i)
+    laterThrows[i - 2] = laterThrows[i - 1] || exprThrows(call->args[i - 1]);
   std::vector<Operand> values;
   for (size_t i = 0; i < count; ++i) {
     if (call->args[i]->type->isUndefined()) {
       emitDiscarded(call->args[i]); // `void f()` still runs f
       values.push_back({nullptr, false, call->args[i]->type});
-    } else
+    } else {
       values.push_back(emitOperand(call->args[i], laterCannotAssign[i]));
+      holdOperand(values.back(), laterThrows[i]);
+    }
   }
+  for (Operand &value : values)
+    takeOperand(value);
 
-  for (size_t i = 0; i < count; ++i) {
-    if (i > 0)
-      builder_.CreateCall(rt_.printChar, {builder_.getInt32(' ')});
-    const Operand &value = values[i];
-    const Type *type = value.type;
-    if (type->isUndefined()) {
+  bool toStderr = call->builtin == Builtin::ConsoleError;
+  if (toStderr)
+    builder_.CreateCall(processFunction("tz_err_begin", builder_.getVoidTy(), {}));
+  auto print = [&](llvm::Value *value, const Type *type) {
+    if (type->isUndefined() || type->isNever()) {
       llvm::Value *text = stringLiteral(u"undefined");
       builder_.CreateCall(rt_.printString, {stringObj(text), stringMeta(text)});
-      continue;
+      return;
     }
     switch (type->kind()) {
     case Type::Kind::String:
-      builder_.CreateCall(rt_.printString, {stringObj(value.value), stringMeta(value.value)});
+      builder_.CreateCall(rt_.printString, {stringObj(value), stringMeta(value)});
       break;
     case Type::Kind::Int:
-      builder_.CreateCall(rt_.printI32, {value.value});
+      builder_.CreateCall(rt_.printI32, {value});
       break;
     case Type::Kind::Long:
-      builder_.CreateCall(rt_.printI64, {value.value});
+      builder_.CreateCall(rt_.printI64, {value});
       break;
     case Type::Kind::Double:
-      builder_.CreateCall(rt_.printF64, {value.value});
+      builder_.CreateCall(rt_.printF64, {value});
       break;
     case Type::Kind::Bool:
-      builder_.CreateCall(rt_.printBool, {builder_.CreateZExt(value.value, builder_.getInt32Ty())});
+      builder_.CreateCall(rt_.printBool, {builder_.CreateZExt(value, builder_.getInt32Ty())});
       break;
+    case Type::Kind::Decimal: {
+      llvm::Type *i64 = builder_.getInt64Ty();
+      builder_.CreateCall(decimalFunction("tz_print_decimal", builder_.getVoidTy(), {i64, i64}),
+                          {decimalCoef(value), decimalMeta(value)});
+      break;
+    }
     case Type::Kind::Array:
     case Type::Kind::Optional:
     case Type::Kind::Function:
     case Type::Kind::Object:
-      builder_.CreateCall(rt_.printValue, {typeDescriptor(type), spill(value.value, "print.value")});
+    case Type::Kind::Result:
+    case Type::Kind::Iterator:
+    case Type::Kind::Json:
+    case Type::Kind::Dict:
+    case Type::Kind::Literal:
+    case Type::Kind::Union:
+    case Type::Kind::Promise:
+    case Type::Kind::Unknown:
+    case Type::Kind::ClassRef:
+      builder_.CreateCall(rt_.printValue, {typeDescriptor(type), spill(value, "print.value")});
       break;
     default:
       llvm_unreachable("Sema rejects other argument types");
     }
+  };
+  // `console.log(...xs)` prints the elements as arguments of their own: a
+  // space goes before each value but the first printed.
+  llvm::Value *first = nullptr;
+  if (call->hasSpread()) {
+    first = createStackSlot(builder_.getInt1Ty(), "print.first");
+    builder_.CreateStore(builder_.getTrue(), first);
+  }
+  auto separate = [&](size_t i) {
+    if (!first) {
+      if (i > 0)
+        builder_.CreateCall(rt_.printChar, {builder_.getInt32(' ')});
+      return;
+    }
+    llvm::BasicBlock *spaceBlock = newBlock("print.space");
+    llvm::BasicBlock *valueBlock = newBlock("print.value");
+    builder_.CreateCondBr(builder_.CreateLoad(builder_.getInt1Ty(), first), valueBlock, spaceBlock);
+    switchTo(spaceBlock);
+    builder_.CreateCall(rt_.printChar, {builder_.getInt32(' ')});
+    builder_.CreateBr(valueBlock);
+    switchTo(valueBlock);
+    builder_.CreateStore(builder_.getFalse(), first);
+  };
+  for (size_t i = 0; i < count; ++i) {
+    const Operand &value = values[i];
+    if (call->spreads(i) && value.type->isArray()) {
+      // Each element, in a loop.
+      const Type *element = value.type->inner();
+      llvm::Value *length = arrayLength(value.value);
+      llvm::Value *indexSlot = createStackSlot(builder_.getInt64Ty(), "print.index");
+      builder_.CreateStore(builder_.getInt64(0), indexSlot);
+      llvm::BasicBlock *condBlock = newBlock("print.cond");
+      llvm::BasicBlock *bodyBlock = newBlock("print.body");
+      llvm::BasicBlock *endBlock = newBlock("print.end");
+      builder_.CreateBr(condBlock);
+      switchTo(condBlock);
+      llvm::Value *index = builder_.CreateLoad(builder_.getInt64Ty(), indexSlot);
+      builder_.CreateCondBr(builder_.CreateICmpULT(index, length), bodyBlock, endBlock);
+      switchTo(bodyBlock);
+      separate(i);
+      llvm::Value *at = builder_.CreateLoad(builder_.getInt64Ty(), indexSlot);
+      llvm::Value *item =
+          builder_.CreateLoad(lower(element), elementAddress(arrayData(value.value), element, at), "item");
+      print(item, element);
+      builder_.CreateStore(builder_.CreateAdd(at, builder_.getInt64(1)), indexSlot);
+      builder_.CreateBr(condBlock);
+      switchTo(endBlock);
+      dropOperand(value);
+      continue;
+    }
+    separate(i);
+    print(value.value, value.type);
     dropOperand(value);
   }
   builder_.CreateCall(rt_.printChar, {builder_.getInt32('\n')});
+  if (toStderr)
+    builder_.CreateCall(processFunction("tz_err_end", builder_.getVoidTy(), {}));
 }
 
 llvm::Value *CodeGen::emitConditional(ConditionalExpr *cond) {
@@ -1878,6 +2713,39 @@ llvm::Value *CodeGen::emitConditional(ConditionalExpr *cond) {
 llvm::Value *CodeGen::emitConversion(llvm::Value *value, const Type *from, const Type *to) {
   if (from == to)
     return value;
+  // A string of a pattern (Type::stringPattern) is a string as it is.
+  if (from->isString() && to->isString())
+    return value;
+  // A value that cannot exist, in code that never runs: the callback of
+  // mapErr on a Result that cannot be an Err.
+  if (from->isNever())
+    return llvm::Constant::getNullValue(lowerHalf(to));
+  if (from->isUnknown() || to->isUnknown())
+    return emitUnknownConversion(value, from, to);
+  // A variable narrowed to never (every member of its union ruled out), in
+  // code that never runs.
+  if (to->isNever()) {
+    releaseValue(value, from);
+    return llvm::Constant::getNullValue(lower(to));
+  }
+  // A number or boolean literal type is a value of its base.
+  from = storedType(from);
+  to = storedType(to);
+  if (from == to)
+    return value;
+  auto unionLike = [](const Type *t) {
+    t = t->nonOptional();
+    return t->isUnion() || t->isStringLiteral();
+  };
+  if (unionLike(from) || unionLike(to))
+    return emitUnionConversion(value, from, to);
+  if ((from->nonOptional()->isJson() || to->nonOptional()->isJson()) &&
+      from->nonOptional() != to->nonOptional())
+    return emitJsonConversion(value, from, to);
+  if (from->isResult() && to->isResult())
+    return makeResult(to, resultIsOk(value, from),
+                      convertHalf(resultHalf(value, from, false), from->okType(), to->okType()),
+                      convertHalf(resultHalf(value, from, true), from->errType(), to->errType()));
 
   if (to->isString()) {
     if (from->isBool())
@@ -1889,6 +2757,14 @@ llvm::Value *CodeGen::emitConversion(llvm::Value *value, const Type *from, const
       return callReturningString(rt_.strFromF64, {value});
     if (from->isUndefined())
       return stringLiteral(u"undefined");
+    if (from->isDecimal()) {
+      llvm::Type *i64 = builder_.getInt64Ty(), *ptr = builder_.getPtrTy();
+      llvm::Value *text = callReturningString(
+          decimalFunction("tz_dec_to_string", builder_.getVoidTy(), {ptr, i64, i64}),
+          {decimalCoef(value), decimalMeta(value)});
+      releaseValue(value, from);
+      return text;
+    }
     // Arrays and optionals: the runtime knows how to show any value.
     llvm::Value *result = emitValueToString(value, from);
     releaseValue(value, from);
@@ -1905,8 +2781,13 @@ llvm::Value *CodeGen::emitConversion(llvm::Value *value, const Type *from, const
   }
   if (from->isOptional()) // narrowed: known to hold a value
     return emitConversion(optionalValue(value, from), from->inner(), to);
-  if (from->isObject()) // seen through a type with read-only fields
+  // An object seen through a type with read-only fields, or an iterator
+  // through one that drops what it returns; an array of objects as one of a
+  // type they are (`Dog[]` as `Animal[]`).
+  if (isReference(from) || (from->isArray() && to->isArray()))
     return value;
+  if (from->isInteger() && to->isDecimal())
+    return decimalFromInteger(value);
 
   llvm::Type *target = lower(to);
   if (from->isInteger() && to->isInteger())
@@ -1939,6 +2820,7 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   case Expr::Kind::FloatLit:
   case Expr::Kind::BoolLit:
   case Expr::Kind::StringLit:
+  case Expr::Kind::RegexLit:
   case Expr::Kind::Undefined:
   case Expr::Kind::Name:
   case Expr::Kind::Function: // creating a closure runs none of its code
@@ -1946,8 +2828,10 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   case Expr::Kind::Template:
     return llvm::all_of(cast<TemplateExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::ArrayLit:
-    return llvm::all_of(cast<ArrayLitExpr>(expr)->elements,
-                        [](const ArrayLitExpr::Element &e) { return cannotAssign(e.expr); });
+    // Spreading an iterator runs a generator or the callbacks of helpers.
+    return llvm::all_of(cast<ArrayLitExpr>(expr)->elements, [](const ArrayLitExpr::Element &e) {
+      return cannotAssign(e.expr) && !(e.spread && e.expr->type->isIterator());
+    });
   case Expr::Kind::ObjectLit:
     return llvm::all_of(cast<ObjectLitExpr>(expr)->props,
                         [](const ObjectLitExpr::Property &p) { return cannotAssign(p.value); });
@@ -1974,15 +2858,26 @@ bool CodeGen::cannotAssign(const Expr *expr) {
     return llvm::all_of(cast<SequenceExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::OptionalChain:
     return cannotAssign(cast<OptionalChainExpr>(expr)->chain);
-  case Expr::Kind::New:
-    return llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
+  case Expr::Kind::New: // a constructor runs code
+    return !cast<NewExpr>(expr)->cls && !cast<NewExpr>(expr)->reflect &&
+           llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
   case Expr::Kind::Call: {
     // A user function may assign to globals and fields, and so may the
-    // callback of a built-in; other built-ins only evaluate their operands
-    // (array methods change arrays, not variables).
+    // callback of a built-in, and a generator that next() or a consumer of
+    // an iterator runs; other built-ins only evaluate their operands (array
+    // methods change arrays, not variables).
     auto *call = cast<CallExpr>(expr);
     if (call->builtin == Builtin::None ||
-        (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith))
+        (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
+        isResultCallback(call->builtin) || call->builtin == Builtin::SafeTry ||
+        call->builtin == Builtin::PromiseNew || // runs its executor
+        call->builtin == Builtin::ResultAsyncMap || // asyncMap of a Result runs its function
+        call->builtin == Builtin::ResultAsyncAndThen ||
+        call->builtin == Builtin::IterNext || call->builtin == Builtin::ArrayFrom ||
+        isIteratorSink(call->builtin) || call->builtin == Builtin::StrReplaceRegexFn ||
+        call->builtin == Builtin::MapForEach || call->builtin == Builtin::DictGroupBy ||
+        call->builtin == Builtin::DictNew ||
+        (call->builtin == Builtin::BytesFromArray && call->args[0]->type->isIterator()))
       return false;
     if (!llvm::all_of(call->args, cannotAssign))
       return false;
@@ -1992,6 +2887,9 @@ bool CodeGen::cannotAssign(const Expr *expr) {
   }
   case Expr::Kind::Assign:
   case Expr::Kind::Update:
+  case Expr::Kind::Yield: // whoever iterates runs any code
+  case Expr::Kind::Await: // so do the other tasks meanwhile
+  case Expr::Kind::Class: // its static initializers run
     return false;
   }
   return false;
@@ -2027,9 +2925,16 @@ llvm::Value *CodeGen::emitConcat(BinaryExpr *bin) {
   for (size_t i = parts.size() - 1; i > 0; --i)
     laterCannotAssign[i - 1] = laterCannotAssign[i] && cannotAssign(parts[i]);
 
+  std::vector<bool> laterThrows(parts.size(), false);
+  for (size_t i = parts.size() - 1; i > 0; --i)
+    laterThrows[i - 1] = laterThrows[i] || exprThrows(parts[i]);
   std::vector<Operand> operands;
-  for (size_t i = 0; i < parts.size(); ++i)
+  for (size_t i = 0; i < parts.size(); ++i) {
     operands.push_back(emitConcatPart(parts[i], laterCannotAssign[i]));
+    holdOperand(operands.back(), laterThrows[i]);
+  }
+  for (Operand &operand : operands)
+    takeOperand(operand);
   return concatOperands(operands);
 }
 
@@ -2060,13 +2965,20 @@ llvm::Value *CodeGen::emitTemplate(TemplateExpr *tmpl) {
   // `${x}` alone is just x as a string.
   if (count == 1 && tmpl->quasis[0].empty() && tmpl->quasis[1].empty())
     return emitExpr(tmpl->exprs[0]);
+  std::vector<bool> laterThrows(count, false);
+  for (size_t i = count; i > 1; --i)
+    laterThrows[i - 2] = laterThrows[i - 1] || exprThrows(tmpl->exprs[i - 1]);
   std::vector<Operand> operands;
   for (size_t i = 0; i <= count; ++i) {
     if (!tmpl->quasis[i].empty())
       operands.push_back({stringLiteral(tmpl->quasis[i]), false, Type::string()});
-    if (i < count)
+    if (i < count) {
       operands.push_back(emitConcatPart(tmpl->exprs[i], laterCannotAssign[i]));
+      holdOperand(operands.back(), laterThrows[i]);
+    }
   }
+  for (Operand &operand : operands)
+    takeOperand(operand);
   if (operands.empty())
     return stringLiteral(u"");
   if (operands.size() == 1) // a template without substitutions
@@ -2076,7 +2988,9 @@ llvm::Value *CodeGen::emitTemplate(TemplateExpr *tmpl) {
 
 llvm::Value *CodeGen::emitStringComparison(BinaryExpr *bin) {
   Operand lhs = emitOperand(bin->lhs, cannotAssign(bin->rhs));
+  holdOperand(lhs, exprThrows(bin->rhs));
   Operand rhs = emitOperand(bin->rhs, /*canBorrow=*/true);
+  takeOperand(lhs);
   llvm::Value *args[] = {stringObj(lhs.value), stringMeta(lhs.value), stringObj(rhs.value),
                          stringMeta(rhs.value)};
   llvm::Value *zero = builder_.getInt32(0);
@@ -2109,8 +3023,16 @@ llvm::Value *CodeGen::emitStringComparison(BinaryExpr *bin) {
 }
 
 llvm::Value *CodeGen::emitMember(MemberExpr *member) {
-  if (member->object->type->isObject())
+  if (member->method)
+    return emitBoundMethod(member);
+  if (member->object->type->nonOptional()->isJson())
+    return emitJsonMember(member);
+  if (member->object->type->isBytes())
+    return emitBytesMember(member);
+  if (member->object->type->isObject() || member->object->type->isUnion())
     return emitFieldRead(member);
+  if (member->object->type->isResult())
+    return emitResultMember(member);
   // Otherwise Sema allows only `.length` of a string or an array.
   Operand object = emitOperand(member->object, /*canBorrow=*/true);
   llvm::Value *length = object.type->isArray() ? arrayLength(object.value) : stringLength(object.value);
@@ -2122,7 +3044,9 @@ llvm::Value *CodeGen::emitMember(MemberExpr *member) {
 // proved the index in range.
 llvm::Value *CodeGen::emitStringIndex(IndexExpr *index) {
   Operand object = emitOperand(index->object, cannotAssign(index->index));
+  holdOperand(object, exprThrows(index->index));
   llvm::Value *position = emitExpr(index->index);
+  takeOperand(object);
   auto read = [&] {
     return callReturningString(rt_.strCharAt,
                                {stringObj(object.value), stringMeta(object.value), position});
@@ -2154,6 +3078,7 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   }
 
   Operand receiver = emitOperand(member->object, llvm::all_of(call->args, cannotAssign));
+  holdOperand(receiver, llvm::any_of(call->args, [&](Expr *arg) { return exprThrows(arg); }));
   std::vector<Operand> strings;
   std::vector<llvm::Value *> numbers; // positions and counts, as i64
   for (size_t i = 0; i < call->args.size(); ++i) {
@@ -2161,10 +3086,15 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
     if (arg->type->isString()) {
       bool later = std::all_of(call->args.begin() + i + 1, call->args.end(), cannotAssign);
       strings.push_back(emitOperand(arg, later));
+      holdOperand(strings.back(), std::any_of(call->args.begin() + i + 1, call->args.end(),
+                                              [&](Expr *next) { return exprThrows(next); }));
     } else {
       numbers.push_back(builder_.CreateSExt(emitExpr(arg), builder_.getInt64Ty()));
     }
   }
+  takeOperand(receiver);
+  for (Operand &str : strings)
+    takeOperand(str);
   // An optional position: its value and whether it was given.
   auto optional = [&](size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < numbers.size())
@@ -2182,6 +3112,7 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   llvm::Value *obj = stringObj(receiver.value);
   llvm::Value *meta = stringMeta(receiver.value);
   llvm::Value *result = nullptr;
+  bool failable = false; // the runtime may throw
   switch (call->builtin) {
   case Builtin::StrCharCodeAt: {
     llvm::Value *position = numbers[0];
@@ -2246,6 +3177,7 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   }
   case Builtin::StrRepeat:
     result = callReturningString(rt_.strRepeat, {obj, meta, numbers[0]});
+    failable = true; // a negative count
     break;
   case Builtin::StrCharAt: // "" out of range
     result = callReturningString(rt_.strCharAtOrEmpty,
@@ -2289,6 +3221,7 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
     auto [fillObj, fillMeta, hasFill] = optionalString(0);
     result = callReturningString(rt_.strPad, {obj, meta, numbers[0], fillObj, fillMeta, hasFill,
                                               builder_.getInt32(call->builtin == Builtin::StrPadStart)});
+    failable = true; // a string too long
     break;
   }
   case Builtin::StrToUpperCase:
@@ -2311,6 +3244,7 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
   dropOperand(receiver);
   for (const Operand &str : strings)
     dropOperand(str);
+  emitThrowCheckIf(failable);
   return result;
 }
 

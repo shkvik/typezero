@@ -1,0 +1,127 @@
+// same-as-node
+// Computations over types, the rest (docs/generics.md, step 5): never,
+// conditional types with infer and distribution over unions, Exclude and
+// Extract built on them, tuples in types, template literal types, key
+// remapping in mapped types and Awaited. They exist only when compiling:
+// each `const x: T = ...` below compiles only if T is what the comment says.
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+
+// A conditional type over a type parameter goes over the members of a union
+// one by one; `[T]` checks the union as a whole.
+type IsString<T> = T extends string ? "yes" : "no"
+type Whole<T> = [T] extends [string] ? "yes" : "no"
+const s1: IsString<"a"> = "yes"
+const s2: IsString<int> = "no"
+const s3: Equal<IsString<string | int>, "yes" | "no"> = true
+const s4: Whole<string | int> = "no"
+const s5: Equal<IsString<boolean>, "no"> = true
+console.log(s1, s2, s3, s4, s5)
+
+// infer: what stands in a place of the pattern.
+type ElementOf<T> = T extends (infer E)[] ? E : never
+type Head<T> = T extends [infer H, ...infer R] ? H : never
+type Tail<T> = T extends [infer H, ...infer R] ? R : never
+type Last<T> = T extends [...infer Rest, infer L] ? L : never
+type Result<F> = F extends (...args: infer A) => infer R ? R : never
+type Args<F> = F extends (...args: infer A) => unknown ? A : never
+type Inner<P> = P extends Promise<infer V> ? V : P
+const i1: Equal<ElementOf<string[]>, string> = true
+const i2: Equal<Head<[int, string, boolean]>, int> = true
+const i3: Equal<Tail<[int, string, boolean]>, [string, boolean]> = true
+const i4: Equal<Last<[1, 2, 3]>, 3> = true
+const i5: Equal<Result<(x: int) => string>, string> = true
+const i6: Equal<Args<(x: int, y: string) => void>, [int, string]> = true
+const i7: Equal<Inner<Promise<double>>, double> = true
+const i8: Equal<Tail<[int]>, []> = true
+console.log(i1, i2, i3, i4, i5, i6, i7, i8)
+
+// Exclude and Extract go over the members, as `T extends U ? T : never`:
+// an object member is extracted by a field it has.
+type Circle = { kind: "circle"; r: double }
+type Square = { kind: "square"; side: double }
+type Shape = Circle | Square
+type Round = Extract<Shape, { kind: "circle" }>
+const e1: Equal<Round, Circle> = true
+const e2: Equal<Exclude<Shape, { kind: "circle" }>, Square> = true
+const e3: Equal<Exclude<string | int | undefined, undefined>, string | int> = true
+const e4: Exclude<boolean, true> = false
+const disk: Round = { kind: "circle", r: 2 }
+console.log(e1, e2, e3, e4, disk)
+
+// Tuples in types: spread, length, and recursion over the elements; a
+// branch that is the alias itself (Count, Tuple) may go 1000 deep.
+type Push<T extends unknown[], X> = [...T, X]
+type Concat<A extends unknown[], B extends unknown[]> = [...A, ...B]
+type Reverse<T> = T extends [infer H, ...infer R] ? [...Reverse<R>, H] : []
+type Count<T, Acc extends unknown[] = []> = T extends [infer H, ...infer R] ? Count<R, [...Acc, H]> : Acc["length"]
+type Tuple<N extends int, Acc extends unknown[] = []> = Acc["length"] extends N ? Acc : Tuple<N, [...Acc, int]>
+type Add<A extends int, B extends int> = [...Tuple<A>, ...Tuple<B>]["length"]
+const t1: Equal<Push<[int], string>, [int, string]> = true
+const t2: Equal<Concat<[1, 2], [3]>, [1, 2, 3]> = true
+const t3: Equal<Reverse<[1, 2, 3]>, [3, 2, 1]> = true
+const t4: Count<[1, 1, 1, 1, 1]> = 5
+const t5: Add<3, 4> = 7
+const t6: Tuple<600>["length"] = 600
+const pair: Push<[string], int> = ["a", 1]
+const none: Tail<[int]> = []
+console.log(t1, t2, t3, t4, t5, t6, pair, none, none.length)
+
+// Awaited: what a Promise gives, through Promises of Promises.
+const a1: Equal<Awaited<Promise<Promise<int>>>, int> = true
+const a2: Equal<Awaited<Promise<int> | string>, int | string> = true
+console.log(a1, a2)
+
+// Template literal types: a union in them makes each string; Capitalize and
+// the others change literals; `${number}` makes a pattern, which a string
+// literal is if it matches.
+type Event = `on${Capitalize<"click" | "hover">}`
+type Cell = `${"a" | "b"}${1 | 2}`
+const m1: Equal<Event, "onClick" | "onHover"> = true
+const cells: Cell[] = ["a1", "a2", "b1", "b2"]
+const m2: Uppercase<"héllo"> = "HÉLLO"
+const m3: Lowercase<"ABC"> = "abc"
+const m4: Uncapitalize<"Hello"> = "hello"
+type Px = `${number}px`
+const width: Px = "10.5px"
+const widths: Px[] = [width, "0px", "-3px"]
+function css(w: Px): string { return `width: ${w}` }
+console.log(m1, cells, m2, m3, m4, widths, css("1px"))
+type Split<S extends string> = S extends `${infer H}-${infer R}` ? [H, ...Split<R>] : [S]
+type ToInt<S> = S extends `${infer N extends int}` ? N : never
+type Chars<S> = S extends `${infer C}${infer R}` ? [C, ...Chars<R>] : []
+const p1: Equal<Split<"a-b-c">, ["a", "b", "c"]> = true
+const p2: ToInt<"42"> = 42
+const p3: Equal<Chars<"abc">, ["a", "b", "c"]> = true
+console.log(p1, p2, p3)
+
+// Key remapping: `as` in a mapped type names each field anew, and never
+// drops it.
+interface User { id: int; name: string; email?: string }
+type Getters<T> = { [K in keyof T as `get${Capitalize<K & string>}`]: () => T[K] }
+type WithoutId<T> = { [K in keyof T as Exclude<K, "id">]: T[K] }
+type Methods<T> = { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]
+interface Api { get: (id: int) => string; put: (id: int, v: string) => void; count: int }
+const ann: User = { id: 1, name: "ann" }
+const getters: Getters<User> = { getId: () => ann.id, getName: () => ann.name, getEmail: () => ann.email }
+const rest: WithoutId<User> = { name: "bob" }
+const k1: Equal<Methods<Api>, "get" | "put"> = true
+console.log(getters.getId(), getters.getName(), getters.getEmail(), rest, k1)
+
+// never: what cannot be; the value of a check that ruled out every member.
+type IsNever<T> = [T] extends [never] ? true : false
+const n1: IsNever<never> = true
+const n2: IsNever<Exclude<"a", "a">> = true
+function fail(message: string): never { throw new Error(message) }
+function area(s: Shape): double {
+  switch (s.kind) {
+    case "circle":
+      return Math.PI * s.r * s.r
+    case "square":
+      return s.side * s.side
+    default: {
+      const unreachable: never = s
+      return fail(`unknown shape ${unreachable}`)
+    }
+  }
+}
+console.log(n1, n2, area(disk).toFixed(2), area({ kind: "square", side: 3 }))

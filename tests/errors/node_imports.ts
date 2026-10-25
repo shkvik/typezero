@@ -1,0 +1,47 @@
+// Imports from built-in modules: by name only, and only what tz has.
+// expect-error: default imports are not supported: there is no 'export default'; import the names this file uses: 'import { readFileSync, existsSync } from "fs"'
+import fs from "fs"
+// expect-error: 'import * as' is not supported; import the names this file uses: 'import { join } from "node:path"'
+import * as path from "node:path"
+// expect-error: 'import * as' is not supported; import the names you need, e.g. 'import { homedir } from "node:os"'
+import * as os from "node:os"
+// expect-error: default imports are not supported: there is no 'export default'; 'process' is global, as in Node, so the import is not needed: drop it
+import process from "node:process"
+// expect-error: 'readFile' of 'node:fs' takes a callback, which tz does not have; import 'readFile' from "node:fs/promises", which gives a Promise, or 'readFileSync', which gives what it reads, e.g. 'const text = await readFile(path, "utf8")'
+import { readFile } from "node:fs"
+// expect-error: 'mkdir' of 'node:fs' takes a callback, which tz does not have; import 'mkdir' from "node:fs/promises"
+import { mkdir } from "node:fs"
+// expect-error: 'exists' of 'node:fs' takes a callback, which tz does not have; import 'existsSync' and use what it returns
+import { exists } from "node:fs"
+// expect-error: 'node:fs/promises' has no export named 'readFileSync'; the function that waits is 'readFile', or import 'readFileSync' from "node:fs"
+import { readFileSync as readSync } from "node:fs/promises"
+// expect-error: 'watch' of 'node:fs/promises' is not supported yet
+import { watch } from "node:fs/promises"
+// expect-error: 'node:timers/promises' has no export named 'clearTimeout'; it has setTimeout, setImmediate, setInterval and scheduler
+import { clearTimeout } from "node:timers/promises"
+// expect-error: 'cursorTo' of 'node:readline' is not supported yet; tz has createInterface
+import { cursorTo } from "node:readline"
+// expect-error: 'openSync' of 'node:fs' is not supported yet
+import { openSync } from "node:fs"
+// expect-error: 'node:fs' has no export named 'readFileSyncc'
+import { readFileSyncc } from "node:fs"
+// expect-error: 'matchesGlob' of 'path' is not supported yet
+import { matchesGlob } from "path"
+// expect-error: 'networkInterfaces' of 'node:os' is not supported yet
+import { networkInterfaces } from "node:os"
+// expect-error: 'pid' of 'node:process' is not supported yet
+import { pid } from "node:process"
+// expect-error: 'tz:io' has no export named 'readLines'; it has readLine
+import { readLines } from "tz:io"
+// expect-error: import 'join' conflicts with the declaration of 'join' in this file
+import { join } from "node:path"
+// expect-error: duplicate import of 'basename'
+import { basename, basename } from "node:path"
+// expect-error: a built-in module is not re-exported: import what a file needs from 'node:fs' in that file
+export { readFileSync } from "node:fs"
+
+function join(a: string, b: string) {
+  return a + b
+}
+console.log(fs.readFileSync("a.txt", "utf8"), fs.existsSync("a"), path.join("a", "b"), join("a", "b"))
+console.log(basename("a/b"))

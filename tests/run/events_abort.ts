@@ -1,0 +1,53 @@
+// same-as-node
+// AbortController and AbortSignal on EventTarget, globals as in node
+// (docs/events.md, section 4): abort() with the default reason, a
+// DOMException, or one of its own; onabort before the listeners;
+// throwIfAborted(); AbortSignal.abort(), timeout() and any(); how they print.
+const ac = new AbortController()
+console.log(ac, ac.signal.aborted, ac.signal.reason)
+ac.signal.onabort = (ev) => console.log("onabort", ev.type, ev.isTrusted, ev.target == ac.signal, ev.eventPhase)
+ac.signal.addEventListener("abort", (ev) => console.log("listener", ev.type, ev.target == ac.signal))
+ac.abort()
+ac.abort() // once only
+const reason = ac.signal.reason
+if (reason instanceof DOMException) console.log(reason.name, reason.message, reason.code, reason instanceof Error)
+console.log([ac], ac.signal)
+
+const own = new AbortController()
+own.abort(new RangeError("stop"))
+try {
+  own.signal.throwIfAborted()
+} catch (err) {
+  console.log("thrown", err.name, err.message)
+}
+const given = AbortSignal.abort()
+const why = given.reason
+console.log(given.aborted, why instanceof DOMException ? why.name : "?")
+console.log(new DOMException("m").name, new DOMException("m", "TimeoutError").code, new DOMException("m", "Nope").code)
+
+// any(): aborted with the reason of the first signal that aborts.
+const one = new AbortController()
+const two = new AbortController()
+const either = AbortSignal.any([one.signal, two.signal])
+either.addEventListener("abort", () => {
+  const r = either.reason
+  console.log("either", r instanceof Error ? r.message : "?")
+})
+two.abort(new Error("second"))
+one.abort(new Error("first"))
+console.log(AbortSignal.any([given]).aborted)
+
+// timeout(): a TimeoutError, after the delay; its timer does not keep the
+// program alive.
+const soon = AbortSignal.timeout(5)
+soon.addEventListener("abort", () => {
+  const r = soon.reason
+  if (r instanceof DOMException) console.log("timeout", r.name, r.message, r.code)
+})
+setTimeout(() => console.log("after", soon.aborted), 30)
+AbortSignal.timeout(100000)
+
+// Without an import the file is CommonJS for node, whose nextTick callbacks
+// come before the microtasks, whatever globals it names.
+void Promise.resolve().then(() => console.log("microtask"))
+process.nextTick(() => console.log("nextTick"))

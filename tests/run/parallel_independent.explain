@@ -1,0 +1,13 @@
+top-level code
+  start
+    reads  elements of urls (line 16)
+    parallel
+  after await at line 16
+    reads  everything in any int[] (line 17)
+    writes stdout (line 17)
+    runs alone
+
+async function fetchPage, line 7
+  start: runs inside its caller
+  after await at line 8 (in the tasks fetchPage(url) at line 16)
+    parallel

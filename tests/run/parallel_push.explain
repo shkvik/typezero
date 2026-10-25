@@ -1,0 +1,15 @@
+top-level code
+  start
+    parallel
+  after await at line 14
+    reads  everything in results (line 15)
+    writes stdout (line 15)
+    runs alone
+
+async function convert, line 7
+  start: runs inside its caller
+  after await at line 8 (in the tasks convert(name) at line 14)
+    writes elements of results (line 11)
+    writes the length of results (line 11)
+    in order with the same piece in other tasks: elements of results, the length of results
+    in order: line 11

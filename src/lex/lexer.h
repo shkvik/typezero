@@ -13,6 +13,9 @@ public:
   Lexer(llvm::StringRef source, Diagnostics &diags);
 
   Token next();
+  // A regex literal from the `/` at `start`, which next() took for division:
+  // the parser knows that an expression starts there.
+  Token regex(const char *start, bool newlineBefore);
 
   // Where the lexer is, so that the parser can look ahead and come back.
   struct State {
@@ -54,5 +57,8 @@ bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diag
 // The raw text of a template part, as String.raw gives it: escapes stay as
 // written, and only line breaks are normalized to "\n".
 void decodeTemplateRaw(const Token &tok, std::u16string &out);
+// The pattern and the flags of a regex literal, as UTF-16; the escapes stay,
+// they are the regex's own.
+void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags);
 
 } // namespace tz

@@ -22,16 +22,18 @@ TZ_HOT double tz_math_pow(double x, double y) {
   return pow(x, y);
 }
 
-TZ_COLD TZ_NORETURN void tz_panic_zero_power(int64_t exponent) {
-  tz_panicf("integer divide by zero: 0 ** %lld", (long long)exponent);
-}
+// 0 ** -1 of integers, as JavaScript's 0n ** -1n: RangeError, which the
+// program checks for after the call.
+TZ_COLD void tz_throw_zero_power(void) { tz_throw(TZ_RANGE_ERROR, "Division by zero"); }
 
 // `**` of integers, which wraps around like repeated `*`. A negative power
 // is a fraction, which loses its fraction like `/` does.
 TZ_HOT int64_t tz_math_pow_long(int64_t base, int64_t exponent) {
   if (exponent < 0) {
-    if (base == 0)
-      tz_panic_zero_power(exponent);
+    if (base == 0) {
+      tz_throw_zero_power();
+      return 0;
+    }
     if (base == 1 || base == -1)
       return (exponent & 1) ? base : 1;
     return 0;

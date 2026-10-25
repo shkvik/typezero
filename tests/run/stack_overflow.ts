@@ -1,6 +1,5 @@
-// Recursion that runs out of stack stops the program, as JavaScript throws a
-// RangeError.
-// expect-exit: 2
+// Recursion that runs out of stack throws a RangeError, as in JavaScript.
+// expect-exit: 1
 // expect-stderr: RangeError: Maximum call stack size exceeded
 function grow(n: long): long {
   return n < 0 ? 0 : grow(n + 1) + grow(n + 2)

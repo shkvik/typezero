@@ -1,0 +1,28 @@
+// same-as-node
+// `A extends unknown[]`: the types of the parameters of some function, a
+// tuple. In each copy its elements are parameters of their own.
+
+function logged<A extends unknown[], R>(name: string, fn: (...args: A) => R) {
+  return (...args: A): R => {
+    console.log(`→ ${name} with ${args.length}: ${args.join(" ")}`)
+    return fn(...args)
+  }
+}
+
+function add(a: int, b: int) {
+  return a + b
+}
+function greet(who: string, times: int, loud: boolean) {
+  const text = `hi ${who} `.repeat(times)
+  return loud ? text.toUpperCase() : text
+}
+
+const loggedAdd = logged("add", add)
+console.log(loggedAdd(1, 2))
+const loggedGreet = logged("greet", greet)
+console.log(loggedGreet("Ann", 2, true))
+
+function count<A extends unknown[]>(...xs: A) {
+  return xs.length
+}
+console.log(count(1, "a", true), count())

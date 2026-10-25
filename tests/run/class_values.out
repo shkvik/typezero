@@ -1,0 +1,14 @@
+Dog { name: 'rex' } woof Dog 1 x
+Cat { name: 'tom' } function true
+Dog woof true true
+Cat meow false true
+Animal ... false true
+2 1 undefined 2
+woof meow ...
+[class Cat extends Animal] Cat [ [class Dog extends Animal], [class Cat extends Animal] ]
+kit none
+Point { x: 1, y: 2 } 3 Point [class Point]
+hi Inner 7 [class Inner] { count: 7 }
+Puppy { name: 'bit' } small woof true [class Puppy extends Dog]
+[ 'woof', 'small woof', 'meow' ]
+12

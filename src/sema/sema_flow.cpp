@@ -45,6 +45,9 @@ const VarSymbol *variableOf(const Expr *expr) {
 }
 
 const NameExpr *optionalVariable(const Expr *expr) {
+  // `(m = re.exec(s)) != undefined`: the value is the variable's new one.
+  if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op)
+    expr = assign->target;
   auto *name = dyn_cast<NameExpr>(expr);
   return name && name->var && name->var->type->isOptional() ? name : nullptr;
 }
@@ -85,6 +88,38 @@ Sema::Flow Sema::join(const Flow &a, const Flow &b) {
   for (const FieldPath &path : a.definedFields)
     if (llvm::is_contained(b.definedFields, path))
       result.definedFields.push_back(path);
+  for (const auto &narrowed : a.narrowedFields)
+    if (llvm::is_contained(b.narrowedFields, narrowed))
+      result.narrowedFields.push_back(narrowed);
+  for (const auto &narrowed : a.narrowed) {
+    if (llvm::is_contained(b.narrowed, narrowed)) {
+      result.narrowed.push_back(narrowed);
+      continue;
+    }
+    // Narrowed on both sides to different types: to either, as
+    // `typeof x == "string" || typeof x == "number"` narrows x.
+    auto [var, type] = narrowed;
+    auto other = llvm::find_if(b.narrowed, [&](const auto &n) { return n.first == var; });
+    if (other == b.narrowed.end() || var->type->nonOptional()->isParam() || type->isParam() ||
+        other->second->isParam())
+      continue;
+    const Type *either = Type::unionOf({type, other->second});
+    if (either->isError() || !unionProblem(either).empty() || either == var->type)
+      continue;
+    if (var->type->isOptional() && either == var->type->inner())
+      continue; // just defined, which `defined` says
+    result.narrowed.push_back({var, either});
+  }
+  for (const VarSymbol *var : a.okResults)
+    if (b.okResults.contains(var))
+      result.okResults.insert(var);
+  for (const VarSymbol *var : a.errResults)
+    if (b.errResults.contains(var))
+      result.errResults.insert(var);
+  for (llvm::StringRef field : a.setFields)
+    if (llvm::is_contained(b.setFields, field))
+      result.setFields.push_back(field);
+  result.beforeSuper = a.beforeSuper || b.beforeSuper;
   return result;
 }
 
@@ -123,6 +158,11 @@ std::optional<Linear> Sema::linear(const Expr *expr) const {
   case Expr::Kind::Member: {
     auto *member = cast<MemberExpr>(expr);
     if (member->name == "length" && expr->type->isInt())
+      return lengthOf(member->object);
+    // The bytes of an ArrayBuffer or a DataView, which index them.
+    if (member->name == "byteLength" && expr->type->isInt() && member->object->type &&
+        (member->object->type->bytes() == Type::Bytes::ArrayBuffer ||
+         member->object->type->bytes() == Type::Bytes::DataView))
       return lengthOf(member->object);
     return std::nullopt;
   }
@@ -177,22 +217,42 @@ std::optional<Linear> Sema::lengthOf(const Expr *object) const {
   }
   if (const VarSymbol *var = variableOf(object)) {
     const Type *type = var->type->nonOptional();
-    if (type->isString() || type->isArray())
+    // The length of a typed array never changes (nor the bytes of an
+    // ArrayBuffer or a DataView), so facts about it outlive calls.
+    if (type->isString() || type->isArray() || type->isByteView() ||
+        type->bytes() == Type::Bytes::ArrayBuffer)
       return Linear{Term::lengthOf(var), 0};
   }
+  // [numerator, denominator]
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::DecToFraction)
+    return Linear{Term::zero(), 2};
+  // `new Uint8Array([1, 2])`, `new Uint8Array(4)`, embedBytes: lengths that
+  // never change.
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::BytesOf)
+    return Linear{Term::zero(), static_cast<int64_t>(call->args.size())};
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::EmbedBytes)
+    return Linear{Term::zero(),
+                  static_cast<int64_t>(cast<StringLitExpr>(call->args[0])->value.size())};
+  if (auto *call = dyn_cast<CallExpr>(object); call && call->builtin == Builtin::BytesNew)
+    if (std::optional<Linear> n = linear(call->args[0]); n && n->term.isZero())
+      return n;
   return std::nullopt;
 }
 
 bool Sema::provesInBounds(const Expr *object, const Expr *index, bool allowEnd) const {
   std::optional<Linear> at = linear(index), length = lengthOf(object);
-  if (!at || !length)
+  if (!length)
     return false;
-  // 0 <= at, that is 0 < at + 1
-  if (!flow_.facts.proves(Term::zero(), at->term, at->offset + 1))
-    return false;
-  // at < length (+ 1 with allowEnd)
-  return flow_.facts.proves(at->term, length->term,
-                            length->offset - at->offset + (allowEnd ? 1 : 0));
+  // 0 <= at, that is 0 < at + 1; and at < length (+ 1 with allowEnd)
+  if (at && flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
+      flow_.facts.proves(at->term, length->term, length->offset - at->offset + (allowEnd ? 1 : 0)))
+    return true;
+  // An index whose values are known from its form, `table[x & 0xff]` or
+  // `hex[b >> 4]`: the largest below the length.
+  ValueRange range = valueRange(index);
+  return range.lo && range.hi && *range.lo >= 0 &&
+         flow_.facts.proves(Term::zero(), length->term,
+                            length->offset - *range.hi + (allowEnd ? 1 : 0));
 }
 
 bool Sema::provesAtInBounds(const Expr *object, const Expr *index) const {
@@ -219,6 +279,15 @@ bool Sema::provesNotEmpty(const Expr *object) const {
 //===----------------------------------------------------------------------===//
 
 void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) const {
+  addResultFacts(cond, whenTrue, whenFalse);
+  addJsonFacts(cond, whenTrue, whenFalse);
+  addUnionFacts(cond, whenTrue, whenFalse);
+  addUnknownFacts(cond, whenTrue, whenFalse);
+  // `if (isCircle(s))`: what the function's body shows (sema_predicate.cpp).
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::None) {
+    applyPredicate(call, whenTrue, whenFalse);
+    return;
+  }
   // `if (x)`: a `T | undefined` that is truthy holds a value.
   if (const NameExpr *name = optionalVariable(cond)) {
     whenTrue.defined.insert(name->var);
@@ -238,6 +307,27 @@ void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) 
   if (!bin)
     return;
   BinaryOp op = bin->op;
+
+  // `x instanceof C`: x holds a value, and a variable is a C.
+  if (op == BinaryOp::InstanceOf) {
+    if (const NameExpr *name = optionalVariable(bin->lhs))
+      whenTrue.defined.insert(name->var);
+    else if (std::optional<FieldPath> path = optionalField(bin->lhs))
+      defineField(whenTrue, *path);
+    const Type *cls = bin->rhs->type;
+    // A class known only when the program runs, whose objects are a T.
+    if (cls && cls->isConstructor())
+      cls = cls->constructed();
+    if (const VarSymbol *var = variableOf(bin->lhs);
+        var && cls && cls->isClass() && var->type->nonOptional()->isObject() &&
+        cls != var->type->nonOptional() && cls->isSubtypeOf(var->type->nonOptional()))
+      whenTrue.narrowed.push_back({var, cls});
+    // A Uint8Array that is a Buffer.
+    if (const VarSymbol *var = variableOf(bin->lhs);
+        var && cls && cls->isBuffer() && var->type->nonOptional()->bytes() == Type::Bytes::Uint8)
+      whenTrue.narrowed.push_back({var, cls});
+    return;
+  }
 
   if (op == BinaryOp::Eq || op == BinaryOp::Ne) {
     // `x !== undefined`, `x === undefined`
@@ -263,6 +353,51 @@ void Sema::addConditionFacts(const Expr *cond, Flow &whenTrue, Flow &whenFalse) 
       auto *text = dyn_cast<StringLitExpr>(other);
       if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text)
         continue;
+      // A variable of a type parameter T: a string, a boolean or a number
+      // where that is what typeof says (in generic code; an instance has
+      // its type).
+      if (const VarSymbol *var = variableOf(typeOf->operand); var && var->type->nonOptional()->isParam()) {
+        const Type *param = var->type->nonOptional();
+        auto admits = [&](auto test) {
+          llvm::ArrayRef<const Type *> alternatives = param->alternatives();
+          const Type *constraint = param->constraint();
+          return constraint ? test(constraint->nonOptional())
+                            : alternatives.empty() || llvm::any_of(alternatives, test);
+        };
+        const Type *narrowed = nullptr;
+        if (text->value == u"string" && admits([](const Type *t) { return t->isString(); }))
+          narrowed = Type::string();
+        else if (text->value == u"boolean" && admits([](const Type *t) { return t->isBool(); }))
+          narrowed = Type::boolTy();
+        else if (text->value == u"number" && !param->constraint() &&
+                 admits([](const Type *t) { return t->isNumeric(); }))
+          narrowed = numberParam(param);
+        Flow &holds = op == BinaryOp::Eq ? whenTrue : whenFalse;
+        if (narrowed) {
+          holds.narrowed.push_back({var, narrowed});
+          if (var->type->isOptional())
+            holds.defined.insert(var);
+        }
+        // `T extends string | int` that is not a string is an int.
+        llvm::SmallVector<const Type *, 4> others;
+        for (const Type *t : param->alternatives()) {
+          llvm::StringRef name = typeOfName(t);
+          if (std::u16string(name.begin(), name.end()) != text->value)
+            others.push_back(t);
+        }
+        if (!others.empty() && !var->type->isOptional()) {
+          llvm::StringRef kind = typeOfName(others.front());
+          bool same = llvm::all_of(others, [&](const Type *t) { return typeOfName(t) == kind; });
+          const Type *rest = !same                ? nullptr
+                             : kind == "string"  ? Type::string()
+                             : kind == "boolean" ? Type::boolTy()
+                             : kind == "number"  ? numberParam(param)
+                                                 : nullptr;
+          if (rest)
+            (op == BinaryOp::Eq ? whenFalse : whenTrue).narrowed.push_back({var, rest});
+        }
+        continue;
+      }
       const NameExpr *name = optionalVariable(typeOf->operand);
       if (!name)
         continue;
@@ -336,6 +471,23 @@ std::optional<Linear> Sema::knownLength(const Expr *value) const {
       return linear(create->args[0]);
     return Linear{Term::zero(), 0};
   }
+  // A new typed array, Buffer or ArrayBuffer of a known length.
+  if (auto *call = dyn_cast<CallExpr>(value)) {
+    switch (call->builtin) {
+    case Builtin::BytesNew:
+    case Builtin::ArrayBufferNew:
+    case Builtin::BufferAllocFill:
+      return call->args.empty() ? Linear{Term::zero(), 0} : linear(call->args[0]);
+    case Builtin::BytesOf:
+    case Builtin::EmbedBytes:
+      return lengthOf(call);
+    case Builtin::BytesFromArray:
+    case Builtin::BytesFromBytes:
+      return lengthOf(call->args[0]);
+    default:
+      break;
+    }
+  }
   return lengthOf(value);
 }
 
@@ -344,8 +496,25 @@ void Sema::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isError())
     return;
   forgetFieldsOf(flow_, var); // it holds another object now
+  llvm::erase_if(flow_.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
+  // A union holds the member assigned: after `s = circle`, s is a Circle.
+  if (const Type *base = type->nonOptional(); base->isUnion() && value->type &&
+                                              !value->type->isError() && value->type != type &&
+                                              isImplicitlyConvertible(value->type, base))
+    narrowVariable(flow_, var, value->type);
   if (type->isOptional())
     setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
+  if (type->isResult()) {
+    // `r = ok(1)` holds an Ok, as its type says.
+    const Type *given = value->type;
+    flow_.okResults.erase(var);
+    flow_.errResults.erase(var);
+    if (given->isResult() && given->errType()->isNever())
+      flow_.okResults.insert(var);
+    else if (given->isResult() && given->okType()->isNever())
+      flow_.errResults.insert(var);
+    return;
+  }
 
   if (type->isInt()) {
     std::optional<Linear> v = linear(value);
@@ -356,12 +525,25 @@ void Sema::assigned(const VarSymbol *var, const Expr *value) {
     flow_.facts.forget(var);
     if (v)
       flow_.facts.addEqual(Term::of(var), v->term, v->offset);
+    // `n = Math.min(a.length, b.length)` is at most each, and Math.max at
+    // least each: `for (let i = 0; i < n; i++) a[i] = b[i]`.
+    if (auto *call = dyn_cast<CallExpr>(value);
+        call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
+        !call->hasSpread())
+      for (const Expr *arg : call->args)
+        if (std::optional<Linear> bound = linear(arg)) {
+          if (call->builtin == Builtin::MathMin)
+            addLess(flow_.facts, Linear{Term::of(var), 0}, *bound, /*orEqual=*/true);
+          else
+            addLess(flow_.facts, *bound, Linear{Term::of(var), 0}, /*orEqual=*/true);
+        }
     return;
   }
 
   flow_.facts.forget(var); // its length
   const Type *base = type->nonOptional();
-  if (!base->isString() && !base->isArray())
+  if (!base->isString() && !base->isArray() && !base->isByteView() &&
+      base->bytes() != Type::Bytes::ArrayBuffer)
     return;
   if (value->type->isOptional() || value->type->isUndefined())
     return;
@@ -390,12 +572,19 @@ void Sema::forgetCallEffects(Flow &flow) const {
   for (const VarSymbol *var : llvm::to_vector(flow.defined))
     if (changedByCalls(var))
       flow.defined.erase(var);
+  llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return changedByCalls(narrowed.first); });
+  for (auto *results : {&flow.okResults, &flow.errResults})
+    for (const VarSymbol *var : llvm::to_vector(*results))
+      if (changedByCalls(var))
+        results->erase(var);
   // A field of any object, since objects are shared by reference, that some
   // code assigns to; or one reached from a variable a call may change.
-  llvm::erase_if(flow.definedFields, [&](const FieldPath &path) {
+  auto fieldChanged = [&](const FieldPath &path) {
     return changedByCalls(path.var) ||
            llvm::any_of(path.names, [&](llvm::StringRef field) { return assignedFields_.contains(field); });
-  });
+  };
+  llvm::erase_if(flow.definedFields, fieldChanged);
+  llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return fieldChanged(entry.first); });
 }
 
 void Sema::calledFunction() { forgetCallEffects(flow_); }
@@ -427,6 +616,14 @@ Sema::LoopScan Sema::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
   return scan;
 }
 
+// Whether `expr` names a variable that holds an iterator: iterating it runs
+// the code of a generator or the callbacks of helpers.
+bool Sema::namesIterator(const Expr *expr) const {
+  auto *name = dyn_cast<NameExpr>(expr);
+  const VarSymbol *var = name ? lookup(name->name).var : nullptr;
+  return var && var->type && var->type->nonOptional()->isIterator();
+}
+
 // `depth` counts the loops nested inside the scanned one.
 void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
   switch (stmt->kind()) {
@@ -435,9 +632,12 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
       scanStmt(s, scan, depth);
     break;
   case Stmt::Kind::VarDecl:
-    for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls)
+    for (const VarDeclarator &d : cast<VarDeclStmt>(stmt)->decls) {
       if (d.init)
         scanExpr(d.init, scan, depth);
+      if (d.destructured && d.init && namesIterator(d.init))
+        scan.callsFunctions = true;
+    }
     break;
   case Stmt::Kind::Function:
     // What a function declared in the loop assigns to may change in the
@@ -485,6 +685,8 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
   case Stmt::Kind::ForOf: {
     auto *s = cast<ForOfStmt>(stmt);
     scanExpr(s->iterable, scan, depth);
+    if (namesIterator(s->iterable))
+      scan.callsFunctions = true;
     scanStmt(s->body, scan, depth + 1);
     break;
   }
@@ -512,6 +714,18 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
     if (auto *value = cast<ReturnStmt>(stmt)->value)
       scanExpr(value, scan, depth);
     break;
+  case Stmt::Kind::Throw:
+    scanExpr(cast<ThrowStmt>(stmt)->value, scan, depth);
+    break;
+  case Stmt::Kind::Try: {
+    auto *s = cast<TryStmt>(stmt);
+    scanStmt(s->block, scan, depth);
+    if (s->handler)
+      scanStmt(s->handler, scan, depth);
+    if (s->finalizer)
+      scanStmt(s->finalizer, scan, depth);
+    break;
+  }
   case Stmt::Kind::Break: {
     // `break label` leaves the loop unless the label is inside it.
     llvm::StringRef label = cast<BreakStmt>(stmt)->label;
@@ -522,6 +736,7 @@ void Sema::scanStmt(const Stmt *stmt, LoopScan &scan, unsigned depth) const {
   }
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
+  case Stmt::Kind::Class:
     break;
   }
 }
@@ -550,6 +765,8 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
       scanExpr(index->index, scan, depth);
       scan.growsArrays = true; // `a[a.length] = x` appends
       scan.releasesElements = true;
+      // `o[key] = x` assigns the field the key names.
+      keyNames(index->index, [&](llvm::StringRef name) { scan.fieldWrites.insert(name); });
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       scanExpr(member->object, scan, depth);
       scan.fieldWrites.insert(member->name);
@@ -574,12 +791,18 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
       scanExpr(e, scan, depth);
     break;
   case Expr::Kind::ArrayLit:
-    for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements)
+    for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
       scanExpr(e.expr, scan, depth);
+      if (e.spread && namesIterator(e.expr))
+        scan.callsFunctions = true;
+    }
     break;
   case Expr::Kind::ObjectLit:
-    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props)
+    for (const ObjectLitExpr::Property &p : cast<ObjectLitExpr>(expr)->props) {
+      if (p.key)
+        scanExpr(p.key, scan, depth);
       scanExpr(p.value, scan, depth);
+    }
     break;
   case Expr::Kind::Member:
     scanExpr(cast<MemberExpr>(expr)->object, scan, depth);
@@ -645,11 +868,17 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
         scan.growsArrays = scan.shrinksArrays = scan.releasesElements = true;
       else if (method == "fill")
         scan.releasesElements = true;
-      // The methods that call back.
+      // The methods that call back, of arrays and of Results.
       static const char *const callbacks[] = {
-          "map",  "filter", "forEach", "reduce",  "reduceRight", "find",          "findIndex",
-          "some", "every",  "flatMap", "findLast", "findLastIndex", "sort"};
+          "map",     "filter",  "forEach", "reduce",  "reduceRight", "find",       "findIndex",
+          "some",    "every",   "flatMap", "findLast", "findLastIndex", "sort",    "mapErr",
+          "andThen", "orElse",  "match",   "andTee",  "orTee",       "andThrough"};
       if (llvm::is_contained(callbacks, method) && !call->args.empty())
+        scan.callsFunctions = true;
+      // An iterator runs a generator's code or the callbacks of helpers.
+      if (method == "next" || method == "toArray" ||
+          (method == "from" && (isGlobalName(member->object, "Array") ||
+                                isGlobalName(member->object, "Iterator"))))
         scan.callsFunctions = true;
     } else if (!llvm::any_of(kGlobalFunctions, [&](llvm::StringRef name) {
                  return isGlobalName(call->callee, name);
@@ -659,8 +888,13 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
     break;
   }
   case Expr::Kind::New:
+    if (const Expr *callee = cast<NewExpr>(expr)->callee)
+      scanExpr(callee, scan, depth);
     for (const Expr *arg : cast<NewExpr>(expr)->args)
       scanExpr(arg, scan, depth);
+    // A constructor runs code.
+    if (cast<NewExpr>(expr)->name != "Array")
+      scan.callsFunctions = true;
     break;
   case Expr::Kind::Conditional: {
     auto *cond = cast<ConditionalExpr>(expr);
@@ -682,6 +916,21 @@ void Sema::scanExpr(const Expr *expr, LoopScan &scan, unsigned depth) const {
   case Expr::Kind::Function:
     // The same for an arrow created in the loop.
     scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
+    break;
+  case Expr::Kind::Yield:
+    // Whoever iterates the generator runs any code before it goes on.
+    if (const Expr *value = cast<YieldExpr>(expr)->value)
+      scanExpr(value, scan, depth);
+    scan.callsFunctions = true;
+    break;
+  case Expr::Kind::Await:
+    // So does any other task while this one waits.
+    scanExpr(cast<AwaitExpr>(expr)->value, scan, depth);
+    scan.callsFunctions = true;
+    break;
+  case Expr::Kind::Class:
+    // Its static initializers run, and its base may be a call.
+    scan.callsFunctions = true;
     break;
   }
 }
@@ -707,13 +956,16 @@ std::optional<std::pair<int64_t, int64_t>> Sema::syntacticIntRange(const Expr *e
     return std::nullopt;
   }
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    auto *name = dyn_cast<NameExpr>(member->object);
+    const VarSymbol *var = name ? lookup(name->name).var : nullptr;
+    // The bytes of binary data, which no buffer has more of than a length.
+    if (member->name == "byteLength" && var && var->type->isBytes())
+      return std::pair{int64_t(0), kMaxLength};
     if (member->name != "length")
       return std::nullopt;
     if (isa<StringLitExpr>(member->object) || isa<ArrayLitExpr>(member->object))
       return std::pair{int64_t(0), kMaxLength};
-    auto *name = dyn_cast<NameExpr>(member->object);
-    const VarSymbol *var = name ? lookup(name->name).var : nullptr;
-    if (var && (var->type->isString() || var->type->isArray()))
+    if (var && (var->type->isString() || var->type->isArray() || var->type->isTypedArray()))
       return std::pair{int64_t(0), kMaxLength};
     return std::nullopt;
   }
@@ -878,11 +1130,22 @@ Sema::Flow Sema::loopHead(const LoopScan &scan, const Expr *cond, bool induction
     for (const VarSymbol *defined : llvm::to_vector(head.defined))
       if (defined->name == name)
         head.defined.erase(defined);
+    // What a check or an assignment before the loop narrowed it to.
+    llvm::erase_if(head.narrowed,
+                   [&](const auto &narrowed) { return narrowed.first->name == name; });
+    for (auto *results : {&head.okResults, &head.errResults})
+      for (const VarSymbol *result : llvm::to_vector(*results))
+        if (result->name == name)
+          results->erase(result);
     llvm::erase_if(head.definedFields, [&](const FieldPath &path) { return path.var->name == name; });
+    llvm::erase_if(head.narrowedFields,
+                   [&](const auto &entry) { return entry.first.var->name == name; });
   }
-  llvm::erase_if(head.definedFields, [&](const FieldPath &path) {
+  auto written = [&](const FieldPath &path) {
     return llvm::any_of(path.names, [&](llvm::StringRef field) { return scan.fieldWrites.contains(field); });
-  });
+  };
+  llvm::erase_if(head.definedFields, written);
+  llvm::erase_if(head.narrowedFields, [&](const auto &entry) { return written(entry.first); });
   if (scan.callsFunctions)
     forgetCallEffects(head);
   head.facts.forgetIf([&](const Facts::Fact &f) {

@@ -56,17 +56,24 @@ const char *whyUnsupported(llvm::StringRef name) {
   if (name == "Proxy")
     return "the fields of an object are read and written straight in memory, so nothing can "
            "intercept that";
+  if (name == "require")
+    return "files are imported by name: 'import { a } from \"./x\"'";
+  if (name == "module" || name == "exports")
+    return "files export by name: 'export function f() {...}', or 'export { a, b }'";
   return nullptr;
 }
 
 Expr *Sema::numericArg(Expr *arg, const Type *hint) {
-  arg = checkExpr(arg, hint);
+  arg = apparent(checkExpr(arg, hint));
   const Type *type = arg->type;
   if (!type->isNumeric() && !type->isError()) {
     std::string message = "argument of type '" + type->name().str() +
                           "' is not assignable to parameter of type 'double'";
     if (type->isOptional() && type->inner()->isNumeric())
       message += "; the value may be undefined: check it first or give a default with '??'";
+    else if (type->isDecimal())
+      message += "; convert it with 'Number(x)', or use what decimals have: 'x.abs()', 'x.sqrt()', "
+                 "'x.round()', 'decimal.max(a, b)'...";
     diags_.error(arg->loc(), message);
   }
   return arg;
@@ -191,7 +198,16 @@ Expr *Sema::checkMinMaxSpread(CallExpr *call, const Type *hint) {
     Expr *&arg = call->args[i];
     const Type *type;
     if (call->spreads(i)) {
-      arg = checkExpr(arg, hint ? Type::array(hint) : nullptr);
+      markFused(arg);
+      arg = iterableOf(checkExpr(arg, hint ? Type::array(hint) : nullptr));
+      // The values of an iterator, a Set or a Map's values(), as an array.
+      if (arg->type->isIterator() && checkSendsNothing(arg->type, arg->loc(), "a spread")) {
+        auto *values = ctx_.make<ArrayLitExpr>(arg->loc());
+        values->elements.push_back({arg, /*spread=*/true});
+        values->type = Type::array(arg->type->yielded());
+        calledFunction(); // a generator runs
+        arg = values;
+      }
       type = arg->type->isArray() ? arg->type->inner() : arg->type;
       if (!arg->type->isError() && (!arg->type->isArray() || !type->isNumeric())) {
         diags_.error(arg->loc(), "only an array of numbers can be spread here, found '" +
@@ -229,10 +245,16 @@ Expr *Sema::checkMinMaxSpread(CallExpr *call, const Type *hint) {
   return call;
 }
 
-// String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x).
+// String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x),
+// decimal(x).
 Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  static const llvm::StringLiteral names[] = {"String",     "Number", "parseInt",
-                                              "parseFloat", "isNaN",  "isFinite", "Boolean"};
+  static const llvm::StringLiteral names[] = {"String",   "Number",  "parseInt", "parseFloat",
+                                              "isNaN",    "isFinite", "Boolean", "decimal",
+                                              "BigInt"};
+  if (isGlobalName(name, "RegExp")) // `RegExp(s)` is `new RegExp(s)`
+    return rejectSpread(call) ? call : checkRegExpConstructor(name->loc(), call->args);
+  if (isGlobalName(name, "Date"))
+    return checkDateFunction(call, name);
   if (!llvm::any_of(names, [&](llvm::StringRef n) { return isGlobalName(name, n); }))
     return nullptr;
   return checkGlobalFunction(call, name->name, name->loc(), expected);
@@ -243,6 +265,14 @@ Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc 
   call->type = Type::error();
   if (rejectSpread(call))
     return call;
+  if (fn == "decimal")
+    return checkDecimalCall(call, loc);
+  if (fn == "BigInt") {
+    reportBigInt(loc, "'BigInt'");
+    for (Expr *&arg : call->args)
+      arg = checkExpr(arg);
+    return call;
+  }
   if (fn == "Boolean") {
     // The truth of the value, as a condition tests it; `Boolean()` is false.
     if (!checkArity(call, loc, 0, 1))
@@ -267,17 +297,21 @@ Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc 
       call->type = Type::string();
       return call;
     }
-    // Number(x) of a number, a boolean, a string or undefined.
+    // Number(x) of a number, a boolean, a string, a decimal (the nearest
+    // double) or undefined.
     for (Expr *&arg : call->args) {
       arg = checkExpr(arg);
       const Type *type = arg->type, *base = type->nonOptional();
       if (type->isError())
         return call;
+      if (type->isDate()) // its time
+        return dateTime(arg);
       if (base->isNumeric()) {
         arg = convert(arg, type->isOptional() ? Type::optional(Type::doubleTy()) : Type::doubleTy());
-      } else if (!base->isBool() && !base->isString() && !type->isUndefined()) {
-        diags_.error(arg->loc(), "Number() takes a number, a boolean or a string, found '" +
-                                     type->name() + "'");
+      } else if (!base->isBool() && !base->isString() && !base->isDecimal() &&
+                 !type->isUndefined()) {
+        diags_.error(arg->loc(), "Number() takes a number, a boolean, a string or a decimal, "
+                                 "found '" + type->name() + "'");
         return call;
       }
     }
@@ -397,6 +431,8 @@ Expr *Sema::checkNumberMethod(CallExpr *call, MemberExpr *member) {
 }
 
 Expr *Sema::checkStringMethod(CallExpr *call, MemberExpr *member) {
+  if (Expr *regex = checkStringRegexMethod(call, member))
+    return regex;
   struct Method {
     llvm::StringRef name;
     Builtin builtin;
@@ -480,7 +516,7 @@ Expr *Sema::checkStringMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
+Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *arrayType = member->object->type;
   const Type *element = arrayType->inner();
   const VarSymbol *self = arrayVariable(member->object);
@@ -511,7 +547,9 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
       "map",  "filter", "forEach", "reduce",    "reduceRight", "find",    "findIndex",
       "some", "every",  "flatMap", "findLast",  "findLastIndex"};
   if (llvm::is_contained(callbacks, name) || (name == "sort" && count != 0))
-    return checkCallbackMethod(call, member);
+    return checkCallbackMethod(call, member, expected);
+  if (name == "keys" || name == "values" || name == "entries")
+    return checkArrayIterator(call, member);
 
   if (name == "push" || name == "unshift") {
     bool spreads = call->hasSpread();
@@ -582,6 +620,14 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
   if (name == "indexOf" || name == "lastIndexOf" || name == "includes") {
     if (!arity(1, 2))
       return call;
+    if (holdsResults(element)) {
+      diags_.error(member->loc(), "'" + name +
+                                      "' cannot compare Results: in JavaScript each Result is an "
+                                      "object of its own, equal to no other; search with a "
+                                      "function, e.g. 'some' or 'findIndex'");
+      checkArgsLoosely();
+      return call;
+    }
     if (element->nonOptional()->isFunction())
       file_->comparesFunctions = true;
     elementArg(0);
@@ -598,7 +644,31 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  if ((name == "join" || name == "toString") && holdsObjects(element)) {
+  if ((name == "join" || name == "toString") && holdsResults(element)) {
+    diags_.error(member->loc(), "Results cannot be converted to strings: JavaScript would give "
+                                "'[object Object]'; make the text of each first, e.g. 'a.map(r => "
+                                "r.match(...))." +
+                                    name + "()'");
+    checkArgsLoosely();
+    return call;
+  }
+  if ((name == "join" || name == "toString") && holdsUnknown(element)) {
+    diags_.error(member->loc(), "unknown values cannot be converted to strings: one may hold an "
+                                "object; map them to text first, e.g. 'a.map(x => typeof x == "
+                                "\"string\" ? x : \"?\")." +
+                                    name + "()'");
+    checkArgsLoosely();
+    return call;
+  }
+  if ((name == "join" || name == "toString") && holdsJson(element)) {
+    diags_.error(member->loc(), "Json values cannot be converted to strings: an object would be "
+                                "'[object Object]'; map them to text first, e.g. 'a.map(x => "
+                                "JSON.stringify(x))." +
+                                    name + "()'");
+    checkArgsLoosely();
+    return call;
+  }
+  if ((name == "join" || name == "toString") && holdsObjects(element) && !holdsDates(element)) {
     diags_.error(member->loc(), "objects cannot be converted to strings: JavaScript would give "
                                 "'[object Object]'; map them to text first, e.g. 'a.map(o => o.name)." +
                                     name + "()'");
@@ -639,16 +709,49 @@ Expr *Sema::checkArrayMethod(CallExpr *call, MemberExpr *member) {
                                   "without one compares their source code");
       return call;
     }
-    if (holdsObjects(element)) {
+    if (holdsUnknown(element)) {
+      diags_.error(member->loc(), "sorting unknown values needs a comparison function: 'sort()' "
+                                  "without one compares them as strings, objects as '[object "
+                                  "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      return call;
+    }
+    if (holdsJson(element)) {
+      diags_.error(member->loc(), "sorting Json values needs a comparison function: 'sort()' "
+                                  "without one compares them as strings, objects as '[object "
+                                  "Object]'; pass one, e.g. 'sort((a, b) => ...)'");
+      return call;
+    }
+    if (holdsDates(element)) {
+      diags_.error(member->loc(), "sorting dates needs a comparison function: 'sort()' without one "
+                                  "compares the texts of toString(), 'Thu Feb 29 2024 ...', which "
+                                  "puts them in the order of the names of the days; pass one: "
+                                  "'sort((a, b) => a.getTime() - b.getTime())'");
+      return call;
+    }
+    if (holdsObjects(element) || holdsResults(element)) {
       diags_.error(member->loc(), "sorting objects needs a comparison function: 'sort()' without one "
                                   "compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) "
                                   "=> a.x - b.x)'");
       return call;
     }
+    // A union compares its values as strings too, numbers and objects among
+    // them: the same traps.
+    auto textual = [](const Type *m) {
+      const Type *b = m->isLiteral() ? m->literalBase() : m;
+      return b->isString() || b->isBool();
+    };
+    if (const Type *u = element->nonOptional();
+        u->isUnion() && !llvm::all_of(u->members(), textual)) {
+      diags_.error(member->loc(), "'sort()' without a comparison function compares the values "
+                                  "of '" + u->name() + "' as strings, numbers and objects among "
+                                  "them; pass one, e.g. 'sort((a, b) => ...)'");
+      return call;
+    }
     // JavaScript would sort numbers as strings; sorting them differently
     // would give another order than node for the same code. (Undefined
     // elements go to the end without being compared.)
-    if (element->nonOptional()->isNumeric()) {
+    if (element->nonOptional()->isNumeric() || element->nonOptional()->isDecimal() ||
+        apparentType(element->nonOptional())->isNumeric()) {
       diags_.error(member->loc(), llvm::Twine("'sort()' without a comparison function compares "
                                               "numbers as strings, as in JavaScript: [2, 10, 1] "
                                               "becomes [1, 10, 2]; pass one: 'sort((x, y) => ") +
@@ -688,8 +791,59 @@ Expr *Sema::checkNew(NewExpr *expr, const Type *expected) {
     for (Expr *&arg : expr->args)
       arg = checkExpr(arg);
   };
+  // `new cls()` and `new route.cls()` of a variable that holds a class
+  // (docs/decorators.md, sections 5 and 6).
+  if (!expr->callee && !expr->name.empty() && lookupValue(expr->name).var) {
+    expr->callee = ctx_.make<NameExpr>(expr->loc(), expr->name);
+    if (!expr->member.empty())
+      expr->callee = ctx_.make<MemberExpr>(expr->loc(), expr->callee, expr->member);
+  }
+  if (expr->callee)
+    return checkValueNew(expr, expected);
+  if (!expr->member.empty()) {
+    ScopeEntry intl = lookup("Intl");
+    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls)
+      return expr->member == "DateTimeFormat"
+                 ? checkDateFormatNew(expr->loc(), expr->args)
+                 : checkIntlNew(expr->loc(), expr->member, expr->args, /*withNew=*/true);
+    diags_.error(expr->loc(), "'" + expr->name + "." + expr->member +
+                                  "' is not supported; of namespaces, only the classes of 'Intl' "
+                                  "can be made with 'new'");
+    checkArgsLoosely();
+    return expr;
+  }
+  if (ClassDecl *cls = lookupValue(expr->name).cls)
+    return checkClassNew(expr, finalClass(cls), expected);
+  if (const NodeName *n = nodeName(expr->name); n && n->module == NodeModule::Crypto)
+    return checkCryptoNew(expr, n->name);
   if (const char *why = whyUnsupported(expr->name)) {
     diags_.error(expr->loc(), "'new " + expr->name + "' is not supported: " + why);
+    checkArgsLoosely();
+    return expr;
+  }
+  if (expr->name == "RegExp" && !lookup("RegExp").var && !lookup("RegExp").func) {
+    if (!expr->typeArgs.empty())
+      diags_.error(expr->loc(), "'RegExp' takes no type arguments");
+    return checkRegExpConstructor(expr->loc(), expr->args);
+  }
+  if (expr->name == "Date" && !lookup("Date").var && !lookup("Date").func) {
+    if (!expr->typeArgs.empty())
+      diags_.error(expr->loc(), "'Date' takes no type arguments");
+    return checkDateNew(expr->loc(), expr->args);
+  }
+  if ((expr->name == "Map" || expr->name == "Set" || expr->name == "WeakMap" ||
+       expr->name == "WeakSet") &&
+      !lookup(expr->name).var && !lookup(expr->name).func)
+    return checkDictNew(expr, expected);
+  if (expr->name == "Promise" && !lookup("Promise").var && !lookup("Promise").func)
+    return checkPromiseNew(expr, expected);
+  if (expr->name == "WeakRef" && !lookup("WeakRef").var && !lookup("WeakRef").func)
+    return checkWeakRefNew(expr, expected);
+  if (const Type *bytes = bytesTypeNamed(expr->name);
+      bytes && !lookup(expr->name).var && !lookup(expr->name).func)
+    return checkBytesNew(expr, bytes);
+  if (expr->name == "BigInt64Array" || expr->name == "BigUint64Array") {
+    reportBigInt(expr->loc(), "'" + expr->name.str() + "'");
     checkArgsLoosely();
     return expr;
   }
@@ -732,7 +886,17 @@ Expr *Sema::checkNew(NewExpr *expr, const Type *expected) {
 }
 
 Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
+  if (expected && expected->nonOptional()->isJson())
+    return checkJsonArrayLit(lit);
+  // Where an unknown is expected, the elements may be of any types too.
+  if (expected && expected->isUnknown())
+    expected = Type::array(Type::unknown());
   const Type *expectedElement = nullptr;
+  // Where a union is expected, its array, if it has one: `string | double[]`.
+  if (expected && expected->nonOptional()->isUnion())
+    if (const Type *array = expected->nonOptional()->slotPart(UnionSlot::Array);
+        array && array->isArray())
+      expected = array;
   if (expected && expected->nonOptional()->isArray())
     expectedElement = expected->nonOptional()->inner();
 
@@ -744,28 +908,85 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
     lit->type = Type::error();
     return lit;
   }
+  if (expected && expected->nonOptional()->isTuple())
+    return checkTupleLit(lit, expected->nonOptional());
 
   // The element types: of the values, or of the arrays spread into this one.
-  // A string spreads into its characters.
-  std::vector<const Type *> types;
-  for (ArrayLitExpr::Element &e : lit->elements) {
+  // A string spreads into its characters, a tuple into its elements. Literal
+  // numbers next to a decimal element are decimals: they are checked after
+  // the other elements, which changes nothing else.
+  std::vector<const Type *> types(lit->elements.size());
+  bool someDecimal = false;
+  const Type *seen = nullptr; // the type of the elements so far
+  for (size_t i = 0; i < lit->elements.size(); ++i) {
+    ArrayLitExpr::Element &e = lit->elements[i];
+    if (!e.spread && !expectedElement && isLiteralTree(e.expr))
+      continue;
     if (!e.spread) {
-      e.expr = checkExpr(e.expr, expectedElement);
-      types.push_back(e.expr->type);
+      // `[p, { x: 1, y: 2 }]`: a literal takes the type of the objects
+      // before it.
+      const Type *hint = expectedElement;
+      if (!hint && seen && holdsObjects(seen) && literalShaped(e.expr))
+        hint = seen;
+      e.expr = checkExpr(e.expr, hint);
+      types[i] = e.expr->type;
+      someDecimal |= types[i]->nonOptional()->isDecimal();
+      if (!e.expr->type->isError() && seen != Type::error())
+        seen = seen ? unify(seen, e.expr->type) : e.expr->type;
+      if (!seen)
+        seen = Type::error();
       continue;
     }
-    e.expr = checkExpr(e.expr, expectedElement ? Type::array(expectedElement) : nullptr);
+    markFused(e.expr);
+    e.expr =
+        iterableOf(checkExpr(e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
+    if (e.expr->type->isMatch()) // `[...m]`: the captures
+      e.expr = matchItems(e.expr);
     const Type *type = e.expr->type;
     if (type->isString()) {
-      types.push_back(type);
+      types[i] = type;
+      continue;
+    }
+    // `[...gen()]`: the values of the iterator, one after another.
+    if (type->isIterator()) {
+      checkSendsNothing(type, e.expr->loc(), "a spread");
+      calledFunction(); // a generator runs
+      types[i] = type->yielded();
+      someDecimal |= types[i]->nonOptional()->isDecimal();
+      continue;
+    }
+    if (type->isTuple()) {
+      const Type *element = tupleElement(type);
+      if (!element)
+        diags_.error(e.expr->loc(),
+                     "the elements of '" + type->name() +
+                         "' have different types, and an array holds elements of one type");
+      types[i] = element ? element : Type::error();
+      continue;
+    }
+    // `[...bytes]`: the elements as numbers.
+    if (type->isTypedArray()) {
+      types[i] = type->elementType();
       continue;
     }
     if (!type->isArray() && !type->isError()) {
-      diags_.error(e.expr->loc(), "only arrays and strings can be spread here, found '" +
-                                      type->name() + "'");
+      diags_.error(e.expr->loc(), "only arrays, strings, iterators, Maps and Sets can be spread "
+                                  "here, found '" +
+                                      type->name() + "'" +
+                                      (type->isRecord() ? "; for the entries of a Record, spread "
+                                                          "'Object.entries(r)'"
+                                                        : ""));
       type = Type::error();
     }
-    types.push_back(type->isError() ? type : type->inner());
+    types[i] = type->isError() ? type : type->inner();
+    someDecimal |= types[i]->nonOptional()->isDecimal();
+  }
+  for (size_t i = 0; i < lit->elements.size(); ++i) {
+    ArrayLitExpr::Element &e = lit->elements[i];
+    if (types[i])
+      continue;
+    e.expr = checkExpr(e.expr, someDecimal ? Type::decimalTy() : nullptr);
+    types[i] = e.expr->type;
   }
 
   lit->type = Type::error();
@@ -779,11 +1000,31 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
     for (size_t i = 0; i < types.size(); ++i) {
       if (types[i]->isError())
         return lit;
-      const Type *next = element ? unify(element, types[i]) : types[i];
+      const Type *next = element ? unionUnify(element, types[i]) : types[i];
       if (!next) {
-        diags_.error(lit->elements[i].expr->loc(), "array elements must have one type; found '" +
-                                                       element->name() + "' and '" +
-                                                       types[i]->name() + "'");
+        std::string message = "array elements must have one type; found '" + element->name().str() +
+                              "' and '" + types[i]->name().str() + "'";
+        // A value of each type in its own place is a tuple, which must be
+        // expected there: JavaScript makes an array.
+        bool spreads =
+            llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
+        auto literalClass = [](const Type *t) {
+          const ClassDecl *cls = t->nonOptional()->classDecl();
+          return cls && cls->literal;
+        };
+        if (literalClass(element) && literalClass(types[i])) {
+          message += "; each object literal with methods has a type of its own, so objects made "
+                     "by different literals differ; an interface with their fields and methods "
+                     "joins them: 'const xs: Counter[] = [...]'";
+        } else if (!spreads && llvm::none_of(types, [](const Type *t) { return t->isError(); })) {
+          std::string tuple;
+          for (const Type *t : types)
+            tuple += (tuple.empty() ? "" : ", ") + t->name().str();
+          message += "; for a value of each type in its own place, declare a tuple, e.g. "
+                     "'const t: [" +
+                     tuple + "] = ...'";
+        }
+        diags_.error(lit->elements[i].expr->loc(), message);
         return lit;
       }
       element = next;
@@ -802,7 +1043,22 @@ Expr *Sema::checkArrayLit(ArrayLitExpr *lit, const Type *expected) {
     if (!e.spread) {
       e.expr = coerce(e.expr, element);
     } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
-               !(e.expr->type->isString() && element->isString())) {
+               !(e.expr->type->isString() && element->isString()) &&
+               // `[...dogs]` as Animal[]: the same references, copied; also of
+               // a union of objects, which is one reference too.
+               !(e.expr->type->isArray() && isObjectReference(e.expr->type->inner()->nonOptional()) &&
+                 element->nonOptional()->isObject() &&
+                 (e.expr->type->inner()->isOptional() == element->isOptional() ||
+                  element->isOptional()) &&
+                 isImplicitlyConvertible(e.expr->type->inner(), element)) &&
+               !(e.expr->type->isIterator() &&
+                 isImplicitlyConvertible(e.expr->type->yielded(), element)) &&
+               !(e.expr->type->isTypedArray() &&
+                 isImplicitlyConvertible(e.expr->type->elementType(), element)) &&
+               !(e.expr->type->isTuple() &&
+                 llvm::all_of(e.expr->type->fields(), [&](const Field &f) {
+                   return isImplicitlyConvertible(f.type, element);
+                 }))) {
       // Arrays of different types have different layouts, so no conversion.
       diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() + "' into '" +
                                       arrayType->name() + "'");

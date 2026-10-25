@@ -1,0 +1,9 @@
+﻿{
+  "port": 8080,
+  "host": "localhost",
+  "debug": false,
+  "users": [
+    {"name": "Ann", "roles": ["admin"]},
+    {"name": "Bob", "roles": []}
+  ]
+}

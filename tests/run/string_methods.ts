@@ -18,9 +18,9 @@ console.log("straße".toUpperCase(), "ǅ".toLowerCase(), "ǅ".toUpperCase(), "�
 console.log("ΣΊΣΥΦΟΣ".toLowerCase(), "Σ".toLowerCase(), "ΑΣ ΣΑ".toLowerCase(), "привет мир".toUpperCase())
 console.log("ÿ".toUpperCase(), "µ".toUpperCase(), "𐐨".toUpperCase(), "already lower".toLowerCase())
 
-console.log("a.b.c".replace(".", "/"), "a.b.c".replaceAll(".", "/"), "abc".replace("x", "y"))
-console.log("abc".replace("", "-"), "abc".replaceAll("", "-"), "aaa".replaceAll("aa", "b"))
-console.log("price: 5".replace("5", "$$5"), "cat".replace("a", "[$&]"), "abc".replace("b", "($`|$')"), "x".replace("x", "$1$"))
+console.log("a.b.c".replace(/\./, "/"), "a.b.c".replaceAll(".", "/"), "abc".replace(/x/, "y"))
+console.log("abc".replace(/(?:)/, "-"), "abc".replaceAll("", "-"), "aaa".replaceAll("aa", "b"))
+console.log("price: 5".replace(/5/, "$$5"), "cat".replace(/a/, "[$&]"), "abc".replace(/b/, "($`|$')"), "x".replaceAll("x", "$1$"))
 
 console.log("hello".charAt(1), `[${"hello".charAt(9)}]`, "hello".charAt(), "😀x".codePointAt(0), "😀x".codePointAt(1), "😀x".codePointAt(2))
 const text = "a😀b"

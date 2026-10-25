@@ -1,0 +1,4 @@
+main
+microtask
+[ 'A', 'BB' ] 3
+nextTick

@@ -1,0 +1,67 @@
+// Generic classes for main.ts: async methods and Promise fields, fields of
+// the runtime's types, a decorated generic class, and an iterable range.
+
+function later<T>(value: T, ms: number): Promise<T> {
+  return new Promise(resolve => setTimeout(() => resolve(value), ms))
+}
+
+export function Table(name: string) {
+  return (cls: object) => Reflect.defineMetadata(Table, name, cls)
+}
+
+export function Column(cls: object, name: string) {
+  const names: string[] = Reflect.getOwnMetadata(Column, cls) ?? []
+  names.push(name)
+  Reflect.defineMetadata(Column, names, cls)
+}
+
+// A cache of values that a loader gives later, one promise for each key.
+@Table("cache")
+export class Cache<T> {
+  @Column items = new Map<string, T>()
+  last: Promise<T> | undefined = undefined
+  loads = 0
+  load: (key: string) => Promise<T>
+  constructor(load: (key: string) => Promise<T>) {
+    this.load = load
+  }
+  async get(key: string): Promise<T> {
+    const known = this.items.get(key)
+    if (known != undefined)
+      return known
+    this.loads++
+    this.last = this.load(key)
+    const value = await this.last
+    this.items.set(key, value)
+    return value
+  }
+}
+
+export async function lengthOf(key: string): Promise<int> {
+  return later(key.length, 1)
+}
+
+// A value and what the runtime keeps next to it.
+export class Entry<T> {
+  value: T
+  when = new Date(0)
+  pattern = /[a-z]+/g
+  raw = Buffer.from("ok")
+  code: int | string = 200
+  constructor(value: T) {
+    this.value = value
+  }
+}
+
+export class Range {
+  from: int
+  to: int
+  constructor(from: int, to: int) {
+    this.from = from
+    this.to = to
+  }
+  *[Symbol.iterator]() {
+    for (let i = this.from; i < this.to; i++)
+      yield i
+  }
+}

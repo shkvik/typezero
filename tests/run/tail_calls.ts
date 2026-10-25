@@ -63,3 +63,7 @@ function firstDefined(xs: (int | undefined)[], i: int): int | undefined {
 const sparse = new Array<int | undefined>(2000000)
 sparse.push(5)
 console.log(firstDefined(sparse, 0))
+
+// The copy of a generic function for its types jumps the same way.
+function countAll<T>(x: T, n: int, acc: int): int { return n == 0 ? acc : countAll(x, n - 1, acc + 1) }
+console.log(countAll("s", 10000000, 0), countAll(1.5, 10000000, 1))

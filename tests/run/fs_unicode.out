@@ -1,0 +1,10 @@
+[ 'ß.txt', 'Ελληνικά', 'файл.txt', '日本語.md', '😀 smile.txt' ]
+true 30 "файл.txt: текст 😀\n"
+true 32 "😀 smile.txt: текст 😀\n"
+true 30 "日本語.md: текст 😀\n"
+true 34 "Ελληνικά: текст 😀\n"
+true 24 "ß.txt: текст 😀\n"
+false файл.txt: текст 😀
+
+ENOENT: no such file or directory, open 'D\папка ✓\нет такого.txt'
+false

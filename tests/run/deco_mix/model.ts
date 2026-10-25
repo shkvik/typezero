@@ -1,0 +1,47 @@
+// The classes, decorated with what deco.ts exports.
+import { Column, Entity, Log, Retry } from "./deco.ts"
+
+function later<T>(value: T, ms: number): Promise<T> {
+  return new Promise(resolve => setTimeout(() => resolve(value), ms))
+}
+
+@Entity("users")
+export class User {
+  @Column name: string
+  @Column age: int | string
+  @Column role: "admin" | "guest"
+  @Column avatar: Uint8Array
+  @Column pending: Promise<string> | undefined = undefined
+  failures = 1
+  constructor(name: string, age: int | string) {
+    this.name = name
+    this.age = age
+    this.role = "guest"
+    this.avatar = new Uint8Array(2)
+  }
+
+  @Log
+  greet(greeting: string): string {
+    return `${greeting}, ${this.name}`
+  }
+
+  @Retry
+  async load(id: int): Promise<string> {
+    await later(0, 1)
+    if (this.failures > 0) {
+      this.failures--
+      throw new Error(`busy ${id}`)
+    }
+    return `${this.name}#${id}`
+  }
+}
+
+@Entity("admins")
+export class Admin extends User {
+  @Column level: int = 1
+
+  @Log
+  override greet(greeting: string): string {
+    return `${super.greet(greeting)} (admin)`
+  }
+}

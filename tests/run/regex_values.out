@@ -1,0 +1,16 @@
+[ 'number', 'word', 'other' ]
+123 undefined
+[ 'one', 'two' ] [ 'a', 'b', 'c' ]
+7 none
+3 1
+regex /a+b/gi
+match [
+  '5',
+  '5',
+  index: 0,
+  input: '5',
+  groups: [Object: null prototype] { x: '5' }
+]
+2
+1 2
+10701

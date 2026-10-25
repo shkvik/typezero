@@ -1,6 +1,6 @@
 # События: `EventEmitter`
 
-Решения, принятые 24 октября 2026 года. Пока ничего из этого не реализовано: порядок работ — в
+Решения, принятые 24 октября 2026 года. Шаги 1–4 плана сделаны 24 октября; что осталось — в
 конце, в разделе «План реализации».
 
 ## Коротко
@@ -86,13 +86,13 @@ bus.on("user", async user => { await save(user) })   // ок
 На каждом шаге: тесты `tests/run` с `// same-as-node`, ошибки в `tests/errors`, обновление
 README.
 
-1. **`EventEmitter` с явной картой** — перенос `lib/events.js` на tz. Нужны классы с
+1. **`EventEmitter` с явной картой** (сделано) — перенос `lib/events.js` на tz. Нужны классы с
    наследованием ([objects.md](objects.md), шаг 4), списки параметров в generics
    ([generics.md](generics.md), раздел 9), словари ([objects.md](objects.md), шаг 7).
-2. **Вывод карты из `emit`** по всей программе; ошибки на событие, которое никто не шлёт, и на
+2. **Вывод карты из `emit`** (сделано) по всей программе; ошибки на событие, которое никто не шлёт, и на
    разные типы одного события.
-3. **`once()` и `on()`** — после async ([async.md](async.md), шаг 1) и `for await`
+3. **`once()` и `on()`** (сделано) — после async ([async.md](async.md), шаг 1) и `for await`
    ([iterators.md](iterators.md), шаг 4); async-слушатели.
-4. **`EventTarget`, `Event`, `CustomEvent`**, `AbortController` / `AbortSignal` на них.
+4. **`EventTarget`, `Event`, `CustomEvent`**, `AbortController` / `AbortSignal` на них (сделано).
 5. Дальше на этом — потоки node, асинхронные функции `node:child_process`
    ([process.md](process.md)), `node:http` ([net.md](net.md)).

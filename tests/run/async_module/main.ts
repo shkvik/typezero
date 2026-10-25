@@ -1,0 +1,10 @@
+// same-as-node
+// A program of several files is an ES module for Node: its top-level code
+// runs inside a microtask, so the microtasks it queues come before the
+// nextTick callbacks. Async functions of another file are awaited as any.
+import { load, total } from "./tasks.ts"
+process.nextTick(() => console.log("nextTick"))
+void Promise.resolve().then(() => console.log("microtask"))
+console.log("main")
+const values = await Promise.all([load("a"), load("bb")])
+console.log(values, total())

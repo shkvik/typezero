@@ -1,0 +1,21 @@
+55 <Buffer 54 5a 42 31 02 00 00 00> true
+1 250 9.5 pen
+2 4000000000 0.25 чернила
+error: not a TZB1 file
+<Buffer 63 61 66 e9> café 636166e9
+<Buffer 63 61 66 c3 a9> cafÃ©
+636166e9fffffffe2121 caféÿÿÿþ!!
+text "hi" Uint8Array(2) [ 104, 105 ]
+Uint8Array of 2 Uint8Array(2) [ 1, 2 ]
+Buffer of 2: 6f6b <Buffer 6f 6b>
+ArrayBuffer of 3 Uint8Array(3) [ 0, 0, 0 ]
+Float64Array, first 1.5
+4294967295 4294967295 true
+true 84
+85 1
+2 true
+Uint16Array(2) [ 8, 9 ] undefined
+[ <Buffer 61>, Int8Array(1) [ -1 ] ]
+café true
+[ 10, 5 ]
+{"name":"x","raw":{"type":"Buffer","data":[104,105]},"u8":{"0":3,"1":4},"f32":{"0":0.5}}

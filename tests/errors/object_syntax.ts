@@ -1,27 +1,37 @@
 // Object syntax that is not supported yet, or not at all.
 const p = { x: 1, y: 2 }
-// expect-error: methods in object literals are not supported yet; use a field with an arrow function: 'f: () => ...'
-const withMethod = { f() { return 1 } }
+// expect-error: a method cannot have a key in brackets; write its name: 'f() { ... }'
+const computedMethod = { ["f"]() { return 1 } }
 // expect-error: getters and setters are not supported: reading or writing a field never runs code; write a function instead
 const withGetter = { get x() { return 1 } }
-// expect-error: spread in object literals is not supported yet; list the fields
-const spread = { ...p, z: 3 }
-// expect-error: a field name in brackets is not supported yet; write the name itself
-const computed = { ["x"]: 1 }
 // expect-error: a number cannot name a field; an object with numbered entries is an array
 const numbered = { 1: "one" }
-// expect-error: expected ':' after the field name, found '='
-const defaulted = { x = 1 }
-// expect-error: destructuring objects is not supported yet; read the fields one by one: 'const x = p.x'
-const { x, y } = p
-// expect-error: index signatures are not supported yet: an object has a fixed set of fields; a dictionary will be 'Record' or 'Map'
-type Dictionary = { [key: string]: int }
-// expect-error: methods in types are not supported yet; declare a field that holds a function, e.g. 'area: (x: int) => int'
-interface Shape { area(): double }
+// expect-error: an index signature cannot stand next to fields
+type Mixed = { [key: string]: int; size: int }
+// expect-error: method 'area' needs its return type, e.g. 'area(): void'
+interface Shape { area() }
 // expect-error: field 'z' needs a type, e.g. 'z: int'
 type Untyped = { z }
-// expect-error: 'extends' for interfaces is not supported yet; list all the fields in 'Point3'
-interface Point3 extends Point2 { z: int }
-interface Point2 { x: int; y: int }
-// expect-error: generic interfaces are not supported yet
-interface Box<T> { value: int }
+
+// Destructuring patterns.
+// expect-error: a destructuring declaration needs a value: '{ a, b } = ...'
+const { x }
+// expect-error: expected a variable name in the destructuring pattern, found integer literal
+const { y: 1 } = p
+// expect-error: expected a variable name after '...' in the destructuring pattern
+const { ...{ a } } = p
+// expect-error: a key in a destructuring pattern needs a variable: 'a-b: name'
+const { "a-b" } = p
+// expect-error: a rest element must be the last one
+const { ...first, y } = p
+// expect-error: expected a parameter name after '...'
+function rest(...{ length }: int[]) {}
+// expect-error: the variable of 'for...in' is a key, a string, and cannot be destructured
+for (const [a, b] in p) console.log(a, b)
+let k = ""
+// expect-error: 'for...in' needs a new variable: 'for (const k in ...)'
+for (k in p) console.log(k)
+
+// Tuple types.
+// expect-error: optional elements in a tuple type are not supported: a tuple has a fixed length; give the element the type 'T | undefined'
+let optional: [int, string?] = [1, "a"]

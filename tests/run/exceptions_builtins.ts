@@ -1,0 +1,83 @@
+// What built-ins did as panics are exceptions, which can be caught
+// (docs/errors.md, section 2): the names and texts are those of JavaScript
+// where it has the same error.
+function attempt(what: string, f: () => void) {
+  try {
+    f()
+    console.log(what, "ok")
+  } catch (e) {
+    console.log(what, "->", `${e}`)
+  }
+}
+
+let zero = 0
+let none: int | undefined = undefined
+const empty: int[] = []
+let big = 3e9
+let minus = -1
+
+attempt("int /", () => console.log(7 / zero))
+attempt("int %", () => console.log(7 % zero))
+attempt("int **", () => console.log(zero ** minus))
+attempt("long /", () => {
+  const x: long = 7
+  console.log(x / zero)
+})
+attempt("x!", () => console.log(none! + 1))
+attempt("reduce", () => console.log(empty.reduce((a, b) => a + b)))
+attempt("Math.round", () => {
+  const n: int = Math.round(big)
+  console.log(n)
+})
+attempt("Math.floor long", () => {
+  const n: long = Math.floor(big * 1e10)
+  console.log(n)
+})
+attempt("parseInt", () => {
+  const n: int = parseInt("abc")
+  console.log(n)
+})
+attempt("new Array", () => console.log(new Array<int>(minus).length))
+attempt("length", () => {
+  const a = [1, 2, 3]
+  a.length = minus
+})
+attempt("grow by length", () => {
+  const a: int[][] = [[1]]
+  a.length = 3
+})
+attempt("repeat", () => console.log("ab".repeat(minus)))
+attempt("fromCodePoint", () => console.log(String.fromCodePoint(minus)))
+attempt("toFixed", () => console.log((1.5).toFixed(minus * 200)))
+
+// decimal (docs/decimal.md).
+const one: decimal = 1
+const dzero: decimal = 0
+attempt("decimal /", () => console.log(one / dzero))
+attempt("decimal %", () => console.log(one % dzero))
+attempt("decimal parse", () => console.log(decimal("12abc")))
+attempt("decimal NaN", () => console.log(decimal(big * 0 * Infinity)))
+attempt("decimal sqrt", () => console.log((-one).sqrt()))
+attempt("decimal size", () => {
+  const ten: decimal = 10
+  console.log((ten ** 9999999) * ten * ten)
+})
+attempt("decimal mode", () => {
+  const mode = ["up", "sideways"][1] ?? "up"
+  console.log(one.round(2, mode))
+})
+
+// Iterators.
+function* nothing(): Generator<int> {
+  return
+}
+attempt("take", () => console.log([1, 2].values().take(minus).toArray()))
+attempt("iterator reduce", () => console.log(nothing().reduce((a, b) => a + b)))
+
+// Running out of stack is a RangeError too, after which the program goes on.
+function depth(n: int): int {
+  return depth(n + 1) + 1
+}
+attempt("recursion", () => console.log(depth(0)))
+attempt("after", () => console.log(zero + 1))
+console.log("done")

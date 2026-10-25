@@ -1,0 +1,174 @@
+// same-as-node --experimental-transform-types
+// Generic classes (docs/generics.md, step 2): an instance for each list of
+// type arguments, inferred through the constructor or from the type
+// expected; methods, generic methods, static members shared by every
+// instance, inheritance from an instance and between generic classes,
+// interfaces of generic classes, instanceof, and printing as node does.
+class Box<T> {
+  constructor(public value: T) {}
+  get(): T { return this.value }
+  set(v: T) { this.value = v; return this }
+  map<U>(f: (x: T) => U): Box<U> { return new Box(f(this.value)) }
+}
+const b = new Box(1)
+const s = new Box("hi")
+console.log(b, s, b.get() + 1, s.get().toUpperCase())
+console.log(b.map(x => x * 2.5), b.map(x => `#${x}`).get().length, s.set("yo").value)
+const d: Box<double> = new Box(3)
+console.log(d.value / 2, new Box<string[]>([]).value.length)
+const nested = new Box(new Box([1, 2]))
+console.log(nested, nested.get().get().length)
+
+// Fields with initial values, a constructor, and the type of `this`.
+class Stack<T> {
+  items: T[] = []
+  static created = 0
+  constructor() { Stack.created++ }
+  push(x: T) { this.items.push(x); return this }
+  pop(): T | undefined { return this.items.pop() }
+  peek() { return this.items.length > 0 ? this.items[this.items.length - 1] : undefined }
+  size() { return this.items.length }
+}
+const ints = new Stack<int>()
+ints.push(1).push(2).push(3)
+const words: Stack<string> = new Stack()
+words.push("a")
+console.log(ints.pop(), ints.size(), ints.peek(), words.peek(), ints, words)
+console.log(Stack.created, ints instanceof Stack, words instanceof Stack)
+
+// A class extends an instance; its methods see the instance's types.
+class IntStack extends Stack<int> {
+  sum() {
+    let total = 0
+    for (const x of this.items) total += x
+    return total
+  }
+  push(x: int) { super.push(x * 10); return this }
+}
+const is = new IntStack()
+is.push(1).push(2)
+const asStack: Stack<int> = is
+asStack.push(3)
+console.log(is.sum(), is, is instanceof Stack, is instanceof IntStack, Stack.created)
+
+// Generic classes that extend generic classes.
+class Pair<A, B> {
+  constructor(readonly first: A, readonly second: B) {}
+  swap() { return new Pair(this.second, this.first) }
+  describe() { return `(${this.first}, ${this.second})` }
+}
+class Named<A, B> extends Pair<A, B> {
+  constructor(first: A, second: B, public name: string) { super(first, second) }
+  describe() { return `${this.name} ${super.describe()}` }
+}
+const pairs: Pair<int, string>[] = [new Pair(1, "one"), new Named(2, "two", "n")]
+for (const p of pairs) console.log(p.describe())
+console.log(pairs[1], new Pair(true, 1.5).swap())
+
+// A generic class that extends a plain one, and overrides its methods.
+class Animal {
+  constructor(public name: string) {}
+  speak() { return `${this.name} makes a sound` }
+}
+class Pet<T> extends Animal {
+  constructor(name: string, public toy: T) { super(name) }
+  speak() { return `${this.name} plays with ${this.toy}` }
+}
+const animals: Animal[] = [new Animal("cat"), new Pet("rex", "a ball"), new Pet("tom", 3)]
+for (const a of animals) console.log(a.speak())
+
+// Interfaces of generic classes, and generic code over them.
+interface Repo<T> {
+  get(id: int): T | undefined
+  all(): T[]
+}
+interface User { name: string; age: int }
+class MemRepo<T> implements Repo<T> {
+  private items: T[] = []
+  add(x: T) { this.items.push(x); return this }
+  get(id: int) { return this.items[id] }
+  all() { return this.items }
+}
+const users = new MemRepo<User>().add({ name: "ann", age: 30 }).add({ name: "bob", age: 25 })
+function count<T>(repo: Repo<T>) { return repo.all().length }
+const repo: Repo<User> = users
+console.log(count(users), count(new MemRepo<int>().add(7)), repo.get(1), repo.get(5))
+
+// Defaults, static generic methods, and generic code that makes instances.
+class Cell<T = int> {
+  static made = 0
+  constructor(public value: T) { Cell.made++ }
+  static of<U>(x: U) { return new Cell(x) }
+}
+const c: Cell = new Cell(5)
+function wrap<T>(x: T) { return new Cell(x) }
+console.log(c, Cell.of("x"), wrap([1]), wrap(c), Cell.made)
+
+// instanceof tells the instances of a union apart.
+const values: (Box<int> | Stack<int> | string)[] = [new Box(4), ints, "text"]
+for (const v of values) {
+  if (v instanceof Box) console.log("box", v.value + 1)
+  else if (v instanceof Stack) console.log("stack", v.size())
+  else console.log("string", v.length)
+}
+
+// Private members are the class's, whatever the types of the instance.
+class Wallet<T> {
+  #coins: T[] = []
+  add(x: T) { this.#coins.push(x) }
+  merge(other: Wallet<T>) { for (const x of other.#coins) this.#coins.push(x) }
+  count() { return this.#coins.length }
+}
+const w1 = new Wallet<int>(), w2 = new Wallet<int>()
+w1.add(1)
+w2.add(2)
+w2.add(3)
+w1.merge(w2)
+console.log(w1.count(), w1)
+
+// Errors, abstract generic classes, trees of a generic class, JSON.
+class Failure<T> extends Error {
+  constructor(public detail: T, message: string) { super(message) }
+}
+try {
+  throw new Failure(42, "bad")
+} catch (e) {
+  if (e instanceof Error) console.log(e.message)
+}
+abstract class Shape<T> {
+  constructor(public tag: T) {}
+  abstract area(): double
+  describe() { return `${this.tag}: ${this.area().toFixed(1)}` }
+}
+class Square extends Shape<string> {
+  constructor(public side: double) { super("square") }
+  area() { return this.side * this.side }
+}
+class Circle<T> extends Shape<T> {
+  constructor(tag: T, public r: double) { super(tag) }
+  area() { return Math.PI * this.r * this.r }
+}
+const shapes: Shape<string>[] = [new Square(2), new Circle("circle", 1)]
+for (const sh of shapes) console.log(sh.describe())
+console.log(new Circle(7, 2).describe())
+class TreeNode<T> {
+  children: TreeNode<T>[] = []
+  constructor(public value: T) {}
+  add(v: T) {
+    const n = new TreeNode(v)
+    this.children.push(n)
+    return n
+  }
+  count(): int {
+    let total = 1
+    for (const child of this.children) total += child.count()
+    return total
+  }
+}
+const root = new TreeNode("root")
+root.add("a").add("b")
+root.add("c")
+console.log(root.count(), JSON.stringify(root))
+const byName = new Map<string, Pair<int, int>>()
+byName.set("k", new Pair(1, 2))
+console.log(byName)

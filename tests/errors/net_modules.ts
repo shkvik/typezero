@@ -1,0 +1,6 @@
+// The modules of tz's own library behind the globals of fetch and URL are
+// not for programs: they name the globals, or import serve from tz:http.
+// expect-error: there is no built-in module 'tz:fetch'; tz has 'tz:io' and 'tz:http'
+import { Wire } from "tz:fetch"
+// expect-error: there is no built-in module 'tz:url'; tz has 'tz:io' and 'tz:http'
+import { URL } from "tz:url"

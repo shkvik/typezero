@@ -1,0 +1,9 @@
+1,234.5 Map(1) { 'us' => NumberFormat [Intl.NumberFormat] {} }
+42
+-1
+object NumberFormat [Intl.NumberFormat] {}
+7 one
+5
+[ 'a', 'z', 'å', 'ö' ] [ 'a', 'å', 'ö', 'z' ]
+Float64Array(3) [ 1, 2, 3 ] [ '1', '9', '10' ]
+1 234 567,5 [ '25%', '50%' ]

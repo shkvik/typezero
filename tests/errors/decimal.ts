@@ -1,0 +1,81 @@
+// decimal: a double needs decimal(x), a decimal needs Number(x) to become a
+// double, a constant divisor of 0 is an error, and BigNumber.js's methods
+// that operators replace do not exist.
+const price: decimal = 19.99
+const rate = 0.07
+// expect-error: convert it explicitly: 'price * decimal(rate)'
+const a = price * rate
+// expect-error: convert it explicitly: 'decimal(rate) + price'
+const b = rate + price
+// expect-error: operator '<' cannot be applied to types 'decimal' and 'double'
+const c = price < rate
+// expect-error: operator '==' cannot be applied to types 'decimal' and 'double'
+const d = price == rate
+// expect-error: type 'double' is not assignable to type 'decimal'; a double is inexact already
+const e: decimal = rate
+// expect-error: 'Number(x)' gives the nearest double
+const f: double = price
+// expect-error: type 'decimal' is not assignable to type 'int'
+const g: int = price
+// expect-error: decimal division by zero
+const h = price / 0
+// expect-error: decimal division by zero
+const i = price % 0.0
+let total: decimal = 0
+// expect-error: decimal division by zero
+total /= 0
+// expect-error: decimal division by zero
+const j = price.div(0, 2)
+// expect-error: found 'double'; for a square root, use 'x.sqrt()'
+const k = price ** 0.5
+// expect-error: found 'decimal'
+const l = price ** price
+// expect-error: operator '**' cannot be applied to types 'int' and 'decimal'
+const m = 2 ** price
+// expect-error: unary '+' cannot be applied to a decimal
+const n = +price
+// expect-error: operator '|' cannot be applied to types 'decimal' and 'int'
+const o = price | 0
+// expect-error: convert it with 'Number(x)', or use what decimals have
+const p = Math.abs(price)
+// expect-error: a decimal cannot be a condition: 0 would count as false; compare it: 'price != 0'
+if (price) console.log(price)
+// expect-error: operator '+' cannot be applied to types 'string' and 'decimal'
+const q = "Total: " + price
+// expect-error: 'plus' does not exist on type 'decimal'; a decimal uses the operator: 'a + b'
+const r = price.plus(1)
+// expect-error: 'isNaN' does not exist on type 'decimal'; a decimal is never NaN or infinite
+const s = price.isNaN()
+// expect-error: decimalPlaces() only counts the places; to round, use 'x.round(places, mode)'
+const t = price.decimalPlaces(2)
+// expect-error: unknown rounding mode 'nearest'
+const u = price.round(2, "nearest")
+// expect-error: the number of decimal places must be an integer ('int' or 'long'), found 'double'
+const v = price.toFixed(1.5)
+// expect-error: decimal() takes a string, a number or a decimal, found 'boolean'
+const w = decimal(true)
+// expect-error: 'config' does not exist on 'decimal': there are no settings for all decimals
+decimal.config(20)
+// expect-error: decimal.max() needs at least one value
+const x = decimal.max()
+function highest(prices: decimal[]) {
+  // expect-error: decimal.max of an array that may be empty has no value
+  return decimal.max(...prices)
+}
+// expect-error: 'decimal.sum' can only be called
+const y = decimal.sum
+// expect-error: 'decimal' is used as 'decimal(x)'
+const z = decimal
+const list: decimal[] = [3, 1, 2]
+// expect-error: 'sort()' without a comparison function compares numbers as strings
+list.sort()
+// expect-error: this decimal is out of range
+const huge: decimal = 1e10000001
+// expect-error: array elements must have one type; found 'decimal' and 'double'
+const mixed = [price, rate]
+// expect-error: 'BigInt' is not supported, as there is no bigint: integers up to 9.2e18
+const big = BigInt(5)
+// expect-error: the type 'bigint' is not supported
+let count: bigint = 5
+// expect-error: 'typeof x == "bigint"' is not supported
+const isBig = typeof price == "bigint"

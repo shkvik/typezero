@@ -1,0 +1,30 @@
+<Buffer 6f 75 74>
+out
+true
+xtrue
+ExecSyncError Error "Command failed: CHILD --child print o e 2\ne" 2 - <Buffer 6f> <Buffer 65> 3 true -
+ExecSyncError Error "Command failed: CHILD --child print o  1" 1 - o  3 true -
+ExecSyncError Error "Command failed: CHILD --child print o bad\n 7\nbad\n" 7 - o bad
+ 3 true -
+ExecSyncError Error "Command failed: named SCRIPT --child print o e 1\ne" 1 - o e 3 true -
+SystemError Error spawnSync tz-no-such-program ENOENT ENOENT -4058 spawnSync tz-no-such-program tz-no-such-program
+ExecSyncError Error "Command failed: exit 4" 4 - <Buffer > <Buffer > 3 true -
+ExecSyncError Error "Command failed: echo failed 1>&2 && exit 3\nfailed  \n" 3 -  failed  
+ 3 true -
+ExecSyncError Error "spawnSync EXE ETIMEDOUT" - SIGTERM <Buffer > <Buffer > 3 true ETIMEDOUT
+ETIMEDOUT -4039 SIGTERM - true 4
+hello 
+world
+
+a b
+
+shell
+hi 
+injected
+
+["hi & echo injected"]
+EINVAL -4071 spawnSync D\hello.bat EINVAL
+from batch x
+from batch y
+["a b","c"]
+["\"a b\"","c"]

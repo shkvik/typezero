@@ -1,0 +1,76 @@
+// Generic classes over int: a Stack<int> (10 million push and pop) and a
+// MinHeap<int> (heap sort of a million numbers). Each instance is a class
+// written for its type: `Stack<int>` holds an int[], and `<` on T is `<` on
+// ints.
+class Stack<T> {
+  items: T[] = []
+  push(x: T) { this.items.push(x) }
+  pop(): T | undefined { return this.items.pop() }
+  size() { return this.items.length }
+}
+
+class MinHeap<T extends number> {
+  items: T[] = []
+  size() { return this.items.length }
+  push(x: T) {
+    const h = this.items
+    h.push(x)
+    let i = h.length - 1
+    while (i > 0 && i < h.length) {
+      const p = (i - 1) >> 1
+      if (p < 0 || p >= h.length) break
+      const child = h[i], parent = h[p]
+      if (parent <= child) break
+      h[i] = parent
+      h[p] = child
+      i = p
+    }
+  }
+  pop(): T | undefined {
+    const h = this.items
+    const last = h.pop()
+    if (last == undefined || h.length == 0) return last
+    const top = h[0]
+    h[0] = last
+    const n = h.length
+    let i = 0
+    while (i >= 0 && i < n) {
+      const l = 2 * i + 1
+      if (l < 0 || l >= n) break
+      let m = l
+      const r = l + 1
+      if (r < n && h[r] < h[l]) m = r
+      if (m >= n) break
+      const at = h[i], child = h[m]
+      if (at <= child) break
+      h[i] = child
+      h[m] = at
+      i = m
+    }
+    return top
+  }
+}
+
+const stack = new Stack<int>()
+for (let i = 0; i < 10000000; i++) stack.push(i & 1023)
+let total: long = 0
+while (stack.size() > 0) total += stack.pop() ?? 0
+
+const heap = new MinHeap<int>()
+let seed = 12345
+for (let i = 0; i < 1000000; i++) {
+  seed = (seed * 1103515245 + 12345) & 0x7fffffff
+  heap.push(seed % 1000000)
+}
+let previous = -1
+let sorted = true
+let checksum: long = 0
+let k = 0
+while (heap.size() > 0) {
+  const x = heap.pop() ?? 0
+  if (x < previous) sorted = false
+  previous = x
+  checksum += x * (k % 7)
+  k++
+}
+console.log(total, sorted, checksum)

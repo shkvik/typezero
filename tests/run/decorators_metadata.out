@@ -1,0 +1,21 @@
+users
+[ 'name', 'age', 'joined' ]
+use add undefined
+[ { path: '/users', method: 'list' } ]
+USERS
+5 admin
+undefined undefined
+[Function: String] [Function: Number]
+[Function: Date] [Function: Function]
+[ [Function: Number], [Function: Number] ]
+[Function: Number] [Function: Array]
+[ [Function: String] ] [class User]
+true true
+true false true
+users undefined
+[ 'level' ] [ 'name', 'age', 'joined' ]
+users undefined
+one user users
+true undefined false
+injectable [ [Function: Array], [Function: String], [class Admin extends User] ]
+s

@@ -1,0 +1,193 @@
+// same-as-node
+// Generic functions and type aliases (docs/generics.md, step 1).
+interface User { name: string; age: int }
+interface Post { title: string; tags: string[] }
+const users: User[] = [{ name: "ann", age: 30 }, { name: "bob", age: 25 }]
+const posts: Post[] = [{ title: "hi", tags: ["a", "b"] }]
+
+// Type arguments from the arguments.
+function first<T>(xs: T[]) { return xs[0] }
+function identity<T>(x: T): T { return x }
+function pair<T>(a: T, b: T) { return [a, b] }
+console.log(first([1, 2, 3]), first(["a", "b"]), first(users), first(posts))
+console.log(identity(5), identity("x"), identity(true), identity(users[1]))
+// The same rule as for the literal [1, 2.5]: T is a double, and so is 1.
+console.log(pair(1, 2.5), pair("a", "b"))
+const none: int[] = []
+console.log(first(none))
+
+// Arrows after the other arguments: T comes from xs, then U from the arrow.
+function mapAll<T, U>(xs: T[], f: (x: T) => U): U[] {
+  const out: U[] = []
+  for (const x of xs) out.push(f(x))
+  return out
+}
+console.log(mapAll([1, 2, 3], x => x * 2), mapAll(users, u => u.name), mapAll(["a", "bb"], s => s.length))
+function double(x: int) { return x * 2 }
+console.log(mapAll([1, 2], double), mapAll(["1.5"], parseFloat), mapAll([4, 9], Math.sqrt))
+function apply<T, U>(x: T, f: (x: T) => U) { return f(x) }
+console.log(apply(3, n => n + 0.5), apply([1, 2], a => a.length > 1))
+function compose<A, B, C>(f: (a: A) => B, g: (b: B) => C) { return (x: A) => g(f(x)) }
+const show = compose((x: int) => x + 1, y => `<${y}>`)
+console.log(show(41))
+function applyAll<T>(fs: ((x: T) => T)[], x: T) {
+  let v = x
+  for (const f of fs) v = f(v)
+  return v
+}
+console.log(applyAll([(x: int) => x + 1, x => x * 10], 1))
+
+// From the type expected where the call stands, written, or a default.
+function emptyList<T>(): T[] { return [] }
+const names: string[] = emptyList()
+names.push("z")
+console.log(names, emptyList<int>().length)
+function make<T = int>(): T[] { return [] }
+const made = make()
+made.push(7)
+console.log(made, make<string>())
+
+// Rest and optional parameters.
+function listOf<T>(...xs: T[]) { return xs }
+const more = [4, 5]
+console.log(listOf(1, 2), listOf("a"), listOf(0, ...more), listOf<double>())
+const halves: double[] = listOf(1, 2)
+console.log(halves.map(x => x / 2))
+function orElse<T>(x: T | undefined, fallback: T): T { return x ?? fallback }
+function optional<T>(x: T, y?: T) { return y ?? x }
+console.log(orElse(undefined, 5), orElse("a", "b"), optional(1), optional("a", "b"))
+
+// Generic type aliases.
+type Maybe<T> = T | undefined
+type Pair<A, B> = { first: A; second: B }
+type Mapper<T, U> = (x: T) => U
+type List<T> = { value: T; next?: List<T> }
+function makePair<A, B>(a: A, b: B): Pair<A, B> { return { first: a, second: b } }
+const p = makePair(1, "one")
+console.log(p, p.first + 1, p.second.length)
+const maybeUser: Maybe<User> = undefined
+console.log(orElse(maybeUser, users[0]))
+const twice: Mapper<int, int> = x => x * 2
+console.log(twice(21))
+function lengthOf<T>(l: List<T> | undefined): int { return l == undefined ? 0 : 1 + lengthOf(l.next) }
+const chain: List<string> = { value: "a", next: { value: "b", next: { value: "c" } } }
+console.log(lengthOf(chain), chain.next?.value)
+
+// Objects, arrays and functions pass through generic code as they are.
+function swap<T>(xs: T[], i: int, j: int) {
+  if (i >= 0 && j >= 0 && i < xs.length && j < xs.length) {
+    const t = xs[i]
+    xs[i] = xs[j]
+    xs[j] = t
+  }
+}
+const order = users.slice(0)
+swap(order, 0, 1)
+console.log(order)
+function wrap<T>(x: T) { return { value: x, count: 1 } }
+const wrapped = wrap(posts[0])
+console.log(wrapped, wrapped.value?.tags)
+function constant<T>(x: T) { return () => x }
+const getUser = constant(users[0])
+const getSeven = constant(7)
+console.log(getUser(), getSeven())
+function sortBy<T>(xs: T[], key: (x: T) => int) { return xs.sort((a, b) => key(a) - key(b)) }
+console.log(sortBy(users.slice(0), u => u.age), sortBy([3, 1, 2], x => x))
+function same<T>(a: T, b: T) { return a == b }
+console.log(same(users[0], users[0]), same(users[0], users[1]), same("x", "x"), same(1, 2))
+function pick<T>(xs: T[], test: (x: T) => boolean) {
+  const out: T[] = []
+  for (const x of xs) if (test(x)) out.push(x)
+  return out
+}
+console.log(pick(users, u => u.age > 26), pick([1.5, -2], x => x > 0))
+const handlers = [(x: int) => x, (x: int) => x + 1]
+console.log(pick(handlers, f => f(1) == 1).length)
+// One copy serves all objects (and one all functions): it holds, stores
+// and releases them without knowing their fields.
+type Box<T> = { value: T; tags: string[] }
+function rebox<T>(b: Box<T>, x: T) {
+  b.value = x
+  return { value: b.value, tags: ["new"] }
+}
+const ann: User = { name: "ann", age: 30 }
+const userBox: Box<User> = { value: ann, tags: [] }
+console.log(rebox(userBox, { name: "cid", age: 40 }).value.name, userBox)
+const postBox: Box<Post> = { value: { title: "old", tags: ["x"] }, tags: ["old"] }
+console.log(rebox(postBox, { title: "new", tags: [] }).value.title)
+const inc = identity((x: int) => x + 1)
+const upper = identity((s: string) => s.toUpperCase())
+console.log(inc(1), upper("a"), identity(inc)(5))
+function holder<T>(x: T) {
+  let value = x
+  return { set: (y: T) => { value = y }, get: () => value }
+}
+const held = holder(ann)
+held.set({ name: "dan", age: 50 })
+console.log(held.get(), holder(3).get())
+
+// Turning a value into a string is up to its type.
+function label<T>(name: string, x: T) { return name + ": " + x }
+console.log(label("n", 5), label("b", true), label("s", "text"), `${identity(2.5)}`)
+function tagged<T extends string | number | boolean>(name: string, x: T) { return `${name}=${x}` }
+console.log(tagged("n", 5), tagged("d", 0.5), tagged("b", false), tagged("s", "t"))
+
+// `T extends number`: arithmetic gives a double, as in TypeScript; a value
+// of T itself keeps its type.
+function average<T extends number>(xs: T[]) {
+  let s = 0.0
+  for (const x of xs) s += x
+  return s / xs.length
+}
+function maxOf<T extends number>(a: T, b: T): T { return a > b ? a : b }
+function half<T extends number>(x: T) { return x / 2 }
+function total<T extends number>(xs: T[]) { return xs.reduce((s, x) => s + x, 0) }
+const big: long = 3000000000
+console.log(average([1, 2, 4]), average([1.5, 2.5]), maxOf(3, 7), maxOf(2.5, 1.5), maxOf(big, 1))
+console.log(half(7), half(7.5), total([1, 2, 3]), total([0.5, 0.25]))
+
+// `typeof` narrows; each copy knows the answer when compiled.
+function describe<T>(x: T) {
+  if (typeof x == "string") return `text of ${x.length}`
+  if (typeof x == "number") return `number ${x * 2}`
+  return typeof x
+}
+console.log(describe("hey"), describe(21), describe(1.5), describe(true), describe([1]))
+function key<T extends string | int>(x: T) {
+  return typeof x == "string" ? x.toUpperCase() : `#${x + 1}`
+}
+console.log(key("ab"), key(41))
+function kind<T>(x: T): int {
+  if (typeof x == "string") {
+    return 1
+  } else {
+    return 2
+  }
+}
+console.log(kind("a"), kind(5))
+
+// A generic function as a value: the copy for the types where it goes.
+const lists = [[1, 2], [3]]
+console.log(lists.map(first))
+const firstText: (xs: string[]) => string | undefined = first
+const firstInt = first<int>
+const firstAny = first
+console.log(firstText(["q"]), firstInt([9]), firstAny([true]), firstAny(["r"]))
+console.log(mapAll(lists, first))
+
+// Generic arrows named by top-level constants.
+const idArrow = <T>(x: T) => x
+const lastOf = <T>(xs: T[]): T | undefined => xs.at(-1)
+const box = function <T>(x: T) { return [x] }
+console.log(idArrow(3), idArrow("s"), lastOf([1, 2, 3]), lastOf<string>([]), box(1.5))
+function useLater() { return idArrow(10) }
+console.log(useLater())
+
+// Recursion keeps one copy, and its tail calls are jumps.
+function countDown<T>(x: T, n: int): int { return n == 0 ? 0 : countDown(x, n - 1) }
+console.log(countDown("s", 1000))
+function sumTo<T extends number>(xs: T[], i: int, acc: double): double {
+  if (i < 0 || i >= xs.length) return acc
+  return sumTo(xs, i + 1, acc + xs[i])
+}
+console.log(sumTo([1, 2, 3], 0, 0))

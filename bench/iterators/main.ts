@@ -1,0 +1,34 @@
+// Lazy iteration, 10 million values each: a generator walked by for...of, a
+// chain of helpers over an endless generator, and one over the values of an
+// array of 1000, 10000 times. The compiler emits each as one loop: the
+// generator in place, the callbacks inline.
+function* range(from: int, to: int) {
+  for (let i = from; i < to; i++) yield i
+}
+function* naturals() {
+  let n = 0
+  while (true) yield n++
+}
+const n = 10000000
+const zero: long = 0
+
+let multiples: long = 0
+for (const i of range(0, n)) if (i % 3 == 0) multiples += i
+
+const doubled = naturals()
+  .filter(x => x % 3 == 0)
+  .map(x => x * 2)
+  .take(3000000)
+  .reduce((acc, x) => acc + x, zero)
+
+const a: int[] = []
+for (let i = 0; i < 1000; i++) a.push(i)
+let big: long = 0
+for (let round = 0; round < 10000; round++)
+  big += a
+    .values()
+    .filter(x => x > round % 100)
+    .map(x => x * 3)
+    .reduce((acc, x) => acc + x, zero)
+
+console.log(multiples, doubled, big)

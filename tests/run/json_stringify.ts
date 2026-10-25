@@ -1,0 +1,33 @@
+// JSON.stringify of the values of the language, as JavaScript writes the same
+// objects: undefined fields and functions are left out (null in an array),
+// a decimal is a string (docs/decimal.md), a Result is the object of
+// neverthrow's class Ok or Err, a tuple an array.
+class Point {
+  #secret = 1
+  constructor(public x: double, public y: double) {}
+  length() { return Math.hypot(this.x, this.y) + this.#secret }
+}
+type Item = { name: string; price?: double; tags: string[] }
+const items: Item[] = [{ name: "a", tags: [] }, { name: "b", price: 2.5, tags: ["x"] }]
+console.log(JSON.stringify(items))
+console.log(JSON.stringify(new Point(1, 2)))
+console.log(JSON.stringify([new Point(3, 4)], null, "--"))
+const price: decimal = 19.99
+console.log(JSON.stringify({ price, total: price * 3 }))
+console.log(JSON.stringify(ok(1)), JSON.stringify(err("bad")), JSON.stringify([ok()]))
+const pair: [string, int] = ["Ann", 30]
+console.log(JSON.stringify(pair))
+console.log(JSON.stringify([NaN, Infinity, -0, 1e21, 2.0 ** 53]))
+console.log(JSON.stringify({ f: (x: int) => x, n: 1 }), JSON.stringify([(x: int) => x]))
+const maybe: string | undefined = undefined
+const nothing = JSON.stringify(maybe)
+console.log(nothing, JSON.stringify("x"), JSON.stringify(5), JSON.stringify(true))
+console.log(JSON.stringify([1, 2], null, 20).length, JSON.stringify({ a: [1] }, null, 1))
+console.log(JSON.stringify([[1], [2, 3]], null, 2), JSON.stringify({}, null, 2))
+const counter = { n: 0, inc() { this.n++ } }
+console.log(JSON.stringify(counter))
+function* numbers() { yield 1 }
+console.log(JSON.stringify(numbers()))
+console.log(JSON.stringify({ s: "line\nbreak   😀 \ud800", q: '"\\' }))
+const space = 4
+console.log(JSON.stringify({ x: [true, false] }, undefined, space))

@@ -1,0 +1,12 @@
+feed A
+feed B
+count 3
+count 2
+count 1
+[ 'X', 'Y', 'Z' ]
+[ 'p', 'q' ]
+box 7
+box 7
+mapped 1
+mapped 1
+[ 'u' ]

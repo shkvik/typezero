@@ -1,0 +1,10 @@
+{ tea: 2.5, cake: 4, jam: 0.1 } 2.5 [ 'tea', 'cake', 'jam' ]
+{ name: 'box', tags: { red: true, big: false } } true undefined
+{ a: { x: 1 }, b: {} }
+{ a: 1, b: undefined } true
+b: expected int, got string
+expected Record<string, int>, got array
+{ x: [ 1, 2 ], y: [ 3 ] } 2
+{"tea":"2.5","cake":"4","jam":"0.1"} {} {}
+{"a":1} { a: 1, b: undefined }
+{"m":{},"r":{"k":[1]}}

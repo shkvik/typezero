@@ -1,0 +1,7 @@
+13 { x: 0, y: 0 } stats of 3 true [ 4.5, 7.5, 12 ] [ 3, 5, 8 ]
+true false 2432902008176640000 6765
+5 Segment { from: { x: 1, y: 1 }, to: { x: 4, y: 5 } }
+4 Tree {
+  children: [ Tree { children: [] }, Tree { children: [Array] } ]
+}
+Config { name: 'default' } test Config { name: 'test' }

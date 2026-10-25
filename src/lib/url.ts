@@ -1,0 +1,1348 @@
+// URL and URLSearchParams of the WHATWG URL Standard, as node has them as
+// globals (docs/net.md, section 2); a file that names one gets it (see the
+// loader, src/driver/loader.cpp). The parser follows the standard's state
+// machine, so what it makes of an input is what node's ada makes of it.
+//
+// Where it is simpler than the standard: names of hosts outside ASCII are
+// made ASCII by NFKC and lowercasing, then Punycode, which is UTS #46 for
+// nearly every name, without its tables (a handful of characters map
+// otherwise there); and `url.searchParams` gives a new view of the URL's
+// query each time it is read, which reads and writes the URL itself, so
+// that they never hold each other (tz frees by counts, docs/objects.md).
+//
+// The properties of URL are getters and setters, as in JavaScript: tz's
+// classes have none, but its built-in modules do (src/sema/sema_library.cpp),
+// and they print as node prints them.
+
+// The code points of a string, -1 past its end.
+function codePoints(s: string): int[] {
+  const out: int[] = []
+  for (const ch of s) out.push(ch.codePointAt(0) ?? 0)
+  return out
+}
+
+function at(cps: int[], i: int): int {
+  return i >= 0 && i < cps.length ? cps[i] : -1
+}
+
+function fromCodePoints(cps: int[], from: int, to: int): string {
+  let s = ""
+  for (let i = from; i < to && i < cps.length; i++) s += String.fromCodePoint(at(cps, i))
+  return s
+}
+
+function setAt(a: int[], i: int, value: int) {
+  if (i >= 0 && i < a.length) a[i] = value
+}
+
+function isAsciiDigit(c: int): boolean {
+  return c >= 0x30 && c <= 0x39
+}
+
+function isAsciiHexDigit(c: int): boolean {
+  return isAsciiDigit(c) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66)
+}
+
+function isAsciiAlpha(c: int): boolean {
+  return (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)
+}
+
+function isAsciiAlphanumeric(c: int): boolean {
+  return isAsciiAlpha(c) || isAsciiDigit(c)
+}
+
+function lowerAscii(c: int): int {
+  return c >= 0x41 && c <= 0x5a ? c + 0x20 : c
+}
+
+//===----------------------------------------------------------------------===//
+// Percent-encoding
+//===----------------------------------------------------------------------===//
+
+const C0_CONTROL_SET = 0
+const FRAGMENT_SET = 1
+const QUERY_SET = 2
+const SPECIAL_QUERY_SET = 3
+const PATH_SET = 4
+const USERINFO_SET = 5
+const COMPONENT_SET = 6
+const FORM_SET = 7
+
+// Whether `c` is in the percent-encode set `set`.
+function inSet(c: int, set: int): boolean {
+  if (c < 0x20 || c > 0x7e) return true
+  if (set == C0_CONTROL_SET) return false
+  if (set == FRAGMENT_SET) return c == 0x20 || c == 0x22 || c == 0x3c || c == 0x3e || c == 0x60
+  if (c == 0x20 || c == 0x22 || c == 0x23 || c == 0x3c || c == 0x3e) return true
+  if (set == QUERY_SET) return false
+  if (set == SPECIAL_QUERY_SET) return c == 0x27
+  if (c == 0x3f || c == 0x5e || c == 0x60 || c == 0x7b || c == 0x7d) return true
+  if (set == PATH_SET) return false
+  if (c == 0x2f || c == 0x3a || c == 0x3b || c == 0x3d || c == 0x40 || (c >= 0x5b && c <= 0x5d) ||
+      c == 0x7c)
+    return true
+  if (set == USERINFO_SET) return false
+  if ((c >= 0x24 && c <= 0x26) || c == 0x2b || c == 0x2c) return true
+  if (set == COMPONENT_SET) return false
+  return c == 0x21 || (c >= 0x27 && c <= 0x29) || c == 0x7e
+}
+
+const HEX = "0123456789ABCDEF"
+
+function hexByte(b: int): string {
+  return "%" + HEX[(b >> 4) & 15] + HEX[b & 15]
+}
+
+// The UTF-8 bytes of a code point (a lone surrogate as U+FFFD).
+function utf8Bytes(c: int): int[] {
+  if (c >= 0xd800 && c <= 0xdfff) c = 0xfffd
+  if (c < 0x80) return [c]
+  if (c < 0x800) return [0xc0 | (c >> 6), 0x80 | (c & 63)]
+  if (c < 0x10000) return [0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)]
+  return [0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)]
+}
+
+function percentEncode(c: int, set: int, spaceAsPlus = false): string {
+  if (spaceAsPlus && c == 0x20) return "+"
+  if (!inSet(c, set)) return String.fromCodePoint(c)
+  let s = ""
+  for (const b of utf8Bytes(c)) s += hexByte(b)
+  return s
+}
+
+function percentEncodeString(s: string, set: int, spaceAsPlus = false): string {
+  let out = ""
+  for (const ch of s) out += percentEncode(ch.codePointAt(0) ?? 0, set, spaceAsPlus)
+  return out
+}
+
+function hexValue(c: int): int {
+  if (isAsciiDigit(c)) return c - 0x30
+  if (c >= 0x41 && c <= 0x46) return c - 0x41 + 10
+  return c - 0x61 + 10
+}
+
+// The bytes of `s` as UTF-8 with its %XX sequences decoded.
+function percentDecode(s: string): Uint8Array {
+  const input = new TextEncoder().encode(s)
+  const out = new Uint8Array(input.length)
+  let n = 0
+  for (let i = 0; i < input.length; i++) {
+    const b = input[i] ?? 0
+    const h1 = input[i + 1] ?? 0
+    const h2 = input[i + 2] ?? 0
+    let value = b
+    if (b == 0x25 && i + 2 < input.length && isAsciiHexDigit(h1) && isAsciiHexDigit(h2)) {
+      value = ((hexValue(h1) << 4) | hexValue(h2)) & 0xff
+      i += 2
+    }
+    if (n >= 0 && n < out.length) out[n] = value & 0xff
+    n++
+  }
+  return out.slice(0, n)
+}
+
+function utf8Decode(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes)
+}
+
+//===----------------------------------------------------------------------===//
+// Hosts
+//===----------------------------------------------------------------------===//
+
+function isForbiddenHost(c: int): boolean {
+  return c == 0 || c == 9 || c == 0xa || c == 0xd || c == 0x20 || c == 0x23 || c == 0x2f ||
+         c == 0x3a || c == 0x3c || c == 0x3e || c == 0x3f || c == 0x40 || c == 0x5b ||
+         c == 0x5c || c == 0x5d || c == 0x5e || c == 0x7c
+}
+
+function isForbiddenDomain(c: int): boolean {
+  return isForbiddenHost(c) || c <= 0x1f || c == 0x25 || c == 0x7f
+}
+
+// An IPv6 address as eight pieces; undefined if the text is no address.
+function parseIPv6(cps: int[]): int[] | undefined {
+  const address = [0, 0, 0, 0, 0, 0, 0, 0]
+  let pieceIndex = 0
+  let compress = -1
+  let pointer = 0
+  if (at(cps, 0) == 0x3a) {
+    if (at(cps, 1) != 0x3a) return undefined
+    pointer += 2
+    pieceIndex++
+    compress = pieceIndex
+  }
+  while (at(cps, pointer) != -1) {
+    if (pieceIndex == 8) return undefined
+    if (at(cps, pointer) == 0x3a) {
+      if (compress != -1) return undefined
+      pointer++
+      pieceIndex++
+      compress = pieceIndex
+      continue
+    }
+    let value = 0
+    let length = 0
+    while (length < 4 && isAsciiHexDigit(at(cps, pointer))) {
+      value = value * 0x10 + hexValue(at(cps, pointer))
+      pointer++
+      length++
+    }
+    if (at(cps, pointer) == 0x2e) {
+      // An IPv4 address in the last two pieces.
+      if (length == 0) return undefined
+      pointer -= length
+      if (pieceIndex > 6) return undefined
+      let numbersSeen = 0
+      while (at(cps, pointer) != -1) {
+        let ipv4Piece = -1
+        if (numbersSeen > 0) {
+          if (at(cps, pointer) == 0x2e && numbersSeen < 4) pointer++
+          else return undefined
+        }
+        if (!isAsciiDigit(at(cps, pointer))) return undefined
+        while (isAsciiDigit(at(cps, pointer))) {
+          const n = at(cps, pointer) - 0x30
+          if (ipv4Piece == -1) ipv4Piece = n
+          else if (ipv4Piece == 0) return undefined
+          else ipv4Piece = ipv4Piece * 10 + n
+          if (ipv4Piece > 255) return undefined
+          pointer++
+        }
+        setAt(address, pieceIndex, at(address, pieceIndex) * 0x100 + ipv4Piece)
+        numbersSeen++
+        if (numbersSeen == 2 || numbersSeen == 4) pieceIndex++
+      }
+      if (numbersSeen != 4) return undefined
+      break
+    } else if (at(cps, pointer) == 0x3a) {
+      pointer++
+      if (at(cps, pointer) == -1) return undefined
+    } else if (at(cps, pointer) != -1) {
+      return undefined
+    }
+    setAt(address, pieceIndex, value)
+    pieceIndex++
+  }
+  if (compress != -1) {
+    let swaps = pieceIndex - compress
+    pieceIndex = 7
+    while (pieceIndex != 0 && swaps > 0) {
+      const j = compress + swaps - 1
+      const t = at(address, pieceIndex)
+      setAt(address, pieceIndex, at(address, j))
+      setAt(address, j, t)
+      pieceIndex--
+      swaps--
+    }
+  } else if (pieceIndex != 8) {
+    return undefined
+  }
+  return address
+}
+
+function lowerHex(n: int): string {
+  if (n == 0) return "0"
+  let s = ""
+  for (let v = n; v > 0; v = v >> 4) s = "0123456789abcdef"[v & 15] + s
+  return s
+}
+
+function serializeIPv6(address: int[]): string {
+  // The first longest run of two or more zero pieces becomes "::".
+  let best = -1
+  let bestLength = 1
+  for (let i = 0; i < 8; ) {
+    if (address[i] != 0) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < 8 && address[j] == 0) j++
+    if (j - i > bestLength) {
+      best = i
+      bestLength = j - i
+    }
+    i = j
+  }
+  let out = ""
+  let ignore0 = false
+  for (let i = 0; i < 8; i++) {
+    if (ignore0 && address[i] == 0) continue
+    ignore0 = false
+    if (best == i) {
+      out += i == 0 ? "::" : ":"
+      ignore0 = true
+      continue
+    }
+    out += lowerHex(at(address, i))
+    if (i != 7) out += ":"
+  }
+  return out
+}
+
+// A number of an IPv4 address: decimal, octal (0...) or hex (0x...); -1 if
+// it is none.
+function parseIPv4Number(s: string): double {
+  if (s == "") return -1
+  let radix = 10
+  let text = s
+  if (text.length >= 2 && (text.startsWith("0x") || text.startsWith("0X"))) {
+    radix = 16
+    text = text.slice(2)
+  } else if (text.length >= 2 && text.startsWith("0")) {
+    radix = 8
+    text = text.slice(1)
+  }
+  if (text == "") return 0
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0
+    const ok = radix == 10 ? isAsciiDigit(c)
+             : radix == 16 ? isAsciiHexDigit(c)
+             : c >= 0x30 && c <= 0x37
+    if (!ok) return -1
+  }
+  return parseInt(text, radix)
+}
+
+// Whether the last label of a domain is a number, which makes it an IPv4
+// address.
+function endsInNumber(domain: string): boolean {
+  const parts = domain.split(".")
+  if (parts[parts.length - 1] == "") {
+    if (parts.length == 1) return false
+    parts.pop()
+  }
+  const last = parts[parts.length - 1] ?? ""
+  if (last != "" && codePoints(last).every(c => isAsciiDigit(c))) return true
+  return parseIPv4Number(last) >= 0 && (last.startsWith("0x") || last.startsWith("0X"))
+}
+
+// An IPv4 address as its number; -1 for a failure.
+function parseIPv4(domain: string): double {
+  const parts = domain.split(".")
+  if (parts[parts.length - 1] == "" && parts.length > 1) parts.pop()
+  if (parts.length > 4) return -1
+  const numbers: double[] = []
+  for (const part of parts) {
+    const n = parseIPv4Number(part)
+    if (n < 0) return -1
+    numbers.push(n)
+  }
+  for (let i = 0; i + 1 < numbers.length; i++) if (numbers[i] > 255) return -1
+  const last = numbers[numbers.length - 1] ?? 0
+  if (last >= 256 ** (5 - numbers.length)) return -1
+  let ipv4 = last
+  for (let i = 0; i + 1 < numbers.length; i++) ipv4 += numbers[i] * 256 ** (3 - i)
+  return ipv4
+}
+
+function serializeIPv4(address: double): string {
+  const parts: string[] = []
+  let n = address
+  for (let i = 0; i < 4; i++) {
+    parts.unshift(String(n % 256))
+    n = Math.floor(n / 256)
+  }
+  return parts.join(".")
+}
+
+// Punycode (RFC 3492) of a label outside ASCII.
+function punycode(label: string): string {
+  const input = codePoints(label)
+  const base = 36
+  let n = 128
+  let delta = 0
+  let bias = 72
+  let output = ""
+  for (const c of input) if (c < 0x80) output += String.fromCodePoint(c)
+  const basic = output.length
+  let handled = basic
+  if (basic > 0) output += "-"
+  const digit = (d: int) => String.fromCodePoint(d < 26 ? d + 0x61 : d - 26 + 0x30)
+  const adapt = (d: int, points: int, first: boolean): int => {
+    let k = 0
+    let dd = first ? Math.floor(d / 700) : d >> 1
+    dd += Math.floor(dd / points)
+    while (dd > ((base - 1) * 26) >> 1) {
+      dd = Math.floor(dd / (base - 1))
+      k += base
+    }
+    return k + Math.floor(((base - 1 + 1) * dd) / (dd + 38))
+  }
+  while (handled < input.length) {
+    let m = 0x10ffff
+    for (const c of input) if (c >= n && c < m) m = c
+    delta += (m - n) * (handled + 1)
+    n = m
+    for (const c of input) {
+      if (c < n) delta++
+      if (c == n) {
+        let q = delta
+        for (let k = base; ; k += base) {
+          const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias
+          if (q < t) break
+          output += digit(t + ((q - t) % (base - t)))
+          q = Math.floor((q - t) / (base - t))
+        }
+        output += digit(q)
+        bias = adapt(delta, handled + 1, handled == basic)
+        delta = 0
+        handled++
+      }
+    }
+    delta++
+    n++
+  }
+  return output
+}
+
+// UTS #46 ToASCII as the URL Standard asks for it, without its tables (see
+// the top of the file); undefined for a failure.
+function domainToAscii(domain: string): string | undefined {
+  let ascii = true
+  for (const ch of domain) if ((ch.codePointAt(0) ?? 0) >= 0x80) ascii = false
+  if (ascii) {
+    let lowered = ""
+    for (const ch of domain) lowered += String.fromCodePoint(lowerAscii(ch.codePointAt(0) ?? 0))
+    return lowered
+  }
+  const mapped = domain.normalize("NFKC").toLowerCase()
+    .replaceAll("。", ".").replaceAll("．", ".").replaceAll("｡", ".")
+  const labels: string[] = []
+  for (const label of mapped.split(".")) {
+    let plain = true
+    for (const ch of label) if ((ch.codePointAt(0) ?? 0) >= 0x80) plain = false
+    labels.push(plain ? label : "xn--" + punycode(label))
+  }
+  const out = labels.join(".")
+  return out == "" ? undefined : out
+}
+
+function parseOpaqueHost(cps: int[]): string | undefined {
+  for (const c of cps) if (c != 0x25 && isForbiddenHost(c)) return undefined
+  let out = ""
+  for (const c of cps) out += percentEncode(c, C0_CONTROL_SET)
+  return out
+}
+
+// The host parser: the serialized host, or undefined for a failure.
+function parseHost(input: string, isOpaque: boolean): string | undefined {
+  const cps = codePoints(input)
+  if (at(cps, 0) == 0x5b) {
+    if (at(cps, cps.length - 1) != 0x5d) return undefined
+    const address = parseIPv6(cps.slice(1, cps.length - 1))
+    return address == undefined ? undefined : "[" + serializeIPv6(address) + "]"
+  }
+  if (isOpaque) return parseOpaqueHost(cps)
+  const domain = utf8Decode(percentDecode(input))
+  const asciiDomain = domainToAscii(domain)
+  if (asciiDomain == undefined) return undefined
+  for (const ch of asciiDomain) if (isForbiddenDomain(ch.codePointAt(0) ?? 0)) return undefined
+  if (endsInNumber(asciiDomain)) {
+    const ipv4 = parseIPv4(asciiDomain)
+    return ipv4 < 0 ? undefined : serializeIPv4(ipv4)
+  }
+  return asciiDomain
+}
+
+//===----------------------------------------------------------------------===//
+// The URL record and its parser
+//===----------------------------------------------------------------------===//
+
+function defaultPort(scheme: string): int {
+  if (scheme == "http" || scheme == "ws") return 80
+  if (scheme == "https" || scheme == "wss") return 443
+  if (scheme == "ftp") return 21
+  return -1
+}
+
+function isSpecial(scheme: string): boolean {
+  return scheme == "http" || scheme == "https" || scheme == "ws" || scheme == "wss" ||
+         scheme == "ftp" || scheme == "file"
+}
+
+// A URL as the standard has it: its parts, the port -1 for null.
+class UrlRecord {
+  scheme = ""
+  username = ""
+  password = ""
+  host: string | undefined = undefined
+  port = -1
+  path: string[] = []
+  opaquePath: string | undefined = undefined
+  query: string | undefined = undefined
+  fragment: string | undefined = undefined
+
+  copy(): UrlRecord {
+    const r = new UrlRecord()
+    r.scheme = this.scheme
+    r.username = this.username
+    r.password = this.password
+    r.host = this.host
+    r.port = this.port
+    r.path = [...this.path]
+    r.opaquePath = this.opaquePath
+    r.query = this.query
+    r.fragment = this.fragment
+    return r
+  }
+
+  includesCredentials(): boolean {
+    return this.username != "" || this.password != ""
+  }
+
+  shortenPath() {
+    if (this.scheme == "file" && this.path.length == 1 &&
+        isNormalizedDriveLetter(this.path[0] ?? ""))
+      return
+    this.path.pop()
+  }
+
+  pathText(): string {
+    if (this.opaquePath != undefined) return this.opaquePath
+    let out = ""
+    for (const segment of this.path) out += "/" + segment
+    return out
+  }
+
+  serialize(excludeFragment = false): string {
+    let out = this.scheme + ":"
+    const host = this.host
+    if (host != undefined) {
+      out += "//"
+      if (this.includesCredentials()) {
+        out += this.username
+        if (this.password != "") out += ":" + this.password
+        out += "@"
+      }
+      out += host
+      if (this.port != -1) out += ":" + String(this.port)
+    } else if (this.opaquePath == undefined && this.path.length > 1 && this.path[0] == "") {
+      out += "/."
+    }
+    out += this.pathText()
+    const query = this.query
+    if (query != undefined) out += "?" + query
+    const fragment = this.fragment
+    if (!excludeFragment && fragment != undefined) out += "#" + fragment
+    return out
+  }
+}
+
+function isWindowsDriveLetter(cps: int[], from: int): boolean {
+  return isAsciiAlpha(at(cps, from)) && (at(cps, from + 1) == 0x3a || at(cps, from + 1) == 0x7c)
+}
+
+function isNormalizedDriveLetter(s: string): boolean {
+  const cps = codePoints(s)
+  return cps.length == 2 && isAsciiAlpha(cps[0]) && cps[1] == 0x3a
+}
+
+function isWindowsDriveLetterString(s: string): boolean {
+  const cps = codePoints(s)
+  return cps.length == 2 && isWindowsDriveLetter(cps, 0)
+}
+
+// Whether a Windows drive letter starts at `from`, followed by its end or
+// one of / \ ? #.
+function startsWithDriveLetter(cps: int[], from: int): boolean {
+  if (cps.length - from < 2 || !isWindowsDriveLetter(cps, from)) return false
+  if (cps.length - from == 2) return true
+  const c = at(cps, from + 2)
+  return c == 0x2f || c == 0x5c || c == 0x3f || c == 0x23
+}
+
+function isSingleDot(s: string): boolean {
+  return s == "." || s.toLowerCase() == "%2e"
+}
+
+function isDoubleDot(s: string): boolean {
+  const l = s.toLowerCase()
+  return l == ".." || l == ".%2e" || l == "%2e." || l == "%2e%2e"
+}
+
+// The states of the basic URL parser.
+const SCHEME_START = 1
+const SCHEME = 2
+const NO_SCHEME = 3
+const SPECIAL_RELATIVE_OR_AUTHORITY = 4
+const PATH_OR_AUTHORITY = 5
+const RELATIVE = 6
+const RELATIVE_SLASH = 7
+const SPECIAL_AUTHORITY_SLASHES = 8
+const SPECIAL_AUTHORITY_IGNORE_SLASHES = 9
+const AUTHORITY = 10
+const HOST = 11
+const HOSTNAME = 12
+const PORT = 13
+const FILE = 14
+const FILE_SLASH = 15
+const FILE_HOST = 16
+const PATH_START = 17
+const PATH = 18
+const OPAQUE_PATH = 19
+const QUERY = 20
+const FRAGMENT = 21
+
+// The basic URL parser: `url` filled in from `input`, against `base`; with
+// a state override, the setter of one part. False for a failure (with a
+// state override, also for "return" without a change).
+function basicParse(input0: string, base: UrlRecord | undefined, url: UrlRecord,
+                    stateOverride = 0): boolean {
+  let input = input0
+  if (stateOverride == 0) {
+    // Leading and trailing C0 controls and spaces go.
+    let start = 0
+    let end = input.length
+    while (start < end && input.charCodeAt(start) <= 0x20) start++
+    while (end > start && input.charCodeAt(end - 1) <= 0x20) end--
+    input = input.slice(start, end)
+  }
+  // Tabs and newlines go wherever they are.
+  input = input.replaceAll("\t", "").replaceAll("\n", "").replaceAll("\r", "")
+  const cps = codePoints(input)
+  let state = stateOverride != 0 ? stateOverride : SCHEME_START
+  let buffer = ""
+  let atSignSeen = false
+  let insideBrackets = false
+  let passwordTokenSeen = false
+  let pointer = 0
+  for (;; pointer++) {
+    const c = at(cps, pointer)
+    switch (state) {
+      case SCHEME_START:
+        if (isAsciiAlpha(c)) {
+          buffer += String.fromCodePoint(lowerAscii(c))
+          state = SCHEME
+        } else if (stateOverride == 0) {
+          state = NO_SCHEME
+          pointer--
+        } else {
+          return false
+        }
+        break
+      case SCHEME:
+        if (isAsciiAlphanumeric(c) || c == 0x2b || c == 0x2d || c == 0x2e) {
+          buffer += String.fromCodePoint(lowerAscii(c))
+        } else if (c == 0x3a) {
+          if (stateOverride != 0) {
+            if (isSpecial(url.scheme) != isSpecial(buffer)) return false
+            if ((url.includesCredentials() || url.port != -1) && buffer == "file") return false
+            if (url.scheme == "file" && url.host == "") return false
+          }
+          url.scheme = buffer
+          if (stateOverride != 0) {
+            if (url.port == defaultPort(url.scheme)) url.port = -1
+            return true
+          }
+          buffer = ""
+          if (url.scheme == "file") {
+            state = FILE
+          } else if (isSpecial(url.scheme) && base != undefined && base.scheme == url.scheme) {
+            state = SPECIAL_RELATIVE_OR_AUTHORITY
+          } else if (isSpecial(url.scheme)) {
+            state = SPECIAL_AUTHORITY_SLASHES
+          } else if (at(cps, pointer + 1) == 0x2f) {
+            state = PATH_OR_AUTHORITY
+            pointer++
+          } else {
+            url.opaquePath = ""
+            state = OPAQUE_PATH
+          }
+        } else if (stateOverride == 0) {
+          buffer = ""
+          state = NO_SCHEME
+          pointer = -1
+        } else {
+          return false
+        }
+        break
+      case NO_SCHEME:
+        if (base == undefined || (base.opaquePath != undefined && c != 0x23)) return false
+        if (base.opaquePath != undefined && c == 0x23) {
+          url.scheme = base.scheme
+          url.opaquePath = base.opaquePath
+          url.query = base.query
+          url.fragment = ""
+          state = FRAGMENT
+        } else if (base.scheme != "file") {
+          state = RELATIVE
+          pointer--
+        } else {
+          state = FILE
+          pointer--
+        }
+        break
+      case SPECIAL_RELATIVE_OR_AUTHORITY:
+        if (c == 0x2f && at(cps, pointer + 1) == 0x2f) {
+          state = SPECIAL_AUTHORITY_IGNORE_SLASHES
+          pointer++
+        } else {
+          state = RELATIVE
+          pointer--
+        }
+        break
+      case PATH_OR_AUTHORITY:
+        if (c == 0x2f) {
+          state = AUTHORITY
+        } else {
+          state = PATH
+          pointer--
+        }
+        break
+      case RELATIVE: {
+        if (base == undefined) return false
+        url.scheme = base.scheme
+        if (c == 0x2f) {
+          state = RELATIVE_SLASH
+        } else if (isSpecial(url.scheme) && c == 0x5c) {
+          state = RELATIVE_SLASH
+        } else {
+          url.username = base.username
+          url.password = base.password
+          url.host = base.host
+          url.port = base.port
+          url.path = [...base.path]
+          url.query = base.query
+          if (c == 0x3f) {
+            url.query = ""
+            state = QUERY
+          } else if (c == 0x23) {
+            url.fragment = ""
+            state = FRAGMENT
+          } else if (c != -1) {
+            url.query = undefined
+            url.shortenPath()
+            state = PATH
+            pointer--
+          }
+        }
+        break
+      }
+      case RELATIVE_SLASH:
+        if (isSpecial(url.scheme) && (c == 0x2f || c == 0x5c)) {
+          state = SPECIAL_AUTHORITY_IGNORE_SLASHES
+        } else if (c == 0x2f) {
+          state = AUTHORITY
+        } else {
+          if (base != undefined) {
+            url.username = base.username
+            url.password = base.password
+            url.host = base.host
+            url.port = base.port
+          }
+          state = PATH
+          pointer--
+        }
+        break
+      case SPECIAL_AUTHORITY_SLASHES:
+        if (c == 0x2f && at(cps, pointer + 1) == 0x2f) {
+          state = SPECIAL_AUTHORITY_IGNORE_SLASHES
+          pointer++
+        } else {
+          state = SPECIAL_AUTHORITY_IGNORE_SLASHES
+          pointer--
+        }
+        break
+      case SPECIAL_AUTHORITY_IGNORE_SLASHES:
+        if (c != 0x2f && c != 0x5c) {
+          state = AUTHORITY
+          pointer--
+        }
+        break
+      case AUTHORITY:
+        if (c == 0x40) {
+          if (atSignSeen) buffer = "%40" + buffer
+          atSignSeen = true
+          for (const ch of buffer) {
+            const b = ch.codePointAt(0) ?? 0
+            if (b == 0x3a && !passwordTokenSeen) {
+              passwordTokenSeen = true
+              continue
+            }
+            const encoded = percentEncode(b, USERINFO_SET)
+            if (passwordTokenSeen) url.password += encoded
+            else url.username += encoded
+          }
+          buffer = ""
+        } else if (c == -1 || c == 0x2f || c == 0x3f || c == 0x23 ||
+                   (isSpecial(url.scheme) && c == 0x5c)) {
+          if (atSignSeen && buffer == "") return false
+          pointer -= codePoints(buffer).length + 1
+          buffer = ""
+          state = HOST
+        } else {
+          buffer += String.fromCodePoint(c)
+        }
+        break
+      case HOST:
+      case HOSTNAME:
+        if (stateOverride != 0 && url.scheme == "file") {
+          pointer--
+          state = FILE_HOST
+        } else if (c == 0x3a && !insideBrackets) {
+          if (buffer == "") return false
+          if (stateOverride == HOSTNAME) return false
+          const host = parseHost(buffer, !isSpecial(url.scheme))
+          if (host == undefined) return false
+          url.host = host
+          buffer = ""
+          state = PORT
+        } else if (c == -1 || c == 0x2f || c == 0x3f || c == 0x23 ||
+                   (isSpecial(url.scheme) && c == 0x5c)) {
+          pointer--
+          if (isSpecial(url.scheme) && buffer == "") return false
+          if (stateOverride != 0 && buffer == "" &&
+              (url.includesCredentials() || url.port != -1))
+            return false
+          const host = parseHost(buffer, !isSpecial(url.scheme))
+          if (host == undefined) return false
+          url.host = host
+          buffer = ""
+          state = PATH_START
+          if (stateOverride != 0) return true
+        } else {
+          if (c == 0x5b) insideBrackets = true
+          if (c == 0x5d) insideBrackets = false
+          buffer += String.fromCodePoint(c)
+        }
+        break
+      case PORT:
+        if (isAsciiDigit(c)) {
+          buffer += String.fromCodePoint(c)
+        } else if (c == -1 || c == 0x2f || c == 0x3f || c == 0x23 ||
+                   (isSpecial(url.scheme) && c == 0x5c) || stateOverride != 0) {
+          if (buffer != "") {
+            const port = parseInt(buffer, 10)
+            if (port > 65535) return false
+            url.port = port == defaultPort(url.scheme) ? -1 : port | 0
+            buffer = ""
+            if (stateOverride != 0) return true
+          }
+          if (stateOverride != 0) return false
+          state = PATH_START
+          pointer--
+        } else {
+          return false
+        }
+        break
+      case FILE:
+        url.scheme = "file"
+        url.host = ""
+        if (c == 0x2f || c == 0x5c) {
+          state = FILE_SLASH
+        } else if (base != undefined && base.scheme == "file") {
+          url.host = base.host
+          url.path = [...base.path]
+          url.query = base.query
+          if (c == 0x3f) {
+            url.query = ""
+            state = QUERY
+          } else if (c == 0x23) {
+            url.fragment = ""
+            state = FRAGMENT
+          } else if (c != -1) {
+            url.query = undefined
+            if (!startsWithDriveLetter(cps, pointer)) url.shortenPath()
+            else url.path = []
+            state = PATH
+            pointer--
+          }
+        } else {
+          state = PATH
+          pointer--
+        }
+        break
+      case FILE_SLASH:
+        if (c == 0x2f || c == 0x5c) {
+          state = FILE_HOST
+        } else {
+          if (base != undefined && base.scheme == "file") {
+            url.host = base.host
+            const first = base.path[0]
+            if (!startsWithDriveLetter(cps, pointer) && first != undefined &&
+                isNormalizedDriveLetter(first))
+              url.path.push(first)
+          }
+          state = PATH
+          pointer--
+        }
+        break
+      case FILE_HOST:
+        if (c == -1 || c == 0x2f || c == 0x5c || c == 0x3f || c == 0x23) {
+          pointer--
+          if (stateOverride == 0 && isWindowsDriveLetterString(buffer)) {
+            state = PATH
+          } else if (buffer == "") {
+            url.host = ""
+            if (stateOverride != 0) return true
+            state = PATH_START
+          } else {
+            let host = parseHost(buffer, !isSpecial(url.scheme))
+            if (host == undefined) return false
+            if (host == "localhost") host = ""
+            url.host = host
+            if (stateOverride != 0) return true
+            buffer = ""
+            state = PATH_START
+          }
+        } else {
+          buffer += String.fromCodePoint(c)
+        }
+        break
+      case PATH_START:
+        if (isSpecial(url.scheme)) {
+          state = PATH
+          if (c != 0x2f && c != 0x5c) pointer--
+        } else if (stateOverride == 0 && c == 0x3f) {
+          url.query = ""
+          state = QUERY
+        } else if (stateOverride == 0 && c == 0x23) {
+          url.fragment = ""
+          state = FRAGMENT
+        } else if (c != -1) {
+          state = PATH
+          if (c != 0x2f) pointer--
+        } else if (stateOverride != 0 && url.host == undefined) {
+          url.path.push("")
+        }
+        break
+      case PATH:
+        if (c == -1 || c == 0x2f || (isSpecial(url.scheme) && c == 0x5c) ||
+            (stateOverride == 0 && (c == 0x3f || c == 0x23))) {
+          const slash = c == 0x2f || (isSpecial(url.scheme) && c == 0x5c)
+          if (isDoubleDot(buffer)) {
+            url.shortenPath()
+            if (!slash) url.path.push("")
+          } else if (isSingleDot(buffer) && !slash) {
+            url.path.push("")
+          } else if (!isSingleDot(buffer)) {
+            if (url.scheme == "file" && url.path.length == 0 &&
+                isWindowsDriveLetterString(buffer))
+              buffer = buffer.slice(0, 1) + ":"
+            url.path.push(buffer)
+          }
+          buffer = ""
+          if (c == 0x3f) {
+            url.query = ""
+            state = QUERY
+          }
+          if (c == 0x23) {
+            url.fragment = ""
+            state = FRAGMENT
+          }
+        } else {
+          buffer += percentEncode(c, PATH_SET)
+        }
+        break
+      case OPAQUE_PATH:
+        if (c == 0x3f) {
+          url.query = ""
+          state = QUERY
+        } else if (c == 0x23) {
+          url.fragment = ""
+          state = FRAGMENT
+        } else if (c == 0x20) {
+          const next = at(cps, pointer + 1)
+          url.opaquePath = (url.opaquePath ?? "") + (next == 0x3f || next == 0x23 ? "%20" : " ")
+        } else if (c != -1) {
+          url.opaquePath = (url.opaquePath ?? "") + percentEncode(c, C0_CONTROL_SET)
+        }
+        break
+      case QUERY:
+        if ((stateOverride == 0 && c == 0x23) || c == -1) {
+          const set = isSpecial(url.scheme) ? SPECIAL_QUERY_SET : QUERY_SET
+          url.query = (url.query ?? "") + percentEncodeString(buffer, set)
+          buffer = ""
+          if (c == 0x23) {
+            url.fragment = ""
+            state = FRAGMENT
+          }
+        } else {
+          buffer += String.fromCodePoint(c)
+        }
+        break
+      case FRAGMENT:
+        if (c != -1) url.fragment = (url.fragment ?? "") + percentEncode(c, FRAGMENT_SET)
+        break
+    }
+    // A state that goes back a code point at the end reads the end again.
+    if (pointer >= cps.length) break
+  }
+  return true
+}
+
+function parseUrl(input: string, base: UrlRecord | undefined): UrlRecord | undefined {
+  const url = new UrlRecord()
+  return basicParse(input, base, url) ? url : undefined
+}
+
+// The error node gives an input that is no URL.
+export class InvalidUrlError extends TypeError {
+  readonly code = "ERR_INVALID_URL"
+  readonly input: string
+  constructor(input: string) {
+    super("Invalid URL")
+    this.input = input
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// URL
+//===----------------------------------------------------------------------===//
+
+export class URL {
+  #record: UrlRecord
+  // Counts the changes of the query, which views of it (searchParams) read.
+  #queryVersion = 0
+
+  constructor(input: string | URL, base?: string | URL) {
+    const text = typeof input == "string" ? input : input.href
+    let parsedBase: UrlRecord | undefined = undefined
+    if (base != undefined) {
+      const baseText = typeof base == "string" ? base : base.href
+      parsedBase = parseUrl(baseText, undefined)
+      if (parsedBase == undefined) throw new InvalidUrlError(text)
+    }
+    const record = parseUrl(text, parsedBase)
+    if (record == undefined) throw new InvalidUrlError(text)
+    this.#record = record
+  }
+
+  static canParse(input: string, base?: string): boolean {
+    let parsedBase: UrlRecord | undefined = undefined
+    if (base != undefined) {
+      parsedBase = parseUrl(base, undefined)
+      if (parsedBase == undefined) return false
+    }
+    return parseUrl(input, parsedBase) != undefined
+  }
+
+  static parse(input: string, base?: string): URL | undefined {
+    return URL.canParse(input, base) ? new URL(input, base) : undefined
+  }
+
+  get href(): string {
+    return this.#record.serialize()
+  }
+  set href(value: string) {
+    const record = parseUrl(value, undefined)
+    if (record == undefined) throw new InvalidUrlError(value)
+    this.#record = record
+    this.#queryVersion++
+  }
+
+  get origin(): string {
+    const r = this.#record
+    if (r.scheme == "blob") {
+      const inner = parseUrl(r.pathText(), undefined)
+      return inner != undefined && (inner.scheme == "http" || inner.scheme == "https")
+        ? new URL(inner.serialize()).origin
+        : "null"
+    }
+    if (r.scheme == "http" || r.scheme == "https" || r.scheme == "ws" || r.scheme == "wss" ||
+        r.scheme == "ftp")
+      return r.scheme + "://" + (r.host ?? "") + (r.port != -1 ? ":" + String(r.port) : "")
+    return "null"
+  }
+
+  get protocol(): string {
+    return this.#record.scheme + ":"
+  }
+  set protocol(value: string) {
+    basicParse(value + ":", undefined, this.#record, SCHEME_START)
+  }
+
+  get username(): string {
+    return this.#record.username
+  }
+  set username(value: string) {
+    const r = this.#record
+    if (r.host == undefined || r.host == "" || r.scheme == "file") return
+    r.username = percentEncodeString(value, USERINFO_SET)
+  }
+
+  get password(): string {
+    return this.#record.password
+  }
+  set password(value: string) {
+    const r = this.#record
+    if (r.host == undefined || r.host == "" || r.scheme == "file") return
+    r.password = percentEncodeString(value, USERINFO_SET)
+  }
+
+  get host(): string {
+    const r = this.#record
+    if (r.host == undefined) return ""
+    return r.port == -1 ? r.host : r.host + ":" + String(r.port)
+  }
+  set host(value: string) {
+    const r = this.#record
+    if (r.opaquePath != undefined) return
+    const copy = r.copy()
+    if (basicParse(value, undefined, copy, HOST)) this.#record = copy
+  }
+
+  get hostname(): string {
+    return this.#record.host ?? ""
+  }
+  set hostname(value: string) {
+    const r = this.#record
+    if (r.opaquePath != undefined) return
+    const copy = r.copy()
+    if (basicParse(value, undefined, copy, HOSTNAME)) this.#record = copy
+  }
+
+  get port(): string {
+    const port = this.#record.port
+    return port == -1 ? "" : String(port)
+  }
+  set port(value: string) {
+    const r = this.#record
+    if (r.host == undefined || r.host == "" || r.scheme == "file") return
+    if (value == "") {
+      r.port = -1
+      return
+    }
+    const copy = r.copy()
+    if (basicParse(value, undefined, copy, PORT)) this.#record = copy
+  }
+
+  get pathname(): string {
+    return this.#record.pathText()
+  }
+  set pathname(value: string) {
+    const r = this.#record
+    if (r.opaquePath != undefined) return
+    r.path = []
+    basicParse(value, undefined, r, PATH_START)
+  }
+
+  get search(): string {
+    const query = this.#record.query
+    return query == undefined || query == "" ? "" : "?" + query
+  }
+  set search(value: string) {
+    const r = this.#record
+    this.#queryVersion++
+    if (value == "") {
+      r.query = undefined
+      return
+    }
+    const input = value.startsWith("?") ? value.slice(1) : value
+    r.query = ""
+    basicParse(input, undefined, r, QUERY)
+  }
+
+  get searchParams(): URLSearchParams {
+    return URLSearchParams.__view(this)
+  }
+
+  get hash(): string {
+    const fragment = this.#record.fragment
+    return fragment == undefined || fragment == "" ? "" : "#" + fragment
+  }
+  set hash(value: string) {
+    const r = this.#record
+    if (value == "") {
+      r.fragment = undefined
+      return
+    }
+    const input = value.startsWith("#") ? value.slice(1) : value
+    r.fragment = ""
+    basicParse(input, undefined, r, FRAGMENT)
+  }
+
+  toString(): string {
+    return this.href
+  }
+
+  toJSON(): string {
+    return this.href
+  }
+
+  // For the views of the query (URLSearchParams).
+  __query(): string | undefined {
+    return this.#record.query
+  }
+  __queryVersion(): int {
+    return this.#queryVersion
+  }
+  __setQuery(query: string | undefined) {
+    this.#record.query = query
+    this.#queryVersion++
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// URLSearchParams
+//===----------------------------------------------------------------------===//
+
+// application/x-www-form-urlencoded: name=value pairs, with + for spaces.
+function parseForm(input: string): [string, string][] {
+  const out: [string, string][] = []
+  for (const sequence of input.split("&")) {
+    if (sequence == "") continue
+    const eq = sequence.indexOf("=")
+    const name = eq < 0 ? sequence : sequence.slice(0, eq)
+    const value = eq < 0 ? "" : sequence.slice(eq + 1)
+    out.push([utf8Decode(percentDecode(name.replaceAll("+", " "))),
+              utf8Decode(percentDecode(value.replaceAll("+", " ")))])
+  }
+  return out
+}
+
+function serializeForm(list: [string, string][]): string {
+  let out = ""
+  for (const [name, value] of list) {
+    if (out != "") out += "&"
+    out += percentEncodeString(name, FORM_SET, true) + "=" +
+           percentEncodeString(value, FORM_SET, true)
+  }
+  return out
+}
+
+// What `new URLSearchParams(init)` takes: a query, pairs, or a record.
+export type URLSearchParamsInit = string | [string, string][] | Record<string, string> |
+  URLSearchParams
+
+export class URLSearchParams {
+  #list: [string, string][] = []
+  // A view of the query of a URL (see URL.searchParams): what it read of
+  // it, and when.
+  #url: URL | undefined = undefined
+  #version = -1
+
+  constructor(init?: URLSearchParamsInit) {
+    if (init == undefined) return
+    if (typeof init == "string") {
+      this.#list = parseForm(init.startsWith("?") ? init.slice(1) : init)
+    } else if (init instanceof URLSearchParams) {
+      this.#list = [...init.#pairs()]
+    } else if (Array.isArray(init)) {
+      for (const pair of init) this.#list.push([pair[0], pair[1]])
+    } else {
+      for (const [name, value] of Object.entries(init)) this.#list.push([name, value])
+    }
+  }
+
+  static __view(url: URL): URLSearchParams {
+    const params = new URLSearchParams()
+    params.#url = url
+    return params
+  }
+
+  // The pairs, read again from the URL if its query changed.
+  #pairs(): [string, string][] {
+    const url = this.#url
+    if (url != undefined && url.__queryVersion() != this.#version) {
+      this.#list = parseForm(url.__query() ?? "")
+      this.#version = url.__queryVersion()
+    }
+    return this.#list
+  }
+
+  // After a change: the URL of a view gets the query.
+  #update() {
+    const url = this.#url
+    if (url == undefined) return
+    const query = serializeForm(this.#list)
+    url.__setQuery(query == "" ? undefined : query)
+    this.#version = url.__queryVersion()
+  }
+
+  get size(): int {
+    return this.#pairs().length
+  }
+
+  // What it prints as, `URLSearchParams { 'a' => '1' }` (runtime/inspect.c).
+  get __tz_entries(): [string, string][] {
+    return [...this.#pairs()]
+  }
+
+  append(name: string, value: string) {
+    this.#pairs().push([name, value])
+    this.#update()
+  }
+
+  delete(name: string, value?: string) {
+    this.#list = this.#pairs().filter(p => p[0] != name || (value != undefined && p[1] != value))
+    this.#update()
+  }
+
+  get(name: string): string | undefined {
+    for (const [n, v] of this.#pairs()) if (n == name) return v
+    return undefined
+  }
+
+  getAll(name: string): string[] {
+    const out: string[] = []
+    for (const [n, v] of this.#pairs()) if (n == name) out.push(v)
+    return out
+  }
+
+  has(name: string, value?: string): boolean {
+    return this.#pairs().some(p => p[0] == name && (value == undefined || p[1] == value))
+  }
+
+  set(name: string, value: string) {
+    const list = this.#pairs()
+    const out: [string, string][] = []
+    let found = false
+    for (const pair of list) {
+      if (pair[0] != name) {
+        out.push(pair)
+      } else if (!found) {
+        found = true
+        out.push([name, value])
+      }
+    }
+    if (!found) out.push([name, value])
+    this.#list = out
+    this.#update()
+  }
+
+  sort() {
+    // Stable, by the code units of the names.
+    const list = this.#pairs().map((p, i): [[string, string], int] => [p, i])
+    list.sort((a, b) => a[0][0] < b[0][0] ? -1 : a[0][0] > b[0][0] ? 1 : a[1] - b[1])
+    this.#list = list.map(e => e[0])
+    this.#update()
+  }
+
+  toString(): string {
+    return serializeForm(this.#pairs())
+  }
+
+  forEach(callback: (value: string, key: string, parent: URLSearchParams) => void) {
+    for (const [name, value] of [...this.#pairs()]) callback(value, name, this)
+  }
+
+  *keys(): IterableIterator<string> {
+    for (const [name] of [...this.#pairs()]) yield name
+  }
+
+  *values(): IterableIterator<string> {
+    for (const [, value] of [...this.#pairs()]) yield value
+  }
+
+  *entries(): IterableIterator<[string, string]> {
+    for (const pair of [...this.#pairs()]) yield [pair[0], pair[1]]
+  }
+
+  *[Symbol.iterator](): IterableIterator<[string, string]> {
+    for (const pair of [...this.#pairs()]) yield [pair[0], pair[1]]
+  }
+}
+
+// The text of a form, for bodies (fetch.ts).
+export function __formText(params: URLSearchParams): string {
+  return params.toString()
+}
+
+// The bytes of a text with its %XX sequences decoded, for data: URLs
+// (fetch.ts).
+export function __percentDecode(text: string): Uint8Array {
+  return percentDecode(text)
+}

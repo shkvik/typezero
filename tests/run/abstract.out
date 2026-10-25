@@ -1,0 +1,10 @@
+circle: area 3.14, perimeter 6.28
+rect: area 6.00, perimeter 10.00
+[square: area 16.00, perimeter 16.00]
+25.142 3
+[
+  Circle { kind: 'circle', r: 1 },
+  Rect { kind: 'rect', w: 2, h: 3 },
+  Square { kind: 'square', w: 4, h: 4 }
+]
+hello Ann hello Ann true

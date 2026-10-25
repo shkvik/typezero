@@ -1,0 +1,18 @@
+listener 1
+onabort
+listener 2
+second handler
+g listener
+plain reason
+a listener true true
+any listener true true
+any of any listener
+listener micro (before)
+listener micro (after)
+rejected AbortError AbortError
+listener sync
+after abort
+rejected 2 AbortError
+listener micro 3
+rejected 3 AbortError
+stopped anyway: AbortError

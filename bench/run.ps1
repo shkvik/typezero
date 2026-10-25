@@ -69,7 +69,9 @@ New-Item -ItemType Directory -Force $out | Out-Null
 # -File passes "a,b" as one string.
 $Names = $Names | ForEach-Object { $_ -split ',' } | Where-Object { $_ }
 if (-not $Names) {
-  $Names = Get-ChildItem -Directory $PSScriptRoot | Where-Object { $_.Name -ne "out" } |
+  # The servers of http.ps1 run until stopped.
+  $Names = Get-ChildItem -Directory $PSScriptRoot |
+           Where-Object { $_.Name -ne "out" -and -not $_.Name.StartsWith("http_") } |
            ForEach-Object { $_.Name }
 }
 

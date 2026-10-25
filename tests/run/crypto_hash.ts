@@ -1,0 +1,79 @@
+// same-as-node
+import { createHash, createHmac, hash, getHashes } from "node:crypto"
+
+// Every hash of the direct layer, by its name and by the aliases node takes.
+const text = "The quick brown fox jumps over the lazy dog"
+console.log(createHash("md5").update(text).digest("hex"))
+console.log(createHash("sha1").update(text).digest("hex"))
+console.log(createHash("sha224").update(text).digest("hex"))
+console.log(createHash("sha256").update(text).digest("hex"))
+console.log(createHash("sha384").update(text).digest("hex"))
+console.log(createHash("sha512").update(text).digest("hex"))
+console.log(createHash("sha512-224").update(text).digest("hex"))
+console.log(createHash("sha512-256").update(text).digest("hex"))
+console.log(createHash("sha3-224").update(text).digest("hex"))
+console.log(createHash("sha3-256").update(text).digest("hex"))
+console.log(createHash("sha3-384").update(text).digest("hex"))
+console.log(createHash("sha3-512").update(text).digest("hex"))
+console.log(createHash("shake128").update(text).digest("hex"))
+console.log(createHash("shake256").update(text).digest("hex"))
+console.log(createHash("shake128", { outputLength: 100 }).update(text).digest("hex"))
+console.log(createHash("shake256", { outputLength: 3 }).update(text).digest("hex"))
+console.log(createHash("ripemd160").update(text).digest("hex"))
+console.log(createHash("sm3").update(text).digest("hex"))
+console.log(createHash("md5-sha1").update(text).digest("hex"))
+console.log(createHash("blake2b512").update(text).digest("hex"))
+console.log(createHash("blake2s256").update(text).digest("hex"))
+console.log(createHash("SHA-256").update(text).digest("hex"))
+console.log(createHash("RSA-SHA256").update(text).digest("hex"))
+console.log(createHash("rmd160").update(text).digest("hex"))
+console.log(createHash("2.16.840.1.101.3.4.2.1").update(text).digest("hex"))
+console.log(createHash("SHA512-256").update(text).digest("hex"))
+
+// Encodings in and out, pieces, copies.
+const h = createHash("sha256")
+h.update("68656c6c6f", "hex").update(" ").update(Buffer.from("world"))
+const copy = h.copy()
+console.log(h.digest("base64"), copy.update("!").digest("base64url"))
+console.log(createHash("sha1").update("").digest())
+console.log(createHash("sha1").update(new Uint8Array([1, 2, 3])).digest("latin1").length)
+console.log(createHash("md5").update("привет", "utf8").digest("hex"))
+console.log(createHash("md5").update("привет", "latin1").digest("hex"))
+const big = "x".repeat(1000000)
+console.log(createHash("sha256").update(big).digest("hex"))
+console.log(createHash("sha3-256").update(big).digest("hex"))
+
+// HMAC, with keys longer than the block.
+console.log(createHmac("sha256", "key").update(text).digest("hex"))
+console.log(createHmac("sha512", "k".repeat(200)).update(text).digest("hex"))
+console.log(createHmac("md5", Buffer.from("key")).update(text).digest("base64"))
+console.log(createHmac("sha3-256", "key").update(text).digest("hex"))
+console.log(createHmac("blake2b512", "key").update(text).digest("hex"))
+const mac = createHmac("sha1", "key")
+mac.update(text)
+console.log(mac.digest("hex"), JSON.stringify(mac.digest("hex")))
+
+// crypto.hash
+console.log(hash("sha1", text))
+console.log(hash("md5", text, "base64"))
+console.log(hash("sha256", Buffer.from(text), "buffer").length)
+
+// Errors as node throws them.
+try {
+  h.update("x")
+} catch (e) {
+  console.log(e.message)
+}
+try {
+  h.digest()
+} catch (e) {
+  console.log(e.message)
+}
+try {
+  createHash("sha256", { outputLength: 5 })
+} catch (e) {
+  console.log(e.message)
+}
+const names = getHashes()
+console.log(names.length, names.includes("sha256"), names.includes("md4"))
+console.log(names.join(","))

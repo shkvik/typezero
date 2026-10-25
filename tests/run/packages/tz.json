@@ -1,0 +1,7 @@
+{
+  "name": "packages",
+  "main": "main.ts",
+  "dependencies": {
+    "ms": "file:../../packages/ms"
+  }
+}

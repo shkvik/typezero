@@ -1,0 +1,35 @@
+// same-as-node
+// args: one "two words" три --flag=1 "a \"quoted\" word"
+// env: TZ_TEST_GREETING=привет, мир
+// env: TZ_TEST_NUMBER=42
+// The arguments, as in Node, start at index 2.
+const args = process.argv.slice(2)
+console.log(args)
+console.log(args.length == process.argv.length - 2)
+for (const arg of args) console.log(`[${arg}]`)
+const [first, ...rest] = args
+console.log(first, rest.length)
+console.log(process.argv[2] == "one", process.argv[100])
+
+// An environment variable is `string | undefined`.
+console.log(process.env.TZ_TEST_GREETING)
+console.log(process.env["TZ_TEST_GREETING"]?.length)
+console.log(process.env.TZ_TEST_SURELY_MISSING)
+console.log(process.env.TZ_TEST_SURELY_MISSING ?? "default")
+const name = "TZ_TEST_" + "NUMBER"
+const value = process.env[name]
+if (value != undefined) console.log(Number(value) + 1)
+const home = process.env.TZ_TEST_SURELY_MISSING || "no home"
+console.log(home)
+
+// The process and the clock.
+console.log(typeof process.platform, process.platform.length > 0)
+console.log(typeof process.cwd(), process.cwd().length > 0, process.execPath.length > 0)
+const start = performance.now()
+let sum = 0
+for (let i = 0; i < 1000; i++) sum += i
+const elapsed = performance.now() - start
+console.log(sum, elapsed >= 0, elapsed < 60000)
+const now = Date.now()
+console.log(now > 1.7e12, Number.isInteger(now), Date.now() >= now)
+console.log(process.exitCode)

@@ -1,0 +1,28 @@
+5 Point { x: 3, y: 4 }
+Point { x: 6, y: 8 } 6 3
+Point { x: 5, y: 6 }
+user-1 Ann <ann@example.com>
+user-2 Bob <bob@example.com> [ 'admin', 'ops' ]
+true false
+visited 1 times visited 2 times
+User {
+  name: 'Ann',
+  email: 'ann@example.com',
+  id: 1,
+  tags: [],
+  visits: 2,
+  notes: 'visited 2 times'
+}
+2 [ 'name', 'email', 'id', 'tags', 'visits', 'notes' ]
+12.5 Ann Account { owner: 'Ann', balance: 12.5, history: [ 10, 2.5 ] }
+Account { owner: 'Bob', balance: 100, history: [] }
+object true false
+true false
+undefined
+[ 1.4142135623730951, 2, 3 ]
+3 [ Point { x: 1, y: 1 }, Point { x: 0, y: 2 }, Point { x: 3, y: 0 } ]
+[ 2, 1, 4 ]
+6 8 { x: 6, y: 8 }
+Empty {} [ Empty {} ] { point: Point { x: 5, y: 6 } }
+{ a: { b: { c: [Point] } } }
+6 2

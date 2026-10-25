@@ -1,0 +1,91 @@
+// The traps of Date that are visible in the code (docs/date.md, section 5):
+// a string JavaScript cannot read, a date without a time (read as UTC), a
+// day or a month past the end, getYear; and what JavaScript does with dates
+// that is surely not meant.
+// expect-error: '23.10.2026' is not a date JavaScript can read
+const a = new Date("23.10.2026")
+// expect-error: a date without a time is read as midnight UTC, while the same date with a time is local; write '2026-10-23T00:00' for local midnight or '2026-10-23T00:00Z' for UTC
+const b = new Date("2026-10-23")
+// expect-error: February 2026 has no day 31, and JavaScript would make it March 3
+const c = new Date(2026, 1, 31)
+// expect-error: month 12 is January of the next year in JavaScript
+const d = new Date(2026, 12, 1)
+// expect-error: 'getYear' gives the year minus 1900 (126 for 2026); use 'getFullYear()'
+const year = d.getYear()
+// expect-error: a date without a time is read as midnight UTC
+const parsed = Date.parse("2026-10")
+// expect-error: April 2026 has no day 31
+const utc = Date.UTC(2026, 3, 31)
+// expect-error: the year 50 is 1950 in JavaScript
+const short = new Date(50, 0, 1)
+// expect-error: 24 hours are out of range: hours are from 0 to 23
+const late = new Date(2026, 0, 1, 24)
+// expect-error: day -1 is outside the month
+const before = new Date(2026, 0, -1)
+const m = 12
+// expect-error: month 12 is January of the next year
+const fromConstant = new Date(2026, m, 1)
+// expect-error: February 2026 has no day 30, and JavaScript would make it March 2
+const inText = new Date("2026-02-30T10:00")
+// expect-error: is outside the dates JavaScript has
+const far = new Date("+275761-01-01T00:00Z")
+// The last day of February, day 0 of March, is fine; so is February 29 of a
+// leap year.
+const lastDay = new Date(2026, 2, 0)
+const leap = new Date(2024, 1, 29)
+
+// expect-error: '+' with a date joins texts in JavaScript
+const sum = d + 1
+// expect-error: a date minus a number is a number of milliseconds in JavaScript, not a date
+const minus = d - 1
+// expect-error: a date is compared with '<' only with another date
+const less = d < 5
+// expect-error: 'setYear' takes the year minus 1900
+d.setYear(2020)
+// expect-error: 'toGMTString' is the old name of 'toUTCString'
+console.log(d.toGMTString())
+// expect-error: 'getTime' of a date can only be called
+const method = d.getTime
+// expect-error: property 'foo' does not exist on 'Date'
+const unknown = Date.foo
+// expect-error: 'Date.UTC' can only be called
+const notCalled = Date.UTC
+// expect-error: expected 0-7 arguments, but got 8
+const many = new Date(1, 2, 3, 4, 5, 6, 7, 8)
+// expect-error: 'new Date' takes a time in milliseconds, a string or a date, found 'boolean'
+const flag = new Date(true)
+// expect-error: 'Date()' without 'new' gives the text of the current time and ignores its arguments
+const text = Date("2026-10-23T10:00")
+// expect-error: only objects can be spread into an object literal, found 'Date'
+const spread = { ...d }
+// expect-error: 'Object.keys' needs an object, found 'Date'
+const keys = Object.keys(d)
+
+// Languages and options.
+// expect-error: 'en_US' is not a language tag, and JavaScript would throw a RangeError
+const tag = d.toLocaleString("en_US")
+// expect-error: 'lnog' is not a value of the option 'month'
+const value = d.toLocaleString("en", { month: "lnog" })
+// expect-error: 'mnth' is not an option of toLocaleString
+const option = d.toLocaleString("en", { mnth: "long" })
+// expect-error: 'timeStyle' is not an option of toLocaleDateString
+const style = d.toLocaleDateString("en", { timeStyle: "short" })
+// expect-error: dateStyle and timeStyle cannot go with weekday, year, month, day, hour and the other parts
+const mixed = d.toLocaleString("en", { dateStyle: "short", hour: "numeric" })
+// expect-error: the option 'hour12' is a boolean, found 'string'
+const hour12 = d.toLocaleString("en", { hour12: "yes" })
+// expect-error: fractionalSecondDigits is from 1 to 3
+const digits = new Intl.DateTimeFormat("ru", { fractionalSecondDigits: 4 })
+// expect-error: 'Intl.Locale' is not supported yet
+const numbers = new Intl.Locale("ru")
+// expect-error: toLocaleString takes the language as a string
+const list = d.toLocaleString(["ru", "en"])
+// expect-error: 'formatRange' is not supported yet
+const range = new Intl.DateTimeFormat("ru").formatRange(d, d)
+// expect-error: the value is a 'Date', so 'instanceof Date' is always true
+const always = d instanceof Date
+const maybe: Date | undefined = undefined
+// expect-error: the value is a 'Date' or undefined; test it with '!= undefined'
+const defined = maybe instanceof Date
+// expect-error: a 'string' is never a 'Date', so 'instanceof Date' is always false
+const never = "x" instanceof Date

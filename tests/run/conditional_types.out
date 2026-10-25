@@ -1,0 +1,9 @@
+yes no true no true
+true true true true true true true true
+true true true false { kind: 'circle', r: 2 }
+true true true 5 7 600 [ 'a', 1 ] [] 0
+true true
+true [ 'a1', 'a2', 'b1', 'b2' ] HÉLLO abc hello [ '10.5px', '0px', '-3px' ] width: 1px
+true 42 true
+1 ann undefined { name: 'bob' } true
+true true 12.57 9

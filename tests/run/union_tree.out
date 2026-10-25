@@ -1,0 +1,6 @@
+-3 {
+  kind: 'add',
+  left: { kind: 'num', value: 2 },
+  right: { kind: 'neg', arg: { kind: 'num', value: 5 } }
+}
+2 {"kind":"branch","children":[{"kind":"leaf","value":"a"},{"kind":"branch","children":[{"kind":"leaf","value":"b"}]}]}

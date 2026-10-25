@@ -1,0 +1,62 @@
+// What main.ts reads with: a class whose objects `for await` iterates, a
+// decorated async generator method, a generic class with one, and a
+// function that takes any AsyncIterable.
+import { readFile } from "node:fs/promises"
+
+export const calls: string[] = []
+
+export function Traced<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, R>) {
+  const original = method.value
+  method.value = function (this: unknown, ...args: A): R {
+    calls.push(`${name}(${args.join(", ")})`)
+    return original.apply(this, args)
+  }
+}
+
+// The lines of a file, read when the iteration starts.
+export class LineFeed {
+  path: string
+  constructor(path: string) {
+    this.path = path
+  }
+  async *[Symbol.asyncIterator]() {
+    const text = await readFile(this.path, "utf8")
+    for (const line of text.split("\n"))
+      if (line != "")
+        yield line
+  }
+}
+
+export class Journal {
+  entries: string[] = []
+  add(entry: string) {
+    this.entries.push(entry)
+  }
+  @Traced
+  async *since(index: int) {
+    for (let i = index; i < this.entries.length; i++)
+      yield this.entries[i] ?? ""
+  }
+}
+
+export class Queue<T> {
+  items: T[] = []
+  push(x: T) {
+    this.items.push(x)
+  }
+  async *drain() {
+    while (this.items.length > 0) {
+      await undefined
+      const x = this.items.shift()
+      if (x != undefined)
+        yield x
+    }
+  }
+}
+
+export async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = []
+  for await (const x of source)
+    out.push(x)
+  return out
+}

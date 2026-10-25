@@ -1,11 +1,12 @@
-// expect-exit: 2
-// expect-stderr: panic: integer divide by zero: 0 ** -1
+// expect-exit: 1
+// expect-stderr: RangeError: Division by zero
 // `**` of integers stays an integer, like `*`: it wraps around on overflow,
 // and a negative power loses its fraction, like `/` (JavaScript would give
 // 2147483648 and 0.5).
 let two: int = 2
 let thirtyOne: int = 31
 let minusOne: int = -1
+// expect-warning: 'two ** thirtyOne' may overflow int
 console.log(two ** thirtyOne, two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
 let base: long = 2
 console.log(base ** 62, base ** 63, base ** 64, (-base) ** 3)

@@ -1,0 +1,21 @@
+5 5 1
+Map(1) { 'three' => 5 } true
+[ 'a', 'b' ] 1
+cache [ 'items' ] [Function: Map]
+number 200 ok
+string 200 ok
+object 200 ok
+Entry {
+  value: <Buffer 01 02>,
+  when: 1970-01-01T00:00:00.000Z,
+  pattern: /[a-z]+/g,
+  raw: <Buffer 6f 6b>,
+  code: 200
+}
+missing 0 true [a-z]+
+3 7 11 7 3 6
+[ 1, 2, 3 ] 4
+box of 2
+box of TWO
+date 0
+ann 31 { age: 31 } [ 'name', 'age' ]

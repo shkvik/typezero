@@ -1,0 +1,40 @@
+Dog before super; Animal.legs; Animal(Rex); Dog.tricks; Dog after super
+Dog {
+  name: 'Rex',
+  legs: 4,
+  sound: 'woof',
+  breed: 'lab',
+  tricks: [ 'sit', 'roll' ]
+}
+Rex, 4 legs: Rex says woof!
+Bit, 4 legs: Bit yips
+Kesha, 2 legs: Kesha says tweet
+Thing, 4 legs: Thing says ...
+[
+  Dog {
+    name: 'Rex',
+    legs: 4,
+    sound: 'woof',
+    breed: 'lab',
+    tricks: [ 'sit', 'roll' ]
+  },
+  Puppy {
+    name: 'Bit',
+    legs: 4,
+    sound: 'woof',
+    breed: 'pug',
+    tricks: []
+  },
+  Bird { name: 'Kesha', legs: 2, sound: 'tweet' },
+  Animal { name: 'Thing', legs: 4, sound: '...' }
+]
+4 4 x
+Rex true true false false
+Bit true true true false
+Kesha true false false true
+Thing true false false false
+lab: sit, roll no tricks nobody
+Rex Tweety, 2 legs: Tweety says tweet
+2
+4
+Plain { id: 7, label: 'seven', extra: 'e' }

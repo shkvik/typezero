@@ -1,0 +1,4 @@
+Ok { value: Map(2) { 'a' => 1, 'b' => 2 } } Err { error: "bad part 'b'" }
+Map(2) { 'x' => Ok { value: 1 }, 'y' => Err { error: 'no' } }
+x value 1
+y error no

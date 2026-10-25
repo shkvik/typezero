@@ -1,0 +1,62 @@
+// The methods of Result, with arrows written in the call and with functions
+// passed by name, on Oks and Errs.
+function parse(s: string): Result<int, string> {
+  if (s.length == 0) return err("empty")
+  const n = parseInt(s)
+  return isNaN(n) ? err(`not a number: ${s}`) : ok(n | 0)
+}
+
+for (const s of ["42", "", "7"]) {
+  const r = parse(s)
+  console.log(r.isOk(), r.isErr())
+  console.log(r.map(n => n * 2), r.mapErr(e => e.toUpperCase()))
+  console.log(r.andThen(n => (n > 10 ? ok(`${n}`) : err("small"))))
+  console.log(r.orElse(e => (e == "empty" ? ok(0) : err(e.length))))
+  console.log(r.match(n => `ok ${n}`, e => `err ${e}`), r.unwrapOr(-1))
+  // andTee and orTee call the function for its effect and keep the Result.
+  console.log(r.andTee(n => console.log("andTee", n)).orTee(e => console.log("orTee", e)))
+  // andThrough keeps the value unless the function gives an Err.
+  console.log(r.andThrough(n => (n == 7 ? err("seven") : ok(true))))
+}
+
+// The halves meet: an int and a double give a double, an Err of the
+// function joins the errors of the Result.
+console.log(ok(3).match(n => n, e => 1.5))
+console.log(parse("1").andThen(n => ok(n + 0.5)))
+console.log(parse("x").orElse(e => ok(e.length)).map(n => n * 2))
+
+// A Result without a value, as `ok()` makes.
+function save(path: string): Result<void, string> {
+  return path == "" ? err("no path") : ok()
+}
+console.log(save("a.txt"), save(""))
+console.log(save("a.txt").map(() => "saved"), save("").mapErr(e => `failed: ${e}`))
+save("b.txt").match(
+  () => console.log("saved b.txt"),
+  e => console.log("error", e),
+)
+
+// Functions by name, and functions that return objects.
+function twice(n: int) {
+  return n * 2
+}
+function label(n: int): string {
+  return `<${n}>`
+}
+function check(n: int): Result<int, string> {
+  return n > 50 ? err("too big") : ok(n)
+}
+console.log(parse("21").map(twice).map(label), parse("30").map(twice).andThen(check))
+interface Point {
+  x: double
+  y: double
+}
+const point: Result<Point, string> = ok({ x: 1, y: 2 })
+console.log(point.map(p => ({ x: p.y, y: p.x })), err("none").unwrapOr({ x: 0, y: 0 }))
+console.log(["1", "2"].map(s => parse(s)), [1, 2].map(ok))
+
+// The whole chain, with the value of each step.
+const total = ["10", "20", "x", "30"]
+  .map(s => parse(s).map(n => n + 1).unwrapOr(0))
+  .reduce((a, b) => a + b, 0)
+console.log(total)

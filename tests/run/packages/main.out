@@ -1,0 +1,9 @@
+172800000 86400000 36000000 9000000 7200000 60000 5000
+31557600000 100 -259200000 -3600000 -200
+1m 2m -3m 10h
+1 minute 2 minutes -3 minutes
+10 hours
+90000 1814400000 2m 2 minutes
+NaN NaN
+Value provided to ms.parse() must be a string with length between 1 and 99. value=""
+Value provided to ms.format() must be of type number.

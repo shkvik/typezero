@@ -1,0 +1,62 @@
+// same-as-node
+// env: TZ=UTC
+// Unions with the built-in kinds of values: dates, Maps, Sets and Records
+// as members, told apart by instanceof, typeof and Array.isArray; keys of
+// union types (equal by member, as SameValueZero); Record with literal keys;
+// JSON, printing and ==; the errors of node:fs told apart by their code.
+import { readFileSync, statSync } from "node:fs"
+
+type Value = Date | Map<string, number> | Set<string> | string | number[]
+function describe(v: Value): string {
+  if (v instanceof Date) return `date ${v.getUTCFullYear()}`
+  if (v instanceof Map) return `map of ${v.size}: ${[...v.keys()].join()}`
+  if (v instanceof Set) return `set ${[...v].join("+")}`
+  if (typeof v == "string") return `text ${v.toUpperCase()}`
+  return `list ${v.length}`
+}
+const values: Value[] = [new Date(0), new Map([["a", 1], ["b", 2]]), new Set(["x", "y"]), "s", [1, 2]]
+console.log(values.map(describe).join("; "))
+console.log(values)
+console.log(JSON.stringify(values))
+const d = new Date(5)
+const held: Value = values[0] ?? d
+console.log(held == values[0], held == d)
+
+function size(x: Record<string, number> | number[]): number {
+  if (Array.isArray(x)) return x.length
+  return Object.keys(x).length
+}
+console.log(size([1, 2, 3]), size({ a: 1, b: 2 }))
+
+const keys = new Set<string | number>(["a", 1, "a", 1, 2, "1"])
+console.log(keys.size, keys.has(1), keys.has("1"), keys.has(3), keys)
+const names = new Map<string | number, string>([[1, "one"], ["1", "text one"], [1, "uno"]])
+console.log(names.get(1), names.get("1"), names.size, names)
+type Dir = "up" | "down"
+const steps = new Map<Dir, number>([["up", 1], ["down", 2], ["up", 3]])
+console.log(steps.get("up"), steps)
+const moves: Record<Dir, number> = { up: 1, down: -1 }
+moves.down = -2
+console.log(moves.up + moves.down, moves, JSON.stringify(moves), Object.keys(moves))
+function bump(k: Dir): number {
+  moves[k] += 10
+  moves[k]++
+  return moves[k]
+}
+console.log(bump("up"), bump("down"), moves)
+const mixed: (Dir | number)[] = ["up", 1, "down"]
+console.log(mixed, JSON.stringify(mixed), mixed.map((x) => `${x}`).join(), String(mixed[0]))
+const byMixed = new Map<Dir | number, string>([["up", "u"], [1, "one"]])
+console.log(byMixed, byMixed.get("up"), byMixed.get(1), mixed.includes("down"))
+
+function contents(path: string): string {
+  try {
+    return readFileSync(path, "utf8")
+  } catch (e) {
+    if (e instanceof SystemError && e.code == "ENOENT") return `no file (${e.syscall})`
+    throw e
+  }
+}
+console.log(contents("./no/such/file.txt"))
+const st = statSync("./no/such/dir", { throwIfNoEntry: false })
+console.log(st == undefined ? "nothing there" : `size ${st.size}`)

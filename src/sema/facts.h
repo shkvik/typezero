@@ -5,6 +5,7 @@
 #include "llvm/ADT/STLFunctionalExtras.h"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace tz {
@@ -51,6 +52,8 @@ public:
   // Whether `lhs < rhs + offset` follows from the facts and from the ranges of
   // the terms: ints lie in the int range, lengths in [0, kMaxLength].
   bool proves(Term lhs, Term rhs, int64_t offset) const;
+  // The least offset for which they prove `lhs < rhs + offset`, if any.
+  std::optional<int64_t> bound(Term lhs, Term rhs) const;
 
   // Forgets the facts for which `pred` returns true.
   void forgetIf(llvm::function_ref<bool(const Fact &)> pred);

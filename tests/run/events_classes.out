@@ -1,0 +1,20 @@
+change 1 -> 2
+text B
+true [ 'send 5', 'got 5' ]
+start 1.5
+data 1
+ping
+ctor 3
+false
+1
+srv 1 true
+named srv 1
+srv 2 true
+1 Server {
+  _events: [Object: null prototype] { close: [Function (anonymous)] },
+  _eventsCount: 1,
+  _maxListeners: undefined,
+  name: 'srv',
+  Symbol(shapeMode): false,
+  Symbol(kCapture): false
+}

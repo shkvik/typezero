@@ -1,0 +1,14 @@
+// same-as-node
+// node:readline over stdin (readline_lines.in): `for await` gives the lines
+// one by one, without their ends, which are "\n", "\r\n", a lone "\r",
+// U+2028 and U+2029, as Node's; the last line may end with the input, and
+// bytes that are not UTF-8 become U+FFFD.
+import { createInterface } from "node:readline"
+
+const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
+let n = 0
+for await (const line of rl) {
+  n++
+  console.log(n, JSON.stringify(line), line.length)
+}
+console.log("lines:", n)

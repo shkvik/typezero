@@ -1,0 +1,56 @@
+top-level code
+  start
+    parallel
+  after await at line 13
+    writes stdout (lines 15, 17)
+    reads  message of any Error (line 15)
+    in order with step after await at line 8 in the task step(1) at line 13: stdout
+    in order with step after await at line 8 in the task step(2) at line 13: stdout
+    in order with step after await at line 8 in the task step(3) at line 21: stdout
+    in order with step after await at line 8 in the task step(4) at line 21: stdout
+    in order: lines 15-17
+  after await at line 21
+    writes stdout (line 22)
+    in order with step after await at line 8 in the task step(1) at line 13: stdout
+    in order with step after await at line 8 in the task step(2) at line 13: stdout
+    in order: line 22
+
+async function step, line 5
+  start: runs inside its caller
+  after await at line 6
+    in the task step(1) at line 13:
+      parallel
+    in the task step(2) at line 13:
+      parallel
+    in the task step(3) at line 21:
+      parallel
+    in the task step(4) at line 21:
+      parallel
+  after await at line 8
+    writes stdout (line 9)
+    in the task step(1) at line 13:
+      in order with step after await at line 8 in the task step(2) at line 13: stdout
+      in order with step after await at line 8 in the task step(3) at line 21: stdout
+      in order with step after await at line 8 in the task step(4) at line 21: stdout
+      in order with the top-level code after await at line 13: stdout
+      in order with the top-level code after await at line 21: stdout
+      in order: line 9
+    in the task step(2) at line 13:
+      in order with step after await at line 8 in the task step(1) at line 13: stdout
+      in order with step after await at line 8 in the task step(3) at line 21: stdout
+      in order with step after await at line 8 in the task step(4) at line 21: stdout
+      in order with the top-level code after await at line 13: stdout
+      in order with the top-level code after await at line 21: stdout
+      in order: line 9
+    in the task step(3) at line 21:
+      in order with step after await at line 8 in the task step(1) at line 13: stdout
+      in order with step after await at line 8 in the task step(2) at line 13: stdout
+      in order with step after await at line 8 in the task step(4) at line 21: stdout
+      in order with the top-level code after await at line 13: stdout
+      in order: line 9
+    in the task step(4) at line 21:
+      in order with step after await at line 8 in the task step(1) at line 13: stdout
+      in order with step after await at line 8 in the task step(2) at line 13: stdout
+      in order with step after await at line 8 in the task step(3) at line 21: stdout
+      in order with the top-level code after await at line 13: stdout
+      in order: line 9

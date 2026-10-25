@@ -1,0 +1,67 @@
+// Results that hold strings, arrays, objects and functions, wherever values
+// can be: variables, globals that functions change, closures, fields,
+// elements. The leak check of the tests sees that every reference is
+// released.
+interface User {
+  name: string
+  tags: string[]
+}
+
+function find(name: string): Result<User, string> {
+  if (name == "") return err(`no user named '${name}'`)
+  return ok({ name: name.toUpperCase(), tags: [name, `${name}!`] })
+}
+
+// A global that a function replaces.
+let last = find("")
+function look(name: string) {
+  last = find(name)
+  return last.isOk()
+}
+console.log(look("ann"), last, look(""), last)
+
+// Reassigned, captured by a closure, and narrowed.
+let current = find("bob")
+const show = () => current.map(u => u.tags.join(", ")).unwrapOr("nobody")
+console.log(show())
+current = find("")
+console.log(show())
+current = find("cy")
+if (current.isOk()) {
+  const user = current.value
+  current = err("replaced")
+  console.log(user.name, current)
+}
+
+// In fields and elements, and taken out of them.
+const holder = { primary: find("dee"), backup: find("") }
+holder.primary = holder.backup
+console.log(holder)
+const all = ["eve", "", "fay"].map(find)
+all.push(find("gus"))
+const popped = all.pop()
+const firstTwo = all.slice(0, 2)
+all.splice(0, 1, find("hal"))
+all.push(find("ian"))
+all.pop() // removed on purpose: the array kept it
+all.reverse()
+console.log(popped, firstTwo.length, all)
+const filled = new Array<int>(3).map(() => find("ida"))
+console.log(Result.combine(filled).map(users => users.map(u => u.name)))
+const fields = { a: find("jo"), b: find("") }
+console.log(Object.values(fields).filter(r => r.isErr()).length)
+
+// Functions inside Results, and Results inside closures.
+const greet: Result<(name: string) => string, string> = ok(name => `hello, ${name}`)
+console.log(greet.map(f => f("kim")))
+const makers = ["x", ""].map(s => () => find(s))
+console.log(makers.map(make => make().isOk()))
+
+// An Err that stops a chain releases the value it replaces.
+const chained = find("lou")
+  .andThen(u => (u.tags.length > 1 ? err(`${u.name} has too many tags`) : ok(u)))
+  .map(u => u.name)
+console.log(chained)
+const kept = find("max").andThrough(u => (u.name == "MAX" ? err("max is taken") : ok(0)))
+console.log(kept)
+void find("ned") // dropped on purpose

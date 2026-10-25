@@ -1,0 +1,9 @@
+Name? Age? Ann is 42
+question: AbortError
+City? city Paris
+line: one
+line: two
+after close: readline was closed
+rest: three
+rest: four
+end

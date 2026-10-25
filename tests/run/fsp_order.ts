@@ -1,0 +1,49 @@
+// same-as-node
+// The order of what the thread pool gives back, against timers and
+// immediates, where Node's is always the same: a function of
+// node:fs/promises takes a turn of the loop for each of its round trips to
+// the pool (readFile: open, fstat, read and close), and what runs in the
+// poll phase is followed by the immediates, then by the timers.
+import { readFile, writeFile, mkdtemp, rm, stat } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+const log = (s: string) => console.log(s)
+const dir = await mkdtemp(join(tmpdir(), "tz-fsp-order-"))
+const file = join(dir, "a.txt")
+await writeFile(file, "content")
+
+// Three turns of immediates come before readFile, which takes four.
+setImmediate(() => {
+  log("immediate 1")
+  setImmediate(() => {
+    log("immediate 2")
+    setImmediate(() => log("immediate 3"))
+  })
+})
+log(`read ${await readFile(file, "utf8")}`)
+
+// Two before writeFile, which takes three: open, write and close.
+setImmediate(() => {
+  log("immediate a")
+  setImmediate(() => log("immediate b"))
+})
+await writeFile(file, "more")
+log("written")
+
+// In the poll phase, an immediate runs before a timer of 0 ms, and the
+// microtasks of each callback right after it.
+await stat(file)
+setTimeout(() => log("timeout 0"), 0)
+setImmediate(() => log("immediate after stat"))
+void Promise.resolve().then(() => log("microtask after stat"))
+process.nextTick(() => log("tick after stat"))
+await new Promise<void>((resolve) => setTimeout(resolve, 20))
+
+// Several at once: which the pool gives back first depends on the system,
+// and Promise.all keeps their order.
+const texts = await Promise.all([readFile(file, "utf8"), readFile(file, "utf8"), stat(dir)])
+log(`${texts[0]} ${texts[1]} ${texts[2].isDirectory()}`)
+
+await rm(dir, { recursive: true })
+log("end")

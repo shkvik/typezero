@@ -1,0 +1,9 @@
+55 [ 'down', 'left', 'up', 'right' ] true 2
+left left! 4 LEFT true true
+up/right/down/left [ 'down', 'left', 'right', 'up' ] ["up","right","down","left"] right
+down downdown
+[ { dir: 'up', count: 2 }, { dir: 'left', count: 1 } ] {"dir":"up","count":2}
+on off on Light { state: 'on' }
+11 [ 0, 1, 0, 0 ] true
+-1 0 1
+up down left slow

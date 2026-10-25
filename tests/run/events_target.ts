@@ -1,0 +1,59 @@
+// same-as-node
+// EventTarget, Event and CustomEvent, globals as in node (docs/events.md,
+// section 4): the order of listeners, those added while an event is
+// dispatched, once, objects with handleEvent(), the same listener added
+// twice, preventDefault(), stopImmediatePropagation(), removal by a signal;
+// a listener that takes a CustomEvent<T> gets its detail as a T.
+const t = new EventTarget()
+const log: string[] = []
+const late = () => log.push("late")
+t.addEventListener("x", () => {
+  log.push("a")
+  t.addEventListener("x", late)
+})
+t.addEventListener("x", () => log.push("b"), { once: true })
+class Handler implements EventListenerObject {
+  handleEvent(e: Event) {
+    log.push(`obj ${e.type}`)
+  }
+}
+const h = new Handler()
+t.addEventListener("x", h)
+t.addEventListener("x", h) // the same listener is there once
+console.log(t.dispatchEvent(new Event("x")), log)
+t.dispatchEvent(new Event("x"))
+console.log(log)
+t.removeEventListener("x", h)
+t.removeEventListener("x", late)
+log.length = 0
+t.dispatchEvent(new Event("x"))
+console.log(log)
+
+const e = new Event("y", { cancelable: true })
+t.addEventListener("y", (ev) => {
+  ev.preventDefault()
+  console.log("phase", ev.eventPhase, ev.currentTarget == t, ev.composedPath().length, ev.returnValue, ev.defaultPrevented)
+})
+console.log(t.dispatchEvent(e), e.eventPhase, e.target == t, e.defaultPrevented, e.composedPath())
+const e2 = new Event("z")
+t.addEventListener("z", (ev) => {
+  ev.stopImmediatePropagation()
+  console.log("first", ev.cancelBubble)
+})
+t.addEventListener("z", () => console.log("second"))
+t.dispatchEvent(e2)
+console.log(Event.NONE, Event.AT_TARGET, new Event("q").cancelable, new Event("q").bubbles)
+
+// Removed when the signal aborts.
+const ac = new AbortController()
+t.addEventListener("w", () => console.log("w"), { signal: ac.signal })
+t.dispatchEvent(new Event("w"))
+ac.abort()
+t.dispatchEvent(new Event("w"))
+console.log("done w")
+
+const ce = new CustomEvent("c", { detail: { n: 1 } })
+console.log(ce.detail, ce.type, ce.bubbles, ce.cancelable, ce.composed, ce.isTrusted, ce.eventPhase)
+t.addEventListener("c", (ev: CustomEvent<{ n: int }>) => console.log("detail", ev.detail.n + 1))
+t.dispatchEvent(ce)
+console.log(new EventTarget())

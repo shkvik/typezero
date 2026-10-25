@@ -1,0 +1,89 @@
+[ 'арбуз', 'ёж', 'яблоко' ]
+2
+[ 'adam', 'Ådne', 'Émile', 'Øyvind', 'zoe', 'Zoë' ]
+[ 'adam', 'Émile', 'zoe', 'Zoë', 'Ådne', 'Øyvind' ]
+[
+  '9', '10', 'A',
+  'a', 'ä',  'B',
+  'b'
+]
+[ 'a', 'A', 'b', 'B' ]
+0 0 -1 1
+0 -1
+-1 0
+0
+[ 0, -1, 0 ]
+-1 1 0
+[ 'file1', 'file2', 'file10' ]
+[ 'Ae', 'Ä', 'Af' ] [ 'Ä', 'Ae', 'Af' ]
+{
+  locale: 'en',
+  usage: 'sort',
+  sensitivity: 'variant',
+  ignorePunctuation: false,
+  collation: 'default',
+  numeric: false,
+  caseFirst: 'false'
+}
+true
+{
+  locale: 'de-u-co-phonebk-kn',
+  usage: 'sort',
+  sensitivity: 'variant',
+  ignorePunctuation: false,
+  collation: 'phonebk',
+  numeric: true,
+  caseFirst: 'false'
+}
+de-u-co-eor
+{
+  locale: 'de',
+  usage: 'search',
+  sensitivity: 'variant',
+  ignorePunctuation: false,
+  collation: 'default',
+  numeric: false,
+  caseFirst: 'false'
+}
+{
+  locale: 'en-u-kf-upper',
+  usage: 'sort',
+  sensitivity: 'variant',
+  ignorePunctuation: false,
+  collation: 'default',
+  numeric: false,
+  caseFirst: 'lower'
+}
+en-u-kn
+en en
+default
+Collator [Intl.Collator] {} -1
+NFC 7 1 abc
+NFD 9 2 abc
+NFKC 8 1 abc
+NFKD 10 2 abc
+true true
+[ 65, 778 ]
+[ '👨‍👩‍👧', 'é' ]
+5 14
+[
+  { segment: 'Hi', index: 0, input: 'Hi, you', isWordLike: true },
+  { segment: ',', index: 2, input: 'Hi, you', isWordLike: false },
+  { segment: ' ', index: 3, input: 'Hi, you', isWordLike: false },
+  { segment: 'you', index: 4, input: 'Hi, you', isWordLike: true }
+]
+[
+  { segment: 'Hi. ', index: 0, input: 'Hi. You! Ok?' },
+  { segment: 'You! ', index: 4, input: 'Hi. You! Ok?' },
+  { segment: 'Ok?', index: 9, input: 'Hi. You! Ok?' }
+]
+Привет 0
+мир 8
+42 13
+кота 16
+3 [ 'X', ' ', 'Y' ]
+今日|は|良い|天気|です
+{ segment: '良い', index: 3, input: '今日は良い天気です', isWordLike: true }
+undefined undefined { segment: 'b', index: 1, input: 'abc' } { segment: 'a', index: 0, input: 'abc' }
+Segmenter [Intl.Segmenter] {} {} { locale: 'en', granularity: 'grapheme' }
+{ locale: 'fr', granularity: 'word' }

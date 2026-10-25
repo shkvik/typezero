@@ -1,0 +1,9 @@
+{ id: 1, name: 'Anna', email: 'ann@example.com' } { id: 1, name: 'Ann', email: 'ann@example.com', role: 'admin' } Anna admin
+{ name: 'hero', pos: { x: 30, y: 4 } } { name: 'copy', pos: { x: 30, y: 4 } } false true
+{ z: 1, a: 2, b: 'x', c: true, d: [ 1 ] } 2
+{ a: 1, b: 'x', c: true } { a: 2.5, b: 'x', c: true }
+{} { a: 1, b: 'x', c: true }
+{ size: 1.5, color: 'red' } 0.75 RED
+{ color: 'red', extra: 1 } 0
+[ 'item0 of 0', 'item1 of 1', 'item2 of 2' ] [ 't2' ]
+[ 't0+new', 't1+new', 't2+new' ]

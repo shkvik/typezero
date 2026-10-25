@@ -1,0 +1,79 @@
+// same-as-node
+// Numbers in the formats of languages (docs/intl.md), from the ICU of the
+// system: toLocaleString, Intl.NumberFormat and Intl.PluralRules, with the
+// options read as V8 reads them. The language is always given (that of the
+// system differs from one computer to another), and the formats are those
+// that the ICU of Windows and of node write alike.
+console.log((1234567.891).toLocaleString("ru-RU"))
+console.log(new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(1500))
+console.log((1234567.891).toLocaleString("en-US"), (1234567.891).toLocaleString("de-DE"))
+console.log((123456789012).toLocaleString("en-US"), (9007199254740992).toLocaleString("ru"))
+console.log((0.1 + 0.2).toLocaleString("en", { maximumFractionDigits: 20 }))
+console.log((1e21).toLocaleString("en"), (1.5e-7).toLocaleString("en", { maximumSignificantDigits: 3 }))
+console.log(NaN.toLocaleString("ru"), Infinity.toLocaleString("en"), (-Infinity).toLocaleString("de"))
+console.log((0.256).toLocaleString("en", { style: "percent", minimumFractionDigits: 1 }))
+
+// Styles, units and notations.
+console.log(new Intl.NumberFormat("en", { notation: "compact", compactDisplay: "long" }).format(1234567))
+console.log(new Intl.NumberFormat("en", { notation: "compact" }).format(1234), new Intl.NumberFormat("en", { notation: "compact" }).format(12345))
+console.log(new Intl.NumberFormat("ja", { style: "currency", currency: "JPY" }).format(5000))
+console.log(new Intl.NumberFormat("en", { style: "currency", currency: "usd", currencyDisplay: "name" }).format(1))
+console.log(new Intl.NumberFormat("en", { style: "currency", currency: "EUR", currencyDisplay: "code" }).format(9.99))
+console.log(new Intl.NumberFormat("en", { style: "currency", currency: "USD", currencySign: "accounting" }).format(-1))
+console.log(new Intl.NumberFormat("en-IN").format(123456789), new Intl.NumberFormat("ar-EG").format(1234.5))
+console.log(new Intl.NumberFormat("en", { notation: "engineering" }).format(123456), new Intl.NumberFormat("en", { notation: "scientific" }).format(0.000123))
+console.log(new Intl.NumberFormat("en", { style: "unit", unit: "kilometer-per-hour" }).format(50))
+console.log(new Intl.NumberFormat("en", { style: "unit", unit: "megabyte", unitDisplay: "narrow" }).format(12.5))
+console.log(new Intl.NumberFormat("en", { style: "unit", unit: "liter-per-kilometer", unitDisplay: "long" }).format(1))
+console.log(new Intl.NumberFormat("ru", { style: "unit", unit: "kilometer", unitDisplay: "long" }).format(21))
+
+// Digits, grouping, signs and rounding.
+console.log(new Intl.NumberFormat("en", { minimumIntegerDigits: 3, useGrouping: false }).format(7))
+console.log(new Intl.NumberFormat("en", { signDisplay: "exceptZero" }).format(0), new Intl.NumberFormat("en", { signDisplay: "always" }).format(5))
+console.log(new Intl.NumberFormat("en", { maximumFractionDigits: 0, roundingMode: "floor" }).format(2.7))
+console.log(new Intl.NumberFormat("en", { maximumFractionDigits: 0, roundingMode: "halfEven" }).format(2.5))
+console.log(new Intl.NumberFormat("en", { minimumFractionDigits: 2, trailingZeroDisplay: "stripIfInteger" }).format(5))
+console.log(new Intl.NumberFormat("en", { maximumSignificantDigits: 2, maximumFractionDigits: 2, roundingPriority: "lessPrecision" }).format(1.234))
+console.log(new Intl.NumberFormat("en", { maximumSignificantDigits: 2, maximumFractionDigits: 2, roundingPriority: "morePrecision" }).format(1.234))
+console.log(new Intl.NumberFormat("en", { roundingIncrement: 5, maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(1.234))
+console.log(new Intl.NumberFormat("en", { useGrouping: "min2" }).format(1234), new Intl.NumberFormat("en", { useGrouping: "min2" }).format(12345))
+console.log(new Intl.NumberFormat("en", { minimumIntegerDigits: 2.7 }).format(5))
+console.log(new Intl.NumberFormat("en-u-nu-thai").format(12), new Intl.NumberFormat("en", { numberingSystem: "arab" }).format(12))
+
+// formatToParts and resolvedOptions.
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+console.log(usd.formatToParts(-1234.5))
+console.log(new Intl.NumberFormat("en").formatToParts(NaN), new Intl.NumberFormat("en").formatToParts(-Infinity))
+console.log(new Intl.NumberFormat("en", { notation: "scientific" }).formatToParts(-0.000123))
+console.log(new Intl.NumberFormat("en", { notation: "compact" }).formatToParts(12345))
+console.log(new Intl.NumberFormat("en", { style: "unit", unit: "kilometer-per-hour" }).formatToParts(50))
+console.log(new Intl.NumberFormat("en", { style: "percent", signDisplay: "always" }).formatToParts(0.25))
+console.log(new Intl.NumberFormat("en").resolvedOptions())
+console.log(usd.resolvedOptions())
+console.log(new Intl.NumberFormat("en", { notation: "compact" }).resolvedOptions())
+console.log(new Intl.NumberFormat("en", { maximumSignificantDigits: 3, useGrouping: false }).resolvedOptions())
+console.log(new Intl.NumberFormat("en-u-nu-arab", { numberingSystem: "arab" }).resolvedOptions().locale)
+console.log(new Intl.NumberFormat("en-u-nu-arab", { numberingSystem: "thai" }).resolvedOptions().locale)
+console.log(new Intl.NumberFormat("en", { useGrouping: true }).resolvedOptions().useGrouping)
+console.log(new Intl.NumberFormat("en", { notation: "compact", useGrouping: "true" }).resolvedOptions().useGrouping)
+console.log(new Intl.NumberFormat("en", { style: "currency", currency: "JPY" }).resolvedOptions().maximumFractionDigits)
+console.log(new Intl.NumberFormat("ru"), Intl.NumberFormat("en").format(1))
+
+// format as a value, bound to its formatter: the elements of the array go
+// to it as they are.
+const de = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 })
+console.log([1234.56, 0.04, -7].map(de.format), [1, 22, 333].map(de.format))
+const format = de.format
+console.log(format(98765.4321), de.format)
+
+// Plural rules: of the number as the options write it.
+const ordinal = new Intl.PluralRules("en", { type: "ordinal" })
+console.log([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101].map(n => `${n}:${ordinal.select(n)}`).join(" "))
+console.log(new Intl.PluralRules("en", { minimumFractionDigits: 1 }).select(1), new Intl.PluralRules("en").select(1))
+const ru = new Intl.PluralRules("ru-RU")
+console.log(ru.select(1), ru.select(2), ru.select(5), ru.select(1.5), ru.select(21))
+console.log(new Intl.PluralRules("ar").select(0), new Intl.PluralRules("ar").select(2), new Intl.PluralRules("ar").select(100))
+console.log(ru.resolvedOptions().pluralCategories, new Intl.PluralRules("ar").resolvedOptions().pluralCategories)
+console.log(ordinal.resolvedOptions())
+console.log(new Intl.PluralRules("en", { minimumSignificantDigits: 2 }).resolvedOptions())
+console.log(ru)

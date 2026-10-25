@@ -1,0 +1,156 @@
+// Errors across files (docs/errors.md): classes derived from Error with
+// fields and a cause, caught and told apart with instanceof; errors that
+// regexes, Json, decimal, iterators, generic code and overriding methods
+// throw; finally with Result and iterators; e.stack through several files.
+import { AppError, AtMost, LimitError, ParseError, Pattern, Positive, Rule, Validator } from "./errors.ts"
+import { Entry, loadConfig, ownerName, parseLine } from "./parse.ts"
+import { err, ok, Result } from "neverthrow"
+
+// The stack with each path cut to the name of its file.
+function show(stack: string) {
+  for (const line of stack.split("\n")) {
+    const slash = Math.max(line.lastIndexOf("/"), line.lastIndexOf("\\"))
+    const open = line.indexOf("(")
+    console.log(slash < 0 ? line : (open < 0 ? "    at " : line.slice(0, open + 1)) + line.slice(slash + 1))
+  }
+}
+
+function report(e: Error): string {
+  if (e instanceof ParseError) return `parse error at ${e.line} [${e.code}]: ${e.describe()}`
+  if (e instanceof AppError) return `app error [${e.code}]: ${e.describe()}`
+  if (e instanceof LimitError) return `limit ${e.limit}: ${e.name}: ${e.message}`
+  if (e instanceof SyntaxError) return `syntax: ${e.message}`
+  if (e instanceof TypeError) return `type: ${e.message}`
+  return `other: ${e}`
+}
+
+function attempt(what: string, f: () => string) {
+  try {
+    console.log(what, "->", f())
+  } catch (e) {
+    console.log(what, "!>", report(e))
+    const cause = e.cause
+    if (cause != undefined) console.log("  caused by", report(cause))
+  }
+}
+
+// 1. Regexes, decimal and Json, from another file.
+attempt("line", () => JSON.stringify(parseLine("rent: 12.50 #home #monthly", 1, ":", "g")))
+attempt("no match", () => JSON.stringify(parseLine("???", 2, ":", "g")))
+attempt("bad amount", () => JSON.stringify(parseLine("food: 1.2.3", 3, ":", "g")))
+attempt("bad separator", () => JSON.stringify(parseLine("a: 1", 4, "(", "g")))
+attempt("no g", () => JSON.stringify(parseLine("tea: 2 #drink", 5, ":", "")))
+attempt("config", () => JSON.stringify(loadConfig('{"limit": 100, "rules": ["positive"]}')))
+attempt("config type", () => JSON.stringify(loadConfig('{"limit": "lots", "rules": []}')))
+attempt("config text", () => JSON.stringify(loadConfig('{"limit": 1,')))
+attempt("owner", () => ownerName('{"owner": {"name": "Ann"}}'))
+attempt("no owner", () => ownerName('{"owner": null}'))
+
+// 2. Overriding methods that throw, called through the base class.
+const rules: Rule[] = [new Positive(), new AtMost(100)]
+function checkAll(amount: decimal): decimal {
+  let value = amount
+  for (const rule of rules) value = rule.check(value)
+  return value
+}
+for (const amount of [decimal("5"), decimal("-1"), decimal("250")])
+  attempt(`check ${amount}`, () => `${checkAll(amount)}`)
+console.log(rules.map((r) => r.label()).join())
+const validators: Validator[] = [new Pattern("^\\w+$", "i"), new Pattern("[a-", "")]
+for (const v of validators)
+  for (const text of ["abc", "a b"]) attempt(`validate ${text}`, () => v.validate(text))
+
+// 3. Generic code: the error of the callback goes through it.
+function firstThat<T>(items: T[], ok: (x: T) => boolean): T {
+  for (const x of items) if (ok(x)) return x
+  throw new AppError(`none of ${items.length}`, 404)
+}
+function retry<T>(times: int, f: (n: int) => T): T {
+  let last: Error = new Error("never tried")
+  for (let n = 1; n <= times; n++) {
+    try {
+      return f(n)
+    } catch (e) {
+      last = e
+    }
+  }
+  throw new AppError(`failed ${times} times`, 503, { cause: last })
+}
+attempt("first", () => firstThat(["a", "bb", "ccc"], (s) => s.length > 1))
+attempt("first none", () => `${firstThat([1, 2, 3], (n) => n > 5)}`)
+attempt("first throws", () => `${firstThat([decimal("1"), decimal("-2")], (d) => checkAll(d) > 10)}`)
+attempt("retry", () => `${retry(3, (n) => (n < 3 ? checkAll(decimal(-n)) : decimal(n)))}`)
+attempt("retry fails", () => `${retry(2, (n) => checkAll(decimal(n * 1000)))}`)
+
+// 4. Iterators: a generator that throws stops the loop, and finally runs,
+// in the loop and in the generator.
+const log: string[] = []
+function* entries(lines: string[]): Generator<Entry> {
+  try {
+    let n = 0
+    for (const line of lines) yield parseLine(line, ++n, ":", "g")
+  } finally {
+    log.push("generator done")
+  }
+}
+function total(lines: string[]): decimal {
+  let sum: decimal = 0
+  try {
+    for (const e of entries(lines)) sum += checkAll(e.amount)
+  } finally {
+    log.push(`summed ${sum}`)
+  }
+  return sum
+}
+attempt("total", () => `${total(["a: 1", "b: 2.5"])}`)
+attempt("total bad", () => `${total(["a: 1", "b: x", "c: 3"])}`)
+attempt("total rule", () => `${total(["a: 1", "b: 500"])}`)
+attempt("helpers", () =>
+  ["x: 1", "y: -4", "z: 2"]
+    .values()
+    .map((line, i) => parseLine(line, i + 1, ":", "g"))
+    .map((e) => checkAll(e.amount))
+    .toArray()
+    .join(),
+)
+console.log(log.join("; "))
+
+// 5. Result: an error made into an Err, and finally next to a Result.
+function safeLoad(text: string): Result<decimal, AppError> {
+  try {
+    return ok(loadConfig(text).limit)
+  } catch (e) {
+    if (e instanceof AppError) return err(e)
+    throw e
+  } finally {
+    log.push("load tried")
+  }
+}
+for (const text of ['{"limit": 7, "rules": []}', "{}"]) {
+  const r = safeLoad(text)
+  console.log(r.isOk() ? `limit ${r.value}` : `err ${r.error.code} ${r.error.cause instanceof TypeError}`)
+}
+const parse = Result.fromThrowable(
+  (line: string) => parseLine(line, 0, ":", "g").amount,
+  (e) => (e instanceof ParseError ? e.line : -1),
+)
+console.log(parse("k: 9").isOk(), parse("k: ?").isErr())
+console.log(log.slice(-2).join("; "))
+
+// 6. What an error shows: its fields after the text, its cause, and JSON.
+const made = new ParseError(7, "made here", new LimitError(10))
+console.log(made)
+console.log(`${made}`, made.name, made.code, made.line)
+console.log(JSON.stringify(new AppError("plain", 1)), JSON.stringify(new LimitError(3)))
+
+// 7. The stack goes through the files it passed.
+try {
+  checkAll(parseLine("q: -3", 9, ":", "g").amount)
+} catch (e) {
+  show(e.stack)
+}
+try {
+  JSON.stringify(parseLine("bad", 10, ":", "g"))
+} catch (e) {
+  show(e.stack)
+}

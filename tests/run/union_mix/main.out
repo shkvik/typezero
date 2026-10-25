@@ -1,0 +1,22 @@
+circle r=2 0 sun (12.0) false
+rect 1x2 4 door (2.0) false
+rect 3x3 4 square tile (9.0) true
+circle r=0.5 0 dot (0.8) false
+12,2,9,0.75
+2,0.5 2
+Square {
+  name: 'tile',
+  made: 2026-10-26T00:00:00.000Z,
+  w: 3,
+  h: 3,
+  kind: 'rect'
+} {"name":"sun","made":"2026-10-26T00:00:00.000Z","r":2,"kind":"circle"}
+{ circle: 2, rect: 2 } 4 circle,rect
+Set(4) { 'a', 1, '1', 2 }
+Map(3) { 'circle' => 12.75, 'rect' => 11, 0 => -1 } 11 true false
+2026-10-26 | today | 2 marks [ 2026-10-26T00:00:00.000Z, 'today', Map(2) { 'a' => 1, 'b' => 2 } ] ["2026-10-26T00:00:00.000Z","today",{}]
+3 5
+sun (12.0)
+none true
+a,b
+none: open other: EISDIR

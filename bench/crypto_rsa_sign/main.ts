@@ -1,0 +1,39 @@
+// RSA-2048 signatures with SHA-256 and PKCS#1 v1.5, 3000 times;
+// the SHA-256 of the last signature is printed.
+import { createPrivateKey, sign, createHash } from "node:crypto"
+
+const pem =
+  "-----BEGIN PRIVATE KEY-----\n" +
+  "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCm8Utj1f3Q7yFM\n" +
+  "hH8Ui4jvCwxeRlVBnPOHMZsyji70Oq7TtBfLh1l+1hq4HfUCd4sSGmFYvn9np7zr\n" +
+  "G0aFheNZeXcporzUtICnWEYeNhumaelBSgomxMW0+OOXzD426gPleNR2fs5uETmg\n" +
+  "ZwcM2300C9SSh52G2FmgeKP/pr+2NKDxYaOPCkfsyCJxVIu/yXZWVZWGnX5tekRA\n" +
+  "eYDZuTrQX0yixgBRx2zbLAIBtjUyFEGiBjAFAblwZASSEYXgw4g7SOnlO31iJ48g\n" +
+  "xLbbcH0WHQXQbXbODA37ZMqCQxeq6ZQDt/Pfk/AYKu+3m2iBIuNDQstc9AB8HPxO\n" +
+  "Q3jg07P7AgMBAAECggEAOgVsD99Mb2TlHFyCdGgIqBgdbNiiAgNkKm0lxPzgudZ5\n" +
+  "c6/Ig17fznLoZ2xV/s0Ag0Ky6a6Pxj1orgfVS0vc1/ic31YlrgGsIz1NZWul0YFG\n" +
+  "5f+vJolGM587LsN4LgrIXuVPZn2tDlkjP6n/K8tPKRshfunuaHLiN6EmUpCoWdFB\n" +
+  "0mm/Me4kJDnLCNh2LcZExsEyyuegwRKiQkqpqrJYdXJAsTvJZdGyh7Gg41RTNtBk\n" +
+  "zkpRwhkbmH1aiKg3k23JP7rpodvkvWxP/I9gYa/+aaBMHUXP46TEB+/JCAVJ2wSd\n" +
+  "IiqnlF0dNgwT4iYGvOegA+o+sQLSS6qxAwzYwqc8+QKBgQDb87bBq8ruDVSLUq/3\n" +
+  "ZQ9wuVcVp+gTKeaIwDHnsdXpPqROB9wR4gZQkmLSehNNdHqYhCIVTagDv3fqxl/C\n" +
+  "Zfi+qRriEkZXb9PmXOVhQ1V2iPfbOGhb5MNmiCNt5g5CLFYDOGyApcQRGRYSnIi7\n" +
+  "HJQYMkBeXMDTUfZjVCCRiPj2gwKBgQDCTYVe1kphqcBlVCK+k8hoULhIRMcrYkoS\n" +
+  "pn/UCKMoezGMniJRGSwhqGmZ7nMmSPWBdRJhjUz06+ldH66L7D9V4tpKA5hERZu/\n" +
+  "jF/9XEOZC/5duFEGGjqGRorZcKr7PktdEA7sqL2HJjlomor8+mN6eE+xnlzkiv4/\n" +
+  "OVuz8k2TKQKBgCDrpFHudYwVwK6trJq5rIrxoqAiJnEf11pmcdG840hq0MrBEGY4\n" +
+  "zzsl/daE4Pi501Oai0NnARu2f6tLD7AX9RgMVXK6y35wxWV4R/i7zEHWlEpicfQ3\n" +
+  "FCv3el4LjdzHqAQJYOwMY4EvoQceGLTwvRW2B75X4aB/ZwJM6CcAOksjAoGBAI9W\n" +
+  "luwmk8rGaruVvOfwp6hk2/3cVz3nDZQCpkxqbsrfTudYhSJkuoy96+F16ha1Pf/Z\n" +
+  "uMyka8BHBOoBBEgO6Y5XgweU7VB4NXSyfuGuneOa2HSVE5i34rLJ+YZ9OnWMOBaY\n" +
+  "URo/RUodZb6IO75yjM59UPVMSWUEMJm9m6v9NUM5AoGBAMiMxyOYtRvdUyeGw4Nx\n" +
+  "v8o8jn7nCjqyDthFaWnhpMGNon7YBZtscLCXQO3aczg54JzMDv8n2fjcuPNotLEF\n" +
+  "I24eIA6C5ZaDK/cVaSxJA1RqEYObQLsYEVPFWJ1mUvFblghrDCYlCOSTyb4mgEne\n" +
+  "QaNhx+7+7bVHEa8EwZrZIkqU\n" +
+  "-----END PRIVATE KEY-----\n"
+
+const key = createPrivateKey(pem)
+const data = Buffer.from("a message of some length to sign, as a token or a handshake would")
+let signature = Buffer.alloc(0)
+for (let i = 0; i < 3000; i++) signature = sign("sha256", data, key)
+console.log(createHash("sha256").update(signature).digest("hex"))

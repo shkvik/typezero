@@ -15,7 +15,7 @@ function withDiscount(sum: Money, percent: double = 0): Money {
 }
 
 function money(sum: Money): string {
-  return sum.toFixed(2).replace(".", ",") + " ₽"
+  return sum.toFixed(2).replace(/\./, ",") + " ₽"
 }
 
 const names: string[] = []

@@ -1,0 +1,78 @@
+// same-as-node
+// The helpers of iterators (ES2025), Iterator.from and the iterators of arrays.
+function* naturals() {
+  let n = 0
+  while (true) yield n++
+}
+
+const numbers = [5, 120, 7, 300, 150, 2, 999, 101]
+
+// Array methods make two arrays and visit every element; the lazy chain
+// stops at the third.
+console.log(numbers.filter(n => n > 100).map(n => n * 2).slice(0, 3))
+console.log(numbers.values().filter(n => n > 100).map(n => n * 2).take(3).toArray())
+
+// With an endless generator.
+console.log(naturals().filter(n => n % 3 == 0).map(n => n * n).take(4).toArray())
+
+// Laziness: each value goes through the whole chain before the next one.
+const log: string[] = []
+const firstTwo = naturals()
+  .map(n => {
+    log.push(`map ${n}`)
+    return n + 1
+  })
+  .filter(n => {
+    log.push(`filter ${n}`)
+    return n % 2 == 0
+  })
+  .take(2)
+  .toArray()
+console.log(firstTwo, log.join(", "))
+
+// drop, flatMap, reduce, forEach, some, every, find.
+console.log(naturals().drop(5).take(3).toArray())
+console.log(["a b", "c", "d e f"].values().flatMap(s => s.split(" ")).toArray())
+console.log([1, 2, 3].values().flatMap(n => naturals().take(n)).toArray())
+console.log(naturals().take(5).reduce((acc, n) => acc + n))
+console.log(naturals().take(5).reduce((acc, n) => acc + n, 100))
+console.log(numbers.values().reduce((acc, n, i) => acc + n * i, 0))
+numbers.values().take(2).forEach((n, i) => console.log("each", n, i))
+console.log(naturals().some(n => n > 10), naturals().take(3).some(n => n > 10))
+console.log(naturals().take(3).every(n => n < 3), naturals().every(n => n < 3))
+console.log(naturals().find(n => n * n > 50), naturals().take(3).find(n => n > 5))
+console.log(numbers.values().map((n, i) => `${i}=${n}`).take(2).toArray())
+
+// keys(), values() and entries() of arrays.
+const words = ["x", "y", "z"]
+for (const k of words.keys()) console.log("key", k)
+for (const [i, w] of words.entries()) console.log("entry", i, w)
+console.log([...words.entries()])
+console.log(Array.from(words.keys()), [...words.values()])
+
+// Iterator.from: of an array, a string, an iterator.
+console.log(Iterator.from([1, 2]).map(x => x * 10).toArray())
+console.log(Iterator.from("héllo").filter(c => c != "l").toArray())
+console.log(Iterator.from(naturals()).take(2).toArray())
+
+// Helpers as values: lazy objects that hold their callbacks.
+const scale = 3
+const scaled = numbers.values().map(n => n * scale)
+console.log(scaled, typeof scaled)
+console.log(scaled.next().value, scaled.next().value)
+const big = scaled.filter(n => n > 400)
+for (const n of big) console.log("big", n)
+console.log(scaled.next().done)
+const it = words.values()
+console.log(it, it.next().value)
+console.log([...it])
+console.log(Iterator.from("ab"), [..."ab"].values().drop(1))
+const pairs = words.entries()
+console.log(pairs.next().value)
+
+// Laziness of values(): pushes during iteration are visited.
+const grow = [1, 2]
+for (const x of grow.values()) {
+  if (grow.length < 5) grow.push(x * 10)
+}
+console.log(grow)

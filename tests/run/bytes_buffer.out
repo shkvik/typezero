@@ -1,0 +1,40 @@
+utf8 <Buffer 68 c3 a9 6c 6c 6f e2 82 ac f0 9f 98 80> "héllo€😀" 68c3a96c6c6fe282acf09f9880
+latin1 <Buffer 68 e9 6c 6c 6f ac 3d 00> "héllo¬=\u0000" 68e96c6c6fac3d00
+ascii <Buffer 68 e9 6c 6c 6f ac 3d 00> "hillo,=\u0000" 68e96c6c6fac3d00
+utf16le <Buffer 68 00 e9 00 6c 00 6c 00 6f 00 ac 20 3d d8 00 de> "héllo€😀" 6800e9006c006c006f00ac203dd800de
+hex <Buffer > "" 
+base64 <Buffer 86 59 68> "hllo" 865968
+base64url <Buffer 86 59 68> "hllo" 865968
+binary <Buffer 68 e9 6c 6c 6f ac 3d 00> "héllo¬=\u0000" 68e96c6c6fac3d00
+ucs2 <Buffer 68 00 e9 00 6c 00 6c 00 6f 00 ac 20 3d d8 00 de> "héllo€😀" 6800e9006c006c006f00ac203dd800de
+<Buffer > <Buffer 41> <Buffer 48 69> <Buffer 48 69> <Buffer fb ff> <Buffer fb ff>
+€�A� â¬ÿAÃ 苢ﾬ썁 4oKs/0HD 4oKs_0HD
+windows-1252 €Ÿé
+A� A
+A 2
+2
+Uint8Array(4) [ 239, 191, 189, 120 ] { read: 2, written: 3 }
+6 5 2 1
+-1 -1 true
+<Buffer 61 62 63> <Buffer 61 62> <Buffer 61 00 00 00>
+3 2 2 1 <Buffer 41 c3 a9 00 00 78 61 62>
+<Buffer 61 62 61 62 61> <Buffer 01 01 01> <Buffer 41 41 41 41> <Buffer 61 78 78>
+513 258 84148994 84281096 1.539989614439558e-36 8.20788039913184e-304 1 66051 6618611909121
+2 3 2 true 7 3
+<Buffer 03 04> {
+  type: 'Buffer',
+  data: [
+    1, 2, 3, 4,
+    5, 6, 7, 8
+  ]
+} true false true false
+2 6 8 <Buffer 00 00 00 00 00 00 f8 3f>
+bc 6263 2 <Buffer 62 61>
+<Buffer 01 00 02 01> <Buffer 02 00> <Buffer 78>
+扁 <Buffer ac> <Buffer ac>
+<Buffer > <Buffer ff 00 01> <Buffer 62 63 64> <Buffer 62 63>
+bc 99 hi ok
+{"type":"Buffer","data":[104,105]} <Buffer 68 65> <Buffer > <Buffer 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ... 10 more bytes>
+{ encoding: 'utf-8' } TextDecoder { encoding: 'utf-8', fatal: false, ignoreBOM: false } TextDecoder { encoding: 'utf-16le', fatal: true, ignoreBOM: false }
+TypeError The encoded data was not valid for encoding utf-8
+аА При

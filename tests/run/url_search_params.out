@@ -1,0 +1,15 @@
+[ '1', '2' ]  x y € true false 4
+a=1&b=+x+y&a=2&c=%E2%82%AC
+a=9&c=%E2%82%AC&d=%C3%A9%26%3D%2B [ [ 'a', '9' ], [ 'c', '€' ], [ 'd', 'é&=+' ] ] [ 'a', 'c', 'd' ] [ '9', '€', 'é&=+' ]
+a 9
+c €
+d é&=+
+x=1&y=two+words
+k=v&k=w 3
+URLSearchParams { 'a' => '9', 'c' => '€', 'd' => 'é&=+' }
+URLSearchParams {}
+http://h/p?a=1&b=2&c=3+4 ?a=1&b=2&c=3+4
+http://h/p?b=2&c=3+4 2 2
+9 false http://h/p?z=9
+1 w=1
+http://h/p?w=

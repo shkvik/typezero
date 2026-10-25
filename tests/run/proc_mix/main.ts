@@ -1,0 +1,69 @@
+// Child processes with the rest of the language, across files: a decorated
+// method that runs this program again, an async generator of what a child
+// prints, a generic function that makes an ExecSyncError an Err, the fields
+// of a caught ExecSyncError narrowed by checks, unknown values, a child that
+// reads its input with readLine of tz:io, and the overflow warnings for
+// numbers a child printed.
+import { execSync, spawnSync } from "node:child_process"
+import { readLine } from "tz:io"
+import { Runner, attempt, ran } from "./tools.ts"
+
+const at = process.argv.indexOf("--child")
+if (at >= 0) {
+  const what = process.argv[at + 1] ?? ""
+  const arg = process.argv[at + 2] ?? ""
+  if (what == "count") {
+    for (let i = 1; i <= Number(arg); i++)
+      console.log(i * 10)
+  } else if (what == "fail") {
+    console.log("about to fail")
+    process.stderr.write(`failing with ${arg}\n`)
+    process.exitCode = Number(arg) | 0
+  } else if (what == "read") {
+    let n = 0
+    for (let line = readLine(); line != undefined; line = readLine())
+      console.log(`${++n}${arg}${line}`)
+  }
+} else {
+  const runner = new Runner([process.argv[1] ?? "", "--child"])
+
+  // 1. A decorated method and an async generator over what a child prints.
+  console.log(runner.text("count", "2").trim().split("\n"))
+  let total = 0
+  for await (const line of runner.lines("count", "4")) {
+    const n: int = parseInt(line)
+    // expect-warning: 'total += n' may overflow int: 'n' comes from parseInt
+    total += n
+  }
+  console.log(total, ran)
+
+  // 2. A child that fails, as an Err and as a caught ExecSyncError whose
+  // fields checks narrow.
+  const failed = attempt(() => runner.text("fail", "3"))
+  console.log(failed.match(out => `ok ${out}`, e => (e instanceof ExecSyncError ? `status ${e.status ?? -1}` : e.name)))
+  console.log(attempt(() => runner.text("count", "1")).map(out => out.trim()).unwrapOr("-"))
+  try {
+    runner.text("fail", "4")
+  } catch (e) {
+    if (e instanceof ExecSyncError && typeof e.stderr == "string" && typeof e.stdout == "string")
+      console.log(e.status, e.stdout.trim(), e.stderr.trim(), e.output.length)
+  }
+  try {
+    execSync(`"${process.execPath}" "${process.argv[1] ?? ""}" --child fail 5`, { stdio: "pipe" })
+  } catch (e) {
+    if (e instanceof ExecSyncError && e.stdout instanceof Buffer && e.stderr != undefined)
+      console.log(e.status, e.stdout.length, e.stderr instanceof Buffer)
+  }
+
+  // 3. Results as unknown values.
+  const outputs: unknown[] = [
+    spawnSync(process.execPath, [...runner.self, "count", "1"]).stdout,
+    spawnSync(process.execPath, [...runner.self, "count", "1"], { encoding: "utf8" }).stdout,
+  ]
+  for (const out of outputs)
+    console.log(typeof out, out instanceof Buffer ? out.toString("hex") : out)
+
+  // 4. A child that reads the input it is given with readLine.
+  const read = spawnSync(process.execPath, [...runner.self, "read", ": "], { input: "один\nдва\r\nтри", encoding: "utf8" })
+  console.log(read.stdout, read.status)
+}

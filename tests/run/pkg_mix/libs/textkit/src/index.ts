@@ -1,0 +1,51 @@
+// A package that uses what is built into tz: node:path and node:os, Buffer,
+// async functions, compiled regexes, classes with generics and unions.
+import { basename, extname, join } from "node:path"
+import { EOL } from "node:os"
+import { Buffer } from "node:buffer"
+import { slugOf } from "./slug.ts"
+
+export { slugOf }
+
+export function fileKind(path: string): string {
+  const ext = extname(path)
+  return ext == "" ? `${basename(path)} (no extension)` : `${basename(path, ext)} is ${ext.slice(1)}`
+}
+
+export function encode(text: string): string {
+  return Buffer.from(text).toString("base64")
+}
+
+export function decode(base64: string): string {
+  return Buffer.from(base64, "base64").toString("utf8")
+}
+
+export function lines(...parts: string[]): string {
+  return parts.join(EOL == "\r\n" ? "\n" : EOL)
+}
+
+export function words(text: string): string[] {
+  return [...text.matchAll(/[\p{L}\d]+/gu)].map(m => m[0])
+}
+
+export class Counter<T> {
+  counts = new Map<T, int>()
+  add(x: T): int {
+    const n = (this.counts.get(x) ?? 0) + 1
+    this.counts.set(x, n)
+    return n
+  }
+}
+
+export async function slowJoin(dir: string, file: string): Promise<string> {
+  await new Promise<void>(resolve => setTimeout(resolve, 1))
+  return join(dir, file).replaceAll("\\", "/")
+}
+
+export function describe(x: int | string | Buffer): string {
+  if (typeof x == "number")
+    return `number ${x}`
+  if (typeof x == "string")
+    return `text ${x}`
+  return `bytes ${x.toString("hex")}`
+}

@@ -1,0 +1,60 @@
+// same-as-node
+// Regexes as values: in fields and arrays, as parameters, in closures and
+// generic functions. Known only when the program runs, they still match.
+interface Rule {
+  name: string
+  pattern: RegExp
+}
+const rules: Rule[] = [
+  { name: "number", pattern: /^\d+$/ },
+  { name: "word", pattern: /^[a-z]+$/i },
+]
+function classify(token: string): string {
+  for (const rule of rules) if (rule.pattern.test(token)) return rule.name
+  return "other"
+}
+console.log(["42", "Hello", "a1"].map(classify))
+
+function firstGroup(re: RegExp, text: string): string | undefined {
+  const m = re.exec(text)
+  return m?.[1]
+}
+console.log(firstGroup(/(\d+)/, "abc 123"), firstGroup(/(x)/, "abc"))
+
+function all(re: RegExp, text: string): string[] {
+  const found: string[] = []
+  for (const m of text.matchAll(re)) found.push(m[0])
+  return found
+}
+console.log(all(/\w+/g, "one two"), "a,b;c".split(rules.length > 1 ? /[,;]/ : /,/))
+
+// A `let` that nothing assigns to is as known as a constant.
+let digits = /(\d)(\d)?/
+const d = digits.exec("7")
+if (d) console.log(d[1], d[2] ?? "none")
+
+// Closures and generics.
+const makeCounter = (re: RegExp) => (text: string) => text.split(re).length
+const commas = makeCounter(/,/)
+console.log(commas("a,b,c"), commas(""))
+function show<T>(label: string, value: T) {
+  console.log(label, value)
+}
+show("regex", /a+b/gi)
+const m = /(?<x>\d)/.exec("5")
+show("match", m)
+
+// A regex with g keeps its lastIndex in the object, wherever it is.
+const holder = { re: /o/g }
+holder.re.exec("foo boo")
+console.log(holder.re.lastIndex)
+holder.re.lastIndex = 0
+console.log(holder.re.exec("foo boo")?.index, holder.re.lastIndex)
+
+// Many regexes made while the program runs.
+let total = 0
+for (let i = 0; i < 1000; i++) {
+  const re = new RegExp(`${i % 10}+`, "g")
+  total += ("1223334444" + String(i)).replace(re, "").length
+}
+console.log(total)

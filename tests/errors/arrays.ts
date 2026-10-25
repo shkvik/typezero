@@ -1,7 +1,7 @@
 // expect-error: cannot infer the element type of an empty array
 const empty = []
-// expect-error: array elements must have one type; found 'int' and 'string'
-const mixed = [1, "x"]
+// expect-error: array elements must have one type; found 'int[]' and 'string[]'
+const mixed = [[1], ["x"]]
 const ints: int[] = [1, 2]
 // expect-error: type 'int[]' is not assignable to type 'double[]'
 const doubles: double[] = ints
@@ -26,5 +26,5 @@ const spread: double[] = [...ints]
 const size = ints.size
 // expect-error: 'sort' needs a function, found 'int'
 ints.sort(1)
-// expect-error: union types other than 'T | undefined' are not supported yet
-let either: int | string = 1
+// expect-error: union 'int | double' is not supported: 'int' and 'double' cannot be told apart when the program runs: 'typeof' gives "number" for both
+let either: int | double = 1

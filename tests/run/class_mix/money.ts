@@ -1,0 +1,46 @@
+// The other file of class_mix: a class with a decimal field, overloaded
+// constructors and methods (an int or a decimal), and methods that return
+// Results, one of them static.
+export class Money {
+  static created = 0
+  constructor(public amount: decimal, public currency: string) {
+    Money.created++
+  }
+  // Whole cents of euros: `new Money(250)` is 2.50 EUR.
+  constructor(cents: long) {
+    this.amount = decimal(cents).shiftedBy(-2)
+    this.currency = "EUR"
+    Money.created++
+  }
+
+  plus(other: Money): Result<Money, string> {
+    if (other.currency != this.currency)
+      return err(`cannot add ${other.currency} to ${this.currency}`)
+    return ok(new Money(this.amount + other.amount, this.currency))
+  }
+
+  times(k: int) {
+    return new Money(this.amount * k, this.currency)
+  }
+  times(k: decimal) {
+    return new Money((this.amount * k).round(2), this.currency)
+  }
+
+  toString() {
+    return `${this.amount.toFixed(2)} ${this.currency}`
+  }
+
+  // "4.50 EUR"
+  static parse(text: string): Result<Money, string> {
+    const parts = text.split(" ")
+    if (parts.length != 2) return err(`expected '<amount> <currency>', got '${text}'`)
+    const amount = parts[0], currency = parts[1]
+    let points = 0
+    for (const c of amount) {
+      if (c == ".") points++
+      else if (c < "0" || c > "9") return err(`bad amount '${amount}'`)
+    }
+    if (amount.length == 0 || points > 1) return err(`bad amount '${amount}'`)
+    return ok(new Money(decimal(amount), currency))
+  }
+}

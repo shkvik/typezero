@@ -1,0 +1,12 @@
+[ 'rect 6.0', 'circle 3.0', 'rect 1.0' ] Ok { value: 'rect 6.0' }
+rect: tl, rect: tr, rect: br, rect: bl
+circle: no corners
+rect: tl, rect: tr, rect: br, rect: bl
+Err { error: 'no shapes' } Ok { value: 20 } Err { error: "not a size: '4 by 5'" }
+{ value: Circle { name: 'circle', id: 0, r: 1 } } true false
+rect 64 4
+[ 6, 1 ]
+[ 1, 2, 3 ] [ 1, 1 ]
+[ 3, 2, 1 ] [ 1, 1 ]
+{"name":"rect","id":0,"w":2,"h":3,"label":{}} {"name":"circle","id":0,"r":2}
+{ name: 'from json' } circle

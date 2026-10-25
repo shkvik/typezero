@@ -1,0 +1,15 @@
+before main
+greet starts Ann
+greet returned a Promise
+after main
+greet goes on Ann
+hello, Ann
+3 5 16
+5 0.5 text [ 1, 2, 3 ] { a: 1 } true
+done
+second 1
+first 1
+top
+first 2
+first 3
+second 2

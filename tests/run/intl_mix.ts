@@ -1,0 +1,39 @@
+// same-as-node
+// Intl with the rest of the language: formatters in a Map, in unions with
+// other types, in unknown and as generic T; Iterable<T> parameters given
+// Intl.Segmenter segments; Collator.compare as the comparator of sort; and
+// Intl in async code.
+const nf = new Intl.NumberFormat("en-US")
+const formats = new Map<string, Intl.NumberFormat>([["us", nf]])
+console.log(formats.get("us")?.format(1234.5), formats)
+const either: Intl.NumberFormat | string = process.argv.length > 99 ? "none" : nf
+console.log(typeof either == "string" ? either : either.format(42))
+const maybeDate: Intl.Collator | Date = process.argv.length > 99 ? new Date(0) : new Intl.Collator("en")
+if (maybeDate instanceof Date)
+  console.log("date")
+else
+  console.log(maybeDate.compare("a", "b"))
+const u: unknown = nf
+console.log(typeof u, u)
+function first<T>(xs: T[]): T | undefined {
+  return xs[0]
+}
+console.log(first([nf])?.format(7), first([new Intl.PluralRules("en")])?.select(1))
+function count(xs: Iterable<Intl.SegmentData>): int {
+  let n = 0
+  for (const _ of xs)
+    n++
+  return n
+}
+const seg = new Intl.Segmenter("en", { granularity: "word" })
+console.log(count(seg.segment("hello big world")))
+const coll = new Intl.Collator("sv")
+const names = ["ö", "a", "z", "å"]
+console.log(names.sort(coll.compare), [...names].sort((a, b) => a.localeCompare(b, "de")))
+const nums = new Float64Array([3, 1, 2])
+console.log(nums.sort((a, b) => a - b), ["10", "9", "1"].sort(new Intl.Collator("en", { numeric: true }).compare))
+async function fmt(n: number) {
+  await 0
+  return n.toLocaleString("ru-RU")
+}
+console.log(await fmt(1234567.5), await Promise.all([1, 2].map(async x => new Intl.NumberFormat("en", { style: "percent" }).format(x / 4.0))))

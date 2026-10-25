@@ -1,0 +1,7 @@
+// There is no bigint: its literals are errors that point to long and decimal.
+// expect-error: '10n' is a bigint, and there is no bigint: integers up to 9.2e18 fit in 'long'
+const a = 10n
+// expect-error: '0xffn' is a bigint
+const b = 0xffn
+// expect-error: 'const n: decimal = 1_000_000_000_000_000_000_000'
+const c = 1_000_000_000_000_000_000_000n

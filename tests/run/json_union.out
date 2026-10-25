@@ -1,0 +1,16 @@
+[ { kind: 'circle', r: 1 }, { kind: 'square', side: 2 } ] [ 3, 4 ]
+[ 'up', 'down', 'up' ] true
+2 true on
+[ 'a', 1, true, [ 1, 2 ] ]
+[ 'auto', 12 ]
+[ { name: 'a' }, { name: 'b', mode: 'slow' }, { name: 'c' } ]
+{ w: 3, h: 4 }
+{ owner: 'x', counts: { a: 1, b: 2 }, tags: { t: [ 'up' ] } }
+TypeError: kind: expected "circle" | "square", got "triangle"
+TypeError: kind: expected "circle" | "square", got undefined
+TypeError: r: expected double, got string
+TypeError: expected Circle | Square, got 5
+TypeError: expected "up" | "down", got "left"
+TypeError: [1]: expected 0 | 1 | 2, got 3
+TypeError: expected string | int | boolean | int[], got null
+TypeError: tags.t[1]: expected "up" | "down", got "left"

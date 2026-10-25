@@ -1,0 +1,34 @@
+// Where dictionaries differ from JavaScript on purpose (docs/objects.md,
+// section 9), and keys that JavaScript has no counterpart for.
+
+// The keys of a Record keep the order they were added in, also those that
+// are numbers (Node puts those first, in their numeric order).
+const r: Record<string, int> = { b: 1, "2": 2, "1": 3 }
+r["0"] = 4
+console.log(r, Object.keys(r), JSON.stringify(r))
+
+// Nothing comes from Object.prototype: those names are keys like any other.
+const words: Record<string, string> = {}
+console.log(words["toString"], "constructor" in words, words.hasOwnProperty_)
+words["__proto__"] = "proto"
+words.constructor = "made"
+console.log(words, Object.keys(words))
+
+// A decimal is a key by its value, as `==` compares decimals.
+const prices = new Map<decimal, string>([[0.30, "thirty"], [1, "one"]])
+console.log(prices.get(0.3), prices.has(1.00), prices.get(decimal("0.300")), prices)
+const amounts = new Set<decimal>([0.1 + 0.2, 0.3, 1.50, 1.5])
+console.log(amounts.size, amounts)
+
+// Keys that may be undefined, functions and Json values.
+const maybe = new Map<int | undefined, string>([[undefined, "none"], [0, "zero"]])
+console.log(maybe.get(undefined), maybe.get(0), maybe)
+const double = (x: int) => x * 2
+const handlers = new Map<(x: int) => int, string>([[double, "double"]])
+console.log(handlers.get(double), handlers.size)
+const parsed = JSON.parse('[1, "a", true, null, 1, "a"]')
+const seen = new Set<Json>()
+if (Array.isArray(parsed)) for (const j of parsed) seen.add(j)
+console.log(seen.size, seen)
+const objects = JSON.parse('[{}, {}]')
+if (Array.isArray(objects)) console.log(new Set(objects).size)

@@ -1,0 +1,16 @@
+// What tz takes beyond node: imports without an extension or with .js, a
+// directory by its index.ts, and types, interfaces and enums imported like
+// everything else, also when a file passes on what it imports.
+import { Color, paint } from "./colors"
+import { origin, move } from "./geometry"
+import { Point, Shape, describe } from "./shapes.js"
+import { total } from "./lib/sum.ts"
+import { countdown } from "./lib/countdown"
+
+const p: Point = move(origin, 2, 3)
+console.log(p.x, p.y, paint(Color.Green), Color[2])
+const s: Shape = { kind: "circle", at: p }
+console.log(describe(s))
+console.log(total([1, 2, 3]))
+// Calls in tail position jump, also from one file to another.
+console.log(countdown(1000000))

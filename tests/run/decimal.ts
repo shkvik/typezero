@@ -1,0 +1,177 @@
+// decimal in the language: literals read exactly, operators, ints and longs
+// next to decimals, decimals in variables, arrays, objects and closures.
+// Expected output checked against the same computation in BigNumber.js.
+
+// The examples of docs/decimal.md
+const price: decimal = 19.99
+const total = price * 3 + 0.01
+if (total > 50) console.log(total)
+const big: decimal = 123456789012345678901234567890
+console.log(big, big + 1, -big)
+const qty = 4
+console.log(price * qty)
+const parsed = decimal("0.1")
+console.log(parsed + 0.2 == 0.3, decimal("0.30") == decimal("0.3"), decimal("0.30"))
+console.log(decimal(0.1), decimal(0.1 + 0.2), Number(total))
+console.log(decimal(2) ** 100)
+console.log(decimal(1) / 3, decimal(1).div(3, 2), decimal(1).div(3, 2, "half-even"))
+const x: decimal = 2.5
+console.log(x.round(), x.round(0, "half-even"), total.toFixed(2))
+console.log(decimal("1234567.891").toFormat(2), decimal(255).toString(16))
+
+// Literals where a decimal is expected, and next to one
+const tiny: decimal = 0.000000000000000000000000001
+const sum: decimal = 0.1 + 0.2
+const third: decimal = 1 / 3
+const hex: decimal = 0xffffffffffffffffffffffff
+const huge: decimal = 1e40
+const negative: decimal = -12345678901234567890.5
+console.log(tiny, sum, third, hex, huge, negative)
+const plus: decimal = +2.5
+console.log(plus, -plus, price * +2)
+console.log(0.1 + price, (0.1 + 0.2) * price, price * (1 / 4), 3 - price, 1_000.25 + price)
+console.log(price > 19.989, 19.99 == price, price != 20, 0.5 < price)
+const n = 10
+const ratio: decimal = n / 4
+const power: decimal = 2 ** 70
+console.log(ratio, power, n / 4)
+
+// int and long next to decimals
+const count: int = 3
+const units: long = 9007199254740993
+console.log(price * count, price + units, units * big, big - units)
+console.log(count < price, units > price, price == 19.99)
+
+// Variables, compound assignment, ++ and --
+let acc: decimal = 0
+for (let i = 0; i < 10; i++) acc += 0.1
+console.log(acc, acc == 1)
+acc *= 1.5
+acc -= 0.25
+acc /= 4
+console.log(acc)
+acc %= 0.3
+console.log(acc)
+acc **= 3
+console.log(acc)
+let k: decimal = 9.5
+k++
+++k
+console.log(k, k++, k, --k, k--)
+let longOne: decimal = big
+longOne += 1
+longOne *= 2
+console.log(longOne, longOne++, longOne)
+
+// Arrays
+const prices: decimal[] = [19.99, 5, 0.01, 123456789012345678901234567890, -3.5]
+console.log(prices)
+console.log(prices.join(" + "), "=", decimal.sum(...prices))
+prices.sort((a, b) => a - b)
+console.log(prices, prices.indexOf(decimal(5)), prices.includes(decimal("0.010")))
+console.log(prices.map(p => p * 2), prices.filter(p => p > 1).length)
+console.log(prices.reduce((a, b) => a + b, 0), prices.reduce((a, b) => a + b))
+const zeros = new Array<decimal>(3)
+zeros[1] += 2.5
+zeros[2]++
+console.log(zeros, `${zeros}`)
+const lines: decimal[] = []
+for (let i = 1; i <= 3; i++) lines.push(decimal(i) / 7)
+console.log(lines)
+const grid: decimal[] = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27
+]
+console.log(grid)
+
+// Objects and closures
+interface Line {
+  name: string
+  price: decimal
+  qty: int
+}
+const order: Line[] = [{ name: "tea", price: 4.5, qty: 2 }, { name: "cake", price: 3.25, qty: 1 }]
+let subtotal: decimal = 0
+for (const line of order) subtotal += line.price * line.qty
+console.log(order, subtotal)
+order[0].price *= 2
+order[1].price += 123456789012345678901234567890
+console.log(order[0], order[1].price)
+function makeCounter(step: decimal) {
+  let value: decimal = 0
+  return () => {
+    value += step
+    return value
+  }
+}
+const next = makeCounter(0.25)
+next()
+next()
+console.log(next(), makeCounter(big)())
+function vat(net: decimal, rate: decimal = 0.2): decimal {
+  return (net * rate).round(2)
+}
+console.log(vat(19.99), vat(price, 0.07), vat(big))
+
+// undefined, ?:, ??, switch, typeof, conditions
+const maybe: decimal | undefined = prices.find(p => p > 100)
+const none: decimal | undefined = prices.find(p => p > big)
+console.log(maybe, none, none ?? 0.5, maybe ?? 0, maybe == undefined, none == undefined)
+const pick = count > 2 ? price : 0.5
+const other = count > 5 ? 0.5 : price
+console.log(pick, other, typeof price)
+function size(d: decimal): string {
+  switch (d) {
+    case 0:
+      return "zero"
+    case 0.5:
+      return "half"
+    case 1:
+      return "one"
+    default:
+      return d > 1 ? "big" : "small"
+  }
+}
+console.log(size(decimal("0.50")), size(decimal(0)), size(decimal("1.000")))
+console.log(size(price), size(0.25))
+if (price != 0 && total >= price) console.log("ok")
+
+// Text
+console.log(String(price), `${price} x ${count} = ${price * count}`, price.toString())
+console.log(`${big}`.length, String(decimal("-0.000001")), decimal("1e-7"), decimal("1e21"))
+const [num, den] = decimal("0.75").toFraction()
+console.log(num, den, decimal("3.14159").toFraction(100))
+console.log(decimal.max(price, 20, -1), decimal.min(price, 20, -1), decimal.sum())
+console.log(price.toFixed(1, "down"), price.toPrecision(3), price.toExponential(1))
+console.log(price.decimalPlaces())
+console.log(big.sqrt(), decimal(2).sqrt(), decimal(-7).abs(), price.isInteger(), price.shiftedBy(3))
+
+// More of the language around decimals
+const half: decimal = 0.5
+console.log(half * 2 == 1, half * 2, (half * 2).decimalPlaces(), half + half > 0.99)
+function bigger(): decimal {
+  return big * 2
+}
+console.log(bigger(), bigger() > big)
+function addUp(n: int, acc: decimal): decimal {
+  if (n == 0) return acc
+  return addUp(n - 1, acc + big)
+}
+console.log(addUp(100000, 0))
+const shelf: (decimal | undefined)[] = [1.5, undefined, big]
+for (const item of shelf) console.log(item?.toFixed(2), item?.round(), String(item))
+interface Account {
+  balance: decimal
+  limit?: decimal
+}
+const account: Account = { balance: 100 }
+account.limit ??= 500.5
+account.balance -= 0.01
+account.balance++
+console.log(account, account.limit?.toFormat(2))
+const handlers: (() => decimal)[] = []
+const items: decimal[] = [0.1, 0.2, 123456789012345678901234567890.5]
+for (const p of items) handlers.push(() => p * 10)
+console.log(handlers.map(h => h()))
+const stretched = [half]
+stretched.length = 3
+console.log(stretched, `${decimal("-0.5")}`, typeof half == "object")

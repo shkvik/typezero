@@ -1,0 +1,27 @@
+Scanner { label: 'main', words: /\p{L}+/gu } /-?\d+(?:\.\d+)?/g
+[ 'Ann', 'paid', 'and', 'Bob', 'paid', 'and' ]
+total 17.5 [ 1, 2.5 ]
+Ann Object [RegExp String Iterator] {}
+1 10
+0 2 0
+[ 9, 19, 41 ]
+[ 1, 2 ]
+[
+  Ok { value: { key: 'mode', value: 'fast' } },
+  Ok { value: { key: 'level', value: '3' } },
+  Err { error: "not a setting: 'bad line'" }
+] Ok { value: 2 }
+Ok { value: 'ANN' } Err { error: "not a setting: '?'" }
+{ value: /(?<y>\d{4})-(?<m>\d{2})/ } {
+  value: [
+    '2024-05',
+    '2024',
+    '05',
+    index: 4,
+    input: 'due 2024-05',
+    groups: [Object: null prototype] { y: '2024', m: '05' }
+  ]
+} [ /(?<y>\d{4})-(?<m>\d{2})/, /x/g ]
+Ok { value: 4 }
+Scanner { label: 'b22', words: /\p{L}+/gu }
+undefined

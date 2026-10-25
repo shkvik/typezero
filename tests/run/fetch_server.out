@@ -1,0 +1,19 @@
+200 true OK text/plain;charset=UTF-8 hello tz
+201 { id: 1, user: { name: 'Ann' }, method: 'POST' }
+500 Internal Server Error
+404 Nope false not found
+200 one two 
+11 bytes
+7 bytes
+yes Uint8Array(3) [ 1, 2, 255 ]
+[ 'a=1', 'b=2' ] c
+200 true http://127.0.0.1:PORT/final final GET
+302 http://127.0.0.1:PORT/final false
+TypeError fetch failed unexpected redirect
+TypeError fetch failed redirect count exceeded
+204 true ""
+200 ""
+[ 'hello a', 'hello b', 'hello c', 'hello d', 'hello e', 'hello f' ]
+AbortError This operation was aborted
+TimeoutError The operation was aborted due to timeout
+TypeError fetch failed ECONNREFUSED

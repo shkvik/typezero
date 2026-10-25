@@ -1,0 +1,33 @@
+top-level code
+  start
+    parallel
+  after await at line 24
+    reads  everything in stats (line 25)
+    writes stdout (line 25)
+    parallel
+  after await at line 26
+    reads  everything in any int[] (line 26)
+    writes stdout (line 26)
+    runs alone
+
+async function reader, line 7
+  start: runs inside its caller
+  after await at line 8 (in the task reader() at line 24)
+    reads  stats.read (line 9)
+    writes stats.read (line 9)
+    parallel
+
+async function writer, line 12
+  start: runs inside its caller
+  after await at line 13 (in the task writer() at line 24)
+    reads  stats.written (line 14)
+    writes stats.written (line 14)
+    parallel
+
+async function own, line 17
+  start: runs inside its caller
+  after await at line 19
+    in the task own(1) at line 26:
+      parallel
+    in the task own(2) at line 26:
+      parallel

@@ -1,0 +1,9 @@
+{ b: 1, '2': 2, '1': 3, '0': 4 } [ 'b', '2', '1', '0' ] {"b":1,"2":2,"1":3,"0":4}
+undefined false undefined
+{ ['__proto__']: 'proto', constructor: 'made' } [ '__proto__', 'constructor' ]
+thirty true thirty Map(2) { 0.3 => 'thirty', 1 => 'one' }
+2 Set(2) { 0.3, 1.5 }
+none zero Map(2) { undefined => 'none', 0 => 'zero' }
+double 1
+4 Set(4) { 1, 'a', true, null }
+2

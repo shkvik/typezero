@@ -1,8 +1,13 @@
 #include "driver/driver.h"
 
 #include "codegen/codegen.h"
+#include "driver/licenses.h"
 #include "driver/linker.h"
-#include "parse/parser.h"
+#include "driver/loader.h"
+#include "pkg/commands.h"
+#include "pkg/project.h"
+#include "sema/overflow.h"
+#include "sema/parallel.h"
 #include "sema/sema.h"
 
 #include "llvm/ADT/SmallString.h"
@@ -35,33 +40,51 @@
 namespace tz {
 namespace {
 
-const char kUsage[] = R"(usage: tz <command> [options] <file.ts> [arguments]
+const char kUsage[] = R"(usage: tz <command> [options] [<file.ts>] [arguments]
 
 commands:
   build     compile a program into a native executable
   run       compile a program and run it; arguments after the file go to it
+  init      start a project: tz.json, main.ts and .gitignore
+  add       add packages to tz.json: tz add zod, tz add jsr:@std/path@^1,
+            tz add github:user/repo@v1.2.0, tz add ../lib
+  remove    remove packages from tz.json
+  update    move packages to the newest versions tz.json allows
+  port      copy a TypeScript library and adapt it to tz
+  licenses  print the licenses of the code of others an executable embeds,
+            which go along with it: tz licenses app.exe > LICENSES.txt
   version   print the version
+
+Without a file, build and run take "main" of tz.json.
 
 options:
   -o <path>         where to write the output (build only)
   --emit-llvm       write LLVM IR (.ll) instead of an executable (build only)
+  --explain-parallel
+                    print what runs in parallel and why, instead of building
+                    (build only)
 )";
 // Not in the usage: -O0 turns optimization off, runtime inlining included.
 // The tests run every program both ways, and with --emit-llvm it shows the IR
-// exactly as CodeGen emits it.
+// as CodeGen emits it, except that generators are split into the functions
+// of their coroutines (LLVM has to do that at any level).
 
 // Exit codes of tz itself. `tz run` otherwise exits with the program's code.
 constexpr int kExitError = 1;
 constexpr int kExitUsage = 2;
 
-enum class Command { Build, Run };
+enum class Command { Build, Run, Licenses };
 
 struct Options {
   Command command = Command::Build;
   std::string input;
   std::string output;
+  // The name of the executable when it is not named after the input: the
+  // project's, for a build of its "main".
+  std::string outputStem;
   bool optimize = true;
   bool emitLLVM = false;
+  bool explainParallel = false;
   std::vector<std::string> programArgs;
 };
 
@@ -90,14 +113,20 @@ int parseArgs(llvm::ArrayRef<const char *> args, Options &opts) {
     opts.command = Command::Build;
   else if (command == "run")
     opts.command = Command::Run;
+  else if (command == "licenses")
+    opts.command = Command::Licenses;
   else
     return usageError("unknown command '" + command + "'");
 
+  bool programArgs = false;
   for (size_t i = 1; i < args.size(); ++i) {
     llvm::StringRef arg = args[i];
-    if (!opts.input.empty()) {
+    if (!opts.input.empty() || programArgs) {
       // Everything after the source file belongs to the program.
       opts.programArgs.push_back(arg.str());
+    } else if (arg == "--" && opts.command == Command::Run) {
+      // `tz run -- a b`: the program is the project's, and the rest is its.
+      programArgs = true;
     } else if (arg == "-o") {
       if (++i == args.size())
         return usageError("'-o' needs a path");
@@ -106,19 +135,34 @@ int parseArgs(llvm::ArrayRef<const char *> args, Options &opts) {
       opts.optimize = false;
     } else if (arg == "--emit-llvm") {
       opts.emitLLVM = true;
+    } else if (arg == "--explain-parallel") {
+      opts.explainParallel = true;
     } else if (arg.starts_with("-")) {
       return usageError("unknown option '" + arg + "'");
+    } else if (opts.command == Command::Run && !arg.ends_with_insensitive(".ts")) {
+      // Not a source file: the project's program runs, and this is its
+      // first argument.
+      opts.programArgs.push_back(arg.str());
+      programArgs = true;
     } else {
       opts.input = arg.str();
     }
   }
 
-  if (opts.input.empty())
-    return usageError("no source file given");
+  if (opts.command == Command::Licenses) {
+    if (opts.input.empty())
+      return usageError("no executable given");
+    if (!opts.programArgs.empty() || opts.emitLLVM || !opts.output.empty())
+      return usageError("'tz licenses' takes one executable");
+  }
   if (opts.command == Command::Build && !opts.programArgs.empty())
     return usageError("unexpected argument '" + opts.programArgs.front() + "' after the source file");
   if (opts.command == Command::Run && (opts.emitLLVM || !opts.output.empty()))
     return usageError("'-o' and '--emit-llvm' only apply to 'tz build'");
+  if (opts.command == Command::Run && opts.explainParallel)
+    return usageError("'--explain-parallel' only applies to 'tz build'");
+  if (opts.explainParallel && (opts.emitLLVM || !opts.output.empty()))
+    return usageError("'--explain-parallel' builds nothing, so it takes no '-o' or '--emit-llvm'");
   return -1;
 }
 
@@ -133,36 +177,134 @@ void initializeTargets() {
   LLVMInitializeAArch64AsmPrinter();
 }
 
-// Front end: source text to verified LLVM IR. Returns null after reporting
-// errors.
+// Without a file, `tz build` and `tz run` build the "main" of the project
+// around the current directory. Returns -1 when the input is known, else the
+// code tz should exit with.
+int findMain(Options &opts) {
+  if (!opts.input.empty())
+    return -1;
+  std::string manifestPath = pkg::findManifest("");
+  if (manifestPath.empty())
+    return usageError(opts.programArgs.empty()
+                          ? "no source file given, and there is no tz.json here or above"
+                          : "'" + opts.programArgs.front() +
+                                "' is not a .ts file, and there is no tz.json here or above "
+                                "whose \"main\" would run");
+  pkg::Manifest manifest;
+  if (!pkg::readManifest(manifestPath, manifest))
+    return kExitError;
+  if (manifest.main.empty()) {
+    llvm::errs() << "tz: " << manifestPath
+                 << " has no \"main\": add \"main\": \"main.ts\", or name the file to build\n";
+    return kExitError;
+  }
+  llvm::SmallString<256> main(manifest.dir);
+  llvm::sys::path::append(main, manifest.main);
+  opts.input = std::string(main);
+  // "@scope/api" builds api.exe.
+  llvm::StringRef name = manifest.name;
+  name = name.substr(name.rfind('/') + 1);
+  if (!name.empty())
+    opts.outputStem = name.str();
+  return -1;
+}
+
+// The packages of the project the file belongs to: tz.json in its directory
+// or above. False after reporting errors; `graph` stays null without a
+// project.
+bool preparePackages(llvm::StringRef input, pkg::Graph &storage, const pkg::Graph *&graph) {
+  graph = nullptr;
+  llvm::SmallString<256> dir(input);
+  llvm::sys::fs::make_absolute(dir);
+  llvm::sys::path::remove_filename(dir);
+  std::string manifestPath = pkg::findManifest(dir);
+  if (manifestPath.empty())
+    return true;
+  pkg::Manifest manifest;
+  if (!pkg::readManifest(manifestPath, manifest) ||
+      !pkg::preparePackages(manifest, pkg::PrepareOptions(), storage))
+    return false;
+  graph = &storage;
+  return true;
+}
+
+// The program checked: the entry file and the files it imports, loaded and
+// checked by Sema. Returns false after reporting errors.
+struct CheckedProgram {
+  llvm::SourceMgr sourceMgr;
+  std::vector<std::unique_ptr<AstContext>> asts;
+  std::unique_ptr<Diagnostics> diags;
+  SourceFile file;
+};
+
+bool checkProgram(llvm::StringRef path, CheckedProgram &program) {
+  pkg::Graph packages;
+  const pkg::Graph *graph;
+  if (!preparePackages(path, packages, graph))
+    return false;
+  llvm::SourceMgr &sourceMgr = program.sourceMgr;
+  // A program whose emitters get their event maps from its emit() calls is
+  // checked in rounds (see EventInference): each round reads it anew, and
+  // only the last one says what is wrong and is compiled.
+  constexpr unsigned kInferenceRounds = 8;
+  EventInference inference;
+  std::vector<std::unique_ptr<AstContext>> &asts = program.asts;
+  std::unique_ptr<Diagnostics> &diags = program.diags;
+  SourceFile &file = program.file;
+  for (unsigned round = 0;; ++round) {
+    diags = std::make_unique<Diagnostics>(sourceMgr);
+    diags->setRecording(true);
+    AstContext &ast = *asts.emplace_back(std::make_unique<AstContext>());
+    file = SourceFile();
+    if (!loadProgram(path, sourceMgr, ast, *diags, file, graph) || diags->hasErrors()) {
+      diags->replay();
+      return false;
+    }
+    Sema sema(ast, *diags);
+    sema.setEventInference(&inference);
+    sema.check(file);
+    if (!inference.open || inference.final)
+      break;
+    // Another round, with what this one found; the last one once a round
+    // finds nothing more.
+    if (!inference.changed || round + 2 >= kInferenceRounds)
+      inference.final = true;
+    inference.changed = inference.open = false;
+  }
+  // Warnings where an int may overflow (docs/small.md, section 6), of the
+  // last round only, also next to errors; they do not stop the build.
+  checkIntOverflow(file, *diags);
+  diags->replay();
+  return !diags->hasErrors();
+}
+
+// Front end: the entry file and the files it imports to verified LLVM IR.
+// Returns null after reporting errors.
 std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContext &ctx,
                                           const llvm::DataLayout &layout) {
-  auto buffer = llvm::MemoryBuffer::getFile(path);
-  if (!buffer) {
-    llvm::errs() << "tz: cannot read '" << path << "': " << buffer.getError().message() << "\n";
+  CheckedProgram program;
+  if (!checkProgram(path, program))
     return nullptr;
-  }
-  llvm::SourceMgr sourceMgr;
-  unsigned bufferId = sourceMgr.AddNewSourceBuffer(std::move(*buffer), llvm::SMLoc());
-  Diagnostics diags(sourceMgr);
-
-  AstContext ast;
-  Lexer lexer(sourceMgr.getMemoryBuffer(bufferId)->getBuffer(), diags);
-  SourceFile file = Parser(lexer, ast, diags).parseSourceFile();
-  if (diags.hasErrors())
-    return nullptr;
-
-  Sema(ast, diags).check(file);
-  if (diags.hasErrors())
-    return nullptr;
-
-  std::unique_ptr<llvm::Module> module =
-      CodeGen(ctx, llvm::sys::path::filename(path), layout).generate(file);
+  CodeGen codegen(ctx, llvm::sys::path::filename(path), layout);
+  codegen.setSourceMgr(&program.sourceMgr);
+  std::unique_ptr<llvm::Module> module = codegen.generate(program.file);
   if (llvm::verifyModule(*module, &llvm::errs())) {
     llvm::errs() << "tz: internal error: the generated LLVM IR is invalid\n";
     return nullptr;
   }
   return module;
+}
+
+// `tz build --explain-parallel`: the program checked, then what of it may
+// run in parallel and why (docs/async.md, section 5), on stdout. Nothing is
+// built.
+int explain(llvm::StringRef path) {
+  // Checked as a build checks it: in the rounds that find the event maps.
+  CheckedProgram program;
+  if (!checkProgram(path, program))
+    return kExitError;
+  explainParallel(program.file, program.sourceMgr, llvm::outs());
+  return 0;
 }
 
 std::unique_ptr<llvm::TargetMachine> createTargetMachine(const llvm::Triple &triple, bool optimize) {
@@ -377,6 +519,8 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
     return writeFile(output, [&](llvm::raw_pwrite_stream &out) { module->print(out, nullptr); })
                ? 0
                : kExitError;
+  CryptoUse crypto = cryptoUse(*module);
+  addLicenseManifest(*module, {crypto.any});
 
   std::string runtime = runtimeFile(argv0, triple.isOSWindows() ? "tzrt.lib" : "libtzrt.a");
   if (!llvm::sys::fs::exists(runtime)) {
@@ -393,8 +537,26 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
   if (!emitObjectFile(*module, *tm, object))
     return kExitError;
 
+  // node:crypto: the glue, and OpenSSL, all of it or only the objects its direct layer calls
+  // (docs/crypto.md, section 3).
+  std::vector<std::string> inputs = {std::string(object), runtime};
+  if (crypto.any) {
+    const char *openssl = crypto.full ? "libcrypto.lib" : "libcrypto_direct.lib";
+    for (const char *lib : {"tzcrypto.lib", openssl}) {
+      std::string path = runtimeFile(argv0, lib);
+      if (!llvm::sys::fs::exists(path)) {
+        llvm::errs() << "tz: the library of node:crypto is missing: " << path << "\n";
+        return kExitError;
+      }
+      inputs.push_back(path);
+    }
+    if (crypto.full)
+      for (const char *lib : {"ws2_32", "advapi32", "crypt32", "user32"})
+        inputs.push_back(std::string("/defaultlib:") + lib);
+  }
+
   std::string errors;
-  if (!linkExecutable(triple, {std::string(object), runtime}, output, errors)) {
+  if (!linkExecutable(triple, inputs, output, errors)) {
     llvm::errs() << errors << "tz: linking failed\n";
     return kExitError;
   }
@@ -430,7 +592,8 @@ int run(const Options &opts, const char *argv0) {
 }
 
 std::string defaultOutput(const Options &opts) {
-  llvm::SmallString<128> name(llvm::sys::path::stem(opts.input));
+  llvm::SmallString<128> name(opts.outputStem.empty() ? llvm::sys::path::stem(opts.input)
+                                                      : llvm::StringRef(opts.outputStem));
   if (opts.emitLLVM)
     name += ".ll";
   else if (llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows())
@@ -443,9 +606,29 @@ std::string defaultOutput(const Options &opts) {
 int runDriver(int argc, char **argv) {
   Options opts;
   std::vector<const char *> args(argv + 1, argv + argc);
+  if (!args.empty()) {
+    llvm::StringRef command = args[0];
+    llvm::ArrayRef<const char *> rest = llvm::ArrayRef(args).drop_front();
+    if (command == "init")
+      return pkg::commandInit(rest);
+    if (command == "add")
+      return pkg::commandAdd(rest);
+    if (command == "remove")
+      return pkg::commandRemove(rest);
+    if (command == "update")
+      return pkg::commandUpdate(rest);
+    if (command == "port")
+      return pkg::commandPort(rest);
+  }
   if (int code = parseArgs(args, opts); code >= 0)
     return code;
+  if (int code = findMain(opts); code >= 0)
+    return code;
 
+  if (opts.command == Command::Licenses)
+    return printLicenses(opts.input, runtimeFile(argv[0], "licenses"));
+  if (opts.explainParallel)
+    return explain(opts.input);
   initializeTargets();
   if (opts.command == Command::Run)
     return run(opts, argv[0]);

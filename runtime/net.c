@@ -1,0 +1,1307 @@
+// TCP sockets (docs/net.md, step 1): listening, accepting, connecting,
+// reading and writing on the completion port of the loop (io.c), and the
+// names of hosts. What the program calls is in src/lib (`__tz_net_*`); HTTP
+// is in http.c.
+//
+// On Windows every socket is overlapped and tied to the completion port of
+// the loop, with this file's net_completed as the key: AcceptEx, ConnectEx,
+// WSARecv and WSASend are asked of the system, which posts each when it is
+// done, and the poll phase hands it back (tz_io_due) as the callbacks of
+// node are. An operation that is done at once is not posted
+// (FILE_SKIP_COMPLETION_PORT_ON_SUCCESS), as libuv asks: its result is used
+// right away. Names of hosts are looked up by GetAddrInfoExW, which calls
+// back on a thread of the system; that only posts to the port.
+//
+// The objects the program holds are a connection (NetConn) and a listener
+// (NetListener), objects of the language without fields: the program frees
+// them by its counts as any object, which closes the socket. An operation in
+// flight keeps the memory until the system is done with it.
+//
+// TODO(linux): epoll for the sockets, and a resolver of our own
+// (/etc/resolv.conf, /etc/hosts, docs/net.md, section 5): a static program
+// has no libc resolver to rely on.
+
+#include "net.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef _WIN32
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
+extern TzErrorInfo tz_error_info;
+
+// None of the state is static: see the rules in tzrt.h.
+TzMaker tz_net_make;
+int32_t tz_net_started;
+#ifdef _WIN32
+LPFN_ACCEPTEX tz_net_accept_ex;
+LPFN_CONNECTEX tz_net_connect_ex;
+LPFN_GETACCEPTEXSOCKADDRS tz_net_accept_addresses;
+#endif
+
+#define NET_INPUT 16384
+
+//===----------------------------------------------------------------------===//
+// Errors
+//===----------------------------------------------------------------------===//
+
+// libuv's codes, texts and numbers on Windows.
+static const NetError kNetErrors[] = {
+    {"UNKNOWN", "unknown error", -4094},
+    {"ECONNREFUSED", "connection refused", -4078},
+    {"ECONNRESET", "connection reset by peer", -4077},
+    {"ECONNABORTED", "software caused connection abort", -4079},
+    {"ETIMEDOUT", "connection timed out", -4039},
+    {"EADDRINUSE", "address already in use", -4091},
+    {"EADDRNOTAVAIL", "address not available", -4090},
+    {"EACCES", "permission denied", -4092},
+    {"ENETUNREACH", "network is unreachable", -4062},
+    {"EHOSTUNREACH", "host is unreachable", -4065},
+    {"ENOTCONN", "socket is not connected", -4053},
+    {"EPIPE", "broken pipe", -4047},
+    {"ECANCELED", "operation canceled", -4081},
+    {"EMFILE", "too many open files", -4066},
+    {"ENOBUFS", "no buffer space available", -4060},
+    {"EAGAIN", "resource temporarily unavailable", -4088},
+    {"EAFNOSUPPORT", "address family not supported", -4089},
+    {"EINVAL", "invalid argument", -4071},
+    {"ENOTFOUND", "getaddrinfo ENOTFOUND", -3008},
+    {"EAI_AGAIN", "temporary failure", -3001},
+};
+
+enum {
+  NE_UNKNOWN,
+  NE_ECONNREFUSED,
+  NE_ECONNRESET,
+  NE_ECONNABORTED,
+  NE_ETIMEDOUT,
+  NE_EADDRINUSE,
+  NE_EADDRNOTAVAIL,
+  NE_EACCES,
+  NE_ENETUNREACH,
+  NE_EHOSTUNREACH,
+  NE_ENOTCONN,
+  NE_EPIPE,
+  NE_ECANCELED,
+  NE_EMFILE,
+  NE_ENOBUFS,
+  NE_EAGAIN,
+  NE_EAFNOSUPPORT,
+  NE_EINVAL,
+  NE_ENOTFOUND,
+  NE_EAI_AGAIN,
+};
+
+// The errors of names, which are no errors of sockets.
+#define NET_NOT_FOUND (-3008)
+#define NET_TRY_AGAIN (-3001)
+
+const NetError *net_error_of(int32_t error) {
+  int index = NE_UNKNOWN;
+#ifdef _WIN32
+  switch (error) {
+  case WSAECONNREFUSED:
+  case ERROR_CONNECTION_REFUSED:
+    index = NE_ECONNREFUSED;
+    break;
+  case WSAECONNRESET:
+  case ERROR_NETNAME_DELETED:
+    index = NE_ECONNRESET;
+    break;
+  case WSAECONNABORTED:
+  case ERROR_CONNECTION_ABORTED:
+    index = NE_ECONNABORTED;
+    break;
+  case WSAETIMEDOUT:
+  case ERROR_SEM_TIMEOUT:
+    index = NE_ETIMEDOUT;
+    break;
+  case WSAEADDRINUSE:
+    index = NE_EADDRINUSE;
+    break;
+  case WSAEADDRNOTAVAIL:
+    index = NE_EADDRNOTAVAIL;
+    break;
+  case WSAEACCES:
+  case ERROR_ACCESS_DENIED:
+    index = NE_EACCES;
+    break;
+  case WSAENETUNREACH:
+  case ERROR_NETWORK_UNREACHABLE:
+    index = NE_ENETUNREACH;
+    break;
+  case WSAEHOSTUNREACH:
+  case ERROR_HOST_UNREACHABLE:
+    index = NE_EHOSTUNREACH;
+    break;
+  case WSAENOTCONN:
+    index = NE_ENOTCONN;
+    break;
+  case WSAESHUTDOWN:
+  case ERROR_BROKEN_PIPE:
+    index = NE_EPIPE;
+    break;
+  case ERROR_OPERATION_ABORTED:
+    index = NE_ECANCELED;
+    break;
+  case WSAEMFILE:
+    index = NE_EMFILE;
+    break;
+  case WSAENOBUFS:
+    index = NE_ENOBUFS;
+    break;
+  case WSAEWOULDBLOCK:
+    index = NE_EAGAIN;
+    break;
+  case WSAEAFNOSUPPORT:
+    index = NE_EAFNOSUPPORT;
+    break;
+  case WSAEINVAL:
+    index = NE_EINVAL;
+    break;
+  case NET_NOT_FOUND:
+    index = NE_ENOTFOUND;
+    break;
+  case NET_TRY_AGAIN:
+    index = NE_EAI_AGAIN;
+    break;
+  default:
+    break;
+  }
+#else
+  (void)error;
+#endif
+  return &kNetErrors[index];
+}
+
+static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
+
+void *net_system_error(TzMaker make, int32_t error, const char *syscall, const char *where,
+                       int with_text) {
+  const NetError *e = net_error_of(error);
+  char message[512];
+  if (error == NET_NOT_FOUND || error == NET_TRY_AGAIN)
+    snprintf(message, sizeof message, "%s %s%s%s", syscall, e->code, where ? " " : "",
+             where ? where : "");
+  else if (with_text)
+    snprintf(message, sizeof message, "%s %s: %s%s%s", syscall, e->code, e->message,
+             where ? " " : "", where ? where : "");
+  else
+    snprintf(message, sizeof message, "%s %s%s%s", syscall, e->code, where ? " " : "",
+             where ? where : "");
+  TzSystemErrorParts parts;
+  memset(&parts, 0, sizeof parts);
+  parts.message = ascii(message);
+  parts.name = ascii("Error");
+  parts.errno_value = e->number;
+  parts.code = ascii(e->code);
+  parts.syscall = ascii(syscall);
+  return make(&parts);
+}
+
+void *net_error(int32_t kind, const char *message, void *cause) {
+  TzBuf b;
+  tz_buf_init(&b);
+  // UTF-8 to UTF-16: the messages are ASCII but for names of hosts.
+  const unsigned char *s = (const unsigned char *)message;
+  for (size_t i = 0; s[i];) {
+    uint32_t c = s[i];
+    size_t extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+    if (extra)
+      c &= 0x3Fu >> extra;
+    for (size_t k = 1; k <= extra && s[i + k]; ++k)
+      c = (c << 6) | (s[i + k] & 0x3Fu);
+    i += extra + 1;
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      tz_buf_push(&b, (uint16_t)(0xD800 + (c >> 10)));
+      tz_buf_push(&b, (uint16_t)(0xDC00 + (c & 0x3FF)));
+    } else {
+      tz_buf_push(&b, (uint16_t)c);
+    }
+  }
+  // The error takes the message over.
+  TzStr text = tz_buf_take(&b);
+  void *error = tz_error_info.make(kind, text.obj, text.meta);
+  if (cause)
+    *(void **)((char *)error + tz_error_info.cause_offset) = cause;
+  return error;
+}
+
+//===----------------------------------------------------------------------===//
+// Promises and bytes
+//===----------------------------------------------------------------------===//
+
+void net_fulfill(TzPromise **p, const void *value, size_t size) {
+  TzPromise *promise = *p;
+  *p = NULL;
+  if (size)
+    memcpy((char *)promise + TZ_PROMISE_VALUE, value, size);
+  tz_promise_fulfill(promise);
+  tz_obj_release((TzObject *)promise);
+}
+
+void net_reject(TzPromise **p, void *error) {
+  TzPromise *promise = *p;
+  *p = NULL;
+  tz_promise_reject(promise, error);
+  tz_obj_release((TzObject *)promise);
+}
+
+TzBytes *tz_bytes_new_unset(int32_t kind, int64_t length);
+
+TzBytes *net_bytes(const uint8_t *data, size_t length) {
+  TzBytes *b = tz_bytes_new_unset(TZ_BYTES_U8, (int64_t)length);
+  if (length)
+    memcpy(b->data, data, length);
+  return b;
+}
+
+double net_now(void) {
+#ifdef _WIN32
+  return (double)GetTickCount64();
+#else
+  return 0;
+#endif
+}
+
+#ifdef _WIN32
+
+//===----------------------------------------------------------------------===//
+// Sockets on Windows
+//===----------------------------------------------------------------------===//
+
+static void conn_drop(void *object);
+static void listener_drop(void *object);
+static const TzLayout conn_layout = {conn_drop, NULL, 0, 0, "Socket", 6, 0};
+static const TzLayout listener_layout = {listener_drop, NULL, 0, 0, "Server", 6, 0};
+
+static void start(void) {
+  if (tz_net_started)
+    return;
+  WSADATA data;
+  if (WSAStartup(MAKEWORD(2, 2), &data) != 0)
+    tz_panicf("cannot start Winsock (error %d)", WSAGetLastError());
+  tz_net_started = 1;
+}
+
+// The functions of Winsock that are reached through a socket.
+static void load_extensions(SOCKET s) {
+  if (tz_net_accept_ex)
+    return;
+  GUID accept_guid = WSAID_ACCEPTEX, connect_guid = WSAID_CONNECTEX,
+       addresses_guid = WSAID_GETACCEPTEXSOCKADDRS;
+  DWORD bytes;
+  WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &accept_guid, sizeof accept_guid,
+           &tz_net_accept_ex, sizeof tz_net_accept_ex, &bytes, NULL, NULL);
+  WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &connect_guid, sizeof connect_guid,
+           &tz_net_connect_ex, sizeof tz_net_connect_ex, &bytes, NULL, NULL);
+  WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER, &addresses_guid, sizeof addresses_guid,
+           &tz_net_accept_addresses, sizeof tz_net_accept_addresses, &bytes, NULL, NULL);
+}
+
+// What the port gives back for a socket: the operation, which the poll
+// phase then hands back.
+static void net_completed(OVERLAPPED_ENTRY *entry) {
+  NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
+  op->bytes = entry->dwNumberOfBytesTransferred;
+  op->error = entry->Internal != 0 ? -1 : 0; // the error itself comes later
+  tz_io_due(&op->work);
+}
+
+// Ties a new socket to the port of the loop, so that what it asks for comes
+// back there.
+static int attach(SOCKET s) {
+  HANDLE port = (HANDLE)tz_io_port_handle();
+  if (!CreateIoCompletionPort((HANDLE)s, port, (ULONG_PTR)net_completed, 0))
+    return 0;
+  SetFileCompletionNotificationModes((HANDLE)s, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS |
+                                                    FILE_SKIP_SET_EVENT_ON_HANDLE);
+  return 1;
+}
+
+// Prepares an operation; once the system says it is pending, op_wait makes
+// the loop wait for it (unless `unref`).
+static void op_begin(NetOp *op, void (*done)(TzWork *), int unref) {
+  memset(&op->ov, 0, sizeof op->ov);
+  op->work.done = done;
+  op->work.work = NULL;
+  op->work.turns = 1;
+  op->work.unref = (uint32_t)unref;
+  op->bytes = 0;
+  op->error = 0;
+  op->active = 1;
+}
+
+static void op_wait(NetOp *op) { tz_io_begin(&op->work); }
+
+// The error of an operation the port gave back as failed.
+static int32_t op_error(NetOp *op, SOCKET s, int closed) {
+  if (!op->error)
+    return 0;
+  if (closed)
+    return ERROR_OPERATION_ABORTED;
+  DWORD bytes = 0, flags = 0;
+  if (WSAGetOverlappedResult(s, &op->ov, &bytes, FALSE, &flags))
+    return 0;
+  int32_t error = WSAGetLastError();
+  return error ? error : WSAECONNRESET;
+}
+
+//===----------------------------------------------------------------------===//
+// Connections
+//===----------------------------------------------------------------------===//
+
+static NetConn *conn_new(SOCKET s) {
+  NetConn *c = (NetConn *)tz_obj_alloc(sizeof(NetConn));
+  memset(c, 0, sizeof *c);
+  c->rc = 1;
+  c->layout = &conn_layout;
+  c->s = s;
+  c->last_active = net_now();
+  BOOL yes = TRUE;
+  setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&yes, sizeof yes);
+  return c;
+}
+
+static void conn_free(NetConn *c) {
+  if (c->listener) {
+    if (c->prev)
+      c->prev->next = c->next;
+    else
+      c->listener->conns = c->next;
+    if (c->next)
+      c->next->prev = c->prev;
+  }
+  tz_free(c->in);
+  tz_free(c->out);
+  tz_free(c->flight);
+  tz_obj_free(c);
+}
+
+void tz_http_release(NetConn *c); // http.c: what HTTP holds
+
+static void close_socket(NetConn *c) {
+  if (c->closed)
+    return;
+  c->closed = 1;
+  closesocket(c->s);
+}
+
+// Frees an orphan once no operation waits.
+static void conn_settle(NetConn *c) {
+  if (c->orphan && c->ops == 0)
+    conn_free(c);
+}
+
+static void conn_drop(void *object) {
+  NetConn *c = (NetConn *)object;
+  tz_http_release(c);
+  if (c->drain) {
+    TzPromise *p = c->drain;
+    c->drain = NULL;
+    tz_obj_release((TzObject *)p);
+  }
+  c->orphan = 1;
+  // What is queued is still written, as a socket of node is ended.
+  if (c->closing && (c->writing || c->out_len)) {
+    if (!c->writing)
+      net_flush(c);
+  } else {
+    close_socket(c);
+  }
+  conn_settle(c);
+}
+
+static void read_done(TzWork *w);
+
+void net_read(NetConn *c) {
+  if (c->reading || c->closed)
+    return;
+  for (;;) {
+    if (c->eof || c->error) {
+      c->on_input(c);
+      return;
+    }
+    // Room for more: what is unused moves to the start; then the buffer
+    // grows.
+    if (c->in_start == c->in_end)
+      c->in_start = c->in_end = 0;
+    if (c->in_cap - c->in_end < 4096) {
+      if (c->in_start > 0) {
+        memmove(c->in, c->in + c->in_start, c->in_end - c->in_start);
+        c->in_end -= c->in_start;
+        c->in_start = 0;
+      }
+      if (c->in_cap - c->in_end < 4096) {
+        uint32_t cap = c->in_cap ? c->in_cap * 2 : NET_INPUT;
+        uint8_t *in = (uint8_t *)tz_alloc(cap);
+        if (c->in_end)
+          memcpy(in, c->in, c->in_end);
+        tz_free(c->in);
+        c->in = in;
+        c->in_cap = cap;
+      }
+    }
+    WSABUF buf = {c->in_cap - c->in_end, (char *)(c->in + c->in_end)};
+    DWORD got = 0, flags = 0;
+    op_begin(&c->rop, read_done, 0);
+    c->reading = 1;
+    ++c->ops;
+    int rc = WSARecv(c->s, &buf, 1, &got, &flags, &c->rop.ov, NULL);
+    if (rc == SOCKET_ERROR && WSAGetLastError() == WSA_IO_PENDING) {
+      op_wait(&c->rop);
+      return;
+    }
+    // Done at once: the port gets nothing.
+    --c->ops;
+    c->reading = 0;
+    if (rc == SOCKET_ERROR) {
+      c->error = WSAGetLastError();
+      continue;
+    }
+    c->last_active = net_now();
+    if (got == 0)
+      c->eof = 1;
+    c->in_end += got;
+    c->on_input(c);
+    return;
+  }
+}
+
+static void read_done(TzWork *w) {
+  NetConn *c = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetConn, rop);
+  --c->ops;
+  c->reading = 0;
+  if (c->orphan) {
+    conn_settle(c);
+    return;
+  }
+  int32_t error = op_error(&c->rop, c->s, c->closed);
+  if (error) {
+    c->error = error;
+  } else {
+    c->last_active = net_now();
+    if (c->rop.bytes == 0)
+      c->eof = 1;
+    c->in_end += c->rop.bytes;
+  }
+  ++c->rc; // what runs may let go of it
+  c->on_input(c);
+  tz_instance_release((TzInstance *)c);
+}
+
+uint8_t *net_reserve(NetConn *c, size_t length) {
+  if (c->out_len + length > c->out_cap) {
+    size_t cap = c->out_cap + c->out_cap / 2 + 4096;
+    if (cap < c->out_len + length)
+      cap = c->out_len + length;
+    uint8_t *out = (uint8_t *)tz_alloc(cap);
+    if (c->out_len)
+      memcpy(out, c->out, c->out_len);
+    tz_free(c->out);
+    c->out = out;
+    c->out_cap = (uint32_t)cap;
+  }
+  return c->out + c->out_len;
+}
+
+void net_wrote(NetConn *c, size_t length) { c->out_len += (uint32_t)length; }
+
+void net_write(NetConn *c, const void *data, size_t length) {
+  if (c->closed || c->error || !length)
+    return;
+  memcpy(net_reserve(c, length), data, length);
+  c->out_len += (uint32_t)length;
+}
+
+size_t net_pending_output(const NetConn *c) { return (size_t)c->out_len + c->flight_len; }
+
+static void write_done(TzWork *w);
+
+// The output below the high-water mark: what waits for that goes on.
+static void drained(NetConn *c) {
+  if (c->drain && (net_pending_output(c) < NET_HIGH_WATER_MARK || c->closed || c->error))
+    net_fulfill(&c->drain, NULL, 0);
+}
+
+static void finish_close(NetConn *c) {
+  if (c->closing && !c->writing && c->out_len == 0) {
+    shutdown(c->s, SD_SEND);
+    close_socket(c);
+  }
+}
+
+void net_flush(NetConn *c) {
+  while (!c->writing && c->out_len && !c->closed && !c->error) {
+    // The queue goes out as it is; the next fills the other buffer.
+    uint8_t *data = c->out;
+    uint32_t cap = c->out_cap;
+    c->out = c->flight;
+    c->out_cap = c->flight_cap;
+    c->flight = data;
+    c->flight_cap = cap;
+    c->flight_len = c->out_len;
+    c->out_len = 0;
+    WSABUF buf = {c->flight_len, (char *)c->flight};
+    DWORD sent = 0;
+    op_begin(&c->wop, write_done, 0);
+    c->writing = 1;
+    ++c->ops;
+    int rc = WSASend(c->s, &buf, 1, &sent, 0, &c->wop.ov, NULL);
+    if (rc == SOCKET_ERROR && WSAGetLastError() == WSA_IO_PENDING) {
+      op_wait(&c->wop);
+      return;
+    }
+    --c->ops;
+    c->writing = 0;
+    c->flight_len = 0;
+    if (rc == SOCKET_ERROR)
+      c->error = WSAGetLastError();
+    c->last_active = net_now();
+  }
+  if (c->error) {
+    c->out_len = 0;
+    if (c->closing)
+      close_socket(c);
+  }
+  drained(c);
+  finish_close(c);
+}
+
+static void write_done(TzWork *w) {
+  NetConn *c = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetConn, wop);
+  --c->ops;
+  c->writing = 0;
+  c->flight_len = 0;
+  int32_t error = op_error(&c->wop, c->s, c->closed);
+  if (error && !c->error)
+    c->error = error;
+  c->last_active = net_now();
+  if (c->orphan && (c->error || c->closed || !c->closing)) {
+    close_socket(c);
+    conn_settle(c);
+    return;
+  }
+  ++c->rc;
+  net_flush(c);
+  if (c->orphan && !c->writing) {
+    close_socket(c);
+    tz_instance_release((TzInstance *)c);
+    return;
+  }
+  tz_instance_release((TzInstance *)c);
+}
+
+void net_close(NetConn *c) {
+  if (c->closed)
+    return;
+  c->closing = 1;
+  if (c->writing || c->out_len)
+    net_flush(c);
+  else
+    finish_close(c);
+}
+
+void net_abort(NetConn *c) {
+  c->out_len = 0;
+  close_socket(c);
+}
+
+// `__tz_net_close(c)`: ends the connection once what is queued is written.
+void tz_net_close(void *conn, TzMaker make) {
+  (void)make;
+  net_close((NetConn *)conn);
+}
+
+//===----------------------------------------------------------------------===//
+// Addresses
+//===----------------------------------------------------------------------===//
+
+// The text of an address, as node shows it: "127.0.0.1", "::1".
+static void address_text(const SOCKADDR *sa, char *out, size_t size) {
+  out[0] = 0;
+  if (sa->sa_family == AF_INET)
+    inet_ntop(AF_INET, &((const SOCKADDR_IN *)sa)->sin_addr, out, size);
+  else if (sa->sa_family == AF_INET6)
+    inet_ntop(AF_INET6, &((const SOCKADDR_IN6 *)sa)->sin6_addr, out, size);
+}
+
+static int address_port(const SOCKADDR *sa) {
+  return ntohs(sa->sa_family == AF_INET ? ((const SOCKADDR_IN *)sa)->sin_port
+                                        : ((const SOCKADDR_IN6 *)sa)->sin6_port);
+}
+
+// The ASCII of a string the program gave (a name of a host, an address);
+// false if it holds other characters, which no such name has after the URL
+// parser made it ASCII.
+static int ascii_of(void *obj, uint64_t meta, char *out, size_t size) {
+  TzStr s = {obj, meta};
+  uint32_t length;
+  int two;
+  const void *units = tz_str_units(&s, &length, &two);
+  if (length + 1 > size)
+    return 0;
+  for (uint32_t i = 0; i < length; ++i) {
+    uint32_t c = two ? ((const uint16_t *)units)[i] : ((const uint8_t *)units)[i];
+    if (c == 0 || c >= 0x80)
+      return 0;
+    out[i] = (char)c;
+  }
+  out[length] = 0;
+  return 1;
+}
+
+// An address written as one: "127.0.0.1", "::1", "[::1]".
+static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int *length) {
+  memset(out, 0, sizeof *out);
+  char text[256];
+  size_t n = strlen(host);
+  if (n >= sizeof text)
+    return 0;
+  if (n >= 2 && host[0] == '[' && host[n - 1] == ']') {
+    memcpy(text, host + 1, n - 2);
+    text[n - 2] = 0;
+  } else {
+    memcpy(text, host, n + 1);
+  }
+  SOCKADDR_IN *v4 = (SOCKADDR_IN *)out;
+  if (inet_pton(AF_INET, text, &v4->sin_addr) == 1) {
+    v4->sin_family = AF_INET;
+    v4->sin_port = htons((u_short)port);
+    *length = sizeof(SOCKADDR_IN);
+    return 1;
+  }
+  SOCKADDR_IN6 *v6 = (SOCKADDR_IN6 *)out;
+  if (inet_pton(AF_INET6, text, &v6->sin6_addr) == 1) {
+    v6->sin6_family = AF_INET6;
+    v6->sin6_port = htons((u_short)port);
+    *length = sizeof(SOCKADDR_IN6);
+    return 1;
+  }
+  return 0;
+}
+
+//===----------------------------------------------------------------------===//
+// Listening
+//===----------------------------------------------------------------------===//
+
+static void listener_free(NetListener *l) {
+  for (NetConn *c = l->conns; c; c = c->next)
+    c->listener = NULL;
+  tz_obj_free(l);
+}
+
+static void listener_close(NetListener *l) {
+  if (l->closed)
+    return;
+  l->closed = 1;
+  closesocket(l->s);
+  if (l->accepting != INVALID_SOCKET && !l->ops) {
+    closesocket(l->accepting);
+    l->accepting = INVALID_SOCKET;
+  }
+}
+
+static void listener_drop(void *object) {
+  NetListener *l = (NetListener *)object;
+  listener_close(l);
+  if (l->pending) {
+    TzPromise *p = l->pending;
+    l->pending = NULL;
+    tz_obj_release((TzObject *)p);
+  }
+  l->orphan = 1;
+  if (!l->ops)
+    listener_free(l);
+}
+
+// `__tz_net_listen(host, port, maxBody)`: a listener on the address, or a
+// SystemError as node's: "listen EADDRINUSE: address already in use
+// 0.0.0.0:3000".
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+                    TzMaker make) {
+  start();
+  tz_net_make = make;
+  char host[256];
+  if (!ascii_of(host_obj, host_meta, host, sizeof host)) {
+    tz_throw(TZ_TYPE_ERROR, "the hostname to listen on must be ASCII");
+    return NULL;
+  }
+  SOCKADDR_STORAGE address;
+  int length = 0;
+  if (!parse_literal(host, port, &address, &length)) {
+    // A name: its first address, found now, as node does before it listens.
+    ADDRINFOW hints, *found = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    wchar_t wide[256];
+    MultiByteToWideChar(CP_UTF8, 0, host, -1, wide, 256);
+    int rc = GetAddrInfoW(wide, NULL, &hints, &found);
+    if (rc != 0 || !found) {
+      tz_thrown = net_system_error(make, NET_NOT_FOUND, "getaddrinfo", host, 0);
+      return NULL;
+    }
+    // IPv4 first, as for connections (see sort_addresses).
+    ADDRINFOW *pick = found;
+    for (ADDRINFOW *a = found; a; a = a->ai_next)
+      if (a->ai_family == AF_INET) {
+        pick = a;
+        break;
+      }
+    memcpy(&address, pick->ai_addr, pick->ai_addrlen);
+    length = (int)pick->ai_addrlen;
+    ((SOCKADDR_IN *)&address)->sin_port = htons((u_short)port); // same place in v6
+    FreeAddrInfoW(found);
+  }
+  char where[300];
+  char text[64];
+  address_text((SOCKADDR *)&address, text, sizeof text);
+  snprintf(where, sizeof where, "%s:%d", text, port);
+  int family = address.ss_family;
+  SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
+                        WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+  if (s == INVALID_SOCKET) {
+    tz_thrown = net_system_error(make, WSAGetLastError(), "listen", where, 1);
+    return NULL;
+  }
+  if (family == AF_INET6) {
+    // "::" takes IPv4 too, as in node.
+    DWORD no = 0;
+    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&no, sizeof no);
+  }
+  // Another program may not take the port while this one has it.
+  BOOL yes = TRUE;
+  setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&yes, sizeof yes);
+  if (bind(s, (SOCKADDR *)&address, length) == SOCKET_ERROR ||
+      listen(s, 511) == SOCKET_ERROR || !attach(s)) {
+    int error = WSAGetLastError();
+    closesocket(s);
+    tz_thrown = net_system_error(make, error, "listen", where, 1);
+    return NULL;
+  }
+  load_extensions(s);
+  NetListener *l = (NetListener *)tz_obj_alloc(sizeof(NetListener));
+  memset(l, 0, sizeof *l);
+  l->rc = 1;
+  l->layout = &listener_layout;
+  l->s = s;
+  l->accepting = INVALID_SOCKET;
+  l->family = family;
+  l->max_body = max_body;
+  SOCKADDR_STORAGE bound;
+  int bound_length = sizeof bound;
+  getsockname(s, (SOCKADDR *)&bound, &bound_length);
+  l->port = address_port((SOCKADDR *)&bound);
+  return l;
+}
+
+int32_t tz_net_listener_port(void *listener, TzMaker make) {
+  (void)make;
+  return ((NetListener *)listener)->port;
+}
+
+static void accept_done(TzWork *w);
+static void accepted(NetListener *l, int32_t error);
+
+// Accepts with AcceptEx into a new socket.
+static void accept_next(NetListener *l) {
+  for (;;) {
+    if (l->closed) {
+      void *none = NULL;
+      if (l->pending)
+        net_fulfill(&l->pending, &none, sizeof none);
+      return;
+    }
+    l->accepting = WSASocketW(l->family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
+                              WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+    if (l->accepting == INVALID_SOCKET) {
+      void *none = NULL;
+      net_fulfill(&l->pending, &none, sizeof none);
+      return;
+    }
+    DWORD got = 0;
+    op_begin(&l->aop, accept_done, 0);
+    ++l->ops;
+    BOOL ok = tz_net_accept_ex(l->s, l->accepting, l->addresses, 0, sizeof(SOCKADDR_STORAGE) + 16,
+                               sizeof(SOCKADDR_STORAGE) + 16, &got, &l->aop.ov);
+    if (!ok && WSAGetLastError() == ERROR_IO_PENDING) {
+      op_wait(&l->aop);
+      return;
+    }
+    --l->ops;
+    if (!ok) {
+      // The other side gave up meanwhile (WSAECONNRESET): the next one.
+      closesocket(l->accepting);
+      l->accepting = INVALID_SOCKET;
+      continue;
+    }
+    accepted(l, 0);
+    return;
+  }
+}
+
+static void accept_done(TzWork *w) {
+  NetListener *l = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetListener, aop);
+  --l->ops;
+  accepted(l, op_error(&l->aop, l->s, l->closed));
+}
+
+// AcceptEx gave a connection, or failed.
+static void accepted(NetListener *l, int32_t error) {
+  SOCKET s = l->accepting;
+  l->accepting = INVALID_SOCKET;
+  if (l->orphan) {
+    closesocket(s);
+    if (!l->ops)
+      listener_free(l);
+    return;
+  }
+  if (error || l->closed) {
+    closesocket(s);
+    if (l->closed) {
+      void *none = NULL;
+      if (l->pending)
+        net_fulfill(&l->pending, &none, sizeof none);
+      return;
+    }
+    accept_next(l); // the other side gave up meanwhile
+    return;
+  }
+  setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (const char *)&l->s, sizeof l->s);
+  if (!attach(s)) {
+    closesocket(s);
+    accept_next(l);
+    return;
+  }
+  NetConn *c = conn_new(s);
+  c->server = 1;
+  c->listener = l;
+  c->next = l->conns;
+  if (l->conns)
+    l->conns->prev = c;
+  l->conns = c;
+  c->http.max_body = l->max_body;
+  net_fulfill(&l->pending, &c, sizeof c);
+}
+
+// `__tz_net_accept(listener)`: the next connection, or undefined once the
+// listener is closed.
+void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
+  NetListener *l = (NetListener *)listener;
+  tz_net_make = make;
+  tz_ref_retain(p); // it may be a member of a group (async.c)
+  l->pending = p;
+  accept_next(l);
+}
+
+// `__tz_net_closeListener(listener)`: stops accepting; what waits for the
+// next connection gets undefined.
+void tz_net_close_listener(void *listener, TzMaker make) {
+  (void)make;
+  listener_close((NetListener *)listener);
+}
+
+// `__tz_net_sweep(listener, idle)`: closes the connections that wait for a
+// request longer than `idle` ms, as node's keepAliveTimeout; with `idle`
+// zero, all of them that wait (server.stop()). Gives how many are left.
+int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+  (void)make;
+  NetListener *l = (NetListener *)listener;
+  double now = net_now();
+  int32_t left = 0;
+  for (NetConn *c = l->conns; c; c = c->next) {
+    if (c->closed)
+      continue;
+    if (!c->busy && !c->writing && (idle == 0 || now - c->last_active >= idle)) {
+      net_abort(c);
+      continue;
+    }
+    ++left;
+  }
+  return left;
+}
+
+//===----------------------------------------------------------------------===//
+// Connecting
+//===----------------------------------------------------------------------===//
+
+// A connection being made: the names of the host looked up, then each
+// address tried in turn.
+typedef struct Connect {
+  NetOp op; // first: the name looked up (posted by hand), then ConnectEx
+  TzPromise *promise;
+  TzMaker make;
+  char host[256];
+  int port;
+  SOCKADDR_STORAGE addresses[16];
+  int lengths[16];
+  int count, next;
+  NetConn *conn;
+  // The first failure, which the error shows (of the first address, as
+  // node shows it), and the address it was of.
+  int32_t error;
+  int failed_at;
+  TzSignal *signal;
+  TzAbortListener abort;
+  // GetAddrInfoExW
+  ADDRINFOEXW *found;
+  HANDLE cancel;
+  int looking;
+  int done; // the promise settled; free once nothing waits
+} Connect;
+
+static void connect_free(Connect *r) {
+  if (r->signal) {
+    tz_signal_unlisten(&r->abort);
+    tz_instance_release((TzInstance *)r->signal);
+  }
+  if (r->conn) {
+    r->conn->orphan = 1;
+    close_socket(r->conn);
+    conn_settle(r->conn);
+  }
+  if (r->promise)
+    tz_obj_release((TzObject *)r->promise);
+  tz_free(r);
+}
+
+static void connect_fail(Connect *r, int32_t error) {
+  char where[300];
+  char text[64];
+  const char *what = r->host;
+  if (r->count > 0) {
+    address_text((SOCKADDR *)&r->addresses[r->failed_at], text, sizeof text);
+    snprintf(where, sizeof where, "%s:%d", text, r->port);
+    what = where;
+  }
+  void *e = error == NET_NOT_FOUND || error == NET_TRY_AGAIN
+                ? net_system_error(r->make, error, "getaddrinfo", r->host, 0)
+                : net_system_error(r->make, error, "connect", what, 0);
+  net_reject(&r->promise, e);
+}
+
+static void connect_done(TzWork *w);
+static void connected(Connect *r, int32_t error);
+
+// IPv4 first, then IPv6, each in the order given: a server on "0.0.0.0" is
+// reached through "localhost", which names "::1" first on Windows.
+static void sort_addresses(Connect *r) {
+  SOCKADDR_STORAGE sorted[16];
+  int lengths[16], n = 0;
+  for (int pass = 0; pass < 2; ++pass)
+    for (int i = 0; i < r->count; ++i)
+      if ((r->addresses[i].ss_family == AF_INET) == (pass == 0)) {
+        sorted[n] = r->addresses[i];
+        lengths[n++] = r->lengths[i];
+      }
+  memcpy(r->addresses, sorted, sizeof(SOCKADDR_STORAGE) * (size_t)n);
+  memcpy(r->lengths, lengths, sizeof(int) * (size_t)n);
+}
+
+// The attempt at the address just tried failed.
+static void attempt_failed(Connect *r, int32_t error) {
+  if (r->error)
+    return;
+  r->error = error;
+  r->failed_at = r->next - 1;
+}
+
+// Whether an address is of this machine, where a refused connection need
+// not be tried again: Windows tries a SYN three times, two seconds in all.
+static int is_loopback(const SOCKADDR_STORAGE *a) {
+  if (a->ss_family == AF_INET)
+    return ((const uint8_t *)&((const SOCKADDR_IN *)a)->sin_addr)[0] == 127;
+  return IN6_IS_ADDR_LOOPBACK(&((const SOCKADDR_IN6 *)a)->sin6_addr);
+}
+
+// Tries the next address.
+static void connect_next(Connect *r) {
+  while (r->next < r->count) {
+    SOCKADDR_STORAGE *address = &r->addresses[r->next];
+    int length = r->lengths[r->next++];
+    if (r->conn) {
+      r->conn->orphan = 1;
+      close_socket(r->conn);
+      conn_settle(r->conn);
+      r->conn = NULL;
+    }
+    SOCKET s = WSASocketW(address->ss_family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
+                          WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+    if (s == INVALID_SOCKET) {
+      attempt_failed(r, WSAGetLastError());
+      continue;
+    }
+    if (is_loopback(address)) {
+      // As libuv does, so that a port nothing listens on fails at once.
+      TCP_INITIAL_RTO_PARAMETERS rto;
+      memset(&rto, 0, sizeof rto);
+      rto.Rtt = TCP_INITIAL_RTO_UNSPECIFIED_RTT;
+      rto.MaxSynRetransmissions = TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS;
+      DWORD bytes;
+      WSAIoctl(s, SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &bytes, NULL, NULL);
+    }
+    // ConnectEx wants a bound socket.
+    SOCKADDR_STORAGE any;
+    memset(&any, 0, sizeof any);
+    any.ss_family = address->ss_family;
+    if (bind(s, (SOCKADDR *)&any, length) == SOCKET_ERROR || !attach(s)) {
+      attempt_failed(r, WSAGetLastError());
+      closesocket(s);
+      continue;
+    }
+    load_extensions(s);
+    r->conn = conn_new(s);
+    op_begin(&r->op, connect_done, 0);
+    ++r->conn->ops;
+    BOOL ok = tz_net_connect_ex(s, (SOCKADDR *)address, length, NULL, 0, NULL, &r->op.ov);
+    if (!ok && WSAGetLastError() == ERROR_IO_PENDING) {
+      op_wait(&r->op);
+      return;
+    }
+    --r->conn->ops;
+    if (!ok) {
+      attempt_failed(r, WSAGetLastError());
+      continue;
+    }
+    connected(r, 0);
+    return;
+  }
+  connect_fail(r, r->error ? r->error : WSAECONNREFUSED);
+  connect_free(r);
+}
+
+static void connect_done(TzWork *w) {
+  Connect *r = (Connect *)CONTAINING_RECORD(w, NetOp, work);
+  --r->conn->ops;
+  connected(r, op_error(&r->op, r->conn->s, r->conn->closed));
+}
+
+// ConnectEx made the connection, or failed.
+static void connected(Connect *r, int32_t error) {
+  NetConn *c = r->conn;
+  if (r->done) { // aborted meanwhile
+    connect_free(r);
+    return;
+  }
+  if (error) {
+    attempt_failed(r, error);
+    connect_next(r);
+    return;
+  }
+  setsockopt(c->s, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
+  r->conn = NULL;
+  net_fulfill(&r->promise, &c, sizeof c);
+  connect_free(r);
+}
+
+// The names of the host came (posted to the port by found_names).
+static void names_done(TzWork *w) {
+  Connect *r = (Connect *)CONTAINING_RECORD(w, NetOp, work);
+  r->looking = 0;
+  if (r->done) {
+    if (r->found)
+      FreeAddrInfoExW(r->found);
+    connect_free(r);
+    return;
+  }
+  int32_t error = r->op.error;
+  r->count = 0;
+  for (ADDRINFOEXW *a = r->found; a && r->count < 16; a = a->ai_next) {
+    if ((a->ai_family != AF_INET && a->ai_family != AF_INET6) ||
+        a->ai_addrlen > sizeof(SOCKADDR_STORAGE))
+      continue;
+    memcpy(&r->addresses[r->count], a->ai_addr, a->ai_addrlen);
+    ((SOCKADDR_IN *)&r->addresses[r->count])->sin_port = htons((u_short)r->port);
+    r->lengths[r->count++] = (int)a->ai_addrlen;
+  }
+  if (r->found)
+    FreeAddrInfoExW(r->found);
+  r->found = NULL;
+  if (r->count == 0) {
+    connect_fail(r, error == WSATRY_AGAIN ? NET_TRY_AGAIN : NET_NOT_FOUND);
+    connect_free(r);
+    return;
+  }
+  sort_addresses(r);
+  connect_next(r);
+}
+
+static void names_posted(OVERLAPPED_ENTRY *entry) {
+  NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
+  tz_io_due(&op->work);
+}
+
+// On a thread of the system: only posts the result to the port.
+static void CALLBACK found_names(DWORD error, DWORD bytes, LPWSAOVERLAPPED overlapped) {
+  (void)bytes;
+  NetOp *op = CONTAINING_RECORD(overlapped, NetOp, ov);
+  op->error = (int32_t)error;
+  PostQueuedCompletionStatus((HANDLE)tz_io_port_handle(), 0, (ULONG_PTR)names_posted, overlapped);
+}
+
+static void abort_connect(TzAbortListener *l) {
+  Connect *r = CONTAINING_RECORD(l, Connect, abort);
+  // The promise is rejected with the reason, as fetch is; what waits for the
+  // system ends when it is done.
+  net_reject(&r->promise, tz_signal_reason(r->signal));
+  r->done = 1;
+  if (r->looking && r->cancel)
+    GetAddrInfoExCancel(&r->cancel);
+  if (r->conn)
+    close_socket(r->conn);
+}
+
+
+// `__tz_net_connect(host, port, signal)`: a connection to the host, or a
+// SystemError as node's: "connect ECONNREFUSED 127.0.0.1:1",
+// "getaddrinfo ENOTFOUND example.invalid".
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
+                    TzMaker make) {
+  start();
+  tz_net_make = make;
+  Connect *r = (Connect *)tz_alloc(sizeof(Connect));
+  memset(r, 0, sizeof *r);
+  tz_ref_retain(p); // it may be a member of a group (async.c)
+  r->promise = p;
+  r->make = make;
+  r->port = port;
+  if (!ascii_of(host_obj, host_meta, r->host, sizeof r->host)) {
+    net_reject(&r->promise, net_error(TZ_TYPE_ERROR, "the host name must be ASCII", NULL));
+    connect_free(r);
+    return;
+  }
+  if (signal) {
+    if (tz_signal_aborted(signal)) {
+      net_reject(&r->promise, tz_signal_reason(signal));
+      connect_free(r);
+      return;
+    }
+    tz_ref_retain(signal); // a member of a group (signal.c)
+    r->signal = (TzSignal *)signal;
+    r->abort.run = abort_connect;
+    tz_signal_listen(r->signal, &r->abort);
+  }
+  int length;
+  if (parse_literal(r->host, port, &r->addresses[0], &length)) {
+    r->lengths[0] = length;
+    r->count = 1;
+    connect_next(r);
+    return;
+  }
+  // "localhost" is the machine itself, without asking (RFC 6761).
+  if (_stricmp(r->host, "localhost") == 0) {
+    parse_literal("127.0.0.1", port, &r->addresses[0], &r->lengths[0]);
+    parse_literal("::1", port, &r->addresses[1], &r->lengths[1]);
+    r->count = 2;
+    connect_next(r);
+    return;
+  }
+  wchar_t wide[256];
+  MultiByteToWideChar(CP_UTF8, 0, r->host, -1, wide, 256);
+  ADDRINFOEXW hints;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+  op_begin(&r->op, names_done, 0);
+  r->looking = 1;
+  INT rc = GetAddrInfoExW(wide, NULL, NS_ALL, NULL, &hints, &r->found, NULL, &r->op.ov,
+                          found_names, &r->cancel);
+  if (rc == WSA_IO_PENDING) {
+    op_wait(&r->op);
+    return;
+  }
+  // Done at once: as if it came back.
+  r->op.error = rc;
+  names_done(&r->op.work);
+}
+
+#else // !_WIN32
+
+//===----------------------------------------------------------------------===//
+// Other systems: not yet
+//===----------------------------------------------------------------------===//
+
+// TODO(linux): sockets on epoll and a resolver of our own (docs/net.md).
+static void unsupported(void) {
+  tz_throw(TZ_ERROR, "networking is not supported on this system yet (docs/net.md, step 1)");
+}
+
+void net_read(NetConn *c) { (void)c; }
+void net_write(NetConn *c, const void *data, size_t length) {
+  (void)c;
+  (void)data;
+  (void)length;
+}
+void net_flush(NetConn *c) { (void)c; }
+uint8_t *net_reserve(NetConn *c, size_t length) {
+  (void)c;
+  (void)length;
+  return NULL;
+}
+void net_wrote(NetConn *c, size_t length) {
+  (void)c;
+  (void)length;
+}
+size_t net_pending_output(const NetConn *c) {
+  (void)c;
+  return 0;
+}
+void net_close(NetConn *c) { (void)c; }
+void net_abort(NetConn *c) { (void)c; }
+void tz_net_close(void *conn, TzMaker make) {
+  (void)conn;
+  (void)make;
+}
+void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
+                    TzMaker make) {
+  (void)host_obj;
+  (void)host_meta;
+  (void)port;
+  (void)max_body;
+  (void)make;
+  unsupported();
+  return NULL;
+}
+int32_t tz_net_listener_port(void *listener, TzMaker make) {
+  (void)listener;
+  (void)make;
+  return 0;
+}
+void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
+  (void)listener;
+  (void)make;
+  unsupported();
+  void *error = tz_thrown;
+  tz_thrown = NULL;
+  tz_promise_reject(p, error);
+}
+void tz_net_close_listener(void *listener, TzMaker make) {
+  (void)listener;
+  (void)make;
+}
+int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+  (void)listener;
+  (void)idle;
+  (void)make;
+  return 0;
+}
+void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
+                    TzMaker make) {
+  (void)host_obj;
+  (void)host_meta;
+  (void)port;
+  (void)signal;
+  (void)make;
+  unsupported();
+  void *error = tz_thrown;
+  tz_thrown = NULL;
+  tz_promise_reject(p, error);
+}
+
+#endif

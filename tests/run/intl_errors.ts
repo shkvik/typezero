@@ -1,0 +1,80 @@
+// same-as-node
+// The errors of Intl that only the running program shows, as JavaScript
+// throws them: a locale, a value of an option, a unit or a code that is not
+// one, options that do not go together. (Written in the code, they are
+// errors of compilation: tests/errors/intl.ts.)
+function v(s: string): string {
+  return s
+}
+function n(x: number): number {
+  return x
+}
+function t(f: () => string) {
+  try {
+    console.log(f())
+  } catch (e) {
+    console.log(`${e.name}: ${e.message}`)
+  }
+}
+t(() => { const made = new Intl.NumberFormat("en", { style: v("currency") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { style: "currency", currency: v("US") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { style: "unit", unit: v("parsec") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { minimumFractionDigits: n(3), maximumFractionDigits: 1 }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { maximumFractionDigits: n(101) }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { style: v("bogus") }); return "made" })
+t(() => "a".normalize(v("X")))
+t(() => new Intl.RelativeTimeFormat("en").format(1, v("decade")))
+t(() => new Intl.RelativeTimeFormat("en").format(n(NaN), "day"))
+t(() => new Intl.DisplayNames("en", { type: "region" }).of(v("12345")) ?? "undefined")
+t(() => { const made = new Intl.Collator(v("en_US")); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { roundingIncrement: n(3) }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { roundingIncrement: 5 }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { roundingIncrement: 5, maximumSignificantDigits: 2 }); return "made" })
+t(() => `${Intl.getCanonicalLocales(v("en_US"))}`)
+t(() => { const made = new Intl.PluralRules("en", { type: v("x") }); return "made" })
+t(() => { const made = new Intl.Segmenter("en", { granularity: v("line") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { style: "unit", unit: v("") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { numberingSystem: v("a") }); return "made" })
+t(() => new Intl.NumberFormat("en", { numberingSystem: v("bogus") }).resolvedOptions().numberingSystem)
+t(() => new Intl.NumberFormat(v("en-u-nu-bogus")).resolvedOptions().locale)
+t(() => new Intl.NumberFormat(v("en-u-nu-arab")).resolvedOptions().locale)
+t(() => new Intl.NumberFormat(v("en-u-nu-arab"), { numberingSystem: "arab" }).resolvedOptions().locale)
+t(() => new Intl.NumberFormat(v("en-u-nu-arab"), { numberingSystem: "thai" }).resolvedOptions().locale)
+t(() => new Intl.NumberFormat(v("en-u-nu-arab"), { numberingSystem: "thai" }).format(12))
+t(() => { const made = new Intl.NumberFormat("en", { useGrouping: v("x") }); return "made" })
+t(() => `${new Intl.NumberFormat("en", { useGrouping: "true" }).resolvedOptions().useGrouping}`)
+t(() => `${new Intl.NumberFormat("en", { useGrouping: true }).resolvedOptions().useGrouping}`)
+t(() => `${new Intl.NumberFormat("en", { notation: "compact", useGrouping: "true" }).resolvedOptions().useGrouping}`)
+t(() => { const made = new Intl.NumberFormat("en", { roundingIncrement: 5, minimumFractionDigits: 2 }); return "made" })
+t(() => new Intl.NumberFormat("en", { roundingIncrement: 5, maximumFractionDigits: 0 }).format(12))
+t(() => { const made = new Intl.NumberFormat("en", { minimumIntegerDigits: n(0) }); return "made" })
+t(() => new Intl.NumberFormat("en", { minimumIntegerDigits: 2.7 }).format(5))
+t(() => { const made = new Intl.NumberFormat("en", { minimumSignificantDigits: n(5), maximumSignificantDigits: 2 }); return "made" })
+t(() => (1).toLocaleString("en", { style: v("bogus") }))
+t(() => (1).toLocaleString(v("en_US")))
+t(() => `${"a".localeCompare("b", "en", { sensitivity: v("x") })}`)
+t(() => { const made = new Intl.Collator("en", { usage: v("x") }); return "made" })
+t(() => { const made = new Intl.Collator("en", { caseFirst: v("x") }); return "made" })
+t(() => new Intl.Collator("en", { collation: v("x") }).resolvedOptions().collation)
+t(() => { const made = new Intl.RelativeTimeFormat("en", { style: v("x") }); return "made" })
+t(() => { const made = new Intl.RelativeTimeFormat("en", { numeric: v("x") }); return "made" })
+t(() => { const made = new Intl.ListFormat("en", { type: v("x") }); return "made" })
+t(() => { const made = new Intl.ListFormat("en", { style: v("x") }); return "made" })
+t(() => { const made = new Intl.DisplayNames("en", { type: v("x") }); return "made" })
+t(() => { const made = new Intl.DisplayNames("en", { type: "region", style: v("x") }); return "made" })
+t(() => { const made = new Intl.DisplayNames("en", { type: "region", fallback: v("x") }); return "made" })
+t(() => `${Intl.NumberFormat.supportedLocalesOf("en", { localeMatcher: v("x") })}`)
+t(() => Intl.NumberFormat("en").format(1))
+t(() => new Intl.NumberFormat("en", { style: "currency", currency: "usd", currencyDisplay: "name" }).format(1))
+t(() => `${new Intl.NumberFormat("en", { style: "currency", currency: "JPY" }).resolvedOptions().maximumFractionDigits}`)
+t(() => new Intl.NumberFormat("en", { style: "currency", currency: "XYZ" }).format(1))
+t(() => new Intl.NumberFormat("en", { style: "unit", unit: "liter-per-kilometer", unitDisplay: "long" }).format(1))
+t(() => new Intl.NumberFormat("en", { style: "currency", currency: "USD", currencySign: "accounting" }).format(-1))
+t(() => { const made = new Intl.NumberFormat("en", { roundingMode: v("x") }); return "made" })
+t(() => { const made = new Intl.NumberFormat("en", { roundingPriority: v("x") }); return "made" })
+
+function percent(x: number, locale: string): string {
+  return x.toLocaleString(locale, { style: "percent" })
+}
+for (const locale of ["ru", "en_GB", "de"])
+  t(() => percent(0.5, locale))

@@ -1,0 +1,40 @@
+// same-as-node
+// Buffer as node has it, with its encodings, and TextEncoder / TextDecoder.
+const s = "héllo€😀"
+for (const enc of ["utf8", "latin1", "ascii", "utf16le", "hex", "base64", "base64url", "binary", "ucs2"]) {
+  const b = Buffer.from(s, enc)
+  console.log(enc, b, JSON.stringify(b.toString(enc)), b.toString("hex"))
+}
+console.log(Buffer.from("zz4142", "hex"), Buffer.from("414", "hex"), Buffer.from("SGk", "base64"), Buffer.from("S G k=\n", "base64"), Buffer.from("-_8", "base64"), Buffer.from("+/8=", "base64url"))
+const b = Buffer.from([0xe2, 0x82, 0xac, 0xff, 0x41, 0xc3])
+console.log(b.toString(), b.toString("latin1"), b.toString("utf16le"), b.toString("base64"), b.toString("base64url"))
+console.log(new TextDecoder("latin1").encoding, new TextDecoder("latin1").decode(new Uint8Array([0x80, 0x9f, 0xe9])))
+console.log(new TextDecoder("utf-16le").decode(new Uint8Array([0x41, 0, 0x42])), new TextDecoder("utf-16be").decode(new Uint8Array([0, 0x41])))
+console.log(new TextDecoder().decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x41])), new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x41])).length)
+console.log(Buffer.from([0xef, 0xbb, 0xbf, 0x41]).toString().length)
+console.log(new TextEncoder().encode("\ud800x"), new TextEncoder().encodeInto("héllo", new Uint8Array(3)))
+console.log(Buffer.byteLength("héllo"), Buffer.byteLength("héllo", "latin1"), Buffer.byteLength("aGk=", "base64"), Buffer.byteLength("abc", "hex"))
+console.log(Buffer.compare(Buffer.from("a"), Buffer.from("b")), Buffer.from("abc").compare(Buffer.from("abd")), Buffer.from("abc").equals(Buffer.from("abc")))
+console.log(Buffer.concat([Buffer.from("a"), Buffer.from("bc")]), Buffer.concat([Buffer.from("a"), Buffer.from("bc")], 2), Buffer.concat([Buffer.from("a")], 4))
+const w = Buffer.alloc(8)
+console.log(w.write("hé"), w.write("xy", 5), w.write("abcdef", 6), w.write("41", 0, "hex"), w)
+console.log(Buffer.alloc(5, "ab"), Buffer.alloc(3, 1), Buffer.alloc(4, "41", "hex"), Buffer.from("abc").fill("x", 1))
+const r = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])
+console.log(r.readUInt16LE(0), r.readUInt16BE(0), r.readInt32LE(1), r.readUInt32BE(4), r.readFloatLE(0), r.readDoubleBE(0), r.readInt8(0), r.readUIntBE(0, 3), r.readIntLE(0, 6))
+console.log(r.indexOf(3), r.indexOf(Buffer.from([4, 5])), Buffer.from("hello").indexOf("ll"), Buffer.from("hello").includes("lo"), r.lastIndexOf(8), Buffer.from("hello").indexOf("l", 3))
+console.log(r.subarray(2, 4), r.toJSON(), Buffer.isBuffer(r), Buffer.isBuffer(new Uint8Array(1)), Buffer.isEncoding("UTF8"), Buffer.isEncoding("x"))
+console.log(r.writeUInt16LE(0x1234, 0), r.writeInt32BE(-2, 2), r.writeDoubleLE(1.5, 0), r)
+console.log(Buffer.from("abc").toString("utf8", 1), Buffer.from("abcd").toString("hex", 1, 3), r.copy(Buffer.alloc(3), 1), Buffer.from("ab").reverse())
+console.log(Buffer.from(new Uint16Array([1, 0x102]).buffer), Buffer.from(new Uint16Array([1, 2]).buffer, 2), Buffer.from(Buffer.from("x")))
+console.log(Buffer.from("AbC").toString("ucs2"), Buffer.from("€", "latin1"), Buffer.from("€", "ascii"))
+console.log(Buffer.allocUnsafe(0), Buffer.from([255, 0, 1]), Buffer.from("abc").map(x => (x + 1) & 0xff), Buffer.from("abc").filter(x => x > 97))
+console.log(Buffer.from("abc").subarray(1).toString(), Buffer.from("abc").at(-1), `${Buffer.from("hi")}`, String(Buffer.from("ok")))
+console.log(JSON.stringify(Buffer.from("hi")), Buffer.from("he"), Buffer.alloc(0), Buffer.alloc(60))
+console.log(new TextEncoder(), new TextDecoder(), new TextDecoder("utf-16le", { fatal: true }))
+try {
+  new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0xff]))
+} catch (e) {
+  console.log(e.name, e.message)
+}
+const label = ["foo", "KOI8-R"][1]
+console.log(new TextDecoder(label).decode(new Uint8Array([0xc1, 0xe1])), new TextDecoder("windows-1251").decode(new Uint8Array([0xcf, 0xf0, 0xe8, 0x98])))

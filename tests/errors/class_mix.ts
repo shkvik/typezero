@@ -1,0 +1,60 @@
+// Classes with Results, decimals and generics: the rules of each hold for
+// the others.
+class Store {
+  saved: string[] = []
+  onSave = (s: string) => this.save(s)
+  save(s: string): Result<int, string> {
+    if (s.length == 0) return err("empty")
+    this.saved.push(s)
+    return ok(this.saved.length)
+  }
+  static check(s: string): Result<string, string> {
+    return s.length > 0 ? ok(s) : err("empty")
+  }
+  scale(k: double) {
+    return k
+  }
+  scale(k: decimal) {
+    return k
+  }
+}
+const store = new Store()
+
+// A Result from a method, a static method, an arrow field or a method as a
+// value is not dropped.
+// expect-error: the Result is not used, so an error in it would go unchecked
+store.save("a")
+// expect-error: the Result is not used, so an error in it would go unchecked
+Store.check("b")
+// expect-error: the Result is not used, so an error in it would go unchecked
+store.onSave("c")
+const bound = store.save
+// expect-error: the Result is not used, so an error in it would go unchecked
+bound("d")
+// expect-error: the function returns a Result that 'forEach' drops
+;["x"].forEach(store.save)
+
+// An instance and a Result are always truthy, each with its own hint.
+// expect-error: a Result is always truthy, an Err too
+if (store.save("e")) console.log("saved")
+// expect-error: an object is always truthy, so the condition is always true
+if (store) console.log("store")
+
+// An int or a long fits a double and a decimal equally well, as in C#.
+// expect-error: the call fits several variants of 'scale' equally well: scale(k: double) and scale(k: decimal)
+console.log(store.scale(2))
+const big: long = 2
+// expect-error: the call fits several variants of 'scale' equally well
+console.log(store.scale(big))
+
+// Each copy of a generic function would make its own class for the literal.
+function counter<T>(start: T) {
+  // expect-error: generic function 'counter' cannot return an object literal with methods yet
+  return {
+    value: start,
+    get() {
+      return this.value
+    },
+  }
+}
+console.log(counter(1).get())

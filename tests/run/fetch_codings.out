@@ -1,0 +1,5 @@
+gzip gzip 500 hello, compressed world! 
+deflate deflate 500 hello, compressed world! 
+raw deflate 500 hello, compressed world! 
+br br 500 hello, compressed world! 
+streamed 500

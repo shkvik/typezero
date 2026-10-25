@@ -1,0 +1,245 @@
+#pragma once
+
+// The functions of runtime/crypto*.c that calls of node:crypto become (docs/crypto.md). Sema
+// checks a call and gives it Builtin::Crypto with the number of the function first, as an int
+// literal, and the arguments in the order the function takes them; CodeGen passes each as its
+// kind says and makes the result of what the function gives (codegen_crypto.cpp). The receiver
+// of a method is the object of the callee MemberExpr, the first argument of the function.
+//
+// Kinds of arguments:
+//   d  data: a string, bytes or a KeyObject, as a value of any type (TzType *, void *); NULL
+//      for undefined
+//   s  a string (obj, meta)
+//   i  an int; b a boolean (an int32); f a double
+//   o  a reference: an object of node:crypto, a Buffer, a Json
+//   m  a hash: an int literal names one of kDirectMds, the direct layer; a string is a name the
+//      full layer looks up (tz_openssl_md), whose error is that of createHash (m), of hash() (n)
+//      or of createHmac and the KDFs (h)
+//   c  a cipher: likewise of kDirectCiphers, or a name (tz_openssl_cipher)
+//
+// Kinds of results:
+//   v  nothing; S the receiver (or the first argument), which the call gives back
+//   o  a reference; p one that may be NULL for undefined
+//   s  a string, through a TzStr * the function takes first; q the same, which may be undefined:
+//      the function returns whether there is one
+//   b  a boolean; i an int; j an int, undefined when negative; f a double; t a Date from a
+//      time in milliseconds
+
+#include "llvm/ADT/StringRef.h"
+
+#include <cstddef>
+
+namespace tz {
+
+struct CryptoFunction {
+  const char *name;
+  char result;
+  const char *params;
+};
+
+enum class CryptoFn : unsigned {
+  HashNew,
+  HashUpdate,
+  HashDigest,
+  HashDigestText,
+  HashCopy,
+  HashOnce,
+  HashOnceText,
+  HmacNew,
+  RandomBytes,
+  RandomFill,
+  GetRandomValues,
+  RandomInt,
+  RandomInt32,
+  RandomUuid,
+  TimingSafeEqual,
+  Pbkdf2,
+  Hkdf,
+  Scrypt,
+  Argon2,
+  CipherNew,
+  CipherUpdate,
+  CipherFinal,
+  CipherSetAad,
+  CipherGetAuthTag,
+  CipherSetAuthTag,
+  CipherSetAutoPadding,
+  SecretKey,
+  GenerateSecretKey,
+  KeyType,
+  KeySymmetricSize,
+  KeyAsymmetricType,
+  KeyExportSecret,
+  KeyExportPem,
+  KeyExportDer,
+  KeyExportJwk,
+  KeyEquals,
+  // The full layer.
+  GetHashes,
+  GetCiphers,
+  GetCurves,
+  CreateKey,
+  GenerateKeyPair,
+  PublicOf,
+  Sign,
+  Verify,
+  SignNew,
+  SignFinal,
+  VerifyFinal,
+  EcdhNew,
+  EcdhGenerateKeys,
+  EcdhGetPublicKey,
+  EcdhGetPrivateKey,
+  EcdhSetPrivateKey,
+  EcdhComputeSecret,
+  DiffieHellman,
+  X509New,
+  X509Subject,
+  X509Issuer,
+  X509ValidFrom,
+  X509ValidTo,
+  X509ValidFromDate,
+  X509ValidToDate,
+  X509SerialNumber,
+  X509Fingerprint,
+  X509SubjectAltName,
+  X509InfoAccess,
+  X509KeyUsage,
+  X509Ca,
+  X509Raw,
+  X509Pem,
+  X509PublicKey,
+  X509CheckHost,
+  X509CheckEmail,
+  X509CheckIp,
+  X509CheckIssued,
+  X509CheckPrivateKey,
+  X509Verify,
+};
+
+inline constexpr CryptoFunction kCryptoFunctions[] = {
+    {"tz_crypto_hash_new", 'o', "mf"},
+    {"tz_crypto_hash_update", 'S', "odi"},
+    {"tz_crypto_hash_digest", 'o', "o"},
+    {"tz_crypto_hash_digest_text", 's', "oi"},
+    {"tz_crypto_hash_copy", 'o', "of"},
+    {"tz_crypto_hash_once", 'o', "nd"},
+    {"tz_crypto_hash_once_text", 's', "ndi"},
+    {"tz_crypto_hmac_new", 'o', "hdi"},
+    {"tz_crypto_random_bytes", 'o', "f"},
+    {"tz_crypto_random_fill", 'S', "offi"},
+    {"tz_crypto_get_random_values", 'S', "o"},
+    {"tz_crypto_random_int", 'f', "ff"},
+    {"tz_crypto_random_int32", 'i', "ii"},
+    {"tz_crypto_random_uuid", 's', ""},
+    {"tz_crypto_timing_safe_equal", 'b', "dd"},
+    {"tz_crypto_pbkdf2", 'o', "ddffh"},
+    {"tz_crypto_hkdf", 'o', "hdddf"},
+    {"tz_crypto_scrypt", 'o', "ddfffff"},
+    {"tz_crypto_argon2", 'o', "isddffffdd"},
+    {"tz_crypto_cipher_new", 'o', "cddfb"},
+    {"tz_crypto_cipher_update", 'o', "odi"},
+    {"tz_crypto_cipher_final", 'o', "o"},
+    {"tz_crypto_cipher_set_aad", 'S', "odf"},
+    {"tz_crypto_cipher_get_auth_tag", 'o', "o"},
+    {"tz_crypto_cipher_set_auth_tag", 'S', "odi"},
+    {"tz_crypto_cipher_set_auto_padding", 'S', "ob"},
+    {"tz_crypto_secret_key", 'o', "di"},
+    {"tz_crypto_generate_secret_key", 'o', "bf"},
+    {"tz_crypto_key_type", 's', "o"},
+    {"tz_crypto_key_symmetric_size", 'j', "o"},
+    {"tz_crypto_key_asymmetric_type", 'q', "o"},
+    {"tz_crypto_key_export_secret", 'o', "o"},
+    {"tz_crypto_key_export_pem", 's', "oissd"},
+    {"tz_crypto_key_export_der", 'o', "oissd"},
+    {"tz_crypto_key_export_jwk", 'o', "o"},
+    {"tz_crypto_key_equals", 'b', "oo"},
+    {"tz_openssl_get_hashes", 'o', ""},
+    {"tz_openssl_get_ciphers", 'o', ""},
+    {"tz_openssl_get_curves", 'o', ""},
+    {"tz_openssl_create_key", 'o', "bdiiisd"},
+    {"tz_openssl_generate_key_pair", 'o', "isffis"},
+    {"tz_openssl_public_of", 'o', "o"},
+    {"tz_openssl_sign", 'o', "dddiiii"},
+    {"tz_openssl_verify", 'b', "ddddiiii"},
+    {"tz_openssl_sign_new", 'o', "sb"},
+    {"tz_openssl_sign_final", 'o', "odiiii"},
+    {"tz_openssl_verify_final", 'b', "oddiiiii"},
+    {"tz_openssl_ecdh_new", 'o', "s"},
+    {"tz_openssl_ecdh_generate_keys", 'o', "oi"},
+    {"tz_openssl_ecdh_get_public_key", 'o', "oi"},
+    {"tz_openssl_ecdh_get_private_key", 'o', "o"},
+    {"tz_openssl_ecdh_set_private_key", 'S', "odi"},
+    {"tz_openssl_ecdh_compute_secret", 'o', "odi"},
+    {"tz_openssl_diffie_hellman", 'o', "oo"},
+    {"tz_openssl_x509_new", 'o', "d"},
+    {"tz_openssl_x509_subject", 's', "o"},
+    {"tz_openssl_x509_issuer", 's', "o"},
+    {"tz_openssl_x509_valid_from", 's', "o"},
+    {"tz_openssl_x509_valid_to", 's', "o"},
+    {"tz_openssl_x509_valid_from_date", 't', "o"},
+    {"tz_openssl_x509_valid_to_date", 't', "o"},
+    {"tz_openssl_x509_serial_number", 's', "o"},
+    {"tz_openssl_x509_fingerprint", 's', "oi"},
+    {"tz_openssl_x509_subject_alt_name", 'q', "o"},
+    {"tz_openssl_x509_info_access", 'q', "o"},
+    {"tz_openssl_x509_key_usage", 'p', "o"},
+    {"tz_openssl_x509_ca", 'b', "o"},
+    {"tz_openssl_x509_raw", 'o', "o"},
+    {"tz_openssl_x509_pem", 's', "o"},
+    {"tz_openssl_x509_public_key", 'o', "o"},
+    {"tz_openssl_x509_check_host", 'q', "osiibbbb"},
+    {"tz_openssl_x509_check_email", 'q', "osi"},
+    {"tz_openssl_x509_check_ip", 'q', "os"},
+    {"tz_openssl_x509_check_issued", 'b', "oo"},
+    {"tz_openssl_x509_check_private_key", 'b', "oo"},
+    {"tz_openssl_x509_verify", 'b', "oo"},
+};
+
+// The hashes and the ciphers of the direct layer: the name node gives each, and the constant of
+// runtime/crypto_md.c, crypto_aes.c or crypto_chacha.c that is it.
+struct DirectAlgorithm {
+  llvm::StringLiteral name;
+  llvm::StringLiteral symbol;
+};
+
+inline constexpr DirectAlgorithm kDirectMds[] = {
+    {"md5", "tz_crypto_md_md5"},
+    {"sha1", "tz_crypto_md_sha1"},
+    {"sha224", "tz_crypto_md_sha224"},
+    {"sha256", "tz_crypto_md_sha256"},
+    {"sha384", "tz_crypto_md_sha384"},
+    {"sha512", "tz_crypto_md_sha512"},
+    {"sha512-224", "tz_crypto_md_sha512_224"},
+    {"sha512-256", "tz_crypto_md_sha512_256"},
+    {"sha3-224", "tz_crypto_md_sha3_224"},
+    {"sha3-256", "tz_crypto_md_sha3_256"},
+    {"sha3-384", "tz_crypto_md_sha3_384"},
+    {"sha3-512", "tz_crypto_md_sha3_512"},
+    {"shake128", "tz_crypto_md_shake128"},
+    {"shake256", "tz_crypto_md_shake256"},
+    {"ripemd160", "tz_crypto_md_ripemd160"},
+    {"sm3", "tz_crypto_md_sm3"},
+    {"md5-sha1", "tz_crypto_md_md5_sha1"},
+    {"blake2b512", "tz_crypto_md_blake2b512"},
+    {"blake2s256", "tz_crypto_md_blake2s256"},
+};
+
+inline constexpr DirectAlgorithm kDirectCiphers[] = {
+    {"aes-128-gcm", "tz_crypto_cipher_aes_128_gcm"},
+    {"aes-192-gcm", "tz_crypto_cipher_aes_192_gcm"},
+    {"aes-256-gcm", "tz_crypto_cipher_aes_256_gcm"},
+    {"aes-128-cbc", "tz_crypto_cipher_aes_128_cbc"},
+    {"aes-192-cbc", "tz_crypto_cipher_aes_192_cbc"},
+    {"aes-256-cbc", "tz_crypto_cipher_aes_256_cbc"},
+    {"aes-128-ctr", "tz_crypto_cipher_aes_128_ctr"},
+    {"aes-192-ctr", "tz_crypto_cipher_aes_192_ctr"},
+    {"aes-256-ctr", "tz_crypto_cipher_aes_256_ctr"},
+    {"chacha20-poly1305", "tz_crypto_cipher_chacha20_poly1305"},
+};
+
+// Whether a call of the runtime named `name` is one of the full layer, which needs all of
+// libcrypto (see Driver).
+inline bool isFullCryptoFunction(llvm::StringRef name) { return name.starts_with("tz_openssl_"); }
+
+} // namespace tz

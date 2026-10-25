@@ -1,0 +1,21 @@
+pattern a+ true
+pattern ( true false SyntaxError: Invalid regular expression: /(/g: Unterminated group
+pattern [z-a] true false SyntaxError: Invalid regular expression: /[z-a]/g: Range out of order in character class
+flags true false SyntaxError: Invalid flags supplied to RegExp constructor 'gg'
+matchAll false true TypeError: String.prototype.matchAll called with a non-global RegExp argument
+replaceAll false true TypeError: String.prototype.replaceAll called with a non-global RegExp argument
+replaceAll fn false true TypeError: String.prototype.replaceAll called with a non-global RegExp argument
+matchAll g 3
+replaceAll g bonono
+parse true false SyntaxError: Unexpected token ']', "{"a": [1, 2,]}" is not valid JSON
+read false true TypeError: Cannot read properties of null (reading 'name')
+read index false true TypeError: Cannot read properties of undefined (reading '0')
+keys false true TypeError: Cannot convert undefined or null to object
+set null false true TypeError: Cannot set properties of null (setting 'name')
+cycle false true TypeError: Converting circular structure to JSON
+{"a":1,"me":null}
+callback false false RangeError: second -
+2
+{"status":404,"name":"HttpError"} {} {}
+{"errors":[{"status":404,"name":"HttpError"},{}]}
+RangeError RangeError: too big true true true

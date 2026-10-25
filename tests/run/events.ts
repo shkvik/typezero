@@ -1,0 +1,159 @@
+// same-as-node
+// node:events (docs/events.md): EventEmitter with an event map, ported from
+// node's lib/events.js. The order listeners run in, once() and the prepend
+// methods, off(), removeAllListeners(), newListener and removeListener, the
+// 'error' event, listener counts, classes that extend EventEmitter, and how
+// an emitter prints.
+import { EventEmitter } from "node:events"
+
+interface User {
+  name: string
+}
+const bus = new EventEmitter<{ user: [user: User]; count: [n: int, label: string] }>()
+console.log(bus)
+bus.on("user", (u) => console.log("user", u.name))
+bus.on("count", (n, label) => console.log("count", n + 1, label))
+console.log(bus.emit("user", { name: "ann" }), bus.emit("count", 1, "x"))
+console.log(bus.listenerCount("user"), bus.eventNames())
+console.log(bus)
+
+// on, once, prependListener; newListener before a listener is added, and
+// removeListener after one goes, also the listener of once() as it fires.
+type Events = { x: []; data: [chunk: string, n: int] }
+const e = new EventEmitter<Events>()
+const order: string[] = []
+e.on("newListener", (name, l) => order.push(`new ${name} ${typeof l}`))
+e.on("removeListener", (name, l) => order.push(`rm ${name} ${typeof l}`))
+const a = () => order.push("a")
+e.on("x", a)
+e.once("x", () => order.push("once"))
+e.prependListener("x", () => order.push("pre"))
+console.log(e.emit("x"), e.emit("x"))
+e.off("x", a)
+console.log(order, e.eventNames(), e.listenerCount("x"))
+e.removeAllListeners()
+console.log(order.slice(-6), e.eventNames(), e)
+
+// A listener added while the event is emitted runs from the next emit on.
+const f = new EventEmitter<Events>()
+const log: string[] = []
+f.on("data", (chunk, n) => {
+  log.push(`1 ${chunk} ${n}`)
+  f.on("data", (c) => log.push(`late ${c}`))
+})
+f.prependOnceListener("data", (chunk) => log.push(`first ${chunk}`))
+f.once("data", (chunk, n) => log.push(`once ${chunk} ${n * 2}`))
+f.emit("data", "a", 1)
+f.emit("data", "b", 2)
+console.log(log)
+console.log(f.listenerCount("data"), f.listeners("data").length, f.rawListeners("data").length)
+console.log(f.emit("x"), f.listenerCount("x"))
+
+// The raw listener of once() removes itself before it calls the listener;
+// listeners() gives the listener itself.
+const g = new EventEmitter<{ ping: [n: int] }>()
+g.once("ping", (n) => console.log("pinged", n))
+const raw = g.rawListeners("ping")
+const plain = g.listeners("ping")
+console.log(plain)
+raw[0]?.(1)
+console.log(g.listenerCount("ping"))
+raw[0]?.(2)
+plain[0]?.(3)
+
+// off() finds the listener of once() by the function given; so does
+// listenerCount().
+const t = new EventEmitter<{ tick: [n: int] }>()
+const seen: string[] = []
+const ta = (n: int) => seen.push(`a${n}`)
+const tb = (n: int) => seen.push(`b${n}`)
+t.once("tick", ta)
+t.on("tick", tb)
+t.on("tick", ta)
+console.log(t.listenerCount("tick"), t.listenerCount("tick", ta), t.listenerCount("tick", tb))
+t.off("tick", ta)
+console.log(t.listenerCount("tick", ta))
+t.emit("tick", 1)
+t.off("tick", ta)
+t.emit("tick", 2)
+console.log(seen, t.listeners("tick").length)
+
+// removeAllListeners(name) removes the last first, each with removeListener.
+const r = new EventEmitter<{ x: [] }>()
+const removed: string[] = []
+const first = () => {}
+const second = () => {}
+r.on("removeListener", (name, listener) =>
+  removed.push(`${name} ${listener == first ? "first" : listener == second ? "second" : "?"}`),
+)
+r.on("x", first).on("x", second)
+r.removeAllListeners("x")
+console.log(removed, r.eventNames())
+
+// A listener that throws: the error leaves emit.
+const h = new EventEmitter<{ boom: [msg: string]; error: [err: Error] }>()
+h.on("boom", (msg) => {
+  throw new Error(msg)
+})
+try {
+  h.emit("boom", "bad")
+} catch (err) {
+  console.log("caught", err.message)
+}
+// emit('error') without a listener throws the error; with one, the
+// listener gets it; an error that is no Error is ERR_UNHANDLED_ERROR.
+try {
+  h.emit("error", new TypeError("no listener"))
+} catch (err) {
+  console.log(err.name, err.message)
+}
+h.once("error", (err) => console.log("handled", err.message))
+console.log(h.emit("error", new Error("now handled")))
+const u = new EventEmitter<{ error: [what: string] }>()
+try {
+  u.emit("error", "boom")
+} catch (err) {
+  console.log(err.message)
+}
+
+// A class of its own, whose methods emit; on() gives the object back as
+// what it is, so calls chain.
+class Server extends EventEmitter<{ listening: [port: double]; close: [] }> {
+  port: double = 0
+  listen(port: double) {
+    this.port = port
+    this.emit("listening", port)
+    return this
+  }
+}
+const s = new Server()
+s.on("listening", (p) => console.log("listening on", p)).on("close", () => console.log("closed"))
+s.listen(8080).emit("close")
+console.log(s, s.listenerCount("close"), s instanceof EventEmitter)
+s.setMaxListeners(3).removeAllListeners("close")
+console.log(s.getMaxListeners(), s.eventNames(), EventEmitter.defaultMaxListeners)
+try {
+  s.setMaxListeners(-1)
+} catch (err) {
+  console.log(err.name, err.message)
+}
+
+// Names known only when the program runs: a map that takes any name.
+interface Message {
+  text: string
+}
+const topics = new EventEmitter<{ [topic: string]: [msg: Message] }>()
+for (const topic of ["news", "sport"]) topics.on(topic, (msg) => console.log(topic, msg.text))
+for (const topic of ["sport", "news", "weather"]) console.log(topics.emit(topic, { text: `about ${topic}` }))
+console.log(topics.eventNames(), topics.listenerCount("news"))
+
+// Names that are numbers come first, as the keys of an object do.
+const n = new EventEmitter<{ [name: string]: [] }>()
+n.on("b", () => {})
+n.on("10", () => {})
+n.on("a", () => {})
+n.on("2", () => {})
+console.log(n.eventNames(), Object.keys(t), JSON.stringify(t))
+console.log([s], { deep: { emitter: s } })
+EventEmitter.defaultMaxListeners = 20
+console.log(t.getMaxListeners(), new EventEmitter<{ y: [] }>().getMaxListeners())

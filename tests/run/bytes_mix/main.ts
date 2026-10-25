@@ -1,0 +1,74 @@
+// same-as-node
+// Binary data with the rest of the language, across files: a record format
+// encoded through DataView into a file and decoded from the Buffer that
+// readFileSync gives, text written and read in other encodings, unions of
+// bytes and text narrowed by typeof, instanceof and Buffer.isBuffer, typed
+// arrays in a Map and a Set (by reference), in generic functions, in a
+// Promise, and as JSON.
+import { Record, bytesOf, decode, describe, encode, fnv1a } from "./pack.ts"
+import { Store } from "./store.ts"
+
+const store = new Store()
+
+// 1. Records through a file.
+const records = [new Record(1, 250, 9.5, "pen"), new Record(2, 4000000000, 0.25, "чернила")]
+const packed = encode(records)
+store.save("records.bin", packed)
+const loaded = store.load("records.bin")
+console.log(loaded.length, loaded.subarray(0, 8), fnv1a(loaded) == fnv1a(packed))
+for (const r of decode(loaded))
+  console.log(r.id, r.count, r.price, r.name)
+try {
+  decode(Buffer.from("nope, not records"))
+} catch (e) {
+  if (e instanceof Error)
+    console.log("error:", e.message)
+}
+
+// 2. Text in other encodings, and bytes appended.
+store.saveText("latin.txt", "café", "latin1")
+console.log(store.load("latin.txt"), store.text("latin.txt"), store.hex("latin.txt"))
+store.saveText("utf8.txt", "café", "utf8")
+console.log(store.load("utf8.txt"), store.text("utf8.txt"))
+const view = new DataView(new ArrayBuffer(4))
+view.setInt32(0, -2, false)
+store.append("latin.txt", view)
+store.append("latin.txt", Buffer.from("!!"))
+console.log(store.hex("latin.txt"), new TextDecoder("windows-1252").decode(store.load("latin.txt")))
+
+// 3. Unions of bytes and text.
+const inputs: (Uint8Array | string | ArrayBuffer)[] = ["hi", new Uint8Array([1, 2]), Buffer.from("ok"),
+                                                       new ArrayBuffer(3)]
+for (const input of inputs)
+  console.log(describe(input), bytesOf(input))
+console.log(describe(new Float64Array([1.5, 2])))
+const shift: long = -1 >>> 0
+console.log(shift, -1 >>> 0, (-1 >>> 0) == shift)
+
+// 4. By reference in a Map and a Set; in generic functions.
+const shared = store.written.get("records.bin")
+if (shared != undefined) {
+  console.log(shared == packed, shared[0])
+  if (packed.length > 0)
+    packed[0] = 0x55
+  console.log(shared[0], store.written.size)
+}
+const seen = new Set<Uint8Array>([packed, packed, Buffer.from("x")])
+console.log(seen.size, seen.has(packed))
+function last<T>(items: T[]): T | undefined {
+  return items[items.length - 1]
+}
+console.log(last([new Uint16Array([7]), new Uint16Array([8, 9])]), last<Buffer>([]))
+function pairs<A, B>(a: A, b: B): [A, B] {
+  return [a, b]
+}
+console.log(pairs(Buffer.from("a"), new Int8Array([-1])))
+
+// 5. In a Promise, and as JSON.
+const later = await store.loadLater("utf8.txt")
+console.log(later.toString(), later.equals(store.load("utf8.txt")))
+const all = await Promise.all([store.loadLater("latin.txt"), store.loadLater("utf8.txt")])
+console.log(all.map(b => b.length))
+console.log(JSON.stringify({ name: "x", raw: Buffer.from("hi"), u8: new Uint8Array([3, 4]),
+                             f32: new Float32Array([0.5]) }))
+store.close()

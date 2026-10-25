@@ -1,0 +1,10 @@
+7 0 9 [ 'apple', 'pear' ] Set(2) { 'a', 'p' }
+Inventory {
+  items: Map(2) { 'apple' => 7, 'pear' => 2 },
+  tags: Set(2) { 'a', 'p' }
+}
+Map(3) { 1 => 3, 2 => 1, 3 => 1 } Map(2) { 'a' => 2, 'b' => 1 }
+Map(2) { 'red' => 2, 'blue' => 1 }
+Map(2) { 1 => 'one', 2 => 'two' }
+2.5 -1
+true undefined

@@ -1,0 +1,56 @@
+// JSON.parse<T> and fromJson<T> (docs/narrowing.md, section 3): the compiler
+// checks every field and builds the object; keys it does not know are
+// skipped, null and a missing key give undefined to an optional field.
+type Item = { title: string; price: decimal; count: int }
+type Order = {
+  id: long
+  items: Item[]
+  address: { city: string; zip?: string }
+  paid: boolean
+  rate: double
+  note?: string
+  meta?: Json
+  tags: string[][]
+}
+
+const text = `{
+  "id": 9007199254740993,
+  "items": [
+    {"title": "pen", "price": 0.1, "count": 2, "color": "red"},
+    {"title": "book", "price": 123456789.123456789123456789, "count": 1}
+  ],
+  "address": {"city": "Riga", "zip": null},
+  "paid": true,
+  "rate": 1e-3,
+  "note": null,
+  "meta": {"source": "web", "flags": [1, null]},
+  "tags": [["a"], []]
+}`
+const order = JSON.parse<Order>(text)
+console.log(order)
+console.log(order.id + 1, order.items.length, order.address.zip ?? "no zip", order.note == undefined)
+let total: decimal = 0
+for (const item of order.items) total += item.price * item.count
+console.log(total)
+
+// fromJson of a Json in hand: the whole of it, or a part.
+const parsed = JSON.parse(text)
+const again = fromJson<Order>(parsed)
+console.log(again.items[1]?.title, again.meta)
+const city = fromJson<string>(parsed.address.city)
+const counts = fromJson<int[]>(JSON.parse("[1, 2, 3]"))
+const missing = fromJson<int | undefined>(parsed.nothing)
+const nothing = fromJson<string | undefined>(parsed.note)
+const kept = fromJson<Json | undefined>(parsed.note)
+console.log(city, counts, missing, nothing, kept)
+
+// Recursive types.
+type Tree = { value: int; children: Tree[] }
+const tree = JSON.parse<Tree>('{"value": 1, "children": [{"value": 2, "children": []}, {"value": 3, "children": [{"value": 4, "children": []}]}]}')
+function sum(t: Tree): int {
+  let s = t.value
+  // expect-warning: 's += sum(c)' may overflow int
+  for (const c of t.children) s += sum(c)
+  return s
+}
+console.log(sum(tree), JSON.stringify(tree))

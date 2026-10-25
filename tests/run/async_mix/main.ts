@@ -1,0 +1,126 @@
+// env: GREETING=hello
+// Async code with the rest of the language, across files: async methods up
+// a class chain and through an interface, a generic class holding promises
+// in a Map, values that may be promises (unions with a Promise), Promise.race
+// and allSettled over promises of different values, awaits inside loops over
+// dictionaries, process.env and node:fs inside async functions with their
+// SystemError rejections, ResultAsync, regex replacements worked out by
+// async code, narrowing across await, and node's order of the queues; with
+// nothing left over at the end.
+import { mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Cache, Folder, Job, Memory, Source, Twice, Upper, later, memo, quick, readText } from "./jobs.ts"
+
+// 1. Async methods up a chain, run side by side.
+const jobs: Job[] = [new Job("plain"), new Upper("upper"), new Twice("twice")]
+console.log(await Promise.all(jobs.map(j => j.start("go"))))
+for (const j of jobs) {
+  const last = await j.last
+  console.log(j.name, j.runs, last?.length)
+}
+const idle = new Job("idle")
+console.log(await idle.last, idle.last == undefined)
+
+// 2. Caches of promises in a Map.
+const lengths = new Cache(async key => {
+  await later(0, 1)
+  return key.length
+})
+const [a, b, c] = await Promise.all([lengths.get("one"), lengths.get("three"), lengths.get("one")])
+console.log(a, b, c, lengths.loads)
+for (const [key, p] of lengths.pending)
+  console.log(key, await p)
+let splits = 0
+const letters = memo(async key => {
+  splits++
+  return key.split("")
+})
+console.log(await letters("abc"), await letters("abc"), splits)
+
+// 3. Values that may be promises, and combinations of different values.
+let total = 0
+for (const n of [1, 2, 3, 4])
+  total += await quick(n)
+console.log(total)
+const winner = await Promise.race([later("slow", 30), later(7, 1)])
+console.log(winner, typeof winner)
+const firstOk = await Promise.any([Promise.reject(new Error("no")), later(true, 2), later("late", 20)])
+console.log(firstOk)
+const settled = await Promise.allSettled([later(1, 1), later("two", 1), new Memory().read("none")])
+const [one, two, three] = settled
+console.log(one.status, one.value, two.value?.toUpperCase(), three.status, three.reason?.message)
+
+// 4. Awaits inside loops over dictionaries, and process.env.
+const delays = new Map<string, int>([["b", 2], ["a", 1], ["c", 3]])
+const order: string[] = []
+for (const [name, ms] of delays) {
+  order.push(await later(`${name}${ms}`, ms))
+}
+console.log(order.join(" "))
+const scores: Record<string, int> = { ann: 3, bob: 5 }
+for (const name in scores)
+  scores[name] = (await later(scores[name] ?? 0, 1)) * 2
+console.log(scores)
+async function greeting(who: string) {
+  await undefined
+  const word = process.env.GREETING ?? "hi"
+  return `${word}, ${who}`
+}
+console.log(await greeting("tz"), process.env.NO_SUCH_VARIABLE ?? "unset")
+
+// 5. node:fs inside async functions, and the SystemError of a rejection.
+const dir = mkdtempSync(join(tmpdir(), "tz-async-mix-"))
+const folder = new Folder(dir)
+folder.write("a.txt", "alpha")
+const sources: Source[] = [folder, new Memory()]
+console.log(await folder.read("a.txt"))
+try {
+  await folder.read("missing.txt")
+} catch (e) {
+  if (e instanceof SystemError)
+    console.log("caught", e.code, e.syscall, e.path?.endsWith("missing.txt"))
+}
+const message = await folder.read("missing.txt").catch(e => e instanceof SystemError ? e.code : "?")
+console.log(message)
+for (const s of sources)
+  console.log(await readText(s, "a.txt"))
+console.log(await readText(folder, "a.txt").map(t => t.length).match(n => `${n} letters`, e => e))
+rmSync(dir, { recursive: true })
+
+// 6. Replacements worked out by async code first, then a regex with a
+// function that is not async.
+const template = "Dear {name}, you owe {amount}."
+const keys = [...template.matchAll(/\{(\w+)\}/g)].map(m => m[1] ?? "")
+const values = await Promise.all(keys.map(async k => later(k == "name" ? "Ann" : "12.50", 1)))
+const filled = new Map<string, string>()
+keys.forEach((k, i) => filled.set(k, values[i] ?? ""))
+console.log(template.replace(/\{(\w+)\}/g, (all, key) => filled.get(key ?? "") ?? all))
+
+// 7. A narrowed local stays narrowed across await: no other task can change it.
+async function describe(job: Job) {
+  const out: string | undefined = job.runs > 0 ? job.name : undefined
+  if (out == undefined)
+    return "never ran"
+  await later(0, 1)
+  return out.toUpperCase()
+}
+console.log(await describe(jobs[0] ?? idle), await describe(idle))
+
+// 8. The order of the queues inside async code, as in node.
+const steps: string[] = []
+async function queues() {
+  // From a timer on: its immediates come before the timers it sets.
+  await later(0, 1)
+  setTimeout(() => steps.push("timeout"), 0)
+  setImmediate(() => steps.push("immediate"))
+  process.nextTick(() => steps.push("tick"))
+  queueMicrotask(() => steps.push("microtask"))
+  steps.push("sync")
+  await undefined
+  steps.push("after await")
+  await later(0, 5)
+  steps.push("done")
+}
+await queues()
+console.log(steps.join(", "))

@@ -1,0 +1,38 @@
+top-level code
+  start
+    reads  elements of any string[] (line 15 in countAll)
+    parallel
+  after await at line 15
+    writes stdout (line 15)
+    runs alone
+  after await at line 26
+    runs alone
+  after await at line 27
+    writes stdout (line 28)
+    reads  ticks (line 28)
+    runs alone
+
+async function countAll, line 4
+  start: runs inside its caller
+    reads  elements of any string[] (line 7)
+  after await at line 7
+    reads  done (line 13)
+    reads  total (line 13)
+    runs alone
+
+async arrow, line 7
+  start: runs inside its caller
+  after await at line 8 (in the tasks of the arrow at line 7)
+    reads  done (line 10)
+    writes done (line 10)
+    reads  total (line 11)
+    writes total (line 11)
+    in order with the same piece in other tasks: done, total
+    in order: lines 10-11
+
+async function ticker, line 20
+  start: runs inside its caller
+  after await at line 22
+    reads  ticks (line 23)
+    writes ticks (line 23)
+    runs alone

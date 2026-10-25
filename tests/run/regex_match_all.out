@@ -1,0 +1,31 @@
+a 1
+bb 22
+ccc 333
+0 a 1
+5 bb 2
+12 ccc 3
+a= a
+bb= bb
+ccc= ccc
+[ '1', '22', '333' ] 4
+[] 5
+1 8 Object [RegExp String Iterator] {}
+[ 'A', 'BB', 'CCC' ]
+[ 1, 2 ] false
+[ '42', '7' ] [ '5' ]
+cc yy
+<a> <a><b> aa
+x-y_z 1 [ 'tab', 'here' ]
+true привет
+DEF abc
+true false true false
+false true false true
+false true 2 1
+true false true false
+true true 0
+[ [ 0, 1 ], undefined, [ 0, 1 ], groups: undefined ] true
+[ 'a', 'b', 'c' ] \x61\.b\*c \x78\x20y \x30
+dog dog \x63\[a\]t gi true
+10 20 undefined 3
+true g a2
+Kkk

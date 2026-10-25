@@ -1,0 +1,21 @@
+reset true false true
+add(1, 2) → 13
+13
+hello(Ann, ) → hello Ann!
+hello(Bob, ?) → hello Bob?
+hello Ann! hello Bob?
+21
+twice(2.5) → 5
+5
+add(3, 4) → 17
+17
+[ 21, 22 ]
+6
+add(1, 1) → 2
+2 { hello: 2, sum: 4, reset: 1 }
+add(1, 1) → 3
+300
+add(2, 2) → 5
+500 7
+start upTo
+[ 0, 1, 2 ]

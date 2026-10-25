@@ -1,0 +1,41 @@
+top-level code
+  start
+    parallel
+  after await at line 19
+    reads  everything in any int[] (line 19)
+    writes stdout (lines 19, 20)
+    reads  computed (line 20)
+    reads  entries of cache (line 20)
+    parallel
+  after await at line 30
+    reads  everything in any int[] (line 30)
+    writes stdout (line 30)
+    runs alone
+
+async function lookup, line 9
+  start: runs inside its caller
+  after await at line 10
+    reads  entries of cache (line 11)
+    writes entries of cache (line 15)
+    reads  computed (line 13)
+    writes computed (line 13)
+    in the task lookup("a") at line 19:32:
+      in order with lookup after await at line 10 in the task lookup("a") at line 19:59: computed, entries of cache
+      in order with lookup after await at line 10 in the task lookup("bb") at line 19: computed, entries of cache
+      in order: lines 11-15
+    in the task lookup("a") at line 19:59:
+      in order with lookup after await at line 10 in the task lookup("a") at line 19:32: computed, entries of cache
+      in order with lookup after await at line 10 in the task lookup("bb") at line 19: computed, entries of cache
+      in order: lines 11-15
+    in the task lookup("bb") at line 19:
+      in order with lookup after await at line 10 in the task lookup("a") at line 19:32: computed, entries of cache
+      in order with lookup after await at line 10 in the task lookup("a") at line 19:59: computed, entries of cache
+      in order: lines 11-15
+
+async function letters, line 23
+  start: runs inside its caller
+  after await at line 25
+    in the task letters("hello") at line 30:
+      parallel
+    in the task letters("world") at line 30:
+      parallel

@@ -1,0 +1,48 @@
+sum 249500
+n 0
+n 1
+n 2
+n 3
+alpha,beta,GAMMA
+pair 0 0
+pair 2 0
+pair 2 2
+pair 4 0
+firstOver 8
+Object [Generator] {} object
+0 false
+2 4
+undefined true
+[ 0, 2, 4, 6, 8 ]
+5
+[ 0, 2, 4, 6 ]
+[ '0:alpha', '1:beta', '2:GAMMA' ]
+0 1
+alpha [ 'beta', 'GAMMA' ]
+2 1 100 true
+count 3
+count 2
+count 1
+who are you?
+hello, Anna
+where do you live, Anna?
+Anna lives in Paris
+true
+total 15
+[
+   0,  1,  2, 10,
+  20, 30, 40
+]
+[ 'h', 'é', 'l', 'l', 'o', '😀' ]
+[ 1, 2, 3, 4, 6 ]
+even 2
+even 4
+even 6
+10 15 20
+[ 1, 4, 9, 16 ]
+[ 'ab', 'ab', 'ab' ] [ 1.5, 1.5 ]
+0 x
+1 y
+3 6
+false true [ Object [Generator] {}, Object [Generator] {} ]
+00 10 11 20 21 22 

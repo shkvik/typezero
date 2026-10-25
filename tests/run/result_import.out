@@ -1,0 +1,5 @@
+Ok { value: 1 } Err { error: '0 is not positive' } [ Err { error: 1 }, Err { error: -1 } ]
+Err { error: 'built in' }
+always
+report: disk full Err { error: 18 }
+yes no

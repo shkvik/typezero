@@ -1,0 +1,1618 @@
+// fetch and what goes with it, as node has them as globals (docs/net.md,
+// sections 2 and 3): Headers, Request, Response, ReadableStream, FormData.
+// A file that names one gets it (see the loader, src/driver/loader.cpp);
+// tz:http builds its server on them.
+//
+// The bytes go through the runtime (runtime/net.c, http.c, decompress.c):
+// the `__tz_*` functions without a body are its functions. A body that
+// comes over a connection is read from it as the program reads the body:
+// whole (text(), json()...) or in pieces (body, a ReadableStream).
+//
+// What node computes in getters are getters here too, which print as node
+// prints these classes. Where tz's types are stricter than the web's: a
+// header or a parameter that is not there is undefined rather than null,
+// and a body is never null either.
+
+import { URL, URLSearchParams, __formText, __percentDecode } from "tz:url"
+import { AbortController, AbortSignal } from "tz:web"
+
+function __tz_net_connect(host: string, port: int, signal: AbortSignal | undefined): Promise<object>
+function __tz_net_close(conn: object): void
+function __tz_http_request(conn: object, method: string, target: string, headers: string[],
+                           text: string, bytes: Uint8Array | undefined, flags: int): void
+function __tz_http_response(conn: object, signal: AbortSignal | undefined): Promise<int>
+function __tz_http_status_text(conn: object): string
+function __tz_http_headers(conn: object): string[]
+function __tz_http_has_body(conn: object): boolean
+function __tz_http_read(conn: object,
+                        signal: AbortSignal | undefined): Promise<Uint8Array | undefined>
+function __tz_http_read_all(conn: object, signal: AbortSignal | undefined): Promise<Uint8Array>
+function __tz_http_reusable(conn: object): boolean
+function __tz_http_write(conn: object, chunk: Uint8Array): Promise<void>
+function __tz_http_end(conn: object): void
+function __tz_http_reason(status: int): string
+function __tz_zlib_new(kind: int): object
+function __tz_zlib_push(decoder: object, chunk: Uint8Array): Uint8Array
+function __tz_zlib_end(decoder: object): Uint8Array
+
+// The flags of __tz_http_request and __tz_http_respond (runtime/http.c).
+export const SEND_STREAM = 1
+export const SEND_CLOSE = 2
+export const SEND_NO_BODY = 4
+export const SEND_BYTES = 8
+
+//===----------------------------------------------------------------------===//
+// Headers
+//===----------------------------------------------------------------------===//
+
+function isTokenChar(c: int): boolean {
+  if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) return true
+  return c == 0x21 || c == 0x23 || c == 0x24 || c == 0x25 || c == 0x26 || c == 0x27 || c == 0x2a ||
+         c == 0x2b || c == 0x2d || c == 0x2e || c == 0x5e || c == 0x5f || c == 0x60 || c == 0x7c ||
+         c == 0x7e
+}
+
+function isToken(s: string): boolean {
+  if (s == "") return false
+  for (let i = 0; i < s.length; i++) if (!isTokenChar(s.charCodeAt(i))) return false
+  return true
+}
+
+function isHttpSpace(c: int): boolean {
+  return c == 0x20 || c == 0x09 || c == 0x0a || c == 0x0d
+}
+
+// A value without the whitespace around it, as the Fetch Standard
+// normalizes it.
+function normalizeValue(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && isHttpSpace(value.charCodeAt(start))) start++
+  while (end > start && isHttpSpace(value.charCodeAt(end - 1))) end--
+  return value.slice(start, end)
+}
+
+function isValidValue(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c == 0 || c == 0x0a || c == 0x0d) return false
+  }
+  return true
+}
+
+export type HeadersInit = Headers | [string, string][] | Record<string, string>
+
+export class Headers {
+  // In the order added: each name (lowercase) and its value, one after the
+  // other; and the names as given, once one differs from its lowercase,
+  // which it prints with, as in node.
+  #list: string[] = []
+  #shown: string[] | undefined = undefined
+  #immutable = false
+
+  constructor(init?: HeadersInit) {
+    if (init == undefined) return
+    if (init instanceof Headers) {
+      this.#list = [...init.#list]
+      const shown = init.#shown
+      if (shown != undefined) this.#shown = [...shown]
+    } else if (Array.isArray(init)) {
+      for (const pair of init) this.append(pair[0], pair[1])
+    } else {
+      for (const [name, value] of Object.entries(init)) this.append(name, value)
+    }
+  }
+
+  // The headers of a message read from a connection: names (lowercase) and
+  // values, one after the other.
+  static __fromWire(flat: string[], immutable: boolean): Headers {
+    const h = new Headers()
+    h.#list = flat
+    h.#immutable = immutable
+    return h
+  }
+
+  // For the wire: names (lowercase) and values, one after the other.
+  __flat(): string[] {
+    return this.#list
+  }
+
+  __freeze() {
+    this.#immutable = true
+  }
+
+  // A header the runtime adds, known to be valid: Content-Type of a body.
+  __add(name: string, value: string) {
+    this.#push(name, name, value)
+  }
+
+  #check(method: string, name: string, value?: string) {
+    if (!isToken(name))
+      throw new TypeError(`Headers.${method}: "${name}" is an invalid header name.`)
+    if (value != undefined && !isValidValue(value))
+      throw new TypeError(`Headers.${method}: "${value}" is an invalid header value.`)
+    if (this.#immutable && method != "get" && method != "has") throw new TypeError("immutable")
+  }
+
+  #push(name: string, lower: string, value: string) {
+    let shown = this.#shown
+    if (shown == undefined && name != lower) {
+      shown = []
+      for (let i = 0; i < this.#list.length; i += 2) shown.push(this.#list[i] ?? "")
+      this.#shown = shown
+    }
+    shown?.push(name)
+    this.#list.push(lower)
+    this.#list.push(value)
+  }
+
+  #keep(keep: (i: int) => boolean) {
+    const list: string[] = []
+    const shown = this.#shown
+    const kept: string[] = []
+    for (let i = 0; i + 1 < this.#list.length; i += 2) {
+      if (!keep(i)) continue
+      list.push(this.#list[i] ?? "")
+      list.push(this.#list[i + 1] ?? "")
+      if (shown != undefined) kept.push(shown[i >> 1] ?? "")
+    }
+    this.#list = list
+    if (shown != undefined) this.#shown = kept
+  }
+
+  append(name: string, value: string) {
+    const v = normalizeValue(value)
+    this.#check("append", name, v)
+    this.#push(name, name.toLowerCase(), v)
+  }
+
+  delete(name: string) {
+    this.#check("delete", name)
+    const lower = name.toLowerCase()
+    if (this.#list.includes(lower)) this.#keep(i => this.#list[i] != lower)
+  }
+
+  get(name: string): string | undefined {
+    const list = this.#list
+    const lower = isLower(name) ? name : name.toLowerCase()
+    let out: string | undefined = undefined
+    for (let i = 0; i + 1 < list.length; i += 2)
+      if (list[i] == lower) {
+        const v = list[i + 1] ?? ""
+        out = out == undefined ? v : out + ", " + v
+      }
+    if (out == undefined && !isToken(name))
+      throw new TypeError(`Headers.get: "${name}" is an invalid header name.`)
+    return out
+  }
+
+  getSetCookie(): string[] {
+    const out: string[] = []
+    for (let i = 0; i + 1 < this.#list.length; i += 2)
+      if (this.#list[i] == "set-cookie") out.push(this.#list[i + 1] ?? "")
+    return out
+  }
+
+  has(name: string): boolean {
+    this.#check("has", name)
+    const list = this.#list
+    const lower = name.toLowerCase()
+    for (let i = 0; i < list.length; i += 2) if (list[i] == lower) return true
+    return false
+  }
+
+  set(name: string, value: string) {
+    const v = normalizeValue(value)
+    this.#check("set", name, v)
+    const lower = name.toLowerCase()
+    const list = this.#list
+    let at = -1
+    for (let i = 0; i < list.length && at < 0; i += 2) if (list[i] == lower) at = i
+    if (at < 0) {
+      this.#push(name, lower, v)
+      return
+    }
+    const valueAt = at + 1
+    if (valueAt >= 0 && valueAt < list.length) list[valueAt] = v
+    this.#keep(i => i <= at || this.#list[i] != lower)
+  }
+
+  // The pairs iteration gives: sorted by name, values of a name joined but
+  // those of set-cookie.
+  #sorted(): [string, string][] {
+    const names: string[] = []
+    for (let i = 0; i < this.#list.length; i += 2) {
+      const name = this.#list[i] ?? ""
+      if (!names.includes(name)) names.push(name)
+    }
+    names.sort()
+    const out: [string, string][] = []
+    for (const name of names) {
+      if (name == "set-cookie") {
+        for (const v of this.getSetCookie()) out.push([name, v])
+        continue
+      }
+      out.push([name, this.get(name) ?? ""])
+    }
+    return out
+  }
+
+  forEach(callback: (value: string, key: string, parent: Headers) => void) {
+    for (const [name, value] of this.#sorted()) callback(value, name, this)
+  }
+
+  *entries(): IterableIterator<[string, string]> {
+    for (const pair of this.#sorted()) yield pair
+  }
+
+  *keys(): IterableIterator<string> {
+    for (const pair of this.#sorted()) yield pair[0]
+  }
+
+  *values(): IterableIterator<string> {
+    for (const pair of this.#sorted()) yield pair[1]
+  }
+
+  *[Symbol.iterator](): IterableIterator<[string, string]> {
+    for (const pair of this.#sorted()) yield pair
+  }
+
+  // What it prints as, as node shows it: each name as first given, with its
+  // values joined (runtime/inspect.c).
+  get __tz_keys(): [string, string][] {
+    const out: [string, string][] = []
+    const seen: string[] = []
+    const shown = this.#shown
+    for (let i = 0; i < this.#list.length; i += 2) {
+      const name = this.#list[i] ?? ""
+      if (seen.includes(name)) continue
+      seen.push(name)
+      out.push([shown != undefined ? shown[i >> 1] ?? name : name, this.get(name) ?? ""])
+    }
+    return out
+  }
+}
+
+// Whether a name has no capital letters, so that it needs no lowercasing.
+function isLower(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c >= 0x41 && c <= 0x5a) return false
+  }
+  return true
+}
+
+//===----------------------------------------------------------------------===//
+// ReadableStream
+//===----------------------------------------------------------------------===//
+
+export type ReadableStreamReadResult<R> = { done: false; value: R } | { done: true; value?: R }
+
+// Where a stream is, which its stream, its readers and the controllers its
+// source gets share: none of them holds another, so nothing holds itself
+// (tz frees by counts). The source goes once the stream ends, as the
+// standard clears its algorithms.
+class StreamState<R> {
+  queue: R[] = []
+  state = "readable"
+  error: Error | undefined = undefined
+  source: UnderlyingSource<R> | undefined = undefined
+  started = false
+  pulling = false
+  pullAgain = false
+  closeRequested = false
+  locked = false
+  disturbed = false
+  bytes = false
+  highWaterMark: double = 1
+  reads: PromiseWithResolvers<ReadableStreamReadResult<R>>[] = []
+}
+
+// What `Promise.withResolvers()` gives.
+interface PromiseWithResolvers<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason: Error) => void
+}
+
+export interface UnderlyingSource<R> {
+  start?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
+  pull?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
+  cancel?: (reason: Error | undefined) => Promise<void> | undefined
+  type?: string
+}
+
+export interface QueuingStrategy {
+  highWaterMark?: double
+}
+
+function closeStream<R>(s: StreamState<R>) {
+  if (s.state != "readable") return
+  s.state = "closed"
+  s.source = undefined
+  const reads = s.reads
+  s.reads = []
+  for (const r of reads) r.resolve({ done: true })
+}
+
+function errorStream<R>(s: StreamState<R>, e: Error) {
+  if (s.state != "readable") return
+  s.state = "errored"
+  s.error = e
+  s.queue = []
+  s.source = undefined
+  const reads = s.reads
+  s.reads = []
+  for (const r of reads) r.reject(e)
+}
+
+function desiredSize<R>(s: StreamState<R>): double {
+  return s.highWaterMark - s.queue.length
+}
+
+// Asks the source for more while the queue wants it, one pull at a time.
+function pullIfNeeded<R>(s: StreamState<R>) {
+  if (s.state != "readable" || s.closeRequested || !s.started) return
+  const pull = s.source?.pull
+  if (pull == undefined) return
+  if (s.reads.length == 0 && desiredSize(s) <= 0) return
+  if (s.pulling) {
+    s.pullAgain = true
+    return
+  }
+  s.pulling = true
+  let pulled: Promise<void> | undefined = undefined
+  try {
+    pulled = pull(new ReadableStreamDefaultController<R>(s))
+  } catch (e) {
+    s.pulling = false
+    errorStream(s, e)
+    return
+  }
+  if (pulled == undefined) {
+    afterPull(s)
+    return
+  }
+  void pulled.then(() => afterPull(s), (e: Error) => {
+    s.pulling = false
+    errorStream(s, e)
+  })
+}
+
+function afterPull<R>(s: StreamState<R>) {
+  s.pulling = false
+  if (s.pullAgain) {
+    s.pullAgain = false
+    pullIfNeeded(s)
+  }
+}
+
+export class ReadableStreamDefaultController<R> {
+  #s: StreamState<R>
+
+  constructor(state: StreamState<R>) {
+    this.#s = state
+  }
+
+  get desiredSize(): double {
+    return this.#s.state == "readable" ? desiredSize(this.#s) : 0
+  }
+
+  enqueue(chunk: R) {
+    const s = this.#s
+    if (s.state != "readable" || s.closeRequested)
+      throw new TypeError("Invalid state: Controller is already closed")
+    const read = s.reads.shift()
+    if (read != undefined) read.resolve({ done: false, value: chunk })
+    else s.queue.push(chunk)
+    pullIfNeeded(s)
+  }
+
+  close() {
+    const s = this.#s
+    if (s.state != "readable" || s.closeRequested)
+      throw new TypeError("Invalid state: Controller is already closed")
+    s.closeRequested = true
+    if (s.queue.length == 0) closeStream(s)
+  }
+
+  error(e: Error) {
+    errorStream(this.#s, e)
+  }
+}
+
+export class ReadableStreamDefaultReader<R> {
+  #s: StreamState<R> | undefined
+
+  constructor(stream: ReadableStream<R>) {
+    const s = stream.__state()
+    if (s.locked) throw new TypeError("Invalid state: ReadableStream is locked")
+    s.locked = true
+    this.#s = s
+  }
+
+  async read(): Promise<ReadableStreamReadResult<R>> {
+    const s = this.#s
+    if (s == undefined) throw new TypeError("Reader is released")
+    s.disturbed = true
+    if (s.queue.length > 0) {
+      const chunk = s.queue.shift()
+      if (s.closeRequested && s.queue.length == 0) closeStream(s)
+      else pullIfNeeded(s)
+      if (chunk != undefined) return { done: false, value: chunk }
+    }
+    if (s.state == "closed") return { done: true }
+    const error = s.error
+    if (s.state == "errored" && error != undefined) throw error
+    const read = Promise.withResolvers<ReadableStreamReadResult<R>>()
+    s.reads.push(read)
+    pullIfNeeded(s)
+    return await read.promise
+  }
+
+  releaseLock() {
+    const s = this.#s
+    if (s == undefined) return
+    s.locked = false
+    this.#s = undefined
+    const reads = s.reads
+    s.reads = []
+    for (const r of reads) r.reject(new TypeError("Reader was released"))
+  }
+
+  async cancel(reason?: Error): Promise<void> {
+    const s = this.#s
+    if (s != undefined) await cancelStream(s, reason)
+  }
+}
+
+async function cancelStream<R>(s: StreamState<R>, reason: Error | undefined): Promise<void> {
+  s.disturbed = true
+  if (s.state != "readable") return
+  const cancel = s.source?.cancel
+  s.queue = []
+  closeStream(s)
+  if (cancel != undefined) {
+    const done = cancel(reason)
+    if (done != undefined) await done
+  }
+}
+
+export class ReadableStream<R = Uint8Array> {
+  #s = new StreamState<R>()
+
+  constructor(source?: UnderlyingSource<R>, strategy?: QueuingStrategy) {
+    const s = this.#s
+    s.source = source
+    s.highWaterMark = strategy?.highWaterMark ?? (source?.type == "bytes" ? 0 : 1)
+    s.bytes = source?.type == "bytes"
+    const start = source?.start
+    let started: Promise<void> | undefined = undefined
+    if (start != undefined) started = start(new ReadableStreamDefaultController<R>(s))
+    if (started == undefined) {
+      // As the standard, the source is asked once the start is done, after
+      // the code that made the stream.
+      queueMicrotask(() => {
+        s.started = true
+        pullIfNeeded(s)
+      })
+    } else {
+      void started.then(() => {
+        s.started = true
+        pullIfNeeded(s)
+      }, (e: Error) => errorStream(s, e))
+    }
+  }
+
+  __state(): StreamState<R> {
+    return this.#s
+  }
+
+  get locked(): boolean {
+    return this.#s.locked
+  }
+
+  // What node shows of a stream.
+  get state(): string {
+    return this.#s.state
+  }
+
+  get supportsBYOB(): boolean {
+    return this.#s.bytes
+  }
+
+  getReader(): ReadableStreamDefaultReader<R> {
+    return new ReadableStreamDefaultReader<R>(this)
+  }
+
+  async cancel(reason?: Error): Promise<void> {
+    if (this.#s.locked) throw new TypeError("Invalid state: ReadableStream is locked")
+    await cancelStream(this.#s, reason)
+  }
+
+  async *values(): AsyncGenerator<R, void, void> {
+    const reader = this.getReader()
+    let finished = false
+    try {
+      for (;;) {
+        const r = await reader.read()
+        if (r.done) {
+          finished = true
+          return
+        }
+        yield r.value
+      }
+    } finally {
+      // Leaving the loop early cancels the stream, as the standard does.
+      if (!finished) await reader.cancel()
+      reader.releaseLock()
+    }
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<R, void, void> {
+    yield* this.values()
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Bodies
+//===----------------------------------------------------------------------===//
+
+const BODY_NONE = 0
+const BODY_TEXT = 1
+const BODY_BYTES = 2
+const BODY_STREAM = 3
+const BODY_WIRE = 4
+
+const CODING_GZIP = 1
+const CODING_DEFLATE = 2
+const CODING_BR = 3
+
+export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> |
+  URLSearchParams | FormData
+
+// What decodes the chunks of a compressed body, the last one with `last`.
+type Decode = (chunk: Uint8Array, last: boolean) => Uint8Array
+
+// A body that comes over a connection: read from it, decoded on the way,
+// and the connection given back (`release`) once it has all been read. The
+// decoding is a function that fetch gives, so that a server alone has no
+// decoders in its program.
+class Wire {
+  conn: object
+  signal: AbortSignal | undefined
+  decode: Decode | undefined = undefined
+  // The pool of fetch (by origin), or "" for the body of a request to a
+  // server.
+  origin = ""
+  finished = false
+
+  constructor(conn: object, signal: AbortSignal | undefined) {
+    this.conn = conn
+    this.signal = signal
+  }
+
+  // What the decoders make of a chunk; data they cannot decode ends the
+  // body, as undici's "terminated".
+  #decode(decode: Decode, chunk: Uint8Array, last: boolean): Uint8Array {
+    let data: Uint8Array
+    try {
+      data = decode(chunk, last)
+    } catch (e) {
+      this.finished = true
+      __tz_net_close(this.conn)
+      throw new TypeError("terminated", { cause: e })
+    }
+    return data
+  }
+
+  #finish() {
+    this.finished = true
+    if (this.origin != "") giveBack(this.origin, this.conn)
+  }
+
+  async next(): Promise<Uint8Array | undefined> {
+    while (!this.finished) {
+      const chunk = await __tz_http_read(this.conn, this.signal)
+      if (chunk == undefined) {
+        const decode = this.decode
+        const rest = decode != undefined ? this.#decode(decode, new Uint8Array(0), true) : undefined
+        this.#finish()
+        return rest != undefined && rest.length > 0 ? rest : undefined
+      }
+      const decode = this.decode
+      const data = decode != undefined ? this.#decode(decode, chunk, false) : chunk
+      if (data.length > 0) return data
+    }
+    return undefined
+  }
+
+  async all(): Promise<Uint8Array> {
+    const bytes = await __tz_http_read_all(this.conn, this.signal)
+    const decode = this.decode
+    const data = decode != undefined ? this.#decode(decode, bytes, true) : bytes
+    this.#finish()
+    return data
+  }
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  if (parts.length == 1) return parts[0] ?? new Uint8Array(0)
+  let total = 0
+  for (const p of parts) total += p.length
+  const all = new Uint8Array(total)
+  let at = 0
+  for (const p of parts) {
+    all.set(p, at)
+    at += p.length
+  }
+  return all
+}
+
+// What decodes a body of a Content-Encoding: its decoders, applied in turn.
+function decoding(encoding: string | undefined): Decode | undefined {
+  const found = decodersOf(encoding)
+  if (found == undefined || found.length == 0) return undefined
+  const decoders: object[] = found
+  return (chunk, last) => {
+    let data = chunk
+    for (const d of decoders) {
+      const out = __tz_zlib_push(d, data)
+      data = last ? concat([out, __tz_zlib_end(d)]) : out
+    }
+    return data
+  }
+}
+
+// The decoders of a Content-Encoding, in the order to apply them.
+function decodersOf(encoding: string | undefined): object[] | undefined {
+  if (encoding == undefined) return []
+  const out: object[] = []
+  for (const part of encoding.toLowerCase().split(",").reverse()) {
+    const coding = part.trim()
+    if (coding == "" || coding == "identity") continue
+    if (coding == "gzip" || coding == "x-gzip") out.push(__tz_zlib_new(CODING_GZIP))
+    else if (coding == "deflate") out.push(__tz_zlib_new(CODING_DEFLATE))
+    else if (coding == "br") out.push(__tz_zlib_new(CODING_BR))
+    else return undefined // left as it is, as undici leaves it
+  }
+  return out
+}
+
+// The body of a Request or a Response.
+class Body {
+  kind = BODY_NONE
+  text = ""
+  bytes: Uint8Array | undefined = undefined
+  stream: ReadableStream<Uint8Array> | undefined = undefined
+  wire: Wire | undefined = undefined
+  used = false
+  // The Content-Type it gives, if any.
+  type: string | undefined = undefined
+
+  static of(init: BodyInit | undefined): Body {
+    const b = new Body()
+    if (init == undefined) return b
+    if (typeof init == "string") {
+      b.kind = BODY_TEXT
+      b.text = init
+      b.type = "text/plain;charset=UTF-8"
+    } else if (init instanceof Uint8Array) {
+      b.kind = BODY_BYTES
+      b.bytes = new Uint8Array(init)
+    } else if (init instanceof ArrayBuffer) {
+      b.kind = BODY_BYTES
+      b.bytes = new Uint8Array(init.slice(0))
+    } else if (init instanceof ReadableStream) {
+      b.kind = BODY_STREAM
+      b.stream = init
+    } else if (init instanceof URLSearchParams) {
+      b.kind = BODY_TEXT
+      b.text = __formText(init)
+      b.type = "application/x-www-form-urlencoded;charset=UTF-8"
+    } else {
+      const boundary = "----formdata-tz-" + String(Math.floor(Math.random() * 1e12))
+      b.kind = BODY_TEXT
+      b.text = init.__multipart(boundary)
+      b.type = "multipart/form-data; boundary=" + boundary
+    }
+    return b
+  }
+
+  static ofWire(wire: Wire): Body {
+    const b = new Body()
+    b.kind = BODY_WIRE
+    b.wire = wire
+    return b
+  }
+
+  get usedOrDisturbed(): boolean {
+    const stream = this.stream
+    return this.used || (stream != undefined && stream.__state().disturbed)
+  }
+
+  isNull(): boolean {
+    return this.kind == BODY_NONE
+  }
+
+  // The body as a stream (Request.body, Response.body), made once.
+  asStream(): ReadableStream<Uint8Array> | undefined {
+    const existing = this.stream
+    if (existing != undefined) return existing
+    if (this.kind == BODY_NONE) return undefined
+    let stream: ReadableStream<Uint8Array>
+    const maybeWire = this.wire
+    if (maybeWire != undefined) {
+      const wire: Wire = maybeWire
+      stream = new ReadableStream<Uint8Array>({
+        type: "bytes",
+        pull: async c => {
+          const chunk = await wire.next()
+          if (chunk == undefined) c.close()
+          else c.enqueue(chunk)
+        },
+      })
+    } else {
+      const bytes = this.kind == BODY_TEXT ? new TextEncoder().encode(this.text) : this.bytes
+      stream = new ReadableStream<Uint8Array>({
+        type: "bytes",
+        start: c => {
+          if (bytes != undefined && bytes.length > 0) c.enqueue(bytes)
+          c.close()
+        },
+      })
+    }
+    this.stream = stream
+    return stream
+  }
+
+  // All of it, once.
+  async consume(): Promise<Uint8Array> {
+    if (this.usedOrDisturbed) throw new TypeError("Body is unusable: Body has already been read")
+    this.used = true
+    const stream = this.stream
+    if (stream != undefined) {
+      if (stream.locked) throw new TypeError("Body is unusable: Body has already been read")
+      const parts: Uint8Array[] = []
+      const reader = stream.getReader()
+      for (;;) {
+        const r = await reader.read()
+        if (r.done) break
+        parts.push(r.value)
+      }
+      reader.releaseLock()
+      return concat(parts)
+    }
+    if (this.kind == BODY_TEXT) return new TextEncoder().encode(this.text)
+    const bytes = this.bytes
+    if (bytes != undefined) return bytes
+    const wire = this.wire
+    if (wire != undefined) return await wire.all()
+    return new Uint8Array(0)
+  }
+
+  async consumeText(): Promise<string> {
+    if (this.kind == BODY_TEXT && this.stream == undefined) {
+      if (this.used) throw new TypeError("Body is unusable: Body has already been read")
+      this.used = true
+      return this.text
+    }
+    return new TextDecoder().decode(await this.consume())
+  }
+
+  // A copy for clone(), whose stream the two share as the standard tees it.
+  copy(): Body {
+    if (this.usedOrDisturbed) throw new TypeError("Response.clone: Body has already been consumed.")
+    const b = new Body()
+    b.kind = this.kind
+    b.text = this.text
+    b.bytes = this.bytes
+    b.type = this.type
+    if (this.kind == BODY_STREAM || this.kind == BODY_WIRE) {
+      const source = this.asStream()
+      if (source != undefined) {
+        const [left, right] = tee(source)
+        this.stream = left
+        b.kind = BODY_STREAM
+        b.stream = right
+        this.kind = BODY_STREAM
+        this.wire = undefined
+      }
+    }
+    return b
+  }
+}
+
+// Two streams with the chunks of one, each read at its own pace: one read
+// of the source at a time, whose chunk both get in order.
+function tee(source: ReadableStream<Uint8Array>):
+    [ReadableStream<Uint8Array>, ReadableStream<Uint8Array>] {
+  const reader = source.getReader()
+  const buffers: Uint8Array[][] = [[], []]
+  let done = false
+  let reading: Promise<void> | undefined = undefined
+  const readMore = async () => {
+    const r = await reader.read()
+    reading = undefined
+    if (r.done) {
+      done = true
+      return
+    }
+    buffers[0]?.push(r.value)
+    buffers[1]?.push(r.value)
+  }
+  const branch = (i: int) => new ReadableStream<Uint8Array>({
+    pull: async c => {
+      for (;;) {
+        const next = (buffers[i] ?? []).shift()
+        if (next != undefined) {
+          c.enqueue(next)
+          return
+        }
+        if (done) {
+          c.close()
+          return
+        }
+        let pending = reading
+        if (pending == undefined) {
+          pending = readMore()
+          reading = pending
+        }
+        await pending
+      }
+    },
+  })
+  return [branch(0), branch(1)]
+}
+
+//===----------------------------------------------------------------------===//
+// FormData
+//===----------------------------------------------------------------------===//
+
+// The fields of a form, as text: files are not supported yet.
+export class FormData {
+  #entries: [string, string][] = []
+
+  append(name: string, value: string) {
+    this.#entries.push([name, value])
+  }
+
+  delete(name: string) {
+    this.#entries = this.#entries.filter(e => e[0] != name)
+  }
+
+  get(name: string): string | undefined {
+    for (const [n, v] of this.#entries) if (n == name) return v
+    return undefined
+  }
+
+  getAll(name: string): string[] {
+    const out: string[] = []
+    for (const [n, v] of this.#entries) if (n == name) out.push(v)
+    return out
+  }
+
+  has(name: string): boolean {
+    return this.#entries.some(e => e[0] == name)
+  }
+
+  set(name: string, value: string) {
+    const at = this.#entries.findIndex(e => e[0] == name)
+    if (at < 0) {
+      this.#entries.push([name, value])
+      return
+    }
+    this.#entries = this.#entries.filter((e, i) => e[0] != name || i == at)
+    const kept = this.#entries.findIndex(e => e[0] == name)
+    const entries = this.#entries
+    if (kept >= 0 && kept < entries.length) entries[kept] = [name, value]
+  }
+
+  forEach(callback: (value: string, key: string, parent: FormData) => void) {
+    for (const [name, value] of [...this.#entries]) callback(value, name, this)
+  }
+
+  *entries(): IterableIterator<[string, string]> {
+    for (const e of [...this.#entries]) yield [e[0], e[1]]
+  }
+
+  *keys(): IterableIterator<string> {
+    for (const e of [...this.#entries]) yield e[0]
+  }
+
+  *values(): IterableIterator<string> {
+    for (const e of [...this.#entries]) yield e[1]
+  }
+
+  *[Symbol.iterator](): IterableIterator<[string, string]> {
+    for (const e of [...this.#entries]) yield [e[0], e[1]]
+  }
+
+  // As multipart/form-data, for a body.
+  __multipart(boundary: string): string {
+    const escape = (s: string) =>
+      s.replaceAll("\"", "%22").replaceAll("\n", "%0A").replaceAll("\r", "%0D")
+    let out = ""
+    for (const [name, value] of this.#entries)
+      out += `--${boundary}\r\nContent-Disposition: form-data; name="${escape(name)}"\r\n\r\n` +
+             `${value.replaceAll(/\r(?!\n)|(?<!\r)\n/g, "\r\n")}\r\n`
+    return out + `--${boundary}--\r\n`
+  }
+}
+
+// formData() of a body: urlencoded or multipart/form-data.
+function parseFormData(type: string | undefined, bytes: Uint8Array): FormData {
+  const form = new FormData()
+  const contentType = (type ?? "").toLowerCase()
+  if (contentType.startsWith("application/x-www-form-urlencoded")) {
+    for (const [name, value] of new URLSearchParams(new TextDecoder().decode(bytes)))
+      form.append(name, value)
+    return form
+  }
+  if (contentType.startsWith("multipart/form-data")) {
+    const m = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(type ?? "")
+    const boundary = m == undefined ? "" : m[1] ?? m[2] ?? ""
+    if (boundary == "") throw new TypeError("Failed to parse body as FormData.")
+    const text = new TextDecoder().decode(bytes)
+    const parts = text.split("--" + boundary)
+    for (const part of parts.slice(1)) {
+      if (part.startsWith("--")) break
+      const headEnd = part.indexOf("\r\n\r\n")
+      if (headEnd < 0) continue
+      const head = part.slice(0, headEnd)
+      let body = part.slice(headEnd + 4)
+      if (body.endsWith("\r\n")) body = body.slice(0, body.length - 2)
+      const name = /name="([^"]*)"/i.exec(head)
+      if (name == undefined) continue
+      const field = (name[1] ?? "").replaceAll("%22", "\"").replaceAll("%0A", "\n")
+        .replaceAll("%0D", "\r")
+      form.append(field, body)
+    }
+    return form
+  }
+  throw new TypeError("Failed to parse body as FormData.")
+}
+
+//===----------------------------------------------------------------------===//
+// Request
+//===----------------------------------------------------------------------===//
+
+export type RequestRedirect = "follow" | "error" | "manual"
+
+export interface RequestInit {
+  method?: string
+  headers?: HeadersInit
+  body?: BodyInit
+  redirect?: RequestRedirect
+  signal?: AbortSignal
+  keepalive?: boolean
+  cache?: string
+  credentials?: string
+  integrity?: string
+  mode?: string
+  referrer?: string
+  referrerPolicy?: string
+  // "half": a body that streams, as the Fetch Standard requires it then.
+  duplex?: string
+}
+
+function normalizeMethod(method: string): string {
+  if (!isToken(method)) throw new TypeError(`'${method}' is not a valid HTTP method.`)
+  const upper = method.toUpperCase()
+  if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK")
+    throw new TypeError(`'${method}' HTTP method is unsupported.`)
+  if (upper == "DELETE" || upper == "GET" || upper == "HEAD" || upper == "OPTIONS" ||
+      upper == "POST" || upper == "PUT" || upper == "PATCH")
+    return upper == "PATCH" ? method : upper
+  return method
+}
+
+export class Request {
+  #method = "GET"
+  #url: string
+  #headers: Headers
+  #body: Body
+  #redirect: RequestRedirect = "follow"
+  #signal: AbortSignal | undefined = undefined
+  #keepalive = false
+
+  constructor(input: string | URL | Request, init?: RequestInit) {
+    if (input instanceof Request) {
+      this.#method = input.#method
+      this.#url = input.#url
+      this.#headers = new Headers(input.#headers)
+      this.#redirect = input.#redirect
+      this.#signal = input.#signal
+      const given = init?.body
+      this.#body = given != undefined ? Body.of(given) : input.#body
+      if (given == undefined && input.#body.kind != BODY_NONE) {
+        if (input.#body.usedOrDisturbed)
+          throw new TypeError("Request.constructor: Cannot construct a Request with a Request " +
+                              "object that has already been used.")
+        input.#body.used = true // the new request takes it over
+      }
+    } else {
+      const text = typeof input == "string" ? input : input.href
+      let parsed: URL
+      try {
+        parsed = new URL(text)
+      } catch (e) {
+        throw new TypeError("Failed to parse URL from " + text, { cause: e })
+      }
+      if (parsed.username != "" || parsed.password != "")
+        throw new TypeError("Request cannot be constructed from a URL that includes credentials: " +
+                            text)
+      this.#url = parsed.href
+      this.#headers = new Headers()
+      this.#body = Body.of(undefined)
+    }
+    if (init != undefined) {
+      if (init.method != undefined) this.#method = normalizeMethod(init.method)
+      if (init.headers != undefined) this.#headers = new Headers(init.headers)
+      if (init.redirect != undefined) this.#redirect = init.redirect
+      if (init.signal != undefined) this.#signal = init.signal
+      if (init.keepalive != undefined) this.#keepalive = init.keepalive
+      if (init.body != undefined) {
+        if (this.#method == "GET" || this.#method == "HEAD")
+          throw new TypeError("Request with GET/HEAD method cannot have body.")
+        this.#body = Body.of(init.body)
+        if (this.#body.kind == BODY_STREAM && init.duplex != "half")
+          throw new TypeError("RequestInit: duplex option is required when sending a body.")
+      }
+    }
+    const type = this.#body.type
+    if (type != undefined && !this.#headers.has("content-type"))
+      this.#headers.__add("content-type", type)
+  }
+
+  // A request a server read from `conn` (tz:http): its URL from `base`, the
+  // address the server listens on, unless the request names its host.
+  static __fromServer(conn: object, method: string, target: string, flat: string[],
+                      base: string, hasBody: boolean): Request {
+    const r = new Request("http://localhost/")
+    r.#method = method
+    r.#headers = Headers.__fromWire(flat, false)
+    const host = r.#headers.get("host")
+    r.#url = target.startsWith("/") ? (host != undefined ? "http://" + host : base) + target
+           : target.startsWith("http://") || target.startsWith("https://") ? target
+           : base + "/" + target
+    if (hasBody) r.#body = Body.ofWire(new Wire(conn, undefined))
+    return r
+  }
+
+  get method(): string {
+    return this.#method
+  }
+
+  get url(): string {
+    return this.#url
+  }
+
+  get headers(): Headers {
+    return this.#headers
+  }
+
+  get destination(): string {
+    return ""
+  }
+
+  get referrer(): string {
+    return "about:client"
+  }
+
+  get referrerPolicy(): string {
+    return ""
+  }
+
+  get mode(): string {
+    return "cors"
+  }
+
+  get credentials(): string {
+    return "same-origin"
+  }
+
+  get cache(): string {
+    return "default"
+  }
+
+  get redirect(): RequestRedirect {
+    return this.#redirect
+  }
+
+  get integrity(): string {
+    return ""
+  }
+
+  get keepalive(): boolean {
+    return this.#keepalive
+  }
+
+  get isReloadNavigation(): boolean {
+    return false
+  }
+
+  get isHistoryNavigation(): boolean {
+    return false
+  }
+
+  get signal(): AbortSignal {
+    let signal = this.#signal
+    if (signal == undefined) {
+      signal = new AbortController().signal
+      this.#signal = signal
+    }
+    return signal
+  }
+
+  // Node does not show these two of a request.
+  @__tz_hidden get body(): ReadableStream<Uint8Array> | undefined {
+    return this.#body.asStream()
+  }
+
+  @__tz_hidden get bodyUsed(): boolean {
+    return this.#body.usedOrDisturbed
+  }
+
+  __bodyOf(): Body {
+    return this.#body
+  }
+
+  __signalIfAny(): AbortSignal | undefined {
+    return this.#signal
+  }
+
+  clone(): Request {
+    const init: RequestInit = { method: this.#method, headers: this.#headers, redirect: this.#redirect }
+    const r = new Request(this.#url, init)
+    r.#signal = this.#signal
+    r.#body = this.#body.copy()
+    return r
+  }
+
+  async text(): Promise<string> {
+    return await this.#body.consumeText()
+  }
+
+  async json(): Promise<Json> {
+    return JSON.parse(await this.#body.consumeText())
+  }
+
+  async bytes(): Promise<Uint8Array> {
+    return await this.#body.consume()
+  }
+
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    return (await this.#body.consume()).slice().buffer
+  }
+
+  async formData(): Promise<FormData> {
+    return parseFormData(this.#headers.get("content-type"), await this.#body.consume())
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Response
+//===----------------------------------------------------------------------===//
+
+export interface ResponseInit {
+  status?: int
+  statusText?: string
+  headers?: HeadersInit
+}
+
+export class Response {
+  #status = 200
+  #statusText = ""
+  #headers: Headers
+  #body: Body
+  #type = "default"
+  #url = ""
+  #redirected = false
+
+  constructor(body?: BodyInit, init?: ResponseInit) {
+    const status = init?.status ?? 200
+    if (status < 200 || status > 599)
+      throw new RangeError("init[\"status\"] must be in the range of 200 to 599, inclusive.")
+    this.#status = status
+    const statusText = init?.statusText ?? ""
+    for (let i = 0; i < statusText.length; i++) {
+      const c = statusText.charCodeAt(i)
+      if (c == 0x0a || c == 0x0d || c > 0xff) throw new TypeError("Invalid statusText")
+    }
+    this.#statusText = statusText
+    this.#headers = new Headers(init?.headers)
+    this.#body = Body.of(body)
+    if (body != undefined && (status == 101 || status == 204 || status == 205 || status == 304))
+      throw new TypeError(`Response constructor: Invalid response status code ${status}`)
+    const type = this.#body.type
+    if (type != undefined && !this.#headers.has("content-type"))
+      this.#headers.__add("content-type", type)
+  }
+
+  static json<T>(data: T, init?: ResponseInit): Response {
+    const r = new Response(JSON.stringify(data), init)
+    r.#headers.set("content-type", "application/json")
+    return r
+  }
+
+  static redirect(url: string | URL, status = 302): Response {
+    const target = new URL(typeof url == "string" ? url : url.href)
+    if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308)
+      throw new RangeError(`Invalid status code ${status}`)
+    const r = new Response(undefined, { status })
+    r.#headers.set("location", target.href)
+    r.#headers.__freeze()
+    return r
+  }
+
+  static error(): Response {
+    const r = new Response(undefined, { status: 200 })
+    r.#status = 0
+    r.#type = "error"
+    r.#headers.__freeze()
+    return r
+  }
+
+  // A response fetch read from a connection.
+  static __fromWire(status: int, statusText: string, flat: string[], body: Body, url: string,
+                    redirected: boolean): Response {
+    const r = new Response(undefined)
+    r.#status = status
+    r.#statusText = statusText
+    r.#headers = Headers.__fromWire(flat, true)
+    r.#body = body
+    r.#type = "basic"
+    r.#url = url
+    r.#redirected = redirected
+    return r
+  }
+
+  get status(): int {
+    return this.#status
+  }
+
+  get statusText(): string {
+    return this.#statusText
+  }
+
+  get headers(): Headers {
+    return this.#headers
+  }
+
+  get body(): ReadableStream<Uint8Array> | undefined {
+    return this.#body.asStream()
+  }
+
+  get bodyUsed(): boolean {
+    return this.#body.usedOrDisturbed
+  }
+
+  get ok(): boolean {
+    return this.#status >= 200 && this.#status <= 299
+  }
+
+  get redirected(): boolean {
+    return this.#redirected
+  }
+
+  get type(): string {
+    return this.#type
+  }
+
+  get url(): string {
+    return this.#url
+  }
+
+  __bodyOf(): Body {
+    return this.#body
+  }
+
+  __setUrl(url: string, redirected: boolean) {
+    this.#url = url
+    this.#redirected = redirected
+  }
+
+  clone(): Response {
+    const r = new Response(undefined, { status: this.#status == 0 ? 200 : this.#status })
+    r.#status = this.#status
+    r.#statusText = this.#statusText
+    r.#headers = new Headers(this.#headers)
+    r.#body = this.#body.copy()
+    r.#type = this.#type
+    r.#url = this.#url
+    r.#redirected = this.#redirected
+    return r
+  }
+
+  async text(): Promise<string> {
+    return await this.#body.consumeText()
+  }
+
+  async json(): Promise<Json> {
+    return JSON.parse(await this.#body.consumeText())
+  }
+
+  async bytes(): Promise<Uint8Array> {
+    return await this.#body.consume()
+  }
+
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    return (await this.#body.consume()).slice().buffer
+  }
+
+  async formData(): Promise<FormData> {
+    return parseFormData(this.#headers.get("content-type"), await this.#body.consume())
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// fetch
+//===----------------------------------------------------------------------===//
+
+// The connections kept alive, by origin, with when each was given back:
+// undici keeps them 4 s.
+class Idle {
+  conn: object
+  since: double
+  constructor(conn: object, since: double) {
+    this.conn = conn
+    this.since = since
+  }
+}
+const pool = new Map<string, Idle[]>()
+const KEEP_ALIVE_MS = 4000
+
+function takeIdle(origin: string): object | undefined {
+  const list = pool.get(origin)
+  if (list == undefined) return undefined
+  const now = Date.now()
+  for (;;) {
+    const idle = list.pop()
+    if (idle == undefined) return undefined
+    if (now - idle.since < KEEP_ALIVE_MS) return idle.conn
+    __tz_net_close(idle.conn)
+  }
+}
+
+function giveBack(origin: string, conn: object) {
+  if (!__tz_http_reusable(conn)) {
+    __tz_net_close(conn)
+    return
+  }
+  let list = pool.get(origin)
+  if (list == undefined) {
+    list = []
+    pool.set(origin, list)
+  }
+  list.push(new Idle(conn, Date.now()))
+}
+
+// The ports fetch never connects to (the Fetch Standard's "bad port"): those
+// of other protocols, which a request could confuse.
+const BAD_PORTS = new Set<int>([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
+  103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
+  512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993,
+  995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
+  6669, 6679, 6697, 10080,
+])
+
+function fetchFailed(cause: Error): TypeError {
+  return new TypeError("fetch failed", { cause })
+}
+
+// What the body of a request to send is: text, bytes, a stream, or none.
+function requestHeaders(url: URL, headers: Headers, body: Body): string[] {
+  const out: string[] = ["host", url.host]
+  const flat = headers.__flat()
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    const name = flat[i] ?? ""
+    if (name == "host") continue
+    out.push(name)
+    out.push(flat[i + 1] ?? "")
+  }
+  const defaults: [string, string][] = [
+    ["connection", "keep-alive"], ["accept", "*/*"], ["accept-language", "*"],
+    ["sec-fetch-mode", "cors"], ["user-agent", "tz"], ["accept-encoding", "gzip, deflate, br"],
+  ]
+  for (const [name, value] of defaults)
+    if (!headers.has(name)) {
+      out.push(name)
+      out.push(value)
+    }
+  void body
+  return out
+}
+
+// One request over a connection of the pool, or a new one; its response
+// with the head read.
+async function send(url: URL, method: string, headers: Headers, body: Body,
+                    signal: AbortSignal | undefined, redirected: boolean): Promise<Response> {
+  const hostname = url.hostname
+  const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
+  const port = url.port == "" ? 80 : parseInt(url.port) | 0
+  const origin = host + ":" + String(port)
+  const target = (url.pathname == "" ? "/" : url.pathname) + url.search
+  const flat = requestHeaders(url, headers, body)
+  // The bytes of a body that is no stream, once: a request sent again after
+  // a connection the server closed meanwhile sends them again.
+  let text = ""
+  let bytes: Uint8Array | undefined = undefined
+  let flags = 0
+  if (body.kind == BODY_TEXT) {
+    text = body.text
+  } else if (body.kind == BODY_BYTES) {
+    bytes = body.bytes
+    flags = SEND_BYTES
+  } else if (body.kind == BODY_STREAM || body.kind == BODY_WIRE) {
+    flags = SEND_STREAM
+  } else if (method != "POST" && method != "PUT" && method != "PATCH") {
+    flags = SEND_NO_BODY
+  }
+  let conn = takeIdle(origin)
+  let reused = conn != undefined
+  for (;;) {
+    let c: object
+    if (conn != undefined) {
+      c = conn
+    } else {
+      try {
+        c = await __tz_net_connect(host, port, signal)
+      } catch (e) {
+        signal?.throwIfAborted()
+        throw fetchFailed(e)
+      }
+    }
+    __tz_http_request(c, method, target, flat, text, bytes, flags)
+    if (flags == SEND_STREAM) {
+      const stream = body.asStream()
+      if (stream != undefined) {
+        try {
+          for await (const chunk of stream) await __tz_http_write(c, chunk)
+        } catch (e) {
+          __tz_net_close(c)
+          signal?.throwIfAborted()
+          throw fetchFailed(e)
+        }
+      }
+      __tz_http_end(c)
+    }
+    let status: int
+    try {
+      status = await __tz_http_response(c, signal)
+    } catch (e) {
+      __tz_net_close(c)
+      signal?.throwIfAborted()
+      // A connection the server closed while it waited in the pool: the
+      // request goes again on a new one.
+      if (reused && flags != SEND_STREAM) {
+        conn = undefined
+        reused = false
+        continue
+      }
+      throw fetchFailed(e)
+    }
+    const responseFlat = __tz_http_headers(c)
+    const responseHeaders = Headers.__fromWire(responseFlat, true)
+    let responseBody: Body
+    if (__tz_http_has_body(c)) {
+      const wire = new Wire(c, signal)
+      wire.origin = origin
+      wire.decode = decoding(responseHeaders.get("content-encoding"))
+      responseBody = Body.ofWire(wire)
+    } else {
+      giveBack(origin, c)
+      responseBody = Body.of(undefined)
+    }
+    let shown = url.href
+    const hash = shown.indexOf("#")
+    if (hash >= 0) shown = shown.slice(0, hash)
+    return Response.__fromWire(status, __tz_http_status_text(c), responseFlat, responseBody,
+                               shown, redirected)
+  }
+}
+
+// A data: URL, read without the network.
+function dataResponse(url: URL): Response {
+  const text = url.href.slice(5)
+  const comma = text.indexOf(",")
+  if (comma < 0) throw fetchFailed(new TypeError("invalid data: URL"))
+  let type = text.slice(0, comma)
+  const data = text.slice(comma + 1)
+  const base64 = /;base64$/i.test(type)
+  if (base64) type = type.slice(0, type.length - 7)
+  const decoded = __percentDecode(data)
+  const bytes = base64 ? Buffer.from(new TextDecoder("latin1").decode(decoded), "base64") : decoded
+  const r = new Response(new Uint8Array(bytes), {
+    headers: { "content-type": type == "" ? "text/plain;charset=US-ASCII" : type },
+  })
+  r.__setUrl(url.href, false)
+  return r
+}
+
+export async function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const request = new Request(input, init)
+  const signal = request.__signalIfAny()
+  signal?.throwIfAborted()
+  let url = new URL(request.url)
+  let method = request.method
+  const headers = new Headers(request.headers)
+  let body = request.__bodyOf()
+  if (body.kind != BODY_NONE) {
+    if (body.usedOrDisturbed) throw new TypeError("Body is unusable: Body has already been read")
+    body.used = true
+  }
+  let redirects = 0
+  for (;;) {
+    if (url.protocol == "data:") return dataResponse(url)
+    if (url.protocol == "https:")
+      throw fetchFailed(new Error("https is not supported yet: fetch over TLS comes with OpenSSL " +
+                                  "(docs/net.md, step 4)"))
+    if (url.protocol != "http:") throw fetchFailed(new Error("not implemented... yet..."))
+    if (url.port != "" && BAD_PORTS.has(parseInt(url.port) | 0))
+      throw fetchFailed(new Error("bad port"))
+    const response = await send(url, method, headers, body, signal, redirects > 0)
+    const status = response.status
+    const location = response.headers.get("location")
+    const redirect = status == 301 || status == 302 || status == 303 || status == 307 ||
+                     status == 308
+    if (!redirect || location == undefined || request.redirect == "manual") return response
+    if (request.redirect == "error") throw fetchFailed(new Error("unexpected redirect"))
+    if (++redirects > 20) throw fetchFailed(new Error("redirect count exceeded"))
+    let next: URL
+    try {
+      next = new URL(location, url)
+    } catch (e) {
+      throw fetchFailed(e)
+    }
+    // The body of the redirect is read away, so that its connection goes on.
+    await response.arrayBuffer()
+    if (((status == 301 || status == 302) && method == "POST") ||
+        (status == 303 && method != "GET" && method != "HEAD")) {
+      method = "GET"
+      body = Body.of(undefined)
+      for (const name of ["content-encoding", "content-language", "content-location",
+                          "content-type", "content-length"])
+        headers.delete(name)
+    } else if (body.kind == BODY_STREAM || body.kind == BODY_WIRE) {
+      throw fetchFailed(new Error("cannot follow a redirect with a body that streams"))
+    }
+    if (next.origin != url.origin) {
+      headers.delete("authorization")
+      headers.delete("cookie")
+      headers.delete("proxy-authorization")
+    }
+    url = next
+  }
+}
+
+// What tz:http needs.
+export function __serverRequest(conn: object, method: string, target: string, flat: string[],
+                                base: string, hasBody: boolean): Request {
+  return Request.__fromServer(conn, method, target, flat, base, hasBody)
+}
+
+export function __responseBody(response: Response): Body {
+  return response.__bodyOf()
+}
+
+export function __bodyKind(body: Body): int {
+  return body.kind
+}
+
+export function __bodyText(body: Body): string {
+  return body.text
+}
+
+export function __bodyBytes(body: Body): Uint8Array | undefined {
+  return body.bytes
+}
+
+export function __bodyStream(body: Body): ReadableStream<Uint8Array> | undefined {
+  return body.asStream()
+}
+
+export function __reason(status: int): string {
+  return __tz_http_reason(status)
+}

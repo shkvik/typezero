@@ -1,0 +1,56 @@
+// same-as-node
+// env: TZ=America/New_York
+// Local time, in the zone that TZ names, as in node: the local fields and
+// setters, the local constructor, getTimezoneOffset, and the changes of the
+// clocks. (The names of zones are in the language of the system, so the
+// texts here end before them; see date_zone_name.ts.)
+const d = new Date(2026, 9, 23, 10, 30)
+console.log(d, d.getTime())
+console.log(d.getFullYear(), d.getMonth(), d.getDate(), d.getDay(), d.getHours(), d.getMinutes())
+console.log(d.getSeconds(), d.getMilliseconds(), d.getTimezoneOffset())
+const text = (x: Date) => x.toString().slice(0, 33)
+console.log(text(d), d.toDateString(), d.toTimeString().slice(0, 17))
+
+// Setters in local time: summer time ends on November 1, 2026.
+d.setMonth(10, 5)
+console.log(text(d), d.getTimezoneOffset())
+d.setDate(0)
+console.log(text(d))
+d.setHours(48, 5)
+console.log(text(d))
+d.setFullYear(2027, 1, 29)
+console.log(text(d))
+d.setMinutes(-1, 30, 500)
+console.log(text(d), d.getMilliseconds())
+d.setSeconds(3600)
+d.setMilliseconds(-1)
+console.log(text(d), d.getMilliseconds())
+
+// A local time the clocks skip is read with the offset before the change; a
+// local time that comes twice is the first of the two.
+console.log(text(new Date(2026, 2, 8, 2, 30)), text(new Date(2026, 10, 1, 1, 30)))
+const skipped = new Date(2026, 2, 8, 2, 30), twice = new Date(2026, 10, 1, 1, 30)
+console.log(skipped.getHours(), twice.getTimezoneOffset())
+
+// The last day of February is day 0 of March; years from 0 to 99 are 19xx
+// in JavaScript, which only computed numbers can reach here.
+console.log(new Date(2024, 2, 0).getDate(), new Date(2026, 2, 0).getDate())
+const shortYears: int[] = [50, 99, 100]
+for (const y of shortYears) console.log(new Date(y, 0).getFullYear(), Date.UTC(y, 0))
+
+// Before standard time, the offset of the zone had seconds.
+const old = new Date(1880, 0, 1)
+console.log(text(old), old.getTimezoneOffset(), old.getTime())
+console.log(text(new Date(-1e14)), text(new Date(0)))
+
+// A setter of a date without a time: setFullYear starts from midnight.
+const bad = new Date(NaN)
+bad.setHours(1)
+console.log(bad.getTime())
+bad.setFullYear(2020)
+console.log(text(bad))
+
+// Local and UTC fields of the same moment.
+const moment = new Date(Date.UTC(2026, 0, 1, 3))
+console.log(moment.getDate(), moment.getUTCDate(), moment.getHours(), moment.getUTCHours())
+console.log(`${moment}`.slice(0, 24), String(moment).length > 33, Date().length > 33)

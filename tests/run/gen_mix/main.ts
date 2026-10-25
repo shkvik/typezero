@@ -1,0 +1,78 @@
+// Generics with the rest of the language, across files: generic classes
+// with async methods and Promise fields, decorated (once, for the generic
+// class), holding Maps, dates, regexes, Buffers and unions; unknown as a
+// type argument; Iterable<T> parameters given arrays, Sets, Maps, typed
+// arrays and Buffers; a class with [Symbol.iterator] walked by an async
+// function; instances of one generic class in a union, told apart by
+// instanceof; keyof and mapped types over a class.
+import { Cache, Column, Entry, Range, Table, lengthOf } from "./store.ts"
+
+// 1. Async methods and Promise fields, and metadata of the generic class.
+const lengths = new Cache<int>(lengthOf)
+console.log(await lengths.get("three"), await lengths.get("three"), lengths.loads)
+console.log(lengths.items, lengths.last != undefined)
+const words = new Cache<string[]>(async key => key.split(""))
+console.log(await words.get("ab"), words.items.size)
+console.log(Reflect.getMetadata(Table, Cache), Reflect.getMetadata(Column, Cache),
+            Reflect.getMetadata("design:type", Cache, "items"))
+
+// 2. Fields of the runtime's types, and unknown as a type argument.
+const anything: Entry<unknown>[] = [new Entry<unknown>(1), new Entry<unknown>("s"),
+                                     new Entry<unknown>(new Map<string, int>([["k", 2]]))]
+for (const r of anything)
+  console.log(typeof r.value, r.code, r.raw.toString())
+console.log(new Entry(Buffer.from([1, 2])))
+const coded = new Entry<string>("x")
+coded.code = "missing"
+console.log(coded.code, coded.when.getTime(), coded.pattern.test("abc"), coded.pattern.source)
+
+// 3. Iterable<T> parameters.
+function total(xs: Iterable<int>): int {
+  let sum = 0
+  for (const x of xs)
+    sum += x
+  return sum
+}
+const counts = new Map<string, int>([["a", 1], ["b", 2]])
+console.log(total([1, 2]), total(new Set([3, 4])), total(new Uint8Array([5, 6])),
+            total(Buffer.from([7])), total(counts.values()), total(new Range(1, 4)))
+
+// 4. A class with [Symbol.iterator] in an async function.
+async function walk(range: Range) {
+  const seen: int[] = []
+  for (const i of range) {
+    seen.push(await lengths.get("x".repeat(i)))
+  }
+  return seen
+}
+console.log(await walk(new Range(1, 4)), lengths.loads)
+
+// 5. Instances of one generic class in a union.
+class Box<T> {
+  value: T
+  constructor(value: T) {
+    this.value = value
+  }
+}
+const boxes: (Box<int> | Box<string> | Date)[] = [new Box(1), new Box("two"), new Date(0)]
+for (const b of boxes) {
+  if (b instanceof Box) {
+    const v = b.value
+    console.log("box of", typeof v == "number" ? v + 1 : v.toUpperCase())
+  } else {
+    console.log("date", b.getTime())
+  }
+}
+
+// 6. keyof and mapped types over a class.
+class User {
+  name = "ann"
+  age = 30
+}
+function get<T, K extends keyof T>(obj: T, key: K): T[K] {
+  return obj[key]
+}
+type Patch = Partial<User>
+const patch: Patch = { age: 31 }
+const keys: (keyof User)[] = ["name", "age"]
+console.log(get(new User(), "name"), get(new User(), "age") + 1, patch, keys)

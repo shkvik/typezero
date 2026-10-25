@@ -1,0 +1,31 @@
+// The other file of iter_mix: generators and a class with generator methods
+// (one of them static), exported to main.ts.
+export class Item {
+  constructor(public name: string, public price: decimal, public qty: int) {}
+}
+
+export function* parseLines(lines: string[]) {
+  for (const line of lines) {
+    const [name, price, qty] = line.split(";")
+    if (name == undefined || price == undefined || qty == undefined)
+      yield err(`bad line '${line}'`)
+    else yield ok(new Item(name, decimal(price), parseInt(qty) | 0))
+  }
+}
+
+export class Cart {
+  items: Item[] = []
+  add(item: Item) {
+    this.items.push(item)
+  }
+  // The object stays alive while its iterator does.
+  *lines() {
+    for (const item of this.items) yield `${item.qty} x ${item.name}`
+  }
+  *totals() {
+    for (const item of this.items) yield item.price * item.qty
+  }
+  static *sizes(max: int) {
+    for (let n = 1; n <= max; n *= 2) yield n
+  }
+}

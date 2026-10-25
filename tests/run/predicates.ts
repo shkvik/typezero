@@ -1,0 +1,121 @@
+// same-as-node
+// A function that returns a boolean narrows in a condition as its body
+// would (docs/narrowing.md): types, fields that hold a value, and facts
+// about numbers and lengths; on both branches.
+interface Circle { kind: "circle"; r: double }
+interface Square { kind: "square"; side: double }
+type Shape = Circle | Square
+
+function isCircle(s: Shape) { return s.kind == "circle" }
+function area(s: Shape) {
+  if (isCircle(s)) return Math.PI * s.r * s.r
+  return s.side * s.side // the other branch knows too
+}
+console.log(area({ kind: "circle", r: 1 }).toFixed(3), area({ kind: "square", side: 3 }))
+
+// A written `x is T` is checked against the body, and says the same.
+function isSquare(s: Shape): s is Square {
+  return s.kind == "square"
+}
+function side(s: Shape) {
+  if (!isSquare(s)) return 0
+  return s.side
+}
+console.log(side({ kind: "square", side: 4 }), side({ kind: "circle", r: 4 }))
+
+// Fields that hold a value.
+interface Person { name: string; email?: string }
+function hasEmail(p: Person) { return p.email != undefined && p.email.length > 0 }
+function contact(p: Person) {
+  if (!hasEmail(p)) return `${p.name}: none`
+  return `${p.name}: ${p.email.toLowerCase()}`
+}
+console.log(contact({ name: "Ann", email: "ANN@X.ORG" }), contact({ name: "Bob" }))
+
+// Ranges and lengths prove indices, as the condition would.
+function validIndex(a: int[], k: int) { return k >= 0 && k < a.length }
+function bump(a: int[], k: int) {
+  if (validIndex(a, k)) a[k] += 100
+  return a
+}
+console.log(bump([1, 2, 3], 1), bump([1, 2, 3], 5))
+function nonEmpty(xs: string[]) { return xs.length > 0 }
+function last(xs: string[]) {
+  if (!nonEmpty(xs)) return "(empty)"
+  const top: string = xs.pop()
+  return top
+}
+console.log(last(["a", "b"]), last([]))
+function isSmall(x: int) { return x >= 0 && x < 1000 }
+const sizes = [5, 999, 1000, -1].filter(isSmall)
+console.log(sizes)
+
+// Several returns: what each shows when it gives true.
+function isRound(s: Shape | undefined) {
+  if (s == undefined) return false
+  if (s.kind == "square") return false
+  return s.r > 0
+}
+function radius(s: Shape | undefined) {
+  if (isRound(s)) return s.r
+  return -1
+}
+console.log(radius({ kind: "circle", r: 2 }), radius({ kind: "square", side: 1 }), radius(undefined))
+
+// filter keeps what the function shows.
+const shapes: Shape[] = [{ kind: "circle", r: 1 }, { kind: "square", side: 2 }, { kind: "circle", r: 3 }]
+console.log(shapes.filter(isCircle).map(c => c.r), shapes.filter(isSquare).map(s => s.side))
+console.log([1, undefined, 3].filter(x => x != undefined).map(x => x * 2))
+const words = ["a", undefined, "bc"]
+console.log(words.filter(w => w != undefined && w.length > 1))
+
+// asserts: from the call on, as when the function returns.
+function assertCircle(s: Shape): asserts s is Circle {
+  if (s.kind != "circle") throw new Error(`not a circle: ${s.kind}`)
+}
+function diameter(s: Shape) {
+  assertCircle(s)
+  return 2 * s.r
+}
+console.log(diameter({ kind: "circle", r: 5 }))
+try {
+  diameter({ kind: "square", side: 1 })
+} catch (e) {
+  console.log(e.message)
+}
+
+// this is T, of a method.
+class Node2 {
+  value: int
+  constructor(value: int) {
+    this.value = value
+  }
+  isLeaf(): this is Leaf { return this instanceof Leaf }
+}
+class Leaf extends Node2 {
+  label: string
+  constructor(value: int, label: string) {
+    super(value)
+    this.label = label
+  }
+}
+function name(n: Node2) { return n.isLeaf() ? n.label : `node ${n.value}` }
+console.log(name(new Leaf(1, "leaf")), name(new Node2(2)))
+
+// Generic: x is T.
+function isDefined<T>(x: T | undefined): x is T { return x != undefined }
+const found: int | undefined = [1, 2].length > 1 ? 41 : undefined
+if (isDefined(found)) console.log(found + 1)
+
+// The lazy filter of iterators too.
+console.log(shapes.values().filter(isCircle).map(c => c.r * 2).toArray())
+for (const s of shapes.values().filter(s => s.kind == "square")) console.log(s.side)
+function* tokens() {
+  yield 1
+  yield "two"
+  yield 3
+}
+console.log(tokens().filter(x => typeof x == "number").map(x => x * 10).toArray())
+// A function that calls one that tests says what that one shows.
+function isCircular(s: Shape) { return isCircle(s) }
+console.log(shapes.filter(isCircular).map(c => c.r))

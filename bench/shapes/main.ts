@@ -1,0 +1,74 @@
+// Virtual calls: a million shapes of four classes in one array, mixed at
+// random, and 20 passes that sum area() and perimeter() of each through the
+// abstract class (in Go, through an interface).
+abstract class Shape {
+  abstract area(): double
+  abstract perimeter(): double
+}
+
+class Circle extends Shape {
+  constructor(public r: double) {
+    super()
+  }
+  area() {
+    return 3.141592653589793 * this.r * this.r
+  }
+  perimeter() {
+    return 2 * 3.141592653589793 * this.r
+  }
+}
+
+class Rect extends Shape {
+  constructor(public w: double, public h: double) {
+    super()
+  }
+  area() {
+    return this.w * this.h
+  }
+  perimeter() {
+    return 2 * (this.w + this.h)
+  }
+}
+
+class Square extends Rect {
+  constructor(side: double) {
+    super(side, side)
+  }
+  perimeter() {
+    return 4 * this.w
+  }
+}
+
+class Triangle extends Shape {
+  constructor(public base: double, public height: double, public side: double) {
+    super()
+  }
+  area() {
+    return 0.5 * this.base * this.height
+  }
+  perimeter() {
+    return this.base + this.height + this.side
+  }
+}
+
+const shapes: Shape[] = []
+let seed = 12345
+for (let i = 0; i < 1000000; i++) {
+  seed = (seed * 1103515245 + 12345) & 0x7fffffff
+  const size = 1 + (seed % 100) / 10.0
+  const kind = (seed >> 8) & 3
+  if (kind == 0) shapes.push(new Circle(size))
+  else if (kind == 1) shapes.push(new Rect(size, size + 1))
+  else if (kind == 2) shapes.push(new Square(size))
+  else shapes.push(new Triangle(size, size + 2, size + 3))
+}
+
+let area = 0.0
+let perimeter = 0.0
+for (let pass = 0; pass < 20; pass++) {
+  for (const s of shapes) {
+    area += s.area()
+    perimeter += s.perimeter()
+  }
+}
+console.log(area.toFixed(1), perimeter.toFixed(1))

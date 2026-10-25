@@ -127,11 +127,16 @@ void CodeGen::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
   std::vector<bool> self(functions.size(), false);
   for (size_t i = 0; i < functions.size(); ++i) {
     FunctionDecl *fn = functions[i];
-    if (!fn->body || !fn->sym || !fn->sym->ret)
+    // A generator's `return` gives a value to whoever iterates it, and
+    // calling one runs none of its code; an async function's settles its
+    // promise. A method a decorator may replace is called through its stub.
+    if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync ||
+        fn->impl)
       continue;
     for (CallExpr *call : tailCallsIn(fn)) {
       auto target = llvm::find(functions, call->func->decl);
-      if (target == functions.end() || call->func->ret != fn->sym->ret)
+      if (target == functions.end() || call->func->ret != fn->sym->ret ||
+          call->func->decl->isGenerator || call->func->decl->isAsync || call->func->decl->impl)
         continue;
       size_t j = size_t(target - functions.begin());
       self[i] = self[i] || j == i;
@@ -175,6 +180,13 @@ void CodeGen::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       group.members.push_back(functions[member]);
       tailGroupOf_[functions[member]] = &group;
     }
+    // The tail calls between them are jumps, which do not grow the stack
+    // (see CodeGen::analyzeThrows).
+    for (FunctionDecl *member : group.members)
+      for (CallExpr *call : tailCallsIn(member))
+        if (llvm::is_contained(group.members, call->func->decl) &&
+            call->func->ret == member->sym->ret)
+          tailJumps_.insert(call);
   };
   for (size_t v = 0; v < functions.size(); ++v)
     if (index[v] < 0)
@@ -265,6 +277,7 @@ void CodeGen::emitTailGroup(TailGroup &group) {
     emitParamsAndBody(member, args);
     closeBody();
   }
+  finishFunctionUnwind();
   tailGroup_ = nullptr;
   tailStatements_.clear();
   function_ = nullptr;
@@ -376,9 +389,7 @@ void CodeGen::emitTailJump(CallExpr *call) {
   size_t k = size_t(llvm::find(tailGroup_->members, call->func->decl) - tailGroup_->members.begin());
   // The callee owns its arguments, as for any call; then this call is done
   // with its own variables.
-  std::vector<llvm::Value *> args;
-  for (Expr *arg : call->args)
-    args.push_back(emitExpr(arg));
+  std::vector<llvm::Value *> args = emitHeldValues(call->args);
   const FuncSymbol *func = call->func;
   for (size_t i = args.size(); i < func->params.size(); ++i)
     args.push_back(undefinedValue(func->params[i]));

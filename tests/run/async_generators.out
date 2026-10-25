@@ -1,0 +1,44 @@
+yield 0
+t1
+t2
+got 0
+yield 1
+t3
+t4
+got 1
+yield 2
+t5
+t6
+got 2
+count done
+name a
+name b
+name c
+name d
+name x
+yield 0
+name n0
+count done
+v 1
+v 2
+v 3
+w 1
+caught rejected
+closing 1
+finally
+after await in finally
+yield 0
+yield 1
+yield 2
+search 20
+throwing at 1
+finally
+after await in finally
+caught from body
+failing 1
+caught boom
+X
+Y
+expression
+Object [AsyncGenerator] {}
+end

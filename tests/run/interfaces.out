@@ -1,0 +1,29 @@
+hello Ann | Ann greets you
+hello R2 | R2#7 beeps at you
+hello Sam | Sam#7 beeps at you
+hello Lit | lit greets you
+hello Polite | Polite bows to you
+31 (born 1996)
+17 (born 2010)
+71 (born 1956)
+Ann, R2, plain
+[
+  Person { name: 'Ann', age: 30, born: 1996 },
+  Robot { name: 'R2', serial: 7 },
+  Student { name: 'Sam', serial: 7, age: 16, born: 2010 },
+  { name: 'Lit', greet: [Function: greet] },
+  { name: 'Polite', greet: [Function: greet] }
+]
+Ann true false false
+R2 false true false
+Sam false true true
+Lit false false false
+Polite false false false
+4 4
+800 8
+-20 20
+[
+  { n: 4, inc: [Function: inc], get: [Function: get] },
+  { n: 8, inc: [Function: inc], get: [Function: get] },
+  Real { n: 20 }
+]

@@ -1,0 +1,123 @@
+// The expected output is what BigNumber.js 11 computes for the same values
+// with its default settings, which decimals follow (docs/decimal.md).
+const modes: string[] = [
+  "up", "down", "ceil", "floor", "half-up", "half-down", "half-even", "half-ceil",
+  "half-floor"
+]
+const D: string[] = [
+  "1", "-1", "2", "10", "-22.5", "0.125", "123456789012345678901234567890", "1e-10", "2.675",
+  "-2.675"
+]
+const DB: string[] = ["3", "7", "-3", "0.7", "8", "1e-5", "400"]
+for (const a of D)
+  for (const b of DB)
+    for (const dp of [0, 2, 5])
+      console.log(modes.map(m => decimal(a).div(decimal(b), dp, m)).join(" "))
+for (const a of D)
+  console.log(decimal(a).div(3), decimal(a) / 3)
+const R: string[] = [
+  "2.5", "-2.5", "3.5", "-3.5", "2.45", "2.55", "-2.55", "1.005", "0.0005", "123.456",
+  "-0.0001", "999.999", "0.5", "1.4999999", "-1.5", "15", "-25", "7.77777777777777777777777",
+  "123456789012345678901234567890.55"
+]
+for (const a of R) {
+  const x = decimal(a)
+  console.log(x.round())
+  for (const dp of [0, 1, 2, -1])
+    console.log(modes.map(m => x.round(dp, m)).join(" "))
+}
+const F: string[] = [
+  "0", "1", "-1", "0.5", "-0.5", "2.345", "-2.345", "1234567.891", "-1234567.891",
+  "0.000123456", "-0.001", "1e21", "1.5e-10", "123456789012345678901234567890.123",
+  "999.995", "0.1", "100", "12345678", "-0.0000001", "9.99999"
+]
+const SM: string[] = ["half-up", "half-even", "down", "up", "floor"]
+for (const a of F) {
+  const x = decimal(a)
+  console.log(x.toFixed(), x.toFormat(), x.toExponential(), x.toPrecision())
+  for (const n of [0, 1, 2, 5]) {
+    console.log(x.toFixed(n), x.toFormat(n), x.toExponential(n))
+    for (const m of SM)
+      console.log(x.toFixed(n, m), x.toFormat(n, m), x.toExponential(n, m))
+    if (n > 0)
+      console.log(x.toPrecision(n), SM.map(m => x.toPrecision(n, m)).join(" "))
+  }
+  console.log(x.toFixed(-2), x.toFormat(-1, "up"), x.toPrecision(25))
+}
+const S: string[] = [
+  "0", "255", "-255", "0.5", "0.1", "-0.1", "3.75", "1e-30", "-1e-30",
+  "123456789012345678901234567890", "0.333", "1e20", "35.5", "0.99999999999999999999999",
+  "10.0625", "7"
+]
+for (const a of S) {
+  const x = decimal(a)
+  console.log(x.toString(), [2, 3, 7, 8, 10, 16, 36].map(b => x.toString(b)).join(" "))
+}
+const Q: string[] = [
+  "0", "1", "2", "4", "0.25", "1e-30", "2e-41", "1e30", "10", "0.0001", "99",
+  "123456789012345678901234567890", "1.21", "0.5", "3e-21", "1e-40"
+]
+for (const a of Q)
+  console.log(decimal(a).sqrt())
+const U: string[] = [
+  "0", "-0", "1", "-1.50", "2.5000", "-123456789012345678901234567890.5", "1e-30", "1e30",
+  "-7", "100", "0.1", "9223372036854775808", "-9223372036854775808"
+]
+for (const a of U) {
+  const x = decimal(a)
+  const shifted = [-25, -3, 0, 2, 25].map(k => x.shiftedBy(k)).join(" ")
+  console.log(x.abs(), x.isInteger(), x.decimalPlaces(), shifted)
+}
+const T: string[] = [
+  "0", "1", "-1", "0.5", "0.75", "-0.75", "3.14159265358979", "0.333333333333", "1.1",
+  "1200", "-0.0625", "2.718281828459045", "0.1", "123.456"
+]
+const MD: string[] = ["1", "2", "10", "100", "1000", "1000000"]
+for (const a of T) {
+  const x = decimal(a)
+  const [n, d] = x.toFraction()
+  console.log(`${n}/${d}`, MD.map(md => {
+    const [n, d] = x.toFraction(decimal(md))
+    return `${n}/${d}`
+  }).join(" "))
+}
+const L: string[][] = [
+  ["1", "2", "3"],
+  ["-1", "-2.5", "0"],
+  ["0.1", "0.10", "0.100"],
+  ["123456789012345678901234567890", "-5", "1e30"],
+  ["7"]
+]
+for (const l of L) {
+  const v = l.map(s => decimal(s))
+  if (v.length > 0)
+    console.log(decimal.max(...v), decimal.min(...v), decimal.sum(...v), decimal.max(0, ...v),
+                decimal.sum(...v, ...v))
+}
+const W: string[] = [
+  " 12 ", "+5", "-.5", "5.", ".5e1", "1e3", "1E-3", "0x1f", "0XFF", "-0b101", "0o17",
+  "1_000", "1_000.000_1", "0x1.8", "0b0.1", "00012.3400", "-0", "\t7\n", "0x0.0000001",
+  "1e-10000001", "-1e5", "123456789012345678901234567890e-25", "0xFFFFFFFFFFFFFFFFFFFF",
+  "0o7_7", "  3 　"
+]
+for (const s of W)
+  console.log(decimal(s))
+const V: string[] = [
+  "0", "0.1", "-19.99", "123456789012345678901234567890", "1e-7", "1e400",
+  "9007199254740993", "0.30000000000000004", "1.7976931348623157e308", "-1e-400", "2.5",
+  "12345678901234567890.123", "-1e400"
+]
+for (const a of V)
+  console.log(Number(decimal(a)))
+console.log(decimal(Number("0.1")))
+console.log(decimal(1.0 / 3))
+console.log(decimal(Number("1e21")))
+console.log(decimal(Number("1e-7")))
+console.log(decimal(2.0 ** 53 + 2))
+console.log(decimal(-0.0))
+console.log(decimal(Number("123.456")))
+console.log(decimal(Number("5e-324")))
+console.log(decimal(Number.MAX_VALUE))
+console.log(decimal(0.1 + 0.2))
+console.log(decimal(Number("-1.5")))
+console.log(decimal(Math.PI))

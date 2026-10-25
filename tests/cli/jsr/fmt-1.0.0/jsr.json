@@ -1,0 +1,5 @@
+{
+  "name": "@std/fmt",
+  "version": "1.0.0",
+  "exports": { ".": "./mod.ts", "./colors": "./colors.ts" }
+}

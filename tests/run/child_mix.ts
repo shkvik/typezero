@@ -1,0 +1,122 @@
+// same-as-node
+// env: TZ_MIX_GONE=from outside
+// Child processes from async code: spawnSync, execFileSync and execSync
+// between awaits, in timers and in an async generator while the thread pool
+// reads and writes files; the changes of process.env the children see; and
+// the Buffers they print, written and read back through node:fs/promises.
+// The program here is this one again, which does what its arguments after
+// --child say; with stdio "inherit" a child reads this test's stdin
+// (child_mix.in) and prints to its stdout.
+import { execFileSync, execSync, spawnSync } from "node:child_process"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { readFileSync, writeFileSync } from "node:fs"
+import { setTimeout as sleep } from "node:timers/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+const at = process.argv.indexOf("--child")
+if (at >= 0) {
+  const args = process.argv.slice(at + 1)
+  const what = args[0] ?? ""
+  if (what == "env") {
+    console.log(process.env.TZ_MIX_SET ?? "-", process.env.TZ_MIX_GONE ?? "-", process.env.TZ_MIX_OWN ?? "-")
+  } else if (what == "bytes") {
+    writeFileSync(1, Buffer.from([0, 1, 2, 127, 128, 254, 255]))
+  } else if (what == "reverse") {
+    writeFileSync(1, readFileSync(0).reverse())
+  } else if (what == "upper") {
+    process.stdout.write(readFileSync(0, "utf8").toUpperCase())
+  } else if (what == "later") {
+    // A child that waits itself before it prints and sets its code.
+    const ms = Number(args[1] ?? "0") | 0
+    await sleep(ms)
+    console.log(`slept ${ms}`)
+    process.exitCode = 7
+  } else if (what == "say") {
+    console.log(args[1] ?? "")
+  }
+} else {
+  const self = [process.argv[1] ?? "", "--child"]
+  const run = (...args: string[]) => execFileSync(process.execPath, [...self, ...args], { encoding: "utf8" })
+
+  // A child that reads this program's stdin and prints to its stdout,
+  // after what this program printed before it.
+  console.log("before the child")
+  execFileSync(process.execPath, [...self, "upper"], { stdio: "inherit" })
+  console.log("after the child")
+
+  const dir = await mkdtemp(join(tmpdir(), "tz-child-mix-"))
+  const log: string[] = []
+
+  // Files read and written on the pool while the children run.
+  const names = ["a", "b", "c", "d", "e", "f", "g", "h"]
+  const writes = names.map((n) => writeFile(join(dir, n + ".txt"), n.repeat(1000)))
+  const said = run("say", "while writing").trim()
+  await Promise.all(writes)
+  const reads = names.map((n) => readFile(join(dir, n + ".txt"), "utf8"))
+  const between = spawnSync(process.execPath, [...self, "say", "while reading"], { encoding: "utf8" })
+  const texts = await Promise.all(reads)
+  console.log(said, between.stdout.trim(), between.status, texts.map((t) => t.length).join(","))
+
+  // Children between awaits, in a timer and from an async generator.
+  async function step(name: string, ms: int) {
+    await sleep(ms)
+    log.push(`${name}: ${run("say", name).trim()}`)
+  }
+  setTimeout(() => log.push(`timer: ${run("say", "timer").trim()}`), 5)
+  await Promise.all([step("first", 1), step("second", 20)])
+  async function* children(count: int) {
+    for (let i = 0; i < count; i++) {
+      await sleep(1)
+      yield run("say", `child ${i}`).trim()
+    }
+  }
+  for await (const line of children(3))
+    log.push(line)
+  console.log(log.join("; "))
+
+  // A child that waits on its own event loop and ends with a code.
+  const later = spawnSync(process.execPath, [...self, "later", "30"], { encoding: "utf8" })
+  console.log(later.stdout.trim(), later.status)
+  try {
+    execFileSync(process.execPath, [...self, "later", "1"])
+  } catch (e) {
+    // Without an encoding what it printed is a Buffer.
+    if (e instanceof ExecSyncError && e.stdout instanceof Buffer)
+      console.log("failed with", e.status, e.stdout.toString().trim())
+  }
+
+  // What the children see of process.env, as this program got it and after
+  // it changes it.
+  console.log(run("env").trim())
+  process.env.TZ_MIX_SET = "set here"
+  process.env.TZ_MIX_GONE = "replaced"
+  console.log(run("env").trim())
+  delete process.env.TZ_MIX_GONE
+  console.log(run("env").trim())
+  const own = spawnSync(process.execPath, [...self, "env"], {
+    encoding: "utf8",
+    env: { ...process.env, TZ_MIX_OWN: "own" },
+  })
+  console.log(own.stdout.trim())
+  process.env.TZ_MIX_SET = "changed"
+  console.log(run("env").trim())
+  delete process.env.TZ_MIX_SET
+  console.log(run("env").trim())
+
+  // Buffers out of children, through files and back into children.
+  const bytes = execFileSync(process.execPath, [...self, "bytes"])
+  console.log(bytes.length, bytes.toString("hex"), bytes.buffer.byteLength >= 7)
+  await writeFile(join(dir, "bytes.bin"), bytes)
+  const back = await readFile(join(dir, "bytes.bin"))
+  console.log(back.equals(bytes), back[6], back.subarray(3, 5).toString("hex"))
+  const reversed = execFileSync(process.execPath, [...self, "reverse"], { input: back })
+  console.log(reversed.toString("hex"))
+  const shell = execSync(`"${process.execPath}" ${self.map((a) => `"${a}"`).join(" ")} say "through the shell"`)
+  console.log(shell.toString().trim(), shell.byteLength)
+  const both = spawnSync(process.execPath, [...self, "upper"], { input: "привет" })
+  console.log(both.stdout.toString(), both.stdout.length, both.stderr.length)
+
+  await rm(dir, { recursive: true })
+  console.log("done")
+}

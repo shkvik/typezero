@@ -38,11 +38,19 @@ void Facts::addEqual(Term a, Term b, int64_t offset) {
   add(b, a, 1 - offset);
 }
 
-// Shortest paths in the graph whose edge a -> b with weight w stands for
-// `a <= b + w`: a path from lhs to rhs of total weight w proves lhs <= rhs + w.
 bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
   if (lhs == rhs)
     return offset >= 1;
+  std::optional<int64_t> least = bound(lhs, rhs);
+  return least && *least <= offset;
+}
+
+// Shortest paths in the graph whose edge a -> b with weight w stands for
+// `a <= b + w`: a path from lhs to rhs of total weight w proves lhs <= rhs + w,
+// that is lhs < rhs + w + 1.
+std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
+  if (lhs == rhs)
+    return 1;
 
   std::vector<Term> nodes{Term::zero()};
   auto node = [&](Term t) {
@@ -91,7 +99,9 @@ bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
     if (!changed)
       break;
   }
-  return dist[target] != kInf && dist[target] <= offset - 1;
+  if (dist[target] == kInf)
+    return std::nullopt;
+  return dist[target] + 1;
 }
 
 void Facts::forgetIf(llvm::function_ref<bool(const Fact &)> pred) {

@@ -1,0 +1,7 @@
+[ 'TZ_DICT_ONE', 'TZ_DICT_TWO' ] [ '1', 'two' ]
+true false object
+3 4 4
+undefined undefined false
+3
+two changed
+two 5

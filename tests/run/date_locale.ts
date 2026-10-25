@@ -1,0 +1,49 @@
+// same-as-node
+// env: TZ=Asia/Bishkek
+// Dates in the formats of languages, from the ICU of the system: the
+// options become the language's best pattern, as V8 makes it. The language
+// and the zone are given (those of the system differ from one computer to
+// another), and the formats chosen are those that the ICU of Windows and of
+// node write alike.
+const d = new Date(Date.UTC(2026, 9, 23, 15, 4, 5, 678))
+const utc = { timeZone: "UTC" }
+console.log(d.toLocaleString("en-US", utc), "|", d.toLocaleDateString("en-US", utc), "|", d.toLocaleTimeString("en-US", utc))
+console.log(d.toLocaleString("ru-RU", utc), "|", d.toLocaleDateString("ru", utc), "|", d.toLocaleTimeString("ru", utc))
+console.log(d.toLocaleString("de", utc), "|", d.toLocaleString("ja", utc), "|", d.toLocaleString("en-GB", utc))
+console.log(d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }))
+console.log(d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }))
+console.log(d.toLocaleDateString("de", { month: "long" }), d.toLocaleDateString("ru", { month: "long" }))
+console.log(d.toLocaleString("fr", { dateStyle: "full", timeStyle: "full", timeZone: "UTC" }))
+console.log(d.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }))
+console.log(d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }))
+
+// The hours: of 12 or of 24, by hour12 and hourCycle.
+console.log(d.toLocaleString("ru", { hour12: true, timeZone: "UTC" }))
+console.log(d.toLocaleString("en-US", { hour12: false, timeZone: "UTC" }))
+console.log(d.toLocaleString("en-US", { hourCycle: "h23", timeZone: "UTC" }))
+const midnight = new Date(Date.UTC(2026, 9, 23, 0, 40))
+console.log(midnight.toLocaleTimeString("en-US", { hourCycle: "h24", hour: "numeric", minute: "2-digit", timeZone: "UTC" }))
+console.log(midnight.toLocaleTimeString("en-US", { hourCycle: "h11", hour: "numeric", timeZone: "UTC" }))
+console.log(midnight.toLocaleTimeString("ja", { hour12: true, timeZone: "UTC" }))
+console.log(midnight.toLocaleTimeString("en-u-hc-h23", { timeZone: "UTC" }))
+
+// Zones: names of the database in any case, UTC, offsets.
+const zones = ["asia/bishkek", "UTC", "+05:30", "-0800", "America/New_York", "Europe/Berlin"]
+for (const timeZone of zones) {
+  const f = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "numeric", timeZoneName: "short" })
+  console.log(timeZone, f.format(d), f.resolvedOptions().timeZone)
+}
+
+// Intl.DateTimeFormat: format, formatToParts and resolvedOptions.
+const ru = new Intl.DateTimeFormat("ru", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+console.log(ru.format(d), ru.format(0), ru.formatToParts(d))
+console.log(ru.resolvedOptions())
+console.log(new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeStyle: "short" }).resolvedOptions())
+console.log(new Intl.DateTimeFormat("xx").resolvedOptions().locale == new Intl.DateTimeFormat().resolvedOptions().locale)
+console.log(new Intl.DateTimeFormat("EN-us").resolvedOptions().locale, new Intl.DateTimeFormat("en-XX").resolvedOptions().locale)
+console.log(Intl.DateTimeFormat("de", utc).format(d), new Intl.DateTimeFormat("de", utc))
+console.log(new Intl.DateTimeFormat("ja-JP-u-ca-japanese", { year: "numeric", timeZone: "UTC" }).format(d))
+console.log(new Intl.DateTimeFormat("en", { fractionalSecondDigits: 3, second: "numeric", timeZone: "UTC" }).format(d))
+
+// An invalid date writes as Invalid Date.
+console.log(new Date(NaN).toLocaleString("ru"), new Date(NaN).toLocaleDateString("en-US", { month: "long" }))

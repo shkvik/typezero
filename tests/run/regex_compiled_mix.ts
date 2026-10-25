@@ -1,0 +1,83 @@
+// same-as-node
+// Regex literals, compiled to machine code, with the rest of the language: a
+// replace callback that throws while the matches are replaced, the g flag
+// checked when only the running program knows the regex, matchAll as a
+// lazy iterator stopped early, generators that match and are closed early,
+// text of two-byte characters, strings from JSON and from Map keys, and a
+// regex as a member of a union.
+function attempt(what: string, f: () => string) {
+  try {
+    console.log(what, f())
+  } catch (e) {
+    console.log(what, `${e}`)
+  }
+}
+
+// 1. A callback that throws on the third match of a compiled global regex.
+let seen = 0
+attempt("callback", () =>
+  "a1 b2 c3 d4".replace(/([a-z])(\d)/g, (m: string, letter: string, digit: string) => {
+    if (++seen == 3) throw new RangeError(`stop at ${m}`)
+    return `${digit}${letter}`
+  }),
+)
+console.log(seen, "a1 b2".replace(/([a-z])(\d)/g, (m: string, l: string, d: string) => d + l))
+
+// 2. The g flag of a regex the program makes.
+function make(flags: string): RegExp {
+  return new RegExp("o", flags)
+}
+attempt("replaceAll", () => "foo".replaceAll(make(""), "0"))
+attempt("replaceAll g", () => "foo".replaceAll(make("g"), "0"))
+attempt("matchAll", () => [..."foo".matchAll(make("i"))].length.toString())
+attempt("matchAll g", () => [..."foo".matchAll(make("gi"))].length.toString())
+
+// 3. matchAll is lazy: a loop that stops takes only what it asked for.
+const words = "one two three four five"
+const firstTwo: string[] = []
+for (const m of words.matchAll(/\w+/g)) {
+  firstTwo.push(m[0])
+  if (firstTwo.length == 2) break
+}
+console.log(firstTwo.join(), [...words.matchAll(/(\w)(\w*)/g)].map((m) => m[1]).join(""))
+
+// 4. A generator that matches, closed before its end.
+const log: string[] = []
+function* numbers(text: string): Generator<number> {
+  try {
+    for (const m of text.matchAll(/\d+/g)) yield Number(m[0])
+  } finally {
+    log.push("closed")
+  }
+}
+let sum: number = 0
+for (const n of numbers("10 20 30 40")) {
+  sum += n
+  if (sum > 25) break
+}
+console.log(sum, log.join())
+
+// 5. Two-byte text.
+const ru = "Привет, мир! Это тест: ёж и Ель."
+console.log(ru.match(/[а-яё]+/gi)?.join("|"), /привет/i.test(ru), ru.replace(/\p{Lu}/gu, "_"))
+console.log(ru.split(/[,!:.]\s*/), ru.search(/мир/), [...ru.matchAll(/(?<w>[ёе]\p{L}*)/giu)].map((m) => m.groups?.w).join())
+
+// 6. Strings from JSON and from the keys of a Map.
+const data = JSON.parse('{"users": ["ann@example.com", "bob at example", "кот@пример.рф"]}')
+const users = data.users
+if (Array.isArray(users))
+  for (const u of users) if (typeof u == "string") console.log(u, /^[^@\s]+@[^@\s]+$/u.test(u))
+const counts = new Map<string, number>([["error: disk", 2], ["warning: cpu", 1], ["error: net", 3]])
+let errors: number = 0
+for (const [key, n] of counts) if (/^error\b/.test(key)) errors += n
+console.log(errors, [...counts.keys()].map((k) => k.replace(/:.*/, "")).join())
+
+// 7. A regex or a string, as a union.
+function find(text: string, pattern: RegExp | string): number {
+  return typeof pattern == "string" ? text.indexOf(pattern) : text.search(pattern)
+}
+console.log(find("hello world", "world"), find("hello world", /o\s/), find("hello", /z/))
+const mixed: (RegExp | number)[] = [/a+/gi, 2]
+const byName = new Map<string, RegExp>([["digits", /\d+/g]])
+const digits = byName.get("digits")
+console.log(mixed, JSON.stringify(mixed), `${mixed[0]}|${mixed[1]}`, byName, digits?.test("a1"))

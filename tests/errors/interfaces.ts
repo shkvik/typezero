@@ -1,0 +1,120 @@
+// Interfaces: what a class that implements one must have, what an interface
+// that extends another may change, and where objects fit only by declaration.
+interface Named {
+  name: string
+}
+interface Shape {
+  name: string
+  area(): double
+}
+
+// A class is an interface only if it says so.
+class Thing {
+  constructor(public name: string) {}
+}
+function hello(n: Named) {
+  return n.name
+}
+// expect-error: type 'Thing' is not assignable to type 'Named'; an instance of a class is only of its class's type and of those it extends or implements: write 'implements Named' in the class
+hello(new Thing("t"))
+
+// It has every member, of the same type.
+// expect-error: class 'NoArea' implements 'Shape', but has no 'area'; declare it, e.g. 'area: () => double'
+class NoArea implements Shape {
+  name = "x"
+}
+// A field may be read-only in the class while no code changes it through
+// the interface (tests/errors/widen_readonly.ts).
+class Square implements Shape {
+  readonly name = "square"
+  area() {
+    return 1
+  }
+}
+class Wide implements Shape {
+  name = "wide"
+  // expect-error: class 'Wide' implements 'Shape', whose 'area' is '() => double', but 'Wide.area' takes other parameters: area(k: int)
+  area(k: int) {
+    return 1.0 * k
+  }
+}
+class Counted implements Named {
+  // expect-error: class 'Counted' implements 'Named', whose field 'name' is 'string', but in 'Counted' it is 'int'
+  constructor(public name: int) {}
+}
+class Texty implements Shape {
+  name = "t"
+  // expect-error: 'area' returns 'string', and 'Shape', which 'Texty' implements, says it returns 'double'
+  area(): string {
+    return ""
+  }
+}
+interface Clicky {
+  onClick: () => void
+}
+class Button implements Clicky {
+  // expect-error: 'onClick' is a field in 'Clicky' that code may replace, so in 'Button', which implements it, it must be a field too
+  onClick() {}
+}
+// expect-error: 'Thing' is a class, and a class implements only interfaces
+class Copy implements Thing {}
+
+// An interface that extends another may narrow a field to objects of a type
+// down the chain, or make it read-only (code that writes through the wider
+// one is checked in tests/errors/widen_fields.ts), and nothing else.
+class Animal {}
+class Dog extends Animal {}
+interface Owner {
+  pet: Animal
+}
+interface DogOwner extends Owner {
+  pet: Dog
+}
+interface Port {
+  port: int
+}
+interface FixedPort extends Port {
+  readonly port: int
+}
+interface WidePort extends Port {
+  // expect-error: field 'port' of 'WidePort' is 'double', and 'Port' declares it as 'int'; an interface can narrow a field of one it extends only to objects of a type down the chain of its type
+  port: double
+}
+// expect-error: interface 'Loop' cannot extend itself
+interface Loop extends Loop {
+  z: int
+}
+// expect-error: 'Animal' is a class, and an interface extends only interfaces
+interface Pet extends Animal {
+  name: string
+}
+
+// A literal fits an interface with methods if it has exactly its members.
+// expect-error: the object literal does not fit 'Shape': it has no field 'size'; an object must have exactly the fields of its type
+const big: Shape = { name: "b", size: 1, area() { return 1.0 } }
+// expect-error: the object literal does not fit 'Clicky': 'onClick' is a field there that code may replace, which a method cannot be
+const clicky: Clicky = { onClick() {} }
+
+// Several signatures of one method: a class implements each.
+interface Adder {
+  add(k: double): string
+  add(s: string): string
+}
+// expect-error: class 'Half' implements 'Adder', but has no variant of 'add' for its signature '(string) => string'
+class Half implements Adder {
+  add(k: double) {
+    return ""
+  }
+}
+// expect-error: an object literal cannot be of type 'Adder': its method 'add' has several signatures, and only a class implements those
+const adder: Adder = { add: (k: double) => "" }
+function useAdder(a: Adder) {
+  // expect-error: 'add' has several variants, add(a: double) and add(a: string): say which one with the type of the place it goes
+  const f = a.add
+  // expect-error: 'add' is a method of 'Adder' with several signatures and cannot be replaced
+  a.add = (k: double) => ""
+  // expect-error: no variant of 'add' fits these arguments
+  return a.add(true)
+}
+// expect-error: several signatures of method 'pick' are supported only in an interface
+function inline(o: { pick(k: int): int; pick(s: string): int }) {}

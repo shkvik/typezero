@@ -1,0 +1,67 @@
+// same-as-node
+// What regexes and Json throw when the program runs, caught: new RegExp of a
+// pattern or flags that are no regex, matchAll and replaceAll without g,
+// JSON.parse of a text that is not JSON, a key of null or undefined, a value
+// inside itself, and an error of a replace callback, which goes on from
+// replace. Nothing they built is left behind (the run checks for leaks).
+function attempt(what: string, f: () => string) {
+  try {
+    console.log(what, f())
+  } catch (e) {
+    const first = e.message.split("\n")[0]
+    console.log(what, e instanceof SyntaxError, e instanceof TypeError, `${e.name}: ${first}`)
+  }
+}
+function regex(pattern: string, flags: string): RegExp {
+  return new RegExp(pattern, flags)
+}
+const patterns = ["a+", "(", "[z-a]"]
+for (const p of patterns) attempt("pattern " + p, () => String(regex(p, "g").test("aaa")))
+attempt("flags", () => regex("a", "gg").source)
+const plain = regex("a", "")
+attempt("matchAll", () => [..."banana".matchAll(plain)].length.toString())
+attempt("replaceAll", () => "banana".replaceAll(plain, "o"))
+attempt("replaceAll fn", () => "banana".replaceAll(plain, (m: string) => m.toUpperCase()))
+const global = regex("a", "g")
+attempt("matchAll g", () => [..."banana".matchAll(global)].length.toString())
+attempt("replaceAll g", () => "banana".replaceAll(global, "o"))
+attempt("parse", () => JSON.stringify(JSON.parse('{"a": [1, 2,]}')))
+const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}')
+attempt("read", () => JSON.stringify(j.owner.name) ?? "nothing")
+attempt("read index", () => JSON.stringify(j.users[3][0]) ?? "nothing")
+attempt("keys", () => Object.keys(j.owner).join())
+attempt("set null", () => {
+  j.owner.name = "Bob"
+  return "set"
+})
+const self = JSON.parse('{"a": 1}')
+self.me = self
+attempt("cycle", () => JSON.stringify(self))
+self.me = null
+console.log(JSON.stringify(self))
+let calls = 0
+attempt("callback", () =>
+  "a-b-c".replace(/-/g, (m: string) => {
+    calls++
+    if (calls == 2) throw new RangeError("second " + m)
+    return "+"
+  }),
+)
+console.log(calls)
+
+// JSON.stringify of errors: message, cause and the name of a built-in kind
+// are no keys of the object; the fields of a class and a name it gives are.
+class HttpError extends Error {
+  status: int
+  constructor(status: int, message: string) {
+    super(message)
+    this.status = status
+    this.name = "HttpError"
+  }
+}
+class LimitError extends RangeError {}
+const http = new HttpError(404, "not found")
+const limit = new LimitError("too big", { cause: http })
+console.log(JSON.stringify(http), JSON.stringify(limit), JSON.stringify(new TypeError("t")))
+console.log(JSON.stringify({ errors: [http, limit] }))
+console.log(limit.name, `${limit}`, limit instanceof RangeError, limit instanceof Error, limit.cause == http)

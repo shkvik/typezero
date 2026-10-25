@@ -1,0 +1,36 @@
+15 true true
+"first\nsecond\nthird\n" 19
+replaced false
+undefined undefined
+b
+[ 'a', 'b', 'notes.txt' ]
+[ 'a', 'b', 'notes.txt', 'b\\c', 'b\\y.txt', 'b\\c\\d', 'b\\c\\x.txt' ]
+[ 'c', 'y.txt' ] []
+a  false true false
+b  false true false
+notes.txt  true false false
+c b false true false
+y.txt b true false false
+d b\c false true false
+x.txt b\c true false false
+[ 'name', 'parentPath' ]
+true false false false 2 true true 1
+[
+  'dev',     'mode',
+  'nlink',   'uid',
+  'gid',     'rdev',
+  'blksize', 'ino',
+  'size',    'blocks',
+  'atimeMs', 'mtimeMs',
+  'ctimeMs', 'birthtimeMs'
+]
+true undefined
+true true
+replaced false
+"y"
+0
+true
+true
+true true
+[ 'b', 'notes.txt' ]
+false

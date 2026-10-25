@@ -1,0 +1,11 @@
+user ann
+user bob
+order 7 2 many
+total 5.00 EUR
+count 42 x
+chained 3!
+[ 'user', 'order', 'total', 'chain', 'chained' ]
+ready at 1
+sold apple 3
+sold pear 1
+closed [ 'sold' ]

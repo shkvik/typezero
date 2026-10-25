@@ -31,6 +31,9 @@ message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
 # tz looks for the runtime files next to its own executable.
 set(TZ_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin)
 
+include(third_party/openssl/openssl.cmake)
+# The texts `tz licenses` prints, next to tz.exe (src/driver/licenses.cpp).
+file(COPY third_party/licenses/ DESTINATION ${TZ_OUTPUT_DIR}/licenses)
 add_subdirectory(runtime)
 add_subdirectory(src)
 

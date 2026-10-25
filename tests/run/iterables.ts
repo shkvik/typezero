@@ -1,0 +1,104 @@
+// same-as-node --experimental-transform-types
+// Collections of the program (docs/iterators.md, step 3): a class with
+// `[Symbol.iterator]()`, a generator method or one that returns an iterator
+// written by hand, is iterated wherever JavaScript iterates; a parameter
+// `Iterable<T>` takes anything iterable, with a copy of the function for
+// each kind; `new Set(x)` and `new Map(x)` take any iterable.
+class Range {
+  constructor(readonly from: int, readonly to: int) {}
+  *[Symbol.iterator]() {
+    for (let i = this.from; i < this.to; i++) yield i
+  }
+}
+const r = new Range(0, 3)
+for (const i of r) console.log("range", i)
+const [first, second] = r
+console.log([...r], first, second, Array.from(r), Array.from(r, x => x * x))
+console.log(new Set(r), new Set(new Range(5, 7)).has(6))
+
+// An iterator written by hand: next() gives `{ done, value }`.
+class Countdown {
+  constructor(private n: int) {}
+  [Symbol.iterator]() {
+    let n = this.n
+    return {
+      next: (): IteratorResult<int, undefined> =>
+        n > 0 ? { done: false, value: n-- } : { done: true, value: undefined },
+    }
+  }
+}
+for (const x of new Countdown(3)) console.log("countdown", x)
+console.log([...new Countdown(4)], Math.max(...new Countdown(5)))
+
+// An iterator class of its own, which is also iterable.
+class Fib {
+  private a = 0
+  private b = 1
+  constructor(private left: int) {}
+  next(): IteratorResult<int, undefined> {
+    if (this.left == 0) return { done: true, value: undefined }
+    this.left--
+    const value = this.a
+    const sum = this.a + this.b
+    this.a = this.b
+    this.b = sum
+    return { done: false, value }
+  }
+  [Symbol.iterator]() { return this }
+}
+console.log([...new Fib(10)])
+
+// Pairs for a Map, from a generator method of a generic class.
+class Registry<T> {
+  private names: string[] = []
+  private values: T[] = []
+  add(name: string, value: T) {
+    this.names.push(name)
+    this.values.push(value)
+    return this
+  }
+  *[Symbol.iterator](): Generator<[string, T]> {
+    const names = this.names, values = this.values
+    for (let i = 0; i < names.length && i < values.length; i++) yield [names[i], values[i]]
+  }
+}
+const reg = new Registry<int>().add("a", 1).add("b", 2)
+const map = new Map(reg)
+console.log(map, map.get("b"))
+for (const [name, value] of reg) console.log(name, value)
+
+// Iterable<T> parameters: a copy for each kind of iterable.
+function sum(xs: Iterable<int>) {
+  let total = 0
+  for (const x of xs) total += x
+  return total
+}
+function* evens(limit: int) {
+  for (let i = 0; i < limit; i += 2) yield i
+}
+console.log(sum([1, 2, 3]), sum(new Set([4, 5])), sum(r), sum(new Countdown(4)), sum(evens(7)),
+            sum(new Fib(6)))
+function collect<T>(xs: Iterable<T>): T[] { return [...xs] }
+console.log(collect("héllo"), collect(new Map([["k", true]])), collect(reg), collect(new Countdown(2)))
+function largest<T extends number>(xs: Iterable<T>) {
+  let best = -Infinity
+  for (const x of xs) if (x > best) best = x
+  return best
+}
+console.log(largest([1.5, 0.5]), largest(new Range(3, 9)))
+class Bag<T> {
+  items: T[] = []
+  addAll(xs: Iterable<T>) {
+    for (const x of xs) this.items.push(x)
+    return this
+  }
+}
+console.log(new Bag<int>().addAll([1]).addAll(new Range(5, 7)).addAll(new Countdown(2)).items)
+
+// An iterator where an Iterator is expected.
+function firstTwo(it: Iterator<int>) {
+  const a = it.next()
+  const b = it.next()
+  return [a.value, b.value]
+}
+console.log(firstTwo(evens(10)), firstTwo(new Fib(5)))

@@ -1,0 +1,17 @@
+12,345,678,901,234,567,890.125
+12 345 678 901 234 567 890,13 ₽
+0,100
+-3
+2
+1.000000000000000000000000000001
+[
+  { type: 'minusSign', value: '-' },
+  { type: 'integer', value: '1' },
+  { type: 'group', value: ',' },
+  { type: 'integer', value: '234' },
+  { type: 'decimal', value: '.' },
+  { type: 'fraction', value: '5' }
+]
+[ '1,5', '2,25' ]
+one other
+30% 98,765,432T

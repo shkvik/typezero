@@ -1,7 +1,7 @@
 # Языки: `Intl`
 
-Решения, принятые 24 октября 2026 года. Пока ничего из этого не реализовано: порядок работ — в
-конце, в разделе «План реализации».
+Решения, принятые 24 октября 2026 года. Шаги 1–4 плана сделаны 24 октября для Windows (ICU
+системы); данные CLDR в exe для Linux — вместе со сборкой под Linux.
 
 ## Коротко
 
@@ -47,8 +47,8 @@ new Intl.PluralRules("ru-RU").select(5)                     // "many" — «5 я
 
 На каждом шаге: тесты `tests/run` с `// same-as-node`, обновление README.
 
-1. **Сборка данных CLDR** по частям (числа, сортировка, множественное число, …) и по языкам —
+1. **Сборка данных CLDR** (для Windows не нужна — ICU системы; для Linux — позже) по частям (числа, сортировка, множественное число, …) и по языкам —
    общая с датами ([date.md](date.md), шаг 4); ICU системы в Windows.
-2. **Числа** — `toLocaleString`, `Intl.NumberFormat`.
-3. **Строки** — `localeCompare`, `Intl.Collator`, `normalize`, `Intl.Segmenter`.
-4. **Остальное** — `PluralRules`, `RelativeTimeFormat`, `ListFormat`, `DisplayNames`.
+2. **Числа** (сделано) — `toLocaleString`, `Intl.NumberFormat`.
+3. **Строки** (сделано) — `localeCompare`, `Intl.Collator`, `normalize`, `Intl.Segmenter`.
+4. **Остальное** (сделано, кроме `selectRange` и `formatRange`) — `PluralRules`, `RelativeTimeFormat`, `ListFormat`, `DisplayNames`.

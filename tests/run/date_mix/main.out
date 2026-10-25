@@ -1,0 +1,25 @@
+standup at 2026-10-26T09:00:00.000Z for 15 min, until 2026-10-26T09:15:00.000Z
+release at 2026-10-29T09:00:00.000Z
+review at 2026-10-25T09:00:00.000Z for 60 min, until 2026-10-25T10:00:00.000Z
+1,4,0
+standup at 2026-11-02T09:00:00.000Z for 15 min, until 2026-11-02T09:15:00.000Z
+release at 2026-11-05T09:00:00.000Z
+review at 2026-11-01T09:00:00.000Z for 60 min, until 2026-11-01T10:00:00.000Z
+review < standup < release
+Thu Oct 29 2026 09:00:00 GMT+0000 | Mon Oct 26 2026 09:00:00 GMT+0000 | Sun Oct 25 2026 09:00:00 GMT+0000
+2026-10-29,2026-10-26,2026-10-25
+release 2026-10-29T09:00:00.000Z
+9 after
+ok 2026-10-27T00:00:00.000Z
+err RangeError: late by 12 h, due 2026-10-25T21:00:00.000Z
+err TypeError: not a date: 'someday'
+first sunday 2026-11-01
+Mon,Tue,Wed,Thu,Fri days done, days done
+{"title":"standup","at":"2026-10-26T09:00:00.000Z","minutes":15} {"title":"release","at":"2026-10-29T09:00:00.000Z"}
+{"when":"2026-10-26T09:00:00.000Z","never":null,"list":["2026-10-29T09:00:00.000Z"]}
+x true
+true Invalid time value null Invalid Date
+RangeError late by 1.5 h 5400000
+6 PM
+RangeError: Invalid time zone specified: Nowhere/Land
+Meeting { title: 'printed', at: 2026-10-26T09:00:00.000Z, minutes: 5 }

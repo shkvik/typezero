@@ -1,0 +1,6 @@
+{
+  "name": "ms",
+  "version": "4.0.0",
+  "main": "src/index.ts",
+  "dependencies": {}
+}

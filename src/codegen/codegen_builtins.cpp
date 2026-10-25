@@ -5,6 +5,7 @@
 #include "codegen/codegen.h"
 
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using llvm::cast;
@@ -29,8 +30,24 @@ llvm::Value *CodeGen::spillArray(llvm::ArrayRef<llvm::Value *> values, llvm::Typ
   return array;
 }
 
+// RangeError if the double does not fit (NaN does not either).
 llvm::Value *CodeGen::emitCheckedInteger(llvm::Value *value, const Type *to) {
-  return builder_.CreateCall(to->isInt() ? rt_.checkedInt32 : rt_.checkedInt64, {value});
+  bool isInt = to->isInt();
+  llvm::Type *f64 = builder_.getDoubleTy();
+  llvm::Value *low = llvm::ConstantFP::get(f64, isInt ? -2147483648.0 : -9223372036854775808.0);
+  llvm::Value *high = llvm::ConstantFP::get(f64, isInt ? 2147483648.0 : 9223372036854775808.0);
+  llvm::Value *fits = builder_.CreateAnd(builder_.CreateFCmpOGE(value, low),
+                                         builder_.CreateFCmpOLT(value, high));
+  llvm::BasicBlock *badBlock = newBlock("int.does.not.fit");
+  llvm::BasicBlock *okBlock = newBlock("int.fits");
+  builder_.CreateCondBr(fits, okBlock, badBlock, llvm::MDBuilder(ctx_).createLikelyBranchWeights());
+  switchTo(badBlock);
+  builder_.CreateCall(processFunction("tz_throw_does_not_fit", builder_.getVoidTy(),
+                                      {f64, builder_.getInt32Ty()}),
+                      {value, builder_.getInt32(isInt ? 32 : 64)});
+  emitRuntimeThrow();
+  switchTo(okBlock);
+  return builder_.CreateFPToSI(value, lower(to));
 }
 
 llvm::Value *CodeGen::emitStringToNumber(llvm::Value *str) {
@@ -71,7 +88,17 @@ llvm::Value *CodeGen::emitMathCall(CallExpr *call) {
       return x;
     if (from->isFloat())
       return emitCheckedInteger(x, type);
-    return builder_.CreateCall(rt_.checkedInt32OfLong, {x});
+    // A long where an int is expected.
+    llvm::Value *fits = builder_.CreateICmpULE(builder_.CreateAdd(x, builder_.getInt64(0x80000000)),
+                                               builder_.getInt64(0xFFFFFFFF));
+    llvm::BasicBlock *badBlock = newBlock("int.does.not.fit");
+    llvm::BasicBlock *okBlock = newBlock("int.fits");
+    builder_.CreateCondBr(fits, okBlock, badBlock, llvm::MDBuilder(ctx_).createLikelyBranchWeights());
+    switchTo(badBlock);
+    builder_.CreateCall(rt_.checkedInt32OfLong, {x});
+    emitRuntimeThrow();
+    switchTo(okBlock);
+    return builder_.CreateTrunc(x, builder_.getInt32Ty());
   }
 
   switch (call->builtin) {
@@ -181,9 +208,13 @@ llvm::Value *CodeGen::emitNumberBuiltin(CallExpr *call) {
     Operand value = emitOperand(call->args[0], /*canBorrow=*/true);
     const Type *base = argType->nonOptional();
     llvm::Value *v = argType->isOptional() ? builder_.CreateExtractValue(value.value, 0) : value.value;
-    llvm::Value *number = base->isString() ? emitStringToNumber(v)
-                          : base->isBool() ? builder_.CreateUIToFP(v, f64)
-                                           : v; // Sema made numbers doubles
+    llvm::Type *i64 = builder_.getInt64Ty();
+    llvm::Value *number =
+        base->isString()    ? emitStringToNumber(v)
+        : base->isBool()    ? builder_.CreateUIToFP(v, f64)
+        : base->isDecimal() ? builder_.CreateCall(decimalFunction("tz_dec_to_f64", f64, {i64, i64}),
+                                                  {decimalCoef(v), decimalMeta(v)})
+                            : v; // Sema made numbers doubles
     if (argType->isOptional())
       number = builder_.CreateSelect(builder_.CreateExtractValue(value.value, 1), number, nan);
     dropOperand(value);
@@ -243,13 +274,17 @@ llvm::Value *CodeGen::emitNumberBuiltin(CallExpr *call) {
     for (Expr *arg : call->args)
       values.push_back(emitExpr(arg));
     llvm::Value *array = spillArray(values, units ? builder_.getInt32Ty() : f64);
-    return callReturningString(units ? rt_.strFromCharCodes : rt_.strFromCodePoints,
-                               {array, builder_.getInt64(values.size())});
+    llvm::Value *text = callReturningString(units ? rt_.strFromCharCodes : rt_.strFromCodePoints,
+                                            {array, builder_.getInt64(values.size())});
+    emitThrowCheckIf(!units); // a code point out of range
+    return text;
   }
   case Builtin::NumToFixed: {
     llvm::Value *x = emitExpr(cast<MemberExpr>(call->callee)->object);
     llvm::Value *digits = hasArg ? emitExpr(call->args[0]) : builder_.getInt64(0);
-    return callReturningString(rt_.numToFixed, {x, digits});
+    llvm::Value *text = callReturningString(rt_.numToFixed, {x, digits});
+    emitThrowCheckIf(hasArg); // digits out of range
+    return text;
   }
   default:
     llvm_unreachable("not a function of Number");

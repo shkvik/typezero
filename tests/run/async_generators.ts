@@ -1,0 +1,99 @@
+// same-as-node
+// Async generators and `for await` (docs/iterators.md, step 4): `yield`
+// awaits its value, each step and `for await` take the turns of the queue
+// Node's take (the chain of microtasks shows them), and an iterator left
+// early is closed, its `finally` blocks awaited.
+const log = (s: string) => console.log(s)
+void Promise.resolve().then(() => log("t1")).then(() => log("t2")).then(() => log("t3"))
+  .then(() => log("t4")).then(() => log("t5")).then(() => log("t6"))
+
+async function* count(n: int) {
+  for (let i = 0; i < n; i++) {
+    log(`yield ${i}`)
+    yield i
+  }
+  log("count done")
+}
+for await (const x of count(3)) log(`got ${x}`)
+
+// What it yields is awaited; `yield*` takes the values of another, or the
+// elements of an array awaited.
+async function* names() {
+  yield "a"
+  yield Promise.resolve("b")
+  yield* ["c", Promise.resolve("d")]
+  yield* letters()
+  for await (const n of count(1)) yield `n${n}`
+}
+async function* letters() {
+  yield "x"
+  return 5
+}
+for await (const s of names()) log(`name ${s}`)
+
+// Over an array: each element awaited, a promise too.
+for await (const v of [1, Promise.resolve(2), 3]) log(`v ${v}`)
+try {
+  for await (const v of [Promise.resolve(1), Promise.reject(new Error("rejected"))]) log(`w ${v}`)
+} catch (e) {
+  log(`caught ${e.message}`)
+}
+
+// Left early: `finally` runs, and may await.
+async function* closing() {
+  try {
+    yield 1
+    yield 2
+  } finally {
+    log("finally")
+    await undefined
+    log("after await in finally")
+  }
+}
+for await (const x of closing()) {
+  log(`closing ${x}`)
+  break
+}
+async function search(): Promise<int> {
+  for await (const x of count(5))
+    if (x == 2) return x * 10
+  return -1
+}
+log(`search ${await search()}`)
+try {
+  for await (const x of closing()) {
+    log(`throwing at ${x}`)
+    throw new Error("from body")
+  }
+} catch (e) {
+  log(`caught ${e.message}`)
+}
+
+// An error in the generator rejects the step; the generator is done.
+async function* failing() {
+  yield 1
+  throw new Error("boom")
+}
+try {
+  for await (const x of failing()) log(`failing ${x}`)
+} catch (e) {
+  log(`caught ${e.message}`)
+}
+
+// Methods and function expressions; one that awaits between its values.
+class Bag {
+  items = ["x", "y"]
+  async *each() {
+    for (const i of this.items) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1))
+      yield i.toUpperCase()
+    }
+  }
+}
+for await (const s of new Bag().each()) log(s)
+const gen = async function* () {
+  yield "expression"
+}
+for await (const s of gen()) log(s)
+console.log(count(1))
+log("end")

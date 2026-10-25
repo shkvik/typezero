@@ -1,0 +1,24 @@
+[ 'Ünïcödé', 'Ελληνικά', 'русский', '中文', 'ﬅﬆ' ] [ '123', '٣٤٥' ]
+Ελληνικά русский 中文
+[ '😀', '👍', '🏽' ] 29 [ '123', '٣٤٥', '😀👍🏽' ]
+false true true
+true false true
+<1> <22> <333> äöü
+true true true true
+true false true true
+true false true false
+true false true true
+true true true false false
+[ 'Σ', 'Σ', 'σ', 'ς' ] [ 'Ä', 'ä' ] [ 'SS', 'ß' ]
+true true true true
+true false true true
+2 true true 3
+true true false true
+|😀|😀| 9 [ '😀', 'a' ]
+true true true 2
+true false 1
+bcd [ 'a', 'b' ] x
+abc [ 'ΔΕ', 'δε' ] true
+false true true
+- true true true
+false [\p{L}--\p{Lu}]

@@ -1,0 +1,15 @@
+out 1
+err 1
+warn: 42 [ 1, 2 ] { a: 'b' }
+info true
+debug undefined
+out 2, still out 2
+err 2 without a newline; 
+out 3
+out 4
+err 3
+out 5
+true true
+err 4, through a function value
+x
+y

@@ -1,0 +1,5 @@
+-> inc 2
+-> inc 3
+5 5
+-> greet ann undefined
+hi, ann

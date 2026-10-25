@@ -1,0 +1,45 @@
+a string of 5: HELLO
+a number, twice 42
+a number, twice 5
+yes
+no
+nothing
+a point 5 away
+an array of 3
+some object
+a function
+[
+  'hello',
+  21,
+  2.5,
+  true,
+  false,
+  undefined,
+  Point { x: 3, y: 4 },
+  [ 1, 2, 3 ],
+  { a: 1 }
+]
+text string
+undefined undefined
+5 number
+true false true true
+true false
+default 1
+2 1
+1 true
+8081
+9
+{ port: 8080, host: 'localhost', debug: true }
+Point other other
+[ Point { x: 1, y: 1 }, { y: 2 } ]
+["hello",21,2.5,true,false,null,{"x":3,"y":4},[1,2,3],{"a":1}] 5 undefined
+{
+  "port": 8080,
+  "host": "localhost",
+  "debug": true
+}
+true 1
+true 2
+[ 'a' ] [ 'number', 'string', 'boolean', 'undefined' ]
+4 undefined [ 'a' ]
+two

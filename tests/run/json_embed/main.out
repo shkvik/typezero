@@ -1,0 +1,13 @@
+{
+  port: 8080,
+  host: 'localhost',
+  debug: false,
+  users: [ { name: 'Ann', roles: [Array] }, { name: 'Bob', roles: [] } ]
+}
+8080 Ann []
+true true
+30
+<h1>Привет</h1>
+<p>line 2</p>
+
+8081 2 false

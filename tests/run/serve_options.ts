@@ -1,0 +1,37 @@
+// same-as-node
+// The options of serve: onListen, a signal that stops the server, and what
+// the server tells: its port, hostname and url; stop() lets the requests
+// being handled finish.
+import { serve } from "tz:http"
+
+const controller = new AbortController()
+const started = Promise.withResolvers<void>()
+let listened = ""
+const server = serve({
+  port: 0,
+  hostname: "127.0.0.1",
+  signal: controller.signal,
+  onListen: address => {
+    listened = `${address.hostname} ${address.port > 0}`
+  },
+}, async req => {
+  if (new URL(req.url).pathname == "/slow") {
+    started.resolve()
+    await new Promise<void>(r => setTimeout(r, 100))
+  }
+  return new Response("done")
+})
+console.log(listened, server.hostname, server.port > 0)
+console.log(server.url.href.replaceAll(String(server.port), "PORT"))
+const slow = fetch(`http://127.0.0.1:${server.port}/slow`)
+await started.promise
+controller.abort()
+const r = await slow
+console.log(r.status, await r.text())
+await server.finished
+console.log("finished")
+try {
+  await fetch(`http://127.0.0.1:${server.port}/`)
+} catch (e) {
+  console.log(e.message)
+}

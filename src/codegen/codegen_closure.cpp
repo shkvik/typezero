@@ -7,7 +7,8 @@
 // just calls it, and a null environment.
 //
 // An environment (and a box) is an object of the runtime (TzObject in
-// runtime/tzrt.h): { i64 rc, ptr drop, fields... }. Its fields are the
+// runtime/tzrt.h): { i64 rc, ptr descriptor, fields... }, whose descriptor
+// holds the function that drops it (see dropDescriptor). Its fields are the
 // captured variables: a copy of the value of one that never changes after the
 // closure is created, and the box of any other. The function that declares a
 // boxed variable keeps the box in a slot of its frame, and every closure that
@@ -64,7 +65,7 @@ FunctionDecl *knownFunction(const Expr *expr) {
 } // namespace
 
 const Type *CodeGen::functionTypeOf(const FuncSymbol *fn) {
-  return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->ret);
+  return Type::function(fn->params, fn->minArgs, fn->hasRest, fn->ret, fn->hasThis);
 }
 
 const Type *CodeGen::typeOf(const VarSymbol *var) {
@@ -105,7 +106,9 @@ llvm::Constant *CodeGen::functionInfo(FunctionDecl *fn) {
   if (llvm::Constant *info = infos_.lookup(fn))
     return info;
   llvm::Function *code;
-  if (fn->isClosure()) {
+  if (fn->takesThis()) {
+    code = methodCode(fn); // the object is its environment
+  } else if (fn->isClosure()) {
     code = closureCode(fn);
   } else {
     // A top-level function as a value: code that takes an environment and
@@ -139,6 +142,8 @@ const CodeGen::EnvLayout &CodeGen::envLayout(const FunctionDecl *fn) {
     return layout;
   const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
   layout.fields.assign(captures.begin(), captures.end());
+  layout.key = key;
+  layout.member = isCyclicEnv(key);
   std::vector<llvm::Type *> types{builder_.getInt64Ty(), builder_.getPtrTy()};
   for (const VarSymbol *var : layout.fields)
     types.push_back(var->boxed() ? builder_.getPtrTy() : lower(typeOf(var)));
@@ -152,17 +157,28 @@ const CodeGen::EnvLayout &CodeGen::envLayout(const FunctionDecl *fn) {
   llvm::IRBuilderBase::InsertPoint point = builder_.saveIP();
   builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", layout.drop));
   llvm::Value *env = layout.drop->getArg(0);
+  // A member releases what it holds as one (see runtime/group.c).
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
+    if (uncounted_.count({key, var})) // an owner it lives in (layer 2)
+      continue;
     llvm::Value *field = builder_.CreateStructGEP(layout.type, env, unsigned(i + 2));
-    if (var->boxed()) {
-      builder_.CreateCall(objReleaseFn_, {builder_.CreateLoad(builder_.getPtrTy(), field)});
-    } else {
-      const Type *type = typeOf(var);
-      releaseValue(builder_.CreateLoad(lower(type), field), type);
-    }
+    llvm::Value *value = builder_.CreateLoad(var->boxed() ? builder_.getPtrTy() : lower(typeOf(var)), field);
+    if (var->boxed())
+      layout.member ? releaseObjectIn(env, value) : (void)builder_.CreateCall(objReleaseFn_, {value});
+    else if (layout.member)
+      releaseIn(env, value, typeOf(var));
+    else
+      releaseValue(value, typeOf(var));
   }
-  builder_.CreateCall(rt_.objFree, {env});
+  if (layout.member) {
+    builder_.CreateCall(
+        groupFunction("tz_group_obj_free", builder_.getVoidTy(), {builder_.getPtrTy()}), {env});
+    layout.descriptor = memberDescriptor(layout.drop, "closure " + qualifiedName(fn).substr(3));
+  } else {
+    builder_.CreateCall(rt_.objFree, {env});
+    layout.descriptor = dropDescriptor(layout.drop);
+  }
   builder_.CreateRetVoid();
   builder_.restoreIP(point);
   return layout;
@@ -175,9 +191,15 @@ llvm::StructType *CodeGen::boxType(const Type *type) {
   return box;
 }
 
-llvm::Value *CodeGen::newBox(const Type *type) {
+llvm::Value *CodeGen::newBox(const Type *type, bool member) {
   llvm::StructType *box = boxType(type);
   llvm::Function *&drop = boxDrops_[type];
+  // A box of a variable whose values may form cycles with it is a member of
+  // a group (see runtime/group.c). Its drop lets go of the value as from a
+  // member, which is right for a box outside the groups too (a box of the
+  // same type may be either).
+  bool memberDrop = (member || isCyclicBox(type) || mayHoldMember(type)) && type->isManaged();
+  member = (member || isCyclicBox(type)) && type->isManaged();
   if (!drop) {
     // Releases the value, then frees the box; without a value to release,
     // just frees it.
@@ -190,16 +212,32 @@ llvm::Value *CodeGen::newBox(const Type *type) {
       llvm::IRBuilderBase::InsertPoint point = builder_.saveIP();
       builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", drop));
       llvm::Value *object = drop->getArg(0);
-      releaseValue(builder_.CreateLoad(lower(type), builder_.CreateStructGEP(box, object, 2)), type);
-      builder_.CreateCall(rt_.objFree, {object});
+      llvm::Value *value = builder_.CreateLoad(lower(type), builder_.CreateStructGEP(box, object, 2));
+      if (memberDrop) {
+        releaseIn(object, value, type);
+        builder_.CreateCall(
+            groupFunction("tz_group_obj_free", builder_.getVoidTy(), {builder_.getPtrTy()}), {object});
+      } else {
+        releaseValue(value, type);
+        builder_.CreateCall(rt_.objFree, {object});
+      }
       builder_.CreateRetVoid();
       builder_.restoreIP(point);
     }
   }
   uint64_t size = module_->getDataLayout().getTypeAllocSize(box);
-  llvm::Value *object = builder_.CreateCall(rt_.objAlloc, {builder_.getInt64(size)}, "box");
-  builder_.CreateStore(builder_.getInt64(1), builder_.CreateStructGEP(box, object, 0));
-  builder_.CreateStore(drop, builder_.CreateStructGEP(box, object, 1));
+  llvm::Value *object;
+  if (member) {
+    object = allocMember(size, "box");
+    llvm::Constant *descriptor = memberDescriptor(drop, "box");
+    if (!llvm::is_contained(boxDescriptors_, std::make_pair(descriptor, type)))
+      boxDescriptors_.push_back({descriptor, type});
+    builder_.CreateStore(descriptor, builder_.CreateStructGEP(box, object, 1));
+  } else {
+    object = builder_.CreateCall(rt_.objAlloc, {builder_.getInt64(size)}, "box");
+    builder_.CreateStore(builder_.getInt64(1), builder_.CreateStructGEP(box, object, 0));
+    builder_.CreateStore(dropDescriptor(drop), builder_.CreateStructGEP(box, object, 1));
+  }
   builder_.CreateStore(llvm::Constant::getNullValue(lower(type)), builder_.CreateStructGEP(box, object, 2));
   return object;
 }
@@ -212,7 +250,7 @@ llvm::Value *CodeGen::boxPointer(const VarSymbol *var) {
   return builder_.CreateLoad(builder_.getPtrTy(), slot, var->name + ".box");
 }
 
-llvm::Value *CodeGen::createEnv(const EnvLayout &layout, bool onStack) {
+llvm::Value *CodeGen::createEnv(const EnvLayout &layout, bool onStack, bool member) {
   llvm::StructType *type = layout.type;
   llvm::Value *env;
   if (onStack) {
@@ -221,12 +259,18 @@ llvm::Value *CodeGen::createEnv(const EnvLayout &layout, bool onStack) {
     builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), builder_.CreateStructGEP(type, env, 1));
   } else {
     uint64_t size = module_->getDataLayout().getTypeAllocSize(type);
-    env = builder_.CreateCall(rt_.objAlloc, {builder_.getInt64(size)}, "env");
-    builder_.CreateStore(builder_.getInt64(1), builder_.CreateStructGEP(type, env, 0));
-    builder_.CreateStore(layout.drop, builder_.CreateStructGEP(type, env, 1));
+    member = member && layout.member;
+    if (member) {
+      env = allocMember(size, "env");
+    } else {
+      env = builder_.CreateCall(rt_.objAlloc, {builder_.getInt64(size)}, "env");
+      builder_.CreateStore(builder_.getInt64(1), builder_.CreateStructGEP(type, env, 0));
+    }
+    builder_.CreateStore(layout.descriptor, builder_.CreateStructGEP(type, env, 1));
   }
   // An environment on the stack lives only while the variables do, so it
   // borrows their values.
+  member = member && layout.member && !onStack;
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
     llvm::Value *value;
@@ -234,8 +278,18 @@ llvm::Value *CodeGen::createEnv(const EnvLayout &layout, bool onStack) {
       value = boxPointer(var);
       if (!onStack)
         builder_.CreateCall(objRetainFn_, {value});
+      if (member)
+        builder_.CreateCall(groupFunction("tz_group_store", builder_.getVoidTy(),
+                                          {builder_.getPtrTy(), builder_.getPtrTy()}),
+                            {env, value});
+    } else if (uncounted_.count({layout.key, var})) {
+      // The closure lives in an object that the object it refers to made
+      // and holds alone (docs/objects.md, section 11, layer 2).
+      value = emitVarValue(var, /*borrow=*/true);
     } else {
       value = emitVarValue(var, /*borrow=*/onStack);
+      if (member)
+        groupStore(env, value, typeOf(var));
     }
     builder_.CreateStore(value, builder_.CreateStructGEP(type, env, unsigned(i + 2)));
   }
@@ -281,8 +335,10 @@ llvm::Value *CodeGen::emitFunctionExpr(FunctionExpr *fe) {
   // Without captures there is no environment, unless the program compares
   // functions: then each evaluation needs an identity of its own.
   llvm::Value *env = llvm::ConstantPointerNull::get(builder_.getPtrTy());
-  if (!layout.fields.empty() || (comparesFunctions_ && !fn->nonEscaping))
-    env = createEnv(layout, fn->nonEscaping);
+  if (!layout.fields.empty() || (comparesFunctions_ && !fn->nonEscaping)) {
+    env = createEnv(layout, fn->nonEscaping, !unstoredSites_.contains(fe));
+    noteUnstored(env, fe);
+  }
   return makeFunctionValue(info, env);
 }
 
@@ -322,14 +378,21 @@ llvm::Value *CodeGen::callFunctionValue(llvm::Value *fn, const Type *fnType, llv
 // `f(x)` with a function value f: the function stays alive during the call.
 // One in a field, `o.f(x)`, is not borrowed: the call may assign to the field.
 llvm::Value *CodeGen::emitValueCall(CallExpr *call) {
+  // A method of an interface: the code the object's table gives.
+  if (auto *member = dyn_cast<MemberExpr>(call->callee))
+    if (const InterfaceMember *method =
+            dispatchedMember(member->object->type, member->name, call->signature);
+        (method && method->callable) || call->signature >= 0)
+      return emitInterfaceCall(call);
   const Type *type = call->callee->type;
   Operand callee =
       emitOperand(call->callee, isa<NameExpr>(call->callee) && llvm::all_of(call->args, cannotAssign));
-  std::vector<llvm::Value *> args;
-  for (Expr *arg : call->args)
-    args.push_back(emitExpr(arg));
+  holdOperand(callee, llvm::any_of(call->args, [&](Expr *arg) { return exprThrows(arg); }));
+  std::vector<llvm::Value *> args = emitHeldValues(call->args);
+  takeOperand(callee);
   llvm::Value *result = callFunctionValue(callee.value, type, args);
   dropOperand(callee);
+  emitThrowCheckIf(typeThrows(type));
   return result;
 }
 
@@ -385,6 +448,22 @@ llvm::Value *CodeGen::emitFunctionAdapter(CastExpr *cast) {
 }
 
 void CodeGen::bindCaptures(const FunctionDecl *fn) {
+  // A method of an object literal: the object holds what it captured.
+  if (fn->cls && fn->cls->literal) {
+    envParam_->setName("this");
+    const ObjectLayout &layout = objectLayout(fn->cls->type);
+    const std::vector<VarSymbol *> &captures = fn->cls->group->captures;
+    for (size_t i = 0; i < captures.size(); ++i) {
+      const VarSymbol *var = captures[i];
+      llvm::Value *field = builder_.CreateStructGEP(layout.type, envParam_,
+                                                    unsigned(layout.captures + i), var->name);
+      if (var->boxed())
+        envBoxes_[var] = builder_.CreateLoad(builder_.getPtrTy(), field, var->name + ".box");
+      else
+        addresses_[var] = field;
+    }
+    return;
+  }
   // The captured variables: the values copied into the environment, and the
   // boxes it holds.
   envParam_->setName("env");
@@ -400,6 +479,14 @@ void CodeGen::bindCaptures(const FunctionDecl *fn) {
 }
 
 void CodeGen::emitClosure(FunctionDecl *fn) {
+  if (fn->isGenerator) {
+    emitGenerator(fn, closureCode(fn));
+    return;
+  }
+  if (fn->isAsync) {
+    emitAsyncFunction(fn, closureCode(fn));
+    return;
+  }
   findTailGroups(fn);
   if (TailGroup *group = tailGroupOf_.lookup(fn)) {
     emitTailGroup(*group);

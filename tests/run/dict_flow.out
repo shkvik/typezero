@@ -1,0 +1,21 @@
+a=1
+[ 'b=2', 'c=3', 'd=4' ]
+[ 2, 4 ] [ 6 ]
+a 1
+b 1
+c none
+each a
+stop at b
+42 2 undefined
+Map(2) {
+  'double' => [Function (anonymous)],
+  'count' => [Function (anonymous)]
+}
+Rex true
+Tom false
+Map(2) {
+  'rex' => Dog { name: 'Rex' },
+  'tom' => Animal { name: 'Tom' }
+}
+1
+23416728348467684 79

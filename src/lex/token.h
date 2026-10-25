@@ -18,6 +18,9 @@ enum class Tok {
   TemplateHead,
   TemplateMiddle,
   TemplateTail,
+  // `/pattern/flags`, which the lexer reads only when the parser asks: in
+  // other places `/` divides.
+  RegexLiteral,
 
   // Keywords
   KwAs,
@@ -62,6 +65,7 @@ enum class Tok {
   QuestionQuestion,
   QuestionDot, // `?.`
   Arrow,       // `=>`
+  At,          // `@`, before a decorator
 
   // Operators
   Plus,

@@ -1,0 +1,8 @@
+{ name: 'h', it: Object [Generator] {} }
+0 [ 1, 2 ]
+Object [Generator] {} 0
+0 1
+0 undefined
+[ 'abc', 'bc', 'c' ]
+a label long enough to live on the heap 1 another label long enough to live on the heap
+[ 45, 1, 45 ] 2

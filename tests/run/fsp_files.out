@@ -1,0 +1,31 @@
+13 true
+"first\nsecond\nthird\n" 19
+заменён
+"за"
+undefined b
+undefined
+[ 'a', 'notes.txt', 'x' ]
+[
+  'a',
+  'notes.txt',
+  'x',
+  'x\\f3.txt',
+  'a\\b',
+  'a\\f1.txt',
+  'a\\b\\c',
+  'a\\b\\f2.txt'
+]
+a  false true
+notes.txt  true false
+x  false true
+f3.txt x true false
+b a false true
+f1.txt a true false
+c a\b false true
+f2.txt a\b true false
+true 3 true true
+333
+[ 'a', 'moved.txt', 'notes.txt' ]
+true
+0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+removed

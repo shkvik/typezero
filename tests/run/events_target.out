@@ -1,0 +1,17 @@
+true [ 'a', 'b', 'obj x', 'late' ]
+[
+  'a',     'b',
+  'obj x', 'late',
+  'a',     'obj x',
+  'late'
+]
+[ 'a' ]
+phase 2 true 1 false true
+false 0 true true []
+first true
+0 2 false false
+w
+done w
+{ n: 1 } c false false false false 0
+detail 2
+EventTarget {}

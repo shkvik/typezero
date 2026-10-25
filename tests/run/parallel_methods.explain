@@ -1,0 +1,33 @@
+top-level code
+  start
+    reads  elements of any int[] (line 23 in Account.deposit)
+    parallel
+  after await at line 23
+    writes stdout (line 24)
+    reads  alice.balance (line 24)
+    reads  bob.balance (line 24)
+    reads  elements of accounts (line 27)
+    reads  elements of any int[] (line 27 in the arrow at line 27)
+    in order with Account.deposit after await at line 15 in the tasks account.deposit([10]) at line 27: alice.balance, bob.balance
+    in order: line 24
+  after await at line 27
+    writes stdout (line 28)
+    reads  alice.balance (line 28)
+    reads  bob.balance (line 28)
+    runs alone
+
+async method Account.deposit, line 13
+  start: runs inside its caller
+    reads  elements of any int[] (line 14)
+  after await at line 15
+    reads  elements of any int[] (line 14)
+    reads  this.balance (line 16)
+    writes this.balance (line 16)
+    in the task alice.deposit([1, 2]) at line 23:
+      parallel
+    in the task bob.deposit([3]) at line 23:
+      parallel
+    in the tasks account.deposit([10]) at line 27:
+      in order with the same piece in other tasks: balance of any Account
+      in order with the top-level code after await at line 23: balance of any Account
+      in order: line 16

@@ -1,0 +1,62 @@
+// Result of neverthrow, built in: ok/err, the types they get, narrowing with
+// isOk() and isErr(), and printing as node prints neverthrow's Ok and Err.
+
+function parseIntSafe(s: string): Result<int, string> {
+  if (s.length == 0) return err("пусто")
+  const n = parseInt(s)
+  return isNaN(n) ? err("не число") : ok(n | 0)
+}
+
+console.log(parseIntSafe("42"), parseIntSafe(""), parseIntSafe("x"))
+const text = parseIntSafe("42")
+  .map(n => n * 2)
+  .match(n => `получилось ${n}`, e => "ошибка: " + e)
+console.log(text)
+
+// Without a declared type, the returns make one: Result<string, string>.
+function trimmed(s: string) {
+  if (s.trim() == "") return err("blank")
+  return ok(s.trim())
+}
+console.log(trimmed("  a  "), trimmed("   "))
+
+// Where a Result is expected, ok() takes that type at once: 1 is a double.
+const half: Result<double, string> = ok(1)
+console.log(half.map(x => x / 2))
+// ok(1) alone cannot be an Err: its value can be read.
+console.log(ok(1).value, err("e").error, ok(), err())
+// A variable gets its type from what is assigned to it later, too.
+let state = ok(0)
+console.log(state)
+state = err("broken")
+console.log(state)
+
+// isOk() and isErr() narrow a variable, also after an early return.
+function describe(s: string): string {
+  const r = parseIntSafe(s)
+  if (r.isErr()) return `ошибка: ${r.error}`
+  return `число ${r.value + 1}`
+}
+console.log(describe("41"), describe(""))
+const r = parseIntSafe("7")
+if (r.isOk() && r.value > 5) console.log("big", r.value)
+console.log(r.isOk() ? r.value * 3 : -1)
+const bad = parseIntSafe("?")
+if (!bad.isOk()) console.log(bad.error.length)
+else console.log(bad.value)
+
+// Ok<T, E> and Err<T, E> as types: Results that are known to be one.
+function always(n: int): Ok<int, string> {
+  return ok(n)
+}
+console.log(always(3).value)
+
+// Printing, as node prints instances of neverthrow's classes.
+console.log([ok(1), err(2)])
+console.log({ result: ok({ name: "Bob", age: 3 }), other: err("x") })
+console.log(ok(ok(ok(ok(1)))))
+console.log(ok("a".repeat(55)))
+console.log(ok("a".repeat(56)))
+console.log(err("a".repeat(56)))
+console.log(ok({ a: "x".repeat(40), b: "y".repeat(40) }))
+console.log(typeof ok(1))

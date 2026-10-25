@@ -1,0 +1,99 @@
+// same-as-node
+// Json (docs/modules.md, section 5): what JSON.parse gives, read as
+// JavaScript reads it, narrowed by checks, compared, written back.
+const text = '{"name": "Ann", "phone": null, "age": 30, "tags": ["a", "b"], "address": {"city": "Riga"}}'
+const user = JSON.parse(text)
+console.log(user)
+console.log(user.name, user.phone, user.email, user.age)
+console.log(user.tags[0], user.tags[5], user.address.city, user["address"]["city"])
+console.log(user.tags.length, user.name.length, user.age.length)
+console.log(user?.address?.city, user.nothing?.city, user.phone?.number)
+
+// null and a missing key: `== null` and `== undefined` are true for both.
+console.log(user.phone == null, user.phone == undefined, user.email == null, user.age != null)
+console.log(user.phone ?? "no phone", user.email ?? "no email", user.age ?? 0)
+console.log(typeof user, typeof user.name, typeof user.age, typeof user.phone, typeof user.email,
+  typeof user.tags)
+
+// `==` with a value is `===`: a Json of that kind and value.
+console.log(user.age == 30, user.age == 31, user.name == "Ann", user.name == 30, user.tags == user.tags)
+const flags = JSON.parse("[true, false, 0, null]")
+console.log(flags[0] == true, flags[1] == false, flags[2] == 0, flags[3] == null, flags[2] == null)
+
+// Checks narrow a variable.
+function describe(x: Json | undefined): string {
+  if (x == undefined) return "nothing"
+  if (typeof x == "string") return `the string ${x.toUpperCase()}`
+  if (typeof x == "number") return `the number ${x * 2}`
+  if (typeof x == "boolean") return `the boolean ${!x}`
+  if (Array.isArray(x)) return `an array of ${x.length}`
+  if (x == null) return "null"
+  return `an object with ${Object.keys(x).length} keys`
+}
+for (const key of ["name", "phone", "age", "tags", "address", "email"])
+  console.log(key, describe(user[key]))
+console.log(describe(JSON.parse("false")), describe(JSON.parse("{}")))
+
+const tags = user.tags
+if (Array.isArray(tags)) {
+  for (const tag of tags) console.log(tag)
+  console.log(tags.map(t => typeof t == "string" ? t.repeat(2) : "?").join("+"))
+}
+
+// A switch compares as `===`.
+const items = JSON.parse('[{"kind": "a"}, {"kind": "b"}, {"kind": null}, {}]')
+if (Array.isArray(items))
+  for (const item of items) {
+    switch (item.kind) {
+      case "a":
+        console.log("kind a")
+        break
+      case null:
+        console.log("kind null")
+        break
+      case undefined:
+        console.log("no kind")
+        break
+      default:
+        console.log("another kind:", item.kind)
+    }
+  }
+
+// Keys as JavaScript gives them: array indices first.
+const keys = JSON.parse('{"b": 1, "2": 2, "a": 3, "1": 4, "01": 5}')
+console.log(keys)
+console.log(Object.keys(keys), Object.values(keys), Object.entries(JSON.parse('{"x": [1]}')))
+for (const key in keys) console.log(key, keys[key])
+console.log(Object.keys(JSON.parse('["x", "y"]')), Object.keys(JSON.parse("5")))
+console.log(JSON.parse('{"a": 1, "b": 2, "a": 3}'), JSON.parse('{"__proto__": 1, "it\'s": 2}'))
+
+// Writing keys and elements.
+const settings = JSON.parse("{}")
+settings.port = 8080
+settings["host name"] = "localhost"
+settings.list = [1, "two", null]
+settings.port = 8081
+console.log(settings)
+const numbers = JSON.parse("[1, 2]")
+numbers[2] = 3
+numbers[0] = "one"
+if (Array.isArray(numbers)) numbers.push(true)
+console.log(numbers)
+
+// Literals where a Json is expected; null exists only there.
+const patch: Json = { phone: null, name: "Bob", age: 31, tags: ["x", 1, false, null], nested: {} }
+console.log(patch)
+const values: Json[] = [1, "a"]
+const array: Json = values
+values.push(null) // the same array
+console.log(array)
+
+// JSON.stringify of a Json.
+console.log(JSON.stringify(user))
+console.log(JSON.stringify(patch, null, 2))
+console.log(JSON.stringify(JSON.parse('[-0, 1e400, 0.1, 1e21, "\\u00e9\\ud800", "tab\\tq\\""]')))
+
+// Destructuring reads keys and elements.
+const { name: who, address: { city }, nothing } = user
+const [first, second, third] = user.tags
+console.log(who, city, nothing, first, second, third)

@@ -1,0 +1,83 @@
+// Decorators where they cannot be, and what they cannot do.
+function Log<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, R>) {
+  console.log(name, method.writable)
+}
+function Column(cls: object, name: string) {
+  console.log(cls, name)
+}
+function Inject(cls: object, name: string | undefined, index: int) {
+  console.log(cls, name, index)
+}
+function Sealed(cls: object) {
+  console.log(cls)
+}
+function Replace(cls: object) {
+  return cls
+}
+
+class Wrong {
+  // expect-error: 'Log' cannot decorate a field: it takes 3 arguments, and a decorator of a field gets 2, the class and the name of the field
+  @Log count = 0
+  // expect-error: 'Inject' cannot decorate a field: it takes 3 arguments
+  @Inject name = ""
+  // expect-error: 'Inject' takes the position of a parameter: it decorates parameters, not methods
+  @Inject run() {}
+  // expect-error: 'Log' takes the descriptor of a method: it decorates methods, not parameters
+  walk(@Log steps: int) {
+    return steps
+  }
+  // expect-error: a decorator cannot decorate an 'accessor' field: in tz it is an ordinary field
+  @Column accessor size = 1
+  // expect-error: a decorator cannot decorate a '#private' member, whose name is no key of the class; make it 'private secret'
+  @Column #secret = 1
+}
+
+// expect-error: 'Column' cannot decorate a class: it takes 2 arguments, and a decorator of a class gets 1, the class
+@Column
+class OnClass {}
+
+// expect-error: 'Replace' returns 'object': a class decorator gives back nothing, the class it got, or a class that extends it, which then replaces it
+@Replace
+class Replaced {}
+
+abstract class Shape {
+  // expect-error: a decorator cannot decorate an abstract method, which has no code; decorate the methods that implement it
+  @Log abstract area(): double
+}
+
+// expect-error: a decorator of a parameter can decorate only a parameter of a method or a constructor of a class
+function plain(@Inject x: int) {
+  return x
+}
+
+// One name of the class keeps the records of both members.
+class Clash {
+  @Column static id = 0
+  // expect-error: both the static member 'id' and the member 'id' of 'Clash' are decorated, and the records of '@Column' for both would be one
+  @Column id = 1
+  @Log size(n: int) { return n }
+  // expect-error: two variants of 'size' of 'Clash' are decorated, and the records 'design:*' the compiler writes for both would be one
+  @Column size(s: string) { return s.length }
+}
+
+// There are no prototypes, and the decorator has the class.
+class Point {
+  x = 0
+}
+// expect-error: there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class
+console.log(Point.prototype)
+function Proto(target: object, name: string) {
+  // expect-error: 'constructor' is not supported: an object has no prototype in tz; a decorator gets the class itself
+  console.log(target.constructor, name)
+}
+
+// The method's own `this`.
+function Wrapper(_cls: object, _name: string, method: MethodDescriptor<[int], int>) {
+  const original = method.value
+  // expect-error: the function takes its 'this' first, which a plain call does not pass; call it with '.call(obj, ...)' or '.apply(obj, args)'
+  console.log(original(1))
+  // expect-error: an arrow function cannot have a 'this' parameter: it sees the 'this' of the function around it; write a 'function'
+  const arrow = (this: unknown, n: int) => n
+  // expect-error: 'bind' is not supported: pass the 'this' with every call, 'f.call(obj, ...)'
+  original.bind(1)
+}

@@ -1,0 +1,30 @@
+main
+nextTick
+t1
+plain
+new Promise
+finally callback
+await 1
+queueMicrotask
+t2
+viaAwait
+all
+race
+allSettled
+any
+await 2
+t3
+viaPromise
+t4
+finally
+t5
+t6
+--- timer
+timer end
+tick 1
+tick in tick
+promise 1
+microtask
+promise in tick
+promise in promise
+tick in promise

@@ -1,0 +1,45 @@
+// same-as-node
+// Arguments reach the program as they were given, whatever is in them: on
+// Windows they are quoted into one command line as Node quotes them, and
+// the program splits it back. Random arguments go to this program and to
+// Node, and each says what it got.
+import { execFileSync } from "node:child_process"
+
+const at = process.argv.indexOf("--child")
+if (at >= 0) {
+  console.log(JSON.stringify(process.argv.slice(at + 1)))
+  process.exit(0)
+}
+
+const chars = ["a", "b", " ", "  ", "\t", "\"", "\\", "\\\\", "'", "&", "|", "^", "%", "!", "<", ">",
+               "é", "中", "😀", "=", ";", ",", "(", ")", "*", "?"]
+let seed = 12345
+function next(n: int): int {
+  seed = (seed * 7919 + 13) % 65521
+  return seed % n
+}
+const fixed = ["", " ", "\"", "\\", "\\\\", "a\\", "a\\\\", "a\\\"b", "\\\"", "\"\"", "a b\\",
+               "C:\\Program Files\\x\\", "\\\\server\\share\\", "\"a b\"", "a\"b c\"d", "\t\t",
+               "%PATH%", "^&|<>", "!x!"]
+const all: string[] = [...fixed]
+while (all.length < 400) {
+  let s = ""
+  const length = next(7)
+  for (let i = 0; i < length; i++) s += chars[next(chars.length)] ?? ""
+  all.push(s)
+}
+
+function check(who: string, run: (args: string[]) => string) {
+  let same = 0
+  for (let i = 0; i < all.length; i += 50) {
+    const batch = all.slice(i, i + 50)
+    const got = run(batch).trim()
+    if (got == JSON.stringify(batch)) same += batch.length
+    else console.log(who, "differs:", JSON.stringify(batch), "got", got)
+  }
+  console.log(who, same, "of", all.length)
+}
+const script = process.argv[1] ?? ""
+check("self", args => execFileSync(process.execPath, [script, "--child", ...args], { encoding: "utf8" }))
+check("node", args => execFileSync("node", ["-e", "console.log(JSON.stringify(process.argv.slice(1)))", "--", ...args],
+                                   { encoding: "utf8" }))

@@ -1,0 +1,45 @@
+// Json together with the rest of the language: a Json in a class field from
+// another file, JSON.parse<T> into a type with decimal fields inside a
+// Result, Json as a generic value and inside Results, iterator helpers over a
+// Json[], regexes on strings a Json holds once a check shows they are
+// strings, and JSON.stringify of regexes, matches, iterators, classes,
+// decimals and Results.
+import { Store, readSettings } from "./store"
+
+function hold<T>(value: T) {
+  return { value }
+}
+
+function countKinds<T>(items: T[], kind: (x: T) => string) {
+  return items.values().map(kind).reduce((text, k) => `${text}${k[0]}`, "")
+}
+
+const store = new Store('{"users": [{"name": "Ann"}, null, {"name": 7}, {"name": "Bob"}]}')
+console.log(store.names(), store)
+const users = store.data.users
+if (users != undefined && Array.isArray(users))
+  console.log(countKinds(users, u => (u == null ? "null" : typeof u)), users.length)
+
+// JSON.parse<T> and fromJson<T> into a declared type, as a Result.
+const settings = readSettings('{"name": "shop", "limit": 3, "price": 19.99, "tags": ["a", "b"]}')
+console.log(settings, settings.map(s => s.price * s.limit))
+console.log(readSettings("[1, 2]"), JSON.stringify(settings))
+
+// A Json as a generic value, in a Result and in an array.
+const doc = JSON.parse('{"title": "Report 2024-05", "pages": [3, 4]}')
+const kept: Result<Json, string> = ok(doc)
+console.log(hold(doc), kept, [doc, JSON.parse("null")])
+
+// Regexes on what a Json holds, once a check shows it is a string.
+const title = doc.title
+if (typeof title == "string") {
+  const date = /(?<y>\d{4})-(?<m>\d{2})/.exec(title)
+  console.log(date?.groups.y, title.replace(/\d/g, "#"), JSON.stringify(date))
+}
+
+// JSON.stringify of values that are no JSON in themselves, as node writes
+// them: a regex as {}, a match as the array of its captures, an iterator as
+// {}, a decimal as a string, a Result as its one property.
+console.log(JSON.stringify({ re: /a+/g, match: "xaay".match(/(a)(b)?/), it: [1].values() }))
+console.log(JSON.stringify({ sum: decimal(0.1) + 0.2, results: [ok(1), err("no")] }))
+console.log(JSON.stringify(store, null, 1))

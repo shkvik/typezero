@@ -1,0 +1,93 @@
+// A Json may hold any JSON value: before a check shows what it holds, it is
+// no condition, no string, no number, and has no methods.
+type int = number
+const j = JSON.parse('{"a": 1, "items": [1]}')
+
+// expect-error: a Json cannot be a condition: it may hold 0, "", false or null
+if (j.a) console.log("a")
+// expect-error: give a default with '??', which replaces null and undefined: 'j.a ?? 5'
+const withDefault = j.a || 5
+// expect-error: '!' cannot test a Json
+const not = !j.a
+// expect-error: a Json cannot be converted to a string: it may hold an object
+const text = `${j.a}`
+// expect-error: a Json cannot be converted to a string
+console.log(String(j))
+// expect-error: type 'Json | undefined' is not assignable to type 'double'; a Json may hold any JSON value: check what it holds first
+const n: number = j.a
+// expect-error: operator '+' cannot be applied to types 'Json | undefined' and 'int'
+const sum = j.a + 1
+// expect-error: operator '+=' cannot be applied to types 'Json | undefined' and 'int'
+j.a += 1
+// expect-error: a Json has no method 'map' until a check shows what it holds; put it in a variable and check that
+j.items.map((x: Json) => x)
+// expect-error: a Json has no method 'trim' until a check shows what it holds, e.g. 'if (Array.isArray(j)) j.trim(...)'
+j.trim()
+// expect-error: 'as' is not supported; convert a Json with 'fromJson<double>(x)'
+const cast = j as number
+// expect-error: a key of a Json is a string or a number, found 'boolean'
+const byFlag = j[true]
+
+// null exists only in Json values.
+// expect-error: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined' (null exists only in Json values)
+let phone: string | null
+// expect-error: 'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)
+const nothing = null
+// expect-error: 'null' exists only in Json values, and a value of type 'int' is never null
+console.log(5 == null)
+
+// Only literals and Json[] become Json: an int[] would have to be a copy.
+const numbers = [1, 2]
+// expect-error: type 'int[]' is not assignable to type 'Json'; an array or an object becomes a Json only as a literal
+const fromArray: Json = numbers
+const price: decimal = 1.5
+// expect-error: JSON has no decimals: write it as text with 'String(x)'
+const fromDecimal: Json = price
+// expect-error: a spread is not supported in a Json literal
+const spread: Json = { ...{ a: 1 } }
+
+// JSON.stringify calls no code of the program.
+class Money {
+  constructor(public cents: int) {}
+  toJSON() { return this.cents }
+}
+// expect-error: JSON.stringify does not call the method toJSON of class 'Money'
+console.log(JSON.stringify(new Money(5)))
+// expect-error: a replacer is not supported: tz calls no code by itself
+console.log(JSON.stringify(j, (key: string, value: Json) => value))
+// expect-error: the space of JSON.stringify is a number of spaces or a string, found 'boolean'
+console.log(JSON.stringify(j, null, true))
+// expect-error: the reviver of JSON.parse is not supported
+console.log(JSON.parse("1", (key: string, value: Json) => value))
+// expect-error: 'JSON.load' does not exist; JSON has parse and stringify
+JSON.load("x")
+// expect-error: type arguments can be given only to a generic function and to 'JSON.parse<T>'
+const mapped = [1, 2].map<int>(x => x)
+
+// JSON.parse<T> and fromJson<T> build plain types.
+// expect-error: JSON.parse<Money> cannot build a 'Money': 'Money' is a class, and only its constructor makes one
+const money = JSON.parse<Money>("1")
+type Handler = { run: () => void }
+// expect-error: cannot build a 'Handler': a value of type '() => void' cannot come from JSON
+const handler = JSON.parse<Handler>("{}")
+// expect-error: fromJson<[int, string]> cannot build a '[int, string]': tuples are not supported yet
+const tuple = fromJson<[int, string]>(j)
+// A union: the kind of value JSON holds tells its members apart, and among
+// objects a tag field; when neither can, the compiler says so.
+interface Named { name: string }
+interface Aged { age: int }
+// expect-error: 'Named' and 'Aged' are both objects in JSON, and no field tells them apart; give each a field of a literal type with its own value, e.g. 'kind: "circle"'
+const someone = JSON.parse<Named | Aged>("{}")
+// expect-error: 'int' and 'decimal' are both numbers in JSON, so a number could be either; keep one of them
+const amount = fromJson<int | decimal>(j)
+// expect-error: a Record is an object in JSON, as 'Named' is, so an object could be either
+const either = JSON.parse<Record<string, int> | Named>("{}")
+// expect-error: fromJson needs the type to build, e.g. 'fromJson<User>(j)'
+const untyped = fromJson(j)
+const list = j.items
+if (Array.isArray(list)) {
+  // expect-error: Json values cannot be converted to strings: an object would be '[object Object]'
+  console.log(list.join(","))
+  // expect-error: sorting Json values needs a comparison function
+  list.sort()
+}

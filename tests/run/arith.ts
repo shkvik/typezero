@@ -1,14 +1,17 @@
 // Integer arithmetic wraps around on overflow at run time (in constants it is
 // an error, see errors/constants.ts).
 let big: int = 2147483647
+// expect-warning: 'big + 1' may overflow int: it may reach 2147483648
 console.log(big + 1)
 let small: int = -2147483648
+// expect-warning: 'small - 1' may overflow int
 console.log(small - 1)
 
 // Integer division truncates; the remainder takes the sign of the dividend.
 console.log(7 / 2, -7 / 2, 7 % 3, -7 % 3)
 let min: int = -2147483648
 let minusOne: int = -1
+// expect-warning: 'min / minusOne' may overflow int
 console.log(min / minusOne, min % minusOne)
 
 // Literals take the type the context expects.

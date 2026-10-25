@@ -1,0 +1,12 @@
+name cid 5
+2 ANN b@x
+{ id: 1, name: 'anna' }
+[ 'anna', 'bob' ] [ 1, 2 ]
+[ undefined, 'b@x' ]
+{ id: 3, name: 'pv' } [ {}, { name: 'x' }, { email: 'e' } ] { id: 4, name: 'c', email: 'c@x' } { id: 5, name: 'f' } { id: 6, name: 's' }
+[ 'draft', 'live' ] gone here
+[ 2, 3.5 ] 7
+true false undefined
+b@x anna
+{ draft: true, live: false, gone: false } { id: 7, name: 'thawed' }
+{ port: 9090, host: 'example.com', debug: true } host example.com

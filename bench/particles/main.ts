@@ -1,0 +1,69 @@
+// A simulation written with classes: particles whose positions, velocities
+// and forces are `Vec` objects, and whose methods return new vectors, as such
+// code is usually written. Each step creates and frees about 270 thousand
+// small objects through method calls.
+class Vec {
+  constructor(public x: double, public y: double) {}
+  add(o: Vec) {
+    return new Vec(this.x + o.x, this.y + o.y)
+  }
+  sub(o: Vec) {
+    return new Vec(this.x - o.x, this.y - o.y)
+  }
+  scale(k: double) {
+    return new Vec(this.x * k, this.y * k)
+  }
+  lengthSquared() {
+    return this.x * this.x + this.y * this.y
+  }
+}
+
+class Particle {
+  velocity = new Vec(0, 0)
+  constructor(public position: Vec, public mass: double) {}
+  accelerate(force: Vec, dt: double) {
+    this.velocity = this.velocity.add(force.scale(dt / this.mass))
+  }
+  move(dt: double) {
+    this.position = this.position.add(this.velocity.scale(dt))
+  }
+  energy() {
+    return 0.5 * this.mass * this.velocity.lengthSquared()
+  }
+}
+
+class World {
+  particles: Particle[] = []
+  constructor(count: int) {
+    for (let i = 0; i < count; i++) {
+      const x = ((i * 7919) % 1000) / 100.0
+      const y = ((i * 104729) % 1000) / 100.0
+      this.particles.push(new Particle(new Vec(x, y), 1 + (i % 5)))
+    }
+  }
+  step(dt: double) {
+    const ps = this.particles
+    for (let i = 0; i < ps.length; i++) {
+      const a = ps[i]
+      let force = new Vec(0, 0)
+      for (let j = 0; j < ps.length; j++) {
+        if (i == j) continue
+        const b = ps[j]
+        const d = b.position.sub(a.position)
+        const dist2 = d.lengthSquared() + 0.01
+        force = force.add(d.scale((a.mass * b.mass) / (dist2 * Math.sqrt(dist2))))
+      }
+      a.accelerate(force, dt)
+    }
+    for (const p of ps) p.move(dt)
+  }
+  energy() {
+    let total = 0.0
+    for (const p of this.particles) total += p.energy()
+    return total
+  }
+}
+
+const world = new World(300)
+for (let s = 0; s < 120; s++) world.step(0.0001)
+console.log(world.energy().toFixed(6))

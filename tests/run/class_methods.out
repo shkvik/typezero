@@ -1,0 +1,26 @@
+2 true true false
+[ 10, 20, 30 ]
+[ 3, 40 ]
+5 60
+0 Counter {
+  count: 0,
+  step: 1,
+  reset: [Function: reset],
+  format: [Function: format]
+}
+#0
+count 0 [ 'count', 'step', 'reset', 'format' ]
+[ 3, 6, 9 ]
+400
+[ 1, 4, 9 ] 81
+[ 5, 11 ] 11
+3 main: 4 items after 3 pushes
+{
+  items: [ 0, 1, 2, 3 ],
+  push: [Function: push],
+  top: [Function: top],
+  describe: [Function: describe]
+}
+main: 4 items after 3 pushes
+hi, Ann [ 'hi, Bob', 'hi, Cid' ]
+hello, Ann

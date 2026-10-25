@@ -1,0 +1,94 @@
+// Cycles through what the libraries hold, each freed as a whole once nothing
+// outside holds it, as TZ_CHECK_LEAKS checks at the end (docs/objects.md,
+// section 11): an emitter of node:events whose listeners capture it; a
+// server-like graph whose connections refer back to their server, through
+// the listener of an AbortSignal, the resolve of a Promise, closures and a
+// generator; decorated handler classes made by reflection; and weak
+// references, which become undefined the moment their objects die.
+import { Conn, Handler, Room, Route, Server } from "./graph.ts"
+
+@Route("/echo")
+class Echo extends Handler {
+  handle(conn: Conn, text: string): string {
+    this.handled++
+    return `echo ${super.handle(conn, text)} via ${this.server.name}`
+  }
+}
+
+@Route("/upper")
+class Upper extends Handler {
+  handle(conn: Conn, text: string): string {
+    this.handled++
+    return text.toUpperCase()
+  }
+}
+
+// 1. An emitter whose listeners capture it: the classic cycle of node:events.
+function chat(): WeakRef<Room> {
+  const room = new Room("lobby")
+  room.on("say", (who, text) => {
+    room.lines.push(`${who}: ${text}`)
+  })
+  room.once("close", () => room.say("bot", `bye from ${room.name}`))
+  room.say("ann", "hi")
+  room.emit("close")
+  room.emit("close")
+  console.log(room.lines.join(" | "), room.listenerCount("say"), room.listenerCount("close"))
+  return new WeakRef(room)
+}
+const roomRef = chat()
+console.log("room freed:", roomRef.deref() == undefined)
+
+// 2. A server and its connections: peers, a closure that sends on, the
+// handlers, an abort that closes them all, the promises of their ends, and
+// generators that walk the server while it lives.
+function* ids(server: Server) {
+  for (const id of server.byId.keys()) yield id
+}
+
+async function* logged(server: Server) {
+  for (const line of server.log) {
+    await undefined
+    yield `${server.name}> ${line}`
+  }
+}
+
+async function session(): Promise<[WeakRef<Server>, WeakRef<Conn>]> {
+  const server = new Server("main")
+  const a = server.accept(1)
+  const b = server.accept(2)
+  a.peer = b
+  b.peer = a
+  a.onData = (text) => b.receive(server.route("/upper", a, text))
+  b.onData = (text) => server.log.push(server.route("/echo", b, text))
+  a.receive("ping")
+  a.receive("pong")
+  console.log([...ids(server)].join(","), server.route("/none", a, "x"))
+  for await (const line of logged(server)) console.log(line)
+  const ends = Promise.all([a.done, b.done])
+  server.controller.abort()
+  console.log((await ends).join(", "), server.conns.size, server.controller.signal.aborted)
+  console.log(a.hash.digest("hex").slice(0, 12), b.hash.digest("hex").slice(0, 12))
+  let handled = 0
+  for (const h of server.handlers.values()) handled += h.handled
+  console.log(`handled ${handled}`, server.handlers.get("/echo") instanceof Echo)
+  return [new WeakRef(server), new WeakRef(b)]
+}
+const [serverRef, connRef] = await session()
+console.log("server freed:", serverRef.deref() == undefined, connRef.deref() == undefined)
+
+// 3. A connection that is its own peer, and a weak reference to its server
+// that sees it while the function runs and not after.
+async function alone(): Promise<WeakRef<Server>> {
+  const server = new Server("alone")
+  const c = server.accept(7)
+  c.peer = c
+  c.receive("self")
+  const weak = new WeakRef(server)
+  console.log(weak.deref()?.byId.get(7)?.peer?.id, server.route("/echo", c, "still"))
+  c.close("done")
+  console.log(await c.done)
+  return weak
+}
+const weak = await alone()
+console.log("alone freed:", weak.deref() == undefined)

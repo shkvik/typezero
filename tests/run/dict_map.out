@@ -1,0 +1,41 @@
+3 25 undefined true false
+Map(3) { 'ann' => 31, 'bob' => 25, 'cid' => 40 }
+[ 'ann', 'bob', 'cid' ] [ 32, 25, 40 ]
+true false 2
+ann 32
+cid 40
+[ 'ann', 32 ]
+[ 'cid', 40 ]
+ann 32 2
+cid 40 2
+[ [ 'ann', 32 ], [ 'cid', 40 ] ] [ [ 'ann', 32 ], [ 'cid', 40 ] ]
+Map(0) {} 0
+Map(3) { 'red' => 1, 'green' => 2, 'blue' => 3 } Map(4) { 'red' => 1, 'green' => 2, 'blue' => 3, 'black' => 0 }
+4 -1
+nan zero true Map(3) { NaN => 'nan', 0 => 'zero', 1.5 => 'one and a half' }
+p undefined false
+Map(2) { true => [ 1, 2 ], false => [] }
+a 1
+c 3
+d 4
+Map(3) { 'a' => 10, 'c' => 3, 'd' => 4 }
+x
+y
+x
+x
+x
+at 1
+at 3
+Map(1) { 3 => 'c' }
+{ value: 'red', done: false } { value: 'green', done: false }
+[ 'blue' ]
+[ 10, 20, 30 ]
+[ 'green', 'blue' ]
+Map(3) {
+  'a' => [ 'apple', 'avocado' ],
+  'b' => [ 'banana', 'blueberry' ],
+  'c' => [ 'cherry' ]
+}
+[ 'avocado', 'blueberry' ] [ 'apple', 'banana', 'cherry' ]
+Map(1) { 'a' => Map(2) { 'x' => 1, 'y' => 2 } } { m: Map(1) { 'a' => Map(2) { 'x' => 1, 'y' => 2 } } } [ Map(1) { 'a' => Map(2) { 'x' => 1, 'y' => 2 } } ]
+Map(0) {} object true false

@@ -16,6 +16,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::TemplateHead: return "template literal";
   case Tok::TemplateMiddle:
   case Tok::TemplateTail: return "'}'";
+  case Tok::RegexLiteral: return "regular expression";
   case Tok::KwAs: return "'as'";
   case Tok::KwBreak: return "'break'";
   case Tok::KwCase: return "'case'";
@@ -56,6 +57,7 @@ const char *tokSpelling(Tok kind) {
   case Tok::QuestionQuestion: return "'??'";
   case Tok::QuestionDot: return "'?.'";
   case Tok::Arrow: return "'=>'";
+  case Tok::At: return "'@'";
   case Tok::Plus: return "'+'";
   case Tok::Minus: return "'-'";
   case Tok::Star: return "'*'";
@@ -274,6 +276,13 @@ Token Lexer::next() {
   case '"':
   case '\'':
     return lexString(start, c, nl);
+  case '@':
+    return make(Tok::At, start, nl);
+  case '#':
+    // `#x`, a private name of a class: an identifier that keeps its `#`.
+    if (isIdentStart(peek()))
+      return lexIdentifier(start, nl);
+    break;
   default:
     break;
   }
@@ -296,6 +305,8 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     ++cur_;
     while (llvm::isAlnum(peek()) || peek() == '_')
       ++cur_;
+    if (cur_[-1] == 'n' && cur_ - start > 3) // `0xffn`, a bigint (see below)
+      --cur_;
   } else {
     if (*start == '.')
       isFloat = true;
@@ -333,6 +344,16 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     }
   }
 
+  // `10n` is a bigint, which the language replaces with long and decimal.
+  if (peek() == 'n' && !isIdentChar(peek(1))) {
+    Token tok = make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
+    diags_.error(llvm::SMLoc::getFromPointer(start),
+                 "'" + tok.text + "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
+                 "fit in 'long', longer ones in 'decimal' (e.g. 'const n: decimal = " +
+                     tok.text + "')");
+    ++cur_;
+    return tok;
+  }
   if (isIdentStart(peek())) {
     diags_.error(llvm::SMLoc::getFromPointer(cur_), "an identifier cannot directly follow a number");
     while (isIdentChar(peek()))
@@ -373,6 +394,38 @@ Token Lexer::lexTemplate(const char *start, bool continuation, bool newlineBefor
     if (c == '\\' && cur_ < end_)
       ++cur_;
   }
+}
+
+// `/body/flags`: the body ends at the first `/` that is neither escaped nor
+// in a class `[...]`, and holds no line break.
+Token Lexer::regex(const char *start, bool newlineBefore) {
+  cur_ = start + 1;
+  bool inClass = false;
+  auto lineBreak = [&] {
+    return *cur_ == '\n' || *cur_ == '\r' ||
+           llvm::StringRef(cur_, static_cast<size_t>(end_ - cur_)).starts_with("\xE2\x80\xA8") ||
+           llvm::StringRef(cur_, static_cast<size_t>(end_ - cur_)).starts_with("\xE2\x80\xA9");
+  };
+  for (;;) {
+    if (cur_ >= end_ || lineBreak()) {
+      diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated regular expression literal");
+      return make(Tok::RegexLiteral, start, newlineBefore);
+    }
+    char c = *cur_++;
+    if (c == '\\') {
+      if (cur_ < end_ && !lineBreak())
+        ++cur_;
+    } else if (c == '[') {
+      inClass = true;
+    } else if (c == ']') {
+      inClass = false;
+    } else if (c == '/' && !inClass) {
+      break;
+    }
+  }
+  while (cur_ < end_ && isIdentChar(*cur_))
+    ++cur_;
+  return make(Tok::RegexLiteral, start, newlineBefore);
 }
 
 Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
@@ -567,6 +620,21 @@ static llvm::StringRef templateText(const Token &tok) {
 
 bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
   return decodeText(templateText(tok), /*isTemplate=*/true, out, diags);
+}
+
+void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags) {
+  llvm::StringRef text = tok.text.drop_front();
+  size_t slash = text.rfind('/');
+  if (slash == llvm::StringRef::npos)
+    slash = text.size(); // unterminated, reported already
+  llvm::StringRef body = text.take_front(slash);
+  llvm::StringRef suffix = text.drop_front(std::min(slash + 1, text.size()));
+  pattern.clear();
+  for (size_t i = 0; i < body.size();)
+    appendUtf16(pattern, decodeUtf8(body, i));
+  flags.clear();
+  for (size_t i = 0; i < suffix.size();)
+    appendUtf16(flags, decodeUtf8(suffix, i));
 }
 
 void decodeTemplateRaw(const Token &tok, std::u16string &out) {

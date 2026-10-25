@@ -1,0 +1,69 @@
+// Classes together with the rest of the language: instances of classes in
+// generic functions (one copy for all objects, printed with their class
+// names), decimal fields, overloads that widen an int or a long to decimal,
+// Results of instances, methods and arrow fields that return Results, a
+// Result in an optional field, and a class from another file.
+import { Money } from "./money"
+
+class Wallet {
+  items: Money[] = []
+  last?: Result<int, string>
+  onAdd = (m: Money) => this.add(m)
+  constructor(public owner: string) {}
+
+  add(m: Money): Result<int, string> {
+    const r = m.amount <= 0 ? err(`${m.toString()} is not positive`) : ok(this.items.push(m))
+    this.last = r
+    return r
+  }
+
+  total(currency: string): Result<Money, string> {
+    let sum = new Money(0, currency)
+    for (const m of this.items) {
+      const next = sum.plus(m)
+      if (next.isErr()) return err(next.error)
+      sum = next.value
+    }
+    return ok(sum)
+  }
+}
+
+function show<T>(label: string, x: T) {
+  console.log(label, x)
+}
+
+function firstOr<T>(xs: T[], fallback: T): T {
+  return xs[0] ?? fallback
+}
+
+function wrap<T>(x: T) {
+  return ok(x)
+}
+
+function same<T>(a: T, b: T) {
+  return a == b
+}
+
+const w = new Wallet("ann")
+const price = new Money(19.99, "EUR")
+show("price", price)
+show("wallet", w)
+console.log(w.add(price), w.onAdd(new Money(250)), w.add(new Money(0, "EUR")))
+console.log(w.last, w.items.length, w.last?.match(n => `${n} items`, e => `failed: ${e}`))
+console.log(w.total("EUR"))
+w.items.push(new Money(1, "USD"))
+console.log(w.total("EUR").mapErr(e => `total: ${e}`))
+
+// int, an exact decimal literal, a long.
+const thousand: long = 1000
+console.log(price.times(3), price.times(1.5), price.times(thousand).toString())
+
+console.log(Money.parse("4.50 EUR").andThen(m => m.plus(price)), Money.parse("x"))
+console.log(firstOr(w.items, price).toString(), firstOr([], price).toString())
+console.log(wrap(price).map(m => m.times(2).amount), same(price, price), same(w, new Wallet("ann")))
+console.log(Result.combine([Money.parse("1.25 EUR"), wrap(3)]).map(([m, n]) => m.times(n)))
+const parsed = ["3 EUR", "oops", "7.25 EUR", "1.2.3 EUR"].map(Money.parse)
+// Methods as values, bound to their objects, in Results and arrays.
+console.log(Money.parse("2 EUR").andThen(w.add), ok(2).map(price.times).map(m => m.amount))
+console.log(Result.combineWithAllErrors(parsed))
+console.log(w, Money.created)

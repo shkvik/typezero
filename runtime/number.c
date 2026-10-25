@@ -1,11 +1,14 @@
 // Numbers in text: Number(s), parseInt and parseFloat, which read the ASCII
-// text string.c hands them, and x.toFixed(digits).
+// text string.c hands them, x.toFixed(digits), and the shortest digits of a
+// double, which String(x) writes.
 
 #include "tzrt.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "number_tables.h"
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
@@ -49,9 +52,71 @@ static size_t decimal_length(const char *text, size_t i, size_t n) {
   return j - i;
 }
 
+// The powers of ten that a double holds exactly.
+static const double exact_pow10[23] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,
+                                       1e8,  1e9,  1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+                                       1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+
+// decimal_value without strtod, for the usual numbers: when the significant
+// digits make an integer below 2^53 and the power of ten is exact, one
+// multiplication or division of exact doubles rounds correctly (Clinger's
+// fast path). Returns 0 when it does not apply.
+static int decimal_value_fast(const char *text, size_t n, double *out) {
+  size_t i = 0;
+  int negative = 0;
+  if (i < n && (text[i] == '+' || text[i] == '-'))
+    negative = text[i++] == '-';
+  uint64_t m = 0;
+  int digits = 0;   // significant ones, in m
+  int32_t e10 = 0; // the value is m * 10^e10
+  int point = 0;
+  for (; i < n; ++i) {
+    char c = text[i];
+    if (c == '.') {
+      point = 1;
+      continue;
+    }
+    if (!is_digit(c))
+      break;
+    if (m == 0 && c == '0') { // a leading zero
+      e10 -= point;
+      continue;
+    }
+    if (++digits > 19)
+      return 0;
+    m = m * 10 + (uint64_t)(c - '0');
+    e10 -= point;
+  }
+  if (i < n) { // the exponent, which decimal_length made sure has digits
+    ++i;
+    int exponent_negative = 0;
+    if (text[i] == '+' || text[i] == '-')
+      exponent_negative = text[i++] == '-';
+    int32_t exponent = 0;
+    for (; i < n; ++i) {
+      if (exponent > 100000)
+        return 0;
+      exponent = exponent * 10 + (text[i] - '0');
+    }
+    e10 += exponent_negative ? -exponent : exponent;
+  }
+  double value;
+  if (m == 0)
+    value = 0;
+  else if (m > (1ull << 53) || e10 < -22 || e10 > 22)
+    return 0;
+  else
+    value = e10 >= 0 ? (double)m * exact_pow10[e10] : (double)m / exact_pow10[-e10];
+  *out = negative ? -value : value;
+  return 1;
+}
+
 // strtod of text[0..n), which holds a valid decimal number, correctly
 // rounded as JavaScript requires.
 static double decimal_value(const char *text, size_t n) {
+  double fast;
+  if (decimal_value_fast(text, n, &fast))
+    return fast;
   char local[64];
   char *copy = n < sizeof local ? local : (char *)tz_alloc(n + 1);
   memcpy(copy, text, n);
@@ -245,8 +310,11 @@ static void big_add_power_of_two(Big *b, int k) {
 // with `digits` decimals. Exact, because x = m * 2^e is scaled by 10^digits
 // with big integers.
 void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
-  if (digits < 0 || digits > 100)
-    tz_panicf("RangeError: toFixed() digits argument must be between 0 and 100");
+  if (digits < 0 || digits > 100) {
+    tz_throw(TZ_RANGE_ERROR, "toFixed() digits argument must be between 0 and 100");
+    *out = tz_str_from_ascii("", 0);
+    return;
+  }
   if (isnan(x)) {
     *out = tz_str_from_ascii("NaN", 3);
     return;
@@ -294,4 +362,202 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
       text[len++] = '.';
   }
   *out = tz_str_from_ascii(text, len);
+}
+
+//===----------------------------------------------------------------------===//
+// The shortest digits of a double
+//===----------------------------------------------------------------------===//
+
+// Ryū (Ulf Adams, "Ryū: fast float-to-string conversion", PLDI 2018) finds
+// the shortest decimal that reads back as the same double, and of those the
+// closest to it, a tie going to the even one: the digits Number#toString
+// writes in JavaScript. It scales the bounds of the interval that rounds to
+// the double by a power of ten with 128-bit arithmetic, then removes digits
+// while the bounds stay apart.
+
+// ceil(log2(5^e)) for 0 < e <= 3528, and 1 for e = 0: the bits of 5^e.
+static inline int32_t pow5_bits(int32_t e) { return (int32_t)(((uint32_t)e * 1217359) >> 19) + 1; }
+
+// floor(log10(2^e)) for 0 <= e <= 1650, and floor(log10(5^e)) for 0 <= e <=
+// 2620.
+static inline uint32_t log10_pow2(int32_t e) { return ((uint32_t)e * 78913) >> 18; }
+static inline uint32_t log10_pow5(int32_t e) { return ((uint32_t)e * 732923) >> 20; }
+
+// Whether 5^p divides `value` (not 0), and 2^p (p < 64).
+static int pow5_divides(uint64_t value, uint32_t p) {
+  uint32_t count = 0;
+  while (value % 5 == 0) {
+    value /= 5;
+    ++count;
+  }
+  return count >= p;
+}
+
+static inline int pow2_divides(uint64_t value, uint32_t p) {
+  return (value & ((1ull << p) - 1)) == 0;
+}
+
+// (m * mul) >> j of a 128-bit `mul`, low word first; 64 < j < 128.
+static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
+#ifdef __SIZEOF_INT128__
+  unsigned __int128 low = (unsigned __int128)m * mul[0];
+  unsigned __int128 high = (unsigned __int128)m * mul[1];
+  return (uint64_t)(((low >> 64) + high) >> (j - 64));
+#else
+  // The four products of the 32-bit halves.
+  uint64_t a = m >> 32, b = (uint32_t)m;
+  uint64_t parts[2][2];
+  for (int w = 0; w < 2; ++w) {
+    uint64_t c = mul[w] >> 32, d = (uint32_t)mul[w];
+    uint64_t bd = b * d, ad = a * d, bc = b * c, ac = a * c;
+    uint64_t middle = (bd >> 32) + (uint32_t)ad + (uint32_t)bc;
+    parts[w][0] = (middle << 32) | (uint32_t)bd;
+    parts[w][1] = ac + (ad >> 32) + (bc >> 32) + (middle >> 32);
+  }
+  uint64_t sum = parts[0][1] + parts[1][0];
+  uint64_t high = parts[1][1] + (sum < parts[0][1]);
+  int32_t shift = j - 64;
+  return (high << (64 - shift)) | (sum >> shift);
+#endif
+}
+
+// The shortest digits of a finite positive double, written to `digits` (17
+// at most, no terminator); returns how many, and sets `*exponent` so that the
+// double is those digits times 10^exponent.
+int tz_f64_digits(double value, char *digits, int32_t *exponent) {
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof bits);
+  uint64_t mantissa = bits & ((1ull << 52) - 1);
+  uint32_t biased = (uint32_t)(bits >> 52) & 0x7FF;
+
+  uint64_t output;
+  int32_t e10;
+  int32_t e2 = (int32_t)biased - 1075;
+  if (biased != 0 && e2 <= 0 && e2 >= -52 &&
+      (mantissa & ((1ull << -e2) - 1)) == 0) {
+    // An integer below 2^53: its own digits, without the zeros at the end.
+    output = ((1ull << 52) | mantissa) >> -e2;
+    e10 = 0;
+    while (output % 10 == 0) {
+      output /= 10;
+      ++e10;
+    }
+  } else {
+    // m2 * 2^e2 with two more bits for the bounds, which are mv - mm_shift - 1
+    // and mv + 2 (in quarters): the interval of the reals that round to the
+    // double, closed when its mantissa is even.
+    uint64_t m2;
+    if (biased == 0) {
+      e2 = 1 - 1023 - 52 - 2;
+      m2 = mantissa;
+    } else {
+      e2 = (int32_t)biased - 1023 - 52 - 2;
+      m2 = (1ull << 52) | mantissa;
+    }
+    int even = (m2 & 1) == 0;
+    uint64_t mv = 4 * m2;
+    uint32_t mm_shift = mantissa != 0 || biased <= 1;
+
+    // The bounds and the value scaled by 10^-e10, and whether the digits
+    // dropped from vm and vr in that are all zeros.
+    uint64_t vr, vp, vm;
+    int vm_zeros = 0, vr_zeros = 0;
+    if (e2 >= 0) {
+      uint32_t q = log10_pow2(e2) - (e2 > 3);
+      e10 = (int32_t)q;
+      int32_t k = POW5_BITS + pow5_bits((int32_t)q) - 1;
+      int32_t i = -e2 + (int32_t)q + k;
+      vr = mul_shift(4 * m2, pow5_inv[q], i);
+      vp = mul_shift(4 * m2 + 2, pow5_inv[q], i);
+      vm = mul_shift(4 * m2 - 1 - mm_shift, pow5_inv[q], i);
+      if (q <= 21) {
+        // Only one of mp, mv and mm can be a multiple of 5.
+        if (mv % 5 == 0)
+          vr_zeros = pow5_divides(mv, q);
+        else if (even)
+          vm_zeros = pow5_divides(mv - 1 - mm_shift, q);
+        else
+          vp -= pow5_divides(mv + 2, q);
+      }
+    } else {
+      uint32_t q = log10_pow5(-e2) - (-e2 > 1);
+      e10 = (int32_t)q + e2;
+      int32_t i = -e2 - (int32_t)q;
+      int32_t k = pow5_bits(i) - POW5_BITS;
+      int32_t j = (int32_t)q - k;
+      vr = mul_shift(4 * m2, pow5[i], j);
+      vp = mul_shift(4 * m2 + 2, pow5[i], j);
+      vm = mul_shift(4 * m2 - 1 - mm_shift, pow5[i], j);
+      if (q <= 1) {
+        // mv has at least two trailing zero bits, mp one, mm one only when
+        // mm_shift is 1.
+        vr_zeros = 1;
+        if (even)
+          vm_zeros = mm_shift == 1;
+        else
+          --vp;
+      } else if (q < 63) {
+        vr_zeros = pow2_divides(mv, q);
+      }
+    }
+
+    // Remove digits while the bounds stay apart; the last one removed from
+    // vr says how to round.
+    int32_t removed = 0;
+    uint32_t last = 0;
+    if (vm_zeros || vr_zeros) {
+      // The general case, which needs to know about exact ties (rare).
+      while (vp / 10 > vm / 10) {
+        vm_zeros &= vm % 10 == 0;
+        vr_zeros &= last == 0;
+        last = (uint32_t)(vr % 10);
+        vr /= 10;
+        vp /= 10;
+        vm /= 10;
+        ++removed;
+      }
+      if (vm_zeros) {
+        while (vm % 10 == 0) {
+          vr_zeros &= last == 0;
+          last = (uint32_t)(vr % 10);
+          vr /= 10;
+          vp /= 10;
+          vm /= 10;
+          ++removed;
+        }
+      }
+      if (vr_zeros && last == 5 && vr % 2 == 0)
+        last = 4; // exactly halfway: round to even
+      output = vr + ((vr == vm && (!even || !vm_zeros)) || last >= 5);
+    } else {
+      int round_up = 0;
+      if (vp / 100 > vm / 100) { // two digits at once, the usual start
+        round_up = vr % 100 >= 50;
+        vr /= 100;
+        vp /= 100;
+        vm /= 100;
+        removed += 2;
+      }
+      while (vp / 10 > vm / 10) {
+        round_up = vr % 10 >= 5;
+        vr /= 10;
+        vp /= 10;
+        vm /= 10;
+        ++removed;
+      }
+      output = vr + (vr == vm || round_up);
+    }
+    e10 += removed;
+  }
+
+  char reversed[20];
+  int count = 0;
+  do {
+    reversed[count++] = (char)('0' + output % 10);
+    output /= 10;
+  } while (output != 0);
+  for (int i = 0; i < count; ++i)
+    digits[i] = reversed[count - 1 - i];
+  *exponent = e10;
+  return count;
 }

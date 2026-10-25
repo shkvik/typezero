@@ -1,0 +1,59 @@
+// unknown where tz differs from JavaScript, or where JavaScript has `any`.
+
+// `==` is `===`: a number is never equal to a string.
+const one: unknown = 1
+const text: unknown = "1"
+const big: unknown = 1.0
+console.log(one == text, one != text, one == big)
+
+// Array.isArray gives `unknown[]`: the same array when its elements are
+// unknowns; otherwise (the array in memory holds ints) a new one of them,
+// which the unknown holds from then on.
+const numbers = [1, 2, 3]
+const ints: unknown = numbers
+const mixed: unknown[] = [1, "a"]
+const held: unknown = mixed
+if (Array.isArray(ints)) {
+  ints.push("more")
+  console.log(ints, ints.length, numbers)
+}
+if (Array.isArray(held)) {
+  held.push(true)
+  console.log(held == mixed, mixed)
+}
+
+// A check after a check: an object, then its class.
+class Cat {
+  constructor(public name: string) {}
+}
+function name(x: unknown) {
+  if (typeof x != "object") return `a ${typeof x}`
+  if (x instanceof Cat) return x.name
+  return "some object"
+}
+console.log(name(new Cat("Tom")), name({ a: 1 }), name(5), name(undefined), name(Cat))
+
+// A Map and functions with unknowns.
+const cache = new Map<string, unknown>()
+cache.set("n", 1)
+cache.set("s", "x")
+const n = cache.get("n")
+if (typeof n == "number") console.log(n + 0.5)
+function maybe(flag: boolean): unknown {
+  if (flag) return [flag]
+}
+console.log(maybe(true), maybe(false), cache)
+function withDefault(x: unknown = "default") {
+  return x
+}
+console.log(withDefault(), withDefault(3), withDefault(undefined))
+
+// A Json in an unknown is the value it holds.
+const parsed: unknown = JSON.parse('{"a": [1, "b"], "n": 2}')
+console.log(typeof parsed, parsed)
+const two: unknown = JSON.parse("2")
+if (typeof two == "number") console.log(two * 10)
+
+// What a function would be in JavaScript: typeof says so, nothing more.
+const f: unknown = (x: int) => x + 1
+console.log(typeof f, f)

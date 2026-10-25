@@ -1,0 +1,140 @@
+// same-as-node --experimental-transform-types
+// Classes: fields with initial values, constructors, parameter properties,
+// methods and `this`, static members, private members, instanceof, and how
+// instances print.
+class Point {
+  constructor(public x: double, public y: double) {}
+  length() {
+    return Math.hypot(this.x, this.y)
+  }
+  scaled(k: double) {
+    return new Point(this.x * k, this.y * k)
+  }
+  moveBy(dx: double, dy: double) {
+    this.x += dx
+    this.y += dy
+    return this
+  }
+}
+
+const p = new Point(3, 4)
+console.log(p.length(), p)
+const q = p.scaled(2)
+console.log(q, q.x, p.x)
+p.moveBy(1, 1).moveBy(1, 1)
+console.log(p)
+
+// Fields set where they are declared, then by the constructor; node prints
+// the parameter properties first, then the fields in the order declared.
+class User {
+  name: string
+  email: string
+  readonly id: int
+  tags: string[] = []
+  visits = 0
+  #password = "secret"
+  private notes = "none"
+  static count = 0
+  static readonly prefix = "user-"
+
+  constructor(name: string, id: int) {
+    this.name = name
+    this.id = id
+    this.email = `${name.toLowerCase()}@example.com`
+    User.count++
+  }
+
+  describe() {
+    return `${User.prefix}${this.id} ${this.name} <${this.email}>`
+  }
+  checkPassword(text: string) {
+    return text == this.#password
+  }
+  visit() {
+    this.visits++
+    this.notes = `visited ${this.visits} times`
+    return this.notes
+  }
+  tag(t: string) {
+    this.tags.push(t)
+    return this
+  }
+  static create(name: string) {
+    return new User(name, User.count + 1)
+  }
+}
+
+const ann = new User("Ann", 1)
+const bob = User.create("Bob").tag("admin").tag("ops")
+console.log(ann.describe())
+console.log(bob.describe(), bob.tags)
+console.log(ann.checkPassword("secret"), ann.checkPassword("guess"))
+console.log(ann.visit(), ann.visit())
+console.log(ann)
+console.log(User.count, Object.keys(bob))
+
+// Parameter properties with modifiers and default values.
+class Account {
+  history: double[] = []
+  constructor(
+    readonly owner: string,
+    private balance: double = 0,
+  ) {}
+  deposit(amount: double) {
+    this.balance += amount
+    this.history.push(amount)
+    return this.balance
+  }
+  total() {
+    return this.balance
+  }
+}
+const acc = new Account("Ann")
+acc.deposit(10)
+acc.deposit(2.5)
+console.log(acc.total(), acc.owner, acc)
+console.log(new Account("Bob", 100))
+
+// typeof, instanceof, ==.
+const maybe: Point | undefined = p.length() > 100 ? p : undefined
+console.log(typeof p, p instanceof Point, maybe instanceof Point)
+const other = p
+console.log(p == other, p == q)
+if (maybe instanceof Point) console.log("never")
+console.log(maybe?.length())
+
+// Arrays of instances.
+const points = [new Point(3, 0), new Point(1, 1), new Point(0, 2)]
+points.sort((a, b) => a.length() - b.length())
+console.log(points.map(pt => pt.length()))
+const far = points.find(pt => pt.length() > 2.5)
+console.log(far?.x, points)
+for (const pt of points) pt.moveBy(1, 0)
+console.log(points.map(pt => pt.x))
+
+// Destructuring and spread read the fields; a spread gives a plain object
+// without the `#private` fields.
+const { x, y } = q
+console.log(x, y, { ...q })
+
+// Instances inside other objects, and deeper than node shows.
+class Empty {}
+console.log(new Empty(), [new Empty()], { point: p })
+console.log({ a: { b: { c: new Point(0, 0) } } })
+
+// A linked list of instances.
+class ListNode {
+  next?: ListNode
+  constructor(public value: int) {}
+  append(value: int) {
+    let last: ListNode = this
+    while (last.next) last = last.next
+    last.next = new ListNode(value)
+    return this
+  }
+  sum(): int {
+    return this.value + (this.next ? this.next.sum() : 0)
+  }
+}
+const list = new ListNode(1).append(2).append(3)
+console.log(list.sum(), list.next?.value)

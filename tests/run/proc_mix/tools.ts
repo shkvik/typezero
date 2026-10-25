@@ -1,0 +1,36 @@
+// What main.ts runs programs with: a class whose decorated method runs this
+// program again and records it, an async generator of the lines a child
+// prints, and a generic function that turns a throw into a Result.
+import { execFileSync } from "node:child_process"
+
+export const ran: string[] = []
+
+export function Logged<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, R>) {
+  const original = method.value
+  method.value = function (this: unknown, ...args: A): R {
+    ran.push(`${name} ${args.join(" ")}`)
+    return original.apply(this, args)
+  }
+}
+
+export class Runner {
+  self: string[]
+  constructor(self: string[]) {
+    this.self = self
+  }
+  @Logged
+  text(what: string, arg: string): string {
+    return execFileSync(process.execPath, [...this.self, what, arg], { encoding: "utf8", stdio: "pipe" })
+  }
+  async *lines(what: string, arg: string) {
+    for (const line of this.text(what, arg).split("\n")) {
+      await undefined
+      if (line != "")
+        yield line
+    }
+  }
+}
+
+export function attempt<T>(f: () => T): Result<T, Error> {
+  return Result.fromThrowable(f)()
+}

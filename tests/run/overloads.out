@@ -1,0 +1,9 @@
+Vec { x: 1, y: 2 } Vec { x: 1, y: 2 } Vec { x: 0, y: 0 }
+Vec { x: 2, y: 4 } Vec { x: 3, y: 4 } Vec { x: 1.5, y: 2.5 }
+Vec { x: 3, y: 3 } Vec { x: 1, y: 2 }
+int 1 long 5000000000 double 1.5 string x int 7
+int, double double, double
+two 3 in a list 0 in a list
+4 42
+Vec { x: 11, y: 12 } Vec { x: 6, y: 7 }
+[ Vec { x: 2, y: 3 }, Vec { x: 3, y: 4 } ]

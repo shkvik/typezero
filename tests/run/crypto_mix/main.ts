@@ -1,0 +1,70 @@
+// node:crypto with the rest of the language, across files: AES-GCM over
+// Buffers and Uint8Arrays, a key from scrypt, a generic sealed box, files of
+// node:fs/promises written and read in parallel, an emitter whose event map
+// comes from its emits, hashes of the views of a DataView, HMAC over the
+// lines an async generator yields, and timingSafeEqual on bytes made from
+// numbers proven to fit.
+import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto"
+import { mkdtemp, rm } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Vault, keyFrom, open, seal } from "./vault.ts"
+
+const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+const key = keyFrom("correct horse", salt)
+console.log(key.length, key.toString("hex").slice(0, 16))
+
+// 1. A sealed box of values of several types, opened again.
+type Point = { x: int; y: int }
+const point: Point = { x: 3, y: -4 }
+const back = open(key, seal(key, point))
+console.log(fromJson<Point>(back), open(key, seal(key, ["a", "b"])), open(key, seal(key, 42.5)))
+const tampered = seal(key, "secret")
+if (tampered.length > 30) tampered[30] ^= 1
+try {
+  open(key, tampered)
+} catch (e) {
+  console.log("tampered:", e instanceof Error ? e.message : "?")
+}
+
+// 2. A vault in a directory, written and read in parallel.
+const dir = await mkdtemp(join(tmpdir(), "tz-crypto-mix-"))
+const vault = new Vault(dir, key)
+const stored: string[] = []
+vault.on("stored", (name, hexLength) => stored.push(`${name}:${hexLength}`))
+await Promise.all([vault.put("a", { n: 1 }), vault.put("b", "two"), vault.put("c", [3, 3, 3])])
+console.log(stored.sort())
+const [a, b, c] = await Promise.all([vault.get("a"), vault.get("b"), vault.get("c")])
+console.log(a, b, c)
+
+// 3. Hashes of bytes in a DataView's buffer, through several views.
+const view = new DataView(new ArrayBuffer(8))
+view.setUint32(0, 0xdeadbeef)
+view.setFloat32(4, 1.5, true)
+const whole = createHash("sha256").update(new Uint8Array(view.buffer)).digest("hex")
+const halves = createHash("sha256")
+  .update(new Uint8Array(view.buffer, 0, 4))
+  .update(Buffer.from(view.buffer, 4, 4))
+  .digest("hex")
+console.log(whole == halves, whole.slice(0, 12))
+
+// 4. HMAC of what an async generator yields.
+async function* lines(count: int) {
+  for (let i = 0; i < count; i++) {
+    await undefined
+    yield `line ${i}`
+  }
+}
+const mac = createHmac("sha256", key)
+for await (const line of lines(3)) mac.update(line).update("\n")
+console.log(mac.digest("base64"))
+
+// 5. Bytes from numbers, compared in constant time.
+const bytes = new Uint8Array(4)
+for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 60) & 0xff
+const same = Uint8Array.from(bytes)
+console.log(timingSafeEqual(bytes, same), Buffer.from(bytes).toString("hex"))
+const roll = randomInt(1, 7)
+console.log(roll >= 1 && roll < 7, randomUUID().length)
+
+await rm(dir, { recursive: true })

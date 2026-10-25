@@ -1,0 +1,14 @@
+caught in args
+caught in array
+count 3
+default
+0 0
+1 0
+two !
+gen 0
+gen 10
+gen 20
+[ 'x', 'y' ] 2
+result 3
+1000
+done 10000

@@ -1,0 +1,6 @@
+// same-as-node
+// A generator of another file runs in place here too.
+import { evens, squares } from "./seq.ts"
+let total = 0
+for (const e of evens(10)) total += e
+console.log(total, [...squares(7)])

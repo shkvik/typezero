@@ -1,0 +1,53 @@
+// Only an Error can be thrown (docs/errors.md), and a caught value is always
+// one.
+function f(): int {
+  // expect-error: only an Error can be thrown, found 'string'; throw one with the text as its message, e.g. 'throw new Error("no file")'
+  throw "no file"
+}
+const code = 42
+// expect-error: only an Error can be thrown, found 'int'
+throw code
+const text = "x"
+// expect-error: e.g. 'throw new Error(text)'
+throw text
+let maybe: Error | undefined
+// expect-error: the error may be undefined; check it before throwing it
+throw maybe
+
+try {
+  f()
+  // expect-error: the caught value is always an Error; leave out the type, 'catch (e)'
+} catch (e: string) {
+  console.log(e)
+}
+try {
+  f()
+} catch (e) {
+  // expect-error: 'stack' cannot be assigned: it is made from the places the error passed
+  e.stack = "none"
+  // expect-error: property 'code' does not exist on type 'Error'
+  console.log(e.code)
+  // expect-error: '#frames' is private in class 'Error'
+  console.log(e.#frames)
+}
+
+// Error takes a message and options with a cause, which is an Error.
+// expect-error: type 'int' is not assignable to type 'string | undefined'
+const a = new Error(5)
+// expect-error: field 'cause'
+const b = new Error("x", { cause: "y" })
+
+// The kinds are Error too, and instanceof tells them apart.
+const t: TypeError = new RangeError("r")
+// expect-error: 'instanceof' tests an object, found 'string'
+const s = "x" instanceof TypeError
+
+// Result.fromThrowable takes a function, and one that turns the Error into
+// the error of the Result.
+// expect-error: 'fromThrowable' takes a function, found 'int'
+const g = Result.fromThrowable(5)
+// expect-error: parameter 'x' is declared as 'int', but the function gets 'Error' here
+const h = Result.fromThrowable(() => 1, (x: int) => x)
+const r = ok(1)
+// expect-error: expected 0 arguments, but got 1
+const v = r._unsafeUnwrap({ withStackTrace: true })

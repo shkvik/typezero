@@ -1,0 +1,32 @@
+Ok { value: 42 } Err { error: 'пусто' } Err { error: 'не число' }
+получилось 84
+Ok { value: 'a' } Err { error: 'blank' }
+Ok { value: 0.5 }
+1 e Ok { value: undefined } Err { error: undefined }
+Ok { value: 0 }
+Err { error: 'broken' }
+число 42 ошибка: пусто
+big 7
+21
+8
+3
+[ Ok { value: 1 }, Err { error: 2 } ]
+{
+  result: Ok { value: { name: 'Bob', age: 3 } },
+  other: Err { error: 'x' }
+}
+Ok { value: Ok { value: Ok { value: [Ok] } } }
+Ok { value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+Ok {
+  value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+}
+Err {
+  error: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+}
+Ok {
+  value: {
+    a: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    b: 'yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy'
+  }
+}
+object

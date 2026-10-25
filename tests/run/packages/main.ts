@@ -1,0 +1,21 @@
+// A package from a directory: ms, adapted for tz (tests/packages/ms). The
+// examples are those of its README.
+import { ms, parse, format, parseStrict } from "ms"
+
+console.log(ms("2 days"), ms("1d"), ms("10h"), ms("2.5 hrs"), ms("2h"), ms("1m"), ms("5s"))
+console.log(ms("1y"), ms("100"), ms("-3 days"), ms("-1h"), ms("-200"))
+console.log(ms(60000), ms(2 * 60000), ms(-3 * 60000), ms(ms("10 hours")))
+console.log(ms(60000, { long: true }), ms(2 * 60000, { long: true }), ms(-3 * 60000, { long: true }))
+console.log(ms(ms("10 hours"), { long: true }))
+console.log(parse("1.5 Minutes"), parseStrict("3 weeks"), format(90000), format(90000, { long: true }))
+console.log(ms("nonsense"), ms("1 fortnight"))
+try {
+  parse("")
+} catch (e) {
+  console.log(e.message)
+}
+try {
+  format(Infinity)
+} catch (e) {
+  console.log(e.message)
+}

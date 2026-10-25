@@ -1,0 +1,29 @@
+top-level code
+  start
+    parallel
+  after await at line 21
+    reads  everything in any int[] (line 21)
+    writes stdout (lines 21, 22)
+    reads  everything in log (line 22)
+    runs alone
+
+async generator function ticks, line 7
+  start: runs inside the loop that iterates it
+  after await at line 9
+    writes elements of log (line 10)
+    writes the length of log (line 10)
+    in the task consume("a") at line 21:
+      in order with ticks after await at line 9 in the task consume("b") at line 21: elements of log, the length of log
+      in order: line 10
+    in the task consume("b") at line 21:
+      in order with ticks after await at line 9 in the task consume("a") at line 21: elements of log, the length of log
+      in order: line 10
+  after yield at line 11: runs inside the loop that iterates it
+
+async function consume, line 15
+  start: runs inside its caller
+  after for await at line 17
+    in the task consume("a") at line 21:
+      parallel
+    in the task consume("b") at line 21:
+      parallel

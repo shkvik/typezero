@@ -1,0 +1,27 @@
+// A dictionary benchmark (docs/objects.md, section 9): counts the words of a
+// text with a Map<string, int>, then shows the most frequent ones.
+// The text: 20 MB of words made of syllables from a fixed sequence (the same
+// in main.go), 3.5 million of them, some 160 thousand different.
+const syllables = ["ka", "ri", "to", "men", "sa", "lo", "pe", "dan", "vi", "ru", "ko", "shi",
+  "nor", "el", "ta", "bu", "gar", "mi", "ze", "on"]
+let seed = 42
+function next(n: int): int {
+  seed = (seed * 1103515245 + 12345) & 0x7fffffff
+  return (seed >>> 16) % n
+}
+const parts: string[] = []
+let size = 0
+while (size < 20000000) {
+  // Short words are common, long ones rare, as in a text.
+  let w = syllables[next(20)] ?? ""
+  const extra = next(8) < 5 ? next(2) : 1 + next(3)
+  for (let i = 0; i < extra; i++) w += syllables[next(20)] ?? ""
+  parts.push(w)
+  size += w.length + 1
+}
+const text = parts.join(" ")
+
+const counts = new Map<string, int>()
+for (const word of text.split(" ")) counts.set(word, (counts.get(word) ?? 0) + 1)
+const top = [...counts].sort((a, b) => (b[1] != a[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : 1)).slice(0, 5)
+console.log(counts.size, top.map(([w, n]) => `${w} ${n}`).join(", "))

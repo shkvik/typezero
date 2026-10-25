@@ -1,0 +1,14 @@
+[ 'id', 'name' ] [ 'name', 'email', 'id' ]
+name 4
+email 5
+id 2
+[ 5, 3, 0 ] [ [ 'math', 5 ], [ 'art', 3 ], [ 'music', 0 ] ]
+math 5
+8 [ [ 'ключ', 'значение' ], [ 'a b', 'c' ] ]
+{ first: { id: 10 }, second: { id: 2 } } [ 'second', { id: 2 } ]
+[ 'b', 'c' ] [ 'two', 'three' ] [ [ 'b', 'two' ], [ 'c', 'three' ] ]
+x
+z
+{ name: 'Ann', age: 30, email: 'ann@example.com' } Ann Ann 30 ann@example.com Ann
+{ name: 'Bob', age: 31, email: 'bob@example.com' }
+Bob { age: 31, email: 'bob@example.com' }

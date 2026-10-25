@@ -1,0 +1,21 @@
+Ok { value: 1 } Ok { value: 'two' } Ok { value: 3 }
+Ok { value: { id: 1 } } Ok { value: { label: 'x', tags: [ 'a' ] } }
+7 1
+0.3
+Ok { value: 0.3 } Ok { value: true }
+only fallback
+[ Ok { value: 'a' }, Ok { value: 'b' } ] [ Err { error: 1 } ]
+Ok { value: { first: 'tea', second: 2 } }
+Err { error: 'empty name' }
+Ok { value: 3.375 }
+Ok { value: [ 'jam', 3 ] }
+Ok { value: { name: 'tea', price: 4.2, qty: 3 } }
+Ok { value: { name: 'cake', price: 12.5, qty: 2 } }
+Err { error: 'empty name' }
+Err { error: "bad price '1.2.3'" }
+Err { error: "bad quantity 'x'" }
+Err { error: "expected 3 fields in 'bread;2.10'" }
+total 37.6
+Ok { value: 12.4 } Err { error: 'over by 7.6' }
+true -4
+3 x tea, 2 x cake

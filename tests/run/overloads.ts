@@ -1,0 +1,94 @@
+// Overloads (docs/overloads.md): methods, static methods and constructors
+// may have several variants with one name, each with a body of its own; a
+// call chooses one by the types of its arguments, when compiling. Node runs
+// such code wrongly (the last body replaces the others), so this test is
+// tz's own.
+class Vec {
+  constructor(public x: double, public y: double) {}
+  constructor(p: Vec) {
+    this.x = p.x
+    this.y = p.y
+  }
+  constructor() {
+    this.x = 0
+    this.y = 0
+  }
+
+  add(v: Vec) {
+    return new Vec(this.x + v.x, this.y + v.y)
+  }
+  add(k: double) {
+    return new Vec(this.x + k, this.y + k)
+  }
+
+  static of(x: double) {
+    return new Vec(x, x)
+  }
+  static of(x: double, y: double) {
+    return new Vec(x, y)
+  }
+}
+
+const v = new Vec(1, 2)
+const w = new Vec(v)
+console.log(v, w, new Vec())
+console.log(v.add(w), v.add(2), v.add(0.5))
+console.log(Vec.of(3), Vec.of(1, 2))
+
+// The best variant: the same type is better than a conversion, and int to
+// long better than int to double.
+class Printer {
+  show(n: int) {
+    return `int ${n}`
+  }
+  show(n: long) {
+    return `long ${n}`
+  }
+  show(n: double) {
+    return `double ${n}`
+  }
+  show(s: string) {
+    return `string ${s}`
+  }
+  pair(a: int, b: double) {
+    return `int, double`
+  }
+  pair(a: double, b: double) {
+    return `double, double`
+  }
+  // A variant that takes the arguments as they are beats one that leaves
+  // out a parameter or collects them into a rest parameter.
+  list(a: int, b: int) {
+    return "two"
+  }
+  list(...all: int[]) {
+    return `${all.length} in a list`
+  }
+}
+const pr = new Printer()
+const big: long = 5000000000
+const small: int = 7
+console.log(pr.show(1), pr.show(big), pr.show(1.5), pr.show("x"), pr.show(small))
+console.log(pr.pair(1, 2), pr.pair(1.5, 2))
+console.log(pr.list(1, 2), pr.list(1, 2, 3), pr.list())
+
+// Each variant infers its own return type.
+class Parser {
+  parse(s: string) {
+    return s.length
+  }
+  parse(n: int) {
+    return `${n}`
+  }
+}
+const parser = new Parser()
+const length: int = parser.parse("four")
+const text: string = parser.parse(42)
+console.log(length, text)
+
+// A method as a value: the type of the place says which variant.
+const addK: (k: double) => Vec = v.add
+const addV: (v: Vec) => Vec = v.add
+console.log(addK(10), addV(new Vec(5, 5)))
+const offsets: double[] = [1, 2]
+console.log(offsets.map(v.add))

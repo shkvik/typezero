@@ -1,0 +1,49 @@
+true false true false
+[
+  '2024-01',
+  '2024',
+  '01',
+  undefined,
+  index: 3,
+  input: 'on 2024-01, then',
+  groups: [Object: null prototype] { year: '2024', month: '01' }
+]
+2024 01 undefined 3 on 2024-01, then 4
+2024 01
+2024 01
+true
+1 1
+[ '1', '22', '333' ] true
+2
+key=value key value
+[ 'key', 'value' ] key=value|key|value
+key=value
+key
+value
+3
+undefined b none
+[ 'ab', undefined, index: 0, input: 'ab', groups: undefined ]
+one 0 3
+two 4 7
+three 8 13
+0
+true 6 false 0
+3 2
+a gimsuy true true true
+true true true false false
+[/]\/ a\/b (?:) /a\n/
+/x/g /x/g [ /a/, /b/i ] { re: /c/ }
+false object
+[
+  '42',
+  undefined,
+  '42',
+  index: 0,
+  input: '42',
+  groups: [Object: null prototype] { word: undefined, number: '42' }
+]
+- 42
+1 2 2 3
+A1
+C3
+k v undefined 0

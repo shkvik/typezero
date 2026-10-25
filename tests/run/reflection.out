@@ -1,0 +1,8 @@
+50 web: 0 at 2% 500 404
+Savings { owner: 'ann', limit: 10, balance: 5, rate: 2 } 5 ann
+10 undefined
+[Function: summary] function ann: 5 at 2%
+12 12
+42
+bob: 0 false Account
+bob: 0 at 2% true Savings

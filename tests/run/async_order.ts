@@ -1,0 +1,53 @@
+// same-as-node
+// Microtasks, then() chains, process.nextTick and the turns each form of
+// waiting takes, in the order Node runs them. After top-level code (of a
+// file without `import`, `export` and top-level `await`) and after each
+// callback, the nextTick callbacks come first, then the microtasks, again
+// while either queue has something.
+const log = (s: string) => console.log(s)
+async function plain() {
+  return 1
+}
+async function viaPromise() {
+  return Promise.resolve(1) // follows the Promise: two more turns
+}
+async function viaAwait() {
+  return await Promise.resolve(1)
+}
+const p = Promise.resolve(0)
+void p.then(() => log("t1")).then(() => log("t2")).then(() => log("t3")).then(() => log("t4"))
+  .then(() => log("t5")).then(() => log("t6"))
+void plain().then(() => log("plain"))
+void viaPromise().then(() => log("viaPromise"))
+void viaAwait().then(() => log("viaAwait"))
+void new Promise<int>(resolve => resolve(1)).then(() => log("new Promise"))
+void Promise.resolve(1).finally(() => log("finally callback")).then(() => log("finally"))
+void Promise.all([1, 2]).then(() => log("all"))
+void Promise.race([1, 2]).then(() => log("race"))
+void Promise.allSettled([1]).then(() => log("allSettled"))
+void Promise.any([1]).then(() => log("any"))
+void (async () => {
+  await undefined
+  log("await 1")
+  await undefined
+  log("await 2")
+})()
+queueMicrotask(() => log("queueMicrotask"))
+process.nextTick(() => log("nextTick"))
+log("main")
+
+setTimeout(() => {
+  log("--- timer")
+  process.nextTick(() => {
+    log("tick 1")
+    void Promise.resolve().then(() => log("promise in tick"))
+    process.nextTick(() => log("tick in tick"))
+  })
+  void Promise.resolve().then(() => {
+    log("promise 1")
+    process.nextTick(() => log("tick in promise"))
+    void Promise.resolve().then(() => log("promise in promise"))
+  })
+  queueMicrotask(() => log("microtask"))
+  log("timer end")
+}, 5)

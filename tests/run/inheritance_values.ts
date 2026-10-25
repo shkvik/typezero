@@ -1,0 +1,43 @@
+// Objects known by a type up their chain, as values: methods taken as values
+// stay bound to the object and run the body of its class (in JavaScript
+// `this` is lost), an array of Dog is copied into an array of Animal, and
+// Object.keys gives the keys of the object's own class, as in node.
+class Animal {
+  constructor(public name: string) {}
+  speak() {
+    return `${this.name} makes a sound`
+  }
+}
+class Dog extends Animal {
+  constructor(name: string, public breed: string) {
+    super(name)
+  }
+  speak() {
+    return `${this.name} barks`
+  }
+}
+
+const dogs: Dog[] = [new Dog("Rex", "lab"), new Dog("Fido", "pug")]
+const animals: Animal[] = [...dogs, new Animal("Generic")]
+const speakers = animals.map(a => a.speak)
+console.log(speakers.map(f => f()).join("; "))
+console.log(Object.keys(animals[0]!), Object.keys(animals[2]!))
+for (const key in animals[1]!) console.log(key)
+
+interface Greeter {
+  name: string
+  greet(other: string): string
+}
+class Person implements Greeter {
+  constructor(public name: string) {}
+  greet(other: string) {
+    return `${this.name} greets ${other}`
+  }
+}
+const greeters: Greeter[] = [new Person("Ann"), { name: "Lit", greet: o => `lit: ${o}` }]
+const bound = greeters.map(g => g.greet)
+console.log(bound.map(f => f("Bob")).join("; "))
+// A spread copies the fields of the interface; a method becomes a function
+// bound to the object.
+const copies = greeters.map(g => ({ ...g, name: g.name.toUpperCase() }))
+for (const c of copies) console.log(c.name, c.greet("Eve"))

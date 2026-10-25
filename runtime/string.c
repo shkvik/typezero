@@ -43,6 +43,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Searching uses SSE2, which every x86-64 has, where the compiler offers it.
+#if defined(__SSE2__) && (defined(__clang__) || defined(__GNUC__))
+#define TZ_SSE2 1
+#include <emmintrin.h>
+#endif
+
 #define LEN_MASK ((1ull << 30) - 1)
 #define OFF_SHIFT 30
 #define F_ASCII (1ull << 60)
@@ -122,6 +128,22 @@ static inline TzStr inline_str(const uint8_t *data, uint32_t len) {
   for (uint32_t i = 0; i < len; ++i)
     bits |= (uint64_t)data[i] << (8 * i);
   return inline_from_bits(bits, len);
+}
+
+// The inline string data[from..from+n) of one-byte units, 0 < n <= INLINE_MAX,
+// where `end` units are readable from `data` on: eight bytes are loaded at
+// once when there is room for them.
+static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t from, uint32_t n) {
+  uint64_t bits;
+  if (from + 8 <= end) {
+    memcpy(&bits, data + from, 8);
+    bits &= ~0ull >> (64 - 8 * n);
+  } else {
+    bits = 0;
+    for (uint32_t i = 0; i < n; ++i)
+      bits |= (uint64_t)data[from + i] << (8 * i);
+  }
+  return inline_from_bits(bits, n);
 }
 
 //===----------------------------------------------------------------------===//
@@ -233,13 +255,17 @@ static inline char *buffer_units(Buffer *b) { return (char *)b + sizeof(Buffer);
 TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta);
 
 // The flat string behind `s`, borrowed from `s`. Ropes are flattened once.
+// The words are read one by one, which keeps the result in registers: a copy
+// of the whole struct would pick it from memory, `s` or the rope's.
 static inline TzStr flat(TzStr s) {
-  if (!is_rope(s.meta))
-    return s;
-  Rope *r = (Rope *)s.obj;
-  if (!r->flat.obj)
-    tz_str_flatten(r, s.meta);
-  return r->flat;
+  if (is_rope(s.meta)) {
+    Rope *r = (Rope *)s.obj;
+    if (!r->flat.obj)
+      tz_str_flatten(r, s.meta);
+    s.obj = r->flat.obj;
+    s.meta = r->flat.meta;
+  }
+  return s;
 }
 
 // Code units of a flat string. They are inside `*f` itself when it is inline,
@@ -257,6 +283,21 @@ static inline uint16_t unit_at(const TzStr *f, uint32_t i) {
   const void *u = units(f);
   return is_two(f->meta) ? ((const uint16_t *)u)[i] : ((const uint8_t *)u)[i];
 }
+
+// The code unit at `i` of a one-byte string that is no rope node: a buffer or
+// a literal, tested first (the usual long text), or an inline string; -1 for
+// any other string. It is read from the two words alone, so that a loop over
+// the string keeps everything in registers.
+static inline int32_t direct_byte(void *obj, uint64_t meta, uint32_t i) {
+  if ((meta & (F_ROPE | F_TWO_BYTE)) == 0)
+    return ((const uint8_t *)obj)[sizeof(Buffer) + str_off(meta) + i];
+  if (is_inline(meta))
+    return (uint8_t)((uint64_t)(uintptr_t)obj >> (8 * i));
+  return -1;
+}
+
+// Whether a string is one-byte and no rope node: what direct_byte reads.
+static inline int direct_bytes(uint64_t meta) { return !is_rope(meta) && !is_two(meta); }
 
 // Copies the code units of flat `src` to `dst`, widening one-byte units when
 // `dst_two` is set. Narrowing is the caller's job.
@@ -373,6 +414,22 @@ static TzStr string_from_ascii(const char *text, size_t len) {
 
 TzStr tz_str_from_ascii(const char *text, size_t length) { return string_from_ascii(text, length); }
 
+// A new string of `length` ASCII characters, which the caller writes at the
+// pointer returned before using the string: the text of base64 and hex
+// (buffer.c), made without a copy. NULL for a length that fits in the value
+// itself; then the caller makes the string with tz_str_from_ascii.
+char *tz_str_ascii_units(size_t length, TzStr *out) {
+  if (length <= INLINE_MAX)
+    return NULL;
+  if (length > MAX_LENGTH)
+    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)length,
+              (unsigned long long)MAX_LENGTH);
+  Buffer *b = buffer_new((uint32_t)length, 0);
+  b->used = (uint32_t)length;
+  *out = make_str(b, make_meta((uint32_t)length, 0, 0, 1, F_HEAP));
+  return buffer_units(b);
+}
+
 TzStr tz_str_from_utf16(const uint16_t *units, size_t length) {
   if (length > MAX_LENGTH)
     tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)length,
@@ -400,6 +457,47 @@ static TzStr rope_new(TzStr left, TzStr right) {
   r->flat.obj = NULL;
   r->flat.meta = 0;
   return make_str(r, make_meta(len, 0, two, ascii, F_HEAP | F_ROPE));
+}
+
+// Copies n bytes; a short copy is two overlapping words, not a call.
+static inline void copy_bytes(uint8_t *dst, const uint8_t *src, uint32_t n) {
+  if (n >= 8 && n <= 16) {
+    uint64_t head, tail;
+    memcpy(&head, src, 8);
+    memcpy(&tail, src + n - 8, 8);
+    memcpy(dst, &head, 8);
+    memcpy(dst + n - 8, &tail, 8);
+  } else {
+    memcpy(dst, src, n);
+  }
+}
+
+// The one-byte case of join_sep below: the one-byte `items` joined by flat
+// `sep` into `out`, which has room for exactly the `total` units they make.
+static void join_bytes(uint8_t *out, uint32_t total, const TzStr *items, int64_t n,
+                       const TzStr *sep) {
+  uint32_t sep_len = str_len(sep->meta), pos = 0;
+  const uint8_t *sep_units = (const uint8_t *)units(sep);
+  for (int64_t i = 0; i < n; ++i) {
+    if (i > 0 && sep_len) {
+      if (sep_len == 1)
+        out[pos] = sep_units[0];
+      else
+        copy_bytes(out + pos, sep_units, sep_len);
+      pos += sep_len;
+    }
+    TzStr s = items[i];
+    uint32_t len = str_len(s.meta);
+    if (is_inline(s.meta) && pos + 8 <= total) {
+      // All eight bytes at once: the zeros after the string are written over
+      // by what comes next.
+      memcpy(out + pos, &s.obj, 8);
+    } else if (len) {
+      TzStr f = flat(s);
+      copy_bytes(out + pos, (const uint8_t *)units(&f), len);
+    }
+    pos += len;
+  }
 }
 
 // `items` joined by `sep` (NULL for none) into a new flat string of exactly
@@ -442,15 +540,19 @@ static TzStr join_sep(const TzStr *items, int64_t n, const TzStr *sep) {
 
   Buffer *b = buffer_new((uint32_t)total, two);
   char *dst = buffer_units(b);
-  size_t width = two ? 2 : 1;
-  for (int64_t i = 0; i < n; ++i) {
-    if (i > 0 && sep_len) {
-      copy_units(dst + (size_t)pos * width, two, &separator);
-      pos += sep_len;
+  if (!two) {
+    join_bytes((uint8_t *)dst, (uint32_t)total, items, n, &separator);
+    pos = (uint32_t)total;
+  } else {
+    for (int64_t i = 0; i < n; ++i) {
+      if (i > 0 && sep_len) {
+        copy_units(dst + (size_t)pos * 2, 1, &separator);
+        pos += sep_len;
+      }
+      TzStr f = flat(items[i]);
+      copy_units(dst + (size_t)pos * 2, 1, &f);
+      pos += str_len(f.meta);
     }
-    TzStr f = flat(items[i]);
-    copy_units(dst + (size_t)pos * width, two, &f);
-    pos += str_len(f.meta);
   }
   b->used = pos;
   return make_str(b, make_meta(pos, 0, two, ascii, F_HEAP));
@@ -719,34 +821,199 @@ TZ_HOT int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t 
   return tz_str_units_equal(&a, 0, &b, 0, len);
 }
 
-// Orders strings by UTF-16 code units, as JavaScript's `<` does.
-int32_t tz_str_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
+static inline int32_t compare_lengths(uint32_t la, uint32_t lb) {
+  return la == lb ? 0 : la < lb ? -1 : 1;
+}
+
+TZ_NOINLINE int32_t tz_str_compare_slow(void *a_obj, uint64_t a_meta, void *b_obj,
+                                        uint64_t b_meta) {
   TzStr a = flat(make_str(a_obj, a_meta)), b = flat(make_str(b_obj, b_meta));
   uint32_t la = str_len(a.meta), lb = str_len(b.meta);
   uint32_t n = la < lb ? la : lb;
+  if (n == 0)
+    return compare_lengths(la, lb);
+  if (!is_two(a.meta) && !is_two(b.meta)) {
+    // Bytes compare as the code units they are.
+    int c = memcmp(units(&a), units(&b), n);
+    return c != 0 ? (c < 0 ? -1 : 1) : compare_lengths(la, lb);
+  }
   for (uint32_t i = 0; i < n; ++i) {
     uint16_t x = unit_at(&a, i), y = unit_at(&b, i);
     if (x != y)
       return x < y ? -1 : 1;
   }
-  return la == lb ? 0 : la < lb ? -1 : 1;
+  return compare_lengths(la, lb);
+}
+
+static inline uint64_t byte_swap(uint64_t x) {
+#if defined(__clang__) || defined(__GNUC__)
+  return __builtin_bswap64(x);
+#else
+  uint64_t y = 0;
+  for (int i = 0; i < 8; ++i, x >>= 8)
+    y = (y << 8) | (x & 0xFF);
+  return y;
+#endif
+}
+
+// The first eight code units of a one-byte string that is no rope, as a word
+// with the first unit as the highest byte: an inline string has zeros after
+// its last unit, and a buffer has at least nine units.
+static inline uint64_t first_word(void *obj, uint64_t meta) {
+  uint64_t word = (uint64_t)(uintptr_t)obj;
+  if (!is_inline(meta))
+    memcpy(&word, (const char *)obj + sizeof(Buffer) + str_off(meta), 8);
+  return byte_swap(word);
+}
+
+// Orders strings by UTF-16 code units, as JavaScript's `<` does. One-byte
+// strings mostly differ in their first eight units, which compare as words:
+// the zeros after the end of a shorter inline string order it first, as its
+// length does.
+TZ_HOT int32_t tz_str_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
+  if (direct_bytes(a_meta) && direct_bytes(b_meta) &&
+      (is_inline(a_meta) || str_len(a_meta) >= 8) && (is_inline(b_meta) || str_len(b_meta) >= 8)) {
+    uint64_t x = first_word(a_obj, a_meta), y = first_word(b_obj, b_meta);
+    if (x != y)
+      return x < y ? -1 : 1;
+    if (is_inline(a_meta) && is_inline(b_meta))
+      return compare_lengths(str_len(a_meta), str_len(b_meta));
+  }
+  return tz_str_compare_slow(a_obj, a_meta, b_obj, b_meta);
 }
 
 static uint32_t clamp(int64_t value, uint32_t len) {
   return value < 0 ? 0 : value > (int64_t)len ? len : (uint32_t)value;
 }
 
-// Like JavaScript's indexOf: the first match at or after `from`, or -1.
+// The position of the first byte `c` in data[from..end), or `end`. Sixteen
+// bytes at a time, without reading past `end`.
+static inline uint32_t find_byte(const uint8_t *data, uint32_t from, uint32_t end, uint8_t c) {
+#ifdef TZ_SSE2
+  __m128i needle = _mm_set1_epi8((char)c);
+  for (; from + 16 <= end; from += 16) {
+    __m128i block = _mm_loadu_si128((const __m128i *)(data + from));
+    unsigned mask = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(block, needle));
+    if (mask)
+      return from + (uint32_t)__builtin_ctz(mask);
+  }
+#endif
+  for (; from < end; ++from)
+    if (data[from] == c)
+      return from;
+  return end;
+}
+
+// The same for a 16-bit code unit, eight at a time.
+static inline uint32_t find_unit16(const uint16_t *data, uint32_t from, uint32_t end, uint16_t c) {
+#ifdef TZ_SSE2
+  __m128i needle = _mm_set1_epi16((short)c);
+  for (; from + 8 <= end; from += 8) {
+    __m128i block = _mm_loadu_si128((const __m128i *)(data + from));
+    unsigned mask = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi16(block, needle));
+    if (mask)
+      return from + (uint32_t)__builtin_ctz(mask) / 2;
+  }
+#endif
+  for (; from < end; ++from)
+    if (data[from] == c)
+      return from;
+  return end;
+}
+
+// The first code unit `c` in units[from..end) of a flat string, or `end`.
+static inline uint32_t find_unit(const void *units, int two, uint32_t from, uint32_t end,
+                                 uint16_t c) {
+  if (two)
+    return find_unit16((const uint16_t *)units, from, end, c);
+  return c > 0xFF ? end : find_byte((const uint8_t *)units, from, end, (uint8_t)c);
+}
+
+// How many bytes `c` data[0..end) holds, counting no further than `max`.
+static uint32_t count_byte(const uint8_t *data, uint32_t end, uint8_t c, uint32_t max) {
+  uint32_t count = 0, i = 0;
+#ifdef TZ_SSE2
+  // Sixteen counters of a byte each, summed every 255 blocks before they
+  // could overflow.
+  __m128i needle = _mm_set1_epi8((char)c), zero = _mm_setzero_si128();
+  while (i + 16 <= end && count < max) {
+    uint32_t stop = end - i >= 255 * 16 ? i + 255 * 16 : end - 15;
+    __m128i counters = zero;
+    for (; i < stop; i += 16) {
+      __m128i block = _mm_loadu_si128((const __m128i *)(data + i));
+      counters = _mm_sub_epi8(counters, _mm_cmpeq_epi8(block, needle));
+    }
+    __m128i sums = _mm_sad_epu8(counters, zero);
+    count += (uint32_t)_mm_cvtsi128_si32(sums) + (uint32_t)_mm_extract_epi16(sums, 4);
+  }
+#endif
+  for (; i < end && count < max; ++i)
+    count += data[i] == c;
+  return count < max ? count : max;
+}
+
+static inline int bytes_equal(const uint8_t *a, const uint8_t *b, uint32_t n) {
+  if (n > 16)
+    return memcmp(a, b, n) == 0;
+  for (uint32_t i = 0; i < n; ++i)
+    if (a[i] != b[i])
+      return 0;
+  return 1;
+}
+
+// The first start of needle[0..n) (n >= 2) in data from `from` on, before
+// `end`, the last start + 1; or `end`. The candidates are the places where
+// both the first and the last byte match, sixteen at a time.
+static uint32_t find_bytes(const uint8_t *data, uint32_t from, uint32_t end, const uint8_t *needle,
+                           uint32_t n) {
+#ifdef TZ_SSE2
+  __m128i first = _mm_set1_epi8((char)needle[0]), last = _mm_set1_epi8((char)needle[n - 1]);
+  for (; from + 16 <= end; from += 16) {
+    __m128i a = _mm_loadu_si128((const __m128i *)(data + from));
+    __m128i b = _mm_loadu_si128((const __m128i *)(data + from + n - 1));
+    unsigned mask = (unsigned)_mm_movemask_epi8(
+        _mm_and_si128(_mm_cmpeq_epi8(a, first), _mm_cmpeq_epi8(b, last)));
+    for (; mask; mask &= mask - 1) {
+      uint32_t i = from + (uint32_t)__builtin_ctz(mask);
+      if (bytes_equal(data + i + 1, needle + 1, n - 2))
+        return i;
+    }
+  }
+#endif
+  for (; from < end; ++from)
+    if (data[from] == needle[0] && data[from + n - 1] == needle[n - 1] &&
+        bytes_equal(data + from + 1, needle + 1, n - 2))
+      return from;
+  return end;
+}
+
+// Like JavaScript's indexOf: the first match at or after `from`, or -1. Both
+// strings are flat; `from` is at most the length of `s`.
 static int64_t index_of(const TzStr *s, const TzStr *t, uint32_t from) {
   uint32_t len = str_len(s->meta), tlen = str_len(t->meta);
   if (tlen == 0)
     return from;
   if (tlen > len)
     return -1;
+  const void *su = units(s);
+  int two = is_two(s->meta);
+  // The last start + 1.
+  uint32_t end = len - tlen + 1;
+  if (!two && !is_two(t->meta)) {
+    const uint8_t *tu = (const uint8_t *)units(t);
+    uint32_t i = tlen == 1 ? find_byte((const uint8_t *)su, from, end, tu[0])
+                           : find_bytes((const uint8_t *)su, from, end, tu, tlen);
+    return i == end ? -1 : (int64_t)i;
+  }
   uint16_t first = unit_at(t, 0);
-  for (uint32_t i = from; i + tlen <= len; ++i)
-    if (unit_at(s, i) == first && tz_str_units_equal(s, i + 1, t, 1, tlen - 1))
+  // Candidates start where the first unit matches; the rest is compared.
+  for (uint32_t i = from; i < end; ++i) {
+    i = find_unit(su, two, i, end, first);
+    if (i == end)
+      return -1;
+    if (tlen == 1 || tz_str_units_equal(s, i + 1, t, 1, tlen - 1))
       return i;
+  }
   return -1;
 }
 
@@ -806,40 +1073,130 @@ static void check_index(int64_t index, uint32_t len) {
               len);
 }
 
+TZ_NOINLINE int32_t tz_str_char_code_at_slow(void *obj, uint64_t meta, uint32_t index) {
+  TzStr f = flat(make_str(obj, meta));
+  return unit_at(&f, index);
+}
+
 TZ_HOT int32_t tz_str_char_code_at(void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
-  TzStr f = flat(make_str(obj, meta));
-  return unit_at(&f, (uint32_t)index);
+  int32_t unit = direct_byte(obj, meta, (uint32_t)index);
+  return unit >= 0 ? unit : tz_str_char_code_at_slow(obj, meta, (uint32_t)index);
 }
 
-// s[from..to): short pieces are copied, longer ones share the buffer.
-static TzStr substring_of(TzStr s, uint32_t from, uint32_t to) {
+// A copy of data[from..from+n) of flat one-byte `f`, whose units are `data`,
+// for INLINE_MAX < n < SHORT_LENGTH, as substring_of makes it.
+TZ_NOINLINE void tz_str_short_piece(TzStr *out, const TzStr *f, const uint8_t *data,
+                                    uint32_t from, uint32_t n) {
+  if (n == str_len(f->meta)) {
+    retain(*f);
+    *out = *f;
+    return;
+  }
+  Buffer *b = buffer_new(n, 0);
+  copy_bytes((uint8_t *)buffer_units(b), data + from, n);
+  b->used = n;
+  int ascii = 1;
+  if (!is_ascii(f->meta))
+    for (uint32_t i = 0; i < n && ascii; ++i)
+      ascii = data[from + i] < 0x80;
+  *out = make_str(b, make_meta(n, 0, 0, ascii, F_HEAP));
+}
+
+// s[from..to): short pieces are copied, longer ones share the buffer. The
+// string comes as its two words and the result goes out through `out`: a
+// TzStr passed by value would go through memory.
+TZ_NOINLINE void tz_str_substring_into(TzStr *out, void *obj, uint64_t meta, uint32_t from,
+                                       uint32_t to) {
+  TzStr s = make_str(obj, meta);
   uint32_t n = to - from;
-  if (n == 0)
-    return kEmpty;
+  if (n == 0) {
+    *out = kEmpty;
+    return;
+  }
   if (n == str_len(s.meta)) {
     retain(s);
-    return s;
+    *out = s;
+    return;
   }
   TzStr f = flat(s);
-  if (n < SHORT_LENGTH)
-    return string_from_units((const char *)units(&f) + (size_t)from * (is_two(f.meta) ? 2 : 1), n,
+  if (n <= INLINE_MAX && !is_two(f.meta)) {
+    *out = inline_piece((const uint8_t *)units(&f), str_len(f.meta), from, n);
+  } else if (n < SHORT_LENGTH && !is_two(f.meta)) {
+    tz_str_short_piece(out, &f, (const uint8_t *)units(&f), from, n);
+  } else if (n < SHORT_LENGTH) {
+    *out = string_from_units((const char *)units(&f) + (size_t)from * (is_two(f.meta) ? 2 : 1), n,
                              is_two(f.meta));
-  retain(f);
-  return make_str(f.obj, make_meta(n, str_off(f.meta) + from, is_two(f.meta), is_ascii(f.meta),
-                                   f.meta & F_HEAP));
+  } else {
+    retain(f);
+    *out = make_str(f.obj, make_meta(n, str_off(f.meta) + from, is_two(f.meta), is_ascii(f.meta),
+                                     f.meta & F_HEAP));
+  }
 }
 
-void tz_str_char_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
+static inline TzStr substring_of(TzStr s, uint32_t from, uint32_t to) {
+  TzStr piece;
+  tz_str_substring_into(&piece, s.obj, s.meta, from, to);
+  return piece;
+}
+
+// substring_of without a call when the string is one-byte and no rope and the
+// piece is inline or shares the buffer: what the hot methods below inline. A
+// short piece is cut from a word of eight units, the last eight when it ends
+// there (a buffer has at least nine).
+static inline void substring_fast(TzStr *out, void *obj, uint64_t meta, uint32_t from,
+                                  uint32_t to) {
+  uint32_t n = to - from, len = str_len(meta);
+  if (direct_bytes(meta) && n != 0 && n != len) {
+    uint64_t mask = ~0ull >> (64 - 8 * (n <= INLINE_MAX ? n : INLINE_MAX));
+    if (is_inline(meta)) {
+      *out = inline_from_bits(((uint64_t)(uintptr_t)obj >> (8 * from)) & mask, n);
+      return;
+    }
+    const char *data = (const char *)obj + sizeof(Buffer) + str_off(meta);
+    if (n <= INLINE_MAX && len >= 8) {
+      uint32_t at = from + 8 <= len ? from : len - 8;
+      uint64_t bits;
+      memcpy(&bits, data + at, 8);
+      *out = inline_from_bits((bits >> (8 * (from - at))) & mask, n);
+      return;
+    }
+    if (n >= SHORT_LENGTH) {
+      if (meta & F_HEAP)
+        ++((Header *)obj)->rc;
+      *out = make_str(obj, make_meta(n, str_off(meta) + from, 0, is_ascii(meta), meta & F_HEAP));
+      return;
+    }
+  }
+  tz_str_substring_into(out, obj, meta, from, to);
+}
+
+TzStr tz_str_sub(TzStr s, uint32_t from, uint32_t to) { return substring_of(s, from, to); }
+
+const void *tz_str_units(TzStr *s, uint32_t *length, int *two) {
+  *s = flat(*s);
+  *length = str_len(s->meta);
+  *two = is_two(s->meta);
+  return units(s);
+}
+
+TZ_NOINLINE void tz_str_char_at_slow(TzStr *out, void *obj, uint64_t meta, uint32_t index) {
+  tz_str_substring_into(out, obj, meta, index, index + 1);
+}
+
+// s[i]: the code unit at i as a string. One byte is an inline string.
+TZ_HOT void tz_str_char_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
-  *out = substring_of(make_str(obj, meta), (uint32_t)index, (uint32_t)index + 1);
+  int32_t unit = direct_byte(obj, meta, (uint32_t)index);
+  if (unit >= 0)
+    *out = inline_from_bits((uint64_t)unit, 1);
+  else
+    tz_str_char_at_slow(out, obj, meta, (uint32_t)index);
 }
 
-// The code point at `index` for `for...of`: one code unit, or two for a
-// surrogate pair. Returns the number of code units taken.
-int32_t tz_str_code_point_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
+TZ_NOINLINE int32_t tz_str_code_point_at_slow(TzStr *out, void *obj, uint64_t meta,
+                                              int64_t index) {
   uint32_t len = str_len(meta);
-  check_index(index, len);
   TzStr s = make_str(obj, meta);
   TzStr f = flat(s);
   uint32_t i = (uint32_t)index;
@@ -847,45 +1204,67 @@ int32_t tz_str_code_point_at(TzStr *out, void *obj, uint64_t meta, int64_t index
   if (unit >= 0xD800 && unit <= 0xDBFF && i + 1 < len) {
     uint16_t next = unit_at(&f, i + 1);
     if (next >= 0xDC00 && next <= 0xDFFF) {
-      *out = substring_of(s, i, i + 2);
+      tz_str_substring_into(out, obj, meta, i, i + 2);
       return 2;
     }
   }
-  *out = substring_of(s, i, i + 1);
+  tz_str_substring_into(out, obj, meta, i, i + 1);
+  return 1;
+}
+
+// The code point at `index` for `for...of`: one code unit, or two for a
+// surrogate pair. Returns the number of code units taken. A one-byte string
+// has no surrogates.
+TZ_HOT int32_t tz_str_code_point_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
+  check_index(index, str_len(meta));
+  int32_t unit = direct_byte(obj, meta, (uint32_t)index);
+  if (unit < 0)
+    return tz_str_code_point_at_slow(out, obj, meta, index);
+  *out = inline_from_bits((uint64_t)unit, 1);
   return 1;
 }
 
 // JavaScript's slice: negative positions count from the end.
-void tz_str_slice(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
-                  int32_t has_end) {
+TZ_HOT void tz_str_slice(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
+                         int32_t has_end) {
   uint32_t len = str_len(meta);
   uint32_t from = start < 0 ? clamp(len + start, len) : clamp(start, len);
   uint32_t to = !has_end ? len : end < 0 ? clamp(len + end, len) : clamp(end, len);
-  *out = from < to ? substring_of(make_str(obj, meta), from, to) : kEmpty;
+  if (from < to)
+    substring_fast(out, obj, meta, from, to);
+  else
+    *out = kEmpty;
 }
 
 // JavaScript's substring: negative positions become 0, and the ends swap if
 // needed.
-void tz_str_substring(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
-                      int32_t has_end) {
+TZ_HOT void tz_str_substring(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
+                             int32_t has_end) {
   uint32_t len = str_len(meta);
   uint32_t a = clamp(start, len);
   uint32_t b = has_end ? clamp(end, len) : len;
-  *out = substring_of(make_str(obj, meta), a < b ? a : b, a < b ? b : a);
+  substring_fast(out, obj, meta, a < b ? a : b, a < b ? b : a);
 }
 
 void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
-  if (count < 0)
-    tz_panicf("invalid repeat count %lld", (long long)count);
+  // RangeErrors, as in JavaScript; the program checks for them after the
+  // call.
+  if (count < 0) {
+    tz_throw(TZ_RANGE_ERROR, "Invalid count value: %lld", (long long)count);
+    *out = kEmpty;
+    return;
+  }
   uint32_t len = str_len(meta);
   if (count == 0 || len == 0) {
     *out = kEmpty;
     return;
   }
   uint64_t total = (uint64_t)len * (uint64_t)count;
-  if (count > (int64_t)MAX_LENGTH || total > MAX_LENGTH)
-    tz_panicf("repeated string would exceed the maximum length of %llu",
-              (unsigned long long)MAX_LENGTH);
+  if (count > (int64_t)MAX_LENGTH || total > MAX_LENGTH) {
+    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
+    *out = kEmpty;
+    return;
+  }
   if (count == 1) {
     TzStr s = make_str(obj, meta);
     retain(s);
@@ -923,7 +1302,11 @@ void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
 void tz_str_from_i64(TzStr *out, int64_t value) {
   char buf[24];
   const char *text = format_i64(buf + sizeof buf, value);
-  *out = string_from_ascii(text, (size_t)(buf + sizeof buf - text));
+  size_t len = (size_t)(buf + sizeof buf - text);
+  if (len <= INLINE_MAX)
+    *out = inline_str((const uint8_t *)text, (uint32_t)len);
+  else
+    *out = string_from_ascii(text, len);
 }
 
 void tz_str_from_f64(TzStr *out, double value) {
@@ -1026,6 +1409,13 @@ void tz_buf_ascii_n(TzBuf *b, const char *text, size_t length) {
 }
 
 void tz_buf_ascii(TzBuf *b, const char *text) { tz_buf_ascii_n(b, text, strlen(text)); }
+
+void tz_buf_bytes(TzBuf *b, const uint8_t *units8, size_t length) {
+  buf_reserve(b, length);
+  for (size_t i = 0; i < length; ++i)
+    b->data[b->length + i] = units8[i];
+  b->length += length;
+}
 
 void tz_buf_units(TzBuf *b, const uint16_t *units16, size_t length) {
   buf_reserve(b, length);
@@ -1157,16 +1547,19 @@ void tz_str_char_at_or_empty(TzStr *out, void *obj, uint64_t meta, int64_t index
     *out = kEmpty;
     return;
   }
-  *out = substring_of(make_str(obj, meta), (uint32_t)index, (uint32_t)index + 1);
+  tz_str_char_at(out, obj, meta, index);
+}
+
+TZ_NOINLINE int32_t tz_str_code_point_slow(void *obj, uint64_t meta, uint32_t index) {
+  TzStr f = flat(make_str(obj, meta));
+  return (int32_t)next_code_point(&f, &index, str_len(meta));
 }
 
 // codePointAt(), for a position the compiler checked.
 TZ_HOT int32_t tz_str_code_point(void *obj, uint64_t meta, int64_t index) {
-  uint32_t len = str_len(meta);
-  check_index(index, len);
-  TzStr f = flat(make_str(obj, meta));
-  uint32_t i = (uint32_t)index;
-  return (int32_t)next_code_point(&f, &i, len);
+  check_index(index, str_len(meta));
+  int32_t unit = direct_byte(obj, meta, (uint32_t)index);
+  return unit >= 0 ? unit : tz_str_code_point_slow(obj, meta, (uint32_t)index);
 }
 
 // lastIndexOf(): the last match that starts at or before `position`.
@@ -1177,10 +1570,114 @@ int32_t tz_str_last_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t
   if (tlen > len)
     return -1;
   uint32_t start = has_position ? clamp(position, len) : len;
-  for (int64_t k = start < len - tlen ? start : len - tlen; k >= 0; --k)
-    if (tz_str_units_equal(&s, (uint32_t)k, &t, 0, tlen))
+  int64_t k = start < len - tlen ? start : len - tlen;
+  if (tlen == 0)
+    return (int32_t)k;
+  if (!is_two(s.meta) && !is_two(t.meta)) {
+    const uint8_t *su = (const uint8_t *)units(&s), *tu = (const uint8_t *)units(&t);
+    for (; k >= 0; --k)
+      if (su[k] == tu[0] && bytes_equal(su + k + 1, tu + 1, tlen - 1))
+        return (int32_t)k;
+    return -1;
+  }
+  uint16_t first = unit_at(&t, 0);
+  for (; k >= 0; --k)
+    if (unit_at(&s, (uint32_t)k) == first && tz_str_units_equal(&s, (uint32_t)k, &t, 0, tlen))
       return (int32_t)k;
   return -1;
+}
+
+// The pieces of split_bytes: data[p..q) of flat one-byte `f`. A slice is
+// not retained here; `*slices` counts them, for the caller to retain `f`
+// once for all of them.
+static inline void split_piece(TzStr *out, const TzStr *f, const uint8_t *data, uint32_t len,
+                               uint32_t p, uint32_t q, uint32_t *slices) {
+  uint32_t n = q - p;
+  if (n - 1 < INLINE_MAX) { // 1 to INLINE_MAX
+    *out = inline_piece(data, len, p, n);
+  } else if (n >= SHORT_LENGTH) {
+    ++*slices;
+    *out = make_str(f->obj, make_meta(n, str_off(f->meta) + p, 0, is_ascii(f->meta),
+                                      f->meta & F_HEAP));
+  } else if (n == 0) {
+    *out = kEmpty;
+  } else {
+    tz_str_short_piece(out, f, data, p, n);
+  }
+}
+
+// split() of a one-byte string by a one-byte code unit: the usual case. The
+// separators are counted first, so the array is made once at its final size
+// and the pieces are written straight into it; then the bits of sixteen
+// bytes at a time give the separators.
+static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c, uint32_t max) {
+  const uint8_t *data = (const uint8_t *)units(f);
+  uint32_t len = str_len(f->meta);
+  // n - 1 separators end pieces; the last piece ends at the end, or at the
+  // separator after it when the limit cuts the rest off.
+  uint32_t n = count_byte(data, len, c, max - 1) + 1;
+  TzArray *a = tz_arr_new(string_type, 0, n);
+  TzStr *out = (TzStr *)a->data;
+  uint32_t k = 0, p = 0, slices = 0;
+  if (n == max) { // perhaps fewer pieces than separators
+    for (; k + 1 < n; ++k) {
+      uint32_t q = find_byte(data, p, len, c);
+      split_piece(&out[k], f, data, len, p, q, &slices);
+      p = q + 1;
+    }
+  } else {
+    uint32_t b = 0;
+#ifdef TZ_SSE2
+    // Every separator ends a piece. Each piece is first written as if it
+    // were short, its first eight bytes loaded at once (they are there while
+    // eight bytes follow the block); those that are not short are noted and
+    // redone in batches. That keeps the branches that the processor could
+    // not predict out of the loop.
+    struct {
+      uint32_t k, p, n;
+    } redo[64];
+    uint32_t redos = 0;
+    __m128i needle = _mm_set1_epi8((char)c);
+    for (; b + 24 <= len; b += 16) {
+      __m128i block = _mm_loadu_si128((const __m128i *)(data + b));
+      unsigned mask = (unsigned)_mm_movemask_epi8(_mm_cmpeq_epi8(block, needle));
+      for (; mask; mask &= mask - 1) {
+        uint32_t q = b + (uint32_t)__builtin_ctz(mask), piece = q - p;
+        uint64_t bits;
+        memcpy(&bits, data + p, 8);
+        bits &= piece >= 8 ? ~0ull : (1ull << (8 * piece)) - 1;
+        out[k].obj = (void *)(uintptr_t)bits;
+        out[k].meta =
+            (uint64_t)piece | F_ROPE | ((bits & 0x8080808080808080ull) == 0 ? F_ASCII : 0);
+        redo[redos].k = k;
+        redo[redos].p = p;
+        redo[redos].n = piece;
+        redos += piece - 1 >= INLINE_MAX; // empty, or too long to be inline
+        if (redos == 64) {
+          for (uint32_t i = 0; i < redos; ++i)
+            split_piece(&out[redo[i].k], f, data, len, redo[i].p, redo[i].p + redo[i].n,
+                        &slices);
+          redos = 0;
+        }
+        ++k;
+        p = q + 1;
+      }
+    }
+    for (uint32_t i = 0; i < redos; ++i)
+      split_piece(&out[redo[i].k], f, data, len, redo[i].p, redo[i].p + redo[i].n, &slices);
+#endif
+    for (; b < len; ++b) {
+      if (data[b] == c) {
+        split_piece(&out[k++], f, data, len, p, b, &slices);
+        p = b + 1;
+      }
+    }
+  }
+  split_piece(&out[k], f, data, len, p, find_byte(data, p, len, c), &slices);
+  if (f->meta & F_HEAP)
+    ((Header *)f->obj)->rc += slices;
+  a->length = n;
+  return a;
 }
 
 // split(separator, limit): the pieces between the separators, at most
@@ -1188,33 +1685,50 @@ int32_t tz_str_last_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t
 TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void *sep_obj,
                       uint64_t sep_meta, int32_t has_sep, int64_t limit, int32_t has_limit) {
   uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX; // ToUint32, as in JavaScript
-  TzArray *a = tz_arr_new(string_type, 0, 0);
   if (max == 0)
-    return a;
-  TzStr s = make_str(obj, meta), piece;
+    return tz_arr_new(string_type, 0, 0);
+  TzStr s = make_str(obj, meta);
   if (!has_sep) {
+    TzArray *a = tz_arr_new(string_type, 1, 1);
     retain(s);
-    tz_arr_push_value(a, &s);
+    *(TzStr *)a->data = s;
     return a;
   }
   TzStr f = flat(s), sep = flat(make_str(sep_obj, sep_meta));
   uint32_t len = str_len(f.meta), sep_len = str_len(sep.meta);
   if (sep_len == 0) {
-    for (uint32_t i = 0; i < len && a->length < max; ++i) {
-      piece = substring_of(s, i, i + 1);
-      tz_arr_push_value(a, &piece);
+    // Each code unit, a short string unless it is above 0xFF.
+    uint32_t n = len < max ? len : max;
+    TzArray *a = tz_arr_new(string_type, 0, n);
+    TzStr *out = (TzStr *)a->data;
+    if (is_two(f.meta)) {
+      for (uint32_t i = 0; i < n; ++i)
+        tz_str_substring_into(&out[i], f.obj, f.meta, i, i + 1);
+    } else {
+      const uint8_t *data = (const uint8_t *)units(&f);
+      for (uint32_t i = 0; i < n; ++i)
+        out[i] = inline_from_bits(data[i], 1);
     }
+    a->length = n;
     return a;
   }
+  if (sep_len == 1 && !is_two(f.meta) && unit_at(&sep, 0) <= 0xFF)
+    return split_bytes(string_type, &f, (uint8_t)unit_at(&sep, 0), max);
+
+  // Any other separator: the matches are found twice, once to count them.
+  uint32_t n = 1;
+  for (int64_t q = 0; n < max && (q = index_of(&f, &sep, (uint32_t)q)) >= 0; q += sep_len)
+    ++n;
+  TzArray *a = tz_arr_new(string_type, 0, n);
+  TzStr *out = (TzStr *)a->data;
   uint32_t p = 0;
-  for (int64_t q; (q = index_of(&f, &sep, p)) >= 0; p = (uint32_t)q + sep_len) {
-    piece = substring_of(s, p, (uint32_t)q);
-    tz_arr_push_value(a, &piece);
-    if (a->length == max)
-      return a;
+  for (uint32_t k = 0; k < n; ++k) {
+    int64_t q = index_of(&f, &sep, p);
+    uint32_t end = q < 0 ? len : (uint32_t)q;
+    tz_str_substring_into(&out[k], f.obj, f.meta, p, end);
+    p = end + sep_len;
   }
-  piece = substring_of(s, p, len);
-  tz_arr_push_value(a, &piece);
+  a->length = n;
   return a;
 }
 
@@ -1231,18 +1745,37 @@ void tz_arr_append_code_points(TzArray *a, void *obj, uint64_t meta) {
   }
 }
 
-// trim() (ends 3), trimStart() (1) and trimEnd() (2).
-void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
-  TzStr s = make_str(obj, meta);
-  TzStr f = flat(s);
+// Whitespace as JavaScript's trim() and Number() see it, ASCII first.
+static inline int is_space(uint32_t unit) {
+  return unit == ' ' || (unit >= 9 && unit <= 13) || (unit >= 0x80 && tz_is_js_space(unit));
+}
+
+TZ_NOINLINE void tz_str_trim_slow(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
+  TzStr f = flat(make_str(obj, meta));
   uint32_t start = 0, end = str_len(f.meta);
   if (ends & 1)
-    while (start < end && tz_is_js_space(unit_at(&f, start)))
+    while (start < end && is_space(unit_at(&f, start)))
       ++start;
   if (ends & 2)
-    while (end > start && tz_is_js_space(unit_at(&f, end - 1)))
+    while (end > start && is_space(unit_at(&f, end - 1)))
       --end;
-  *out = substring_of(s, start, end);
+  tz_str_substring_into(out, obj, meta, start, end);
+}
+
+// trim() (ends 3), trimStart() (1) and trimEnd() (2).
+TZ_HOT void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
+  if (!direct_bytes(meta)) {
+    tz_str_trim_slow(out, obj, meta, ends);
+    return;
+  }
+  uint32_t start = 0, end = str_len(meta);
+  if (ends & 1)
+    while (start < end && is_space((uint32_t)direct_byte(obj, meta, start)))
+      ++start;
+  if (ends & 2)
+    while (end > start && is_space((uint32_t)direct_byte(obj, meta, end - 1)))
+      --end;
+  substring_fast(out, obj, meta, start, end);
 }
 
 // padStart() and padEnd(): `fill` (by default a space) repeated, and cut, up
@@ -1257,8 +1790,11 @@ void tz_str_pad(TzStr *out, void *obj, uint64_t meta, int64_t length, void *fill
     *out = s;
     return;
   }
-  if (length > (int64_t)MAX_LENGTH)
-    tz_panicf("RangeError: Invalid string length %lld", (long long)length);
+  if (length > (int64_t)MAX_LENGTH) {
+    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
+    *out = kEmpty;
+    return;
+  }
   TzStr f = flat(s);
   uint32_t total = (uint32_t)length, gap = total - len;
   Builder w;
@@ -1293,12 +1829,62 @@ static int final_sigma(const TzStr *f, uint32_t i, uint32_t len) {
   return 1;
 }
 
+// Whether toUpperCase() (`upper`) or toLowerCase() maps a Latin-1 unit to
+// the one 0x20 away: the ASCII letters, and the Latin-1 ones but × and ÷.
+static inline int flips_case(uint8_t c, int upper) {
+  if (upper)
+    return (c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7);
+  return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7);
+}
+
+// toUpperCase() and toLowerCase() of a one-byte string whose result is
+// one-byte too, which is every toLowerCase(); toUpperCase() leaves Latin-1
+// only for µ, ß and ÿ, and then this returns 0.
+static int latin1_case(TzStr *out, const TzStr *s, const TzStr *f, int upper) {
+  uint32_t len = str_len(f->meta);
+  const uint8_t *u = (const uint8_t *)units(f);
+  uint32_t first = len; // the first unit that changes
+  for (uint32_t i = 0; i < len; ++i) {
+    if (upper && (u[i] == 0xB5 || u[i] == 0xDF || u[i] == 0xFF))
+      return 0;
+    if (first == len && flips_case(u[i], upper))
+      first = i;
+  }
+  if (first == len) {
+    retain(*s);
+    *out = *s;
+    return 1;
+  }
+  Builder w;
+  builder_init(&w, len, 0);
+  builder_put(&w, f, 0, len);
+  uint8_t *dst = w.b ? (uint8_t *)buffer_units(w.b) : (uint8_t *)&w.bits;
+  for (uint32_t i = first; i < len; ++i)
+    if (flips_case(dst[i], upper))
+      dst[i] ^= 0x20;
+  *out = builder_finish(&w, 0);
+  return 1;
+}
+
 // toUpperCase() and toLowerCase(), with the full mappings of Unicode, as V8
 // has them: "ß" becomes "SS", and a final capital sigma a final small one.
 static void convert_case(TzStr *out, void *obj, uint64_t meta, int upper) {
   TzStr s = make_str(obj, meta);
   TzStr f = flat(s);
   uint32_t len = str_len(f.meta);
+  if (is_ascii(f.meta) && is_inline(f.meta)) {
+    // The letters of all eight bytes at once: adding a constant to a byte
+    // sets its top bit from the first letter on, another constant from just
+    // past the last one, and a letter flips 0x20.
+    uint64_t bits = inline_bits(&f);
+    uint64_t from = upper ? 0x1F1F1F1F1F1F1F1Full : 0x3F3F3F3F3F3F3F3Full;
+    uint64_t past = upper ? 0x0505050505050505ull : 0x2525252525252525ull;
+    uint64_t letters = (bits + from) & ~(bits + past) & 0x8080808080808080ull;
+    *out = inline_from_bits(bits ^ (letters >> 2), len);
+    return;
+  }
+  if (!is_two(f.meta) && !is_ascii(f.meta) && latin1_case(out, &s, &f, upper))
+    return;
   if (is_ascii(f.meta)) {
     const uint8_t *u = (const uint8_t *)units(&f);
     uint8_t from = upper ? 'a' : 'A';
@@ -1378,6 +1964,45 @@ static void put_replacement(TzBuf *b, const TzStr *replacement, const TzStr *s, 
   buf_put(b, replacement, plain, len - plain);
 }
 
+// tz_str_replace of one-byte `f` and `replacement` when the replacement has
+// no patterns ($): the matches are counted first, and the result is made at
+// its final size, one byte per unit. `at` is the first match. Returns 0 if
+// it does not apply.
+static int replace_plain(TzStr *out, const TzStr *f, const TzStr *pattern,
+                         const TzStr *replacement, int64_t at, int all) {
+  uint32_t len = str_len(f->meta), p_len = str_len(pattern->meta);
+  uint32_t r_len = str_len(replacement->meta);
+  const uint8_t *r = (const uint8_t *)units(replacement);
+  if (r_len && find_byte(r, 0, r_len, '$') != r_len)
+    return 0;
+  // An empty pattern matches between every two code units, and at both ends.
+  uint64_t count = 1;
+  if (all) {
+    if (p_len == 0)
+      count = (uint64_t)len + 1;
+    else
+      for (int64_t q = at + p_len; (q = index_of(f, pattern, (uint32_t)q)) >= 0; q += p_len)
+        ++count;
+  }
+  uint64_t total = len + count * r_len - count * p_len;
+  if (total > MAX_LENGTH)
+    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)total,
+              (unsigned long long)MAX_LENGTH);
+  Builder w;
+  builder_init(&w, (uint32_t)total, 0);
+  uint32_t copied = 0;
+  for (uint64_t k = 0; k < count; ++k) {
+    builder_put(&w, f, copied, (uint32_t)at - copied);
+    builder_put(&w, replacement, 0, r_len);
+    copied = (uint32_t)at + p_len;
+    if (k + 1 < count)
+      at = p_len ? index_of(f, pattern, copied) : at + 1;
+  }
+  builder_put(&w, f, copied, len - copied);
+  *out = builder_finish(&w, is_ascii(f->meta) && is_ascii(replacement->meta));
+  return 1;
+}
+
 // replace() (the first match) and replaceAll() of a string pattern.
 void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint64_t p_meta,
                     void *r_obj, uint64_t r_meta, int32_t all) {
@@ -1391,6 +2016,9 @@ void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint6
     *out = s;
     return;
   }
+  if (!is_two(f.meta) && !is_two(replacement.meta) &&
+      replace_plain(out, &f, &pattern, &replacement, at, all))
+    return;
   TzBuf b;
   tz_buf_init(&b);
   uint32_t copied = 0;
@@ -1427,7 +2055,10 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
     if (!(cp >= 0 && cp <= 0x10FFFF && cp == (double)(uint32_t)cp)) {
       char text[32];
       text[tz_format_f64(cp, text)] = 0;
-      tz_panicf("RangeError: Invalid code point %s", text);
+      tz_throw(TZ_RANGE_ERROR, "Invalid code point %s", text);
+      tz_buf_free(&b);
+      *out = tz_str_from_ascii("", 0);
+      return;
     }
     buf_code_point(&b, (uint32_t)cp);
   }
@@ -1438,11 +2069,25 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
 // Numbers from strings (number.c does the parsing)
 //===----------------------------------------------------------------------===//
 
-// The ASCII characters of flat `f` from `from` to `to`, up to the first other
-// one, as a C string in `local` or in a new block; `*n` gets their count.
-static char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local, size_t size,
-                        size_t *n) {
-  char *text = (size_t)(to - from) < size ? local : (char *)tz_alloc((size_t)(to - from) + 1);
+// The ASCII characters of flat `*f` from `from` to `to`, up to the first
+// other one; `*n` gets their count. A one-byte string lends its own units,
+// read from `*f`, which must stay where it is meanwhile. A two-byte one is
+// copied to `local`, or to a new block that `*owned` gets for the caller to
+// free.
+static const char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local, size_t size,
+                              size_t *n, char **owned) {
+  *owned = NULL;
+  if (!is_two(f->meta)) {
+    const char *text = from < to ? (const char *)units(f) + from : "";
+    size_t k = 0;
+    while (k < to - from && (uint8_t)text[k] < 0x80)
+      ++k;
+    *n = k;
+    return text;
+  }
+  char *text = local;
+  if ((size_t)(to - from) >= size)
+    text = *owned = (char *)tz_alloc((size_t)(to - from) + 1);
   size_t k = 0;
   for (uint32_t i = from; i < to; ++i) {
     uint16_t unit = unit_at(f, i);
@@ -1460,46 +2105,45 @@ static char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local,
 double tz_str_to_number(void *obj, uint64_t meta) {
   TzStr f = flat(make_str(obj, meta));
   uint32_t start = 0, end = str_len(f.meta);
-  while (start < end && tz_is_js_space(unit_at(&f, start)))
+  while (start < end && is_space(unit_at(&f, start)))
     ++start;
-  while (end > start && tz_is_js_space(unit_at(&f, end - 1)))
+  while (end > start && is_space(unit_at(&f, end - 1)))
     --end;
-  char local[64];
+  char local[64], *owned;
   size_t n;
-  char *text = ascii_text(&f, start, end, local, sizeof local, &n);
+  const char *text = ascii_text(&f, start, end, local, sizeof local, &n, &owned);
   double value = tz_number_from_ascii(text, n, n == end - start);
-  if (text != local)
-    tz_free(text);
+  tz_free(owned);
   return value;
 }
 
-// The ASCII text after the leading whitespace, which parseInt and parseFloat
-// read a number from the start of.
-static char *leading_text(void *obj, uint64_t meta, char *local, size_t size, size_t *n) {
-  TzStr f = flat(make_str(obj, meta));
-  uint32_t start = 0, end = str_len(f.meta);
-  while (start < end && tz_is_js_space(unit_at(&f, start)))
+// The ASCII text after the leading whitespace of flat `*f`, which parseInt
+// and parseFloat read a number from the start of.
+static const char *leading_text(const TzStr *f, char *local, size_t size, size_t *n,
+                                char **owned) {
+  uint32_t start = 0, end = str_len(f->meta);
+  while (start < end && is_space(unit_at(f, start)))
     ++start;
-  return ascii_text(&f, start, end, local, size, n);
+  return ascii_text(f, start, end, local, size, n, owned);
 }
 
 // parseInt(s, radix); a radix of 0 means none, as in JavaScript.
 double tz_parse_int(void *obj, uint64_t meta, int32_t radix) {
-  char local[64];
+  TzStr f = flat(make_str(obj, meta));
+  char local[64], *owned;
   size_t n;
-  char *text = leading_text(obj, meta, local, sizeof local, &n);
+  const char *text = leading_text(&f, local, sizeof local, &n, &owned);
   double value = tz_parse_int_ascii(text, n, radix);
-  if (text != local)
-    tz_free(text);
+  tz_free(owned);
   return value;
 }
 
 double tz_parse_float(void *obj, uint64_t meta) {
-  char local[64];
+  TzStr f = flat(make_str(obj, meta));
+  char local[64], *owned;
   size_t n;
-  char *text = leading_text(obj, meta, local, sizeof local, &n);
+  const char *text = leading_text(&f, local, sizeof local, &n, &owned);
   double value = tz_parse_float_ascii(text, n);
-  if (text != local)
-    tz_free(text);
+  tz_free(owned);
   return value;
 }

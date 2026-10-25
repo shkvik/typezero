@@ -1,0 +1,7 @@
+# Files the tests embed byte for byte (embedText, embedJson, embedBytes) keep the same
+# bytes on every system, whatever core.autocrlf says; so does the stdin of
+# tests (NAME.in), whose "\r\n" and "\n" are what they test.
+tests/**/*.html -text
+tests/**/*.json -text
+tests/**/*.bin -text
+tests/**/*.in -text

@@ -1,0 +1,59 @@
+10/23/2026, 3:04:05 PM | 10/23/2026 | 3:04:05 PM
+23.10.2026, 15:04:05 | 23.10.2026 | 15:04:05
+23.10.2026, 15:04:05 | 2026/10/23 15:04:05 | 23/10/2026, 15:04:05
+23 октября 2026 г.
+Friday, October 23
+Oktober октябрь
+vendredi 23 octobre 2026 à 15:04:05 temps universel coordonné
+Oct 23, 2026, 9:04 PM
+21:04
+23.10.2026, 3:04:05 PM
+10/23/2026, 15:04:05
+10/23/2026, 15:04:05
+24:40
+0 AM
+午前0:40:00
+00:40:00
+asia/bishkek 9:04 PM GMT+6 Asia/Bishkek
+UTC 3:04 PM UTC UTC
++05:30 8:34 PM GMT+5:30 +05:30
+-0800 7:04 AM GMT-8 -08:00
+America/New_York 11:04 AM EDT America/New_York
+Europe/Berlin 5:04 PM GMT+2 Europe/Berlin
+23 октября в 21:04 1 января в 06:00 [
+  { type: 'day', value: '23' },
+  { type: 'literal', value: ' ' },
+  { type: 'month', value: 'октября' },
+  { type: 'literal', value: ' в ' },
+  { type: 'hour', value: '21' },
+  { type: 'literal', value: ':' },
+  { type: 'minute', value: '04' }
+]
+{
+  locale: 'ru',
+  calendar: 'gregory',
+  numberingSystem: 'latn',
+  timeZone: 'Asia/Bishkek',
+  hourCycle: 'h23',
+  hour12: false,
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+}
+{
+  locale: 'en-US',
+  calendar: 'gregory',
+  numberingSystem: 'latn',
+  timeZone: 'Asia/Bishkek',
+  hourCycle: 'h12',
+  hour12: true,
+  dateStyle: 'full',
+  timeStyle: 'short'
+}
+true
+en-US en
+23.10.2026 DateTimeFormat [Intl.DateTimeFormat] {}
+令和8年
+5.678
+Invalid Date Invalid Date

@@ -1,0 +1,63 @@
+// The forms of node:crypto that tz does not take: callbacks (docs/crypto.md, section 5), options
+// and encodings not written in the call, arguments of the wrong kind, and what is not there yet.
+import {
+  createHash, createCipheriv, createDecipheriv, randomBytes, randomInt, getRandomValues,
+  timingSafeEqual, generateKeyPairSync, createSecretKey, argon2Sync, sign, KeyObject,
+  // expect-error: 'scrypt' of 'node:crypto' takes a callback, which tz does not have (docs/crypto.md, section 5); import 'scryptSync' and use what it returns
+  scrypt,
+  // expect-error: 'webcrypto' of 'node:crypto' is not supported yet: Web Crypto comes later (docs/crypto.md, step 4)
+  webcrypto,
+  // expect-error: 'publicEncrypt' of 'node:crypto' is not supported yet
+  publicEncrypt,
+  // expect-error: 'node:crypto' has no export named 'createSha'
+  createSha,
+} from "node:crypto"
+
+// expect-error: 'randomBytes' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: 'const bytes = randomBytes(n)'
+randomBytes(16, (err: Error | undefined, bytes: Buffer) => console.log(bytes))
+// expect-error: 'randomInt' with a callback is not supported
+randomInt(10, (err: Error | undefined, n: int) => console.log(n))
+const options = { outputLength: 16 }
+// expect-error: the options of 'createHash' are written in the call, as an object literal, e.g. '{ outputLength: ... }'
+createHash("shake128", options)
+// expect-error: 'createHash' has no option 'length'; it takes outputLength
+createHash("shake128", { length: 16 })
+const encoding = "hex"
+// expect-error: the encoding of 'digest' is written as a literal, e.g. 'hex': the type of what it gives depends on it
+createHash("sha256").update("a").digest(encoding)
+// expect-error: unknown encoding 'hax'
+createHash("sha256").digest("hax")
+// expect-error: the data is a string or bytes (a Buffer, a typed array or a DataView); found 'int'
+createHash("sha256").update(42)
+// expect-error: 'getRandomValues' fills an array of integers (a Uint8Array, an Int32Array, a Buffer...); found 'Float64Array'
+getRandomValues(new Float64Array(4))
+// expect-error: the first argument is bytes (a Buffer, a typed array or a DataView, an ArrayBuffer); found 'string'
+timingSafeEqual("secret", Buffer.from("secret"))
+const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32), Buffer.alloc(12))
+// expect-error: property 'setAuthTag' does not exist on type 'Cipheriv'
+cipher.setAuthTag(Buffer.alloc(16))
+const decipher = createDecipheriv("aes-256-gcm", Buffer.alloc(32), Buffer.alloc(12))
+// expect-error: property 'getAuthTag' does not exist on type 'Decipheriv'
+decipher.getAuthTag()
+// expect-error: 'rsa' keys need '{ modulusLength: 2048 }'
+generateKeyPairSync("rsa")
+// expect-error: unknown type of the key pair 'dh'
+generateKeyPairSync("dh")
+// expect-error: unknown algorithm of Argon2 'argon2x'
+argon2Sync("argon2x", { message: "pw", nonce: Buffer.alloc(16), parallelism: 1, tagLength: 32, memory: 64, passes: 3 })
+// expect-error: the parameters of 'argon2Sync' need 'passes'
+argon2Sync("argon2id", { message: "pw", nonce: Buffer.alloc(16), parallelism: 1, tagLength: 32, memory: 64 })
+const key = createSecretKey(Buffer.alloc(16))
+// expect-error: 'asymmetricKeyDetails' is not supported yet
+console.log(key.asymmetricKeyDetails)
+// expect-error: the private key is a string or bytes (a Buffer, a typed array or a DataView, an ArrayBuffer, a KeyObject); found 'int'
+sign("sha256", Buffer.alloc(1), 5)
+// expect-error: 'crypto.subtle' is not supported yet: Web Crypto comes later (docs/crypto.md, step 4)
+console.log(crypto.subtle)
+// expect-error: 'new KeyObject' is not how node makes one: use 'createSecretKey', 'createPublicKey' or 'createPrivateKey'
+const made = new KeyObject()
+const hasher = createHash("sha256")
+// expect-error: 'write' of Hash is not supported yet: in node it is a stream too, and tz has no streams yet (docs/streams.md); use 'update(data)' and 'digest()'
+hasher.write("x")
+// expect-error: 'pipe' of Cipheriv is not supported yet
+createCipheriv("aes-128-gcm", Buffer.alloc(16), Buffer.alloc(12)).pipe(hasher)

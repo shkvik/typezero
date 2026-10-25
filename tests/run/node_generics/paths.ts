@@ -1,0 +1,38 @@
+// Generic functions of a file that is not the entry, which use what it
+// imports from built-in modules: each copy of them sees this file's names,
+// wherever it is made.
+import { posix } from "node:path"
+import { EOL } from "node:os"
+import { existsSync, statSync, Stats } from "node:fs"
+import { pick } from "./main.ts"
+
+export function label<T>(value: T, dir: string, file: string): string {
+  return `${posix.basename(posix.join(dir, file))}=${value}`
+}
+
+export function extensions<T>(items: T[], path: (x: T) => string): string[] {
+  return items.map((x) => posix.extname(path(x)))
+}
+
+// A generic that calls one of the entry file, which imports this one.
+export function firstName<T>(items: T[], path: (x: T) => string): string {
+  return posix.basename(path(pick(items)))
+}
+
+// A function a generic gives back, which runs later, in another file.
+export function joiner<T>(dir: T): (file: string) => string {
+  return (file) => posix.join(`${dir}`, file)
+}
+
+export function lines<T>(items: T[]): string {
+  return items.map((x) => `${x}`).join(EOL).split(EOL).join("|")
+}
+
+export function kinds<T>(items: T[], path: (x: T) => string): string[] {
+  return items.map((x) => {
+    const p = path(x)
+    if (!existsSync(p)) return "none"
+    const st: Stats = statSync(p)
+    return st.isDirectory() ? "dir" : "file"
+  })
+}

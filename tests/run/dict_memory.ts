@@ -1,0 +1,55 @@
+// Dictionaries are freed with what they hold, without recursion however
+// deep: a trie a million levels deep, maps of maps, maps that hold objects
+// that hold maps.
+class TrieNode {
+  children = new Map<string, TrieNode>()
+  end = false
+}
+function insert(root: TrieNode, word: string) {
+  let node = root
+  for (const c of word) {
+    let next = node.children.get(c)
+    if (next == undefined) {
+      next = new TrieNode()
+      node.children.set(c, next)
+    }
+    node = next
+  }
+  node.end = true
+}
+const root = new TrieNode()
+insert(root, "a".repeat(1000000))
+insert(root, "ab")
+console.log(root.children.size, root.children.get("a")?.children.size)
+
+let chain = new Map<int, Map<int, int>[]>()
+for (let i = 0; i < 300000; i++) {
+  const next = new Map<int, Map<int, int>[]>()
+  next.set(i, [new Map([[i, i]])])
+  chain = next
+}
+console.log(chain.size)
+
+interface Box { inner: Record<string, Box[]> }
+let box: Box = { inner: {} }
+for (let i = 0; i < 300000; i++) box = { inner: { [String(i)]: [box] } }
+console.log(Object.keys(box.inner))
+
+// An iterator dropped half way, and an error thrown in the middle of an
+// iteration, end their iterations.
+const m = new Map([["a", 1], ["b", 2], ["c", 3]])
+const it = m.entries()
+console.log(it.next().value)
+function walk() {
+  for (const [k] of m) if (k == "b") throw new Error("stop at " + k)
+}
+try {
+  walk()
+} catch (e) {
+  console.log(e.message)
+}
+for (let i = 0; i < 100; i++) {
+  m.delete("x")
+  m.set("x", i)
+}
+console.log(m)

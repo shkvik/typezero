@@ -1,0 +1,43 @@
+# The objects of libcrypto.lib that make libcrypto_direct.lib, the direct layer of docs/crypto.md
+# (section 3): the algorithms that runtime/crypto_*.c calls without the general API of OpenSSL.
+# On Windows the linker loads an object of a library for every name it needs, and keeps what is not
+# a COMDAT of it (the assembly), so one call that reaches the general API (a CRYPTO_malloc that may
+# report an error) would bring nearly all of OpenSSL. build.ps1 takes these objects out of
+# libcrypto.lib and gives each name they need from the rest a stub that stops the program: the
+# code that calls them (CRYPTO_gcm128_new...) is never reached and drops out of the program.
+#
+# The hashes
+libcrypto-lib-md5_dgst.obj
+libcrypto-lib-md5-x86_64.obj
+libcrypto-lib-sha1dgst.obj
+libcrypto-lib-sha1-x86_64.obj
+libcrypto-lib-sha256.obj
+libcrypto-lib-sha256-x86_64.obj
+libcrypto-lib-sha512.obj
+libcrypto-lib-sha512-x86_64.obj
+libcrypto-lib-sha3.obj
+libcrypto-lib-keccak1600-x86_64.obj
+libcrypto-lib-rmd_dgst.obj
+libcrypto-lib-sm3.obj
+libdefault-lib-blake2b_prov.obj
+libdefault-lib-blake2s_prov.obj
+# AES and its modes: GCM, CBC, CTR
+libcrypto-lib-aes-x86_64.obj
+libcrypto-lib-aesni-x86_64.obj
+libcrypto-lib-vpaes-x86_64.obj
+libcrypto-lib-bsaes-x86_64.obj
+libcrypto-lib-gcm128.obj
+libcrypto-lib-ghash-x86_64.obj
+libcrypto-lib-aesni-gcm-x86_64.obj
+libcrypto-lib-aes-gcm-avx512.obj
+libcrypto-lib-ctr128.obj
+libcrypto-lib-cbc128.obj
+# ChaCha20-Poly1305
+libcrypto-lib-chacha-x86_64.obj
+libcrypto-lib-poly1305.obj
+libcrypto-lib-poly1305-x86_64.obj
+# What the assembly needs: the features of the CPU (OPENSSL_ia32cap_P, set before main),
+# OPENSSL_cleanse and CRYPTO_memcmp.
+libcrypto-lib-x86_64cpuid.obj
+libcrypto-lib-cpuid.obj
+libcrypto-lib-ctype.obj

@@ -1,0 +1,51 @@
+// Calls of the functions of built-in modules that tz cannot take.
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmdirSync, constants,
+         Stats } from "node:fs"
+import { join, sep, posix } from "node:path"
+import { EOL } from "node:os"
+import { argv } from "node:process"
+import { readLine } from "tz:io"
+
+const file = "a.txt"
+// expect-error: unknown encoding 'utf9' (node throws a TypeError); Buffer knows utf8, utf16le, latin1, ascii, base64, base64url and hex
+readFileSync(file, { encoding: "utf9" })
+const encoding = "utf8"
+// expect-error: the encoding of 'readFileSync' is written as a literal, 'utf8': the type of what it gives depends on it
+readFileSync(file, encoding)
+const options = { encoding: "utf8" }
+// expect-error: the options of 'readFileSync' are written in the call, as an object literal
+readFileSync(file, options)
+// expect-error: 'readFileSync' has no option 'encodings'; it takes encoding and flag
+readFileSync(file, { encodings: "utf8" })
+// expect-error: 'writeFileSync' writes a string or bytes (a Uint8Array or a Buffer); found 'int'; convert it first, e.g. 'String(x)'
+writeFileSync(file, 42)
+const types = true
+// expect-error: the option 'withFileTypes' of 'readdirSync' is written as a literal, true or false
+readdirSync(".", { withFileTypes: types })
+// expect-error: 'bigint' is not supported: tz has no bigint; the numbers of Stats are doubles
+statSync(file, { bigint: true })
+// expect-error: the options of 'rmdirSync' are deprecated in Node; to delete a directory with what is in it, use 'rmSync(path, { recursive: true })'
+rmdirSync("d", { recursive: true })
+// expect-error: 'constants.O_RDONLY' of 'node:fs' is not supported yet
+console.log(constants.O_RDONLY)
+// expect-error: 'sep' is a string, not a function
+sep()
+// expect-error: 'join' of 'node:path' can only be called; where a function is expected, pass an arrow that calls it, e.g. 'x => join(x)'
+const f = join
+// expect-error: this is not a value: the functions of 'node:path/posix' are used by their names, e.g. 'posix.join(a, b)'
+const p = posix
+// expect-error: cannot assign to 'EOL' because it is imported
+EOL = "\n"
+// expect-error: cannot assign to 'argv' because it is imported
+argv = []
+// expect-error: 'new Stats' is not possible: only the functions of node:fs make Stats
+const s = new Stats()
+// expect-error: 'new SystemError' is not possible: only the functions of node:fs make SystemError; throw an Error, or an object of a class of your own that extends Error
+throw new SystemError("x")
+// expect-error: expected 0-1 arguments, but got 2
+readLine("a", "b")
+// expect-error: 'mkdirSync' of 'node:fs' can only be called
+mkdirSync.call(1)
+
+// expect-error: class 'MyError' cannot extend 'SystemError': only the functions of node:fs make its objects; extend Error
+class MyError extends SystemError {}

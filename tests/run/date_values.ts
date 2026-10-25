@@ -1,0 +1,58 @@
+// Dates as values in what tz has beyond JavaScript: Result, generic functions,
+// `Date | undefined`; and toJSON() of an invalid date, which is null in
+// JavaScript and undefined here.
+function parseDate(text: string): Result<Date, string> {
+  const d = new Date(text)
+  return isNaN(d.getTime()) ? err(`not a date: ${text}`) : ok(d)
+}
+const texts = ["2026-10-23T10:00:00Z", "someday"]
+for (const text of texts) {
+  const r = parseDate(text)
+  console.log(r, r.map(d => d.getUTCFullYear()).unwrapOr(0))
+}
+const parsed = Result.combine(texts.slice(0, 1).map(parseDate))
+console.log(parsed)
+
+// Generic functions see a date as any object.
+function latest<T>(items: T[], time: (item: T) => double): T | undefined {
+  let best: T | undefined = undefined
+  let bestTime = -Infinity
+  for (const item of items) {
+    const t = time(item)
+    if (t > bestTime) {
+      best = item
+      bestTime = t
+    }
+  }
+  return best
+}
+const days = [new Date(Date.UTC(2026, 0, 5)), new Date(Date.UTC(2026, 6, 1)), new Date(Date.UTC(2025, 11, 31))]
+console.log(latest(days, d => d.getTime()), latest<Date>([], d => d.getTime()))
+function pair<T>(a: T, b: T): T[] {
+  return [a, b]
+}
+console.log(pair(days[0]!, days[1]!))
+
+// `Date | undefined`.
+interface Task {
+  name: string
+  due?: Date
+}
+const tasks: Task[] = [{ name: "write", due: new Date(Date.UTC(2026, 9, 30)) }, { name: "rest" }]
+for (const task of tasks) {
+  console.log(task, task.due?.getUTCDate(), task.due == undefined)
+  if (task.due) task.due.setUTCDate(task.due.getUTCDate() + 1)
+}
+console.log(tasks[0]!.due)
+
+// A date is shared: what one holder changes, the others see.
+const shared = new Date(0)
+const holders = [{ at: shared }, { at: shared }]
+holders[0]!.at.setUTCFullYear(2000)
+console.log(holders[1]!.at, holders[0]!.at == holders[1]!.at)
+const bump = () => shared.setUTCHours(shared.getUTCHours() + 1)
+bump()
+bump()
+console.log(shared)
+
+console.log(new Date(NaN).toJSON(), new Date(0).toJSON(), new Date(0).toJSON("key"))

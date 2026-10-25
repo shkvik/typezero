@@ -1,0 +1,6 @@
+RangeError get0 needs arguments
+TypeError negative
+21
+TypeError Other.m was called with a 'this' that is not an instance of Other
+before
+decorating [class Late]

@@ -1,0 +1,20 @@
+date 1970; map of 2: a,b; set x+y; text S; list 2
+[
+  1970-01-01T00:00:00.000Z,
+  Map(2) { 'a' => 1, 'b' => 2 },
+  Set(2) { 'x', 'y' },
+  's',
+  [ 1, 2 ]
+]
+["1970-01-01T00:00:00.000Z",{},{},"s",[1,2]]
+true false
+3 2
+4 true true false Set(4) { 'a', 1, 2, '1' }
+uno text one 2 Map(2) { 1 => 'uno', '1' => 'text one' }
+3 Map(2) { 'up' => 3, 'down' => 2 }
+-1 { up: 1, down: -2 } {"up":1,"down":-2} [ 'up', 'down' ]
+12 9 { up: 12, down: 9 }
+[ 'up', 1, 'down' ] ["up",1,"down"] up,1,down up
+Map(2) { 'up' => 'u', 1 => 'one' } u one true
+no file (open)
+nothing there

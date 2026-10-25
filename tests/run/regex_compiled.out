@@ -1,0 +1,51 @@
+2099 100 50 75 23 25 2099
+325 2075 th the
+4203 200 100 150 23 50 4203
+650 4179 th the
+-1 -1 -1 rro
+-1 61 -1 none
+-1 -1 61 none
+64 -1 -1 rro
+[ 'ac', index: 1, input: 'xacab', groups: undefined ] [ 'foobar', index: 0, input: 'foobarbar', groups: undefined ]
+[ 'a-b', 'ab-c', 'abc' ]
+[
+  'singing',
+  'sing',
+  index: 0,
+  input: 'singing ringing',
+  groups: undefined
+] [ 'aaab', index: 1, input: 'caaab aab', groups: undefined ] [ 'xy', index: 3, input: 'xxzxy', groups: undefined ]
+[ '<a>', '<bb>', '<ccc>' ] [ 'aaab', index: 0, input: 'aaab', groups: undefined ] [ 'aaa', 'a', 'aa', index: 0, input: 'aaa', groups: undefined ]
+[ '1', '22', '', '333' ] [ 'a', '1', 'b', '22', 'c' ] [ 'a', 'b', 'c' ] [ 'a' ]
+[ 'ab', undefined, index: 0, input: 'ab', groups: undefined ] [ 'abab', 'b', 'b', index: 0, input: 'abab', groups: undefined ] [
+  'aab',
+  'b',
+  undefined,
+  'b',
+  index: 0,
+  input: 'aab',
+  groups: undefined
+]
+[ 'aa', 'bb', 'ee' ] [ '"hi"', "'yo'" ]
+[ 'aA', 'a', index: 0, input: 'aA', groups: undefined ] [ 'is is', 'is', index: 3, input: 'it is is so', groups: undefined ]
+[ '10', '20' ] [ '20', '30' ]
+[ '', '1', '053', index: 4, input: '1053', groups: undefined ] [ 'a', 'abc', index: 0, input: 'abc', groups: undefined ] [ 'b', index: 2, input: 'aab', groups: undefined ]
+[ '1', index: 2, input: 'ab12', groups: undefined ] 3 [ '2', index: 3, input: 'ab12', groups: undefined ] 4
+[ '1', '2' ] true
+[ 'o', index: 5, input: 'foo boo', groups: undefined ] 6
+1000 b 5000 ba,ba,ba,ba, 1001
+[ '', '', '', '' ] -a-b-c- [ '', '', '', '' ] .a.a.a.
+4 6 3 9 11 [ '😀', 'a', '😀' ]
+[ 'x', 'y' ] true false 4
+3 undefined
+undefined 2
+false false true [ '', index: 21, input: 'aaaaaaaaaaaaaaaaaaaa!', groups: undefined ]
+[
+  'abababababababababc',
+  'b',
+  undefined,
+  index: 0,
+  input: 'abababababababababc',
+  groups: undefined
+] false
+false a aa

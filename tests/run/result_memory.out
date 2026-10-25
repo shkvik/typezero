@@ -1,0 +1,19 @@
+true Ok { value: { name: 'ANN', tags: [ 'ann', 'ann!' ] } } false Err { error: "no user named ''" }
+bob, bob!
+nobody
+CY Err { error: 'replaced' }
+{
+  primary: Err { error: "no user named ''" },
+  backup: Err { error: "no user named ''" }
+}
+Ok { value: { name: 'GUS', tags: [ 'gus', 'gus!' ] } } 2 [
+  Ok { value: { name: 'FAY', tags: [Array] } },
+  Err { error: "no user named ''" },
+  Ok { value: { name: 'HAL', tags: [Array] } }
+]
+Ok { value: [ 'IDA', 'IDA', 'IDA' ] }
+1
+Ok { value: 'hello, kim' }
+[ true, false ]
+Err { error: 'LOU has too many tags' }
+Err { error: 'max is taken' }

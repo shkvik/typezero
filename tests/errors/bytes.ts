@@ -1,0 +1,115 @@
+// Binary data (docs/bytes.md): a value that may not fit in an element, an
+// index that may be out of range, and the traps of JavaScript and node.
+function stores(x: int, i: int, d: double, other: Uint8Array, a: int[], w: Int16Array) {
+  const u = new Uint8Array(4)
+  // expect-error: 300 does not fit in an element of 'Uint8Array' (0 to 255): JavaScript would store 44
+  u[0] = 300
+  // expect-error: cannot prove that the value fits in an element of 'Uint8Array' (0 to 255)
+  u[1] = x
+  u[1] = x & 0xff
+  if (x >= 0 && x <= 255) u[1] = x
+  u[2] = other[0] ?? 0
+  // expect-error: type 'double' is not assignable to type 'int'
+  u[3] = 1.7
+  // expect-error: type 'double' is not assignable to type 'int'
+  u[3] = d
+  // expect-error: cannot prove that the index is within the Uint8Array
+  u[i] = 1
+  // expect-error: check the index first, e.g. 'if (i >= 0 && i < u.length)'
+  if (i < u.length) u[i] = 1
+  if (i >= 0 && i < u.length) u[i] = 2
+  // expect-error: cut it explicitly: 'u[0] = (u[0] + 1) & 0xff'
+  u[0]++
+  // expect-error: cannot prove that the result fits in an element of 'Uint8Array'
+  u[0] += 1
+  u[0] ^= 0x0f
+  u[0] = Math.min(Math.max(x, 0), 255)
+  u[0] = x >>> 24
+  // expect-error: 256 does not fit in an element of 'Uint8Array' (0 to 255): JavaScript would store 0
+  u.fill(256)
+  // expect-error: cannot prove that the elements of 'int[]' fit in an element of 'Uint8Array'
+  u.set(a)
+  // expect-error: 999 does not fit in an element of 'Uint8Array'
+  u.set([1, 2, 999])
+  // expect-error: 300 does not fit in an element of 'Uint8Array'
+  console.log(new Uint8Array([1, 2, 300]))
+  // expect-error: convert them explicitly, e.g. 'Uint8Array.from(a, x => x & 0xff)'
+  console.log(new Uint8Array(a))
+  // expect-error: the elements of 'Int16Array' (-32768 to 32767) may not fit in an element of 'Uint8Array'
+  console.log(new Uint8Array(w))
+  // expect-error: the elements of 'Float32Array' are doubles
+  console.log(new Uint8Array(new Float32Array(2)))
+  // expect-error: the elements of 'Uint32Array' (0 to 4294967295) may not fit in an element of 'Int32Array'
+  console.log(new Int32Array(new Uint32Array(2)))
+  // expect-error: cannot prove that the value fits in an element of 'Uint8Array'
+  console.log(Uint8Array.from(a, n => n * 2))
+  // expect-error: cannot prove that the value fits in an element of 'Uint8Array'
+  console.log(u.map(n => n * 2))
+  console.log(u.map(n => 255 - n), Int8Array.from(u, n => n - 128))
+  // expect-error: cannot prove that what the function returns fits
+  console.log(u.map(Math.abs))
+  const dv = new DataView(u.buffer)
+  // expect-error: 300 does not fit in a Uint8 (0 to 255)
+  dv.setUint8(0, 300)
+  // expect-error: cannot prove that the value fits in an Int8 (-128 to 127)
+  dv.setInt8(0, x)
+  const b = Buffer.from("x")
+  // expect-error: 300 does not fit in a Uint8 (0 to 255)
+  b.writeUInt8(300)
+  // expect-error: cannot prove that the value fits in a Uint16 (0 to 65535)
+  b.writeUInt16LE(x)
+  // expect-error: the byte count of 'writeUIntLE' must be written as a number from 1 to 6
+  b.writeUIntLE(1, 0, i)
+  // expect-error: cannot prove that the value fits in 2 bytes
+  b.writeUIntLE(70000, 0, 2)
+  // expect-error: 256 does not fit in a byte
+  console.log(Buffer.alloc(2, 256))
+}
+
+function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
+  // expect-error: 'slice' of a Buffer is not supported: in node it shares the memory
+  console.log(b.slice(0, 1))
+  // expect-error: 'new Buffer(...)' is not supported, as in node, where it is deprecated
+  console.log(new Buffer(3))
+  // expect-error: 'BigInt64Array' is not supported, as there is no bigint
+  console.log(new BigInt64Array(2))
+  // expect-error: 'getBigInt64' is not supported, as there is no bigint
+  console.log(new DataView(buffer).getBigInt64(0))
+  // expect-error: 'readBigUInt64LE' is not supported, as there is no bigint
+  console.log(b.readBigUInt64LE(0))
+  // expect-error: the length of 'Uint8Array' cannot change
+  u.length = 3
+  // expect-error: the length of a typed array cannot be negative
+  console.log(new Uint8Array(-1))
+  // expect-error: the length of a typed array must be an integer, found 'double'
+  console.log(new Uint8Array(x / 2.5))
+  // expect-error: unknown encoding 'utf9' (node throws a TypeError)
+  console.log(Buffer.from("x", "utf9"))
+  // expect-error: 'utf-17' is not an encoding TextDecoder knows
+  console.log(new TextDecoder("utf-17"))
+  // expect-error: the encoding 'gbk' is not supported yet
+  console.log(new TextDecoder("gbk"))
+  // expect-error: a value of type 'ArrayBuffer' cannot be converted to a string
+  console.log(`${buffer}`)
+  // expect-error: type 'ArrayBuffer' cannot be indexed; read its bytes through a view
+  console.log(buffer[0])
+  // expect-error: a DataView is made over an ArrayBuffer, found 'Uint8Array'
+  console.log(new DataView(u))
+  // expect-error: typed arrays have no 'flatMap'
+  // expect-error: parameter 'n' needs a type
+  console.log(u.flatMap(n => [n]))
+  // expect-error: a Uint8Array is made from a length, an array or an iterator of numbers
+  console.log(new Uint8Array("abc"))
+  // expect-error: property 'push' does not exist on type 'Uint8Array'
+  u.push(1)
+  // expect-error: property 'map' does not exist on type 'Uint8Array'; methods must be called
+  console.log(u.map)
+  // expect-error: the options of 'decode' ({ stream: true }) are not supported yet
+  console.log(new TextDecoder().decode(u, { stream: true }))
+  // expect-error: 'SharedArrayBuffer' is not supported yet
+  const shared: SharedArrayBuffer | undefined = undefined
+  // expect-error: JSON has no binary data
+  console.log(JSON.parse<Uint8Array>("{}"))
+  // expect-error: an ArrayBuffer that can change its size is not supported yet
+  console.log(new ArrayBuffer(4, { maxByteLength: 8 }))
+}

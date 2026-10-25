@@ -1,0 +1,59 @@
+// same-as-node
+// Dictionaries in generators, closures, nested loops and exceptions.
+const m = new Map([["a", 1], ["b", 2], ["c", 3]])
+function* pairs() {
+  for (const [k, v] of m) yield `${k}=${v}`
+}
+const g = pairs()
+console.log(g.next().value)
+m.set("d", 4)
+console.log([...g])
+function* evens(s: Set<int>) {
+  for (const x of s) if (x % 2 == 0) yield x
+}
+console.log([...evens(new Set([1, 2, 3, 4]))], evens(new Set([5, 6])).toArray())
+outer: for (const [k] of m) {
+  for (const x of new Set([1, 2, 3])) {
+    if (x == 2) continue outer
+    if (k == "c") break outer
+    console.log(k, x)
+  }
+}
+function find(target: int) {
+  for (const [k, v] of m) if (v == target) return k
+  return "none"
+}
+console.log(find(3), find(9))
+try {
+  m.forEach((v, k) => {
+    if (v == 2) throw new Error(`stop at ${k}`)
+    console.log("each", k)
+  })
+} catch (e) {
+  console.log(e.message)
+}
+const handlers = new Map<string, (x: int) => int>()
+let calls = 0
+handlers.set("double", x => x * 2).set("count", x => { calls++; return x + calls })
+console.log(handlers.get("double")?.(21), handlers.get("count")?.(1), handlers.get("none")?.(1))
+console.log(handlers)
+class Animal {
+  name: string
+  constructor(name: string) { this.name = name }
+}
+class Dog extends Animal { bark() { return "woof" } }
+const pets = new Map<string, Animal>([["rex", new Dog("Rex")], ["tom", new Animal("Tom")]])
+for (const pet of pets.values()) console.log(pet.name, pet instanceof Dog)
+console.log(pets)
+pets.delete("rex")
+console.log(pets.size)
+const memo = new Map<int, double>()
+function fib(n: int): double {
+  if (n < 2) return n
+  const known = memo.get(n)
+  if (known != undefined) return known
+  const value = fib(n - 1) + fib(n - 2)
+  memo.set(n, value)
+  return value
+}
+console.log(fib(80), memo.size)

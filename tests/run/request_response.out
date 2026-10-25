@@ -1,0 +1,46 @@
+Response {
+  status: 201,
+  statusText: '',
+  headers: Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' },
+  body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+  bodyUsed: false,
+  ok: true,
+  redirected: false,
+  type: 'default',
+  url: ''
+}
+Request {
+  method: 'POST',
+  url: 'http://example.com/x',
+  headers: Headers { 'content-type': 'text/plain;charset=UTF-8' },
+  destination: '',
+  referrer: 'about:client',
+  referrerPolicy: '',
+  mode: 'cors',
+  credentials: 'same-origin',
+  cache: 'default',
+  redirect: 'follow',
+  integrity: '',
+  keepalive: false,
+  isReloadNavigation: false,
+  isHistoryNavigation: false,
+  signal: AbortSignal { aborted: false }
+}
+ReadableStream { locked: false, state: 'readable', supportsBYOB: false }
+hi true
+TypeError Body is unusable: Body has already been read
+202 application/json { a: [ 1, 2 ] }
+307 http://x.com/a
+TypeError immutable
+0 error false
+RangeError init["status"] must be in the range of 200 to 599, inclusive.
+TypeError Response constructor: Invalid response status code 204
+TypeError Request with GET/HEAD method cannot have body.
+TypeError Failed to parse URL from /relative
+clone me clone me
+st st
+POST
+application/x-www-form-urlencoded;charset=UTF-8 a=1&b=two+words
+1 [ '2' ] false
+3
+Uint8Array(3) [ 1, 2, 3 ]

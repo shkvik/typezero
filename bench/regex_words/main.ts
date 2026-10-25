@@ -1,0 +1,29 @@
+// A regex benchmark (docs/regex.md):
+// counts whole words with `\b(?:error|warning|fatal)\b`.
+// The text: 20 MB of words, numbers and dates from a fixed sequence (the
+// same in main.go).
+const words = ["running", "data", "error", "the", "warning", "loading", "value", "fatal",
+  "string", "parse", "agggtaaa", "TTTACCCT", "thing", "king", "of", "compile", "ringing",
+  "acgt", "x1", "warningX"]
+let seed = 42
+function next(n: int): int {
+  seed = (seed * 1103515245 + 12345) & 0x7fffffff
+  return (seed >>> 16) % n
+}
+const parts: string[] = []
+let size = 0
+while (size < 20000000) {
+  let w: string
+  if (next(20) == 0) {
+    const year = 2000 + next(30)
+    const month = String(1 + next(12)).padStart(2, "0")
+    const day = String(1 + next(28)).padStart(2, "0")
+    w = `${year}-${month}-${day}`
+  } else {
+    w = words[next(words.length)] ?? ""
+  }
+  parts.push(w)
+  size += w.length + 1
+}
+const text = parts.join(" ")
+console.log(text.match(/\b(?:error|warning|fatal)\b/g)?.length ?? 0)

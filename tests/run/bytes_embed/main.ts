@@ -1,0 +1,13 @@
+// embedBytes: a file built into the executable, as a Uint8Array whose bytes
+// are read from the executable itself; every embedBytes of the file gives
+// the same array.
+import { checksum } from "./sum.ts"
+
+const table = embedBytes("./table.bin")
+console.log(table.length, table[0] ?? -1, table.subarray(250))
+console.log(embedBytes("./table.bin") == table, checksum(table))
+table[0] = 7
+console.log(embedBytes("./table.bin")[0], table.buffer.byteLength, new Uint16Array(table.buffer, 0, 2))
+console.log(new TextDecoder().decode(embedBytes("./hello.txt")))
+const empty = embedBytes("./empty.bin")
+console.log(empty, Buffer.from(embedBytes("./hello.txt")).toString("base64"))

@@ -1,0 +1,12 @@
+ann: hi | bot: bye from lobby 1 0
+room freed: true
+1,2 no route /none
+main> echo 2:PING via main
+main> echo 2:PONG via main
+1 shutdown, 2 shutdown 0 true
+c78862c4afdd b8d235f618e8
+handled 6 true
+server freed: true true
+7 echo 7:still via alone
+7 done
+alone freed: true

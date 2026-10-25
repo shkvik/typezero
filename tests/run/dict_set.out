@@ -1,0 +1,28 @@
+Set(2) { 3, 1 } 2 true false
+true false Set(1) { 1 }
+Set(4) { 'h', 'e', 'l', 'o' } helo
+Set(3) { 5, 1, 2 } [ 5, 1, 2 ] [ 5, 1, 2 ] [ 5, 1, 2 ]
+[ [ 5, 5 ], [ 1, 1 ], [ 2, 2 ] ]
+5 5 3
+1 1 3
+2 2 3
+5
+1
+2
+5 1
+Set(5) { 1, 2, 3, 4, 5 } Set(2) { 3, 4 } Set(2) { 1, 2 } Set(3) { 1, 2, 5 }
+Set(2) { 3, 4 } Set(1) { 5 }
+false true true
+false true
+Set(1) { 1 } Set(5) { 1, 2, 3, 4, 9 }
+Set(3) { 'b', 'a', 'c' } true
+true false Set(2) { 'x', undefined }
+2 Set(2) { { id: 1 }, { id: 1 } }
+[ 'ts', 'go', 'rust' ]
+again ts
+again go
+Set(0) {} 0 Set(0) {}
+300 44850
+Set(10) { 290, 291, 292, 293, 294, 295, 296, 297, 298, 299 }
+[Set Iterator] { 292, 293, 294, 295, 296, 297, 298, 299 } { value: 291, done: false }
+[Set Entries] { [ 1, 1 ], [ 2, 2 ] }

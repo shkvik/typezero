@@ -1,0 +1,96 @@
+// same-as-node
+// expect-stderr: to stderr
+// execFileSync and execSync give what the program printed, and throw when
+// it fails: an ExecSyncError with what it printed and how it ended, or a
+// SystemError when it could not start. What it wrote to stderr goes on to
+// this program's stderr.
+import { execFileSync, execSync } from "node:child_process"
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+const at = process.argv.indexOf("--child")
+if (at >= 0) {
+  const args = process.argv.slice(at + 1)
+  const what = args[0] ?? ""
+  if (what == "print") {
+    process.stdout.write(args[1] ?? "")
+    process.stderr.write(args[2] ?? "")
+    process.exitCode = Number(args[3] ?? "0") | 0
+  } else if (what == "args") {
+    console.log(JSON.stringify(args.slice(1)))
+  } else if (what == "sleep") {
+    setTimeout(() => console.log("woke up"), 2000)
+  }
+} else {
+  const script = process.argv[1] ?? ""
+  const self = [script, "--child"]
+  // The command line of the child in messages: tz runs itself where Node
+  // runs the script.
+  function clean(text: string) {
+    return text.replaceAll(`${process.execPath} ${script}`, "CHILD").replaceAll(script, "SCRIPT")
+               .replaceAll(process.execPath, "EXE").replaceAll("\r", "")
+  }
+  console.log(execFileSync(process.execPath, [...self, "print", "out"]))
+  console.log(execFileSync(process.execPath, [...self, "print", "out"], { encoding: "utf8" }))
+  console.log(execFileSync(process.execPath, [...self, "print", "", "to stderr\n"], { encoding: "utf8" }) == "")
+  console.log(execFileSync(process.execPath, [...self, "print", "x"], { stdio: "inherit" }) == undefined)
+
+  function failure(run: () => void) {
+    try {
+      run()
+      console.log("no error")
+    } catch (e) {
+      if (e instanceof ExecSyncError)
+        console.log("ExecSyncError", e.name,
+                    JSON.stringify(e.code == undefined ? clean(e.message)
+                                                       : e.message.replaceAll(process.execPath, "EXE")),
+                    e.status ?? "-", e.signal ?? "-", e.stdout, e.stderr, e.output.length, e.pid > 0,
+                    e.code ?? "-")
+      else if (e instanceof SystemError)
+        console.log("SystemError", e.name, e.message, e.code, e.errno, e.syscall, e.path)
+      else
+        console.log(e.name, e.message)
+    }
+  }
+  failure(() => execFileSync(process.execPath, [...self, "print", "o", "e", "2"], { stdio: "pipe" }))
+  failure(() => execFileSync(process.execPath, [...self, "print", "o", "", "1"], { encoding: "utf8" }))
+  failure(() => execFileSync(process.execPath, [...self, "print", "o", "bad\n", "7"], { encoding: "utf8", stdio: "pipe" }))
+  failure(() => execFileSync(process.execPath, [...self, "print", "o", "e", "1"], { encoding: "utf8", stdio: "pipe", argv0: "named" }))
+  failure(() => execFileSync("tz-no-such-program", ["a"]))
+  failure(() => execSync("exit 4"))
+  failure(() => execSync("echo failed 1>&2 && exit 3", { encoding: "utf8", stdio: "pipe" }))
+  failure(() => execFileSync(process.execPath, [...self, "sleep"], { timeout: 300, stdio: "pipe" }))
+  try {
+    execSync(`"${process.execPath}" "${script}" --child sleep`, { timeout: 300 })
+  } catch (e) {
+    if (e instanceof ExecSyncError)
+      console.log(e.code, e.errno, e.signal, e.status ?? "-", e.syscall?.startsWith("spawnSync "),
+                  e.spawnargs?.length)
+  }
+
+  // Through the shell, as in Node: cmd.exe on Windows.
+  console.log(execSync("echo hello && echo world", { encoding: "utf8" }).replaceAll("\r", ""))
+  console.log(execFileSync("echo", ["a", "b"], { shell: true, encoding: "utf8" }).replaceAll("\r", ""))
+  console.log(execSync("echo shell", { shell: process.env.ComSpec ?? "cmd.exe", encoding: "utf8" }).trim())
+  const userInput = "hi & echo injected"
+  console.log(execSync("echo " + userInput, { encoding: "utf8" }).replaceAll("\r", ""))
+  console.log(execFileSync(process.execPath, [...self, "args", userInput], { encoding: "utf8" }).trim())
+
+  // A batch file runs only through the shell (CVE-2024-27980).
+  const dir = mkdtempSync(join(tmpdir(), "tz-child-"))
+  const bat = join(dir, "hello.bat")
+  writeFileSync(bat, "@echo from batch %1\r\n")
+  try {
+    execFileSync(bat, ["x"])
+  } catch (e) {
+    if (e instanceof SystemError) console.log(e.code, e.errno, e.message.replaceAll(dir, "D"))
+  }
+  console.log(execFileSync(`"${bat}"`, ["x"], { shell: true, encoding: "utf8" }).trim())
+  console.log(execSync(`"${bat}" y`, { encoding: "utf8", cwd: dir }).trim())
+  rmSync(dir, { recursive: true })
+
+  // windowsVerbatimArguments: the command line as it is, unquoted.
+  console.log(execFileSync(process.execPath, [...self, "args", "\"a b\"", "c"], { encoding: "utf8", windowsVerbatimArguments: true }).trim())
+  console.log(execFileSync(process.execPath, [...self, "args", "\"a b\"", "c"], { encoding: "utf8", windowsHide: true }).trim())
+}

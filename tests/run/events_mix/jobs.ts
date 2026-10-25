@@ -1,0 +1,37 @@
+// What main.ts runs: an emitter whose events come from the emits here and
+// in main.ts, which reads files through node:fs/promises with the signal of
+// its own AbortController, and a generic function over any AsyncIterable.
+import { EventEmitter } from "node:events"
+import { readFile } from "node:fs/promises"
+
+export class Jobs extends EventEmitter {
+  #controller = new AbortController()
+  started = 0
+
+  async read(name: string, path: string) {
+    this.started++
+    this.emit("start", name)
+    try {
+      const text = await readFile(path, { encoding: "utf8", signal: this.#controller.signal })
+      this.emit("done", name, text.trim().length)
+    } catch (e) {
+      if (e instanceof Error) this.emit("failed", name, e.name)
+    }
+  }
+
+  // Cancels what is being read, as node's AbortController does.
+  cancel(why: string) {
+    this.#controller.abort(new Error(why))
+    this.#controller = new AbortController()
+  }
+
+  currentSignal() {
+    return this.#controller.signal
+  }
+}
+
+export async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = []
+  for await (const x of source) out.push(x)
+  return out
+}

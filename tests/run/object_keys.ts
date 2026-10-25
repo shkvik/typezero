@@ -1,0 +1,53 @@
+// same-as-node --experimental-transform-types
+// Object.keys, Object.values, Object.entries and for...in walk the fields
+// that hold a value, in the order the object got them, as it prints. Keys
+// in brackets name fields when they are known when compiling.
+interface User {
+  id: int
+  name: string
+  email?: string
+}
+const ann: User = { id: 1, name: "Ann" }
+const bob: User = { name: "Bob", email: "bob@example.com", id: 2 }
+console.log(Object.keys(ann), Object.keys(bob))
+for (const key in bob) console.log(key, key.length)
+
+const scores = { math: 5, art: 3, music: 0 }
+console.log(Object.values(scores), Object.entries(scores))
+let best = ""
+let bestScore = -1
+for (const [subject, score] of Object.entries(scores))
+  if (score > bestScore) {
+    best = subject
+    bestScore = score
+  }
+console.log(best, bestScore)
+const sum = Object.values(scores).reduce((acc, n) => acc + n, 0)
+console.log(sum, Object.entries({ "ключ": "значение", "a b": "c" }))
+
+// The values are shared with the object, as in JavaScript.
+const owners = { first: { id: 1 }, second: { id: 2 } }
+const list = Object.values(owners)
+list[0]!.id = 10
+console.log(owners, Object.entries(owners)[1])
+const optional: { a?: string; b?: string; c: string } = { b: "two", c: "three" }
+console.log(Object.keys(optional), Object.values(optional), Object.entries(optional))
+for (const k in { x: 1, y: 2, z: 3 }) {
+  if (k == "y") continue
+  console.log(k)
+}
+
+// Keys in brackets.
+const key = "name"
+const alias = key
+enum Field {
+  Email = "email",
+}
+const user = { [key]: "Ann", ["age"]: 30, [Field.Email]: "ann@example.com" }
+console.log(user, user.name, user[key], user["age"], user[Field.Email], user[alias])
+user[key] = "Bob"
+user["age"] += 1
+user[Field.Email] = "bob@example.com"
+console.log(user)
+const { [key]: who, ...others } = user
+console.log(who, others)

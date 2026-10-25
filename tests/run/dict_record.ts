@@ -1,0 +1,60 @@
+// same-as-node
+// Record<string, T> and `{ [key: string]: T }`: a dictionary with the
+// syntax of an object.
+const counts: Record<string, number> = {}
+for (const w of "the cat and the hat and the bat".split(" ")) counts[w] = (counts[w] ?? 0) + 1
+console.log(counts)
+console.log(counts.the, counts["cat"], counts["dog"], "and" in counts, "dog" in counts)
+console.log(Object.keys(counts), Object.values(counts), Object.entries(counts))
+for (const k in counts) console.log(k, counts[k])
+delete counts.the
+delete counts["and"]
+console.log(counts, delete counts.nothing)
+
+type Scores = { [name: string]: int[] }
+const scores: Scores = { ann: [1, 2], "bob smith": [3] }
+scores.cid = []
+scores.cid?.push(4)
+const key = "ann"
+scores[key]?.push(5)
+console.log(scores, scores.bob, Object.keys(scores).length)
+const groups: Record<string, string[]> = {}
+for (const w of ["apple", "avocado", "banana"]) (groups[w[0] ?? ""] ??= []).push(w)
+console.log(groups)
+
+// Literals with computed keys and spreads; later keys keep the place of the
+// earlier ones.
+const k2 = "two"
+const base: Record<string, int> = { one: 1, [k2]: 2, three: 3 }
+const more = { ...base, four: 4, one: 100 }
+console.log(base, more)
+const merged: Record<string, int> = { ...base, ...{ x: 9, y: 8 } }
+console.log(merged)
+interface Limits { min: int; max?: int }
+const limits: Limits = { min: 1 }
+const asRecord: Record<string, int> = { ...limits }
+console.log(asRecord)
+const { one, ...others } = base
+console.log(one, others)
+
+// Keys that are names of Object.prototype are keys like any other.
+const odd: Record<string, string> = {}
+console.log(odd.hasOwnPropertyX)
+odd["__proto__x"] = "a"
+console.log(odd, JSON.stringify(odd))
+console.log(JSON.stringify(scores), JSON.stringify({ r: base }, null, 2))
+console.log(Object.fromEntries([["a", 1], ["b", 2]]), Object.fromEntries(new Map([["c", true]])))
+const byLength = Object.groupBy(["one", "three", "two"], w => String(w.length))
+console.log(byLength)
+const nested: Record<string, Record<string, int>> = { a: { x: 1 }, b: {} }
+nested.b!.y = 2
+console.log(nested, { deep: { deeper: { r: base } } })
+const empty: Record<string, int> = {}
+console.log(empty, typeof empty, Object.keys(empty).length)
+
+// for...in does not visit a key deleted meanwhile, as V8 does.
+const walked: Record<string, int> = { a: 1, b: 2, c: 3 }
+for (const k in walked) {
+  if (k == "a") delete walked.b
+  console.log(k, walked[k])
+}

@@ -1,0 +1,80 @@
+// Events with the rest of the language, across files: an EventEmitter
+// subclass whose event map comes from the emits of both files, with async
+// listeners; its AbortController cancelling readFile of node:fs/promises;
+// on() in `for await`, ended by an event, by `break` and by a signal, and
+// given to a generic function; once() with a timeout; AbortSignal.any() of
+// the program's signal and the emitter's; and the overflow warnings, which
+// the last of the rounds that find the event maps reports.
+import { on, once } from "node:events"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { setTimeout as wait } from "node:timers/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Jobs, collect } from "./jobs.ts"
+
+const log = (s: string) => console.log(s)
+const dir = await mkdtemp(join(tmpdir(), "tz-events-mix-"))
+const files = ["a", "bb", "ccc"]
+for (const name of files) await writeFile(join(dir, name + ".txt"), name.repeat(4))
+
+const jobs = new Jobs()
+// An async listener: emit does not wait for it.
+jobs.on("done", async (name, size) => {
+  await undefined
+  log(`saved ${name}: ${size}`)
+})
+jobs.on("failed", (name, why) => log(`failed ${name}: ${why}`))
+
+// 1. on() until "finished", which this file emits.
+const done = on(jobs, "done", { close: ["finished"] })
+for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
+jobs.emit("finished")
+let total = 0
+for await (const [name, size] of done) {
+  const weight: int = parseInt(String(size))
+  // expect-warning: 'total += weight' may overflow int: 'weight' comes from parseInt
+  total += weight
+  log(`done ${name} ${size}`)
+}
+log(`total ${total}, started ${jobs.started}, listening ${jobs.listenerCount("done")}`)
+
+// 2. The emitter's AbortController cancels a read in flight.
+const reading = jobs.read("slow", join(dir, "a.txt"))
+jobs.cancel("enough")
+await reading
+await wait(5)
+
+// 3. on() given to a generic function, ended by `break` in it, and by a
+// signal of AbortSignal.any().
+const mine = new AbortController()
+const either = AbortSignal.any([mine.signal, jobs.currentSignal()])
+setTimeout(() => {
+  jobs.emit("start", "x")
+  jobs.emit("start", "y")
+  mine.abort(new Error("stop"))
+}, 1)
+try {
+  log(`${(await collect(on(jobs, "start", { signal: either }))).length}`)
+} catch (e) {
+  if (e instanceof Error) log(`collect: ${e.name} ${e.cause instanceof Error ? e.cause.message : "-"}`)
+}
+setTimeout(() => jobs.emit("start", "z"), 1)
+for await (const [name] of on(jobs, "start")) {
+  log(`first start ${name}`)
+  break
+}
+log(`start listeners ${jobs.listenerCount("start")}`)
+
+// 4. once() with a timeout, and one that comes in time.
+const alive = setTimeout(() => log("not reached"), 1000)
+try {
+  await once(jobs, "finished", { signal: AbortSignal.timeout(5) })
+} catch (e) {
+  if (e instanceof Error) log(`once: ${e.name} ${e.cause instanceof DOMException ? e.cause.name : "-"}`)
+}
+setTimeout(() => jobs.emit("finished"), 1)
+log(`once: ${(await once(jobs, "finished", { signal: AbortSignal.timeout(500) })).length}`)
+clearTimeout(alive)
+
+await rm(dir, { recursive: true })
+log("end")

@@ -1,0 +1,74 @@
+// Generators and iterators together with the rest of the language: a
+// generator and generator methods from another file, iterators of class
+// instances, of decimals and of Results, helper chains in generic functions,
+// iterators as generic values and in fields, and safeTry, whose `yield* r`
+// takes the value of a Result, next to real generators.
+import { Cart, Item, parseLines } from "./shop"
+
+function firstN<T>(xs: T[], n: int) {
+  return xs.values().take(n).toArray()
+}
+
+function countWhere<T>(it: Generator<T>, keep: (x: T) => boolean) {
+  return it.filter(keep).reduce((n, _) => n + 1, 0)
+}
+
+function hold<T>(value: T) {
+  return { value }
+}
+
+const parsed = [...parseLines(["tea;4.20;3", "cake;12.5", "jam;1.10;2"])]
+console.log(parsed)
+const cart = new Cart()
+for (const r of parseLines(["tea;4.20;3", "jam;1.10;2", "milk;0.99;1"]))
+  if (r.isOk()) cart.add(r.value)
+console.log([...cart.lines()], [...Cart.sizes(10)])
+
+// Decimals from a generator method, summed exactly.
+let total = decimal(0)
+for (const t of cart.totals()) total += t
+console.log(`total ${total}`, cart.totals().map(t => t.toFixed(2)).toArray())
+
+// Results from a generator: all of them, or the first error.
+console.log(Result.combine([...parseLines(["a;1;1", "b;2;2"])]).map(items => items.length))
+console.log(Result.combine([...parseLines(["a;1;1", "oops"])]))
+
+// Generic functions over iterators of class instances.
+console.log(firstN(cart.items, 2), firstN([3, 2, 1], 5))
+console.log(countWhere(cart.totals(), t => t > 2), countWhere(cart.lines(), s => s.startsWith("1")))
+
+// An iterator kept in a generic value and in a class field: it stays where
+// it stopped.
+const held = hold(cart.lines())
+console.log(held, held.value.next())
+class Reader {
+  source = Cart.sizes(100)
+  read() {
+    return this.source.next()
+  }
+}
+const reader = new Reader()
+console.log(reader.read(), reader.read(), [...reader.source].length, reader)
+
+// A generator method of an object literal sees the object as `this`.
+const ticker = {
+  ticks: 0,
+  *run(n: int) {
+    for (let i = 0; i < n; i++) yield ++this.ticks
+  },
+}
+console.log([...ticker.run(3)], ticker.ticks)
+
+// safeTry: `yield* r` takes the value of a Result; a real generator inside
+// it gives values.
+function sumQuantities(lines: string[]) {
+  return safeTry(function* () {
+    function* quantities() {
+      for (const r of parseLines(lines)) yield r.map(item => item.qty)
+    }
+    let sum = 0
+    for (const q of quantities()) sum += yield* q
+    return ok(sum)
+  })
+}
+console.log(sumQuantities(["a;1;2", "b;1;3"]), sumQuantities(["a;1;2", "?"]))

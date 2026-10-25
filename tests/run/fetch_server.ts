@@ -1,0 +1,131 @@
+// same-as-node
+// expect-stderr: Error: boom
+// A server of tz:http and fetch in one program, on a free port: text and
+// JSON both ways, status and headers, a body that streams each way, an
+// exception of the handler (500), redirects, HEAD, requests at the same
+// time, a request cancelled by a signal, and stop().
+import { serve } from "tz:http"
+
+const enc = new TextEncoder()
+const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+  const url = new URL(req.url)
+  switch (url.pathname) {
+    case "/hello":
+      return new Response(`hello ${url.searchParams.get("name") ?? "world"}`)
+    case "/users": {
+      const user = await req.json()
+      return Response.json({ id: 1, user, method: req.method }, { status: 201 })
+    }
+    case "/boom":
+      throw new Error("boom")
+    case "/stream":
+      return new Response(new ReadableStream({
+        start: c => {
+          c.enqueue(enc.encode("one "))
+          c.enqueue(enc.encode("two "))
+          c.close()
+        },
+      }))
+    case "/count": {
+      let total = 0
+      const body = req.body
+      if (body != undefined) for await (const chunk of body) total += chunk.length
+      return new Response(`${total} bytes`)
+    }
+    case "/echo":
+      return new Response(await req.bytes(), {
+        headers: { "x-got": req.headers.get("x-sent") ?? "-", "content-type": "application/octet-stream" },
+      })
+    case "/cookies":
+      return new Response("c", { headers: [["set-cookie", "a=1"], ["set-cookie", "b=2"]] })
+    case "/redirect":
+      return Response.redirect(new URL("/final", req.url), 302)
+    case "/loop":
+      return new Response("", { status: 301, headers: { location: "/loop" } })
+    case "/final":
+      return new Response(`final ${req.method}`)
+    case "/empty":
+      return new Response(undefined, { status: 204 })
+    case "/slow":
+      await new Promise<void>(resolve => setTimeout(resolve, 300))
+      return new Response("slow")
+  }
+  return new Response("not found", { status: 404, statusText: "Nope" })
+})
+const base = `http://127.0.0.1:${server.port}`
+const port = (s: string) => s.replaceAll(String(server.port), "PORT")
+
+let r = await fetch(`${base}/hello?name=tz`)
+console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), await r.text())
+r = await fetch(`${base}/users`, {
+  method: "POST",
+  body: JSON.stringify({ name: "Ann" }),
+  headers: { "content-type": "application/json" },
+})
+console.log(r.status, await r.json())
+r = await fetch(`${base}/boom`)
+console.log(r.status, await r.text())
+r = await fetch(`${base}/missing`)
+console.log(r.status, r.statusText, r.ok, await r.text())
+r = await fetch(`${base}/stream`)
+console.log(r.status, await r.text())
+r = await fetch(`${base}/count`, { method: "POST", body: "hello world" })
+console.log(await r.text())
+r = await fetch(`${base}/count`, {
+  method: "PUT",
+  body: new ReadableStream({
+    start: c => {
+      c.enqueue(enc.encode("abc"))
+      c.enqueue(enc.encode("defg"))
+      c.close()
+    },
+  }),
+  duplex: "half",
+})
+console.log(await r.text())
+r = await fetch(`${base}/echo`, { method: "POST", body: new Uint8Array([1, 2, 255]), headers: { "x-sent": "yes" } })
+console.log(r.headers.get("x-got"), await r.bytes())
+r = await fetch(`${base}/cookies`)
+console.log(r.headers.getSetCookie(), await r.text())
+
+r = await fetch(`${base}/redirect`, { method: "POST", body: "x" })
+console.log(r.status, r.redirected, port(r.url), await r.text())
+r = await fetch(`${base}/redirect`, { redirect: "manual" })
+console.log(r.status, port(r.headers.get("location") ?? ""), r.redirected)
+await r.arrayBuffer()
+for (const path of ["/redirect", "/loop"]) {
+  try {
+    await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
+  } catch (e) {
+    console.log(e.name, e.message, e.cause?.message)
+  }
+}
+r = await fetch(`${base}/empty`)
+console.log(r.status, r.body == undefined, JSON.stringify(await r.text()))
+r = await fetch(`${base}/hello`, { method: "HEAD" })
+console.log(r.status, JSON.stringify(await r.text()))
+
+const names = ["a", "b", "c", "d", "e", "f"]
+console.log(await Promise.all(names.map(async n => (await fetch(`${base}/hello?name=${n}`)).text())))
+
+const controller = new AbortController()
+setTimeout(() => controller.abort(), 50)
+try {
+  await fetch(`${base}/slow`, { signal: controller.signal })
+} catch (e) {
+  console.log(e.name, e.message)
+}
+try {
+  await fetch(`${base}/slow`, { signal: AbortSignal.timeout(50) })
+} catch (e) {
+  console.log(e.name, e.message)
+}
+
+await server.stop()
+await server.finished
+try {
+  await fetch(`http://127.0.0.1:${server.port}/hello`)
+} catch (e) {
+  const cause = e.cause
+  console.log(e.name, e.message, cause instanceof SystemError ? cause.code : "?")
+}

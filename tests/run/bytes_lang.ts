@@ -1,0 +1,19 @@
+// same-as-node
+// Typed arrays with the rest of the language: destructuring, optional
+// chains, spreads into rest parameters, objects and JSON, shared windows.
+const u = new Uint8Array([1, 2, 3])
+console.log(Array.isArray(u))
+const [a, b, ...rest] = u
+console.log(a, b, rest)
+let maybe: Uint8Array | undefined = u
+console.log(maybe?.[1], maybe?.length)
+const parts = [u, new Uint8Array([4])]
+console.log(parts.map(p => p.length), Buffer.concat(parts))
+function total(...xs: int[]) { return xs.reduce((s, x) => s + x, 0) }
+console.log(total(...u))
+const obj = { data: u, name: "x" }
+console.log(obj, JSON.stringify(obj))
+console.log(u.indexOf(2), u.includes(7), u.lastIndexOf(3, -1))
+const view = u.subarray(1)
+if (view.length > 0) view[0] = 9
+console.log(u, view, view.byteOffset)

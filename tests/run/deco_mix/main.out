@@ -1,0 +1,56 @@
+> greet(hi)
+hi, Ann
+> greet(hello)
+> greet(hello)
+hello, Bob (admin)
+load: busy 1, try 2
+load: busy 2, try 2
+Ann#1 Bob#2
+Map(1) { 'greet' => 3 }
+users admins [ 'name', 'age', 'role', 'avatar', 'pending' ] [ 'level' ]
+name [Function: String]
+age [Function: Object]
+role [Function: String]
+avatar [Function: Uint8Array]
+pending [Function: Promise]
+level [Function: Number]
+true true
+a date in 1970
+a Buffer of 2: 747a
+bytes, first 9
+user Ann
+another object
+another object
+another object
+another object
+text "picked"
+text "right"
+number 2.5
+boolean
+undefined
+[
+  1970-01-01T00:00:00.000Z,
+  <Buffer 74 7a>,
+  Uint8Array(1) [ 9 ],
+  User {
+    name: 'Ann',
+    age: 30,
+    role: 'guest',
+    avatar: Uint8Array(2) [ 0, 0 ],
+    failures: 0
+  },
+  Map(1) { 'a' => 1 },
+  Set(1) { 's' },
+  Promise { 42 },
+  /x+/g,
+  'picked',
+  'right',
+  2.5,
+  true,
+  undefined
+]
+string true
+syntax error: SyntaxError
+RangeError far
+TypeError only an Error can be thrown, and this is a number
+[class Admin extends User] function [ [class User], [class Admin extends User] ] true admins

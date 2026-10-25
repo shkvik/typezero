@@ -1,0 +1,31 @@
+0c60c80f961f0e71f3a9b524af6012062fe037a6
+c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a
+6a7be24f5b46c5c3769d73a6689b3ad79f9f245a1cdb20e41ee9d5a31bea14445f54a362850dd4dc7d6a22b714d3d05635425c3f127951dfb8f1d9bf88f143538798e0acae2ca6a88b3f109a4e8c2cc1e64f77a4131b3b721cdaafd197d350736d920b41
+745731af4484f323968969eda289aeee005b5903ac561e64a5aca121797bf7734ef9fd58422e2e22183bcacba9ec87ba0c83b7a2e788f03ce0da06463433cda6
+7add880227173fa3fac7424886223faf9c4d4307cc4c1493a487d49feb98e637
+9217ed4e67e55719c23caf603e6dcfd8
+9ca0d662557439e3b83365f2da4626d35da195c6d9d1779f09838cf9e408966ece99106e2585ace6f083
+60ed0b819793aba3c33a17021859ac9708e0644e3b78992e6eae96e16465604a482ad7574d682e6be37dfeffbc79d9619d717ebfa2814128c9cd832791e405733dade3aebc2e2a4c36c7f85a9097a131b2b524ed3504ba113e931ccf4fdd5e0b72eeb565
+6bc2b00dd0d758dce0994366efc8369d6d1f442be09b4616b21ae30055ec3737
+4e7993a3e8d9b81032105b2fa734e5e6304dc26fad2c8bc4ec69976a07dbfae1
+52e7ea2051a297382e5604cf9290f85166fb46ce58432d288276be9e57193d1e1c271382a63ea8bfb2f5b7178c7da84acf5d9ffdf43555b707cd005476789ec59f23ce8b76c7682577c5d547b83a5383ad38e1b43bf7ced0ef75e087728a90c0a0595bc4
+RangeError The value of "iterations" is out of range. It must be >= 1 && <= 2147483647. Received 0
+RangeError The value of "iterations" is out of range. It must be an integer. Received 1.5
+RangeError Invalid scrypt params
+RangeError Invalid scrypt params: error:030000AC:digital envelope routines::memory limit exceeded
+RangeError Invalid key length
+RangeError The value of "parameters.nonce.byteLength" is out of range. It must be >= 8 && <= 4294967295. Received 4
+RangeError The value of "parameters.memory" is out of range. It must be >= 8 && <= 4294967295. Received 7
+16 36 true
+4 true
+true
+8 0 0
+4
+RangeError The value of "size" is out of range. It must be >= 0 && <= 2147483647. Received -1
+RangeError The value of "max" is out of range. It must be greater than the value of "min" (5). Received 5
+true false
+RangeError Input buffers must have the same byte length
+secret 6 undefined secret
+{"kty":"oct","k":"c2VjcmV0"}
+true false
+secret 8 32

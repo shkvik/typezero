@@ -1,0 +1,65 @@
+// Generators and iterators used wrongly.
+function* numbers() {
+  yield 1
+  yield 2
+}
+function* asks() {
+  // expect-error: the value of 'yield' is what next(x) sends, and nothing says its type; declare it in the return type, e.g. ': Generator<int, void, string>'
+  const answer = yield 1
+}
+// expect-error: a generator returns an iterator: declare its type as 'Generator<int>'
+function* wrongType(): int {
+  yield 1
+}
+function* declared(): Generator<int> {
+  // expect-error: type 'string' is not assignable to type 'int'
+  yield "one"
+}
+function* mixed() {
+  yield [1]
+  // expect-error: 'mixed' yields 'string[]' here and 'int[]' elsewhere; a generator yields values of one type
+  yield ["two"]
+}
+// expect-error: cannot tell what 'empty' yields: it has no 'yield'; declare its type, e.g. ': Generator<int>'
+function* empty() {
+  return
+}
+function* delegates() {
+  // expect-error: 'yield*' needs an array, a string or an iterator, found 'int'
+  yield* 5
+}
+function* talk(): Generator<string, void, string> {
+  const name = yield "who?"
+  console.log(name)
+}
+// expect-error: 'for...of' resumes each 'yield' of 'Generator<string, void, string>' without a value, but it expects 'string' from next(x)
+for (const s of talk()) console.log(s)
+// expect-error: a spread resumes each 'yield' of 'Generator<string, void, string>' without a value
+const all = [...talk()]
+function* withReturn() {
+  yield [1]
+  return ["done"]
+}
+// expect-error: next() of 'Generator<int[], string[]>' gives 'int[]', or 'string[]' when it is done, and no union holds both
+const r = withReturn().next()
+const it = numbers()
+// expect-error: 'return()' of an iterator is not supported yet: it comes with exceptions
+it.return()
+// expect-error: property 'length' does not exist on type 'Generator<int>'; an iterator does not know how many values it gives
+it.length()
+// expect-error: property 'size' does not exist on type 'Generator<int>'; methods must be called
+const size = it.size
+// expect-error: the callback of 'flatMap' must return an array or an iterator, found 'string'
+const chars = numbers().flatMap(n => `${n}`)
+// expect-error: an iterator cannot be converted to a string: JavaScript would give '[object Generator]'
+const text = `${it}`
+// expect-error: 'Iterator.from' needs an array, a string or an iterator, found 'int'
+const from = Iterator.from(5)
+// expect-error: 'Array.of' is not supported; of Array only 'Array.from' and 'new Array' are
+const arr = Array.of(1, 2)
+// expect-error: an object is always truthy
+if (it) console.log("always")
+// expect-error: type 'Generator<int>' is not assignable to type 'Generator<string>'
+const wrong: Generator<string> = numbers()
+// expect-error: 'Generator' takes 1-3 type arguments
+let tooMany: Generator<int, int, int, int>

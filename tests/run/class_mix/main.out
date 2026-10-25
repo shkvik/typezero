@@ -1,0 +1,29 @@
+price Money { amount: 19.99, currency: 'EUR' }
+wallet Wallet { owner: 'ann', items: [], onAdd: [Function: onAdd] }
+Ok { value: 1 } Ok { value: 2 } Err { error: '0.00 EUR is not positive' }
+Err { error: '0.00 EUR is not positive' } 2 failed: 0.00 EUR is not positive
+Ok { value: Money { amount: 22.49, currency: 'EUR' } }
+Err { error: 'total: cannot add USD to EUR' }
+Money { amount: 59.97, currency: 'EUR' } Money { amount: 29.99, currency: 'EUR' } 19990.00 EUR
+Ok { value: Money { amount: 24.49, currency: 'EUR' } } Err { error: "expected '<amount> <currency>', got 'x'" }
+19.99 EUR 19.99 EUR
+Ok { value: 39.98 } true false
+Ok { value: Money { amount: 3.75, currency: 'EUR' } }
+Ok { value: 4 } Ok { value: 39.98 }
+Err {
+  error: [
+    "expected '<amount> <currency>', got 'oops'",
+    "bad amount '1.2.3'"
+  ]
+}
+Wallet {
+  owner: 'ann',
+  items: [
+    Money { amount: 19.99, currency: 'EUR' },
+    Money { amount: 2.5, currency: 'EUR' },
+    Money { amount: 1, currency: 'USD' },
+    Money { amount: 2, currency: 'EUR' }
+  ],
+  last: Ok { value: 4 },
+  onAdd: [Function: onAdd]
+} 22

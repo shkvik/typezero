@@ -1,0 +1,85 @@
+// same-as-node --experimental-transform-types
+// What the compiler infers in classes: the types of fields from their
+// values, the return types of methods (also of those that call each other),
+// and the types of literals from the constructors and methods they go to.
+const base = 10
+
+class Stats {
+  values = [1.5, 2.5, 4]
+  count = this.values.length + base
+  origin = { x: 0, y: 0 }
+  label = `stats of ${this.values.length}`
+  ready = this.count > 0
+  scale(by: double = this.values.length) {
+    return this.values.map(v => v * by)
+  }
+}
+const stats = new Stats()
+console.log(stats.count, stats.origin, stats.label, stats.ready, stats.scale(), stats.scale(2))
+
+class Parity {
+  isEven(n: int) {
+    return n == 0 ? true : this.isOdd(n - 1)
+  }
+  isOdd(n: int) {
+    return n == 0 ? false : this.isEven(n - 1)
+  }
+  fact(n: long) {
+    return n <= 1 ? 1 : n * this.fact(n - 1)
+  }
+  static fib(n: int) {
+    return n < 2 ? n : Parity.fib(n - 1) + Parity.fib(n - 2)
+  }
+}
+const parity = new Parity()
+console.log(parity.isEven(10), parity.isOdd(10), parity.fact(20), Parity.fib(20))
+
+// Literals take their types from the constructors and methods they go to.
+interface Point {
+  x: double
+  y: double
+}
+class Segment {
+  constructor(
+    public from: Point,
+    public to: Point,
+  ) {}
+  length() {
+    return Math.hypot(this.to.x - this.from.x, this.to.y - this.from.y)
+  }
+  moved(by: Point) {
+    return new Segment(
+      { x: this.from.x + by.x, y: this.from.y + by.y },
+      { x: this.to.x + by.x, y: this.to.y + by.y },
+    )
+  }
+}
+const a = { x: 0, y: 0 }
+const b = { x: 3, y: 4 }
+const segment = new Segment(a, b)
+const offset = { x: 1, y: 1 }
+console.log(segment.length(), segment.moved(offset))
+
+// A tree of instances, and a static field that holds an instance.
+class Tree {
+  children: Tree[] = []
+  add(child: Tree) {
+    this.children.push(child)
+    return this
+  }
+  size(): int {
+    return 1 + this.children.reduce((sum, child) => sum + child.size(), 0)
+  }
+}
+const tree = new Tree().add(new Tree()).add(new Tree().add(new Tree()))
+console.log(tree.size(), tree)
+
+class Config {
+  static current = new Config("default")
+  constructor(public name: string) {}
+  static use(name: string) {
+    Config.current = new Config(name)
+    return Config.current
+  }
+}
+console.log(Config.current, Config.use("test").name, Config.current)

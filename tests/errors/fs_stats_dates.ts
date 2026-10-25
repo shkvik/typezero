@@ -1,0 +1,7 @@
+// The dates of a Stats are made when they are read: there is nothing to
+// assign to.
+import { statSync } from "node:fs"
+const st = statSync(".")
+// expect-error: 'mtime' cannot be assigned: it is made from 'mtimeMs' when it is read
+st.mtime = new Date(0)
+console.log(st.mtime)

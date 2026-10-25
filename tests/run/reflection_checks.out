@@ -1,0 +1,21 @@
+new Point { x: 3, y: 4 }
+new TypeError: new Point: argument 2: expected int, got 2.5
+new TypeError: new Point: expected 2 arguments, got 1
+new TypeError: new Point: expected 2 arguments, got 3
+new TypeError: new Point: argument 1: expected int, got a string
+new Label { text: 'here', at: Point { x: 1, y: 2 } }
+new TypeError: new Label: argument 2: expected Point, got an object of class Label
+apply Point { x: 4, y: 2 }
+apply Point { x: 7, y: 6 }
+apply TypeError: Reflect.apply: expected 1 to 2 arguments, got 0
+apply TypeError: Reflect.apply: argument 1: expected int, got true
+apply TypeError: Point.move was called with a 'this' that is not an instance of Point
+apply 21, 18
+apply TypeError: Reflect.apply: argument 2: expected double, got a string
+apply TypeError: Function.prototype.apply was called on 5, which is not a function
+apply TypeError: Function.prototype.apply was called on 7, which is not a function
+construct 9
+construct TypeError: class Shape is abstract and cannot be made
+get 7
+get TypeError: Reflect.get called on non-object
+get Point

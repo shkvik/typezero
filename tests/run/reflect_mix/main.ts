@@ -1,0 +1,132 @@
+// Classes as values, reflection and decorators with the rest of the language,
+// across files: a decorated registry of classes, `new` of a class known only
+// when the program runs, Reflect.get / apply / construct and fromJson(cls, j)
+// in a generic class; decorated async methods and async generators; a mixin
+// over an EventEmitter subclass whose event map comes from the emits, and
+// decorated methods of one; and classes of the library (EventTarget,
+// AbortController) as values.
+import { EventEmitter, on } from "node:events"
+import { Bus, Counting, Entity, Logged, Names, Store, calls, registered } from "./registry.ts"
+
+@Entity
+class User {
+  constructor(public name: string, public age: int) {}
+  greet() {
+    return `hi, ${this.name}`
+  }
+}
+
+@Entity
+class Note {
+  tags: string[] = []
+  constructor(public text: string) {}
+  shout(times: int) {
+    return this.text.toUpperCase().repeat(times)
+  }
+}
+
+// 1. The registry the decorator filled, and `new` of what it holds: the
+// arguments are checked against the constructor of each.
+console.log(registered.map((cls) => cls.name).join(", "))
+const argLists: unknown[][] = [["x", 1], ["y"]]
+for (const args of argLists)
+  for (const cls of registered) {
+    try {
+      const made = Reflect.construct(cls, args)
+      console.log(made instanceof User, made instanceof Note, Reflect.get(made, "name") ?? Reflect.get(made, "text"))
+    } catch (e) {
+      console.log(String(e))
+    }
+  }
+
+// 2. Reflection by names, as a router would call a method.
+const note = new Note("ok")
+const shout = Reflect.get(note, "shout")
+console.log(typeof shout, Reflect.apply(shout, note, [3]))
+const greet = Reflect.get(new User("ann", 30), "greet")
+console.log(Reflect.apply(greet, new User("bob", 40), []))
+
+// 3. A generic class over a class value, fromJson through its constructor and
+// an async generator; decorated async methods and async generators.
+const users = new Store(User).load(fromJson<Json[]>(JSON.parse('[{"name": "ann", "age": 30}, {"name": "cy", "age": 7}]')))
+for await (const user of users.each()) console.log(user.greet(), user.age, user instanceof User)
+const notes = new Store(Note).load([JSON.parse('{"text": "a", "tags": ["t"]}')])
+for await (const n of notes.each()) console.log(n.text, n.tags)
+const names = new Names(["ann", "bob", "cy"])
+console.log(await names.first())
+for await (const name of names.from(1)) console.log(name)
+console.log(calls)
+
+// 4. A mixin over an emitter subclass; its events are those of its emits.
+const CountingBus = Counting(Bus)
+const bus = new CountingBus()
+bus.on("note", (what, count) => console.log(`note ${what} #${count}`))
+bus.on("data", (n) => console.log(`data ${n}`))
+bus.note("hello")
+bus.send(5)
+bus.note("again")
+console.log(bus.emitted, bus instanceof Bus, bus instanceof EventEmitter, CountingBus.name)
+setTimeout(() => {
+  bus.send(6)
+  bus.send(7)
+}, 1)
+let seen = 0
+for await (const [n] of on(bus, "data")) {
+  console.log(`for await ${n}`)
+  if (++seen == 2) break
+}
+
+// 5. Classes of the library as values.
+const kinds: Constructor[] = [EventTarget, AbortController, User]
+console.log(kinds.map((k) => k.name).join(" "))
+const controller = Reflect.construct(AbortController, [])
+if (controller instanceof AbortController) {
+  controller.signal.addEventListener("abort", () => console.log("aborted", Reflect.get(controller.signal, "aborted")))
+  controller.abort()
+}
+const TargetKind = kinds[0]
+if (TargetKind != undefined) {
+  const target = new TargetKind()
+  if (target instanceof EventTarget) {
+    // The listener knows its target from the event: one that held it would
+    // make a cycle with it.
+    target.addEventListener("ping", (ev) => console.log("ping", ev.type, ev.target instanceof EventTarget))
+    target.dispatchEvent(new Event("ping"))
+  }
+}
+
+// 6. A decorated emitter class: registered, and made from its class value.
+@Entity
+class Ticker extends EventEmitter {
+  tick() {
+    this.emit("tick", registered.length)
+  }
+}
+const TickerKind = registered[registered.length - 1]
+const ticker = TickerKind == undefined ? undefined : Reflect.construct(TickerKind, [])
+if (ticker instanceof Ticker) {
+  ticker.on("tick", (count) => console.log(`tick with ${count} classes`))
+  ticker.tick()
+}
+
+// 7. Decorated methods of an emitter subclass, one async, whose emits give
+// its event map, and one of them called through reflection.
+class Server extends EventEmitter {
+  @Logged
+  listen(port: int) {
+    this.emit("listening", port)
+    return this
+  }
+  @Logged
+  async stop() {
+    await undefined
+    this.emit("closed")
+  }
+}
+const server = new Server()
+server.on("listening", (port) => console.log("port", port))
+server.on("closed", () => console.log("closed"))
+server.listen(80).listen(81)
+await server.stop()
+const listen = Reflect.get(server, "listen")
+console.log(Reflect.apply(listen, server, [82]) == server, calls.slice(2))

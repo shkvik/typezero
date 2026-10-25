@@ -14,6 +14,7 @@ const maybe: ((texts: string[]) => int) | undefined = tag
 const tagged = maybe?.call`x`
 // expect-error: a point right after a number belongs to the number, so a name cannot follow it; write '1..toString' or '(1).toString'
 const one = 1.toString()
-// `in` in a loop header belongs to `for...in`, which is not supported.
-// expect-error: 'for...in' loops are not supported; use 'for...of'
-for (const k in nums) console.log(k)
+// `in` in a loop header belongs to `for...in`, which needs a new variable.
+let k = ""
+// expect-error: 'for...in' needs a new variable: 'for (const k in ...)'
+for (k in nums) console.log(k)

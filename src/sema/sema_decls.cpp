@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <string>
 
@@ -53,7 +54,7 @@ std::string formatNumber(double value) {
 // Declarations
 //===----------------------------------------------------------------------===//
 
-void Sema::declareTypes(llvm::ArrayRef<Stmt *> stmts) {
+std::vector<Stmt *> Sema::declareTypes(llvm::ArrayRef<Stmt *> stmts, bool resolve) {
   std::vector<Stmt *> declared;
   for (Stmt *stmt : stmts) {
     llvm::StringRef name;
@@ -63,6 +64,8 @@ void Sema::declareTypes(llvm::ArrayRef<Stmt *> stmts) {
         // `type int = number` tells tsc what an int is; here it is built in.
         bool integer = name == "int" || name == "long" || name == "double";
         bool forTsc = integer && alias->type.kind == TypeRef::Kind::Name && alias->type.name == "number";
+        // So is the union tsc needs for Json (docs/modules.md, section 5).
+        forTsc |= name == "Json" && alias->type.kind == TypeRef::Kind::Union;
         if (!forTsc)
           diags_.error(alias->loc(), "'" + name + "' is a built-in type and cannot be redefined" +
                                          (integer ? "; only 'type " + name.str() +
@@ -73,6 +76,10 @@ void Sema::declareTypes(llvm::ArrayRef<Stmt *> stmts) {
     } else if (auto *decl = dyn_cast<EnumDecl>(stmt)) {
       name = decl->name;
       declare(name, decl->loc(), {nullptr, nullptr, decl});
+    } else if (auto *cls = dyn_cast<ClassDecl>(stmt); cls && scopes_.size() == 1) {
+      // Only at the top level of a file; elsewhere checkClassStmt reports it.
+      name = cls->name;
+      declareClass(cls);
     } else {
       continue;
     }
@@ -84,13 +91,33 @@ void Sema::declareTypes(llvm::ArrayRef<Stmt *> stmts) {
     }
     declared.push_back(stmt);
   }
-  // Resolved here, in the scope that declares them, so that the names they
-  // use mean what they mean here.
+  if (resolve)
+    resolveTypes(declared);
+  return declared;
+}
+
+// Resolved in the scope that declares them, so that the names they use mean
+// what they mean there. A generic alias names a type for each list of type
+// arguments; here it is checked once with its type parameters.
+void Sema::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
+  // An alias of `typeof x` waits for x, until a type uses it.
+  std::function<bool(const TypeRef &)> typeOf = [&](const TypeRef &ref) {
+    return ref.kind == TypeRef::Kind::TypeOf || llvm::any_of(ref.args, typeOf);
+  };
   for (Stmt *stmt : declared) {
-    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt))
+    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt); alias && typeOf(alias->type))
+      continue;
+    if (auto *alias = dyn_cast<TypeAliasDecl>(stmt); alias && !alias->typeParams.empty()) {
+      instantiateAlias(alias, aliasTypeParams(alias), alias->loc());
+    } else if (alias) {
       resolveAlias(alias);
-    else
+    } else if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
+      // A class whose base is a value is resolved where it is declared.
+      if (!cls->baseExpr)
+        resolveClass(cls);
+    } else {
       resolveEnum(cast<EnumDecl>(stmt));
+    }
   }
 }
 
@@ -100,7 +127,11 @@ Stmt *Sema::lookupType(llvm::StringRef name) const {
     if (found != scope->end())
       return found->second;
   }
-  return nullptr;
+  // The utilities of TypeScript that are mapped types (see declarePrelude).
+  if (TypeAliasDecl *alias = builtinAliases_.lookup(name))
+    return alias;
+  // Error and its kinds (see Sema::lookup).
+  return errorKindClass(name);
 }
 
 // An object type may refer to itself through its fields (`next?: Node`,
@@ -110,6 +141,14 @@ Stmt *Sema::lookupType(llvm::StringRef name) const {
 const Type *Sema::resolveAlias(TypeAliasDecl *alias) {
   if (alias->resolved)
     return alias->resolved;
+  // A type of another file, imported before it is resolved: in its own file.
+  if (Module *home = declModules_.lookup(alias); home && home != module_ && scopes_.size() == 1) {
+    Module *here = module_;
+    useModule(home);
+    const Type *type = resolveAlias(alias);
+    useModule(here);
+    return type;
+  }
   if (alias->resolving) {
     if (alias->self) {
       alias->recursive = true;
@@ -123,12 +162,36 @@ const Type *Sema::resolveAlias(TypeAliasDecl *alias) {
   const Type *type;
   if (alias->type.kind == TypeRef::Kind::Object) {
     alias->self = Type::declareObject(alias->name);
-    std::vector<Field> fields = resolveFields(alias->type);
+    // `interface User extends Named`: the fields of Named come first.
+    std::vector<const Type *> bases;
+    std::vector<Overload> overloads;
+    std::vector<Field> fields = alias->bases.empty() ? resolveFields(alias->type, &overloads)
+                                                     : interfaceFields(alias, bases, overloads);
     if (alias->recursive) {
-      alias->self->defineFields(std::move(fields));
+      alias->self->defineFields(std::move(fields), std::move(overloads));
       type = alias->self;
     } else {
-      type = Type::object(std::move(fields), alias->name);
+      type = Type::object(std::move(fields), alias->name, std::move(overloads));
+    }
+    for (const Type *base : bases)
+      if (!type->isError())
+        addBase(type, base);
+  } else if (alias->type.kind == TypeRef::Kind::Union) {
+    // A union whose members refer back to it in their fields, as the nodes
+    // of a tree do: the fields get it as declared, with its members after.
+    alias->self = Type::declareUnion(alias->name);
+    type = resolveTypeInner(alias->type);
+    if (alias->recursive && !type->isError()) {
+      if (type->isUnion()) {
+        alias->self->defineMembers(type);
+        type = alias->self;
+      } else {
+        diags_.error(alias->loc(), "type alias '" + alias->name +
+                                       "' refers to itself, and only a union of several types "
+                                       "without undefined can: make a field optional instead, "
+                                       "e.g. 'next?: " + alias->name + "'");
+        type = Type::error();
+      }
     }
   } else {
     type = resolveTypeInner(alias->type);
@@ -147,6 +210,13 @@ void Sema::resolveEnum(EnumDecl *decl) {
   if (decl->resolved || decl->resolving) {
     if (decl->resolving)
       diags_.error(decl->loc(), "the members of enum '" + decl->name + "' depend on themselves");
+    return;
+  }
+  if (Module *home = declModules_.lookup(decl); home && home != module_ && scopes_.size() == 1) {
+    Module *here = module_;
+    useModule(home);
+    resolveEnum(decl);
+    useModule(here);
     return;
   }
   decl->resolving = true;

@@ -68,9 +68,9 @@ const source = "" + inc
 const joined = [inc].join()
 // expect-error: sorting functions needs a comparison function
 const sorted = [inc].sort()
-// expect-error: 'call' is not supported yet: it sets 'this', which exists only in classes; call the function directly
+// expect-error: 'call' is not supported: it sets 'this', and a method taken as a value is bound to its object already; call the function directly
 inc.call(undefined, 1)
-// expect-error: 'this' exists only in the methods of classes, which are not supported yet
+// expect-error: 'this' is used outside of a method; it exists in the methods of classes and object literals
 const self = this
 function count() {
   // expect-error: 'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'

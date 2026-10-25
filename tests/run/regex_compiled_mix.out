@@ -1,0 +1,16 @@
+callback RangeError: stop at c3
+3 1a 2b
+replaceAll TypeError: String.prototype.replaceAll called with a non-global RegExp argument
+replaceAll g f00
+matchAll TypeError: String.prototype.matchAll called with a non-global RegExp argument
+matchAll g 2
+one,two ottff
+30 closed
+Привет|мир|Это|тест|ёж|и|Ель true _ривет, мир! _то тест: ёж и _ль.
+[ 'Привет', 'мир', 'Это тест', 'ёж и Ель', '' ] 8 ет,ест,ёж,Ель
+ann@example.com true
+bob at example false
+кот@пример.рф true
+5 error,warning,error
+6 4 -1
+[ /a+/gi, 2 ] [{},2] /a+/gi|2 Map(1) { 'digits' => /\d+/g } true

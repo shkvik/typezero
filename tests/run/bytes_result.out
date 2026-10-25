@@ -1,0 +1,7 @@
+Ok { value: <Buffer ca fe> } Err { error: 'not hex: xyz' }
+Ok { value: 6 }
+Ok { value: <Buffer 09 08 07> } Err { error: 'ENOENT' }
+Ok { value: '090807' }
+negative
+none
+2 bytes

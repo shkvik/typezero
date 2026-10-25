@@ -8,7 +8,7 @@ const c = (1.5).toFixd(2)
 const d = isNaN("x")
 // expect-error: type 'int' is not assignable to type 'string'
 const e = parseInt(5)
-// expect-error: Number() takes a number, a boolean or a string, found 'int[]'
+// expect-error: Number() takes a number, a boolean, a string or a decimal, found 'int[]'
 const f = Number([1])
 // expect-error: property 'parse' does not exist on 'Number'
 const g = Number.parse("1")

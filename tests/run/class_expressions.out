@@ -1,0 +1,4 @@
+true 2 2 2 2 Counter { count: 2 }
+10
+Holder { base: true, items: [ 2 ] } Holder { base: true, items: [] } false
+ok [ 'status', 'check' ]

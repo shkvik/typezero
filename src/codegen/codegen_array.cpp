@@ -32,9 +32,20 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::String: return 5;
   case Type::Kind::Array: return 6;
   case Type::Kind::Optional: return 7;
-  case Type::Kind::Undefined: return 8;
+  case Type::Kind::Undefined:
+  case Type::Kind::Void:  // the half of `ok()`, which holds undefined
+  case Type::Kind::Never: // a half that holds nothing
+    return 8;
   case Type::Kind::Function: return 9;
-  case Type::Kind::Object: return 10;
+  case Type::Kind::Object:
+  case Type::Kind::Iterator:
+  case Type::Kind::Dict:
+  case Type::Kind::Promise:
+  case Type::Kind::ClassRef: return 10; // an object of the runtime, which prints as one
+  case Type::Kind::Decimal: return 11;
+  case Type::Kind::Result: return 12;
+  case Type::Kind::Json: return 13;
+  case Type::Kind::Unknown: return 16; // TZ_T_UNKNOWN
   default: llvm_unreachable("no runtime descriptor for this type");
   }
 }
@@ -46,19 +57,26 @@ uint32_t descriptorKind(const Type *type) {
 llvm::Constant *CodeGen::typeDescriptor(const Type *type) {
   if (llvm::Constant *found = typeDescriptors_.lookup(type))
     return found;
+  if (type->isResult())
+    return resultDescriptor(type);
+  if (type->isUnion() || type->isLiteral())
+    return unionDescriptor(type);
   // The element of an array, the value of `T | undefined`; a function's
   // inner() is its return type, which is not part of the value.
   llvm::Constant *inner = type->isArray() || type->isOptional()
                               ? typeDescriptor(type->inner())
                               : llvm::ConstantPointerNull::get(builder_.getPtrTy());
-  uint64_t size = module_->getDataLayout().getTypeAllocSize(lower(type));
+  uint64_t size = module_->getDataLayout().getTypeAllocSize(lowerHalf(type));
   llvm::Constant *init = llvm::ConstantStruct::get(
       typeDescTy_, {builder_.getInt32(descriptorKind(type)), builder_.getInt32(static_cast<uint32_t>(size)),
                     inner});
   auto *global = new llvm::GlobalVariable(*module_, typeDescTy_, /*isConstant=*/true,
                                           llvm::GlobalValue::PrivateLinkage, init,
                                           "tz.type." + type->name());
-  global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  // Reflection tells the types of functions and arrays in unknowns apart by
+  // their descriptors (runtime/reflect.c), which must not be merged.
+  if (!type->isFunction() && !type->isArray())
+    global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   typeDescriptors_[type] = global;
   return global;
 }
@@ -122,31 +140,56 @@ void CodeGen::emitPush(llvm::Value *array, llvm::ArrayRef<llvm::Value *> values,
   for (size_t i = 0; i < values.size(); ++i)
     builder_.CreateStore(values[i], elementAddress(data, element, builder_.CreateAdd(at, builder_.getInt64(i))));
   builder_.CreateStore(newLength, arrayField(array, kLength));
+  // An array that may be a member of a group: its elements join it.
+  if (refMayBeMember(Type::array(element)))
+    for (llvm::Value *value : values)
+      groupStore(array, value, element);
 }
 
 llvm::Value *CodeGen::emitArrayLiteral(ArrayLitExpr *lit) {
+  if (lit->type->isTuple())
+    return emitTupleLiteral(lit);
   const Type *element = lit->type->inner();
   llvm::Constant *descriptor = typeDescriptor(element);
   bool spreads = llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
 
   if (!spreads) {
     llvm::Value *count = builder_.getInt64(lit->elements.size());
-    llvm::Value *array = builder_.CreateCall(rt_.arrNew, {descriptor, count, count}, "array");
+    bool member = makesMember(lit, lit->type);
+    llvm::Value *array = newArray(lit->type, count, count, member, "array");
+    noteUnstored(array, lit);
     if (lit->elements.empty())
       return array;
     // Nothing can reach the new array while its elements are evaluated, so
-    // its data pointer stays put.
+    // its data pointer stays put. If one of them throws, the array goes
+    // with those stored (the runtime made the rest zero).
+    std::vector<Expr *> exprs;
+    for (const ArrayLitExpr::Element &e : lit->elements)
+      exprs.push_back(e.expr);
+    Held held = hold(array, lit->type, llvm::any_of(exprs, [&](Expr *e) { return exprThrows(e); }));
     llvm::Value *data = arrayData(array);
-    for (size_t i = 0; i < lit->elements.size(); ++i)
-      builder_.CreateStore(emitExpr(lit->elements[i].expr),
-                           elementAddress(data, element, builder_.getInt64(i)));
-    return array;
+    for (size_t i = 0; i < lit->elements.size(); ++i) {
+      llvm::Value *value = emitExpr(lit->elements[i].expr);
+      builder_.CreateStore(value, elementAddress(data, element, builder_.getInt64(i)));
+      if (member)
+        groupStore(array, value, element);
+    }
+    return take(held);
   }
 
   size_t plain = llvm::count_if(lit->elements, [](const ArrayLitExpr::Element &e) { return !e.spread; });
-  llvm::Value *array = builder_.CreateCall(
-      rt_.arrNew, {descriptor, builder_.getInt64(0), builder_.getInt64(plain)}, "array");
+  (void)descriptor;
+  llvm::Value *array = newArray(lit->type, builder_.getInt64(0), builder_.getInt64(plain),
+                                makesMember(lit, lit->type), "array");
+  noteUnstored(array, lit);
+  Held held = hold(array, lit->type, llvm::any_of(lit->elements, [&](const ArrayLitExpr::Element &e) {
+                     return exprThrows(e.expr);
+                   }));
   for (const ArrayLitExpr::Element &e : lit->elements) {
+    if (e.spread && (e.expr->type->isIterator() || e.expr->type->isTypedArray())) {
+      emitIteratorSpread(array, e.expr, element);
+      continue;
+    }
     if (e.spread) {
       // Appended right away, so a variable can be borrowed. A string adds
       // its characters.
@@ -154,6 +197,8 @@ llvm::Value *CodeGen::emitArrayLiteral(ArrayLitExpr *lit) {
       if (e.expr->type->isString())
         builder_.CreateCall(rt_.arrAppendCodePoints,
                             {array, stringObj(source.value), stringMeta(source.value)});
+      else if (e.expr->type->isTuple())
+        emitTupleSpread(array, source.value, e.expr->type, element);
       else
         builder_.CreateCall(rt_.arrAppend, {array, source.value});
       dropOperand(source);
@@ -161,7 +206,7 @@ llvm::Value *CodeGen::emitArrayLiteral(ArrayLitExpr *lit) {
       emitPush(array, {emitExpr(e.expr)}, element);
     }
   }
-  return array;
+  return take(held);
 }
 
 llvm::Value *CodeGen::emitArrayFold(llvm::Value *array, const Type *element, llvm::Value *init,
@@ -191,16 +236,23 @@ llvm::Value *CodeGen::emitArrayFold(llvm::Value *array, const Type *element, llv
 llvm::Value *CodeGen::emitNewArray(NewExpr *expr) {
   llvm::Constant *descriptor = typeDescriptor(expr->type->inner());
   if (expr->args.empty())
-    return builder_.CreateCall(rt_.arrNew, {descriptor, builder_.getInt64(0), builder_.getInt64(0)},
-                               "array");
-  // The runtime reports a negative length, as JavaScript's RangeError would.
-  return builder_.CreateCall(rt_.arrNewLength, {descriptor, emitExpr(expr->args[0])}, "array");
+    return newArray(expr->type, builder_.getInt64(0), builder_.getInt64(0));
+  // The runtime throws RangeError for a negative length, as JavaScript does.
+  llvm::FunctionCallee create = rt_.arrNewLength;
+  if (isCyclic(expr->type))
+    create = groupFunction("tz_arr_new_length_group", builder_.getPtrTy(),
+                           {builder_.getPtrTy(), builder_.getInt64Ty()});
+  llvm::Value *array = builder_.CreateCall(create, {descriptor, emitExpr(expr->args[0])}, "array");
+  emitThrowCheckIf(exprThrows(expr));
+  return array;
 }
 
 llvm::Value *CodeGen::emitArrayIndex(IndexExpr *index) {
   const Type *element = index->object->type->inner();
   Operand array = emitOperand(index->object, cannotAssign(index->index));
+  holdOperand(array, exprThrows(index->index));
   llvm::Value *position = emitExpr(index->index);
+  takeOperand(array);
   auto read = [&] {
     llvm::Value *value = builder_.CreateLoad(lower(element),
                                              elementAddress(arrayData(array.value), element, position));
@@ -222,6 +274,7 @@ llvm::Value *CodeGen::emitElementAssign(AssignExpr *assign, bool needResult) {
   auto *index = cast<IndexExpr>(assign->target);
   const Type *element = index->type;
   Operand array = emitOperand(index->object, cannotAssign(index->index) && cannotAssign(assign->value));
+  holdOperand(array, exprThrows(index->index) || exprThrows(assign->value));
   llvm::Value *position = emitExpr(index->index);
 
   llvm::Value *value;
@@ -234,13 +287,23 @@ llvm::Value *CodeGen::emitElementAssign(AssignExpr *assign, bool needResult) {
       retainString(old); // the right side may replace the element
       Operand rhs = emitConcatPart(assign->value, /*canBorrow=*/false);
       value = concatOperands({{old, true, element}, rhs});
+    } else if (element->isDecimal()) {
+      retainValue(old, element); // the right side may replace the element
+      value = emitDecimalCompound(*assign->op, old, assign->value);
+      releaseValue(old, element);
     } else {
       value = emitArithmetic(*assign->op, old, emitExpr(assign->value), element);
     }
   }
 
+  takeOperand(array);
   auto replace = [&] {
-    storeReplacing(elementAddress(arrayData(array.value), element, position), value, element);
+    storeField_ = "[i]";
+    storeLoc_ = assign->loc();
+    storeIn(array.value, array.type, elementAddress(arrayData(array.value), element, position),
+            value, element);
+    storeField_.clear();
+    storeLoc_ = llvm::SMLoc();
   };
   if (!index->mayAppend) {
     replace();
@@ -270,9 +333,14 @@ llvm::Value *CodeGen::emitElementAssign(AssignExpr *assign, bool needResult) {
 llvm::Value *CodeGen::emitLengthAssign(AssignExpr *assign, bool needResult) {
   auto *member = cast<MemberExpr>(assign->target);
   Operand array = emitOperand(member->object, cannotAssign(assign->value));
+  holdOperand(array, exprThrows(assign->value));
   llvm::Value *length = emitExpr(assign->value);
+  takeOperand(array);
   builder_.CreateCall(rt_.arrSetLength, {array.value, length});
   dropOperand(array);
+  // A negative length, or one that would grow an array whose elements have
+  // no default.
+  emitThrowCheck();
   return needResult ? length : nullptr;
 }
 
@@ -284,9 +352,10 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
 
   // All arguments are evaluated before the method runs, as in JavaScript.
   auto ownedArgs = [&](size_t from) {
-    std::vector<llvm::Value *> values;
-    for (size_t i = from; i < call->args.size(); ++i)
-      values.push_back(emitExpr(call->args[i]));
+    holdOperand(array, llvm::any_of(call->args, [&](Expr *arg) { return exprThrows(arg); }));
+    std::vector<llvm::Value *> values =
+        emitHeldValues(llvm::ArrayRef<Expr *>(call->args).drop_front(from));
+    takeOperand(array);
     return values;
   };
   // An optional position argument: its value and whether it was given.
@@ -328,8 +397,11 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
   case Builtin::ArrUnshift: {
     std::vector<llvm::Value *> values = ownedArgs(0);
     llvm::Value *slots = builder_.CreateCall(rt_.arrUnshiftSlots, {array.value, builder_.getInt64(values.size())});
-    for (size_t i = 0; i < values.size(); ++i)
+    for (size_t i = 0; i < values.size(); ++i) {
       builder_.CreateStore(values[i], elementAddress(slots, element, builder_.getInt64(i)));
+      if (refMayBeMember(arrayType))
+        groupStore(array.value, values[i], element);
+    }
     result = builder_.CreateTrunc(arrayLength(array.value), builder_.getInt32Ty());
     break;
   }
@@ -340,6 +412,9 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
       llvm::Value *last = builder_.CreateSub(length, builder_.getInt64(1));
       llvm::Value *value = builder_.CreateLoad(lower(element), elementAddress(arrayData(array.value), element, last));
       builder_.CreateStore(builder_.CreateTrunc(last, builder_.getInt32Ty()), arrayField(array.value, kLength));
+      // Out of a member, a reference inside its group counts again.
+      if (refMayBeMember(arrayType))
+        takeFrom(array.value, value, element);
       return value;
     };
     result = call->mayBeOutOfRange
@@ -351,6 +426,9 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
     llvm::Value *slot = createStackSlot(lower(element), "shifted");
     llvm::Value *has = builder_.CreateCall(rt_.arrShift, {array.value, slot});
     llvm::Value *value = builder_.CreateLoad(lower(element), slot);
+    // Out of a member, a reference inside its group counts again.
+    if (refMayBeMember(arrayType))
+      takeFrom(array.value, value, element);
     result = call->mayBeOutOfRange
                  ? makeOptional(value, builder_.CreateICmpNE(has, builder_.getInt32(0)), call->type)
                  : value;
@@ -374,14 +452,29 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
     std::vector<llvm::Value *> values = ownedArgs(0);
     llvm::Value *start = values.empty() ? builder_.getInt64(0) : values[0];
     auto [end, hasEnd] = position(values, 1);
-    result = builder_.CreateCall(rt_.arrSlice, {array.value, start, end, hasEnd}, "slice");
+    // A copy of a type that may form cycles is a member unless nothing
+    // stores it, whatever the array copied is.
+    llvm::FunctionCallee slice = rt_.arrSlice;
+    if (isCyclic(call->type))
+      slice = groupFunction(makesMember(call, call->type) ? "tz_arr_slice_group"
+                                                          : "tz_arr_slice_plain",
+                            builder_.getPtrTy(),
+                            {builder_.getPtrTy(), builder_.getInt64Ty(), builder_.getInt64Ty(),
+                             builder_.getInt32Ty()});
+    result = builder_.CreateCall(slice, {array.value, start, end, hasEnd}, "slice");
+    noteUnstored(result, call);
     break;
   }
   case Builtin::ArrConcat: {
     std::vector<Operand> parts;
     for (size_t i = 0; i < call->args.size(); ++i)
       parts.push_back({emitExpr(call->args[i]), true, call->args[i]->type});
-    result = builder_.CreateCall(rt_.arrCopy, {array.value}, "concat");
+    llvm::FunctionCallee copy = rt_.arrCopy;
+    if (isCyclic(call->type))
+      copy = groupFunction(makesMember(call, call->type) ? "tz_arr_copy_group" : "tz_arr_copy_plain",
+                           builder_.getPtrTy(), {builder_.getPtrTy()});
+    result = builder_.CreateCall(copy, {array.value}, "concat");
+    noteUnstored(result, call);
     for (Operand &part : parts) {
       if (part.type == arrayType) {
         builder_.CreateCall(rt_.arrAppend, {result, part.value});
@@ -446,8 +539,11 @@ llvm::Value *CodeGen::emitArrayMethod(CallExpr *call) {
                                                  builder_.getInt64(inserted), slotsOut},
                                  "removed");
     llvm::Value *slots = builder_.CreateLoad(builder_.getPtrTy(), slotsOut);
-    for (size_t i = 0; i < inserted; ++i)
+    for (size_t i = 0; i < inserted; ++i) {
       builder_.CreateStore(values[i + 2], elementAddress(slots, element, builder_.getInt64(i)));
+      if (refMayBeMember(arrayType))
+        groupStore(array.value, values[i + 2], element);
+    }
     break;
   }
   default:
@@ -497,7 +593,8 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
     addresses_[stmt->binding.sym] = slot;
     builder_.CreateStore(value, slot);
   } else {
-    storeReplacing(createLocal(stmt->binding.sym, stmt->binding.name), value, element);
+    storeVar(stmt->binding.sym, createLocal(stmt->binding.sym, stmt->binding.name), value,
+             /*replacing=*/true);
   }
 
   pushLoop(endBlock, condBlock, scopes_.size() - 1);
@@ -515,23 +612,38 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
 // comes; elements the callback adds are not visited.
 llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
+  if (member->object->type->isTypedArray())
+    return emitBytesCallbackMethod(call);
   const Type *arrayType = member->object->type;
   const Type *element = arrayType->inner();
   const Type *callbackType = call->args[0]->type;
   llvm::Type *i64 = builder_.getInt64Ty();
   Builtin method = call->builtin;
 
+  // The array and the callback wait in slots while the callback may throw,
+  // as does what the method builds, so that the way out releases them.
+  bool throws = typeThrows(callbackType);
+  // reduce of an empty array without an initial value throws too.
+  bool emptyThrows = (method == Builtin::ArrReduce || method == Builtin::ArrReduceRight) &&
+                     call->args.size() < 2;
   llvm::Value *array = emitExpr(member->object);
+  Held heldArray = hold(array, arrayType,
+                        throws || emptyThrows ||
+                            llvm::any_of(call->args, [&](Expr *arg) { return exprThrows(arg); }));
   llvm::Value *callback = emitExpr(call->args[0]);
+  Held heldCallback = hold(callback, callbackType,
+                           throws || emptyThrows ||
+                               (call->args.size() > 1 && exprThrows(call->args[1])));
   llvm::Value *init = call->args.size() > 1 ? emitExpr(call->args[1]) : nullptr;
 
   if (method == Builtin::ArrSortWith) {
     // The runtime sorts; the comparison goes through a function that calls
-    // the callback.
+    // the callback, and does nothing more once it threw.
     llvm::Value *context = spill(callback, "compare");
     builder_.CreateCall(rt_.arrSortWith, {array, sortComparator(call), context});
-    releaseValue(callback, callbackType);
-    return array; // the same array, with this reference
+    releaseValue(take(heldCallback), callbackType);
+    emitThrowCheckIf(throws);
+    return take(heldArray); // the same array, with this reference
   }
 
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
@@ -560,7 +672,7 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
       builder_.CreateCondBr(builder_.CreateICmpEQ(length, builder_.getInt64(0)), emptyBlock, firstBlock,
                             llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
       switchTo(emptyBlock);
-      emitPanic("TypeError: Reduce of empty array with no initial value");
+      emitThrowNew(1, "Reduce of empty array with no initial value");
       switchTo(firstBlock);
       llvm::Value *first = readElement(start);
       retainValue(first, element);
@@ -571,9 +683,12 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
   // map, filter, flatMap: the new array.
   llvm::Value *out = nullptr;
   if (method == Builtin::ArrMap || method == Builtin::ArrFilter || method == Builtin::ArrFlatMap)
-    out = builder_.CreateCall(rt_.arrNew, {typeDescriptor(call->type->inner()), builder_.getInt64(0),
-                                           method == Builtin::ArrMap ? length : builder_.getInt64(0)},
-                              "result");
+    out = newArray(call->type, builder_.getInt64(0),
+                   method == Builtin::ArrMap ? length : builder_.getInt64(0),
+                   makesMember(call, call->type), "result");
+  if (out)
+    noteUnstored(out, call);
+  Held heldOut = hold(out, call->type, throws);
   // find, findIndex, some, every: the result if no element decides it.
   llvm::Value *resultSlot = nullptr;
   if (!reduce && !out && method != Builtin::ArrForEach) {
@@ -621,7 +736,10 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
   args.resize(passes);
   if (passes == valueArgs + 2)
     retainValue(array, arrayType);
+  Held heldElement = hold(value, element, throws && keeps);
   llvm::Value *result = callFunctionValue(callback, callbackType, args);
+  emitThrowCheckIf(throws);
+  take(heldElement);
   const Type *resultType = callbackType->ret();
 
   // What the result means. `found` is where an element decides the result.
@@ -657,7 +775,10 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
     llvm::BasicBlock *dropBlock = newBlock("filter.drop");
     builder_.CreateCondBr(result, keepBlock, dropBlock);
     switchTo(keepBlock);
-    emitPush(out, {value}, element);
+    // `filter(Boolean)` of `T | undefined` elements keeps those that hold a
+    // value, as plain T.
+    const Type *kept = call->type->inner();
+    emitPush(out, {emitConversion(value, element, kept)}, kept);
     builder_.CreateBr(nextBlock);
     switchTo(dropBlock);
     releaseValue(value, element);
@@ -707,10 +828,10 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
   builder_.CreateBr(headBlock);
 
   switchTo(endBlock);
-  releaseValue(callback, callbackType);
-  releaseValue(array, arrayType);
+  releaseValue(take(heldCallback), callbackType);
+  releaseValue(take(heldArray), arrayType);
   if (out)
-    return out;
+    return take(heldOut);
   if (reduce)
     return builder_.CreateLoad(lower(call->type), accSlot);
   if (resultSlot)
@@ -722,7 +843,9 @@ llvm::Value *CodeGen::emitCallbackMethod(CallExpr *call) {
 // (ptr context, ptr x, ptr y) -> i32, the sign of compare(*x, *y), where
 // the context holds the function value. NaN counts as 0.
 llvm::Function *CodeGen::sortComparator(CallExpr *call) {
-  const Type *element = cast<MemberExpr>(call->callee)->object->type->inner();
+  const Type *receiver = cast<MemberExpr>(call->callee)->object->type;
+  // The runtime gives the elements of a typed array as numbers of their type.
+  const Type *element = receiver->isTypedArray() ? receiver->elementType() : receiver->inner();
   Expr *callbackExpr = call->args[0];
   const Type *callbackType = callbackExpr->type;
   llvm::Type *ptr = builder_.getPtrTy();
@@ -733,6 +856,17 @@ llvm::Function *CodeGen::sortComparator(CallExpr *call) {
   llvm::Function *outer = function_;
   function_ = fn;
   builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", fn));
+  if (typeThrows(callbackType)) {
+    // Once the callback threw, the sort only has to end.
+    llvm::BasicBlock *thrownBlock = llvm::BasicBlock::Create(ctx_, "thrown", fn);
+    llvm::BasicBlock *compareBlock = llvm::BasicBlock::Create(ctx_, "compare", fn);
+    builder_.CreateCondBr(
+        builder_.CreateIsNotNull(builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal())),
+        thrownBlock, compareBlock);
+    builder_.SetInsertPoint(thrownBlock);
+    builder_.CreateRet(builder_.getInt32(0));
+    builder_.SetInsertPoint(compareBlock);
+  }
   llvm::Value *callback = builder_.CreateLoad(fnTy_, fn->getArg(0), "compare");
   size_t passes = std::min<size_t>(callbackType->params().size(), 2);
   std::vector<llvm::Value *> args;
@@ -753,6 +887,14 @@ llvm::Function *CodeGen::sortComparator(CallExpr *call) {
     result = callFunctionValue(callback, callbackType, args);
   }
   const Type *resultType = callbackType->ret();
+  if (resultType->isDecimal()) {
+    llvm::Value *sign = decimalSign(result);
+    releaseValue(result, resultType);
+    builder_.CreateRet(sign);
+    function_ = outer;
+    builder_.restoreIP(point);
+    return fn;
+  }
   llvm::Value *positive, *negative;
   if (resultType->isFloat()) {
     llvm::Value *zero = llvm::ConstantFP::get(builder_.getDoubleTy(), 0.0);

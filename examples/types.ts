@@ -30,4 +30,5 @@ console.log("дорого?", expensive)
 
 // Переполнение int заворачивается, как в Go.
 let max: int = 2147483647
+// expect-warning: 'max + 1' may overflow int
 console.log("max + 1 =", max + 1)

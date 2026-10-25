@@ -1,0 +1,62 @@
+3 дня назад 3 дн. назад
+-3 дн. in 2 hours
+tomorrow yesterday this year 2 weeks ago
+1,234.5 seconds ago in 1 Quartal
+[
+  { type: 'integer', value: '1', unit: 'day' },
+  { type: 'group', value: ',', unit: 'day' },
+  { type: 'integer', value: '234', unit: 'day' },
+  { type: 'decimal', value: '.', unit: 'day' },
+  { type: 'fraction', value: '5', unit: 'day' },
+  { type: 'literal', value: ' days ago' }
+]
+[ { type: 'literal', value: 'yesterday' } ] [
+  { type: 'literal', value: 'in ' },
+  { type: 'integer', value: '3', unit: 'month' },
+  { type: 'literal', value: ' months' }
+]
+{
+  locale: 'en',
+  style: 'long',
+  numeric: 'always',
+  numberingSystem: 'latn'
+}
+{
+  locale: 'en-u-nu-arab',
+  style: 'long',
+  numeric: 'always',
+  numberingSystem: 'arab'
+} in ٥ minutes
+RelativeTimeFormat [Intl.RelativeTimeFormat] {}
+a, b и c a, b, and c
+a, b, or c a b c
+ one  and x
+[
+  { type: 'element', value: 'a' },
+  { type: 'literal', value: ', ' },
+  { type: 'element', value: 'b' },
+  { type: 'literal', value: ', and ' },
+  { type: 'element', value: 'c' }
+]
+{ locale: 'de', type: 'conjunction', style: 'short' } ListFormat [Intl.ListFormat] {}
+United States Latin America XX undefined
+Германия us
+US Dollar российский рубль
+undefined xyz
+German Französisch
+English (United States)
+Latin latn
+Gregorian Calendar
+era week wk.
+месяц
+{ locale: 'en', style: 'long', type: 'region', fallback: 'code' } {
+  locale: 'en',
+  style: 'long',
+  type: 'language',
+  fallback: 'code',
+  languageDisplay: 'dialect'
+}
+DisplayNames [Intl.DisplayNames] {}
+[ 'en-US', 'ru', 'zh-Hant-TW' ] [ 'de' ] []
+[ 'ru-RU-u-nu-arab', 'en-US', 'de' ]
+[ 'en-XX' ] [ 'fr' ]

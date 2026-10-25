@@ -1,0 +1,31 @@
+// same-as-node
+// URLSearchParams: from a query, pairs and a record; append, delete, get
+// (undefined where JavaScript gives null), getAll, has, set, sort, size,
+// iteration and toString with the form encoding; and the searchParams of a
+// URL, which read and change its query.
+const p = new URLSearchParams("?a=1&b=%20x+y&a=2&c=%E2%82%AC")
+console.log(p.getAll("a"), p.get("b"), p.get("c"), p.has("a"), p.has("a", "3"), p.size)
+console.log(p.toString())
+p.sort()
+p.set("a", "9")
+p.delete("b")
+p.append("d", "é&=+")
+console.log(p.toString(), [...p], [...p.keys()], [...p.values()])
+p.forEach((value, key) => console.log(key, value))
+console.log(new URLSearchParams({ x: "1", y: "two words" }).toString())
+console.log(new URLSearchParams([["k", "v"], ["k", "w"]]).toString(), new URLSearchParams(p).size)
+console.log(p)
+console.log(new URLSearchParams())
+
+const url = new URL("http://h/p?a=1&b=2")
+url.searchParams.append("c", "3 4")
+console.log(url.href, url.search)
+url.searchParams.delete("a")
+console.log(url.href, url.searchParams.get("b"), url.searchParams.size)
+url.search = "?z=9"
+console.log(url.searchParams.get("z"), url.searchParams.has("b"), url.href)
+const view = url.searchParams
+url.search = "?w=1"
+console.log(view.get("w"), view.toString())
+url.searchParams.set("w", "")
+console.log(url.href)

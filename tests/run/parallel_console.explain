@@ -1,0 +1,45 @@
+top-level code
+  start
+    writes stdout (line 15 in work)
+    in order with work after await at line 8 in the task work(1) at line 15: stdout
+    in order with work after await at line 8 in the task work(2) at line 15: stdout
+    in order with work after await at line 8 in the task work(3) at line 15: stdout
+    in order: line 15
+  after await at line 15
+    reads  everything in any int[] (line 15)
+    writes stdout (lines 15, 22 in work)
+    in order with work after await at line 8 in the task work(4) at line 22: stdout
+    in order: lines 15-22
+  after await at line 22
+    reads  everything in any int[] (line 22)
+    writes stdout (line 22)
+    runs alone
+
+async function work, line 6
+  start: runs inside its caller
+    writes stdout (line 7)
+  after await at line 8
+    writes stdout (line 11)
+    in the task work(1) at line 15:
+      in order with the start of the top-level code: stdout
+      in order with work after await at line 8 in the task work(2) at line 15: stdout
+      in order with work after await at line 8 in the task work(3) at line 15: stdout
+      in order: line 11
+    in the task work(2) at line 15:
+      in order with the start of the top-level code: stdout
+      in order with work after await at line 8 in the task work(1) at line 15: stdout
+      in order with work after await at line 8 in the task work(3) at line 15: stdout
+      in order: line 11
+    in the task work(3) at line 15:
+      in order with the start of the top-level code: stdout
+      in order with work after await at line 8 in the task work(1) at line 15: stdout
+      in order with work after await at line 8 in the task work(2) at line 15: stdout
+      in order: line 11
+    in the task work(4) at line 22:
+      in order with the top-level code after await at line 15: stdout
+      in order: line 11
+
+async function quiet, line 17
+  start: runs inside its caller
+  after await at line 18 (in the task quiet(5) at line 22)
+    parallel

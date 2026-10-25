@@ -1,0 +1,75 @@
+// Unions next to the types of tz: Result, decimal, generics, Json, and `==`,
+// which compares as `===` does.
+
+// Errors of different types make a union, `E | F`.
+type ParseError = "empty" | "not a number"
+function parseCount(s: string): Result<int, ParseError> {
+  if (s.length == 0) return err("empty")
+  const n = parseInt(s)
+  return isNaN(n) ? err("not a number") : ok(n | 0)
+}
+function checkRange(n: int): Result<int, string> {
+  return n > 100 ? err(`too big: ${n}`) : ok(n)
+}
+const results = ["42", "", "x", "500"].map(s => parseCount(s).andThen(checkRange))
+console.log(results)
+for (const r of results)
+  console.log(r.match(n => `ok ${n}`, e => (e == "empty" ? "nothing" : `failed: ${e}`)))
+function both(a: string, b: string) {
+  return safeTry(function* () {
+    const x = yield* parseCount(a)
+    const y = yield* checkRange(x)
+    return ok(x + y)
+  })
+}
+console.log(both("7", "1"), both("", "1"), both("700", "1"))
+const either = parseCount("3").unwrapOr("none")
+console.log(either, typeof either)
+
+// A decimal or a label.
+function price(p: decimal | "free") {
+  return p == "free" ? "free" : `${p * 2}`
+}
+const cost: decimal = 19.99
+console.log(price(cost), price("free"))
+
+// Generics: a copy for each union, and T found from a union.
+function orElse<T>(x: T | string, fallback: T): T {
+  if (typeof x == "string") return fallback
+  return x
+}
+const n: int | string = 5
+console.log(orElse(n, 0), orElse<int>("x", 0))
+function count<T>(xs: T[], x: T) {
+  return xs.filter(y => y == x).length
+}
+const tags: ("a" | "b" | int)[] = ["a", 1, "b", 1, "a"]
+console.log(count(tags, "a"), count(tags, 1), count(tags, "b"))
+
+// Checks of a Json give a union: `string | double`.
+const data = JSON.parse('{"id": 7, "name": "x", "list": [1]}')
+for (const key of ["id", "name", "list"]) {
+  const value = data[key]
+  if (typeof value == "string" || typeof value == "number") console.log(key, value, typeof value)
+  else console.log(key, "is something else")
+}
+
+// `==` compares as `===`: 1 and "1" are different values of `string | int`.
+function same(a: string | int, b: string | int) {
+  return a == b
+}
+console.log(same(1, 1), same(1, "1"), same("1", "1"), same("1", 1))
+
+// never: every member ruled out.
+type Shape = { kind: "circle"; r: double } | { kind: "square"; side: double }
+function assertNever(x: never): never {
+  throw new Error(`unexpected ${JSON.stringify(x)}`)
+}
+function area(s: Shape) {
+  switch (s.kind) {
+    case "circle": return 3.0 * s.r * s.r
+    case "square": return s.side * s.side
+    default: return assertNever(s)
+  }
+}
+console.log(area({ kind: "circle", r: 1 }), area({ kind: "square", side: 2 }))

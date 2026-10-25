@@ -1,0 +1,36 @@
+// same-as-node
+// env: TZ=UTC
+// Dictionaries with dates and with what node:fs, node:path and node:os give:
+// a date is a key by reference, as in JavaScript; groupBy over readdirSync.
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync, Stats } from "node:fs"
+import { extname, join } from "node:path"
+import { tmpdir } from "node:os"
+
+const d1 = new Date(Date.UTC(2026, 0, 1))
+const d2 = new Date(Date.UTC(2026, 0, 1))
+const seen = new Map<Date, string>()
+seen.set(d1, "first")
+seen.set(d2, "second")
+seen.set(d1, "again")
+console.log(seen.size, seen.get(d1), seen.get(d2), seen.has(new Date(d1.getTime())))
+console.log(seen)
+const days = new Set<Date>([d1, d1, d2])
+console.log(days.size, days)
+const due: Record<string, Date> = { a: d1 }
+due.b = new Date(0)
+console.log(due, JSON.stringify(due))
+console.log(JSON.stringify({ m: seen, s: days, r: due }))
+const sorted = [...seen.keys()].sort((a, b) => a.getTime() - b.getTime())
+console.log(sorted.length, sorted[0] == d1 || sorted[0] == d2)
+
+const dir = mkdtempSync(join(tmpdir(), "tz-dict-"))
+for (const f of ["a.ts", "b.ts", "c.md", "notes.txt"]) writeFileSync(join(dir, f), f)
+console.log(Object.groupBy(readdirSync(dir), (f) => extname(f)))
+const byKind = Map.groupBy(readdirSync(dir, { withFileTypes: true }), (e) => e.isFile())
+console.log(byKind.get(true)?.map((e) => e.name).join(), byKind.has(false))
+const stats = new Map<string, Stats>()
+for (const f of readdirSync(dir)) stats.set(f, statSync(join(dir, f)))
+console.log([...stats].map(([f, s]) => `${f}:${s.size}`).join())
+const sizes = Object.fromEntries([...stats].map(([f, s]): [string, number] => [f, s.size]))
+console.log(sizes, Object.keys(sizes).length)
+rmSync(dir, { recursive: true })

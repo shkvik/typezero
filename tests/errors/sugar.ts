@@ -27,8 +27,6 @@ function some(first: int, ...rest: int[]): void {}
 // expect-error: a spread argument can only be passed to a rest parameter
 some(...nums)
 // expect-error: a spread argument can only be passed to a rest parameter
-console.log(...nums)
-// expect-error: a spread argument can only be passed to a rest parameter
 Math.sqrt(...nums)
 // expect-error: a spread argument can only be passed to a rest parameter
 nums.unshift(...nums)

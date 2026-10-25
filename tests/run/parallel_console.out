@@ -1,0 +1,10 @@
+start 1
+start 2
+start 3
+done 1 499500
+done 2 499500
+done 3 499500
+[ 1, 2, 3 ]
+start 4
+done 4 499500
+[ 25, 4 ]

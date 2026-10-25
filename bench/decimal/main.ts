@@ -1,0 +1,13 @@
+// A million prices with cents, then ten passes summing price * quantity, and
+// the average.
+const prices: decimal[] = []
+for (let i = 0; i < 1000000; i++) prices.push(0.01 * (i % 100000) + 0.99)
+let total: decimal = 0
+for (let r = 0; r < 10; r++) {
+  let qty = 1
+  for (const p of prices) {
+    total += p * qty
+    qty = qty % 5 + 1
+  }
+}
+console.log(total, (total / 10000000).toFixed(2))

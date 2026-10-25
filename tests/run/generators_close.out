@@ -1,0 +1,16 @@
+break 3: [break inner, break outer]
+return 5: [return inner, return outer]
+throw at 2: [throw inner, throw outer]
+kept: [kept inner, kept outer]
+0
+kept again: []
+1,2,3
+spread: [spread inner, spread outer]
+1,2
+take: [take inner, take outer]
+4
+find: [find inner, find outer]
+true
+some: [some inner, some outer]
+delegate: [first inner, first outer, both]
+labels: [b inner, b outer, b inner, b outer, b inner, b outer, a inner, a outer]

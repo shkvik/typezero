@@ -1,0 +1,116 @@
+// Classes as values, class expressions, mixins and reflection: what tz
+// cannot do with them, and why.
+class User {
+  constructor(public name: string) {}
+}
+abstract class Shape {}
+
+// `typeof C` is that class only; a class known only when the program runs is
+// a Constructor.
+let kind: typeof User = User
+class Other {}
+// expect-error: type 'typeof Other' is not assignable to type 'typeof User'
+kind = Other
+const some: Constructor<User> = User
+// expect-error: type 'Constructor<User>' is not assignable to type 'typeof User'
+const exact: typeof User = some
+// expect-error: a class makes objects, and 'int' is not an object type; give the type of its objects, e.g. 'Constructor<User>'
+let numbers: Constructor<int>
+const n = 5
+// expect-error: 'new' makes an object of a class, and this is a 'int'
+new n()
+// expect-error: 'Constructor<User>' is some class known only when the program runs, which has only its 'name'
+console.log(some.prototype, some.length)
+// expect-error: is some class known only when the program runs, whose static members are not known
+some.create()
+
+// The class a class expression extends is known when compiling.
+function Bad(cls: Constructor) {
+  // expect-error: the class extended must be known when compiling: the fields of an object lie at places fixed then
+  return class extends cls {}
+}
+function NotAClass(x: int) {
+  // expect-error: a class can extend only a class, and this is a 'int'
+  return class extends x {}
+}
+// A class expression is made once, not at each call: it cannot use the
+// variables of the function around it.
+function Tag<B extends Constructor>(Base: B, tag: string) {
+  return class extends Base {
+    t = tag
+  }
+}
+// expect-error: cannot call 'Tag' with B = typeof User: a class expression cannot use 'tag', a variable of the function around it
+const Tagged = Tag(User, "x")
+// expect-error: 'ConstructorArgs' is the list of the parameters of the constructor of the class extended
+function plain(...args: ConstructorArgs) {}
+function Labeled(label: string) {
+  return class {
+    // expect-error: a class expression cannot use 'label', a variable of the function around it: the class is made once, not at each call, and its static fields get their values the first time
+    static label = label
+  }
+}
+
+// A class known when compiling, given where `Constructor<T>` is taken, is
+// made directly in the copy for it: what its constructor takes is checked
+// then.
+function make<T extends object>(cls: Constructor<T>, a: int, b: int): T {
+  return new cls(a, b)
+}
+// expect-error: cannot call 'make' with T = User: expected 1 argument, but got 2
+make(User, 1, 2)
+
+// A class decorator gives back the class it got or one that extends it.
+function Unrelated<T extends Constructor>(cls: T) {
+  return class Elsewhere {}
+}
+// expect-error: 'Unrelated' returns 'typeof Elsewhere': a class decorator gives back nothing, the class it got, or a class that extends it
+@Unrelated
+class Decorated {}
+function Runtime(cls: Constructor) {
+  return cls
+}
+// expect-error: 'Runtime' returns 'Constructor', some class known only when the program runs, and the class it gives in place of 'Kept' must be known when compiling
+@Runtime
+class Kept {}
+let ids = 1
+function WithId<T extends Constructor>(cls: T) {
+  return class extends cls {
+    id = ids++
+  }
+}
+@WithId
+class Stored {
+  // expect-error: static field 'last' holds an object made before, of the class as declared
+  static last = new Stored()
+}
+
+// Reflection takes objects, functions and arrays of arguments.
+// expect-error: Reflect.get takes an object, and this is a 'int'
+Reflect.get(5, "x")
+// expect-error: Reflect.apply calls a function, and this is a 'string'
+Reflect.apply("f", undefined, [])
+const pair: [string, int] = ["a", 1]
+// expect-error: the arguments are an array, and this is a tuple; copy it into one, '[...t]'
+Reflect.construct(some, pair)
+// expect-error: Reflect.construct makes an object of a class, and this is a 'int'
+Reflect.construct(5, [])
+const j = JSON.parse("{}")
+// expect-error: Reflect.get takes an object of the language; read a key of a Json as JavaScript does
+Reflect.get(j, "x")
+// expect-error: the third argument of Reflect.construct, the class whose prototype the object gets, is not supported
+Reflect.construct(User, ["a"], User)
+
+// fromJson makes a class through its constructor, which a Json must be
+// able to give the arguments of.
+class Callback {
+  constructor(public run: () => void) {}
+}
+// expect-error: fromJson cannot make a 'Callback' from a Json: parameter 'run' of its constructor: a value of type '() => void' cannot come from JSON
+fromJson(Callback, j)
+// expect-error: fromJson cannot make a 'Shape' from a Json: 'Shape' is abstract
+fromJson(Shape, j)
+// expect-error: fromJson(cls, j) makes an object of the class 'cls', and this is a 'int'
+fromJson(5, j)
+// expect-error: JSON.parse<User> cannot build a 'User': 'User' is a class, and only its constructor makes one; make it with 'fromJson(User, j)'
+JSON.parse<User>("{}")

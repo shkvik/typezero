@@ -1,0 +1,64 @@
+// same-as-node
+// Literal types: a string literal type is held as a small number, and turns
+// back into its text without allocating; number and boolean literal types
+// are values of their base types (docs/objects.md, section 7).
+type Dir = "up" | "down" | "left" | "right"
+
+function step(d: Dir): int {
+  switch (d) {
+    case "up": return -10
+    case "down": return 10
+    case "left": return -1
+    case "right": return 1
+  }
+}
+
+function opposite(d: Dir): Dir {
+  if (d == "up") return "down"
+  if (d == "down") return "up"
+  return d == "left" ? "right" : "left"
+}
+
+const dirs: Dir[] = ["up", "right", "down", "left"]
+let position = 55
+for (const d of dirs) position += step(d)
+console.log(position, dirs.map(opposite), dirs.includes("left"), dirs.indexOf("down"))
+const first: Dir = "left"
+console.log(first, `${first}!`, first.length, first.toUpperCase(), first == "left", first < "m")
+console.log(dirs.join("/"), [...dirs].sort(), JSON.stringify(dirs), String(opposite(first)))
+const longer: Dir | "center" = opposite("up")
+const plain: string = longer
+console.log(longer, plain + plain)
+
+// In objects, arrays and fields of classes.
+type Move = { dir: Dir; count: int }
+const moves: Move[] = [{ dir: "up", count: 2 }, { dir: "left", count: 1 }]
+console.log(moves, JSON.stringify(moves[0]))
+class Light {
+  state: "on" | "off" = "off"
+  flip() {
+    this.state = this.state == "on" ? "off" : "on"
+    return this.state
+  }
+}
+const light = new Light()
+console.log(light.flip(), light.flip(), light.flip(), light)
+
+// Number literal types are numbers.
+type Bit = 0 | 1
+const bits: Bit[] = [1, 0, 1, 1]
+let value = 0
+for (const b of bits) value = value * 2 + b
+const flip = (b: Bit): Bit => (b == 0 ? 1 : 0)
+console.log(value, bits.map(flip), bits.includes(0))
+type Level = -1 | 0 | 1
+function compare(a: int, b: int): Level {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+console.log(compare(1, 2), compare(2, 2), compare(3, 2))
+
+// A default value of a literal type, and an optional one.
+function go(d: Dir = "up", note?: "fast" | "slow") {
+  return `${d}${note ? " " + note : ""}`
+}
+console.log(go(), go("down"), go("left", "slow"))

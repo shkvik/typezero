@@ -1,0 +1,30 @@
+// Dictionaries of unions: counts by kind in a Record with literal keys, a Map
+// with keys of a union, and values of unions with dates and dictionaries.
+import { err, ok, Result } from "neverthrow"
+import { Figure, Kind } from "./shapes.ts"
+
+export function byKind(figures: Figure[]): Record<Kind, int> {
+  const counts: Record<Kind, int> = { circle: 0, rect: 0 }
+  for (const f of figures) counts[f.kind] += 1
+  return counts
+}
+
+// Keys of strings and numbers: one key for each value, by its member.
+export function distinct(keys: (string | int)[]): Set<string | int> {
+  return new Set(keys)
+}
+
+export type Stamp = Date | string | Map<string, int>
+
+export function when(s: Stamp): string {
+  if (s instanceof Date) return s.toISOString().slice(0, 10)
+  if (s instanceof Map) return `${s.size} marks`
+  return s
+}
+
+// The first value of a kind, or why there is none.
+export function first<T>(items: T[], ok_: (x: T) => boolean): Result<T, "empty" | "none"> {
+  if (items.length == 0) return err("empty")
+  for (const x of items) if (ok_(x)) return ok(x)
+  return err("none")
+}

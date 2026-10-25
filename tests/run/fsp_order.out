@@ -1,0 +1,13 @@
+immediate 1
+immediate 2
+immediate 3
+read content
+immediate a
+immediate b
+written
+microtask after stat
+tick after stat
+immediate after stat
+timeout 0
+more more true
+end

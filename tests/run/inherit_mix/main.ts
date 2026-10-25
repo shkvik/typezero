@@ -1,0 +1,48 @@
+// Inheritance together with the rest of the language: virtual calls on
+// instances from another file in arrays, Results and generic values, an
+// overridden generator method, overloaded generator methods, instanceof in
+// iterator helpers, regexes in static and subclass fields, JSON.stringify of
+// subclass instances (the fields of the base first, as node writes them) and
+// JSON.parse into an interface of fields only.
+import { Circle, Named, Rect, Shape, largest } from "./shapes"
+
+function hold<T>(value: T) {
+  return { value }
+}
+
+class Counter {
+  *steps(n: int) {
+    for (let i = 1; i <= n; i++) yield i
+  }
+  *steps(text: string) {
+    for (const c of text) yield c.length
+  }
+}
+
+class Backwards extends Counter {
+  *steps(n: int) {
+    for (let i = n; i >= 1; i--) yield i
+  }
+}
+
+const shapes: Shape[] = [new Rect(2, 3), new Circle(1), new Rect(1, 1)]
+console.log(shapes.map(s => s.describe()), largest(shapes).map(s => s.describe()))
+for (const s of shapes) console.log([...s.corners()].join(", "))
+console.log(largest([]), Rect.parse("4x5").map(r => r.area()), Rect.parse("4 by 5"))
+
+const kept = hold(shapes[1])
+console.log(kept, kept.value instanceof Circle, kept.value instanceof Rect)
+const parsed = Rect.parse("2x8")
+if (parsed.isOk()) {
+  const r = parsed.value
+  console.log(r.label.exec("rect 2x8")?.[0], r.scale(2).area(), r.scale(decimal(0.5)).area())
+}
+console.log(shapes.values().filter(s => s instanceof Rect).map(s => s.area()).toArray())
+
+const counters: Counter[] = [new Counter(), new Backwards()]
+for (const c of counters) console.log([...c.steps(3)], [...c.steps("ab")])
+
+console.log(JSON.stringify(shapes[0]), JSON.stringify(new Circle(2)))
+const named = JSON.parse<Named>('{"name": "from json", "extra": 1}')
+const asNamed: Named = new Circle(3)
+console.log(named, asNamed.name)

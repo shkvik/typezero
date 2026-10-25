@@ -1,0 +1,25 @@
+Box { value: 1 } Box { value: 'hi' } 2 HI
+Box { value: 2.5 } 2 yo
+1.5 0
+Box { value: Box { value: [ 1, 2 ] } } 2
+3 2 2 a Stack { items: [ 1, 2 ] } Stack { items: [ 'a' ] }
+2 true true
+60 IntStack { items: [ 10, 20, 30 ] } true true 3
+(1, one)
+n (2, two)
+Named { first: 2, second: 'two', name: 'n' } Pair { first: 1.5, second: true }
+cat makes a sound
+rex plays with a ball
+tom plays with 3
+2 1 { name: 'bob', age: 25 } undefined
+Cell { value: 5 } Cell { value: 'x' } Cell { value: [ 1 ] } Cell { value: Cell { value: 5 } } 4
+box 5
+stack 2
+string 4
+3 Wallet {}
+bad
+square: 4.0
+circle: 3.1
+7: 12.6
+4 {"value":"root","children":[{"value":"a","children":[{"value":"b","children":[]}]},{"value":"c","children":[]}]}
+Map(1) { 'k' => Pair { first: 1, second: 2 } }

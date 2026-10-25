@@ -1,0 +1,17 @@
+// same-as-node
+// TextDecoder of the old single-byte encodings (docs/bytes.md, section 5):
+// the tables of those named in the code are built into the program, and a
+// label known only when it runs brings all of them.
+const high = new Uint8Array(128)
+for (let i = 0; i < high.length; i++) high[i] = 0x80 + i
+const labels = ["windows-1251", "koi8-r", "ibm866", "iso-8859-2", "macintosh", "x-mac-cyrillic",
+                "windows-1253", "iso-8859-8-i", "windows-874", "x-user-defined", "latin1"]
+for (const label of labels) {
+  const decoder = new TextDecoder(label)
+  console.log(decoder.encoding, JSON.stringify(decoder.decode(high.subarray(0x40))))
+}
+const cyrillic = new TextDecoder("cp1251")
+console.log(cyrillic.encoding, cyrillic.decode(new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2])))
+console.log(new TextDecoder("KOI8-U").decode(new Uint8Array([0xf0, 0xd2, 0xc9, 0xd7, 0xa6, 0xd4])))
+console.log(JSON.stringify(new TextDecoder("windows-1253").decode(new Uint8Array([0x41, 0xaa, 0x42]))))
+console.log(new TextDecoder(" Windows-1252 ").encoding, new TextDecoder("ascii").decode(new Uint8Array([0x80, 0x41])))

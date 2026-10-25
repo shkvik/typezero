@@ -1,0 +1,18 @@
+Headers { 'Content-Type': 'text/plain', 'X-A': '1, 2' }
+[ [ 'content-type', 'text/plain' ], [ 'x-a', '1, 2' ] ] 1, 2 (none) true
+Headers { 'X-A': '3' } 3 true
+a=1, b=2 [ 'a=1', 'b=2' ] */*
+[ 'accept', 'set-cookie', 'set-cookie' ] [ '*/*', 'a=1', 'b=2' ] [
+  [ 'accept', '*/*' ],
+  [ 'set-cookie', 'a=1' ],
+  [ 'set-cookie', 'b=2' ]
+]
+accept=*/*
+set-cookie=a=1
+set-cookie=b=2
+*/* Headers {}
+TypeError Headers.append: "bad name" is an invalid header name.
+TypeError Headers.append: "" is an invalid header name.
+TypeError Headers.append: "ü" is an invalid header name.
+TypeError Headers.set: "a
+b" is an invalid header value.

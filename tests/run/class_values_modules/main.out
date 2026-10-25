@@ -1,0 +1,2 @@
+Note { text: 'a', tag: 'tagged' } Note { text: 'b', tag: 'tagged', serial: 1 } a [tagged] b [tagged] 1 1
+[ 'tagged', 'tagged' ] 2

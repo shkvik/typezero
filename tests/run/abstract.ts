@@ -1,0 +1,75 @@
+// same-as-node --experimental-transform-types
+// Abstract classes and methods: an abstract method has no body, and every
+// class that can be created implements it. Its return type, when it declares
+// none, is that of the first implementation; an implementation that declares
+// none returns what the abstract method returns (Rect.area multiplies ints
+// and returns a double).
+abstract class Shape {
+  static made = 0
+  constructor(public kind: string) {
+    Shape.made++
+  }
+  abstract area(): double
+  abstract perimeter()
+  describe() {
+    return `${this.kind}: area ${this.area().toFixed(2)}, perimeter ${this.perimeter().toFixed(2)}`
+  }
+}
+
+class Circle extends Shape {
+  constructor(public r: double) {
+    super("circle")
+  }
+  area() {
+    return Math.PI * this.r ** 2
+  }
+  perimeter() {
+    return 2 * Math.PI * this.r
+  }
+}
+
+class Rect extends Shape {
+  constructor(public w: int, public h: int) {
+    super("rect")
+  }
+  area() {
+    return this.w * this.h
+  }
+  perimeter() {
+    return 2.0 * (this.w + this.h)
+  }
+}
+
+class Square extends Rect {
+  constructor(side: int) {
+    super(side, side)
+    this.kind = "square"
+  }
+  describe() {
+    return `[${super.describe()}]`
+  }
+}
+
+const shapes: Shape[] = [new Circle(1), new Rect(2, 3), new Square(4)]
+let total = 0.0
+for (const s of shapes) {
+  console.log(s.describe())
+  total += s.area()
+}
+console.log(total.toFixed(3), Shape.made)
+console.log(shapes)
+
+// An abstract method with one implementation: calls go straight to it.
+abstract class Greeter {
+  abstract greet(name: string): string
+  twice(name: string) {
+    return `${this.greet(name)} ${this.greet(name)}`
+  }
+}
+class Hello extends Greeter {
+  greet(name: string) {
+    return `hello ${name}`
+  }
+}
+const g: Greeter = new Hello()
+console.log(g.twice("Ann"), g instanceof Greeter)

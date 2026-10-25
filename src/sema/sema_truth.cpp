@@ -125,7 +125,10 @@ bool isLiteral(const Expr *expr) {
 // an array, a function or an object.
 const Type *falsyType(const Type *type) {
   const Type *base = type->nonOptional();
-  return base->isArray() || base->isFunction() || base->isObject() ? Type::undefinedTy() : type;
+  return base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
+                 base->isDict()
+             ? Type::undefinedTy()
+             : type;
 }
 
 } // namespace
@@ -143,6 +146,15 @@ Expr *Sema::checkBranching(Expr *expr, Flow &whenTrue, Flow &whenFalse, TruthUse
     bool isAnd = bin->op == BinaryOp::LogAnd;
     Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
     bin->lhs = checkBranching(bin->lhs, lhsTrue, lhsFalse);
+    // `typeof x == "string" && x.length > 0` in an instance where x is a
+    // number: the right side never runs, and was written for other types.
+    if (std::optional<bool> constant = checkingInstance_ ? constantCondition(bin->lhs) : std::nullopt;
+        constant && *constant != isAnd) {
+      whenTrue = lhsTrue;
+      whenFalse = lhsFalse;
+      flow_ = join(whenTrue, whenFalse);
+      return bin->lhs;
+    }
     flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
     bin->rhs = checkBranching(bin->rhs, rhsTrue, rhsFalse);
     whenTrue = isAnd ? rhsTrue : join(lhsTrue, rhsTrue);
@@ -216,7 +228,8 @@ Expr *Sema::checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue, 
   const Expr *other = isAssign ? cast<AssignExpr>(bin->rhs)->value : bin->rhs;
 
   Flow lhsTrue, lhsFalse, rhsTrue, rhsFalse;
-  bin->lhs = checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use);
+  // `T extends string` is tested, and given, as a string.
+  bin->lhs = apparent(checkTestedValue(bin->lhs, expected, lhsTrue, lhsFalse, use));
   bool ok = checkTruthy(bin->lhs, use, other);
   const Type *l = bin->lhs->type;
   flow_ = isAnd ? lhsTrue : lhsFalse; // the right side runs only then
@@ -272,10 +285,46 @@ Expr *Sema::checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue, 
 }
 
 bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
-  const Type *type = expr->type, *base = type->nonOptional();
+  // A type parameter tests as its constraint: `T extends string` as a string.
+  const Type *type = expr->type, *base = apparentType(type->nonOptional());
   if (type->isError() || base->isBool() || base->isString() ||
-      (type->isOptional() && (base->isArray() || base->isFunction() || base->isObject())))
+      (type->isOptional() &&
+       (base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
+        base->isIterator() || base->isDict() || base->isPromise())))
     return true;
+  // `T extends string | boolean`: none of them is a number.
+  if (base->isParam() && !base->alternatives().empty() &&
+      llvm::all_of(base->alternatives(), [](const Type *t) { return t->isBool() || t->isString(); }))
+    return true;
+  // A union or a literal type: if no member is a number, and some member
+  // (or undefined) may be falsy.
+  if (base->isUnion() || base->isLiteral()) {
+    llvm::ArrayRef<const Type *> members =
+        base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
+    const Type *number = nullptr;
+    bool falsy = type->isOptional();
+    for (const Type *m : members) {
+      const Type *b = m->isLiteral() ? m->literalBase() : m;
+      if (b->isNumeric() || b->isDecimal() || b->isParam() || b->isJson())
+        number = m;
+      bool empty = m->isStringLiteral() ? m->literalText().empty() : m->literalNumber() == 0;
+      if (m->isLiteral() ? empty : b->isBool() || b->isString())
+        falsy = true;
+    }
+    if (!number && falsy)
+      return true;
+    if (!number) {
+      diags_.error(expr->loc(), "a value of type '" + type->name().str() +
+                                    "' is always truthy, so the condition is always true");
+      return false;
+    }
+    diags_.error(expr->loc(), "a value of type '" + type->name().str() +
+                                  "' cannot be a condition: '" + number->name().str() +
+                                  "' is a number, and 0 would count as false; check what it "
+                                  "holds, e.g. 'typeof " +
+                                  hintText(expr) + " == \"string\"'");
+    return false;
+  }
 
   const char *op = nullptr;
   switch (use) {
@@ -293,8 +342,52 @@ bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
   if (type->isVoid() || type->isUndefined()) {
     message = type->isVoid() ? "an expression of type 'void' has no value to test"
                              : "the value is always undefined, which is always falsy";
-  } else if (base->isNumeric()) {
-    std::string what = type->isOptional() ? "a number that may be undefined" : "a number";
+  } else if (base->isParam()) {
+    // An instance may make it a number, where `firstOr([0, 5], 9)` would
+    // give 9.
+    std::string what = "a value of type '" + type->name().str() + "'";
+    message = op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
+    message += ": '" + base->name().str() + "' may be a number, and 0 would count as false; ";
+    if (use == TruthUse::Or)
+      message += "give a default with '??': '" + x + " ?? " + y + "'";
+    else if (use == TruthUse::OrAssign)
+      message += "give a default with '??=': '" + x + " ??= " + y + "'";
+    else if (use == TruthUse::AndAssign)
+      message += "check for undefined: 'if (" + x + " != undefined) " + x + " = " + y + "'";
+    else
+      message += "check for undefined: '" + x + (negated ? " == " : " != ") + "undefined'";
+  } else if (base->isJson()) {
+    // Any value of JavaScript but undefined: 0, "", false and null are false.
+    message = op ? "'" + std::string(op) + "' cannot test a Json" : "a Json cannot be a condition";
+    message += ": it may hold 0, \"\", false or null, which would count as false; ";
+    if (use == TruthUse::Or)
+      message += "give a default with '??', which replaces null and undefined: '" + x + " ?? " + y +
+                 "'";
+    else if (use == TruthUse::OrAssign)
+      message += "give a default with '??=': '" + x + " ??= " + y + "'";
+    else
+      message += "compare it as you mean, e.g. '" + x + (negated ? " == null'" : " != null'") +
+                 ", '" + x + (negated ? " != true'" : " == true'") + " or 'typeof " + x +
+                 " == \"string\"'";
+  } else if (base->isUnknown()) {
+    // It may hold a number, where 0 would count as false (docs/small.md).
+    message = op ? "'" + std::string(op) + "' cannot test an unknown value"
+                 : "an unknown value cannot be a condition";
+    message += ": it may hold 0, \"\" or false, which would count as false; ";
+    if (use == TruthUse::Or)
+      message += "give a default with '??': '" + x + " ?? " + y + "'";
+    else if (use == TruthUse::OrAssign)
+      message += "give a default with '??=': '" + x + " ??= " + y + "'";
+    else
+      message += "check what it holds, e.g. '" + x + (negated ? " == undefined'" : " != undefined'") +
+                 " or 'typeof " + x + " == \"string\"'";
+  } else if (base->isResult()) {
+    // An Err is an object too: `if (save())` would never see the error.
+    message = "a Result is always truthy, an Err too, as both are objects in JavaScript; test "
+              "it: '" + x + (negated ? ".isErr()'" : ".isOk()'");
+  } else if (base->isNumeric() || base->isDecimal()) {
+    std::string noun = base->isDecimal() ? "a decimal" : "a number";
+    std::string what = type->isOptional() ? noun + " that may be undefined" : noun;
     message = op ? "'" + std::string(op) + "' cannot test " + what : what + " cannot be a condition";
     message += base->isFloat() ? ": 0 and NaN would count as false" : ": 0 would count as false";
     if (type->isOptional()) {
@@ -327,8 +420,13 @@ bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
   } else {
     // An array, a function or an object, which is always truthy.
     const NameExpr *narrowed = narrowedVariable(expr);
-    bool isArray = base->isArray(), isObject = base->isObject();
-    const char *what = isArray ? "an array" : isObject ? "an object" : "a function";
+    bool isArray = base->isArray(), isPromise = base->isPromise(),
+         isObject = base->isObject() || base->isIterator() || base->isDict() ||
+                    base->isClassRef() || isPromise;
+    const char *what = isArray     ? "an array"
+                       : isPromise ? "a Promise"
+                       : isObject  ? "an object"
+                                   : "a function";
     if (narrowed)
       message = "'" + narrowed->name.str() + "' always holds " + what + " at this point";
     else
@@ -375,7 +473,7 @@ void Sema::reportAssignmentCondition(const AssignExpr *assign, TruthUse use) {
   const Type *type = assign->type;
   std::string message = "an assignment cannot be a condition; ";
   if (isLiteral(assign->value) || type->isError() ||
-      !(type->isOptional() || type->isNumeric() || type->isString())) {
+      !(type->isOptional() || type->isNumeric() || type->isDecimal() || type->isString())) {
     const char *eq = negated ? "!=" : "==";
     message += "to compare, use '" + std::string(eq) + "': '" + target + " " + eq + " " + value + "'";
   } else {

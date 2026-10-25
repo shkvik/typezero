@@ -21,9 +21,11 @@ length(p4)
 const p5 = { x: 1.0 }
 // expect-error: type '{ x: double }' is not assignable to type 'Point'; it has no field 'y'
 length(p5)
+// Where the object goes is not known: the array element is not the variable.
 const p6 = { x: 1, y: 2 }
+const many6 = [p6]
 // expect-error: field 'x' is 'int' here and 'double' in 'Point': give the object its type where it is created, e.g. 'const p: Point = { ... }'
-length(p6)
+length(many6[0]!)
 // expect-error: duplicate field 'x' in the object literal
 const twice = { x: 1, x: 2 }
 // expect-error: cannot infer the type of field 'none' from 'undefined'; declare the type of the object, e.g. 'const o: { none?: int } = ...'
@@ -44,8 +46,9 @@ p.z = 1
 p.toString()
 // expect-error: property 'hasOwnProperty' does not exist on type 'Point'; objects inherit nothing from Object.prototype
 p.hasOwnProperty("x")
-// expect-error: type 'Point' cannot be indexed; read a field by its name, e.g. 'o.name'
-console.log(p["x"])
+let key = "x"
+// expect-error: type 'Point' can be indexed only by a key known when compiling
+console.log(p[key])
 // expect-error: field 'x' is not a function; it has type 'double'
 p.x()
 
@@ -60,7 +63,8 @@ settings.port = 8080
 settings.port++
 const open: { port: int } = { port: 1 }
 const closed: Settings = open
-// expect-error: field 'port' is read-only here, and '{ port: int }' would let it be changed
+// Back to a type that lets code change it: allowed while no code does
+// (tests/errors/widen_readonly.ts).
 const reopened: { port: int } = closed
 
 // Nothing from Object.prototype: no implicit conversion to a string.
@@ -148,5 +152,5 @@ function afterLoop(n: Node): int {
 // expect-error: 'counter' is used in its own initializer, before it has a value
 const counter = { n: 0, inc: () => counter.n++ }
 const many: Point[] = [p]
-// expect-error: type '{ x: int; y: int }[]' is not assignable to type 'Point[]'; field 'x' is 'int' here and 'double' in 'Point'
-const ints: Point[] = many.map(q => ({ x: 1, y: 2 }))
+// expect-error: type 'string' is not assignable to type 'double' of field 'y'
+const ints: Point[] = many.map(q => ({ x: 1, y: "2" }))

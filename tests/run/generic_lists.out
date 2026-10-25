@@ -1,0 +1,22 @@
+-> add 1 2
+3
+-> greet
+-> greet
+hi, ann yo, bob
+-> sum
+-> sum 1 2 3
+0 6
+-> arrow ab 2
+abab
+#1true
+q3false
+call
+p2false
+13 103 3
+z9true 9
+3 0
+5 1
+1|a|2.5|true
+[ 1, 'b' ] 1
+1 2 x y z
+

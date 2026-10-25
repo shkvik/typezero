@@ -1,0 +1,43 @@
+at 0 0
+inner finally 0 0
+outer finally 0 0
+inner finally 0 1
+outer finally 0 1
+at 1 0
+inner finally 1 0
+outer finally 1 0
+inner finally 1 1
+outer finally 1 1
+inner finally 2 0
+outer finally 2 0
+one! no 2!
+finally sees 3
+ab-returned
+second
+from finally
+TypeError: new
+finally after catch
+caught x
+caught in a concatenation
+caught in a template
+caught in an array
+caught in an object
+caught in the arguments
+caught after a receiver
+caught in map
+caught in filter
+closure saw one
+closure saw two
+retry: try 1
+retry: try 2
+worked after 3
+got 0
+got 1
+stop at 2
+0
+next: stop at 1
+true
+generator caught inside
+generator finally
+[ 1, 2, 3 ]
+body at 1

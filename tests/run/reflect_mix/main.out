@@ -1,0 +1,31 @@
+User, Note
+true false x
+TypeError: new Note: expected 1 argument, got 2
+TypeError: new User: expected 2 arguments, got 1
+false true y
+function OKOKOK
+hi, bob
+hi, ann 30 true
+hi, cy 7 true
+a [ 't' ]
+ann
+bob
+cy
+[ 'first()', 'from(1)' ]
+note hello #1
+data 5
+note again #2
+2 true true 
+data 6
+data 7
+for await 6
+for await 7
+EventTarget AbortController User
+aborted true
+ping ping true
+tick with 3 classes
+port 80
+port 81
+closed
+port 82
+true [ 'listen(80)', 'listen(81)', 'stop()', 'listen(82)' ]

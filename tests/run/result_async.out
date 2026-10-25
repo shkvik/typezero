@@ -1,0 +1,18 @@
+Ok { value: 30 }
+Err { error: 'failed: no name' }
+Ok { value: 40 }
+Ok { value: '20 years' }
+Err { error: 15 }
+Ok { value: 30 }
+Ok { value: 21 }
+Ok { value: 0 }
+age 30
+error failed: no name
+-1 30
+tee saw 30
+Ok { value: 30 }
+Ok { value: 5 } Err { error: 'bad' }
+Ok { value: 30 }
+Ok { value: 30 } Err { error: 'no name' }
+Ok { value: 9 }
+Err { error: 'not positive' }

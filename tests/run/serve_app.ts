@@ -1,0 +1,34 @@
+// same-as-node
+// serve with the handler of an app as hono has it: `app.fetch`, a field
+// that holds an arrow `(request, env?, ctx?) => Response | Promise<Response>`,
+// with routes that answer at once or async.
+import { serve } from "tz:http"
+
+class Context {
+  req: Request
+  constructor(req: Request) {
+    this.req = req
+  }
+  text(s: string) { return new Response(s) }
+}
+class App {
+  #routes = new Map<string, (c: Context) => Response | Promise<Response>>()
+  get(path: string, handler: (c: Context) => Response | Promise<Response>) {
+    this.#routes.set(path, handler)
+    return this
+  }
+  fetch = (request: Request, env?: unknown, ctx?: unknown): Response | Promise<Response> => {
+    const handler = this.#routes.get(new URL(request.url).pathname)
+    if (handler == undefined) return new Response("404 Not Found", { status: 404 })
+    return handler(new Context(request))
+  }
+}
+const app = new App()
+app.get("/", c => c.text("Hello"))
+app.get("/async", async c => c.text(`async ${c.req.method}`))
+const server = serve({ port: 0, hostname: "127.0.0.1" }, app.fetch)
+for (const path of ["/", "/async", "/nope"]) {
+  const r = await fetch(`http://127.0.0.1:${server.port}${path}`)
+  console.log(r.status, await r.text())
+}
+await server.stop()

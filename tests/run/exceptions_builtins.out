@@ -1,0 +1,28 @@
+int / -> RangeError: Division by zero
+int % -> RangeError: Division by zero
+int ** -> RangeError: Division by zero
+long / -> RangeError: Division by zero
+x! -> TypeError: none is undefined
+reduce -> TypeError: Reduce of empty array with no initial value
+Math.round -> RangeError: 3000000000 does not fit in int
+Math.floor long -> RangeError: 30000000000000000000 does not fit in long
+parseInt -> RangeError: NaN does not fit in int
+new Array -> RangeError: Invalid array length
+length -> RangeError: Invalid array length
+grow by length -> RangeError: an array of arrays cannot grow by setting its length, which would leave elements without a value; use push()
+repeat -> RangeError: Invalid count value: -1
+fromCodePoint -> RangeError: Invalid code point -1
+toFixed -> RangeError: toFixed() digits argument must be between 0 and 100
+decimal / -> RangeError: Division by zero
+decimal % -> RangeError: Division by zero
+decimal parse -> SyntaxError: Cannot convert 12abc to a decimal
+decimal NaN -> RangeError: The number NaN cannot be converted to a decimal because it is not finite
+decimal sqrt -> RangeError: Square root of a negative decimal
+decimal size -> RangeError: Maximum decimal size exceeded
+decimal mode -> RangeError: unknown rounding mode 'sideways'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', 'half-ceil' and 'half-floor'
+take -> RangeError: -1 must be positive
+iterator reduce -> TypeError: Reduce of a done iterator with no initial value
+recursion -> RangeError: Maximum call stack size exceeded
+1
+after ok
+done

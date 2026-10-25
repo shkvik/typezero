@@ -1,0 +1,100 @@
+// same-as-node
+// Generic classes with async methods and Promise fields, with fields of the
+// runtime's types and unknown as a type argument; Iterable<T> parameters of
+// arrays, Sets, typed arrays, Buffers and Map iterators; a class with
+// [Symbol.iterator] in an async function; instances of a generic class in
+// unions, told apart by instanceof.
+function later<T>(value: T, ms: number): Promise<T> {
+  return new Promise(resolve => setTimeout(() => resolve(value), ms))
+}
+
+class Cache<T> {
+  pending: Promise<T> | undefined = undefined
+  items = new Map<string, T>()
+  load: (key: string) => Promise<T>
+  constructor(load: (key: string) => Promise<T>) {
+    this.load = load
+  }
+  async get(key: string): Promise<T> {
+    const known = this.items.get(key)
+    if (known != undefined)
+      return known
+    const value = await this.load(key)
+    this.items.set(key, value)
+    return value
+  }
+}
+const lengths = new Cache<int>(async k => {
+  await later(0, 1)
+  return k.length
+})
+console.log(await lengths.get("abc"), await lengths.get("abc"), lengths.items)
+
+class Holder<T> {
+  value: T
+  when = new Date(0)
+  pattern = /x+/g
+  bytes = Buffer.from("hi")
+  either: int | string = 1
+  constructor(value: T) {
+    this.value = value
+  }
+}
+console.log(new Holder<unknown>("anything"), new Holder(new Map<string, int>([["a", 1]])))
+const u: Holder<unknown> = new Holder<unknown>(5)
+console.log(typeof u.value)
+
+function total(xs: Iterable<int>): int {
+  let sum = 0
+  for (const x of xs)
+    sum += x
+  return sum
+}
+console.log(total([1, 2]), total(new Set([3, 4])), total(new Uint8Array([5, 6])), total(Buffer.from([7])),
+            total(new Map<string, int>([["a", 1]]).values()))
+
+class Range {
+  from: int
+  to: int
+  constructor(from: int, to: int) {
+    this.from = from
+    this.to = to
+  }
+  *[Symbol.iterator]() {
+    for (let i = this.from; i < this.to; i++)
+      yield i
+  }
+}
+async function walk() {
+  for (const i of new Range(1, 4)) {
+    await later(0, 1)
+    console.log("step", i)
+  }
+}
+await walk()
+
+class Box<T> {
+  value: T
+  constructor(value: T) {
+    this.value = value
+  }
+}
+const boxes: (Box<int> | Box<string>)[] = [new Box(1), new Box("s")]
+for (const b of boxes) {
+  const v = b.value
+  if (typeof v == "number")
+    console.log("int box", v + 1)
+  else
+    console.log("string box", v.toUpperCase())
+}
+console.log(boxes, boxes[0] instanceof Box)
+const mixed: Box<int> | Date = process.argv.length > 99 ? new Date(0) : new Box(41)
+if (mixed instanceof Box)
+  console.log(mixed.value + 1)
+else
+  console.log(mixed.getTime())
+const two: Box<int> | Holder<string> = process.argv.length > 99 ? new Holder("h") : new Box(2)
+if (two instanceof Holder)
+  console.log(two.value.length)
+else
+  console.log(two.value * 10)

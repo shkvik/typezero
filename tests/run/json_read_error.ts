@@ -1,0 +1,8 @@
+// same-as-node
+// Reading a key of undefined or null throws the TypeError of JavaScript;
+// `?.` gives undefined instead.
+// expect-exit: 1
+// expect-stderr: TypeError: Cannot read properties of undefined (reading 'name')
+const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}')
+console.log(j.users[0].name, j.users[1]?.name, j.owner?.name)
+console.log(j.users[1].name)

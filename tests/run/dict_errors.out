@@ -1,0 +1,13 @@
+forEach RangeError: too big: 3
+groupBy RangeError: too big: 3
+map groupBy RangeError: too big: 3
+new Map 2
+new Map throws RangeError: too big: 3
+new Set RangeError: too big: 3
+keys map RangeError: too big: 3
+values helper RangeError: too big: 3
+for of RangeError: too big: 3
+record RangeError: too big: 3
+fromEntries RangeError: too big: 3
+spread RangeError: too big: 5
+tuple RangeError: too big: 3

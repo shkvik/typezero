@@ -1,0 +1,87 @@
+// same-as-node
+// env: TZ=America/New_York
+// Reading date strings as V8 does: the ISO format of the standard (a date
+// with a time is local, without one UTC), and the other formats V8 reads.
+// The strings come from an array, so that tz cannot see them: written in a
+// call, the ones that are no date are compile errors (tests/errors/date.ts).
+const inputs: string[] = [
+  // ISO
+  "2026-10-23T10:00",
+  "2026-10-23T10:00:00.000Z",
+  "2026-10-23T10:00:00+06:00",
+  "2026-10-23T10:00:00.5-0330",
+  "2026-10-23t10:00z",
+  "2026-10-23T24:00",
+  "2026-10-23T24:01",
+  "2026-10-23",
+  "2026-10",
+  "2026",
+  "+275760-09-13T00:00:00Z",
+  "+275760-09-13T00:00:01Z",
+  "-000001-01-01T00:00Z",
+  "-000000-01-01T00:00Z",
+  "2026-10-23T10:00:00.123456789",
+  "2026-02-30T00:00",
+  "2026-13-01",
+  "2026-03-08T02:30",
+  "2026-11-01T01:30",
+  // What toString, toUTCString and toISOString write
+  "Fri Oct 23 2026 10:00:00 GMT+0600 (Kyrgyzstan Time)",
+  "Fri, 23 Oct 2026 10:00:00 GMT",
+  "Fri Oct 23 2026",
+  // Other formats
+  "2026/10/23",
+  "2026/10/23 10:00",
+  "10/23/2026",
+  "10/23/2026 10:00 PM",
+  "10/23",
+  "Oct 23 2026 10:00",
+  "October 23, 2026 10:00:00",
+  "23 Oct 2026",
+  "23 October 2026 10:00 UTC",
+  "2026-10-23 10:00",
+  "2026-10-23 10:00:00 Z",
+  "Oct 23 2026 10:00 GMT+0600",
+  "Oct 23 2026 10:00 GMT+6",
+  "Oct 23 2026 10:00 EST",
+  "Oct 23 2026 10:00 PDT",
+  "Oct 23 2026 12:00 AM",
+  "Oct 23 2026 12:30 pm",
+  "Oct 23 2026 13:00 PM",
+  "Oct 23 49",
+  "Oct 23 50",
+  "Oct 23 99",
+  "Oct 23 100",
+  "on Friday, Oct 23 2026",
+  "Oct 23 2026 (a comment (nested)) 10:00",
+  "23.10.2026",
+  "10.23.2026",
+  "10:00 Oct 23 2026",
+  "Oct 23 2026 10::",
+  "Oct 23 2026 10:00:00.5",
+  "",
+  " ",
+  "garbage",
+  "2026",
+  "1",
+  "12",
+  "Oct",
+  "23 10 2026",
+  "2026 10 23",
+  "Oct 32 2026",
+  "Feb 29 2027",
+  "-2026-10-23",
+  "+2026-10-23",
+  "2026-10-23T10:00:00GMT",
+  "2026-10-23T10:00:00 GMT",
+  "Fri Oct 23 2026 10:00:00 GMT+0600 extra",
+]
+for (const s of inputs) {
+  const t = Date.parse(s)
+  const d = new Date(s)
+  console.log(quoted(s), t, d.getTime() == t || (isNaN(t) && isNaN(d.getTime())), d)
+}
+
+function quoted(s: string): string {
+  return `"${s}"`
+}

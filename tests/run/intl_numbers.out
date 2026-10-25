@@ -1,0 +1,165 @@
+1 234 567,891
+1 500,00 ₽
+1,234,567.891 1.234.567,891
+123,456,789,012 9 007 199 254 740 992
+0.30000000000000004
+1,000,000,000,000,000,000,000 0.00000015
+не число ∞ -∞
+25.6%
+1.2 million
+1.2K 12K
+￥5,000
+1.00 US dollars
+EUR 9.99
+($1.00)
+12,34,56,789 ١٬٢٣٤٫٥
+123.456E3 1.23E-4
+50 km/h
+12.5MB
+1 liter per kilometer
+21 километр
+007
+0 +5
+2
+2
+5
+1.2
+1.23
+1.25
+1234 12,345
+05
+๑๒ ١٢
+[
+  { type: 'minusSign', value: '-' },
+  { type: 'currency', value: '$' },
+  { type: 'integer', value: '1' },
+  { type: 'group', value: ',' },
+  { type: 'integer', value: '234' },
+  { type: 'decimal', value: '.' },
+  { type: 'fraction', value: '50' }
+]
+[ { type: 'nan', value: 'NaN' } ] [ { type: 'minusSign', value: '-' }, { type: 'infinity', value: '∞' } ]
+[
+  { type: 'minusSign', value: '-' },
+  { type: 'integer', value: '1' },
+  { type: 'decimal', value: '.' },
+  { type: 'fraction', value: '23' },
+  { type: 'exponentSeparator', value: 'E' },
+  { type: 'exponentMinusSign', value: '-' },
+  { type: 'exponentInteger', value: '4' }
+]
+[ { type: 'integer', value: '12' }, { type: 'compact', value: 'K' } ]
+[
+  { type: 'integer', value: '50' },
+  { type: 'literal', value: ' ' },
+  { type: 'unit', value: 'km/h' }
+]
+[
+  { type: 'plusSign', value: '+' },
+  { type: 'integer', value: '25' },
+  { type: 'percentSign', value: '%' }
+]
+{
+  locale: 'en',
+  numberingSystem: 'latn',
+  style: 'decimal',
+  minimumIntegerDigits: 1,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 3,
+  useGrouping: 'auto',
+  notation: 'standard',
+  signDisplay: 'auto',
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'auto',
+  trailingZeroDisplay: 'auto'
+}
+{
+  locale: 'en-US',
+  numberingSystem: 'latn',
+  style: 'currency',
+  currency: 'USD',
+  currencyDisplay: 'symbol',
+  currencySign: 'standard',
+  minimumIntegerDigits: 1,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: 'auto',
+  notation: 'standard',
+  signDisplay: 'auto',
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'auto',
+  trailingZeroDisplay: 'auto'
+}
+{
+  locale: 'en',
+  numberingSystem: 'latn',
+  style: 'decimal',
+  minimumIntegerDigits: 1,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+  minimumSignificantDigits: 1,
+  maximumSignificantDigits: 2,
+  useGrouping: 'min2',
+  notation: 'compact',
+  compactDisplay: 'short',
+  signDisplay: 'auto',
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'morePrecision',
+  trailingZeroDisplay: 'auto'
+}
+{
+  locale: 'en',
+  numberingSystem: 'latn',
+  style: 'decimal',
+  minimumIntegerDigits: 1,
+  minimumSignificantDigits: 1,
+  maximumSignificantDigits: 3,
+  useGrouping: false,
+  notation: 'standard',
+  signDisplay: 'auto',
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'auto',
+  trailingZeroDisplay: 'auto'
+}
+en-u-nu-arab
+en
+always
+min2
+0
+NumberFormat [Intl.NumberFormat] {} 1
+[ '1.234,6', '0', '-7' ] [ '1', '22', '333' ]
+98.765,4 [Function (anonymous)]
+1:one 2:two 3:few 4:other 11:other 12:other 13:other 21:one 22:two 23:few 101:one
+other one
+one few many other one
+zero two other
+[ 'one', 'few', 'many', 'other' ] [ 'zero', 'one', 'two', 'few', 'many', 'other' ]
+{
+  locale: 'en',
+  type: 'ordinal',
+  minimumIntegerDigits: 1,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 3,
+  pluralCategories: [ 'one', 'two', 'few', 'other' ],
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'auto',
+  trailingZeroDisplay: 'auto'
+}
+{
+  locale: 'en',
+  type: 'cardinal',
+  minimumIntegerDigits: 1,
+  minimumSignificantDigits: 2,
+  maximumSignificantDigits: 21,
+  pluralCategories: [ 'one', 'other' ],
+  roundingIncrement: 1,
+  roundingMode: 'halfExpand',
+  roundingPriority: 'auto',
+  trailingZeroDisplay: 'auto'
+}
+PluralRules [Intl.PluralRules] {}

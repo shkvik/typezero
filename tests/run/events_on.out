@@ -1,0 +1,11 @@
+1 one
+2 two
+3 three
+listeners after: 0 0
+got 4
+caught boom
+listeners after error: 0 0
+first 5
+listeners after break: 0
+aborted: AbortError
+once: AbortError TimeoutError

@@ -1,0 +1,59 @@
+top-level code
+  start
+    writes the listeners of stats (line 38)
+    reads  the abort signals (line 44)
+    reads  the state of server (line 58 in get)
+    in order with the arrow at line 44 after await at line 46: the listeners of stats
+    in order: line 38
+  after await at line 58
+    writes stdout (line 59)
+    reads  everything in any string[] (line 59)
+    reads  the state of server (line 60 in get)
+    parallel
+  after await at line 60
+    writes stdout (lines 60, 62)
+    reads  entries of counts (lines 61, 61 in the arrow at line 61)
+    reads  elements of any string[] (line 61)
+    reads  everything in seen (line 62)
+    reads  stats.served (line 62)
+    reads  registry.sessions (line 62)
+    reads  entries of any Map<string, Session> (line 62)
+    writes the abort signals (line 63)
+    in order with the arrow at line 44 after await at line 46: entries of any Map<string, Session>, entries of counts, stats.served
+    in order: lines 61-62
+
+async arrow, line 44
+  start (in the callbacks at line 44)
+    reads  the state of any Request (line 45)
+    reads  the state of the URL made at line 45 (line 45)
+    parallel
+  after await at line 46 (in the callbacks at line 44)
+    reads  entries of counts (line 47)
+    writes entries of counts (line 47)
+    reads  stats.served (line 48 in Stats.hit)
+    writes stats.served (line 48 in Stats.hit)
+    reads  the listeners of stats (line 48 in Stats.hit)
+    reads  entries of any Map<string, Session> (line 49 in Registry.open)
+    writes entries of any Map<string, Session> (line 49 in Registry.open)
+    reads  peer of any Session (line 50)
+    writes peer of any Session (line 49 in Registry.open)
+    reads  registry.sessions (line 49 in Registry.open)
+    writes session.peer (line 49 in Registry.open)
+    in order with the same piece in other tasks: entries of any Map<string, Session>, entries of counts, peer of any Session, session.peer, stats.served
+    in order with the start of the top-level code: the listeners of stats
+    in order with the top-level code after await at line 60: entries of any Map<string, Session>, entries of counts, stats.served
+    in order: lines 47-50
+
+async function get, line 53
+  start: runs inside its caller
+    reads  the state of server (line 54)
+  after await at line 54
+    in the tasks of get at line 58:
+      parallel
+    in the top-level code:
+      parallel
+  after await at line 55
+    in the tasks of get at line 58:
+      parallel
+    in the top-level code:
+      parallel

@@ -1,0 +1,102 @@
+// same-as-node
+// The compiler warns where an int may overflow (docs/small.md, section 6):
+// int arithmetic wraps around at run time, where JavaScript's numbers go on.
+// It knows the ranges of values over the whole program, and warns where a
+// value from outside may make an int too large, or a counter grows in a loop
+// without a bound; where it can show that the value fits, it is silent.
+// The values here are small, so the program prints what node prints.
+import { readLine } from "tz:io"
+
+// Values from outside: input, parseInt, JSON.
+const text = readLine() ?? "[1, 2, 3]"
+const prices = JSON.parse<int[]>(text)
+let sum = 0
+// expect-warning: 'sum += p' may overflow int: 'p' comes from JSON on line 12; declare it as 'let sum: long = 0'
+for (const p of prices) sum += p
+let wide: long = 0
+for (const p of prices) wide += p
+console.log(sum, wide)
+
+const seconds: int = parseInt(readLine() ?? "90")
+// expect-warning: 'seconds * 1000' may overflow int: 'seconds' comes from parseInt on line 20; compute it as a long: 'const ms: long = seconds * 1000'
+const ms = seconds * 1000
+console.log(ms)
+// A check before the operation keeps it within int.
+if (seconds >= 0 && seconds < 86400) console.log(seconds * 1000)
+// So does a function that checks (docs/narrowing.md, section 1).
+function isSmall(x: int) {
+  return x >= 0 && x < 1000
+}
+if (isSmall(seconds)) console.log(seconds * 1000)
+// Bounds from Math.min and Math.max, `%`, masks and charCodeAt.
+console.log(Math.max(0, Math.min(seconds, 1000)) * 1000, (seconds % 100) * 1000)
+console.log((seconds & 0xff) * 1000, text.charCodeAt(0) * 1000)
+// expect-warning: 'Math.min(seconds, 1000) * 1000' may overflow int: the result of 'Math.min(...)' comes from parseInt on line 20
+console.log(Math.min(seconds, 1000) * 1000)
+
+// All the calls of a function count; the one that passes a value from
+// outside is named.
+function scale(n: int): int {
+  // expect-warning: 'n * 1000' may overflow int: 'n' comes from parseInt on line 20, passed by the call on line 43
+  return n * 1000
+}
+console.log(scale(5), scale(60), scale(seconds))
+function triple(n: int): int {
+  return n * 3
+}
+console.log(triple(5), triple(700000000))
+
+// `| 0`, `>>> 0`, masks and shifts wrap around in JavaScript too: silent.
+let h = 0
+for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0
+console.log(h, (h * 7) >>> 0, (h << 5) ^ h)
+// Without them, a hash outgrows int after a few characters.
+let unsafe = 7
+// expect-warning: 'unsafe * 31' may overflow int: 'unsafe' grows with every pass of the loop on line 56
+for (const c of text) unsafe = unsafe * 31 + c.length
+console.log(unsafe < 0 || unsafe > 0)
+
+// Loops: what a loop adds up is bounded by its passes.
+let small = 0
+for (let i = 0; i < 1000; i++) small += i
+let large = 0
+// expect-warning: 'large += i' may overflow int: 'large' grows with every pass of the loop on line 64
+for (let i = 0; i < 100000; i++) large += i
+let squares = 0
+// expect-warning: 'i * i' may overflow int: it may reach 9999800001
+for (let i = 0; i < 100000; i++) squares = i * i
+console.log(small, large > 0, squares > 0)
+// A counter of a loop that only the input ends.
+let lines = 0
+// expect-warning: 'lines++' may overflow int: 'lines' grows with every pass of the loop on line 72, which has no bound; declare it as 'let lines: long = 0'
+while (readLine() != undefined) lines++
+let count: long = 0
+while (readLine() != undefined) count++
+console.log(lines, count)
+// A loop that its checks end.
+let k = 0
+while (true) {
+  k++
+  if (k * k > 50) break
+}
+console.log(k)
+
+// Callbacks run where they are passed: reduce adds up the elements.
+// expect-warning: 'total + p' may overflow int: 'p' comes from JSON on line 12
+console.log(prices.reduce((total, p) => total + p, 0), [1, 2, 3].map((x) => x * 1000))
+
+// Fields filled from JSON come from outside too.
+type Order = { id: int; count: int }
+const order = JSON.parse<Order>('{"id": 7, "count": 3}')
+// expect-warning: 'order.count * 1000' may overflow int: 'order.count' comes from JSON on line 90
+console.log(order.count * 1000, order.id)
+
+// In an async function too: an await is a point where other code runs,
+// and a value from outside stays one across it.
+async function scaled(text: string): Promise<int> {
+  const n: int = parseInt(text)
+  await undefined
+  // expect-warning: 'n * 1000' may overflow int: 'n' comes from parseInt
+  return n * 1000
+}
+console.log(await scaled("12"))

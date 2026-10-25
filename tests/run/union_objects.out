@@ -1,0 +1,20 @@
+circle a 3.14 circle of radius 1
+square b 4.00 square of side 2
+rect c 6.00 rect 2x3
+[
+  { kind: 'circle', r: 1, label: 'a' },
+  { kind: 'square', side: 2, label: 'b' },
+  { kind: 'rect', w: 2, h: 3, label: 'c' }
+]
+{"kind":"square","side":2,"label":"b"} object
+12.566370614359172 rect 1x1
+4 { kind: 'square', side: 1, label: 'd' }
+{ kind: 'circle', r: 1, label: 'first' }
+3
+[ 'rex fetches', 'tom meow', 'beep 7' ] [ 'woof', 'meow', 'beep 7' ]
+[ 'kit: meow', 'max: woof' ] [ Cat { name: 'kit' }, Dog { name: 'max' } ]
+value 42 error nope
+[ 1 ]
+3
+5
+-1 2 2

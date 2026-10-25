@@ -1,0 +1,128 @@
+// env: TZ=UTC
+// Dictionaries with the rest of the language, across files: in classes up a
+// chain and through an interface, as T of generic functions, inside
+// Result, with dates as keys (by reference) and values, filled from
+// generators, walked by iterator helpers, as JSON, and with what node:fs and
+// node:path give; and the errors thrown on the way, with nothing left.
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { extname, join } from "node:path"
+import { tmpdir } from "node:os"
+import { err, ok, Result } from "neverthrow"
+import { Inventory, Ledger, Priced, Shop } from "./stock.ts"
+
+// 1. Classes up a chain and an interface.
+const shop = new Shop()
+shop.add("pen", 3, "office", "cheap")
+shop.add("ink", 2, "office")
+shop.add("pen", 1)
+shop.prices.pen = 1.5
+shop.prices["ink"] = 4
+console.log(shop.value(), shop.counts, shop.tags)
+const priced: Priced = shop
+console.log(priced.price("ink"), Object.keys(priced.prices).join())
+const inventories: Inventory[] = [shop, new Inventory()]
+console.log(inventories.map((i) => i.counts.size).join())
+try {
+  shop.add("pad", 1)
+  console.log(shop.value())
+} catch (e) {
+  console.log(e instanceof TypeError, e.message)
+}
+try {
+  shop.take("ink", 5)
+} catch (e) {
+  console.log(`${e}`)
+}
+console.log(shop.take("pad", 1), shop.counts.has("pad"), shop)
+
+// 2. Generic code: dictionaries as T, and keys and values of any type.
+function tally<T>(items: T[]): Map<T, int> {
+  const m = new Map<T, int>()
+  for (const x of items) m.set(x, (m.get(x) ?? 0) + 1)
+  return m
+}
+function top<K>(m: Map<K, int>): K | undefined {
+  let best: K | undefined = undefined
+  let most = -1
+  for (const [k, n] of m)
+    if (n > most) {
+      best = k
+      most = n
+    }
+  return best
+}
+function keysOf<V>(r: Record<string, V>): string[] {
+  return Object.keys(r)
+}
+console.log(tally(["a", "b", "a"]), top(tally([3, 1, 3, 3])), keysOf(shop.tags).join())
+console.log(top(tally([true, false, false])), tally<decimal>([1.5, 1.50, 2]).size)
+
+// 3. Result: a value found, or why not.
+function find(r: Record<string, decimal>, name: string): Result<decimal, string> {
+  const p = r[name]
+  return p == undefined ? err(`no '${name}'`) : ok(p)
+}
+for (const name of ["pen", "cup"]) {
+  const r = find(shop.prices, name)
+  console.log(r.isOk() ? `${name} costs ${r.value}` : r.error)
+}
+const counted: Result<Map<string, int>, string> = ok(tally(["x", "x"]))
+console.log(counted.map((m) => m.get("x") ?? 0).unwrapOr(-1))
+
+// 4. Dates: keys by reference, values, sorted by time; JSON writes the ISO
+// texts of a Record and nothing of a Map or a Set.
+const ledger = new Ledger()
+const monday = new Date(Date.UTC(2026, 9, 26))
+const sameDay = new Date(monday.getTime())
+ledger.note(monday, "open")
+ledger.note(monday, "count")
+ledger.note(sameDay, "audit")
+ledger.closed.add(sameDay)
+console.log(ledger.byDay.size, ledger.byDay.get(monday)?.join(), ledger.closed.has(monday))
+const due: Record<string, Date> = { rent: new Date(Date.UTC(2026, 10, 1)), tax: monday }
+const order = Object.entries(due).sort((a, b) => a[1].getTime() - b[1].getTime())
+console.log(order.map(([k]) => k).join(), JSON.stringify(due), JSON.stringify(ledger))
+console.log(ledger)
+
+// 5. Generators and iterator helpers fill and walk them.
+function* stockOf(names: string[]): Generator<[string, int]> {
+  let i = 0
+  for (const n of names) yield [n, ++i * 10]
+}
+const stock = new Map(stockOf(["a", "b", "c"]))
+const big = new Set(
+  stock
+    .entries()
+    .filter(([, n]) => n > 10)
+    .map(([k]) => k),
+)
+console.log(stock, big, [...stock.values()].reduce((a, b) => a + b, 0))
+function* checked(names: string[]): Generator<[string, int]> {
+  for (const n of names) {
+    if (n.length > 3) throw new RangeError(`name too long: ${n}`)
+    yield [n, n.length]
+  }
+}
+try {
+  console.log(new Map(checked(["ab", "abcd"])).size)
+} catch (e) {
+  console.log(e.message)
+}
+
+// 6. JSON.parse into a Record: checked, and the errors thrown.
+for (const text of ['{"a": 1, "b": 2}', '{"a": 1, "b": "two"}', "[1]"]) {
+  try {
+    const r = JSON.parse<Record<string, int>>(text)
+    console.log(r, Object.values(r).reduce((x, y) => x + y, 0))
+  } catch (e) {
+    console.log(`${e}`)
+  }
+}
+
+// 7. What node:fs and node:path give, grouped.
+const dir = mkdtempSync(join(tmpdir(), "tz-dict-mix-"))
+for (const f of ["a.ts", "b.ts", "c.md"]) writeFileSync(join(dir, f), f)
+const byExt = Map.groupBy(readdirSync(dir), (f) => extname(f))
+const byFirst = Object.groupBy(readdirSync(dir, { withFileTypes: true }), (e) => e.name[0] ?? "")
+console.log(byExt, Object.entries(byFirst).map(([k, es]) => `${k}:${es?.map((e) => e.name)}`).join())
+rmSync(dir, { recursive: true })

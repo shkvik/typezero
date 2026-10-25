@@ -1,0 +1,26 @@
+// same-as-node
+// Generic functions declared in another file use that file's imports of
+// node:path, node:os and node:fs, whichever file makes their copies (the
+// entry here, which that file imports in turn), and so does a generic of the
+// entry copied in a file that runs before it.
+import { posix } from "node:path"
+import { early } from "./early.ts"
+import { extensions, firstName, joiner, kinds, label, lines } from "./paths.ts"
+
+export function pick<T>(items: T[]): T {
+  return items[items.length - 1]!
+}
+
+export function pickName<T>(items: T[], path: (x: T) => string): string {
+  return posix.basename(path(pick(items)))
+}
+
+console.log(label(1, "a/b", "c.txt"), label("x", "/tmp", "d.md"))
+console.log(extensions(["a.ts", "b.json", "c"], (s) => s).join())
+console.log(extensions([{ file: "x.tar.gz" }], (o) => o.file).join())
+console.log(firstName([1, 2], (n) => `/data/${n}.csv`))
+const inDocs = joiner("docs")
+console.log(inDocs("readme.md"), joiner(7)("x"))
+console.log(lines([1, 2, 3]), lines(["a"]))
+console.log(kinds([".", "./no/such/file"], (p) => p).join())
+console.log(early, pickName([3], (n) => `/q/${n}.txt`))

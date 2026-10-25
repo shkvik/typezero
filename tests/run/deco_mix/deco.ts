@@ -1,0 +1,53 @@
+// Decorators of a library, used by the classes of model.ts: they log and
+// retry methods (async ones too), and record metadata that functions of
+// this file read back for classes declared elsewhere.
+
+export const calls = new Map<string, int>()
+
+export function Log<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, R>) {
+  const original = method.value
+  method.value = function (this: unknown, ...args: A): R {
+    calls.set(name, (calls.get(name) ?? 0) + 1)
+    console.log(`> ${name}(${args.join(", ")})`)
+    return original.apply(this, args)
+  }
+}
+
+// Tries an async method again, three times in all.
+export function Retry<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, Promise<R>>) {
+  const original = method.value
+  method.value = async function (this: unknown, ...args: A): Promise<R> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await original.apply(this, args)
+      } catch (e: unknown) {
+        if (!(e instanceof Error) || attempt >= 3)
+          throw e
+        console.log(`${name}: ${e.message}, try ${attempt + 1}`)
+      }
+    }
+  }
+}
+
+export function Entity(table: string) {
+  return (cls: object) => Reflect.defineMetadata(Entity, table, cls)
+}
+
+export function Column(cls: object, name: string) {
+  const names: string[] = Reflect.getOwnMetadata(Column, cls) ?? []
+  names.push(name)
+  Reflect.defineMetadata(Column, names, cls)
+}
+
+export function tableOf(cls: object): string {
+  return Reflect.getMetadata(Entity, cls) ?? "?"
+}
+
+export function columnsOf(cls: object): string[] {
+  return Reflect.getMetadata(Column, cls) ?? []
+}
+
+// What the compiler wrote for a member: the constructor of its type.
+export function designOf(cls: object, name: string): unknown {
+  return Reflect.getMetadata("design:type", cls, name)
+}

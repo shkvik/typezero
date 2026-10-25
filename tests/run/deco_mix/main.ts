@@ -1,0 +1,78 @@
+// Decorators, metadata and unknown with the rest of the language, across
+// files: decorators of one file on the classes of another, on async and
+// overridden methods, read back by a third; design:* records of members of
+// union, literal, Promise and byte types; unknown holding promises,
+// dictionaries, dates, bytes and regexes, narrowed by typeof and instanceof;
+// unions in unknown; and `catch (e: unknown)`.
+import { calls, columnsOf, designOf, tableOf } from "./deco.ts"
+import { Admin, User } from "./model.ts"
+
+// 1. Decorated methods, async and overridden.
+const ann = new User("Ann", 30)
+const bob = new Admin("Bob", "forty")
+console.log(ann.greet("hi"))
+console.log(bob.greet("hello"))
+console.log(await ann.load(1), await bob.load(2))
+console.log(calls)
+
+// 2. Metadata of classes of another file, read by functions of a third.
+console.log(tableOf(User), tableOf(Admin), columnsOf(User), columnsOf(Admin))
+for (const name of ["name", "age", "role", "avatar", "pending", "level"])
+  console.log(name, designOf(Admin, name))
+console.log(designOf(User, "age") == Object, designOf(User, "role") == String)
+
+// 3. unknown holding the values of the runtime.
+function describe(u: unknown): string {
+  if (u instanceof Date)
+    return `a date in ${u.getUTCFullYear()}`
+  if (u instanceof Buffer)
+    return `a Buffer of ${u.length}: ${u.toString("hex")}`
+  if (u instanceof Uint8Array)
+    return `bytes, first ${u[0] ?? -1}`
+  if (u instanceof User)
+    return `user ${u.name}`
+  if (typeof u == "object")
+    return "another object"
+  if (typeof u == "string")
+    return `text "${u}"`
+  if (typeof u == "number")
+    return `number ${u}`
+  return typeof u
+}
+const choice: int | string = process.argv.length > 99 ? 1 : "picked"
+const literal: "left" | "right" = process.argv.length > 99 ? "left" : "right"
+const things: unknown[] = [new Date(0), Buffer.from("tz"), new Uint8Array([9]), ann,
+                           new Map<string, int>([["a", 1]]), new Set<string>(["s"]),
+                           Promise.resolve(42), /x+/g, choice, literal, 2.5, true, undefined]
+for (const t of things)
+  console.log(describe(t))
+console.log(things)
+const widened: unknown | int | string = choice
+console.log(typeof widened, widened == "picked")
+
+// 4. `catch (e: unknown)`: an Error, shown by instanceof.
+try {
+  JSON.parse("{")
+} catch (e: unknown) {
+  if (e instanceof SyntaxError)
+    console.log("syntax error:", e.name)
+  else if (e instanceof Error)
+    console.log("error:", e.message)
+}
+// Thrown again, what an unknown holds must be an Error: anything else is a
+// TypeError.
+function rethrow(u: unknown) {
+  throw u
+}
+for (const thrown of [new RangeError("far"), 5])
+  try {
+    rethrow(thrown)
+  } catch (e: unknown) {
+    if (e instanceof Error)
+      console.log(e.name, e.message)
+  }
+
+// 5. Classes as values, alone and in unions.
+const kind = process.argv.length > 99 ? "none" : Admin
+const classes = [User, Admin]
+console.log(kind, typeof kind, classes, kind == Admin, tableOf(Admin))

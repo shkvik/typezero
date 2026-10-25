@@ -1,0 +1,6 @@
+1 Order { total: 100, id: 1 } #1 of 100 2
+Item { name: 'pen', price: 3, id: 3 } 3 1 true
+#1 1 true
+#4 4 true
+BigOrder { total: 5000, id: 4, big: true } true true
+Kept { x: 1 } [class Kept]

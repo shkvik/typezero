@@ -1,0 +1,13 @@
+// Warnings about int overflow (docs/small.md, section 6) come next to the
+// errors, and do not count as errors themselves.
+const seconds: int = parseInt("90")
+// expect-warning: 'seconds * 1000' may overflow int: 'seconds' comes from parseInt on line 3
+const ms = seconds * 1000
+// expect-error: a number cannot be a condition
+if (ms) console.log(ms)
+
+// A constant that does not fit is an error, not a warning.
+const day = 86400
+// expect-error: this constant is 86400000000, which does not fit in 'int'
+const micro = day * 1000000
+console.log(micro)

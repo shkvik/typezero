@@ -1,0 +1,11 @@
+1 "first" 5
+2 "second" 6
+3 "third" 5
+4 "" 0
+5 "fourth" 6
+6 "fifth" 5
+7 "sixth" 5
+8 "� bad �" 7
+9 "привет, мир" 11
+10 "last without end" 16
+lines: 10

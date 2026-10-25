@@ -1,0 +1,59 @@
+// serve and fetch with the rest of the language, across files: handlers of
+// a decorated class found by path and called through reflection; a body an
+// async generator streams, read with `for await`; a response signed with
+// HMAC that the client checks; a fetch that an AbortController aborts; and
+// a server that the events' AbortSignal stops, with the program's own
+// onabort and listeners kept.
+import { serve } from "tz:http"
+import { Handlers, routes, verified } from "./routes.ts"
+
+const handlers = new Handlers()
+const stop = new AbortController()
+const log: string[] = []
+stop.signal.onabort = () => log.push("onabort of the program")
+stop.signal.addEventListener("abort", () => log.push("listener of the program"))
+
+const server = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, async req => {
+  const name = routes.get(new URL(req.url).pathname)
+  if (name == undefined) return new Response("not found", { status: 404 })
+  await undefined
+  const method = Reflect.get(handlers, name)
+  const result = Reflect.apply(method, handlers, [req])
+  return result instanceof Response ? result : new Response("bad handler", { status: 500 })
+})
+const base = `http://127.0.0.1:${server.port}`
+
+// 1. A signed response, checked by the client.
+const hello = await fetch(`${base}/hello?name=tz`)
+const text = await hello.text()
+const signature = hello.headers.get("x-signature") ?? ""
+console.log(hello.status, text, verified(text, signature), verified(text + "!", signature))
+
+// 2. A body streamed by an async generator, read in pieces.
+const counted = await fetch(`${base}/count`)
+const decoder = new TextDecoder()
+let received = ""
+const body = counted.body
+if (body != undefined) for await (const chunk of body) received += decoder.decode(chunk)
+console.log(received)
+
+// 3. A fetch whose body an AbortController aborts while it comes.
+const cancel = new AbortController()
+const slow = await fetch(`${base}/slow`, { signal: cancel.signal })
+setTimeout(() => cancel.abort(), 50)
+try {
+  console.log("not aborted", await slow.text())
+} catch (e) {
+  console.log(slow.status, "aborted:", e instanceof Error ? e.name : "?")
+}
+
+// 4. Not found, and the server stopped by its signal.
+console.log((await fetch(`${base}/nope`)).status, handlers.served)
+stop.abort()
+await server.finished
+console.log(log.join(", "))
+try {
+  await fetch(`${base}/hello`)
+} catch (e) {
+  console.log("after stop:", e instanceof Error ? e.message : "?")
+}

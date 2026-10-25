@@ -1,0 +1,9 @@
+User { name: 'ann', stamp: 100 } hi, ann 100 1 ann
+Post { title: 'news', stamp: 101 } 101 [class (anonymous) extends User] [class (anonymous) extends Post]
+hi, bob [admin, new] 102 Tagged [class Tagged]
+hi, cid
+hi, bob [admin, new]
+hi, ann
+[ 100, 103 ]
+Admin { name: 'root', tags: [ 'all' ], level: 1 } hi, root [all] 1
+Moderator { name: 'mo', stamp: 104, role: 'mod' } 1 hi, mo [Function: Moderator]

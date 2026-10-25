@@ -1,0 +1,17 @@
+// `sum` through generic functions: a fold with a callback and a search, as
+// generic code over an int[] (the copy for int is the code written for int).
+function fold<T, A>(xs: T[], init: A, f: (acc: A, x: T) => A): A {
+  let acc = init
+  for (const x of xs) acc = f(acc, x)
+  return acc
+}
+function indexOf<T>(xs: T[], x: T): int {
+  for (let i = 0; i < xs.length; i++) if (xs[i] == x) return i
+  return -1
+}
+const a: int[] = []
+for (let i = 0; i < 10000000; i++) a.push(i & 1023)
+const zero: long = 0
+let total: long = 0
+for (let r = 0; r < 20; r++) total += fold(a, zero, (s, x) => s + x)
+console.log(total, indexOf(a, 1023), indexOf(a, 5000))

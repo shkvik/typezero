@@ -1,0 +1,34 @@
+field name of [class User] { count: 0 }
+field email of [class User] { count: 0 }
+required email
+evaluate first
+evaluate second
+evaluate inject WHO
+evaluate inject HOW
+parameter 1 of greet gets HOW
+parameter 0 of greet gets WHO
+apply second to greet
+apply first to greet
+field count of [class User] { count: 0 }
+evaluate static
+apply static to create
+evaluate inject NAME
+evaluate inject AGE
+parameter 1 of the constructor gets AGE
+parameter 0 of the constructor gets NAME
+class [class User] { count: 0 }
+named [class User] { count: 0 }
+then the code after the class
+Ann greets Bob warmly 1
+[class User] { count: 1 } User User true
+[class Admin extends User] Admin
+[
+  [class User] { count: 1 },
+  [class Admin extends User],
+  [class Rules]
+]
+function [Function: String] [Function: Number]
+evaluate area
+apply area to abstractArea
+class [class Shape]
+done

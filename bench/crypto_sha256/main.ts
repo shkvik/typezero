@@ -1,0 +1,8 @@
+// 2 GiB through SHA-256, in pieces of 1 MiB.
+import { createHash } from "node:crypto"
+
+const piece = Buffer.alloc(1 << 20)
+for (let i = 0; i < piece.length; i++) piece[i] = i & 0xff
+const h = createHash("sha256")
+for (let i = 0; i < 2048; i++) h.update(piece)
+console.log(h.digest("hex"))

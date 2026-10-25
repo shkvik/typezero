@@ -1,0 +1,87 @@
+// same-as-node
+import {
+  pbkdf2Sync, scryptSync, hkdfSync, argon2Sync, timingSafeEqual, randomBytes, randomInt, randomUUID,
+  randomFillSync, getRandomValues, createSecretKey, generateKeySync,
+} from "node:crypto"
+
+// The KDFs.
+console.log(pbkdf2Sync("password", "salt", 1, 20, "sha1").toString("hex"))
+console.log(pbkdf2Sync("password", "salt", 4096, 32, "sha256").toString("hex"))
+console.log(pbkdf2Sync(Buffer.from("pw"), Buffer.from("salt"), 3, 100, "sha512").toString("hex"))
+console.log(scryptSync("password", "salt", 64).toString("hex"))
+console.log(scryptSync("pw", "NaCl", 32, { N: 1024, r: 8, p: 16 }).toString("hex"))
+console.log(scryptSync("pw", "salt", 16, { cost: 256, blockSize: 4, parallelization: 2 }).toString("hex"))
+console.log(Buffer.from(hkdfSync("sha256", "key", "salt", "info", 42)).toString("hex"))
+console.log(Buffer.from(hkdfSync("sha512", Buffer.from("key"), "", "", 100)).toString("hex"))
+const nonce = Buffer.alloc(16, 1)
+console.log(argon2Sync("argon2id", { message: "password", nonce, parallelism: 1, tagLength: 32, memory: 64, passes: 3 }).toString("hex"))
+console.log(argon2Sync("argon2i", { message: "password", nonce, parallelism: 4, tagLength: 32, memory: 100, passes: 3 }).toString("hex"))
+console.log(argon2Sync("argon2d", { message: "password", nonce, parallelism: 1, tagLength: 100, memory: 64, passes: 2,
+                                    secret: Buffer.from("key"), associatedData: "ad" }).toString("hex"))
+for (const f of [
+  () => {
+    pbkdf2Sync("pw", "salt", 0, 16, "sha256")
+  },
+  () => {
+    pbkdf2Sync("pw", "salt", 1.5, 16, "sha256")
+  },
+  () => {
+    scryptSync("pw", "salt", 16, { N: 3 })
+  },
+  () => {
+    scryptSync("pw", "salt", 16, { N: 2 ** 20 })
+  },
+  () => {
+    hkdfSync("sha256", "k", "s", "i", 255 * 32 + 1)
+  },
+  () => {
+    argon2Sync("argon2id", { message: "pw", nonce: Buffer.alloc(4), parallelism: 1, tagLength: 32, memory: 64, passes: 3 })
+  },
+  () => {
+    argon2Sync("argon2id", { message: "pw", nonce, parallelism: 1, tagLength: 32, memory: 7, passes: 3 })
+  },
+]) {
+  try {
+    f()
+  } catch (e) {
+    console.log(e.name, e.message)
+  }
+}
+
+// Random numbers: their shape, not their values.
+console.log(randomBytes(16).length, randomUUID().length, /^[0-9a-f-]{36}$/.test(randomUUID()))
+console.log(randomUUID().charAt(14), "89ab".includes(randomUUID().charAt(19)))
+let inRange = true
+for (let i = 0; i < 1000; i++) {
+  const n = randomInt(10)
+  const m = randomInt(-5, 5)
+  inRange &&= n >= 0 && n < 10 && m >= -5 && m < 5
+}
+console.log(inRange)
+const filled = randomFillSync(Buffer.alloc(8), 2, 4)
+console.log(filled.length, filled[0], filled[7])
+console.log(getRandomValues(new Uint32Array(4)).length)
+try {
+  randomBytes(-1)
+} catch (e) {
+  console.log(e.name, e.message)
+}
+try {
+  randomInt(5, 5)
+} catch (e) {
+  console.log(e.name, e.message)
+}
+
+// timingSafeEqual and secret keys.
+console.log(timingSafeEqual(Buffer.from("abc"), Buffer.from("abc")), timingSafeEqual(Buffer.from("abc"), Buffer.from("abd")))
+try {
+  timingSafeEqual(Buffer.from("a"), Buffer.from("ab"))
+} catch (e) {
+  console.log(e.name, e.message)
+}
+const secret = createSecretKey(Buffer.from("secret"))
+console.log(secret.type, secret.symmetricKeySize, secret.asymmetricKeyType, secret.export().toString())
+console.log(JSON.stringify(secret.export({ format: "jwk" })))
+console.log(secret.equals(createSecretKey(Buffer.from("secret"))), secret.equals(createSecretKey(Buffer.from("other"))))
+const generated = generateKeySync("hmac", { length: 64 })
+console.log(generated.type, generated.symmetricKeySize, generateKeySync("aes", { length: 256 }).export().length)

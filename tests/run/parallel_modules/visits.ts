@@ -1,0 +1,13 @@
+// The tasks of main.ts: they push into an array of this file, so they keep
+// node's order where they do.
+const seen: string[] = []
+
+export async function visit(name: string) {
+  await Promise.resolve()
+  const upper = name.toUpperCase()
+  seen.push(upper)
+}
+
+export function visited() {
+  return seen.join(",")
+}

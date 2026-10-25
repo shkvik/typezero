@@ -1,0 +1,35 @@
+// Binary data in what node does not have: a Result of a Buffer, a
+// ResultAsync of the bytes of a file, and `Uint8Array | string` in a Result.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { err, ok, Result, ResultAsync } from "neverthrow"
+
+function parseHex(text: string): Result<Buffer, string> {
+  return /^([0-9a-f]{2})*$/.test(text) ? ok(Buffer.from(text, "hex")) : err(`not hex: ${text}`)
+}
+console.log(parseHex("cafe"), parseHex("xyz"))
+const sum = parseHex("010203").map(b => b.reduce((a, x) => a + x, 0))
+console.log(sum)
+
+const dir = mkdtempSync(join(tmpdir(), "tz-bytes-result-"))
+const file = join(dir, "a.bin")
+writeFileSync(file, new Uint8Array([9, 8, 7]))
+async function load(path: string): Promise<Buffer> {
+  await undefined
+  return readFileSync(path)
+}
+function read(path: string): ResultAsync<Buffer, string> {
+  return ResultAsync.fromPromise(load(path), e => e instanceof SystemError ? e.code : e.message)
+}
+console.log(await read(file), await read(join(dir, "missing.bin")))
+console.log(await read(file).map(b => b.toString("hex")))
+
+function either(n: int): Result<Uint8Array | string, string> {
+  if (n < 0)
+    return err("negative")
+  return n == 0 ? ok("none") : ok(new Uint8Array(n))
+}
+for (const n of [-1, 0, 2])
+  console.log(either(n).match(v => typeof v == "string" ? v : `${v.length} bytes`, e => e))
+rmSync(dir, { recursive: true })

@@ -1,6 +1,6 @@
-// expect-exit: 2
-// expect-stderr: panic: TypeError: the value asserted with '!' is undefined
-// `x!` checks that x is there, and stops the program otherwise.
+// expect-exit: 1
+// expect-stderr: TypeError: a[i] is undefined
+// `x!` checks that x is there, and throws a TypeError otherwise.
 const a = [1, 2, 3]
 let i = 1
 i += 2

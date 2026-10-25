@@ -1,0 +1,70 @@
+// Overloaded methods and constructors (docs/overloads.md): variants a call
+// cannot tell apart are errors where they are declared, and a call that
+// fits no variant, or two equally well, where it is made.
+class Shapes {
+  f(x?: int) {
+    return 1
+  }
+  // expect-error: variants f(x?: int) and f() fit a call with 0 arguments equally well; give them parameters of different types
+  f() {
+    return 2
+  }
+  g(a: int, b = 0) {
+    return 1
+  }
+  // expect-error: variants g(a: int, b?: int) and g(a: int) fit a call with 1 argument equally well
+  g(a: int) {
+    return 2
+  }
+  h(a: int): int {
+    return 1
+  }
+  // expect-error: variants of 'h' cannot differ only in what they return: a call chooses a variant by its arguments
+  h(a: int): string {
+    return ""
+  }
+  k(a: int) {
+    return 1
+  }
+  // expect-error: duplicate variant k(a: int): variants must differ in their parameters
+  k(a: int) {
+    return 2
+  }
+  m(a: int, b: double) {
+    return 1
+  }
+  m(a: double, b: int) {
+    return 2
+  }
+  constructor(a: int) {}
+  constructor(a: string) {}
+}
+class Twice {
+  constructor(a: int) {}
+  // expect-error: duplicate variant constructor(b: int): variants must differ in their parameters
+  constructor(b: int) {}
+}
+
+const s = new Shapes(1)
+// expect-error: the call fits several variants of 'm' equally well: m(a: int, b: double) and m(a: double, b: int); convert an argument to choose one
+s.m(1, 1)
+// expect-error: no variant of 'm' fits these arguments; m(a: int, b: double) takes 'int' as argument 1, which is 'string'; m(a: double, b: int) takes 'double' as argument 1, which is 'string'
+s.m("x", 1)
+// expect-error: no variant of 'm' takes 3 arguments: there are m(a: int, b: double) and m(a: double, b: int)
+s.m(1, 2, 3)
+const args = [1, 2]
+// expect-error: a spread argument cannot choose among the variants of 'm'; pass the arguments one by one
+s.m(...args)
+// expect-error: 'm' has several variants, m(a: int, b: double) and m(a: double, b: int): say which one with the type of the place it goes, e.g. 'const f: (a: double, b: int) => int = s.m'
+const f = s.m
+// expect-error: no variant of the constructor of 'Shapes' takes 0 arguments: there are constructor(a: int) and constructor(a: string)
+const none = new Shapes()
+
+// Plain functions have no variants.
+function area(r: double) {
+  return r
+}
+// expect-error: duplicate declaration of 'area'; plain functions are not overloaded: give each variant its own name
+function area(w: double, h: double) {
+  return w * h
+}

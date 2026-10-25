@@ -1,0 +1,5 @@
+Point { x: 3, y: -4 } 7
+Point: 2 Pair: 2
+3
+Point { x: 7, y: 8 } Point: 2 Point { x: 1, y: 2 }
+Pair { left: 7, right: 8 } Pair: 2 Pair { left: 3, right: 4 }

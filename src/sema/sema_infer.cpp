@@ -43,6 +43,10 @@ bool Sema::returnsValue(const Stmt *stmt) {
                         [](const SwitchCase &c) { return llvm::any_of(c.body, returnsValue); });
   case Stmt::Kind::Labeled:
     return returnsValue(cast<LabeledStmt>(stmt)->body);
+  case Stmt::Kind::Try: {
+    auto *s = cast<TryStmt>(stmt);
+    return returnsValue(s->block) || returnsValue(s->handler) || returnsValue(s->finalizer);
+  }
   default:
     return false;
   }
@@ -51,6 +55,18 @@ bool Sema::returnsValue(const Stmt *stmt) {
 const Type *Sema::returnType(FuncSymbol *fn) {
   if (fn->ret)
     return fn->ret;
+  // Each copy of a template finds its own (see checkTemplateInstance).
+  if (isTemplate(fn))
+    return Type::unknown();
+  if (fn->inferring && suspended_.contains(fn)) {
+    // Code of another file, checked out of turn because this function
+    // needs it (see loadEarly), needs this function in turn.
+    diags_.error(fn->loc, "cannot tell what " + quotedName(fn->name) +
+                              " returns: it uses a file that imports it back and calls it "
+                              "while loading; declare its return type, e.g. '): int'");
+    suspended_.erase(fn); // reported once
+    return Type::error();
+  }
   if (fn->inferring) // a call in a cycle being inferred: the type so far
     return fn->assumed ? fn->assumed : Type::error();
   inferReturnType(fn);
@@ -60,7 +76,7 @@ const Type *Sema::returnType(FuncSymbol *fn) {
 const Type *Sema::functionType(FuncSymbol *fn) {
   resolveParams(fn);
   const Type *ret = returnType(fn);
-  return Type::function(fn->params, fn->minArgs, fn->hasRest, ret ? ret : Type::error());
+  return Type::function(fn->params, fn->minArgs, fn->hasRest, ret ? ret : Type::error(), fn->hasThis);
 }
 
 Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
@@ -77,8 +93,12 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
   saved.otherCaseVars = otherCaseVars_;
   saved.chainShortCircuits = chainShortCircuits_;
   saved.returns = returns_;
+  saved.yields = yields_;
   saved.trial = trial_;
   saved.early = early_;
+  saved.module = module_;
+  saved.instance = checkingInstance_;
+  saved.capture = diags_.capture();
   flow_ = Flow();
   if (NestedGroup *group = fn ? fn->group : nullptr) {
     // A function declared in a block sees what is visible in the block,
@@ -91,7 +111,7 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
     while (!blockNames_.empty() && blockNames_.back().functions > group->functionDepth)
       blockNames_.pop_back();
   } else if (!fn || !fn->isExpression) {
-    // A top-level function sees only globals.
+    // A top-level function sees only the globals of its file.
     scopes_.resize(1);
     typeScopes_.resize(1);
     functions_.clear();
@@ -99,6 +119,21 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
     blockNames_.clear();
     otherCaseVars_.clear();
     trial_ = false;
+    if (Module *home = fn ? declModules_.lookup(fn) : nullptr) {
+      useModule(home);
+      // The variables its imports name that are declared by now: those of
+      // a file whose code is being checked, in an import cycle.
+      bindImports();
+    }
+    // Its errors are its own, not those of an instance being checked; but
+    // those of the code of a class that a copy of a template made are the
+    // copy's (see checkLateClasses).
+    checkingInstance_ = nullptr;
+    diags_.setCapture(nullptr);
+    if (Instance *owner = fn && fn->cls ? lateOwners_.lookup(fn->cls) : nullptr) {
+      checkingInstance_ = owner;
+      diags_.setCapture(&lateErrors_[owner]);
+    }
   }
   // An arrow is checked where it is written.
   currentFunction_ = nullptr;
@@ -106,6 +141,7 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
   pendingLabels_.clear();
   chainShortCircuits_ = false;
   returns_ = nullptr;
+  yields_ = nullptr;
   return saved;
 }
 
@@ -122,11 +158,30 @@ void Sema::leaveBody(BodyState &saved) {
   otherCaseVars_ = std::move(saved.otherCaseVars);
   chainShortCircuits_ = saved.chainShortCircuits;
   returns_ = saved.returns;
+  yields_ = saved.yields;
   trial_ = saved.trial;
   early_ = saved.early;
+  module_ = saved.module;
+  checkingInstance_ = saved.instance;
+  diags_.setCapture(saved.capture);
 }
 
 void Sema::inferReturnType(FuncSymbol *fn) {
+  // A method of an instance of a generic class returns what the method of
+  // the generic class returns, with the types of the instance; unless it
+  // makes a class, which each instance makes its own (see isTemplate).
+  if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls && decl->cls->generic &&
+                                     !hasClassExpr(decl->generic)) {
+    const Type *ret = returnType(decl->generic->sym);
+    fn->ret = ret ? substitute(instanceType(decl->cls, ret), decl->generic->sym->typeParams, fn->typeParams)
+                  : Type::error();
+    return;
+  }
+  // A method that takes the type of the one it overrides.
+  if (const Type *inherited = inheritedReturnType(fn)) {
+    fn->ret = inherited;
+    return;
+  }
   FunctionDecl *decl = fn->decl;
   BodyState saved = enterBody(decl);
   // Real diagnostics, also when a trial in a cycle calls this function;
@@ -149,19 +204,49 @@ void Sema::inferReturnType(FuncSymbol *fn) {
 void Sema::checkAndInfer(FunctionDecl *decl) {
   FuncSymbol *fn = decl->sym;
   std::vector<ReturnStmt *> returns;
+  std::vector<YieldExpr *> yields;
   std::vector<ReturnStmt *> *outer = returns_;
+  std::vector<YieldExpr *> *outerYields = yields_;
   returns_ = &returns;
+  yields_ = &yields;
   fn->inferring = true;
+  inferring_.push_back(fn);
   checkFunctionBody(decl);
+  inferring_.pop_back();
   fn->inferring = false;
   returns_ = outer;
-  const Type *type = unifyReturns(fn, returns, !alwaysReturns(decl->body), /*report=*/true);
+  yields_ = outerYields;
+  bool fallsOff = !alwaysReturns(decl->body);
+  const Type *type = decl->isGenerator
+                         ? inferGeneratorType(fn, yields, returns, fallsOff, /*report=*/true)
+                     : decl->isAsync ? inferAsyncType(fn, returns, fallsOff, /*report=*/true)
+                                     : unifyReturns(fn, returns, fallsOff, /*report=*/true);
+  // The generator of safeTry also returns the errors of its `yield*`.
+  if (decl->safeTry && type && !type->isError())
+    type = generatorResult(decl, type);
   fn->ret = type ? type : Type::error();
-  // Now every return converts its value to that type.
-  if (!fn->ret->isError() && !fn->ret->isVoid())
+  if (decl->isAsync && !decl->isGenerator) {
+    finishAsyncReturns(fn, returns);
+    return;
+  }
+  // Now every return converts its value to that type, and in a generator
+  // every yield to the type of the values it gives; in an async generator,
+  // what they await converts once it is there (see emitAsyncYield).
+  bool async = decl->isAsync;
+  const Type *returned = decl->isGenerator && (fn->ret->isIterator() || fn->ret->isAsyncIterator())
+                             ? fn->ret->returned()
+                             : fn->ret;
+  if (!returned->isError() && !returned->isVoid())
     for (ReturnStmt *ret : returns)
-      if (ret->value && !ret->value->type->isError())
-        ret->value = convert(ret->value, fn->ret);
+      if (ret->value && !ret->value->type->isError() &&
+          (!async || (awaitedType(ret->value->type) == ret->value->type &&
+                      !ret->value->type->isUndefined())))
+        ret->value = convert(ret->value, returned);
+  if (fn->ret->isIterator() || fn->ret->isAsyncIterator())
+    for (YieldExpr *yield : yields)
+      if (!yield->delegate && yield->value && !yield->value->type->isError() &&
+          (!async || awaitedType(yield->value->type) == yield->value->type))
+        yield->value = convert(yield->value, fn->ret->yielded());
 }
 
 // Each function of the cycle is checked on a fresh copy of its body, with
@@ -174,6 +259,7 @@ void Sema::checkAndInfer(FunctionDecl *decl) {
 void Sema::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
   for (FuncSymbol *fn : cycle)
     fn->inferring = true;
+  inferring_.insert(inferring_.end(), cycle.begin(), cycle.end());
   bool muted = diags_.setMuted(true);
   bool failed = false;
   for (int round = 0; round < 8 && !failed; ++round) {
@@ -181,16 +267,26 @@ void Sema::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
     for (FuncSymbol *fn : cycle) {
       FunctionDecl *copy = freshCopy(fn->decl);
       std::vector<ReturnStmt *> returns;
+      std::vector<YieldExpr *> yields;
       returns_ = &returns;
+      yields_ = &yields;
       trial_ = true;
       flow_ = Flow();
       checkFunctionBody(copy);
       trial_ = false;
       returns_ = nullptr;
-      const Type *found = unifyReturns(fn, returns, !alwaysReturns(copy->body), /*report=*/false);
+      yields_ = nullptr;
+      bool fallsOff = !alwaysReturns(copy->body);
+      const Type *found;
+      if (fn->decl->isGenerator)
+        found = inferGeneratorType(fn, yields, returns, fallsOff, /*report=*/false);
+      else if (fn->decl->isAsync)
+        found = inferAsyncType(fn, returns, fallsOff, /*report=*/false);
+      else
+        found = unifyReturns(fn, returns, fallsOff, /*report=*/false);
       if (!found)
         continue; // nothing known yet
-      const Type *next = fn->assumed ? unify(fn->assumed, found) : found;
+      const Type *next = fn->assumed ? unionUnify(fn->assumed, found) : found;
       if (!next || next->isError()) {
         failed = true;
         break;
@@ -204,6 +300,7 @@ void Sema::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
       break;
   }
   diags_.setMuted(muted);
+  inferring_.resize(inferring_.size() - cycle.size());
 
   for (FuncSymbol *fn : cycle) {
     fn->inferring = false;
@@ -243,7 +340,7 @@ const Type *Sema::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *
       type = t;
       continue;
     }
-    const Type *common = unify(type, t);
+    const Type *common = unionUnify(type, t);
     if (!common || common->isError()) {
       if (report)
         diags_.error(ret->value->loc(), quotedName(fn->name) + " returns '" + t->name() + "' here and '" +
@@ -271,6 +368,19 @@ void Sema::resolveParams(FuncSymbol *fn) {
     return;
   fn->pendingParams = false;
   FunctionDecl *decl = fn->decl;
+  // Those of a method of an instance of a generic class: of the method of
+  // the generic class, with the types of the instance.
+  if (FunctionDecl *generic = decl->generic; generic && decl->cls && decl->cls->generic) {
+    resolveParams(generic->sym);
+    auto sub = [&](const Type *t) {
+      return t ? substitute(instanceType(decl->cls, t), generic->sym->typeParams, fn->typeParams) : nullptr;
+    };
+    for (size_t i = 0; i < fn->params.size() && i < generic->sym->params.size(); ++i)
+      fn->params[i] = sub(generic->sym->params[i]);
+    for (size_t i = 0; i < decl->params.size() && i < generic->params.size(); ++i)
+      decl->params[i].declaredType = sub(generic->params[i].declaredType);
+    return;
+  }
   std::vector<const Type *> found(decl->params.size(), nullptr);
   // Muted at first; if a value has an error, a second check reports it.
   for (bool report : {false, true}) {
@@ -279,6 +389,14 @@ void Sema::resolveParams(FuncSymbol *fn) {
     BodyState saved = enterBody(decl);
     bool muted = diags_.setMuted(!report);
     FunctionDecl *copy = freshCopy(decl);
+    // A method's default values see its `this` and the private members of
+    // its class.
+    functions_.push_back(copy);
+    if (copy->takesThis())
+      declareThis(copy);
+    ClassDecl *outerClass = currentClass_;
+    if (!copy->isClosure())
+      currentClass_ = copy->cls;
     pushScope();
     for (size_t i = 0; i < decl->params.size() && i < copy->params.size(); ++i) {
       const Type *type = decl->params[i].declaredType;
@@ -287,6 +405,8 @@ void Sema::resolveParams(FuncSymbol *fn) {
       declareVar(copy->params[i].name, copy->params[i].loc, type, /*isConst=*/false);
     }
     popScope();
+    functions_.pop_back();
+    currentClass_ = outerClass;
     diags_.setMuted(muted);
     leaveBody(saved);
   }
@@ -296,9 +416,10 @@ void Sema::resolveParams(FuncSymbol *fn) {
       continue;
     const Type *type = found[i] ? found[i] : Type::error();
     if (type->isVoid() || type->isUndefined()) {
-      diags_.error(param.loc, "cannot tell the type of '" + param.name + "' from its default value; "
-                                                                        "add one, e.g. '" + param.name +
-                                  ": int | undefined = undefined'");
+      diags_.error(param.loc, "cannot tell the type of '" + param.label() +
+                                  "' from its default value; "
+                                  "add one, e.g. '" +
+                                  param.label() + ": int | undefined = undefined'");
       type = Type::error();
     }
     // An error in the value itself is reported when the body is checked.
@@ -309,14 +430,36 @@ void Sema::resolveParams(FuncSymbol *fn) {
 
 FunctionDecl *Sema::freshCopy(const FunctionDecl *fn) {
   Lexer lexer(fn->source, diags_);
-  Parser parser(lexer, ctx_, diags_);
-  FunctionDecl *copy = fn->isExpression ? parser.parseFunctionExprCopy() : parser.parseFunctionCopy();
+  Parser parser(lexer, ctx_, diags_, /*library=*/fn->cls && fn->cls->library);
+  FunctionDecl *copy = fn->isArrow || ((fn->isExpression || fn->lifted) && !fn->cls)
+                           ? parser.parseFunctionExprCopy()
+                       : fn->cls ? parser.parseMethodCopy()
+                                 : parser.parseFunctionCopy();
+  copy->isExpression = fn->isExpression;
+  copy->isAsync = fn->isAsync;
+  copy->lifted = fn->lifted;
+  copy->cls = fn->cls;
+  copy->isStatic = fn->isStatic;
+  copy->isConstructor = fn->isConstructor;
+  copy->accessor = fn->accessor;
+  copy->hiddenGetter = fn->hiddenGetter;
+  copy->access = fn->access;
   copy->sym = fn->sym;
   copy->name = fn->name;
+  copy->typeArgs = fn->typeArgs;
+  copy->isInstance = fn->isInstance;
   copy->parent = fn->parent;
   copy->group = fn->group;
   copy->var = fn->var;
   copy->creationSeq = fn->creationSeq;
+  // The parameters of an argument list in the place of the rest parameter
+  // (see expandArgumentList).
+  if (!fn->listName.empty() && copy->params.size() > fn->listStart) {
+    copy->params.resize(fn->listStart);
+    copy->listName = fn->listName;
+    copy->listStart = fn->listStart;
+    copy->listType = fn->listType;
+  }
   for (size_t i = 0; i < copy->params.size() && i < fn->params.size(); ++i)
     copy->params[i].declaredType = fn->params[i].declaredType;
   // The parameters an arrow takes without naming them (see Signature).

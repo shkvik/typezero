@@ -1,0 +1,69 @@
+// env: TZ=UTC
+// Unions across files: classes up a chain told apart by a literal `kind`
+// in each, behind an interface, with an exhaustive switch and a function
+// that tests; Records with literal keys, Maps and Sets with union keys, and
+// unions with dates and dictionaries, narrowed by instanceof, typeof and
+// Array.isArray, as T, inside Result, printed and as JSON; and the errors of
+// node:fs told apart by their code.
+import { readFileSync } from "node:fs"
+import { Circle, corners, Figure, isRound, Kind, Measured, Rect, Square } from "./shapes.ts"
+import { byKind, distinct, first, Stamp, when } from "./tally.ts"
+
+const day = new Date(Date.UTC(2026, 9, 26))
+const figures: Figure[] = [
+  new Circle("sun", day, 2),
+  new Rect("door", day, 1, 2),
+  new Square("tile", day, 3),
+  new Circle("dot", day, 0.5),
+]
+
+// 1. The chain and the tag.
+for (const f of figures) {
+  const how = f.kind == "circle" ? `r=${f.r}` : `${f.w}x${f.h}`
+  console.log(f.kind, how, corners(f), f.label(), f instanceof Square)
+}
+const measured: Measured[] = [...figures]
+console.log(measured.map((m) => m.area()).join())
+const round = figures.filter(isRound)
+console.log(round.map((c) => c.r).join(), round.length)
+console.log(figures[2], JSON.stringify(figures[0]))
+
+// 2. Dictionaries of unions.
+const counts = byKind(figures)
+console.log(counts, counts.circle + counts.rect, Object.keys(counts).join())
+console.log(distinct(["a", 1, "a", 1, "1", 2]))
+const sizes = new Map<Kind | int, double>()
+for (const f of figures) sizes.set(f.kind, (sizes.get(f.kind) ?? 0) + f.area())
+sizes.set(0, -1)
+console.log(sizes, sizes.get("rect"), sizes.has(0), sizes.has(1))
+
+// 3. Unions with dates and dictionaries.
+const stamps: Stamp[] = [day, "today", new Map([["a", 1], ["b", 2]])]
+console.log(stamps.map(when).join(" | "), stamps, JSON.stringify(stamps))
+function sizeOf(x: Record<string, int> | int[]): int {
+  return Array.isArray(x) ? x.length : Object.values(x).reduce((a, b) => a + b, 0)
+}
+console.log(sizeOf([1, 2, 3]), sizeOf({ a: 2, b: 3 }))
+
+// 4. As T, and inside Result.
+const big = first(figures, (f) => f.area() > 8)
+console.log(big.isOk() ? big.value.label() : big.error)
+const none = first(stamps, (s) => typeof s == "string" && s.length > 10)
+console.log(none.isOk() ? "found" : none.error, first<Stamp>([], () => true).isErr())
+const picked = first(stamps, (s) => s instanceof Map)
+if (picked.isOk()) {
+  const v = picked.value
+  console.log(v instanceof Map ? [...v.keys()].join() : "not a map")
+}
+
+// 5. The errors of node:fs.
+function read(path: string): string {
+  try {
+    return readFileSync(path, "utf8")
+  } catch (e) {
+    if (e instanceof SystemError && e.code == "ENOENT") return `none: ${e.syscall}`
+    if (e instanceof SystemError) return `other: ${e.code}`
+    throw e
+  }
+}
+console.log(read("./no/such/file"), read("."))

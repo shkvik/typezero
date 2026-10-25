@@ -1,7 +1,7 @@
 # Криптография
 
-Решения, принятые 24 октября 2026 года. Пока ничего из этого не реализовано: порядок работ — в
-конце, в разделе «План реализации».
+Решения, принятые 24 октября 2026 года. Шаги 1–3 и 5 плана сделаны 24 октября; что осталось —
+в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -111,13 +111,13 @@ OpenSSL быстрее Go. В node те же функции идут через 
 На каждом шаге: тесты `tests/run` с `// same-as-node`, ошибки в `tests/errors`, прогон под
 `TZ_CHECK_LEAKS=1`, обновление README.
 
-1. **OpenSSL в поставке** — сборка под каждую цель с настройками из раздела 2, подключение к
+1. **OpenSSL в поставке** (сделано) — сборка под каждую цель с настройками из раздела 2, подключение к
    exe только при использовании, `tz licenses`.
-2. **Простой слой** — хеши, HMAC, `hash()`, `randomBytes` / `randomUUID` / `randomInt` /
+2. **Простой слой** (сделано) — хеши, HMAC, `hash()`, `randomBytes` / `randomUUID` / `randomInt` /
    `getRandomValues`, `timingSafeEqual`, `pbkdf2Sync` / `scryptSync` / `argon2Sync` /
    `hkdfSync`, `createCipheriv` / `createDecipheriv` для AES и ChaCha20 с именем в коде; ошибки
    компиляции на неизвестные имена и колбэки. Нужен `Buffer` ([bytes.md](bytes.md), шаг 2).
-3. **Полный слой** — `KeyObject`, ключи PEM / DER / JWK, подписи, `generateKeyPairSync`, ECDH,
+3. **Полный слой** (сделано) — `KeyObject`, ключи PEM / DER / JWK, подписи, `generateKeyPairSync`, ECDH,
    `X509Certificate`, имена из переменных. Он же — основа TLS ([net.md](net.md), шаг 4).
 4. **Web Crypto** (`crypto.subtle`) — после async ([async.md](async.md), шаг 1).
-5. **Замеры** в `bench` против Go и node.
+5. **Замеры** (сделано) в `bench` против Go и node.
