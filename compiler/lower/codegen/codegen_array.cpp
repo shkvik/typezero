@@ -1,12 +1,12 @@
 // Arrays: literals, element access, methods and `for...of`.
 //
-// An array value is a pointer to a header (see runtime/array.c):
+// An array value is a pointer to a header (see runtime/core/array/array.c):
 //   { i64 rc, ptr type, ptr data, i32 length, i32 capacity, ptr alloc }
 // `type` describes the elements for the runtime, `data` points at the first
 // element. Elements are stored unboxed by their static type. The hot paths
 // (indexing, length, push, pop) are emitted inline; the rest calls the runtime.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -19,10 +19,10 @@ namespace tz {
 
 namespace {
 
-// Header fields; must match runtime/array.c.
+// Header fields; must match runtime/core/array/array.c.
 enum ArrayField : unsigned { kRefCount, kElementType, kData, kLength, kCapacity, kAlloc };
 
-// Type descriptor kinds; must match runtime/tzrt.h.
+// Type descriptor kinds; must match runtime/core/tzrt/tzrt.h.
 uint32_t descriptorKind(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int: return 1;
@@ -74,7 +74,8 @@ llvm::Constant *CodeGen::typeDescriptor(const Type *type) {
                                           llvm::GlobalValue::PrivateLinkage, init,
                                           "tz.type." + type->name());
   // Reflection tells the types of functions and arrays in unknowns apart by
-  // their descriptors (runtime/reflect.c), which must not be merged.
+  // their descriptors (runtime/library/reflect/reflect/reflect.c), which must
+  // not be merged.
   if (!type->isFunction() && !type->isArray())
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   typeDescriptors_[type] = global;

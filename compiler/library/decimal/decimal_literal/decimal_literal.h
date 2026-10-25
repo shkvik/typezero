@@ -20,9 +20,9 @@ struct DecimalLiteral {
   int64_t top() const { return exponent + static_cast<int64_t>(digits.size()) - 1; }
 };
 
-// The range of BigNumber.js (and of runtime/decimal.c): a value whose leading
-// digit is beyond 10^kDecimalMaxExp does not exist, one below 10^kDecimalMinExp
-// is zero.
+// The range of BigNumber.js (and of runtime/library/decimal/decimal/decimal.c):
+// a value whose leading digit is beyond 10^kDecimalMaxExp does not exist, one
+// below 10^kDecimalMinExp is zero.
 constexpr int64_t kDecimalMaxExp = 10000000;
 constexpr int64_t kDecimalMinExp = -10000000;
 
@@ -34,8 +34,8 @@ std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text);
 DecimalLiteral decimalOf(uint64_t value);
 
 // The number of a rounding mode written as a string ("half-up" and the
-// like), as BigNumber.js numbers them and runtime/decimal.c takes them; -1
-// for another string.
+// like), as BigNumber.js numbers them and
+// runtime/library/decimal/decimal/decimal.c takes them; -1 for another string.
 int decimalRoundingMode(const std::u16string &name);
 constexpr int kRoundHalfUp = 4;
 // The modes, for messages.

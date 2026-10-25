@@ -7,9 +7,10 @@
 // price`. An int or a long becomes a decimal by itself, without loss; a
 // double, inexact already, only through decimal(x), and a decimal becomes a
 // double only through Number(x). decimal(x), decimal.max, min and sum and the
-// methods of a decimal are built-ins of runtime/decimal.c.
+// methods of a decimal are built-ins of
+// runtime/library/decimal/decimal/decimal.c.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/ConvertUTF.h"
 

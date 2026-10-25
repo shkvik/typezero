@@ -10,7 +10,7 @@
 // environment can form a cycle: top-level functions, or the functions
 // declared in one block (see NestedGroup). An arrow can only call itself.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 

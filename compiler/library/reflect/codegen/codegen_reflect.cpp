@@ -5,8 +5,8 @@
 //
 // The fields and methods of an object of tz lie at places fixed when
 // compiling, without names. A class that reflection reaches gets a
-// description, TzClassInfo (runtime/tzrt.h), which the object of the class
-// points to:
+// description, TzClassInfo (runtime/core/tzrt/tzrt.h), which the object of the
+// class points to:
 //
 //   - construct: makes an object from arguments as unknowns, checking each
 //     against a constructor (the first that takes them, of several);
@@ -21,7 +21,7 @@
 // gives the runtime those of the types that reach an unknown. A value that
 // does not fit is a TypeError that names the parameter.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -34,7 +34,7 @@ namespace tz {
 
 namespace {
 
-// TZ_LAYOUT_CLASS and TZ_LAYOUT_DATE of runtime/tzrt.h.
+// TZ_LAYOUT_CLASS and TZ_LAYOUT_DATE of runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kLayoutClass = 2097152;
 constexpr uint32_t kLayoutDate = 1024;
 
@@ -217,7 +217,7 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
 
 namespace {
 
-// TZ_T_* of runtime/tzrt.h, and the kinds tz_unknown_kind gives.
+// TZ_T_* of runtime/core/tzrt/tzrt.h, and the kinds tz_unknown_kind gives.
 enum : uint32_t { kBoxInt = 1, kBoxLong = 2, kBoxDouble = 3 };
 enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
 
@@ -1018,7 +1018,7 @@ void CodeGen::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
   beginFunction(fn, nullptr);
   loc_ = cls->loc();
   pushScope();
-  if (!jsonPathTy_) // runtime/json.c: TzJsonPath
+  if (!jsonPathTy_) // runtime/library/json/json/json.c: TzJsonPath
     jsonPathTy_ = llvm::StructType::create(ctx_, {ptr, ptr, i64, i64}, "tz.jsonpath");
   llvm::Value *json = fn->getArg(0), *path = fn->getArg(1);
   llvm::Value *null = llvm::ConstantPointerNull::get(builder_.getPtrTy());

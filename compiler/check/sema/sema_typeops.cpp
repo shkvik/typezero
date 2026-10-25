@@ -12,9 +12,9 @@
 // generic code a computation over type parameters waits, a type parameter
 // of its own (Type::typeOp), until a copy gives them types.
 
-#include "lex/lexer.h"
-#include "parse/parser.h"
-#include "sema/sema.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/load/parser/parser.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

@@ -1,4 +1,4 @@
-#include "support/decimal_literal.h"
+#include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallString.h"

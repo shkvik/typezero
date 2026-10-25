@@ -7,18 +7,18 @@
 // just calls it, and a null environment.
 //
 // An environment (and a box) is an object of the runtime (TzObject in
-// runtime/tzrt.h): { i64 rc, ptr descriptor, fields... }, whose descriptor
-// holds the function that drops it (see dropDescriptor). Its fields are the
-// captured variables: a copy of the value of one that never changes after the
-// closure is created, and the box of any other. The function that declares a
-// boxed variable keeps the box in a slot of its frame, and every closure that
-// captures it holds a reference to the same box.
+// runtime/core/tzrt/tzrt.h): { i64 rc, ptr descriptor, fields... }, whose
+// descriptor holds the function that drops it (see dropDescriptor). Its fields
+// are the captured variables: a copy of the value of one that never changes
+// after the closure is created, and the box of any other. The function that
+// declares a boxed variable keeps the box in a slot of its frame, and every
+// closure that captures it holds a reference to the same box.
 //
 // The functions declared in one block share one environment (see
 // NestedGroup), created before the first statement that mentions them; they
 // call each other with it.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -157,7 +157,7 @@ const CodeGen::EnvLayout &CodeGen::envLayout(const FunctionDecl *fn) {
   llvm::IRBuilderBase::InsertPoint point = builder_.saveIP();
   builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", layout.drop));
   llvm::Value *env = layout.drop->getArg(0);
-  // A member releases what it holds as one (see runtime/group.c).
+  // A member releases what it holds as one (see runtime/core/group/group.c).
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
     if (uncounted_.count({key, var})) // an owner it lives in (layer 2)
@@ -195,9 +195,9 @@ llvm::Value *CodeGen::newBox(const Type *type, bool member) {
   llvm::StructType *box = boxType(type);
   llvm::Function *&drop = boxDrops_[type];
   // A box of a variable whose values may form cycles with it is a member of
-  // a group (see runtime/group.c). Its drop lets go of the value as from a
-  // member, which is right for a box outside the groups too (a box of the
-  // same type may be either).
+  // a group (see runtime/core/group/group.c). Its drop lets go of the value as
+  // from a member, which is right for a box outside the groups too (a box of
+  // the same type may be either).
   bool memberDrop = (member || isCyclicBox(type) || mayHoldMember(type)) && type->isManaged();
   member = (member || isCyclicBox(type)) && type->isManaged();
   if (!drop) {

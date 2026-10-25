@@ -17,7 +17,7 @@
 // of the characters it matches; the compiler then walks the tree. Unicode
 // comes from regex_tables.h, which gen_regex_tables.mjs takes from Node.js.
 
-#include "regex.h"
+#include "runtime/library/regex/regex/regex.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +31,7 @@ static void *re_alloc(size_t size) {
 }
 static void re_dealloc(void *p) { free(p); }
 #else
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 static void *re_alloc(size_t size) { return tz_alloc(size ? size : 1); }
 static void re_dealloc(void *p) { tz_free(p); }
 #endif
@@ -60,7 +60,7 @@ typedef struct {
   uint32_t value;
 } ReName;
 
-#include "regex_tables.h"
+#include "runtime/library/regex/regex_compile/regex_tables.h"
 
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define MAX_CODE_POINT 0x10FFFFu

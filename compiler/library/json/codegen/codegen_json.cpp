@@ -3,10 +3,11 @@
 // JSON.parse, JSON.stringify, embedJson, and the functions CodeGen makes for
 // JSON.parse<T> and fromJson<T> (docs/narrowing.md, section 3).
 //
-// A Json is a pointer to a node of the runtime (runtime/json.c), counted as
-// objects are, so retaining one is the inline increment of objects and arrays;
-// `Json | undefined` is that pointer, null for undefined. The runtime does
-// what depends on the kind of the node.
+// A Json is a pointer to a node of the runtime
+// (runtime/library/json/json/json.c), counted as objects are, so retaining one
+// is the inline increment of objects and arrays; `Json | undefined` is that
+// pointer, null for undefined. The runtime does what depends on the kind of the
+// node.
 //
 // What JavaScript throws, the runtime throws (docs/errors.md): reading a key
 // of null or undefined, writing one of what is no object, a text that is not
@@ -14,7 +15,7 @@
 // checks tz_thrown after those calls, and ThrowScanner (codegen_throw.cpp)
 // knows them.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -30,7 +31,7 @@ namespace tz {
 
 namespace {
 
-// The kind of an array node; must match runtime/tzrt.h.
+// The kind of an array node; must match runtime/core/tzrt/tzrt.h.
 constexpr int32_t kJsonArray = 4;
 
 std::u16string utf16(llvm::StringRef text) {
@@ -601,7 +602,7 @@ llvm::Function *CodeGen::fromJsonFunction(const Type *type) {
   if (llvm::Function *fn = fromJsonFunctions_.lookup(type))
     return fn;
   llvm::Type *ptr = builder_.getPtrTy(), *i64 = builder_.getInt64Ty();
-  if (!jsonPathTy_) // runtime/json.c: TzJsonPath
+  if (!jsonPathTy_) // runtime/library/json/json/json.c: TzJsonPath
     jsonPathTy_ = llvm::StructType::create(ctx_, {ptr, ptr, i64, i64}, "tz.jsonpath");
   auto *fnType = llvm::FunctionType::get(lower(type), {ptr, ptr}, false);
   llvm::StringRef name = type->name();
@@ -683,8 +684,8 @@ llvm::Function *CodeGen::fromJsonFunction(const Type *type) {
   } else if (type->isUnion()) {
     // The member a value goes to is told by what kind of value it is, then by
     // its value for a literal, and among objects by the tag field that Sema
-    // found (see jsonTagField). The kinds are TZ_JSON_* of runtime/tzrt.h;
-    // tz_json_kind gives -1 for undefined.
+    // found (see jsonTagField). The kinds are TZ_JSON_* of
+    // runtime/core/tzrt/tzrt.h; tz_json_kind gives -1 for undefined.
     enum { kBool = 1, kNumber = 2, kString = 3, kArray = 4, kObject = 5 };
     std::map<int, std::vector<const Type *>> byKind;
     for (const Type *m : type->members()) {

@@ -20,12 +20,12 @@
 // A promise keeps its reactions in a list until it settles; then they move
 // to the end of the microtask queue, each holding the promise while it waits
 // there. A reaction is a TzReactor inside some object: the coroutine of an
-// async function (src/codegen/codegen_async.cpp), the reaction of a then(),
-// whose code the compiler makes, or one of the runtime's own below. The jobs
-// of the runtime take as many turns of the queue as V8's do, so that the
+// async function (compiler/lower/codegen/codegen_async.cpp), the reaction of a
+// then(), whose code the compiler makes, or one of the runtime's own below. The
+// jobs of the runtime take as many turns of the queue as V8's do, so that the
 // output interleaves as in Node.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -1622,9 +1622,9 @@ static void fulfill_after(TzPromise *p, int32_t turns) {
 // An async generator: the queue of the steps asked of it (next() and
 // return()) and the state of the spec (AsyncGeneratorState), then the
 // reactor its coroutine awaits with, and then its frame
-// (src/codegen/codegen_async_iter.cpp). A step is served by running the body
-// to its next `yield` or its end; a next() asked while it runs waits in the
-// queue, as AsyncGeneratorEnqueue says.
+// (compiler/lower/codegen/codegen_async_iter.cpp). A step is served by running
+// the body to its next `yield` or its end; a next() asked while it runs waits
+// in the queue, as AsyncGeneratorEnqueue says.
 enum { AGEN_START, AGEN_YIELD, AGEN_RUNNING, AGEN_RETURNING, AGEN_DONE };
 _Static_assert(offsetof(TzAsyncGen, reactor) == 40 && sizeof(TzAsyncGen) == 80,
                "TzAsyncGen must match kAgenReactor and kAgenHeader of CodeGen");

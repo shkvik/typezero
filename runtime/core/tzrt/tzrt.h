@@ -1,5 +1,5 @@
 // Declarations shared between the files of the runtime. Programs call the
-// runtime through the functions declared in src/codegen/codegen.cpp
+// runtime through the functions declared in compiler/lower/codegen/codegen.cpp
 // (CodeGen::declareRuntime); keep both in sync.
 
 #ifndef TZRT_H
@@ -16,8 +16,8 @@
 
 // TZ_HOT marks the fast paths that programs call in their loops. tz copies
 // those a program calls into the program, so that the optimizer can inline
-// them there (see linkRuntime in src/driver/driver.cpp); every other call
-// goes to tzrt.lib. Two rules follow:
+// them there (see linkRuntime in compiler/cli/driver/driver.cpp); every other
+// call goes to tzrt.lib. Two rules follow:
 //
 //   - State is never `static`: a copied function must reach the one variable
 //     in tzrt.lib, not a copy of its own. The driver rejects static state.
@@ -31,11 +31,11 @@
 // The runtime is built twice (runtime/CMakeLists.txt): tzrt for programs
 // that run on one thread, and with TZ_PARALLEL, tzrt_mt for those whose
 // async code runs in parallel (docs/async.md, section 8; parallel.c), which
-// tz links when the program has pieces that may (src/sema/parallel.h).
-// TZ_THREAD_LOCAL marks the state each thread of tzrt_mt has a copy of, as
-// the error in flight; in tzrt it is an ordinary variable. Layouts are the
-// same in both: tzcrypto.lib, built once, goes with either, and must not
-// touch that state itself (TZ_NO_THREAD_STATE).
+// tz links when the program has pieces that may
+// (compiler/check/parallel/parallel.h). TZ_THREAD_LOCAL marks the state each
+// thread of tzrt_mt has a copy of, as the error in flight; in tzrt it is an
+// ordinary variable. Layouts are the same in both: tzcrypto.lib, built once,
+// goes with either, and must not touch that state itself (TZ_NO_THREAD_STATE).
 #ifndef TZ_PARALLEL
 #define TZ_PARALLEL 0
 #endif
@@ -125,9 +125,9 @@ typedef struct TzResultType {
 // A union whose members lie apart in memory (TZ_T_UNION, docs/objects.md
 // section 7): an int32 tag, the number of the slot the value takes, then
 // the value of that slot at offset 8. `slots` gives the type of each slot by
-// its number (see UnionSlot in src/sema/types.h); the tag of undefined, in
-// `A | B | undefined`, is 0. All the objects of a union take one slot: an
-// object's layout tells its type.
+// its number (see UnionSlot in compiler/program/types/types.h); the tag of
+// undefined, in `A | B | undefined`, is 0. All the objects of a union take one
+// slot: an object's layout tells its type.
 #define TZ_UNION_SLOTS 12
 typedef struct TzUnionType {
   TzType base;
@@ -368,10 +368,10 @@ typedef struct TzField {
 
 // A tuple, `[string, int]`, is an object with the fields "0", "1"... that
 // prints as an array. An iterator is an object without fields followed by
-// the frame of its coroutine (src/codegen/codegen_iter.cpp); its flag says
-// what it prints as. A regex prints as `/source/flags` (regex.c); a match
-// as the array of its captures with its other fields after them; the named
-// groups of a match, an object without a prototype in JavaScript, as
+// the frame of its coroutine (compiler/lower/codegen/codegen_iter.cpp); its
+// flag says what it prints as. A regex prints as `/source/flags` (regex.c); a
+// match as the array of its captures with its other fields after them; the
+// named groups of a match, an object without a prototype in JavaScript, as
 // `[Object: null prototype] { ... }`.
 enum {
   TZ_LAYOUT_TUPLE = 1,
@@ -390,14 +390,15 @@ enum {
   // The iterator of a Map or a Set, `[Map Iterator] { 'a', 'b' }`, which
   // shows what is left: the keys, or the values, or [key, value] entries.
   // Its coroutine keeps the map and the position in the promise, after the
-  // fields every iterator has there (src/codegen/codegen_iter.cpp).
+  // fields every iterator has there (compiler/lower/codegen/codegen_iter.cpp).
   TZ_LAYOUT_DICT_ITERATOR = 8192,
   TZ_LAYOUT_DICT_VALUES = 16384,
   TZ_LAYOUT_DICT_ENTRIES = 32768,
   TZ_LAYOUT_DICT_OF_SET = 65536,
   TZ_LAYOUT_PROMISE = 131072,     // Promise { value } (async.c)
   TZ_LAYOUT_TIMER = 262144,       // Timeout {} and Immediate {}, by the layout's name; so the
-                                  // objects of node:crypto, Hash {} (runtime/crypto.h)
+                                  // objects of node:crypto, Hash {}
+                                  // (runtime/library/crypto/crypto/crypto.h)
   // An object of binary data (bytes.c): its TZ_BYTES_* kind is in the bits
   // from TZ_LAYOUT_BYTES_SHIFT on.
   TZ_LAYOUT_BYTES = 524288,
@@ -411,7 +412,7 @@ enum {
   // An async iterator, whose layout is a TzAsyncIterLayout (async.c).
   TZ_LAYOUT_ASYNC_ITERATOR = 268435456,
   TZ_LAYOUT_ASYNC_GENERATOR = 536870912, // Object [AsyncGenerator] {}
-  // A class of the built-in modules tz has written in tz (src/lib), which
+  // A class of the built-in modules tz has written in tz (library/), which
   // prints as node prints its object (inspect.c): an emitter of node:events
   // and the classes down its chain show `_maxListeners: undefined`, and the
   // keys that node has as symbols, `Symbol(kCapture)`; the wrapper of
@@ -437,7 +438,7 @@ enum {
 #define TZ_FIELD_METHOD 0xFFFFFFFFu
 
 // The offset of a key that a getter gives, a property of a class of tz's
-// library (src/lib) such as `status` of Response: not stored in the object,
+// library (library/) such as `status` of Response: not stored in the object,
 // it prints with the value its getter gives, as node prints the properties
 // of its classes. It is no key otherwise (Object.keys, JSON.stringify), as
 // a getter of a prototype is not one in JavaScript. Its type is a
@@ -647,7 +648,7 @@ void tz_buf_join(TzBuf *out, const TzArray *array, const TzBuf *sep);
 // or so is `coef * 10^-scale` in the value itself, with the scale in the low
 // 32 bits of `meta` and no flags; longer ones keep their digits in a TzDecObj
 // that `coef` points to (see decimal.c). Must match CodeGen
-// (src/codegen/codegen_decimal.cpp).
+// (compiler/library/decimal/codegen/codegen_decimal.cpp).
 typedef struct {
   int64_t coef;
   uint64_t meta;
@@ -683,7 +684,7 @@ void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta);
 // null, true and false are nodes of the runtime that are never freed. A Json
 // array keeps its elements in a TzArray of Json, which a program sees as
 // `Json[]` once it checked Array.isArray. Must match CodeGen
-// (src/codegen/codegen_json.cpp).
+// (compiler/library/json/codegen/codegen_json.cpp).
 enum {
   TZ_JSON_NULL = 0,
   TZ_JSON_BOOL = 1,
@@ -761,7 +762,7 @@ int32_t tz_json_strict_equal(const TzJson *a, const TzJson *b);
 // code reads and writes entries, `count`, `used` and `iterating` directly.
 // While an iteration is in progress (`iterating` > 0) entries do not move,
 // so a position stays valid, and keys added meanwhile come after it, as in
-// JavaScript. Must match CodeGen (src/codegen/codegen_dict.cpp).
+// JavaScript. Must match CodeGen (compiler/lower/codegen/codegen_dict.cpp).
 //
 // A map starts as every object of the language does, with its count and its
 // layout, whose drop function is tz_map_drop and whose flag TZ_LAYOUT_DICT
@@ -826,7 +827,7 @@ void tz_process_env_changed(const TzStr *name, const TzStr *value);
 // a box. The box is an object of the language too, with tz_box_layout, so
 // that code that sees it as an `object` releases and prints it as one. The
 // value follows the header, as a value of `type` lies in memory, and the box
-// owns it. Must match CodeGen (src/codegen/codegen_unknown.cpp).
+// owns it. Must match CodeGen (compiler/lower/codegen/codegen_unknown.cpp).
 typedef struct TzBox {
   int64_t rc;
   const TzLayout *layout; // &tz_box_layout
@@ -887,8 +888,8 @@ int32_t tz_unknown_equal(const void *a, const void *b);
 // and retained.
 void tz_unknown_unbox(const void *u, const TzType *type, void *out);
 
-// The built-in modules written in tz (library.c, src/lib): what their
-// intrinsics `__tz_*` do (see src/sema/sema_events.cpp).
+// The built-in modules written in tz (library.c, library/): what their
+// intrinsics `__tz_*` do (see compiler/library/events/sema/sema_events.cpp).
 void *tz_lib_bare(void *map, void *(*make)(const void *));
 void tz_lib_class_name(TzStr *out, const void *o, void *(*make)(const void *));
 int32_t tz_lib_pid(void *(*make)(const void *));
@@ -1016,8 +1017,8 @@ int32_t tz_unknown_holds(const void *u, const TzType *type);
 // empty), and fills the slots of up to `max` matches one after the other;
 // it returns how many it found, fewer than `max` when there are no more. For
 // a literal it is the machine code the compiler made of it
-// (src/codegen/codegen_regex_native.cpp); for `new RegExp(s)`, the
-// interpreter, tz_re_interpret.
+// (compiler/library/regex/codegen/codegen_regex_native.cpp); for `new
+// RegExp(s)`, the interpreter, tz_re_interpret.
 typedef int32_t (*TzReMatch)(const uint32_t *program, const void *units, int32_t wide,
                              int32_t length, int32_t start, int32_t *caps, int32_t sticky,
                              int32_t max);
@@ -1025,7 +1026,7 @@ typedef int32_t (*TzReMatch)(const uint32_t *program, const void *units, int32_t
 // A regex: an object of the language whose one field the compiler reads and
 // writes is lastIndex, right after the header. A literal without g and y is
 // a constant the compiler emits, never freed; the others the runtime makes.
-// Must match CodeGen (src/codegen/codegen_regex.cpp).
+// Must match CodeGen (compiler/library/regex/codegen/codegen_regex.cpp).
 typedef struct TzRegex {
   int64_t rc;
   const TzLayout *layout; // tz_re_layout
@@ -1096,7 +1097,7 @@ typedef struct {
 //===----------------------------------------------------------------------===//
 
 // The kinds of errors the runtime throws, numbered as kErrorKinds in
-// src/ast/ast.h.
+// compiler/program/ast/ast.h.
 enum { TZ_ERROR = 0, TZ_TYPE_ERROR = 1, TZ_RANGE_ERROR = 2, TZ_SYNTAX_ERROR = 3, TZ_URI_ERROR = 4 };
 
 // A place an error passed on its way up: a function, and where in which file.
@@ -1263,10 +1264,10 @@ void tz_store_barrier_ref(void *owner, void *object);
 // only what no other piece that may run at the same time writes; before the
 // first thing that is not so, it waits for its turn: tz_order_enter(),
 // which the program calls before such an access (CodeGen, from the decisions
-// of src/sema/parallel.h), and TZ_ORDERED(), which the functions of the
-// runtime that touch its shared state (the queues, the promises, the
-// timers, the output...) begin with. On the main thread, and once the
-// thread has its turn, both cost a test.
+// of compiler/check/parallel/parallel.h), and TZ_ORDERED(), which the functions
+// of the runtime that touch its shared state (the queues, the promises, the
+// timers, the output...) begin with. On the main thread, and once the thread
+// has its turn, both cost a test.
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
 TZ_NOINLINE void tz_order_wait(void);
 static inline void tz_order_enter_inline(void) {
@@ -1311,7 +1312,7 @@ int tz_error_named(const void *error);
 // A Date: an object of the language whose one field is its time value, in
 // milliseconds since 1970 in UTC, NaN for an invalid date. The compiler makes
 // these objects and reads and writes the field. Must match CodeGen
-// (src/codegen/codegen_date.cpp).
+// (compiler/library/date/codegen/codegen_date.cpp).
 typedef struct TzDate {
   int64_t rc;
   const TzLayout *layout; // with TZ_LAYOUT_DATE
@@ -1340,7 +1341,7 @@ double tz_date_equivalent_time(double t);
 // Promises, microtasks, timers and the event loop (async.c)
 //===----------------------------------------------------------------------===//
 
-// Must match CodeGen (src/codegen/codegen_async.cpp).
+// Must match CodeGen (compiler/lower/codegen/codegen_async.cpp).
 enum { TZ_PROMISE_PENDING = 0, TZ_PROMISE_FULFILLED = 1, TZ_PROMISE_REJECTED = 2 };
 
 typedef struct TzPromise TzPromise;
@@ -1355,8 +1356,8 @@ typedef struct TzReactor TzReactor;
 // `ahead`: when the piece of async code it goes on with may run ahead of
 // its turn on a thread of the parallel runtime, the number of the await it
 // goes on from (CodeGen sets it at each await, from the decisions of
-// src/sema/parallel.h), 0 when not; once a thread took it on, the TzJob it
-// runs as (parallel.c). Every other reactor has 0.
+// compiler/check/parallel/parallel.h), 0 when not; once a thread took it on,
+// the TzJob it runs as (parallel.c). Every other reactor has 0.
 struct TzReactor {
   TzReactor *next;
   void (*run)(TzReactor *self, TzPromise *source);
@@ -1460,7 +1461,7 @@ typedef struct TzAsyncIterLayout {
 
 // An async generator: the steps asked of it, its state, and the reactor its
 // coroutine awaits with, which its frame follows. Must match CodeGen
-// (src/codegen/codegen_async_iter.cpp).
+// (compiler/lower/codegen/codegen_async_iter.cpp).
 typedef struct TzAgenStep {
   struct TzAgenStep *next;
   TzPromise *promise; // held
@@ -1544,7 +1545,7 @@ typedef struct TzAbortListener {
   void (*run)(struct TzAbortListener *self);
 } TzAbortListener;
 
-// What an AbortSignal of tz's library (src/lib/web.tz) holds for the
+// What an AbortSignal of tz's library (library/events/web.tz) holds for the
 // runtime: whether it is aborted, the reason, and the runtime's listeners.
 typedef struct TzSignal {
   int64_t rc;
@@ -1569,8 +1570,9 @@ void *tz_signal_reason(const void *signal);
 //===----------------------------------------------------------------------===//
 
 // The kinds of the objects of binary data (docs/bytes.md), numbered as
-// Type::Bytes in src/sema/types.h. The typed arrays come first, by their
-// elements; a Buffer is a Uint8Array that prints as node prints a Buffer.
+// Type::Bytes in compiler/program/types/types.h. The typed arrays come first,
+// by their elements; a Buffer is a Uint8Array that prints as node prints a
+// Buffer.
 enum {
   TZ_BYTES_U8 = 1,
   TZ_BYTES_I8 = 2,
@@ -1592,8 +1594,8 @@ enum {
 // An ArrayBuffer: the memory, which its views share. Its bytes follow the
 // header in the same block, or, with TZ_ABUF_STATIC, lie in the executable
 // (embedBytes) and are never freed. No buffer is longer than kMaxLength of
-// src/sema/facts.h, so that the proofs of indices hold. Must match CodeGen
-// (src/codegen/codegen_bytes.cpp).
+// compiler/check/facts/facts.h, so that the proofs of indices hold. Must match
+// CodeGen (compiler/library/bytes/codegen/codegen_bytes.cpp).
 typedef struct TzArrayBuffer {
   int64_t rc;
   const TzLayout *layout;
@@ -1694,7 +1696,8 @@ int32_t tz_text_decoder_flag(const void *decoder, int32_t which);
 
 // Programs call these functions, and console.error and process.stdout.write
 // those of tzrt.c, through CodeGen::processFunction
-// (src/codegen/codegen_process.cpp), which declares each where it is used.
+// (compiler/library/process/codegen/codegen_process.cpp), which declares each
+// where it is used.
 
 // The code the program ends with when its code runs to the end:
 // process.exitCode, or 0.
@@ -1722,7 +1725,8 @@ void tz_out_flush(int all);
 // the runtime gives it (CodeGen::objectMaker): the parts are a struct of the
 // object's fields, in an order both sides know, which the object takes over.
 // The structs below are those parts; the compiler lays out the same fields
-// in the same order (see makerFields in src/codegen/codegen_node.cpp).
+// in the same order (see makerFields in
+// compiler/library/node/codegen/codegen_node.cpp).
 typedef void *(*TzMaker)(const void *parts);
 
 // `string | undefined` as the compiler lays it out.

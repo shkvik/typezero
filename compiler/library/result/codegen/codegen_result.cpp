@@ -11,7 +11,7 @@
 // in the call is inlined by LLVM, so `parse(s).map(n => n * 2).match(...)`
 // becomes plain branches.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 
@@ -25,7 +25,7 @@ namespace tz {
 
 namespace {
 
-// The descriptor kind; must match runtime/tzrt.h.
+// The descriptor kind; must match runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kResultKind = 12;
 
 // The half of a Result that the argument `i` of a method gets.
@@ -66,7 +66,7 @@ llvm::Type *CodeGen::lowerHalf(const Type *half) {
 }
 
 // { i32 kind, i32 size, ptr value type, ptr error type, i32 value offset,
-// i32 error offset, i32 ok offset }: TzResultType in runtime/tzrt.h.
+// i32 error offset, i32 ok offset }: TzResultType in runtime/core/tzrt/tzrt.h.
 llvm::Constant *CodeGen::resultDescriptor(const Type *type) {
   ResultLayout layout = resultLayout(type);
   const llvm::DataLayout &data = module_->getDataLayout();

@@ -1,4 +1,4 @@
-#include "sema/facts.h"
+#include "compiler/check/facts/facts.h"
 
 #include <algorithm>
 #include <limits>

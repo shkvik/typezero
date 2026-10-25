@@ -7,7 +7,7 @@
 // The data of the languages and the tables of Unicode are the ICU of the
 // system (icu.h, intl.h).
 
-#include "intl.h"
+#include "runtime/library/intl/intl/intl.h"
 
 #include <math.h>
 #include <string.h>

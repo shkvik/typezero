@@ -1,7 +1,7 @@
-#include "pkg/scan.h"
+#include "compiler/packages/scan/scan.h"
 
-#include "lex/lexer.h"
-#include "support/diagnostics.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/program/diagnostics/diagnostics.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"

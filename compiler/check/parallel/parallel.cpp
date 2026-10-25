@@ -20,7 +20,7 @@
 // callback of map writes at its own index, each task its own. A call adds
 // what the start of the function called does, with `this` the object it is
 // called on; a function value may be any function of its type that the
-// program has as a value. The built-in modules written in tz (src/lib) are
+// program has as a value. The built-in modules written in tz (library/) are
 // not walked: what their functions do with what the program gives them is
 // described (see libraryCall).
 //
@@ -37,10 +37,10 @@
 // part that keeps the order is the one from the first to the last access of
 // that data in the piece.
 
-#include "sema/parallel.h"
+#include "compiler/check/parallel/parallel.h"
 
-#include "sema/crypto_api.h"
-#include "sema/types.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/types/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -763,7 +763,7 @@ private:
   // The functions the program has as values, by their type.
   std::map<const Type *, std::vector<unsigned>> values_;
   llvm::DenseSet<unsigned> valueFns_;
-  // The built-in modules written in tz (src/lib): the program's calls into
+  // The built-in modules written in tz (library/): the program's calls into
   // them are described (libraryCall), and their code is not walked.
   std::vector<std::pair<const char *, const char *>> libRanges_;
   // The listeners the program gives them, by what runs them (CallRec::
@@ -2031,7 +2031,7 @@ void Analysis::newExpr(const NewExpr *n) {
 //===----------------------------------------------------------------------===//
 //
 // node:events, tz:http, fetch, URL, streams, EventTarget and AbortController
-// are code in tz (src/lib), which the program calls. Their code is not
+// are code in tz (library/), which the program calls. Their code is not
 // walked: what the program sees of it is described here. A call reads what
 // it is given and reads or changes the state of the object it is called on
 // (a getter only reads it); the functions given to it may run now or later:

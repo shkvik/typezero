@@ -7,7 +7,7 @@
 // system, so arguments, environment variables and paths in any language
 // arrive whole; the code pages of the console play no part.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdlib.h>
 #include <string.h>

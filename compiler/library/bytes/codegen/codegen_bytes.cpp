@@ -1,9 +1,9 @@
 // Binary data (docs/bytes.md). A typed array, a Buffer or a DataView is a
-// pointer to a TzBytes of the runtime (runtime/tzrt.h):
+// pointer to a TzBytes of the runtime (runtime/core/tzrt/tzrt.h):
 //   { i64 rc, ptr layout, ptr data, i32 length, i32 offset, ptr buffer }
 // and an ArrayBuffer a pointer to { i64 rc, ptr layout, ptr data, i32 length,
-// i32 flags }. The runtime makes them (runtime/bytes.c, buffer.c); the code
-// reads and writes the elements itself, at `data`.
+// i32 flags }. The runtime makes them (runtime/library/bytes/bytes/bytes.c,
+// buffer.c); the code reads and writes the elements itself, at `data`.
 //
 // `data` and `length` never change, but a store of an element could, as far
 // as LLVM knows, write over them, and then a loop that writes elements would
@@ -11,9 +11,9 @@
 // carry TBAA of their own (bytesTbaa), apart from the accesses of elements:
 // LLVM keeps them in registers, and the loops over bytes become vector code.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
-#include "../../runtime/encodings.h"
+#include "runtime/library/bytes/encodings/encodings.h"
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -44,12 +44,13 @@ struct EncodingTable {
 const EncodingTable kEncodingTables[] = {TZ_ENCODING_TABLES(TZ_ENCODING_TABLE)};
 #undef TZ_ENCODING_TABLE
 
-// The encodings of TextDecoder, numbered as in runtime/buffer.c.
+// The encodings of TextDecoder, numbered as in
+// runtime/library/bytes/buffer/buffer.c.
 enum { kTextUtf8, kTextUtf16le, kTextUtf16be, kTextSingleByte, kTextCjk };
 
-// The multi-byte encodings (runtime/cjk.c), each a TzCjkEncoding of the
-// runtime that names its indexes: a program that refers to one gets those
-// from the linker, and no others.
+// The multi-byte encodings (runtime/library/bytes/cjk/cjk.c), each a
+// TzCjkEncoding of the runtime that names its indexes: a program that refers to
+// one gets those from the linker, and no others.
 const char *const kCjkEncodings[] = {"gbk",         "gb18030",   "big5",  "euc-jp",
                                      "iso-2022-jp", "shift_jis", "euc-kr"};
 

@@ -16,7 +16,7 @@
 // with `string` or `number` in it, it is a string of a pattern
 // (Type::stringPattern), which a literal is if it matches.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

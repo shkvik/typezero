@@ -2,7 +2,8 @@
 // those node embeds (its src/node_root_certs.h, Mozilla's list from NSS), taken from the node
 // that runs this, as tls.rootCertificates gives them:
 //
-//   node runtime/gen_tls_roots.mjs > runtime/tls_roots.h
+//   cd runtime/library/tls/tls
+//   node gen_tls_roots.mjs > tls_roots.h
 //
 // Their DER, one after the other, is compressed with raw deflate, which tls.c inflates with the
 // zlib of the runtime the first time a program makes a connection of https.

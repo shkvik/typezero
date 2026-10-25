@@ -3,7 +3,7 @@
 // formatting, panics, the debugger statement, startup and shutdown.
 // Strings live in string.c, the rest of process in process.c.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdarg.h>

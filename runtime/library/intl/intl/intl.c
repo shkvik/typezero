@@ -7,7 +7,7 @@
 // intl_names.c (RelativeTimeFormat, ListFormat, DisplayNames). Dates use
 // the languages of this file too (date_format.c).
 
-#include "intl.h"
+#include "runtime/library/intl/intl/intl.h"
 
 #include <math.h>
 #include <stdlib.h>

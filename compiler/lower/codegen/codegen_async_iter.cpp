@@ -2,14 +2,14 @@
 //
 // An async generator is a coroutine of LLVM that both awaits, as an async
 // function does, and yields, as a generator does. Its object is a TzAsyncGen
-// of the runtime (runtime/tzrt.h): { i64 rc, ptr layout, the queue of the
-// steps asked of it, its state, the reactor it awaits with }, and then its
+// of the runtime (runtime/core/tzrt/tzrt.h): { i64 rc, ptr layout, the queue of
+// the steps asked of it, its state, the reactor it awaits with }, and then its
 // frame, so that the runtime resumes it as it resumes an async function
 // (tz.async.resume, which goes to the frame after the reactor). The runtime
 // keeps the state machine of the spec (AsyncGeneratorEnqueue, Yield,
-// CompleteStep, DrainQueue, in runtime/async.c); the code here gives each
-// `yield` its value and asks what to do next: go on, wait for the next step,
-// or return, which runs the `finally` blocks around it.
+// CompleteStep, DrainQueue, in runtime/core/async/async.c); the code here gives
+// each `yield` its value and asks what to do next: go on, wait for the next
+// step, or return, which runs the `finally` blocks around it.
 //
 // `for await` asks an async iterator for each value through its layout
 // (TzAsyncIterLayout): a promise of the value, or one fulfilled with the flag
@@ -19,8 +19,8 @@
 // iterator, each element is awaited, and then a turn more, as the iterator
 // of the spec that wraps a sync one (CreateAsyncFromSyncIterator) takes.
 
-#include "codegen/codegen.h"
-#include "sema/sema.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/IR/MDBuilder.h"
 
@@ -30,7 +30,8 @@ namespace tz {
 
 namespace {
 
-// Must match TzAsyncGen in runtime/tzrt.h: the reactor, then the frame.
+// Must match TzAsyncGen in runtime/core/tzrt/tzrt.h: the reactor, then the
+// frame.
 constexpr uint64_t kAgenReactor = 40;
 constexpr uint64_t kAgenHeader = 80;
 constexpr uint32_t kAgenFrameAlign = 8;

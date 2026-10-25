@@ -1,7 +1,7 @@
 // URL and URLSearchParams of the WHATWG URL Standard, as node has them as
 // globals (docs/net.md, section 2); a file that names one gets it (see the
-// loader, src/driver/loader.cpp). The parser follows the standard's state
-// machine, so what it makes of an input is what node's ada makes of it.
+// loader, compiler/load/loader/loader.cpp). The parser follows the standard's
+// state machine, so what it makes of an input is what node's ada makes of it.
 //
 // Where it is simpler than the standard: names of hosts outside ASCII are
 // made ASCII by NFKC and lowercasing, then Punycode, which is UTS #46 for
@@ -11,8 +11,9 @@
 // that they never hold each other (tz frees by counts, docs/objects.md).
 //
 // The properties of URL are getters and setters, as in JavaScript: tz's
-// classes have none, but its built-in modules do (src/sema/sema_library.cpp),
-// and they print as node prints them.
+// classes have none, but its built-in modules do
+// (compiler/library/tz_modules/sema/sema_library.cpp), and they print as node
+// prints them.
 
 // The code points of a string, -1 past its end.
 function codePoints(s: string): int[] {
@@ -1256,7 +1257,8 @@ export class URLSearchParams {
     return this.#pairs().length
   }
 
-  // What it prints as, `URLSearchParams { 'a' => '1' }` (runtime/inspect.c).
+  // What it prints as, `URLSearchParams { 'a' => '1' }`
+  // (runtime/library/console/inspect/inspect.c).
   get __tz_entries(): [string, string][] {
     return [...this.#pairs()]
   }

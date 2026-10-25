@@ -3,21 +3,23 @@
 // An ArrayBuffer is the memory; a typed array, a Buffer or a DataView is a
 // window into it (TzBytes in tzrt.h) that holds a reference to its buffer.
 // The code reads and writes elements itself, straight from `data` (see
-// src/codegen/codegen_bytes.cpp); the runtime makes the objects and does
-// what takes a loop: copies with conversions, fill, set, sort, join...
+// compiler/library/bytes/codegen/codegen_bytes.cpp); the runtime makes the
+// objects and does what takes a loop: copies with conversions, fill, set, sort,
+// join...
 //
 // Sema checks that what is stored fits in the element (docs/bytes.md,
 // section 3), so the conversions here only need to agree with JavaScript
 // where JavaScript converts too: between the kinds of typed arrays, and from
 // doubles.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
-// kMaxLength of src/sema/facts.h: the proofs of indices count on it.
+// kMaxLength of compiler/check/facts/facts.h: the proofs of indices count on
+// it.
 #define MAX_LENGTH ((int64_t)(1 << 30) - 1)
 
 void tz_bytes_drop(void *object);

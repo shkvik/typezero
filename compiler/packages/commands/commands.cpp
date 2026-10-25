@@ -1,9 +1,9 @@
-#include "pkg/commands.h"
+#include "compiler/packages/commands/commands.h"
 
-#include "pkg/fetch.h"
-#include "pkg/json.h"
-#include "pkg/project.h"
-#include "pkg/semver.h"
+#include "compiler/packages/fetch/fetch.h"
+#include "compiler/packages/json/json.h"
+#include "compiler/packages/project/project.h"
+#include "compiler/packages/semver/semver.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"

@@ -1,11 +1,11 @@
-// What the built-in modules tz has written in tz (src/lib) ask of the
+// What the built-in modules tz has written in tz (library/) ask of the
 // runtime through their intrinsics, `function __tz_lib_pid(): int` without
-// a body (src/codegen/codegen_library.cpp): node:events, and the events of
-// the web platform. util.inspect of an unknown, `__tz_lib_inspect`, is
-// tz_lib_inspect in inspect.c. Each takes the maker of SystemError last,
-// which these do not use.
+// a body (compiler/library/tz_modules/codegen/codegen_library.cpp):
+// node:events, and the events of the web platform. util.inspect of an unknown,
+// `__tz_lib_inspect`, is tz_lib_inspect in inspect.c. Each takes the maker of
+// SystemError last, which these do not use.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

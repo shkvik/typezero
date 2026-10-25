@@ -8,14 +8,15 @@
 // of the standard (https://encoding.spec.whatwg.org/index-NAME.txt), which
 // the directory given holds:
 //
-//   node runtime/gen_cjk_tables.mjs <directory> > runtime/cjk_tables.h
+//   cd runtime/library/bytes/cjk
+//   node gen_cjk_tables.mjs <directory> > cjk_tables.h
 
 import fs from "node:fs";
 import path from "node:path";
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node runtime/gen_cjk_tables.mjs <directory of index-*.txt>");
+  console.error("usage: node gen_cjk_tables.mjs <directory of index-*.txt>");
   process.exit(1);
 }
 

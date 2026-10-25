@@ -10,8 +10,8 @@
 // may be older than node's, and then details may differ: the kind of space
 // before "PM", a newer name of a zone.
 
-#include "date.h"
-#include "intl.h"
+#include "runtime/library/date/date/date.h"
+#include "runtime/library/intl/intl/intl.h"
 
 #include <math.h>
 #include <stdlib.h>

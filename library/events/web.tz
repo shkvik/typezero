@@ -3,7 +3,7 @@
 // DOMException; ported from lib/internal/event_target.js and
 // lib/internal/abort_controller.js of Node 24 (docs/events.md, section 4).
 // A file that names one of them gets it, as if it imported it (see the
-// loader, src/driver/loader.cpp).
+// loader, compiler/load/loader/loader.cpp).
 //
 // tz has no getters, so what node computes in a getter is a field here that
 // the code keeps up to date: `currentTarget` and `eventPhase` while an event
@@ -13,14 +13,16 @@
 //
 // An AbortSignal is also what the runtime cancels its waits with (the
 // timers of node:timers/promises, node:fs/promises, node:readline): each
-// signal holds the runtime's side of it (runtime/signal.c), which the
-// compiler passes where a call takes a `signal`, and its abort runs the
-// runtime's listeners in their places among those of the program.
+// signal holds the runtime's side of it
+// (runtime/library/events/signal/signal.c), which the compiler passes where a
+// call takes a `signal`, and its abort runs the runtime's listeners in their
+// places among those of the program.
 
-// What this code asks of the runtime (runtime/library.c, signal.c): the
-// name of the class of an object; the runtime's side of a new AbortSignal,
-// that side aborted with the reason, the runtime's listeners that came
-// before the listener numbered `order`, and the number of a new listener.
+// What this code asks of the runtime
+// (runtime/library/tz_modules/library/library.c, signal.c): the name of the
+// class of an object; the runtime's side of a new AbortSignal, that side
+// aborted with the reason, the runtime's listeners that came before the
+// listener numbered `order`, and the number of a new listener.
 function __tz_lib_class_name(object: object): string
 function __tz_signal_new(): object
 function __tz_lib_signal_abort(native: object, reason: unknown): void
@@ -190,10 +192,11 @@ export class EventTarget {
   #events = new Map<string, Listener>()
 
   // addEventListener(type, listener, options) and removeEventListener() of
-  // the program: the compiler calls these (src/sema/sema_events.cpp). A
-  // function gets the kind of event E it takes, `(e: CustomEvent<int>) =>
-  // ...`, and Event if it says none; the dispatch of another event to it is
-  // a TypeError. An object gets the event in handleEvent().
+  // the program: the compiler calls these
+  // (compiler/library/events/sema/sema_events.cpp). A function gets the kind of
+  // event E it takes, `(e: CustomEvent<int>) => ...`, and Event if it says
+  // none; the dispatch of another event to it is a TypeError. An object gets
+  // the event in handleEvent().
   addFunctionListener<E extends Event>(
     type: string,
     listener: (event: E) => void,
@@ -317,8 +320,9 @@ export class AbortSignal extends EventTarget {
   // in its place among the others, as node's event handlers are (see
   // setOnabort).
   @__tz_hidden onabort: ((event: Event) => void) | undefined = undefined
-  // The runtime's side (runtime/signal.c): what the runtime's waits listen
-  // to, each with a number from the counter of the listeners.
+  // The runtime's side (runtime/library/events/signal/signal.c): what the
+  // runtime's waits listen to, each with a number from the counter of the
+  // listeners.
   #native: object = __tz_signal_new()
   // The signals of any() that follow this one. They do not hold it, so a
   // signal and those that follow it make no cycle.
@@ -330,8 +334,8 @@ export class AbortSignal extends EventTarget {
   }
 
   // `signal.onabort = handler` of the program: the compiler calls this
-  // (src/sema/sema_events.cpp). Set to undefined, the handler stays in its
-  // place and does nothing.
+  // (compiler/library/events/sema/sema_events.cpp). Set to undefined, the
+  // handler stays in its place and does nothing.
   setOnabort(handler: ((event: Event) => void) | undefined) {
     this.onabort = handler
     if (this.#onabortListens) return

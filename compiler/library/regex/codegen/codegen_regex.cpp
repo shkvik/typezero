@@ -1,7 +1,7 @@
 // Regular expressions (docs/regex.md): literals, the methods of RegExp and
-// of the strings that take one, which call the runtime (runtime/regex.c), and
-// replace() with a function, whose loop is emitted here so that the function
-// is called like any other.
+// of the strings that take one, which call the runtime
+// (runtime/library/regex/regex/regex.c), and replace() with a function, whose
+// loop is emitted here so that the function is called like any other.
 //
 // A literal's program, compiled by Sema, is a constant in the executable. A
 // literal without g and y has no state that matters (lastIndex is used only
@@ -9,9 +9,9 @@
 // frees; one with g or y is a new object each time it is evaluated, as in
 // JavaScript, where each has its own lastIndex.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
-#include "../../runtime/regex.h"
+#include "runtime/library/regex/regex/regex.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

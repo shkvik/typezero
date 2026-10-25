@@ -21,9 +21,9 @@
 // instance, since the instances are made as the program is checked, and a
 // call checked before one of them exists must work for it too.
 
-#include "lex/lexer.h"
-#include "parse/parser.h"
-#include "sema/sema.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/load/parser/parser.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

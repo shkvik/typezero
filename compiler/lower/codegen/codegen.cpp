@@ -1,4 +1,4 @@
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -16,20 +16,21 @@ namespace tz {
 
 namespace {
 
-// String value layout; must match runtime/string.c.
+// String value layout; must match runtime/core/string/string.c.
 constexpr uint64_t kStrLengthMask = (uint64_t(1) << 30) - 1;
 constexpr uint64_t kStrAscii = uint64_t(1) << 60;
 constexpr uint64_t kStrTwoByte = uint64_t(1) << 61;
 constexpr uint64_t kStrRope = uint64_t(1) << 62;
 constexpr uint64_t kStrHeap = uint64_t(1) << 63;
-// The count of a shared object starts here (TZ_RC_SHARED, runtime/tzrt.h);
-// those of the members of groups are below it.
+// The count of a shared object starts here (TZ_RC_SHARED,
+// runtime/core/tzrt/tzrt.h); those of the members of groups are below it.
 constexpr int64_t kRcShared = -(int64_t(1) << 60);
 // A one-byte string of up to this many code units is stored in the value
 // itself: `obj` holds the code units and `meta` has ROPE without HEAP.
 constexpr size_t kInlineMax = 8;
-// A number passed to tz_str_concat_n as it is (see runtime/string.c): the
-// ROPE and TWO_BYTE flags without HEAP, and the kind of number in the low bits.
+// A number passed to tz_str_concat_n as it is (see
+// runtime/core/string/string.c): the ROPE and TWO_BYTE flags without HEAP, and
+// the kind of number in the low bits.
 constexpr uint64_t kNumberPart = kStrRope | kStrTwoByte;
 constexpr uint64_t kNumberInt = 1;
 constexpr uint64_t kNumberDouble = 2;
@@ -136,7 +137,8 @@ std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
   usesAsync_ = file.usesAsync;
   // Node runs a file with `import`, `export` or top-level `await` as an ES
   // module, inside a microtask, and any other as CommonJS, before the
-  // microtasks; the order of what follows depends on it (runtime/async.c).
+  // microtasks; the order of what follows depends on it
+  // (runtime/core/async/async.c).
   esModule_ = file.topLevelAwait;
   for (const Module *module : file.modules)
     if (module->isEntry && (llvm::any_of(module->file.imports,
@@ -273,7 +275,7 @@ void CodeGen::declareRuntime() {
   rt_.printString = declare("tz_print_string", voidTy, {ptr, i64});
   rt_.printValue = declare("tz_print_value", voidTy, {ptr, ptr});
   rt_.debugger = declare("tz_debugger", voidTy, {});
-  // Numbers (runtime/tzrt.c, number.c and math.c).
+  // Numbers (runtime/core/tzrt/tzrt.c, number.c and math.c).
   rt_.toInt32 = declare("tz_to_int32", i32, {f64});
   rt_.mathRound = declare("tz_math_round", f64, {f64});
   rt_.mathPow = declare("tz_math_pow", f64, {f64, f64});
@@ -318,8 +320,8 @@ void CodeGen::declareRuntime() {
   rt_.strFromCharCodes = declare("tz_str_from_char_codes", voidTy, {ptr, ptr, i64});
   rt_.strFromCodePoints = declare("tz_str_from_code_points", voidTy, {ptr, ptr, i64});
 
-  // Arrays (runtime/array.c). Values of any type go by address, with the
-  // type descriptor of the elements stored in the array.
+  // Arrays (runtime/core/array/array.c). Values of any type go by address, with
+  // the type descriptor of the elements stored in the array.
   rt_.arrNew = declare("tz_arr_new", ptr, {ptr, i64, i64});
   rt_.arrNewLength = declare("tz_arr_new_length", ptr, {ptr, i64});
   rt_.arrFree = declare("tz_arr_free", voidTy, {ptr});
@@ -338,10 +340,10 @@ void CodeGen::declareRuntime() {
   rt_.arrSort = declare("tz_arr_sort", voidTy, {ptr});
   rt_.arrSortWith = declare("tz_arr_sort_with", voidTy, {ptr, ptr, ptr});
   rt_.arrSplice = declare("tz_arr_splice", ptr, {ptr, i64, i64, i32, i64, ptr});
-  // The objects of closures (runtime/closure.c).
+  // The objects of closures (runtime/core/closure/closure.c).
   rt_.objAlloc = declare("tz_obj_alloc", ptr, {i64});
   rt_.objFree = declare("tz_obj_free", voidTy, {ptr});
-  // Object.keys and the like (runtime/object.c).
+  // Object.keys and the like (runtime/core/object/object.c).
   rt_.objKeys = declare("tz_obj_keys", ptr, {ptr, ptr});
   rt_.objValues = declare("tz_obj_values", ptr, {ptr, ptr});
   rt_.objEntries = declare("tz_obj_entries", ptr, {ptr, ptr, ptr, i64});
@@ -388,7 +390,8 @@ void CodeGen::defineRefCountHelpers() {
       b.SetInsertPoint(countedBlock);
       llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
       auto *freeBlock = isRetain ? nullptr : llvm::BasicBlock::Create(ctx_, "free", fn);
-      // A shared object's count goes atomically (runtime/publish.c).
+      // A shared object's count goes atomically
+      // (runtime/core/publish/publish.c).
       if (parallel_)
         countShared(b, obj, count, isRetain, freeBlock, doneBlock);
       if (isRetain) {
@@ -455,7 +458,8 @@ void CodeGen::defineRefCountHelpers() {
   plainObjReleaseFn_ = objReleaseFn_;
 
   // tz.ref.retain: a reference that may point at a member of a group, whose
-  // count is negative (see runtime/group.c): its group's count goes up.
+  // count is negative (see runtime/core/group/group.c): its group's count goes
+  // up.
   refRetainFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage, "tz.ref.retain",
                                         module_.get());
   refRetainFn_->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -520,8 +524,8 @@ void CodeGen::defineRefCountHelpers() {
 }
 
 // In a parallel program, the count of a shared object (below zero, see
-// TZ_RC_SHARED in runtime/tzrt.h) goes atomically; the last release drops
-// the object, which is this thread's alone then, with a count of zero.
+// TZ_RC_SHARED in runtime/core/tzrt/tzrt.h) goes atomically; the last release
+// drops the object, which is this thread's alone then, with a count of zero.
 // Leaves `b` in the block for the other objects, whose `count` is the one
 // loaded.
 void CodeGen::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm::Value *count,
@@ -944,7 +948,7 @@ llvm::Value *CodeGen::addressOf(const VarSymbol *var) {
   assert(global && "variable used before its declaration was emitted");
   // The state of a built-in module (fetch's pool of connections, the stdio
   // streams...): code that runs ahead of its turn waits for it first, as the
-  // analysis does not walk that code (runtime/parallel.c).
+  // analysis does not walk that code (runtime/core/parallel/parallel.c).
   if (parallel_ && function_ && libraryState_.contains(var))
     builder_.CreateCall(processFunction("tz_order_enter", builder_.getVoidTy(), {}));
   return global;
@@ -2666,7 +2670,7 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
 // As in JavaScript, all arguments are evaluated before anything is printed:
 // `console.log(a.pop(), a)` shows the array without the popped element.
 // console.error prints the same way to stderr (see tz_err_begin in
-// runtime/tzrt.c).
+// runtime/core/tzrt/tzrt.c).
 void CodeGen::emitConsoleLog(CallExpr *call) {
   size_t count = call->args.size();
   std::vector<bool> laterCannotAssign(count, true);
@@ -3365,8 +3369,8 @@ llvm::Value *CodeGen::emitStringMethod(CallExpr *call) {
 }
 
 // A short literal is an inline string. A longer one lives in the executable
-// in the same layout as a heap buffer (see runtime/string.c), one byte per
-// code unit when all of them fit.
+// in the same layout as a heap buffer (see runtime/core/string/string.c), one
+// byte per code unit when all of them fit.
 llvm::Constant *CodeGen::stringLiteral(const std::u16string &text) {
   auto found = literals_.find(text);
   if (found != literals_.end())

@@ -18,7 +18,7 @@
 // function that checks them and makes the object. A class nothing else
 // reaches by reflection is then not described at all.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

@@ -19,11 +19,11 @@
 // field a loop increments, a result of recursion) is trusted: a warning about
 // every `node.count + 1` would be noise.
 
-#include "sema/overflow.h"
+#include "compiler/check/overflow/overflow.h"
 
-#include "sema/facts.h"
-#include "sema/sema.h"
-#include "sema/types.h"
+#include "compiler/check/facts/facts.h"
+#include "compiler/check/sema/sema.h"
+#include "compiler/program/types/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"

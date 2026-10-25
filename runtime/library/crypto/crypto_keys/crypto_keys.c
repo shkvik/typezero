@@ -2,7 +2,7 @@
 // and back, sign and verify (RSA, RSA-PSS, ECDSA, Ed25519, Ed448), createSign and createVerify,
 // generateKeyPairSync, ECDH and diffieHellman, as node does them over OpenSSL.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/bn.h>
 #include <openssl/core_names.h>

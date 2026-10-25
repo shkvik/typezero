@@ -1,12 +1,12 @@
 // Async (docs/async.md, step 1): async functions as coroutines, `await`,
 // Promises and their methods, timers and the queues.
 //
-// A Promise is an object of the runtime (TzPromise in runtime/tzrt.h):
-// { i64 rc, ptr layout, ptr head, ptr tail, ptr error, i32 state, i32 flags }
-// and then its value, at TZ_PROMISE_VALUE. Its layout says the type of the
-// value, for the runtime to release, copy and print it; the code stores and
-// reads the value itself, and the runtime settles the promise and queues its
-// reactions (runtime/async.c).
+// A Promise is an object of the runtime (TzPromise in
+// runtime/core/tzrt/tzrt.h): { i64 rc, ptr layout, ptr head, ptr tail, ptr
+// error, i32 state, i32 flags } and then its value, at TZ_PROMISE_VALUE. Its
+// layout says the type of the value, for the runtime to release, copy and print
+// it; the code stores and reads the value itself, and the runtime settles the
+// promise and queues its reactions (runtime/core/async/async.c).
 //
 // An async function is a coroutine of LLVM (the switch-resumed kind, as a
 // generator is) whose frame lies in the same allocation as its promise:
@@ -24,8 +24,8 @@
 // for the types at hand. Top-level code with `await` is a coroutine itself,
 // tz.main.async, whose promise main hands to the runtime.
 
-#include "codegen/codegen.h"
-#include "sema/sema.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -38,7 +38,7 @@ namespace tz {
 
 namespace {
 
-// Must match runtime/tzrt.h.
+// Must match runtime/core/tzrt/tzrt.h.
 constexpr uint64_t kPromiseHeader = 48; // TZ_PROMISE_VALUE
 constexpr uint64_t kReactorSize = 40;
 enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlags };
@@ -117,7 +117,8 @@ llvm::Constant *CodeGen::promiseLayout(const Type *value) {
   }
   auto *drop = cast<llvm::Function>(
       asyncFunction("tz_promise_drop", builder_.getVoidTy(), {ptr}).getCallee());
-  // TZ_LAYOUT_GROUP: its promises are members of groups (runtime/async.c).
+  // TZ_LAYOUT_GROUP: its promises are members of groups
+  // (runtime/core/async/async.c).
   uint32_t flags = kLayoutPromise | (promiseIsMember(value) ? 0x80000000u : 0u);
   auto *global = new llvm::GlobalVariable(
       *module_, layoutDescTy_, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
@@ -289,7 +290,7 @@ void CodeGen::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function) {
     args.push_back(function_->getArg(i));
   emitParams(fn, args);
   // Its pieces may run on other threads while the caller goes on with what
-  // it passed: shared (runtime/publish.c).
+  // it passed: shared (runtime/core/publish/publish.c).
   if (parallel_ && (aheadFunctions_.contains(fn) || fn->awaitsAhead)) {
     if (fn->isClosure() || fn->takesThis())
       builder_.CreateCall(processFunction("tz_publish_object", builder_.getVoidTy(),
@@ -459,7 +460,8 @@ llvm::Value *CodeGen::awaitPromise(llvm::Value *promise, const Type *type, llvm:
 llvm::Value *CodeGen::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
   // `await __tz_ahead(p)` in the built-in modules: the piece after it may
-  // run ahead of its turn (runtime/parallel.c), as the code guarantees.
+  // run ahead of its turn (runtime/core/parallel/parallel.c), as the code
+  // guarantees.
   if (auto *call = dyn_cast<CallExpr>(operand); call && call->builtin == Builtin::LibAhead) {
     if (parallel_)
       aheadStarts_.try_emplace(await, uint32_t(aheadStarts_.size() + 1));
@@ -801,7 +803,8 @@ llvm::Value *CodeGen::emitPromiseCombine(CallExpr *call) {
     releaseValue(values, argType);
   }
 
-  // How the runtime collects what it gives (TzCombine in runtime/tzrt.h).
+  // How the runtime collects what it gives (TzCombine in
+  // runtime/core/tzrt/tzrt.h).
   const Type *result = call->type->promised();
   int32_t kind = call->builtin == Builtin::PromiseAll          ? kAll
                  : call->builtin == Builtin::PromiseAllSettled ? kAllSettled

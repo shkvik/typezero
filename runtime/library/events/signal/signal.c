@@ -4,24 +4,25 @@
 // questions and the interface of node:readline) listen to.
 //
 // AbortController and AbortSignal themselves are classes of tz's library,
-// on EventTarget (src/lib/web.tz, docs/events.md, section 4). Each signal
-// holds one of these, which the compiler passes where a call takes a
-// `signal` (Sema::signalOption): the runtime checks whether it is aborted,
-// and listens to its abort with a TzAbortListener. When the signal aborts,
-// abortSignal() of web.tz marks this one aborted with the reason first, and
-// its dispatch of the abort event runs the runtime's listeners here at the
-// places they came among the listeners of the program: every listener, of
-// the program or of the runtime, takes its number from one counter
-// (tz_lib_order), and before the listener of the program numbered n, the
-// runtime's listeners numbered below n run (tz_lib_signal_run). So an abort
-// rejects what waits in the order Node's listeners would.
+// on EventTarget (library/events/web.tz, docs/events.md, section 4). Each
+// signal holds one of these, which the compiler passes where a call takes a
+// `signal` (Sema::signalOption): the runtime checks whether it is aborted, and
+// listens to its abort with a TzAbortListener. When the signal aborts,
+// abortSignal() of web.tz marks this one aborted with the reason first, and its
+// dispatch of the abort event runs the runtime's listeners here at the places
+// they came among the listeners of the program: every listener, of the program
+// or of the runtime, takes its number from one counter (tz_lib_order), and
+// before the listener of the program numbered n, the runtime's listeners
+// numbered below n run (tz_lib_signal_run). So an abort rejects what waits in
+// the order Node's listeners would.
 //
 // The intrinsics of tz's library that cross to C (`function __tz_net_connect(
-// ..., signal: AbortSignal | undefined)`, runtime/net.c and http.c) get the
-// same: the runtime's side of the signal (CodeGen::emitExternal), which
-// fetch and serve listen to with a TzAbortListener.
+// ..., signal: AbortSignal | undefined)`, runtime/library/net/net/net.c and
+// http.c) get the same: the runtime's side of the signal
+// (CodeGen::emitExternal), which fetch and serve listen to with a
+// TzAbortListener.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 

@@ -2,7 +2,7 @@
 // objects of node:crypto and their methods, HMAC, PBKDF2 and HKDF over any hash, the random
 // numbers of the system, timingSafeEqual and secret keys.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <math.h>
 #include <stdio.h>

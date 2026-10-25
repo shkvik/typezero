@@ -12,8 +12,8 @@
 // (docs/date.md, section 2), only for programs that use local time; until
 // then local time there is UTC.
 
-#include "icu.h"
-#include "tzrt.h"
+#include "runtime/library/intl/icu/icu.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -1,13 +1,13 @@
-// Decimals: values of two words, { i64 coef, i64 meta }, as runtime/decimal.c
-// lays them out. A short decimal is `coef * 10^-scale` with the scale in the
-// low bits of meta; a long one points to its digits, counted like a string
-// when they are on the heap, or a constant in the executable for a long
-// literal. Arithmetic, comparisons and the methods call the runtime, whose
-// fast paths for short values (TZ_HOT) are inlined into the program, so that
-// `total += price` is an addition with an overflow check.
+// Decimals: values of two words, { i64 coef, i64 meta }, as
+// runtime/library/decimal/decimal/decimal.c lays them out. A short decimal is
+// `coef * 10^-scale` with the scale in the low bits of meta; a long one points
+// to its digits, counted like a string when they are on the heap, or a constant
+// in the executable for a long literal. Arithmetic, comparisons and the methods
+// call the runtime, whose fast paths for short values (TZ_HOT) are inlined into
+// the program, so that `total += price` is an addition with an overflow check.
 
-#include "codegen/codegen.h"
-#include "support/decimal_literal.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -19,7 +19,7 @@ namespace tz {
 
 namespace {
 
-// The flags of meta; must match runtime/tzrt.h.
+// The flags of meta; must match runtime/core/tzrt/tzrt.h.
 constexpr uint64_t kDecLong = uint64_t(1) << 62;
 // The largest scale of a short decimal.
 constexpr int64_t kDecScaleMax = 0x7fffffff;
@@ -28,7 +28,7 @@ constexpr int64_t kDecScaleMax = 0x7fffffff;
 constexpr int64_t kLiteralRefCount = int64_t(1) << 62;
 // What `/` rounds to: 20 places, half up, as BigNumber.js by default.
 constexpr int64_t kDivisionPlaces = 20;
-// The folds of runtime/decimal.c.
+// The folds of runtime/library/decimal/decimal/decimal.c.
 enum Fold : int32_t { kFoldSum, kFoldMax, kFoldMin };
 
 } // namespace
@@ -82,7 +82,7 @@ llvm::Function *CodeGen::decimalRefCount(bool retain) {
   llvm::Value *obj = b.CreateIntToPtr(b.CreateExtractValue(value, 0, "coef"), b.getPtrTy(), "obj");
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
   auto *freeBlock = retain ? nullptr : llvm::BasicBlock::Create(ctx_, "free", fn);
-  if (parallel_) // a shared one, atomically (runtime/publish.c)
+  if (parallel_) // a shared one, atomically (runtime/core/publish/publish.c)
     countShared(b, obj, count, retain, freeBlock, doneBlock);
   if (retain) {
     b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);

@@ -9,7 +9,7 @@
 // HTTP reads and writes plaintext as it does without TLS. net.c reaches this file through
 // NetTlsOps; a program, through `__tz_tls_connect` (fetch) and `__tz_tls_listen` (serve), which
 // tz links only into a program that may use https, together with libssl and all of libcrypto
-// (src/driver/licenses.cpp).
+// (compiler/link/licenses/licenses.cpp).
 //
 // The client checks the server after the handshake, as node does: the chain of its certificate
 // against the roots (OpenSSL's verification), then the name of the host (node's
@@ -21,8 +21,8 @@
 // TODO(linux): the roots of the system with NODE_USE_SYSTEM_CA (/etc/ssl/certs); the rest works
 // as it is once net.c has sockets there.
 
-#include "crypto.h"
-#include "net.h"
+#include "runtime/library/crypto/crypto/crypto.h"
+#include "runtime/library/net/net/net.h"
 
 #ifdef _WIN32
 // Before OpenSSL, whose headers undefine what wincrypt.h defines in their way (X509_NAME).
@@ -41,7 +41,7 @@
 #include <string.h>
 #include <zlib.h>
 
-#include "tls_roots.h"
+#include "runtime/library/tls/tls/tls_roots.h"
 
 // node 24's tls.DEFAULT_CIPHERS: the suites of TLS 1.3, and the ciphers of TLS 1.2.
 static const char kSuites[] =

@@ -1,4 +1,4 @@
-#include "sema/types.h"
+#include "compiler/program/types/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -966,7 +966,8 @@ const Type *Type::date() {
 }
 
 // Not interned with the object types: each WeakRef<T> is only itself, and
-// what the runtime keeps in it the program does not see (runtime/group.c).
+// what the runtime keeps in it the program does not see
+// (runtime/core/group/group.c).
 const Type *Type::weakRef(const Type *target) {
   static std::map<const Type *, Type *> types;
   Type *&type = types[target];
@@ -1006,7 +1007,7 @@ const Type *Type::intl(IntlKind kind) {
 }
 
 // The timers of the runtime: their objects hold what the program does not
-// see (TzTimer in runtime/tzrt.h).
+// see (TzTimer in runtime/core/tzrt/tzrt.h).
 const Type *Type::timeout() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Timeout")).get();

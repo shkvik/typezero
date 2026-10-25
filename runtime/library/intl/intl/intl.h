@@ -102,8 +102,8 @@ enum { TZ_IN_DOUBLE = 0, TZ_IN_INTEGER = 1, TZ_IN_DECIMAL = 2 };
 // What follows is for the runtime only.
 #ifndef __cplusplus
 
-#include "icu.h"
-#include "tzrt.h"
+#include "runtime/library/intl/icu/icu.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 // The locale and the options as the compiled code passes them
 // (CodeGen::emitIntlOptions); the strings are borrowed.

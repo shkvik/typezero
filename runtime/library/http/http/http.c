@@ -1,7 +1,7 @@
 // HTTP/1.1 on the connections of net.c (docs/net.md, steps 2 and 3): the
 // heads of requests and responses read and checked, bodies of a length or
 // in chunks, and heads written in one piece with the body. The program's
-// side (Request, Response, serve, fetch) is in src/lib, which calls the
+// side (Request, Response, serve, fetch) is in library/, which calls the
 // `__tz_http_*` functions here.
 //
 // Reading is strict, as a server facing the internet must be (RFC 9112 and
@@ -15,7 +15,7 @@
 // transfer coding other than chunked, 505 for a version other than 1.x) and
 // its connection closed.
 
-#include "net.h"
+#include "runtime/library/net/net/net.h"
 
 #include <stdio.h>
 #include <string.h>

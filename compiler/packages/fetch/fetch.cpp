@@ -1,7 +1,7 @@
-#include "pkg/fetch.h"
+#include "compiler/packages/fetch/fetch.h"
 
-#include "pkg/json.h"
-#include "pkg/net.h"
+#include "compiler/packages/json/json.h"
+#include "compiler/packages/net/net.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"

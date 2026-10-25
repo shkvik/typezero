@@ -4,7 +4,7 @@
 // this file; tz build checks the program by its own rules.
 //
 // It lies next to tz as types/node_modules/@types/tz/index.d.ts, and
-// types/tsconfig.json (src/types/tsconfig.json) brings it in together with
+// types/tsconfig.json (editors/types/tsconfig.json) brings it in together with
 // @types/node and neverthrow: for a plugin of tsserver that would give the
 // .tz files of the editor to TypeScript's checker. There is none yet;
 // tests/cli/types.cmake checks these declarations on .ts copies of programs.

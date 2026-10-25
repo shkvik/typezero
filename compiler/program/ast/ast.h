@@ -323,7 +323,8 @@ public:
   // The length of the literal in the source, from loc(); 0 for one that
   // `new RegExp("...")` stands for.
   size_t written = 0;
-  // Set by Sema (see runtime/regex.h); empty after an error.
+  // Set by Sema (see runtime/library/regex/regex/regex.h); empty after an
+  // error.
   std::vector<uint32_t> program;
 };
 
@@ -758,7 +759,7 @@ enum class Builtin {
   // Dates (sema_date.cpp, docs/date.md). The numbers of the constructors and
   // of the functions of Date are doubles. The receiver of a method is the
   // object of the callee MemberExpr; a getter or a setter takes the field
-  // first, as an int literal (TZ_DATE_* of runtime/tzrt.h).
+  // first, as an int literal (TZ_DATE_* of runtime/core/tzrt/tzrt.h).
   WeakRefNew,        // new WeakRef(object)
   WeakRefDeref,      // w.deref(): the object, or undefined once it died
   DateNew,           // new Date() (now) and new Date(ms)
@@ -789,7 +790,7 @@ enum class Builtin {
   // The rest of Intl (sema_intl.cpp, docs/intl.md). The receiver of a method
   // is the object of the callee MemberExpr. The locale and the options, each
   // optional, are the last arguments where there are any.
-  IntlNew,              // the kind (TZ_INTL_* of runtime/intl.h, an int literal), locale?, options?
+  IntlNew,              // the kind (TZ_INTL_* of intl.h, an int literal), locale?, options?
   IntlSupportedLocales, // the name of the method (a string literal), locales, options?
   IntlCanonicalLocales, // locales?: a string, a string[] or undefined
   IntlResolvedOptions,
@@ -823,7 +824,7 @@ enum class Builtin {
   PathFormat, // style, the object
   PathToNamespacedPath,
   // node:os. OsString and OsNumber take which one (an int literal, see
-  // runtime/os.c).
+  // runtime/library/node/os/os.c).
   OsString,
   OsNumber,
   OsAvailableParallelism,
@@ -1054,7 +1055,7 @@ enum class Builtin {
   TextDecoderInfo,   // 0 encoding, 1 fatal, 2 ignoreBOM
   EmbedBytes,        // embedBytes(path): the bytes (one per code unit) and the path
   // node:crypto (sema_crypto.cpp, docs/crypto.md): a call of a function of
-  // runtime/crypto*.c, whose number (CryptoFn of sema/crypto_api.h) is the
+  // runtime/library/crypto/, whose number (CryptoFn of crypto_api.h) is the
   // first argument, an int literal, and the receiver of a method the second.
   Crypto,
   // generateKeyPairSync: the call that makes the private key, then for the
@@ -1074,7 +1075,7 @@ enum class Builtin {
   MetaHas,
   MetaHasOwn,
   MetaDelete,
-  // The intrinsics of the built-in modules written in tz (src/lib, see
+  // The intrinsics of the built-in modules written in tz (library/, see
   // sema_events.cpp) that need the compiler, as they take a type:
   // `__tz_listener<F>(u)`, the function an unknown holds, as an F;
   // `__tz_as<C>(o)`, the object o as an instance of the class C, or undefined
@@ -1084,33 +1085,34 @@ enum class Builtin {
   // side of the AbortSignal, or undefined.
   LibListener,
   LibAs,
-  // node:stream (src/sema/sema_stream.cpp): `__tz_chunk<T>(u)`, the T the
-  // unknown u holds; `__tz_isChunk<T>(u)`, whether it holds one;
-  // `__tz_chunkKind<T>()` and `__tz_typeName<T>()`, constants of each copy;
-  // `__tz_overrides(o, "m")`, whether the class of the object o replaces the
-  // method m of the class the code knows it by.
+  // node:stream (compiler/library/stream/sema/sema_stream.cpp):
+  // `__tz_chunk<T>(u)`, the T the unknown u holds; `__tz_isChunk<T>(u)`,
+  // whether it holds one; `__tz_chunkKind<T>()` and `__tz_typeName<T>()`,
+  // constants of each copy; `__tz_overrides(o, "m")`, whether the class of the
+  // object o replaces the method m of the class the code knows it by.
   LibChunk,
   LibIsChunk,
   LibChunkKind,
   LibTypeName,
   LibOverrides,
-  // The I/O of the streams of node:fs and process (src/lib/fs_stream.tz),
-  // each a Promise but the last: `__tz_fsOpen(path, flags, mode)` of the
-  // descriptor, `__tz_fsRead(fd, buffer, offset, length, position)` and
-  // `__tz_fsWrite(...)` of the bytes moved, `__tz_fsClose(fd, fsync)`,
-  // `__tz_stdinChunk(max)` of the next Buffer of stdin (undefined at its
-  // end), and `__tz_stdWrite(fd, buffer)`, which writes to stdout or stderr.
+  // The I/O of the streams of node:fs and process
+  // (library/stream/fs_stream.tz), each a Promise but the last:
+  // `__tz_fsOpen(path, flags, mode)` of the descriptor, `__tz_fsRead(fd,
+  // buffer, offset, length, position)` and `__tz_fsWrite(...)` of the bytes
+  // moved, `__tz_fsClose(fd, fsync)`, `__tz_stdinChunk(max)` of the next Buffer
+  // of stdin (undefined at its end), and `__tz_stdWrite(fd, buffer)`, which
+  // writes to stdout or stderr.
   LibFsOpen,
   LibFsRead,
   LibFsWrite,
   LibFsClose,
   LibStdinChunk,
   LibStdWrite,
-  // The parallel runtime (runtime/parallel.c), for code of the built-in
-  // modules that the analysis of src/sema/parallel.h does not walk:
-  // `await __tz_ahead(p)`, an await after which the piece may run ahead of
-  // its turn, which the code itself guarantees, and `__tz_order()`, where it
-  // waits for its turn before it touches shared data.
+  // The parallel runtime (runtime/core/parallel/parallel.c), for code of the
+  // built-in modules that the analysis of compiler/check/parallel/parallel.h
+  // does not walk: `await __tz_ahead(p)`, an await after which the piece may
+  // run ahead of its turn, which the code itself guarantees, and
+  // `__tz_order()`, where it waits for its turn before it touches shared data.
   LibAhead,
   LibOrder,
   LibNativeSignal,
@@ -2088,7 +2090,7 @@ inline bool derivesFromError(const ClassDecl *cls) {
 
 // The kinds of errors the language has built in (docs/errors.md): Error and
 // the classes JavaScript derives from it, each a class that extends Error,
-// in the order TZ_ERROR_* in runtime/tzrt.h numbers them.
+// in the order TZ_ERROR_* in runtime/core/tzrt/tzrt.h numbers them.
 inline constexpr llvm::StringLiteral kErrorKinds[] = {"Error", "TypeError", "RangeError",
                                                       "SyntaxError", "URIError"};
 
@@ -2252,7 +2254,7 @@ struct Module {
   std::string name;
   SourceFile file;
   bool isEntry = false;
-  // A built-in module of tz written in tz (src/lib), which the loader reads
+  // A built-in module of tz written in tz (library/), which the loader reads
   // from next to the compiler: node:events, tz:http, and the modules of the
   // globals of the web platform such as EventTarget, URL and fetch. Only its
   // code may declare and call the intrinsics `__tz_*`.

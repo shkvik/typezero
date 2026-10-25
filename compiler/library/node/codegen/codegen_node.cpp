@@ -1,13 +1,14 @@
-// The built-in modules (docs/io.md): calls of runtime/path.c, os.c and fs.c.
+// The built-in modules (docs/io.md): calls of runtime/library/node/path/path.c,
+// os.c and fs.c.
 //
 // What the runtime makes objects of (a SystemError, a Stats, a Dirent, what
 // path.parse() gives...) it makes through a function of the program, a
 // maker: the runtime fills a struct with the fields of the object, in an
 // order both sides know (makerFields here, the Tz...Parts structs in
-// runtime/tzrt.h), and the maker allocates the object and moves them in.
-// The program passes its makers with each call.
+// runtime/core/tzrt/tzrt.h), and the maker allocates the object and moves them
+// in. The program passes its makers with each call.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"

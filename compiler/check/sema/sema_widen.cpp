@@ -30,7 +30,7 @@
 // a part of it), behind a write through a type its part cannot be seen as.
 // The error shows at the conversion and names the write.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
@@ -1249,7 +1249,7 @@ void Sema::checkWidenings(SourceFile &file) {
         todo.push_back({e.to, off + e.off, std::max({e.md, md - e.off, 0})});
     }
     // What reached a place the check does not follow may meet any write of
-    // the program; the built-in modules (src/lib) write only to what they
+    // the program; the built-in modules (library/) write only to what they
     // make, and what reaches them they follow.
     if (!found && unknown)
       for (const Write &write : flows.writes) {

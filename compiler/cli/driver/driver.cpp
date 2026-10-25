@@ -1,14 +1,14 @@
-#include "driver/driver.h"
+#include "compiler/cli/driver/driver.h"
 
-#include "codegen/codegen.h"
-#include "driver/licenses.h"
-#include "driver/linker.h"
-#include "driver/loader.h"
-#include "pkg/commands.h"
-#include "pkg/project.h"
-#include "sema/overflow.h"
-#include "sema/parallel.h"
-#include "sema/sema.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/link/licenses/licenses.h"
+#include "compiler/link/linker/linker.h"
+#include "compiler/load/loader/loader.h"
+#include "compiler/packages/commands/commands.h"
+#include "compiler/packages/project/project.h"
+#include "compiler/check/overflow/overflow.h"
+#include "compiler/check/parallel/parallel.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSet.h"
@@ -361,12 +361,11 @@ unsigned copySize(llvm::Function &fn, llvm::SmallPtrSetImpl<llvm::Function *> &s
   return size;
 }
 
-// Copies the hot runtime functions (TZ_HOT in runtime/tzrt.h) the program
-// calls, and the hot ones they call, from the runtime bitcode into the
-// program's module as available_externally: the optimizer may inline them
-// into the program's loops, and then drops them, so every call that is left
-// goes to tzrt.lib, which is linked as usual. Returns false after reporting
-// an error.
+// Copies the hot runtime functions (TZ_HOT in runtime/core/tzrt/tzrt.h) the
+// program calls, and the hot ones they call, from the runtime bitcode into the
+// program's module as available_externally: the optimizer may inline them into
+// the program's loops, and then drops them, so every call that is left goes to
+// tzrt.lib, which is linked as usual. Returns false after reporting an error.
 bool linkRuntime(llvm::Module &module, const std::string &path) {
   auto buffer = llvm::MemoryBuffer::getFile(path);
   if (!buffer) {
@@ -542,7 +541,7 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
     return kExitError;
   module->setTargetTriple(triple);
   // The runtime of the threads, or the one of a single thread (see
-  // TZ_PARALLEL in runtime/tzrt.h).
+  // TZ_PARALLEL in runtime/core/tzrt/tzrt.h).
   llvm::StringRef variant = parallel ? "tzrt_mt" : "tzrt";
   if (opts.optimize && !linkRuntime(*module, runtimeFile(argv0, (variant + ".bc").str())))
     return kExitError;

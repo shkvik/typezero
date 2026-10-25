@@ -1,6 +1,6 @@
 // Cycles of references without a collector (docs/objects.md, section 11):
 // which types may form cycles, and the code that keeps their groups
-// (runtime/group.c).
+// (runtime/core/group/group.c).
 //
 // The analysis builds, over the whole program, the graph of what may hold
 // what: an object type holds the types of its fields, an array its elements,
@@ -21,7 +21,7 @@
 // (groupStore), releases what the slot held as the member did (releaseIn),
 // and a value that moves out of one takes its count back (takeFrom).
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 
@@ -2583,7 +2583,7 @@ bool CodeGen::refMayBeMember(const Type *type) {
   case Type::Kind::Function:
     // The environment of a closure, or a promise: `resolve` of `new Promise`
     // has its promise as its environment, and a promise may be a member
-    // (promiseIsMember, runtime/async.c).
+    // (promiseIsMember, runtime/core/async/async.c).
     result = fnMayBeMember_ || hasCycles_;
     break;
   case Type::Kind::Promise:
@@ -2788,7 +2788,7 @@ void CodeGen::groupStore(llvm::Value *owner, llvm::Value *value, const Type *typ
   llvm::Type *ptr = builder_.getPtrTy();
   // Debug mode notes where the store is, for what a walk reports.
   if (debugMemory_) {
-    // Each thread's own in a parallel program (runtime/group.c).
+    // Each thread's own in a parallel program (runtime/core/group/group.c).
     auto *site = cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_group_site", ptr));
     site->setThreadLocal(parallel_);
     builder_.CreateStore(groupSite(), parallel_ ? static_cast<llvm::Value *>(
@@ -3008,7 +3008,7 @@ void CodeGen::forgetWeakRefs(llvm::Value *object) {
 
 // Releases what each field holds as a member lets go of it, then frees the
 // object unless it is one: a group frees its members' memory itself, after
-// all of them released what they hold (runtime/group.c).
+// all of them released what they hold (runtime/core/group/group.c).
 void CodeGen::emitMemberDrop(const Type *type, ObjectLayout &layout) {
   llvm::Function *drop = layout.drop;
   llvm::Function *saved = function_;
@@ -3217,8 +3217,8 @@ void CodeGen::finishGroupDebug(llvm::Instruction *init) {
 }
 
 // void publish(ptr object): every value the object holds, to the runtime,
-// which makes it shared (runtime/publish.c); the boxes of the variables it
-// captures as objects.
+// which makes it shared (runtime/core/publish/publish.c); the boxes of the
+// variables it captures as objects.
 llvm::Function *CodeGen::publishFunction(
     const Type *type, llvm::StructType *layout,
     llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,

@@ -1,6 +1,6 @@
 // Type aliases, enums and the constants of the global objects.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/ConvertUTF.h"

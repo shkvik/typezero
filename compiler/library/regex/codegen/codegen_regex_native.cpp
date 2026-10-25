@@ -1,15 +1,16 @@
 // Regex literals as machine code (docs/regex.md, section 1).
 //
-// tz turns the program of each regex literal (runtime/regex.h) into a
-// matcher of its own (TzReMatch, runtime/tzrt.h): LLVM IR that is optimized
-// with the rest of the program, so the interpreter of runtime/regex.c is
-// left to the regexes of `new RegExp(s)`. The matcher is the program
-// translated instruction by instruction, each doing what the interpreter
-// does for it, with the same choice points and undo records on a stack
-// (tz_re_bt), so its results are the interpreter's, which are JavaScript's.
-// What goes is the cost of interpreting: there is no dispatch on opcodes,
-// the operands are constants, a class is a few compares or a table, and the
-// code comes twice, for strings of bytes and of two-byte units.
+// tz turns the program of each regex literal
+// (runtime/library/regex/regex/regex.h) into a matcher of its own (TzReMatch,
+// runtime/core/tzrt/tzrt.h): LLVM IR that is optimized with the rest of the
+// program, so the interpreter of runtime/library/regex/regex/regex.c is left to
+// the regexes of `new RegExp(s)`. The matcher is the program translated
+// instruction by instruction, each doing what the interpreter does for it, with
+// the same choice points and undo records on a stack (tz_re_bt), so its results
+// are the interpreter's, which are JavaScript's. What goes is the cost of
+// interpreting: there is no dispatch on opcodes, the operands are constants, a
+// class is a few compares or a table, and the code comes twice, for strings of
+// bytes and of two-byte units.
 //
 // Shortcuts make it faster still, each skipping only work that would fail
 // with nothing to show for it, so the results stay the same:
@@ -37,17 +38,17 @@
 // search (choices taken, loop iterations, characters repeats read) passes a
 // budget, the matcher notes each instruction it gets to, with the state of
 // the counted loops around it, and the position, in a bit set (TzReMemo in
-// runtime/regex.h). Where it gets to a noted one again, it fails at once:
-// that state failed before. What a lookaround notes on the way to its match
-// is forgotten, as is, after a match, what was noted at its end, where the
-// next search may start. The result stays the same, and the time is the
-// length of the input times the size of the regex, as in the bounded
+// runtime/library/regex/regex/regex.h). Where it gets to a noted one again, it
+// fails at once: that state failed before. What a lookaround notes on the way
+// to its match is forgotten, as is, after a match, what was noted at its end,
+// where the next search may start. The result stays the same, and the time is
+// the length of the input times the size of the regex, as in the bounded
 // backtracker of Rust's regex crate. Only a regex with a backreference
 // backtracks without bound, as in JavaScript.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
-#include "../../runtime/regex.h"
+#include "runtime/library/regex/regex/regex.h"
 
 #include <array>
 #include <map>
@@ -210,7 +211,7 @@ constexpr uint32_t kMaxSlots = 4096;
 class MatcherBuilder {
 public:
   // `threadLocal`: the stack of backtracking is each thread's own (in a
-  // program of the parallel runtime, runtime/regex.c).
+  // program of the parallel runtime, runtime/library/regex/regex/regex.c).
   MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal)
       : threadLocal_(threadLocal), module_(module), ctx_(module.getContext()), b_(ctx_),
         program_(program),
@@ -891,8 +892,9 @@ std::pair<Value *, Value *> MatcherBuilder::readChar(Value *pos, bool back, Basi
     return {unitAt(before), before};
   }
   // With u, a surrogate pair is one character, and in the middle of one there
-  // is none (see read_forward in runtime/regex.c): the runtime reads it, as
-  // a unit that is not a surrogate is the character itself.
+  // is none (see read_forward in runtime/library/regex/regex/regex.c): the
+  // runtime reads it, as a unit that is not a surrogate is the character
+  // itself.
   Value *at = pos;
   if (!back) {
     failUnless(b_.CreateICmpSLT(pos, length_), fail);
@@ -993,7 +995,7 @@ Value *MatcherBuilder::memoContext(uint32_t pc, Value *pos) {
   return context;
 }
 
-// The memo (TzReMemo in runtime/regex.h): its fields.
+// The memo (TzReMemo in runtime/library/regex/regex/regex.h): its fields.
 enum { kMemoPages, kMemoRows, kMemoLength, kMemoLog, kMemoLogLength, kMemoLogCapacity };
 
 llvm::StructType *MatcherBuilder::memoType() {
@@ -1828,7 +1830,8 @@ void MatcherBuilder::emitRepeat(uint32_t pc) {
 }
 
 // The character that what follows a repeat must start with, past what only
-// notes positions (as next_char in runtime/regex.c): -1 if none.
+// notes positions (as next_char in runtime/library/regex/regex/regex.c): -1 if
+// none.
 int64_t followingChar(const uint32_t *code, uint32_t pc, bool unicode) {
   for (;;) {
     const uint32_t *op = code + pc;

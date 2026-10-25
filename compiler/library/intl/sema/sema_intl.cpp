@@ -4,7 +4,8 @@
 // their objects, as in JavaScript); toLocaleString of numbers and decimals,
 // localeCompare and normalize of strings; Intl.getCanonicalLocales and
 // supportedLocalesOf. Their objects are objects of the runtime
-// (runtime/intl.h), and the calls are built-ins (Builtin::IntlNew...).
+// (runtime/library/intl/intl/intl.h), and the calls are built-ins
+// (Builtin::IntlNew...).
 //
 // The options are checked as for dates (sema_date.cpp): an object whose
 // fields are options of the kind, each of its type. What JavaScript rejects
@@ -13,9 +14,9 @@
 // the option, a currency or a unit that is not one, style "currency"
 // without a currency, digits out of range.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
-#include "../../runtime/intl.h"
+#include "runtime/library/intl/intl/intl.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"

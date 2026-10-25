@@ -8,9 +8,9 @@
 // that is not base64, where hex stops), the algorithms are node's (those of
 // its deps/nbytes).
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
-#include "encodings.h"
+#include "runtime/library/bytes/encodings/encodings.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -22,7 +22,8 @@ extern const TzLayout tz_bytes_layouts[];
 
 #define MAX_LENGTH ((int64_t)(1 << 30) - 1)
 
-// Buffer's encodings, as Sema numbers them (src/sema/sema_bytes.cpp).
+// Buffer's encodings, as Sema numbers them
+// (compiler/library/bytes/sema/sema_bytes.cpp).
 enum { ENC_UTF8, ENC_UTF16LE, ENC_LATIN1, ENC_ASCII, ENC_BASE64, ENC_BASE64URL, ENC_HEX };
 
 // The code units of a string, which stays where it is while they are used.

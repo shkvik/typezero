@@ -1,8 +1,8 @@
 // The functions of Math and Number, parseInt and the like, String.fromCharCode
 // and x.toFixed(). Simple ones are emitted inline; the rest call the runtime
-// (runtime/math.c and runtime/number.c).
+// (runtime/library/math/math/math.c and runtime/core/number/number.c).
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"

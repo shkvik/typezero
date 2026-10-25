@@ -8,7 +8,8 @@
 //   - the code points of each property \p{...} accepts: General_Category,
 //     Script, Script_Extensions and the binary properties.
 //
-//   node runtime/gen_regex_tables.mjs > runtime/regex_tables.h
+//   cd runtime/library/regex/regex_compile
+//   node gen_regex_tables.mjs > regex_tables.h
 
 const MAX = 0x10ffff;
 const isSurrogate = (cp) => cp >= 0xd800 && cp <= 0xdfff;

@@ -10,8 +10,8 @@
 // machines). Only a lookaround recurses, as deep as lookarounds nest in
 // the pattern.
 
-#include "regex.h"
-#include "tzrt.h"
+#include "runtime/library/regex/regex/regex.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 
@@ -693,12 +693,12 @@ int32_t tz_re_interpret(const uint32_t *program, const void *units, int32_t wide
 // What compiled matchers call
 //===----------------------------------------------------------------------===//
 
-// The machine code that tz makes of a literal (src/codegen/
-// codegen_regex_native.cpp) runs the same program as the interpreter, and
-// keeps its choice points and undo records here: a word of 64 bits each, the
-// entry's code in the low half and a value in the high half; a negative code
-// is an undo record, ~code the slot it restores. Kept from one match to the
-// next. Not static: see the rules in tzrt.h.
+// The machine code that tz makes of a literal (codegen_regex_native.cpp) runs
+// the same program as the interpreter, and keeps its choice points and undo
+// records here: a word of 64 bits each, the entry's code in the low half and a
+// value in the high half; a negative code is an undo record, ~code the slot it
+// restores. Kept from one match to the next. Not static: see the rules in
+// tzrt.h.
 TZ_THREAD_LOCAL int64_t *tz_re_bt;
 TZ_THREAD_LOCAL int32_t tz_re_bt_capacity;
 
@@ -1285,9 +1285,9 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
   return texts;
 }
 
-// s.matchAll(re) makes an iterator (src/codegen/codegen_iter.cpp) that works
-// on a copy of the regex, as JavaScript does. Before it is made, the check of
-// the g flag, where the regex is known only when the program runs: a
+// s.matchAll(re) makes an iterator (compiler/lower/codegen/codegen_iter.cpp)
+// that works on a copy of the regex, as JavaScript does. Before it is made, the
+// check of the g flag, where the regex is known only when the program runs: a
 // TypeError without it.
 void tz_re_check_match_all(const TzRegex *re) {
   if (!(tz_re_flags(re->program) & TZ_RE_GLOBAL))

@@ -1,7 +1,7 @@
 // The full layer (docs/crypto.md, section 3): X509Certificate, as node reads certificates with
 // OpenSSL and words what it finds in them.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/asn1.h>
 #include <openssl/bio.h>

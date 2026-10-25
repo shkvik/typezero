@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ast/ast.h"
-#include "sema/crypto_api.h"
-#include "sema/facts.h"
-#include "sema/types.h"
-#include "support/decimal_literal.h"
-#include "support/diagnostics.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/check/facts/facts.h"
+#include "compiler/program/types/types.h"
+#include "compiler/library/decimal/decimal_literal/decimal_literal.h"
+#include "compiler/program/diagnostics/diagnostics.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -44,7 +44,7 @@ enum class NodeModule {
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
 // The name a file that says `crypto.subtle` imports the SubtleCrypto of tz:webcrypto under
-// (src/driver/loader.cpp), which Sema reads it by (sema_webcrypto.cpp).
+// (compiler/load/loader/loader.cpp), which Sema reads it by (sema_webcrypto.cpp).
 inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
 
 // Why the built-in module `path` (see isBuiltinModule) cannot be imported:
@@ -990,8 +990,8 @@ private:
   // name without Sync and its options, and no fd.
   bool fsAsync_ = false;
   // The option `signal` of a call, an AbortSignal of the library
-  // (src/lib/web.tz) or undefined, or undefined for none: what the runtime
-  // gets of it, its side of the signal (Builtin::LibNativeSignal).
+  // (library/events/web.tz) or undefined, or undefined for none: what the
+  // runtime gets of it, its side of the signal (Builtin::LibNativeSignal).
   Expr *signalOption(Expr *value, llvm::SMLoc loc);
   // The properties, methods and assignments of the objects of the runtime
   // (Type::Runtime); none of them can be assigned to.
@@ -1017,10 +1017,10 @@ private:
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
   // Web Crypto (sema_webcrypto.cpp): the intrinsics __tz_subtle_* of
-  // src/lib/webcrypto.tz, the calls of the program on its SubtleCrypto (the
-  // algorithms, formats and usages it writes, checked here, and the function
-  // of the algorithm's family they go to), `crypto.subtle` and the members
-  // of a CryptoKey the program may read.
+  // library/crypto/webcrypto.tz, the calls of the program on its SubtleCrypto
+  // (the algorithms, formats and usages it writes, checked here, and the
+  // function of the algorithm's family they go to), `crypto.subtle` and the
+  // members of a CryptoKey the program may read.
   Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name);
   Expr *checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *subtleObject(MemberExpr *member);
@@ -1964,7 +1964,7 @@ private:
   Expr *checkTupleJoin(CallExpr *call, MemberExpr *member);
 
   // Events (sema_events.cpp, docs/events.md): node:events and the events of
-  // the web platform, which tz has written in tz (src/lib), and what the
+  // the web platform, which tz has written in tz (library/), and what the
   // compiler adds to that code.
   //
   // Marks the classes of the built-in modules written in tz
@@ -1977,10 +1977,9 @@ private:
   // null if `name` names none of them.
   Expr *checkLibCall(CallExpr *call, NameExpr *name);
   // `signal.onabort = handler` of the program, with both checked: a call of
-  // setOnabort (src/lib/web.tz), as node's event handlers listen from when
-  // they are first set; `aborted` and `reason`, an error; null for any other
-  // assignment.
-  // `logical`: the assignment of `o.x ??= v`, `||=` or `&&=`.
+  // setOnabort (library/events/web.tz), as node's event handlers listen from
+  // when they are first set; `aborted` and `reason`, an error; null for any
+  // other assignment. `logical`: the assignment of `o.x ??= v`, `||=` or `&&=`.
   Expr *onabortAssign(AssignExpr *assign, MemberExpr *member, bool logical);
   bool logicalAssign_ = false; // the next assignment checked is that of `o.x ??= v`
   // An emitter: an object of EventEmitter of node:events or of a class
@@ -2002,8 +2001,9 @@ private:
   static const Type *listenerType(const Type *args, const Type *ret);
   // A listener of the event `event` whose listeners get `args`: a function
   // of them that returns nothing, an async one, or one that takes `this`
-  // (`kind`, as src/lib/events.tz numbers them), converted to an unknown, as
-  // the emitter keeps it. `receiver` is the emitter, the `this` it gets.
+  // (`kind`, as library/events/events.tz numbers them), converted to an
+  // unknown, as the emitter keeps it. `receiver` is the emitter, the `this` it
+  // gets.
   enum class ListenerKind { Plain, Async, This };
   Expr *checkListener(Expr *arg, const Type *args, llvm::StringRef event, const Type *receiver,
                       ListenerKind &kind);
@@ -2030,7 +2030,7 @@ private:
   // name there. Null for the other functions of the module.
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   // Streams (sema_stream.cpp, docs/streams.md): node:stream, which tz has
-  // written in tz (src/lib/stream.tz), and what the compiler adds to it.
+  // written in tz (library/stream/stream.tz), and what the compiler adds to it.
   //
   // A class of node:stream or one that extends it; the chunk types its
   // readable and writable sides have (null for a side it has not).
@@ -2105,12 +2105,12 @@ private:
   // methods.
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   // fs.createReadStream(path, options?) and createWriteStream(), which
-  // `decl` of src/lib/fs_stream.tz declares: an encoding gives a stream of
-  // strings.
+  // `decl` of library/stream/fs_stream.tz declares: an encoding gives a stream
+  // of strings.
   Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   // process.stdin, process.stdout or process.stderr read as a stream: the
-  // stream of src/lib/fs_stream.tz; null if the program does not use them
-  // as streams (the loader did not load it).
+  // stream of library/stream/fs_stream.tz; null if the program does not use
+  // them as streams (the loader did not load it).
   Expr *processStream(MemberExpr *member);
   // What stands for process.stdin in a StreamView.
   VarSymbol *processStdinVar();
@@ -2717,7 +2717,7 @@ private:
   // The class of the built-in kind `name` (Error, TypeError...), or null.
   ClassDecl *errorKindClass(llvm::StringRef name) const;
 
-  // The built-in modules written in tz (sema_library.cpp, src/lib), which
+  // The built-in modules written in tz (sema_library.cpp, library/), which
   // prepareLibraries and inLibrary (sema_events.cpp) find. An intrinsic, `function __tz_name(...): T` without a body: its types
   // must be ones the runtime takes and gives.
   void checkExternal(FunctionDecl *fn);

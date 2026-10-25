@@ -1,7 +1,8 @@
 // Generates number_tables.h: the powers of 5 that the shortest formatting of
 // doubles in number.c multiplies by (the algorithm Ryū of Ulf Adams, 2018).
 //
-//   node runtime/gen_number_tables.mjs > runtime/number_tables.h
+//   cd runtime/core/number
+//   node gen_number_tables.mjs > number_tables.h
 //
 // pow5[i] is 5^i scaled to its top 125 bits; pow5_inv[i] is 2^(bits(5^i) - 1 +
 // 125) / 5^i plus one, 1 / 5^i scaled to 125 bits and rounded up. Each is a

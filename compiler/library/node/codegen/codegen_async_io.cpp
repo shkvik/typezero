@@ -1,7 +1,8 @@
-// Waiting for I/O (docs/async.md, step 2): calls of runtime/fs.c for
-// node:fs/promises and node:readline, of runtime/async.c for
-// node:timers/promises; what they take of an AbortSignal is its side of the
-// runtime (runtime/signal.c).
+// Waiting for I/O (docs/async.md, step 2): calls of
+// runtime/library/node/fs/fs.c for node:fs/promises and node:readline, of
+// runtime/core/async/async.c for node:timers/promises; what they take of an
+// AbortSignal is its side of the runtime
+// (runtime/library/events/signal/signal.c).
 //
 // A function that gives a Promise makes it here, of the type Sema gave, and
 // the runtime settles it later: it holds the promise meanwhile and writes the
@@ -9,7 +10,7 @@
 // (codegen_node.cpp), and an error in them rejects the promise rather than
 // being thrown.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"

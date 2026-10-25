@@ -11,7 +11,7 @@
 // value of a literal type it switches on. A field that every member has is
 // read through the union: `s.kind`, `s.name`.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/ConvertUTF.h"
 

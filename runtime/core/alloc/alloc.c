@@ -24,7 +24,7 @@
 // in a page (or when its thread goes idle, parallel.c), freeing each block
 // as its own.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 

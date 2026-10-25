@@ -19,7 +19,7 @@
 // read through, and on a call of a function if the program assigns to a field
 // of that name anywhere (any code may run in the call).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -684,7 +684,7 @@ Expr *Sema::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
 //===----------------------------------------------------------------------===//
 
 // The fields that hold a value, in the order the object got them, as the
-// object prints (see TzLayout in runtime/tzrt.h).
+// object prints (see TzLayout in runtime/core/tzrt/tzrt.h).
 Expr *Sema::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef fn = member->name;
   call->type = Type::error();

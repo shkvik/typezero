@@ -1,4 +1,4 @@
-// The built-in modules tz has written in tz (src/lib, docs/net.md): tz:http
+// The built-in modules tz has written in tz (library/, docs/net.md): tz:http
 // and the modules of the globals of the web platform, URL, fetch, Response
 // and the others. Their code is checked as any file is; what it has that a
 // program has not is checked here:
@@ -18,7 +18,7 @@
 // and the others that need the compiler, are checked there (checkLibCall);
 // a declared one goes to C as is.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ast/ast.h"
-#include "sema/parallel.h"
-#include "sema/types.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/check/parallel/parallel.h"
+#include "compiler/program/types/types.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -54,8 +54,8 @@ bool intlCallMayThrow(const CallExpr *call);
 //
 // Representation of values:
 //   int, long, double, boolean   i32, i64, double, i1
-//   string                       { ptr obj, i64 meta } (runtime/string.c)
-//   T[]                          ptr to an array header (runtime/array.c)
+//   string                       { ptr obj, i64 meta } (runtime/core/string/string.c)
+//   T[]                          ptr to an array header (runtime/core/array/array.c)
 //   T | undefined                { T value, i1 has }; the value is zero when
 //                                undefined, so it can always be released
 //   function                     { ptr info, ptr env }: info is a constant
@@ -66,7 +66,7 @@ bool intlCallMayThrow(const CallExpr *call);
 //                                `T | undefined` is that ptr, null when
 //                                undefined. An instance of a class is one
 //                                too (see codegen_class.cpp).
-//   decimal                      { i64 coef, i64 meta } (runtime/decimal.c,
+//   decimal                      { i64 coef, i64 meta } (runtime/library/decimal/decimal/decimal.c,
 //                                codegen_decimal.cpp)
 //   Result<T, E>                 { T value, E error, i1 ok } in some order
 //                                (see codegen_result.cpp); the half not in
@@ -95,7 +95,7 @@ public:
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
   // What of the program's async code may run in parallel (docs/async.md):
   // with a piece that may, the program runs on the threads of the parallel
-  // runtime, tzrt_mt (see TZ_PARALLEL in runtime/tzrt.h).
+  // runtime, tzrt_mt (see TZ_PARALLEL in runtime/core/tzrt/tzrt.h).
   void setParallelPlan(const ParallelPlan *plan);
   bool parallel() const { return parallel_; }
   // Before a place where async code touches what keeps node's order, the
@@ -227,12 +227,13 @@ private:
   // The built-in modules: node:path, node:os, node:fs and tz:io
   // (codegen_node.cpp).
   llvm::Value *emitNodeBuiltin(CallExpr *call);
-  // node:crypto (codegen_crypto.cpp): a call of runtime/crypto*.c, and
+  // node:crypto (codegen_crypto.cpp): a call of runtime/library/crypto/, and
   // generateKeyPairSync.
   llvm::Value *emitCryptoCall(CallExpr *call);
   llvm::Value *emitCryptoKeyPair(CallExpr *call);
   // `ptr (ptr parts)`: makes an object of `type` from the struct of its
-  // fields the runtime fills (TzMaker in runtime/tzrt.h), taking them over.
+  // fields the runtime fills (TzMaker in runtime/core/tzrt/tzrt.h), taking them
+  // over.
   llvm::Function *objectMaker(const Type *type);
   // The struct of the parts of `type` that its maker reads.
   llvm::StructType *makerParts(const Type *type);
@@ -248,7 +249,8 @@ private:
   // (codegen_child.cpp).
   llvm::Value *emitChildBuiltin(CallExpr *call);
   // The maker of what they give, the result of spawnSync or an
-  // ExecSyncError, from the TzSpawnParts of runtime/child.c.
+  // ExecSyncError, from the TzSpawnParts of
+  // runtime/library/child_process/child/child.c.
   llvm::Function *spawnMaker(const Type *type);
   llvm::StructType *spawnPartsType();
   // An owned value of `to` from what stream `stream` printed, in the parts
@@ -657,7 +659,7 @@ private:
   // from kPlainIdBase on, above those of every class.
   static constexpr uint32_t kPlainIdBase = 0x40000000;
   // Those of the objects of binary data, by their kind (TZ_BYTES_CLASS in
-  // runtime/tzrt.h).
+  // runtime/core/tzrt/tzrt.h).
   static constexpr uint32_t kBytesIdBase = 0x3FFFFF00;
   uint32_t plainTypeId(const Type *type);
   llvm::Value *objectClassId(llvm::Value *object);
@@ -678,8 +680,8 @@ private:
   std::vector<const Type *> subtypes_; // see SourceFile::subtypes
 
   // Json (codegen_json.cpp): a pointer to a node of the runtime
-  // (runtime/json.c), counted as objects are; `Json | undefined` is that
-  // pointer, null for undefined.
+  // (runtime/library/json/json/json.c), counted as objects are; `Json |
+  // undefined` is that pointer, null for undefined.
   llvm::FunctionCallee jsonFunction(llvm::StringRef name, llvm::Type *ret,
                                     llvm::ArrayRef<llvm::Type *> params);
   // Whether a borrowed `Json | undefined` holds something other than null.
@@ -821,7 +823,7 @@ private:
 
   // Regular expressions (codegen_regex.cpp). A literal's program is a
   // constant; a literal without g and y is a constant object too (see
-  // TzRegex in runtime/tzrt.h).
+  // TzRegex in runtime/core/tzrt/tzrt.h).
   llvm::FunctionCallee regexFunction(llvm::StringRef name, llvm::Type *ret,
                                      llvm::ArrayRef<llvm::Type *> params);
   llvm::Constant *regexProgram(const RegexLitExpr *lit);
@@ -838,8 +840,8 @@ private:
   llvm::Value *emitReplaceWith(CallExpr *call);
   std::map<std::vector<uint32_t>, llvm::Constant *> regexPrograms_;
   // Dictionaries (codegen_dict.cpp): a pointer to a TzMap of the runtime
-  // (runtime/map.c), counted and released through its layout as an object
-  // is. An entry is { i32 hash, i32 live, key, value }, laid out here.
+  // (runtime/core/map/map.c), counted and released through its layout as an
+  // object is. An entry is { i32 hash, i32 live, key, value }, laid out here.
   struct DictLayout {
     llvm::StructType *entry = nullptr;
     uint64_t keyOffset = 0, valueOffset = 0, size = 0;
@@ -985,9 +987,9 @@ private:
   std::vector<llvm::Value *> emitHeldValues(llvm::ArrayRef<Expr *> exprs);
 
   // Async (codegen_async.cpp, docs/async.md). A Promise is an object of the
-  // runtime (TzPromise in runtime/tzrt.h) with its value after the header;
-  // an async function is a coroutine whose frame follows its promise and the
-  // reactor it awaits with.
+  // runtime (TzPromise in runtime/core/tzrt/tzrt.h) with its value after the
+  // header; an async function is a coroutine whose frame follows its promise
+  // and the reactor it awaits with.
   struct AsyncState {
     llvm::Value *object = nullptr;  // the promise
     llvm::Value *reactor = nullptr; // what it awaits with
@@ -1098,8 +1100,9 @@ private:
 
   // unknown, object and classes as values (codegen_unknown.cpp). An unknown
   // is a pointer, null for undefined: an object of the language as it is,
-  // any other value in a box of the runtime (TzBox, runtime/unknown.c). A
-  // class as a value is a constant object (TzClass) made when first used.
+  // any other value in a box of the runtime (TzBox,
+  // runtime/core/unknown/unknown.c). A class as a value is a constant object
+  // (TzClass) made when first used.
   llvm::FunctionCallee unknownFunction(llvm::StringRef name, llvm::Type *ret,
                                        llvm::ArrayRef<llvm::Type *> params);
   // An owned value of `from` as one of `to`, one of them an unknown.
@@ -1138,7 +1141,7 @@ private:
   // (codegen_events.cpp).
   llvm::Value *emitLibBuiltin(CallExpr *call);
   // The runtime's side of the AbortSignal `signal` of `type` (an AbortSignal
-  // of src/lib/web.tz, or undefined): its field #native, borrowed or
+  // of library/events/web.tz, or undefined): its field #native, borrowed or
   // retained, or null.
   llvm::Value *nativeSignal(llvm::Value *signal, const Type *type, bool retain = false);
   static bool isAbortSignal(const Type *type);
@@ -1157,11 +1160,11 @@ private:
   // Classes as values and reflection (codegen_reflect.cpp, docs/decorators.md
   // sections 5 and 6). A class expression is its class's object, after its
   // static fields get their values. The classes reflection reaches get a
-  // description (TzClassInfo in runtime/tzrt.h) that the object of the class
-  // points to: the function that makes an object from arguments as
-  // unknowns, the one that makes it from a Json, and its methods as
-  // functions that take their `this`. A function value in an unknown is
-  // called through the invoker of its type.
+  // description (TzClassInfo in runtime/core/tzrt/tzrt.h) that the object of
+  // the class points to: the function that makes an object from arguments as
+  // unknowns, the one that makes it from a Json, and its methods as functions
+  // that take their `this`. A function value in an unknown is called through
+  // the invoker of its type.
   llvm::Value *emitClassExpr(ClassExpr *expr);
   llvm::Value *emitReflectNew(NewExpr *expr);
   llvm::Value *emitReflectCall(CallExpr *call);
@@ -1250,8 +1253,9 @@ private:
   llvm::StructType *reflectMethodTy_ = nullptr;
 
   // Dates (codegen_date.cpp). A Date is an object { i64 rc, ptr layout,
-  // double time } that the code makes; the runtime (runtime/date.c)
-  // computes with times. An Intl.DateTimeFormat is an object of the runtime.
+  // double time } that the code makes; the runtime
+  // (runtime/library/date/date/date.c) computes with times. An
+  // Intl.DateTimeFormat is an object of the runtime.
   llvm::Value *emitDateCall(CallExpr *call);
   // A new date that holds `time`.
   llvm::Value *newDate(llvm::Value *time);
@@ -1262,8 +1266,8 @@ private:
 
   // Binary data (codegen_bytes.cpp). A typed array, a Buffer or a DataView
   // is a pointer to a TzBytes, an ArrayBuffer to a TzArrayBuffer
-  // (runtime/tzrt.h); both have their data pointer and their length at the
-  // same offsets. The code reads and writes elements itself.
+  // (runtime/core/tzrt/tzrt.h); both have their data pointer and their length
+  // at the same offsets. The code reads and writes elements itself.
   llvm::Value *emitBytesCall(CallExpr *call);
   llvm::Value *emitBytesIndex(IndexExpr *index);
   llvm::Value *emitBytesElementAssign(AssignExpr *assign, bool needResult);
@@ -1291,7 +1295,7 @@ private:
   llvm::StringMap<llvm::Constant *> encodingTables_;
 
   // The rest of Intl (codegen_intl.cpp): objects of the runtime
-  // (runtime/intl.h).
+  // (runtime/library/intl/intl/intl.h).
   llvm::Value *emitIntlCall(CallExpr *call);
   // The TzIntlOptions of a locale and options (either may be null) on the
   // stack; `held` gets the operands to drop after the call.
@@ -1317,8 +1321,8 @@ private:
   // program, the graph of "a slot of this type may hold an object of that
   // one" (fields, elements, entries, captures, boxes, subtypes) tells which
   // types may form a cycle; their objects are made as members of groups
-  // (runtime/group.c). References that may point at a member are counted
-  // through the group, and stores into a member join groups; everything
+  // (runtime/core/group/group.c). References that may point at a member are
+  // counted through the group, and stores into a member join groups; everything
   // else is counted as before.
   void analyzeCycles(SourceFile &file);
   // Layer 1: the allocations whose objects are never stored (StoreScanner).
@@ -1363,10 +1367,10 @@ private:
   void groupStore(llvm::Value *owner, llvm::Value *value, const Type *type);
   void countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm::Value *count, bool retain,
                    llvm::BasicBlock *freeBlock, llvm::BasicBlock *doneBlock);
-  // The parallel runtime (runtime/publish.c): before a value goes where
-  // other threads may reach it, it becomes shared. storeBarrier: into
-  // `owner`, an object of the heap, which is shared or not; publishValue:
-  // into a global that functions see.
+  // The parallel runtime (runtime/core/publish/publish.c): before a value goes
+  // where other threads may reach it, it becomes shared. storeBarrier: into
+  // `owner`, an object of the heap, which is shared or not; publishValue: into
+  // a global that functions see.
   void storeBarrier(llvm::Value *owner, llvm::Value *value, const Type *type);
   void publishValue(llvm::Value *value, const Type *type);
   // Releases `value`, which a slot of `owner` held.
@@ -1419,7 +1423,7 @@ private:
   std::set<std::pair<const Type *, std::string>> ownedFields_, backRefFields_;
   // Debug mode (a program compiled with TZ_CHECK_LEAKS set, as the tests
   // are): the proofs of layers 1 and 2 are checked when the program runs,
-  // and large groups are walked (runtime/group.c).
+  // and large groups are walked (runtime/core/group/group.c).
   bool debugMemory_ = false;
   // The field a store into a member being emitted writes, for the place
   // debug mode notes (tz_group_site).
@@ -1436,8 +1440,8 @@ private:
   // The functions that give the walk the references in the members, by
   // layout, handed to the runtime after main's init.
   void finishGroupDebug(llvm::Instruction *init);
-  // The parallel runtime (runtime/publish.c): for each descriptor of an
-  // object the program makes, the function that publishes what the object
+  // The parallel runtime (runtime/core/publish/publish.c): for each descriptor
+  // of an object the program makes, the function that publishes what the object
   // holds, handed over at the start of main.
   void finishPublishTable(llvm::Instruction *init);
   llvm::Function *publishFunction(const Type *type, llvm::StructType *layout,
@@ -1467,7 +1471,7 @@ private:
   bool parallel_ = false;        // runs on the threads of tzrt_mt
   // The awaits after which a piece may run ahead of its turn, and the
   // places where pieces touch what keeps node's order (see ParallelPlan).
-  // Each by its number, from 1: the site of runtime/parallel.c.
+  // Each by its number, from 1: the site of runtime/core/parallel/parallel.c.
   llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
   llvm::DenseSet<const char *> orderedLocs_;
   const AwaitExpr *awaiting_ = nullptr; // the await being emitted
@@ -1479,7 +1483,7 @@ private:
   llvm::Function *plainInstanceReleaseFn_ = nullptr;
   // A promise of `value` is a member of a group: what it settles with may be
   // one (its value, or its error when an Error may be), see
-  // runtime/async.c.
+  // runtime/core/async/async.c.
   bool promiseIsMember(const Type *value) {
     return hasCycles_ && (anyCyclicObject_ || (value && mayHoldMember(value)));
   }
@@ -1495,7 +1499,7 @@ private:
   std::unique_ptr<llvm::Module> module_;
   llvm::IRBuilder<> builder_;
   llvm::StructType *strTy_;   // { ptr obj, i64 meta }
-  llvm::StructType *arrayTy_; // the array header, see runtime/array.c
+  llvm::StructType *arrayTy_; // the array header, see runtime/core/array/array.c
   llvm::StructType *typeDescTy_;
   llvm::StructType *fnTy_;     // { ptr info, ptr env }
   llvm::StructType *fnInfoTy_; // { ptr code, string name }
@@ -1601,7 +1605,7 @@ private:
   std::vector<llvm::BasicBlock *> chainEnds_;
   void pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget, size_t scopeDepth);
 
-  // Functions of the C runtime (runtime/*.c).
+  // Functions of the C runtime (runtime/).
   struct Runtime {
     llvm::FunctionCallee init;
     llvm::FunctionCallee shutdown;

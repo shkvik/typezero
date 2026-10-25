@@ -91,4 +91,4 @@ foreach(style CRLF UNIX)
   endif()
 endforeach()
 
-format(check ${root}/tests ${root}/examples ${root}/src/lib ${root}/bench)
+format(check ${root}/tests ${root}/examples ${root}/library ${root}/bench)

@@ -11,7 +11,7 @@
 // calling a function that reads a variable before the code that sets it runs
 // (checkLoadOrder).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

@@ -24,7 +24,7 @@
 
 // Built once for both runtimes (see TZ_PARALLEL in tzrt.h).
 #define TZ_NO_THREAD_STATE
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stddef.h>
 #include <stdint.h>

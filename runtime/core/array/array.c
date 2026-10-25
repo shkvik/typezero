@@ -14,14 +14,14 @@
 // An array owns its elements: the ones that are strings, arrays or optionals
 // of those are reference counted, and released when the array dies.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 // The same limit as for strings, which keeps every length far from the int
-// range (see kMaxLength in src/sema/facts.h).
+// range (see kMaxLength in compiler/check/facts/facts.h).
 #define MAX_LENGTH ((1u << 30) - 1)
 
 int64_t tz_arr_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_arrays)); }
@@ -532,8 +532,8 @@ TzArray *tz_arr_copy(TzArray *a) { return tz_arr_slice(a, 0, 0, 0); }
 
 // A slice and a copy of an array of a type that may form cycles, as the
 // compiler wants them: members of groups, or not when it found that they
-// are never stored (see StoreScanner in src/codegen/codegen_cycles.cpp),
-// whatever `a` is.
+// are never stored (see StoreScanner in
+// compiler/lower/codegen/codegen_cycles.cpp), whatever `a` is.
 static TzArray *slice_as(TzArray *a, int64_t start, int64_t end, int32_t has_end, int member) {
   int64_t length = a->length;
   int64_t from = relative(start, length);

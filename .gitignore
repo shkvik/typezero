@@ -10,3 +10,4 @@ CMakeUserPresets.json
 *.obj
 *.ll
 !tests/**/*.ll
+tmp

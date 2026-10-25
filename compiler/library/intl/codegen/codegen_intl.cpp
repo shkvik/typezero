@@ -1,9 +1,9 @@
 // Intl beyond dates (docs/intl.md). Its objects are objects of the runtime
-// (runtime/intl.h), which the code holds, passes to the runtime's functions
-// and releases through the drop function of their own layouts. The locale
-// and the options go to the runtime as a TzIntlOptions on the stack; a
-// number as its kind and its words; what the runtime makes for the program
-// (the parts of formatToParts, the data of a segment) it lays out by a
+// (runtime/library/intl/intl/intl.h), which the code holds, passes to the
+// runtime's functions and releases through the drop function of their own
+// layouts. The locale and the options go to the runtime as a TzIntlOptions on
+// the stack; a number as its kind and its words; what the runtime makes for the
+// program (the parts of formatToParts, the data of a segment) it lays out by a
 // TzIntlShape that the code gives it.
 //
 // `nf.format` and `collator.compare` as values are function values whose
@@ -14,9 +14,9 @@
 // that is not one. The program checks tz_thrown after those calls, and
 // ThrowScanner (codegen_throw.cpp) knows them (intlCallMayThrow).
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
-#include "../../runtime/intl.h"
+#include "runtime/library/intl/intl/intl.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -132,9 +132,10 @@ bool intlCallMayThrow(const CallExpr *call) {
   }
 }
 
-// TzIntlOptions (runtime/intl.h): { string locale, [N x string] text, [N x
-// double] number, i64 has_text, i64 has_number, i32 has_locale }. The strings
-// are borrowed from the operands, which `held` keeps until after the call.
+// TzIntlOptions (runtime/library/intl/intl/intl.h): { string locale, [N x
+// string] text, [N x double] number, i64 has_text, i64 has_number, i32
+// has_locale }. The strings are borrowed from the operands, which `held` keeps
+// until after the call.
 llvm::Value *CodeGen::emitIntlOptions(Expr *locale, Expr *options, std::vector<Operand> &held) {
   llvm::Type *i32 = builder_.getInt32Ty(), *i64 = builder_.getInt64Ty(),
              *f64 = builder_.getDoubleTy();

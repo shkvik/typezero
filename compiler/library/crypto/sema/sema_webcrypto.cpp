@@ -1,8 +1,8 @@
 // Web Crypto (docs/crypto.md, step 4): what the compiler adds to crypto.subtle, which tz has
-// written in tz (src/lib/webcrypto.tz):
+// written in tz (library/crypto/webcrypto.tz):
 //
-//   - the intrinsics __tz_subtle_* of that code, the jobs of the pool that runtime/crypto_subtle*.c
-//     does, each a call of Builtin::Crypto that gives a promise (crypto_api.h);
+//   - the intrinsics __tz_subtle_* of that code, the jobs of the pool that crypto_subtle*.c of
+//     the runtime does, each a call of Builtin::Crypto that gives a promise (crypto_api.h);
 //   - `crypto.subtle` and `globalThis.crypto`;
 //   - the calls of the program on its SubtleCrypto. An algorithm, a format or a usage written in
 //     the call is checked here, as tsc would and further: an algorithm node does not know, one
@@ -11,8 +11,8 @@
 //     function of its family, so that the program brings only that code (and the direct layer of
 //     OpenSSL for HMAC, AES and the KDFs), and generateKey and exportKey give the exact type.
 
-#include "sema/crypto_api.h"
-#include "sema/sema.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -28,7 +28,7 @@ using llvm::isa;
 namespace tz {
 
 //===----------------------------------------------------------------------===//
-// The intrinsics of src/lib/webcrypto.tz
+// The intrinsics of library/crypto/webcrypto.tz
 //===----------------------------------------------------------------------===//
 
 namespace {
@@ -191,7 +191,7 @@ const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRe
   return nullptr;
 }
 
-// What node 24 registers for each operation, as src/lib/webcrypto.tz has them.
+// What node 24 registers for each operation, as library/crypto/webcrypto.tz has them.
 const std::vector<llvm::StringLiteral> &algorithmsOf(llvm::StringRef op) {
   static const std::vector<llvm::StringLiteral> digest = {"SHA-1", "SHA-256", "SHA-384",
                                                           "SHA-512"};
@@ -249,7 +249,7 @@ std::string quotedList(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRe
   return out + "'";
 }
 
-// The family of an algorithm: what makes and uses its keys (src/lib/webcrypto.tz).
+// The family of an algorithm: what makes and uses its keys (library/crypto/webcrypto.tz).
 llvm::StringRef familyOf(llvm::StringRef name) {
   if (name == "HMAC")
     return "Hmac";

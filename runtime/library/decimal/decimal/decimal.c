@@ -18,7 +18,7 @@
 // BigNumber.js, a result whose leading digit is beyond 10^MAX_EXP is an
 // error (BigNumber.js gives Infinity) and one below 10^MIN_EXP is zero.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>

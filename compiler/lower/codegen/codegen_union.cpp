@@ -1,7 +1,7 @@
 // Unions and literal types (docs/objects.md, section 7).
 //
 // How a value lies in memory follows from the slots its type takes (see
-// UnionSlot in src/sema/types.h):
+// UnionSlot in compiler/program/types/types.h):
 //   - a string literal type, or a union of them, is an i32: the literal's
 //     atom, its number among the string literals of the program (0 is
 //     undefined). Comparing is comparing numbers; the text comes from a
@@ -16,7 +16,7 @@
 //     words: { i32 tag, i64 word, i64 word }, 16 or 24 bytes, never on the
 //     heap. A slot of objects holds a reference as above.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -157,7 +157,7 @@ llvm::Constant *CodeGen::unionDescriptor(const Type *type) {
     return typeDescriptor(stored);
   if (llvm::Constant *found = typeDescriptors_.lookup(type))
     return found;
-  // { TzType, slots[12] }: TzUnionType in runtime/tzrt.h.
+  // { TzType, slots[12] }: TzUnionType in runtime/core/tzrt/tzrt.h.
   constexpr unsigned kSlots = 12;
   auto *slotsType = llvm::ArrayType::get(builder_.getPtrTy(), kSlots);
   std::vector<llvm::Constant *> slots(kSlots, llvm::ConstantPointerNull::get(builder_.getPtrTy()));

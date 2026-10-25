@@ -1,9 +1,9 @@
 // Dates (docs/date.md). A Date is an object { i64 rc, ptr layout, double
-// time } that the code makes itself (TzDate in runtime/tzrt.h): reading the
-// time is a load, and `a - b` of dates two loads and a subtraction. The
-// runtime computes with times (runtime/date.c): fields, setters, texts,
-// parsing; local time and languages come from the ICU of the system
-// (date_zone.c, date_format.c). An Intl.DateTimeFormat is an object the
+// time } that the code makes itself (TzDate in runtime/core/tzrt/tzrt.h):
+// reading the time is a load, and `a - b` of dates two loads and a subtraction.
+// The runtime computes with times (runtime/library/date/date/date.c): fields,
+// setters, texts, parsing; local time and languages come from the ICU of the
+// system (date_zone.c, date_format.c). An Intl.DateTimeFormat is an object the
 // runtime makes, which holds a formatter of ICU.
 //
 // What JavaScript throws, the runtime throws (docs/errors.md): toISOString()
@@ -11,9 +11,9 @@
 // running program shows to be wrong. The program checks tz_thrown after
 // those calls, and ThrowScanner (codegen_throw.cpp) knows them.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
-#include "../../runtime/date.h"
+#include "runtime/library/date/date/date.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -79,8 +79,8 @@ llvm::Value *CodeGen::newDate(llvm::Value *time) {
   return date;
 }
 
-// TzDateOptions (runtime/tzrt.h): { string locale, [TZ_DTO_COUNT x string]
-// values, i32 present, i32 hour12, double fractional }. The strings are
+// TzDateOptions (runtime/core/tzrt/tzrt.h): { string locale, [TZ_DTO_COUNT x
+// string] values, i32 present, i32 hour12, double fractional }. The strings are
 // borrowed from the operands, which `held` keeps until after the call.
 llvm::Value *CodeGen::emitDateOptions(llvm::ArrayRef<Expr *> args, std::vector<Operand> &held) {
   llvm::Type *i32 = builder_.getInt32Ty(), *f64 = builder_.getDoubleTy();

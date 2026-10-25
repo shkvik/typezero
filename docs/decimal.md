@@ -1,7 +1,7 @@
 # Точные десятичные числа: `decimal`
 
-Решения, принятые 23 октября 2026 года. Шаги 1 и 2 плана сделаны 24 октября (кроме
-`JSON.stringify` — он вместе с JSON); ошибки при выполнении пока паники — до исключений.
+Решения, принятые 23 октября 2026 года. Шаги 1 и 2 плана сделаны 24 октября, `JSON.stringify` —
+вместе с JSON; ошибки при выполнении — исключения.
 
 ## Коротко
 
@@ -128,6 +128,6 @@ decimal("0.30") == decimal("0.3")                   // true
    печать и `String(x)`; деление на 20 знаков; ошибки: `double` без `decimal()`, деление на
    константу 0, `10n` и `BigInt`. Рантайм: короткая форма и длинная. Исключения (`RangeError`,
    `SyntaxError`) — после [errors.md](errors.md), шаг 2.
-2. **Методы** (сделано, кроме `JSON.stringify`). `div` с режимами, `round`, `toFixed`, `toFormat`, `toString(base)`,
+2. **Методы** (сделано). `div` с режимами, `round`, `toFixed`, `toFormat`, `toString(base)`,
    `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`, `shiftedBy`,
    `toFraction`, `decimal.max` / `min` / `sum`; `JSON.stringify` строкой.

@@ -1,16 +1,17 @@
 // spawnSync, execFileSync and execSync of node:child_process
-// (docs/process.md): a call of tz_child_run in runtime/child.c.
+// (docs/process.md): a call of tz_child_run in
+// runtime/library/child_process/child/child.c.
 //
 // The call fills a TzSpawnRequest on the stack with its arguments, borrowed
-// for the call (see ChildArg in src/ast/ast.h for what Sema gives). The
-// runtime runs the program and gives back what happened as TzSpawnParts,
-// which a maker of the program turns into the result of spawnSync or an
-// ExecSyncError: it takes each field the type has from the parts, converted
-// to the field's type (stdout may be a string, a Buffer, undefined or a
-// union of them). For execSync and execFileSync, stdout comes back in the
+// for the call (see ChildArg in compiler/program/ast/ast.h for what Sema
+// gives). The runtime runs the program and gives back what happened as
+// TzSpawnParts, which a maker of the program turns into the result of spawnSync
+// or an ExecSyncError: it takes each field the type has from the parts,
+// converted to the field's type (stdout may be a string, a Buffer, undefined or
+// a union of them). For execSync and execFileSync, stdout comes back in the
 // parts the call passes, and the call converts it the same way.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/Support/ErrorHandling.h"
 
@@ -20,7 +21,8 @@ namespace tz {
 
 namespace {
 
-// The fields of TzSpawnRequest and TzSpawnParts (runtime/child.c).
+// The fields of TzSpawnRequest and TzSpawnParts
+// (runtime/library/child_process/child/child.c).
 enum RequestField : unsigned {
   RqFile,
   RqArgs,
@@ -69,7 +71,7 @@ enum PartsField : unsigned {
   PtPiped,
 };
 
-// HAS_CWD and the others of runtime/child.c.
+// HAS_CWD and the others of runtime/library/child_process/child/child.c.
 enum : uint32_t {
   HasCwd = 1,
   HasTimeout = 2,

@@ -6,7 +6,8 @@
 // and `stdio` whether there is any (a stream the child inherits gives none),
 // so those two must be literals. The others are values of any expression,
 // `T | undefined` too. Each call gets the arguments ChildArg lists, the
-// absent options undefined, and runtime/child.c runs the program.
+// absent options undefined, and runtime/library/child_process/child/child.c
+// runs the program.
 //
 // spawnSync never throws for the program: it gives an object with what
 // happened, as Node does. execSync and execFileSync give what the program
@@ -16,7 +17,7 @@
 // the fields Node gives that error: status, signal, output, pid, stdout and
 // stderr.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/ConvertUTF.h"
 

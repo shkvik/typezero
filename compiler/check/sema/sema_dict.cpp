@@ -2,8 +2,8 @@
 // written `{ [key: string]: V }`, which is read and written with the syntax
 // of objects (`r[k]`, `r.k`, `delete r[k]`, `k in r`, Object.keys, for...in,
 // spreads), and Map<K, V> and Set<T> with the methods of JavaScript. All
-// three are one hash table of the runtime (runtime/map.c) that keeps its keys
-// in the order they were added.
+// three are one hash table of the runtime (runtime/core/map/map.c) that keeps
+// its keys in the order they were added.
 //
 // Reading a key gives `V | undefined`, as reading an element at an index not
 // proven in range does. The traps of JavaScript are errors: `m[k]` on a Map
@@ -16,7 +16,7 @@
 // iterated, a Map is its entries() and a Set its values(): iterators, which
 // every consumer of iterators takes.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

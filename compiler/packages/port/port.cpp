@@ -4,14 +4,14 @@
 // is TypeScript that tz's parser may refuse, and the changes are local. The
 // copy is of tz: a.ts becomes a.tz.
 
-#include "pkg/commands.h"
+#include "compiler/packages/commands/commands.h"
 
-#include "ast/ast.h"
-#include "pkg/fetch.h"
-#include "pkg/json.h"
-#include "pkg/project.h"
-#include "pkg/scan.h"
-#include "pkg/semver.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/packages/fetch/fetch.h"
+#include "compiler/packages/json/json.h"
+#include "compiler/packages/project/project.h"
+#include "compiler/packages/scan/scan.h"
+#include "compiler/packages/semver/semver.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"

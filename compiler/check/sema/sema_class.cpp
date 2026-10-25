@@ -25,7 +25,7 @@
 // one name, each with a body of its own: a call chooses one by the types of
 // its arguments, when compiling, as in C#.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

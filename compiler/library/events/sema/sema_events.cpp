@@ -1,7 +1,7 @@
 // Events (docs/events.md): node:events and the events of the web platform,
-// which tz has written in tz (src/lib/events.tz and src/lib/web.tz), and
-// what the compiler adds to that code: the intrinsics `__tz_*` it uses, and
-// the types of the events.
+// which tz has written in tz (library/events/events.tz and
+// library/events/web.tz), and what the compiler adds to that code: the
+// intrinsics `__tz_*` it uses, and the types of the events.
 //
 // The code of an emitter sees each listener as an `unknown`, as JavaScript
 // sees a function. The type of an emitter, `EventEmitter<Events>`, says
@@ -13,7 +13,7 @@
 // the arguments of emit those of `emit<A>` with A the tuple of the event,
 // whose copy calls each listener as a function of them.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -280,7 +280,7 @@ const Type *Sema::eventMapOf(const Type *type) const {
   if (!emitter)
     return nullptr;
   // The streams of node:stream have theirs from StreamEmitter (see
-  // src/lib/stream.tz).
+  // library/stream/stream.tz).
   const ClassDecl *streams = libraryClass("StreamEmitter");
   for (const ClassDecl *c = classOf(type); c; c = c->parent)
     if (c->generic && (c->generic == emitter || c->generic == streams) && !c->typeArgs.empty())

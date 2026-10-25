@@ -42,18 +42,19 @@
 #include <unistd.h>
 #endif
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
-// What the program gives and gets (must match src/codegen/codegen_child.cpp)
+// What the program gives and gets (must match
+// compiler/library/child_process/codegen/codegen_child.cpp)
 //===----------------------------------------------------------------------===//
 
-// The call, as Sema checked it (see ChildArg in src/ast/ast.h). Strings,
-// the array, the map and the bytes are borrowed.
+// The call, as Sema checked it (see ChildArg in compiler/program/ast/ast.h).
+// Strings, the array, the map and the bytes are borrowed.
 typedef struct {
   TzStr file; // the program; the command of execSync
   TzArray *args;

@@ -2,20 +2,20 @@
 // reading and writing fields.
 //
 // An object is a reference to { i64 rc, ptr layout, fields... }, allocated by
-// tz_obj_alloc (runtime/closure.c) as the environments of closures are. The
-// fields are stored unboxed, each in the representation of its type (an
-// optional field as `T | undefined`), at offsets fixed by the type, so
+// tz_obj_alloc (runtime/core/closure/closure.c) as the environments of closures
+// are. The fields are stored unboxed, each in the representation of its type
+// (an optional field as `T | undefined`), at offsets fixed by the type, so
 // reading one is a single load.
 //
-// `layout` points at a constant descriptor (TzLayout in runtime/tzrt.h): the
-// function that drops the object, and for printing and Object.keys the
-// names, offsets and types of the fields in the order of the literal that
-// created the object. Node prints the keys of an object in the order they
-// were added, so one type may have several descriptors, which differ only in
-// that order. A tuple is an object with the fields "0", "1"... whose
-// descriptor says that it prints as an array.
+// `layout` points at a constant descriptor (TzLayout in
+// runtime/core/tzrt/tzrt.h): the function that drops the object, and for
+// printing and Object.keys the names, offsets and types of the fields in the
+// order of the literal that created the object. Node prints the keys of an
+// object in the order they were added, so one type may have several
+// descriptors, which differ only in that order. A tuple is an object with the
+// fields "0", "1"... whose descriptor says that it prints as an array.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -116,9 +116,10 @@ const CodeGen::ObjectLayout &CodeGen::objectLayout(const Type *type) {
 
   auto *fnType = llvm::FunctionType::get(builder_.getVoidTy(), {builder_.getPtrTy()}, false);
   std::string name = layoutName(type);
-  // The runtime makes regexes, and frees them (see TzRegex in runtime/tzrt.h);
-  // so with formatters of dates, the other objects of Intl (which the
-  // object's own layout frees, tz_intl_drop) and the objects of binary data.
+  // The runtime makes regexes, and frees them (see TzRegex in
+  // runtime/core/tzrt/tzrt.h); so with formatters of dates, the other objects
+  // of Intl (which the object's own layout frees, tz_intl_drop) and the objects
+  // of binary data.
   llvm::StringRef runtimeDrop = type->isRegExp()                         ? "tz_re_drop"
                                 : type->isWeakRef()                      ? "tz_weak_drop"
                                 : type->isDateFormat()                   ? "tz_dtf_drop"
@@ -245,7 +246,7 @@ void CodeGen::emitObjectDrop(const Type *type, ObjectLayout &layout) {
     builder_.SetInsertPoint(countedBlock);
     llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), nextValue, "rc");
     // The next object dies with this one when this held its last reference:
-    // a shared one's count goes atomically (runtime/publish.c).
+    // a shared one's count goes atomically (runtime/core/publish/publish.c).
     auto *deadBlock = llvm::BasicBlock::Create(ctx_, "next.dead", drop);
     if (parallel_) {
       llvm::IRBuilder<> b(builder_.GetInsertBlock());
@@ -284,7 +285,8 @@ void CodeGen::emitObjectDrop(const Type *type, ObjectLayout &layout) {
 }
 
 llvm::Constant *CodeGen::layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys) {
-  // TZ_LAYOUT_TUPLE, TZ_LAYOUT_MATCH and TZ_LAYOUT_DATE (runtime/tzrt.h).
+  // TZ_LAYOUT_TUPLE, TZ_LAYOUT_MATCH and TZ_LAYOUT_DATE
+  // (runtime/core/tzrt/tzrt.h).
   return layoutDescriptor(type, keys,
                           type->isTuple() ? 1 : type->isMatch() ? 64 : type->isDate() ? 1024 : 0);
 }

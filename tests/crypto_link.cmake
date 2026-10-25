@@ -13,8 +13,8 @@ file(WRITE ${DIR}/full.tz
      "import { createHash } from \"node:crypto\"\n"
      "const name: string = process.argv[2] ?? \"sha256\"\n"
      "console.log(createHash(name).update(\"abc\").digest(\"hex\"))\n")
-# Web Crypto (src/lib/webcrypto.tz): HMAC with its algorithm in a constant, as hono signs cookies,
-# needs only the direct layer; an ECDSA key, all of OpenSSL.
+# Web Crypto (library/crypto/webcrypto.tz): HMAC with its algorithm in a constant, as hono signs
+# cookies, needs only the direct layer; an ECDSA key, all of OpenSSL.
 file(WRITE ${DIR}/subtle_direct.tz
      "const algorithm = { name: \"HMAC\", hash: \"SHA-256\" }\n"
      "const key = await crypto.subtle.importKey(\"raw\", new Uint8Array(8), algorithm, false, [\"sign\"])\n"

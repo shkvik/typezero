@@ -4,7 +4,7 @@
 // node:path is the system's (CodeGen passes it). fs.c resolves paths with
 // these functions too, as Node does on Windows before it calls the system.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 

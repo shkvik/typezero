@@ -1,5 +1,5 @@
 // Streams (docs/streams.md): node:stream, which tz has written in tz
-// (src/lib/stream.tz), and what the compiler adds to that code.
+// (library/stream/stream.tz), and what the compiler adds to that code.
 //
 // The code of Stream sees a chunk as an unknown; the classes of the program,
 // Readable<T>, Writable<T>, Duplex<W, R>, Transform<W, R> and PassThrough<T>,
@@ -11,7 +11,7 @@
 // the chunks the next one takes; and a Duplex works where a Writable is
 // expected.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -73,7 +73,7 @@ Sema::StreamChunks Sema::streamChunksOf(const ClassDecl *cls) const {
 void Sema::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
   // A Duplex<W, R> is a Writable<W> too, as node's Duplex is (Symbol.hasInstance
   // of Writable): their objects lie in memory as Stream's do (see
-  // src/lib/stream.tz).
+  // library/stream/stream.tz).
   ClassDecl *generic = inst->generic;
   ClassDecl *writable = libraryClass("Writable");
   if (!generic || !generic->library || generic->name != "Duplex" || !writable ||
@@ -396,7 +396,7 @@ Expr *Sema::checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expect
 }
 
 //===----------------------------------------------------------------------===//
-// The intrinsics of src/lib/stream.tz
+// The intrinsics of library/stream/stream.tz
 //===----------------------------------------------------------------------===//
 
 Expr *Sema::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg) {

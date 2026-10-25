@@ -8,9 +8,9 @@
 // or reads as UTC while the same date with a time would be local; February
 // 31, month 12 and the like as numbers written in the code; getYear.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
-#include "../../runtime/date.h"
+#include "runtime/library/date/date/date.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"

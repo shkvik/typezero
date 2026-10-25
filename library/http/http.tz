@@ -6,15 +6,15 @@
 // other (keep-alive, pipelining); the requests of different connections are
 // handled at the same time. With the parallel runtime (docs/async.md,
 // section 8) the threads of the runtime take what comes for the connections
-// (runtime/net.c), and the piece that waits for the head of a request runs
-// on the thread that read it, ahead of its turn: the Request made of it, the
-// handler, the response, the wait for the next request. Only what touches
-// data other pieces may write waits for node's order: the handler's own
-// accesses, as the compiler marks them. The code here touches the server's
-// own fields only after __tz_order(), and the functions of the runtime it
-// calls need no turn, but those that do wait for it themselves.
-// The bytes go through the runtime (runtime/net.c, http.c), and with
-// `tls: { cert, key }` through TLS on each connection (runtime/tls.c): https.
+// (runtime/library/net/net/net.c), and the piece that waits for the head of a
+// request runs on the thread that read it, ahead of its turn: the Request made
+// of it, the handler, the response, the wait for the next request. Only what
+// touches data other pieces may write waits for node's order: the handler's own
+// accesses, as the compiler marks them. The code here touches the server's own
+// fields only after __tz_order(), and the functions of the runtime it calls
+// need no turn, but those that do wait for it themselves. The bytes go through
+// the runtime (runtime/library/net/net/net.c, http.c), and with `tls: { cert,
+// key }` through TLS on each connection (runtime/library/tls/tls/tls.c): https.
 
 import {
   Request, Response, ReadableStream, SEND_BYTES, SEND_NO_BODY, SEND_STREAM,

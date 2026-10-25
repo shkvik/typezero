@@ -2,7 +2,8 @@
 // toLowerCase and the properties their Final_Sigma rule needs. The data comes
 // from Node.js itself, so that the runtime converts exactly as V8 does.
 //
-//   node runtime/gen_unicode_tables.mjs > runtime/unicode_tables.h
+//   cd runtime/core/unicode
+//   node gen_unicode_tables.mjs > unicode_tables.h
 
 const MAX = 0x10ffff;
 const isSurrogate = (cp) => cp >= 0xd800 && cp <= 0xdfff;

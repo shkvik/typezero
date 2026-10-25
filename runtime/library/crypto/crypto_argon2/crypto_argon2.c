@@ -2,7 +2,7 @@
 // RFC 9106 (version 0x13) over the BLAKE2b of OpenSSL, as its reference code computes them. The
 // lanes are filled one after another; the result does not depend on that.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <string.h>
 

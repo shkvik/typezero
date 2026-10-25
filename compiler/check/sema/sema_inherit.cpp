@@ -21,7 +21,7 @@
 // through the wider type what the narrower one does not allow is found by the
 // check of the whole program (sema_widen.cpp).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

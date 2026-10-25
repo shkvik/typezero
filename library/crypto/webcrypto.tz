@@ -3,14 +3,14 @@
 // Node 24 (util.js, webidl.js, mac.js, aes.js, ec.js, rsa.js, cfrg.js, hkdf.js, pbkdf2.js), with
 // node's errors: DOMExceptions of its names and messages, and the TypeErrors of Web IDL. A file
 // that says `crypto.subtle` or names one of these types gets them, as if it imported them (see
-// the loader, src/driver/loader.cpp).
+// the loader, compiler/load/loader/loader.cpp).
 //
 // What takes time runs on the threads of the pool, as node runs it on those of libuv: digests,
 // signatures, ciphers, derivations and the making of key pairs. The intrinsics __tz_subtle_*
-// give the promises that runtime/crypto_subtle*.c settles (src/sema/sema_webcrypto.cpp); a job
-// that fails gives undefined, which becomes node's OperationError here. The rest, which node
-// does at once too (normalizing an algorithm, checking usages, reading and writing keys), is
-// done here over node:crypto.
+// give the promises that runtime/library/crypto/crypto_subtle* settles
+// (compiler/library/crypto/sema/sema_webcrypto.cpp); a job that fails gives undefined, which
+// becomes node's OperationError here. The rest, which node does at once too (normalizing an
+// algorithm, checking usages, reading and writing keys), is done here over node:crypto.
 //
 // A key's algorithm decides what it does: a CryptoKey holds the KeyHandle of its family, which
 // the import or the generation of the key made, and the operations go through it. So a program

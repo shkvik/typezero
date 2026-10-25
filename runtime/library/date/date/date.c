@@ -9,8 +9,8 @@
 // date_zone.c: only the functions of local time call there, so a program
 // that uses only UTC (and Date.now()) never loads them.
 
-#include "date.h"
-#include "tzrt.h"
+#include "runtime/library/date/date/date.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -6,7 +6,7 @@
 
 #include "internal/deprecated.h"
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/aes.h>
 #include <openssl/crypto.h>

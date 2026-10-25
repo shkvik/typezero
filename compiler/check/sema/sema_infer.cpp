@@ -6,9 +6,9 @@
 // type is first needed. Functions that call each other (and a function that
 // calls itself) need each other's types: inferCycle finds them together.
 
-#include "lex/lexer.h"
-#include "parse/parser.h"
-#include "sema/sema.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/load/parser/parser.h"
+#include "compiler/check/sema/sema.h"
 
 using llvm::cast;
 using llvm::dyn_cast;

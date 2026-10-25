@@ -1,6 +1,7 @@
 // Binary data (docs/bytes.md): ArrayBuffer, the typed arrays, DataView,
 // Buffer as node has it, TextEncoder and TextDecoder. Each is an object type
-// of its own, whose objects the runtime makes (runtime/bytes.c, buffer.c).
+// of its own, whose objects the runtime makes
+// (runtime/library/bytes/bytes/bytes.c, buffer.c).
 //
 // Elements are read and written as those of arrays are, with the proofs of
 // indices of sema_flow.cpp: an element read without one may be undefined,
@@ -11,9 +12,9 @@
 // `x >>> 24`), checks above, elements of a narrower kind, Math.min and
 // Math.max (see valueRange).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
-#include "../../runtime/encodings.h"
+#include "runtime/library/bytes/encodings/encodings.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -47,7 +48,7 @@ const std::pair<llvm::StringLiteral, Bytes> kNames[] = {
     {"TextDecoder", Bytes::TextDecoder},
 };
 
-// Buffer's encodings, numbered as in runtime/buffer.c.
+// Buffer's encodings, numbered as in runtime/library/bytes/buffer/buffer.c.
 enum Encoding { Utf8, Utf16le, Latin1, Ascii, Base64, Base64url, Hex };
 
 std::optional<int> encodingNamed(llvm::StringRef name) {

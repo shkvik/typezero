@@ -11,7 +11,7 @@
 // string, `Array.isArray(items)` a Json[], `x != null` (or `!= undefined`)
 // takes undefined away.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -62,7 +62,8 @@ struct JsonProblem {
 };
 
 // Checks the text of a file that embedJson reads, with the grammar of
-// JSON.parse (runtime/json.c), so that the program cannot fail to parse it.
+// JSON.parse (runtime/library/json/json/json.c), so that the program cannot
+// fail to parse it.
 JsonProblem checkJsonText(llvm::StringRef s) {
   size_t i = 0, n = s.size();
   auto whitespace = [&] {

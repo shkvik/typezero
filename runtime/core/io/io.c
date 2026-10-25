@@ -1,7 +1,7 @@
 // Waiting for I/O (docs/async.md, step 2): the thread pool that makes the
 // calls of the system that block, as libuv's does for the files of Node, and
-// the wait of the poll phase of the loop (runtime/async.c) for what it
-// finished.
+// the wait of the poll phase of the loop (runtime/core/async/async.c) for what
+// it finished.
 //
 // The language runs on one thread, the main one. A piece of work (TzWork)
 // the runtime queues goes to the first free thread of the pool, which makes
@@ -36,7 +36,7 @@
 // runs first, as it always does in Node. A work may finish later, as the
 // system decides, which Node may as well.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdlib.h>
 #include <string.h>

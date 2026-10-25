@@ -2,13 +2,13 @@
 // text string.c hands them, x.toFixed(digits), and the shortest digits of a
 // double, which String(x) writes.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "number_tables.h"
+#include "runtime/core/number/number_tables.h"
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 

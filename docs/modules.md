@@ -159,7 +159,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   ошибки показывает `tz build`. Их даст свой языковой сервер или плагин tsserver, который
   отдаёт файлы `.tz` проверке TypeScript.
 - **Для плагина всё готово** рядом с tz, в `types/`: настройки tsc для программ tz,
-  `@types/node` (node 24), объявления neverthrow и `tz.d.ts` ([src/types](../src/types/tz.d.ts)) —
+  `@types/node` (node 24), объявления neverthrow и `tz.d.ts` ([editors/types](../editors/types/tz.d.ts)) —
   то, что в tz есть без импорта: `int`, `long`, `double`, `decimal` с методами, `Json`,
   `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` и остальное из
   neverthrow, `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,

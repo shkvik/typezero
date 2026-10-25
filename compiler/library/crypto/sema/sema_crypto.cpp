@@ -1,6 +1,7 @@
 // node:crypto (docs/crypto.md): the calls of its functions, the methods and properties of its
 // objects (Hash, Hmac, Cipheriv, Decipheriv, KeyObject, Sign, Verify, ECDH, X509Certificate) and
-// the global crypto of Web Crypto, which become calls of runtime/crypto*.c (see crypto_api.h).
+// the global crypto of Web Crypto, which become calls of runtime/library/crypto/ (see
+// crypto_api.h).
 //
 // The compiler picks the layer of OpenSSL (docs/crypto.md, section 3): a hash or a cipher named
 // by a literal goes straight to its functions when the direct layer has it, and a name known only
@@ -8,8 +9,8 @@
 // node does not know, or that node 24 turns off (md4, des-cbc), is an error here; the callback
 // forms are errors with the Sync form as the hint, as with node:fs (docs/io.md).
 
-#include "sema/crypto_api.h"
-#include "sema/sema.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"

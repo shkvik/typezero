@@ -3,7 +3,7 @@
 // The compiler lays them out and releases what they hold; the runtime only
 // allocates them and counts them for leak checks.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 int64_t tz_obj_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_objects)); }
 

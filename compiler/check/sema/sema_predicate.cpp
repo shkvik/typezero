@@ -15,7 +15,7 @@
 // `this is T`, is checked against the body: each return that may give true
 // (or each way out, for asserts) must have shown x to be T.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 using llvm::cast;
 using llvm::dyn_cast;

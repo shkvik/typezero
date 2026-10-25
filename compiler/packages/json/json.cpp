@@ -1,4 +1,4 @@
-#include "pkg/json.h"
+#include "compiler/packages/json/json.h"
 
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"

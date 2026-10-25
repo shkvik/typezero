@@ -3,7 +3,7 @@
 // properties such as `process.argv` and `process.env.HOME` become calls of
 // built-ins without arguments, or with the name of the variable.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/ConvertUTF.h"
 

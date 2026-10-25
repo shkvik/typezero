@@ -16,7 +16,7 @@
 // methods are closures whose environment is the object: the variables they
 // capture are stored in it after its fields.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -31,7 +31,7 @@ namespace {
 
 // A field that is a method (a method of a literal, or an arrow in a field of
 // a class): node prints it as `[Function: name]`. TZ_FIELD_METHOD in
-// runtime/tzrt.h.
+// runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kMethodField = 0xFFFFFFFFu;
 
 } // namespace
@@ -180,9 +180,9 @@ llvm::Constant *CodeGen::classDescriptor(const ClassDecl *cls) {
         fieldDescTy_, {utf8Constant(shown), builder_.getInt32(uint32_t(shown.size())),
                        builder_.getInt32(uint32_t(offset)), typeDescriptor(type->fields()[i].type)}));
   };
-  // An emitter of node:events (src/lib/events.tz) prints as node's: its
+  // An emitter of node:events (library/events/events.tz) prints as node's: its
   // private fields under node's names, those that are symbols in node last
-  // (TZ_LAYOUT_LIBRARY in runtime/tzrt.h).
+  // (TZ_LAYOUT_LIBRARY in runtime/core/tzrt/tzrt.h).
   bool emitter = false;
   for (const ClassDecl *c = cls; c && !emitter; c = c->parent)
     emitter = c->library && c->name == "EventEmitterBase";
@@ -257,7 +257,7 @@ llvm::Constant *CodeGen::classDescriptor(const ClassDecl *cls) {
   llvm::Constant *className = shown.empty() ? llvm::ConstantPointerNull::get(builder_.getPtrTy())
                                             : utf8Constant(shown);
   // An Error, and an object of a class derived from it, prints as Node
-  // prints errors (TZ_LAYOUT_ERROR in runtime/tzrt.h).
+  // prints errors (TZ_LAYOUT_ERROR in runtime/core/tzrt/tzrt.h).
   uint32_t flags = derivesFromError(cls) ? 512 : 0;
   if (library)
     flags |= 1073741824; // TZ_LAYOUT_LIBRARY

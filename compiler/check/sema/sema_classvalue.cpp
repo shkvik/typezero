@@ -24,7 +24,7 @@
 // replaces it: from where the declaration runs on, the name means that class
 // (`new Order(100).id`), as TypeScript reassigns the name.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

@@ -24,8 +24,8 @@
 // consumer. A generator called there is emitted inline: its body in place,
 // with the consumer at each `yield`.
 
-#include "codegen/codegen.h"
-#include "sema/sema.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -39,7 +39,7 @@ namespace tz {
 
 namespace {
 
-// What an iterator prints as; must match TzLayout in runtime/tzrt.h.
+// What an iterator prints as; must match TzLayout in runtime/core/tzrt/tzrt.h.
 enum : unsigned {
   kLayoutGenerator = 2,      // Object [Generator] {}
   kLayoutArrayIterator = 4,  // Object [Array Iterator] {}

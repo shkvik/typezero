@@ -2,7 +2,7 @@
 // PBKDF2-HMAC-SHA256 of crypto.c and the SHA-256 of OpenSSL, with the checks of the parameters
 // that OpenSSL makes (EVP_PBE_scrypt_ex), which node reports.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <limits.h>
 #include <string.h>

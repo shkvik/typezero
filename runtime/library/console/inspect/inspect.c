@@ -9,7 +9,7 @@
 // One difference is deliberate: an optional field that holds undefined is
 // not shown, since in tz a missing field and an undefined one are the same.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -830,8 +830,8 @@ static void format_dict(Ctx *ctx, TzBuf *out, const TzMap *m, int recurse_times)
 // Node shows it without taking it, `[Map Iterator] { 'a', 'b' }` and
 // `[Map Entries] { [ 'a', 1 ] }`. The coroutine keeps the map and its
 // position in the promise, which lies after the header and the two pointers
-// that start the frame (src/codegen/codegen_iter.cpp); the map is NULL once
-// the iterator is done.
+// that start the frame (compiler/lower/codegen/codegen_iter.cpp); the map is
+// NULL once the iterator is done.
 static void format_dict_iterator(Ctx *ctx, TzBuf *out, const TzInstance *it, int recurse_times) {
   uint32_t flags = it->layout->flags;
   int set = (flags & TZ_LAYOUT_DICT_OF_SET) != 0, entries = (flags & TZ_LAYOUT_DICT_ENTRIES) != 0;
@@ -1328,7 +1328,7 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   }
   ++recurse_times;
   // A CryptoKey of Web Crypto shows its fields a level deeper, as node's custom inspect of it
-  // does (src/lib/webcrypto.tz).
+  // does (library/crypto/webcrypto.tz).
   if ((layout->flags & TZ_LAYOUT_LIBRARY) && named(layout, "CryptoKey"))
     ++recurse_times;
   ctx->seen[ctx->seen_count++] = object;
@@ -1648,7 +1648,7 @@ void tz_print_value(const TzType *type, const void *value) {
   tz_free((void *)ctx.circular);
 }
 
-// util.inspect of an unknown, for the messages of tz's library (src/lib):
+// util.inspect of an unknown, for the messages of tz's library (library/):
 // a string is quoted, as in an array.
 void tz_lib_inspect(TzStr *out, const void *u, TzMaker make) {
   (void)make;

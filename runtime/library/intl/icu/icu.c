@@ -1,7 +1,7 @@
 // Loading the ICU of the system (see icu.h).
 
-#include "icu.h"
-#include "tzrt.h"
+#include "runtime/library/intl/icu/icu.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 

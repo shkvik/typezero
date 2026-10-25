@@ -4,7 +4,7 @@
 #ifndef TZ_NET_H
 #define TZ_NET_H
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

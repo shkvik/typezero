@@ -1,9 +1,9 @@
-#include "driver/loader.h"
+#include "compiler/load/loader/loader.h"
 
-#include "lex/lexer.h"
-#include "parse/parser.h"
-#include "pkg/project.h"
-#include "sema/sema.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/load/parser/parser.h"
+#include "compiler/packages/project/project.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -87,10 +87,11 @@ private:
   // that names one gets it as if it imported it, unless it declares or
   // imports that name itself.
   void importLibraryGlobals(Module *module, llvm::StringRef text);
-  // The streams of node:fs and of process, written in tz (src/lib/fs_stream.tz):
-  // the names createReadStream, createWriteStream, ReadStream and WriteStream
-  // that a file imports from node:fs come from there, and a file that uses
-  // process.stdin, process.stdout or process.stderr as a stream loads it.
+  // The streams of node:fs and of process, written in tz
+  // (library/stream/fs_stream.tz): the names createReadStream,
+  // createWriteStream, ReadStream and WriteStream that a file imports from
+  // node:fs come from there, and a file that uses process.stdin, process.stdout
+  // or process.stderr as a stream loads it.
   void importFsStreams(Module *module, llvm::StringRef text);
 
   llvm::SourceMgr &sourceMgr_;
@@ -217,7 +218,7 @@ Module *Loader::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
   // binds the names they give.
   if (spec == "neverthrow")
     return nullptr;
-  // Built into tz and written in tz (src/lib, docs/events.md, docs/net.md);
+  // Built into tz and written in tz (library/, docs/events.md, docs/net.md);
   // the modules of the globals only for the code there.
   if (spec == "node:events" || spec == "events")
     return libraryModule("events.tz", "node:events", loc);
@@ -509,7 +510,7 @@ Module *Loader::libraryModule(llvm::StringRef file, llvm::StringRef name, llvm::
 namespace {
 
 // The globals of the web platform that tz has written in tz, and the files
-// of src/lib that declare them.
+// of library/ that declare them.
 struct LibraryGlobal {
   llvm::StringLiteral name, file, module;
 };

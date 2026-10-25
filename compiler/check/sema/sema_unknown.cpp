@@ -15,7 +15,7 @@
 // are references in memory (see codegen_unknown.cpp): an object as it is, and
 // in an unknown any other value in a box of the runtime.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

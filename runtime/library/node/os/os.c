@@ -11,7 +11,7 @@
 #define _DEFAULT_SOURCE // gethostname, getloadavg and the like, which -std=c17 hides
 #endif
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdio.h>
 #include <stdlib.h>

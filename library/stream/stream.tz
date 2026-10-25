@@ -16,11 +16,12 @@
 // Duplex<W, R>, Transform<W, R> and PassThrough<T>, are thin: their methods
 // give the chunks their types, and they declare no fields Stream does not
 // have, so that a Duplex works where a Writable is expected (the compiler
-// lets it, src/sema/sema_stream.cpp). A chunk that the stream emits goes to
-// the listeners of 'data' as what it is: a Buffer, a string once the stream
-// has an encoding, or a T in object mode; the compiler makes sure the
-// listeners take that (setEncoding narrows the type of the stream from that
-// point on, and is an error on a stream that has listeners already).
+// lets it, compiler/library/stream/sema/sema_stream.cpp). A chunk that the
+// stream emits goes to the listeners of 'data' as what it is: a Buffer, a
+// string once the stream has an encoding, or a T in object mode; the compiler
+// makes sure the listeners take that (setEncoding narrows the type of the
+// stream from that point on, and is an error on a stream that has listeners
+// already).
 //
 // Cycles. tz frees memory by counting references, which a cycle keeps alive
 // (README, "Строки и память"). The listeners this code adds to a stream
@@ -62,8 +63,9 @@ class StreamRangeError extends RangeError {
   }
 }
 
-// What this code asks of the runtime (runtime/library.c, inspect.c): the
-// name of the class of an object; an unknown as console.log shows it.
+// What this code asks of the runtime
+// (runtime/library/tz_modules/library/library.c, inspect.c): the name of the
+// class of an object; an unknown as console.log shows it.
 function __tz_lib_class_name(object: object): string
 function __tz_lib_inspect(value: unknown): string
 
@@ -211,8 +213,9 @@ const kAfterWritePending = 1 << 28
 const kBuffered = 1 << 29
 const kWEnded = 1 << 30
 
-// The kinds of listeners of src/lib/events.tz: one that takes the emitter as
-// `this`, and one that takes the first argument of its event as an unknown.
+// The kinds of listeners of library/events/events.tz: one that takes the
+// emitter as `this`, and one that takes the first argument of its event as an
+// unknown.
 const kThisListener = 2
 const kUnknownArgListener = 3
 
@@ -698,7 +701,8 @@ export class Stream extends EventEmitterBase {
     onwrite(this, er)
   }
 
-  // write(chunk, encoding, cb) of the program (src/sema/sema_stream.cpp).
+  // write(chunk, encoding, cb) of the program
+  // (compiler/library/stream/sema/sema_stream.cpp).
   _writeBool(chunk: unknown, encoding: string | undefined, cb: StreamCallback | undefined): boolean {
     return this._writeAny(chunk, encoding, cb ?? nop) == true
   }
@@ -2430,7 +2434,7 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
 // pipeline(), finished() and compose() of node:stream take streams and
 // functions of any types, which the compiler checks: each call becomes one
 // of streamPipeline(), streamFinished() or streamCompose() (see
-// src/sema/sema_stream.cpp).
+// compiler/library/stream/sema/sema_stream.cpp).
 export function pipeline() {}
 export function finished() {}
 export function compose() {}
@@ -2495,7 +2499,7 @@ export type StreamEvents<T> = {
 }
 
 // What gives the classes their event map: the compiler finds it here as it
-// finds that of EventEmitter (src/sema/sema_events.cpp).
+// finds that of EventEmitter (compiler/library/events/sema/sema_events.cpp).
 export class StreamEmitter<Events> extends Stream {}
 
 // The sides a Duplex is being made with, which the constructors up its

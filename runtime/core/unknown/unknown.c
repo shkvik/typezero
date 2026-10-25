@@ -6,10 +6,10 @@
 // that reference itself; any other value lies in a box, an object of the
 // language whose layout is tz_box_layout and which holds the value with the
 // descriptor of its type. The compiler converts to unknown and back (see
-// src/codegen/codegen_unknown.cpp) and calls these functions for what needs
-// the type at run time: typeof, the values a check showed, equality.
+// compiler/lower/codegen/codegen_unknown.cpp) and calls these functions for
+// what needs the type at run time: typeof, the values a check showed, equality.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <stdio.h>

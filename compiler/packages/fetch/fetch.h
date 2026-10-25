@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pkg/semver.h"
+#include "compiler/packages/semver/semver.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"

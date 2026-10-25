@@ -10,7 +10,7 @@
 // the target, as reflect-metadata walks prototypes: an object's class, then
 // the class that one extends, and so on.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <string.h>
 

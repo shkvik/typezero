@@ -1,4 +1,4 @@
-#include "pkg/semver.h"
+#include "compiler/packages/semver/semver.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"

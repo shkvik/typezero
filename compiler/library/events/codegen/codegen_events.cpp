@@ -1,11 +1,12 @@
-// The intrinsics of the built-in modules tz has written in tz (src/lib)
+// The intrinsics of the built-in modules tz has written in tz (library/)
 // that take a type, which Sema gives as Builtin::LibListener and LibAs (see
-// src/sema/sema_events.cpp): `__tz_listener<F>(u)`, which takes the function
-// out of the box of an unknown, and `__tz_as<C>(o)`, a comparison of class
-// numbers; and the runtime's side of an AbortSignal given as a `signal`, a
-// field. The intrinsics the code declares are thunks (codegen_library.cpp).
+// compiler/library/events/sema/sema_events.cpp): `__tz_listener<F>(u)`, which
+// takes the function out of the box of an unknown, and `__tz_as<C>(o)`, a
+// comparison of class numbers; and the runtime's side of an AbortSignal given
+// as a `signal`, a field. The intrinsics the code declares are thunks
+// (codegen_library.cpp).
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 namespace tz {
 
@@ -14,8 +15,8 @@ llvm::Value *CodeGen::emitLibBuiltin(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::LibListener: {
     // The function lies in its box after the header (TZ_BOX_VALUE in
-    // runtime/tzrt.h), the box of an unknown that holds it; retained, as
-    // the listener may remove itself while it runs.
+    // runtime/core/tzrt/tzrt.h), the box of an unknown that holds it; retained,
+    // as the listener may remove itself while it runs.
     Operand box = emitOperand(call->args[0], /*canBorrow=*/true);
     llvm::Value *value = builder_.CreateLoad(
         lower(call->type), builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), box.value, 24),

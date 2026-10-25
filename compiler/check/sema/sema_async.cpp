@@ -9,7 +9,7 @@
 // an error, as a dropped Result is: nothing would wait for it, and an error
 // in it would end the program later. `void p` drops one on purpose.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

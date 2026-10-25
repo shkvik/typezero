@@ -19,7 +19,7 @@
 // each such field and the code and info of each such method; for an object
 // that holds a function in that field, the code is a stub that calls it.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"

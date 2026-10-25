@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ast/ast.h"
-#include "lex/lexer.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/load/lexer/lexer.h"
 
 namespace tz {
 

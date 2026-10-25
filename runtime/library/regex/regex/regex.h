@@ -124,11 +124,12 @@ enum {
 
 #define RE_INFINITY 0xFFFFFFFFu
 
-// The memo of a matcher that tz compiled (src/codegen/codegen_regex_native.cpp
-// and runtime/regex.c): a bit for each row, an instruction with the state of
-// the counted loops around it, and position, which says that the match got
-// there and failed. The bits of TZ_RE_MEMO_PAGE positions make a page, row
-// after row; a page is made when the match first gets to it.
+// The memo of a matcher that tz compiled
+// (compiler/library/regex/codegen/codegen_regex_native.cpp and
+// runtime/library/regex/regex/regex.c): a bit for each row, an instruction with
+// the state of the counted loops around it, and position, which says that the
+// match got there and failed. The bits of TZ_RE_MEMO_PAGE positions make a
+// page, row after row; a page is made when the match first gets to it.
 #define TZ_RE_MEMO_PAGE 4096
 
 typedef struct {

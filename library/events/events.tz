@@ -8,8 +8,9 @@
 // removeListener, the warning and the errors are node's. This code sees a
 // listener as an `unknown`, as JavaScript sees a function: the compiler
 // checks each call of the program against the event map of its emitter
-// before it comes here (src/sema/sema_events.cpp), and `__tz_listener<F>(l)`
-// gives back the function `l` holds as a function of its event's type F.
+// before it comes here (compiler/library/events/sema/sema_events.cpp), and
+// `__tz_listener<F>(l)` gives back the function `l` holds as a function of its
+// event's type F.
 //
 // What node keeps in properties of functions and arrays (the listener that
 // the wrapper of once() wraps, `warned` of an array of listeners), this code
@@ -18,9 +19,10 @@
 
 import { AbortSignal, Event, EventTarget } from "tz:web"
 
-// What this code asks of the runtime (runtime/library.c, inspect.c): the
-// Record marked as an object without a prototype, as it prints; the name of
-// the class of an object; an unknown as console.log shows it; process.pid.
+// What this code asks of the runtime
+// (runtime/library/tz_modules/library/library.c, inspect.c): the Record marked
+// as an object without a prototype, as it prints; the name of the class of an
+// object; an unknown as console.log shows it; process.pid.
 function __tz_lib_bare(map: Record<string, unknown>): Record<string, unknown>
 function __tz_lib_class_name(object: object): string
 function __tz_lib_inspect(value: unknown): string
@@ -28,9 +30,9 @@ function __tz_lib_pid(): int
 
 // The listener once() adds: node's onceWrapper, bound to its state. It
 // prints as node prints that, `[Function: bound onceWrapper] { listener:
-// ... }` (TZ_LAYOUT_LIBRARY in runtime/tzrt.h), and holds the listener, but
-// not the emitter, which calls it with itself: so an emitter and its
-// listeners make no cycle of references, which counting could not free.
+// ... }` (TZ_LAYOUT_LIBRARY in runtime/core/tzrt/tzrt.h), and holds the
+// listener, but not the emitter, which calls it with itself: so an emitter and
+// its listeners make no cycle of references, which counting could not free.
 class OnceWrapper {
   #fired = false
   constructor(readonly listener: unknown) {}
@@ -56,16 +58,17 @@ class ThisListener {
   constructor(readonly listener: unknown) {}
 }
 
-// A listener of the code of node:stream (src/lib/stream.tz) that takes the
-// first argument of its event as an unknown, whatever the type its emitter
-// emits it with: the chunk of a 'data' event, which is a Buffer, a string or
-// a T of an object-mode stream. It prints as the function it holds.
+// A listener of the code of node:stream (library/stream/stream.tz) that takes
+// the first argument of its event as an unknown, whatever the type its emitter
+// emits it with: the chunk of a 'data' event, which is a Buffer, a string or a
+// T of an object-mode stream. It prints as the function it holds.
 class UnknownArgListener {
   constructor(readonly listener: unknown) {}
 }
 
-// What the compiler says a listener is (src/sema/sema_events.cpp); a
-// listener of the built-in modules may be kUnknownArg too.
+// What the compiler says a listener is
+// (compiler/library/events/sema/sema_events.cpp); a listener of the built-in
+// modules may be kUnknownArg too.
 const kPlain = 0
 const kAsync = 1
 const kThis = 2
@@ -131,8 +134,8 @@ export class EventEmitterBase {
   // node's _events, _eventsCount and _maxListeners, which print with those
   // names, first, and Symbol(shapeMode) and Symbol(kCapture), which print
   // after the fields of the classes down the chain, as node prints symbols
-  // (see classDescriptor in src/codegen/codegen_class.cpp). The program does
-  // not see them: only this code knows what `#events` holds.
+  // (see classDescriptor in compiler/lower/codegen/codegen_class.cpp). The
+  // program does not see them: only this code knows what `#events` holds.
   #events: Record<string, unknown> = __tz_lib_bare({})
   #eventsCount = 0
   #maxListeners: double | undefined = undefined

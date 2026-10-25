@@ -7,7 +7,7 @@
 // come from its body unless they are declared, as a return type does. What
 // next(x) sends to a `yield` must be declared, as TypeScript requires.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

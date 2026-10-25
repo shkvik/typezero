@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ast/ast.h"
-#include "support/diagnostics.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/diagnostics/diagnostics.h"
 
 namespace tz {
 

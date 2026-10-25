@@ -14,7 +14,7 @@
 // tz_thrown after the call. JSON.parse and JSON.stringify, which find their
 // errors deep in their work, jump back to where they started.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <setjmp.h>

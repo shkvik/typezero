@@ -12,7 +12,7 @@
 // and each one the error passes add their place, up to Node's default of ten
 // (Error.stackTraceLimit). Places cost nothing until something throws.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdarg.h>
 #include <stdio.h>

@@ -18,7 +18,7 @@
 // takes a generator, which here is an ordinary function called at once:
 // `yield* r` takes the value of r, or returns the Err r from the generator.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

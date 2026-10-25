@@ -9,11 +9,11 @@
 // toString writes, and many more. Words before the first number are skipped,
 // text in parentheses too.
 //
-// tz builds this file into itself as C++ (src/support/date_syntax.cpp) to
-// check the date strings written in a program, so the code keeps to what C
-// and C++ share.
+// tz builds this file into itself as C++
+// (compiler/library/date/date_syntax/date_syntax.cpp) to check the date strings
+// written in a program, so the code keeps to what C and C++ share.
 
-#include "date.h"
+#include "runtime/library/date/date/date.h"
 
 #include <math.h>
 

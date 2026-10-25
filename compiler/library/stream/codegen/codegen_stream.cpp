@@ -1,9 +1,9 @@
-// The intrinsics of node:stream (src/lib/stream.tz), which Sema gives as
-// Builtin::LibChunk and the others (see src/sema/sema_stream.cpp): the T an
-// unknown holds, whether it holds one, and whether the class of an object
-// replaces a method.
+// The intrinsics of node:stream (library/stream/stream.tz), which Sema gives as
+// Builtin::LibChunk and the others (see
+// compiler/library/stream/sema/sema_stream.cpp): the T an unknown holds,
+// whether it holds one, and whether the class of an object replaces a method.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 namespace tz {
 
@@ -112,8 +112,8 @@ llvm::Value *CodeGen::emitStreamBuiltin(CallExpr *call) {
   case Builtin::LibFsWrite:
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk: {
-    // A Promise that the runtime settles (runtime/fs.c), as those of
-    // node:fs/promises are (codegen_async_io.cpp).
+    // A Promise that the runtime settles (runtime/library/node/fs/fs.c), as
+    // those of node:fs/promises are (codegen_async_io.cpp).
     llvm::Type *voidTy = builder_.getVoidTy(), *i64 = builder_.getInt64Ty();
     llvm::Type *f64 = builder_.getDoubleTy();
     std::vector<llvm::Value *> values = emitHeldValues(call->args);
@@ -152,7 +152,8 @@ llvm::Value *CodeGen::emitStreamBuiltin(CallExpr *call) {
     return promise;
   }
   case Builtin::LibStdWrite: {
-    // The bytes of the Buffer, where console.log writes (runtime/tzrt.c).
+    // The bytes of the Buffer, where console.log writes
+    // (runtime/core/tzrt/tzrt.c).
     std::vector<llvm::Value *> values = emitHeldValues(call->args);
     builder_.CreateCall(processFunction("tz_lib_std_write", builder_.getVoidTy(), {i32, ptr}),
                         {values[0], values[1]});

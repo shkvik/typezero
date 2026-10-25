@@ -8,10 +8,11 @@
 // node:readline) are types of their own (Type::Runtime) that the program
 // reaches only through their methods and properties, which become built-in
 // calls. AbortController and AbortSignal are classes of tz's library on
-// EventTarget (src/lib/web.tz); what the runtime gets of a signal is its
-// side of it (runtime/signal.c), also a type of the runtime.
+// EventTarget (library/events/web.tz); what the runtime gets of a signal is its
+// side of it (runtime/library/events/signal/signal.c), also a type of the
+// runtime.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -24,7 +25,8 @@ namespace tz {
 
 namespace {
 
-// The runtime's side of an AbortSignal (runtime/signal.c).
+// The runtime's side of an AbortSignal
+// (runtime/library/events/signal/signal.c).
 const Type *signalType() { return Type::runtimeObject(Type::Runtime::AbortSignal); }
 
 } // namespace

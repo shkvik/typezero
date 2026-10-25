@@ -1,17 +1,17 @@
 // Web Crypto (docs/crypto.md, step 4): the work of crypto.subtle that takes time, which runs on
-// the threads of the pool (runtime/io.c), as node runs it on those of libuv. This file is the
-// direct layer: digests, HMAC, PBKDF2, HKDF and AES-GCM / CBC / CTR over the hashes and ciphers
+// the threads of the pool (runtime/core/io/io.c), as node runs it on those of libuv. This file is
+// the direct layer: digests, HMAC, PBKDF2, HKDF and AES-GCM / CBC / CTR over the hashes and ciphers
 // the caller names (crypto_md.c, crypto_aes.c); crypto_subtle_kw.c has AES-KW and
-// crypto_subtle_keys.c the full layer. The code of crypto.subtle (src/lib/webcrypto.tz) calls
-// them through the intrinsics __tz_subtle_* (sema_crypto.cpp), each with the promise it settles
-// first.
+// crypto_subtle_keys.c the full layer. The code of crypto.subtle (library/crypto/webcrypto.tz)
+// calls them through the intrinsics __tz_subtle_* (sema_crypto.cpp), each with the promise it
+// settles first.
 //
 // The main thread copies what the thread reads, as the data may change meanwhile (the spec has
 // the bytes copied too), and makes the ArrayBuffer the thread writes the result into; the thread
 // touches nothing else of the runtime. A job that fails fulfills its promise with undefined (a
 // verification with -1), which the library turns into node's OperationError.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <stdlib.h>
 #include <string.h>

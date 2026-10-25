@@ -18,7 +18,7 @@
 // at the same offsets, as a subclass keeps those of its parent first; so the
 // runtime finds message, name, cause and the places in any of them.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/ConvertUTF.h"
 
@@ -50,8 +50,8 @@ void Sema::declareErrorClass() {
   field("name", Type::string());
   field("cause", optionalError);
   // The places the error passed on its way up, as the addresses of constant
-  // descriptors (see tz_error_frame in runtime/error.c); private, as `#`
-  // makes it.
+  // descriptors (see tz_error_frame in runtime/core/error/error.c); private, as
+  // `#` makes it.
   field("#frames", Type::array(Type::longTy()));
   std::vector<Field> fields;
   for (const ClassField &f : cls->fields)
@@ -101,7 +101,8 @@ void Sema::declareErrorClass() {
 
   // SystemError (docs/io.md, section 5), the errors of the system that the
   // functions of node:fs throw, with fields of its own after Error's: only
-  // the runtime makes them (see runtime/fs.c), so it has no constructor.
+  // the runtime makes them (see runtime/library/node/fs/fs.c), so it has no
+  // constructor.
   auto *system = ctx_.make<ClassDecl>(llvm::SMLoc(), "SystemError");
   system->builtin = true;
   system->resolved = system->declared = true;

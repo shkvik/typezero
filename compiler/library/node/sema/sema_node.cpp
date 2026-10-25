@@ -13,9 +13,9 @@
 // in the call: the type of the result may depend on them (an encoding gives
 // a string; `withFileTypes: true` gives Dirents), so those that decide it
 // must be literals. What fails in the system is a SystemError
-// (sema_error.cpp), which runtime/fs.c makes as Node does.
+// (sema_error.cpp), which runtime/library/node/fs/fs.c makes as Node does.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

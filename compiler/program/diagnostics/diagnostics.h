@@ -45,11 +45,11 @@ public:
 
   // While recording, what would be printed is kept instead, in order, until
   // replay() prints it: the driver checks a program in rounds when its event
-  // maps come from its emit() calls (see EventInference in sema/sema.h), and
+  // maps come from its emit() calls (see EventInference in sema.h), and
   // shows only what the last round says.
   void setRecording(bool recording) { recording_ = recording; }
   void replay();
-  // Warnings in the code of tz's own library (src/lib) are dropped: they
+  // Warnings in the code of tz's own library (library/) are dropped: they
   // would tell the program's author about code that is not theirs.
   void quietRange(const char *begin, const char *end) { quiet_.push_back({begin, end}); }
 

@@ -3,10 +3,10 @@
 // An unknown is a pointer, null for undefined. An object of the language (an
 // instance, a literal, a date, a dictionary, an iterator, a class) goes in as
 // the reference it is; any other value goes into a box of the runtime, an
-// object whose layout says what it holds (TzBox in runtime/tzrt.h). An
-// unknown is counted and released as an object is, through the drop
-// function of its layout. A value a check showed comes out of the box by
-// the runtime's functions, or is the reference itself.
+// object whose layout says what it holds (TzBox in runtime/core/tzrt/tzrt.h).
+// An unknown is counted and released as an object is, through the drop function
+// of its layout. A value a check showed comes out of the box by the runtime's
+// functions, or is the reference itself.
 //
 // A class as a value is a constant object, TzClass, made the first time the
 // code uses one: its layout names it and has TZ_LAYOUT_CLASS, and it points
@@ -14,7 +14,7 @@
 // reflection reaches it (see codegen_reflect.cpp). Its count is huge, so that
 // counting it, as the code does for any object, never frees it.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 
@@ -26,11 +26,12 @@ namespace tz {
 
 namespace {
 
-// What tz_unknown_kind gives, TZ_KIND_* of runtime/tzrt.h: the texts of typeof.
+// What tz_unknown_kind gives, TZ_KIND_* of runtime/core/tzrt/tzrt.h: the texts
+// of typeof.
 const char16_t *const kKindNames[] = {u"undefined", u"number", u"string",
                                       u"boolean",   u"object", u"function"};
 
-// TZ_LAYOUT_CLASS and TZ_LAYOUT_BUILTIN of runtime/tzrt.h.
+// TZ_LAYOUT_CLASS and TZ_LAYOUT_BUILTIN of runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kLayoutClass = 2097152;
 constexpr uint32_t kLayoutBuiltin = 4194304;
 
@@ -75,7 +76,7 @@ llvm::Value *CodeGen::boxValue(llvm::Value *value, const Type *type) {
   if (type->isFunction())
     unknownFunctionTypes_.insert(type);
   // A value that may hold a member of a group goes into a box that is one
-  // (runtime/unknown.c).
+  // (runtime/core/unknown/unknown.c).
   const char *box = mayHoldMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
   return builder_.CreateCall(unknownFunction(box, ptr, {ptr, ptr}),
                              {typeDescriptor(type), spill(value, "box.value")}, "box");

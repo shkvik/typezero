@@ -1,4 +1,4 @@
-#include "pkg/net.h"
+#include "compiler/packages/net/net.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"

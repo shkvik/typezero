@@ -3,7 +3,7 @@
 // getCurves(). A name becomes a TzMd or a TzCipherAlg over the EVP API, kept for the rest of the
 // program, so that the functions of crypto.c work on them as on those of the direct layer.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/core_names.h>
 #include <openssl/ec.h>

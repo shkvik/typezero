@@ -3,9 +3,9 @@
 // (docs/objects.md, section 11, layer 3).
 //
 // The compiler finds the types whose objects may form a cycle (see
-// src/codegen/codegen_cycles.cpp) and makes their objects members of groups
-// (TzGroupLink in tzrt.h); every other object is counted as before and pays
-// nothing. A group is a ring of members, linked through `next`, with one
+// compiler/lower/codegen/codegen_cycles.cpp) and makes their objects members of
+// groups (TzGroupLink in tzrt.h); every other object is counted as before and
+// pays nothing. A group is a ring of members, linked through `next`, with one
 // count: the references from outside it, which its leader keeps. A reference
 // that a member holds to a member of the same group is not counted.
 //
@@ -33,7 +33,7 @@
 // share and that are no members are counted here too, atomically
 // (TZ_RC_SHARED in tzrt.h): every negative count comes here.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -543,7 +543,7 @@ void tz_group_pin_value(const TzType *type, void *value) {
 // A WeakRef: an object of the language whose fields the program does not
 // see, the object it refers to (NULL once that died) and the next WeakRef to
 // the same object. The table finds the first by the object. Must match
-// CodeGen (src/codegen/codegen_cycles.cpp).
+// CodeGen (compiler/lower/codegen/codegen_cycles.cpp).
 typedef struct TzWeak {
   int64_t rc;
   const TzLayout *layout;

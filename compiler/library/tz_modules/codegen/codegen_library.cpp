@@ -1,4 +1,4 @@
-// The built-in modules tz has written in tz (src/lib, sema_library.cpp):
+// The built-in modules tz has written in tz (library/, sema_library.cpp):
 // their intrinsics, calls of the runtime.
 //
 // `function __tz_net_listen(host: string, port: int): object` is a call of
@@ -12,7 +12,7 @@
 // system it may throw (or reject with). An error it throws is left in
 // tz_thrown, as a function of the program leaves it.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 namespace tz {
 
@@ -53,7 +53,8 @@ void CodeGen::emitExternal(FunctionDecl *fn) {
       params.push_back(i32);
       args.push_back(builder_.CreateZExt(value, i32));
     } else if (isAbortSignal(type)) {
-      // A signal crosses as the runtime's side of it (runtime/signal.c).
+      // A signal crosses as the runtime's side of it
+      // (runtime/library/events/signal/signal.c).
       params.push_back(ptr);
       args.push_back(nativeSignal(value, type));
     } else {

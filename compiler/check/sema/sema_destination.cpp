@@ -16,7 +16,7 @@
 // the types of variables and fields it can tell without checking anything,
 // and a place it cannot tell leaves the literal as it is.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

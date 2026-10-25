@@ -1,13 +1,14 @@
 // fetch and what goes with it, as node has them as globals (docs/net.md,
 // sections 2 and 3): Headers, Request, Response, ReadableStream, FormData.
-// A file that names one gets it (see the loader, src/driver/loader.cpp);
-// tz:http builds its server on them.
+// A file that names one gets it (see the loader,
+// compiler/load/loader/loader.cpp); tz:http builds its server on them.
 //
-// The bytes go through the runtime (runtime/net.c, http.c, decompress.c),
-// and those of https through TLS on the connection (runtime/tls.c):
-// the `__tz_*` functions without a body are its functions. A body that
-// comes over a connection is read from it as the program reads the body:
-// whole (text(), json()...) or in pieces (body, a ReadableStream).
+// The bytes go through the runtime (runtime/library/net/net/net.c, http.c,
+// decompress.c), and those of https through TLS on the connection
+// (runtime/library/tls/tls/tls.c): the `__tz_*` functions without a body are
+// its functions. A body that comes over a connection is read from it as the
+// program reads the body: whole (text(), json()...) or in pieces (body, a
+// ReadableStream).
 //
 // What node computes in getters are getters here too, which print as node
 // prints these classes. Where tz's types are stricter than the web's: a
@@ -37,7 +38,8 @@ function __tz_zlib_new(kind: int): object
 function __tz_zlib_push(decoder: object, chunk: Uint8Array): Uint8Array
 function __tz_zlib_end(decoder: object): Uint8Array
 
-// The flags of __tz_http_request and __tz_http_respond (runtime/http.c).
+// The flags of __tz_http_request and __tz_http_respond
+// (runtime/library/http/http/http.c).
 export const SEND_STREAM = 1
 export const SEND_CLOSE = 2
 export const SEND_NO_BODY = 4
@@ -260,7 +262,7 @@ export class Headers {
   }
 
   // What it prints as, as node shows it: each name as first given, with its
-  // values joined (runtime/inspect.c).
+  // values joined (runtime/library/console/inspect/inspect.c).
   get __tz_keys(): [string, string][] {
     const out: [string, string][] = []
     const seen: string[] = []

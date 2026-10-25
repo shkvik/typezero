@@ -3,7 +3,7 @@
 // first block of the key stream, the data is ciphered from the second block on, and the tag
 // covers the AAD and the ciphertext, each padded to 16 bytes, and their lengths.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/crypto.h>
 #include <string.h>

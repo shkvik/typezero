@@ -15,7 +15,7 @@ namespace tz {
 struct Embedded {
   bool openssl = false;
   // The indexes of the WHATWG Encoding Standard: the program decodes a
-  // multi-byte encoding of TextDecoder (runtime/cjk.c).
+  // multi-byte encoding of TextDecoder (runtime/library/bytes/cjk/cjk.c).
   bool whatwg = false;
 };
 

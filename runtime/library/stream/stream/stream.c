@@ -1,7 +1,8 @@
-// What node:stream, which tz has written in tz (src/lib/stream.tz), asks of
-// the runtime through its intrinsics (src/sema/sema_stream.cpp).
+// What node:stream, which tz has written in tz (library/stream/stream.tz), asks
+// of the runtime through its intrinsics
+// (compiler/library/stream/sema/sema_stream.cpp).
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 // `__tz_chunk<T>(u)` of an unknown that holds no T: the types of the
 // library promise it never happens, so it is a fault of tz.

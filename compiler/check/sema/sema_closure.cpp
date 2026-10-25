@@ -8,7 +8,7 @@
 // created; any other captured variable lives in a box that the function
 // declaring it and the closures share (VarSymbol::boxed).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"

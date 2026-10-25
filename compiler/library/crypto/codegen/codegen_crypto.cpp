@@ -1,10 +1,10 @@
-// node:crypto (docs/crypto.md): calls of the functions of runtime/crypto*.c that Sema chose
+// node:crypto (docs/crypto.md): calls of the functions of runtime/library/crypto/ that Sema chose
 // (sema_crypto.cpp), each argument passed as its kind in kCryptoFunctions says, and the result
-// made of what the function gives (see sema/crypto_api.h). The runtime borrows the arguments;
+// made of what the function gives (see crypto_api.h). The runtime borrows the arguments;
 // every call may throw.
 
-#include "codegen/codegen.h"
-#include "sema/crypto_api.h"
+#include "compiler/lower/codegen/codegen.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 
 #include "llvm/Support/ErrorHandling.h"
 
@@ -47,7 +47,7 @@ llvm::Value *CodeGen::emitCryptoCall(CallExpr *call) {
     params.push_back(ptr);
     args.push_back(out);
   }
-  // A job of Web Crypto settles the promise it gets later (runtime/crypto_subtle*.c).
+  // A job of Web Crypto settles the promise it gets later (runtime/library/crypto/crypto_subtle*).
   llvm::Value *promise = nullptr;
   if (fn.result == 'P') {
     promise = newPromise(call->type->promised());

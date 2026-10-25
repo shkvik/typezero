@@ -14,12 +14,12 @@
 // (one that lives in its value) is inlined into the program. It stores the
 // values itself, at the offset the layout gives.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 #include <string.h>
 
-// String values; must match runtime/string.c.
+// String values; must match runtime/core/string/string.c.
 #define STR_LEN_MASK ((1ull << 30) - 1)
 #define STR_TWO_BYTE (1ull << 61)
 #define STR_ROPE (1ull << 62)

@@ -11,7 +11,7 @@
 // is called through the invoker of its type, which checks the arguments
 // against its parameters.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdio.h>
 #include <string.h>

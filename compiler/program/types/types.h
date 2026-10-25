@@ -44,7 +44,7 @@ enum class TypeOp : uint8_t {
 // 7). A value of a union whose members take more than one slot holds the
 // number of its slot as a tag, the same number for a slot in every union:
 // converting between unions keeps the tag. The runtime reads it too (see
-// TZ_T_UNION in runtime/tzrt.h).
+// TZ_T_UNION in runtime/core/tzrt/tzrt.h).
 enum class UnionSlot : uint8_t {
   None = 0, // undefined, in `A | B | undefined`
   String,
@@ -136,12 +136,12 @@ public:
     Iterator,  // `Generator<T, R, N>`, also spelled `IterableIterator<T>`
     // A value of JSON (docs/modules.md, section 5): null, a boolean, a
     // number, a string, an array of Json or an object of them. A reference to
-    // a node of the runtime (runtime/json.c).
+    // a node of the runtime (runtime/library/json/json/json.c).
     Json,
     // A dictionary (docs/objects.md, section 9): `Record<string, V>` (also
     // written `{ [key: string]: V }`), `Map<K, V>` or `Set<T>`. A reference to
-    // a hash table of the runtime (runtime/map.c), which keeps its keys in the
-    // order they were added.
+    // a hash table of the runtime (runtime/core/map/map.c), which keeps its
+    // keys in the order they were added.
     Dict,
     // The type of one value (docs/objects.md, section 7): `"circle"`, `0`,
     // `true`. A string literal is held as a small number, its atom (see
@@ -152,13 +152,13 @@ public:
     // follows from the slots its members take (see UnionSlot).
     Union,
     // `Promise<T>` (docs/async.md): a reference to an object of the runtime
-    // (runtime/async.c) that holds a T once it is fulfilled.
+    // (runtime/core/async/async.c) that holds a T once it is fulfilled.
     Promise,
     // A value of any type, which code may use only once a check showed what
     // it holds (docs/decorators.md, section 4): undefined included, so
     // `unknown | undefined` is unknown. A reference: an object of the
     // language as it is, any other value in a box of the runtime
-    // (runtime/unknown.c), null for undefined.
+    // (runtime/core/unknown/unknown.c), null for undefined.
     Unknown,
     // A class itself as a value, `typeof User` (docs/decorators.md): what a
     // decorator gets. A reference to the object of the class, which lives as
@@ -252,7 +252,7 @@ public:
   // gives, and setInterval of node:timers/promises.
   enum class Runtime : uint8_t {
     None,
-    AbortSignal, // the runtime's side of one (runtime/signal.c)
+    AbortSignal, // the runtime's side of one (runtime/library/events/signal/signal.c)
     FileHandle,
     Readline,
     ReadlinePromises,
@@ -262,8 +262,9 @@ public:
   bool isRuntimeObject() const { return runtime_ != Runtime::None; }
   bool isAsyncIterator() const { return runtime_ == Runtime::AsyncIterator; }
   // The objects of node:crypto (docs/crypto.md), which the runtime makes
-  // (runtime/crypto.h): types of their own without fields the program sees,
-  // whose methods and properties reach what the runtime keeps in them.
+  // (runtime/library/crypto/crypto/crypto.h): types of their own without fields
+  // the program sees, whose methods and properties reach what the runtime keeps
+  // in them.
   enum class Crypto { None, Hash, Hmac, Cipheriv, Decipheriv, KeyObject, Sign, Verify, Ecdh, X509 };
   Crypto crypto() const { return crypto_; }
   bool isCrypto() const { return crypto_ != Crypto::None; }
@@ -321,9 +322,9 @@ public:
   bool isWeakRef() const { return weakRef_; }
   const Type *weakTarget() const { return weakRef_ ? inner_ : nullptr; }
   // Binary data (docs/bytes.md): object types of their own, whose objects
-  // the runtime makes (runtime/bytes.c). The typed arrays are numbered by
-  // their elements as TZ_BYTES_* in runtime/tzrt.h; a Buffer is a Uint8Array
-  // with the methods of node.
+  // the runtime makes (runtime/library/bytes/bytes/bytes.c). The typed arrays
+  // are numbered by their elements as TZ_BYTES_* in runtime/core/tzrt/tzrt.h; a
+  // Buffer is a Uint8Array with the methods of node.
   enum class Bytes {
     None,
     Uint8,

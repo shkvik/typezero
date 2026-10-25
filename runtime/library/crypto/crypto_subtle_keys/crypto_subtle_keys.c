@@ -4,7 +4,7 @@
 // key pairs. The threads use OpenSSL, which is safe to share between threads, and memory of the
 // system; the main thread holds each EVP_PKEY while its job runs and makes the results.
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
@@ -18,7 +18,7 @@
 
 TzKey *tz_openssl_key_of(void *pkey, int private_key);
 
-// The kinds of signature, as src/lib/webcrypto.tz numbers them.
+// The kinds of signature, as library/crypto/webcrypto.tz numbers them.
 enum { SIGN_PKCS1 = 0, SIGN_PSS = 1, SIGN_ECDSA = 2, SIGN_EDDSA = 3 };
 // What a job makes: an ArrayBuffer (or undefined), a verification, or a private KeyObject.
 enum { MAKES_BYTES, MAKES_VERDICT, MAKES_KEY };
@@ -371,7 +371,7 @@ void tz_openssl_subtle_derive(TzPromise *p, const TzKey *key, const TzKey *peer)
 // Key pairs
 //===----------------------------------------------------------------------===//
 
-// The kinds of key pairs, as src/lib/webcrypto.tz numbers them.
+// The kinds of key pairs, as library/crypto/webcrypto.tz numbers them.
 enum { PAIR_RSA = 0, PAIR_EC = 1, PAIR_ED25519 = 2, PAIR_X25519 = 3 };
 
 static void generate_run(KeyJob *j) {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ast/ast.h"
+#include "compiler/program/ast/ast.h"
 
 #include "llvm/ADT/STLFunctionalExtras.h"
 

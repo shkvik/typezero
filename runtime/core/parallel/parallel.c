@@ -10,15 +10,15 @@
 // relies on: the main thread keeps that order, as the loop of async.c runs
 // the microtasks, the timers and what I/O brings, one after another. A piece
 // that comes after an await and may run at the same time as others
-// (src/sema/parallel.h) has a reactor marked `ahead`. When such a reactor
-// waits in the microtask queue behind the one the main thread is about to
-// run, the main thread hands it to an idle thread of the pool as a job. The
-// thread resumes the coroutine right away, ahead of its turn, and runs it as
-// long as the piece touches only what no other piece that may run at the
+// (compiler/check/parallel/parallel.h) has a reactor marked `ahead`. When such
+// a reactor waits in the microtask queue behind the one the main thread is
+// about to run, the main thread hands it to an idle thread of the pool as a
+// job. The thread resumes the coroutine right away, ahead of its turn, and runs
+// it as long as the piece touches only what no other piece that may run at the
 // same time writes: its own objects, data nobody changes. Before the first
-// thing that keeps node's order (an access the compiler marked, a function
-// of the runtime that touches its shared state: the queues, the promises,
-// the output...) it waits for its turn (tz_order_wait).
+// thing that keeps node's order (an access the compiler marked, a function of
+// the runtime that touches its shared state: the queues, the promises, the
+// output...) it waits for its turn (tz_order_wait).
 //
 // When the main thread comes to the reactor in the queue, it takes the job
 // back if no thread has started it, and runs it itself. Otherwise it lends
@@ -43,7 +43,7 @@
 // TZ_THREADS sets how many threads run code, the main one among them: the
 // number of processors by default; 1 runs everything on the main thread.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stddef.h>
 #include <stdio.h>

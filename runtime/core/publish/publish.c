@@ -23,7 +23,7 @@
 // its descriptor (CodeGen::publishTable), which calls tz_publish_value for
 // each; the objects of the runtime by their kinds here.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdio.h>
 #include <stdlib.h>

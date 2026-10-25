@@ -1075,7 +1075,7 @@ const tags = new Set(["ts", "go", "ts"])            // Set(2) { 'ts', 'go' }
 console.log(counts.get("the"), byTeam.red, tags.union(new Set(["rust"])))
 ```
 
-- **Одна хеш-таблица** рантайма ([map.c](runtime/map.c)) для `Record`, `Map` и `Set`: записи лежат
+- **Одна хеш-таблица** рантайма ([map.c](runtime/core/map/map.c)) для `Record`, `Map` и `Set`: записи лежат
   массивом в порядке добавления, как в упорядоченных таблицах V8 и словарях CPython, удалённая
   запись остаётся дырой до уплотнения, а ключ находит индекс позиций с открытой адресацией.
   Словарь до 8 записей обходится без индекса и сравнивает хеши записей подряд. Хеш ключа хранится в
@@ -1345,7 +1345,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
 ```
 
 - **Литерал компилируется при сборке** тем же компилятором регулярок, что в рантайме
-  (`runtime/regex_compile.c`, собран и в `tz`): синтаксическая ошибка — ошибка компиляции, а
+  (`runtime/library/regex/regex_compile/regex_compile.c`, собран и в `tz`): синтаксическая ошибка — ошибка компиляции, а
   программа сопоставления — константа в exe, которую компилятор ещё и переводит в машинный код
   (см. «Сопоставление»). Литерал без `g` и `y` — константный объект (его состояние ничего не
   значит), с `g` или `y` — новый объект при каждом вычислении, как в JS, со своим `lastIndex`.
@@ -1369,7 +1369,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   V8, с `u` совпадение может начаться между половинами суррогатной пары, но символ там не
   читается, а ссылка назад (`\1`) там не кончается.
 - **Каждый литерал — машинный код**
-  ([codegen_regex_native.cpp](src/codegen/codegen_regex_native.cpp)): программа регулярки,
+  ([codegen_regex_native.cpp](compiler/library/regex/codegen/codegen_regex_native.cpp)): программа регулярки,
   переведённая в LLVM IR инструкция за инструкцией, — своя функция поиска, которую LLVM
   оптимизирует вместе с программой, в двух вариантах: для строк по байту и по два байта на символ.
   Результаты — те же, что у интерпретатора (сверено с node на тысячах случайных регулярок, в том
@@ -1398,7 +1398,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
 - **Unicode** — свойства `\p{…}` (General_Category, Script, Script_Extensions и двоичные, с
   короткими именами) и регистр для `/i` (простое приведение регистра с `u` и `v`, `toUpperCase`
   одного символа без них) берутся из таблиц, которые
-  [gen_regex_tables.mjs](runtime/gen_regex_tables.mjs) получает из самого Node.js. Таблицы
+  [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs) получает из самого Node.js. Таблицы
   свойств попадают в exe, только если в программе есть `new RegExp` с неизвестным при сборке
   шаблоном.
 - **`matchAll`** — ленивый итератор `IterableIterator<RegExpMatchArray>`, как в JS: совпадение
@@ -1432,7 +1432,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
 Дата — ссылка на объект, как в JS ([date.md](docs/date.md)): в нём одно поле, время в
 миллисекундах с 1970 года по UTC (`NaN` у `Invalid Date`). `set…` меняют сам объект, и это видят
 все, у кого он есть. Время (`getTime()`, `a - b`, `a < b`) читается одной загрузкой из памяти, а
-поля, установку полей, строки и разбор считает рантайм ([date.c](runtime/date.c)) по тем же
+поля, установку полей, строки и разбор считает рантайм ([date.c](runtime/library/date/date/date.c)) по тем же
 формулам, что V8. `console.log(d)` печатает как node: `2026-10-22T18:00:00.000Z`, в массивах и
 объектах тоже; неправильная дата — `Invalid Date`.
 
@@ -1558,11 +1558,11 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   однобайтовые кодировки WHATWG (`windows-1251`, `koi8-r`, `iso-8859-5`, `ibm866`, …) с их
   метками, `fatal` и `ignoreBOM`. Таблица кодировки попадает в программу, только если метку
   видно в коде (одна — 256 байт; метка, известная только при выполнении, — все 29, ~7 КБ);
-  таблицы и метки [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у самого node.
+  таблицы и метки [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у самого node.
 - **Многобайтовые кодировки** `TextDecoder`: `gbk` и `gb18030`, `big5`, `euc-jp`, `iso-2022-jp`,
-  `shift_jis`, `euc-kr` — декодеры стандарта WHATWG ([cjk.c](runtime/cjk.c)) с его таблицами,
-  которые [gen_cjk_tables.mjs](runtime/gen_cjk_tables.mjs) делает из файлов
-  `index-*.txt` стандарта ([cjk_tables.h](runtime/cjk_tables.h), лицензия BSD-3-Clause —
+  `shift_jis`, `euc-kr` — декодеры стандарта WHATWG ([cjk.c](runtime/library/bytes/cjk/cjk.c)) с его таблицами,
+  которые [gen_cjk_tables.mjs](runtime/library/bytes/cjk/gen_cjk_tables.mjs) делает из файлов
+  `index-*.txt` стандарта ([cjk_tables.h](runtime/library/bytes/cjk/cjk_tables.h), лицензия BSD-3-Clause —
   её печатает `tz licenses`). Таблица и декодеры (3 КБ) тоже попадают в exe, только если
   кодировку видно в коде: `gbk` и `gb18030` — +53 КБ, `euc-kr` — +51 КБ, `big5` — +43 КБ,
   `euc-jp` — +40 КБ, `shift_jis` и `iso-2022-jp` — +26 КБ (у трёх японских одна таблица JIS X
@@ -1606,7 +1606,7 @@ out[2] = text[0] ?? 0                               // можно: элемен�
 ## Языки: Intl
 
 Числа, сравнение строк и слова — по правилам языков, как в node ([intl.md](docs/intl.md)).
-Объекты `Intl` делает рантайм ([intl.c](runtime/intl.c) и файлы после него): опции читаются в
+Объекты `Intl` делает рантайм ([intl.c](runtime/library/intl/intl/intl.c) и файлы после него): опции читаются в
 том порядке и с теми же проверками, что в V8, а пишет и сравнивает ICU. Даты — в «Датах».
 
 ```ts
@@ -1715,7 +1715,7 @@ for (const entry of readdirSync(".", { withFileTypes: true }))
 - **`node:path`** — `join`, `resolve`, `normalize`, `relative`, `dirname`, `basename`, `extname`,
   `parse`, `format`, `isAbsolute`, `toNamespacedPath`, `sep`, `delimiter`. Стиль — системы (в
   Windows `\`), через `posix` и `win32` (`posix.join(a, b)`, и `"node:path/posix"`) — другой.
-  Алгоритмы — те же шаги, что в `path.js` из node, на C (`runtime/path.c`); результаты сверены с
+  Алгоритмы — те же шаги, что в `path.js` из node, на C (`runtime/library/node/path/path.c`); результаты сверены с
   node на тысячах случайных путей, со всеми особыми случаями Windows (`\\server\share`, `\\?\`,
   `C:`, имена устройств вроде `CON:`).
 - **`node:os`** — `EOL`, `devNull`, `platform()`, `homedir()`, `tmpdir()`, `hostname()`, `cpus()`,
@@ -1866,7 +1866,7 @@ setTimeout(() => bus.emit("user", ann), 10)
 const [user] = await once(bus, "user")
 ```
 
-- **Код — node.** `EventEmitter` написан на tz ([src/lib/events.tz](src/lib/events.tz)) переносом
+- **Код — node.** `EventEmitter` написан на tz ([library/events/events.tz](library/events/events.tz)) переносом
   `lib/events.js` из node 24: `_events` — один слушатель или массив, `newListener` — до добавления,
   `removeListener` — после удаления, обёртка `once()` снимает себя перед вызовом, слушатель,
   добавленный во время `emit`, работает со следующего; `emit("error")` без слушателя бросает
@@ -1907,7 +1907,7 @@ const [user] = await once(bus, "user")
   ещё никто не ждёт, ждут в очереди; событие `error` (если оно есть в карте) и `signal` заканчивают
   цикл ошибкой после событий до них, событие из `close` — просто после них; когда цикл кончается
   (и `break`), слушатели снимаются. `on()` у `EventTarget` — ошибка «пока нет».
-- **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([src/lib/web.tz](src/lib/web.tz))
+- **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([library/events/web.tz](library/events/web.tz))
   — глобальные, и тоже как в node: порядок слушателей (и добавленных во время `dispatchEvent`),
   `once`, `signal`, `capture`, объект с `handleEvent()`, один слушатель — один раз,
   `preventDefault()`, `stopImmediatePropagation()`; ошибка слушателя — на следующем ходу.
@@ -1922,7 +1922,7 @@ const [user] = await once(bus, "user")
   чем выполнятся слушатели их источника. `new AbortSignal()` и присваивание `aborted` и `reason` —
   ошибки (в node это `TypeError` и геттеры). Тот же сигнал отменяет ожидания рантайма
   (`node:timers/promises`, `node:fs/promises`, `node:readline`): у каждого сигнала есть сторона
-  рантайма (`runtime/signal.c`), которую компилятор передаёт туда, где вызов берёт `signal`, а
+  рантайма (`runtime/library/events/signal/signal.c`), которую компилятор передаёт туда, где вызов берёт `signal`, а
   слушатели рантайма выполняются среди слушателей программы на своих местах, как слушатели node.
 - **Память.** Эмиттер и его слушатели сами цикла ссылок не образуют (обёртка `once()` не держит
   эмиттер, сигнал `any()` — свои источники, хотя они держат его), но слушатель, который захватывает свой эмиттер
@@ -1947,7 +1947,7 @@ for await (const text of createReadStream("log.txt", "utf8")) console.log(text.l
 const users = Readable.from([ann, bob])                         // Readable<User>
 ```
 
-- **Код — node.** `node:stream` написан на tz ([src/lib/stream.tz](src/lib/stream.tz)) переносом
+- **Код — node.** `node:stream` написан на tz ([library/stream/stream.tz](library/stream/stream.tz)) переносом
   `lib/internal/streams` из node 24 поверх `EventEmitter`: `Readable` (поток и пауза, `read()`,
   `unshift`, событие `readable`), `Writable` (`cork` / `uncork`, `writev`, `final`), `Duplex`,
   `Transform`, `PassThrough`, `pipe` (ошибку дальше не передаёт, как в node), `pipeline` и
@@ -1980,7 +1980,7 @@ const users = Readable.from([ann, bob])                         // Readable<User
   `ReadStream` и `WriteStream` с опциями node (`encoding`, `start` и `end`, `highWaterMark` —
   64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`, `signal`), событиями `open`,
   `ready` и `close` и полями `bytesRead`, `bytesWritten`, `path`, `pending`. Чтение и запись — в
-  пуле потоков рантайма (`runtime/fs.c`), как у node через libuv.
+  пуле потоков рантайма (`runtime/library/node/fs/fs.c`), как у node через libuv.
 - **`process.stdin`** — `Readable` (байты, после `setEncoding` — строки): читает, только когда его
   слушают, из того же буфера, что `readLine` и `readFileSync(0)`. **`process.stdout`** и
   **`process.stderr`** — `Writable`, когда программа пользуется ими как потоком (`pipe` в них,
@@ -2089,7 +2089,7 @@ const signature = sign(undefined, Buffer.from("message"), privateKey)
   `node:fs`; `argon2Sync` принимает литерал без spread.
 
 **Web Crypto** — `crypto.subtle`, как в node, на том же OpenSSL; написан на tz
-([src/lib/webcrypto.tz](src/lib/webcrypto.tz), по коду node 24):
+([library/crypto/webcrypto.tz](library/crypto/webcrypto.tz), по коду node 24):
 
 ```ts
 const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
@@ -2510,7 +2510,7 @@ for await (const v of [fetchA(), fetchB()]) console.log(v)           // масс
   обычно выводится из `yield`.
 - Это корутина LLVM, как async-функция, и объект: очередь шагов, которые у него попросили, и
   состояние из спецификации (`AsyncGeneratorEnqueue`, `Yield`, `DrainQueue` — в
-  `runtime/async.c`), за ними реактор, с которым он ждёт, и фрейм. Шаг `for await` — `Promise`
+  `runtime/core/async/async.c`), за ними реактор, с которым он ждёт, и фрейм. Шаг `for await` — `Promise`
   значения (или с пометкой «конец»), который цикл ждёт; ни объекта `{ value, done }`, ни вызова
   `next()` через таблицу. Обороты очереди — как у V8: `yield` ждёт значение (оборот), `for await`
   ждёт шаг (ещё оборот), поэтому вывод вперемешку с другими цепочками промисов совпадает с node.
@@ -2649,7 +2649,7 @@ async function convert, line 7
 ним ничего не идёт) или строки `in order with <кусок>: <данные>` и `in order: lines A-B` —
 участок от первого до последнего обращения к общим данным, который один и идёт по очереди. Кусок,
 который идёт в нескольких задачах (`a.run()` и `b.run()`), объясняется для каждой: `in the task
-a.run(2) at line 17:`. Анализ — `src/sema/parallel.cpp`; на любом из тестов он занимает меньше 4 мс,
+a.run(2) at line 17:`. Анализ — `compiler/check/parallel/parallel.cpp`; на любом из тестов он занимает меньше 4 мс,
 на программе в 11 тыс. строк с тысячей async-функций — около 90 мс. Сборка программы с async
 идёт через него: по его решениям компилятор готовит код к параллельному выполнению.
 
@@ -2977,7 +2977,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 ```
 
 и `Developer: Reload Window`. Проверки типов в редакторе нет — ошибки показывает `tz build`.
-Объявления встроенных имён tz для TypeScript ([tz.d.ts](src/types/tz.d.ts)), `@types/node` и
+Объявления встроенных имён tz для TypeScript ([tz.d.ts](editors/types/tz.d.ts)), `@types/node` и
 настройки tsc лежат рядом с `tz.exe`, в `types`, — для плагина tsserver, который проверял бы
 файлы `.tz` ([docs/modules.md](docs/modules.md), раздел 6); самого плагина пока нет.
 
@@ -3510,12 +3510,12 @@ ctest --preset dev
 ```
 
 Результат — `build/dev/bin/tz.exe`, рядом с ним каталог `lib` со встроенными модулями, написанными
-на tz (`src/lib`), `types` — объявления и настройки для редактора (см. «Редактор»),
+на tz (`library/`), `types` — объявления и настройки для редактора (см. «Редактор»),
 `tzcrypto.lib`, `libcrypto.lib` и `libcrypto_direct.lib` для программ с `node:crypto`,
 `licenses` для `tz licenses` и рантайм в двух видах: `tzrt.lib` линкуется в каждую
 программу, а `tzrt.bc` — тот же код в виде LLVM bitcode; и так же `tzrt_mt.lib` и `tzrt_mt.bc` —
 рантайм потоков для программ, чей async-код идёт параллельно (`TZ_PARALLEL` в
-[tzrt.h](runtime/tzrt.h)). Рантайм собирает clang из того же LLVM
+[tzrt.h](runtime/core/tzrt/tzrt.h)). Рантайм собирает clang из того же LLVM
 (CMake не умеет собирать C через clang, когда C++ собирает MSVC, поэтому это отдельные команды в
 [runtime/CMakeLists.txt](runtime/CMakeLists.txt)). Готовый LLVM собран в Release со статическим
 CRT, без RTTI и исключений, поэтому `tz` собирается так же; Debug-сборка не поддерживается.
@@ -3533,20 +3533,36 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 вызывается из `tzrt.lib`. Флаг `-O0` (его нет в `--help`, он для тестов и отладки компилятора)
 выключает и оптимизации, и это встраивание.
 
+Код лежит в трёх деревьях, по виду кода:
+
+- `compiler/` — весь C++, из него собирается `tz.exe`;
+- `runtime/` — весь C, из него `tzrt.lib`, `tzrt.bc` и `tzcrypto.lib`, которые входят в программы:
+  `core/` — рантайм языка, `library/` — C-часть тем библиотеки;
+- `library/` — код на tz, который лежит рядом с `tz.exe` в `lib` и компилируется вместе с
+  программой.
+
+Темы библиотеки называются одинаково во всех трёх деревьях: у `node:crypto` C++ лежит в
+`compiler/library/crypto/`, C — в `runtime/library/crypto/`, код на tz — в `library/crypto/`.
+Класс и модуль на C лежат каждый в своей папке с его именем: `compiler/load/lexer/lexer.cpp`,
+`runtime/core/string/string.c`. У тем, которые сделаны частями классов `Sema` и `CodeGen`, эти части
+лежат в папках `sema/` и `codegen/` темы: `compiler/library/crypto/sema/sema_crypto.cpp`. Что
+дальше — [docs/structure.md](docs/structure.md).
+
 | Каталог | Что внутри |
 |---|---|
-| `src/lex` | токены и лексер; литерал регулярки лексер читает, когда парсер встречает `/` там, где начинается выражение |
-| `src/support` | диагностика; точное значение числового литерала для `decimal` (`decimal_literal.cpp`); компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax.cpp`); так же разборщик дат (`date_syntax.cpp`) |
-| `src/parse` | парсер рекурсивным спуском, ASI; деструктуризация (и параметров) раскрывается здесь же в обычные объявления и присваивания через скрытые переменные, шаблон с тегом — в вызов тега |
-| `src/ast` | узлы AST и символы |
-| `src/sema` | типы, разрешение имён, проверка типов; неявные преобразования становятся узлами `CastExpr`; факты и доказательства индексов (`facts.cpp`, `sema_flow.cpp`); встроенные функции (`sema_builtins.cpp`); псевдонимы типов, `interface`, `enum` и целые константы (`sema_decls.cpp`); вывод типа возврата (`sema_infer.cpp`); замыкания, функции блоков и методы с колбэками (`sema_closure.cpp`); `WeakRef` (`sema_weak.cpp`); литералы объектов, spread, ключи в скобках, кортежи, `Object.keys` и сужение полей (`sema_object.cpp`); классы как значения, `Constructor<T>`, class-выражения, примеси-шаблоны и подмена класса декоратором (`sema_classvalue.cpp`); отражение: `Reflect.get`, `apply`, `construct` и `fromJson(cls, j)` (`sema_reflect.cpp`); классы, `this`, правило задания полей, статические члены, `instanceof`, перегрузка и литералы с методами (`sema_class.cpp`); наследование, переопределение, `super`, `abstract`, интерфейсы и `implements`, таблицы методов (`sema_inherit.cpp`); класс `Error`, `throw`, `try` (`sema_error.cpp`); тип литерала по тому, куда объект идёт дальше (`sema_destination.cpp`); объединения и литеральные типы, их сужение, полнота `switch`, поля и методы объединений (`sema_union.cpp`); функции-проверки: сводки `return`, `x is T`, `asserts`, `filter` (`sema_predicate.cpp`); `process`, `Date.now()` и `performance.now()` (`sema_process.cpp`); `decimal`: литералы, операторы и методы (`sema_decimal.cpp`); области видимости файлов, импорты и экспорты, проверка порядка загрузки и неиспользуемые функции (`sema_modules.cpp`); обобщённые функции и псевдонимы, вывод аргументов типа и копии под типы (`sema_generic.cpp`); `Result`, `safeTry` и забытые `Result` (`sema_result.cpp`); генераторы, `yield`, типы итераторов и их методы (`sema_iter.cpp`); регулярки: литералы, типы совпадений, методы `RegExp` и строк, ловушки JS (`sema_regex.cpp`); `Json`, `null`, `JSON`, `embedJson` и `embedText`, `fromJson` и проверка файлов JSON при компиляции (`sema_json.cpp`); даты, их ловушки и `Intl.DateTimeFormat` (`sema_date.cpp`); async-функции, `await`, `for await`, `Promise`, таймеры и очереди, забытые `Promise`, `ResultAsync` (`sema_async.cpp`); куски async-кода, что каждый читает и пишет, задачи и что из этого пойдёт параллельно, `--explain-parallel` (`parallel.cpp`); `node:fs/promises`, `node:timers/promises`, `node:readline` и опция `signal` (`sema_async_io.cpp`); встроенные модули: импорты из `node:fs`, `node:path`, `node:os`, `node:process` и `tz:io`, их функции и опции, классы `Stats` и `Dirent` (`sema_node.cpp`); `spawnSync`, `execFileSync` и `execSync`, их опции, типы результата и `ExecSyncError` (`sema_child.cpp`); словари `Record`, `Map` и `Set`, `Object.groupBy` и `Object.fromEntries` (`sema_dict.cpp`); байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент (`sema_bytes.cpp`); `unknown` и `object`, их сужение (`sema_unknown.cpp`); декораторы и порядок их применения, описание метода, метаданные и `design:*`, функции с `this`, списки параметров, классы как значения (`sema_decorate.cpp`); `node:crypto`: функции, методы и свойства его объектов, имена алгоритмов и выбор слоя OpenSSL (`sema_crypto.cpp`, функции рантайма — в `crypto_api.h`); события: карты событий, вызовы программы на эмиттерах и `EventTarget`, `once()`, карты из `emit` программы, встроенные функции `__tz_*` модулей на tz (`sema_events.cpp`); остальной `Intl`, `toLocaleString` чисел, `localeCompare` и `normalize`, типы `Intl.*` (`sema_intl.cpp`); встроенные модули, написанные на tz: их функции рантайма `__tz_*`, геттеры и сеттеры их классов, функция, чей результат приводится к ожидаемому (async-обработчик там, где ждут `Response \| Promise<Response>`) (`sema_library.cpp`) |
-| `src/codegen` | генерация LLVM IR через `IRBuilder`; массивы и методы с колбэками — `codegen_array.cpp`; `Math`, `Number` и т.п. — `codegen_builtins.cpp`; значения функций, окружения и коробки — `codegen_closure.cpp`; раскладки объектов, их описания, литералы (и со spread), кортежи, поля и `Object.keys` — `codegen_object.cpp`; методы, конструкторы, `new`, статические поля, `instanceof` — `codegen_class.cpp`; таблицы методов, таблицы интерфейсов и вызовы через них — `codegen_inherit.cpp`; `process` и часы — `codegen_process.cpp`; `decimal` — `codegen_decimal.cpp`; `Result`, его методы и `yield*` — `codegen_result.cpp`; хвостовые вызовы — `codegen_tail.cpp`; генераторы как корутины LLVM и на месте, их закрытие, итераторы массивов и ленивые цепочки в один цикл — `codegen_iter.cpp`; какие функции могут бросить (по всей программе), путь исключения наверх, `try` / `catch` / `finally`, проверка стека, класс `Error` и `Result.fromThrowable` — `codegen_throw.cpp`; регулярки, описания совпадений и `replace` с функцией — `codegen_regex.cpp`; машинный код литералов регулярок — `codegen_regex_native.cpp`; `Json`, `JSON.parse` / `stringify`, `embedJson` и функции `JSON.parse<T>` — `codegen_json.cpp`; объединения: представление, метки, атомы литералов, преобразования, поля и методы объединений объектов — `codegen_union.cpp`; даты и `Intl.DateTimeFormat` — `codegen_date.cpp`; async-функции как корутины, `Promise`, реакции `then` / `catch` / `finally`, `Promise.all` и другие, таймеры, `ResultAsync` — `codegen_async.cpp`; async-генераторы и `for await` — `codegen_async_iter.cpp`; `node:fs/promises`, `node:readline`, `node:timers/promises` и что они берут от сигнала отмены — `codegen_async_io.cpp`; встроенные модули и функции, которыми рантайм делает объекты (`SystemError`, `Stats`...) — `codegen_node.cpp`; запуск программ и функции, которыми рантайм делает результат `spawnSync` и `ExecSyncError`, — `codegen_child.cpp`; словари `Record`, `Map` и `Set` — `codegen_dict.cpp`; байтовые массивы, чтения и записи `DataView` и `Buffer` на месте, TBAA байтов и `embedBytes` — `codegen_bytes.cpp`; `unknown`, классы как значения и `join` кортежа — `codegen_unknown.cpp`; объявление класса с декораторами, заглушки и переходники методов, которые декоратор может подменить, метаданные — `codegen_decorate.cpp`; какие типы могут образовать циклы, код групп, слои 1 и 2 и проверки отладочного режима — `codegen_cycles.cpp`; вызовы функций `node:crypto` по их описанию и `generateKeyPairSync` — `codegen_crypto.cpp`; описания классов для отражения, `new` класса-значения, проверка значений `unknown` по параметрам, `Reflect.get` / `apply` / `construct`, `fromJson` классов — `codegen_reflect.cpp`; встроенные функции `__tz_*` модулей на tz — `codegen_events.cpp`; остальной `Intl`, опции для рантайма и привязанные `format` / `compare` — `codegen_intl.cpp`; вызовы рантайма из встроенных модулей на tz, геттеры в описаниях их классов для печати, переходники результата функций — `codegen_library.cpp` |
-| `src/driver` | командная строка, загрузка файлов программы по импортам и их порядок, пакеты по имени, встроенные модули на tz и глобальные имена `tz:web`, `tz:url` и `tz:fetch` (`loader.cpp`), проходы проверки для карт событий из `emit`, пайплайн оптимизаций, объектный файл, встроенный LLD; какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses.cpp`) |
-| `src/pkg` | проекты и пакеты: `tz.json`, `tz.lock`, выбор версий и граф пакетов программы (`project.cpp`), semver (`semver.cpp`), кэш, JSR и git (`fetch.cpp`), HTTP через WinHTTP (`net.cpp`), JSON с позициями для ошибок и правок (`json.cpp`), импорты файла без парсера (`scan.cpp`), `tz init` / `add` / `remove` / `update` (`commands.cpp`), `tz port` (`port.cpp`) |
-| `src/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
+| `compiler/cli` | `main.cpp`; командная строка, проходы проверки для карт событий из `emit`, пайплайн оптимизаций, объектный файл (`driver/`) |
+| `compiler/load` | загрузка файлов программы по импортам и их порядок, пакеты по имени, встроенные модули на tz и глобальные имена `tz:web`, `tz:url` и `tz:fetch` (`loader/`); токены (`token/`) и лексер (`lexer/`): литерал регулярки лексер читает, когда парсер встречает `/` там, где начинается выражение; парсер рекурсивным спуском, ASI; деструктуризация (и параметров) раскрывается здесь же в обычные объявления и присваивания через скрытые переменные, шаблон с тегом — в вызов тега (`parser/`) |
+| `compiler/program` | что проходы передают друг другу: узлы AST и символы (`ast/`), типы (`types/`), диагностика (`diagnostics/`) |
+| `compiler/check` | `Sema` (`sema/`): разрешение имён, проверка типов; неявные преобразования становятся узлами `CastExpr`; доказательства индексов (`sema_flow.cpp`); встроенные функции (`sema_builtins.cpp`); псевдонимы типов, `interface`, `enum` и целые константы (`sema_decls.cpp`); вывод типа возврата (`sema_infer.cpp`); замыкания, функции блоков и методы с колбэками (`sema_closure.cpp`); литералы объектов, spread, ключи в скобках, кортежи, `Object.keys` и сужение полей (`sema_object.cpp`); классы как значения, `Constructor<T>`, class-выражения, примеси-шаблоны и подмена класса декоратором (`sema_classvalue.cpp`); классы, `this`, правило задания полей, статические члены, `instanceof`, перегрузка и литералы с методами (`sema_class.cpp`); наследование, переопределение, `super`, `abstract`, интерфейсы и `implements`, таблицы методов (`sema_inherit.cpp`); класс `Error`, `throw`, `try` (`sema_error.cpp`); тип литерала по тому, куда объект идёт дальше (`sema_destination.cpp`); объединения и литеральные типы, их сужение, полнота `switch`, поля и методы объединений (`sema_union.cpp`); функции-проверки: сводки `return`, `x is T`, `asserts`, `filter` (`sema_predicate.cpp`); области видимости файлов, импорты и экспорты, проверка порядка загрузки и неиспользуемые функции (`sema_modules.cpp`); обобщённые функции и псевдонимы, вывод аргументов типа и копии под типы (`sema_generic.cpp`); генераторы, `yield`, типы итераторов и их методы (`sema_iter.cpp`); async-функции, `await`, `for await`, `Promise`, таймеры и очереди, забытые `Promise`, `ResultAsync` (`sema_async.cpp`); словари `Record`, `Map` и `Set`, `Object.groupBy` и `Object.fromEntries` (`sema_dict.cpp`); `unknown` и `object`, их сужение (`sema_unknown.cpp`); декораторы и порядок их применения, описание метода, метаданные и `design:*`, функции с `this`, списки параметров, классы как значения (`sema_decorate.cpp`). Рядом — факты для доказательств индексов (`facts/`), предупреждения о переполнении `int` (`overflow/`) и куски async-кода: что каждый читает и пишет, задачи и что из этого пойдёт параллельно, `--explain-parallel` (`parallel/`) |
+| `compiler/lower` | `CodeGen` (`codegen/`): генерация LLVM IR через `IRBuilder`; массивы и методы с колбэками — `codegen_array.cpp`; `Math`, `Number` и т.п. — `codegen_builtins.cpp`; значения функций, окружения и коробки — `codegen_closure.cpp`; раскладки объектов, их описания, литералы (и со spread), кортежи, поля и `Object.keys` — `codegen_object.cpp`; методы, конструкторы, `new`, статические поля, `instanceof` — `codegen_class.cpp`; таблицы методов, таблицы интерфейсов и вызовы через них — `codegen_inherit.cpp`; хвостовые вызовы — `codegen_tail.cpp`; генераторы как корутины LLVM и на месте, их закрытие, итераторы массивов и ленивые цепочки в один цикл — `codegen_iter.cpp`; какие функции могут бросить (по всей программе), путь исключения наверх, `try` / `catch` / `finally`, проверка стека, класс `Error` и `Result.fromThrowable` — `codegen_throw.cpp`; объединения: представление, метки, атомы литералов, преобразования, поля и методы объединений объектов — `codegen_union.cpp`; async-функции как корутины, `Promise`, реакции `then` / `catch` / `finally`, `Promise.all` и другие, таймеры, `ResultAsync` — `codegen_async.cpp`; async-генераторы и `for await` — `codegen_async_iter.cpp`; словари `Record`, `Map` и `Set` — `codegen_dict.cpp`; `unknown`, классы как значения и `join` кортежа — `codegen_unknown.cpp`; объявление класса с декораторами, заглушки и переходники методов, которые декоратор может подменить, метаданные — `codegen_decorate.cpp`; какие типы могут образовать циклы, код групп, слои 1 и 2 и проверки отладочного режима — `codegen_cycles.cpp` |
+| `compiler/link` | встроенный LLD (`linker/`); какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses/`) |
+| `compiler/packages` | проекты и пакеты: `tz.json`, `tz.lock`, выбор версий и граф пакетов программы (`project/`), semver (`semver/`), кэш, JSR и git (`fetch/`), HTTP через WinHTTP (`net/`), JSON с позициями для ошибок и правок (`json/`), импорты файла без парсера (`scan/`), `tz init` / `add` / `remove` / `update` (`commands/`), `tz port` (`port/`) |
+| `compiler/library` | C++-часть тем библиотеки. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; чтения и записи `DataView` и `Buffer` на месте, TBAA байтов. `child_process`: `spawnSync`, `execFileSync` и `execSync`, их опции, типы результата и `ExecSyncError`; запуск и функции, которыми рантайм делает результат. `crypto`: функции, методы и свойства объектов `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`; вызовы функций рантайма по их описанию (`crypto_api/`) и `generateKeyPairSync`. `date`: даты, их ловушки и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы; точное значение числового литерала (`decimal_literal/`). `events`: карты событий, вызовы программы на эмиттерах и `EventTarget`, `once()`, карты из `emit` программы, встроенные функции `__tz_*` модулей на tz. `intl`: остальной `Intl`, `toLocaleString` чисел, `localeCompare` и `normalize`, типы `Intl.*`, опции для рантайма и привязанные `format` / `compare`. `json`: `Json`, `null`, `JSON`, `embedJson` и `embedText`, `fromJson`, проверка файлов JSON при компиляции, функции `JSON.parse<T>`. `node`: импорты из `node:fs`, `node:path`, `node:os`, `node:process` и `tz:io`, их функции и опции, классы `Stats` и `Dirent` и функции, которыми рантайм делает объекты (`SystemError`, `Stats`...); `node:fs/promises`, `node:timers/promises`, `node:readline` и опция `signal`. `process`: `process`, `Date.now()` и `performance.now()`. `reflect`: `Reflect.get`, `apply`, `construct` и `fromJson(cls, j)`, описания классов для отражения, `new` класса-значения, проверка значений `unknown` по параметрам. `regex`: литералы, типы совпадений, методы `RegExp` и строк, ловушки JS, описания совпадений и `replace` с функцией; машинный код литералов (`codegen_regex_native.cpp`); компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result`, `safeTry`, забытые `Result`, методы и `yield*`. `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули, написанные на tz: их функции рантайма `__tz_*`, геттеры и сеттеры их классов, функция, чей результат приводится к ожидаемому (async-обработчик там, где ждут `Response \| Promise<Response>`). `weakref`: `WeakRef` |
+| `runtime/core` | рантайм языка: аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`tzrt`); исключение в полёте, места стека ошибки, текст `e.stack`, не пойманное исключение (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий и объекты (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач и `nextTick`, необработанные отклонения, таймеры и цикл событий, как в node, `node:timers/promises`, async-итераторы и async-генераторы (`async`); пул потоков и ожидание ввода-вывода в фазе poll — IOCP в Windows (`io`); хеш-таблица словарей `Record`, `Map` и `Set` (`map`); коробки `unknown`, `typeof` и `===` у них (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
+| `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json`, `JSON.parse` как в V8, `JSON.stringify` любого значения и проверки `JSON.parse<T>`. `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `node`: `node:path` в обоих стилях (`path`); `node:fs` и `node:fs/promises`, ошибки ОС `SystemError` как в libuv, stdin, `readLine` и `node:readline`, чтение и запись кусками для потоков файлов (`fs`); `node:os` (`os`). `events`: сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal`). `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён. `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `__tz_*` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
+| `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz`), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
+| `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
 | `editors/vscode` | расширение VS Code: подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
-| `src/lib` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`: `node:events` (`events.tz`), `tz:http` (`http.tz`), `node:stream` (`stream.tz`), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`) и глобальные — файл, который их называет, получает их сам: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`), `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
-| `runtime` | рантайм на C: аллокатор, куча на каждый поток (`alloc.c`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel.c`); общие объекты и атомарные счётчики (`publish.c`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`tzrt.c`); исключение в полёте, места стека ошибки, текст `e.stack`, не пойманное исключение (`error.c`); аргументы, переменные окружения, код выхода и часы (`process.c`); строки (`string.c`); массивы (`array.c`); `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect.c`); разбор чисел и `toFixed` (`number.c`); `Math` (`math.c`); окружения замыканий и объекты (`closure.c`); точные десятичные числа `decimal` (`decimal.c`); значения `Json`, `JSON.parse` как в V8, `JSON.stringify` любого значения и проверки `JSON.parse<T>` (`json.c`); `Object.keys` / `values` / `entries` (`object.c`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode.c`); регулярки: разбор и компиляция в программу (`regex_compile.c`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex.c`); даты: поля, установка полей и строки (`date.c`), разбор строк, как в V8 (`date_parse.c`, общий с `tz`), местный пояс (`date_zone.c`) и языки (`date_format.c`) по ICU системы, которую `icu.c` загружает при первом обращении; `Promise`, очередь микрозадач и `nextTick`, необработанные отклонения, таймеры и цикл событий, как в node, `node:timers/promises`, async-итераторы и async-генераторы (`async.c`); пул потоков и ожидание ввода-вывода в фазе poll — IOCP в Windows (`io.c`); сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal.c`); `node:path` в обоих стилях (`path.c`); `node:fs` и `node:fs/promises`, ошибки ОС `SystemError` как в libuv, stdin, `readLine` и `node:readline`, чтение и запись кусками для потоков файлов (`fs.c`); что просит `node:stream`: проверка куска, байты в stdout и stderr (`stream.c`); `node:child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child.c`); `node:os` (`os.c`); хеш-таблица словарей `Record`, `Map` и `Set` (`map.c`); `ArrayBuffer`, типизированные массивы и их методы (`bytes.c`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer.c`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у node (`encodings.h`); коробки `unknown`, `typeof` и `===` у них (`unknown.c`); записи метаданных (`meta.c`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group.c`); сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net.c`); HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http.c`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress.c`); отражение: `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect.c`); что просят встроенные модули на tz через `__tz_*` (`library.c`); остальной `Intl`: языки, опции и части `formatToParts` (`intl.c`), числа и `PluralRules` (`intl_number.c`), `Collator`, `normalize` и `Segmenter` (`intl_text.c`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names.c`). Отдельно, в `tzcrypto.lib`, — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto.c`), хеши (`crypto_md.c`), AES (`crypto_aes.c`) и ChaCha20-Poly1305 (`crypto_chacha.c`), scrypt (`crypto_scrypt.c`) и Argon2 (`crypto_argon2.c`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp.c`), ключи, подписи и обмен ключами (`crypto_keys.c`), сертификаты (`crypto_x509.c`); Web Crypto (`crypto_subtle*.c`); TLS соединений `net.c` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/gen_tls_roots.mjs) берёт у node (`tls.c`, `tls_roots.h`) |
 | `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node`, undici-types и объявления neverthrow для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |
 | `tests` | `run/*.tz` с ожидаемым выводом в `*.out`; `errors/*.tz` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.tz`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
 | `bench` | одни и те же программы на typezero и Go и скрипт сравнения; сервер «Hello, World!» на tz, Go и node и нагрузка на него (`http.ps1`) |

@@ -4,7 +4,7 @@
 #   tzrt.bc   LLVM bitcode. tz copies the small functions a program calls
 #             from it into the program before optimizing, so that their fast
 #             paths are inlined into the program (see linkRuntime in
-#             src/driver/driver.cpp).
+#             compiler/cli/driver/driver.cpp).
 #   tzrt.lib  the same code compiled, linked into every program: everything
 #             that was not inlined is called here.
 #
@@ -14,17 +14,23 @@
 #
 # CMake cannot build C with clang while tz itself is built with MSVC, so both
 # come from custom commands.
+#
+# Two trees, one folder per module (its .c, its .h, its tables and their
+# generator): core/, the runtime of the language, and library/, the C of the
+# topics of the library, named as in compiler/library/ and library/. Includes
+# name files from the root of the repository: "runtime/core/tzrt/tzrt.h".
 
 find_program(TZ_CLANG clang PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 find_program(TZ_LLVM_LINK llvm-link PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 find_program(TZ_LLVM_LIB llvm-lib PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 
-set(sources alloc.c tzrt.c string.c array.c inspect.c number.c math.c unicode.c closure.c
-            process.c object.c decimal.c regex.c regex_compile.c json.c error.c date.c
-            date_parse.c date_zone.c date_format.c icu.c intl.c intl_number.c intl_text.c
-            intl_names.c path.c fs.c child.c os.c map.c async.c io.c signal.c bytes.c buffer.c
-            unknown.c meta.c library.c reflect.c net.c http.c decompress.c group.c cjk.c stream.c
-            parallel.c publish.c)
+# Every module is in tzrt but those of node:crypto and TLS, which make
+# tzcrypto.lib (below).
+file(GLOB_RECURSE sources CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+     ${CMAKE_CURRENT_SOURCE_DIR}/core/*.c ${CMAKE_CURRENT_SOURCE_DIR}/library/*.c)
+list(FILTER sources EXCLUDE REGEX "^library/(crypto|tls)/")
+file(GLOB_RECURSE extras CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+     ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${CMAKE_CURRENT_SOURCE_DIR}/*.mjs)
 # What fetch decodes with (decompress.c): zlib's inflate and brotli's
 # decoder, built as they come, without their warnings.
 set(third_party ${PROJECT_SOURCE_DIR}/third_party)
@@ -33,7 +39,7 @@ set(third_party_sources
     brotli/common/constants.c brotli/common/context.c brotli/common/dictionary.c
     brotli/common/platform.c brotli/common/shared_dictionary.c brotli/common/transform.c
     brotli/dec/bit_reader.c brotli/dec/decode.c brotli/dec/huffman.c brotli/dec/state.c)
-set(includes -I${third_party}/zlib -I${third_party}/brotli/include)
+set(includes -I${PROJECT_SOURCE_DIR} -I${third_party}/zlib -I${third_party}/brotli/include)
 set(flags -O2 -std=c17 -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS ${includes})
 if(WIN32)
   list(APPEND flags -fms-runtime-lib=static) # the static CRT, as tz links it
@@ -117,31 +123,32 @@ endforeach()
 # program brings only the algorithms it names: crypto_md.c and crypto_aes.c are compiled once for
 # each family of hashes and each mode. Not in tzrt.bc: nothing of it is hot enough to copy into
 # programs.
+set(crypto library/crypto)
 set(crypto_parts
-  "crypto crypto.c"
-  "crypto_md5 crypto_md.c TZ_MD_MD5"
-  "crypto_sha1 crypto_md.c TZ_MD_SHA1"
-  "crypto_sha256 crypto_md.c TZ_MD_SHA256"
-  "crypto_sha512 crypto_md.c TZ_MD_SHA512"
-  "crypto_sha3 crypto_md.c TZ_MD_SHA3"
-  "crypto_ripemd160 crypto_md.c TZ_MD_RIPEMD160"
-  "crypto_sm3 crypto_md.c TZ_MD_SM3"
-  "crypto_md5_sha1 crypto_md.c TZ_MD_MD5_SHA1"
-  "crypto_blake2b crypto_md.c TZ_MD_BLAKE2B"
-  "crypto_blake2s crypto_md.c TZ_MD_BLAKE2S"
-  "crypto_aes_gcm crypto_aes.c TZ_AES_GCM"
-  "crypto_aes_cbc crypto_aes.c TZ_AES_CBC"
-  "crypto_aes_ctr crypto_aes.c TZ_AES_CTR"
-  "crypto_chacha crypto_chacha.c"
-  "crypto_scrypt crypto_scrypt.c"
-  "crypto_argon2 crypto_argon2.c"
-  "crypto_evp crypto_evp.c"
-  "crypto_keys crypto_keys.c"
-  "crypto_x509 crypto_x509.c"
-  "crypto_subtle crypto_subtle.c"
-  "crypto_subtle_kw crypto_subtle_kw.c"
-  "crypto_subtle_keys crypto_subtle_keys.c"
-  "tls tls.c")
+  "crypto ${crypto}/crypto/crypto.c"
+  "crypto_md5 ${crypto}/crypto_md/crypto_md.c TZ_MD_MD5"
+  "crypto_sha1 ${crypto}/crypto_md/crypto_md.c TZ_MD_SHA1"
+  "crypto_sha256 ${crypto}/crypto_md/crypto_md.c TZ_MD_SHA256"
+  "crypto_sha512 ${crypto}/crypto_md/crypto_md.c TZ_MD_SHA512"
+  "crypto_sha3 ${crypto}/crypto_md/crypto_md.c TZ_MD_SHA3"
+  "crypto_ripemd160 ${crypto}/crypto_md/crypto_md.c TZ_MD_RIPEMD160"
+  "crypto_sm3 ${crypto}/crypto_md/crypto_md.c TZ_MD_SM3"
+  "crypto_md5_sha1 ${crypto}/crypto_md/crypto_md.c TZ_MD_MD5_SHA1"
+  "crypto_blake2b ${crypto}/crypto_md/crypto_md.c TZ_MD_BLAKE2B"
+  "crypto_blake2s ${crypto}/crypto_md/crypto_md.c TZ_MD_BLAKE2S"
+  "crypto_aes_gcm ${crypto}/crypto_aes/crypto_aes.c TZ_AES_GCM"
+  "crypto_aes_cbc ${crypto}/crypto_aes/crypto_aes.c TZ_AES_CBC"
+  "crypto_aes_ctr ${crypto}/crypto_aes/crypto_aes.c TZ_AES_CTR"
+  "crypto_chacha ${crypto}/crypto_chacha/crypto_chacha.c"
+  "crypto_scrypt ${crypto}/crypto_scrypt/crypto_scrypt.c"
+  "crypto_argon2 ${crypto}/crypto_argon2/crypto_argon2.c"
+  "crypto_evp ${crypto}/crypto_evp/crypto_evp.c"
+  "crypto_keys ${crypto}/crypto_keys/crypto_keys.c"
+  "crypto_x509 ${crypto}/crypto_x509/crypto_x509.c"
+  "crypto_subtle ${crypto}/crypto_subtle/crypto_subtle.c"
+  "crypto_subtle_kw ${crypto}/crypto_subtle_kw/crypto_subtle_kw.c"
+  "crypto_subtle_keys ${crypto}/crypto_subtle_keys/crypto_subtle_keys.c"
+  "tls library/tls/tls/tls.c")
 set(crypto_dir ${CMAKE_CURRENT_BINARY_DIR}/crypto)
 file(MAKE_DIRECTORY ${crypto_dir})
 set(crypto_objects)
@@ -161,7 +168,7 @@ foreach(part ${crypto_parts})
     COMMAND ${TZ_CLANG} ${flags} ${defines} -ffunction-sections -fdata-sections
             -I${TZ_OPENSSL_DIR}/include -I${TZ_OPENSSL_DIR}/private -c -MD -MF ${object}.d
             -o ${object} ${CMAKE_CURRENT_SOURCE_DIR}/${source}
-    DEPENDS ${source} crypto.h
+    DEPENDS ${source} ${crypto}/crypto/crypto.h
     DEPFILE ${object}.d
     COMMENT "Compiling ${name} of node:crypto"
     VERBATIM)
@@ -178,8 +185,4 @@ add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzcrypto.lib
 add_custom_target(tzrt DEPENDS ${TZ_OUTPUT_DIR}/tzrt.bc ${TZ_OUTPUT_DIR}/tzrt.lib
                                ${TZ_OUTPUT_DIR}/tzrt_mt.bc ${TZ_OUTPUT_DIR}/tzrt_mt.lib
                                ${TZ_OUTPUT_DIR}/tzcrypto.lib
-  SOURCES ${sources} tzrt.h unicode_tables.h gen_unicode_tables.mjs regex.h regex_tables.h
-          gen_regex_tables.mjs date.h icu.h intl.h encodings.h gen_encodings.mjs cjk_tables.h
-          gen_cjk_tables.mjs
-          number_tables.h gen_number_tables.mjs ${crypto_sources} crypto.h net.h tls_roots.h
-          gen_tls_roots.mjs)
+  SOURCES ${sources} ${crypto_sources} ${extras})

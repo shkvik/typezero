@@ -4,7 +4,7 @@
 // has it: the linker drops what nothing calls, the dictionary of brotli
 // (122 KB) too.
 
-#include "net.h"
+#include "runtime/library/net/net/net.h"
 
 #include <string.h>
 

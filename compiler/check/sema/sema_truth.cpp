@@ -13,7 +13,7 @@
 // values give one of their operands, as in JavaScript: with `nick` of type
 // `string | undefined`, `nick || "anon"` is a string.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 using llvm::cast;
 using llvm::dyn_cast;

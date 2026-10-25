@@ -1,6 +1,6 @@
 #pragma once
 
-// The functions of runtime/crypto*.c that calls of node:crypto become (docs/crypto.md). Sema
+// The functions of runtime/library/crypto/ that calls of node:crypto become (docs/crypto.md). Sema
 // checks a call and gives it Builtin::Crypto with the number of the function first, as an int
 // literal, and the arguments in the order the function takes them; CodeGen passes each as its
 // kind says and makes the result of what the function gives (codegen_crypto.cpp). The receiver
@@ -25,8 +25,8 @@
 //   b  a boolean; i an int; j an int, undefined when negative; f a double; t a Date from a
 //      time in milliseconds
 //   P  a Promise of the type Sema gave, which CodeGen makes and passes first; the function
-//      settles it later, from a job of the pool (Web Crypto, runtime/crypto_subtle*.c), and never
-//      throws
+//      settles it later, from a job of the pool (Web Crypto, crypto_subtle*.c of the runtime),
+//      and never throws
 
 #include "llvm/ADT/StringRef.h"
 
@@ -118,7 +118,7 @@ enum class CryptoFn : unsigned {
   X509CheckIssued,
   X509CheckPrivateKey,
   X509Verify,
-  // Web Crypto: the intrinsics __tz_subtle_* of src/lib/webcrypto.tz (sema_webcrypto.cpp).
+  // Web Crypto: the intrinsics __tz_subtle_* of library/crypto/webcrypto.tz (sema_webcrypto.cpp).
   SubtleDigest,
   SubtleHmac,
   SubtleHmacVerify,
@@ -225,7 +225,7 @@ inline constexpr CryptoFunction kCryptoFunctions[] = {
 };
 
 // The hashes and the ciphers of the direct layer: the name node gives each, and the constant of
-// runtime/crypto_md.c, crypto_aes.c or crypto_chacha.c that is it.
+// runtime/library/crypto/crypto_md/crypto_md.c, crypto_aes.c or crypto_chacha.c that is it.
 struct DirectAlgorithm {
   llvm::StringLiteral name;
   llvm::StringLiteral symbol;

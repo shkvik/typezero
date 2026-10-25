@@ -14,7 +14,7 @@
 // emitted as `.original`. So every call, through the class, a method table,
 // an interface or a bound value, sees what the decorators left.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 
@@ -185,9 +185,9 @@ void CodeGen::emitDecoratedMethod(FunctionDecl *fn) {
     builder_.CreateRetVoid();
 }
 
-// Metadata (runtime/meta.c): the key as an address of a constant of its own
-// for an object key, or a string; values go in as unknowns, and records of an
-// object key come out as the type Sema found for them.
+// Metadata (runtime/library/reflect/meta/meta.c): the key as an address of a
+// constant of its own for an object key, or a string; values go in as unknowns,
+// and records of an object key come out as the type Sema found for them.
 llvm::Value *CodeGen::emitMetaCall(CallExpr *call) {
   usesMetadata_ = true;
   llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty(), *i64 = builder_.getInt64Ty();

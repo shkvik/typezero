@@ -15,7 +15,7 @@
 // is `(a0: int, a1: int) => ...`, `fn(...args)` is `fn(a0, a1)`, and a tuple
 // of them is made only if the body uses `args` itself as a value.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

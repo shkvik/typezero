@@ -2,7 +2,7 @@
 // values, functions with a `this` parameter, and lists of parameters
 // (`A extends unknown[]`, docs/generics.md section 9).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

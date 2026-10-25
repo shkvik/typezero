@@ -16,7 +16,8 @@
 //                     characters (without HEAP, see below)
 //         bit  63     HEAP: obj is reference counted (literals are not)
 //
-// The layout must match CodeGen (kStr* constants in src/codegen/codegen.cpp).
+// The layout must match CodeGen (kStr* constants in
+// compiler/lower/codegen/codegen.cpp).
 //
 // Representations:
 //   inline        a one-byte string of up to 8 code units lives in `obj`, the
@@ -44,7 +45,7 @@
 // with a compare-and-swap of `used`, and a shared rope is flattened under a
 // lock, its flat result published before anyone reads it.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <stdlib.h>
 #include <string.h>

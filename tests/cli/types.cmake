@@ -1,4 +1,4 @@
-# The declarations next to tz for TypeScript's checker (src/types, docs/modules.md,
+# The declarations next to tz for TypeScript's checker (editors/types, docs/modules.md,
 # section 6), for a plugin of tsserver to come: a program that uses what tz
 # has built in and node's modules, and the examples, build with tz and, as
 # .ts copies, have no errors for tsc. Needs node and TypeScript's

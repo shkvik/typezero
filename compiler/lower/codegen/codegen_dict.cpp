@@ -1,12 +1,12 @@
 // Dictionaries (docs/objects.md, section 9): Record, Map and Set.
 //
 // A dictionary is a pointer to a hash table of the runtime (TzMap in
-// runtime/tzrt.h, runtime/map.c), which starts as every object does, with
-// its count and its layout: retaining and releasing it is as for any object,
-// and the drop function of the layout is the runtime's. Its entries lie in
-// an array in the order they were added, each { i32 hash, i32 live, key,
-// value }, laid out here by the types of the keys and values; the runtime
-// gets the offsets in the layout (TzMapLayout), one constant per type.
+// runtime/core/tzrt/tzrt.h, runtime/core/map/map.c), which starts as every
+// object does, with its count and its layout: retaining and releasing it is as
+// for any object, and the drop function of the layout is the runtime's. Its
+// entries lie in an array in the order they were added, each { i32 hash, i32
+// live, key, value }, laid out here by the types of the keys and values; the
+// runtime gets the offsets in the layout (TzMapLayout), one constant per type.
 //
 // The runtime finds and adds entries (tz_map_find, tz_map_add, and for a
 // string key the variants whose fast path is inlined); the compiled code
@@ -16,7 +16,7 @@
 // and its entries do not move: the scope of the iteration ends it however it
 // is left.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -30,7 +30,7 @@ namespace tz {
 
 namespace {
 
-// TzMap; must match runtime/tzrt.h.
+// TzMap; must match runtime/core/tzrt/tzrt.h.
 enum MapField : unsigned {
   kMapRefCount,
   kMapLayout,
@@ -92,7 +92,8 @@ const CodeGen::DictLayout &CodeGen::dictLayout(const Type *type) {
     mapDescTy_ = llvm::StructType::create(ctx_, {layoutDescTy_, ptr, ptr, i32, i32, i32, i32},
                                           "tz.maplayout");
   }
-  // TZ_LAYOUT_GROUP: the maps are members of groups (runtime/group.c).
+  // TZ_LAYOUT_GROUP: the maps are members of groups
+  // (runtime/core/group/group.c).
   auto make = [&](bool member) {
     uint32_t flags = kLayoutDict | (member ? 0x80000000u : 0u);
     llvm::Constant *base = llvm::ConstantStruct::get(

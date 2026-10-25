@@ -1,9 +1,9 @@
 // WeakRef (docs/objects.md, section 11): a reference to an object that does
 // not hold it. `deref()` gives the object, or undefined from the moment it
 // died, which in tz is exactly when its count or that of its group reached
-// zero (runtime/group.c).
+// zero (runtime/core/group/group.c).
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 namespace tz {
 

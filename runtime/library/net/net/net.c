@@ -1,6 +1,6 @@
 // TCP sockets (docs/net.md, step 1): listening, accepting, connecting,
 // reading and writing on the completion port of the loop (io.c), and the
-// names of hosts. What the program calls is in src/lib (`__tz_net_*`); HTTP
+// names of hosts. What the program calls is in library/ (`__tz_net_*`); HTTP
 // is in http.c.
 //
 // On Windows every socket is overlapped and tied to the completion port of
@@ -28,7 +28,7 @@
 // (/etc/resolv.conf, /etc/hosts, docs/net.md, section 5): a static program
 // has no libc resolver to rely on.
 
-#include "net.h"
+#include "runtime/library/net/net/net.h"
 
 #include <stdio.h>
 #include <stdlib.h>

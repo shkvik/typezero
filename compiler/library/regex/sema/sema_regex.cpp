@@ -1,7 +1,8 @@
 // Regular expressions (docs/regex.md): literals, compiled here by the
-// runtime's own compiler (runtime/regex_compile.c, built into tz); the types
-// of matches; the methods of RegExp and of the strings that take a regex; and
-// the traps of JavaScript, which are errors here.
+// runtime's own compiler (runtime/library/regex/regex_compile/regex_compile.c,
+// built into tz); the types of matches; the methods of RegExp and of the
+// strings that take a regex; and the traps of JavaScript, which are errors
+// here.
 //
 // A literal is compiled once, while the program compiles: its syntax errors
 // are compile errors, and its flags and groups are known. So are those of a
@@ -13,9 +14,9 @@
 // its flags too, so `s.match(re)`, whose result depends on the g flag, is an
 // error for it.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
-#include "../../runtime/regex.h"
+#include "runtime/library/regex/regex/regex.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"

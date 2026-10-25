@@ -2,7 +2,7 @@
 // CodeGen::emitMathCall). The small ones are TZ_HOT, so that tz inlines
 // them, and with them the call to the C library.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
 #include <math.h>
 

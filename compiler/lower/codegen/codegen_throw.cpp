@@ -20,7 +20,7 @@
 // may throw waits in a managed slot of the scope (CodeGen::hold), so the way
 // out releases it too; LLVM keeps it in a register on the normal path.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -610,7 +610,7 @@ private:
       break;
     case Builtin::MetaDefine:
       // A key `design:*` that the program wrote, which only the compiler
-      // writes (runtime/meta.c).
+      // writes (runtime/library/reflect/meta/meta.c).
       if (!c->metaKey && !c->designRecord && !c->args.empty() && !isa<StringLitExpr>(c->args[0]))
         intrinsic(caught);
       break;
@@ -915,12 +915,12 @@ bool CodeGen::exprThrows(const Expr *expr) {
 // Places
 //===----------------------------------------------------------------------===//
 
-// tz_thrown and the stack limit (TzThread in runtime/tzrt.h): in a parallel
-// program the thread's own, since code on the threads of the runtime throws
-// at the same time. Its address then goes through llvm.threadlocal.address,
-// which a coroutine does not keep across a suspension: it may resume on
-// another thread. Both are in one variable, so that a function finds them
-// from one address.
+// tz_thrown and the stack limit (TzThread in runtime/core/tzrt/tzrt.h): in a
+// parallel program the thread's own, since code on the threads of the runtime
+// throws at the same time. Its address then goes through
+// llvm.threadlocal.address, which a coroutine does not keep across a
+// suspension: it may resume on another thread. Both are in one variable, so
+// that a function finds them from one address.
 llvm::GlobalVariable *CodeGen::thrownGlobal() {
   if (!thrown_) {
     auto *type = llvm::StructType::get(ctx_, {builder_.getPtrTy(), builder_.getPtrTy()});
@@ -953,7 +953,7 @@ std::string CodeGen::frameFunctionName() const {
 }
 
 // { ptr function, i32 length, i32 line, ptr file, i32 length, i32 column }:
-// TzFrame in runtime/tzrt.h.
+// TzFrame in runtime/core/tzrt/tzrt.h.
 llvm::Constant *CodeGen::frameDescriptor(llvm::SMLoc loc, const std::string *name) {
   std::string function = name ? *name : frameFunctionName();
   auto key = std::make_pair(function, loc.getPointer());
@@ -1057,7 +1057,7 @@ void CodeGen::finishFunctionUnwind() {
     builder_.CreateBr(coro_->finalBlock);
   } else if (function_->hasExternalLinkage()) { // main
     // Node reports the error of an ES module a few turns of the microtask
-    // queue later (runtime/async.c).
+    // queue later (runtime/core/async/async.c).
     llvm::CallInst *call = builder_.CreateCall(
         processFunction(usesAsync_ && esModule_ ? "tz_async_main_failed" : "tz_uncaught",
                         builder_.getVoidTy(), {}));
@@ -1479,7 +1479,7 @@ llvm::Function *CodeGen::errorMaker() {
 }
 
 // What main tells the runtime first: how to make an Error, and where its
-// fields are (TzErrorInfo in runtime/tzrt.h).
+// fields are (TzErrorInfo in runtime/core/tzrt/tzrt.h).
 void CodeGen::emitErrorSupport() {
   if (!errorClass_)
     return;

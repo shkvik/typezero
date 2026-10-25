@@ -1,8 +1,8 @@
-// process, Date.now() and performance.now(): calls of runtime/process.c, and
-// of the output functions of runtime/tzrt.c for process.stdout.write and the
-// like.
+// process, Date.now() and performance.now(): calls of
+// runtime/library/process/process/process.c, and of the output functions of
+// runtime/core/tzrt/tzrt.c for process.stdout.write and the like.
 
-#include "codegen/codegen.h"
+#include "compiler/lower/codegen/codegen.h"
 
 #include "llvm/Support/ErrorHandling.h"
 
@@ -83,7 +83,8 @@ llvm::Value *CodeGen::emitProcessBuiltin(CallExpr *call) {
   case Builtin::ProcessStderrWrite: {
     bool toStdout = call->builtin == Builtin::ProcessStdoutWrite;
     if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
-      // The bytes of a Buffer or a Uint8Array, as they are (runtime/stream.c).
+      // The bytes of a Buffer or a Uint8Array, as they are
+      // (runtime/library/stream/stream/stream.c).
       Operand bytes = emitOperand(call->args[0], /*canBorrow=*/true);
       builder_.CreateCall(processFunction("tz_lib_std_write", builder_.getVoidTy(),
                                           {i32, builder_.getPtrTy()}),

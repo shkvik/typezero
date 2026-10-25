@@ -2,7 +2,7 @@
 // `new Array`, the functions of Math, Number and String, and parseInt and
 // the like.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 

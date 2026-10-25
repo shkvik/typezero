@@ -1,6 +1,6 @@
-#include "driver/licenses.h"
+#include "compiler/link/licenses/licenses.h"
 
-#include "sema/crypto_api.h"
+#include "compiler/library/crypto/crypto_api/crypto_api.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Constants.h"

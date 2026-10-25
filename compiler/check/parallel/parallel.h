@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ast/ast.h"
+#include "compiler/program/ast/ast.h"
 
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
@@ -13,9 +13,9 @@ namespace tz {
 // What may run in parallel in a program checked by Sema (docs/async.md,
 // sections 2-5): the pieces of its async code, what each reads and writes,
 // and which pieces keep node's order because they touch the same data. The
-// parallel runtime follows these decisions (runtime/parallel.c, CodeGen:
-// the pieces that may run ahead, and the places where they wait for their
-// turn); tz build --explain-parallel explains them.
+// parallel runtime follows these decisions (runtime/core/parallel/parallel.c,
+// CodeGen: the pieces that may run ahead, and the places where they wait for
+// their turn); tz build --explain-parallel explains them.
 struct ParallelPlan {
   // A task: the top-level code, a call of an async function that nothing
   // awaits right away, or a callback that runs on its own later (of then,

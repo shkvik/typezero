@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lex/token.h"
+#include "compiler/load/token/token.h"
 
 #include "llvm/ADT/StringRef.h"
 

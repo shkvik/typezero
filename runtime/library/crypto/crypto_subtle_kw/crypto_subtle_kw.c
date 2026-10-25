@@ -5,7 +5,7 @@
 // The low-level AES functions are deprecated for programs; OpenSSL keeps them for itself.
 #include "internal/deprecated.h"
 
-#include "crypto.h"
+#include "runtime/library/crypto/crypto/crypto.h"
 
 #include <openssl/aes.h>
 #include <stdlib.h>

@@ -12,9 +12,9 @@
 // true })`) goes on where the last chunk ended. "Restore to the queue" puts
 // bytes back in front of the rest.
 
-#include "tzrt.h"
+#include "runtime/core/tzrt/tzrt.h"
 
-#include "cjk_tables.h"
+#include "runtime/library/bytes/cjk/cjk_tables.h"
 
 // What a handler of the standard gives back for a byte: go on to the next
 // one, an error (U+FFFD, or a TypeError when fatal), or the end.

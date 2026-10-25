@@ -1,10 +1,11 @@
 // The streams of node:fs and of process: fs.ReadStream and fs.WriteStream,
 // ported from lib/internal/fs/streams.js of Node 24 (docs/streams.md, step
 // 3), process.stdin as a Readable and process.stdout and process.stderr as
-// Writables. The calls of the system are the runtime's (runtime/fs.c), each
-// a work for the pool of runtime/io.c, as a call of node:fs with a callback
-// is: `__tz_fsOpen` and the others give a Promise, which the code waits for
-// as node's callback is called.
+// Writables. The calls of the system are the runtime's
+// (runtime/library/node/fs/fs.c), each a work for the pool of
+// runtime/core/io/io.c, as a call of node:fs with a callback is: `__tz_fsOpen`
+// and the others give a Promise, which the code waits for as node's callback is
+// called.
 
 import { AbortSignal } from "tz:web"
 import { Readable, Stream, StreamCallback, Writable, WriteChunk, streamFinished } from "node:stream"
@@ -337,7 +338,7 @@ export class WriteStream extends Writable<Buffer> {
 
 // fs.createReadStream(path, options) and createWriteStream(); the compiler
 // gives the encoding written in place of the options apart, and the chunk
-// type (src/sema/sema_stream.cpp).
+// type (compiler/library/stream/sema/sema_stream.cpp).
 export function createReadStream() {}
 export function createWriteStream() {}
 

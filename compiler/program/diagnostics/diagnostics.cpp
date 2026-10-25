@@ -1,4 +1,4 @@
-#include "support/diagnostics.h"
+#include "compiler/program/diagnostics/diagnostics.h"
 
 #include "llvm/Support/raw_ostream.h"
 

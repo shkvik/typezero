@@ -16,9 +16,9 @@
 // kind of iterable gets a copy of the function, which iterates it as code
 // written for it would (docs/generics.md).
 
-#include "lex/lexer.h"
-#include "parse/parser.h"
-#include "sema/sema.h"
+#include "compiler/load/lexer/lexer.h"
+#include "compiler/load/parser/parser.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/Support/MemoryBuffer.h"
 

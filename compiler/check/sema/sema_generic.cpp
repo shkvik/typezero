@@ -30,7 +30,7 @@
 // the branch that cannot run is dropped without being checked: it was written
 // for other types.
 
-#include "sema/sema.h"
+#include "compiler/check/sema/sema.h"
 
 #include "llvm/ADT/STLExtras.h"
 
