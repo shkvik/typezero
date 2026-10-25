@@ -242,7 +242,7 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
     }
     out.files.push_back({file.str(), checksum.lower()});
   }
-  // "./mod.ts" is the file mod.ts of the package.
+  // "./mod.tz" is the file mod.tz of the package.
   auto packageFile = [](llvm::StringRef target) {
     target.consume_front("./");
     return target.str();

@@ -17,7 +17,7 @@ $dir = Join-Path $PSScriptRoot "http_hello"
 $out = Join-Path $PSScriptRoot "out"
 New-Item -ItemType Directory -Force $out | Out-Null
 $env:GOAMD64 = if ($env:GOAMD64) { $env:GOAMD64 } else { "v1" }
-& $Tz build -o (Join-Path $out "http_hello-tz.exe") (Join-Path $dir "main.ts")
+& $Tz build -o (Join-Path $out "http_hello-tz.exe") (Join-Path $dir "main.tz")
 if ($LASTEXITCODE -ne 0) { throw "tz failed" }
 & $Go build -o (Join-Path $out "http_hello-go.exe") (Join-Path $dir "main.go")
 if ($LASTEXITCODE -ne 0) { throw "go failed" }

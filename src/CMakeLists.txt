@@ -101,7 +101,6 @@ add_executable(tz
   pkg/scan.cpp
   pkg/project.cpp
   pkg/commands.cpp
-  pkg/editor.cpp
   pkg/port.cpp
 )
 
@@ -136,13 +135,14 @@ add_dependencies(tz tzrt)
 
 # The built-in modules written in tz go next to tz, where the loader reads
 # them (src/driver/loader.cpp); copied again whenever they change.
-foreach(file lib/events.ts lib/web.ts lib/url.ts lib/fetch.ts lib/http.ts lib/webcrypto.ts
-             lib/stream.ts lib/stream_promises.ts lib/stream_consumers.ts lib/string_decoder.ts
-             lib/fs_stream.ts)
+foreach(file lib/events.tz lib/web.tz lib/url.tz lib/fetch.tz lib/http.tz lib/webcrypto.tz
+             lib/stream.tz lib/stream_promises.tz lib/stream_consumers.tz lib/string_decoder.tz
+             lib/fs_stream.tz)
   configure_file(${file} ${TZ_OUTPUT_DIR}/${file} COPYONLY)
 endforeach()
 
-# What tz has built in, declared for the editor, and the settings of tsc for
-# programs of tz (src/pkg/editor.cpp): next to tz, beside @types/node.
+# What tz has built in, declared for TypeScript's checker, and its settings
+# for programs of tz: next to tz, beside @types/node, for a plugin of tsserver
+# that would check .tz files in the editor (docs/modules.md, section 6).
 configure_file(types/tz.d.ts ${TZ_OUTPUT_DIR}/types/node_modules/@types/tz/index.d.ts COPYONLY)
 configure_file(types/tsconfig.json ${TZ_OUTPUT_DIR}/types/tsconfig.json COPYONLY)

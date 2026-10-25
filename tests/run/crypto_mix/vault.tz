@@ -1,4 +1,4 @@
-// What main.ts keeps its secrets with: a generic sealed box over any value
+// What main.tz keeps its secrets with: a generic sealed box over any value
 // that JSON writes, AES-256-GCM with a key from scrypt, and a store of the
 // sealed bytes in files read and written through node:fs/promises, which
 // emits an event for each.

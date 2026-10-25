@@ -79,9 +79,9 @@ if (-not $Names) {
 $env:GOAMD64 = if ($env:GOAMD64) { $env:GOAMD64 } else { "v1" }
 foreach ($n in $Names) {
   $dir = Join-Path $PSScriptRoot $n
-  $ts = Join-Path $dir "main.ts"
-  if (Test-Path $ts) {
-    & $Tz build -o (Join-Path $out "$n-tz.exe") $ts
+  $src = Join-Path $dir "main.tz"
+  if (Test-Path $src) {
+    & $Tz build -o (Join-Path $out "$n-tz.exe") $src
     if ($LASTEXITCODE -ne 0) { throw "tz failed on $n" }
   }
   & $Go build -o (Join-Path $out "$n-go.exe") (Join-Path $dir "main.go")

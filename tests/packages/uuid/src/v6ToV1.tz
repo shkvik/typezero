@@ -1,6 +1,6 @@
-import { parse } from './parse.js';
-import { unsafeStringify } from './stringify.js';
-import { UUIDTypes } from './types.js';
+import { parse } from './parse.tz';
+import { unsafeStringify } from './stringify.tz';
+import { UUIDTypes } from './types.tz';
 
 /**
  * Convert a v6 UUID to a v1 UUID

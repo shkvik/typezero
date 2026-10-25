@@ -3,7 +3,7 @@
 // Reading date strings as V8 does: the ISO format of the standard (a date
 // with a time is local, without one UTC), and the other formats V8 reads.
 // The strings come from an array, so that tz cannot see them: written in a
-// call, the ones that are no date are compile errors (tests/errors/date.ts).
+// call, the ones that are no date are compile errors (tests/errors/date.tz).
 const inputs: string[] = [
   // ISO
   "2026-10-23T10:00",

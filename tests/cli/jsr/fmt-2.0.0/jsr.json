@@ -1,5 +1,5 @@
 {
   "name": "@std/fmt",
   "version": "2.0.0",
-  "exports": "./mod.ts"
+  "exports": "./mod.tz"
 }

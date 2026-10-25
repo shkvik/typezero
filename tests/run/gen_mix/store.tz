@@ -1,4 +1,4 @@
-// Generic classes for main.ts: async methods and Promise fields, fields of
+// Generic classes for main.tz: async methods and Promise fields, fields of
 // the runtime's types, a decorated generic class, and an iterable range.
 
 function later<T>(value: T, ms: number): Promise<T> {

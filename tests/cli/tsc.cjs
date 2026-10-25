@@ -1,6 +1,6 @@
 // Checks the files of a tsconfig.json with TypeScript's checker, as the editor
 // does: node tsc.cjs <lib/typescript.js> <tsconfig.json>. Prints every error
-// and exits with 1 if there is one (tests/cli/editor_tsc.cmake).
+// and exits with 1 if there is one (tests/cli/types.cmake).
 const path = require("path")
 const ts = require(process.argv[2])
 const configFile = process.argv[3]

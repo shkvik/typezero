@@ -1,10 +1,12 @@
 # Модули
 
 Решения, принятые 23 октября 2026 года. Шаги 1–3 плана сделаны 24 октября (`embedBytes` — вместе с
-байтами), шаг 4 — 25 октября; подробности — в конце, в разделе «План реализации».
+байтами), шаг 4 — 25 октября. 25 октября решено, что файлы tz называются `.tz` (раздел 2);
+подробности — в конце, в разделе «План реализации».
 
 ## Коротко
 
+- Файлы программ на tz — `.tz`: `main.tz`, `math.tz`. Файлы `.ts` и `.js` tz не собирает.
 - Импорт — одной формой: `import { a, b as c } from "./x"`. Импорта по умолчанию,
   `export default`, `import * as`, `import "./x"` и слова `type` в импорте нет.
 - Экспорт: `export` перед объявлением, `export { a, b as c }`, `export { a } from "./x"`,
@@ -19,16 +21,16 @@
 ## 1. Импорт и экспорт
 
 ```ts
-// math.ts
+// math.tz
 export const PI = 3.14159
 export function add(a: number, b: number) { return a + b }
-function helper() { ... }              // без export — видно только внутри math.ts
+function helper() { ... }              // без export — видно только внутри math.tz
 
-// geometry/index.ts — «витрина» каталога
+// geometry/index.tz — «витрина» каталога
 export { area } from "./circle"        // реэкспорт по имени
-export * from "./square"               // реэкспорт всего, что экспортирует square.ts
+export * from "./square"               // реэкспорт всего, что экспортирует square.tz
 
-// main.ts
+// main.tz
 import { add, PI } from "./math"
 import { add as plus } from "./math"   // переименование
 import { area, Circle } from "./geometry"   // типы импортируются так же, как значения
@@ -52,16 +54,24 @@ import { area, Circle } from "./geometry"   // типы импортируютс
   подсказкой вынести в отдельный файл. `declare module`, `declare global`, `/// <reference>`,
   `require` и динамического `import()` тоже нет.
 
-## 2. Пути
+## 2. Файлы и пути
 
-- `"./math"`, `"./math.ts"` и `"./math.js"` (так пишут в TS для node) — всё это `math.ts`.
-- Каталог — его `index.ts`: `"./geometry"` → `geometry/index.ts`.
+- **Файлы tz — `.tz`** (решено 25 октября). Синтаксис тот же, что у TypeScript, но язык свой.
+  Скрипт на TS становится программой на tz, когда его переименовывают в `.tz` и правят то, что
+  tz не принимает; библиотеку на TS переносит `tz port` ([packages.md](packages.md)). Пакеты для
+  tz — тоже файлы `.tz`.
+- `"./math"` и `"./math.tz"` — это `math.tz`.
+- `"./math.ts"`, `"./math.js"` (так пишут в TS для node) и другие расширения TS и JS — ошибка с
+  подсказкой: `the files of tz end in .tz: import './math' or './math.tz'`. Если рядом лежит
+  `math.ts`, подсказка предлагает переименовать его; то же у `"./math"`, когда есть только
+  `math.ts`. `tz build main.ts` — ошибка `rename it to main.tz`.
+- Каталог — его `index.tz`: `"./geometry"` → `geometry/index.tz`.
 - Пути только относительные (`./`, `../`). Имя без точки (`"zod"`) — пакет
   ([packages.md](packages.md)); `node:fs`, `tz:io` — встроенная библиотека ([io.md](io.md)).
 
 ## 3. Сборка и порядок загрузки
 
-- `tz build main.ts` сам находит все файлы по импортам; на выходе — один exe. Экспорты, которые
+- `tz build main.tz` сам находит все файлы по импортам; на выходе — один exe. Экспорты, которые
   никто не использует, в exe не попадают.
 - Порядок загрузки — как в JS: сначала то, что модуль импортирует (по порядку импортов), потом
   он сам; каждый модуль — один раз. Код верхнего уровня выполняется при загрузке модуля.
@@ -70,17 +80,17 @@ import { area, Circle } from "./geometry"   // типы импортируютс
 
 ## 4. Циклические импорты
 
-Цикл (`a.ts` импортирует `b.ts`, `b.ts` — `a.ts`, прямо или через другие файлы) разрешён: так
+Цикл (`a.tz` импортирует `b.tz`, `b.tz` — `a.tz`, прямо или через другие файлы) разрешён: так
 пишут типы, которые ссылаются друг на друга, взаимно рекурсивные функции в разных файлах,
 модели данных с отношениями.
 
 Ошибка — только если код, который выполняется при загрузке модуля (не внутри функции), читает
 переменную другого модуля, которая к этому моменту ещё не задана, — прямо или через вызванную
-функцию. Пример: `main.ts` импортирует `a.ts`, `a.ts` первой строкой импортирует `b.ts`, значит,
-`b.ts` выполняется целиком раньше `a.ts`:
+функцию. Пример: `main.tz` импортирует `a.tz`, `a.tz` первой строкой импортирует `b.tz`, значит,
+`b.tz` выполняется целиком раньше `a.tz`:
 
 ```ts
-// b.ts
+// b.tz
 import { aName, getA } from "./a"
 export const bSeesA = "b видит " + aName   // ошибка
 export const bCallsA = getA()              // ошибка: getA читает aName
@@ -88,13 +98,13 @@ export function bLater() { return aName }  // ок: при вызове всё �
 ```
 
 ```
-b.ts читает aName из a.ts при загрузке, но a.ts в этот момент ещё не загружен:
-main.ts → a.ts → b.ts → (a.ts уже начат). Вычисли это внутри функции или перенеси aName
+b.tz читает aName из a.tz при загрузке, но a.tz в этот момент ещё не загружен:
+main.tz → a.tz → b.tz → (a.tz уже начат). Вычисли это внутри функции или перенеси aName
 туда, где нет цикла.
 ```
 
-Какой из файлов окажется «виноват», зависит от порядка импортов: если в `main.ts` поменять их
-местами, ошибка переедет в `a.ts`. Поэтому сообщение показывает всю цепочку. Внутри одного
+Какой из файлов окажется «виноват», зависит от порядка импортов: если в `main.tz` поменять их
+местами, ошибка переедет в `a.tz`. Поэтому сообщение показывает всю цепочку. Внутри одного
 файла такая проверка уже есть: вызов функции с верхнего уровня раньше, чем объявлена глобальная
 переменная, которую она читает, — ошибка.
 
@@ -134,47 +144,36 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
 ## 6. Редактор
 
-Пока у tz нет своего языкового сервера, код в редакторе проверяет TypeScript (tsc в VS Code).
-Чтобы он понимал программы на tz, рядом с компилятором лежат объявления и настройки, а
-`tz init` подключает их к проекту.
+Файлы `.tz` VS Code сам не знает. Расширение [editors/vscode](../editors/vscode/README.md)
+добавляет язык `tz`: подсветку грамматикой TypeScript, которая есть в VS Code, комментарии,
+скобки и отступы как у TS. Ставится копией в каталог расширений
+(`editors\vscode\install.ps1`).
 
-- **`tz init`** кроме `tz.json`, `main.ts` и `.gitignore` пишет `tsconfig.json` из одной
-  настройки: `"extends": "./.tz/tsconfig.json"`. В проекте, сделанном раньше, `tz init`
-  добавляет только `tsconfig.json` и `/.tz/` в `.gitignore`.
-- **`.tz/tsconfig.json` пишет tz** — при `tz init`, `tz add`, `tz remove`, `tz update` и при
-  сборке, если он устарел. В нём путь к настройкам рядом с tz и пути к пакетам проекта в кэше
-  (`"zod": [".../cache/jsr/@tz/zod/3.24.1/mod.ts"]`): редактор находит пакеты там же, где tz.
-  Пути — этого компьютера, поэтому `.tz/` лежит в `.gitignore`; после `git clone` его пишет первая
-  сборка. Если `tsconfig.json` проекта свой и `.tz` не упоминает, tz его не трогает.
-- **Рядом с tz, в `types/`**: настройки tsc для программ tz, `@types/node` (node 24), объявления
-  neverthrow и `tz.d.ts` ([src/types](../src/types/tz.d.ts)) — то, что в tz есть без импорта:
-  `int`, `long`, `double`, `decimal` с методами, `Json`, `JSON.parse<T>`, `fromJson`, `embedJson`,
-  `embedText`, `embedBytes`, `Result` и остальное из neverthrow, `SystemError`, `ExecSyncError`,
-  `Constructor`, `ConstructorArgs`, `MethodDescriptor`, `Reflect.defineMetadata` и
-  `getMetadata`, `Timeout`, типы Web Crypto, — и модули `"tz:io"` и `"tz:http"`. Писать в файлах
-  `type int = number` не нужно.
-- **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`): имена разных файлов не
-  смешиваются, `await` на верхнем уровне разрешён. Импорты — как в tz (`"./math"` и
-  `"./math.ts"`), DOM нет, `strict` включён, но без `noImplicitAny`: tz выводит типы параметров из
-  вызовов. `e` в `catch` — `Error`, а не `unknown`, декораторы — как в tz
-  (`experimentalDecorators`).
-- **Где tz знает больше**, объявление мягче, чтобы редактор не подчёркивал то, что tz
-  принимает. Для tsc `int`, `long` и `decimal` — `number` (поэтому методы `decimal` редактор
-  предлагает и у `number`), значение метаданных — `any`, как в пакете reflect-metadata.
-  `JSON.parse(text)` без аргумента типа для tsc — его собственный, с `any`.
-- **Что остаётся подчёркнутым** — места, где tsc строже tz: перегрузки с телом у каждого варианта
-  ([overloads.md](overloads.md)), чтение полей `Json` без проверки, `value` у результата
-  `Promise.allSettled` без проверки `status`, `onabort = undefined` (в tz нет `null`), кодировка
-  `Buffer` в переменной, члены, добавленные подменой класса, вычитание дат, `Readable<T>`. Это
-  уберёт свой языковой сервер.
-- **Замер** на 332 программах `tests/run`: с настройками tsc по умолчанию ошибки были в 302
-  программах, всего 3813; с настройками и объявлениями tz — в 69 программах, 299 ошибок. Это места
-  из предыдущего пункта и тесты, которые проверяют ошибки при выполнении. Примеры (`examples`) и
-  бенчмарки (`bench`) проходят без ошибок.
+- **Только подсветка.** Проверки типов, подсказок и перехода к определению в редакторе нет —
+  ошибки показывает `tz build`. Их даст свой языковой сервер или плагин tsserver, который
+  отдаёт файлы `.tz` проверке TypeScript.
+- **Для плагина всё готово** рядом с tz, в `types/`: настройки tsc для программ tz,
+  `@types/node` (node 24), объявления neverthrow и `tz.d.ts` ([src/types](../src/types/tz.d.ts)) —
+  то, что в tz есть без импорта: `int`, `long`, `double`, `decimal` с методами, `Json`,
+  `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` и остальное из
+  neverthrow, `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,
+  `MethodDescriptor`, `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и
+  модули `"tz:io"` и `"tz:http"`. Тест `tests/cli/types.cmake` проверяет их TypeScript из
+  VS Code на копиях программ с расширением `.ts`.
+- **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`), импорты как в tz, DOM
+  нет, `strict` без `noImplicitAny` (tz выводит типы параметров из вызовов), `e` в `catch` —
+  `Error`, декораторы как в tz (`experimentalDecorators`). Где tz знает больше, объявление
+  мягче: для tsc `int`, `long` и `decimal` — `number`, значение метаданных — `any`, как в пакете
+  reflect-metadata.
+- **Замер** на 332 программах `tests/run`, пока они были `.ts` и tsc их проверял: с его
+  настройками по умолчанию ошибки были в 302 программах, всего 3813; с настройками и
+  объявлениями tz — в 69 программах, 299 ошибок. Остались места, где tsc строже tz: перегрузки с
+  телом у каждого варианта ([overloads.md](overloads.md)), чтение полей `Json` без проверки,
+  `onabort = undefined` (в tz нет `null`), члены, добавленные подменой класса, вычитание дат.
 
 ## План реализации
 
-На каждом шаге: тесты (многофайловые — каталог с `main.ts` и ожидаемым выводом), ошибки в
+На каждом шаге: тесты (многофайловые — каталог с `main.tz` и ожидаемым выводом), ошибки в
 `tests/errors`, обновление README.
 
 1. **Несколько файлов** (сделано). Разбор `import` / `export`, поиск файлов и пути, видимость внутри
@@ -186,8 +185,8 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 3. **Файлы данных** (сделано; `embedBytes` — с [bytes.md](bytes.md), шаг 2). `embedJson` / `embedText`, тип `Json` с `null`, печать `Json` как в node.
    `JSON.parse` и `JSON.stringify` — после исключений ([errors.md](errors.md), шаг 2): разбор
    бросает `SyntaxError`.
-4. **Редактор** (сделано 25 октября). `tz.d.ts` и настройки tsc рядом с tz, `@types/node`,
-   undici-types и neverthrow в [third_party/types](../third_party/types/README.md);
-   `tsconfig.json` из `tz init`, `.tz/tsconfig.json` с путями пакетов
-   ([src/pkg/editor.cpp](../src/pkg/editor.cpp)); тесты `tests/cli/editor.cmake` и
-   `editor_tsc.cmake` (проект и примеры проверяются TypeScript из VS Code без ошибок).
+4. **Редактор** (сделано 25 октября). Файлы `.tz`: загрузчик, `tz init`, пакеты и `tz port`,
+   ошибки с подсказкой на `.ts` и `.js`, все тесты и примеры. Расширение VS Code с подсветкой
+   ([editors/vscode](../editors/vscode/README.md)). `tz.d.ts` и настройки tsc рядом с tz,
+   `@types/node`, undici-types и neverthrow в [third_party/types](../third_party/types/README.md),
+   тест `tests/cli/types.cmake` — для будущего плагина tsserver; его самого нет.

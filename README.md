@@ -13,22 +13,22 @@ console.log("fib(30) =", fib(30))
 ```
 
 ```
-tz run fib.ts            # скомпилировать и запустить
-tz build fib.ts          # получить fib.exe
-tz build --emit-llvm fib.ts   # посмотреть LLVM IR (fib.ll)
-tz build --explain-parallel app.ts   # что пойдёт параллельно и почему (см. «Async»)
-tz init                  # проект: tz.json, main.ts, .gitignore и tsconfig.json для редактора
+tz run fib.tz            # скомпилировать и запустить
+tz build fib.tz          # получить fib.exe
+tz build --emit-llvm fib.tz   # посмотреть LLVM IR (fib.ll)
+tz build --explain-parallel app.tz   # что пойдёт параллельно и почему (см. «Async»)
+tz init                  # проект: tz.json, main.tz и .gitignore
 tz add zod               # пакет (см. «Пакеты»)
 tz run                   # без файла — "main" из tz.json
 ```
 
-Программа из нескольких файлов собирается так же, из главного: `tz build main.ts` сам находит
-файлы, которые импортирует `main.ts`, и те, что импортируют они (см. «Модули»).
+Программа из нескольких файлов собирается так же, из главного: `tz build main.tz` сам находит
+файлы, которые импортирует `main.tz`, и те, что импортируют они (см. «Модули»).
 
 Примеры программ лежат в [examples](examples): типы и преобразования, строки, массивы,
 Фибоначчи, простые числа, последовательность Коллатца, разбор и печать чека
-([receipt.ts](examples/receipt.ts)), калькулятор с `enum` и `switch` ([calc.ts](examples/calc.ts)),
-точки на плоскости с `Math` и метками ([points.ts](examples/points.ts)). Сравнение скорости и памяти с Go на
+([receipt.tz](examples/receipt.tz)), калькулятор с `enum` и `switch` ([calc.tz](examples/calc.tz)),
+точки на плоскости с `Math` и метками ([points.tz](examples/points.tz)). Сравнение скорости и памяти с Go на
 одинаковых программах — в [bench](bench).
 
 ## Что уже работает
@@ -313,12 +313,12 @@ tz run                   # без файла — "main" из tz.json
 - Необязательные точки с запятой (ASI), комментарии, escape-последовательности.
 - Программы из нескольких файлов (см. «Модули»): `import { a, b as c } from "./x"`, `export`
   перед объявлением, `export { a, b as c }`, `export { a } from "./x"`, `export * from "./x"`;
-  пути `"./math"`, `"./math.ts"`, `"./math.js"`, каталог — его `index.ts`; циклические импорты.
+  пути `"./math"` и `"./math.tz"`, каталог — его `index.tz`; циклические импорты. Файлы программ
+  на tz — `.tz`; на `.ts` и `.js` — ошибка с подсказкой переименовать.
 - Пакеты (см. «Пакеты»): `import { ms } from "ms"` по имени из `tz.json`, пакеты из каталога, git
   и JSR, `tz.lock` с версиями и хешами, общий кэш исходников, `tz init`, `tz add`, `tz remove`,
-  `tz update`, `tz build` и `tz run` без файла; `tz port` переносит TS-библиотеку.
-- Редактор (см. «Редактор»): `tz init` настраивает для проекта TypeScript в VS Code —
-  объявления встроенных имён tz, `@types/node`, пути к пакетам.
+  `tz update`, `tz build` и `tz run` без файла; `tz port` переносит TS-библиотеку в файлы `.tz`.
+- Редактор (см. «Редактор»): подсветка файлов `.tz` в VS Code.
 - JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)`,
   `JSON.stringify(x, null, space)` любого значения, чтение и запись ключей (`j.users[0].name`),
   сужение `typeof`, `Array.isArray` и `!= null`, `JSON.parse<User>(text)` и `fromJson<User>(j)`,
@@ -446,7 +446,7 @@ try {
   бросить может какая-нибудь функция этого типа.
 - **Стек** собирается по пути исключения наверх: функция, которая бросила, и каждая, через которую
   исключение прошло (и та, что его поймала), дописывают своё место — имя, файл и строку со
-  столбцом, как в node: `    at Point.move (D:\app\main.ts:12:5)`. Мест не больше десяти, как
+  столбцом, как в node: `    at Point.move (D:\app\main.tz:12:5)`. Мест не больше десяти, как
   у node по умолчанию (`Error.stackTraceLimit`). Стоит это что-то только при броске. Исключение,
   которое ещё не бросали, мест не имеет: его `stack` — только текст, а `console.log` печатает его
   в скобках, `[Error: текст]`, как node печатает ошибку без стека.
@@ -828,7 +828,7 @@ function grow() {
   Группа, которая доросла до 4096, 8192... членов, обходится, и программа сообщает, сколько её
   членов уже не достать снаружи и что их держит:
   `tz: group of Player: 4094 of 4097 objects cannot be reached, held by Player.opponent at
-  main.ts:20; ...`. Доказательства слоёв 1 и 2 проверяются во время работы
+  main.tz:20; ...`. Доказательства слоёв 1 и 2 проверяются во время работы
   (`tz: debug check failed: ...`), а в конце печатаются оставшиеся группы с типами членов.
 - **Скорость.** Группа из 10 млн узлов со строкой освобождается за 190 мс, если узлы идут в
   кольце подряд по памяти, и за 1,3 с, если разбросаны (1 млн — 20 мс, 100 тыс. — 1 мс).
@@ -1027,7 +1027,7 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   компиляции.
 
 DI-контейнер и маршрутизатор — библиотеки на tz поверх всего этого, не часть языка: пример — в
-[tests/run/decorators_di.ts](tests/run/decorators_di.ts).
+[tests/run/decorators_di.tz](tests/run/decorators_di.tz).
 
 ## unknown и object
 
@@ -1317,7 +1317,7 @@ const text = parseIntSafe("42")
   `asyncAndThen` у `Result`, которые вызывают функцию сразу. Каждый шаг занимает столько же
   оборотов очереди микрозадач, сколько код neverthrow 8 (`map` — async-функция внутри `then`,
   `andThen` — просто `then`), поэтому всё, что выполняется между шагами, печатается в том же
-  порядке: [result_async_order.ts](tests/run/result_async_order.ts) сверен с neverthrow в node.
+  порядке: [result_async_order.tz](tests/run/result_async_order.tz) сверен с neverthrow в node.
   `ResultAsync.combine` и `andThrough` у `ResultAsync` — ошибки с подсказкой (`Promise.all` и
   `Result.combine`; `andThen`).
 
@@ -1866,7 +1866,7 @@ setTimeout(() => bus.emit("user", ann), 10)
 const [user] = await once(bus, "user")
 ```
 
-- **Код — node.** `EventEmitter` написан на tz ([src/lib/events.ts](src/lib/events.ts)) переносом
+- **Код — node.** `EventEmitter` написан на tz ([src/lib/events.tz](src/lib/events.tz)) переносом
   `lib/events.js` из node 24: `_events` — один слушатель или массив, `newListener` — до добавления,
   `removeListener` — после удаления, обёртка `once()` снимает себя перед вызовом, слушатель,
   добавленный во время `emit`, работает со следующего; `emit("error")` без слушателя бросает
@@ -1907,7 +1907,7 @@ const [user] = await once(bus, "user")
   ещё никто не ждёт, ждут в очереди; событие `error` (если оно есть в карте) и `signal` заканчивают
   цикл ошибкой после событий до них, событие из `close` — просто после них; когда цикл кончается
   (и `break`), слушатели снимаются. `on()` у `EventTarget` — ошибка «пока нет».
-- **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([src/lib/web.ts](src/lib/web.ts))
+- **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([src/lib/web.tz](src/lib/web.tz))
   — глобальные, и тоже как в node: порядок слушателей (и добавленных во время `dispatchEvent`),
   `once`, `signal`, `capture`, объект с `handleEvent()`, один слушатель — один раз,
   `preventDefault()`, `stopImmediatePropagation()`; ошибка слушателя — на следующем ходу.
@@ -1947,7 +1947,7 @@ for await (const text of createReadStream("log.txt", "utf8")) console.log(text.l
 const users = Readable.from([ann, bob])                         // Readable<User>
 ```
 
-- **Код — node.** `node:stream` написан на tz ([src/lib/stream.ts](src/lib/stream.ts)) переносом
+- **Код — node.** `node:stream` написан на tz ([src/lib/stream.tz](src/lib/stream.tz)) переносом
   `lib/internal/streams` из node 24 поверх `EventEmitter`: `Readable` (поток и пауза, `read()`,
   `unshift`, событие `readable`), `Writable` (`cork` / `uncork`, `writev`, `final`), `Duplex`,
   `Transform`, `PassThrough`, `pipe` (ошибку дальше не передаёт, как в node), `pipeline` и
@@ -2089,7 +2089,7 @@ const signature = sign(undefined, Buffer.from("message"), privateKey)
   `node:fs`; `argon2Sync` принимает литерал без spread.
 
 **Web Crypto** — `crypto.subtle`, как в node, на том же OpenSSL; написан на tz
-([src/lib/webcrypto.ts](src/lib/webcrypto.ts), по коду node 24):
+([src/lib/webcrypto.tz](src/lib/webcrypto.tz), по коду node 24):
 
 ```ts
 const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
@@ -2146,25 +2146,28 @@ const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey)       // JsonWe
 
 ## Модули
 
-Каждый `.ts`-файл — модуль: его имена видны только ему, а другим — то, что он экспортирует и
-они импортируют. `tz build main.ts` читает `main.ts`, находит по импортам остальные файлы и
+Каждый `.tz`-файл — модуль: его имена видны только ему, а другим — то, что он экспортирует и
+они импортируют. `tz build main.tz` читает `main.tz`, находит по импортам остальные файлы и
 собирает всё в один exe; файлы читаются при компиляции, рядом с exe они не нужны.
 
 ```ts
-// geometry/index.ts — «витрина» каталога
+// geometry/index.tz — «витрина» каталога
 export { area } from "./circle"   // реэкспорт по имени
-export * from "./rect"            // всё, что экспортирует rect.ts
+export * from "./rect"            // всё, что экспортирует rect.tz
 
-// main.ts
+// main.tz
 import { add, PI } from "./math"
-import { add as plus } from "./math.ts"   // тот же файл, другое имя
+import { add as plus } from "./math.tz"   // тот же файл, другое имя
 import { area, Rect } from "./geometry"   // типы импортируются как всё остальное
 ```
 
-- Путь — только относительный: `"./math"`, `"./math.ts"` и `"./math.js"` (так пишут в TS для
-  node) — это `math.ts`; каталог — его `index.ts` (если рядом нет `geometry.ts`). Регистр букв
-  в пути должен совпадать с именем файла: в Windows файл нашёлся бы и так, а в Linux — нет.
-  Node.js понимает только вариант с `.ts`, поэтому тесты, которые сверяются с node, пишут его.
+- Путь — только относительный: `"./math"` и `"./math.tz"` — это `math.tz`; каталог — его
+  `index.tz` (если рядом нет `geometry.tz`). Регистр букв в пути должен совпадать с именем файла:
+  в Windows файл нашёлся бы и так, а в Linux — нет. Файлы tz — только `.tz`: `"./math.ts"` и
+  `"./math.js"` — ошибка с подсказкой `import './math' or './math.tz'`, а если рядом лежит
+  `math.ts` — ещё и `rename math.ts to math.tz`. Node.js запускает файлы `.tz` только копией с
+  расширением `.ts`, поэтому тесты, которые сверяются с node, импортируют с расширением
+  (`"./math.tz"`): в копии оно становится `.ts`.
   Типы node импортирует только через `import type`, которого здесь нет, поэтому программы,
   которые импортируют типы, с node не сверяются.
 - Импортировать можно функции, переменные, типы, `interface` и `enum`; одно имя — и тип, и
@@ -2174,12 +2177,12 @@ import { area, Rect } from "./geometry"   // типы импортируются
 - Порядок загрузки — как в JS: сначала файлы, которые модуль импортирует (по порядку импортов),
   потом он сам, каждый файл один раз; код верхнего уровня выполняется при загрузке. Функции,
   типы и `enum` всех файлов готовы ещё при компиляции и от порядка не зависят.
-- Циклические импорты разрешены: `a.ts` импортирует `b.ts`, а `b.ts` — `a.ts`. Тогда `b.ts`
-  загружается раньше `a.ts`, и его код верхнего уровня не может читать переменные `a.ts`: в node
+- Циклические импорты разрешены: `a.tz` импортирует `b.tz`, а `b.tz` — `a.tz`. Тогда `b.tz`
+  загружается раньше `a.tz`, и его код верхнего уровня не может читать переменные `a.tz`: в node
   это `ReferenceError` при запуске, здесь — ошибка компиляции с цепочкой импортов, прямо
   (`const s = "b sees " + aName`) или через вызванную функцию (`const v = getA()`):
-  `b.ts reads 'aName' of a.ts while it loads, but a.ts is not loaded yet: main.ts -> a.ts ->
-  b.ts -> (a.ts already started)`. Внутри функций и стрелок, которые вызовут позже, читать их
+  `b.tz reads 'aName' of a.tz while it loads, but a.tz is not loaded yet: main.tz -> a.tz ->
+  b.tz -> (a.tz already started)`. Внутри функций и стрелок, которые вызовут позже, читать их
   можно. Если для типа стрелки нужен тип переменной файла, который загрузится позже, компилятор
   проверяет этот файл заранее, до её объявления.
 - Та же проверка и внутри одного файла: код верхнего уровня, который вызывает функцию раньше, чем
@@ -2206,7 +2209,7 @@ import { area, Rect } from "./geometry"   // типы импортируются
 ```json
 {
   "name": "app",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "ms": "file:../ms",
     "greet": "jsr:@tz/greet@^2.0.0",
@@ -2225,18 +2228,17 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   `"file:../lib"` или `"../lib"` — каталог, как он есть. `npm:` и версия без источника (`"^4"`) —
   ошибки с подсказкой.
 - **tz.json**: `name`, `version`, `main` (что собирают `tz build` и `tz run` без файла и что
-  импортирует `"пакет"`), `exports` (`{ ".": "./mod.ts", "./mini": "./mini.ts" }`: импортировать
+  импортирует `"пакет"`), `exports` (`{ ".": "./mod.tz", "./mini": "./mini.tz" }`: импортировать
   можно только эти пути) и `dependencies`. Комментарии и запятая в конце разрешены, неизвестное
   поле — ошибка. Имя пакета — `zod` или `@scope/name`, но не имя встроенного модуля (`fs`, `path`,
   `util`...). Пакет без `tz.json` говорит о себе в `jsr.json` или `deno.json`; если и их нет, его
-  вход — `mod.ts`, `index.ts` или `src/index.ts`.
-- **Команды.** `tz init [каталог]` — `tz.json`, `main.ts`, `.gitignore` и `tsconfig.json` для
-  редактора (см. «Редактор»). `tz add zod` — пакет,
+  вход — `mod.tz`, `index.tz` или `src/index.tz`.
+- **Команды.** `tz init [каталог]` — `tz.json`, `main.tz` и `.gitignore`. `tz add zod` — пакет,
   адаптированный для tz (`jsr:@tz/zod`, импорт — `"zod"`), с диапазоном `^` от новейшей версии;
   `tz add @std/path@^1`, `tz add github:user/repo@v1.0.0`, `tz add ../lib` — остальные (имя для
   импорта — `name` из `tz.json` пакета или имя репозитория). `tz remove zod`, `tz update [имя...]` —
   новейшие версии, которые разрешает `tz.json`. Если версии не сходятся, `tz.json` остаётся как был.
-  `tz run` без файла запускает `main`; аргументы программы — всё, что не `.ts`, и всё после `--`.
+  `tz run` без файла запускает `main`; аргументы программы — всё, что не `.tz`, и всё после `--`.
   `tz build` без файла называет exe по `name`.
 - **tz.lock** лежит рядом с `tz.json`: точная версия (у git — коммит) и хеш исходников каждого
   пакета, с зависимостями зависимостей; локальных каталогов в нём нет. Если `tz.lock` подходит к
@@ -2266,7 +2268,7 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   временный каталог и переименовывается целиком, поэтому несколько `tz` сразу не мешают друг другу.
 - **Импорт.** Имя без точки — пакет из `dependencies` того пакета, чей это файл (у каждого пакета
   они свои); `"zod/mini"` — путь из его `exports`, а без `exports` — файл пакета. Файлы пакета
-  называются по нему (`@std/fmt/colors.ts`), пакет из JSR или git импортирует только свои файлы и
+  называются по нему (`@std/fmt/colors.tz`), пакет из JSR или git импортирует только свои файлы и
   зависимости. `"jsr:..."` в коде проекта — ошибка с подсказкой `tz add`. Правила tz для пакетов те
   же, что для программы.
 - **`tz port <пакет>`** — копия TS-библиотеки (каталог, `jsr:`, `github:` или `git:`) для
@@ -2285,7 +2287,7 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   ручных правок (они перечислены в начале файла); его использует тест `tests/run/packages`.
   [tests/packages/uuid](tests/packages/uuid) — uuid 14.0.3 (`v1`, `v3`, `v4`, `v5`, `v6`, `v7`,
   `NIL`, `MAX`, `parse`, `stringify`, `validate`, `version`, `v1ToV6`, `v6ToV1`; правки — в начале
-  `src/index.ts`): перегрузок у функций нет, поэтому `v4<TBuf extends Uint8Array = never>(options?,
+  `src/index.tz`): перегрузок у функций нет, поэтому `v4<TBuf extends Uint8Array = never>(options?,
   buf?: TBuf, offset?)` даёт `string | TBuf` — без буфера это `string`, а с буфером `string |
   Uint8Array`; `v3.DNS` (свойство функции) — экспорт `DNS` и `URL`. Тест
   `tests/run/packages_uuid` печатает ровно то же, что оригинальный uuid 14.0.3 в node.
@@ -2628,7 +2630,7 @@ async-функции и из колбэка `then`, `finally`, `Promise.all` / `
 бы один пишет, идут по очереди в порядке node, остальные — параллельно. Async-генератор идёт в
 задаче цикла, который его перебирает. Так рантайм их и выполняет (см. ниже).
 
-`tz build --explain-parallel app.ts` ничего не собирает и печатает для кода верхнего уровня, каждой
+`tz build --explain-parallel app.tz` ничего не собирает и печатает для кода верхнего уровня, каждой
 async-функции и каждого колбэка их куски в порядке исходника:
 
 ```
@@ -2642,7 +2644,7 @@ async function convert, line 7
 ```
 
 Под куском — что он читает (`reads`) и пишет (`writes`), со строками: `line 12 in save` — через
-вызов `save` в строке 12, в других файлах — `lib.ts:5`. Затем решение: `parallel` (может идти
+вызов `save` в строке 12, в других файлах — `lib.tz:5`. Затем решение: `parallel` (может идти
 одновременно с другими кусками, общих изменяемых данных с ними нет), `runs alone` (одновременно с
 ним ничего не идёт) или строки `in order with <кусок>: <данные>` и `in order: lines A-B` —
 участок от первого до последнего обращения к общим данным, который один и идёт по очереди. Кусок,
@@ -2965,28 +2967,22 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
 
 ## Редактор
 
-Пока своего языкового сервера нет, код в VS Code проверяет TypeScript, и tz настраивает его для
-проекта ([docs/modules.md](docs/modules.md), раздел 6):
+Программы на tz — файлы `.tz`. Расширение [editors/vscode](editors/vscode/README.md) учит VS Code
+их подсвечивать: язык `tz` с грамматикой TypeScript, скобками, комментариями и отступами как у TS.
+Установка:
 
-- `tz init` пишет `tsconfig.json`, который расширяет `.tz/tsconfig.json`. Тот пишет сам tz —
-  при `tz add`, `tz remove`, `tz update` и при сборке: в нём настройки рядом с tz и пути к пакетам
-  проекта в кэше. `.tz/` — в `.gitignore`: пути там этого компьютера. В старом проекте `tz init`
-  добавляет только `tsconfig.json`.
-- Рядом с `tz.exe`, в `types`: `@types/node`, объявления neverthrow и
-  [tz.d.ts](src/types/tz.d.ts) — `int`, `long`, `decimal` с методами, `Json`, `JSON.parse<T>`,
-  `fromJson`, `embedJson`, `Result` без импорта, `SystemError`, `Constructor`, метаданные,
-  `"tz:io"`, `"tz:http"` и остальное, что в tz есть без импорта. Настройки: каждый файл — модуль,
-  импорты как в tz, без DOM, `strict` без `noImplicitAny`, `e` в `catch` — `Error`,
-  декораторы как в tz.
-- Подчёркнутым остаётся то, в чём tsc строже tz: перегрузки с телом у каждого варианта, поля
-  `Json` без проверки, `undefined` вместо `null` в свойствах вроде `onabort`. На тестах tz:
-  ошибки tsc были в 302 программах из 332 (3813 ошибок), теперь — в 69 (299); примеры и
-  бенчмарки проходят без ошибок.
-- В этом репозитории [tsconfig.json](tsconfig.json) берёт настройки у tz из `build/dev`: тесты,
-  примеры и бенчмарки открываются в редакторе так же.
+```
+powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
+```
+
+и `Developer: Reload Window`. Проверки типов в редакторе нет — ошибки показывает `tz build`.
+Объявления встроенных имён tz для TypeScript ([tz.d.ts](src/types/tz.d.ts)), `@types/node` и
+настройки tsc лежат рядом с `tz.exe`, в `types`, — для плагина tsserver, который проверял бы
+файлы `.tz` ([docs/modules.md](docs/modules.md), раздел 6); самого плагина пока нет.
 
 ## Чем отличается от TypeScript
 
+- Файлы программ — `.tz`, а не `.ts` (см. «Модули»); синтаксис тот же.
 - Есть целые типы. `7 / 2` для `int` равно `3`; переполнение целых при выполнении
   заворачивается, как в Go. `**` целых тоже остаётся целым: `x ** 31` для `int` заворачивается,
   `x ** -1` равно `0` (а отрицательная степень-константа — ошибка компиляции с подсказкой
@@ -3526,7 +3522,7 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 ## Как устроен компилятор
 
 ```
-.ts → Lexer → Parser → AST → Sema → CodeGen → LLVM IR → + рантайм → оптимизации → .obj → LLD → .exe
+.tz → Lexer → Parser → AST → Sema → CodeGen → LLVM IR → + рантайм → оптимизации → .obj → LLD → .exe
 ```
 
 Быстрые пути рантайма, которые программы вызывают в циклах (выделение и освобождение памяти,
@@ -3545,18 +3541,19 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `src/sema` | типы, разрешение имён, проверка типов; неявные преобразования становятся узлами `CastExpr`; факты и доказательства индексов (`facts.cpp`, `sema_flow.cpp`); встроенные функции (`sema_builtins.cpp`); псевдонимы типов, `interface`, `enum` и целые константы (`sema_decls.cpp`); вывод типа возврата (`sema_infer.cpp`); замыкания, функции блоков и методы с колбэками (`sema_closure.cpp`); `WeakRef` (`sema_weak.cpp`); литералы объектов, spread, ключи в скобках, кортежи, `Object.keys` и сужение полей (`sema_object.cpp`); классы как значения, `Constructor<T>`, class-выражения, примеси-шаблоны и подмена класса декоратором (`sema_classvalue.cpp`); отражение: `Reflect.get`, `apply`, `construct` и `fromJson(cls, j)` (`sema_reflect.cpp`); классы, `this`, правило задания полей, статические члены, `instanceof`, перегрузка и литералы с методами (`sema_class.cpp`); наследование, переопределение, `super`, `abstract`, интерфейсы и `implements`, таблицы методов (`sema_inherit.cpp`); класс `Error`, `throw`, `try` (`sema_error.cpp`); тип литерала по тому, куда объект идёт дальше (`sema_destination.cpp`); объединения и литеральные типы, их сужение, полнота `switch`, поля и методы объединений (`sema_union.cpp`); функции-проверки: сводки `return`, `x is T`, `asserts`, `filter` (`sema_predicate.cpp`); `process`, `Date.now()` и `performance.now()` (`sema_process.cpp`); `decimal`: литералы, операторы и методы (`sema_decimal.cpp`); области видимости файлов, импорты и экспорты, проверка порядка загрузки и неиспользуемые функции (`sema_modules.cpp`); обобщённые функции и псевдонимы, вывод аргументов типа и копии под типы (`sema_generic.cpp`); `Result`, `safeTry` и забытые `Result` (`sema_result.cpp`); генераторы, `yield`, типы итераторов и их методы (`sema_iter.cpp`); регулярки: литералы, типы совпадений, методы `RegExp` и строк, ловушки JS (`sema_regex.cpp`); `Json`, `null`, `JSON`, `embedJson` и `embedText`, `fromJson` и проверка файлов JSON при компиляции (`sema_json.cpp`); даты, их ловушки и `Intl.DateTimeFormat` (`sema_date.cpp`); async-функции, `await`, `for await`, `Promise`, таймеры и очереди, забытые `Promise`, `ResultAsync` (`sema_async.cpp`); куски async-кода, что каждый читает и пишет, задачи и что из этого пойдёт параллельно, `--explain-parallel` (`parallel.cpp`); `node:fs/promises`, `node:timers/promises`, `node:readline` и опция `signal` (`sema_async_io.cpp`); встроенные модули: импорты из `node:fs`, `node:path`, `node:os`, `node:process` и `tz:io`, их функции и опции, классы `Stats` и `Dirent` (`sema_node.cpp`); `spawnSync`, `execFileSync` и `execSync`, их опции, типы результата и `ExecSyncError` (`sema_child.cpp`); словари `Record`, `Map` и `Set`, `Object.groupBy` и `Object.fromEntries` (`sema_dict.cpp`); байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент (`sema_bytes.cpp`); `unknown` и `object`, их сужение (`sema_unknown.cpp`); декораторы и порядок их применения, описание метода, метаданные и `design:*`, функции с `this`, списки параметров, классы как значения (`sema_decorate.cpp`); `node:crypto`: функции, методы и свойства его объектов, имена алгоритмов и выбор слоя OpenSSL (`sema_crypto.cpp`, функции рантайма — в `crypto_api.h`); события: карты событий, вызовы программы на эмиттерах и `EventTarget`, `once()`, карты из `emit` программы, встроенные функции `__tz_*` модулей на tz (`sema_events.cpp`); остальной `Intl`, `toLocaleString` чисел, `localeCompare` и `normalize`, типы `Intl.*` (`sema_intl.cpp`); встроенные модули, написанные на tz: их функции рантайма `__tz_*`, геттеры и сеттеры их классов, функция, чей результат приводится к ожидаемому (async-обработчик там, где ждут `Response \| Promise<Response>`) (`sema_library.cpp`) |
 | `src/codegen` | генерация LLVM IR через `IRBuilder`; массивы и методы с колбэками — `codegen_array.cpp`; `Math`, `Number` и т.п. — `codegen_builtins.cpp`; значения функций, окружения и коробки — `codegen_closure.cpp`; раскладки объектов, их описания, литералы (и со spread), кортежи, поля и `Object.keys` — `codegen_object.cpp`; методы, конструкторы, `new`, статические поля, `instanceof` — `codegen_class.cpp`; таблицы методов, таблицы интерфейсов и вызовы через них — `codegen_inherit.cpp`; `process` и часы — `codegen_process.cpp`; `decimal` — `codegen_decimal.cpp`; `Result`, его методы и `yield*` — `codegen_result.cpp`; хвостовые вызовы — `codegen_tail.cpp`; генераторы как корутины LLVM и на месте, их закрытие, итераторы массивов и ленивые цепочки в один цикл — `codegen_iter.cpp`; какие функции могут бросить (по всей программе), путь исключения наверх, `try` / `catch` / `finally`, проверка стека, класс `Error` и `Result.fromThrowable` — `codegen_throw.cpp`; регулярки, описания совпадений и `replace` с функцией — `codegen_regex.cpp`; машинный код литералов регулярок — `codegen_regex_native.cpp`; `Json`, `JSON.parse` / `stringify`, `embedJson` и функции `JSON.parse<T>` — `codegen_json.cpp`; объединения: представление, метки, атомы литералов, преобразования, поля и методы объединений объектов — `codegen_union.cpp`; даты и `Intl.DateTimeFormat` — `codegen_date.cpp`; async-функции как корутины, `Promise`, реакции `then` / `catch` / `finally`, `Promise.all` и другие, таймеры, `ResultAsync` — `codegen_async.cpp`; async-генераторы и `for await` — `codegen_async_iter.cpp`; `node:fs/promises`, `node:readline`, `node:timers/promises` и что они берут от сигнала отмены — `codegen_async_io.cpp`; встроенные модули и функции, которыми рантайм делает объекты (`SystemError`, `Stats`...) — `codegen_node.cpp`; запуск программ и функции, которыми рантайм делает результат `spawnSync` и `ExecSyncError`, — `codegen_child.cpp`; словари `Record`, `Map` и `Set` — `codegen_dict.cpp`; байтовые массивы, чтения и записи `DataView` и `Buffer` на месте, TBAA байтов и `embedBytes` — `codegen_bytes.cpp`; `unknown`, классы как значения и `join` кортежа — `codegen_unknown.cpp`; объявление класса с декораторами, заглушки и переходники методов, которые декоратор может подменить, метаданные — `codegen_decorate.cpp`; какие типы могут образовать циклы, код групп, слои 1 и 2 и проверки отладочного режима — `codegen_cycles.cpp`; вызовы функций `node:crypto` по их описанию и `generateKeyPairSync` — `codegen_crypto.cpp`; описания классов для отражения, `new` класса-значения, проверка значений `unknown` по параметрам, `Reflect.get` / `apply` / `construct`, `fromJson` классов — `codegen_reflect.cpp`; встроенные функции `__tz_*` модулей на tz — `codegen_events.cpp`; остальной `Intl`, опции для рантайма и привязанные `format` / `compare` — `codegen_intl.cpp`; вызовы рантайма из встроенных модулей на tz, геттеры в описаниях их классов для печати, переходники результата функций — `codegen_library.cpp` |
 | `src/driver` | командная строка, загрузка файлов программы по импортам и их порядок, пакеты по имени, встроенные модули на tz и глобальные имена `tz:web`, `tz:url` и `tz:fetch` (`loader.cpp`), проходы проверки для карт событий из `emit`, пайплайн оптимизаций, объектный файл, встроенный LLD; какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses.cpp`) |
-| `src/pkg` | проекты и пакеты: `tz.json`, `tz.lock`, выбор версий и граф пакетов программы (`project.cpp`), semver (`semver.cpp`), кэш, JSR и git (`fetch.cpp`), HTTP через WinHTTP (`net.cpp`), JSON с позициями для ошибок и правок (`json.cpp`), импорты файла без парсера (`scan.cpp`), `tz init` / `add` / `remove` / `update` (`commands.cpp`), `.tz/tsconfig.json` для редактора (`editor.cpp`), `tz port` (`port.cpp`) |
-| `src/types` | то, что tz даёт редактору: встроенные имена tz для tsc (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`); лежат рядом с `tz.exe` в `types` |
-| `src/lib` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`: `node:events` (`events.ts`), `tz:http` (`http.ts`), `node:stream` (`stream.ts`), `node:stream/promises` (`stream_promises.ts`), `node:stream/consumers` (`stream_consumers.ts`), `node:string_decoder` (`string_decoder.ts`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.ts`) и глобальные — файл, который их называет, получает их сам: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.ts`), `URL` и `URLSearchParams` (`url.ts`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.ts`). Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
+| `src/pkg` | проекты и пакеты: `tz.json`, `tz.lock`, выбор версий и граф пакетов программы (`project.cpp`), semver (`semver.cpp`), кэш, JSR и git (`fetch.cpp`), HTTP через WinHTTP (`net.cpp`), JSON с позициями для ошибок и правок (`json.cpp`), импорты файла без парсера (`scan.cpp`), `tz init` / `add` / `remove` / `update` (`commands.cpp`), `tz port` (`port.cpp`) |
+| `src/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
+| `editors/vscode` | расширение VS Code: подсветка файлов `.tz` ([README](editors/vscode/README.md)) |
+| `src/lib` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`: `node:events` (`events.tz`), `tz:http` (`http.tz`), `node:stream` (`stream.tz`), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`) и глобальные — файл, который их называет, получает их сам: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`), `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
 | `runtime` | рантайм на C: аллокатор, куча на каждый поток (`alloc.c`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel.c`); общие объекты и атомарные счётчики (`publish.c`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`tzrt.c`); исключение в полёте, места стека ошибки, текст `e.stack`, не пойманное исключение (`error.c`); аргументы, переменные окружения, код выхода и часы (`process.c`); строки (`string.c`); массивы (`array.c`); `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect.c`); разбор чисел и `toFixed` (`number.c`); `Math` (`math.c`); окружения замыканий и объекты (`closure.c`); точные десятичные числа `decimal` (`decimal.c`); значения `Json`, `JSON.parse` как в V8, `JSON.stringify` любого значения и проверки `JSON.parse<T>` (`json.c`); `Object.keys` / `values` / `entries` (`object.c`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode.c`); регулярки: разбор и компиляция в программу (`regex_compile.c`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex.c`); даты: поля, установка полей и строки (`date.c`), разбор строк, как в V8 (`date_parse.c`, общий с `tz`), местный пояс (`date_zone.c`) и языки (`date_format.c`) по ICU системы, которую `icu.c` загружает при первом обращении; `Promise`, очередь микрозадач и `nextTick`, необработанные отклонения, таймеры и цикл событий, как в node, `node:timers/promises`, async-итераторы и async-генераторы (`async.c`); пул потоков и ожидание ввода-вывода в фазе poll — IOCP в Windows (`io.c`); сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal.c`); `node:path` в обоих стилях (`path.c`); `node:fs` и `node:fs/promises`, ошибки ОС `SystemError` как в libuv, stdin, `readLine` и `node:readline`, чтение и запись кусками для потоков файлов (`fs.c`); что просит `node:stream`: проверка куска, байты в stdout и stderr (`stream.c`); `node:child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child.c`); `node:os` (`os.c`); хеш-таблица словарей `Record`, `Map` и `Set` (`map.c`); `ArrayBuffer`, типизированные массивы и их методы (`bytes.c`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer.c`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у node (`encodings.h`); коробки `unknown`, `typeof` и `===` у них (`unknown.c`); записи метаданных (`meta.c`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group.c`); сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net.c`); HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http.c`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress.c`); отражение: `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect.c`); что просят встроенные модули на tz через `__tz_*` (`library.c`); остальной `Intl`: языки, опции и части `formatToParts` (`intl.c`), числа и `PluralRules` (`intl_number.c`), `Collator`, `normalize` и `Segmenter` (`intl_text.c`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names.c`). Отдельно, в `tzcrypto.lib`, — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto.c`), хеши (`crypto_md.c`), AES (`crypto_aes.c`) и ChaCha20-Poly1305 (`crypto_chacha.c`), scrypt (`crypto_scrypt.c`) и Argon2 (`crypto_argon2.c`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp.c`), ключи, подписи и обмен ключами (`crypto_keys.c`), сертификаты (`crypto_x509.c`); Web Crypto (`crypto_subtle*.c`); TLS соединений `net.c` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/gen_tls_roots.mjs) берёт у node (`tls.c`, `tls_roots.h`) |
 | `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node`, undici-types и объявления neverthrow для редактора ([types](third_party/types/README.md)) |
-| `tests` | `run/*.ts` с ожидаемым выводом в `*.out`; `errors/*.ts` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.ts`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
+| `tests` | `run/*.tz` с ожидаемым выводом в `*.out`; `errors/*.tz` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.tz`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
 | `bench` | одни и те же программы на typezero и Go и скрипт сравнения; сервер «Hello, World!» на tz, Go и node и нагрузка на него (`http.ps1`) |
 | `docs` | принятые решения, которые ещё не реализованы или реализованы не до конца: объекты и классы ([objects.md](docs/objects.md)), generics ([generics.md](docs/generics.md)), исключения и `Result` ([errors.md](docs/errors.md)), модули и JSON ([modules.md](docs/modules.md)), ввод-вывод ([io.md](docs/io.md)), async ([async.md](docs/async.md)), итераторы и генераторы ([iterators.md](docs/iterators.md)), декораторы ([decorators.md](docs/decorators.md)), мелочи языка ([small.md](docs/small.md)), точные десятичные `decimal` ([decimal.md](docs/decimal.md)), регулярные выражения ([regex.md](docs/regex.md)), даты ([date.md](docs/date.md)), пакеты ([packages.md](docs/packages.md)), байтовые массивы ([bytes.md](docs/bytes.md)), сеть ([net.md](docs/net.md)), криптография ([crypto.md](docs/crypto.md)), запуск процессов ([process.md](docs/process.md)), события ([events.md](docs/events.md)), потоки ([streams.md](docs/streams.md)), перегрузка методов ([overloads.md](docs/overloads.md)), проверки и сужение, JSON в свои типы ([narrowing.md](docs/narrowing.md)), языки `Intl` ([intl.md](docs/intl.md)) |
 
 ## Тесты
 
-Каждый `tests/run/name.ts` компилируется дважды, как обычно и с `-O0`, запускается с проверкой
+Каждый `tests/run/name.tz` компилируется дважды, как обычно и с `-O0`, запускается с проверкой
 утечек, и stdout сравнивается с `name.out`. Код выхода и stderr задаются комментариями
 `// expect-exit: N` и `// expect-stderr: текст`, а запуск — строками `// args: a "b c"`
 (аргументы), `// env: ИМЯ=значение` (переменная окружения, по одной на строку) и
@@ -3564,12 +3561,12 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 порядок строк обоих); stdin — файл `name.in` рядом с тестом, байт в байт (для `readLine` и
 `readFileSync(0)`). Если рядом лежит `name.explain`, тест `explain/name` сверяет с ним то, что
 печатает `tz build --explain-parallel` (для программы из нескольких файлов — `main.explain`). Каждый
-`tests/errors/*.ts` обязан не скомпилироваться, а на строке под
+`tests/errors/*.tz` обязан не скомпилироваться, а на строке под
 комментарием `// expect-error: текст` должна быть ошибка с этим текстом (так проверяется, что
-каждая ловушка в [tests/errors/bounds.ts](tests/errors/bounds.ts) поймана отдельно).
+каждая ловушка в [tests/errors/bounds.tz](tests/errors/bounds.tz) поймана отдельно).
 
-Программа из нескольких файлов — каталог: `tests/run/name/main.ts` с остальными файлами рядом и
-ожидаемым выводом в `main.out`, или `tests/errors/name/main.ts`, где `// expect-error:` может
+Программа из нескольких файлов — каталог: `tests/run/name/main.tz` с остальными файлами рядом и
+ожидаемым выводом в `main.out`, или `tests/errors/name/main.tz`, где `// expect-error:` может
 стоять в любом из файлов каталога.
 
 Тесты с первой строкой `// same-as-node` ведут себя ровно как JavaScript: если установлен Node.js

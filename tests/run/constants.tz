@@ -1,6 +1,6 @@
 // same-as-node --experimental-transform-types
 // Integer constants are computed at compile time, where an overflow is an
-// error (see errors/constants.ts). These fit, or are meant to wrap around.
+// error (see errors/constants.tz). These fit, or are meant to wrap around.
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const month: long = MS_PER_DAY * 30
 const big: long = 2 ** 40

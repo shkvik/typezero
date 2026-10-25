@@ -5,7 +5,7 @@
 // the listener of an AbortSignal, the resolve of a Promise, closures and a
 // generator; decorated handler classes made by reflection; and weak
 // references, which become undefined the moment their objects die.
-import { Conn, Handler, Room, Route, Server } from "./graph.ts"
+import { Conn, Handler, Room, Route, Server } from "./graph.tz"
 
 @Route("/echo")
 class Echo extends Handler {

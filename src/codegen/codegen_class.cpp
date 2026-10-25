@@ -180,7 +180,7 @@ llvm::Constant *CodeGen::classDescriptor(const ClassDecl *cls) {
         fieldDescTy_, {utf8Constant(shown), builder_.getInt32(uint32_t(shown.size())),
                        builder_.getInt32(uint32_t(offset)), typeDescriptor(type->fields()[i].type)}));
   };
-  // An emitter of node:events (src/lib/events.ts) prints as node's: its
+  // An emitter of node:events (src/lib/events.tz) prints as node's: its
   // private fields under node's names, those that are symbols in node last
   // (TZ_LAYOUT_LIBRARY in runtime/tzrt.h).
   bool emitter = false;

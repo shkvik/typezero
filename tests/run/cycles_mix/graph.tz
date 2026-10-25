@@ -1,5 +1,5 @@
-// What main.ts builds its cycles from: an emitter whose events are those its
-// code and main.ts emit; a server whose connections refer back to it, with
+// What main.tz builds its cycles from: an emitter whose events are those its
+// code and main.tz emit; a server whose connections refer back to it, with
 // the signal of its AbortController, the promises of their ends and a hash
 // of what each reads; and handlers that a class decorator registers by path,
 // which reflection makes for each server.

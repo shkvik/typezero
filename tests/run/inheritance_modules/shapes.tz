@@ -1,4 +1,4 @@
-// The classes and the interface that main.ts extends and implements.
+// The classes and the interface that main.tz extends and implements.
 export interface HasArea {
   area(): double
 }

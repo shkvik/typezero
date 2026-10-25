@@ -1,5 +1,5 @@
 // The other file of iter_mix: generators and a class with generator methods
-// (one of them static), exported to main.ts.
+// (one of them static), exported to main.tz.
 export class Item {
   constructor(public name: string, public price: decimal, public qty: int) {}
 }

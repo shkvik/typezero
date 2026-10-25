@@ -16,8 +16,8 @@ struct Graph;
 // the order they load, as in JavaScript (what a file imports first, in the
 // order of its imports, then the file itself; each file once), and
 // `program.items` holds their statements in that order. Import paths are
-// relative: "./math", "./math.ts" and "./math.js" are math.ts, and a
-// directory is its index.ts (docs/modules.md). A name that is not a path is
+// relative: "./math" and "./math.tz" are math.tz, and a directory is its
+// index.tz (docs/modules.md). A name that is not a path is
 // a package of `packages`, the project of the entry file and what it depends
 // on (docs/packages.md); without a tz.json there are none. Problems with
 // imports are reported to `diags`; returns false only if the entry file

@@ -1,20 +1,30 @@
-// Paths that do not name a .ts file of the program.
+// Paths that do not name a .tz file of the program.
 // expect-error: 'zod' is the name of a package, but there is no tz.json to list packages in; make one with 'tz init' and add the package with 'tz add zod' (a file of the program is imported by its relative path, e.g. './zod')
 import { z } from "zod"
 // expect-error: built-in module 'node:http' is not supported yet
 import { createServer } from "node:http"
-// expect-error: cannot find './missing': there is no missing.ts or missing/index.ts
+// expect-error: cannot find './missing': there is no missing.tz or missing/index.tz
 import { q } from "./missing"
-// expect-error: cannot find './lib/': there is no lib/index.ts
+// expect-error: cannot find './lib/': there is no lib/index.tz
 import { r } from "./lib/"
-// expect-error: a .json file is not a module: only .ts files can be imported; embed the data with 'const data = embedJson("./data.json")'
+// expect-error: a .json file is not a module: only .tz files can be imported; embed the data with 'const data = embedJson("./data.json")'
 import { d } from "./data.json"
-// expect-error: only .ts files can be imported
+// expect-error: the files of tz end in .tz: import './util' or './util.tz'
 import { m } from "./util.mjs"
+// expect-error: the files of tz end in .tz: import './math' or './math.tz'
+import { sum } from "./math.js"
+// A file of TypeScript next to the program needs another name.
+// expect-error: the files of tz end in .tz: import './old' or './old.tz', and rename old.ts to old.tz
+import { o } from "./old.ts"
+// expect-error: cannot find './old': there is no old.tz or old/index.tz; there is old.ts, and the files of tz end in .tz: rename it to old.tz
+import { p } from "./old"
+// expect-error: only .tz files can be imported; tz needs no declarations: it reads the code itself
+import { t } from "./types.d.ts"
 // expect-error: an import names a file by its path relative to the importing file, e.g. './math' or '../lib/math'
 import { a } from "/abs/path"
 // expect-error: write '/' in the path of an import
 import { b } from ".\\math"
-// The path of a file that exists, with or without an extension.
-import { add } from "./math.js"
-console.log(add(1, 2))
+// The path of a file that exists, with or without its extension.
+import { add } from "./math"
+import { add as plus } from "./math.tz"
+console.log(add(1, 2), plus(3, 4))

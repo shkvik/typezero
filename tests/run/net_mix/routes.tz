@@ -1,4 +1,4 @@
-// What main.ts serves with: a class of handlers that a decorator registers
+// What main.tz serves with: a class of handlers that a decorator registers
 // by path, found and called through reflection; responses signed with
 // HMAC; and bodies that an async generator streams.
 import { createHmac, timingSafeEqual } from "node:crypto"

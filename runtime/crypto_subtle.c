@@ -2,7 +2,7 @@
 // the threads of the pool (runtime/io.c), as node runs it on those of libuv. This file is the
 // direct layer: digests, HMAC, PBKDF2, HKDF and AES-GCM / CBC / CTR over the hashes and ciphers
 // the caller names (crypto_md.c, crypto_aes.c); crypto_subtle_kw.c has AES-KW and
-// crypto_subtle_keys.c the full layer. The code of crypto.subtle (src/lib/webcrypto.ts) calls
+// crypto_subtle_keys.c the full layer. The code of crypto.subtle (src/lib/webcrypto.tz) calls
 // them through the intrinsics __tz_subtle_* (sema_crypto.cpp), each with the promise it settles
 // first.
 //

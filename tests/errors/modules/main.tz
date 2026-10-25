@@ -1,6 +1,6 @@
 // Mistakes in imports and exports.
 // expect-error: './math' has no export named 'sub'
-// expect-error: './math' has no export named 'helper'; add 'export' to its declaration in math.ts
+// expect-error: './math' has no export named 'helper'; add 'export' to its declaration in math.tz
 import { add, sub, helper, counter } from "./math"
 // expect-error: import 'PI' conflicts with the declaration of 'PI' in this file; import it under another name, e.g. 'import { PI as PI2 } from "./math"'
 import { add as plus, PI } from "./math"

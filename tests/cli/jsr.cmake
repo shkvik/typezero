@@ -26,9 +26,8 @@ tz(add @std/fmt@^0.1 IN ranges EXIT 1 STDERR "tz.json needs jsr:@std/fmt@^0.1, a
 tz(add greet@^2.1.0-beta.1 IN ranges STDOUT "added greet: jsr:@tz/greet@^2.1.0-beta.1 (2.1.0-beta.1)\n")
 tz(add @std/fmt@^1.2.3. IN ranges EXIT 1 STDERR "tz: in 'jsr:@std/fmt@^1.2.3.': '1.2.3.' is not a version or a range of versions")
 
-tz(init app STDOUT
-   "created tz.json, main.ts, .gitignore and tsconfig.json in app; run the program with 'tz run'\n")
-write(app/main.ts [[
+tz(init app STDOUT "created tz.json, main.tz and .gitignore in app; run the program with 'tz run'\n")
+write(app/main.tz [[
 import { greet } from "greet"
 console.log(greet("jsr"))
 ]])
@@ -41,12 +40,10 @@ tz(add greet IN app STDOUT "added greet: jsr:@tz/greet@^2.0.0 (2.0.0)\n"
 if(TZ_STDERR MATCHES "downloading jsr:@std/fmt")
   message(FATAL_ERROR "@std/fmt was downloaded again:\n${TZ_STDERR}")
 endif()
-# The editor finds it in the cache (tests/cli/editor.cmake).
-expect_match(app/.tz/tsconfig.json [=["greet": \["<work>/cache/jsr/@tz/greet/2.0.0/mod.ts"\]]=])
 expect_file(app/tz.json [[
 {
   "name": "app",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "greet": "jsr:@tz/greet@^2.0.0"
   }
@@ -75,7 +72,7 @@ tz(run IN app STDOUT "<red>hello, jsr</red>\n")
 tz(add @std/fmt@~1.0 IN app STDOUT "added @std/fmt: jsr:@std/fmt@~1.0 (1.0.0)\n")
 expect_match(app/tz.lock [["jsr:@std/fmt": {
       "version": "1.0.0",]])
-write(app/main.ts [[
+write(app/main.tz [[
 import { greet } from "greet"
 import { shout, fmtVersion } from "@std/fmt"
 import { red } from "@std/fmt/colors"
@@ -106,7 +103,7 @@ tz(add npm:zod IN app EXIT 1 STDERR "tz: npm packages are not supported: npm has
 # Without @std/fmt in tz.json, greet's range lets it go up, but tz.lock keeps
 # what it has until an update.
 tz(remove @std/fmt IN app STDOUT "removed @std/fmt\n")
-write(app/main.ts [[
+write(app/main.tz [[
 import { greet } from "greet"
 console.log(greet("jsr"))
 ]])
@@ -122,17 +119,17 @@ tz(run IN app STDOUT "<red>hi, jsr</red> (fmt 1.2.0)\n")
 tz(remove nosuch IN app EXIT 1 STDERR "tz: 'nosuch' is not a dependency in <work>/app/tz.json")
 
 # Only what a package exports can be imported.
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { wrap } from "greet/_wrap"
 console.log(wrap("x", "-"))
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR "error: 'greet/_wrap' names nothing greet exports; it exports 'greet'")
+tz(build bad.tz IN app EXIT 1 STDERR "error: 'greet/_wrap' names nothing greet exports; it exports 'greet'")
 
 # Files that are not what the registry lists, and sources that are not what
 # tz.lock names.
 jsr_publish(@tz/bad 1.0.0 jsr/greet-1.0.0)
-file(APPEND ${WORK}/jsr/@tz/bad/1.0.0/mod.ts "// changed\n")
-tz(add bad IN app EXIT 1 STDERR "/jsr/@tz/bad/1.0.0/mod.ts is not the file the registry lists: its SHA-256 differs")
+file(APPEND ${WORK}/jsr/@tz/bad/1.0.0/mod.tz "// changed\n")
+tz(add bad IN app EXIT 1 STDERR "/jsr/@tz/bad/1.0.0/mod.tz is not the file the registry lists: its SHA-256 differs")
 file(READ ${WORK}/app/tz.lock lock)
 string(REGEX REPLACE "(\"jsr:@tz/greet\": {[^}]*\"hash\": \")sha256-[0-9a-f]+" "\\1sha256-0123"
        changed "${lock}")

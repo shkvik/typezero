@@ -8,7 +8,7 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { setInterval, setTimeout } from "node:timers/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Journal, LineFeed, Queue, calls, collect } from "./feeds.ts"
+import { Journal, LineFeed, Queue, calls, collect } from "./feeds.tz"
 
 const dir = await mkdtemp(join(tmpdir(), "tz-aio-mix-"))
 const file = join(dir, "data.bin")

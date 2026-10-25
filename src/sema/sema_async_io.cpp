@@ -8,7 +8,7 @@
 // node:readline) are types of their own (Type::Runtime) that the program
 // reaches only through their methods and properties, which become built-in
 // calls. AbortController and AbortSignal are classes of tz's library on
-// EventTarget (src/lib/web.ts); what the runtime gets of a signal is its
+// EventTarget (src/lib/web.tz); what the runtime gets of a signal is its
 // side of it (runtime/signal.c), also a type of the runtime.
 
 #include "sema/sema.h"

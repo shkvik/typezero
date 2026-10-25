@@ -1,5 +1,5 @@
-// What main.ts runs: an emitter whose events come from the emits here and
-// in main.ts, which reads files through node:fs/promises with the signal of
+// What main.tz runs: an emitter whose events come from the emits here and
+// in main.tz, which reads files through node:fs/promises with the signal of
 // its own AbortController, and a generic function over any AsyncIterable.
 import { EventEmitter } from "node:events"
 import { readFile } from "node:fs/promises"

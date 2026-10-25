@@ -6,14 +6,14 @@ top-level code
     reads  everything in seen (line 7 in visited)
     runs alone
 
-async function visit, visits.ts:5
+async function visit, visits.tz:5
   start: runs inside its caller
-  after await at visits.ts:6
-    writes elements of seen (visits.ts:8)
-    writes the length of seen (visits.ts:8)
+  after await at visits.tz:6
+    writes elements of seen (visits.tz:8)
+    writes the length of seen (visits.tz:8)
     in the task visit("a") at line 6:
-      in order with visit after await at visits.ts:6 in the task visit("b") at line 6: elements of seen, the length of seen
-      in order: visits.ts:8
+      in order with visit after await at visits.tz:6 in the task visit("b") at line 6: elements of seen, the length of seen
+      in order: visits.tz:8
     in the task visit("b") at line 6:
-      in order with visit after await at visits.ts:6 in the task visit("a") at line 6: elements of seen, the length of seen
-      in order: visits.ts:8
+      in order with visit after await at visits.tz:6 in the task visit("a") at line 6: elements of seen, the length of seen
+      in order: visits.tz:8

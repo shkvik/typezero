@@ -1544,7 +1544,7 @@ typedef struct TzAbortListener {
   void (*run)(struct TzAbortListener *self);
 } TzAbortListener;
 
-// What an AbortSignal of tz's library (src/lib/web.ts) holds for the
+// What an AbortSignal of tz's library (src/lib/web.tz) holds for the
 // runtime: whether it is aborted, the reason, and the runtime's listeners.
 typedef struct TzSignal {
   int64_t rc;

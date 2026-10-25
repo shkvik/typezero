@@ -1,4 +1,4 @@
-// Decorators of a library, used by the classes of model.ts: they log and
+// Decorators of a library, used by the classes of model.tz: they log and
 // retry methods (async ones too), and record metadata that functions of
 // this file read back for classes declared elsewhere.
 

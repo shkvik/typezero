@@ -5,8 +5,8 @@
 // bytes and text narrowed by typeof, instanceof and Buffer.isBuffer, typed
 // arrays in a Map and a Set (by reference), in generic functions, in a
 // Promise, and as JSON.
-import { Record, bytesOf, decode, describe, encode, fnv1a } from "./pack.ts"
-import { Store } from "./store.ts"
+import { Record, bytesOf, decode, describe, encode, fnv1a } from "./pack.tz"
+import { Store } from "./store.tz"
 
 const store = new Store()
 

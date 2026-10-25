@@ -126,21 +126,22 @@ std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::
   return refs;
 }
 
-std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec) {
+std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec, Sources sources) {
   std::vector<std::string> candidates;
   llvm::StringRef last = path::filename(spec, path::Style::posix);
   llvm::StringRef ext = path::extension(spec, path::Style::posix);
+  const char *own = sources == Sources::Tz ? ".tz" : ".ts";
   if (spec.ends_with("/") || last == "." || last == "..")
-    candidates.push_back((spec.rtrim('/') + "/index.ts").str());
+    candidates.push_back((spec.rtrim('/') + "/index" + own).str());
   else if (spec.ends_with(".d.ts"))
     return "";
-  else if (ext == ".ts")
+  else if (ext == own)
     candidates.push_back(spec.str());
-  else if (ext == ".js")
+  else if (ext == ".js" && sources == Sources::TypeScript)
     candidates.push_back((spec.drop_back(3) + ".ts").str());
   else if (ext.empty() || !llvm::all_of(ext.drop_front(), llvm::isAlpha)) {
-    candidates.push_back((spec + ".ts").str());
-    candidates.push_back((spec + "/index.ts").str());
+    candidates.push_back((spec + own).str());
+    candidates.push_back((spec + "/index" + own).str());
   }
   for (const std::string &candidate : candidates) {
     llvm::SmallString<256> full(path::parent_path(fromFile));
@@ -153,7 +154,7 @@ std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec) {
 }
 
 void reachableFiles(const std::vector<std::string> &entries, std::vector<std::string> &files,
-                    std::vector<std::string> &external) {
+                    std::vector<std::string> &external, Sources sources) {
   llvm::StringSet<> seen, seenExternal;
   std::vector<std::string> work(entries.rbegin(), entries.rend());
   while (!work.empty()) {
@@ -173,7 +174,7 @@ void reachableFiles(const std::vector<std::string> &entries, std::vector<std::st
     for (auto it = refs.rbegin(); it != refs.rend(); ++it) {
       llvm::StringRef spec = it->specifier;
       if (spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == "..") {
-        std::string target = resolveRelative(file, spec);
+        std::string target = resolveRelative(file, spec, sources);
         if (!target.empty())
           work.push_back(target);
       } else if (seenExternal.insert(spec).second) {

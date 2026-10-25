@@ -2,8 +2,8 @@
 // fields and a cause, caught and told apart with instanceof; errors that
 // regexes, Json, decimal, iterators, generic code and overriding methods
 // throw; finally with Result and iterators; e.stack through several files.
-import { AppError, AtMost, LimitError, ParseError, Pattern, Positive, Rule, Validator } from "./errors.ts"
-import { Entry, loadConfig, ownerName, parseLine } from "./parse.ts"
+import { AppError, AtMost, LimitError, ParseError, Pattern, Positive, Rule, Validator } from "./errors.tz"
+import { Entry, loadConfig, ownerName, parseLine } from "./parse.tz"
 import { err, ok, Result } from "neverthrow"
 
 // The stack with each path cut to the name of its file.

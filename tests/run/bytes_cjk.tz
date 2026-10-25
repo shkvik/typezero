@@ -5,7 +5,7 @@
 // decoder throws a TypeError, and `{ stream: true }` goes on in the next
 // call, also inside a character. Only what node decodes the same way is
 // here: node decodes some bytes of big5, euc-jp, shift_jis and euc-kr as ICU
-// does, not as the standard (tests/run/bytes_cjk_whatwg.ts).
+// does, not as the standard (tests/run/bytes_cjk_whatwg.tz).
 
 const digits = "0123456789abcdef"
 function hex(s: string): string {

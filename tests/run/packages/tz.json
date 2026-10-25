@@ -1,6 +1,6 @@
 {
   "name": "packages",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "ms": "file:../../packages/ms"
   }

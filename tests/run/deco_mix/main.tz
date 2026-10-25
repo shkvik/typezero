@@ -4,8 +4,8 @@
 // union, literal, Promise and byte types; unknown holding promises,
 // dictionaries, dates, bytes and regexes, narrowed by typeof and instanceof;
 // unions in unknown; and `catch (e: unknown)`.
-import { calls, columnsOf, designOf, tableOf } from "./deco.ts"
-import { Admin, User } from "./model.ts"
+import { calls, columnsOf, designOf, tableOf } from "./deco.tz"
+import { Admin, User } from "./model.tz"
 
 // 1. Decorated methods, async and overridden.
 const ann = new User("Ann", 30)

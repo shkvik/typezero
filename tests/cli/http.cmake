@@ -9,7 +9,7 @@ jsr_publish(@std/fmt 1.2.0 jsr/fmt-1.2.0)
 jsr_publish(@tz/greet 2.0.0 jsr/greet-2.0.0)
 
 tz(init app)
-write(app/main.ts [[
+write(app/main.tz [[
 import { greet } from "greet"
 console.log(greet("http"))
 ]])

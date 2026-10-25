@@ -10,7 +10,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Cache, Folder, Job, Memory, Source, Twice, Upper, later, memo, quick, readText } from "./jobs.ts"
+import { Cache, Folder, Job, Memory, Source, Twice, Upper, later, memo, quick, readText } from "./jobs.tz"
 
 // 1. Async methods up a chain, run side by side.
 const jobs: Job[] = [new Job("plain"), new Upper("upper"), new Twice("twice")]

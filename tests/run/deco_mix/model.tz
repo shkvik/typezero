@@ -1,5 +1,5 @@
-// The classes, decorated with what deco.ts exports.
-import { Column, Entity, Log, Retry } from "./deco.ts"
+// The classes, decorated with what deco.tz exports.
+import { Column, Entity, Log, Retry } from "./deco.tz"
 
 function later<T>(value: T, ms: number): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))

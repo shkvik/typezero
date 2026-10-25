@@ -9,7 +9,7 @@
 //   string;
 // - no 'satisfies never': a string can be any unit;
 // - `!match?.groups` is `!match`: a match of the literal always has its groups.
-// node runs it as it is (it strips the types).
+// Files end in .tz, and imports name them so.
 
 const s = 1000;
 const m = s * 60;

@@ -1,5 +1,5 @@
-import { NonSharedArrayBuffer } from './types.js';
-import { validate } from './validate.js';
+import { NonSharedArrayBuffer } from './types.tz';
+import { validate } from './validate.tz';
 
 function parse(uuid: string): NonSharedArrayBuffer {
   if (!validate(uuid)) {

@@ -24,7 +24,7 @@ class NoArea implements Shape {
   name = "x"
 }
 // A field may be read-only in the class while no code changes it through
-// the interface (tests/errors/widen_readonly.ts).
+// the interface (tests/errors/widen_readonly.tz).
 class Square implements Shape {
   readonly name = "square"
   area() {
@@ -61,7 +61,7 @@ class Copy implements Thing {}
 
 // An interface that extends another may narrow a field to objects of a type
 // down the chain, or make it read-only (code that writes through the wider
-// one is checked in tests/errors/widen_fields.ts), and nothing else.
+// one is checked in tests/errors/widen_fields.tz), and nothing else.
 class Animal {}
 class Dog extends Animal {}
 interface Owner {

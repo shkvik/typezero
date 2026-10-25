@@ -1,5 +1,5 @@
 // The server of the HTTP benchmark (bench/http.ps1): "Hello, World!" to
-// every request, on the port given, as main.ts.
+// every request, on the port given, as main.tz.
 package main
 
 import (

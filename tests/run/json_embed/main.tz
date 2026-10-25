@@ -2,7 +2,7 @@
 // when the program is compiled, relative to the file of the call, and the
 // exe needs them no more. The same file gives the same value every time, as
 // require() of a JSON file does in node.
-import { page, settings } from "./data/settings.ts"
+import { page, settings } from "./data/settings.tz"
 
 const config = embedJson("./config.json")
 console.log(config)

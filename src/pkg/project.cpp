@@ -283,7 +283,7 @@ bool readExports(const Manifest &out, const JsonValue &value,
                  std::vector<std::pair<std::string, std::string>> &exports) {
   auto add = [&](llvm::StringRef key, const JsonValue &target) {
     if (!target.isString()) {
-      reportAt(out.path, out.text, target.begin, "an export names a .ts file of the package");
+      reportAt(out.path, out.text, target.begin, "an export names a .tz file of the package");
       return false;
     }
     llvm::StringRef file = target.string;
@@ -295,8 +295,8 @@ bool readExports(const Manifest &out, const JsonValue &value,
     return add(".", value);
   if (!value.isObject()) {
     reportAt(out.path, out.text, value.begin,
-             "'exports' is a file, or an object such as { \".\": \"./mod.ts\", \"./mini\": "
-             "\"./mini.ts\" }");
+             "'exports' is a file, or an object such as { \".\": \"./mod.tz\", \"./mini\": "
+             "\"./mini.tz\" }");
     return false;
   }
   for (size_t i = 0; i < value.keys.size(); ++i) {
@@ -693,7 +693,7 @@ std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersio
     path::append(full, file);
     entries.push_back(std::string(full));
   }
-  reachableFiles(entries, files, external);
+  reachableFiles(entries, files, external, Sources::Tz);
   for (llvm::StringRef spec : external) {
     // Without the path inside the package: "jsr:@std/path@^1".
     std::string package, dep, subpath;

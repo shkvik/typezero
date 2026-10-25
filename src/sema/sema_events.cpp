@@ -1,5 +1,5 @@
 // Events (docs/events.md): node:events and the events of the web platform,
-// which tz has written in tz (src/lib/events.ts and src/lib/web.ts), and
+// which tz has written in tz (src/lib/events.tz and src/lib/web.tz), and
 // what the compiler adds to that code: the intrinsics `__tz_*` it uses, and
 // the types of the events.
 //
@@ -280,7 +280,7 @@ const Type *Sema::eventMapOf(const Type *type) const {
   if (!emitter)
     return nullptr;
   // The streams of node:stream have theirs from StreamEmitter (see
-  // src/lib/stream.ts).
+  // src/lib/stream.tz).
   const ClassDecl *streams = libraryClass("StreamEmitter");
   for (const ClassDecl *c = classOf(type); c; c = c->parent)
     if (c->generic && (c->generic == emitter || c->generic == streams) && !c->typeArgs.empty())
@@ -512,7 +512,7 @@ std::string fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-// "main.ts:3:13" of a place, for messages.
+// "main.tz:3:13" of a place, for messages.
 std::string shortPlace(const std::string &place) {
   std::string file = fileOfPlace(place);
   return llvm::sys::path::filename(file).str() + place.substr(file.size());

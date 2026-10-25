@@ -6,16 +6,16 @@ if(NOT CMAKE_HOST_WIN32)
   skip("only Windows locks the executable of a running program")
 endif()
 
-write(wait.ts [[
+write(wait.tz [[
 import { readLine } from "tz:io"
 // Runs until its input ends.
 while (readLine() != undefined) {}
 ]])
-tz(build wait.ts)
+tz(build wait.tz)
 
 # wait.exe starts right after tz, long before tz links, and reads what tz
 # prints: it runs until tz ends.
-execute_process(COMMAND ${TZ} build wait.ts COMMAND ${WORK}/wait.exe
+execute_process(COMMAND ${TZ} build wait.tz COMMAND ${WORK}/wait.exe
   WORKING_DIRECTORY ${WORK}
   OUTPUT_VARIABLE out ERROR_VARIABLE err RESULTS_VARIABLE codes)
 normalize(err "${err}")
@@ -35,4 +35,4 @@ if(left)
 endif()
 
 # Once the program has ended, the build goes through.
-tz(build wait.ts)
+tz(build wait.tz)

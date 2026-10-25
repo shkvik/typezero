@@ -1,4 +1,4 @@
-// The server of the HTTP benchmark under node (bench/http.ps1), as main.ts.
+// The server of the HTTP benchmark under node (bench/http.ps1), as main.tz.
 import { createServer } from "node:http";
 
 const port = Number(process.argv[2] ?? 8080);

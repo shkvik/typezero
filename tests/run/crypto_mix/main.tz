@@ -8,7 +8,7 @@ import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from "
 import { mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Vault, keyFrom, open, seal } from "./vault.ts"
+import { Vault, keyFrom, open, seal } from "./vault.tz"
 
 const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
 const key = keyFrom("correct horse", salt)

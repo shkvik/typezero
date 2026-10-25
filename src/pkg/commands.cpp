@@ -232,12 +232,12 @@ int commandInit(llvm::ArrayRef<const char *> args) {
     name = "app";
   std::vector<std::string> created{"tz.json"};
   if (!writeText(file("tz.json"), "{\n  \"name\": " + jsonQuote(name) +
-                                      ",\n  \"main\": \"main.ts\",\n  \"dependencies\": {}\n}\n"))
+                                      ",\n  \"main\": \"main.tz\",\n  \"dependencies\": {}\n}\n"))
     return kExitError;
-  if (!fs::exists(file("main.ts"))) {
-    if (!writeText(file("main.ts"), "console.log(\"Hello, world!\")\n"))
+  if (!fs::exists(file("main.tz"))) {
+    if (!writeText(file("main.tz"), "console.log(\"Hello, world!\")\n"))
       return kExitError;
-    created.push_back("main.ts");
+    created.push_back("main.tz");
   }
   if (!fs::exists(file(".gitignore"))) {
     // What tz build makes. tz.lock belongs in git: it makes every build use

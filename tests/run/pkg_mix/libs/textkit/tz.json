@@ -1,6 +1,6 @@
 {
   "name": "textkit",
   "version": "1.2.0",
-  "main": "src/index.ts",
+  "main": "src/index.tz",
   "dependencies": {}
 }

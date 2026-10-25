@@ -4,7 +4,7 @@
 // An ES module without top-level `await` that throws: Node reports the error
 // four turns of the microtask queue later, and the microtasks queued before
 // run meanwhile, but not the nextTick callbacks.
-import { chain } from "./chain.ts"
+import { chain } from "./chain.tz"
 queueMicrotask(chain)
 process.nextTick(() => console.log("never: nextTick"))
 console.log("main")

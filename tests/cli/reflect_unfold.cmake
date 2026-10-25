@@ -29,12 +29,12 @@ function call<T extends object>(obj: T, who: string): unknown {
 }
 const container = new Container()
 ]])
-write(known.ts "${classes}
+write(known.tz "${classes}
 const a = container.get(UserService)
 const b = container.make(UserService)
 console.log(call(a, \"ann\"), call(b, \"bob\"), Reflect.get(b, \"name\"))
 ")
-write(runtime.ts "${classes}
+write(runtime.tz "${classes}
 const kinds: Constructor[] = [UserService]
 for (const kind of kinds) {
   const a = container.get(kind)
@@ -44,8 +44,8 @@ for (const kind of kinds) {
 ")
 set(expected "users: hello ann users: hello bob users\n")
 
-tz(run known.ts STDOUT "${expected}")
-tz(build --emit-llvm -o known.ll known.ts)
+tz(run known.tz STDOUT "${expected}")
+tz(build --emit-llvm -o known.ll known.tz)
 file(READ ${WORK}/known.ll ir)
 foreach(name tz.classinfo.UserService tz_reflect_init tz_reflect_get tz_reflect_apply
              tz_reflect_new tz_reflect_construct)
@@ -55,7 +55,7 @@ foreach(name tz.classinfo.UserService tz_reflect_init tz_reflect_get tz_reflect_
   endif()
 endforeach()
 
-tz(run runtime.ts STDOUT "${expected}")
-tz(build --emit-llvm -o runtime.ll runtime.ts)
+tz(run runtime.tz STDOUT "${expected}")
+tz(build --emit-llvm -o runtime.ll runtime.tz)
 expect_match(runtime.ll "@tz\\.classinfo\\.UserService = private constant")
 expect_match(runtime.ll "tz_reflect_init")

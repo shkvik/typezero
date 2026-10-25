@@ -1,5 +1,5 @@
 // The other file of result_mix: functions that return Results, a generic
-// alias of Result and an interface, all imported by main.ts. neverthrow's
+// alias of Result and an interface, all imported by main.tz. neverthrow's
 // err comes in under another name.
 import { err as fail } from "neverthrow"
 

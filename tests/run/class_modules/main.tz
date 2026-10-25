@@ -1,6 +1,6 @@
 // same-as-node --experimental-transform-types
 // Classes go from file to file as the other declarations do.
-import { Circle, Square as Box, largest } from "./shapes.ts"
+import { Circle, Square as Box, largest } from "./shapes.tz"
 
 const circles = [new Circle(1), new Circle(3), new Circle(2).grow(0.5)]
 const big = largest(circles)

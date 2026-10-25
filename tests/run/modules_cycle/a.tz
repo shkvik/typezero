@@ -1,4 +1,4 @@
-import { isOdd, shout, tagOf } from "./b.ts"
+import { isOdd, shout, tagOf } from "./b.tz"
 console.log("a loads")
 export const prefix = "hello"
 export function greet(who: string) {

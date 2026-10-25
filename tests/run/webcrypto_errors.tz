@@ -1,7 +1,7 @@
 // same-as-node
 // Web Crypto: what node rejects when the program runs, as node does: DOMExceptions of its names,
 // legacy codes and messages, and the TypeErrors of Web IDL. The algorithms come from variables:
-// written in the call, these would be errors of the compiler (tests/errors/webcrypto.ts).
+// written in the call, these would be errors of the compiler (tests/errors/webcrypto.tz).
 const subtle = crypto.subtle
 const enc = new TextEncoder()
 async function attempt(what: string, run: () => Promise<void>) {

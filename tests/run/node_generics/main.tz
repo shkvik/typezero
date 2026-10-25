@@ -4,8 +4,8 @@
 // entry here, which that file imports in turn), and so does a generic of the
 // entry copied in a file that runs before it.
 import { posix } from "node:path"
-import { early } from "./early.ts"
-import { extensions, firstName, joiner, kinds, label, lines } from "./paths.ts"
+import { early } from "./early.tz"
+import { extensions, firstName, joiner, kinds, label, lines } from "./paths.tz"
 
 export function pick<T>(items: T[]): T {
   return items[items.length - 1]!

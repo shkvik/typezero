@@ -157,7 +157,7 @@ std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
       continue;
     std::string prefix;
     llvm::StringRef name(module->name);
-    name.consume_back(".ts");
+    name.consume_back(".tz");
     llvm::SmallVector<llvm::StringRef, 4> parts;
     name.split(parts, '/');
     for (llvm::StringRef part : parts)

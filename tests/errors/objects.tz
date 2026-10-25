@@ -64,7 +64,7 @@ settings.port++
 const open: { port: int } = { port: 1 }
 const closed: Settings = open
 // Back to a type that lets code change it: allowed while no code does
-// (tests/errors/widen_readonly.ts).
+// (tests/errors/widen_readonly.tz).
 const reopened: { port: int } = closed
 
 // Nothing from Object.prototype: no implicit conversion to a string.

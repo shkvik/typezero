@@ -6,7 +6,7 @@ import (
 )
 
 // The text: 20 MB of words, numbers and dates from a fixed sequence (the
-// same in main.ts).
+// same in main.tz).
 var seed int32 = 42
 
 func next(n int32) int32 {

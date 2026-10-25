@@ -1138,7 +1138,7 @@ private:
   // (codegen_events.cpp).
   llvm::Value *emitLibBuiltin(CallExpr *call);
   // The runtime's side of the AbortSignal `signal` of `type` (an AbortSignal
-  // of src/lib/web.ts, or undefined): its field #native, borrowed or
+  // of src/lib/web.tz, or undefined): its field #native, borrowed or
   // retained, or null.
   llvm::Value *nativeSignal(llvm::Value *signal, const Type *type, bool retain = false);
   static bool isAbortSignal(const Type *type);

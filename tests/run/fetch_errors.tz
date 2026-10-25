@@ -2,7 +2,7 @@
 // How fetch fails, as in node ("fetch failed" with the cause), and where tz
 // says more: a request larger than maxBodySize gets 413; data: URLs need
 // no network. A name that is not found may be EAI_AGAIN on a machine
-// without a network. https is in tls_serve.ts and tls_errors.ts.
+// without a network. https is in tls_serve.tz and tls_errors.tz.
 import { serve } from "tz:http"
 
 async function attempt(what: string, url: string, init?: RequestInit) {

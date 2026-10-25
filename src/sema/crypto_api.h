@@ -118,7 +118,7 @@ enum class CryptoFn : unsigned {
   X509CheckIssued,
   X509CheckPrivateKey,
   X509Verify,
-  // Web Crypto: the intrinsics __tz_subtle_* of src/lib/webcrypto.ts (sema_webcrypto.cpp).
+  // Web Crypto: the intrinsics __tz_subtle_* of src/lib/webcrypto.tz (sema_webcrypto.cpp).
   SubtleDigest,
   SubtleHmac,
   SubtleHmacVerify,

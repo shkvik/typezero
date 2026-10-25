@@ -5,7 +5,7 @@
 // a server that the events' AbortSignal stops, with the program's own
 // onabort and listeners kept.
 import { serve } from "tz:http"
-import { Handlers, routes, verified } from "./routes.ts"
+import { Handlers, routes, verified } from "./routes.tz"
 
 const handlers = new Handlers()
 const stop = new AbortController()

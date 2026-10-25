@@ -7,7 +7,7 @@ import (
 )
 
 // The text: 20 MB of words made of syllables from a fixed sequence (the same
-// in main.ts), 3.5 million of them, some 160 thousand different.
+// in main.tz), 3.5 million of them, some 160 thousand different.
 var seed int32 = 42
 
 func next(n int32) int32 {

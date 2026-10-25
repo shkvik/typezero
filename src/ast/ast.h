@@ -1094,7 +1094,7 @@ enum class Builtin {
   LibChunkKind,
   LibTypeName,
   LibOverrides,
-  // The I/O of the streams of node:fs and process (src/lib/fs_stream.ts),
+  // The I/O of the streams of node:fs and process (src/lib/fs_stream.tz),
   // each a Promise but the last: `__tz_fsOpen(path, flags, mode)` of the
   // descriptor, `__tz_fsRead(fd, buffer, offset, length, position)` and
   // `__tz_fsWrite(...)` of the bytes moved, `__tz_fsClose(fd, fsync)`,
@@ -2198,7 +2198,7 @@ struct ExportDecl {
   Module *from = nullptr; // set by the loader
 };
 
-// One parsed .ts file, or a whole program: the loader joins the statements
+// One parsed .tz file, or a whole program: the loader joins the statements
 // of all its files in the order they load. Top-level statements other than
 // function declarations form the program's entry point.
 struct SourceFile {
@@ -2248,7 +2248,7 @@ struct SourceFile {
 struct Module {
   // Where the file is: for the entry as given, for the others found from it.
   std::string path;
-  // The file relative to the entry's directory, with '/': "geometry/index.ts".
+  // The file relative to the entry's directory, with '/': "geometry/index.tz".
   std::string name;
   SourceFile file;
   bool isEntry = false;

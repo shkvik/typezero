@@ -5,29 +5,29 @@
 #   cmake -DTZ=<tz.exe> -DDIR=<scratch directory> -P crypto_link.cmake
 
 file(MAKE_DIRECTORY ${DIR})
-file(WRITE ${DIR}/plain.ts "console.log(\"hi\")\n")
-file(WRITE ${DIR}/direct.ts
+file(WRITE ${DIR}/plain.tz "console.log(\"hi\")\n")
+file(WRITE ${DIR}/direct.tz
      "import { createHash } from \"node:crypto\"\n"
      "console.log(createHash(\"sha256\").update(\"abc\").digest(\"hex\"))\n")
-file(WRITE ${DIR}/full.ts
+file(WRITE ${DIR}/full.tz
      "import { createHash } from \"node:crypto\"\n"
      "const name: string = process.argv[2] ?? \"sha256\"\n"
      "console.log(createHash(name).update(\"abc\").digest(\"hex\"))\n")
-# Web Crypto (src/lib/webcrypto.ts): HMAC with its algorithm in a constant, as hono signs cookies,
+# Web Crypto (src/lib/webcrypto.tz): HMAC with its algorithm in a constant, as hono signs cookies,
 # needs only the direct layer; an ECDSA key, all of OpenSSL.
-file(WRITE ${DIR}/subtle_direct.ts
+file(WRITE ${DIR}/subtle_direct.tz
      "const algorithm = { name: \"HMAC\", hash: \"SHA-256\" }\n"
      "const key = await crypto.subtle.importKey(\"raw\", new Uint8Array(8), algorithm, false, [\"sign\"])\n"
      "console.log((await crypto.subtle.sign(algorithm.name, key, new Uint8Array(1))).byteLength)\n")
 # fetch of a URL known to be http:// gets no TLS; one of https://, all of OpenSSL and libssl
 # (docs/net.md, section 4). Neither runs: they are only built.
-file(WRITE ${DIR}/fetch_http.ts
+file(WRITE ${DIR}/fetch_http.tz
      "const res = await fetch(\"http://localhost:1/\")\n"
      "console.log(res.status)\n")
-file(WRITE ${DIR}/fetch_https.ts
+file(WRITE ${DIR}/fetch_https.tz
      "const res = await fetch(\"https://localhost:1/\")\n"
      "console.log(res.status)\n")
-file(WRITE ${DIR}/subtle_full.ts
+file(WRITE ${DIR}/subtle_full.tz
      "const pair = await crypto.subtle.generateKey({ name: \"ECDSA\", namedCurve: \"P-256\" }, false, [\"sign\"])\n"
      "console.log(pair.privateKey.type)\n")
 
@@ -36,10 +36,10 @@ function(fail message)
 endfunction()
 
 foreach(name plain direct full subtle_direct subtle_full fetch_http fetch_https)
-  execute_process(COMMAND ${TZ} build -o ${DIR}/${name}.exe ${DIR}/${name}.ts
+  execute_process(COMMAND ${TZ} build -o ${DIR}/${name}.exe ${DIR}/${name}.tz
                   RESULT_VARIABLE result ERROR_VARIABLE errors)
   if(result)
-    fail("tz build ${name}.ts failed: ${errors}")
+    fail("tz build ${name}.tz failed: ${errors}")
   endif()
   file(SIZE ${DIR}/${name}.exe ${name}_size)
   execute_process(COMMAND ${TZ} licenses ${DIR}/${name}.exe RESULT_VARIABLE result

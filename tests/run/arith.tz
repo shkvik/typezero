@@ -1,5 +1,5 @@
 // Integer arithmetic wraps around on overflow at run time (in constants it is
-// an error, see errors/constants.ts).
+// an error, see errors/constants.tz).
 let big: int = 2147483647
 // expect-warning: 'big + 1' may overflow int: it may reach 2147483648
 console.log(big + 1)

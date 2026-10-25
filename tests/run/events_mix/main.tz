@@ -10,7 +10,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { setTimeout as wait } from "node:timers/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Jobs, collect } from "./jobs.ts"
+import { Jobs, collect } from "./jobs.tz"
 
 const log = (s: string) => console.log(s)
 const dir = await mkdtemp(join(tmpdir(), "tz-events-mix-"))

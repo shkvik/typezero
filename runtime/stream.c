@@ -1,4 +1,4 @@
-// What node:stream, which tz has written in tz (src/lib/stream.ts), asks of
+// What node:stream, which tz has written in tz (src/lib/stream.tz), asks of
 // the runtime through its intrinsics (src/sema/sema_stream.cpp).
 
 #include "tzrt.h"

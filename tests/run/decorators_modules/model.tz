@@ -1,4 +1,4 @@
-import { Entity, Log } from "./log.ts"
+import { Entity, Log } from "./log.tz"
 
 @Entity("orders")
 export class Order {

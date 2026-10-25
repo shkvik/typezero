@@ -27,13 +27,18 @@ struct ImportRef {
 // "x"`, `import "x"`, `export ... from "x"`.
 std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::StringRef text);
 
-// The .ts file a relative import of `fromFile` names, as the loader finds it
-// ("./a" is a.ts or a/index.ts, "./a.js" is a.ts); "" if there is none.
-std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef specifier);
+// What the files are: tz's (a package), or TypeScript's (what tz port reads).
+enum class Sources { Tz, TypeScript };
+
+// The file a relative import of `fromFile` names, "" if there is none: of tz
+// as the loader finds it ("./a" is a.tz or a/index.tz), or of TypeScript as
+// tsc does ("./a" is a.ts or a/index.ts, "./a.js" is a.ts).
+std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef specifier,
+                            Sources sources);
 
 // The files reachable from `entries` through relative imports, and the
 // specifiers of everything else they import, without duplicates.
 void reachableFiles(const std::vector<std::string> &entries, std::vector<std::string> &files,
-                    std::vector<std::string> &external);
+                    std::vector<std::string> &external, Sources sources);
 
 } // namespace tz::pkg

@@ -1,7 +1,8 @@
 // tz port: a copy of a TypeScript library with what tz does not accept
 // changed where that can be done mechanically, and a list of the rest
 // (docs/packages.md, section 2). It reads tokens, not a syntax tree: the code
-// is TypeScript that tz's parser may refuse, and the changes are local.
+// is TypeScript that tz's parser may refuse, and the changes are local. The
+// copy is of tz: a.ts becomes a.tz.
 
 #include "pkg/commands.h"
 
@@ -314,6 +315,22 @@ void FilePort::modules() {
       importDecl(i);
     }
   }
+  // The copy is of tz: a relative import of a .ts or .js file names the .tz
+  // file it becomes.
+  for (size_t i = 1; i < toks_.size(); ++i) {
+    if (!is(i, Tok::StringLiteral) ||
+        !(isName(i - 1, "from") || (isName(i - 1, "import") && !afterDot(i - 1))))
+      continue;
+    std::string spec = stringValue(toks_[i]);
+    llvm::StringRef ref(spec);
+    llvm::StringRef ext = path::extension(ref, path::Style::posix);
+    if (!(ref.starts_with("./") || ref.starts_with("../")) || ref.ends_with(".d.ts") ||
+        (ext != ".ts" && ext != ".js"))
+      continue;
+    char quote = toks_[i].text.front();
+    add(at(i), endOf(i), quote + ref.drop_back(3).str() + ".tz" + quote,
+        "imports of .ts and .js files name the .tz files of the copy");
+  }
 }
 
 void FilePort::exportDefault(size_t i) {
@@ -369,7 +386,7 @@ void FilePort::exportList(size_t open, size_t close) {
   std::string target;
   if (isName(close + 1, "from") && is(close + 2, Tok::StringLiteral)) {
     std::string spec = stringValue(toks_[close + 2]);
-    std::string file = resolveRelative(file_, spec);
+    std::string file = resolveRelative(file_, spec, Sources::TypeScript);
     llvm::SmallString<256> real;
     if (!file.empty() && !fs::real_path(file, real))
       if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end())
@@ -499,7 +516,7 @@ void FilePort::importDecl(size_t i) {
   if (!defaultName.empty()) {
     std::string exported;
     if (relative) {
-      std::string target = resolveRelative(file_, spec);
+      std::string target = resolveRelative(file_, spec, Sources::TypeScript);
       llvm::SmallString<256> real;
       if (!target.empty() && !fs::real_path(target, real))
         if (auto it = ctx_.defaultNames.find(std::string(real)); it != ctx_.defaultNames.end())
@@ -1019,7 +1036,8 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
                  (toks[k + 1].is(Tok::KwAs) && k + 2 < j && toks[k + 2].is(Tok::KwDefault))))
               reexportsDefault = true;
           if (reexportsDefault && j + 2 < toks.size() && toks[j + 1].text == "from") {
-            std::string target = resolveRelative(file, stringValue(toks[j + 2]));
+            std::string target =
+                resolveRelative(file, stringValue(toks[j + 2]), Sources::TypeScript);
             llvm::SmallString<256> targetReal;
             if (!target.empty() && !fs::real_path(target, targetReal))
               if (auto it = ctx.defaultNames.find(std::string(targetReal));
@@ -1146,6 +1164,11 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   return true;
 }
 
+// The name of the copy of a file: a.tz for a.ts.
+std::string copyName(llvm::StringRef file) {
+  return file.ends_with(".ts") ? (file.drop_back(3) + ".tz").str() : file.str();
+}
+
 std::string displayPath(llvm::StringRef base, llvm::StringRef relative) {
   llvm::SmallString<256> shown(base);
   path::append(shown, relative);
@@ -1242,7 +1265,7 @@ int commandPort(llvm::ArrayRef<const char *> args) {
     }
     entries.push_back(std::string(full));
   }
-  reachableFiles(entries, files, external);
+  reachableFiles(entries, files, external, Sources::TypeScript);
   PortContext ctx;
   ctx.packageName = derivedName(shortName + ".ts", "", "");
   findDefaultNames(files, dir, ctx);
@@ -1255,9 +1278,10 @@ int commandPort(llvm::ArrayRef<const char *> args) {
   // Port each file.
   Counts counts;
   struct Ported {
-    std::string relative;
+    std::string relative; // of the copy
     std::string text;
     std::vector<Note> notes;
+    std::string source; // relative, of the file ported
   };
   std::vector<Ported> ported;
   for (const std::string &file : files) {
@@ -1275,8 +1299,9 @@ int commandPort(llvm::ArrayRef<const char *> args) {
       return kExitError;
     FilePort port(file, std::move(text), ctx, counts);
     port.run();
-    ported.push_back({path::convert_to_slash(relative.drop_front()), port.text(),
-                      std::move(port.notes())});
+    ported.push_back({copyName(path::convert_to_slash(relative.drop_front())), port.text(),
+                      std::move(port.notes()),
+                      path::convert_to_slash(relative.drop_front())});
   }
   std::sort(ported.begin(), ported.end(),
             [](const Ported &a, const Ported &b) { return a.relative < b.relative; });
@@ -1285,6 +1310,12 @@ int commandPort(llvm::ArrayRef<const char *> args) {
     path::append(target, p.relative);
     if (!writeFile(target, p.text))
       return kExitError;
+    // In place, a.tz replaces a.ts.
+    if (inPlace && p.source != p.relative) {
+      llvm::SmallString<256> old(outDir);
+      path::append(old, p.source);
+      fs::remove(old);
+    }
   }
   // The license and the readme go with the code.
   std::error_code ec;
@@ -1310,13 +1341,14 @@ int commandPort(llvm::ArrayRef<const char *> args) {
     std::string json = "{\n  \"name\": " + jsonQuote(name);
     if (!version.empty())
       json += ",\n  \"version\": " + jsonQuote(version);
+    // The exports are files of the copy.
     if (exports.size() == 1 && exports[0].first == ".") {
-      json += ",\n  \"main\": " + jsonQuote(exports[0].second);
+      json += ",\n  \"main\": " + jsonQuote(copyName(exports[0].second));
     } else {
       json += ",\n  \"exports\": {";
       for (size_t i = 0; i < exports.size(); ++i)
         json += (i ? ",\n    " : "\n    ") + jsonQuote(exports[i].first) + ": " +
-                jsonQuote("./" + exports[i].second);
+                jsonQuote("./" + copyName(exports[i].second));
       json += "\n  }";
     }
     json += ",\n  \"dependencies\": {";
@@ -1348,7 +1380,7 @@ int commandPort(llvm::ArrayRef<const char *> args) {
       llvm::outs() << "  " << displayPath(out, p.relative) << ":" << line << ":" << column
                    << ": " << n.message << "\n";
     }
-  llvm::outs() << "then 'tz build " << displayPath(out, exports[0].second)
+  llvm::outs() << "then 'tz build " << displayPath(out, copyName(exports[0].second))
                << "' reports what else tz does not accept\n";
   return 0;
 }

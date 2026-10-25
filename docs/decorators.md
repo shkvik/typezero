@@ -80,7 +80,7 @@ export function Log<A extends unknown[], R>(_cls: object, name: string, method: 
 ## 3. Метаданные
 
 ```ts
-// table.ts — весь декоратор
+// table.tz — весь декоратор
 export function Table(name: string) {
   return (cls: object) => Reflect.defineMetadata(Table, name, cls)
 }

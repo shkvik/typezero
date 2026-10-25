@@ -1,4 +1,4 @@
-// The intrinsics of node:stream (src/lib/stream.ts), which Sema gives as
+// The intrinsics of node:stream (src/lib/stream.tz), which Sema gives as
 // Builtin::LibChunk and the others (see src/sema/sema_stream.cpp): the T an
 // unknown holds, whether it holds one, and whether the class of an object
 // replaces a method.

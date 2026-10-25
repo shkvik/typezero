@@ -4,7 +4,7 @@
 import { posix } from "node:path"
 import { EOL } from "node:os"
 import { existsSync, statSync, Stats } from "node:fs"
-import { pick } from "./main.ts"
+import { pick } from "./main.tz"
 
 export function label<T>(value: T, dir: string, file: string): string {
   return `${posix.basename(posix.join(dir, file))}=${value}`

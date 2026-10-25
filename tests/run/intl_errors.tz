@@ -2,7 +2,7 @@
 // The errors of Intl that only the running program shows, as JavaScript
 // throws them: a locale, a value of an option, a unit or a code that is not
 // one, options that do not go together. (Written in the code, they are
-// errors of compilation: tests/errors/intl.ts.)
+// errors of compilation: tests/errors/intl.tz.)
 function v(s: string): string {
   return s
 }

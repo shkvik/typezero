@@ -4,11 +4,11 @@
 // questions and the interface of node:readline) listen to.
 //
 // AbortController and AbortSignal themselves are classes of tz's library,
-// on EventTarget (src/lib/web.ts, docs/events.md, section 4). Each signal
+// on EventTarget (src/lib/web.tz, docs/events.md, section 4). Each signal
 // holds one of these, which the compiler passes where a call takes a
 // `signal` (Sema::signalOption): the runtime checks whether it is aborted,
 // and listens to its abort with a TzAbortListener. When the signal aborts,
-// abortSignal() of web.ts marks this one aborted with the reason first, and
+// abortSignal() of web.tz marks this one aborted with the reason first, and
 // its dispatch of the abort event runs the runtime's listeners here at the
 // places they came among the listeners of the program: every listener, of
 // the program or of the runtime, takes its number from one counter

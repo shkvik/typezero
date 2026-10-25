@@ -6,8 +6,8 @@
 // Array.isArray, as T, inside Result, printed and as JSON; and the errors of
 // node:fs told apart by their code.
 import { readFileSync } from "node:fs"
-import { Circle, corners, Figure, isRound, Kind, Measured, Rect, Square } from "./shapes.ts"
-import { byKind, distinct, first, Stamp, when } from "./tally.ts"
+import { Circle, corners, Figure, isRound, Kind, Measured, Rect, Square } from "./shapes.tz"
+import { byKind, distinct, first, Stamp, when } from "./tally.tz"
 
 const day = new Date(Date.UTC(2026, 9, 26))
 const figures: Figure[] = [

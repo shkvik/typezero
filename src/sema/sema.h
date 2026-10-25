@@ -100,7 +100,7 @@ struct EventInference {
   struct Event {
     std::string name;
     Portable args; // a tuple
-    std::string where; // of the first emit: "main.ts:12:5"
+    std::string where; // of the first emit: "main.tz:12:5"
   };
   // The events found so far, in the order found, by the place of the
   // emitter: `new EventEmitter()`, or the class that extends EventEmitter.
@@ -990,7 +990,7 @@ private:
   // name without Sync and its options, and no fd.
   bool fsAsync_ = false;
   // The option `signal` of a call, an AbortSignal of the library
-  // (src/lib/web.ts) or undefined, or undefined for none: what the runtime
+  // (src/lib/web.tz) or undefined, or undefined for none: what the runtime
   // gets of it, its side of the signal (Builtin::LibNativeSignal).
   Expr *signalOption(Expr *value, llvm::SMLoc loc);
   // The properties, methods and assignments of the objects of the runtime
@@ -1017,7 +1017,7 @@ private:
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
   // Web Crypto (sema_webcrypto.cpp): the intrinsics __tz_subtle_* of
-  // src/lib/webcrypto.ts, the calls of the program on its SubtleCrypto (the
+  // src/lib/webcrypto.tz, the calls of the program on its SubtleCrypto (the
   // algorithms, formats and usages it writes, checked here, and the function
   // of the algorithm's family they go to), `crypto.subtle` and the members
   // of a CryptoKey the program may read.
@@ -1977,7 +1977,7 @@ private:
   // null if `name` names none of them.
   Expr *checkLibCall(CallExpr *call, NameExpr *name);
   // `signal.onabort = handler` of the program, with both checked: a call of
-  // setOnabort (src/lib/web.ts), as node's event handlers listen from when
+  // setOnabort (src/lib/web.tz), as node's event handlers listen from when
   // they are first set; `aborted` and `reason`, an error; null for any other
   // assignment.
   // `logical`: the assignment of `o.x ??= v`, `||=` or `&&=`.
@@ -2002,7 +2002,7 @@ private:
   static const Type *listenerType(const Type *args, const Type *ret);
   // A listener of the event `event` whose listeners get `args`: a function
   // of them that returns nothing, an async one, or one that takes `this`
-  // (`kind`, as src/lib/events.ts numbers them), converted to an unknown, as
+  // (`kind`, as src/lib/events.tz numbers them), converted to an unknown, as
   // the emitter keeps it. `receiver` is the emitter, the `this` it gets.
   enum class ListenerKind { Plain, Async, This };
   Expr *checkListener(Expr *arg, const Type *args, llvm::StringRef event, const Type *receiver,
@@ -2030,7 +2030,7 @@ private:
   // name there. Null for the other functions of the module.
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   // Streams (sema_stream.cpp, docs/streams.md): node:stream, which tz has
-  // written in tz (src/lib/stream.ts), and what the compiler adds to it.
+  // written in tz (src/lib/stream.tz), and what the compiler adds to it.
   //
   // A class of node:stream or one that extends it; the chunk types its
   // readable and writable sides have (null for a side it has not).
@@ -2105,11 +2105,11 @@ private:
   // methods.
   Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
   // fs.createReadStream(path, options?) and createWriteStream(), which
-  // `decl` of src/lib/fs_stream.ts declares: an encoding gives a stream of
+  // `decl` of src/lib/fs_stream.tz declares: an encoding gives a stream of
   // strings.
   Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
   // process.stdin, process.stdout or process.stderr read as a stream: the
-  // stream of src/lib/fs_stream.ts; null if the program does not use them
+  // stream of src/lib/fs_stream.tz; null if the program does not use them
   // as streams (the loader did not load it).
   Expr *processStream(MemberExpr *member);
   // What stands for process.stdin in a StreamView.
@@ -2142,7 +2142,7 @@ private:
                             llvm::ArrayRef<const Type *> bound, const std::vector<bool> &given,
                             llvm::SMLoc loc);
   // Event maps found from emit() calls (see EventInference). The map of the
-  // emitter at `site` ("new main.ts:3:13", "class main.ts:Server"): in a
+  // emitter at `site` ("new main.tz:3:13", "class main.tz:Server"): in a
   // round that looks for them an opaque type of its own, which the calls on
   // its emitters record into; in the last round the object type of the
   // events found.
@@ -2154,7 +2154,7 @@ private:
   // instance of a class (of EventEmitter with the map found for its place);
   // null if that is not known from its form.
   const Type *createdType(const NewExpr *create);
-  // The place of `loc` in the program, "main.ts:3:13".
+  // The place of `loc` in the program, "main.tz:3:13".
   std::string placeOf(llvm::SMLoc loc) const;
   // What a round looking for maps does with a call on an emitter of the
   // opaque map `events` of `site`: records the arguments of an emit, gives
@@ -2352,7 +2352,7 @@ private:
   static std::string readBeforeLoad(const Module *reader, const std::string &what,
                                     const Module *source, llvm::StringRef declared);
   bool reportImportAssign(const NameExpr *name, const VarSymbol *var);
-  // "main.ts -> a.ts -> b.ts -> (a.ts already started)": how `reader`
+  // "main.tz -> a.tz -> b.tz -> (a.tz already started)": how `reader`
   // came to load before `source`.
   static std::string loadChain(const Module *reader, const Module *source);
   // Reads of variables before the code that sets them runs: top-level code

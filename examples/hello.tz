@@ -1,2 +1,2 @@
-// tz run examples/hello.ts
+// tz run examples/hello.tz
 console.log("Привет из typezero!")

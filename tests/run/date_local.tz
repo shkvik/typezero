@@ -3,7 +3,7 @@
 // Local time, in the zone that TZ names, as in node: the local fields and
 // setters, the local constructor, getTimezoneOffset, and the changes of the
 // clocks. (The names of zones are in the language of the system, so the
-// texts here end before them; see date_zone_name.ts.)
+// texts here end before them; see date_zone_name.tz.)
 const d = new Date(2026, 9, 23, 10, 30)
 console.log(d, d.getTime())
 console.log(d.getFullYear(), d.getMonth(), d.getDate(), d.getDay(), d.getHours(), d.getMinutes())

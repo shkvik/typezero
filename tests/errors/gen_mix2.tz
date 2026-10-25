@@ -1,5 +1,5 @@
 // Writes through a wider type that pass through the built-in modules and
-// through errors (tests/run/gen_mix2.ts has the reads that are allowed): a
+// through errors (tests/run/gen_mix2.tz has the reads that are allowed): a
 // listener of an emitter that puts another Animal into the array it gets,
 // and an error whose narrowed field a `catch` (or the callback of a
 // promise's `catch`) changes after it was thrown or rejected.

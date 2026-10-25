@@ -1,5 +1,5 @@
 // Code that runs while the entry file waits for it: a copy of a generic of
 // the entry, made here, uses what the entry imports from node:path.
-import { pickName } from "./main.ts"
+import { pickName } from "./main.tz"
 
 export const early = pickName(["/a/b.txt", "/c/d.md"], (s) => s)

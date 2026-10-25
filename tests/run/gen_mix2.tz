@@ -5,7 +5,7 @@
 // gives once awaited, the names of the events of an emitter as a union and
 // as handler names, the arguments of an event found with `infer`, and a
 // Dog[] that the listeners of an emitter and the entries of a Map see as an
-// Animal[] and only read (tests/errors/gen_mix2.ts is the write that is
+// Animal[] and only read (tests/errors/gen_mix2.tz is the write that is
 // not allowed).
 import { EventEmitter } from "node:events"
 

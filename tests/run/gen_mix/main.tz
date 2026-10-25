@@ -5,7 +5,7 @@
 // arrays and Buffers; a class with [Symbol.iterator] walked by an async
 // function; instances of one generic class in a union, told apart by
 // instanceof; keyof and mapped types over a class.
-import { Cache, Column, Entry, Range, Table, lengthOf } from "./store.ts"
+import { Cache, Column, Entry, Range, Table, lengthOf } from "./store.tz"
 
 // 1. Async methods and Promise fields, and metadata of the generic class.
 const lengths = new Cache<int>(lengthOf)

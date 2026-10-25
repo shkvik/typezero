@@ -1,4 +1,4 @@
-// What main.ts builds on: a registry of classes that a class decorator fills,
+// What main.tz builds on: a registry of classes that a class decorator fills,
 // a method decorator for async methods and async generators, a mixin over an
 // emitter class, and a generic store whose items fromJson makes.
 import { EventEmitter } from "node:events"

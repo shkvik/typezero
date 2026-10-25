@@ -1328,7 +1328,7 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   }
   ++recurse_times;
   // A CryptoKey of Web Crypto shows its fields a level deeper, as node's custom inspect of it
-  // does (src/lib/webcrypto.ts).
+  // does (src/lib/webcrypto.tz).
   if ((layout->flags & TZ_LAYOUT_LIBRARY) && named(layout, "CryptoKey"))
     ++recurse_times;
   ctx->seen[ctx->seen_count++] = object;

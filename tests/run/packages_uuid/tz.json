@@ -1,6 +1,6 @@
 {
   "name": "packages_uuid",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "uuid": "file:../../packages/uuid"
   }

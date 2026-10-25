@@ -1,10 +1,10 @@
-// What tz takes beyond node: imports without an extension or with .js, a
-// directory by its index.ts, and types, interfaces and enums imported like
+// What tz takes beyond node: imports without an extension or with .tz, a
+// directory by its index.tz, and types, interfaces and enums imported like
 // everything else, also when a file passes on what it imports.
 import { Color, paint } from "./colors"
 import { origin, move } from "./geometry"
-import { Point, Shape, describe } from "./shapes.js"
-import { total } from "./lib/sum.ts"
+import { Point, Shape, describe } from "./shapes.tz"
+import { total } from "./lib/sum.tz"
 import { countdown } from "./lib/countdown"
 
 const p: Point = move(origin, 2, 3)

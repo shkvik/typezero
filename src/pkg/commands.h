@@ -7,7 +7,7 @@ namespace tz::pkg {
 // The commands of tz that work on a project rather than compile it. Each
 // takes the arguments after the command's name and returns tz's exit code.
 
-// tz init [directory]: tz.json, main.ts and .gitignore.
+// tz init [directory]: tz.json, main.tz and .gitignore.
 int commandInit(llvm::ArrayRef<const char *> args);
 // tz add <package>...: adds packages to tz.json and tz.lock.
 int commandAdd(llvm::ArrayRef<const char *> args);

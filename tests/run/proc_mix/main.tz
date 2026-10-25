@@ -6,7 +6,7 @@
 // numbers a child printed.
 import { execSync, spawnSync } from "node:child_process"
 import { readLine } from "tz:io"
-import { Runner, attempt, ran } from "./tools.ts"
+import { Runner, attempt, ran } from "./tools.tz"
 
 const at = process.argv.indexOf("--child")
 if (at >= 0) {

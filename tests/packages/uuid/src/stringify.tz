@@ -1,4 +1,4 @@
-import { validate } from './validate.js';
+import { validate } from './validate.tz';
 
 /**
  * Convert array of 16 byte values to UUID string format of the form:

@@ -22,7 +22,7 @@ console.log(a.concat([7, 8], 9), a.join(), a.join(" | "), a.toString())
 // reverse() and sort() change the array and return it; console.log shows the
 // state after all its arguments ran. Without a comparison function, sort()
 // compares the string forms, as in JavaScript; numbers need one (see
-// errors/sort.ts), here one that compares them as strings.
+// errors/sort.tz), here one that compares them as strings.
 const b = a.slice()
 console.log(b.reverse(), b.sort((x, y) => x - y), [10, 9, 1, 100, 25].sort((x, y) => (String(x) < String(y) ? -1 : 1)))
 console.log(["b", "a", "C", "ä"].sort(), [true, false, true].sort())

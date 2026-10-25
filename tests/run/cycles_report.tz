@@ -1,4 +1,4 @@
-// expect-stderr: tz: group of Player: 4094 of 4097 objects cannot be reached, held by Player.opponent at cycles_report.ts:20
+// expect-stderr: tz: group of Player: 4094 of 4097 objects cannot be reached, held by Player.opponent at cycles_report.tz:20
 // A program compiled with TZ_CHECK_LEAKS set walks a group that has grown
 // large (docs/objects.md, section 11): players who played each other are in
 // one group, which only grows as long as one of them is still in the lobby,

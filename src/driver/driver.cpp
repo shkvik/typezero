@@ -5,7 +5,6 @@
 #include "driver/linker.h"
 #include "driver/loader.h"
 #include "pkg/commands.h"
-#include "pkg/editor.h"
 #include "pkg/project.h"
 #include "sema/overflow.h"
 #include "sema/parallel.h"
@@ -43,12 +42,12 @@
 namespace tz {
 namespace {
 
-const char kUsage[] = R"(usage: tz <command> [options] [<file.ts>] [arguments]
+const char kUsage[] = R"(usage: tz <command> [options] [<file.tz>] [arguments]
 
 commands:
   build     compile a program into a native executable
   run       compile a program and run it; arguments after the file go to it
-  init      start a project: tz.json, main.ts and .gitignore
+  init      start a project: tz.json, main.tz and .gitignore
   add       add packages to tz.json: tz add zod, tz add jsr:@std/path@^1,
             tz add github:user/repo@v1.2.0, tz add ../lib
   remove    remove packages from tz.json
@@ -142,9 +141,11 @@ int parseArgs(llvm::ArrayRef<const char *> args, Options &opts) {
       opts.explainParallel = true;
     } else if (arg.starts_with("-")) {
       return usageError("unknown option '" + arg + "'");
-    } else if (opts.command == Command::Run && !arg.ends_with_insensitive(".ts")) {
+    } else if (opts.command == Command::Run && !arg.ends_with_insensitive(".tz") &&
+               !arg.ends_with_insensitive(".ts")) {
       // Not a source file: the project's program runs, and this is its
-      // first argument.
+      // first argument. A file of TypeScript is taken as the source, for
+      // the error that says it needs another name.
       opts.programArgs.push_back(arg.str());
       programArgs = true;
     } else {
@@ -191,14 +192,14 @@ int findMain(Options &opts) {
     return usageError(opts.programArgs.empty()
                           ? "no source file given, and there is no tz.json here or above"
                           : "'" + opts.programArgs.front() +
-                                "' is not a .ts file, and there is no tz.json here or above "
+                                "' is not a .tz file, and there is no tz.json here or above "
                                 "whose \"main\" would run");
   pkg::Manifest manifest;
   if (!pkg::readManifest(manifestPath, manifest))
     return kExitError;
   if (manifest.main.empty()) {
     llvm::errs() << "tz: " << manifestPath
-                 << " has no \"main\": add \"main\": \"main.ts\", or name the file to build\n";
+                 << " has no \"main\": add \"main\": \"main.tz\", or name the file to build\n";
     return kExitError;
   }
   llvm::SmallString<256> main(manifest.dir);
@@ -228,10 +229,6 @@ bool preparePackages(llvm::StringRef input, pkg::Graph &storage, const pkg::Grap
       !pkg::preparePackages(manifest, pkg::PrepareOptions(), storage))
     return false;
   graph = &storage;
-  // The editor's settings follow the packages and where tz is; if they
-  // cannot be written, the error says so and the build goes on.
-  if (pkg::editorSetUp(manifest.dir))
-    pkg::writeEditorConfig(manifest.dir, graph);
   return true;
 }
 
@@ -650,7 +647,6 @@ std::string defaultOutput(const Options &opts) {
 int runDriver(int argc, char **argv) {
   Options opts;
   std::vector<const char *> args(argv + 1, argv + argc);
-  pkg::setTypesDir(runtimeFile(argv[0], "types"));
   if (!args.empty()) {
     llvm::StringRef command = args[0];
     llvm::ArrayRef<const char *> rest = llvm::ArrayRef(args).drop_front();

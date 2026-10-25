@@ -6,7 +6,7 @@
 // decorated methods of one; and classes of the library (EventTarget,
 // AbortController) as values.
 import { EventEmitter, on } from "node:events"
-import { Bus, Counting, Entity, Logged, Names, Store, calls, registered } from "./registry.ts"
+import { Bus, Counting, Entity, Logged, Names, Store, calls, registered } from "./registry.tz"
 
 @Entity
 class User {

@@ -3,7 +3,7 @@
 import { basename, extname, join } from "node:path"
 import { EOL } from "node:os"
 import { Buffer } from "node:buffer"
-import { slugOf } from "./slug.ts"
+import { slugOf } from "./slug.tz"
 
 export { slugOf }
 

@@ -3,7 +3,7 @@
 // plan): a value may go where its type is seen as one that allows more
 // writes, as long as the program never makes such a write. Everything here
 // only reads through the wider type, or writes what the value's own type
-// allows; tests/errors/widen_*.ts are the writes that are not allowed.
+// allows; tests/errors/widen_*.tz are the writes that are not allowed.
 class Animal {
   name: string
   constructor(name: string) { this.name = name }

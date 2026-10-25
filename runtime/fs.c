@@ -4088,7 +4088,7 @@ void tz_fs_shutdown(void) { bytes_free(&tz_in); }
 // Descriptors for the streams of node:fs
 //===----------------------------------------------------------------------===//
 
-// fs.ReadStream and fs.WriteStream (src/lib/fs_stream.ts, docs/streams.md,
+// fs.ReadStream and fs.WriteStream (src/lib/fs_stream.tz, docs/streams.md,
 // step 3) open, read, write and close a file as Node's do: each call a work
 // for the pool, as a call with a callback of node:fs is, the descriptor a
 // CRT one, as libuv gives it on Windows. A read or a write holds its Buffer
@@ -4340,7 +4340,7 @@ void tz_fss_close(TzPromise *p, int32_t fd, int32_t sync, TzMaker make) {
 // process.stdin as a stream
 //===----------------------------------------------------------------------===//
 
-// The reads of process.stdin as a Readable (src/lib/fs_stream.ts): each
+// The reads of process.stdin as a Readable (src/lib/fs_stream.tz): each
 // waits for the next chunk, at most `max` bytes, of the buffer that readLine
 // and readline read too, or undefined at its end. Not static: see the rules
 // in tzrt.h.

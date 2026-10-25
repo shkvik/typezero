@@ -79,7 +79,7 @@ class Mole extends Animal {
 
 // A field may narrow down the chain only to objects of a type down the chain
 // of its own, which lie in memory the same way (and become read-only; code
-// that writes through Kennel is checked in tests/errors/widen_fields.ts).
+// that writes through Kennel is checked in tests/errors/widen_fields.tz).
 class Kennel {
   pet: Animal = new Animal("a")
   readonly size: int = 1
@@ -113,7 +113,7 @@ class Child extends Parent {
 class Lone { override x = 1 }
 
 // An array of Dog is an array of Animal while no code puts another Animal
-// into it (tests/errors/widen_arrays.ts).
+// into it (tests/errors/widen_arrays.tz).
 const dogs: Dog[] = []
 const animals: Animal[] = dogs
 const copied: Animal[] = [...dogs]

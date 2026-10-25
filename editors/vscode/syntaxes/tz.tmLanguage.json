@@ -1,0 +1,10 @@
+{
+  "name": "typezero",
+  "scopeName": "source.tz",
+  "fileTypes": ["tz"],
+  "patterns": [
+    {
+      "include": "source.ts"
+    }
+  ]
+}

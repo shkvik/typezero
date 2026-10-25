@@ -23,7 +23,10 @@
 #
 #   node tests (MODE=node): the same source run by Node.js the same way must
 #     print exactly <name>.out too, and exit with the same code and stderr,
-#     which keeps the expectations honest about JavaScript.
+#     which keeps the expectations honest about JavaScript. Node strips the
+#     types of .ts files only, so it runs a copy in COPY whose files end in
+#     .ts and import each other so; in what it prints, the names of the
+#     files end in .tz again.
 #     Options for node may follow the `// same-as-node` marker.
 #     node/preload.cjs runs first: it gives Node what tz has built in, the
 #     global SystemError and the module "tz:io" (docs/io.md).
@@ -37,8 +40,8 @@
 #                              comment; several comments may stack up
 #     // expect-warning: text  the same for a warning; other warnings are
 #                              allowed here
-#   With MULTI set, SRC is the main.ts of a program of several files, and the
-#   comments may be in any .ts file of its directory.
+#   With MULTI set, SRC is the main.tz of a program of several files, and the
+#   comments may be in any .tz file of its directory.
 
 file(STRINGS ${SRC} directives REGEX "// expect-")
 set(expected_exit 0)
@@ -131,7 +134,7 @@ endfunction()
 function(collect_expectations kind out)
   get_filename_component(test_dir ${SRC} DIRECTORY)
   if(MULTI)
-    file(GLOB_RECURSE sources RELATIVE ${test_dir} ${test_dir}/*.ts)
+    file(GLOB_RECURSE sources RELATIVE ${test_dir} ${test_dir}/*.tz)
     list(SORT sources)
   else()
     get_filename_component(sources ${SRC} NAME)
@@ -141,7 +144,7 @@ function(collect_expectations kind out)
     if(MULTI)
       set(where "${test_dir}/${rel}:")
     else()
-      set(where ".ts:")
+      set(where ".tz:")
     endif()
     string(REPLACE "\\" "/" where "${where}")
     file(READ ${test_dir}/${rel} source)
@@ -268,14 +271,57 @@ elseif(MODE STREQUAL "node")
   file(STRINGS ${SRC} marker REGEX "^// same-as-node")
   string(REGEX REPLACE "^// same-as-node *" "" node_options "${marker}")
   separate_arguments(node_options)
+  # The copy, laid out under COPY as under tests: the program's file (for a
+  # program of several files, every file of its directory) and the files
+  # they import, with .ts for .tz.
+  get_filename_component(test_dir ${SRC} DIRECTORY)
+  set(queue ${SRC})
+  if(MULTI)
+    file(GLOB_RECURSE queue ${test_dir}/*)
+  endif()
+  file(REMOVE_RECURSE ${COPY})
+  set(done "")
+  set(names "")
+  while(queue)
+    list(POP_FRONT queue file)
+    list(FIND done "${file}" seen)
+    if(NOT seen EQUAL -1 OR NOT EXISTS ${file})
+      continue()
+    endif()
+    list(APPEND done ${file})
+    file(RELATIVE_PATH rel ${CMAKE_CURRENT_LIST_DIR} ${file})
+    if(NOT file MATCHES "\\.tz$")
+      configure_file(${file} ${COPY}/${rel} COPYONLY)
+      continue()
+    endif()
+    file(READ ${file} text)
+    string(REGEX MATCHALL "from \"\\.\\.?/[^\"]*\\.tz\"" imports "${text}")
+    get_filename_component(dir ${file} DIRECTORY)
+    foreach(import IN LISTS imports)
+      string(REGEX REPLACE "^from \"(.*)\"$" "\\1" target "${import}")
+      get_filename_component(target ${dir}/${target} ABSOLUTE)
+      list(APPEND queue ${target})
+    endforeach()
+    string(REGEX REPLACE "(from \"\\.\\.?/[^\"]*)\\.tz\"" "\\1.ts\"" text "${text}")
+    string(REGEX REPLACE "\\.tz$" ".ts" rel "${rel}")
+    file(WRITE ${COPY}/${rel} "${text}")
+    get_filename_component(name ${file} NAME_WE)
+    list(APPEND names ${name})
+  endwhile()
+  file(RELATIVE_PATH entry ${CMAKE_CURRENT_LIST_DIR} ${SRC})
+  string(REGEX REPLACE "\\.tz$" ".ts" entry "${entry}")
   execute_process(
     COMMAND ${CMAKE_COMMAND} -E env ${program_env} ${NODE} --no-warnings
-            --require ${CMAKE_CURRENT_LIST_DIR}/node/preload.cjs ${node_options} ${SRC}
+            --require ${CMAKE_CURRENT_LIST_DIR}/node/preload.cjs ${node_options} ${COPY}/${entry}
             ${program_args}
     ${stdin_option}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE ${stderr_var}
     RESULT_VARIABLE exit_code)
+  foreach(name IN LISTS names)
+    string(REPLACE "${name}.ts" "${name}.tz" stdout "${stdout}")
+    string(REPLACE "${name}.ts" "${name}.tz" stderr "${stderr}")
+  endforeach()
   check_exit_and_stderr("${exit_code}" "${stdout}" "${stderr}")
   check_stdout("${stdout}")
 

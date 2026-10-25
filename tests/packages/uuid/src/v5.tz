@@ -1,8 +1,8 @@
-import { sha1 } from './sha1.js';
-import { UUIDTypes } from './types.js';
-import { v35 } from './v35.js';
+import { sha1 } from './sha1.tz';
+import { UUIDTypes } from './types.tz';
+import { v35 } from './v35.tz';
 
-export { DNS, URL } from './v35.js';
+export { DNS, URL } from './v35.tz';
 
 function v5<TBuf extends Uint8Array = never>(
   value: string | Uint8Array,

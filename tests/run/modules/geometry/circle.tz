@@ -1,4 +1,4 @@
-import { PI } from "../math.ts"
+import { PI } from "../math.tz"
 console.log("geometry/circle loads")
 export function area(r: double) {
   return PI * r * r

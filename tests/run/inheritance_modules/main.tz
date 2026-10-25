@@ -1,7 +1,7 @@
 // A class that extends a class of another file, and an interface of another
 // file implemented in this one (node imports types only with `import type`,
 // so this test is not run by node).
-import { Shape, Circle, HasArea } from "./shapes.ts"
+import { Shape, Circle, HasArea } from "./shapes.tz"
 
 class Square extends Shape {
   constructor(public side: double) {

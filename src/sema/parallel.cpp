@@ -718,10 +718,10 @@ private:
   };
   Pos posOf(llvm::SMLoc loc) const;
   std::string where(llvm::SMLoc loc) const;
-  // "at line 12", or "at lib.ts:12" in another file; "line 12" or
-  // "lib.ts:12".
+  // "at line 12", or "at lib.tz:12" in another file; "line 12" or
+  // "lib.tz:12".
   static bool inOtherFile(const std::string &where) {
-    return where.find(".ts:") != std::string::npos;
+    return where.find(".tz:") != std::string::npos;
   }
   static std::string atText(const std::string &where) {
     return inOtherFile(where) ? "at " + where : "at line " + where;
@@ -4117,7 +4117,7 @@ unsigned Analysis::lineOf(llvm::SMLoc loc) const {
   return sources_.FindLineNumber(loc);
 }
 
-// "12" in the entry file, "lib/math.ts:12" in another.
+// "12" in the entry file, "lib/math.tz:12" in another.
 std::string Analysis::where(llvm::SMLoc loc) const {
   if (!loc.isValid())
     return "?";
@@ -4522,7 +4522,7 @@ std::vector<std::string> Analysis::decisionLines(unsigned piece) const {
   if (from == to) {
     lines.push_back("in order: " + lineText(from));
   } else if (inOtherFile(from) || inOtherFile(to)) {
-    // In another file: "lib.ts:3-5" within it.
+    // In another file: "lib.tz:3-5" within it.
     llvm::StringRef a(from), b(to);
     if (a.rsplit(':').first == b.rsplit(':').first)
       lines.push_back("in order: " + from + "-" + b.rsplit(':').second.str());

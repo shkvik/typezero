@@ -67,7 +67,7 @@ struct Manifest {
   bool isTzJson = false;
   std::string name, version, main;
   size_t mainOffset = 0;
-  // "." -> "mod.ts", "./mini" -> "mini.ts": what imports of the package can
+  // "." -> "mod.tz", "./mini" -> "mini.tz": what imports of the package can
   // name; empty when the package does not say.
   std::vector<std::pair<std::string, std::string>> exports;
   std::vector<Dependency> dependencies;
@@ -113,7 +113,7 @@ struct Lock {
 // The packages of a program, for the loader. packages[0] is the project.
 struct Package {
   std::string id;      // "" for the project
-  std::string name;    // what its files are called after: "@std/path/join.ts"
+  std::string name;    // what its files are called after: "@std/path/join.tz"
   std::string version;
   std::string dir;     // canonical
   std::string manifestPath; // tz.json, if it has one

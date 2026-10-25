@@ -1308,7 +1308,7 @@ void Sema::reportWidening(const Type *from, const Type *to, llvm::SMLoc at, llvm
                           llvm::StringRef name, llvm::SMLoc write, const Type *value,
                           const Type *through, bool element, llvm::StringRef field,
                           const Type *narrow, const Type *owner, int depth) {
-  // "line 12", or "line 12 of shapes.ts" in another file.
+  // "line 12", or "line 12 of shapes.tz" in another file.
   llvm::SourceMgr &sources = diags_.sourceMgr();
   unsigned id = sources.FindBufferContainingLoc(write);
   std::string line =

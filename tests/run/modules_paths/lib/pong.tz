@@ -1,4 +1,4 @@
-import { countdown } from "./countdown.ts"
+import { countdown } from "./countdown.tz"
 export function pong(n: int): string {
   return countdown(n)
 }

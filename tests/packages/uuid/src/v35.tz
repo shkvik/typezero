@@ -1,6 +1,6 @@
-import { parse } from './parse.js';
-import { unsafeStringify } from './stringify.js';
-import { UUIDTypes } from './types.js';
+import { parse } from './parse.tz';
+import { unsafeStringify } from './stringify.tz';
+import { UUIDTypes } from './types.tz';
 
 export function stringToBytes(str: string) {
   // tz: the UTF-8 of TextEncoder, as the TODO of uuid has it; tz has no

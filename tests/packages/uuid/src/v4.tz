@@ -1,6 +1,6 @@
-import { rng } from './rng.js';
-import { unsafeStringify } from './stringify.js';
-import { UUIDTypes, Version4Options } from './types.js';
+import { rng } from './rng.tz';
+import { unsafeStringify } from './stringify.tz';
+import { UUIDTypes, Version4Options } from './types.tz';
 
 function v4<TBuf extends Uint8Array = never>(
   options?: Version4Options,

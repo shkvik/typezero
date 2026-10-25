@@ -1,4 +1,4 @@
-import { validate } from './validate.js';
+import { validate } from './validate.tz';
 
 function version(uuid: string) {
   if (!validate(uuid)) {

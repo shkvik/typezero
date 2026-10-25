@@ -1,6 +1,6 @@
 {
   "name": "pkg-mix",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "textkit": "file:./libs/textkit"
   }

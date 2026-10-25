@@ -43,9 +43,9 @@ load tried; load tried
 ParseError: line 7: made here ParseError 400 7
 {"code":1,"name":"AppError"} {"limit":"3"}
 AppError: negative amount -3
-    at Positive.check (errors.ts:39:26)
-    at checkAll (main.ts:53:42)
-    at main.ts:148:3
+    at Positive.check (errors.tz:39:26)
+    at checkAll (main.tz:53:42)
+    at main.tz:148:3
 ParseError: line 10: cannot read 'bad'
-    at parseLine (parse.ts:19:29)
-    at main.ts:153:18
+    at parseLine (parse.tz:19:29)
+    at main.tz:153:18

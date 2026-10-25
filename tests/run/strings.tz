@@ -7,7 +7,7 @@ console.log(hello.length, privet.length, smile.length, "".length)
 console.log(hello[1], privet[1], hello.charCodeAt(0), privet.charCodeAt(0), smile.charCodeAt(1))
 
 // + concatenates strings; numbers and booleans join them through templates
-// or String() (see errors/string_plus.ts).
+// or String() (see errors/string_plus.tz).
 let n = 42
 console.log(`n = ${n}`, `pi ~ ${3.14}`, `ok: ${true}`, `${1 + 2}3`, `1${2}${3}`)
 let s = "a"

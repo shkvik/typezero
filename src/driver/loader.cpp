@@ -25,6 +25,27 @@ namespace {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
+// Why an import cannot name `file` (relative to `dir`), which `spec` names as
+// written, or "" when its extension is not one of TypeScript or JavaScript:
+// the files of tz end in .tz (docs/modules.md).
+std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringRef spec) {
+  static const llvm::StringLiteral kForeign[] = {".ts",  ".js",  ".tsx", ".jsx",
+                                                 ".mts", ".cts", ".mjs", ".cjs"};
+  llvm::StringRef ext = path::extension(file, path::Style::posix);
+  if (!llvm::is_contained(kForeign, ext))
+    return "";
+  if (file.ends_with(".d.ts"))
+    return "only .tz files can be imported; tz needs no declarations: it reads the code itself";
+  std::string stem = spec.drop_back(ext.size()).str();
+  std::string message = "the files of tz end in .tz: import '" + stem + "' or '" + stem + ".tz'";
+  llvm::SmallString<256> full(dir);
+  path::append(full, file);
+  if (fs::is_regular_file(full))
+    message += ", and rename " + path::filename(file, path::Style::posix).str() + " to " +
+               path::stem(file, path::Style::posix).str() + ".tz";
+  return message;
+}
+
 class Loader {
 public:
   Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
@@ -66,7 +87,7 @@ private:
   // that names one gets it as if it imported it, unless it declares or
   // imports that name itself.
   void importLibraryGlobals(Module *module, llvm::StringRef text);
-  // The streams of node:fs and of process, written in tz (src/lib/fs_stream.ts):
+  // The streams of node:fs and of process, written in tz (src/lib/fs_stream.tz):
   // the names createReadStream, createWriteStream, ReadStream and WriteStream
   // that a file imports from node:fs come from there, and a file that uses
   // process.stdin, process.stdout or process.stderr as a stream loads it.
@@ -90,6 +111,13 @@ private:
 };
 
 bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
+  if (path::extension(entryPath) != ".tz") {
+    llvm::errs() << "tz: '" << entryPath << "' is not a file of tz: they end in .tz";
+    if (path::extension(entryPath) == ".ts")
+      llvm::errs() << "; rename it to " << path::stem(entryPath) << ".tz";
+    llvm::errs() << "\n";
+    return false;
+  }
   llvm::SmallString<256> real;
   if (std::error_code ec = fs::real_path(entryPath, real)) {
     llvm::errs() << "tz: cannot read '" << entryPath << "': " << ec.message() << "\n";
@@ -192,20 +220,20 @@ Module *Loader::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
   // Built into tz and written in tz (src/lib, docs/events.md, docs/net.md);
   // the modules of the globals only for the code there.
   if (spec == "node:events" || spec == "events")
-    return libraryModule("events.ts", "node:events", loc);
+    return libraryModule("events.tz", "node:events", loc);
   if (spec == "tz:http")
-    return libraryModule("http.ts", "tz:http", loc);
+    return libraryModule("http.tz", "tz:http", loc);
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch"))
-    return libraryModule(spec.drop_front(3).str() + ".ts", spec, loc);
+    return libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
   // node:stream and the modules on it (docs/streams.md).
   if (spec == "node:stream" || spec == "stream")
-    return libraryModule("stream.ts", "node:stream", loc);
+    return libraryModule("stream.tz", "node:stream", loc);
   if (spec == "node:stream/promises" || spec == "stream/promises")
-    return libraryModule("stream_promises.ts", "node:stream/promises", loc);
+    return libraryModule("stream_promises.tz", "node:stream/promises", loc);
   if (spec == "node:stream/consumers" || spec == "stream/consumers")
-    return libraryModule("stream_consumers.ts", "node:stream/consumers", loc);
+    return libraryModule("stream_consumers.tz", "node:stream/consumers", loc);
   if (spec == "node:string_decoder" || spec == "string_decoder")
-    return libraryModule("string_decoder.ts", "node:string_decoder", loc);
+    return libraryModule("string_decoder.tz", "node:string_decoder", loc);
   if (isBuiltinModule(spec)) {
     if (std::string problem = builtinModuleProblem(spec); !problem.empty())
       diags_.error(loc, problem);
@@ -231,27 +259,25 @@ Module *Loader::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
   std::vector<std::string> candidates;
   llvm::StringRef last = path::filename(spec, path::Style::posix);
   llvm::StringRef ext = path::extension(spec, path::Style::posix);
+  std::string baseDir = path::parent_path(realPaths_[from]).str();
   if (spec.ends_with("/") || last == "." || last == "..") {
-    candidates.push_back((spec.rtrim('/') + "/index.ts").str());
-  } else if (spec.ends_with(".d.ts") || ext == ".json" || ext == ".tsx" || ext == ".mts" ||
-             ext == ".cts" || ext == ".mjs" || ext == ".cjs" || ext == ".jsx") {
-    diags_.error(loc, ext == ".json"
-                          ? "a .json file is not a module: only .ts files can be imported; embed "
-                            "the data with 'const data = embedJson(\"" +
-                                spec.str() + "\")'"
-                          : std::string("only .ts files can be imported"));
-    return nullptr;
-  } else if (ext == ".ts") {
+    candidates.push_back((spec.rtrim('/') + "/index.tz").str());
+  } else if (ext == ".tz") {
     candidates.push_back(spec.str());
-  } else if (ext == ".js") {
-    // As in TypeScript for node: the .js file that math.ts compiles to.
-    candidates.push_back((spec.drop_back(3) + ".ts").str());
+  } else if (ext == ".json") {
+    diags_.error(loc, "a .json file is not a module: only .tz files can be imported; embed the "
+                      "data with 'const data = embedJson(\"" +
+                          spec.str() + "\")'");
+    return nullptr;
+  } else if (std::string problem = foreignFile(baseDir, spec, spec); !problem.empty()) {
+    diags_.error(loc, problem);
+    return nullptr;
   } else {
-    candidates.push_back((spec + ".ts").str());
-    candidates.push_back((spec + "/index.ts").str());
+    candidates.push_back((spec + ".tz").str());
+    candidates.push_back((spec + "/index.tz").str());
   }
 
-  return load(path::parent_path(realPaths_[from]), candidates, spec, loc, packageOf_[from]);
+  return load(baseDir, candidates, spec, loc, packageOf_[from]);
 }
 
 Module *Loader::resolvePackage(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
@@ -336,16 +362,17 @@ Module *Loader::resolvePackage(Module *from, llvm::StringRef spec, llvm::SMLoc l
     if (!package.main.empty())
       candidates.push_back(package.main);
     else
-      candidates = {"mod.ts", "index.ts", "src/index.ts", "src/mod.ts"};
+      candidates = {"mod.tz", "index.tz", "src/index.tz", "src/mod.tz"};
   } else {
     llvm::StringRef file = llvm::StringRef(subpath).drop_front(2);
-    if (file.ends_with(".ts")) {
+    if (file.ends_with(".tz")) {
       candidates.push_back(file.str());
-    } else if (file.ends_with(".js")) {
-      candidates.push_back((file.drop_back(3) + ".ts").str());
+    } else if (std::string problem = foreignFile(package.dir, file, spec); !problem.empty()) {
+      diags_.error(loc, problem);
+      return nullptr;
     } else {
-      candidates.push_back((file + ".ts").str());
-      candidates.push_back((file + "/index.ts").str());
+      candidates.push_back((file + ".tz").str());
+      candidates.push_back((file + "/index.tz").str());
     }
   }
   return load(package.dir, candidates, spec, loc, index);
@@ -375,10 +402,16 @@ Module *Loader::load(llvm::StringRef baseDir, const std::vector<std::string> &ca
     }
     if (Module *known = byRealPath_.lookup(real))
       return known;
+    if (path::extension(real) != ".tz") {
+      diags_.error(loc, "'" + spec + "' names " + path::filename(real) +
+                            ", and the files of tz end in .tz: rename it to " +
+                            path::stem(real) + ".tz");
+      return nullptr;
+    }
     std::string name = relativeName(real);
     std::string filePath = name;
     if (owner) {
-      // A file of a package is named after the package: "@std/path/join.ts".
+      // A file of a package is named after the package: "@std/path/join.tz".
       llvm::StringRef inside = real.str();
       bool within = inside.consume_front(owner->dir) &&
                     (inside.starts_with("/") || inside.starts_with("\\"));
@@ -423,12 +456,21 @@ Module *Loader::load(llvm::StringRef baseDir, const std::vector<std::string> &ca
   }
 
   std::string message = "cannot find '" + spec.str() + "': there is no ";
+  std::string typescript;
   for (size_t i = 0; i < candidates.size(); ++i) {
     llvm::StringRef shown(candidates[i]);
     if (shown.starts_with("./"))
       shown = shown.drop_front(2);
     message += (i ? " or " : "") + shown.str();
+    // The same file of TypeScript, which only needs another name.
+    llvm::SmallString<256> ts(baseDir);
+    path::append(ts, shown.drop_back(3) + ".ts");
+    if (typescript.empty() && fs::is_regular_file(ts))
+      typescript = path::convert_to_slash(shown.drop_back(3)) + ".ts";
   }
+  if (!typescript.empty())
+    message += "; there is " + typescript + ", and the files of tz end in .tz: rename it to " +
+               typescript.substr(0, typescript.size() - 3) + ".tz";
   diags_.error(loc, message);
   return nullptr;
 }
@@ -472,71 +514,71 @@ struct LibraryGlobal {
   llvm::StringLiteral name, file, module;
 };
 constexpr LibraryGlobal kLibraryGlobals[] = {
-    {"EventTarget", "web.ts", "tz:web"},
-    {"Event", "web.ts", "tz:web"},
-    {"CustomEvent", "web.ts", "tz:web"},
-    {"AbortController", "web.ts", "tz:web"},
-    {"AbortSignal", "web.ts", "tz:web"},
-    {"DOMException", "web.ts", "tz:web"},
-    {"EventListenerObject", "web.ts", "tz:web"},
-    {"URL", "url.ts", "tz:url"},
-    {"URLSearchParams", "url.ts", "tz:url"},
-    {"Headers", "fetch.ts", "tz:fetch"},
-    {"Request", "fetch.ts", "tz:fetch"},
-    {"Response", "fetch.ts", "tz:fetch"},
-    {"ReadableStream", "fetch.ts", "tz:fetch"},
-    {"ReadableStreamDefaultReader", "fetch.ts", "tz:fetch"},
-    {"ReadableStreamDefaultController", "fetch.ts", "tz:fetch"},
-    {"FormData", "fetch.ts", "tz:fetch"},
-    {"fetch", "fetch.ts", "tz:fetch"},
+    {"EventTarget", "web.tz", "tz:web"},
+    {"Event", "web.tz", "tz:web"},
+    {"CustomEvent", "web.tz", "tz:web"},
+    {"AbortController", "web.tz", "tz:web"},
+    {"AbortSignal", "web.tz", "tz:web"},
+    {"DOMException", "web.tz", "tz:web"},
+    {"EventListenerObject", "web.tz", "tz:web"},
+    {"URL", "url.tz", "tz:url"},
+    {"URLSearchParams", "url.tz", "tz:url"},
+    {"Headers", "fetch.tz", "tz:fetch"},
+    {"Request", "fetch.tz", "tz:fetch"},
+    {"Response", "fetch.tz", "tz:fetch"},
+    {"ReadableStream", "fetch.tz", "tz:fetch"},
+    {"ReadableStreamDefaultReader", "fetch.tz", "tz:fetch"},
+    {"ReadableStreamDefaultController", "fetch.tz", "tz:fetch"},
+    {"FormData", "fetch.tz", "tz:fetch"},
+    {"fetch", "fetch.tz", "tz:fetch"},
     // The types that go with them, global in TypeScript too.
-    {"RequestInit", "fetch.ts", "tz:fetch"},
-    {"ResponseInit", "fetch.ts", "tz:fetch"},
-    {"HeadersInit", "fetch.ts", "tz:fetch"},
-    {"BodyInit", "fetch.ts", "tz:fetch"},
-    {"RequestRedirect", "fetch.ts", "tz:fetch"},
-    {"ReadableStreamReadResult", "fetch.ts", "tz:fetch"},
-    {"UnderlyingSource", "fetch.ts", "tz:fetch"},
+    {"RequestInit", "fetch.tz", "tz:fetch"},
+    {"ResponseInit", "fetch.tz", "tz:fetch"},
+    {"HeadersInit", "fetch.tz", "tz:fetch"},
+    {"BodyInit", "fetch.tz", "tz:fetch"},
+    {"RequestRedirect", "fetch.tz", "tz:fetch"},
+    {"ReadableStreamReadResult", "fetch.tz", "tz:fetch"},
+    {"UnderlyingSource", "fetch.tz", "tz:fetch"},
     // Those of Web Crypto: the types of TypeScript's lib.dom that its
     // functions take and give.
-    {"CryptoKey", "webcrypto.ts", "tz:webcrypto"},
-    {"CryptoKeyPair", "webcrypto.ts", "tz:webcrypto"},
-    {"SubtleCrypto", "webcrypto.ts", "tz:webcrypto"},
-    {"JsonWebKey", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaOtherPrimesInfo", "webcrypto.ts", "tz:webcrypto"},
-    {"BufferSource", "webcrypto.ts", "tz:webcrypto"},
-    {"KeyUsage", "webcrypto.ts", "tz:webcrypto"},
-    {"KeyFormat", "webcrypto.ts", "tz:webcrypto"},
-    {"KeyType", "webcrypto.ts", "tz:webcrypto"},
-    {"NamedCurve", "webcrypto.ts", "tz:webcrypto"},
-    {"BigInteger", "webcrypto.ts", "tz:webcrypto"},
-    {"Algorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"AlgorithmIdentifier", "webcrypto.ts", "tz:webcrypto"},
-    {"HashAlgorithmIdentifier", "webcrypto.ts", "tz:webcrypto"},
-    {"KeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"AesKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"HmacKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"EcKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaHashedKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
-    {"AesCbcParams", "webcrypto.ts", "tz:webcrypto"},
-    {"AesCtrParams", "webcrypto.ts", "tz:webcrypto"},
-    {"AesGcmParams", "webcrypto.ts", "tz:webcrypto"},
-    {"AesKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
-    {"AesDerivedKeyParams", "webcrypto.ts", "tz:webcrypto"},
-    {"HmacImportParams", "webcrypto.ts", "tz:webcrypto"},
-    {"HmacKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
-    {"EcKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
-    {"EcKeyImportParams", "webcrypto.ts", "tz:webcrypto"},
-    {"EcdsaParams", "webcrypto.ts", "tz:webcrypto"},
-    {"EcdhKeyDeriveParams", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaHashedKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaHashedImportParams", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaPssParams", "webcrypto.ts", "tz:webcrypto"},
-    {"RsaOaepParams", "webcrypto.ts", "tz:webcrypto"},
-    {"Pbkdf2Params", "webcrypto.ts", "tz:webcrypto"},
-    {"HkdfParams", "webcrypto.ts", "tz:webcrypto"},
+    {"CryptoKey", "webcrypto.tz", "tz:webcrypto"},
+    {"CryptoKeyPair", "webcrypto.tz", "tz:webcrypto"},
+    {"SubtleCrypto", "webcrypto.tz", "tz:webcrypto"},
+    {"JsonWebKey", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaOtherPrimesInfo", "webcrypto.tz", "tz:webcrypto"},
+    {"BufferSource", "webcrypto.tz", "tz:webcrypto"},
+    {"KeyUsage", "webcrypto.tz", "tz:webcrypto"},
+    {"KeyFormat", "webcrypto.tz", "tz:webcrypto"},
+    {"KeyType", "webcrypto.tz", "tz:webcrypto"},
+    {"NamedCurve", "webcrypto.tz", "tz:webcrypto"},
+    {"BigInteger", "webcrypto.tz", "tz:webcrypto"},
+    {"Algorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"AlgorithmIdentifier", "webcrypto.tz", "tz:webcrypto"},
+    {"HashAlgorithmIdentifier", "webcrypto.tz", "tz:webcrypto"},
+    {"KeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"AesKeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"HmacKeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"EcKeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaKeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaHashedKeyAlgorithm", "webcrypto.tz", "tz:webcrypto"},
+    {"AesCbcParams", "webcrypto.tz", "tz:webcrypto"},
+    {"AesCtrParams", "webcrypto.tz", "tz:webcrypto"},
+    {"AesGcmParams", "webcrypto.tz", "tz:webcrypto"},
+    {"AesKeyGenParams", "webcrypto.tz", "tz:webcrypto"},
+    {"AesDerivedKeyParams", "webcrypto.tz", "tz:webcrypto"},
+    {"HmacImportParams", "webcrypto.tz", "tz:webcrypto"},
+    {"HmacKeyGenParams", "webcrypto.tz", "tz:webcrypto"},
+    {"EcKeyGenParams", "webcrypto.tz", "tz:webcrypto"},
+    {"EcKeyImportParams", "webcrypto.tz", "tz:webcrypto"},
+    {"EcdsaParams", "webcrypto.tz", "tz:webcrypto"},
+    {"EcdhKeyDeriveParams", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaKeyGenParams", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaHashedKeyGenParams", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaHashedImportParams", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaPssParams", "webcrypto.tz", "tz:webcrypto"},
+    {"RsaOaepParams", "webcrypto.tz", "tz:webcrypto"},
+    {"Pbkdf2Params", "webcrypto.tz", "tz:webcrypto"},
+    {"HkdfParams", "webcrypto.tz", "tz:webcrypto"},
 };
 
 } // namespace
@@ -617,7 +659,7 @@ void Loader::importLibraryGlobals(Module *module, llvm::StringRef text) {
   // name of its own.
   if (subtle) {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);
-    if (ImportDecl *decl = importOf("webcrypto.ts", "tz:webcrypto", loc))
+    if (ImportDecl *decl = importOf("webcrypto.tz", "tz:webcrypto", loc))
       decl->names.push_back({"subtle", loc, kSubtleName, loc});
   }
   for (ImportDecl &decl : imports)
@@ -720,7 +762,7 @@ void Loader::importFsStreams(Module *module, llvm::StringRef text) {
   if (!streams.loc.isValid())
     return;
   streams.path = "node:internal/fs/streams";
-  streams.from = libraryModule("fs_stream.ts", "node:internal/fs/streams", streams.loc);
+  streams.from = libraryModule("fs_stream.tz", "node:internal/fs/streams", streams.loc);
   if (streams.from)
     module->file.imports.push_back(std::move(streams));
 }

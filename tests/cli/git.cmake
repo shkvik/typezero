@@ -8,16 +8,16 @@ endif()
 
 # numbers: v1.0.0 and v2.0.0.
 write(src/numbers/tz.json [[
-{ "name": "numbers", "main": "numbers.ts" }
+{ "name": "numbers", "main": "numbers.tz" }
 ]])
-write(src/numbers/numbers.ts [[
+write(src/numbers/numbers.tz [[
 export function scale(n: int) { return n * 10 }
 ]])
 git(init -q IN src/numbers)
 git(add . IN src/numbers)
 git(commit -qm one IN src/numbers)
 git(tag v1.0.0 IN src/numbers)
-write(src/numbers/numbers.ts [[
+write(src/numbers/numbers.tz [[
 export function scale(n: int) { return n * 100 }
 ]])
 git(commit -qam two IN src/numbers)
@@ -29,16 +29,16 @@ git(clone -q --bare src/numbers numbers.git IN .)
 write(src/lib/tz.json "{
   \"name\": \"lib\",
   \"version\": \"1.0.0\",
-  \"main\": \"src/index.ts\",
+  \"main\": \"src/index.tz\",
   \"dependencies\": { \"numbers\": \"git:${WORK}/numbers.git@v1.0.0\" }
 }
 ")
-write(src/lib/src/index.ts [[
+write(src/lib/src/index.tz [[
 import { scale } from "numbers"
 import { label } from "./label"
 export function describe(n: int) { return `${label} ${scale(n)}` }
 ]])
-write(src/lib/src/label.ts [[
+write(src/lib/src/label.tz [[
 export const label = "lib 1.0:"
 ]])
 git(init -q IN src/lib)
@@ -48,7 +48,7 @@ git(tag v1.0.0 IN src/lib)
 file(READ ${WORK}/src/lib/tz.json manifest)
 string(REPLACE "v1.0.0" "v2.0.0" manifest "${manifest}")
 write(src/lib/tz.json "${manifest}")
-write(src/lib/src/label.ts [[
+write(src/lib/src/label.tz [[
 export const label = "lib 1.1:"
 ]])
 git(commit -qam two IN src/lib)
@@ -56,7 +56,7 @@ git(tag v1.1.0 IN src/lib)
 git(clone -q --bare src/lib lib.git IN .)
 
 tz(init app)
-write(app/main.ts [[
+write(app/main.tz [[
 import { describe } from "lib"
 console.log(describe(4))
 ]])
@@ -102,7 +102,7 @@ file(READ ${WORK}/app/tz.json manifest)
 string(REPLACE "lib.git@v1.1.0" "lib.git@main" manifest "${manifest}")
 write(app/tz.json "${manifest}")
 tz(run IN app STDOUT "lib 1.1: 400\n")
-write(src/lib/src/label.ts [[
+write(src/lib/src/label.tz [[
 export const label = "lib main:"
 ]])
 git(commit -qam three IN src/lib)
@@ -119,7 +119,7 @@ tz(run IN app STDOUT "lib main: 400\n")
 file(READ ${WORK}/app/tz.lock lock)
 string(REGEX MATCH "\"ref\": \"main\",\n      \"commit\": \"([0-9a-f]+)\"" ignored "${lock}")
 string(SUBSTRING "${CMAKE_MATCH_1}" 0 16 commit)
-file(GLOB label ${WORK}/cache/git/lib-*/${commit}/src/label.ts)
+file(GLOB label ${WORK}/cache/git/lib-*/${commit}/src/label.tz)
 file(READ ${label} saved)
 file(APPEND ${label} "// changed\n")
 tz(run IN app EXIT 1 STDERR "are not those tz.lock names")

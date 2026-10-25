@@ -211,7 +211,7 @@ const kAfterWritePending = 1 << 28
 const kBuffered = 1 << 29
 const kWEnded = 1 << 30
 
-// The kinds of listeners of src/lib/events.ts: one that takes the emitter as
+// The kinds of listeners of src/lib/events.tz: one that takes the emitter as
 // `this`, and one that takes the first argument of its event as an unknown.
 const kThisListener = 2
 const kUnknownArgListener = 3

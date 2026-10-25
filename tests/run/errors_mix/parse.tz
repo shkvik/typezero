@@ -1,6 +1,6 @@
 // Reading the input: regexes made when the program runs, decimal(s) and
 // JSON.parse<T>, whose errors become errors of the program with a cause.
-import { AppError, ParseError } from "./errors.ts"
+import { AppError, ParseError } from "./errors.tz"
 
 export type Entry = { name: string; amount: decimal; tags: string[] }
 

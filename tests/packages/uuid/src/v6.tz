@@ -1,8 +1,8 @@
-import { parse } from './parse.js';
-import { unsafeStringify } from './stringify.js';
-import { UUIDTypes, Version6Options } from './types.js';
-import { v1 } from './v1.js';
-import { v1ToV6 } from './v1ToV6.js';
+import { parse } from './parse.tz';
+import { unsafeStringify } from './stringify.tz';
+import { UUIDTypes, Version6Options } from './types.tz';
+import { v1 } from './v1.tz';
+import { v1ToV6 } from './v1ToV6.tz';
 
 // tz: v1() and v1ToV6() give a string or bytes (UUIDTypes), as plain functions have one
 // signature; bytes in, bytes out, which a string would only be after parse().

@@ -3,7 +3,7 @@
 // chain and of interfaces, generic code, Result, generators and iterator
 // helpers, sorting with a comparison, join(), JSON.stringify, and the
 // errors dates throw.
-import { Dated, Event, LateError, Meeting, checkDue, parseWhen } from "./events.ts"
+import { Dated, Event, LateError, Meeting, checkDue, parseWhen } from "./events.tz"
 import { err, ok, Result } from "neverthrow"
 
 const base = Date.UTC(2026, 9, 26, 9, 0)

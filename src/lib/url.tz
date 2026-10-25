@@ -1336,13 +1336,13 @@ export class URLSearchParams {
   }
 }
 
-// The text of a form, for bodies (fetch.ts).
+// The text of a form, for bodies (fetch.tz).
 export function __formText(params: URLSearchParams): string {
   return params.toString()
 }
 
 // The bytes of a text with its %XX sequences decoded, for data: URLs
-// (fetch.ts).
+// (fetch.tz).
 export function __percentDecode(text: string): Uint8Array {
   return percentDecode(text)
 }

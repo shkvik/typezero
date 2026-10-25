@@ -2,7 +2,7 @@
 import { isUnit } from "shapes"
 // expect-error: 'zod' is not a dependency in
 import { z } from "zod"
-// expect-error: cannot find 'shapes/missing': package shapes has no missing.ts or missing/index.ts
+// expect-error: cannot find 'shapes/missing': package shapes has no missing.tz or missing/index.tz
 import { y } from "shapes/missing"
 // expect-error: import a package by its name in tz.json: add it with 'tz add jsr:@std/path' and write 'from "@std/path/join"'
 import { join } from "jsr:@std/path@^1/join"

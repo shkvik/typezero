@@ -4,7 +4,7 @@
 import { existsSync as exists, mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { saveNote, readNote } from "./notes.ts"
+import { saveNote, readNote } from "./notes.tz"
 
 const dir = mkdtempSync(join(tmpdir(), "tz-notes-"))
 const file = saveNote(dir, "today", "купить хлеб")

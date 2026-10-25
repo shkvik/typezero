@@ -1,7 +1,7 @@
 // embedBytes: a file built into the executable, as a Uint8Array whose bytes
 // are read from the executable itself; every embedBytes of the file gives
 // the same array.
-import { checksum } from "./sum.ts"
+import { checksum } from "./sum.tz"
 
 const table = embedBytes("./table.bin")
 console.log(table.length, table[0] ?? -1, table.subarray(250))

@@ -1,6 +1,6 @@
 {
   "name": "uuid",
   "version": "14.0.3",
-  "main": "src/index.ts",
+  "main": "src/index.tz",
   "dependencies": {}
 }

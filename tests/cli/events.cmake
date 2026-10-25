@@ -7,10 +7,10 @@ include(${SOURCE}/../cli.cmake)
 write(libs/ticker/tz.json [[
 {
   "name": "ticker",
-  "exports": { ".": "./mod.ts" }
+  "exports": { ".": "./mod.tz" }
 }
 ]])
-write(libs/ticker/mod.ts [[
+write(libs/ticker/mod.tz [[
 import { EventEmitter } from "node:events"
 
 // Its map comes from the emits below and from the program that uses it.
@@ -24,7 +24,7 @@ export class Ticker extends EventEmitter {
 ]])
 tz(init app)
 tz(add ../libs/ticker IN app STDOUT "added ticker: file:../libs/ticker\n")
-write(app/main.ts [[
+write(app/main.tz [[
 import { on, once } from "node:events"
 import { Ticker } from "ticker"
 
@@ -57,16 +57,16 @@ if(NOT count EQUAL 1)
   message(FATAL_ERROR "expected one overflow warning, found ${count}:\n${TZ_STDERR}")
 endif()
 file(MAKE_DIRECTORY ${WORK}/app/sub)
-tz(build -o ../app.exe ../main.ts IN app/sub STDERR "may overflow int")
+tz(build -o ../app.exe ../main.tz IN app/sub STDERR "may overflow int")
 
 # An event that nothing emits, found in the last round, reported once.
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { Ticker } from "ticker"
 const t = new Ticker()
 t.on("tock", () => console.log("never"))
 t.tick("1")
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR "no code of the program emits 'tock' on this emitter; it emits 'tick'")
+tz(build bad.tz IN app EXIT 1 STDERR "no code of the program emits 'tock' on this emitter; it emits 'tick'")
 string(REGEX MATCHALL "emits 'tock'" errors "${TZ_STDERR}")
 list(LENGTH errors count)
 if(NOT count EQUAL 1)

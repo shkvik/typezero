@@ -6,7 +6,7 @@
 // in functions, methods and another file, and an event may have the types
 // a listener of another one passes.
 import { EventEmitter, once } from "node:events"
-import { Shop, report } from "./shop.ts"
+import { Shop, report } from "./shop.tz"
 
 class User {
   name: string

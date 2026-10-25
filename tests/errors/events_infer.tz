@@ -9,9 +9,9 @@ const bus = new EventEmitter()
 bus.on("usr", () => {})
 bus.emit("user", "ann")
 bus.emit("count", 1)
-// expect-error: 'count' is emitted with [int] at events_infer.ts:11:10, but with 'string' here; an event has one type of arguments
+// expect-error: 'count' is emitted with [int] at events_infer.tz:11:10, but with 'string' here; an event has one type of arguments
 bus.emit("count", "two")
-// expect-error: 'count' is emitted with [int] at events_infer.ts:11:10, but with 0 arguments here
+// expect-error: 'count' is emitted with [int] at events_infer.tz:11:10, but with 0 arguments here
 bus.emit("count")
 const topic = String(Math.random())
 // expect-error: the name of the event must be known when compiling, as a string literal

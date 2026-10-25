@@ -3,7 +3,7 @@
 // a class, a class itself, a function or a dictionary that may be undefined
 // is tested for being there, and narrows; `filter(Boolean)` drops undefined
 // from the type of the elements; `unknown` is tested once a check shows what
-// it holds. tests/errors/truthiness_objects.ts has what is always true.
+// it holds. tests/errors/truthiness_objects.tz has what is always true.
 
 class User {
   name: string

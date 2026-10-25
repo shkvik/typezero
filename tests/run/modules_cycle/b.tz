@@ -1,8 +1,8 @@
-import { prefix, isEven } from "./a.ts"
+import { prefix, isEven } from "./a.tz"
 console.log("b loads first")
 export function isOdd(n: int) {
   return n == 0 ? false : isEven(n - 1)
 }
 export const shout = (s: string) => s.toUpperCase()
-// Reads `prefix` when it is called, after a.ts has set it.
+// Reads `prefix` when it is called, after a.tz has set it.
 export const tagOf = (name: string) => `${prefix}/${name}`

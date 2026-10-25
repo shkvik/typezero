@@ -1,4 +1,4 @@
-// What main.ts runs programs with: a class whose decorated method runs this
+// What main.tz runs programs with: a class whose decorated method runs this
 // program again and records it, an async generator of the lines a child
 // prints, and a generic function that turns a throw into a Result.
 import { execFileSync } from "node:child_process"

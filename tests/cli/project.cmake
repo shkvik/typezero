@@ -3,28 +3,27 @@
 include(${SOURCE}/../cli.cmake)
 
 file(MAKE_DIRECTORY ${WORK}/hello)
-tz(init IN hello STDOUT
-   "created tz.json, main.ts, .gitignore and tsconfig.json; run the program with 'tz run'\n")
+tz(init IN hello STDOUT "created tz.json, main.tz and .gitignore; run the program with 'tz run'\n")
 expect_file(hello/tz.json [[
 {
   "name": "hello",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {}
 }
 ]])
-expect_file(hello/.gitignore "*.exe\n*.ll\n/hello\n/.tz/\n")
+expect_file(hello/.gitignore "*.exe\n*.ll\n/hello\n")
 tz(run IN hello STDOUT "Hello, world!\n")
 tz(init IN hello EXIT 1 STDERR "tz: there is a tz.json already in <work>/hello")
 
-# Without a file, "main" runs; arguments that are not a .ts file are the
+# Without a file, "main" runs; arguments that are not a .tz file are the
 # program's, and so is everything after '--'.
-write(hello/main.ts [[
+write(hello/main.tz [[
 import { argv } from "node:process"
 console.log(argv.slice(2).join(" "))
 ]])
 tz(run a b IN hello STDOUT "a b\n")
-tz(run -- x.ts -o IN hello STDOUT "x.ts -o\n")
-tz(run main.ts c IN hello STDOUT "c\n")
+tz(run -- x.tz -o IN hello STDOUT "x.tz -o\n")
+tz(run main.tz c IN hello STDOUT "c\n")
 # From a directory inside the project too; the executable is named after it.
 file(MAKE_DIRECTORY ${WORK}/hello/sub)
 tz(run d IN hello/sub STDOUT "d\n")
@@ -38,22 +37,22 @@ endif()
 write(libs/shapes/tz.json [[
 {
   "name": "shapes",
-  "exports": { ".": "./mod.ts", "./units": "./units.ts" },
+  "exports": { ".": "./mod.tz", "./units": "./units.tz" },
   "dependencies": { "fmt": "file:../fmt" }
 }
 ]])
-write(libs/shapes/mod.ts [[
+write(libs/shapes/mod.tz [[
 import { fixed } from "fmt"
-import { cm } from "./units.ts"
+import { cm } from "./units.tz"
 export function area(w: double, h: double) { return `${fixed(w * h)} ${cm}²` }
 ]])
-write(libs/shapes/units.ts [[
+write(libs/shapes/units.tz [[
 export const cm = "cm"
 ]])
-write(libs/fmt/index.ts [[
+write(libs/fmt/index.tz [[
 export function fixed(n: double) { return n.toFixed(1) }
 ]])
-write(libs/fmt/extra/more.ts [[
+write(libs/fmt/extra/more.tz [[
 export const more = "more"
 ]])
 tz(init app)
@@ -61,14 +60,14 @@ tz(add ../libs/shapes ../libs/fmt IN app STDOUT "added shapes: file:../libs/shap
 expect_file(app/tz.json [[
 {
   "name": "app",
-  "main": "main.ts",
+  "main": "main.tz",
   "dependencies": {
     "fmt": "file:../libs/fmt",
     "shapes": "file:../libs/shapes"
   }
 }
 ]])
-write(app/main.ts [[
+write(app/main.tz [[
 import { area } from "shapes"
 import { cm } from "shapes/units"
 import { more } from "fmt/extra/more"
@@ -80,29 +79,29 @@ if(EXISTS ${WORK}/app/tz.lock)
 endif()
 
 # Errors.
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { z } from "zod"
 console.log(z)
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR
+tz(build bad.tz IN app EXIT 1 STDERR
    "error: 'zod' is not a dependency in <work>/app/tz.json; add it with 'tz add zod'")
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { x } from "shapes/mod"
 console.log(x)
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR
+tz(build bad.tz IN app EXIT 1 STDERR
    "error: 'shapes/mod' names nothing shapes exports; it exports 'shapes', 'shapes/units'")
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { x } from "jsr:@std/path@^1"
 console.log(x)
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR
+tz(build bad.tz IN app EXIT 1 STDERR
    "error: import a package by its name in tz.json: add it with 'tz add jsr:@std/path' and write 'from \"@std/path\"'")
-write(app/bad.ts [[
+write(app/bad.tz [[
 import { x } from "npm:zod"
 console.log(x)
 ]])
-tz(build bad.ts IN app EXIT 1 STDERR "error: npm packages are not supported")
+tz(build bad.tz IN app EXIT 1 STDERR "error: npm packages are not supported")
 
 write(broken/tz.json [[
 {
@@ -110,7 +109,7 @@ write(broken/tz.json [[
   "dependecies": {}
 }
 ]])
-tz(build x.ts IN broken EXIT 1 STDERR
+tz(build x.tz IN broken EXIT 1 STDERR
    "tz.json:3:3: error: unknown field 'dependecies' in tz.json; the fields are name, version, main, exports and dependencies")
 write(broken/tz.json [[
 {
@@ -119,25 +118,25 @@ write(broken/tz.json [[
   }
 }
 ]])
-tz(build x.ts IN broken EXIT 1 STDERR
+tz(build x.tz IN broken EXIT 1 STDERR
    "tz.json:3:5: error: 'fs' is the name of a module built into tz; give the package another name")
 write(broken/tz.json [[
 { "dependencies": { "zod": "^4" } }
 ]])
-tz(build x.ts IN broken EXIT 1 STDERR
+tz(build x.tz IN broken EXIT 1 STDERR
    "tz.json:1:28: error: '^4' is a version, but not where the package comes from; tz takes packages from JSR and git: write e.g. 'jsr:@scope/name@^4'")
 write(broken/tz.json [[
 { "dependencies": { "zod": "npm:zod@^4" } }
 ]])
-tz(build x.ts IN broken EXIT 1 STDERR "tz.json:1:28: error: npm packages are not supported")
+tz(build x.tz IN broken EXIT 1 STDERR "tz.json:1:28: error: npm packages are not supported")
 write(broken/tz.json [[
 { "dependencies": { "lib": "file:../nowhere" } }
 ]])
-tz(build x.ts IN broken EXIT 1 STDERR "tz.json:1:28: error: there is no directory '../nowhere'")
+tz(build x.tz IN broken EXIT 1 STDERR "tz.json:1:28: error: there is no directory '../nowhere'")
 write(broken/tz.json [[
 { "name": "broken", }
 ]])
-tz(build IN broken EXIT 1 STDERR "tz.json has no \"main\": add \"main\": \"main.ts\", or name the file to build")
+tz(build IN broken EXIT 1 STDERR "tz.json has no \"main\": add \"main\": \"main.tz\", or name the file to build")
 write(broken/tz.json "{ \"name\": ")
 tz(build IN broken EXIT 1 STDERR "tz.json:1:11: error: unexpected end of the JSON text")
 tz(build EXIT 2 STDERR "tz: no source file given, and there is no tz.json here or above")

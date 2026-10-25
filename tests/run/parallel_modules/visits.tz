@@ -1,4 +1,4 @@
-// The tasks of main.ts: they push into an array of this file, so they keep
+// The tasks of main.tz: they push into an array of this file, so they keep
 // node's order where they do.
 const seen: string[] = []
 

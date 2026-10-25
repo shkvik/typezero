@@ -1,4 +1,4 @@
-// The tasks main.ts runs: async methods up a class chain and through an
+// The tasks main.tz runs: async methods up a class chain and through an
 // interface, a generic cache of promises in a Map, values that may be
 // promises, and ResultAsync over node:fs.
 import { readFileSync, writeFileSync } from "node:fs"

@@ -1,8 +1,8 @@
-# Programs of tz as TypeScript's checker sees them in the editor (docs/modules.md,
-# section 6): a project that tz init set up, using what tz has built in, a
-# package and node's modules, and the examples build with tz and have no
-# errors for tsc. Needs node and TypeScript's lib/typescript.js (TZ_TYPESCRIPT,
-# by default VS Code's).
+# The declarations next to tz for TypeScript's checker (src/types, docs/modules.md,
+# section 6), for a plugin of tsserver to come: a program that uses what tz
+# has built in and node's modules, and the examples, build with tz and, as
+# .ts copies, have no errors for tsc. Needs node and TypeScript's
+# lib/typescript.js (TZ_TYPESCRIPT, by default VS Code's).
 include(${SOURCE}/../cli.cmake)
 if(NOT NODE)
   skip("node is not installed")
@@ -20,31 +20,15 @@ function(tsc config)
   endif()
 endfunction()
 
-write(libs/shapes/tz.json [[
-{
-  "name": "shapes",
-  "exports": { ".": "./mod.ts", "./units": "./units.ts" }
-}
-]])
-write(libs/shapes/mod.ts [[
-export function area(w: double, h: double) { return w * h }
-]])
-write(libs/shapes/units.ts [[
-export const cm = "cm"
-]])
-tz(init app)
-tz(add ../libs/shapes IN app)
 write(app/config.json [[
 {"port": 8080, "tags": ["a"]}
 ]])
 write(app/note.txt "hello")
-write(app/main.ts [=[
+set(program [=[
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { readLine } from "tz:io"
 import { serve } from "tz:http"
-import { area } from "shapes"
-import { cm } from "shapes/units"
 
 // Numbers.
 const n: int = 3
@@ -52,7 +36,7 @@ const big: long = 1 << 20
 const price: decimal = 19.99
 const total = price * n + 0.01
 console.log(total, total.toFixed(1), total.round(0, "half-even"), decimal("0.1") + decimal("0.2"))
-console.log(decimal.max(price, total), big, area(2, 1.5), cm)
+console.log(decimal.max(price, total), big)
 
 // JSON.
 type Config = { port: double; tags: string[] }
@@ -127,9 +111,10 @@ const answer = await fetch(`http://127.0.0.1:${server.port}/hi`)
 console.log(answer.status, await answer.text())
 await server.stop()
 ]=])
-tz(run IN app STDOUT [[
+write(app/main.tz "${program}")
+tz(run main.tz IN app STDOUT [[
 59.98 60.0 60 0.3
-59.98 1048576 3 cm
+59.98 1048576
 8080 [ 'a' ] 2 8080 5
 half 2 true
 true
@@ -142,14 +127,18 @@ call twice
 no input
 200 got /hi
 ]])
-tsc(app/tsconfig.json)
 
-# The examples, with the settings next to tz.
+# The program and the examples as .ts files, with the settings next to tz.
 get_filename_component(types ${TZ} DIRECTORY)
-get_filename_component(examples ${SOURCE}/../../examples ABSOLUTE)
-write(examples/tsconfig.json "{
+write(tsc/main.ts "${program}")
+file(GLOB examples ${SOURCE}/../../examples/*.tz)
+foreach(example IN LISTS examples)
+  get_filename_component(name ${example} NAME_WE)
+  configure_file(${example} ${WORK}/tsc/${name}.ts COPYONLY)
+endforeach()
+write(tsc/tsconfig.json "{
   \"extends\": \"${types}/types/tsconfig.json\",
-  \"include\": [\"${examples}/*.ts\"]
+  \"include\": [\"*.ts\"]
 }
 ")
-tsc(examples/tsconfig.json)
+tsc(tsc/tsconfig.json)

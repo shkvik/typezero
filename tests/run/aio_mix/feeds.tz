@@ -1,4 +1,4 @@
-// What main.ts reads with: a class whose objects `for await` iterates, a
+// What main.tz reads with: a class whose objects `for await` iterates, a
 // decorated async generator method, a generic class with one, and a
 // function that takes any AsyncIterable.
 import { readFile } from "node:fs/promises"

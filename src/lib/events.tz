@@ -56,7 +56,7 @@ class ThisListener {
   constructor(readonly listener: unknown) {}
 }
 
-// A listener of the code of node:stream (src/lib/stream.ts) that takes the
+// A listener of the code of node:stream (src/lib/stream.tz) that takes the
 // first argument of its event as an unknown, whatever the type its emitter
 // emits it with: the chunk of a 'data' event, which is a Buffer, a string or
 // a T of an object-mode stream. It prints as the function it holds.

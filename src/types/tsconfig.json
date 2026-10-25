@@ -1,14 +1,14 @@
-// The settings of TypeScript's checker for programs of tz, in the editor (tsc
-// in VS Code; docs/modules.md, section 6). It lies next to tz as
-// types/tsconfig.json; the .tz/tsconfig.json that tz writes for a project
-// extends it.
+// The settings of TypeScript's checker for programs of tz (docs/modules.md,
+// section 6). It lies next to tz as types/tsconfig.json, for a plugin of
+// tsserver that would check the .tz files of the editor (there is none yet),
+// and tests/cli/types.cmake checks .ts copies of programs with it.
 {
   "compilerOptions": {
     // What tz has of JavaScript: the newest standard, without the DOM.
     "target": "ESNext",
     "lib": ["ESNext"],
     "module": "ESNext",
-    // Imports as tz finds them: "./math" and "./math.ts".
+    // Imports as in the .ts copies of programs: "./math" and "./math.ts".
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     // Every file is a module, also one without imports and exports: its names
