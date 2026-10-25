@@ -101,6 +101,7 @@ add_executable(tz
   pkg/scan.cpp
   pkg/project.cpp
   pkg/commands.cpp
+  pkg/editor.cpp
   pkg/port.cpp
 )
 
@@ -140,3 +141,8 @@ foreach(file lib/events.ts lib/web.ts lib/url.ts lib/fetch.ts lib/http.ts lib/we
              lib/fs_stream.ts)
   configure_file(${file} ${TZ_OUTPUT_DIR}/${file} COPYONLY)
 endforeach()
+
+# What tz has built in, declared for the editor, and the settings of tsc for
+# programs of tz (src/pkg/editor.cpp): next to tz, beside @types/node.
+configure_file(types/tz.d.ts ${TZ_OUTPUT_DIR}/types/node_modules/@types/tz/index.d.ts COPYONLY)
+configure_file(types/tsconfig.json ${TZ_OUTPUT_DIR}/types/tsconfig.json COPYONLY)

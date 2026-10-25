@@ -102,11 +102,29 @@ endforeach()
 # helpers of cli.cmake. Packages come from local git repositories and a mirror
 # of JSR on the disk that the test makes, never from the network.
 find_program(TZ_GIT git)
+# TypeScript's checker, for cli/editor_tsc: its lib/typescript.js, by default
+# the one VS Code comes with (looked for again once an update of VS Code has
+# moved it).
+set(TZ_TYPESCRIPT "" CACHE FILEPATH "lib/typescript.js of TypeScript, for tests/cli/editor_tsc.cmake")
+if(NOT EXISTS "${TZ_TYPESCRIPT}")
+  find_program(TZ_VSCODE code)
+  if(TZ_VSCODE)
+    get_filename_component(vscode ${TZ_VSCODE} DIRECTORY)
+    get_filename_component(vscode ${vscode} DIRECTORY)
+    file(GLOB found ${vscode}/resources/app/extensions/node_modules/typescript/lib/typescript.js
+                    ${vscode}/*/resources/app/extensions/node_modules/typescript/lib/typescript.js)
+    if(found)
+      list(GET found 0 found)
+      set(TZ_TYPESCRIPT ${found} CACHE FILEPATH "lib/typescript.js of TypeScript, for tests/cli/editor_tsc.cmake" FORCE)
+    endif()
+  endif()
+endif()
 file(GLOB TZ_CLI_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cmake)
 foreach(src ${TZ_CLI_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME cli/${name}
     COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DGIT=${TZ_GIT} -DNODE=${TZ_NODE}
+            -DTYPESCRIPT=${TZ_TYPESCRIPT}
             -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/cli -DWORK=${CMAKE_CURRENT_BINARY_DIR}/cli/${name}
             -P ${src})
   set_tests_properties(cli/${name} PROPERTIES SKIP_REGULAR_EXPRESSION "skipped: ")

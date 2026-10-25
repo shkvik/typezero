@@ -3,7 +3,8 @@
 include(${SOURCE}/../cli.cmake)
 
 file(MAKE_DIRECTORY ${WORK}/hello)
-tz(init IN hello STDOUT "created tz.json, main.ts and .gitignore; run the program with 'tz run'\n")
+tz(init IN hello STDOUT
+   "created tz.json, main.ts, .gitignore and tsconfig.json; run the program with 'tz run'\n")
 expect_file(hello/tz.json [[
 {
   "name": "hello",
@@ -11,7 +12,7 @@ expect_file(hello/tz.json [[
   "dependencies": {}
 }
 ]])
-expect_file(hello/.gitignore "*.exe\n*.ll\n/hello\n")
+expect_file(hello/.gitignore "*.exe\n*.ll\n/hello\n/.tz/\n")
 tz(run IN hello STDOUT "Hello, world!\n")
 tz(init IN hello EXIT 1 STDERR "tz: there is a tz.json already in <work>/hello")
 

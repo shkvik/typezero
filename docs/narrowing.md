@@ -94,8 +94,8 @@ const same = fromJson<User>(j)             // уже разобранный Json
     класса есть конструктор, и обходить его нельзя.
 - `JSON.parse(text)` без типа — по-прежнему `Json` ([modules.md](modules.md), раздел 5).
 - Обратно — `JSON.stringify(user)`, как в JS.
-- tsc пишет у `JSON.parse<User>` «Expected 0 type arguments» — подчёркивание в редакторе до
-  своего языкового сервера.
+- В редакторе `JSON.parse<User>` объявлен tz для tsc ([modules.md](modules.md), раздел 6), а
+  `JSON.parse(text)` без типа для tsc — его собственный, с `any`.
 
 ## План реализации
 

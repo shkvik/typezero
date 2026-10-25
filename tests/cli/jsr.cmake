@@ -26,7 +26,8 @@ tz(add @std/fmt@^0.1 IN ranges EXIT 1 STDERR "tz.json needs jsr:@std/fmt@^0.1, a
 tz(add greet@^2.1.0-beta.1 IN ranges STDOUT "added greet: jsr:@tz/greet@^2.1.0-beta.1 (2.1.0-beta.1)\n")
 tz(add @std/fmt@^1.2.3. IN ranges EXIT 1 STDERR "tz: in 'jsr:@std/fmt@^1.2.3.': '1.2.3.' is not a version or a range of versions")
 
-tz(init app STDOUT "created tz.json, main.ts and .gitignore in app; run the program with 'tz run'\n")
+tz(init app STDOUT
+   "created tz.json, main.ts, .gitignore and tsconfig.json in app; run the program with 'tz run'\n")
 write(app/main.ts [[
 import { greet } from "greet"
 console.log(greet("jsr"))
@@ -40,6 +41,8 @@ tz(add greet IN app STDOUT "added greet: jsr:@tz/greet@^2.0.0 (2.0.0)\n"
 if(TZ_STDERR MATCHES "downloading jsr:@std/fmt")
   message(FATAL_ERROR "@std/fmt was downloaded again:\n${TZ_STDERR}")
 endif()
+# The editor finds it in the cache (tests/cli/editor.cmake).
+expect_match(app/.tz/tsconfig.json [=["greet": \["<work>/cache/jsr/@tz/greet/2.0.0/mod.ts"\]]=])
 expect_file(app/tz.json [[
 {
   "name": "app",

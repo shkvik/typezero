@@ -1,0 +1,33 @@
+// The settings of TypeScript's checker for programs of tz, in the editor (tsc
+// in VS Code; docs/modules.md, section 6). It lies next to tz as
+// types/tsconfig.json; the .tz/tsconfig.json that tz writes for a project
+// extends it.
+{
+  "compilerOptions": {
+    // What tz has of JavaScript: the newest standard, without the DOM.
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    // Imports as tz finds them: "./math" and "./math.ts".
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    // Every file is a module, also one without imports and exports: its names
+    // are its own, and it may await at the top level.
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    // tz infers the types of parameters from the calls.
+    "noImplicitAny": false,
+    // What catch gets is always an Error (docs/errors.md).
+    "useUnknownInCatchVariables": false,
+    // Decorators as tz has them (docs/decorators.md).
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    // @types/node, and what tz has built in (tz.d.ts) as @types/tz.
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["node", "tz"],
+    "paths": {
+      "neverthrow": ["./node_modules/neverthrow/index.d.ts"]
+    }
+  }
+}

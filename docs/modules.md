@@ -1,7 +1,7 @@
 # Модули
 
 Решения, принятые 23 октября 2026 года. Шаги 1–3 плана сделаны 24 октября (`embedBytes` — вместе с
-байтами); что осталось — в конце, в разделе «План реализации».
+байтами), шаг 4 — 25 октября; подробности — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -132,12 +132,45 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   `fromJson<Config>(j)` проверяет каждое поле и строит объект, ошибка — `TypeError` с путём до
   поля ([narrowing.md](narrowing.md), раздел 3). Руками тоже можно — проверками и сужением.
 
-## 6. Объявления для редактора
+## 6. Редактор
 
-Чтобы tsc и VS Code понимали код на tz, компилятор будет поставлять файл объявлений своих
-встроенных имён: `int`, `long`, `double`, `Result`, `ok`, `err`, `safeTry`, `Json`,
-`embedJson`, `embedText` и др. Тогда писать в каждом файле `type int = number` не нужно.
-Формат и способ подключения — вместе с инструментами для редактора.
+Пока у tz нет своего языкового сервера, код в редакторе проверяет TypeScript (tsc в VS Code).
+Чтобы он понимал программы на tz, рядом с компилятором лежат объявления и настройки, а
+`tz init` подключает их к проекту.
+
+- **`tz init`** кроме `tz.json`, `main.ts` и `.gitignore` пишет `tsconfig.json` из одной
+  настройки: `"extends": "./.tz/tsconfig.json"`. В проекте, сделанном раньше, `tz init`
+  добавляет только `tsconfig.json` и `/.tz/` в `.gitignore`.
+- **`.tz/tsconfig.json` пишет tz** — при `tz init`, `tz add`, `tz remove`, `tz update` и при
+  сборке, если он устарел. В нём путь к настройкам рядом с tz и пути к пакетам проекта в кэше
+  (`"zod": [".../cache/jsr/@tz/zod/3.24.1/mod.ts"]`): редактор находит пакеты там же, где tz.
+  Пути — этого компьютера, поэтому `.tz/` лежит в `.gitignore`; после `git clone` его пишет первая
+  сборка. Если `tsconfig.json` проекта свой и `.tz` не упоминает, tz его не трогает.
+- **Рядом с tz, в `types/`**: настройки tsc для программ tz, `@types/node` (node 24), объявления
+  neverthrow и `tz.d.ts` ([src/types](../src/types/tz.d.ts)) — то, что в tz есть без импорта:
+  `int`, `long`, `double`, `decimal` с методами, `Json`, `JSON.parse<T>`, `fromJson`, `embedJson`,
+  `embedText`, `embedBytes`, `Result` и остальное из neverthrow, `SystemError`, `ExecSyncError`,
+  `Constructor`, `ConstructorArgs`, `MethodDescriptor`, `Reflect.defineMetadata` и
+  `getMetadata`, `Timeout`, типы Web Crypto, — и модули `"tz:io"` и `"tz:http"`. Писать в файлах
+  `type int = number` не нужно.
+- **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`): имена разных файлов не
+  смешиваются, `await` на верхнем уровне разрешён. Импорты — как в tz (`"./math"` и
+  `"./math.ts"`), DOM нет, `strict` включён, но без `noImplicitAny`: tz выводит типы параметров из
+  вызовов. `e` в `catch` — `Error`, а не `unknown`, декораторы — как в tz
+  (`experimentalDecorators`).
+- **Где tz знает больше**, объявление мягче, чтобы редактор не подчёркивал то, что tz
+  принимает. Для tsc `int`, `long` и `decimal` — `number` (поэтому методы `decimal` редактор
+  предлагает и у `number`), значение метаданных — `any`, как в пакете reflect-metadata.
+  `JSON.parse(text)` без аргумента типа для tsc — его собственный, с `any`.
+- **Что остаётся подчёркнутым** — места, где tsc строже tz: перегрузки с телом у каждого варианта
+  ([overloads.md](overloads.md)), чтение полей `Json` без проверки, `value` у результата
+  `Promise.allSettled` без проверки `status`, `onabort = undefined` (в tz нет `null`), кодировка
+  `Buffer` в переменной, члены, добавленные подменой класса, вычитание дат, `Readable<T>`. Это
+  уберёт свой языковой сервер.
+- **Замер** на 332 программах `tests/run`: с настройками tsc по умолчанию ошибки были в 302
+  программах, всего 3813; с настройками и объявлениями tz — в 69 программах, 299 ошибок. Это места
+  из предыдущего пункта и тесты, которые проверяют ошибки при выполнении. Примеры (`examples`) и
+  бенчмарки (`bench`) проходят без ошибок.
 
 ## План реализации
 
@@ -153,4 +186,8 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 3. **Файлы данных** (сделано; `embedBytes` — с [bytes.md](bytes.md), шаг 2). `embedJson` / `embedText`, тип `Json` с `null`, печать `Json` как в node.
    `JSON.parse` и `JSON.stringify` — после исключений ([errors.md](errors.md), шаг 2): разбор
    бросает `SyntaxError`.
-4. **Объявления для редактора** — вместе с инструментами.
+4. **Редактор** (сделано 25 октября). `tz.d.ts` и настройки tsc рядом с tz, `@types/node`,
+   undici-types и neverthrow в [third_party/types](../third_party/types/README.md);
+   `tsconfig.json` из `tz init`, `.tz/tsconfig.json` с путями пакетов
+   ([src/pkg/editor.cpp](../src/pkg/editor.cpp)); тесты `tests/cli/editor.cmake` и
+   `editor_tsc.cmake` (проект и примеры проверяются TypeScript из VS Code без ошибок).

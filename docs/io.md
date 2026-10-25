@@ -152,9 +152,9 @@ try {
 
 Запуск других программ, сеть и потоки (streams) — вместе с async.
 
-**Редактор.** Файл объявлений tz ([modules.md](modules.md), раздел 6) добавит `SystemError` и
-модуль `"tz:io"`. В настройках tsc для tz выключен `useUnknownInCatchVariables`: в tz `e` в
-`catch` всегда `Error`, а не `unknown`.
+**Редактор.** Объявления tz для tsc ([modules.md](modules.md), раздел 6) дают `SystemError` и
+модуль `"tz:io"`, функции node — `@types/node`. В настройках tsc для tz выключен
+`useUnknownInCatchVariables`: в tz `e` в `catch` всегда `Error`, а не `unknown`.
 
 ## План реализации
 

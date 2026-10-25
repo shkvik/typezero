@@ -5,6 +5,7 @@
 #include "driver/linker.h"
 #include "driver/loader.h"
 #include "pkg/commands.h"
+#include "pkg/editor.h"
 #include "pkg/project.h"
 #include "sema/overflow.h"
 #include "sema/parallel.h"
@@ -227,6 +228,10 @@ bool preparePackages(llvm::StringRef input, pkg::Graph &storage, const pkg::Grap
       !pkg::preparePackages(manifest, pkg::PrepareOptions(), storage))
     return false;
   graph = &storage;
+  // The editor's settings follow the packages and where tz is; if they
+  // cannot be written, the error says so and the build goes on.
+  if (pkg::editorSetUp(manifest.dir))
+    pkg::writeEditorConfig(manifest.dir, graph);
   return true;
 }
 
@@ -645,6 +650,7 @@ std::string defaultOutput(const Options &opts) {
 int runDriver(int argc, char **argv) {
   Options opts;
   std::vector<const char *> args(argv + 1, argv + argc);
+  pkg::setTypesDir(runtimeFile(argv[0], "types"));
   if (!args.empty()) {
     llvm::StringRef command = args[0];
     llvm::ArrayRef<const char *> rest = llvm::ArrayRef(args).drop_front();

@@ -679,10 +679,9 @@ void tz_weak_drop(void *object) {
 // Freeing groups
 //===----------------------------------------------------------------------===//
 
-// A group is freed on the spot, by the code that let go of it. docs/objects.md
-// wants groups of more than ~10 000 members freed by a background thread; that
-// needs lists of blocks freed by other threads in the pages of alloc.c, and is
-// not done yet: tz_group_free is where it would hand a large group over.
+// A group is freed on the spot, by the code that let go of it. Freeing groups
+// of more than ~10 000 members in the background is postponed (docs/objects.md,
+// step 10, says why): tz_group_free is where it would hand a large group over.
 //
 // The groups whose count reached zero while another was being freed, freed
 // one after another: a chain of groups takes no stack, however long. Not
