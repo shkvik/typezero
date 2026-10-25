@@ -14,6 +14,7 @@
 #include "intl.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 // The locale and the options as the compiled code passes them
@@ -781,8 +782,22 @@ typedef struct {
   TzBuf key;
   Resolved *resolved;
 } CacheEntry;
-CacheEntry tz_dtf_cache[CACHED]; // not static: see the rules in tzrt.h
-uint32_t tz_dtf_cache_next;
+typedef struct {
+  CacheEntry entries[CACHED];
+  uint32_t next;
+} Cache;
+
+// The thread's own (TzThread::caches).
+static Cache *cache_of(TzThread *t) {
+  Cache *c = (Cache *)t->caches[TZ_CACHE_DATE_FORMAT];
+  if (!c) {
+    c = (Cache *)calloc(1, sizeof *c);
+    if (!c)
+      tz_panic("out of memory", 13);
+    t->caches[TZ_CACHE_DATE_FORMAT] = c;
+  }
+  return c;
+}
 
 static void key_of(TzBuf *key, int kind, const TzDateOptions *o) {
   tz_buf_push(key, (uint16_t)kind);
@@ -811,8 +826,9 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
   TzBuf key;
   tz_buf_init(&key);
   key_of(&key, kind, o);
+  Cache *cache = cache_of(&tz_thread);
   for (int i = 0; i < CACHED; ++i) {
-    CacheEntry *e = &tz_dtf_cache[i];
+    CacheEntry *e = &cache->entries[i];
     if (e->resolved && e->key.length == key.length &&
         memcmp(e->key.data, key.data, key.length * sizeof(uint16_t)) == 0) {
       tz_buf_free(&key);
@@ -824,7 +840,7 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
     tz_buf_free(&key);
     return NULL;
   }
-  CacheEntry *e = &tz_dtf_cache[tz_dtf_cache_next++ % CACHED];
+  CacheEntry *e = &cache->entries[cache->next++ % CACHED];
   if (e->resolved) {
     release(e->resolved);
     tz_buf_free(&e->key);
@@ -832,6 +848,24 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
   e->resolved = r;
   e->key = key;
   return r;
+}
+
+// What the caches of every thread hold, before the leak check.
+void tz_date_format_shutdown(void) {
+  for (int32_t t = 0; t < tz_thread_total(); ++t) {
+    TzThread *thread = tz_thread_at(t);
+    Cache *cache = thread ? (Cache *)thread->caches[TZ_CACHE_DATE_FORMAT] : NULL;
+    if (!cache)
+      continue;
+    for (int i = 0; i < CACHED; ++i) {
+      CacheEntry *e = &cache->entries[i];
+      if (e->resolved) {
+        release(e->resolved);
+        tz_buf_free(&e->key);
+        e->resolved = NULL;
+      }
+    }
+  }
 }
 
 void tz_date_locale(TzStr *out, double t, int32_t kind, const TzDateOptions *o) {

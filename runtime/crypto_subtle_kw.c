@@ -113,15 +113,14 @@ void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int
   TzCryptoData key, data;
   if (!tz_crypto_data(&key, kt, kv, TZ_ENC_UTF8, "key") ||
       !tz_crypto_data(&data, dt, dv, TZ_ENC_UTF8, "data")) {
-    void *error = tz_thrown;
-    tz_thrown = NULL;
+    void *error = tz_error_take();
     tz_promise_reject(p, error);
     return;
   }
   KwJob *j = (KwJob *)tz_alloc(sizeof(KwJob));
   memset(j, 0, sizeof *j);
   j->promise = p;
-  ++p->rc;
+  tz_ref_retain(p);
   j->key = copy(key.data, key.length);
   j->key_length = key.length;
   j->data = copy(data.data, data.length);
@@ -132,8 +131,7 @@ void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int
   j->out = tz_abuf_new((int64_t)j->length + 8);
   if (!j->out) {
     // Longer than an ArrayBuffer can be: the job fails, as node's does.
-    tz_instance_release((TzInstance *)tz_thrown);
-    tz_thrown = NULL;
+    tz_instance_release((TzInstance *)tz_error_take());
     j->failed = 1;
     j->out = tz_abuf_new(0);
   }

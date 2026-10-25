@@ -66,6 +66,12 @@ llvm::Value *CodeGen::emitLibBuiltin(CallExpr *call) {
   case Builtin::LibStdinChunk:
   case Builtin::LibStdWrite:
     return emitStreamBuiltin(call);
+  case Builtin::LibAhead: // the promise itself; emitAwait makes the site
+    return emitExpr(call->args[0]);
+  case Builtin::LibOrder:
+    if (parallel_)
+      builder_.CreateCall(processFunction("tz_order_enter", builder_.getVoidTy(), {}));
+    return nullptr;
   case Builtin::LibNativeSignal: {
     // The runtime's side of the signal, retained, or null for undefined.
     const Type *type = call->args[0]->type;

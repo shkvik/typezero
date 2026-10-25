@@ -27,6 +27,23 @@
 //     a hundred instructions along.
 //
 // TZ_COLD: rarely called; the optimizer keeps calls to it out of the hot path.
+//
+// The runtime is built twice (runtime/CMakeLists.txt): tzrt for programs
+// that run on one thread, and with TZ_PARALLEL, tzrt_mt for those whose
+// async code runs in parallel (docs/async.md, section 8; parallel.c), which
+// tz links when the program has pieces that may (src/sema/parallel.h).
+// TZ_THREAD_LOCAL marks the state each thread of tzrt_mt has a copy of, as
+// the error in flight; in tzrt it is an ordinary variable. Layouts are the
+// same in both: tzcrypto.lib, built once, goes with either, and must not
+// touch that state itself (TZ_NO_THREAD_STATE).
+#ifndef TZ_PARALLEL
+#define TZ_PARALLEL 0
+#endif
+#if TZ_PARALLEL
+#define TZ_THREAD_LOCAL _Thread_local
+#else
+#define TZ_THREAD_LOCAL
+#endif
 #if defined(__clang__) || defined(__GNUC__)
 #define TZ_HOT __attribute__((hot))
 #define TZ_COLD __attribute__((cold))
@@ -189,6 +206,57 @@ void tz_obj_free(void *object);
 #define TZ_RC_GROUP (-(INT64_C(1) << 62))
 #define TZ_RC_ETERNAL (-(INT64_C(1) << 61))
 
+// Shared objects (docs/async.md, section 8). In the parallel runtime an
+// object that other threads may reach, as soon as something they can reach
+// holds it (tz_publish, parallel.c), is counted with atomic operations: its
+// count is TZ_RC_SHARED plus its references, below zero, so that the fast
+// paths, which count the others, leave it to the slow ones. The counts of
+// groups are all below TZ_RC_SHARED: a count below it is a member's. A
+// count from TZ_RC_FOREVER up is of an object never freed (on the stack, or
+// one of the runtime's constants), which is far from zero whatever happens.
+#define TZ_RC_SHARED (-(INT64_C(1) << 60))
+#define TZ_RC_FOREVER (INT64_C(1) << 61)
+
+static inline int tz_rc_is_member(int64_t rc) { return rc < TZ_RC_SHARED; }
+static inline int tz_rc_is_shared(int64_t rc) { return rc < 0 && rc >= TZ_RC_SHARED; }
+
+// One reference more, and one less, to an object that is never a member of
+// a group (a string, a Json, a decimal...): tz_rc_dec says whether it was the
+// last, and the caller frees the object. Plain counts, but for a shared
+// object (only in the parallel runtime), whose count is negative and goes
+// atomically: inline in tzrt_mt, through the functions below elsewhere
+// (tzcrypto.lib is built once for both runtimes).
+void tz_rc_shared_add(int64_t *rc, int64_t n);
+int tz_rc_shared_dec(int64_t *rc);
+
+static inline void tz_rc_add(int64_t *rc, int64_t n) {
+  if (*rc < 0) {
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+    __atomic_fetch_add(rc, n, __ATOMIC_RELAXED);
+#else
+    tz_rc_shared_add(rc, n);
+#endif
+    return;
+  }
+  *rc += n;
+}
+
+static inline void tz_rc_inc(int64_t *rc) { tz_rc_add(rc, 1); }
+
+static inline int tz_rc_dec(int64_t *rc) {
+  if (*rc < 0) {
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+    if (__atomic_sub_fetch(rc, 1, __ATOMIC_ACQ_REL) != TZ_RC_SHARED)
+      return 0;
+    *rc = 0; // the last reference: the object is this thread's alone
+    return 1;
+#else
+    return tz_rc_shared_dec(rc);
+#endif
+  }
+  return --*rc == 0;
+}
+
 typedef struct TzGroupLink {
   void *leader;   // the member that holds the count; itself for the leader
   uintptr_t next; // the next member, round the group; TZ_GROUP_ARRAY tags an array
@@ -208,7 +276,9 @@ void *tz_group_alloc(int64_t size);
 // allocations above; not counted for the leak check.
 void *tz_group_alloc_tagged(size_t size, uintptr_t tag);
 // One more reference from outside to the group of `member`, or one less,
-// which frees the group when it was the last.
+// which frees the group when it was the last. In the parallel runtime they
+// also count a shared object (TZ_RC_SHARED), which has a descriptor that
+// drops it: every object with a negative count comes here.
 void tz_group_retain(void *member);
 void tz_group_release(void *member);
 // Frees the group of `leader`, whose count reached zero.
@@ -225,6 +295,11 @@ void tz_group_take(void *owner, void *ref);
 // The end of the drop function of an object that may be a member: frees it,
 // unless it is a member, which its group frees with the others.
 void tz_group_obj_free(void *object);
+// Publishing (publish.c): the group of `member` becomes published, and
+// `each` gets every member of it, and whether it is an array; nothing if it
+// was already.
+void tz_group_publish(void *member, void (*each)(void *member, int32_t array));
+int32_t tz_group_published(const void *member);
 // The same for values of `type` at `value`, for every reference in them.
 void tz_group_store_value(void *owner, const TzType *type, void *value);
 void tz_group_take_value(void *owner, const TzType *type, void *value);
@@ -248,7 +323,7 @@ typedef struct TzGroupSite {
   uint32_t field_length;
 } TzGroupSite;
 extern int32_t tz_group_debugging;
-extern const TzGroupSite *tz_group_site;
+extern TZ_THREAD_LOCAL const TzGroupSite *tz_group_site;
 void tz_group_note_unstored(const void *object, const struct TzFrame *made);
 void tz_group_forget_unstored(const void *object);
 void tz_group_check_owned(const void *object, const struct TzFrame *at, const char *owner,
@@ -657,7 +732,7 @@ void tz_json_shutdown(void);
 // Frees a node whose count reached zero, and everything that dies with it.
 void tz_json_free(TzJson *j);
 static inline void tz_json_release(TzJson *j) {
-  if (j && --j->rc == 0)
+  if (j && tz_rc_dec(&j->rc))
     tz_json_free(j);
 }
 // The positions of the entries of an object in the order JavaScript gives
@@ -1049,10 +1124,165 @@ typedef struct TzErrorInfo {
 // runtime) handed over, until a `catch` takes it. A function that throws
 // leaves it here and returns; its caller checks it after the call. The code
 // of the program runs only while it is NULL.
-extern void *tz_thrown;
-// A function that may recurse throws RangeError when the stack is below this
-// at its start.
-extern char *tz_stack_limit;
+//
+// A function that may recurse throws RangeError when the stack is below
+// tz_stack_limit at its start.
+//
+// Both are the thread's own, in one variable with the rest of what each
+// thread has (TzThread), so that a function of the program finds them from
+// one address of the thread (CodeGen::thrownSlot). The first two fields
+// must match CodeGen.
+
+// The allocator's own memory of a thread (alloc.c): its pages with room for
+// each size class, its segments, spares; and the blocks other threads freed
+// that it has not taken back yet, linked by their first word.
+#define TZ_HEAP_BINS 44
+#define TZ_HEAP_HUGE_SPARES 4
+typedef struct TzHeap {
+  void *bins[TZ_HEAP_BINS];
+  void *segments;
+  void *spare;
+  void *huge_spares[TZ_HEAP_HUGE_SPARES];
+  void *remote; // through atomic operations
+} TzHeap;
+
+typedef struct TzThread {
+  void *thrown;
+  char *stack_limit;
+  // What the thread made and freed: the counts of the leak check
+  // (TZ_CHECK_LEAKS), summed over the threads (tzrt.c).
+  int64_t live_objects, live_arrays, live_strings, live_decimals, live_json;
+  // The parallel runtime (parallel.c): whether the thread holds the turn,
+  // node's order, in which only one thread at a time goes on, the main one
+  // but while it lends the turn to the piece of async code of another
+  // thread; that piece, which this thread runs ahead of its turn; its
+  // number, 0 for the main thread.
+  int32_t turn;
+  int32_t index;
+  struct TzJob *job;
+  // A thread of the pool, which never has the turn without a job.
+  int32_t worker;
+  // The locks of connections the thread holds (net.c): none may be held
+  // while it waits for its turn.
+  int32_t conn_locks;
+  // The lock a function of the runtime took for the promise it gave, which
+  // the await that follows lets go of once it waits (net.c, async.c).
+  void *await_lock;
+  // The microtasks of a piece that runs ahead of its event, in their order
+  // (parallel.c): they go on here, or to the queue once it has the turn.
+  struct TzReactor *local_head, *local_tail;
+  // The caches of objects that the functions of a file keep for the next
+  // calls (TZ_CACHE_*): each thread its own, as the formatters of ICU are
+  // not to be used by two threads at once. NULL until the first use.
+  void *caches[4];
+  TzHeap heap;
+} TzThread;
+
+enum { TZ_CACHE_INTL = 0, TZ_CACHE_DATE_FORMAT = 1 };
+#ifndef TZ_NO_THREAD_STATE
+extern TZ_THREAD_LOCAL TzThread tz_thread;
+#define tz_thrown (tz_thread.thrown)
+#define tz_stack_limit (tz_thread.stack_limit)
+#define tz_live_objects (tz_thread.live_objects)
+#define tz_live_arrays (tz_thread.live_arrays)
+#define tz_live_strings (tz_thread.live_strings)
+#define tz_live_decimals (tz_thread.live_decimals)
+#define tz_live_json (tz_thread.live_json)
+#endif
+// The sum of a count of TzThread (the int64_t at `offset`) over the threads
+// of the program (parallel.c).
+int64_t tz_thread_sum(size_t offset);
+// Adds the thread that calls it to those tz_thread_sum counts.
+void tz_thread_register(void);
+// The threads of the program, by number: for the end of a program checked
+// for leaks, when the others wait idle (parallel.c).
+int32_t tz_thread_total(void);
+TzThread *tz_thread_at(int32_t i);
+// The number of the thread that calls it: 0 for the main one.
+int32_t tz_thread_index(void);
+// The pool of the parallel runtime, as TZ_THREADS asks (parallel.c).
+void tz_parallel_init(void);
+// Lets other threads run (parallel.c): for a thread that spins on a lock.
+void tz_thread_yield(void);
+static inline void tz_cpu_relax(void) {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  __builtin_ia32_pause();
+#endif
+}
+
+// A lock that the thread that holds it may take again, for state of the
+// runtime that threads share and that is rarely touched (the zone of the
+// dates, what is made at the first use). Nothing in the runtime of one
+// thread. Zero is a free lock.
+typedef struct {
+  int32_t owner; // tz_thread.index + 1 of the thread that holds it
+  int32_t depth;
+} TzLock;
+
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+static inline void tz_lock(TzLock *l) {
+  int32_t me = tz_thread.index + 1;
+  if (__atomic_load_n(&l->owner, __ATOMIC_RELAXED) == me) {
+    ++l->depth;
+    return;
+  }
+  for (unsigned spin = 0;; ++spin) {
+    int32_t none = 0;
+    if (__atomic_compare_exchange_n(&l->owner, &none, me, 1, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+      break;
+    if (spin > 64)
+      tz_thread_yield();
+    else
+      tz_cpu_relax();
+  }
+  l->depth = 1;
+}
+
+static inline void tz_unlock(TzLock *l) {
+  if (--l->depth == 0)
+    __atomic_store_n(&l->owner, 0, __ATOMIC_RELEASE);
+}
+#else
+static inline void tz_lock(TzLock *l) { (void)l; }
+static inline void tz_unlock(TzLock *l) { (void)l; }
+#endif
+
+// Shared objects (publish.c, docs/async.md, section 8): everything a value
+// of `type` at `value` holds, or an object (with a descriptor or a layout)
+// holds, and they, become shared, counted atomically from then on, before
+// other threads may reach them. After a store of such a value into `owner`,
+// tz_store_barrier publishes it when `owner` is shared. All of it does
+// nothing in the runtime of one thread.
+void tz_publish_value(const TzType *type, void *value);
+void tz_publish_object(void *object);
+void tz_store_barrier(void *owner, const TzType *type, void *value);
+void tz_store_barrier_ref(void *owner, void *object);
+
+// Node's order (parallel.c, docs/async.md, section 3). A thread of the pool
+// runs a piece of async code ahead of its turn as long as the piece touches
+// only what no other piece that may run at the same time writes; before the
+// first thing that is not so, it waits for its turn: tz_order_enter(),
+// which the program calls before such an access (CodeGen, from the decisions
+// of src/sema/parallel.h), and TZ_ORDERED(), which the functions of the
+// runtime that touch its shared state (the queues, the promises, the
+// timers, the output...) begin with. On the main thread, and once the
+// thread has its turn, both cost a test.
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+TZ_NOINLINE void tz_order_wait(void);
+static inline void tz_order_enter_inline(void) {
+  if (!tz_thread.turn)
+    tz_order_wait();
+}
+#define TZ_ORDERED() tz_order_enter_inline()
+#else
+#define TZ_ORDERED() ((void)0)
+#endif
+void tz_order_enter(void);
+// The error in flight, which the caller takes over: NULL if there is none.
+void *tz_error_take(void);
+// Sets tz_stack_limit, and the room the handler of a stack overflow needs,
+// for the thread that calls it (tzrt.c).
+void tz_thread_stack_init(void);
 void tz_error_init(const TzErrorInfo *info);
 // Throws a new Error of `kind` with the message `format` makes (UTF-8): it
 // becomes tz_thrown, and the caller goes on as if nothing happened, to
@@ -1121,11 +1351,18 @@ typedef struct TzReactor TzReactor;
 // after it returns, the runtime releases that promise, which the reactor
 // held while queued, and `owner`, the object the reactor lives in. A reactor
 // is in one list at a time, linked by `next`.
+//
+// `ahead`: when the piece of async code it goes on with may run ahead of
+// its turn on a thread of the parallel runtime, the number of the await it
+// goes on from (CodeGen sets it at each await, from the decisions of
+// src/sema/parallel.h), 0 when not; once a thread took it on, the TzJob it
+// runs as (parallel.c). Every other reactor has 0.
 struct TzReactor {
   TzReactor *next;
   void (*run)(TzReactor *self, TzPromise *source);
   TzObject *owner;
   TzPromise *source;
+  uintptr_t ahead;
 };
 
 // A promise: an object whose layout has TZ_LAYOUT_PROMISE and, unless it is
@@ -1185,10 +1422,21 @@ typedef struct TzTimer {
 
 void tz_microtask(TzReactor *r);
 void tz_run_microtasks(void);
+// Its reactions to the microtask queue, as a promise that settles queues
+// them (for io.c, which held them back).
+void tz_promise_trigger(TzPromise *p);
+// Wakes the poll phase of the loop from another thread (io.c).
+void tz_io_wake_loop(void);
+// The loop waits for `n` more things of the runtime's own (io.c).
+void tz_work_ref_count(int32_t n);
 void tz_promise_drop(void *promise);
 void tz_promise_fulfill(TzPromise *p);
 void tz_promise_reject(TzPromise *p, void *error);
 TzPromise *tz_promise_new(const TzLayout *layout);
+// `await p` (null: of a value that is no promise) in an async function: its
+// reactor `r` is queued once p settles; `ahead`, the number of the await
+// when the piece after it may run ahead of its turn (see TzReactor).
+void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead);
 // The nextTick callbacks and the microtasks, after a callback of the loop.
 void tz_after_callback(void);
 // A Promise<void> of the runtime's own.
@@ -1242,6 +1490,10 @@ typedef struct TzAsyncGen {
 // trips to the pool, 1 for 0), which the work may set too; `done` runs no
 // earlier than that many polls after the work was queued. A work that is
 // `unref` does not keep the loop alive.
+//
+// `settles`: the promise that `done` settles, when settling it is all that
+// `done` does that the program can see (tz_work_queue_settles): the parallel
+// runtime may then run what waits for it ahead of the event (parallel.c).
 typedef struct TzWork {
   struct TzWork *next;
   void (*work)(struct TzWork *self);
@@ -1249,9 +1501,11 @@ typedef struct TzWork {
   uint32_t turns;
   uint32_t unref;
   uint64_t queued, due; // of the poll phases
+  struct TzPromise *settles;
 } TzWork;
 
 void tz_work_queue(TzWork *w);
+void tz_work_queue_settles(TzWork *w, struct TzPromise *p);
 // Waits of the runtime's own, outside the pool (net.c): a work that began
 // waiting keeps the loop alive (unless unref) until it is due; once what it
 // waited for came, tz_io_due hands it to the poll phase, which runs `done`.

@@ -12,6 +12,13 @@
 // right away. Names of hosts are looked up by GetAddrInfoExW, which calls
 // back on a thread of the system; that only posts to the port.
 //
+// In the parallel runtime the connections a server of http accepts are tied
+// to the port of the pool instead (parallel.c): its threads take what comes
+// for them (net_completed_pooled) and run the piece that waits for it. The
+// state of a connection changes under its lock, as its task, those threads
+// and the main thread may each touch it; a thread that holds the lock never
+// waits for its turn.
+//
 // The objects the program holds are a connection (NetConn) and a listener
 // (NetListener), objects of the language without fields: the program frees
 // them by its counts as any object, which closes the socket. An operation in
@@ -277,6 +284,7 @@ double net_now(void) {
 // it (CodeGen::emitExternal): its fetch calls name only http:// URLs, which
 // redirected it to https://. Rejects `p`, or throws without one.
 void tz_net_no_tls(TzPromise *p, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   void *error = net_error(TZ_ERROR,
                           "this program has no TLS for https: tz links it only into programs "
@@ -333,16 +341,18 @@ static void net_completed(OVERLAPPED_ENTRY *entry) {
   tz_io_due(&op->work);
 }
 
-// Ties a new socket to the port of the loop, so that what it asks for comes
-// back there.
-static int attach(SOCKET s) {
-  HANDLE port = (HANDLE)tz_io_port_handle();
-  if (!CreateIoCompletionPort((HANDLE)s, port, (ULONG_PTR)net_completed, 0))
+// Ties a new socket to a port, so that what it asks for comes back there,
+// to `taken`.
+static int attach_to(SOCKET s, HANDLE port, void (*taken)(OVERLAPPED_ENTRY *)) {
+  if (!CreateIoCompletionPort((HANDLE)s, port, (ULONG_PTR)taken, 0))
     return 0;
   SetFileCompletionNotificationModes((HANDLE)s, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS |
                                                     FILE_SKIP_SET_EVENT_ON_HANDLE);
   return 1;
 }
+
+// To the port of the loop.
+static int attach(SOCKET s) { return attach_to(s, (HANDLE)tz_io_port_handle(), net_completed); }
 
 // Prepares an operation; once the system says it is pending, op_wait makes
 // the loop wait for it (unless `unref`).
@@ -426,8 +436,19 @@ static void conn_settle(NetConn *c) {
     conn_free(c);
 }
 
+// The same, for one locked: unlocked first.
+static void conn_unlock_settle(NetConn *c) {
+  int gone = c->orphan && c->ops == 0;
+  conn_unlock(c);
+  if (gone)
+    conn_free(c);
+}
+
 static void conn_drop(void *object) {
+  // It leaves lists of the runtime: in node's order (parallel.c).
+  TZ_ORDERED();
   NetConn *c = (NetConn *)object;
+  conn_lock(c);
   tz_http_release(c);
   if (c->drain) {
     TzPromise *p = c->drain;
@@ -442,7 +463,7 @@ static void conn_drop(void *object) {
   } else {
     close_socket(c);
   }
-  conn_settle(c);
+  conn_unlock_settle(c);
 }
 
 static void read_done(TzWork *w);
@@ -571,10 +592,11 @@ void net_read(NetConn *c) {
 
 static void read_done(TzWork *w) {
   NetConn *c = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetConn, rop);
+  conn_lock(c);
   --c->ops;
   c->reading = 0;
   if (c->orphan) {
-    conn_settle(c);
+    conn_unlock_settle(c);
     return;
   }
   int32_t error = op_error(&c->rop, c->s, c->closed);
@@ -593,13 +615,14 @@ static void read_done(TzWork *w) {
       c->eof = 1;
     c->in_end += c->rop.bytes;
   }
-  ++c->rc; // what runs may let go of it
+  tz_rc_inc(&c->rc); // what runs may let go of it
   // Ciphertext is decrypted first, and more read until the reader has
   // something.
   if (c->tls && !c->error)
     net_read(c);
   else
     c->on_input(c);
+  conn_unlock(c);
   tz_instance_release((TzInstance *)c);
 }
 
@@ -712,6 +735,7 @@ void net_flush(NetConn *c) {
 
 static void write_done(TzWork *w) {
   NetConn *c = CONTAINING_RECORD(CONTAINING_RECORD(w, NetOp, work), NetConn, wop);
+  conn_lock(c);
   --c->ops;
   c->writing = 0;
   c->flight_len = 0;
@@ -721,18 +745,71 @@ static void write_done(TzWork *w) {
   c->last_active = net_now();
   if (c->orphan && (c->error || c->closed || !c->closing)) {
     close_socket(c);
-    conn_settle(c);
+    conn_unlock_settle(c);
     return;
   }
-  ++c->rc;
+  tz_rc_inc(&c->rc);
   net_flush(c);
-  if (c->orphan && !c->writing) {
+  if (c->orphan && !c->writing)
     close_socket(c);
-    tz_instance_release((TzInstance *)c);
-    return;
-  }
+  conn_unlock(c);
   tz_instance_release((TzInstance *)c);
 }
+
+#if TZ_PARALLEL
+// parallel.c, async.c, io.c: see net_completed_pooled.
+void *tz_pool_port_handle(void);
+void tz_trigger_hold(void);
+int32_t tz_trigger_take(TzPromise **out);
+int32_t tz_ahead_here(TzPromise *p);
+void tz_ahead_forward(TzPromise *p);
+void tz_io_due_remote(TzWork *w);
+void tz_io_done_remote(TzWork *w);
+
+// What the port of the pool gives back for a connection of a server, on a
+// thread of the pool (parallel.c). What touches only the connection is done
+// here: the head of the next request read, or more of the output written;
+// and the piece that waits for the request runs here too, ahead of its
+// event, when it may. The rest (an error, the end, a body, a connection the
+// program let go of) goes to the main thread, as if it came there.
+static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
+  NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
+  op->bytes = entry->dwNumberOfBytesTransferred;
+  op->error = entry->Internal != 0 ? -1 : 0;
+  int reading = op->work.done == read_done;
+  NetConn *c = reading ? CONTAINING_RECORD(op, NetConn, rop) : CONTAINING_RECORD(op, NetConn, wop);
+  conn_lock(c);
+  int here = !c->orphan && !c->closed && !c->tls && !c->error && !op->error &&
+             (reading ? op->bytes > 0 && tz_http_waits_request(c) : !c->closing && !c->drain);
+  if (!here) {
+    conn_unlock(c);
+    tz_io_due_remote(&op->work);
+    return;
+  }
+  // The promise it settles keeps its reactions, for the piece to run here.
+  tz_trigger_hold();
+  if (reading) {
+    --c->ops;
+    c->reading = 0;
+    c->last_active = net_now();
+    c->in_end += op->bytes;
+    c->on_input(c);
+  } else {
+    --c->ops;
+    c->writing = 0;
+    c->flight_len = 0;
+    c->last_active = net_now();
+    net_flush(c);
+  }
+  conn_unlock(c);
+  TzPromise *held[16];
+  int32_t n = tz_trigger_take(held);
+  for (int32_t i = 0; i < n; ++i)
+    if (n > 1 || !tz_ahead_here(held[i]))
+      tz_ahead_forward(held[i]);
+  tz_io_done_remote(&op->work);
+}
+#endif
 
 void net_close(NetConn *c) {
   if (c->closed)
@@ -755,8 +832,12 @@ void net_abort(NetConn *c) {
 
 // `__tz_net_close(c)`: ends the connection once what is queued is written.
 void tz_net_close(void *conn, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
-  net_close((NetConn *)conn);
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  net_close(c);
+  conn_unlock(c);
 }
 
 //===----------------------------------------------------------------------===//
@@ -851,6 +932,8 @@ static void listener_close(NetListener *l) {
 }
 
 static void listener_drop(void *object) {
+  // It leaves lists of the runtime: in node's order (parallel.c).
+  TZ_ORDERED();
   NetListener *l = (NetListener *)object;
   listener_close(l);
   if (l->pending) {
@@ -945,6 +1028,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
 }
 
 int32_t tz_net_listener_port(void *listener, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   return ((NetListener *)listener)->port;
 }
@@ -1017,12 +1101,27 @@ static void accepted(NetListener *l, int32_t error) {
     return;
   }
   setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (const char *)&l->s, sizeof l->s);
-  if (!attach(s)) {
+  // With the parallel runtime, what comes for a connection of http goes to
+  // the threads of the pool (net_completed_pooled).
+  void *pool = NULL;
+#if TZ_PARALLEL
+  if (!l->tls)
+    pool = tz_pool_port_handle();
+#endif
+  int attached = 0;
+#if TZ_PARALLEL
+  if (pool)
+    attached = attach_to(s, (HANDLE)pool, net_completed_pooled);
+  else
+#endif
+    attached = attach(s);
+  if (!attached) {
     closesocket(s);
     accept_next(l);
     return;
   }
   NetConn *c = conn_new(s);
+  c->pooled = pool != NULL;
   c->server = 1;
   c->listener = l;
   c->next = l->conns;
@@ -1039,6 +1138,7 @@ static void accepted(NetListener *l, int32_t error) {
 // `__tz_net_accept(listener)`: the next connection, or undefined once the
 // listener is closed.
 void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
+  TZ_ORDERED();
   NetListener *l = (NetListener *)listener;
   tz_net_make = make;
   tz_ref_retain(p); // it may be a member of a group (async.c)
@@ -1049,25 +1149,40 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
 // `__tz_net_closeListener(listener)`: stops accepting; what waits for the
 // next connection gets undefined.
 void tz_net_close_listener(void *listener, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
-  listener_close((NetListener *)listener);
+  NetListener *l = (NetListener *)listener;
+  listener_close(l);
+  // The server stops: its connections end after the requests being handled.
+  for (NetConn *c = l->conns; c; c = c->next) {
+    conn_lock(c);
+    c->http.ending = 1;
+    c->http.keep_alive = 0;
+    conn_unlock(c);
+  }
 }
 
 // `__tz_net_sweep(listener, idle)`: closes the connections that wait for a
 // request longer than `idle` ms, as node's keepAliveTimeout; with `idle`
 // zero, all of them that wait (server.stop()). Gives how many are left.
 int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   NetListener *l = (NetListener *)listener;
   double now = net_now();
   int32_t left = 0;
   for (NetConn *c = l->conns; c; c = c->next) {
-    if (c->closed)
-      continue;
-    if (!c->busy && !c->writing && (idle == 0 || now - c->last_active >= idle)) {
-      net_abort(c);
+    conn_lock(c);
+    if (c->closed) {
+      conn_unlock(c);
       continue;
     }
+    if (!c->busy && !c->writing && (idle == 0 || now - c->last_active >= idle)) {
+      net_abort(c);
+      conn_unlock(c);
+      continue;
+    }
+    conn_unlock(c);
     ++left;
   }
   return left;
@@ -1309,6 +1424,7 @@ static void abort_connect(TzAbortListener *l) {
 // "getaddrinfo ENOTFOUND example.invalid".
 void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
                     TzMaker make) {
+  TZ_ORDERED();
   start();
   tz_net_make = make;
   Connect *r = (Connect *)tz_alloc(sizeof(Connect));
@@ -1411,6 +1527,7 @@ size_t net_pending_output(const NetConn *c) {
 void net_close(NetConn *c) { (void)c; }
 void net_abort(NetConn *c) { (void)c; }
 void tz_net_close(void *conn, TzMaker make) {
+  TZ_ORDERED();
   (void)conn;
   (void)make;
 }
@@ -1425,11 +1542,13 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   return NULL;
 }
 int32_t tz_net_listener_port(void *listener, TzMaker make) {
+  TZ_ORDERED();
   (void)listener;
   (void)make;
   return 0;
 }
 void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
+  TZ_ORDERED();
   (void)listener;
   (void)make;
   unsupported();
@@ -1438,10 +1557,12 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   tz_promise_reject(p, error);
 }
 void tz_net_close_listener(void *listener, TzMaker make) {
+  TZ_ORDERED();
   (void)listener;
   (void)make;
 }
 int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
+  TZ_ORDERED();
   (void)listener;
   (void)idle;
   (void)make;
@@ -1449,6 +1570,7 @@ int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
 }
 void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
                     TzMaker make) {
+  TZ_ORDERED();
   (void)host_obj;
   (void)host_meta;
   (void)port;

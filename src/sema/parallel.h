@@ -13,9 +13,9 @@ namespace tz {
 // What may run in parallel in a program checked by Sema (docs/async.md,
 // sections 2-5): the pieces of its async code, what each reads and writes,
 // and which pieces keep node's order because they touch the same data. The
-// parallel runtime is to follow these decisions; for now they are only
-// explained (tz build --explain-parallel), and the program runs in one
-// thread as node would.
+// parallel runtime follows these decisions (runtime/parallel.c, CodeGen:
+// the pieces that may run ahead, and the places where they wait for their
+// turn); tz build --explain-parallel explains them.
 struct ParallelPlan {
   // A task: the top-level code, a call of an async function that nothing
   // awaits right away, or a callback that runs on its own later (of then,
@@ -48,6 +48,10 @@ struct ParallelPlan {
     // the first to the last access of that data does.
     std::vector<unsigned> inOrderWith;
     llvm::SMLoc orderedFrom, orderedTo;
+    // Each place where it touches that data: the access in the piece's own
+    // code, or the call that makes it. The parallel runtime waits for the
+    // piece's turn before the first of them it comes to (tz_order_enter).
+    std::vector<llvm::SMLoc> orderedAt;
   };
   std::vector<Task> tasks;
   std::vector<Piece> pieces;

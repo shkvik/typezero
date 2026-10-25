@@ -114,7 +114,7 @@ llvm::Value *CodeGen::emitResultAdapter(CastExpr *cast) {
     if (typeThrows(from)) {
       llvm::BasicBlock *thrownBlock = newBlock("adapt.thrown");
       llvm::BasicBlock *okBlock = newBlock("adapt.ok");
-      llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal(), "thrown");
+      llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownSlot(), "thrown");
       builder_.CreateCondBr(builder_.CreateIsNotNull(error), thrownBlock, okBlock);
       switchTo(thrownBlock);
       builder_.CreateRet(llvm::Constant::getNullValue(lower(to->ret())));

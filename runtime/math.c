@@ -105,8 +105,9 @@ double tz_math_hypot(const double *values, int64_t n) {
 // Math.random
 //===----------------------------------------------------------------------===//
 
-// xorshift128+, as in V8. All zero means not seeded yet.
-uint64_t tz_random_state[2]; // not static: see the rules in tzrt.h
+// xorshift128+, as in V8. All zero means not seeded yet. Each thread has
+// its own, seeded apart (the address of `seed` differs too).
+TZ_THREAD_LOCAL uint64_t tz_random_state[2]; // not static: see the rules in tzrt.h
 
 static uint64_t splitmix64(uint64_t *x) {
   uint64_t z = (*x += 0x9E3779B97F4A7C15ull);

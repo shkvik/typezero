@@ -54,6 +54,11 @@ endforeach()
 file(STRINGS ${SRC} run_options REGEX "^// (args:|env:|merge-stderr)" ENCODING UTF-8)
 set(program_args "")
 set(program_env "")
+# THREADS: the parallel runtime (docs/async.md, section 8) with threads, and
+# every piece that may run ahead of its turn does (TZ_PARALLEL_STRESS).
+if(THREADS)
+  list(APPEND program_env TZ_THREADS=8 TZ_PARALLEL_STRESS=1)
+endif()
 set(stderr_var stderr)
 foreach(line IN LISTS run_options)
   if(line MATCHES "^// args: *(.*)$")

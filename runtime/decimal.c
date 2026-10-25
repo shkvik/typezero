@@ -73,9 +73,7 @@ static const uint64_t pow10_64[20] = {1ull,
                                       1000000000000000000ull,
                                       10000000000000000000ull};
 
-int64_t tz_live_decimals; // not static: see the rules in tzrt.h
-
-int64_t tz_dec_live_objects(void) { return tz_live_decimals; }
+int64_t tz_dec_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_decimals)); }
 
 static inline int is_short(uint64_t meta) { return (meta & TZ_DEC_LONG) == 0; }
 
@@ -114,13 +112,24 @@ void tz_dec_free(void *obj) {
 
 void tz_dec_retain_value(TzDec v) {
   if (v.meta & TZ_DEC_HEAP)
-    ++((TzDecObj *)(uintptr_t)v.coef)->rc;
+    tz_rc_inc(&((TzDecObj *)(uintptr_t)v.coef)->rc);
 }
 
 void tz_dec_release_value(TzDec v) {
-  if ((v.meta & TZ_DEC_HEAP) && --((TzDecObj *)(uintptr_t)v.coef)->rc == 0)
+  if ((v.meta & TZ_DEC_HEAP) && tz_rc_dec(&((TzDecObj *)(uintptr_t)v.coef)->rc))
     tz_dec_free((void *)(uintptr_t)v.coef);
 }
+
+#if TZ_PARALLEL
+// publish.c: a decimal other threads may reach.
+void tz_dec_publish(TzDec v) {
+  if (!(v.meta & TZ_DEC_HEAP))
+    return;
+  TzDecObj *o = (TzDecObj *)(uintptr_t)v.coef;
+  if (o->rc > 0 && o->rc < TZ_RC_FOREVER)
+    o->rc = TZ_RC_SHARED + o->rc;
+}
+#endif
 
 //===----------------------------------------------------------------------===//
 // Natural numbers in base 10^9, the lowest digit first

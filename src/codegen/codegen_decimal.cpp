@@ -81,13 +81,15 @@ llvm::Function *CodeGen::decimalRefCount(bool retain) {
   b.SetInsertPoint(countedBlock);
   llvm::Value *obj = b.CreateIntToPtr(b.CreateExtractValue(value, 0, "coef"), b.getPtrTy(), "obj");
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
+  auto *freeBlock = retain ? nullptr : llvm::BasicBlock::Create(ctx_, "free", fn);
+  if (parallel_) // a shared one, atomically (runtime/publish.c)
+    countShared(b, obj, count, retain, freeBlock, doneBlock);
   if (retain) {
     b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);
     b.CreateBr(doneBlock);
   } else {
     llvm::Value *left = b.CreateSub(count, b.getInt64(1));
     b.CreateStore(left, obj);
-    auto *freeBlock = llvm::BasicBlock::Create(ctx_, "free", fn);
     b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), freeBlock, doneBlock);
     b.SetInsertPoint(freeBlock);
     b.CreateCall(decimalFunction("tz_dec_free", b.getVoidTy(), {b.getPtrTy()}), {obj});

@@ -23,6 +23,8 @@
 
 #include "codegen/codegen.h"
 
+#include "llvm/IR/MDBuilder.h"
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -2700,7 +2702,26 @@ llvm::Function *CodeGen::groupAwareRelease(llvm::Function *plain) {
   b.CreateCondBr(b.CreateIsNotNull(object), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), object, "rc");
-  b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), memberBlock, plainBlock);
+  if (parallel_) {
+    // A shared object, no member: counted atomically; the last release
+    // hands it to the plain release with a count of 1, which frees it.
+    auto *notMemberBlock = llvm::BasicBlock::Create(ctx_, "not.member", fn);
+    auto *sharedBlock = llvm::BasicBlock::Create(ctx_, "shared", fn);
+    auto *lastBlock = llvm::BasicBlock::Create(ctx_, "shared.last", fn);
+    b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(uint64_t(-(int64_t(1) << 60)))), memberBlock,
+                   notMemberBlock);
+    b.SetInsertPoint(notMemberBlock);
+    b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), sharedBlock, plainBlock);
+    b.SetInsertPoint(sharedBlock);
+    llvm::Value *old = b.CreateAtomicRMW(llvm::AtomicRMWInst::Sub, object, b.getInt64(1),
+                                         llvm::MaybeAlign(8), llvm::AtomicOrdering::AcquireRelease);
+    b.CreateCondBr(b.CreateICmpEQ(old, b.getInt64(uint64_t(-(int64_t(1) << 60) + 1))), lastBlock, doneBlock);
+    b.SetInsertPoint(lastBlock);
+    b.CreateStore(b.getInt64(1), object);
+    b.CreateBr(plainBlock);
+  } else {
+    b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), memberBlock, plainBlock);
+  }
   b.SetInsertPoint(memberBlock);
   b.CreateCall(groupFunction("tz_group_release", b.getVoidTy(), {ptr}), {object});
   b.CreateBr(doneBlock);
@@ -2766,8 +2787,14 @@ void CodeGen::groupStore(llvm::Value *owner, llvm::Value *value, const Type *typ
     return;
   llvm::Type *ptr = builder_.getPtrTy();
   // Debug mode notes where the store is, for what a walk reports.
-  if (debugMemory_)
-    builder_.CreateStore(groupSite(), module_->getOrInsertGlobal("tz_group_site", ptr));
+  if (debugMemory_) {
+    // Each thread's own in a parallel program (runtime/group.c).
+    auto *site = cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_group_site", ptr));
+    site->setThreadLocal(parallel_);
+    builder_.CreateStore(groupSite(), parallel_ ? static_cast<llvm::Value *>(
+                                                      builder_.CreateThreadLocalAddress(site))
+                                                : site);
+  }
   switch (refShape(type)) {
   case RefShape::Pointer:
     builder_.CreateCall(groupFunction("tz_group_store", builder_.getVoidTy(), {ptr, ptr}),
@@ -2805,7 +2832,7 @@ void CodeGen::releaseIn(llvm::Value *owner, llvm::Value *value, const Type *type
     builder_.CreateCondBr(builder_.CreateIsNotNull(ref), refBlock, doneBlock);
     builder_.SetInsertPoint(refBlock);
     llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), ref, "rc");
-    builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(0)), memberBlock,
+    builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(uint64_t(-(int64_t(1) << 60)))), memberBlock,
                           plainBlock);
     builder_.SetInsertPoint(memberBlock);
     builder_.CreateCall(groupFunction("tz_group_unstore", builder_.getVoidTy(), {ptr, ptr}),
@@ -2848,7 +2875,7 @@ void CodeGen::takeFrom(llvm::Value *owner, llvm::Value *value, const Type *type)
     builder_.CreateCondBr(builder_.CreateIsNotNull(ref), refBlock, doneBlock);
     builder_.SetInsertPoint(refBlock);
     llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), ref, "rc");
-    builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(0)), memberBlock,
+    builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(uint64_t(-(int64_t(1) << 60)))), memberBlock,
                           doneBlock);
     builder_.SetInsertPoint(memberBlock);
     builder_.CreateCall(groupFunction("tz_group_take", builder_.getVoidTy(), {ptr, ptr}),
@@ -2876,8 +2903,41 @@ void CodeGen::takeFrom(llvm::Value *owner, llvm::Value *value, const Type *type)
   }
 }
 
+void CodeGen::storeBarrier(llvm::Value *owner, llvm::Value *value, const Type *type) {
+  if (!parallel_ || !type->isManaged() || isa<llvm::Constant>(value))
+    return;
+  llvm::Type *ptr = builder_.getPtrTy();
+  llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), owner, "owner.rc");
+  llvm::BasicBlock *barrierBlock = newBlock("barrier");
+  llvm::BasicBlock *doneBlock = newBlock("barrier.done");
+  builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(0)), barrierBlock, doneBlock,
+                        llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
+  switchTo(barrierBlock);
+  // An array goes by its type: it has no descriptor of its own.
+  RefShape shape = type->isString() || type->isArray() ? RefShape::Other : refShape(type);
+  if (shape == RefShape::Pointer || shape == RefShape::Function) {
+    llvm::Value *object = shape == RefShape::Function ? builder_.CreateExtractValue(value, 1) : value;
+    builder_.CreateCall(processFunction("tz_store_barrier_ref", builder_.getVoidTy(), {ptr, ptr}),
+                        {owner, object});
+  } else {
+    builder_.CreateCall(processFunction("tz_store_barrier", builder_.getVoidTy(), {ptr, ptr, ptr}),
+                        {owner, typeDescriptor(type), spillHere(builder_, value, "published")});
+  }
+  builder_.CreateBr(doneBlock);
+  switchTo(doneBlock);
+}
+
+void CodeGen::publishValue(llvm::Value *value, const Type *type) {
+  if (!parallel_ || !type->isManaged() || isa<llvm::Constant>(value))
+    return;
+  llvm::Type *ptr = builder_.getPtrTy();
+  builder_.CreateCall(processFunction("tz_publish_value", builder_.getVoidTy(), {ptr, ptr}),
+                      {typeDescriptor(type), spillHere(builder_, value, "published")});
+}
+
 void CodeGen::storeIn(llvm::Value *owner, const Type *ownerType, llvm::Value *address,
                       llvm::Value *value, const Type *type) {
+  storeBarrier(owner, value, type);
   if (!type->isManaged() || !mayHoldMember(type) || (ownerType && !ownerMayBeMember(ownerType))) {
     storeReplacing(address, value, type);
     return;
@@ -2891,6 +2951,11 @@ void CodeGen::storeIn(llvm::Value *owner, const Type *ownerType, llvm::Value *ad
 void CodeGen::storeVar(const VarSymbol *var, llvm::Value *address, llvm::Value *value,
                        bool replacing) {
   const Type *type = typeOf(var);
+  // What a global holds, functions may read in any task; a box, closures.
+  if (var->isGlobal && var->usedInFunction)
+    publishValue(value, type);
+  else if (var->boxed() && !(isCyclicBox(type) && mayHoldMember(type)))
+    storeBarrier(boxPointer(var), value, type);
   if (var->boxed() && isCyclicBox(type) && mayHoldMember(type)) {
     llvm::Value *box = boxPointer(var);
     if (replacing) {
@@ -2916,7 +2981,7 @@ void CodeGen::releaseObjectIn(llvm::Value *owner, llvm::Value *object) {
   builder_.CreateCondBr(builder_.CreateIsNotNull(object), refBlock, doneBlock);
   builder_.SetInsertPoint(refBlock);
   llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), object, "rc");
-  builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(0)), memberBlock,
+  builder_.CreateCondBr(builder_.CreateICmpSLT(count, builder_.getInt64(uint64_t(-(int64_t(1) << 60)))), memberBlock,
                         plainBlock);
   builder_.SetInsertPoint(memberBlock);
   builder_.CreateCall(groupFunction("tz_group_unstore", builder_.getVoidTy(), {ptr, ptr}),
@@ -3148,6 +3213,106 @@ void CodeGen::finishGroupDebug(llvm::Instruction *init) {
                                          "tz.group.traces");
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(groupFunction("tz_group_debug_init", builder_.getVoidTy(), {ptr, builder_.getInt32Ty()}),
+               {table, b.getInt32(uint32_t(entries.size()))});
+}
+
+// void publish(ptr object): every value the object holds, to the runtime,
+// which makes it shared (runtime/publish.c); the boxes of the variables it
+// captures as objects.
+llvm::Function *CodeGen::publishFunction(
+    const Type *type, llvm::StructType *layout,
+    llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
+    llvm::ArrayRef<std::pair<unsigned, const Type *>> values, llvm::StringRef name) {
+  llvm::Type *ptr = builder_.getPtrTy();
+  auto *fnType = llvm::FunctionType::get(builder_.getVoidTy(), {ptr}, false);
+  auto *fn = llvm::Function::Create(fnType, llvm::GlobalValue::InternalLinkage,
+                                    "tz.publish." + name, module_.get());
+  fn->addFnAttr(llvm::Attribute::NoUnwind);
+  llvm::IRBuilder<> b(llvm::BasicBlock::Create(ctx_, "entry", fn));
+  llvm::Value *object = fn->getArg(0);
+  llvm::FunctionCallee value =
+      processFunction("tz_publish_value", builder_.getVoidTy(), {ptr, ptr});
+  llvm::FunctionCallee ref = processFunction("tz_publish_object", builder_.getVoidTy(), {ptr});
+  auto one = [&](const Type *t, unsigned element) {
+    if (!t->isManaged())
+      return;
+    b.CreateCall(value, {typeDescriptor(t), b.CreateStructGEP(layout, object, element)});
+  };
+  if (type) {
+    const ObjectLayout &l = objectLayout(type);
+    for (unsigned i = 0; i < type->fields().size(); ++i)
+      one(type->fields()[i].type, l.elements[i]);
+  }
+  for (auto [var, element] : captures) {
+    if (var->boxed())
+      b.CreateCall(ref, {b.CreateLoad(ptr, b.CreateStructGEP(layout, object, element))});
+    else
+      one(typeOf(var), element);
+  }
+  for (auto [element, t] : values)
+    one(t, element);
+  b.CreateRetVoid();
+  return fn;
+}
+
+void CodeGen::finishPublishTable(llvm::Instruction *init) {
+  if (!parallel_)
+    return;
+  llvm::Type *ptr = builder_.getPtrTy();
+  std::vector<llvm::Constant *> entries;
+  auto *entryType = llvm::StructType::get(ctx_, {ptr, ptr});
+  llvm::DenseSet<llvm::Constant *> seen;
+  auto add = [&](llvm::Constant *descriptor, llvm::Function *publish) {
+    if (seen.insert(descriptor).second)
+      entries.push_back(llvm::ConstantStruct::get(entryType, {descriptor, publish}));
+  };
+  std::map<const Type *, llvm::Function *> objects;
+  auto objectPublish = [&](const Type *type) {
+    llvm::Function *&publish = objects[type];
+    if (!publish) {
+      const ObjectLayout &l = objectLayout(type);
+      std::vector<std::pair<const VarSymbol *, unsigned>> captures;
+      if (const ClassDecl *cls = type->classDecl(); cls && cls->group)
+        for (size_t i = 0; i < cls->group->captures.size(); ++i)
+          captures.push_back({cls->group->captures[i], unsigned(l.captures + i)});
+      publish = publishFunction(type, l.type, captures, {}, "object");
+    }
+    return publish;
+  };
+  // Making a layout may make more: by index, as the map grows.
+  std::vector<std::pair<const Type *, llvm::Constant *>> layouts;
+  for (const auto &[key, descriptor] : layoutDescriptors_)
+    layouts.push_back({key.first, descriptor});
+  for (const auto &[type, descriptor] : layouts)
+    if (type->isObject())
+      add(descriptor, objectPublish(type));
+  for (const auto &[cls, descriptor] : classDescriptors_)
+    add(descriptor, objectPublish(cls->type));
+  for (const auto &[key, layout] : envLayouts_) {
+    std::vector<std::pair<const VarSymbol *, unsigned>> captures;
+    for (size_t i = 0; i < layout.fields.size(); ++i)
+      if (!uncounted_.count({key, layout.fields[i]}))
+        captures.push_back({layout.fields[i], unsigned(i + 2)});
+    add(layout.descriptor, publishFunction(nullptr, layout.type, captures, {}, "env"));
+  }
+  for (const auto &[type, drop] : boxDrops_) {
+    if (!type->isManaged())
+      continue;
+    llvm::Function *publish = publishFunction(nullptr, boxType(type), {}, {{2u, type}}, "box");
+    if (llvm::Constant *descriptor = dropDescriptors_.lookup(drop))
+      add(descriptor, publish);
+    if (llvm::Constant *descriptor = memberDescriptors_.lookup(drop))
+      add(descriptor, publish);
+  }
+  for (const PublishedObject &o : publishedObjects_)
+    add(o.descriptor, publishFunction(nullptr, o.type, {}, o.values, "other"));
+  auto *arrayType = llvm::ArrayType::get(entryType, entries.size());
+  auto *table = new llvm::GlobalVariable(*module_, arrayType, /*isConstant=*/true,
+                                         llvm::GlobalValue::PrivateLinkage,
+                                         llvm::ConstantArray::get(arrayType, entries),
+                                         "tz.publish.table");
+  llvm::IRBuilder<> b(init->getNextNode());
+  b.CreateCall(processFunction("tz_publish_init", builder_.getVoidTy(), {ptr, builder_.getInt32Ty()}),
                {table, b.getInt32(uint32_t(entries.size()))});
 }
 

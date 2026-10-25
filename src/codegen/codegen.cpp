@@ -22,6 +22,9 @@ constexpr uint64_t kStrAscii = uint64_t(1) << 60;
 constexpr uint64_t kStrTwoByte = uint64_t(1) << 61;
 constexpr uint64_t kStrRope = uint64_t(1) << 62;
 constexpr uint64_t kStrHeap = uint64_t(1) << 63;
+// The count of a shared object starts here (TZ_RC_SHARED, runtime/tzrt.h);
+// those of the members of groups are below it.
+constexpr int64_t kRcShared = -(int64_t(1) << 60);
 // A one-byte string of up to this many code units is stored in the value
 // itself: `obj` holds the code units and `meta` has ROPE without HEAP.
 constexpr size_t kInlineMax = 8;
@@ -76,8 +79,58 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
   promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
+void CodeGen::setParallelPlan(const ParallelPlan *plan) {
+  plan_ = plan;
+  parallel_ = plan && llvm::any_of(plan->pieces, [](const ParallelPlan::Piece &p) { return !p.alone; });
+  if (!parallel_)
+    return;
+  // A piece of code from an await on runs ahead of its turn when it may run
+  // at the same time as others in any task (the code of a function is one
+  // for all its tasks); the places where it touches what keeps node's order
+  // wait for the turn.
+  for (const ParallelPlan::Piece &piece : plan->pieces) {
+    if (piece.alone)
+      continue;
+    if (piece.start) {
+      aheadStarts_.try_emplace(piece.start, uint32_t(aheadStarts_.size() + 1));
+      if (piece.fn)
+        aheadFunctions_.insert(piece.fn);
+    }
+    for (llvm::SMLoc at : piece.orderedAt)
+      orderedLocs_.insert(at.getPointer());
+  }
+}
+
+void CodeGen::orderAt(llvm::SMLoc loc) {
+  if (!parallel_ || !function_ || !orderedLocs_.contains(loc.getPointer()))
+    return;
+  builder_.CreateCall(processFunction("tz_order_enter", builder_.getVoidTy(), {}));
+}
+
 std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
   comparesFunctions_ = file.comparesFunctions;
+  // The variables of the built-in modules that hold what may change: all
+  // but constants of values that do not.
+  if (parallel_)
+    for (const Module *module : file.modules) {
+      if (!module->builtin)
+        continue;
+      for (Stmt *item : module->file.items) {
+        if (auto *cls = dyn_cast<ClassDecl>(item)) {
+          for (const ClassField &f : cls->fields)
+            if (f.isStatic && f.var)
+              libraryState_.insert(f.var);
+          continue;
+        }
+        if (auto *decl = dyn_cast<VarDeclStmt>(item))
+          for (VarDeclarator &d : decl->decls) {
+            const Type *t = d.sym->type;
+            bool value = t && (t->isNumeric() || t->isBool() || t->isString());
+            if (d.sym->usedInFunction && !(d.sym->isConst && value))
+              libraryState_.insert(d.sym);
+          }
+      }
+    }
   usesTls_ = file.usesTls;
   subtypes_ = file.subtypes;
   usesAsync_ = file.usesAsync;
@@ -156,6 +209,7 @@ std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
   finishReflection(file, mainInit_);
   finishMetadata(file, mainInit_);
   finishGroupDebug(mainInit_);
+  finishPublishTable(mainInit_);
   return std::move(module_);
 }
 
@@ -333,13 +387,16 @@ void CodeGen::defineRefCountHelpers() {
 
       b.SetInsertPoint(countedBlock);
       llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
+      auto *freeBlock = isRetain ? nullptr : llvm::BasicBlock::Create(ctx_, "free", fn);
+      // A shared object's count goes atomically (runtime/publish.c).
+      if (parallel_)
+        countShared(b, obj, count, isRetain, freeBlock, doneBlock);
       if (isRetain) {
         b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);
         b.CreateBr(doneBlock);
       } else {
         llvm::Value *left = b.CreateSub(count, b.getInt64(1));
         b.CreateStore(left, obj);
-        auto *freeBlock = llvm::BasicBlock::Create(ctx_, "free", fn);
         b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), freeBlock, doneBlock);
         b.SetInsertPoint(freeBlock);
         b.CreateCall(isString ? rt_.strFree : rt_.arrFree, {obj});
@@ -373,13 +430,15 @@ void CodeGen::defineRefCountHelpers() {
     b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
     b.SetInsertPoint(countedBlock);
     llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
+    auto *dropBlock = isRetain ? nullptr : llvm::BasicBlock::Create(ctx_, "drop", fn);
+    if (parallel_)
+      countShared(b, obj, count, isRetain, dropBlock, doneBlock);
     if (isRetain) {
       b.CreateStore(b.CreateAdd(count, b.getInt64(1)), obj);
       b.CreateBr(doneBlock);
     } else {
       llvm::Value *left = b.CreateSub(count, b.getInt64(1));
       b.CreateStore(left, obj);
-      auto *dropBlock = llvm::BasicBlock::Create(ctx_, "drop", fn);
       b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), dropBlock, doneBlock);
       b.SetInsertPoint(dropBlock);
       llvm::Value *descriptor =
@@ -442,7 +501,10 @@ void CodeGen::defineRefCountHelpers() {
   llvm::Value *obj = instanceReleaseFn_->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(obj), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
-  llvm::Value *left = b.CreateSub(b.CreateLoad(b.getInt64Ty(), obj, "rc"), b.getInt64(1));
+  llvm::Value *instanceCount = b.CreateLoad(b.getInt64Ty(), obj, "rc");
+  if (parallel_)
+    countShared(b, obj, instanceCount, /*retain=*/false, dropBlock, doneBlock);
+  llvm::Value *left = b.CreateSub(instanceCount, b.getInt64(1));
   b.CreateStore(left, obj);
   b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), dropBlock, doneBlock);
   b.SetInsertPoint(dropBlock);
@@ -455,6 +517,35 @@ void CodeGen::defineRefCountHelpers() {
   plainInstanceReleaseFn_ = instanceReleaseFn_;
   if (hasCycles_)
     instanceReleaseFn_ = groupAwareRelease(plainInstanceReleaseFn_);
+}
+
+// In a parallel program, the count of a shared object (below zero, see
+// TZ_RC_SHARED in runtime/tzrt.h) goes atomically; the last release drops
+// the object, which is this thread's alone then, with a count of zero.
+// Leaves `b` in the block for the other objects, whose `count` is the one
+// loaded.
+void CodeGen::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm::Value *count,
+                          bool retain, llvm::BasicBlock *freeBlock, llvm::BasicBlock *doneBlock) {
+  llvm::Function *fn = b.GetInsertBlock()->getParent();
+  auto *sharedBlock = llvm::BasicBlock::Create(ctx_, "shared", fn);
+  auto *plainBlock = llvm::BasicBlock::Create(ctx_, "plain", fn);
+  b.CreateCondBr(b.CreateICmpSLT(count, b.getInt64(0)), sharedBlock, plainBlock,
+                 llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
+  b.SetInsertPoint(sharedBlock);
+  if (retain) {
+    b.CreateAtomicRMW(llvm::AtomicRMWInst::Add, obj, b.getInt64(1), llvm::MaybeAlign(8),
+                      llvm::AtomicOrdering::Monotonic);
+    b.CreateBr(doneBlock);
+  } else {
+    llvm::Value *old = b.CreateAtomicRMW(llvm::AtomicRMWInst::Sub, obj, b.getInt64(1),
+                                         llvm::MaybeAlign(8), llvm::AtomicOrdering::AcquireRelease);
+    auto *lastBlock = llvm::BasicBlock::Create(ctx_, "shared.last", fn);
+    b.CreateCondBr(b.CreateICmpEQ(old, b.getInt64(uint64_t(kRcShared + 1))), lastBlock, doneBlock);
+    b.SetInsertPoint(lastBlock);
+    b.CreateStore(b.getInt64(0), obj);
+    b.CreateBr(freeBlock);
+  }
+  b.SetInsertPoint(plainBlock);
 }
 
 void CodeGen::setFunctionAttributes(llvm::Function *fn) {
@@ -851,6 +942,11 @@ llvm::Value *CodeGen::addressOf(const VarSymbol *var) {
     return address;
   llvm::Value *global = globals_.lookup(var);
   assert(global && "variable used before its declaration was emitted");
+  // The state of a built-in module (fetch's pool of connections, the stdio
+  // streams...): code that runs ahead of its turn waits for it first, as the
+  // analysis does not walk that code (runtime/parallel.c).
+  if (parallel_ && function_ && libraryState_.contains(var))
+    builder_.CreateCall(processFunction("tz_order_enter", builder_.getVoidTy(), {}));
   return global;
 }
 
@@ -1103,6 +1199,7 @@ void CodeGen::dropOperand(const Operand &operand) {
 //===----------------------------------------------------------------------===//
 
 void CodeGen::emitStmt(Stmt *stmt) {
+  orderAt(stmt->loc());
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
     pushScope();
@@ -1555,6 +1652,7 @@ void CodeGen::emitDiscarded(Expr *expr) {
 // A built-in that fails in it throws from where the expression is (loc_).
 llvm::Value *CodeGen::emitExpr(Expr *expr) {
   llvm::SMLoc outer = std::exchange(loc_, expr->loc());
+  orderAt(expr->loc());
   llvm::Value *value = emitExprKind(expr);
   loc_ = outer;
   return value;
@@ -2262,6 +2360,8 @@ llvm::Value *CodeGen::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *
 }
 
 llvm::Value *CodeGen::emitAssign(AssignExpr *assign, bool needResult) {
+  orderAt(assign->loc());
+  orderAt(assign->target->loc());
   if (assign->op && *assign->op == BinaryOp::Nullish)
     return emitNullishAssign(assign, needResult);
   if (auto *index = dyn_cast<IndexExpr>(assign->target);
@@ -2368,6 +2468,8 @@ llvm::Value *CodeGen::emitNullishAssign(AssignExpr *assign, bool needResult) {
 }
 
 llvm::Value *CodeGen::emitUpdate(UpdateExpr *update) {
+  orderAt(update->loc());
+  orderAt(update->target->loc());
   if (auto *index = dyn_cast<IndexExpr>(update->target);
       index && index->object->type->isTypedArray())
     return emitBytesUpdate(update);

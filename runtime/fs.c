@@ -1709,7 +1709,7 @@ TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, co
   tz_free(queue);
   path_free(&base);
   if (!ok) {
-    if (--result->rc == 0)
+    if (tz_rc_dec(&result->rc))
       tz_arr_free(result);
     return NULL;
   }
@@ -2583,7 +2583,8 @@ static void fsp_queue(FsRequest *r, void (*work)(TzWork *), void (*done)(TzWork 
   r->work.work = work;
   r->work.done = done;
   r->work.turns = 1;
-  tz_work_queue(&r->work);
+  // Done settles the promise and frees the request, nothing else.
+  tz_work_queue_settles(&r->work, r->promise);
 }
 
 // The failure the thread found, of `syscall`, showing `shows` paths.
@@ -3999,6 +4000,8 @@ void *tz_readline_new(int32_t output, TzSignal *signal) {
 }
 
 static void readline_drop(void *object) {
+  // It leaves lists of the runtime: in node's order (parallel.c).
+  TZ_ORDERED();
   Readline *rl = (Readline *)object;
   for (size_t i = 0; i < tz_readline_count; ++i)
     if (tz_readlines[i] == rl) {
@@ -4113,7 +4116,7 @@ static FdRequest *fd_new(TzPromise *p, TzMaker make) {
   FdRequest *r = (FdRequest *)tz_alloc(sizeof(FdRequest));
   memset(r, 0, sizeof *r);
   r->promise = p;
-  ++p->rc;
+  tz_rc_inc(&p->rc);
   r->make = make;
   r->position = -1;
   return r;
@@ -4282,7 +4285,7 @@ static void fd_transfer(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, in
   FdRequest *r = fd_new(p, make);
   r->fd = fd;
   r->bytes = b;
-  ++b->rc;
+  tz_rc_inc(&b->rc);
   if (offset < 0 || length < 0 || (int64_t)offset + length > b->length) {
     offset = 0;
     length = 0;
@@ -4376,7 +4379,7 @@ void tz_stdin_chunk(TzPromise *p, int32_t max) {
   if (!w)
     abort();
   w->promise = p;
-  ++p->rc;
+  tz_rc_inc(&p->rc);
   w->max = max > 0 ? max : 65536;
   if (tz_chunk_tail)
     tz_chunk_tail->next = w;

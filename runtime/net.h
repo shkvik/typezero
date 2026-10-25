@@ -81,6 +81,7 @@ typedef struct HttpState {
   uint8_t body_done;
   uint8_t response_mode; // of the response being written (http.c)
   uint8_t refused;       // answered with an error already: what the program writes goes
+  uint8_t ending;        // the server stops: no request after the one being handled
   int64_t remaining;
   int64_t body_read;    // bytes of the body given so far
   double max_body;      // of a request to a server; 0: no limit
@@ -104,6 +105,13 @@ struct NetConn {
 #else
   int s;
 #endif
+  // The parallel runtime (docs/async.md, section 8): what the connection
+  // holds changes under the lock, as the thread that runs its task and
+  // those that take what the system says of it may differ. A connection of
+  // a server waits on the port of the pool (`pooled`): its threads take
+  // what comes for it, and run the piece that waits for it (net.c).
+  TzLock lock;
+  uint8_t pooled;
   uint8_t closed;  // the socket is closed
   uint8_t closing; // closes once what is queued is written
   uint8_t orphan;  // the program let go of it: freed once no operation waits
@@ -141,6 +149,31 @@ struct NetConn {
   uint8_t *sealed;
   uint32_t sealed_len, sealed_cap;
 };
+
+// The lock of a connection (see NetConn). A thread that holds it never
+// waits for its turn (parallel.c checks), so that the main thread may wait
+// for it.
+static inline void conn_lock(NetConn *c) {
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+  tz_lock(&c->lock);
+  ++tz_thread.conn_locks;
+#else
+  (void)c;
+#endif
+}
+
+static inline void conn_unlock(NetConn *c) {
+#if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
+  --tz_thread.conn_locks;
+  tz_unlock(&c->lock);
+#else
+  (void)c;
+#endif
+}
+
+// http.c: whether the connection of a server waits for the head of its
+// next request.
+int tz_http_waits_request(NetConn *c);
 
 struct NetListener {
   int64_t rc;

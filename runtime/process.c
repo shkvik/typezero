@@ -140,7 +140,12 @@ static TzStr exec_path(void) {
 // Node has the path of the script, then the arguments. So argv.slice(2) is
 // the arguments, as in any script for Node. One array, which the program may
 // change, as in Node; the runtime keeps a reference to it.
+// Made by the first thread that asks, under the lock, and shared from then
+// on (publish.c): every thread sees the one array, and the one map.
+TzLock tz_process_lock;
+
 TzArray *tz_process_argv(const TzType *string_type) {
+  tz_lock(&tz_process_lock);
   if (!tz_argv) {
 #ifdef _WIN32
     _configure_wide_argv(_crt_argv_unexpanded_arguments);
@@ -163,10 +168,16 @@ TzArray *tz_process_argv(const TzType *string_type) {
 #endif
       tz_arr_push_value(a, &arg);
     }
+#if TZ_PARALLEL
+    const TzType array_type = {TZ_T_ARRAY, sizeof(TzArray *), string_type};
+    tz_publish_value(&array_type, &a);
+#endif
     tz_argv = a;
   }
-  ++tz_argv->rc;
-  return tz_argv;
+  tz_rc_inc(&tz_argv->rc);
+  TzArray *argv = tz_argv;
+  tz_unlock(&tz_process_lock);
+  return argv;
 }
 
 // process.env[name]: whether the variable is set, and its value in `out`
@@ -228,6 +239,7 @@ int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
 TzMap *tz_env_map;
 
 TzMap *tz_process_env_map(const TzMapLayout *layout) {
+  tz_lock(&tz_process_lock);
   if (!tz_env_map) {
     TzMap *m = tz_map_new(layout);
     int32_t added;
@@ -259,10 +271,15 @@ TzMap *tz_process_env_map(const TzMapLayout *layout) {
     FreeEnvironmentStringsW(block);
 #endif
     m->flags |= TZ_MAP_ENV;
+#if TZ_PARALLEL
+    tz_publish_object(m);
+#endif
     tz_env_map = m;
   }
-  ++tz_env_map->rc;
-  return tz_env_map;
+  tz_rc_inc(&tz_env_map->rc);
+  TzMap *env = tz_env_map;
+  tz_unlock(&tz_process_lock);
+  return env;
 }
 
 void tz_process_env_changed(const TzStr *name, const TzStr *value) {
@@ -345,11 +362,11 @@ int32_t tz_process_exit_status(void) { return tz_exit_code; }
 void tz_process_shutdown(void) {
   TzArray *a = tz_argv;
   tz_argv = NULL;
-  if (a && --a->rc == 0)
+  if (a && tz_rc_dec(&a->rc))
     tz_arr_free(a);
   TzMap *env = tz_env_map;
   tz_env_map = NULL;
-  if (env && --env->rc == 0)
+  if (env && tz_rc_dec(&env->rc))
     tz_map_drop(env);
 }
 

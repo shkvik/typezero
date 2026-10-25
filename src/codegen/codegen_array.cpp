@@ -566,6 +566,9 @@ void CodeGen::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot, llvm::B
   builder_.CreateStore(builder_.getInt64(0), indexSlot);
 
   emitBlock(condBlock);
+  // Each element is read here, in whatever piece the iteration is.
+  orderAt(stmt->loc());
+  orderAt(stmt->iterable->loc());
   llvm::Value *iterable = builder_.CreateLoad(lower(iterableType), iterableSlot);
   llvm::Value *index = builder_.CreateLoad(i64, indexSlot, "index");
   llvm::Value *length = isString ? stringLength(iterable) : arrayLength(iterable);
@@ -861,7 +864,7 @@ llvm::Function *CodeGen::sortComparator(CallExpr *call) {
     llvm::BasicBlock *thrownBlock = llvm::BasicBlock::Create(ctx_, "thrown", fn);
     llvm::BasicBlock *compareBlock = llvm::BasicBlock::Create(ctx_, "compare", fn);
     builder_.CreateCondBr(
-        builder_.CreateIsNotNull(builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal())),
+        builder_.CreateIsNotNull(builder_.CreateLoad(builder_.getPtrTy(), thrownSlot())),
         thrownBlock, compareBlock);
     builder_.SetInsertPoint(thrownBlock);
     builder_.CreateRet(builder_.getInt32(0));

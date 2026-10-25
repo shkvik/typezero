@@ -149,7 +149,10 @@ const CodeGen::ObjectLayout &CodeGen::objectLayout(const Type *type) {
   llvm::Value *object = layout.release->getArg(0);
   b.CreateCondBr(b.CreateIsNotNull(object), countedBlock, doneBlock);
   b.SetInsertPoint(countedBlock);
-  llvm::Value *left = b.CreateSub(b.CreateLoad(b.getInt64Ty(), object, "rc"), b.getInt64(1));
+  llvm::Value *objectCount = b.CreateLoad(b.getInt64Ty(), object, "rc");
+  if (parallel_)
+    countShared(b, object, objectCount, /*retain=*/false, dropBlock, doneBlock);
+  llvm::Value *left = b.CreateSub(objectCount, b.getInt64(1));
   b.CreateStore(left, object);
   b.CreateCondBr(b.CreateICmpEQ(left, b.getInt64(0)), dropBlock, doneBlock);
   b.SetInsertPoint(dropBlock);
@@ -240,20 +243,25 @@ void CodeGen::emitObjectDrop(const Type *type, ObjectLayout &layout) {
     auto *doneBlock = llvm::BasicBlock::Create(ctx_, "done", drop);
     builder_.CreateCondBr(builder_.CreateIsNotNull(nextValue), countedBlock, doneBlock);
     builder_.SetInsertPoint(countedBlock);
-    llvm::Value *left = builder_.CreateSub(builder_.CreateLoad(builder_.getInt64Ty(), nextValue, "rc"),
-                                           builder_.getInt64(1));
+    llvm::Value *count = builder_.CreateLoad(builder_.getInt64Ty(), nextValue, "rc");
+    // The next object dies with this one when this held its last reference:
+    // a shared one's count goes atomically (runtime/publish.c).
+    auto *deadBlock = llvm::BasicBlock::Create(ctx_, "next.dead", drop);
+    if (parallel_) {
+      llvm::IRBuilder<> b(builder_.GetInsertBlock());
+      countShared(b, nextValue, count, /*retain=*/false, deadBlock, doneBlock);
+      builder_.SetInsertPoint(b.GetInsertBlock());
+    }
+    llvm::Value *left = builder_.CreateSub(count, builder_.getInt64(1));
     builder_.CreateStore(left, nextValue);
+    builder_.CreateCondBr(builder_.CreateICmpEQ(left, builder_.getInt64(0)), deadBlock, doneBlock);
+    builder_.SetInsertPoint(deadBlock);
     if (exact) {
-      object->addIncoming(nextValue, countedBlock);
-      builder_.CreateCondBr(builder_.CreateICmpEQ(left, builder_.getInt64(0)), loopBlock,
-                            doneBlock);
+      object->addIncoming(nextValue, deadBlock);
+      builder_.CreateBr(loopBlock);
     } else {
       // The drop function of the next object's own descriptor.
-      auto *deadBlock = llvm::BasicBlock::Create(ctx_, "next.dead", drop);
       auto *otherBlock = llvm::BasicBlock::Create(ctx_, "next.other", drop);
-      builder_.CreateCondBr(builder_.CreateICmpEQ(left, builder_.getInt64(0)), deadBlock,
-                            doneBlock);
-      builder_.SetInsertPoint(deadBlock);
       llvm::Value *descriptor = builder_.CreateLoad(
           builder_.getPtrTy(),
           builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), nextValue, 8));

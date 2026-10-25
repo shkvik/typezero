@@ -620,7 +620,7 @@ TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, i
   b->length = (int32_t)length;
   b->offset = (int32_t)offset;
   b->buffer = buffer;
-  ++buffer->rc;
+  tz_rc_inc(&buffer->rc);
   return b;
 }
 

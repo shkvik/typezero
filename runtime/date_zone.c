@@ -25,7 +25,9 @@
 #include <windows.h>
 #endif
 
-// None of this is static: see the rules in tzrt.h.
+// None of this is static: see the rules in tzrt.h. Threads use it under the
+// lock: a UCalendar is no object of ICU for two threads at once.
+TzLock tz_zone_lock;
 void *tz_zone_calendar; // the UCalendar of the local zone, or NULL for UTC
 int32_t tz_zone_state;  // 0 not opened yet
 // The last moments asked about: the offset holds from `from` up to `to`
@@ -159,14 +161,25 @@ static void offsets_at(double t, double *offset, double *dst) {
 
 double tz_date_offset(double t) {
   double offset, dst;
+  tz_lock(&tz_zone_lock);
   offsets_at(t, &offset, &dst);
+  tz_unlock(&tz_zone_lock);
   return offset;
 }
 
 // V8's ToUTC: a local time that a change of the clocks skips, or that comes
 // twice, is read with the offset from before the change (ICU's
 // UCAL_TZ_LOCAL_FORMER).
+static double local_to_utc(double local);
+
 double tz_date_local_to_utc(double local) {
+  tz_lock(&tz_zone_lock);
+  double utc = local_to_utc(local);
+  tz_unlock(&tz_zone_lock);
+  return utc;
+}
+
+static double local_to_utc(double local) {
   void *cal = zone_calendar();
   if (!cal)
     return local;
@@ -194,7 +207,15 @@ double tz_date_local_to_utc(double local) {
 // The long name of the zone in the language of the system, in standard or
 // daylight saving time as at t: "Kyrgyzstan Time", "Central European Summer
 // Time"; "GMT+03:00" for a zone without names.
+static void zone_name(TzBuf *out, double t);
+
 void tz_date_zone_name(TzBuf *out, double t) {
+  tz_lock(&tz_zone_lock);
+  zone_name(out, t);
+  tz_unlock(&tz_zone_lock);
+}
+
+static void zone_name(TzBuf *out, double t) {
   // Whether it is summer time, as V8 decides it: for a time before 1970 or
   // after 2038 at the same day of an equivalent year of today's rules.
   if (t < 0 || t > 2147483647000.0)
@@ -220,8 +241,10 @@ void tz_date_zone_name(TzBuf *out, double t) {
 // The IANA name of the local zone, as Intl.DateTimeFormat().resolvedOptions()
 // gives it; UTC without ICU.
 int32_t tz_date_zone_id(TzUChar *out, int32_t capacity) {
+  tz_lock(&tz_zone_lock);
   void *cal = zone_calendar();
   if (!cal) {
+    tz_unlock(&tz_zone_lock);
     static const char utc[] = "UTC";
     for (int i = 0; i < 3; ++i)
       out[i] = (TzUChar)utc[i];
@@ -229,5 +252,6 @@ int32_t tz_date_zone_id(TzUChar *out, int32_t capacity) {
   }
   TzUErrorCode status = 0;
   int32_t n = tz_icu()->ucal_getTimeZoneID(cal, out, capacity, &status);
+  tz_unlock(&tz_zone_lock);
   return TZ_U_FAILURE(status) ? 0 : n;
 }

@@ -79,9 +79,18 @@ llvm::Constant *CodeGen::dropDescriptor(llvm::Function *drop) {
   if (!descriptor) {
     llvm::Type *ptr = builder_.getPtrTy();
     auto *type = llvm::StructType::get(ctx_, llvm::ArrayRef<llvm::Type *>(ptr));
+    llvm::Constant *init = llvm::ConstantStruct::get(type, {drop});
+    // The parallel runtime reads the flags of any descriptor (publish.c): a
+    // whole layout, without fields.
+    if (parallel_) {
+      llvm::Constant *null = llvm::ConstantPointerNull::get(ptr);
+      type = layoutDescTy_;
+      init = llvm::ConstantStruct::get(
+          layoutDescTy_, {drop, null, builder_.getInt32(0), builder_.getInt32(0), null,
+                          builder_.getInt32(0), builder_.getInt32(0)});
+    }
     auto *global = new llvm::GlobalVariable(*module_, type, /*isConstant=*/true,
-                                            llvm::GlobalValue::PrivateLinkage,
-                                            llvm::ConstantStruct::get(type, {drop}),
+                                            llvm::GlobalValue::PrivateLinkage, init,
                                             drop->getName() + ".descriptor");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     descriptor = global;
@@ -561,6 +570,7 @@ void CodeGen::emitStaticFields(ClassDecl *cls) {
   for (const ClassField &f : cls->fields)
     if (f.isStatic && f.var && f.init) {
       llvm::Value *value = emitExpr(f.init);
+      publishValue(value, f.var->type);
       storeReplacing(addressOf(f.var), value, f.var->type);
       if (isEternal(f.var))
         pinValue(value, f.var->type);

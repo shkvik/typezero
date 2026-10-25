@@ -35,6 +35,7 @@
 #include "llvm/Transforms/IPO/GlobalDCE.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -280,15 +281,24 @@ bool checkProgram(llvm::StringRef path, CheckedProgram &program) {
 }
 
 // Front end: the entry file and the files it imports to verified LLVM IR.
-// Returns null after reporting errors.
+// Returns null after reporting errors. `parallel` tells whether the program
+// runs on the threads of the parallel runtime (tzrt_mt): some of its async
+// code may run at the same time as other (docs/async.md).
 std::unique_ptr<llvm::Module> compileToIR(llvm::StringRef path, llvm::LLVMContext &ctx,
-                                          const llvm::DataLayout &layout) {
+                                          const llvm::DataLayout &layout, bool &parallel) {
   CheckedProgram program;
   if (!checkProgram(path, program))
     return nullptr;
   CodeGen codegen(ctx, llvm::sys::path::filename(path), layout);
   codegen.setSourceMgr(&program.sourceMgr);
+  ParallelPlan plan;
+  // TZ_NO_PARALLEL (for the developers of tz, and benchmarks): the program
+  // runs on one thread, with the runtime of one.
+  if (program.file.usesAsync && !std::getenv("TZ_NO_PARALLEL"))
+    plan = planParallel(program.file, program.sourceMgr);
+  codegen.setParallelPlan(&plan);
   std::unique_ptr<llvm::Module> module = codegen.generate(program.file);
+  parallel = codegen.parallel();
   if (llvm::verifyModule(*module, &llvm::errs())) {
     llvm::errs() << "tz: internal error: the generated LLVM IR is invalid\n";
     return nullptr;
@@ -523,11 +533,16 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
     return kExitError;
 
   llvm::LLVMContext ctx;
-  std::unique_ptr<llvm::Module> module = compileToIR(opts.input, ctx, tm->createDataLayout());
+  bool parallel = false;
+  std::unique_ptr<llvm::Module> module =
+      compileToIR(opts.input, ctx, tm->createDataLayout(), parallel);
   if (!module)
     return kExitError;
   module->setTargetTriple(triple);
-  if (opts.optimize && !linkRuntime(*module, runtimeFile(argv0, "tzrt.bc")))
+  // The runtime of the threads, or the one of a single thread (see
+  // TZ_PARALLEL in runtime/tzrt.h).
+  llvm::StringRef variant = parallel ? "tzrt_mt" : "tzrt";
+  if (opts.optimize && !linkRuntime(*module, runtimeFile(argv0, (variant + ".bc").str())))
     return kExitError;
   runPasses(*module, *tm, opts.optimize);
 
@@ -538,7 +553,8 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
   CryptoUse crypto = cryptoUse(*module);
   addLicenseManifest(*module, {crypto.any, usesEncodingIndexes(*module)});
 
-  std::string runtime = runtimeFile(argv0, triple.isOSWindows() ? "tzrt.lib" : "libtzrt.a");
+  std::string runtime = runtimeFile(argv0, triple.isOSWindows() ? (variant + ".lib").str()
+                                                              : ("lib" + variant + ".a").str());
   if (!llvm::sys::fs::exists(runtime)) {
     llvm::errs() << "tz: the runtime is missing: " << runtime << "\n";
     return kExitError;

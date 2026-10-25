@@ -46,8 +46,8 @@ typedef struct {
 
 // The stack of choice points and undo records, kept from one match to the
 // next. Not static: see the rules in tzrt.h.
-ReEntry *tz_re_stack;
-size_t tz_re_stack_size, tz_re_stack_capacity;
+TZ_THREAD_LOCAL ReEntry *tz_re_stack;
+TZ_THREAD_LOCAL size_t tz_re_stack_size, tz_re_stack_capacity;
 
 TZ_NOINLINE static void grow_stack(void) {
   size_t capacity = tz_re_stack_capacity * 2 + 256;
@@ -600,8 +600,8 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
 }
 
 // Scratch space for the registers, kept between matches.
-int32_t *tz_re_registers;
-size_t tz_re_register_capacity;
+TZ_THREAD_LOCAL int32_t *tz_re_registers;
+TZ_THREAD_LOCAL size_t tz_re_register_capacity;
 
 // One match at or after `start` (only at it when sticky): 1 and the captures
 // in `caps` if there is one.
@@ -699,8 +699,8 @@ int32_t tz_re_interpret(const uint32_t *program, const void *units, int32_t wide
 // entry's code in the low half and a value in the high half; a negative code
 // is an undo record, ~code the slot it restores. Kept from one match to the
 // next. Not static: see the rules in tzrt.h.
-int64_t *tz_re_bt;
-int32_t tz_re_bt_capacity;
+TZ_THREAD_LOCAL int64_t *tz_re_bt;
+TZ_THREAD_LOCAL int32_t tz_re_bt_capacity;
 
 // Room for `need` entries, of which `top` are there: returns the new stack.
 TZ_NOINLINE int64_t *tz_re_bt_grow(int32_t top, int32_t need) {

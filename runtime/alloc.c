@@ -16,9 +16,13 @@
 // for strings: a program creates millions of them, and the C library's
 // malloc costs several times more per call.
 //
-// Parallel async will give each thread its own heap (the `bins` below);
-// a block freed by another thread will then go through an atomic list of its
-// page, as in mimalloc.
+// Each thread has a heap of its own (TzHeap in tzrt.h): the segments it took
+// and their pages are its. In the parallel runtime (TZ_PARALLEL) a thread
+// may free a block of another's heap: the block goes onto that heap's list
+// of remote frees, a stack that others push onto with an atomic exchange,
+// and the owner takes the whole list back the next time it runs out of room
+// in a page (or when its thread goes idle, parallel.c), freeing each block
+// as its own.
 
 #include "tzrt.h"
 
@@ -39,10 +43,10 @@
 #define UNITS (SEGMENT_SIZE / UNIT_SIZE)   // 64
 #define MAX_SMALL ((size_t)32 << 10)       // larger objects are huge
 #define HUGE_HEADER 64                     // keeps huge blocks 64-byte aligned
-#define HUGE_SPARES 4                      // freed huge blocks kept for reuse
+#define HUGE_SPARES TZ_HEAP_HUGE_SPARES     // freed huge blocks kept for reuse
 #define HUGE_SPARE_UNITS 16                // of up to 1 MiB each
 // Size classes: multiples of 8 up to 64, then four per power of two.
-#define BINS 44
+#define BINS TZ_HEAP_BINS
 
 enum { KIND_SMALL = 1, KIND_HUGE = 2 };
 
@@ -58,9 +62,12 @@ typedef struct Page {
   struct Page *next, *prev;
 } Page;
 
+struct Heap;
+
 typedef struct Segment {
   uint32_t kind;
   uint32_t huge_units; // huge: the units of the block (committed)
+  struct Heap *owner;  // small: the heap of the thread whose pages these are
   void *os_base; // what to give back to the OS
   size_t os_size;
   uint64_t free_units; // bit u set: unit u holds no page
@@ -74,13 +81,18 @@ _Static_assert(sizeof(Segment) <= UNIT_SIZE, "segment metadata must fit in unit 
 // Units 1..63 free, unit 0 taken by the metadata.
 #define ALL_UNITS_FREE (~(uint64_t)1)
 
-// Not static: see the rules in tzrt.h.
-struct {
+// TzHeap of the thread, with its types.
+typedef struct Heap {
   Page *bins[BINS];   // pages with room, per size class
   Segment *segments;  // small segments, those with free units first
   Segment *spare;     // one empty segment kept for reuse
   Segment *huge_spares[HUGE_SPARES]; // freed huge blocks of up to 1 MiB
-} tz_heap;
+  void *remote;       // blocks freed by other threads (atomic)
+} Heap;
+
+_Static_assert(sizeof(Heap) == sizeof(TzHeap), "Heap must match TzHeap");
+
+#define tz_heap (*(Heap *)&tz_thread.heap)
 
 //===----------------------------------------------------------------------===//
 // The operating system
@@ -203,6 +215,7 @@ static Segment *segment_new(void) {
     if (!s)
       out_of_memory(SEGMENT_SIZE);
     s->kind = KIND_SMALL;
+    s->owner = &tz_heap;
     s->os_base = base;
     s->os_size = reserved;
   }
@@ -313,17 +326,28 @@ static void *huge_alloc(size_t size) {
   if (!s)
     out_of_memory(size);
   s->kind = KIND_HUGE;
+  s->owner = NULL;
   s->huge_units = units <= UINT32_MAX ? (uint32_t)units : UINT32_MAX;
   s->os_base = base;
   s->os_size = reserved;
   return (char *)s + HUGE_HEADER;
 }
 
+void tz_heap_collect(void);
+
 // tz_alloc when the first page of the size class has no room, or the block
 // is huge.
 TZ_NOINLINE void *tz_alloc_slow(size_t size) {
   if (size > MAX_SMALL)
     return huge_alloc(size);
+#if TZ_PARALLEL
+  // What other threads freed may make room.
+  if (__atomic_load_n(&tz_heap.remote, __ATOMIC_RELAXED)) {
+    tz_heap_collect();
+    if (tz_heap.bins[bin_of(size)])
+      return tz_alloc(size);
+  }
+#endif
   // Pages at the head of the list without room are full: drop them from it
   // until one has room, or start a new page.
   unsigned bin = bin_of(size);
@@ -395,11 +419,30 @@ TZ_NOINLINE void tz_free_slow(void *p) {
   }
 }
 
+#if TZ_PARALLEL
+// tz_free of a small block of another thread's heap: onto that heap's list
+// of remote frees.
+TZ_NOINLINE void tz_free_remote(void *p) {
+  Heap *owner = segment_of(p)->owner;
+  void *head = __atomic_load_n(&owner->remote, __ATOMIC_RELAXED);
+  do
+    *(void **)p = head;
+  while (!__atomic_compare_exchange_n(&owner->remote, &head, p, 1, __ATOMIC_RELEASE,
+                                      __ATOMIC_RELAXED));
+}
+#endif
+
 TZ_HOT void tz_free(void *p) {
   if (!p)
     return;
   Segment *s = segment_of(p);
   if (s->kind == KIND_SMALL) {
+#if TZ_PARALLEL
+    if (s->owner != &tz_heap) {
+      tz_free_remote(p);
+      return;
+    }
+#endif
     Page *page = page_of(s, p);
     *(void **)p = page->free;
     page->free = p;
@@ -407,4 +450,16 @@ TZ_HOT void tz_free(void *p) {
       return;
   }
   tz_free_slow(p);
+}
+
+// Takes back what other threads freed of this thread's heap.
+void tz_heap_collect(void) {
+#if TZ_PARALLEL
+  void *block = __atomic_exchange_n(&tz_heap.remote, NULL, __ATOMIC_ACQUIRE);
+  while (block) {
+    void *next = *(void **)block;
+    tz_free(block);
+    block = next;
+  }
+#endif
 }

@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern int64_t tz_live_arrays; // array.c
 
 // TzJson::flags of an object: some key is an array index, so the keys do not
 // come in the order they were added.
@@ -42,11 +41,10 @@ extern int64_t tz_live_arrays; // array.c
 TzJson tz_json_null_node = {IMMORTAL, TZ_JSON_NULL, 0, {0}};
 TzJson tz_json_true_node = {IMMORTAL, TZ_JSON_BOOL, 0, {1}};
 TzJson tz_json_false_node = {IMMORTAL, TZ_JSON_BOOL, 0, {0}};
-int64_t tz_live_json;
 
 const TzType tz_json_type = {TZ_T_JSON, sizeof(TzJson *), NULL};
 
-int64_t tz_json_live_objects(void) { return tz_live_json; }
+int64_t tz_json_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_json)); }
 
 //===----------------------------------------------------------------------===//
 // Nodes and reference counts
@@ -62,7 +60,7 @@ static TzJson *node_new(uint32_t kind, size_t payload) {
 }
 
 static TzJson *retained(TzJson *j) {
-  ++j->rc;
+  tz_rc_inc(&j->rc);
   return j;
 }
 
@@ -87,9 +85,56 @@ static void dead_push(Dead *dead, TzJson *j) {
 }
 
 static void drop_child(Dead *dead, TzJson *j) {
-  if (j && --j->rc == 0)
+  if (j && tz_rc_dec(&j->rc))
     dead_push(dead, j);
 }
+
+#if TZ_PARALLEL
+// publish.c: a Json other threads may reach, and everything in it, shared;
+// as tz_json_free walks it, without recursion.
+void tz_json_publish(TzJson *root) {
+  if (!root)
+    return;
+  Dead pending = {NULL, 0, 0};
+  dead_push(&pending, root);
+  while (pending.count) {
+    TzJson *j = pending.items[--pending.count];
+    if (j->rc <= 0 || j->rc >= TZ_RC_FOREVER)
+      continue; // shared already, or one of the constants
+    j->rc = TZ_RC_SHARED + j->rc;
+    switch (j->kind) {
+    case TZ_JSON_NUMBER:
+      if (j->flags & F_TEXT)
+        tz_publish_value(&tz_string_type, &j->u.number.text);
+      break;
+    case TZ_JSON_STRING:
+      tz_publish_value(&tz_string_type, &j->u.string);
+      break;
+    case TZ_JSON_ARRAY: {
+      TzArray *a = j->u.array;
+      if (a->rc > 0 && a->rc < TZ_RC_FOREVER) {
+        a->rc = TZ_RC_SHARED + a->rc;
+        TzJson **items = (TzJson **)a->data;
+        for (uint32_t i = 0; i < a->length; ++i)
+          if (items[i])
+            dead_push(&pending, items[i]);
+      }
+      break;
+    }
+    case TZ_JSON_OBJECT:
+      for (uint32_t i = 0; i < j->u.object.count; ++i) {
+        tz_publish_value(&tz_string_type, &j->u.object.entries[i].key);
+        if (j->u.object.entries[i].value)
+          dead_push(&pending, j->u.object.entries[i].value);
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  tz_free(pending.items);
+}
+#endif
 
 void tz_json_free(TzJson *j) {
   Dead dead = {NULL, 0, 0};
@@ -106,7 +151,7 @@ void tz_json_free(TzJson *j) {
       // The elements are Json too, so they join the others here instead of
       // going through tz_arr_free.
       TzArray *a = j->u.array;
-      if (--a->rc == 0) {
+      if (tz_rc_dec(&a->rc)) {
         TzJson **items = (TzJson **)a->data;
         for (uint32_t i = 0; i < a->length; ++i)
           drop_child(&dead, items[i]);
@@ -138,7 +183,7 @@ void tz_json_free(TzJson *j) {
 
 // The release the compiler calls (CodeGen::releaseValue).
 TZ_HOT void tz_json_release_value(TzJson *j) {
-  if (j && --j->rc == 0)
+  if (j && tz_rc_dec(&j->rc))
     tz_json_free(j);
 }
 
@@ -441,7 +486,7 @@ void tz_json_as_string(TzStr *out, const TzJson *j) {
 TzArray *tz_json_as_array(const TzJson *j) {
   if (!j || j->kind != TZ_JSON_ARRAY)
     return tz_arr_new(&tz_json_type, 0, 0);
-  ++j->u.array->rc;
+  tz_rc_inc(&j->u.array->rc);
   return j->u.array;
 }
 
@@ -1155,9 +1200,21 @@ Caches tz_json_caches; // not static: see the rules in tzrt.h
 // compiled, is read the first time the program gets there; `cache` keeps
 // the value for the next times, so the same file gives the same value, as
 // require() of a JSON file in node does.
+// Threads fill a cache once, under the lock, with a value they share
+// (publish.c).
+TzLock tz_json_embed_lock;
+
 TzJson *tz_json_embed(TzJson **cache, void *obj, uint64_t meta) {
+  TzJson *found = __atomic_load_n(cache, __ATOMIC_ACQUIRE);
+  if (found)
+    return retained(found);
+  tz_lock(&tz_json_embed_lock);
   if (!*cache) {
-    *cache = tz_json_parse(obj, meta);
+    TzJson *parsed = tz_json_parse(obj, meta);
+#if TZ_PARALLEL
+    tz_json_publish(parsed);
+#endif
+    __atomic_store_n(cache, parsed, __ATOMIC_RELEASE);
     Caches *c = &tz_json_caches;
     if (c->count < 64) {
       c->slots[c->count] = cache;
@@ -1176,7 +1233,9 @@ TzJson *tz_json_embed(TzJson **cache, void *obj, uint64_t meta) {
     }
     ++c->count;
   }
-  return retained(*cache);
+  found = *cache;
+  tz_unlock(&tz_json_embed_lock);
+  return retained(found);
 }
 
 void tz_json_shutdown(void) {

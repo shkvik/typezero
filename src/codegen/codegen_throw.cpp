@@ -915,12 +915,27 @@ bool CodeGen::exprThrows(const Expr *expr) {
 // Places
 //===----------------------------------------------------------------------===//
 
+// tz_thrown and the stack limit (TzThread in runtime/tzrt.h): in a parallel
+// program the thread's own, since code on the threads of the runtime throws
+// at the same time. Its address then goes through llvm.threadlocal.address,
+// which a coroutine does not keep across a suspension: it may resume on
+// another thread. Both are in one variable, so that a function finds them
+// from one address.
 llvm::GlobalVariable *CodeGen::thrownGlobal() {
   if (!thrown_) {
-    thrown_ = cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_thrown", builder_.getPtrTy()));
+    auto *type = llvm::StructType::get(ctx_, {builder_.getPtrTy(), builder_.getPtrTy()});
+    thrown_ = cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_thread", type));
     thrown_->setAlignment(llvm::Align(8));
+    thrown_->setThreadLocal(parallel_);
   }
   return thrown_;
+}
+
+llvm::Value *CodeGen::thrownSlot() { return thrownSlot(builder_); }
+
+llvm::Value *CodeGen::thrownSlot(llvm::IRBuilderBase &b) {
+  return parallel_ ? b.CreateThreadLocalAddress(thrownGlobal())
+                   : static_cast<llvm::Value *>(thrownGlobal());
 }
 
 // As V8 names them: `f`, `Point.length`, `new Point`; nothing for top-level
@@ -1061,7 +1076,7 @@ void CodeGen::emitThrowCheck() {
 }
 
 void CodeGen::emitThrowCheckWith(llvm::function_ref<void()> release) {
-  llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal(), "thrown");
+  llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownSlot(), "thrown");
   llvm::BasicBlock *throwBlock = newBlock("throw");
   llvm::BasicBlock *goBlock = newBlock("go");
   builder_.CreateCondBr(builder_.CreateIsNotNull(error), throwBlock, goBlock,
@@ -1117,14 +1132,11 @@ void CodeGen::emitThrowStmt(ThrowStmt *stmt) {
 }
 
 void CodeGen::emitStackCheck(llvm::SMLoc loc) {
-  if (!stackLimit_) {
-    stackLimit_ =
-        cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_stack_limit", builder_.getPtrTy()));
-    stackLimit_->setAlignment(llvm::Align(8));
-  }
   llvm::Type *ptr = builder_.getPtrTy();
   llvm::Value *top = builder_.CreateIntrinsic(llvm::Intrinsic::stackaddress, {ptr}, {});
-  llvm::Value *limit = builder_.CreateLoad(ptr, stackLimit_, "stack.limit");
+  // Each thread has a stack of its own: TzThread::stack_limit.
+  llvm::Value *slot = builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), thrownSlot(), 8);
+  llvm::Value *limit = builder_.CreateLoad(ptr, slot, "stack.limit");
   llvm::BasicBlock *overflowBlock = newBlock("stack.overflow");
   llvm::BasicBlock *goBlock = newBlock("stack.ok");
   builder_.CreateCondBr(builder_.CreateICmpULT(top, limit), overflowBlock, goBlock,
@@ -1265,8 +1277,8 @@ void CodeGen::emitTry(TryStmt *stmt) {
   };
   // Takes the error in flight.
   auto takeError = [&] {
-    llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal(), "error");
-    builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownGlobal());
+    llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownSlot(), "error");
+    builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownSlot());
     return error;
   };
 
@@ -1332,7 +1344,7 @@ void CodeGen::emitTry(TryStmt *stmt) {
       }
       // The error goes on up, its places kept.
       switchTo(rethrowBlock);
-      builder_.CreateStore(error, thrownGlobal());
+      builder_.CreateStore(error, thrownSlot());
       builder_.CreateBr(unwindTarget());
       if (returns) {
         switchTo(returnBlock);
@@ -1566,7 +1578,7 @@ llvm::Value *CodeGen::emitFromThrowable(CallExpr *call) {
     args.push_back(code->getArg(i));
   llvm::Value *f = builder_.CreateLoad(fnTy_, builder_.CreateStructGEP(envType, env, 2), "f");
   llvm::Value *returned = callFunctionValue(f, fnType, args);
-  llvm::Value *thrown = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+  llvm::Value *thrown = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
   llvm::BasicBlock *okBlock = newBlock("ok");
   llvm::BasicBlock *errBlock = newBlock("err");
   builder_.CreateCondBr(builder_.CreateIsNull(thrown), okBlock, errBlock);
@@ -1577,7 +1589,7 @@ llvm::Value *CodeGen::emitFromThrowable(CallExpr *call) {
                                             resultType->okType()),
                                 nullptr));
   switchTo(errBlock);
-  builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+  builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
   llvm::Value *error = thrown;
   if (toErrorType) {
     llvm::Value *toError = builder_.CreateLoad(fnTy_, builder_.CreateStructGEP(envType, env, 3), "toError");
@@ -1592,7 +1604,7 @@ llvm::Value *CodeGen::emitFromThrowable(CallExpr *call) {
       llvm::BasicBlock *madeBlock = newBlock("made");
       llvm::BasicBlock *failedBlock = newBlock("failed");
       builder_.CreateCondBr(
-          builder_.CreateIsNull(builder_.CreateLoad(ptr, thrownGlobal())), madeBlock, failedBlock);
+          builder_.CreateIsNull(builder_.CreateLoad(ptr, thrownSlot())), madeBlock, failedBlock);
       switchTo(failedBlock);
       builder_.CreateRet(llvm::Constant::getNullValue(lower(resultType)));
       switchTo(madeBlock);
@@ -1612,6 +1624,10 @@ llvm::Value *CodeGen::emitFromThrowable(CallExpr *call) {
   builder_.CreateStore(values[0], builder_.CreateStructGEP(envType, object, 2));
   builder_.CreateStore(values.size() > 1 ? values[1] : llvm::Constant::getNullValue(fnTy_),
                        builder_.CreateStructGEP(envType, object, 3));
+  if (parallel_) {
+    const Type *anyFn = Type::function({}, 0, false, Type::voidTy());
+    publishedObjects_.push_back({dropDescriptor(drop), envType, {{2u, anyFn}, {3u, anyFn}}});
+  }
   return makeFunctionValue(info, object);
 }
 

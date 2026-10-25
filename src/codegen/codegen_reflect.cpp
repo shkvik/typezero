@@ -907,7 +907,7 @@ llvm::Constant *CodeGen::reflectDispatchInfo(const ClassDecl *cls,
     llvm::Value *result = builder_.CreateCall(methodCode(variants[v]), values);
     llvm::BasicBlock *thrownBlock = newBlock("variant.thrown");
     llvm::BasicBlock *doneBlock = newBlock("variant.done");
-    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownGlobal())),
+    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownSlot())),
                           thrownBlock, doneBlock,
                           llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(thrownBlock);
@@ -983,7 +983,7 @@ llvm::Function *CodeGen::invokerFor(const Type *fnType) {
   llvm::Value *result = callFunctionValue(value, fnType, values);
   llvm::BasicBlock *thrownBlock = newBlock("reflect.thrown");
   llvm::BasicBlock *doneBlock = newBlock("reflect.done");
-  builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownGlobal())),
+  builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownSlot())),
                         thrownBlock, doneBlock,
                         llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
   switchTo(thrownBlock);
@@ -1032,7 +1032,7 @@ void CodeGen::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
   auto failIfThrown = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = newBlock("json.failed");
     llvm::BasicBlock *goBlock = newBlock("json.fits");
-    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownGlobal())),
+    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownSlot())),
                           failBlock, goBlock, llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(failBlock);
     release();
@@ -1082,6 +1082,7 @@ void CodeGen::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
     switchTo(setBlock);
     llvm::Value *value = emitFromJson(f.type, item, link);
     failIfThrown([&] { releaseValue(object, cls->type); });
+    storeBarrier(object, value, f.type);
     storeReplacing(fieldAddress(object, cls->type, f.name), value, f.type);
     builder_.CreateBr(nextBlock);
     switchTo(nextBlock);

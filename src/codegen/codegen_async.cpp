@@ -40,7 +40,7 @@ namespace {
 
 // Must match runtime/tzrt.h.
 constexpr uint64_t kPromiseHeader = 48; // TZ_PROMISE_VALUE
-constexpr uint64_t kReactorSize = 32;
+constexpr uint64_t kReactorSize = 40;
 enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlags };
 constexpr uint32_t kFulfilled = 1;
 constexpr uint32_t kLayoutPromise = 131072; // TZ_LAYOUT_PROMISE
@@ -49,8 +49,8 @@ enum CombineKind : int32_t { kAll, kAllSettled, kRace, kAny };
 constexpr uint32_t kAsyncFrameAlign = 8;
 
 // A reaction to a promise (then, catch, finally): { i64 rc, ptr descriptor,
-// reactor { ptr next, ptr run, ptr owner, ptr source }, ptr derived, fn
-// onFulfilled, fn onRejected }.
+// reactor { ptr next, ptr run, ptr owner, ptr source, i64 ahead }, ptr
+// derived, fn onFulfilled, fn onRejected }.
 enum ReactionField : unsigned {
   kReactionRc,
   kReactionDesc,
@@ -58,6 +58,7 @@ enum ReactionField : unsigned {
   kReactorRun,
   kReactorOwner,
   kReactorSource,
+  kReactorAhead,
   kReactionDerived,
   kReactionFulfilled,
   kReactionRejected,
@@ -287,6 +288,19 @@ void CodeGen::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function) {
   for (unsigned i = first; i < function_->arg_size(); ++i)
     args.push_back(function_->getArg(i));
   emitParams(fn, args);
+  // Its pieces may run on other threads while the caller goes on with what
+  // it passed: shared (runtime/publish.c).
+  if (parallel_ && (aheadFunctions_.contains(fn) || fn->awaitsAhead)) {
+    if (fn->isClosure() || fn->takesThis())
+      builder_.CreateCall(processFunction("tz_publish_object", builder_.getVoidTy(),
+                                          {builder_.getPtrTy()}),
+                          {envParam_});
+    for (size_t i = 0; i < fn->params.size(); ++i) {
+      const Param &param = fn->params[i];
+      publishValue(args[i], param.defaultValue ? Type::optional(param.sym->type)
+                                               : param.sym->type);
+    }
+  }
   if (recursive_.contains(fn))
     emitStackCheck(fn->loc());
   emitStmt(fn->body);
@@ -345,8 +359,8 @@ void CodeGen::emitAsyncReturn(llvm::Value *value) {
 }
 
 void CodeGen::emitAsyncUnwind() {
-  llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal(), "error");
-  builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownGlobal());
+  llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownSlot(), "error");
+  builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownSlot());
   if (async_->generator) // the step it ran for is rejected
     finishAsyncGenerator(error);
   else
@@ -393,17 +407,22 @@ llvm::Constant *CodeGen::asyncFrameDescriptor(llvm::SMLoc loc) {
 }
 
 // Waits for the coroutine's turn: the runtime queues its reactor once
-// `promise` (null: none) settles.
+// `promise` (null: none) settles. The piece after an await may run ahead of
+// its turn (aheadStarts_): the runtime marks the reactor, once this piece
+// has its turn.
 void CodeGen::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   llvm::Type *ptr = builder_.getPtrTy();
+  uint32_t site = awaiting_ ? aheadStarts_.lookup(awaiting_) : 0;
+  builder_.CreateCall(
+      asyncFunction("tz_async_await", builder_.getVoidTy(), {ptr, ptr, builder_.getInt32Ty()}),
+      {async_->reactor, promise ? promise : llvm::ConstantPointerNull::get(ptr),
+       builder_.getInt32(site)});
   // Where top-level code waits, for the warning about an await that never
-  // ends.
+  // ends: after the call, which waits for the turn.
   if (!currentFn_) {
     auto *where = cast<llvm::GlobalVariable>(module_->getOrInsertGlobal("tz_main_await", ptr));
     builder_.CreateStore(frameDescriptor(loc), where);
   }
-  builder_.CreateCall(asyncFunction("tz_async_await", builder_.getVoidTy(), {ptr, ptr}),
-                      {async_->reactor, promise ? promise : llvm::ConstantPointerNull::get(ptr)});
   emitSuspend();
 }
 
@@ -422,7 +441,7 @@ llvm::Value *CodeGen::awaitPromise(llvm::Value *promise, const Type *type, llvm:
       builder_.CreateLoad(builder_.getPtrTy(), promiseField(promise, kError), "error");
   retainObject(error);
   releaseValue(promise, type);
-  builder_.CreateStore(error, thrownGlobal());
+  builder_.CreateStore(error, thrownSlot());
   builder_.CreateCall(
       processFunction("tz_error_frame", builder_.getVoidTy(), {builder_.getPtrTy()}),
       {asyncFrameDescriptor(loc)});
@@ -439,18 +458,31 @@ llvm::Value *CodeGen::awaitPromise(llvm::Value *promise, const Type *type, llvm:
 
 llvm::Value *CodeGen::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
+  // `await __tz_ahead(p)` in the built-in modules: the piece after it may
+  // run ahead of its turn (runtime/parallel.c), as the code guarantees.
+  if (auto *call = dyn_cast<CallExpr>(operand); call && call->builtin == Builtin::LibAhead) {
+    if (parallel_)
+      aheadStarts_.try_emplace(await, uint32_t(aheadStarts_.size() + 1));
+    operand = call->args[0];
+  }
   // `await Promise.resolve(x)` waits as `await x` does, one turn of the
   // queue, without the promise.
   if (const Expr *inner = resolvedValue(operand))
     operand = const_cast<Expr *>(inner);
   const Type *type = operand->type;
   llvm::Value *value = emitExpr(operand);
-  if (type->isPromise())
-    return awaitPromise(value, type, await->loc());
-  if (holdsPromise(type))
-    return awaitUnion(value, type, await->type, await->loc());
-  suspendAsync(nullptr, await->loc());
-  return type->isVoid() ? nullptr : value;
+  const AwaitExpr *outer = std::exchange(awaiting_, await);
+  llvm::Value *result;
+  if (type->isPromise()) {
+    result = awaitPromise(value, type, await->loc());
+  } else if (holdsPromise(type)) {
+    result = awaitUnion(value, type, await->type, await->loc());
+  } else {
+    suspendAsync(nullptr, await->loc());
+    result = type->isVoid() ? nullptr : value;
+  }
+  awaiting_ = outer;
+  return result;
 }
 
 bool CodeGen::holdsPromise(const Type *type) {
@@ -628,13 +660,13 @@ llvm::Value *CodeGen::emitPromiseNew(CallExpr *call) {
   if (auto *fe = dyn_cast<FunctionExpr>(executorExpr))
     throws = mayThrow(fe->fn);
   if (throws) {
-    llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownGlobal(), "thrown");
+    llvm::Value *error = builder_.CreateLoad(builder_.getPtrTy(), thrownSlot(), "thrown");
     llvm::BasicBlock *rejectBlock = newBlock("executor.threw");
     llvm::BasicBlock *doneBlock = newBlock("executor.done");
     builder_.CreateCondBr(builder_.CreateIsNotNull(error), rejectBlock, doneBlock,
                           llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(rejectBlock);
-    builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownGlobal());
+    builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), thrownSlot());
     // As reject does: nothing once the promise is settled.
     llvm::Value *locked = builder_.CreateCall(
         asyncFunction("tz_promise_lock", builder_.getInt32Ty(), {builder_.getPtrTy()}), {promise},
@@ -902,7 +934,8 @@ llvm::StructType *CodeGen::reactionType() {
   if (!reactionTy_) {
     llvm::Type *ptr = builder_.getPtrTy();
     reactionTy_ = llvm::StructType::create(
-        ctx_, {builder_.getInt64Ty(), ptr, ptr, ptr, ptr, ptr, ptr, fnTy_, fnTy_}, "tz.reaction");
+        ctx_, {builder_.getInt64Ty(), ptr, ptr, ptr, ptr, ptr, builder_.getInt64Ty(), ptr, fnTy_, fnTy_},
+        "tz.reaction");
   }
   return reactionTy_;
 }
@@ -974,13 +1007,13 @@ llvm::Function *CodeGen::reactionHandler(Builtin kind, const Type *value, const 
   // the value.
   auto settleWith = [&](llvm::Value *given, const Type *fnType) {
     if (typeThrows(fnType)) {
-      llvm::Value *error = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+      llvm::Value *error = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
       llvm::BasicBlock *threwBlock = newBlock("callback.threw");
       llvm::BasicBlock *gaveBlock = newBlock("callback.gave");
       builder_.CreateCondBr(builder_.CreateIsNotNull(error), threwBlock, gaveBlock,
                             llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
       switchTo(threwBlock);
-      builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+      builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
       rejectPromise(derived, error);
       builder_.CreateRetVoid();
       switchTo(gaveBlock);
@@ -1012,13 +1045,13 @@ llvm::Function *CodeGen::reactionHandler(Builtin kind, const Type *value, const 
   if (kind == Builtin::PromiseFinally) {
     llvm::Value *given = callWith(kReactionFulfilled, onFulfilled, nullptr, nullptr);
     if (typeThrows(onFulfilled)) {
-      llvm::Value *error = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+      llvm::Value *error = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
       llvm::BasicBlock *threwBlock = newBlock("callback.threw");
       llvm::BasicBlock *gaveBlock = newBlock("callback.gave");
       builder_.CreateCondBr(builder_.CreateIsNotNull(error), threwBlock, gaveBlock,
                             llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
       switchTo(threwBlock);
-      builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+      builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
       rejectPromise(derived, error);
       builder_.CreateRetVoid();
       switchTo(gaveBlock);
@@ -1109,6 +1142,7 @@ void CodeGen::attachReaction(llvm::Value *source, llvm::Value *derived, llvm::Fu
   builder_.CreateStore(handler, builder_.CreateStructGEP(type, object, kReactorRun));
   builder_.CreateStore(object, builder_.CreateStructGEP(type, object, kReactorOwner));
   builder_.CreateStore(null, builder_.CreateStructGEP(type, object, kReactorSource));
+  builder_.CreateStore(builder_.getInt64(0), builder_.CreateStructGEP(type, object, kReactorAhead));
   builder_.CreateCall(objRetainFn_, {derived});
   builder_.CreateStore(derived, builder_.CreateStructGEP(type, object, kReactionDerived));
   llvm::Value *callbacks[2] = {onFulfilled, onRejected};
@@ -1196,13 +1230,13 @@ llvm::Function *CodeGen::resultAsyncHandler(Builtin kind, const Type *value, con
   auto threw = [&](const Type *fnType, llvm::function_ref<void(llvm::Value *)> onThrow) {
     if (!typeThrows(fnType))
       return;
-    llvm::Value *error = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+    llvm::Value *error = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
     llvm::BasicBlock *threwBlock = newBlock("callback.threw");
     llvm::BasicBlock *gaveBlock = newBlock("callback.gave");
     builder_.CreateCondBr(builder_.CreateIsNotNull(error), threwBlock, gaveBlock,
                           llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(threwBlock);
-    builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+    builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
     onThrow(error);
     done();
     switchTo(gaveBlock);
@@ -1580,13 +1614,13 @@ llvm::Value *CodeGen::emitResultAsyncThrowable(CallExpr *call) {
   llvm::Value *derived = newPromise(result);
   if (typeThrows(fnType)) {
     // f threw rather than give a promise: an Err of that now.
-    llvm::Value *thrown = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+    llvm::Value *thrown = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
     llvm::BasicBlock *threwBlock = newBlock("threw");
     llvm::BasicBlock *gaveBlock = newBlock("gave");
     builder_.CreateCondBr(builder_.CreateIsNotNull(thrown), threwBlock, gaveBlock,
                           llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(threwBlock);
-    builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+    builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
     llvm::Value *errorHalf = thrown;
     const Type *errorType = errorClass_->type;
     if (toErrorType) {
@@ -1599,13 +1633,13 @@ llvm::Value *CodeGen::emitResultAsyncThrowable(CallExpr *call) {
       errorType = toErrorType->ret();
       if (typeThrows(toErrorType)) {
         // toError threw in turn: that rejects the ResultAsync.
-        llvm::Value *again = builder_.CreateLoad(ptr, thrownGlobal(), "thrown");
+        llvm::Value *again = builder_.CreateLoad(ptr, thrownSlot(), "thrown");
         llvm::BasicBlock *failedBlock = newBlock("failed");
         llvm::BasicBlock *madeBlock = newBlock("made");
         builder_.CreateCondBr(builder_.CreateIsNotNull(again), failedBlock, madeBlock,
                               llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
         switchTo(failedBlock);
-        builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+        builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
         rejectPromise(derived, again);
         builder_.CreateRet(derived);
         switchTo(madeBlock);
@@ -1640,6 +1674,10 @@ llvm::Value *CodeGen::emitResultAsyncThrowable(CallExpr *call) {
   builder_.CreateStore(values[0], builder_.CreateStructGEP(envType, object, 2));
   builder_.CreateStore(values.size() > 1 ? values[1] : llvm::Constant::getNullValue(fnTy_),
                        builder_.CreateStructGEP(envType, object, 3));
+  if (parallel_) {
+    const Type *anyFn = Type::function({}, 0, false, Type::voidTy());
+    publishedObjects_.push_back({dropDescriptor(drop), envType, {{2u, anyFn}, {3u, anyFn}}});
+  }
   return makeFunctionValue(info, object);
 }
 

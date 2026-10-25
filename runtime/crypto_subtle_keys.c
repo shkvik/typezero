@@ -56,7 +56,7 @@ static KeyJob *job_new(TzPromise *p, int makes, const TzKey *key) {
   KeyJob *j = (KeyJob *)tz_alloc(sizeof(KeyJob));
   memset(j, 0, sizeof *j);
   j->promise = p;
-  ++p->rc;
+  tz_ref_retain(p);
   j->makes = makes;
   if (key && key->pkey) {
     j->key = (EVP_PKEY *)key->pkey;
@@ -92,8 +92,7 @@ static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *x
   TzCryptoData d, x = {NULL, 0, NULL};
   if (!tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data") ||
       (xt && !tz_crypto_data(&x, xt, xv, TZ_ENC_UTF8, "data"))) {
-    void *error = tz_thrown;
-    tz_thrown = NULL;
+    void *error = tz_error_take();
     tz_promise_reject(j->promise, error);
     job_free(j);
     return 0;

@@ -49,6 +49,8 @@ double tz_lib_order(TzMaker make) {
 // object of the program in the signal's group, which a reference from
 // outside it would keep alive for good.
 static void signal_drop(void *object) {
+  // It leaves lists of the runtime: in node's order (parallel.c).
+  TZ_ORDERED();
   TzSignal *s = (TzSignal *)object;
   // What the runtime listens with holds the signal, so no listener is left.
   if (s->reason)

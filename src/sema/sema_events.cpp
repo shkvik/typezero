@@ -200,7 +200,9 @@ Expr *Sema::checkLibCall(CallExpr *call, NameExpr *name) {
                                          {"__tz_fsWrite", Builtin::LibFsWrite, 5, 0},
                                          {"__tz_fsClose", Builtin::LibFsClose, 2, 0},
                                          {"__tz_stdinChunk", Builtin::LibStdinChunk, 1, 0},
-                                         {"__tz_stdWrite", Builtin::LibStdWrite, 2, 0}};
+                                         {"__tz_stdWrite", Builtin::LibStdWrite, 2, 0},
+                                         {"__tz_ahead", Builtin::LibAhead, 1, 0},
+                                         {"__tz_order", Builtin::LibOrder, 0, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == name->name; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
@@ -234,6 +236,17 @@ Expr *Sema::checkLibCall(CallExpr *call, NameExpr *name) {
     if (!typeArg->isClass() && !typeArg->isParam() && !typeArg->isError())
       diags_.error(name->loc(), "'__tz_as' takes a class");
     call->type = Type::optional(typeArg);
+    break;
+  case Builtin::LibAhead:
+    call->args[0] = checkExpr(call->args[0]);
+    call->type = call->args[0]->type;
+    if (!call->type->isPromise() && !call->type->isError())
+      diags_.error(name->loc(), "'__tz_ahead' takes the promise an await waits for");
+    if (currentFunction_ && currentFunction_->decl)
+      currentFunction_->decl->awaitsAhead = true;
+    break;
+  case Builtin::LibOrder:
+    call->type = Type::voidTy();
     break;
   case Builtin::LibChunk:
   case Builtin::LibIsChunk:

@@ -1,0 +1,36 @@
+// same-as-node
+// Pieces that go on after a file was read run ahead of the event that
+// brings the file, on the threads of the runtime (docs/async.md, section 8):
+// each task reads its file, computes on its own and writes the result; what
+// is printed comes in node's order all the same.
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+
+function digest(text: string) {
+  let h: long = 7
+  for (let round = 0; round < 20; round++)
+    for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i) + round) % 1000003
+  return h
+}
+
+const dir = await mkdtemp(join(tmpdir(), "tz-parallel-files-"))
+const names: string[] = []
+for (let i = 0; i < 6; i++) {
+  const name = join(dir, `f${i}.txt`)
+  await writeFile(name, "line of text ".repeat(2000 + i * 10))
+  names.push(name)
+}
+
+async function convert(name: string, i: int) {
+  const text = await readFile(name, "utf8")
+  const h = digest(text)
+  await writeFile(name + ".out", `${text.length} ${h}`)
+  return `${i}:${h}`
+}
+
+const all = await Promise.all(names.map((n, i) => convert(n, i)))
+console.log(all.join(" "))
+const back = await Promise.all(names.map((n) => readFile(n + ".out", "utf8")))
+console.log(back.join(" | "))
+await rm(dir, { recursive: true })

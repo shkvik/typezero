@@ -1122,7 +1122,7 @@ static void format_entries(Ctx *ctx, TzBuf *out, const TzInstance *object, const
     reduce_to_single_string(ctx, out, &output, recurse_times, NULL, layout, "{", '}', "");
     entries_free(&output);
   }
-  if (pairs && --pairs->rc == 0)
+  if (pairs && tz_rc_dec(&pairs->rc))
     tz_arr_free(pairs);
 }
 

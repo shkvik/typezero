@@ -1106,6 +1106,13 @@ enum class Builtin {
   LibFsClose,
   LibStdinChunk,
   LibStdWrite,
+  // The parallel runtime (runtime/parallel.c), for code of the built-in
+  // modules that the analysis of src/sema/parallel.h does not walk:
+  // `await __tz_ahead(p)`, an await after which the piece may run ahead of
+  // its turn, which the code itself guarantees, and `__tz_order()`, where it
+  // waits for its turn before it touches shared data.
+  LibAhead,
+  LibOrder,
   LibNativeSignal,
   // Reflection (docs/decorators.md, section 6), through the descriptions of
   // the classes: the name of a class known only when the program runs (its
@@ -1602,6 +1609,9 @@ struct FunctionDecl : Stmt {
   // `async function`, `async () => ...`, `async m() {}`: a call runs the body
   // up to its first `await` and gives a Promise of what it returns.
   bool isAsync = false;
+  // Its code awaits `__tz_ahead(p)` (Builtin::LibAhead): a piece of it may
+  // run ahead of its turn.
+  bool awaitsAhead = false;
   // Set by Sema for the `function*` given to safeTry, which is no generator:
   // it runs once, at the call, and `yield* r` in it takes the value of the
   // Result r or returns its Err (see Sema::checkSafeTry). Sema clears

@@ -390,8 +390,10 @@ static void *append(TzMap *m, const void *key, uint32_t hash) {
       *d = 0; // -0 becomes 0, as JavaScript's Map makes it
   }
   tz_value_retain(l->key, k);
-  if (m->rc < 0)
+  if (m->rc < 0) {
     tz_group_store_value(m, l->key, k);
+    tz_store_barrier(m, l->key, k);
+  }
   if (m->index)
     index_insert(m, hash, position);
   ++m->count;
@@ -564,8 +566,8 @@ void tz_map_stored(TzMap *m, void *entry) {
 // Maps whose count reached zero while another one was being freed: freed one
 // after another, so that a chain of maps (a trie, a map of maps of maps)
 // takes no stack however long it is. Not static: see the rules in tzrt.h.
-TzMap *tz_map_dead;
-int32_t tz_map_dropping;
+TZ_THREAD_LOCAL TzMap *tz_map_dead; // each thread frees its own
+TZ_THREAD_LOCAL int32_t tz_map_dropping;
 
 // What a map holds: its entries, and what they hold.
 static void release_entries(TzMap *m) {
@@ -585,6 +587,26 @@ static void release_entries(TzMap *m) {
   tz_free(m->entries);
   tz_free(m->index);
 }
+
+#if TZ_PARALLEL
+// publish.c: what a map other threads may reach holds, which is shared now.
+void tz_map_publish(TzMap *m) {
+  const TzMapLayout *l = m->layout;
+  int managed_key = tz_is_managed(l->key);
+  int managed_value = l->value && tz_is_managed(l->value);
+  if (!managed_key && !managed_value)
+    return;
+  for (uint32_t i = 0; i < m->used; ++i) {
+    char *e = entry_at(m, i);
+    if (!header(e)->live)
+      continue;
+    if (managed_key)
+      tz_publish_value(l->key, e + l->key_offset);
+    if (managed_value)
+      tz_publish_value(l->value, e + l->value_offset);
+  }
+}
+#endif
 
 void tz_map_drop(void *object) {
   TzMap *m = (TzMap *)object;

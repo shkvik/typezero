@@ -748,7 +748,9 @@ private:
     case Builtin::LibFsClose:
     case Builtin::LibStdinChunk:
     case Builtin::LibStdWrite:
+    case Builtin::LibOrder:
     case Builtin::LibNativeSignal: return {};
+    case Builtin::LibAhead: return args.empty() ? Refs() : args[0];
     case Builtin::PromiseReject:
       for (const Refs &a : args)
         flow(a, thrown_);

@@ -305,7 +305,7 @@ TzBytes *tz_bytes_view(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int6
     }
     length = (buffer->length - offset) / size;
   }
-  ++buffer->rc;
+  tz_rc_inc(&buffer->rc);
   return view_of(kind, buffer, offset, length);
 }
 
@@ -326,7 +326,7 @@ TzBytes *tz_dataview_new(TzArrayBuffer *buffer, int64_t offset, int64_t length, 
   } else {
     length = buffer->length - offset;
   }
-  ++buffer->rc;
+  tz_rc_inc(&buffer->rc);
   return view_of(TZ_BYTES_DATA_VIEW, buffer, offset, length);
 }
 
@@ -386,7 +386,7 @@ TzArray *tz_bytes_to_array(const TzBytes *b, const TzType *element) {
 }
 
 TzArrayBuffer *tz_bytes_buffer(TzBytes *b) {
-  ++b->buffer->rc;
+  tz_rc_inc(&b->buffer->rc);
   return b->buffer;
 }
 
@@ -417,7 +417,7 @@ TzBytes *tz_bytes_subarray(TzBytes *b, int64_t start, int64_t end, int32_t has) 
   int64_t from, to;
   range_of(b->length, start, end, has, &from, &to);
   int32_t kind = tz_bytes_kind(b);
-  ++b->buffer->rc;
+  tz_rc_inc(&b->buffer->rc);
   return view_of(kind, b->buffer, b->offset + from * tz_bytes_element_size(kind), to - from);
 }
 

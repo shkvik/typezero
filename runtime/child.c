@@ -895,7 +895,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     int32_t encoding = req->encoding > 0 ? req->encoding - 1 : 0;
     c->input = tz_buffer_from_string(req->input_text.obj, req->input_text.meta, encoding);
   } else if (req->input == INPUT_BYTES && req->stdio[0] == STDIO_PIPE && req->input_bytes) {
-    ++req->input_bytes->rc;
+    tz_rc_inc(&req->input_bytes->rc);
     c->input = req->input_bytes;
   }
   return 1;

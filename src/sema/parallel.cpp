@@ -859,6 +859,9 @@ private:
     bool alone = true;
     std::vector<Partner> partners;
     llvm::SMLoc from, to;
+    // Every place of the piece's own code where it touches what keeps
+    // node's order (the access, or the call that makes it).
+    std::vector<llvm::SMLoc> ats;
   };
   std::vector<std::vector<Touch>> pieceTouches_;
   std::vector<Decision> decisions_;
@@ -4059,6 +4062,8 @@ void Analysis::decide() {
               d.from = at;
             if (!d.to.isValid() || posOf(d.to) < posOf(at))
               d.to = at;
+            if (!llvm::is_contained(d.ats, at))
+              d.ats.push_back(at);
           }
       };
       decisions_[i].partners.push_back({j, shared});
@@ -4645,6 +4650,7 @@ ParallelPlan Analysis::plan() const {
       piece.inOrderWith.push_back(partner.piece);
     piece.orderedFrom = decisions_[i].from;
     piece.orderedTo = decisions_[i].to;
+    piece.orderedAt = decisions_[i].ats;
     plan.pieces.push_back(std::move(piece));
   }
   return plan;

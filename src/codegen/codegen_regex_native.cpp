@@ -209,8 +209,11 @@ constexpr uint32_t kMaxSlots = 4096;
 
 class MatcherBuilder {
 public:
-  MatcherBuilder(llvm::Module &module, const uint32_t *program)
-      : module_(module), ctx_(module.getContext()), b_(ctx_), program_(program),
+  // `threadLocal`: the stack of backtracking is each thread's own (in a
+  // program of the parallel runtime, runtime/regex.c).
+  MatcherBuilder(llvm::Module &module, const uint32_t *program, bool threadLocal)
+      : threadLocal_(threadLocal), module_(module), ctx_(module.getContext()), b_(ctx_),
+        program_(program),
         code_(program + program[TZ_RE_H_CODE]),
         codeSize_(program[TZ_RE_H_SOURCE] - program[TZ_RE_H_CODE]), flags_(program[TZ_RE_H_FLAGS]),
         captures_(program[TZ_RE_H_CAPTURES]), registers_(program[TZ_RE_H_REGISTERS]),
@@ -342,6 +345,11 @@ private:
   std::map<uint32_t, std::array<llvm::AllocaInst *, 3>> lookVars_; // mark, position, log
   BasicBlock *exit_ = nullptr;
   llvm::GlobalVariable *stackVar_ = nullptr, *capacityVar_ = nullptr;
+  bool threadLocal_;
+  // The address of one of them, for this thread.
+  Value *here(llvm::GlobalVariable *var) {
+    return threadLocal_ ? static_cast<Value *>(b_.CreateThreadLocalAddress(var)) : var;
+  }
   std::map<ByteSet, llvm::Constant *> tables_;
 
   // For the width being emitted
@@ -697,7 +705,7 @@ void MatcherBuilder::reserve(uint32_t n) {
       "tz_re_bt_grow",
       llvm::FunctionType::get(b_.getPtrTy(), {b_.getInt32Ty(), b_.getInt32Ty()}, false));
   store(b_.CreateCall(growFn, {load(top_), need}), base_);
-  store(b_.CreateLoad(b_.getInt32Ty(), capacityVar_), capacity_);
+  store(b_.CreateLoad(b_.getInt32Ty(), here(capacityVar_)), capacity_);
   b_.CreateBr(go);
   b_.SetInsertPoint(go);
 }
@@ -1116,6 +1124,8 @@ llvm::Function *MatcherBuilder::build() {
   if (!capacityVar_)
     capacityVar_ = new llvm::GlobalVariable(
         module_, i32Ty, false, llvm::GlobalValue::ExternalLinkage, nullptr, "tz_re_bt_capacity");
+  stackVar_->setThreadLocal(threadLocal_);
+  capacityVar_->setThreadLocal(threadLocal_);
 
   BasicBlock *entry = newBlock("entry");
   b_.SetInsertPoint(entry);
@@ -1144,8 +1154,8 @@ llvm::Function *MatcherBuilder::build() {
   // Every slot holds a value from the start, so that undo records never read
   // undefined memory.
   b_.CreateMemSet(slots_, b_.getInt8(0xFF), slots * 4, llvm::MaybeAlign(4));
-  store(b_.CreateLoad(ptr, stackVar_), base_);
-  store(b_.CreateLoad(i32Ty, capacityVar_), capacity_);
+  store(b_.CreateLoad(ptr, here(stackVar_)), base_);
+  store(b_.CreateLoad(i32Ty, here(capacityVar_)), capacity_);
   store(i32(0), top_);
   store(i32(0), depth_);
   store(llvm::ConstantPointerNull::get(b_.getPtrTy()), memoAt_);
@@ -2285,7 +2295,7 @@ llvm::Constant *CodeGen::regexMatcher(const RegexLitExpr *lit) {
   llvm::Constant *&matcher = regexMatchers_[lit->program];
   if (matcher)
     return matcher;
-  MatcherBuilder builder(*module_, lit->program.data());
+  MatcherBuilder builder(*module_, lit->program.data(), parallel_);
   matcher = builder.build();
   if (!matcher)
     matcher = cast<llvm::Function>(

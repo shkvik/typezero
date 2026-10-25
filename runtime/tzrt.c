@@ -133,11 +133,13 @@ TZ_NOINLINE void tz_out_flush(int all) {
 // What console.error, console.warn and process.stderr.write print between
 // these goes to stderr.
 void tz_err_begin(void) {
+  TZ_ORDERED();
   tz_out_flush(1);
   tz_out_target = &tz_err_stream;
 }
 
 void tz_err_end(void) {
+  TZ_ORDERED();
   tz_out_flush(1);
   tz_out_target = &tz_out_stream;
 }
@@ -156,6 +158,9 @@ TZ_NOINLINE void tz_out_write_slow(const char *data, size_t len) {
 }
 
 void tz_out_write(const char *data, size_t len) {
+  // The output is node's order (parallel.c): what a piece prints waits for
+  // its turn, whatever printed it.
+  TZ_ORDERED();
   if (len > sizeof tz_out_buf - tz_out_len) {
     tz_out_write_slow(data, len);
     return;
@@ -175,7 +180,37 @@ void tz_out_write(const char *data, size_t len) {
 // recursion of the runtime's own code, stops the program as a failure of the
 // runtime, instead of crashing. The handler runs on the little stack Windows
 // keeps for it (SetThreadStackGuarantee).
+// For the developers of tz: with TZ_CRASH_TRACE set, a crash prints where it
+// happened and the calls that led there, as offsets in the executable, for
+// llvm-symbolizer with the PDB that tz builds with TZ_LINK_DEBUG.
+static void crash_trace(EXCEPTION_POINTERS *info) {
+  char line[128];
+  HMODULE base = GetModuleHandleA(NULL);
+  uintptr_t at = (uintptr_t)info->ExceptionRecord->ExceptionAddress;
+  int n = snprintf(line, sizeof line, "tz: crash %08lx at +0x%llx (thread %d)\n",
+                   (unsigned long)info->ExceptionRecord->ExceptionCode,
+                   (unsigned long long)(at - (uintptr_t)base), (int)tz_thread_index());
+  stream_write(&tz_err_stream, line, (size_t)n);
+  // The return addresses on the stack that point into the executable.
+  uintptr_t *sp = (uintptr_t *)info->ContextRecord->Rsp;
+  IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+  uintptr_t lo = (uintptr_t)base, hi = lo + nt->OptionalHeader.SizeOfImage;
+  int shown = 0;
+  for (int i = 0; i < 4096 && shown < 40; ++i) {
+    if (sp[i] > lo && sp[i] < hi) {
+      n = snprintf(line, sizeof line, "  +0x%llx\n", (unsigned long long)(sp[i] - lo));
+      stream_write(&tz_err_stream, line, (size_t)n);
+      ++shown;
+    }
+  }
+}
+
 static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
+  if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      getenv("TZ_CRASH_TRACE")) {
+    crash_trace(info);
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
   if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
     return EXCEPTION_CONTINUE_SEARCH;
   static const char message[] = "tz: the runtime ran out of stack (Maximum call stack size exceeded)\n";
@@ -188,6 +223,21 @@ static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
 
 extern int32_t tz_group_listing; // group.c
 
+void tz_thread_stack_init(void) {
+#ifdef _WIN32
+  ULONG guarantee = 64 * 1024;
+  SetThreadStackGuarantee(&guarantee);
+  ULONG_PTR low, high;
+  GetCurrentThreadStackLimits(&low, &high);
+  tz_stack_limit = (char *)low + STACK_MARGIN;
+#else
+  // TODO(linux): the stack of a thread of the pool, from pthread_getattr_np.
+  // The 8 MB that Linux gives the main thread, from about here.
+  char here;
+  tz_stack_limit = &here - 8 * 1024 * 1024 + STACK_MARGIN;
+#endif
+}
+
 void tz_rt_init(void) {
   // A program checked for leaks lists the members of groups, to report those
   // left at the end (group.c).
@@ -195,19 +245,14 @@ void tz_rt_init(void) {
 #ifdef _WIN32
   stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
   stream_init(&tz_err_stream, STD_ERROR_HANDLE);
-  ULONG guarantee = 64 * 1024;
-  SetThreadStackGuarantee(&guarantee);
   AddVectoredExceptionHandler(1, on_exception);
-  ULONG_PTR low, high;
-  GetCurrentThreadStackLimits(&low, &high);
-  tz_stack_limit = (char *)low + STACK_MARGIN;
 #else
   stream_init(&tz_out_stream, 1);
   stream_init(&tz_err_stream, 2);
-  // The 8 MB that Linux gives the main thread, from about here.
-  char here;
-  tz_stack_limit = &here - 8 * 1024 * 1024 + STACK_MARGIN;
 #endif
+  tz_thread_register();
+  tz_thread_stack_init();
+  tz_parallel_init();
   // Any exit, process.exit() included, writes out what is printed.
   atexit(out_flush_all);
   tz_clock_init();

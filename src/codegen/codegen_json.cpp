@@ -627,7 +627,7 @@ llvm::Function *CodeGen::fromJsonFunction(const Type *type) {
   auto failIfThrown = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = newBlock("json.failed");
     llvm::BasicBlock *goBlock = newBlock("json.fits");
-    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownGlobal())),
+    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownSlot())),
                           failBlock, goBlock, llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
     switchTo(failBlock);
     release();

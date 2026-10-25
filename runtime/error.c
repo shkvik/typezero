@@ -20,13 +20,17 @@
 #include <string.h>
 
 // Not static: see the rules in tzrt.h.
-void *tz_thrown;
-char *tz_stack_limit;
 TzErrorInfo tz_error_info;
 
 enum { kStackTraceLimit = 10 };
 
 void tz_error_init(const TzErrorInfo *info) { tz_error_info = *info; }
+
+void *tz_error_take(void) {
+  void *error = tz_thrown;
+  tz_thrown = NULL;
+  return error;
+}
 
 static TzStr *field_str(const void *error, uint32_t offset) {
   return (TzStr *)((char *)error + offset);

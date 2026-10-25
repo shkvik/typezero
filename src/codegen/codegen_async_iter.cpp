@@ -32,7 +32,7 @@ namespace {
 
 // Must match TzAsyncGen in runtime/tzrt.h: the reactor, then the frame.
 constexpr uint64_t kAgenReactor = 40;
-constexpr uint64_t kAgenHeader = 72;
+constexpr uint64_t kAgenHeader = 80;
 constexpr uint32_t kAgenFrameAlign = 8;
 // TZ_LAYOUT_ASYNC_ITERATOR | TZ_LAYOUT_ASYNC_GENERATOR
 constexpr uint32_t kLayoutAsyncGenerator = 268435456 | 536870912;
@@ -273,7 +273,7 @@ llvm::Value *CodeGen::emitAsyncStep(llvm::Value *slot, const Type *element, llvm
   builder_.CreateCall(objRetainFn_, {error});
   builder_.CreateCall(instanceReleaseFn_, {step});
   forget();
-  builder_.CreateStore(error, thrownGlobal());
+  builder_.CreateStore(error, thrownSlot());
   builder_.CreateCall(processFunction("tz_error_frame", builder_.getVoidTy(), {ptr}),
                       {asyncFrameDescriptor(loc)});
   builder_.CreateBr(unwindTarget());
@@ -317,14 +317,14 @@ void CodeGen::closeAsyncIterator(llvm::Value *slot) {
   }
   // The error in flight, if any, waits meanwhile; one that closing gives is
   // dropped, as a sync iterator's is (see iterCloseFunction).
-  llvm::Value *saved = builder_.CreateLoad(ptr, thrownGlobal(), "saved");
-  builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownGlobal());
+  llvm::Value *saved = builder_.CreateLoad(ptr, thrownSlot(), "saved");
+  builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), thrownSlot());
   llvm::Value *closed = newPromise(Type::voidTy());
   builder_.CreateCall(asyncFunction("tz_async_iter_close", builder_.getVoidTy(), {ptr, ptr}),
                       {it, closed});
   suspendAsync(closed, loc_);
   builder_.CreateCall(instanceReleaseFn_, {closed});
-  builder_.CreateStore(saved, thrownGlobal());
+  builder_.CreateStore(saved, thrownSlot());
   builder_.CreateBr(nextBlock);
   switchTo(nextBlock);
 }

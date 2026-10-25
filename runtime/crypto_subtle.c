@@ -46,7 +46,7 @@ static SubtleJob *job_new(TzPromise *p) {
   SubtleJob *j = (SubtleJob *)tz_alloc(sizeof(SubtleJob));
   memset(j, 0, sizeof *j);
   j->promise = p;
-  ++p->rc;
+  tz_ref_retain(p);
   return j;
 }
 
@@ -56,8 +56,7 @@ static void job_free(SubtleJob *j);
 static int job_copy(SubtleJob *j, int part, const TzType *type, const void *value) {
   TzCryptoData d;
   if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "data")) {
-    void *error = tz_thrown;
-    tz_thrown = NULL;
+    void *error = tz_error_take();
     tz_promise_reject(j->promise, error);
     job_free(j);
     return 0;
@@ -121,8 +120,7 @@ static void job_queue(SubtleJob *j, void (*run)(SubtleJob *), int64_t size) {
     j->out = tz_abuf_new(size);
     if (!j->out) {
       // Longer than an ArrayBuffer can be: the job fails, as node's does.
-      tz_instance_release((TzInstance *)tz_thrown);
-      tz_thrown = NULL;
+      tz_instance_release((TzInstance *)tz_error_take());
       j->failed = 1;
       j->out = tz_abuf_new(0);
     }

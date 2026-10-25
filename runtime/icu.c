@@ -1,6 +1,7 @@
 // Loading the ICU of the system (see icu.h).
 
 #include "icu.h"
+#include "tzrt.h"
 
 #include <string.h>
 
@@ -159,10 +160,18 @@ static int load(void) { return 0; }
 
 #endif
 
+// The threads load ICU once, under the lock; the state goes last.
+TzLock tz_icu_lock;
+
 const TzIcu *tz_icu(void) {
-  if (tz_icu_state == 0) {
-    tz_icu_state = load() ? 1 : -1;
-    if (tz_icu_state > 0) {
+  if (__atomic_load_n(&tz_icu_state, __ATOMIC_ACQUIRE) == 0) {
+    tz_lock(&tz_icu_lock);
+    if (tz_icu_state != 0) {
+      tz_unlock(&tz_icu_lock);
+      return tz_icu_state > 0 ? &tz_icu_functions : NULL;
+    }
+    int32_t state = load() ? 1 : -1;
+    if (state > 0) {
       // Windows adds the user's settings as keywords
       // ("ru_RU@calendar=gregorian;hours=h23;..."); node's ICU knows only the
       // language, and so do we.
@@ -173,6 +182,8 @@ const TzIcu *tz_icu(void) {
       if (TZ_U_FAILURE(status) || n <= 0)
         strcpy(tz_icu_locale, "en_US");
     }
+    __atomic_store_n(&tz_icu_state, state, __ATOMIC_RELEASE);
+    tz_unlock(&tz_icu_lock);
   }
   return tz_icu_state > 0 ? &tz_icu_functions : NULL;
 }

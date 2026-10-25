@@ -1,7 +1,9 @@
 # Every tests/run/*.ts is compiled and run twice: as usual (optimized, with
 # the runtime bitcode linked into the program) and with -O0 (no optimization,
-# the runtime library). Every tests/errors/*.ts must fail to compile. See
-# check.cmake for the expectations.
+# the runtime library). One with async code runs a third time on threads,
+# each piece that may run ahead of its turn on one of them (run/NAME/threads,
+# docs/async.md, section 8). Every tests/errors/*.ts must fail to compile.
+# See check.cmake for the expectations.
 #
 # A program of several files is a directory: tests/run/NAME/main.ts is its
 # entry, with the expected output in main.out next to it, and
@@ -41,6 +43,12 @@ foreach(src ${TZ_RUN_TESTS})
   add_test(NAME run/${name}/O0
     COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run -DOPT=-O0
             -DMULTI=${multi} -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
+  file(STRINGS ${src} async_lines REGEX "(^|[^a-zA-Z_])(async|await)[^a-zA-Z_]")
+  if(async_lines)
+    add_test(NAME run/${name}/threads
+      COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DSRC=${src} -DMODE=run -DTHREADS=ON
+              -DMULTI=${multi} -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
+  endif()
 
   file(STRINGS ${src} same_as_node REGEX "^// same-as-node")
   if(TZ_NODE AND same_as_node)

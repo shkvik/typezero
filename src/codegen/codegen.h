@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/ast.h"
+#include "sema/parallel.h"
 #include "sema/types.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -92,6 +93,14 @@ public:
   // Where the files of the program are, for the places in the stacks of
   // errors (file, line and column).
   void setSourceMgr(const llvm::SourceMgr *sourceMgr) { sourceMgr_ = sourceMgr; }
+  // What of the program's async code may run in parallel (docs/async.md):
+  // with a piece that may, the program runs on the threads of the parallel
+  // runtime, tzrt_mt (see TZ_PARALLEL in runtime/tzrt.h).
+  void setParallelPlan(const ParallelPlan *plan);
+  bool parallel() const { return parallel_; }
+  // Before a place where async code touches what keeps node's order, the
+  // piece it is in waits for its turn on the thread that runs it ahead.
+  void orderAt(llvm::SMLoc loc);
 
 private:
   struct JumpTarget;
@@ -895,6 +904,9 @@ private:
   bool summaryThrows(const ThrowSummary &summary) const;
   // A stack slot for the error in flight and the stack limit, the runtime's.
   llvm::GlobalVariable *thrownGlobal();
+  // The address of this thread's tz_thrown, made by builder_ or by `b`.
+  llvm::Value *thrownSlot();
+  llvm::Value *thrownSlot(llvm::IRBuilderBase &b);
   // A constant TzFrame for `loc` in the function being emitted, or named
   // `function`.
   llvm::Constant *frameDescriptor(llvm::SMLoc loc, const std::string *function = nullptr);
@@ -1349,6 +1361,14 @@ private:
   // After `owner` took over the owned `value` of `type` into a slot of its:
   // joins the groups of what it refers to (tz_group_store).
   void groupStore(llvm::Value *owner, llvm::Value *value, const Type *type);
+  void countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm::Value *count, bool retain,
+                   llvm::BasicBlock *freeBlock, llvm::BasicBlock *doneBlock);
+  // The parallel runtime (runtime/publish.c): before a value goes where
+  // other threads may reach it, it becomes shared. storeBarrier: into
+  // `owner`, an object of the heap, which is shared or not; publishValue:
+  // into a global that functions see.
+  void storeBarrier(llvm::Value *owner, llvm::Value *value, const Type *type);
+  void publishValue(llvm::Value *value, const Type *type);
   // Releases `value`, which a slot of `owner` held.
   void releaseIn(llvm::Value *owner, llvm::Value *value, const Type *type);
   // `value` moved out of a slot of `owner` and is owned by the code now.
@@ -1416,6 +1436,25 @@ private:
   // The functions that give the walk the references in the members, by
   // layout, handed to the runtime after main's init.
   void finishGroupDebug(llvm::Instruction *init);
+  // The parallel runtime (runtime/publish.c): for each descriptor of an
+  // object the program makes, the function that publishes what the object
+  // holds, handed over at the start of main.
+  void finishPublishTable(llvm::Instruction *init);
+  llvm::Function *publishFunction(const Type *type, llvm::StructType *layout,
+                                  llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
+                                  llvm::ArrayRef<std::pair<unsigned, const Type *>> values,
+                                  llvm::StringRef name);
+  // Other objects of the program's own: their descriptor, struct and the
+  // values in it, by element.
+  struct PublishedObject {
+    llvm::Constant *descriptor;
+    llvm::StructType *type;
+    std::vector<std::pair<unsigned, const Type *>> values;
+  };
+  std::vector<PublishedObject> publishedObjects_;
+  // The async functions whose pieces may run ahead of their turn: what they
+  // get is published as they start.
+  llvm::DenseSet<const FunctionDecl *> aheadFunctions_;
   llvm::Function *traceFunction(const Type *type, llvm::StructType *layout,
                                 llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
                                 llvm::StringRef name);
@@ -1424,6 +1463,15 @@ private:
   // The slots in main of those that no function uses.
   llvm::DenseSet<llvm::Value *> eternalSlots_;
   bool hasCycles_ = false;       // some type, environment or box is cyclic
+  const ParallelPlan *plan_ = nullptr;
+  bool parallel_ = false;        // runs on the threads of tzrt_mt
+  // The awaits after which a piece may run ahead of its turn, and the
+  // places where pieces touch what keeps node's order (see ParallelPlan).
+  // Each by its number, from 1: the site of runtime/parallel.c.
+  llvm::DenseMap<const Node *, uint32_t> aheadStarts_;
+  llvm::DenseSet<const char *> orderedLocs_;
+  const AwaitExpr *awaiting_ = nullptr; // the await being emitted
+  llvm::DenseSet<const VarSymbol *> libraryState_; // see addressOf
   bool anyCyclicObject_ = false; // some object or dictionary type is
   bool fnMayBeMember_ = false;   // a function value's environment may be a member
   llvm::Function *refRetainFn_ = nullptr; // tz.ref.retain
@@ -1682,7 +1730,7 @@ private:
   // The expression being emitted: where a built-in that fails throws from.
   llvm::SMLoc loc_;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
-  llvm::GlobalVariable *thrown_ = nullptr, *stackLimit_ = nullptr;
+  llvm::GlobalVariable *thrown_ = nullptr; // tz_thread
   std::map<std::pair<std::string, const char *>, llvm::Constant *> frames_;
   llvm::StringMap<std::string> filePaths_;
   ClassDecl *errorClass_ = nullptr;

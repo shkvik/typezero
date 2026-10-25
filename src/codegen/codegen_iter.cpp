@@ -213,9 +213,9 @@ llvm::Function *CodeGen::iterCloseFunction() {
   llvm::Value *close = b.CreateStructGEP(promiseTy_, promise, kClose);
   b.CreateCondBr(b.CreateICmpEQ(b.CreateLoad(i32, close), b.getInt32(1)), closeBlock, endBlock);
   b.SetInsertPoint(closeBlock);
-  llvm::Value *saved = b.CreateLoad(ptr, thrownGlobal(), "saved");
+  llvm::Value *saved = b.CreateLoad(ptr, thrownSlot(b), "saved");
   llvm::Value *null = llvm::ConstantPointerNull::get(b.getPtrTy());
-  b.CreateStore(null, thrownGlobal());
+  b.CreateStore(null, thrownSlot(b));
   b.CreateStore(b.getInt32(2), close);
   for (unsigned field : {kOut, kIn, kRet})
     b.CreateStore(null, b.CreateStructGEP(promiseTy_, promise, field));
@@ -226,13 +226,13 @@ llvm::Function *CodeGen::iterCloseFunction() {
   // A `yield` in a `finally` stopped it: it stays where it is, as in
   // JavaScript, until it is dropped.
   b.CreateStore(b.getInt32(0), close);
-  llvm::Value *error = b.CreateLoad(ptr, thrownGlobal(), "error");
+  llvm::Value *error = b.CreateLoad(ptr, thrownSlot(b), "error");
   b.CreateCondBr(b.CreateIsNotNull(error), failedBlock, closedBlock);
   b.SetInsertPoint(failedBlock);
   b.CreateCall(objReleaseFn_, {error});
   b.CreateBr(closedBlock);
   b.SetInsertPoint(closedBlock);
-  b.CreateStore(saved, thrownGlobal());
+  b.CreateStore(saved, thrownSlot(b));
   b.CreateBr(endBlock);
   b.SetInsertPoint(endBlock);
   b.CreateRetVoid();

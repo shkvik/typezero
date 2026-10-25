@@ -39,8 +39,8 @@ enum { CHUNK_SIZE, CHUNK_DATA, CHUNK_DATA_END, CHUNK_TRAILER };
 enum { SEND_FIXED, SEND_CHUNKED, SEND_RAW };
 
 // The date of the Date header, made once a second.
-char tz_http_date[32];
-int64_t tz_http_date_second = -1;
+TZ_THREAD_LOCAL char tz_http_date[32]; // each thread its own
+TZ_THREAD_LOCAL int64_t tz_http_date_second = -1;
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
@@ -119,7 +119,7 @@ static void clear_head(HttpState *h) {
   memset(&h->method, 0, sizeof h->method);
   memset(&h->target, 0, sizeof h->target);
   memset(&h->status_text, 0, sizeof h->status_text);
-  if (h->headers && --h->headers->rc == 0)
+  if (h->headers && tz_rc_dec(&h->headers->rc))
     tz_arr_free(h->headers);
   h->headers = NULL;
 }
@@ -181,6 +181,7 @@ static void input(NetConn *c);
 static void abort_wait(TzAbortListener *l) {
   HttpState *h = CONTAINING_RECORD(l, HttpState, abort);
   NetConn *c = CONTAINING_RECORD(h, NetConn, http);
+  conn_lock(c);
   TzSignal *signal = h->signal;
   h->signal = NULL;
   void *reason = tz_signal_reason(signal);
@@ -193,6 +194,7 @@ static void abort_wait(TzAbortListener *l) {
   // The rest of the message will not be read.
   h->keep_alive = 0;
   net_abort(c);
+  conn_unlock(c);
 }
 
 // Starts a wait of the program: `p` (held), for `kind`, cancelled by
@@ -407,7 +409,7 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
   if (ok && encodings && !f->chunked && !f->coded)
     f->coded = 1; // an empty Transfer-Encoding
   if (!ok) {
-    if (--headers->rc == 0)
+    if (tz_rc_dec(&headers->rc))
       tz_arr_free(headers);
     return 0;
   }
@@ -609,13 +611,13 @@ static int read_request(NetConn *c) {
   if (version == 11 && f.hosts != 1)
     bad = 1;
   if (bad || f.coded) {
-    if (--headers->rc == 0)
+    if (tz_rc_dec(&headers->rc))
       tz_arr_free(headers);
     refuse(c, bad ? 400 : 501);
     return -1;
   }
   if (h->max_body > 0 && f.length >= 0 && (double)f.length > h->max_body) {
-    if (--headers->rc == 0)
+    if (tz_rc_dec(&headers->rc))
       tz_arr_free(headers);
     refuse(c, 413);
     return -1;
@@ -625,7 +627,7 @@ static int read_request(NetConn *c) {
   h->target = latin1(s + target, target_end - target);
   h->headers = headers;
   h->version = version;
-  h->keep_alive = version == 11 ? !f.close : f.keep_alive && !f.close;
+  h->keep_alive = (version == 11 ? !f.close : f.keep_alive && !f.close) && !h->ending;
   h->head_request = equals_lower(s + at, method_end - at, "head");
   h->body = f.chunked ? BODY_CHUNKED : f.length > 0 ? BODY_LENGTH : BODY_NONE;
   h->remaining = f.length > 0 ? f.length : 0;
@@ -681,12 +683,12 @@ static int read_response(NetConn *c) {
     }
     c->in_start = (uint32_t)end + 2;
     if (status < 200 && status != 101) { // 100 Continue, 103 Early Hints
-      if (--headers->rc == 0)
+      if (tz_rc_dec(&headers->rc))
         tz_arr_free(headers);
       continue;
     }
     if ((f.chunked || f.coded) && f.length >= 0) {
-      if (--headers->rc == 0)
+      if (tz_rc_dec(&headers->rc))
         tz_arr_free(headers);
       settle_error(c, net_error(TZ_ERROR, "the response has both Content-Length and "
                                           "Transfer-Encoding",
@@ -999,65 +1001,88 @@ static void input(NetConn *c) {
   }
 }
 
+int tz_http_waits_request(NetConn *c) {
+  return c->on_input == input && c->http.wait_kind == WAIT_REQUEST && c->http.waiting;
+}
+
 // `__tz_http_next(conn)`: the next request of a server's connection: 1 when
 // its head is read, 0 when the connection ends (or a request was refused).
+// It needs no turn: it touches only the connection, under its lock, which
+// the await that follows lets go of once it waits (async.c), so that the
+// promise cannot settle on another thread before (net_completed_pooled).
 void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
   NetConn *c = (NetConn *)conn;
+  conn_lock(c);
   c->busy = 0;
   if (!c->http.version) // the first request
-    c->http.keep_alive = 1;
-  if (!begin_wait(c, p, WAIT_REQUEST, NULL, make))
-    return;
-  input(c);
+    c->http.keep_alive = !c->http.ending;
+  if (begin_wait(c, p, WAIT_REQUEST, NULL, make))
+    input(c);
+#if TZ_PARALLEL
+  tz_thread.await_lock = &c->lock;
+#else
+  conn_unlock(c);
+#endif
 }
 
 // `__tz_http_response(conn, signal)`: the status of the response, once its
 // head is read.
 void tz_http_response(TzPromise *p, void *conn, void *signal, TzMaker make) {
+  TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
-  if (!begin_wait(c, p, WAIT_RESPONSE, signal, make))
-    return;
-  input(c);
+  conn_lock(c);
+  if (begin_wait(c, p, WAIT_RESPONSE, signal, make))
+    input(c);
+  conn_unlock(c);
 }
 
 // `__tz_http_read(conn, signal)`: the next piece of the body, or undefined
 // at its end.
 void tz_http_read(TzPromise *p, void *conn, void *signal, TzMaker make) {
+  TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
-  if (!begin_wait(c, p, WAIT_CHUNK, signal, make))
-    return;
-  send_continue(c);
-  input(c);
+  conn_lock(c);
+  if (begin_wait(c, p, WAIT_CHUNK, signal, make)) {
+    send_continue(c);
+    input(c);
+  }
+  conn_unlock(c);
 }
 
 // `__tz_http_readAll(conn, signal)`: the rest of the body at once.
 void tz_http_read_all(TzPromise *p, void *conn, void *signal, TzMaker make) {
+  TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
-  if (!begin_wait(c, p, WAIT_ALL, signal, make))
-    return;
-  send_continue(c);
-  input(c);
+  conn_lock(c);
+  if (begin_wait(c, p, WAIT_ALL, signal, make)) {
+    send_continue(c);
+    input(c);
+  }
+  conn_unlock(c);
+}
+
+// The parts of the head last read, each taken once, by the task of the
+// connection: the connection lets go of them, so that what reads the next
+// head (on another thread, maybe) never counts them at the same time.
+static TzStr take_str(TzStr *s) {
+  TzStr taken = *s;
+  memset(s, 0, sizeof *s);
+  return taken;
 }
 
 void tz_http_method(TzStr *out, void *conn, TzMaker make) {
   (void)make;
-  NetConn *c = (NetConn *)conn;
-  tz_str_retain_value(c->http.method);
-  *out = c->http.method;
+  *out = take_str(&((NetConn *)conn)->http.method);
 }
 
 void tz_http_target(TzStr *out, void *conn, TzMaker make) {
   (void)make;
-  NetConn *c = (NetConn *)conn;
-  tz_str_retain_value(c->http.target);
-  *out = c->http.target;
+  *out = take_str(&((NetConn *)conn)->http.target);
 }
 
 void tz_http_status_text(TzStr *out, void *conn, TzMaker make) {
   (void)make;
-  NetConn *c = (NetConn *)conn;
-  tz_str_retain_value(c->http.status_text);
-  *out = c->http.status_text;
+  *out = take_str(&((NetConn *)conn)->http.status_text);
 }
 
 void *tz_http_headers(void *conn, TzMaker make) {
@@ -1066,7 +1091,7 @@ void *tz_http_headers(void *conn, TzMaker make) {
   TzArray *headers = c->http.headers;
   if (!headers)
     return tz_arr_new(&tz_string_type, 0, 0);
-  ++headers->rc;
+  c->http.headers = NULL;
   return headers;
 }
 
@@ -1080,21 +1105,32 @@ int32_t tz_http_has_body(void *conn, TzMaker make) {
 // Whether the connection can carry the next message: kept alive, the body
 // read to its end, nothing broken.
 int32_t tz_http_reusable(void *conn, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   NetConn *c = (NetConn *)conn;
-  return c->http.keep_alive && c->http.body_done && !c->closed && !c->error && !c->eof &&
-         !c->closing;
+  conn_lock(c);
+  int32_t reusable = c->http.keep_alive && c->http.body_done && !c->closed && !c->error &&
+                     !c->eof && !c->closing;
+  conn_unlock(c);
+  return reusable;
 }
 
 int32_t tz_http_keep_alive(void *conn, TzMaker make) {
   (void)make;
-  return ((NetConn *)conn)->http.keep_alive;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  int32_t keep = c->http.keep_alive;
+  conn_unlock(c);
+  return keep;
 }
 
-// The server stops: the connection ends after the response being made.
+// The connection ends after the response being made.
 void tz_http_end_after(void *conn, TzMaker make) {
   (void)make;
-  ((NetConn *)conn)->http.keep_alive = 0;
+  NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  c->http.keep_alive = 0;
+  conn_unlock(c);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1252,13 +1288,26 @@ enum {
   RESPOND_BYTES = 8, // the body is the bytes, not the text
 };
 
+static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta,
+                    void *headers, void *body_obj, uint64_t body_meta, void *bytes,
+                    int32_t flags);
+
 // `__tz_http_respond(conn, status, statusText, headers, text, bytes,
-// flags)`: the head and the body of a response, in one write.
+// flags)`: the head and the body of a response, in one write. Without the
+// turn: it touches only the connection, under its lock.
 void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_meta,
                      void *headers, void *body_obj, uint64_t body_meta, void *bytes,
                      int32_t flags, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  respond(c, status, text_obj, text_meta, headers, body_obj, body_meta, bytes, flags);
+  conn_unlock(c);
+}
+
+static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta,
+                    void *headers, void *body_obj, uint64_t body_meta, void *bytes,
+                    int32_t flags) {
   HttpState *h = &c->http;
   if (c->closed || c->error || h->refused)
     return;
@@ -1339,11 +1388,25 @@ void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_m
 
 // `__tz_http_request(conn, method, target, headers, text, bytes, flags)`:
 // the head and the body of a request, in one write. The headers have Host.
+static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *target_obj,
+                    uint64_t target_meta, void *headers, void *body_obj, uint64_t body_meta,
+                    void *bytes, int32_t flags);
+
 void tz_http_request(void *conn, void *method_obj, uint64_t method_meta, void *target_obj,
                      uint64_t target_meta, void *headers, void *body_obj, uint64_t body_meta,
                      void *bytes, int32_t flags, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  request(c, method_obj, method_meta, target_obj, target_meta, headers, body_obj, body_meta, bytes,
+          flags);
+  conn_unlock(c);
+}
+
+static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *target_obj,
+                    uint64_t target_meta, void *headers, void *body_obj, uint64_t body_meta,
+                    void *bytes, int32_t flags) {
   HttpState *h = &c->http;
   TzStr method = {method_obj, method_meta}, target = {target_obj, target_meta};
   put_str(c, method);
@@ -1386,8 +1449,17 @@ void tz_http_request(void *conn, void *method_obj, uint64_t method_meta, void *t
 
 // `__tz_http_write(conn, chunk)`: a piece of a body that streams; waits
 // while too much is queued.
+static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make);
+
 void tz_http_write(TzPromise *p, void *conn, void *bytes, TzMaker make) {
+  TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
+  conn_lock(c);
+  write_chunk(p, c, bytes, make);
+  conn_unlock(c);
+}
+
+static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
   const TzBytes *data = (const TzBytes *)bytes;
   size_t length = (size_t)tz_bytes_byte_length(data);
   if (c->closed || c->error || c->http.refused) {
@@ -1422,13 +1494,16 @@ void tz_http_write(TzPromise *p, void *conn, void *bytes, TzMaker make) {
 
 // `__tz_http_end(conn)`: the end of a body that streams.
 void tz_http_end(void *conn, TzMaker make) {
+  TZ_ORDERED();
   (void)make;
   NetConn *c = (NetConn *)conn;
-  if (c->closed || c->error || c->http.refused)
-    return;
-  if (c->http.response_mode == SEND_CHUNKED)
-    net_write(c, "0\r\n\r\n", 5);
-  net_flush(c);
-  if (c->server && !c->http.keep_alive)
-    net_close(c);
+  conn_lock(c);
+  if (!c->closed && !c->error && !c->http.refused) {
+    if (c->http.response_mode == SEND_CHUNKED)
+      net_write(c, "0\r\n\r\n", 5);
+    net_flush(c);
+    if (c->server && !c->http.keep_alive)
+      net_close(c);
+  }
+  conn_unlock(c);
 }

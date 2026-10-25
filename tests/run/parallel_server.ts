@@ -1,0 +1,56 @@
+// A server under many requests at once, on the threads of the parallel
+// runtime (docs/async.md, section 8): a handler that touches only its own
+// data runs on the thread that read the request; one that counts in a
+// global keeps node's order, so that no count is lost or given twice; an
+// async one goes on after its awaits. Every answer comes back right.
+import { serve } from "tz:http"
+
+let hits = 0
+
+async function later(path: string): Promise<Response> {
+  const length = await Promise.resolve(path.length)
+  await new Promise<void>((resolve) => setTimeout(resolve, 1))
+  return new Response(`later ${length}`)
+}
+
+const server = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
+  const path = new URL(request.url).pathname
+  if (path == "/count") {
+    hits++
+    return new Response(String(hits))
+  }
+  if (path.startsWith("/later/")) return later(path)
+  return new Response(`echo ${path}`)
+})
+
+const base = `http://127.0.0.1:${server.port}`
+const paths: string[] = []
+for (let i = 0; i < 600; i++)
+  paths.push(i % 3 == 0 ? "/count" : i % 3 == 1 ? `/later/${"x".repeat(i % 7)}` : `/echo/${i}`)
+// In rounds of 150 at once: more connections than the backlog of the
+// listener (511, as node's) would be refused.
+const answers: { path: string, text: string }[] = []
+for (let round = 0; round < 4; round++) {
+  const some = await Promise.all(paths.slice(round * 150, round * 150 + 150).map(async (path) => {
+    const text = await (await fetch(base + path)).text()
+    return { path, text }
+  }))
+  answers.push(...some)
+}
+
+const counts = new Set<string>()
+let echoes = 0
+let laters = 0
+for (const { path, text } of answers) {
+  if (path == "/count") counts.add(text)
+  else if (path.startsWith("/later/")) {
+    if (text == `later ${path.length}`) laters++
+  } else if (text == `echo ${path}`) echoes++
+}
+let all = true
+for (let n = 1; n <= 200; n++) if (!counts.has(String(n))) all = false
+console.log(`counted ${hits} times, each number once: ${counts.size == 200 && all}`)
+console.log(`echoes right: ${echoes} of 200`)
+console.log(`later answers right: ${laters} of 200`)
+await server.stop()
+console.log("stopped")

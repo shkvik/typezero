@@ -4,8 +4,15 @@
 //
 // Each connection is an async task that reads its requests one after the
 // other (keep-alive, pipelining); the requests of different connections are
-// handled at the same time. For now on the one thread of the loop: the
-// parallel runtime (docs/async.md, step 4) will run them on all the cores.
+// handled at the same time. With the parallel runtime (docs/async.md,
+// section 8) the threads of the runtime take what comes for the connections
+// (runtime/net.c), and the piece that waits for the head of a request runs
+// on the thread that read it, ahead of its turn: the Request made of it, the
+// handler, the response, the wait for the next request. Only what touches
+// data other pieces may write waits for node's order: the handler's own
+// accesses, as the compiler marks them. The code here touches the server's
+// own fields only after __tz_order(), and the functions of the runtime it
+// calls need no turn, but those that do wait for it themselves.
 // The bytes go through the runtime (runtime/net.c, http.c), and with
 // `tls: { cert, key }` through TLS on each connection (runtime/tls.c): https.
 
@@ -153,20 +160,24 @@ export class Server {
     this.#open++
     try {
       for (;;) {
-        const got = await __tz_http_next(conn)
+        const got = await __tz_ahead(__tz_http_next(conn))
         if (got == 0) break
         const request = __serverRequest(conn, __tz_http_method(conn), __tz_http_target(conn),
                                         __tz_http_headers(conn), this.#base,
                                         __tz_http_has_body(conn))
         let response: Response
         try {
-          response = await this.#handler(request)
+          // A handler that answers at once is not awaited: its answer goes
+          // out in the same piece.
+          const answer = this.#handler(request)
+          response = answer instanceof Response ? answer : await __tz_ahead(answer)
         } catch (e) {
           // As Deno and Bun: the error goes to stderr, the client gets 500.
           console.error(e)
           response = new Response("Internal Server Error", { status: 500 })
         }
-        if (this.#stopping) __tz_http_end_after(conn)
+        // A server that stops ends the connection after this response: the
+        // runtime knows (__tz_net_close_listener).
         const head = request.method == "HEAD"
         if (!respond(conn, response, head)) await respondStreaming(conn, response, head)
         if (!__tz_http_keep_alive(conn)) break
@@ -174,6 +185,7 @@ export class Server {
     } catch (e) {
       // The connection broke (a body that failed as it streamed): it ends.
     } finally {
+      __tz_order()
       __tz_net_close(conn)
       this.#open--
       if (this.#stopping && this.#open == 0) this.#resolveFinished()

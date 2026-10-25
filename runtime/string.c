@@ -37,6 +37,12 @@
 //
 // Every function takes its string arguments borrowed and returns an owned
 // (+1) result.
+//
+// In the parallel runtime a string that threads share (TZ_RC_SHARED, see
+// publish.c) is counted atomically, and the two things that change a string
+// that is read stay safe: an append in place claims its room in the buffer
+// with a compare-and-swap of `used`, and a shared rope is flattened under a
+// lock, its flat result published before anyone reads it.
 
 #include "tzrt.h"
 
@@ -150,9 +156,7 @@ static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t fro
 // Objects and reference counts
 //===----------------------------------------------------------------------===//
 
-int64_t tz_live_strings; // not static: see the rules in tzrt.h
-
-int64_t tz_str_live_objects(void) { return tz_live_strings; }
+int64_t tz_str_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_strings)); }
 
 static void *object_new(size_t size, uint32_t kind) {
   Header *h = (Header *)tz_alloc(size);
@@ -165,13 +169,13 @@ static void *object_new(size_t size, uint32_t kind) {
 
 static inline void retain(TzStr s) {
   if (s.meta & F_HEAP)
-    ++((Header *)s.obj)->rc;
+    tz_rc_inc(&((Header *)s.obj)->rc);
 }
 
 void tz_str_free(void *obj);
 
 static inline void release(TzStr s) {
-  if ((s.meta & F_HEAP) && --((Header *)s.obj)->rc == 0)
+  if ((s.meta & F_HEAP) && tz_rc_dec(&((Header *)s.obj)->rc))
     tz_str_free(s.obj);
 }
 
@@ -220,7 +224,7 @@ TZ_NOINLINE void tz_str_free_rope(void *obj) {
       Rope *r = (Rope *)h;
       TzStr children[3] = {r->left, r->right, r->flat};
       for (int i = 0; i < 3; ++i)
-        if ((children[i].meta & F_HEAP) && --((Header *)children[i].obj)->rc == 0)
+        if ((children[i].meta & F_HEAP) && tz_rc_dec(&((Header *)children[i].obj)->rc))
           stack_push(&pending, children[i].obj);
     }
     --tz_live_strings;
@@ -254,15 +258,28 @@ static inline char *buffer_units(Buffer *b) { return (char *)b + sizeof(Buffer);
 
 TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta);
 
+// The flat result of a rope, once there: in the parallel runtime the meta is
+// written before the object, which another thread may be reading.
+static inline void *rope_flat_obj(const Rope *r) {
+#if TZ_PARALLEL
+  return __atomic_load_n(&r->flat.obj, __ATOMIC_ACQUIRE);
+#else
+  return r->flat.obj;
+#endif
+}
+
 // The flat string behind `s`, borrowed from `s`. Ropes are flattened once.
 // The words are read one by one, which keeps the result in registers: a copy
 // of the whole struct would pick it from memory, `s` or the rope's.
 static inline TzStr flat(TzStr s) {
   if (is_rope(s.meta)) {
     Rope *r = (Rope *)s.obj;
-    if (!r->flat.obj)
+    void *obj = rope_flat_obj(r);
+    if (!obj) {
       tz_str_flatten(r, s.meta);
-    s.obj = r->flat.obj;
+      obj = r->flat.obj;
+    }
+    s.obj = obj;
     s.meta = r->flat.meta;
   }
   return s;
@@ -331,7 +348,67 @@ static inline uint64_t add_inline_units(uint64_t bits, uint32_t pos, TzStr s) {
   return bits;
 }
 
+#if TZ_PARALLEL
+// The lock of the shared ropes being flattened, which their children are
+// read and released under. Not static: see the rules in tzrt.h.
+int32_t tz_str_flatten_lock;
+
+static void flatten_lock(void) {
+  for (unsigned spin = 0;; ++spin) {
+    int32_t free_ = 0;
+    if (__atomic_compare_exchange_n(&tz_str_flatten_lock, &free_, 1, 1, __ATOMIC_ACQUIRE,
+                                    __ATOMIC_RELAXED))
+      return;
+    if (spin > 64)
+      tz_thread_yield();
+    else
+      tz_cpu_relax();
+  }
+}
+
+static void flatten_unlock(void) { __atomic_store_n(&tz_str_flatten_lock, 0, __ATOMIC_RELEASE); }
+
+static void flatten_rope(Rope *r, uint64_t meta);
+
+// A shared rope (or one with a shared one below) is flattened under the
+// lock, its shared children first, so that no thread reads children another
+// is releasing.
 TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
+  if (!tz_rc_is_shared(r->h.rc)) {
+    // This thread's own: only its shared children need the lock, which
+    // flat() of each takes.
+    PtrStack pending;
+    stack_init(&pending);
+    stack_push(&pending, &r->right);
+    stack_push(&pending, &r->left);
+    while (pending.count > 0) {
+      const TzStr *s = (const TzStr *)pending.items[--pending.count];
+      if (!is_rope(s->meta))
+        continue;
+      Rope *child = (Rope *)s->obj;
+      if (rope_flat_obj(child))
+        continue;
+      if (tz_rc_is_shared(child->h.rc)) {
+        tz_str_flatten(child, s->meta);
+        continue;
+      }
+      stack_push(&pending, &child->right);
+      stack_push(&pending, &child->left);
+    }
+    stack_free(&pending);
+    flatten_rope(r, meta);
+    return;
+  }
+  flatten_lock();
+  if (!r->flat.obj)
+    flatten_rope(r, meta);
+  flatten_unlock();
+}
+
+static void flatten_rope(Rope *r, uint64_t meta) {
+#else
+TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
+#endif
   uint32_t len = str_len(meta);
   int two = is_two(meta);
   // Spare room: a flattened string is often appended to next.
@@ -363,7 +440,16 @@ TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
   stack_free(&pending);
 
   b->used = len;
+#if TZ_PARALLEL
+  // A shared rope's result is shared, and readers find it once its object
+  // is there.
+  if (tz_rc_is_shared(r->h.rc))
+    b->h.rc = TZ_RC_SHARED + 1;
+  r->flat.meta = make_meta(len, 0, two, is_ascii(meta), F_HEAP);
+  __atomic_store_n(&r->flat.obj, (void *)b, __ATOMIC_RELEASE);
+#else
   r->flat = make_str(b, make_meta(len, 0, two, is_ascii(meta), F_HEAP));
+#endif
   release(r->left);
   release(r->right);
   r->left = kEmpty;
@@ -440,6 +526,31 @@ TzStr tz_str_from_utf16(const uint16_t *units, size_t length) {
 void tz_str_retain_value(TzStr s) { retain(s); }
 
 void tz_str_release_value(TzStr s) { release(s); }
+
+#if TZ_PARALLEL
+// publish.c: a string other threads may reach, and what it is made of.
+void tz_str_publish(TzStr s) {
+  if (!(s.meta & F_HEAP))
+    return;
+  PtrStack pending;
+  stack_init(&pending);
+  stack_push(&pending, s.obj);
+  while (pending.count > 0) {
+    Header *h = (Header *)pending.items[--pending.count];
+    if (h->rc <= 0 || h->rc >= TZ_RC_FOREVER)
+      continue; // shared already
+    h->rc = TZ_RC_SHARED + h->rc;
+    if (h->kind == KIND_ROPE) {
+      Rope *r = (Rope *)h;
+      TzStr children[3] = {r->left, r->right, r->flat};
+      for (int i = 0; i < 3; ++i)
+        if (children[i].meta & F_HEAP)
+          stack_push(&pending, children[i].obj);
+    }
+  }
+  stack_free(&pending);
+}
+#endif
 
 //===----------------------------------------------------------------------===//
 // Concatenation
@@ -567,9 +678,11 @@ static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t t
   TzStr base = parts[0];
   if (is_rope(base.meta)) {
     Rope *r = (Rope *)base.obj;
-    if (!r->flat.obj)
+    void *obj = rope_flat_obj(r);
+    if (!obj)
       return 0;
-    base = r->flat;
+    base.obj = obj;
+    base.meta = r->flat.meta;
   }
   if (!(base.meta & F_HEAP))
     return 0;
@@ -579,21 +692,37 @@ static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t t
   Buffer *b = (Buffer *)base.obj;
   uint32_t off = str_off(base.meta), len = str_len(base.meta);
   uint32_t extra = total - len;
-  // This check and the update of `used` become a compare-and-swap once tasks
-  // run in parallel.
-  if (off + len != b->used || (uint64_t)b->used + extra > b->capacity)
+  if ((uint64_t)off + len + extra > b->capacity)
     return 0;
+  int claimed = 0;
+#if TZ_PARALLEL
+  // Another thread may append to a shared buffer at the same time: the room
+  // is this one's once the swap took it.
+  if (tz_rc_is_shared(b->h.rc)) {
+    uint32_t expected = off + len;
+    if (!__atomic_compare_exchange_n(&b->used, &expected, off + len + extra, 0, __ATOMIC_ACQ_REL,
+                                     __ATOMIC_RELAXED))
+      return 0;
+    claimed = 1;
+  } else if (off + len != b->used) {
+    return 0;
+  }
+#else
+  if (off + len != b->used)
+    return 0;
+#endif
 
   char *dst = buffer_units(b);
   size_t width = base_two ? 2 : 1;
-  uint32_t pos = b->used;
+  uint32_t pos = off + len;
   for (int64_t i = 1; i < n; ++i) {
     TzStr f = flat(parts[i]);
     copy_units(dst + pos * width, base_two, &f);
     pos += str_len(f.meta);
   }
-  b->used = pos;
-  ++b->h.rc;
+  if (!claimed)
+    b->used = pos;
+  tz_rc_inc(&b->h.rc);
   *out = make_str(b, make_meta(total, off, base_two, ascii && is_ascii(base.meta), F_HEAP));
   return 1;
 }
@@ -1163,7 +1292,7 @@ static inline void substring_fast(TzStr *out, void *obj, uint64_t meta, uint32_t
     }
     if (n >= SHORT_LENGTH) {
       if (meta & F_HEAP)
-        ++((Header *)obj)->rc;
+        tz_rc_inc(&((Header *)obj)->rc);
       *out = make_str(obj, make_meta(n, str_off(meta) + from, 0, is_ascii(meta), meta & F_HEAP));
       return;
     }
@@ -1675,7 +1804,7 @@ static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c
   }
   split_piece(&out[k], f, data, len, p, find_byte(data, p, len, c), &slices);
   if (f->meta & F_HEAP)
-    ((Header *)f->obj)->rc += slices;
+    tz_rc_add(&((Header *)f->obj)->rc, slices);
   a->length = n;
   return a;
 }

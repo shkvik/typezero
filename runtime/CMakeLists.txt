@@ -8,6 +8,10 @@
 #   tzrt.lib  the same code compiled, linked into every program: everything
 #             that was not inlined is called here.
 #
+# Each comes twice: tzrt for programs that run on one thread, and tzrt_mt,
+# built with TZ_PARALLEL, for those whose async code runs in parallel on the
+# threads of the runtime (docs/async.md, section 8; see tzrt.h).
+#
 # CMake cannot build C with clang while tz itself is built with MSVC, so both
 # come from custom commands.
 
@@ -19,7 +23,8 @@ set(sources alloc.c tzrt.c string.c array.c inspect.c number.c math.c unicode.c 
             process.c object.c decimal.c regex.c regex_compile.c json.c error.c date.c
             date_parse.c date_zone.c date_format.c icu.c intl.c intl_number.c intl_text.c
             intl_names.c path.c fs.c child.c os.c map.c async.c io.c signal.c bytes.c buffer.c
-            unknown.c meta.c library.c reflect.c net.c http.c decompress.c group.c cjk.c stream.c)
+            unknown.c meta.c library.c reflect.c net.c http.c decompress.c group.c cjk.c stream.c
+            parallel.c publish.c)
 # What fetch decodes with (decompress.c): zlib's inflate and brotli's
 # decoder, built as they come, without their warnings.
 set(third_party ${PROJECT_SOURCE_DIR}/third_party)
@@ -37,8 +42,9 @@ endif()
 # Each file to bitcode. -flto=full stops before the optimizations that only
 # pay off once everything is in one module (vectorization, unrolling).
 set(dir ${CMAKE_CURRENT_BINARY_DIR}/bitcode)
-file(MAKE_DIRECTORY ${dir})
+file(MAKE_DIRECTORY ${dir} ${dir}/mt)
 set(bitcode_files)
+set(bitcode_files_mt)
 foreach(source ${sources})
   get_filename_component(name ${source} NAME_WE)
   set(bitcode ${dir}/${name}.bc)
@@ -50,7 +56,18 @@ foreach(source ${sources})
     COMMENT "Compiling ${source} to bitcode"
     VERBATIM)
   list(APPEND bitcode_files ${bitcode})
+  set(bitcode ${dir}/mt/${name}.bc)
+  add_custom_command(OUTPUT ${bitcode}
+    COMMAND ${TZ_CLANG} ${flags} -DTZ_PARALLEL=1 -flto=full -c -MD -MF ${bitcode}.d -o ${bitcode}
+            ${CMAKE_CURRENT_SOURCE_DIR}/${source}
+    DEPENDS ${source}
+    DEPFILE ${bitcode}.d
+    COMMENT "Compiling ${source} to bitcode for parallel programs"
+    VERBATIM)
+  list(APPEND bitcode_files_mt ${bitcode})
 endforeach()
+# The code of others has no state of the runtime: both use the same.
+set(third_party_bitcode)
 foreach(source ${third_party_sources})
   string(REPLACE "/" "_" name ${source})
   string(REPLACE ".c" "" name ${name})
@@ -66,24 +83,33 @@ foreach(source ${third_party_sources})
     DEPFILE ${bitcode}.d
     COMMENT "Compiling ${source} to bitcode"
     VERBATIM)
-  list(APPEND bitcode_files ${bitcode})
+  list(APPEND third_party_bitcode ${bitcode})
 endforeach()
+list(APPEND bitcode_files ${third_party_bitcode})
+list(APPEND bitcode_files_mt ${third_party_bitcode})
 
 # One module for the whole runtime: tzrt.bc, and compiled as a whole into
 # tzrt.lib, so that the files' functions are inlined into each other too.
 # Each function gets its own section, so the linker drops the unused ones.
-add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzrt.bc
-  COMMAND ${TZ_LLVM_LINK} -o ${TZ_OUTPUT_DIR}/tzrt.bc ${bitcode_files}
-  DEPENDS ${bitcode_files}
-  COMMENT "Linking the runtime bitcode"
-  VERBATIM)
-add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzrt.lib
-  COMMAND ${TZ_CLANG} -O2 -ffunction-sections -fdata-sections -c -o ${dir}/tzrt.obj
-          ${TZ_OUTPUT_DIR}/tzrt.bc
-  COMMAND ${TZ_LLVM_LIB} /nologo /out:${TZ_OUTPUT_DIR}/tzrt.lib ${dir}/tzrt.obj
-  DEPENDS ${TZ_OUTPUT_DIR}/tzrt.bc
-  COMMENT "Compiling the runtime library"
-  VERBATIM)
+foreach(variant tzrt tzrt_mt)
+  if(variant STREQUAL "tzrt")
+    set(files ${bitcode_files})
+  else()
+    set(files ${bitcode_files_mt})
+  endif()
+  add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/${variant}.bc
+    COMMAND ${TZ_LLVM_LINK} -o ${TZ_OUTPUT_DIR}/${variant}.bc ${files}
+    DEPENDS ${files}
+    COMMENT "Linking the runtime bitcode ${variant}.bc"
+    VERBATIM)
+  add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/${variant}.lib
+    COMMAND ${TZ_CLANG} -O2 -ffunction-sections -fdata-sections -c -o ${dir}/${variant}.obj
+            ${TZ_OUTPUT_DIR}/${variant}.bc
+    COMMAND ${TZ_LLVM_LIB} /nologo /out:${TZ_OUTPUT_DIR}/${variant}.lib ${dir}/${variant}.obj
+    DEPENDS ${TZ_OUTPUT_DIR}/${variant}.bc
+    COMMENT "Compiling the runtime library ${variant}.lib"
+    VERBATIM)
+endforeach()
 
 # node:crypto (docs/crypto.md, crypto.h): tzcrypto.lib, the glue between programs and OpenSSL,
 # which tz links only into programs that use it, and TLS for https (tls.c, docs/net.md), which
@@ -150,6 +176,7 @@ add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzcrypto.lib
   VERBATIM)
 
 add_custom_target(tzrt DEPENDS ${TZ_OUTPUT_DIR}/tzrt.bc ${TZ_OUTPUT_DIR}/tzrt.lib
+                               ${TZ_OUTPUT_DIR}/tzrt_mt.bc ${TZ_OUTPUT_DIR}/tzrt_mt.lib
                                ${TZ_OUTPUT_DIR}/tzcrypto.lib
   SOURCES ${sources} tzrt.h unicode_tables.h gen_unicode_tables.mjs regex.h regex_tables.h
           gen_regex_tables.mjs date.h icu.h intl.h encodings.h gen_encodings.mjs cjk_tables.h

@@ -10,6 +10,7 @@
 #include "intl.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *const option_names[TZ_IO_COUNT] = {
@@ -328,7 +329,7 @@ void *tz_intl_new(int32_t kind, const TzIntlOptions *o) {
 void tz_intl_drop(void *object) { ((TzInstance *)object)->layout->drop(object); }
 
 static void release(TzIntl *o) {
-  if (--o->rc == 0)
+  if (tz_rc_dec(&o->rc))
     o->layout->drop(o);
 }
 
@@ -340,8 +341,22 @@ typedef struct {
   size_t length;
   TzIntl *object;
 } CacheEntry;
-CacheEntry tz_intl_cache[CACHED]; // not static: see the rules in tzrt.h
-uint32_t tz_intl_cache_next;
+typedef struct {
+  CacheEntry entries[CACHED];
+  uint32_t next;
+} Cache;
+
+// The thread's own (TzThread::caches).
+static Cache *cache_of(TzThread *t) {
+  Cache *c = (Cache *)t->caches[TZ_CACHE_INTL];
+  if (!c) {
+    c = (Cache *)calloc(1, sizeof *c);
+    if (!c)
+      tz_panic("out of memory", 13);
+    t->caches[TZ_CACHE_INTL] = c;
+  }
+  return c;
+}
 
 // The key of a lookup, with room on the stack for the usual few options.
 typedef struct {
@@ -408,8 +423,9 @@ static void key_free(Key *k) {
 TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method) {
   Key key;
   key_of(&key, kind, o);
+  Cache *cache = cache_of(&tz_thread);
   for (int i = 0; i < CACHED; ++i) {
-    CacheEntry *e = &tz_intl_cache[i];
+    CacheEntry *e = &cache->entries[i];
     if (e->object && e->length == key.length &&
         memcmp(e->key, key.units, key.length * sizeof(uint16_t)) == 0) {
       key_free(&key);
@@ -422,7 +438,7 @@ TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method)
     key_free(&key);
     return NULL;
   }
-  CacheEntry *e = &tz_intl_cache[tz_intl_cache_next++ % CACHED];
+  CacheEntry *e = &cache->entries[cache->next++ % CACHED];
   if (e->object) {
     release(e->object);
     tz_free(e->key);
@@ -435,15 +451,25 @@ TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method)
   return object;
 }
 
+void tz_date_format_shutdown(void);
+
+// What the caches of every thread hold, before the leak check.
 void tz_intl_shutdown(void) {
-  for (int i = 0; i < CACHED; ++i) {
-    CacheEntry *e = &tz_intl_cache[i];
-    if (e->object) {
-      release(e->object);
-      tz_free(e->key);
-      e->object = NULL;
+  for (int32_t t = 0; t < tz_thread_total(); ++t) {
+    TzThread *thread = tz_thread_at(t);
+    Cache *cache = thread ? (Cache *)thread->caches[TZ_CACHE_INTL] : NULL;
+    if (!cache)
+      continue;
+    for (int i = 0; i < CACHED; ++i) {
+      CacheEntry *e = &cache->entries[i];
+      if (e->object) {
+        release(e->object);
+        tz_free(e->key);
+        e->object = NULL;
+      }
     }
   }
+  tz_date_format_shutdown();
 }
 
 // resolvedOptions(): the option `which` (TZ_IO_*, -1 for the locale); 0
