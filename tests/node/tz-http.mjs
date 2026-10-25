@@ -1,7 +1,9 @@
 // "tz:http" for the tests that run under Node too (see preload.cjs): serve
-// as tz has it (docs/net.md, section 1), over node:http, so that a test
-// with a server and its client prints the same under both.
+// as tz has it (docs/net.md, section 1), over node:http, or node:https with
+// `tls: { cert, key }`, so that a test with a server and its client prints
+// the same under both.
 import { createServer } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import net from "node:net";
 import { Readable } from "node:stream";
 
@@ -11,7 +13,8 @@ export function serve(options, handler) {
   let stopping = false;
   let resolveFinished;
   const finished = new Promise(resolve => (resolveFinished = resolve));
-  const server = createServer(async (req, res) => {
+  const scheme = options.tls ? "https" : "http";
+  const listener = async (req, res) => {
     const host = req.headers.host ?? `${hostname}:${server.address().port}`;
     const framed = req.headers["content-length"] !== undefined ||
       req.headers["transfer-encoding"] !== undefined;
@@ -19,7 +22,7 @@ export function serve(options, handler) {
     const headers = [];
     for (let i = 0; i < req.rawHeaders.length; i += 2)
       headers.push([req.rawHeaders[i].toLowerCase(), req.rawHeaders[i + 1]]);
-    const request = new Request(`http://${host}${req.url}`, {
+    const request = new Request(`${scheme}://${host}${req.url}`, {
       method: req.method,
       headers,
       body: hasBody ? Readable.toWeb(req) : undefined,
@@ -45,7 +48,10 @@ export function serve(options, handler) {
       for await (const chunk of response.body) res.write(chunk);
     }
     res.end();
-  });
+  };
+  const server = options.tls
+    ? createSecureServer({ cert: options.tls.cert, key: options.tls.key }, listener)
+    : createServer(listener);
   server.on("connection", socket => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -80,7 +86,7 @@ export function serve(options, handler) {
     hostname,
     get url() {
       const host = hostname === "0.0.0.0" || hostname === "::" ? "localhost" : hostname;
-      return new URL(`http://${host.includes(":") ? `[${host}]` : host}:${port}/`);
+      return new URL(`${scheme}://${host.includes(":") ? `[${host}]` : host}:${port}/`);
     },
     finished,
     stop,

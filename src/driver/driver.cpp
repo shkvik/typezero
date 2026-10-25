@@ -554,11 +554,14 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
     return kExitError;
 
   // node:crypto: the glue, and OpenSSL, all of it or only the objects its direct layer calls
-  // (docs/crypto.md, section 3).
+  // (docs/crypto.md, section 3); TLS, with libssl (docs/net.md, section 4).
   std::vector<std::string> inputs = {std::string(object), runtime};
   if (crypto.any) {
-    const char *openssl = crypto.full ? "libcrypto.lib" : "libcrypto_direct.lib";
-    for (const char *lib : {"tzcrypto.lib", openssl}) {
+    std::vector<const char *> libs = {"tzcrypto.lib"};
+    if (crypto.tls)
+      libs.push_back("libssl.lib");
+    libs.push_back(crypto.full ? "libcrypto.lib" : "libcrypto_direct.lib");
+    for (const char *lib : libs) {
       std::string path = runtimeFile(argv0, lib);
       if (!llvm::sys::fs::exists(path)) {
         llvm::errs() << "tz: the library of node:crypto is missing: " << path << "\n";

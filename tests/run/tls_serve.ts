@@ -1,0 +1,67 @@
+// same-as-node
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// https (docs/net.md, step 4): a server of tz:http with `tls`, and fetch of
+// https:// from it, its certificate checked against the CA the tests trust
+// (NODE_EXTRA_CA_CERTS) and by the name of the host: text and JSON both
+// ways, keep-alive, a body that streams, requests at the same time, and
+// http:// to a server of https.
+import { serve } from "tz:http"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+const dir = process.env.TLS_DIR ?? "."
+const tls = {
+  cert: readFileSync(join(dir, "localhost.pem"), "utf8"),
+  key: readFileSync(join(dir, "key.pem"), "utf8"),
+}
+const enc = new TextEncoder()
+const server = serve({ port: 0, hostname: "127.0.0.1", tls }, async (req) => {
+  const url = new URL(req.url)
+  switch (url.pathname) {
+    case "/hello":
+      return new Response(`hello over ${url.protocol}`)
+    case "/echo":
+      return Response.json({ got: await req.json(), method: req.method })
+    case "/stream":
+      return new Response(
+        new ReadableStream({
+          start: (c) => {
+            c.enqueue(enc.encode("one "))
+            c.enqueue(enc.encode("two"))
+            c.close()
+          },
+        }),
+      )
+    default:
+      return new Response("not here", { status: 404 })
+  }
+})
+console.log(server.url.protocol, server.url.hostname)
+const port = server.url.port
+
+for (const host of ["localhost", "127.0.0.1"]) {
+  const res = await fetch(`https://${host}:${port}/hello`)
+  console.log(host, res.status, await res.text())
+}
+const echo = await fetch(`https://localhost:${port}/echo`, {
+  method: "POST",
+  body: JSON.stringify({ n: 1, s: "ж" }),
+})
+console.log(JSON.stringify(await echo.json()))
+console.log(await (await fetch(`https://localhost:${port}/stream`)).text())
+const all = await Promise.all(
+  ["/hello", "/missing", "/hello"].map(async (p) => {
+    const r = await fetch(`https://localhost:${port}${p}`)
+    return `${r.status} ${await r.text()}`
+  }),
+)
+console.log(all.join(" | "))
+
+try {
+  await fetch(`http://localhost:${port}/hello`)
+  console.log("http to https: answered")
+} catch (e) {
+  if (e instanceof TypeError) console.log("http to https:", e.message)
+}
+await server.stop()

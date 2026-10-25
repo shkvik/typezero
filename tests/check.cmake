@@ -12,7 +12,9 @@
 #     reference-counted object must have been freed.
 #   How the program runs, from lines that start with:
 #     // args: a "b c"         its command-line arguments
-#     // env: NAME=value       an environment variable; one per line
+#     // env: NAME=value       an environment variable; one per line; @TESTS@
+#                              in the value is this directory (tests/tls/ca.pem
+#                              is @TESTS@/tls/ca.pem)
 #     // merge-stderr          stderr goes into stdout, as with `2>&1`, so
 #                              <name>.out holds both in the order written
 #   and <name>.in next to the source, if there is one: its bytes are stdin,
@@ -58,7 +60,8 @@ foreach(line IN LISTS run_options)
     separate_arguments(line_args UNIX_COMMAND "${CMAKE_MATCH_1}")
     list(APPEND program_args ${line_args})
   elseif(line MATCHES "^// env: *(.+)$")
-    list(APPEND program_env "${CMAKE_MATCH_1}")
+    string(REPLACE "@TESTS@" "${CMAKE_CURRENT_LIST_DIR}" value "${CMAKE_MATCH_1}")
+    list(APPEND program_env "${value}")
   elseif(line MATCHES "^// merge-stderr")
     set(stderr_var stdout) # execute_process merges both pipes into the variable
   endif()

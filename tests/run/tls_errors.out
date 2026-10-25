@@ -1,0 +1,8 @@
+expired fetch failed CERT_HAS_EXPIRED
+future fetch failed CERT_NOT_YET_VALID
+wrongname fetch failed ERR_TLS_CERT_ALTNAME_INVALID
+self fetch failed DEPTH_ZERO_SELF_SIGNED_CERT
+other fetch failed UNABLE_TO_VERIFY_LEAF_SIGNATURE
+chain fetch failed UNABLE_TO_GET_ISSUER_CERT_LOCALLY
+rooted fetch failed SELF_SIGNED_CERT_IN_CHAIN
+localhost 200 ok

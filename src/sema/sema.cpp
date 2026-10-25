@@ -2349,9 +2349,13 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
       if (std::optional<int64_t> constant = intConstant(d.init))
         constVars_[d.sym] = *constant;
     // A string constant may name a field: `o[key]`.
-    if (decl->isConst && d.init && type->isString())
+    if (decl->isConst && d.init && type->isString()) {
       if (std::optional<std::string> key = constantKey(d.init))
         constKeys_[d.sym] = std::move(*key);
+      // And how it starts, which tells whether a fetch of it is of http:// (noteHttpsCall).
+      if (std::string prefix = knownPrefix(d.init); !prefix.empty())
+        constPrefixes_[d.sym] = std::move(prefix);
+    }
   }
 }
 
@@ -2999,6 +3003,7 @@ Expr *Sema::checkName(NameExpr *name) {
     // A top-level function as a value.
     name->func = entry.func;
     name->type = functionType(entry.func);
+    noteHttpsValue(entry.func->decl, name->loc());
     return name;
   }
   // `String`, `Date`... as values: the classes that records `design:*` hold
@@ -4555,8 +4560,11 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
     if (entry.func && !entry.var && entry.func->decl && isa<FunctionDecl>(entry.func->decl))
       if (Expr *streams = checkStreamFunction(call, entry.func->decl, name->loc()))
         return streams;
-    if (entry.func && !entry.var)
-      return checkDirectCall(call, entry.func, name->loc(), expected); // a top-level function
+    if (entry.func && !entry.var) { // a top-level function
+      Expr *checked = checkDirectCall(call, entry.func, name->loc(), expected);
+      noteHttpsCall(call, entry.func->decl);
+      return checked;
+    }
     // A function declared in a block, or a constant arrow: called directly,
     // with the environment its variable holds.
     VarSymbol *var = entry.var;

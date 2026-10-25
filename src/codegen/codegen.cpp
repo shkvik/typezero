@@ -78,6 +78,7 @@ CodeGen::CodeGen(llvm::LLVMContext &ctx, llvm::StringRef moduleName, const llvm:
 
 std::unique_ptr<llvm::Module> CodeGen::generate(SourceFile &file) {
   comparesFunctions_ = file.comparesFunctions;
+  usesTls_ = file.usesTls;
   subtypes_ = file.subtypes;
   usesAsync_ = file.usesAsync;
   // Node runs a file with `import`, `export` or top-level `await` as an ES

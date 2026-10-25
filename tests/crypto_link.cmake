@@ -19,6 +19,14 @@ file(WRITE ${DIR}/subtle_direct.ts
      "const algorithm = { name: \"HMAC\", hash: \"SHA-256\" }\n"
      "const key = await crypto.subtle.importKey(\"raw\", new Uint8Array(8), algorithm, false, [\"sign\"])\n"
      "console.log((await crypto.subtle.sign(algorithm.name, key, new Uint8Array(1))).byteLength)\n")
+# fetch of a URL known to be http:// gets no TLS; one of https://, all of OpenSSL and libssl
+# (docs/net.md, section 4). Neither runs: they are only built.
+file(WRITE ${DIR}/fetch_http.ts
+     "const res = await fetch(\"http://localhost:1/\")\n"
+     "console.log(res.status)\n")
+file(WRITE ${DIR}/fetch_https.ts
+     "const res = await fetch(\"https://localhost:1/\")\n"
+     "console.log(res.status)\n")
 file(WRITE ${DIR}/subtle_full.ts
      "const pair = await crypto.subtle.generateKey({ name: \"ECDSA\", namedCurve: \"P-256\" }, false, [\"sign\"])\n"
      "console.log(pair.privateKey.type)\n")
@@ -27,7 +35,7 @@ function(fail message)
   message(FATAL_ERROR "${message}")
 endfunction()
 
-foreach(name plain direct full subtle_direct subtle_full)
+foreach(name plain direct full subtle_direct subtle_full fetch_http fetch_https)
   execute_process(COMMAND ${TZ} build -o ${DIR}/${name}.exe ${DIR}/${name}.ts
                   RESULT_VARIABLE result ERROR_VARIABLE errors)
   if(result)
@@ -71,11 +79,17 @@ if(subtle_full_size LESS 2000000)
   fail("ECDSA of crypto.subtle is ${subtle_full_size} bytes: it should link all of OpenSSL")
 endif()
 
-if(plain_licenses MATCHES "OpenSSL")
-  fail("tz licenses names OpenSSL in a program without it:\n${plain_licenses}")
+foreach(name plain fetch_http)
+  if(${name}_licenses MATCHES "OpenSSL")
+    fail("tz licenses names OpenSSL in a program without it:\n${${name}_licenses}")
+  endif()
+endforeach()
+math(EXPR https_more "${fetch_https_size} - ${fetch_http_size}")
+if(https_more LESS 2000000)
+  fail("fetch of https:// adds ${https_more} bytes: it should link OpenSSL and libssl")
 endif()
-foreach(name direct full subtle_direct subtle_full)
-  if(NOT ${name}_licenses MATCHES "OpenSSL [0-9.]+: the cryptography of node:crypto \\(Apache License 2.0\\)")
+foreach(name direct full subtle_direct subtle_full fetch_https)
+  if(NOT ${name}_licenses MATCHES "OpenSSL [0-9.]+: the cryptography of node:crypto and TLS \\(Apache License 2.0\\)")
     fail("tz licenses does not name OpenSSL in ${name}.exe:\n${${name}_licenses}")
   endif()
   if(NOT ${name}_licenses MATCHES "Apache License\n *Version 2.0, January 2004")

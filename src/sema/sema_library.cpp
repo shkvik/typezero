@@ -151,6 +151,83 @@ Expr *Sema::checkSetterCall(AssignExpr *assign) {
   return checkMethodCall(call, member, nullptr);
 }
 
+//===----------------------------------------------------------------------===//
+// TLS
+//===----------------------------------------------------------------------===//
+
+// TLS is the largest part a program can get, OpenSSL's libssl and all of its libcrypto (docs/net.md,
+// section 4), so tz links it only into a program that may use https: one that fetches a URL not
+// known to be http:// or data: (an https:// one, or one known only when it runs), or serves with
+// options that may have `tls`. A program with neither gets no TLS; there, a call of the runtime's
+// TLS (`__tz_tls_*`) is one that fails (CodeGen::emitExternal), which only a redirect from
+// http:// to https:// reaches.
+
+std::string Sema::knownPrefix(const Expr *expr) const {
+  while (auto *cast = dyn_cast<CastExpr>(expr))
+    expr = cast->operand;
+  auto ascii = [](const std::u16string &text) {
+    std::string out;
+    for (char16_t c : text) {
+      if (c >= 0x80)
+        break;
+      out += static_cast<char>(c);
+    }
+    return out;
+  };
+  if (auto *lit = dyn_cast<StringLitExpr>(expr))
+    return ascii(lit->value);
+  if (auto *tmpl = dyn_cast<TemplateExpr>(expr)) {
+    if (tmpl->quasis[0].empty() && !tmpl->exprs.empty())
+      return knownPrefix(tmpl->exprs[0]);
+    return ascii(tmpl->quasis[0]);
+  }
+  if (auto *bin = dyn_cast<BinaryExpr>(expr); bin && bin->op == BinaryOp::Add)
+    return knownPrefix(bin->lhs);
+  if (auto *name = dyn_cast<NameExpr>(expr); name && name->var) {
+    auto it = constPrefixes_.find(name->var);
+    return it == constPrefixes_.end() ? std::string() : it->second;
+  }
+  // `new URL(url)` and `new Request(url, init)`: the address they are made of.
+  if (auto *made = dyn_cast<NewExpr>(expr); made && made->cls && made->cls->library &&
+                                            (made->cls->name == "URL" ||
+                                             made->cls->name == "Request")) {
+    const std::vector<Expr *> &args = made->ctor ? made->ctor->args : made->args;
+    if (!args.empty() && (made->cls->name == "Request" || args.size() == 1))
+      return knownPrefix(args[0]);
+  }
+  return std::string();
+}
+
+void Sema::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
+  if (!fn || file_->usesTls || call->args.empty() || inLibrary(call->loc()))
+    return;
+  if (fn == libFunctions_.lookup("fetch")) {
+    std::string prefix = llvm::StringRef(knownPrefix(call->args[0])).lower();
+    if (!llvm::StringRef(prefix).starts_with("http://") &&
+        !llvm::StringRef(prefix).starts_with("data:"))
+      file_->usesTls = true;
+  } else if (fn == libFunctions_.lookup("serve")) {
+    // Options written out have `tls` or not (a spread may bring it); others, whatever their type
+    // allows.
+    const Expr *options = call->args[0];
+    while (auto *cast = dyn_cast<CastExpr>(options))
+      options = cast->operand;
+    if (auto *lit = dyn_cast<ObjectLitExpr>(options))
+      file_->usesTls = llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) {
+        return p.spread || p.name == "tls";
+      });
+    else
+      file_->usesTls = !options->type || !options->type->isObject() ||
+                       options->type->field("tls") != nullptr;
+  }
+}
+
+void Sema::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
+  if (fn && !inLibrary(loc) &&
+      (fn == libFunctions_.lookup("fetch") || fn == libFunctions_.lookup("serve")))
+    file_->usesTls = true;
+}
+
 bool Sema::rejectAccessorCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym) {
   if (!sym || !sym->decl || sym->decl->accessor == FunctionDecl::Accessor::None ||
       accessorCalls_.contains(call))

@@ -169,6 +169,8 @@ static void settle_error(NetConn *c, void *error) {
 // The connection broke while a client waited: "fetch failed" has this as
 // its cause, as undici's SocketError "other side closed".
 static void *broken_error(NetConn *c) {
+  if (c->error == NET_TLS_FAILED)
+    return c->tls_ops->error(c, c->http.make);
   if (c->error && c->error != -1)
     return net_system_error(c->http.make, c->error, "read", NULL, 0);
   return net_error(TZ_ERROR, "other side closed", NULL);
@@ -537,6 +539,13 @@ static int read_request(NetConn *c) {
   if (end < 0) {
     if (c->in_end - c->in_start > HTTP_MAX_HEAD) {
       refuse(c, 431);
+      return -1;
+    }
+    // A request starts with its method, a token: anything else, such as the
+    // handshake of TLS sent to a server of http, is answered at once, as node
+    // does, rather than waited on for the end of a head that never comes.
+    if (c->in_end > c->in_start && c->in[c->in_start] != '\r' && !is_token(c->in[c->in_start])) {
+      refuse(c, 400);
       return -1;
     }
     // A line that ends with LF alone, or a CR alone, is no line of HTTP.

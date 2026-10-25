@@ -43,6 +43,7 @@ LPFN_GETACCEPTEXSOCKADDRS tz_net_accept_addresses;
 #endif
 
 #define NET_INPUT 16384
+#define NET_RAW_MAX (256 * 1024)
 
 //===----------------------------------------------------------------------===//
 // Errors
@@ -203,6 +204,15 @@ void *net_system_error(TzMaker make, int32_t error, const char *syscall, const c
 }
 
 void *net_error(int32_t kind, const char *message, void *cause) {
+  // The error takes the message over.
+  TzStr text = net_utf8(message);
+  void *error = tz_error_info.make(kind, text.obj, text.meta);
+  if (cause)
+    *(void **)((char *)error + tz_error_info.cause_offset) = cause;
+  return error;
+}
+
+TzStr net_utf8(const char *message) {
   TzBuf b;
   tz_buf_init(&b);
   // UTF-8 to UTF-16: the messages are ASCII but for names of hosts.
@@ -223,12 +233,7 @@ void *net_error(int32_t kind, const char *message, void *cause) {
       tz_buf_push(&b, (uint16_t)c);
     }
   }
-  // The error takes the message over.
-  TzStr text = tz_buf_take(&b);
-  void *error = tz_error_info.make(kind, text.obj, text.meta);
-  if (cause)
-    *(void **)((char *)error + tz_error_info.cause_offset) = cause;
-  return error;
+  return tz_buf_take(&b);
 }
 
 //===----------------------------------------------------------------------===//
@@ -266,6 +271,22 @@ double net_now(void) {
 #else
   return 0;
 #endif
+}
+
+// What a call of TLS (`__tz_tls_*`) is in a program that tz built without
+// it (CodeGen::emitExternal): its fetch calls name only http:// URLs, which
+// redirected it to https://. Rejects `p`, or throws without one.
+void tz_net_no_tls(TzPromise *p, TzMaker make) {
+  (void)make;
+  void *error = net_error(TZ_ERROR,
+                          "this program has no TLS for https: tz links it only into programs "
+                          "whose fetch may reach https://, and this one names only http:// URLs; "
+                          "write the URL with https:// (docs/net.md, section 4)",
+                          NULL);
+  if (p)
+    tz_promise_reject(p, error);
+  else
+    tz_thrown = error;
 }
 
 #ifdef _WIN32
@@ -376,11 +397,19 @@ static void conn_free(NetConn *c) {
     if (c->next)
       c->next->prev = c->prev;
   }
+  if (c->tls)
+    c->tls_ops->release(c);
   tz_free(c->in);
   tz_free(c->out);
   tz_free(c->flight);
+  tz_free(c->raw);
+  tz_free(c->sealed);
   tz_obj_free(c);
 }
+
+// Whether output waits to be written: the program's, or, with TLS, what is
+// encrypted already.
+static int has_output(const NetConn *c) { return c->out_len || c->sealed_len; }
 
 void tz_http_release(NetConn *c); // http.c: what HTTP holds
 
@@ -407,7 +436,7 @@ static void conn_drop(void *object) {
   }
   c->orphan = 1;
   // What is queued is still written, as a socket of node is ended.
-  if (c->closing && (c->writing || c->out_len)) {
+  if (c->closing && (c->writing || has_output(c))) {
     if (!c->writing)
       net_flush(c);
   } else {
@@ -418,6 +447,68 @@ static void conn_drop(void *object) {
 
 static void read_done(TzWork *w);
 
+void net_input_room(NetConn *c, uint32_t room) {
+  // What is unused moves to the start; then the buffer grows.
+  if (c->in_start == c->in_end)
+    c->in_start = c->in_end = 0;
+  if (c->in_cap - c->in_end >= room)
+    return;
+  if (c->in_start > 0) {
+    memmove(c->in, c->in + c->in_start, c->in_end - c->in_start);
+    c->in_end -= c->in_start;
+    c->in_start = 0;
+  }
+  if (c->in_cap - c->in_end < room) {
+    uint32_t cap = c->in_cap ? c->in_cap * 2 : NET_INPUT;
+    while (cap - c->in_end < room)
+      cap *= 2;
+    uint8_t *in = (uint8_t *)tz_alloc(cap);
+    if (c->in_end)
+      memcpy(in, c->in, c->in_end);
+    tz_free(c->in);
+    c->in = in;
+    c->in_cap = cap;
+  }
+}
+
+// Room to read ciphertext into: a record of 16 KB at first, and twice as
+// much after each read that filled it, up to NET_RAW_MAX, as a large body
+// streams in.
+static void raw_room(NetConn *c) {
+  if (c->raw_start == c->raw_end)
+    c->raw_start = c->raw_end = 0;
+  uint32_t cap = c->raw_cap ? c->raw_cap : NET_INPUT;
+  if (c->raw_full && cap < NET_RAW_MAX)
+    cap *= 2;
+  c->raw_full = 0;
+  if (cap == c->raw_cap && c->raw_cap - c->raw_end >= 4096)
+    return;
+  uint32_t kept = c->raw_end - c->raw_start;
+  if (cap == c->raw_cap && c->raw_start > 0) {
+    memmove(c->raw, c->raw + c->raw_start, kept);
+  } else {
+    uint8_t *raw = (uint8_t *)tz_alloc(cap);
+    if (kept)
+      memcpy(raw, c->raw + c->raw_start, kept);
+    tz_free(c->raw);
+    c->raw = raw;
+    c->raw_cap = cap;
+  }
+  c->raw_start = 0;
+  c->raw_end = kept;
+}
+
+// Ciphertext came: `got` bytes at the end of `raw`, none at the end of the
+// socket.
+static void raw_got(NetConn *c, uint32_t got) {
+  if (got == 0) {
+    c->raw_eof = 1;
+    return;
+  }
+  c->raw_full = got == c->raw_cap - c->raw_end;
+  c->raw_end += got;
+}
+
 void net_read(NetConn *c) {
   if (c->reading || c->closed)
     return;
@@ -426,27 +517,29 @@ void net_read(NetConn *c) {
       c->on_input(c);
       return;
     }
-    // Room for more: what is unused moves to the start; then the buffer
-    // grows.
-    if (c->in_start == c->in_end)
-      c->in_start = c->in_end = 0;
-    if (c->in_cap - c->in_end < 4096) {
-      if (c->in_start > 0) {
-        memmove(c->in, c->in + c->in_start, c->in_end - c->in_start);
-        c->in_end -= c->in_start;
-        c->in_start = 0;
+    if (c->tls) {
+      // What was read already may be what the reader waits for, once it is
+      // decrypted; what TLS answers (its handshake) goes out first.
+      int ready = c->tls_ops->open(c);
+      net_flush(c);
+      if (ready || c->error) {
+        c->on_input(c);
+        return;
       }
-      if (c->in_cap - c->in_end < 4096) {
-        uint32_t cap = c->in_cap ? c->in_cap * 2 : NET_INPUT;
-        uint8_t *in = (uint8_t *)tz_alloc(cap);
-        if (c->in_end)
-          memcpy(in, c->in, c->in_end);
-        tz_free(c->in);
-        c->in = in;
-        c->in_cap = cap;
-      }
+      if (c->closed)
+        return;
+      raw_room(c);
+    } else {
+      net_input_room(c, 4096);
     }
-    WSABUF buf = {c->in_cap - c->in_end, (char *)(c->in + c->in_end)};
+    WSABUF buf;
+    if (c->tls) {
+      buf.len = c->raw_cap - c->raw_end;
+      buf.buf = (char *)(c->raw + c->raw_end);
+    } else {
+      buf.len = c->in_cap - c->in_end;
+      buf.buf = (char *)(c->in + c->in_end);
+    }
     DWORD got = 0, flags = 0;
     op_begin(&c->rop, read_done, 0);
     c->reading = 1;
@@ -464,6 +557,10 @@ void net_read(NetConn *c) {
       continue;
     }
     c->last_active = net_now();
+    if (c->tls) {
+      raw_got(c, got);
+      continue;
+    }
     if (got == 0)
       c->eof = 1;
     c->in_end += got;
@@ -481,8 +578,15 @@ static void read_done(TzWork *w) {
     return;
   }
   int32_t error = op_error(&c->rop, c->s, c->closed);
+  // Closed by this side meanwhile (server.stop() ends the connections that
+  // wait): what came no longer counts, and the reader learns it ended.
+  if (!error && c->closed)
+    error = ERROR_OPERATION_ABORTED;
   if (error) {
     c->error = error;
+  } else if (c->tls) {
+    c->last_active = net_now();
+    raw_got(c, c->rop.bytes);
   } else {
     c->last_active = net_now();
     if (c->rop.bytes == 0)
@@ -490,7 +594,12 @@ static void read_done(TzWork *w) {
     c->in_end += c->rop.bytes;
   }
   ++c->rc; // what runs may let go of it
-  c->on_input(c);
+  // Ciphertext is decrypted first, and more read until the reader has
+  // something.
+  if (c->tls && !c->error)
+    net_read(c);
+  else
+    c->on_input(c);
   tz_instance_release((TzInstance *)c);
 }
 
@@ -518,7 +627,24 @@ void net_write(NetConn *c, const void *data, size_t length) {
   c->out_len += (uint32_t)length;
 }
 
-size_t net_pending_output(const NetConn *c) { return (size_t)c->out_len + c->flight_len; }
+uint8_t *net_seal_reserve(NetConn *c, size_t length) {
+  if (c->sealed_len + length > c->sealed_cap) {
+    size_t cap = c->sealed_cap + c->sealed_cap / 2 + 4096;
+    if (cap < c->sealed_len + length)
+      cap = c->sealed_len + length;
+    uint8_t *sealed = (uint8_t *)tz_alloc(cap);
+    if (c->sealed_len)
+      memcpy(sealed, c->sealed, c->sealed_len);
+    tz_free(c->sealed);
+    c->sealed = sealed;
+    c->sealed_cap = (uint32_t)cap;
+  }
+  return c->sealed + c->sealed_len;
+}
+
+size_t net_pending_output(const NetConn *c) {
+  return (size_t)c->out_len + c->flight_len + c->sealed_len;
+}
 
 static void write_done(TzWork *w);
 
@@ -529,23 +655,34 @@ static void drained(NetConn *c) {
 }
 
 static void finish_close(NetConn *c) {
-  if (c->closing && !c->writing && c->out_len == 0) {
+  if (c->closing && !c->writing && !has_output(c)) {
     shutdown(c->s, SD_SEND);
     close_socket(c);
   }
 }
 
 void net_flush(NetConn *c) {
-  while (!c->writing && c->out_len && !c->closed && !c->error) {
+  while (!c->writing && !c->closed && !c->error) {
+    // With TLS what goes out is the ciphertext of what the program wrote.
+    if (c->tls) {
+      c->tls_ops->seal(c);
+      if (c->error)
+        break;
+    }
+    uint8_t **queue = c->tls ? &c->sealed : &c->out;
+    uint32_t *queued = c->tls ? &c->sealed_len : &c->out_len;
+    uint32_t *capacity = c->tls ? &c->sealed_cap : &c->out_cap;
+    if (!*queued)
+      break;
     // The queue goes out as it is; the next fills the other buffer.
-    uint8_t *data = c->out;
-    uint32_t cap = c->out_cap;
-    c->out = c->flight;
-    c->out_cap = c->flight_cap;
+    uint8_t *data = *queue;
+    uint32_t cap = *capacity;
+    *queue = c->flight;
+    *capacity = c->flight_cap;
     c->flight = data;
     c->flight_cap = cap;
-    c->flight_len = c->out_len;
-    c->out_len = 0;
+    c->flight_len = *queued;
+    *queued = 0;
     WSABUF buf = {c->flight_len, (char *)c->flight};
     DWORD sent = 0;
     op_begin(&c->wop, write_done, 0);
@@ -565,6 +702,7 @@ void net_flush(NetConn *c) {
   }
   if (c->error) {
     c->out_len = 0;
+    c->sealed_len = 0;
     if (c->closing)
       close_socket(c);
   }
@@ -600,7 +738,10 @@ void net_close(NetConn *c) {
   if (c->closed)
     return;
   c->closing = 1;
-  if (c->writing || c->out_len)
+  // TLS says it ends, after what was written.
+  if (c->tls)
+    c->tls_ops->shutdown(c);
+  if (c->writing || has_output(c))
     net_flush(c);
   else
     finish_close(c);
@@ -608,6 +749,7 @@ void net_close(NetConn *c) {
 
 void net_abort(NetConn *c) {
   c->out_len = 0;
+  c->sealed_len = 0;
   close_socket(c);
 }
 
@@ -692,6 +834,8 @@ static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int 
 static void listener_free(NetListener *l) {
   for (NetConn *c = l->conns; c; c = c->next)
     c->listener = NULL;
+  if (l->tls)
+    l->tls_release(l->tls);
   tz_obj_free(l);
 }
 
@@ -886,6 +1030,9 @@ static void accepted(NetListener *l, int32_t error) {
     l->conns->prev = c;
   l->conns = c;
   c->http.max_body = l->max_body;
+  // A server of https: the handshake comes with the first read.
+  if (l->tls)
+    l->tls_accept(l, c);
   net_fulfill(&l->pending, &c, sizeof c);
 }
 
@@ -1233,6 +1380,15 @@ static void unsupported(void) {
 }
 
 void net_read(NetConn *c) { (void)c; }
+void net_input_room(NetConn *c, uint32_t room) {
+  (void)c;
+  (void)room;
+}
+uint8_t *net_seal_reserve(NetConn *c, size_t length) {
+  (void)c;
+  (void)length;
+  return NULL;
+}
 void net_write(NetConn *c, const void *data, size_t length) {
   (void)c;
   (void)data;

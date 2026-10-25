@@ -3,7 +3,8 @@
 // A file that names one gets it (see the loader, src/driver/loader.cpp);
 // tz:http builds its server on them.
 //
-// The bytes go through the runtime (runtime/net.c, http.c, decompress.c):
+// The bytes go through the runtime (runtime/net.c, http.c, decompress.c),
+// and those of https through TLS on the connection (runtime/tls.c):
 // the `__tz_*` functions without a body are its functions. A body that
 // comes over a connection is read from it as the program reads the body:
 // whole (text(), json()...) or in pieces (body, a ReadableStream).
@@ -18,6 +19,7 @@ import { AbortController, AbortSignal } from "tz:web"
 
 function __tz_net_connect(host: string, port: int, signal: AbortSignal | undefined): Promise<object>
 function __tz_net_close(conn: object): void
+function __tz_tls_connect(conn: object, host: string, signal: AbortSignal | undefined): Promise<void>
 function __tz_http_request(conn: object, method: string, target: string, headers: string[],
                            text: string, bytes: Uint8Array | undefined, flags: int): void
 function __tz_http_response(conn: object, signal: AbortSignal | undefined): Promise<int>
@@ -1073,7 +1075,9 @@ export class Request {
     r.#method = method
     r.#headers = Headers.__fromWire(flat, false)
     const host = r.#headers.get("host")
-    r.#url = target.startsWith("/") ? (host != undefined ? "http://" + host : base) + target
+    // The scheme of the server (https with tls), the host the request names.
+    const scheme = base.startsWith("https:") ? "https://" : "http://"
+    r.#url = target.startsWith("/") ? (host != undefined ? scheme + host : base) + target
            : target.startsWith("http://") || target.startsWith("https://") ? target
            : base + "/" + target
     if (hasBody) r.#body = Body.ofWire(new Wire(conn, undefined))
@@ -1431,8 +1435,11 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
                     signal: AbortSignal | undefined, redirected: boolean): Promise<Response> {
   const hostname = url.hostname
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
-  const port = url.port == "" ? 80 : parseInt(url.port) | 0
-  const origin = host + ":" + String(port)
+  const https = url.protocol == "https:"
+  const port = url.port == "" ? (https ? 443 : 80) : parseInt(url.port) | 0
+  // Connections wait in the pool by scheme too: one of https is never reused
+  // for http, nor the other way.
+  const origin = url.protocol + host + ":" + String(port)
   const target = (url.pathname == "" ? "/" : url.pathname) + url.search
   const flat = requestHeaders(url, headers, body)
   // The bytes of a body that is no stream, once: a request sent again after
@@ -1462,6 +1469,17 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
       } catch (e) {
         signal?.throwIfAborted()
         throw fetchFailed(e)
+      }
+      // https: the handshake, and the server checked as node checks it; a
+      // certificate that does not verify is the cause of "fetch failed".
+      if (https) {
+        try {
+          await __tz_tls_connect(c, host, signal)
+        } catch (e) {
+          __tz_net_close(c)
+          signal?.throwIfAborted()
+          throw fetchFailed(e)
+        }
       }
     }
     __tz_http_request(c, method, target, flat, text, bytes, flags)
@@ -1546,10 +1564,8 @@ export async function fetch(input: string | URL | Request, init?: RequestInit): 
   let redirects = 0
   for (;;) {
     if (url.protocol == "data:") return dataResponse(url)
-    if (url.protocol == "https:")
-      throw fetchFailed(new Error("https is not supported yet: fetch over TLS comes with OpenSSL " +
-                                  "(docs/net.md, step 4)"))
-    if (url.protocol != "http:") throw fetchFailed(new Error("not implemented... yet..."))
+    if (url.protocol != "http:" && url.protocol != "https:")
+      throw fetchFailed(new Error("not implemented... yet..."))
     if (url.port != "" && BAD_PORTS.has(parseInt(url.port) | 0))
       throw fetchFailed(new Error("bad port"))
     const response = await send(url, method, headers, body, signal, redirects > 0)

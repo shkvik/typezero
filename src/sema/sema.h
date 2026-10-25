@@ -2737,6 +2737,16 @@ private:
   bool rejectAccessorCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym);
   // The calls of accessors that reading and assigning made.
   llvm::SmallPtrSet<const CallExpr *, 8> accessorCalls_;
+
+  // TLS (docs/net.md, section 4), which tz links only into a program that may use https: a call
+  // of fetch or serve of the program that may (checked), or either taken as a value, sets
+  // SourceFile::usesTls.
+  void noteHttpsCall(CallExpr *call, const FunctionDecl *fn);
+  void noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc);
+  // The ASCII text a string is known to start with: a literal, the first text of a template or of
+  // a `+`, the start of a constant; "" when nothing is known.
+  std::string knownPrefix(const Expr *expr) const;
+  llvm::DenseMap<const VarSymbol *, std::string> constPrefixes_;
 };
 
 // A tuple type of generic code with lists of types spread into it, `[int,

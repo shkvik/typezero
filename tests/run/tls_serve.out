@@ -1,0 +1,7 @@
+https: 127.0.0.1
+localhost 200 hello over https:
+127.0.0.1 200 hello over https:
+{"got":{"n":1,"s":"ж"},"method":"POST"}
+one two
+200 hello over https: | 404 not here | 200 hello over https:
+http to https: fetch failed

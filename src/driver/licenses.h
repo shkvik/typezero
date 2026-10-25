@@ -9,7 +9,8 @@
 namespace tz {
 
 // The code of others that goes into a program (docs/crypto.md, section 6): the parts of the
-// runtime that follow Node.js and V8, always, and OpenSSL when the program uses node:crypto.
+// runtime that follow Node.js and V8, always, and OpenSSL when the program uses node:crypto or
+// https.
 // `tz licenses app.exe` prints their licenses, which must go along with the exe.
 struct Embedded {
   bool openssl = false;
@@ -19,10 +20,12 @@ struct Embedded {
 };
 
 // What of the runtime the module calls, by the names of its functions and constants: node:crypto
-// in its direct layer (tz_crypto_*) or in full (tz_openssl_*).
+// in its direct layer (tz_crypto_*) or in full (tz_openssl_*), and TLS (tz_tls_*), which needs
+// libssl and all of libcrypto (docs/net.md, section 4).
 struct CryptoUse {
   bool any = false;
   bool full = false;
+  bool tls = false;
 };
 CryptoUse cryptoUse(const llvm::Module &module);
 // Whether the module names a multi-byte encoding of the runtime (tz_cjk_encoding_*), whose

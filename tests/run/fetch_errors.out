@@ -1,4 +1,3 @@
-https TypeError: fetch failed (https is not supported yet: fetch over TLS comes with OpenSSL (docs/net.md, step 4))
 bad port TypeError: fetch failed (bad port)
 ftp TypeError: fetch failed (not implemented... yet...)
 no url TypeError: Failed to parse URL from not a url (Invalid URL)

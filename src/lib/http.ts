@@ -6,7 +6,8 @@
 // other (keep-alive, pipelining); the requests of different connections are
 // handled at the same time. For now on the one thread of the loop: the
 // parallel runtime (docs/async.md, step 4) will run them on all the cores.
-// The bytes go through the runtime (runtime/net.c, http.c).
+// The bytes go through the runtime (runtime/net.c, http.c), and with
+// `tls: { cert, key }` through TLS on each connection (runtime/tls.c): https.
 
 import {
   Request, Response, ReadableStream, SEND_BYTES, SEND_NO_BODY, SEND_STREAM,
@@ -16,6 +17,8 @@ import { URL } from "tz:url"
 import { AbortSignal, Event } from "tz:web"
 
 function __tz_net_listen(host: string, port: int, maxBody: double): object
+function __tz_tls_listen(host: string, port: int, maxBody: double, cert: string,
+                         key: string): object
 function __tz_net_listener_port(listener: object): int
 function __tz_net_accept(listener: object): Promise<object | undefined>
 function __tz_net_close_listener(listener: object): void
@@ -39,9 +42,17 @@ export interface ServeAddress {
   port: int
 }
 
+// The certificate of a server of https, and its key: PEM, as node's
+// createServer takes them; the certificates of the chain after the first.
+export interface ServeTls {
+  cert: string
+  key: string
+}
+
 export interface ServeOptions {
   port?: int
   hostname?: string
+  tls?: ServeTls
   signal?: AbortSignal
   onListen?: (address: ServeAddress) => void
   // A request with a larger body is answered with 413, as in Bun.
@@ -65,19 +76,21 @@ export class Server {
   #hostname: string
   #port: int
   #base: string
+  #scheme: string // http or https
   #stopping = false
   #open = 0
   #finished: Promise<void>
   #resolveFinished: () => void
   #sweep: Timeout | undefined = undefined
 
-  constructor(listener: object, hostname: string, handler: Handler) {
+  constructor(listener: object, hostname: string, handler: Handler, scheme: string) {
     this.#listener = listener
     this.#handler = handler
     this.#hostname = hostname
+    this.#scheme = scheme
     this.#port = __tz_net_listener_port(listener)
     const shown = hostname.includes(":") ? "[" + hostname + "]" : hostname
-    this.#base = "http://" + shown + ":" + String(this.#port)
+    this.#base = scheme + "://" + shown + ":" + String(this.#port)
     const { promise, resolve } = Promise.withResolvers<void>()
     this.#finished = promise
     this.#resolveFinished = resolve
@@ -94,7 +107,7 @@ export class Server {
   get url(): URL {
     const any = this.#hostname == "0.0.0.0" || this.#hostname == "::"
     const host = any ? "localhost" : this.#hostname
-    return new URL("http://" + (host.includes(":") ? "[" + host + "]" : host) + ":" +
+    return new URL(this.#scheme + "://" + (host.includes(":") ? "[" + host + "]" : host) + ":" +
                    String(this.#port) + "/")
   }
 
@@ -216,12 +229,15 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
 
 // Starts a server: on `hostname` (0.0.0.0) and `port` (8000, 0 for any
 // free one, which server.port then tells), handling each request with
-// `handler`.
+// `handler`; of https with `tls`.
 export function serve(options: ServeOptions, handler: Handler): Server {
   const hostname = options.hostname ?? "0.0.0.0"
-  const listener = __tz_net_listen(hostname, options.port ?? 8000,
-                                   options.maxBodySize ?? 128 * 1024 * 1024)
-  const server = new Server(listener, hostname, handler)
+  const port = options.port ?? 8000
+  const maxBody = options.maxBodySize ?? 128 * 1024 * 1024
+  const tls = options.tls
+  const listener = tls == undefined ? __tz_net_listen(hostname, port, maxBody)
+                                    : __tz_tls_listen(hostname, port, maxBody, tls.cert, tls.key)
+  const server = new Server(listener, hostname, handler, tls == undefined ? "http" : "https")
   server.__start()
   // The signal stops the server, with a listener of its own: the program's
   // onabort stays the program's.

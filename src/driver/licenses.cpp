@@ -29,7 +29,7 @@ struct Project {
 };
 
 const Project kProjects[] = {
-    {"openssl", "OpenSSL " OPENSSL_VERSION_STR ": the cryptography of node:crypto",
+    {"openssl", "OpenSSL " OPENSSL_VERSION_STR ": the cryptography of node:crypto and TLS",
      "Apache License 2.0", "OpenSSL.txt"},
     {"node", "Node.js: the runtime of tz follows parts of it, such as console.log and node:path",
      "MIT", "Node.js.txt"},
@@ -44,6 +44,10 @@ const Project kProjects[] = {
 CryptoUse cryptoUse(const llvm::Module &module) {
   CryptoUse use;
   auto note = [&](llvm::StringRef name) {
+    if (name.starts_with("tz_tls_")) {
+      use.any = use.full = use.tls = true;
+      return;
+    }
     if (!name.starts_with("tz_crypto_") && !name.starts_with("tz_openssl_"))
       return;
     use.any = true;

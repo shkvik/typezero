@@ -2213,6 +2213,9 @@ struct SourceFile {
   // Set by Sema: the program compares functions (`==`, indexOf...), so every
   // evaluation of a function expression must give a distinct value.
   bool comparesFunctions = false;
+  // Set by Sema: the program may use https (a fetch of a URL not known to be
+  // http://, serve with `tls`), so it gets TLS (docs/net.md, section 4).
+  bool usesTls = false;
   // Set by Sema: the functions of imported files that the program never
   // uses, which are left out of it.
   llvm::SmallPtrSet<const FunctionDecl *, 8> unusedFunctions;

@@ -86,7 +86,8 @@ add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzrt.lib
   VERBATIM)
 
 # node:crypto (docs/crypto.md, crypto.h): tzcrypto.lib, the glue between programs and OpenSSL,
-# which tz links only into programs that use it. Each part is an object of its own, so that a
+# which tz links only into programs that use it, and TLS for https (tls.c, docs/net.md), which
+# libssl goes with. Each part is an object of its own, so that a
 # program brings only the algorithms it names: crypto_md.c and crypto_aes.c are compiled once for
 # each family of hashes and each mode. Not in tzrt.bc: nothing of it is hot enough to copy into
 # programs.
@@ -113,7 +114,8 @@ set(crypto_parts
   "crypto_x509 crypto_x509.c"
   "crypto_subtle crypto_subtle.c"
   "crypto_subtle_kw crypto_subtle_kw.c"
-  "crypto_subtle_keys crypto_subtle_keys.c")
+  "crypto_subtle_keys crypto_subtle_keys.c"
+  "tls tls.c")
 set(crypto_dir ${CMAKE_CURRENT_BINARY_DIR}/crypto)
 file(MAKE_DIRECTORY ${crypto_dir})
 set(crypto_objects)
@@ -152,4 +154,5 @@ add_custom_target(tzrt DEPENDS ${TZ_OUTPUT_DIR}/tzrt.bc ${TZ_OUTPUT_DIR}/tzrt.li
   SOURCES ${sources} tzrt.h unicode_tables.h gen_unicode_tables.mjs regex.h regex_tables.h
           gen_regex_tables.mjs date.h icu.h intl.h encodings.h gen_encodings.mjs cjk_tables.h
           gen_cjk_tables.mjs
-          number_tables.h gen_number_tables.mjs ${crypto_sources} crypto.h net.h)
+          number_tables.h gen_number_tables.mjs ${crypto_sources} crypto.h net.h tls_roots.h
+          gen_tls_roots.mjs)

@@ -1,0 +1,27 @@
+// same-as-node
+// env: NODE_EXTRA_CA_CERTS=@TESTS@/tls/ca.pem
+// env: TLS_DIR=@TESTS@/tls
+// https whose server does not check out (docs/net.md, step 4), as node
+// tells: expired, not yet valid, for another name, signed by itself, by a CA
+// nobody trusts (alone, with an intermediate, with that CA sent along), and
+// then the one that is fine. fetch fails with the reason as its cause.
+import { serve } from "tz:http"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+const dir = process.env.TLS_DIR ?? "."
+const key = readFileSync(join(dir, "key.pem"), "utf8")
+for (const name of ["expired", "future", "wrongname", "self", "other", "chain", "rooted", "localhost"]) {
+  const cert = readFileSync(join(dir, `${name}.pem`), "utf8")
+  const server = serve({ port: 0, hostname: "127.0.0.1", tls: { cert, key } }, () => new Response("ok"))
+  try {
+    const res = await fetch(`https://localhost:${server.url.port}/`)
+    console.log(name, res.status, await res.text())
+  } catch (e) {
+    if (e instanceof TypeError) {
+      const cause = e.cause
+      console.log(name, e.message, cause instanceof SystemError ? cause.code : "?")
+    }
+  }
+  await server.stop()
+}

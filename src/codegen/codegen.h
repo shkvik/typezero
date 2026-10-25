@@ -1472,6 +1472,8 @@ private:
   std::map<std::pair<const FunctionDecl *, const Type *>, llvm::Constant *> adapters_;
   std::vector<FunctionDecl *> pendingClosures_;
   bool comparesFunctions_ = false;
+  // The program has TLS (SourceFile::usesTls): the intrinsics `__tz_tls_*` call it.
+  bool usesTls_ = false;
   std::deque<TailGroup> tailGroups_;
   llvm::DenseMap<const FunctionDecl *, TailGroup *> tailGroupOf_;
   llvm::DenseSet<const void *> tailSearched_;

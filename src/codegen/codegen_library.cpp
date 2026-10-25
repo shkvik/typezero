@@ -65,7 +65,16 @@ void CodeGen::emitExternal(FunctionDecl *fn) {
   args.push_back(systemErrorMaker());
   llvm::StringRef name = fn->name;
   name.consume_front("__");
-  llvm::Value *result = builder_.CreateCall(processFunction(name, cret, params), args);
+  llvm::Value *result;
+  if (name.starts_with("tz_tls_") && !usesTls_) {
+    // A program that tz built without TLS (SourceFile::usesTls) has none to call: the call fails
+    // as the runtime words it, rejecting the promise or throwing.
+    builder_.CreateCall(processFunction("tz_net_no_tls", builder_.getVoidTy(), {ptr, ptr}),
+                        {promise ? promise : llvm::Constant::getNullValue(ptr), args.back()});
+    result = cret->isVoidTy() ? nullptr : llvm::Constant::getNullValue(cret);
+  } else {
+    result = builder_.CreateCall(processFunction(name, cret, params), args);
+  }
   // The function owns its arguments; the runtime only borrowed them.
   for (size_t i = 0; i < sym->params.size(); ++i)
     releaseValue(function->getArg(unsigned(i)), sym->params[i]);

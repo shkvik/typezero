@@ -1,8 +1,8 @@
 // expect-stderr: RangeError: the body of the request is larger than maxBodySize
 // How fetch fails, as in node ("fetch failed" with the cause), and where tz
-// says more: https comes with TLS (docs/net.md, step 4); a request larger
-// than maxBodySize gets 413; data: URLs need no network. A name that is
-// not found may be EAI_AGAIN on a machine without a network.
+// says more: a request larger than maxBodySize gets 413; data: URLs need
+// no network. A name that is not found may be EAI_AGAIN on a machine
+// without a network. https is in tls_serve.ts and tls_errors.ts.
 import { serve } from "tz:http"
 
 async function attempt(what: string, url: string, init?: RequestInit) {
@@ -17,7 +17,6 @@ async function attempt(what: string, url: string, init?: RequestInit) {
   }
 }
 
-await attempt("https", "https://example.com/")
 await attempt("bad port", "http://localhost:6000/")
 await attempt("ftp", "ftp://example.com/")
 await attempt("no url", "not a url")
