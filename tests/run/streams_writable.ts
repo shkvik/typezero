@@ -1,0 +1,74 @@
+// same-as-node
+// Writable of node:stream (docs/streams.md): write() gives false at the
+// highWaterMark and 'drain' comes when the writes are done, end() with a
+// chunk and a callback, _final(), writev() of what cork() held, a stream of
+// strings (decodeStrings: false), and a write that fails.
+import { Writable } from "node:stream"
+const log = (s: string) => console.log(s)
+const w = new Writable({
+  highWaterMark: 5,
+  write(chunk, encoding, callback) {
+    log(`_write ${chunk.toString()} ${encoding} len=${this.writableLength}`)
+    setTimeout(() => callback(), 1)
+  },
+  final(callback) {
+    log("_final")
+    callback()
+  },
+})
+w.on("drain", () => log("drain"))
+w.on("prefinish", () => log("prefinish"))
+w.on("finish", () => log(`finish finished=${w.writableFinished}`))
+w.on("close", () => {
+  log("close")
+  w.removeAllListeners()
+  more()
+})
+log(`write1 ${w.write("abc")}`)
+log(`write2 ${w.write("de", () => log("cb de"))}`)
+log(`write3 ${w.write(Buffer.from("fgh"))}`)
+log(`needDrain ${w.writableNeedDrain} len ${w.writableLength}`)
+w.end("end", () => log("end cb"))
+log(`ended ${w.writableEnded}`)
+
+function more() {
+  const v = new Writable({
+    writev(chunks, callback) {
+      log(`_writev ${chunks.map((c) => c.chunk.toString()).join("|")}`)
+      process.nextTick(() => callback())
+    },
+  })
+  v.cork()
+  v.write("a")
+  v.write("b")
+  v.write("c", "latin1")
+  process.nextTick(() => {
+    log(`corked ${v.writableCorked}`)
+    v.uncork()
+    v.write("d")
+    v.end()
+  })
+  v.on("finish", () => log("v finish"))
+  const s = new Writable({
+    decodeStrings: false,
+    write(chunk, enc, cb) {
+      log(`string chunk ${typeof chunk} ${chunk} ${enc}`)
+      cb()
+    },
+  })
+  s.write("hi")
+  s.end("there", "utf8")
+  const e = new Writable({
+    write(chunk, enc, cb) {
+      void chunk
+      void enc
+      cb(new Error("boom"))
+    },
+  })
+  e.on("error", (err) => log(`error ${err.message}`))
+  e.on("close", () => {
+    log("close e")
+    e.removeAllListeners()
+  })
+  log(`write e ${e.write("x", (err) => log(`cb err ${err?.message}`))}`)
+}

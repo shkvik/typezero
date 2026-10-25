@@ -1,0 +1,2208 @@
+// Web Crypto (docs/crypto.md, step 4): crypto.subtle, CryptoKey and the dictionaries of the
+// algorithms, ported from lib/internal/crypto/webcrypto.js and the files of each algorithm of
+// Node 24 (util.js, webidl.js, mac.js, aes.js, ec.js, rsa.js, cfrg.js, hkdf.js, pbkdf2.js), with
+// node's errors: DOMExceptions of its names and messages, and the TypeErrors of Web IDL. A file
+// that says `crypto.subtle` or names one of these types gets them, as if it imported them (see
+// the loader, src/driver/loader.cpp).
+//
+// What takes time runs on the threads of the pool, as node runs it on those of libuv: digests,
+// signatures, ciphers, derivations and the making of key pairs. The intrinsics __tz_subtle_*
+// give the promises that runtime/crypto_subtle*.c settles (src/sema/sema_webcrypto.cpp); a job
+// that fails gives undefined, which becomes node's OperationError here. The rest, which node
+// does at once too (normalizing an algorithm, checking usages, reading and writing keys), is
+// done here over node:crypto.
+//
+// A key's algorithm decides what it does: a CryptoKey holds the KeyHandle of its family, which
+// the import or the generation of the key made, and the operations go through it. So a program
+// that only makes HMAC keys reaches no code of AES or of asymmetric keys, and needs only the
+// direct layer of OpenSSL (docs/crypto.md, section 3). For the same reason the compiler sends
+// importKey, generateKey, unwrapKey and deriveKey whose algorithm is written in the call to the
+// function of its family (subtleImport*, subtleGenerate*...); the methods of SubtleCrypto take
+// an algorithm of any family.
+
+import { createPrivateKey, createPublicKey, createSecretKey, KeyObject, randomBytes } from "node:crypto"
+import { DOMException } from "tz:web"
+
+export type KeyType = "public" | "private" | "secret"
+export type KeyUsage =
+  | "encrypt"
+  | "decrypt"
+  | "sign"
+  | "verify"
+  | "deriveKey"
+  | "deriveBits"
+  | "wrapKey"
+  | "unwrapKey"
+export type KeyFormat = "jwk" | "pkcs8" | "raw" | "spki"
+export type BufferSource =
+  | ArrayBuffer
+  | DataView
+  | Int8Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array
+export type NamedCurve = string
+export type BigInteger = Uint8Array
+
+// Every dictionary of an algorithm in one: TypeScript has a type for each, which a literal the
+// program writes could not be told apart by, so here their names are this type.
+export interface Algorithm {
+  name: string
+  hash?: string | Algorithm
+  length?: double
+  namedCurve?: string
+  modulusLength?: double
+  publicExponent?: Uint8Array
+  iv?: BufferSource
+  additionalData?: BufferSource
+  tagLength?: double
+  counter?: BufferSource
+  saltLength?: double
+  label?: BufferSource
+  salt?: BufferSource
+  info?: BufferSource
+  iterations?: double
+  public?: CryptoKey
+}
+
+export type AlgorithmIdentifier = string | Algorithm
+export type HashAlgorithmIdentifier = string | Algorithm
+export type KeyAlgorithm = Algorithm
+export type AesKeyAlgorithm = Algorithm
+export type HmacKeyAlgorithm = Algorithm
+export type EcKeyAlgorithm = Algorithm
+export type RsaKeyAlgorithm = Algorithm
+export type RsaHashedKeyAlgorithm = Algorithm
+export type AesCbcParams = Algorithm
+export type AesCtrParams = Algorithm
+export type AesGcmParams = Algorithm
+export type AesKeyGenParams = Algorithm
+export type AesDerivedKeyParams = Algorithm
+export type HmacImportParams = Algorithm
+export type HmacKeyGenParams = Algorithm
+export type EcKeyGenParams = Algorithm
+export type EcKeyImportParams = Algorithm
+export type EcdsaParams = Algorithm
+export type EcdhKeyDeriveParams = Algorithm
+export type RsaKeyGenParams = Algorithm
+export type RsaHashedKeyGenParams = Algorithm
+export type RsaHashedImportParams = Algorithm
+export type RsaPssParams = Algorithm
+export type RsaOaepParams = Algorithm
+export type Pbkdf2Params = Algorithm
+export type HkdfParams = Algorithm
+
+export interface RsaOtherPrimesInfo {
+  d?: string
+  r?: string
+  t?: string
+}
+
+export interface JsonWebKey {
+  alg?: string
+  crv?: string
+  d?: string
+  dp?: string
+  dq?: string
+  e?: string
+  ext?: boolean
+  k?: string
+  key_ops?: string[]
+  kty?: string
+  n?: string
+  oth?: RsaOtherPrimesInfo[]
+  p?: string
+  q?: string
+  qi?: string
+  use?: string
+  x?: string
+  y?: string
+}
+
+export interface CryptoKeyPair {
+  publicKey: CryptoKey
+  privateKey: CryptoKey
+}
+
+export class CryptoKey {
+  readonly type: KeyType
+  readonly extractable: boolean
+  // Copies for the program, as node's getters give: what the key is lies in its handle.
+  readonly algorithm: Algorithm
+  readonly usages: KeyUsage[]
+  @__tz_hidden readonly handle: KeyHandle
+
+  constructor(handle: KeyHandle, algorithm: Algorithm, extractable: boolean) {
+    this.handle = handle
+    this.type = handle.type
+    this.extractable = extractable
+    this.algorithm = algorithm
+    this.usages = [...handle.usages]
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Errors
+//===----------------------------------------------------------------------===//
+
+const kFailed = "The operation failed for an operation-specific reason"
+
+function failed(): DOMException {
+  return new DOMException(kFailed, "OperationError")
+}
+
+function notSupported(message: string): DOMException {
+  return new DOMException(message, "NotSupportedError")
+}
+
+function dataError(message: string): DOMException {
+  return new DOMException(message, "DataError")
+}
+
+function syntaxError(message: string): DOMException {
+  return new DOMException(message, "SyntaxError")
+}
+
+function invalidAccess(message: string): DOMException {
+  return new DOMException(message, "InvalidAccessError")
+}
+
+const kUnrecognized = "Unrecognized algorithm name"
+
+//===----------------------------------------------------------------------===//
+// Bytes
+//===----------------------------------------------------------------------===//
+
+// The bytes of a BufferSource, as a view of its memory.
+function bytesOf(data: BufferSource): Uint8Array {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (data instanceof Uint8Array) return data
+  if (data instanceof DataView) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Int8Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Uint8ClampedArray)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Int16Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Uint16Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Int32Array) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Uint32Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (data instanceof Float32Array)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+}
+
+// A copy of bytes in an ArrayBuffer of their own.
+function arrayBufferOf(bytes: Uint8Array): ArrayBuffer {
+  const out = new ArrayBuffer(bytes.length)
+  new Uint8Array(out).set(bytes)
+  return out
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  let length = 0
+  for (const p of parts) length += p.length
+  const out = new Uint8Array(length)
+  let at = 0
+  for (const p of parts) {
+    out.set(p, at)
+    at += p.length
+  }
+  return out
+}
+
+function base64url(text: string): Uint8Array {
+  return new Uint8Array(Buffer.from(text, "base64url"))
+}
+
+const kNoBytes = new Uint8Array(0)
+
+//===----------------------------------------------------------------------===//
+// Normalizing an algorithm (util.js and webidl.js of node)
+//===----------------------------------------------------------------------===//
+
+// The algorithms an operation knows, as node 24 registers them (the experimental ones it has
+// besides, SHA-3, Ed448, X448, AES-OCB, ChaCha20-Poly1305 and the others, tz has not).
+function algorithmsOf(op: string): string[] {
+  switch (op) {
+    case "digest":
+      return ["SHA-1", "SHA-256", "SHA-384", "SHA-512"]
+    case "generateKey":
+      return [
+        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HMAC", "RSA-OAEP",
+        "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
+      ]
+    case "exportKey":
+      return [
+        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HMAC", "RSA-OAEP",
+        "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
+      ]
+    case "importKey":
+      return [
+        "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "ECDH", "ECDSA", "Ed25519", "HKDF", "HMAC",
+        "PBKDF2", "RSA-OAEP", "RSA-PSS", "RSASSA-PKCS1-v1_5", "X25519",
+      ]
+    case "encrypt":
+    case "decrypt":
+      return ["AES-CBC", "AES-CTR", "AES-GCM", "RSA-OAEP"]
+    case "sign":
+    case "verify":
+      return ["ECDSA", "Ed25519", "HMAC", "RSA-PSS", "RSASSA-PKCS1-v1_5"]
+    case "deriveBits":
+      return ["ECDH", "HKDF", "PBKDF2", "X25519"]
+    case "wrapKey":
+    case "unwrapKey":
+      return ["AES-KW"]
+    case "get key length":
+      return ["AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "HKDF", "HMAC", "PBKDF2"]
+  }
+  return []
+}
+
+// The dictionary of Web IDL the parameters of `name` for `op` are, or "" for none.
+function dictionaryOf(op: string, name: string): string {
+  const aes = name.startsWith("AES-")
+  switch (op) {
+    case "generateKey":
+      if (aes) return "AesKeyGenParams"
+      if (name == "ECDH" || name == "ECDSA") return "EcKeyGenParams"
+      if (name == "HMAC") return "HmacKeyGenParams"
+      if (name.startsWith("RSA")) return "RsaHashedKeyGenParams"
+      return ""
+    case "importKey":
+      if (name == "ECDH" || name == "ECDSA") return "EcKeyImportParams"
+      if (name == "HMAC") return "HmacImportParams"
+      if (name.startsWith("RSA")) return "RsaHashedImportParams"
+      return ""
+    case "encrypt":
+    case "decrypt":
+      if (name == "AES-CBC") return "AesCbcParams"
+      if (name == "AES-CTR") return "AesCtrParams"
+      if (name == "AES-GCM") return "AeadParams"
+      return "RsaOaepParams"
+    case "sign":
+    case "verify":
+      if (name == "ECDSA") return "EcdsaParams"
+      if (name == "RSA-PSS") return "RsaPssParams"
+      return ""
+    case "deriveBits":
+      if (name == "HKDF") return "HkdfParams"
+      if (name == "PBKDF2") return "Pbkdf2Params"
+      return "EcdhKeyDeriveParams"
+    case "get key length":
+      if (aes) return "AesDerivedKeyParams"
+      if (name == "HMAC") return "HmacImportParams"
+      return ""
+  }
+  return ""
+}
+
+const kPrefix = "Failed to normalize algorithm"
+
+function required(dictionary: string, member: string): TypeError {
+  return new TypeError(
+    `${kPrefix}: passed algorithm can not be converted to '${dictionary}' because '${member}' is required in '${dictionary}'.`,
+  )
+}
+
+// A number of Web IDL with [EnforceRange] up to `max`, as node converts it.
+function integer(value: double, member: string, dictionary: string, max: double): double {
+  if (!Number.isFinite(value))
+    throw new TypeError(
+      `${kPrefix}: '${member}' of '${dictionary}' (passed algorithm) is not a finite number.`,
+    )
+  const x = Math.trunc(value)
+  if (x < 0 || x > max)
+    throw new TypeError(
+      `${kPrefix}: '${member}' of '${dictionary}' (passed algorithm) is outside the expected range of 0 to ${max}.`,
+    )
+  return x
+}
+
+const kUnsignedLong = 4294967295
+
+// A number of Web IDL without [EnforceRange]: whole, modulo 2^32, as node converts the length of
+// deriveBits.
+function unsignedLong(value: double): double {
+  if (!Number.isFinite(value) || value == 0) return 0
+  const x = Math.trunc(value)
+  if (x >= 0 && x <= kUnsignedLong) return x
+  return x % 4294967296
+}
+
+const kTagLengths: double[] = [32, 64, 96, 104, 112, 120, 128]
+
+// The bytes of a member, copied, as node copies them.
+function bytesMember(value: BufferSource | undefined, member: string, dictionary: string): Uint8Array {
+  if (value == undefined) throw required(dictionary, member)
+  return bytesOf(value).slice()
+}
+
+function hashMember(given: Algorithm, dictionary: string): string | Algorithm {
+  const hash = given.hash
+  if (hash == undefined) throw required(dictionary, "hash")
+  const name = typeof hash == "string" ? hash : hash.name
+  if (!name.toLowerCase().startsWith("sha"))
+    throw notSupported(`Only SHA hashes are supported in ${dictionary}`)
+  return hash
+}
+
+function byteLength(bytes: Uint8Array, member: string, length: int) {
+  if (bytes.length != length)
+    throw new DOMException(`${member} must contain exactly ${length} bytes`, "OperationError")
+}
+
+// normalizeAlgorithm of node: the canonical name, and the members of the dictionary of the
+// operation, checked in the order of their names, with the buffers copied and the hash
+// normalized.
+function normalize(algorithm: AlgorithmIdentifier, op: string): Algorithm {
+  const given: Algorithm = typeof algorithm == "string" ? { name: algorithm } : algorithm
+  let name = ""
+  const upper = given.name.toUpperCase()
+  for (const known of algorithmsOf(op)) if (known.toUpperCase() == upper) name = known
+  if (name == "") throw notSupported(kUnrecognized)
+  const dictionary = dictionaryOf(op, name)
+  switch (dictionary) {
+    case "":
+      return { name }
+    case "AesKeyGenParams":
+    case "AesDerivedKeyParams": {
+      if (given.length == undefined) throw required(dictionary, "length")
+      const length = integer(given.length, "length", dictionary, 65535)
+      if (length != 128 && length != 192 && length != 256)
+        throw new DOMException("AES key length must be 128, 192, or 256 bits", "OperationError")
+      return { name, length }
+    }
+    case "EcKeyGenParams":
+    case "EcKeyImportParams": {
+      const curve = given.namedCurve
+      if (curve == undefined) throw required(dictionary, "namedCurve")
+      if (curve != "P-256" && curve != "P-384" && curve != "P-521")
+        throw notSupported("Unrecognized namedCurve")
+      return { name, namedCurve: curve }
+    }
+    case "HmacKeyGenParams":
+    case "HmacImportParams": {
+      const hash = hashMember(given, dictionary)
+      const givenLength = given.length
+      if (givenLength == undefined) return { name, hash: normalizeHash(hash) }
+      const length = integer(givenLength, "length", dictionary, kUnsignedLong)
+      if (length == 0)
+        throw new DOMException(
+          `${dictionary}.length cannot be 0`,
+          dictionary == "HmacImportParams" ? "DataError" : "OperationError",
+        )
+      if (length % 8 != 0) throw notSupported(`Unsupported ${dictionary}.length`)
+      return { name, hash: normalizeHash(hash), length }
+    }
+    case "RsaHashedKeyGenParams": {
+      const hash = hashMember(given, dictionary)
+      if (given.modulusLength == undefined) throw required(dictionary, "modulusLength")
+      const modulusLength = integer(given.modulusLength, "modulusLength", dictionary, kUnsignedLong)
+      const exponent = given.publicExponent
+      if (exponent == undefined) throw required(dictionary, "publicExponent")
+      return { name, hash: normalizeHash(hash), modulusLength, publicExponent: exponent.slice() }
+    }
+    case "RsaHashedImportParams":
+    case "EcdsaParams":
+      return { name, hash: normalizeHash(hashMember(given, dictionary)) }
+    case "RsaPssParams": {
+      if (given.saltLength == undefined) throw required(dictionary, "saltLength")
+      return { name, saltLength: integer(given.saltLength, "saltLength", dictionary, kUnsignedLong) }
+    }
+    case "RsaOaepParams": {
+      const label = given.label
+      if (label == undefined) return { name }
+      return { name, label: bytesOf(label).slice() }
+    }
+    case "Pbkdf2Params": {
+      const hash = hashMember(given, dictionary)
+      if (given.iterations == undefined) throw required(dictionary, "iterations")
+      const iterations = integer(given.iterations, "iterations", dictionary, kUnsignedLong)
+      if (iterations == 0) throw new DOMException("iterations cannot be zero", "OperationError")
+      const salt = bytesMember(given.salt, "salt", dictionary)
+      return { name, hash: normalizeHash(hash), iterations, salt }
+    }
+    case "HkdfParams": {
+      const hash = hashMember(given, dictionary)
+      const info = bytesMember(given.info, "info", dictionary)
+      const salt = bytesMember(given.salt, "salt", dictionary)
+      return { name, hash: normalizeHash(hash), info, salt }
+    }
+    case "AesCbcParams": {
+      const iv = bytesMember(given.iv, "iv", dictionary)
+      byteLength(iv, "algorithm.iv", 16)
+      return { name, iv }
+    }
+    case "AesCtrParams": {
+      const counter = bytesMember(given.counter, "counter", dictionary)
+      byteLength(counter, "algorithm.counter", 16)
+      if (given.length == undefined) throw required(dictionary, "length")
+      const length = integer(given.length, "length", dictionary, 255)
+      if (length == 0 || length > 128)
+        throw new DOMException(
+          "AES-CTR algorithm.length must be between 1 and 128",
+          "OperationError",
+        )
+      return { name, counter, length }
+    }
+    case "AeadParams": {
+      const data = given.additionalData
+      const additionalData = data == undefined ? undefined : bytesOf(data).slice()
+      const iv = bytesMember(given.iv, "iv", "AeadParams")
+      const tag = given.tagLength
+      if (tag == undefined) return { name, additionalData, iv }
+      const tagLength = integer(tag, "tagLength", "AeadParams", 255)
+      if (!kTagLengths.includes(tagLength))
+        throw new DOMException(`${tagLength} is not a valid AES-GCM tag length`, "OperationError")
+      return { name, additionalData, iv, tagLength }
+    }
+    case "EcdhKeyDeriveParams": {
+      const key = given.public
+      if (key == undefined) throw required(dictionary, "public")
+      if (key.handle.type != "public")
+        throw invalidAccess("algorithm.public must be a public key")
+      if (key.handle.name.toLowerCase() != name.toLowerCase())
+        throw invalidAccess("key algorithm mismatch")
+      return { name, public: key }
+    }
+  }
+  return { name }
+}
+
+function normalizeHash(hash: string | Algorithm): Algorithm {
+  return normalize(hash, "digest")
+}
+
+// The name of the hash a normalized algorithm has ("SHA-256").
+function hashOf(algorithm: Algorithm): string {
+  const hash = algorithm.hash
+  if (hash == undefined) return ""
+  return typeof hash == "string" ? hash : hash.name
+}
+
+// OpenSSL's name of a hash of Web Crypto, for the full layer.
+function opensslHash(name: string): string {
+  switch (name) {
+    case "SHA-1":
+      return "SHA1"
+    case "SHA-384":
+      return "SHA384"
+    case "SHA-512":
+      return "SHA512"
+  }
+  return "SHA256"
+}
+
+function digestBytes(name: string): int {
+  switch (name) {
+    case "SHA-1":
+      return 20
+    case "SHA-384":
+      return 48
+    case "SHA-512":
+      return 64
+  }
+  return 32
+}
+
+// The digest of data by a hash of Web Crypto, on the pool.
+function digestOf(name: string, data: BufferSource): Promise<ArrayBuffer> {
+  switch (name) {
+    case "SHA-1":
+      return __tz_subtle_digest("sha1", data)
+    case "SHA-384":
+      return __tz_subtle_digest("sha384", data)
+    case "SHA-512":
+      return __tz_subtle_digest("sha512", data)
+  }
+  return __tz_subtle_digest("sha256", data)
+}
+
+//===----------------------------------------------------------------------===//
+// Usages
+//===----------------------------------------------------------------------===//
+
+function anyNotIn(usages: KeyUsage[], allowed: KeyUsage[]): boolean {
+  for (const u of usages) if (!allowed.includes(u)) return true
+  return false
+}
+
+// The usages, each once, in the order given (node's SafeSet).
+function distinct(usages: KeyUsage[]): KeyUsage[] {
+  const out: KeyUsage[] = []
+  for (const u of usages) if (!out.includes(u)) out.push(u)
+  return out
+}
+
+// Those of `usages` in `wanted`, in the order of `wanted` (getUsagesUnion of node).
+function union(usages: KeyUsage[], wanted: KeyUsage[]): KeyUsage[] {
+  const out: KeyUsage[] = []
+  for (const u of wanted) if (usages.includes(u)) out.push(u)
+  return out
+}
+
+const kKeyOps = ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
+
+// validateKeyOps of node: the key_ops of a JWK, each once, with every usage among them.
+function checkKeyOps(ops: string[] | undefined, usages: KeyUsage[]) {
+  if (ops == undefined) return
+  const seen: string[] = []
+  for (const op of ops) {
+    if (!kKeyOps.includes(op)) continue
+    if (seen.includes(op)) throw dataError("Duplicate key operation")
+    seen.push(op)
+  }
+  for (const u of usages) {
+    let found = false
+    for (const op of ops) if (op == u) found = true
+    if (!found) throw dataError("Key operations and usage mismatch")
+  }
+}
+
+// The members of a JWK every family checks: its use and key_ops against the usages, and ext.
+function checkJwk(jwk: JsonWebKey, use: string, usages: KeyUsage[], extractable: boolean) {
+  if (usages.length > 0 && jwk.use != undefined && jwk.use != use)
+    throw dataError('Invalid JWK "use" Parameter')
+  checkKeyOps(jwk.key_ops, usages)
+  if (jwk.ext != undefined && jwk.ext == false && extractable)
+    throw dataError('JWK "ext" Parameter and extractable mismatch')
+}
+
+function opsOf(usages: KeyUsage[]): string[] {
+  const out: string[] = []
+  for (const u of usages) out.push(u)
+  return out
+}
+
+//===----------------------------------------------------------------------===//
+// Keys
+//===----------------------------------------------------------------------===//
+
+// What a key is and does: the KeyObject of node:crypto with the key's algorithm and usages,
+// and the operations of its family, which the subclasses do; the others are no operations of
+// the algorithm, which the checks before them rule out.
+abstract class KeyHandle {
+  constructor(
+    readonly key: KeyObject,
+    readonly type: KeyType,
+    readonly name: string,
+    readonly usages: KeyUsage[],
+  ) {}
+
+  async sign(algorithm: Algorithm, data: BufferSource): Promise<ArrayBuffer> {
+    void algorithm
+    void data
+    throw notSupported(kUnrecognized)
+  }
+
+  async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
+    void algorithm
+    void signature
+    void data
+    throw notSupported(kUnrecognized)
+  }
+
+  async cipher(algorithm: Algorithm, data: BufferSource, decrypt: boolean): Promise<ArrayBuffer> {
+    void algorithm
+    void data
+    void decrypt
+    throw notSupported(kUnrecognized)
+  }
+
+  // AES-KW of wrapKey and unwrapKey.
+  async wrap(data: BufferSource, unwrap: boolean): Promise<ArrayBuffer> {
+    void data
+    void unwrap
+    throw notSupported(kUnrecognized)
+  }
+
+  async deriveBits(algorithm: Algorithm, length: double | undefined): Promise<ArrayBuffer> {
+    void algorithm
+    void length
+    throw notSupported(kUnrecognized)
+  }
+
+  // exportKey in the formats of the family: undefined for one it has not.
+  exportRaw(): ArrayBuffer | undefined {
+    return undefined
+  }
+
+  exportSpki(): ArrayBuffer | undefined {
+    if (this.type != "public") return undefined
+    return arrayBufferOf(this.key.export({ format: "der", type: "spki" }))
+  }
+
+  exportPkcs8(): ArrayBuffer | undefined {
+    if (this.type != "private") return undefined
+    return arrayBufferOf(this.key.export({ format: "der", type: "pkcs8" }))
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    void extractable
+    return undefined
+  }
+}
+
+// The members of the JWK node:crypto exports of an asymmetric key, as strings.
+function jwkOfKey(key: KeyObject): JsonWebKey {
+  return fromJson<JsonWebKey>(key.export({ format: "jwk" }))
+}
+
+// A JWK as node:crypto reads it.
+function jsonOf(jwk: JsonWebKey): Json {
+  const j: Json = {
+    kty: jwk.kty,
+    crv: jwk.crv,
+    x: jwk.x,
+    y: jwk.y,
+    d: jwk.d,
+    n: jwk.n,
+    e: jwk.e,
+    p: jwk.p,
+    q: jwk.q,
+    dp: jwk.dp,
+    dq: jwk.dq,
+    qi: jwk.qi,
+    k: jwk.k,
+  }
+  return j
+}
+
+// The JWK, or an error for bytes given as one; the bytes, or an error for a JWK given as them.
+function jwkData(keyData: BufferSource | JsonWebKey): JsonWebKey {
+  if (
+    keyData instanceof ArrayBuffer ||
+    keyData instanceof Uint8Array ||
+    keyData instanceof DataView ||
+    keyData instanceof Int8Array ||
+    keyData instanceof Uint8ClampedArray ||
+    keyData instanceof Int16Array ||
+    keyData instanceof Uint16Array ||
+    keyData instanceof Int32Array ||
+    keyData instanceof Uint32Array ||
+    keyData instanceof Float32Array ||
+    keyData instanceof Float64Array
+  )
+    throw dataError("Invalid keyData")
+  return keyData
+}
+
+function rawData(keyData: BufferSource | JsonWebKey, op: string): Uint8Array {
+  if (keyData instanceof ArrayBuffer) return new Uint8Array(keyData)
+  if (keyData instanceof Uint8Array) return keyData
+  if (keyData instanceof DataView) return bytesOf(keyData)
+  if (keyData instanceof Int8Array) return bytesOf(keyData)
+  if (keyData instanceof Uint8ClampedArray) return bytesOf(keyData)
+  if (keyData instanceof Int16Array) return bytesOf(keyData)
+  if (keyData instanceof Uint16Array) return bytesOf(keyData)
+  if (keyData instanceof Int32Array) return bytesOf(keyData)
+  if (keyData instanceof Uint32Array) return bytesOf(keyData)
+  if (keyData instanceof Float32Array) return bytesOf(keyData)
+  if (keyData instanceof Float64Array) return bytesOf(keyData)
+  throw new TypeError(
+    `Failed to execute '${op}' on 'SubtleCrypto': 2nd argument is not instance of ArrayBuffer, Buffer, TypedArray, or DataView.`,
+  )
+}
+
+//===----------------------------------------------------------------------===//
+// HMAC (mac.js)
+//===----------------------------------------------------------------------===//
+
+class HmacHandle extends KeyHandle {
+  constructor(key: KeyObject, usages: KeyUsage[], readonly hash: string) {
+    super(key, "secret", "HMAC", usages)
+  }
+
+  async sign(algorithm: Algorithm, data: BufferSource): Promise<ArrayBuffer> {
+    void algorithm
+    switch (this.hash) {
+      case "SHA-1":
+        return await __tz_subtle_hmac("sha1", this.key, data)
+      case "SHA-384":
+        return await __tz_subtle_hmac("sha384", this.key, data)
+      case "SHA-512":
+        return await __tz_subtle_hmac("sha512", this.key, data)
+    }
+    return await __tz_subtle_hmac("sha256", this.key, data)
+  }
+
+  async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
+    void algorithm
+    let verdict = 0
+    switch (this.hash) {
+      case "SHA-1":
+        verdict = await __tz_subtle_hmacVerify("sha1", this.key, signature, data)
+        break
+      case "SHA-384":
+        verdict = await __tz_subtle_hmacVerify("sha384", this.key, signature, data)
+        break
+      case "SHA-512":
+        verdict = await __tz_subtle_hmacVerify("sha512", this.key, signature, data)
+        break
+      default:
+        verdict = await __tz_subtle_hmacVerify("sha256", this.key, signature, data)
+    }
+    return verdict == 1
+  }
+
+  exportRaw(): ArrayBuffer | undefined {
+    return arrayBufferOf(this.key.export())
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    const alg = this.hash == "SHA-1" ? "HS1" : `HS${this.hash.slice(4)}`
+    return {
+      key_ops: opsOf(this.usages),
+      ext: extractable,
+      alg,
+      kty: "oct",
+      k: this.key.export().toString("base64url"),
+    }
+  }
+}
+
+function blockBits(hash: string): double {
+  return hash == "SHA-384" || hash == "SHA-512" ? 1024 : 512
+}
+
+function generateHmac(algorithm: Algorithm, extractable: boolean, usages: KeyUsage[]): CryptoKey {
+  const hash = hashOf(algorithm)
+  const length = algorithm.length ?? blockBits(hash)
+  if (anyNotIn(usages, ["sign", "verify"]))
+    throw syntaxError("Unsupported key usage for an HMAC key")
+  const key = createSecretKey(randomBytes(length / 8))
+  const handle = new HmacHandle(key, distinct(usages), hash)
+  return new CryptoKey(handle, { name: "HMAC", length, hash: { name: hash } }, extractable)
+}
+
+function importHmac(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  if (anyNotIn(usages, ["sign", "verify"])) throw syntaxError("Unsupported key usage for HMAC key")
+  const hash = hashOf(algorithm)
+  let bytes: Uint8Array
+  if (format == "raw") {
+    bytes = rawData(keyData, "importKey")
+  } else if (format == "jwk") {
+    const jwk = jwkData(keyData)
+    if (jwk.kty == undefined) throw dataError("Invalid keyData")
+    if (jwk.kty != "oct") throw dataError('Invalid JWK "kty" Parameter')
+    checkJwk(jwk, "sig", usages, extractable)
+    const expected = hash == "SHA-1" ? "HS1" : `HS${hash.slice(4)}`
+    if (jwk.alg != undefined && jwk.alg != expected)
+      throw dataError('JWK "alg" does not match the requested algorithm')
+    const k = jwk.k
+    if (k == undefined) throw dataError("Invalid keyData")
+    bytes = base64url(k)
+  } else {
+    return undefined
+  }
+  const length = bytes.length * 8
+  if (length == 0) throw dataError("Zero-length key is not supported")
+  if (algorithm.length != undefined && algorithm.length != length)
+    throw dataError("Invalid key length")
+  const handle = new HmacHandle(createSecretKey(bytes), usages, hash)
+  return new CryptoKey(handle, { name: "HMAC", length, hash: { name: hash } }, extractable)
+}
+
+//===----------------------------------------------------------------------===//
+// AES (aes.js)
+//===----------------------------------------------------------------------===//
+
+class AesHandle extends KeyHandle {
+  constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly bits: double) {
+    super(key, "secret", name, usages)
+  }
+
+  async cipher(algorithm: Algorithm, data: BufferSource, decrypt: boolean): Promise<ArrayBuffer> {
+    let result: ArrayBuffer | undefined = undefined
+    if (this.name == "AES-GCM") {
+      const tag = (algorithm.tagLength ?? 128) / 8
+      if (decrypt && tag > bytesOf(data).length)
+        throw new DOMException("The provided data is too small.", "OperationError")
+      result = await this.#gcm(algorithm, data, decrypt, tag | 0)
+    } else if (this.name == "AES-CBC") {
+      result = await this.#cbc(algorithm, data, decrypt)
+    } else {
+      result = await this.#ctr(algorithm, data, decrypt)
+    }
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  #gcm(algorithm: Algorithm, data: BufferSource, decrypt: boolean, tag: int) {
+    const iv = algorithm.iv ?? kNoBytes
+    const aad = algorithm.additionalData ?? kNoBytes
+    if (this.bits == 128) return __tz_subtle_aes("aes-128-gcm", this.key, decrypt, iv, aad, tag, 0, data)
+    if (this.bits == 192) return __tz_subtle_aes("aes-192-gcm", this.key, decrypt, iv, aad, tag, 0, data)
+    return __tz_subtle_aes("aes-256-gcm", this.key, decrypt, iv, aad, tag, 0, data)
+  }
+
+  #cbc(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
+    const iv = algorithm.iv ?? kNoBytes
+    if (this.bits == 128)
+      return __tz_subtle_aes("aes-128-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
+    if (this.bits == 192)
+      return __tz_subtle_aes("aes-192-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
+    return __tz_subtle_aes("aes-256-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
+  }
+
+  #ctr(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
+    const counter = algorithm.counter ?? kNoBytes
+    const bits = (algorithm.length ?? 128) | 0
+    if (this.bits == 128)
+      return __tz_subtle_aes("aes-128-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
+    if (this.bits == 192)
+      return __tz_subtle_aes("aes-192-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
+    return __tz_subtle_aes("aes-256-ctr", this.key, decrypt, counter, kNoBytes, 0, bits, data)
+  }
+
+  async wrap(data: BufferSource, unwrap: boolean): Promise<ArrayBuffer> {
+    const result = await __tz_subtle_aesKw(this.key, unwrap, data)
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  exportRaw(): ArrayBuffer | undefined {
+    return arrayBufferOf(this.key.export())
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    return {
+      key_ops: opsOf(this.usages),
+      ext: extractable,
+      alg: `A${this.bits}${this.name.slice(4)}`,
+      kty: "oct",
+      k: this.key.export().toString("base64url"),
+    }
+  }
+}
+
+function aesUsages(name: string): KeyUsage[] {
+  return name == "AES-KW" ? ["wrapKey", "unwrapKey"] : ["wrapKey", "unwrapKey", "encrypt", "decrypt"]
+}
+
+function generateAes(algorithm: Algorithm, extractable: boolean, usages: KeyUsage[]): CryptoKey {
+  const name = algorithm.name
+  const length = algorithm.length ?? 0
+  if (anyNotIn(usages, aesUsages(name))) throw syntaxError("Unsupported key usage for an AES key")
+  const key = createSecretKey(randomBytes(length / 8))
+  return new CryptoKey(new AesHandle(key, name, distinct(usages), length), { name, length }, extractable)
+}
+
+function importAes(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  if (anyNotIn(usages, aesUsages(name))) throw syntaxError("Unsupported key usage for an AES key")
+  let bytes: Uint8Array
+  if (format == "raw") {
+    bytes = rawData(keyData, "importKey")
+    const length = bytes.length * 8
+    if (length != 128 && length != 192 && length != 256) throw dataError("Invalid key length")
+  } else if (format == "jwk") {
+    const jwk = jwkData(keyData)
+    if (jwk.kty == undefined) throw dataError("Invalid keyData")
+    if (jwk.kty != "oct") throw dataError('Invalid JWK "kty" Parameter')
+    checkJwk(jwk, "enc", usages, extractable)
+    const k = jwk.k
+    if (k == undefined) throw dataError("Invalid keyData")
+    bytes = base64url(k)
+    const length = bytes.length * 8
+    if (length != 128 && length != 192 && length != 256) throw dataError("Invalid key length")
+    if (jwk.alg != undefined && jwk.alg != `A${length}${name.slice(4)}`)
+      throw dataError('JWK "alg" does not match the requested algorithm')
+  } else {
+    return undefined
+  }
+  const length = bytes.length * 8
+  const handle = new AesHandle(createSecretKey(bytes), name, usages, length)
+  return new CryptoKey(handle, { name, length }, extractable)
+}
+
+//===----------------------------------------------------------------------===//
+// PBKDF2 and HKDF (pbkdf2.js, hkdf.js and importGenericSecretKey of keys.js)
+//===----------------------------------------------------------------------===//
+
+class KdfHandle extends KeyHandle {
+  async deriveBits(algorithm: Algorithm, length: double | undefined): Promise<ArrayBuffer> {
+    if (length == undefined) throw new DOMException("length cannot be null", "OperationError")
+    if (length % 8 != 0) throw new DOMException("length must be a multiple of 8", "OperationError")
+    if (length == 0) return new ArrayBuffer(0)
+    const salt = algorithm.salt ?? kNoBytes
+    const hash = hashOf(algorithm)
+    let result: ArrayBuffer | undefined = undefined
+    if (this.name == "PBKDF2") {
+      const iterations = algorithm.iterations ?? 1
+      // The KDFs of OpenSSL count in an int, as node checks it.
+      if (iterations > 2147483647 || length / 8 > 2147483647) throw failed()
+      switch (hash) {
+        case "SHA-1":
+          return await __tz_subtle_pbkdf2("sha1", this.key, salt, iterations, length / 8)
+        case "SHA-384":
+          return await __tz_subtle_pbkdf2("sha384", this.key, salt, iterations, length / 8)
+        case "SHA-512":
+          return await __tz_subtle_pbkdf2("sha512", this.key, salt, iterations, length / 8)
+      }
+      return await __tz_subtle_pbkdf2("sha256", this.key, salt, iterations, length / 8)
+    }
+    const info = algorithm.info ?? kNoBytes
+    // node's hkdf takes at most 1024 bytes of info.
+    if (bytesOf(info).length > 1024) throw failed()
+    switch (hash) {
+      case "SHA-1":
+        result = await __tz_subtle_hkdf("sha1", this.key, salt, info, length / 8)
+        break
+      case "SHA-384":
+        result = await __tz_subtle_hkdf("sha384", this.key, salt, info, length / 8)
+        break
+      case "SHA-512":
+        result = await __tz_subtle_hkdf("sha512", this.key, salt, info, length / 8)
+        break
+      default:
+        result = await __tz_subtle_hkdf("sha256", this.key, salt, info, length / 8)
+    }
+    if (result == undefined) throw failed()
+    return result
+  }
+}
+
+function importKdf(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  if (extractable) throw syntaxError(`${name} keys are not extractable`)
+  if (anyNotIn(usages, ["deriveKey", "deriveBits"]))
+    throw syntaxError(`Unsupported key usage for a ${name} key`)
+  if (format != "raw") return undefined
+  const key = createSecretKey(rawData(keyData, "importKey"))
+  return new CryptoKey(new KdfHandle(key, "secret", name, usages), { name }, false)
+}
+
+//===----------------------------------------------------------------------===//
+// Asymmetric keys: what ECDSA, ECDH, RSA and Ed25519 / X25519 share
+//===----------------------------------------------------------------------===//
+
+// The KeyObject of DER data, or a DataError, as node's import takes it.
+function derKey(bytes: Uint8Array, format: KeyFormat): KeyObject {
+  try {
+    if (format == "spki") return createPublicKey({ key: bytes, format: "der", type: "spki" })
+    return createPrivateKey({ key: bytes, format: "der", type: "pkcs8" })
+  } catch (err) {
+    void err
+    throw dataError("Invalid keyData")
+  }
+}
+
+function jwkKey(jwk: JsonWebKey): KeyObject {
+  try {
+    if (jwk.d == undefined) return createPublicKey({ key: jsonOf(jwk), format: "jwk" })
+    return createPrivateKey({ key: jsonOf(jwk), format: "jwk" })
+  } catch (err) {
+    void err
+    throw dataError("Invalid keyData")
+  }
+}
+
+function keyType(key: KeyObject): KeyType {
+  return key.type == "private" ? "private" : key.type == "public" ? "public" : "secret"
+}
+
+// DER: a length, and a TLV.
+function derLength(n: int): Uint8Array {
+  if (n < 128) return new Uint8Array([n & 0x7f])
+  if (n < 256) return new Uint8Array([0x81, n & 0xff])
+  return new Uint8Array([0x82, (n >> 8) & 0xff, n & 0xff])
+}
+
+function der(tag: int, content: Uint8Array): Uint8Array {
+  return concat([new Uint8Array([tag & 0xff]), derLength(content.length), content])
+}
+
+//===----------------------------------------------------------------------===//
+// ECDSA and ECDH (ec.js)
+//===----------------------------------------------------------------------===//
+
+class EcHandle extends KeyHandle {
+  constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly curve: string) {
+    super(key, keyType(key), name, usages)
+  }
+
+  async sign(algorithm: Algorithm, data: BufferSource): Promise<ArrayBuffer> {
+    if (this.type != "private") throw invalidAccess("Key must be a private key")
+    const result = await __tz_subtle_sign(this.key, 2, opensslHash(hashOf(algorithm)), 0, data)
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
+    if (this.type != "public") throw invalidAccess("Key must be a public key")
+    const hash = opensslHash(hashOf(algorithm))
+    const verdict = await __tz_subtle_verify(this.key, 2, hash, 0, signature, data)
+    if (verdict < 0) throw failed()
+    return verdict == 1
+  }
+
+  async deriveBits(algorithm: Algorithm, length: double | undefined): Promise<ArrayBuffer> {
+    return ecdhDeriveBits(this, algorithm, length)
+  }
+
+  exportRaw(): ArrayBuffer | undefined {
+    if (this.type != "public") return undefined
+    const jwk = jwkOfKey(this.key)
+    return arrayBufferOf(concat([new Uint8Array([4]), base64url(jwk.x ?? ""), base64url(jwk.y ?? "")]))
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    const jwk = jwkOfKey(this.key)
+    return {
+      key_ops: opsOf(this.usages),
+      ext: extractable,
+      kty: "EC",
+      x: jwk.x,
+      y: jwk.y,
+      crv: jwk.crv,
+      d: jwk.d,
+    }
+  }
+}
+
+function ecUsages(name: string, isPublic: boolean): KeyUsage[] {
+  if (name == "ECDH") return isPublic ? [] : ["deriveKey", "deriveBits"]
+  return isPublic ? ["verify"] : ["sign"]
+}
+
+function checkEcUsages(name: string, isPublic: boolean, usages: KeyUsage[]) {
+  if (anyNotIn(usages, ecUsages(name, isPublic)))
+    throw syntaxError(`Unsupported key usage for a ${name} key`)
+}
+
+// The DER of the algorithm of an EC public key on the curve: ecPublicKey and its OID.
+function ecAlgorithm(curve: string): Uint8Array {
+  const ecPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])
+  const oid =
+    curve == "P-256"
+      ? new Uint8Array([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07])
+      : curve == "P-384"
+        ? new Uint8Array([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22])
+        : new Uint8Array([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23])
+  return der(0x30, concat([ecPublicKey, oid]))
+}
+
+async function generateEc(
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  const name = algorithm.name
+  const curve = algorithm.namedCurve ?? "P-256"
+  if (anyNotIn(usages, name == "ECDSA" ? ["sign", "verify"] : ["deriveKey", "deriveBits"]))
+    throw syntaxError(`Unsupported key usage for an ${name} key`)
+  const privateKey = await __tz_subtle_generate(1, 0, 0, curve)
+  if (privateKey == undefined) throw failed()
+  const publicKey = createPublicKey(privateKey)
+  const set = distinct(usages)
+  const publicUsages: KeyUsage[] = name == "ECDSA" ? union(set, ["verify"]) : []
+  const privateUsages = name == "ECDSA" ? union(set, ["sign"]) : union(set, ["deriveKey", "deriveBits"])
+  return {
+    publicKey: new CryptoKey(
+      new EcHandle(publicKey, name, publicUsages, curve),
+      { name, namedCurve: curve },
+      true,
+    ),
+    privateKey: new CryptoKey(
+      new EcHandle(privateKey, name, privateUsages, curve),
+      { name, namedCurve: curve },
+      extractable,
+    ),
+  }
+}
+
+function importEc(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  const curve = algorithm.namedCurve ?? "P-256"
+  let key: KeyObject
+  if (format == "spki" || format == "pkcs8") {
+    checkEcUsages(name, format == "spki", usages)
+    key = derKey(rawData(keyData, "importKey"), format)
+  } else if (format == "jwk") {
+    const jwk = jwkData(keyData)
+    if (jwk.kty == undefined) throw dataError("Invalid keyData")
+    if (jwk.kty != "EC") throw dataError('Invalid JWK "kty" Parameter')
+    if (jwk.crv != curve) throw dataError('JWK "crv" does not match the requested algorithm')
+    checkEcUsages(name, jwk.d == undefined, usages)
+    checkJwk(jwk, name == "ECDH" ? "enc" : "sig", usages, extractable)
+    if (name == "ECDSA" && jwk.alg != undefined) {
+      const wanted = jwk.alg == "ES256" ? "P-256" : jwk.alg == "ES384" ? "P-384" : jwk.alg == "ES512" ? "P-521" : ""
+      if (wanted != curve) throw dataError('JWK "alg" does not match the requested algorithm')
+    }
+    key = jwkKey(jwk)
+  } else if (format == "raw") {
+    checkEcUsages(name, true, usages)
+    const point = rawData(keyData, "importKey")
+    try {
+      key = createPublicKey({
+        key: der(0x30, concat([ecAlgorithm(curve), der(0x03, concat([new Uint8Array([0]), point]))])),
+        format: "der",
+        type: "spki",
+      })
+    } catch (err) {
+      void err
+      throw dataError("Invalid keyData")
+    }
+  } else {
+    return undefined
+  }
+  if (key.asymmetricKeyType != "ec") throw dataError("Invalid key type")
+  let actual = ""
+  try {
+    actual = jwkOfKey(key).crv ?? ""
+  } catch (err) {
+    void err
+  }
+  if (actual != curve) throw dataError("Named curve mismatch")
+  return new CryptoKey(new EcHandle(key, name, usages, curve), { name, namedCurve: curve }, extractable)
+}
+
+// ECDH and X25519 (ecdhDeriveBits of diffiehellman.js): the shared secret, cut to `length` bits.
+async function ecdhDeriveBits(
+  handle: KeyHandle,
+  algorithm: Algorithm,
+  length: double | undefined,
+): Promise<ArrayBuffer> {
+  const peer = algorithm.public
+  if (peer == undefined) throw required("EcdhKeyDeriveParams", "public")
+  if (handle.type != "private") throw invalidAccess("baseKey must be a private key")
+  if (peer.handle.name != handle.name)
+    throw invalidAccess("The public and private keys must be of the same type")
+  const theirs = peer.handle
+  if (handle instanceof EcHandle && theirs instanceof EcHandle && handle.curve != theirs.curve)
+    throw invalidAccess("Named curve mismatch")
+  const bits = await __tz_subtle_derive(handle.key, theirs.key)
+  if (bits == undefined) throw failed()
+  if (length == undefined) return bits
+  const bytes = Math.ceil(length / 8) | 0
+  if (bits.byteLength < bytes) throw new DOMException("derived bit length is too small", "OperationError")
+  const cut = new Uint8Array(bits.slice(0, bytes))
+  const rest = length % 8
+  if (rest != 0) {
+    const masks = [0, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe]
+    const last = cut.length - 1
+    if (last >= 0) cut[last] = cut[last] & (masks[rest | 0] ?? 0)
+  }
+  return arrayBufferOf(cut)
+}
+
+//===----------------------------------------------------------------------===//
+// RSASSA-PKCS1-v1_5, RSA-PSS and RSA-OAEP (rsa.js)
+//===----------------------------------------------------------------------===//
+
+class RsaHandle extends KeyHandle {
+  constructor(
+    key: KeyObject,
+    name: string,
+    usages: KeyUsage[],
+    readonly hash: string,
+    readonly modulusLength: double,
+  ) {
+    super(key, keyType(key), name, usages)
+  }
+
+  async sign(algorithm: Algorithm, data: BufferSource): Promise<ArrayBuffer> {
+    if (this.type != "private") throw invalidAccess("Key must be a private key")
+    const pss = this.name == "RSA-PSS"
+    const salt = pss ? this.#saltLength(algorithm) : 0
+    const result = await __tz_subtle_sign(this.key, pss ? 1 : 0, opensslHash(this.hash), salt, data)
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
+    if (this.type != "public") throw invalidAccess("Key must be a public key")
+    const pss = this.name == "RSA-PSS"
+    const salt = pss ? this.#saltLength(algorithm) : 0
+    const hash = opensslHash(this.hash)
+    const verdict = await __tz_subtle_verify(this.key, pss ? 1 : 0, hash, salt, signature, data)
+    if (verdict < 0) throw failed()
+    return verdict == 1
+  }
+
+  // The salt of RSA-PSS, which the key must have room for, as node checks it.
+  #saltLength(algorithm: Algorithm): int {
+    const salt = algorithm.saltLength ?? 0
+    const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash) - 2
+    if (salt > most) throw failed()
+    return salt | 0
+  }
+
+  async cipher(algorithm: Algorithm, data: BufferSource, decrypt: boolean): Promise<ArrayBuffer> {
+    if (this.type != (decrypt ? "private" : "public"))
+      throw invalidAccess("The requested operation is not valid for the provided key")
+    const label = algorithm.label ?? kNoBytes
+    const result = await __tz_subtle_rsaOaep(this.key, opensslHash(this.hash), label, decrypt, data)
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    const jwk = jwkOfKey(this.key)
+    const bits = this.hash == "SHA-1" ? "1" : this.hash.slice(4)
+    const alg =
+      this.name == "RSASSA-PKCS1-v1_5"
+        ? `RS${bits}`
+        : this.name == "RSA-PSS"
+          ? `PS${bits}`
+          : this.hash == "SHA-1"
+            ? "RSA-OAEP"
+            : `RSA-OAEP-${bits}`
+    return {
+      key_ops: opsOf(this.usages),
+      ext: extractable,
+      alg,
+      kty: "RSA",
+      n: jwk.n,
+      e: jwk.e,
+      d: jwk.d,
+      p: jwk.p,
+      q: jwk.q,
+      dp: jwk.dp,
+      dq: jwk.dq,
+      qi: jwk.qi,
+    }
+  }
+}
+
+function rsaUsages(name: string, isPublic: boolean): KeyUsage[] {
+  if (name == "RSA-OAEP") return isPublic ? ["encrypt", "wrapKey"] : ["decrypt", "unwrapKey"]
+  return isPublic ? ["verify"] : ["sign"]
+}
+
+// The modulus length and the public exponent of an RSA key, from its JWK.
+function rsaDetails(key: KeyObject): Algorithm {
+  const jwk = jwkOfKey(key)
+  const n = base64url(jwk.n ?? "")
+  let bits = n.length * 8
+  const first = n[0] ?? 0
+  for (let bit = 0x80; bit > 0 && (first & bit) == 0; bit = bit >> 1) bits -= 1
+  return { name: "", modulusLength: bits, publicExponent: base64url(jwk.e ?? "") }
+}
+
+async function generateRsa(
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  const name = algorithm.name
+  const exponent = algorithm.publicExponent ?? kNoBytes
+  // bigIntArrayToUnsignedInt of node: at most 32 bits, leading zeros allowed.
+  let value = 0
+  for (let i = 0; i < exponent.length; i++) {
+    const shift = exponent.length - i - 1
+    const byte = exponent[i] ?? 0
+    if (shift >= 4 && byte != 0)
+      throw new DOMException(
+        "The publicExponent must be equivalent to an unsigned 32-bit value",
+        "OperationError",
+      )
+    if (shift < 4) value = value + byte * Math.pow(256, shift)
+  }
+  if (anyNotIn(usages, name == "RSA-OAEP" ? ["encrypt", "decrypt", "wrapKey", "unwrapKey"] : ["sign", "verify"]))
+    throw syntaxError("Unsupported key usage for a RSA key")
+  const modulusLength = algorithm.modulusLength ?? 0
+  const privateKey = await __tz_subtle_generate(0, modulusLength, value, "")
+  if (privateKey == undefined) throw failed()
+  const publicKey = createPublicKey(privateKey)
+  const set = distinct(usages)
+  const oaep = name == "RSA-OAEP"
+  const publicUsages = oaep ? union(set, ["encrypt", "wrapKey"]) : union(set, ["verify"])
+  const privateUsages = oaep ? union(set, ["decrypt", "unwrapKey"]) : union(set, ["sign"])
+  const hash = hashOf(algorithm)
+  return {
+    publicKey: new CryptoKey(
+      new RsaHandle(publicKey, name, publicUsages, hash, modulusLength),
+      { name, modulusLength, publicExponent: exponent, hash: { name: hash } },
+      true,
+    ),
+    privateKey: new CryptoKey(
+      new RsaHandle(privateKey, name, privateUsages, hash, modulusLength),
+      { name, modulusLength, publicExponent: exponent.slice(), hash: { name: hash } },
+      extractable,
+    ),
+  }
+}
+
+function importRsa(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  const hash = hashOf(algorithm)
+  let key: KeyObject
+  if (format == "spki" || format == "pkcs8") {
+    if (anyNotIn(usages, rsaUsages(name, format == "spki")))
+      throw syntaxError(`Unsupported key usage for an ${name} key`)
+    key = derKey(rawData(keyData, "importKey"), format)
+  } else if (format == "jwk") {
+    const jwk = jwkData(keyData)
+    if (jwk.kty == undefined) throw dataError("Invalid keyData")
+    if (jwk.kty != "RSA") throw dataError('Invalid JWK "kty" Parameter')
+    if (anyNotIn(usages, rsaUsages(name, jwk.d == undefined)))
+      throw syntaxError(`Unsupported key usage for an ${name} key`)
+    checkJwk(jwk, name == "RSA-OAEP" ? "enc" : "sig", usages, extractable)
+    if (jwk.alg != undefined) {
+      const bits = hash == "SHA-1" ? "1" : hash.slice(4)
+      const expected =
+        name == "RSASSA-PKCS1-v1_5"
+          ? `RS${bits}`
+          : name == "RSA-PSS"
+            ? `PS${bits}`
+            : hash == "SHA-1"
+              ? "RSA-OAEP"
+              : `RSA-OAEP-${bits}`
+      if (jwk.alg != expected) throw dataError('JWK "alg" does not match the requested algorithm')
+    }
+    key = jwkKey(jwk)
+  } else {
+    return undefined
+  }
+  if (key.asymmetricKeyType != "rsa") throw dataError("Invalid key type")
+  const details = rsaDetails(key)
+  const modulusLength = details.modulusLength ?? 0
+  const handle = new RsaHandle(key, name, usages, hash, modulusLength)
+  const publicExponent = details.publicExponent ?? kNoBytes
+  return new CryptoKey(handle, { name, modulusLength, publicExponent, hash: { name: hash } }, extractable)
+}
+
+//===----------------------------------------------------------------------===//
+// Ed25519 and X25519 (cfrg.js)
+//===----------------------------------------------------------------------===//
+
+// The DER of the algorithm of Ed25519 or X25519: its OID alone.
+function okpAlgorithm(name: string): Uint8Array {
+  return new Uint8Array([0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, name == "Ed25519" ? 0x70 : 0x6e])
+}
+
+class OkpHandle extends KeyHandle {
+  constructor(key: KeyObject, name: string, usages: KeyUsage[]) {
+    super(key, keyType(key), name, usages)
+  }
+
+  async sign(algorithm: Algorithm, data: BufferSource): Promise<ArrayBuffer> {
+    void algorithm
+    if (this.type != "private") throw invalidAccess("Key must be a private key")
+    const result = await __tz_subtle_sign(this.key, 3, "", 0, data)
+    if (result == undefined) throw failed()
+    return result
+  }
+
+  async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
+    void algorithm
+    if (this.type != "public") throw invalidAccess("Key must be a public key")
+    const verdict = await __tz_subtle_verify(this.key, 3, "", 0, signature, data)
+    if (verdict < 0) throw failed()
+    return verdict == 1
+  }
+
+  async deriveBits(algorithm: Algorithm, length: double | undefined): Promise<ArrayBuffer> {
+    return ecdhDeriveBits(this, algorithm, length)
+  }
+
+  exportRaw(): ArrayBuffer | undefined {
+    if (this.type != "public") return undefined
+    return arrayBufferOf(base64url(jwkOfKey(this.key).x ?? ""))
+  }
+
+  exportJwk(extractable: boolean): JsonWebKey | undefined {
+    const jwk = jwkOfKey(this.key)
+    return {
+      key_ops: opsOf(this.usages),
+      ext: extractable,
+      alg: this.name == "Ed25519" ? "Ed25519" : undefined,
+      crv: jwk.crv,
+      d: jwk.d,
+      x: jwk.x,
+      kty: "OKP",
+    }
+  }
+}
+
+function okpUsages(name: string, isPublic: boolean): KeyUsage[] {
+  if (name == "X25519") return isPublic ? [] : ["deriveKey", "deriveBits"]
+  return isPublic ? ["verify"] : ["sign"]
+}
+
+function checkOkpUsages(name: string, isPublic: boolean, usages: KeyUsage[]) {
+  if (anyNotIn(usages, okpUsages(name, isPublic)))
+    throw syntaxError(`Unsupported key usage for a ${name} key`)
+}
+
+// createCFRGRawKey of node: a key of 32 raw bytes.
+function okpRawKey(name: string, bytes: Uint8Array, isPublic: boolean): KeyObject {
+  if (bytes.length != 32) throw dataError(`${name} raw keys must be exactly 32-bytes`)
+  try {
+    if (isPublic)
+      return createPublicKey({
+        key: der(0x30, concat([okpAlgorithm(name), der(0x03, concat([new Uint8Array([0]), bytes]))])),
+        format: "der",
+        type: "spki",
+      })
+    const inner = der(0x04, bytes)
+    return createPrivateKey({
+      key: der(0x30, concat([new Uint8Array([0x02, 0x01, 0x00]), okpAlgorithm(name), der(0x04, inner)])),
+      format: "der",
+      type: "pkcs8",
+    })
+  } catch (err) {
+    void err
+    throw dataError("Invalid keyData")
+  }
+}
+
+async function generateOkp(
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  const name = algorithm.name
+  const ed = name == "Ed25519"
+  if (anyNotIn(usages, ed ? ["sign", "verify"] : ["deriveKey", "deriveBits"]))
+    throw syntaxError(`Unsupported key usage for an ${name} key`)
+  const privateKey = await __tz_subtle_generate(ed ? 2 : 3, 0, 0, "")
+  if (privateKey == undefined) throw failed()
+  const publicKey = createPublicKey(privateKey)
+  const set = distinct(usages)
+  const publicUsages: KeyUsage[] = ed ? union(set, ["verify"]) : []
+  const privateUsages = ed ? union(set, ["sign"]) : union(set, ["deriveKey", "deriveBits"])
+  // node gives these two the other way round.
+  return {
+    privateKey: new CryptoKey(new OkpHandle(privateKey, name, privateUsages), { name }, extractable),
+    publicKey: new CryptoKey(new OkpHandle(publicKey, name, publicUsages), { name }, true),
+  }
+}
+
+function importOkp(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  let key: KeyObject
+  if (format == "spki" || format == "pkcs8") {
+    checkOkpUsages(name, format == "spki", usages)
+    key = derKey(rawData(keyData, "importKey"), format)
+  } else if (format == "jwk") {
+    const jwk = jwkData(keyData)
+    if (jwk.kty == undefined) throw dataError("Invalid keyData")
+    if (jwk.kty != "OKP") throw dataError('Invalid JWK "kty" Parameter')
+    if (jwk.crv != name) throw dataError('JWK "crv" Parameter and algorithm name mismatch')
+    const isPublic = jwk.d == undefined
+    checkJwk(jwk, name == "Ed25519" ? "sig" : "enc", usages, extractable)
+    if (jwk.alg != undefined && name == "Ed25519" && jwk.alg != name && jwk.alg != "EdDSA")
+      throw dataError('JWK "alg" does not match the requested algorithm')
+    const x = jwk.x
+    if (x == undefined) throw dataError(isPublic ? "Invalid keyData" : "Invalid JWK")
+    checkOkpUsages(name, isPublic, usages)
+    const publicKey = okpRawKey(name, base64url(x), true)
+    const d = jwk.d
+    if (d == undefined) {
+      key = publicKey
+    } else {
+      key = okpRawKey(name, base64url(d), false)
+      if (!createPublicKey(key).equals(publicKey)) throw dataError("Invalid keyData")
+    }
+  } else if (format == "raw") {
+    checkOkpUsages(name, true, usages)
+    key = okpRawKey(name, rawData(keyData, "importKey"), true)
+  } else {
+    return undefined
+  }
+  if (key.asymmetricKeyType != name.toLowerCase()) throw dataError("Invalid key type")
+  return new CryptoKey(new OkpHandle(key, name, usages), { name }, extractable)
+}
+
+//===----------------------------------------------------------------------===//
+// The operations
+//===----------------------------------------------------------------------===//
+
+// What the import of each family makes, checked as importKeySync of node checks it.
+function imported(
+  key: CryptoKey | undefined,
+  algorithm: Algorithm,
+  format: KeyFormat,
+): CryptoKey {
+  if (key == undefined)
+    throw notSupported(`Unable to import ${algorithm.name} using ${format} format`)
+  if ((key.type == "secret" || key.type == "private") && key.handle.usages.length == 0)
+    throw syntaxError(`Usages cannot be empty when importing a ${key.type} key.`)
+  return key
+}
+
+function importAny(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey {
+  const name = algorithm.name
+  let key: CryptoKey | undefined = undefined
+  if (name == "HMAC") key = importHmac(format, keyData, algorithm, extractable, usages)
+  else if (name.startsWith("AES-")) key = importAes(format, keyData, algorithm, extractable, usages)
+  else if (name == "PBKDF2" || name == "HKDF")
+    key = importKdf(format, keyData, algorithm, extractable, usages)
+  else if (name == "ECDSA" || name == "ECDH")
+    key = importEc(format, keyData, algorithm, extractable, usages)
+  else if (name.startsWith("RSA")) key = importRsa(format, keyData, algorithm, extractable, usages)
+  else key = importOkp(format, keyData, algorithm, extractable, usages)
+  return imported(key, algorithm, format)
+}
+
+function createdKey(key: CryptoKey): CryptoKey {
+  if (key.handle.usages.length == 0) throw syntaxError("Usages cannot be empty when creating a key.")
+  return key
+}
+
+function createdPair(pair: CryptoKeyPair): CryptoKeyPair {
+  if (pair.privateKey.handle.usages.length == 0)
+    throw syntaxError("Usages cannot be empty when creating a key.")
+  return pair
+}
+
+function normalizeOr(algorithm: AlgorithmIdentifier, op: string, fallback: string): Algorithm {
+  try {
+    return normalize(algorithm, op)
+  } catch (err) {
+    void err
+    return normalize(algorithm, fallback)
+  }
+}
+
+// cipherOrWrap of node.
+async function cipherOrWrap(
+  decrypt: boolean,
+  algorithm: Algorithm,
+  key: CryptoKey,
+  data: BufferSource,
+  op: KeyUsage,
+): Promise<ArrayBuffer> {
+  const handle = key.handle
+  if (handle.name != algorithm.name || !handle.usages.includes(op))
+    throw invalidAccess("The requested operation is not valid for the provided key")
+  switch (algorithm.name) {
+    case "RSA-OAEP":
+    case "AES-CTR":
+    case "AES-CBC":
+    case "AES-GCM":
+      return handle.cipher(algorithm, data, decrypt)
+    case "AES-KW":
+      if (op == "wrapKey" || op == "unwrapKey") return handle.wrap(data, decrypt)
+  }
+  throw notSupported(kUnrecognized)
+}
+
+async function exportAny(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer | JsonWebKey> {
+  const handle = key.handle
+  try {
+    normalize(handle.name, "exportKey")
+  } catch (err) {
+    void err
+    throw notSupported(`${handle.name} key export is not supported`)
+  }
+  // The name of the error is node's.
+  if (!key.extractable) throw new DOMException("key is not extractable", "InvalidAccessException")
+  let result: ArrayBuffer | JsonWebKey | undefined = undefined
+  if (format == "spki") result = handle.exportSpki()
+  else if (format == "pkcs8") result = handle.exportPkcs8()
+  else if (format == "jwk") result = handle.exportJwk(key.extractable)
+  else if (handle.type != "private") result = handle.exportRaw()
+  if (result == undefined)
+    throw notSupported(`Unable to export ${handle.name} ${handle.type} key using ${format} format`)
+  return result
+}
+
+async function exportBytes(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer> {
+  const result = await exportAny(format, key)
+  if (result instanceof ArrayBuffer) return result
+  // Not for a format other than "jwk"; the JSON text keeps the type exact.
+  return arrayBufferOf(new TextEncoder().encode(JSON.stringify(result)))
+}
+
+// The bytes wrapKey encrypts: the key exported, a JWK as JSON text, which AES-KW pads with
+// spaces to whole blocks.
+async function wrappedBytes(format: KeyFormat, key: CryptoKey, kw: boolean): Promise<Uint8Array> {
+  const data = await exportAny(format, key)
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  let text = JSON.stringify(data)
+  if (kw && text.length % 8 != 0) text = text + " ".repeat(8 - (text.length % 8))
+  return new TextEncoder().encode(text)
+}
+
+// The key data unwrapKey decrypted: the bytes, or the JWK of the JSON text.
+function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): BufferSource | JsonWebKey {
+  if (format != "jwk") return bytes
+  try {
+    return fromJson<JsonWebKey>(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)))
+  } catch (err) {
+    void err
+    throw dataError("Invalid wrapped JWK key")
+  }
+}
+
+// getKeyLength of node: the length of the key deriveKey makes, or undefined for a KDF.
+function keyLength(algorithm: AlgorithmIdentifier): double | undefined {
+  const a = normalize(algorithm, "get key length")
+  if (a.name.startsWith("AES-")) {
+    const length = a.length ?? 0
+    if (length != 128 && length != 192 && length != 256)
+      throw new DOMException("Invalid key length", "OperationError")
+    return length
+  }
+  if (a.name == "HMAC") {
+    const length = a.length
+    if (length == undefined) return blockBits(hashOf(a))
+    if (length != 0) return length
+    throw new DOMException("Invalid key length", "OperationError")
+  }
+  return undefined
+}
+
+async function deriveKeyWith(
+  algorithm: AlgorithmIdentifier,
+  baseKey: CryptoKey,
+  derivedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  usages: KeyUsage[],
+  importer: (
+    format: KeyFormat,
+    keyData: BufferSource | JsonWebKey,
+    algorithm: Algorithm,
+    extractable: boolean,
+    usages: KeyUsage[],
+  ) => CryptoKey | undefined,
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "deriveBits")
+  const derived = normalize(derivedKeyAlgorithm, "importKey")
+  const handle = baseKey.handle
+  if (!handle.usages.includes("deriveKey"))
+    throw invalidAccess("baseKey does not have deriveKey usage")
+  if (handle.name != alg.name) throw invalidAccess("Key algorithm mismatch")
+  const length = keyLength(derivedKeyAlgorithm)
+  const bits = await handle.deriveBits(alg, length)
+  return imported(importer("raw", bits, derived, extractable, usages), derived, "raw")
+}
+
+async function unwrapWith(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  usages: KeyUsage[],
+  importer: (
+    format: KeyFormat,
+    keyData: BufferSource | JsonWebKey,
+    algorithm: Algorithm,
+    extractable: boolean,
+    usages: KeyUsage[],
+  ) => CryptoKey | undefined,
+): Promise<CryptoKey> {
+  const unwrapAlg = normalizeOr(unwrapAlgorithm, "unwrapKey", "decrypt")
+  const keyAlg = normalize(unwrappedKeyAlgorithm, "importKey")
+  const bytes = await cipherOrWrap(true, unwrapAlg, unwrappingKey, wrappedKey, "unwrapKey")
+  const keyData = unwrappedData(format, bytes)
+  return imported(importer(format, keyData, keyAlg, extractable, usages), keyAlg, format)
+}
+
+export class SubtleCrypto {
+  async digest(algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer> {
+    return digestOf(normalize(algorithm, "digest").name, data)
+  }
+
+  async generateKey(
+    algorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey | CryptoKeyPair> {
+    const alg = normalize(algorithm, "generateKey")
+    const name = alg.name
+    if (name == "HMAC") return createdKey(generateHmac(alg, extractable, keyUsages))
+    if (name.startsWith("AES-")) return createdKey(generateAes(alg, extractable, keyUsages))
+    if (name == "ECDSA" || name == "ECDH")
+      return createdPair(await generateEc(alg, extractable, keyUsages))
+    if (name.startsWith("RSA")) return createdPair(await generateRsa(alg, extractable, keyUsages))
+    return createdPair(await generateOkp(alg, extractable, keyUsages))
+  }
+
+  async importKey(
+    format: KeyFormat,
+    keyData: BufferSource | JsonWebKey,
+    algorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey> {
+    return importAny(format, keyData, normalize(algorithm, "importKey"), extractable, keyUsages)
+  }
+
+  async exportKey(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer | JsonWebKey> {
+    return exportAny(format, key)
+  }
+
+  async sign(algorithm: AlgorithmIdentifier, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> {
+    const alg = normalize(algorithm, "sign")
+    const handle = key.handle
+    if (!handle.usages.includes("sign") || alg.name != handle.name)
+      throw invalidAccess("Unable to use this key to sign")
+    return handle.sign(alg, data)
+  }
+
+  async verify(
+    algorithm: AlgorithmIdentifier,
+    key: CryptoKey,
+    signature: BufferSource,
+    data: BufferSource,
+  ): Promise<boolean> {
+    const alg = normalize(algorithm, "verify")
+    const handle = key.handle
+    if (!handle.usages.includes("verify") || alg.name != handle.name)
+      throw invalidAccess("Unable to use this key to verify")
+    return handle.verify(alg, signature, data)
+  }
+
+  async encrypt(algorithm: AlgorithmIdentifier, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> {
+    return cipherOrWrap(false, normalize(algorithm, "encrypt"), key, data, "encrypt")
+  }
+
+  async decrypt(algorithm: AlgorithmIdentifier, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> {
+    return cipherOrWrap(true, normalize(algorithm, "decrypt"), key, data, "decrypt")
+  }
+
+  async deriveBits(
+    algorithm: AlgorithmIdentifier,
+    baseKey: CryptoKey,
+    length?: double,
+  ): Promise<ArrayBuffer> {
+    const alg = normalize(algorithm, "deriveBits")
+    const handle = baseKey.handle
+    if (!handle.usages.includes("deriveBits"))
+      throw invalidAccess("baseKey does not have deriveBits usage")
+    if (handle.name != alg.name) throw invalidAccess("Key algorithm mismatch")
+    const bits = length == undefined ? undefined : unsignedLong(length)
+    return handle.deriveBits(alg, bits)
+  }
+
+  async deriveKey(
+    algorithm: AlgorithmIdentifier,
+    baseKey: CryptoKey,
+    derivedKeyAlgorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey> {
+    return deriveKeyWith(algorithm, baseKey, derivedKeyAlgorithm, extractable, keyUsages, importSecret)
+  }
+
+  async wrapKey(
+    format: KeyFormat,
+    key: CryptoKey,
+    wrappingKey: CryptoKey,
+    wrapAlgorithm: AlgorithmIdentifier,
+  ): Promise<ArrayBuffer> {
+    const alg = normalizeOr(wrapAlgorithm, "wrapKey", "encrypt")
+    const bytes = await wrappedBytes(format, key, alg.name == "AES-KW")
+    return cipherOrWrap(false, alg, wrappingKey, bytes, "wrapKey")
+  }
+
+  async unwrapKey(
+    format: KeyFormat,
+    wrappedKey: BufferSource,
+    unwrappingKey: CryptoKey,
+    unwrapAlgorithm: AlgorithmIdentifier,
+    unwrappedKeyAlgorithm: AlgorithmIdentifier,
+    extractable: boolean,
+    keyUsages: KeyUsage[],
+  ): Promise<CryptoKey> {
+    return unwrapWith(
+      format,
+      wrappedKey,
+      unwrappingKey,
+      unwrapAlgorithm,
+      unwrappedKeyAlgorithm,
+      extractable,
+      keyUsages,
+      importAnyFamily,
+    )
+  }
+}
+
+// The importers of the families for deriveKey and unwrapKey.
+function importSecret(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  const name = algorithm.name
+  if (name == "HMAC") return importHmac(format, keyData, algorithm, extractable, usages)
+  if (name.startsWith("AES-")) return importAes(format, keyData, algorithm, extractable, usages)
+  if (name == "PBKDF2" || name == "HKDF")
+    return importKdf(format, keyData, algorithm, extractable, usages)
+  return undefined
+}
+
+function importAnyFamily(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: Algorithm,
+  extractable: boolean,
+  usages: KeyUsage[],
+): CryptoKey | undefined {
+  return importAny(format, keyData, algorithm, extractable, usages)
+}
+
+export const subtle = new SubtleCrypto()
+
+//===----------------------------------------------------------------------===//
+// What the compiler calls for an algorithm written in the call (sema_webcrypto.cpp): the work
+// of its family only.
+//===----------------------------------------------------------------------===//
+
+// A JWK the program has as JSON, as JSON.parse gives it in node.
+function subtleJwkOf(json: Json | undefined): JsonWebKey {
+  if (json == undefined) throw dataError("Invalid keyData")
+  return fromJson<JsonWebKey>(json)
+}
+
+async function subtleImportAny(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return importAny(format, keyData, normalize(algorithm, "importKey"), extractable, keyUsages)
+}
+
+async function subtleImportHmac(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importHmac(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleImportAes(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importAes(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleImportKdf(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importKdf(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleImportEc(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importEc(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleImportRsa(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importRsa(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleImportOkp(
+  format: KeyFormat,
+  keyData: BufferSource | JsonWebKey,
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  const alg = normalize(algorithm, "importKey")
+  return imported(importOkp(format, keyData, alg, extractable, keyUsages), alg, format)
+}
+
+async function subtleGenerateHmac(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return createdKey(generateHmac(normalize(algorithm, "generateKey"), extractable, keyUsages))
+}
+
+async function subtleGenerateAes(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return createdKey(generateAes(normalize(algorithm, "generateKey"), extractable, keyUsages))
+}
+
+async function subtleGenerateEc(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  return createdPair(await generateEc(normalize(algorithm, "generateKey"), extractable, keyUsages))
+}
+
+async function subtleGenerateRsa(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  return createdPair(await generateRsa(normalize(algorithm, "generateKey"), extractable, keyUsages))
+}
+
+async function subtleGenerateOkp(
+  algorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKeyPair> {
+  return createdPair(await generateOkp(normalize(algorithm, "generateKey"), extractable, keyUsages))
+}
+
+// exportKey with the format written in the call: "jwk" gives a JsonWebKey (never bytes), the
+// others an ArrayBuffer (never a JWK).
+async function subtleExportJwk(format: KeyFormat, key: CryptoKey): Promise<JsonWebKey> {
+  const result = await exportAny(format, key)
+  if (result instanceof ArrayBuffer) return {}
+  return result
+}
+
+async function subtleExportBytes(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer> {
+  return exportBytes(format, key)
+}
+
+async function subtleDeriveKeyHmac(
+  algorithm: AlgorithmIdentifier,
+  baseKey: CryptoKey,
+  derivedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await deriveKeyWith(
+    algorithm,
+    baseKey,
+    derivedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importHmac,
+  )
+}
+
+async function subtleDeriveKeyAes(
+  algorithm: AlgorithmIdentifier,
+  baseKey: CryptoKey,
+  derivedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await deriveKeyWith(
+    algorithm,
+    baseKey,
+    derivedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importAes,
+  )
+}
+
+async function subtleDeriveKeyKdf(
+  algorithm: AlgorithmIdentifier,
+  baseKey: CryptoKey,
+  derivedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await deriveKeyWith(
+    algorithm,
+    baseKey,
+    derivedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importKdf,
+  )
+}
+
+async function subtleUnwrapHmac(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importHmac,
+  )
+}
+
+async function subtleUnwrapAes(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importAes,
+  )
+}
+
+async function subtleUnwrapKdf(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importKdf,
+  )
+}
+
+async function subtleUnwrapEc(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importEc,
+  )
+}
+
+async function subtleUnwrapRsa(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importRsa,
+  )
+}
+
+async function subtleUnwrapOkp(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: AlgorithmIdentifier,
+  unwrappedKeyAlgorithm: AlgorithmIdentifier,
+  extractable: boolean,
+  keyUsages: KeyUsage[],
+): Promise<CryptoKey> {
+  return await unwrapWith(
+    format,
+    wrappedKey,
+    unwrappingKey,
+    unwrapAlgorithm,
+    unwrappedKeyAlgorithm,
+    extractable,
+    keyUsages,
+    importOkp,
+  )
+}

@@ -180,7 +180,8 @@ llvm::Constant *CodeGen::classDescriptor(const ClassDecl *cls) {
   bool library = emitter || (cls->library && (cls->name == "OnceWrapper" ||
                                                cls->name == "AsyncListener" ||
                                                cls->name == "ThisListener" ||
-                                               cls->name == "ListenerList"));
+                                               cls->name == "ListenerList" ||
+                                               cls->name == "CryptoKey"));
   auto method = [&](llvm::StringRef name, const FunctionDecl *fn) {
     entries.push_back(llvm::ConstantStruct::get(
         fieldDescTy_, {utf8Constant(name), builder_.getInt32(uint32_t(name.size())),

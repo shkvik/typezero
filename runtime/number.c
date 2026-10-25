@@ -364,6 +364,91 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   *out = tz_str_from_ascii(text, len);
 }
 
+// The exponent of a double as V8's Double::Exponent() gives it: value = significand * 2^e with
+// the 53 bits of the significand an integer.
+static int radix_exponent(double value) {
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof bits);
+  int biased = (int)((bits >> 52) & 0x7ff);
+  return biased == 0 ? 1 - 1075 : biased - 1075;
+}
+
+// The next double up from a finite non-negative one.
+static double next_up(double value) {
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof bits);
+  ++bits;
+  memcpy(&value, &bits, sizeof bits);
+  return value;
+}
+
+// x.toString(radix) as V8 writes it (DoubleToRadixCString of src/numbers/conversions.cc): the
+// integer part exactly, the fraction to the precision of the double, rounded to even.
+void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
+  if (radix < 2 || radix > 36) {
+    tz_throw(TZ_RANGE_ERROR, "toString() radix argument must be between 2 and 36");
+    *out = tz_str_from_ascii("", 0);
+    return;
+  }
+  if (radix == 10 || isnan(x) || isinf(x)) {
+    tz_str_from_f64(out, x);
+    return;
+  }
+  static const char chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+  // 1100 digits of an integer part at most (2^1024 in base 2), as many of a fraction.
+  enum { SIZE = 2200 };
+  char buffer[SIZE];
+  int integer_cursor = SIZE / 2, fraction_cursor = SIZE / 2;
+  int negative = x < 0;
+  if (negative)
+    x = -x;
+  double integer = floor(x), fraction = x - integer;
+  // The fraction has digits only to the precision of the double.
+  double delta = 0.5 * (next_up(x) - x);
+  if (delta < next_up(0.0))
+    delta = next_up(0.0);
+  if (fraction >= delta) {
+    buffer[fraction_cursor++] = '.';
+    do {
+      fraction *= (double)radix;
+      delta *= (double)radix;
+      int digit = (int)fraction;
+      buffer[fraction_cursor++] = chars[digit];
+      fraction -= digit;
+      // Round to even, carrying into the digits before.
+      if ((fraction > 0.5 || (fraction == 0.5 && (digit & 1))) && fraction + delta > 1) {
+        for (;;) {
+          --fraction_cursor;
+          if (fraction_cursor == SIZE / 2) {
+            integer += 1; // into the integer part
+            break;
+          }
+          char c = buffer[fraction_cursor];
+          int d = c > '9' ? c - 'a' + 10 : c - '0';
+          if (d + 1 < radix) {
+            buffer[fraction_cursor++] = chars[d + 1];
+            break;
+          }
+        }
+        break;
+      }
+    } while (fraction >= delta);
+  }
+  // The integer digits; those below the precision of the double are zero.
+  while (radix_exponent(integer / (double)radix) > 0) {
+    integer /= (double)radix;
+    buffer[--integer_cursor] = '0';
+  }
+  do {
+    double remainder = fmod(integer, (double)radix);
+    buffer[--integer_cursor] = chars[(int)remainder];
+    integer = (integer - remainder) / (double)radix;
+  } while (integer > 0);
+  if (negative)
+    buffer[--integer_cursor] = '-';
+  *out = tz_str_from_ascii(buffer + integer_cursor, (size_t)(fraction_cursor - integer_cursor));
+}
+
 //===----------------------------------------------------------------------===//
 // The shortest digits of a double
 //===----------------------------------------------------------------------===//

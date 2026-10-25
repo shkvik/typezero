@@ -1,0 +1,10 @@
+final 4
+destroy true
+"1\n2\n3\ndone\n" true
+line "one" utf8
+line "two" utf8
+size 100
+data xxx
+echo ping
+echo pong
+end

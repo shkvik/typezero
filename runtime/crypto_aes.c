@@ -159,7 +159,8 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
   else
     failed = (c->decrypt ? CRYPTO_gcm128_decrypt : CRYPTO_gcm128_encrypt)(gcm, in, out, length);
   if (failed) {
-    tz_throw(TZ_ERROR, "Trying to add data in unsupported state");
+    if (!c->quiet)
+      tz_throw(TZ_ERROR, "Trying to add data in unsupported state");
     return -1;
   }
   return (int64_t)length;
@@ -186,7 +187,8 @@ static int64_t gcm_final(TzCipher *c, uint8_t *out) {
     ok = 1;
   }
   if (!ok) {
-    tz_throw(TZ_ERROR, "Unsupported state or unable to authenticate data");
+    if (!c->quiet)
+      tz_throw(TZ_ERROR, "Unsupported state or unable to authenticate data");
     return -1;
   }
   return 0;

@@ -279,11 +279,36 @@ llvm::Value *CodeGen::emitNumberBuiltin(CallExpr *call) {
     emitThrowCheckIf(!units); // a code point out of range
     return text;
   }
+  case Builtin::UriEncodeComponent:
+  case Builtin::UriEncode:
+  case Builtin::UriDecodeComponent:
+  case Builtin::UriDecode: {
+    llvm::StringRef name = call->builtin == Builtin::UriEncodeComponent ? "tz_uri_encode_component"
+                           : call->builtin == Builtin::UriEncode        ? "tz_uri_encode"
+                           : call->builtin == Builtin::UriDecodeComponent
+                               ? "tz_uri_decode_component"
+                               : "tz_uri_decode";
+    llvm::Type *ptr = builder_.getPtrTy();
+    Operand text = emitOperand(call->args[0], /*canBorrow=*/true);
+    llvm::Value *result = callReturningString(
+        processFunction(name, builder_.getVoidTy(), {ptr, ptr, builder_.getInt64Ty()}),
+        {stringObj(text.value), stringMeta(text.value)});
+    dropOperand(text);
+    emitThrowCheck(); // URIError: URI malformed
+    return result;
+  }
   case Builtin::NumToFixed: {
     llvm::Value *x = emitExpr(cast<MemberExpr>(call->callee)->object);
     llvm::Value *digits = hasArg ? emitExpr(call->args[0]) : builder_.getInt64(0);
     llvm::Value *text = callReturningString(rt_.numToFixed, {x, digits});
     emitThrowCheckIf(hasArg); // digits out of range
+    return text;
+  }
+  case Builtin::NumToRadix: {
+    llvm::Value *x = emitExpr(cast<MemberExpr>(call->callee)->object);
+    llvm::Value *radix = emitExpr(call->args[0]);
+    llvm::Value *text = callReturningString(rt_.numToRadix, {x, radix});
+    emitThrowCheck(); // a radix out of range
     return text;
   }
   default:

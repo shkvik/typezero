@@ -19,7 +19,7 @@ set(sources alloc.c tzrt.c string.c array.c inspect.c number.c math.c unicode.c 
             process.c object.c decimal.c regex.c regex_compile.c json.c error.c date.c
             date_parse.c date_zone.c date_format.c icu.c intl.c intl_number.c intl_text.c
             intl_names.c path.c fs.c child.c os.c map.c async.c io.c signal.c bytes.c buffer.c
-            unknown.c meta.c library.c reflect.c net.c http.c decompress.c group.c)
+            unknown.c meta.c library.c reflect.c net.c http.c decompress.c group.c cjk.c stream.c)
 # What fetch decodes with (decompress.c): zlib's inflate and brotli's
 # decoder, built as they come, without their warnings.
 set(third_party ${PROJECT_SOURCE_DIR}/third_party)
@@ -110,7 +110,10 @@ set(crypto_parts
   "crypto_argon2 crypto_argon2.c"
   "crypto_evp crypto_evp.c"
   "crypto_keys crypto_keys.c"
-  "crypto_x509 crypto_x509.c")
+  "crypto_x509 crypto_x509.c"
+  "crypto_subtle crypto_subtle.c"
+  "crypto_subtle_kw crypto_subtle_kw.c"
+  "crypto_subtle_keys crypto_subtle_keys.c")
 set(crypto_dir ${CMAKE_CURRENT_BINARY_DIR}/crypto)
 file(MAKE_DIRECTORY ${crypto_dir})
 set(crypto_objects)
@@ -147,5 +150,6 @@ add_custom_command(OUTPUT ${TZ_OUTPUT_DIR}/tzcrypto.lib
 add_custom_target(tzrt DEPENDS ${TZ_OUTPUT_DIR}/tzrt.bc ${TZ_OUTPUT_DIR}/tzrt.lib
                                ${TZ_OUTPUT_DIR}/tzcrypto.lib
   SOURCES ${sources} tzrt.h unicode_tables.h gen_unicode_tables.mjs regex.h regex_tables.h
-          gen_regex_tables.mjs date.h icu.h intl.h encodings.h gen_encodings.mjs
+          gen_regex_tables.mjs date.h icu.h intl.h encodings.h gen_encodings.mjs cjk_tables.h
+          gen_cjk_tables.mjs
           number_tables.h gen_number_tables.mjs ${crypto_sources} crypto.h net.h)

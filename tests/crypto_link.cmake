@@ -13,12 +13,21 @@ file(WRITE ${DIR}/full.ts
      "import { createHash } from \"node:crypto\"\n"
      "const name: string = process.argv[2] ?? \"sha256\"\n"
      "console.log(createHash(name).update(\"abc\").digest(\"hex\"))\n")
+# Web Crypto (src/lib/webcrypto.ts): HMAC with its algorithm in a constant, as hono signs cookies,
+# needs only the direct layer; an ECDSA key, all of OpenSSL.
+file(WRITE ${DIR}/subtle_direct.ts
+     "const algorithm = { name: \"HMAC\", hash: \"SHA-256\" }\n"
+     "const key = await crypto.subtle.importKey(\"raw\", new Uint8Array(8), algorithm, false, [\"sign\"])\n"
+     "console.log((await crypto.subtle.sign(algorithm.name, key, new Uint8Array(1))).byteLength)\n")
+file(WRITE ${DIR}/subtle_full.ts
+     "const pair = await crypto.subtle.generateKey({ name: \"ECDSA\", namedCurve: \"P-256\" }, false, [\"sign\"])\n"
+     "console.log(pair.privateKey.type)\n")
 
 function(fail message)
   message(FATAL_ERROR "${message}")
 endfunction()
 
-foreach(name plain direct full)
+foreach(name plain direct full subtle_direct subtle_full)
   execute_process(COMMAND ${TZ} build -o ${DIR}/${name}.exe ${DIR}/${name}.ts
                   RESULT_VARIABLE result ERROR_VARIABLE errors)
   if(result)
@@ -51,10 +60,21 @@ if(full_size LESS 2000000)
   fail("a hash named by a value is ${full_size} bytes: it should link all of OpenSSL")
 endif()
 
+execute_process(COMMAND ${DIR}/subtle_direct.exe OUTPUT_VARIABLE out)
+if(NOT out STREQUAL "32\n")
+  fail("subtle_direct.exe printed '${out}'")
+endif()
+if(subtle_direct_size GREATER 1000000)
+  fail("HMAC of crypto.subtle is ${subtle_direct_size} bytes: it should take the direct layer")
+endif()
+if(subtle_full_size LESS 2000000)
+  fail("ECDSA of crypto.subtle is ${subtle_full_size} bytes: it should link all of OpenSSL")
+endif()
+
 if(plain_licenses MATCHES "OpenSSL")
   fail("tz licenses names OpenSSL in a program without it:\n${plain_licenses}")
 endif()
-foreach(name direct full)
+foreach(name direct full subtle_direct subtle_full)
   if(NOT ${name}_licenses MATCHES "OpenSSL [0-9.]+: the cryptography of node:crypto \\(Apache License 2.0\\)")
     fail("tz licenses does not name OpenSSL in ${name}.exe:\n${${name}_licenses}")
   endif()
@@ -65,4 +85,5 @@ endforeach()
 if(NOT plain_licenses MATCHES "Node.js: .*\\(MIT\\).*V8: .*\\(BSD-3-Clause\\)")
   fail("tz licenses does not name the parts of the runtime:\n${plain_licenses}")
 endif()
-message(STATUS "plain ${plain_size}, direct ${direct_size}, full ${full_size} bytes")
+message(STATUS "plain ${plain_size}, direct ${direct_size}, full ${full_size}, subtle_direct "
+               "${subtle_direct_size}, subtle_full ${subtle_full_size} bytes")

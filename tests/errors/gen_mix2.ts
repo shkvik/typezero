@@ -1,0 +1,51 @@
+// Writes through a wider type that pass through the built-in modules and
+// through errors (tests/run/gen_mix2.ts has the reads that are allowed): a
+// listener of an emitter that puts another Animal into the array it gets,
+// and an error whose narrowed field a `catch` (or the callback of a
+// promise's `catch`) changes after it was thrown or rejected.
+import { EventEmitter } from "node:events"
+
+class Animal {
+  constructor(public name: string) {}
+}
+class Dog extends Animal {}
+class Cat extends Animal {}
+
+class Zoo extends EventEmitter<{ show: [all: Animal[]] }> {
+  show(all: Animal[]) {
+    this.emit("show", all)
+  }
+}
+const dogs: Dog[] = [new Dog("Rex")]
+const zoo = new Zoo()
+zoo.on("show", (all) => all.push(new Cat("Tom")))
+// expect-error: 'Dog[]' cannot go where 'Animal[]' is expected here: line 21 puts a 'Cat' into it
+zoo.show(dogs)
+
+class PetError extends Error {
+  constructor(public pet: Animal) {
+    super("pet")
+  }
+}
+class DogError extends PetError {
+  constructor(public pet: Dog) {
+    super(pet)
+  }
+}
+function fail(e: PetError) {
+  throw e
+}
+try {
+  // expect-error: writes a 'Cat' to its field 'pet', which is a 'Dog' in 'DogError'
+  fail(new DogError(new Dog("Ace")))
+} catch (e) {
+  if (e instanceof PetError) e.pet = new Cat("Tim")
+}
+
+function rejectWith(e: PetError): Promise<void> {
+  return Promise.reject(e)
+}
+// expect-error: writes a 'Cat' to its field 'pet', which is a 'Dog' in 'DogError'
+await rejectWith(new DogError(new Dog("Max"))).catch((e) => {
+  if (e instanceof PetError) e.pet = new Cat("Sam")
+})

@@ -204,8 +204,8 @@ int tz_error_base_field(const TzField *field) {
 // "HttpError"`), which is a key of the object in JavaScript: a name that is
 // not the one of a built-in class.
 int tz_error_named(const void *error) {
-  static const char *const builtins[] = {"Error", "TypeError", "RangeError", "SyntaxError",
-                                         "SystemError"};
+  static const char *const builtins[] = {"Error",    "TypeError",  "RangeError", "SyntaxError",
+                                         "URIError", "SystemError"};
   TzBuf name;
   tz_buf_init(&name);
   tz_buf_str(&name, *field_str(error, tz_error_info.name_offset));

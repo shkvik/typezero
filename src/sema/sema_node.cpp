@@ -85,8 +85,9 @@ const llvm::StringLiteral kChildExports[] = {"ChildProcess", "_forkChild",   "ex
                                              "execFile",     "execFileSync", "execSync",
                                              "fork",         "spawn",        "spawnSync"};
 // What node:process gives that tz has: the properties of process it has.
-const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",   "exitCode", "cwd",
-                                             "platform", "execPath", "stdout", "stderr"};
+const llvm::StringLiteral kProcessNames[] = {"argv",     "env",      "exit",  "exitCode",
+                                             "cwd",      "platform", "execPath", "stdin",
+                                             "stdout",   "stderr"};
 
 // The modules tz has, by the name after "node:".
 std::optional<NodeModule> moduleOf(llvm::StringRef path) {
@@ -260,7 +261,7 @@ std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringR
     if (llvm::is_contained(kProcessNames, name))
       return "";
     return what + " is not supported yet; tz has: argv, env, exit, exitCode, cwd, platform, "
-                  "execPath, stdout and stderr";
+                  "execPath, stdin, stdout and stderr";
   case NodeModule::Buffer:
     if (name == "Buffer")
       return "";

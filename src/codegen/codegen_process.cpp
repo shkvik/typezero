@@ -82,6 +82,15 @@ llvm::Value *CodeGen::emitProcessBuiltin(CallExpr *call) {
   case Builtin::ProcessStdoutWrite:
   case Builtin::ProcessStderrWrite: {
     bool toStdout = call->builtin == Builtin::ProcessStdoutWrite;
+    if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
+      // The bytes of a Buffer or a Uint8Array, as they are (runtime/stream.c).
+      Operand bytes = emitOperand(call->args[0], /*canBorrow=*/true);
+      builder_.CreateCall(processFunction("tz_lib_std_write", builder_.getVoidTy(),
+                                          {i32, builder_.getPtrTy()}),
+                          {builder_.getInt32(toStdout ? 1 : 2), bytes.value});
+      dropOperand(bytes);
+      return builder_.getTrue();
+    }
     Operand text = emitOperand(call->args[0], /*canBorrow=*/true);
     llvm::Value *written =
         builder_.CreateCall(processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),

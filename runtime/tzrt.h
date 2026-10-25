@@ -819,6 +819,12 @@ void tz_lib_class_name(TzStr *out, const void *o, void *(*make)(const void *));
 int32_t tz_lib_pid(void *(*make)(const void *));
 // util.inspect of the unknown `u` (borrowed), a string quoted (inspect.c).
 void tz_lib_inspect(TzStr *out, const void *u, void *(*make)(const void *));
+// `__tz_chunk<T>(u)` of an unknown that holds no T (stream.c): ends the
+// program.
+TZ_COLD TZ_NORETURN void tz_lib_bad_chunk(const void *u, const char *type,
+                                          uint32_t type_length);
+// Whether the unknown `u` (borrowed) holds binary data of `kind` (TZ_BYTES_*).
+int32_t tz_lib_is_bytes(const void *u, int32_t kind);
 
 // Metadata (meta.c): records by key (an object key's address, or NULL and
 // the string), target and property (has_property unset for none). Values
@@ -881,6 +887,11 @@ void tz_reflect_init(TzClass *const *classes, uint32_t count, const TzInvokerEnt
 // array of any values (borrowed).
 void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count);
 void *tz_reflect_construct(const TzClass *cls, const TzArray *args);
+// Reflect.construct(C, args) of a class known when compiling: its function
+// `construct` (as TzClassInfo has it) makes the object from the array of
+// any values (borrowed), without the description of the class.
+void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count),
+                      const TzArray *args);
 // Reflect.get(target, key): a field as an unknown, a method as a function,
 // or undefined (NULL); a target that is no object is a TypeError.
 void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta);
@@ -910,6 +921,13 @@ int32_t tz_unknown_to_box(const void *u, const TzType *type, void *out);
 // The layout of the object of the language an unknown holds; NULL for
 // undefined and a value in a box.
 const TzLayout *tz_unknown_layout(const void *u);
+// What tells the variants of a method apart when the program chooses one
+// (docs/overloads.md, section 6): the kind (TZ_T_*) of the value an unknown
+// holds in a box, 0 for undefined and an object of the language; whether it
+// holds a box of exactly `type` (of a Json, any Json), as tz_unknown_to_box
+// takes it.
+uint32_t tz_unknown_box_kind(const void *u);
+int32_t tz_unknown_holds(const void *u, const TzType *type);
 
 //===----------------------------------------------------------------------===//
 // Regular expressions (regex.c)
@@ -1004,7 +1022,7 @@ typedef struct {
 
 // The kinds of errors the runtime throws, numbered as kErrorKinds in
 // src/ast/ast.h.
-enum { TZ_ERROR = 0, TZ_TYPE_ERROR = 1, TZ_RANGE_ERROR = 2, TZ_SYNTAX_ERROR = 3 };
+enum { TZ_ERROR = 0, TZ_TYPE_ERROR = 1, TZ_RANGE_ERROR = 2, TZ_SYNTAX_ERROR = 3, TZ_URI_ERROR = 4 };
 
 // A place an error passed on its way up: a function, and where in which file.
 // The compiler emits one constant for each call and throw that may throw
@@ -1378,6 +1396,39 @@ void tz_buf_bytes_join(TzBuf *out, const TzBytes *b, const TzBuf *sep);
 // first `max` bytes, and how many more there are.
 void tz_buf_bytes_hex(TzBuf *out, const uint8_t *data, int64_t length, int64_t max,
                       const char *more);
+// A multi-byte encoding of TextDecoder (cjk.c): which decoder of the WHATWG
+// Encoding Standard, and the indexes it reads, each the code points of the
+// pointers from `first` on (0 for none). A Big5 code point is U+2xxxx where
+// its bit in `astral` is set. EUC-JP has jis0212 as its second index; gb18030
+// (and gbk) has its ranges, pairs of a pointer and a code point. `decode` is
+// tz_cjk_decode, which a program gets only with an encoding it names.
+enum {
+  TZ_CJK_KIND_GB18030,
+  TZ_CJK_KIND_BIG5,
+  TZ_CJK_KIND_EUC_JP,
+  TZ_CJK_KIND_ISO_2022_JP,
+  TZ_CJK_KIND_SHIFT_JIS,
+  TZ_CJK_KIND_EUC_KR,
+};
+typedef struct TzCjkEncoding {
+  const char *name;
+  int32_t kind;
+  uint32_t first, count;
+  const uint16_t *table;
+  const uint8_t *astral;
+  uint32_t first2, count2;
+  const uint16_t *table2;
+  const uint32_t *ranges;
+  uint32_t range_count;
+  int32_t (*decode)(const struct TzCjkEncoding *encoding, uint32_t *state, TzBuf *out,
+                    const uint8_t *data, int64_t length, int32_t stream, int32_t fatal);
+} TzCjkEncoding;
+// Appends the text of `length` bytes to `out`, going on from `state` (four
+// words, zero at the start of a stream) and leaving it there; unless
+// `stream`, the bytes end the stream. Returns 0 at the first error when
+// `fatal`, 1 otherwise.
+int32_t tz_cjk_decode(const TzCjkEncoding *encoding, uint32_t *state, TzBuf *out,
+                      const uint8_t *data, int64_t length, int32_t stream, int32_t fatal);
 // The text of a TextDecoder's encoding, its `encoding` property.
 const char *tz_text_decoder_name(const void *decoder);
 // Whether a TextDecoder is fatal, and whether it ignores the BOM.

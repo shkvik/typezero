@@ -216,6 +216,18 @@ void *tz_reflect_construct(const TzClass *cls, const TzArray *args) {
   return result;
 }
 
+void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count),
+                      const TzArray *args) {
+  void *small[8];
+  void **values = args->length <= 8 ? small : (void **)tz_alloc(args->length * sizeof(void *));
+  as_unknowns(args, values);
+  void *result = construct(values, args->length);
+  release_unknowns(values, args->length);
+  if (values != small)
+    tz_free(values);
+  return result;
+}
+
 //===----------------------------------------------------------------------===//
 // Reflect.get
 //===----------------------------------------------------------------------===//
@@ -390,4 +402,14 @@ int32_t tz_unknown_to_box(const void *u, const TzType *type, void *out) {
 // and a value in a box.
 const TzLayout *tz_unknown_layout(const void *u) {
   return u && !as_box(u) ? ((const TzInstance *)u)->layout : NULL;
+}
+
+uint32_t tz_unknown_box_kind(const void *u) {
+  const TzBox *box = as_box(u);
+  return box ? box->type->kind : 0;
+}
+
+int32_t tz_unknown_holds(const void *u, const TzType *type) {
+  const TzBox *box = as_box(u);
+  return box && (box->type == type || (type->kind == TZ_T_JSON && box->type->kind == TZ_T_JSON));
 }

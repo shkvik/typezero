@@ -600,6 +600,11 @@ const Type *Sema::peekType(const Expr *expr, const DestinationScan &scan) const 
   if (auto *name = dyn_cast<NameExpr>(expr))
     return name->name == scan.name ? nullptr : peekName(name->name, scan);
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
+    // `crypto.subtle`: the SubtleCrypto of tz:webcrypto, whose methods take algorithms.
+    if (member->name == "subtle" && isGlobalName(member->object, "crypto")) {
+      VarSymbol *subtle = lookup(kSubtleName).var;
+      return subtle ? subtle->type : nullptr;
+    }
     const Type *object = peekType(member->object, scan);
     object = object ? object->nonOptional() : nullptr;
     if (object && object->isRecord()) // `r.key`

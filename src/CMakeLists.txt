@@ -51,9 +51,11 @@ add_executable(tz
   sema/parallel.cpp
   sema/sema_async_io.cpp
   sema/sema_events.cpp
+  sema/sema_stream.cpp
   sema/sema_crypto.cpp
   sema/sema_library.cpp
   sema/sema_weak.cpp
+  sema/sema_webcrypto.cpp
   codegen/codegen.cpp
   codegen/codegen_array.cpp
   codegen/codegen_builtins.cpp
@@ -85,6 +87,7 @@ add_executable(tz
   codegen/codegen_async_io.cpp
   codegen/codegen_async_iter.cpp
   codegen/codegen_events.cpp
+  codegen/codegen_stream.cpp
   codegen/codegen_crypto.cpp
   codegen/codegen_library.cpp
   driver/driver.cpp
@@ -132,6 +135,8 @@ add_dependencies(tz tzrt)
 
 # The built-in modules written in tz go next to tz, where the loader reads
 # them (src/driver/loader.cpp); copied again whenever they change.
-foreach(file lib/events.ts lib/web.ts lib/url.ts lib/fetch.ts lib/http.ts)
+foreach(file lib/events.ts lib/web.ts lib/url.ts lib/fetch.ts lib/http.ts lib/webcrypto.ts
+             lib/stream.ts lib/stream_promises.ts lib/stream_consumers.ts lib/string_decoder.ts
+             lib/fs_stream.ts)
   configure_file(${file} ${TZ_OUTPUT_DIR}/${file} COPYONLY)
 endforeach()

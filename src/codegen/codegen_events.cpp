@@ -56,6 +56,16 @@ llvm::Value *CodeGen::emitLibBuiltin(CallExpr *call) {
     phi->addIncoming(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr)), dropEnd);
     return phi;
   }
+  case Builtin::LibChunk:
+  case Builtin::LibIsChunk:
+  case Builtin::LibOverrides:
+  case Builtin::LibFsOpen:
+  case Builtin::LibFsRead:
+  case Builtin::LibFsWrite:
+  case Builtin::LibFsClose:
+  case Builtin::LibStdinChunk:
+  case Builtin::LibStdWrite:
+    return emitStreamBuiltin(call);
   case Builtin::LibNativeSignal: {
     // The runtime's side of the signal, retained, or null for undefined.
     const Type *type = call->args[0]->type;

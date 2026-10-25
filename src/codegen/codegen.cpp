@@ -230,6 +230,7 @@ void CodeGen::declareRuntime() {
   rt_.parseInt = declare("tz_parse_int", f64, {ptr, i64, i32});
   rt_.parseFloat = declare("tz_parse_float", f64, {ptr, i64});
   rt_.numToFixed = declare("tz_num_to_fixed", voidTy, {ptr, f64, i64});
+  rt_.numToRadix = declare("tz_num_to_radix", voidTy, {ptr, f64, i64});
 
   // String functions take strings as (obj, meta) pairs and return them
   // through a pointer passed first.
@@ -2144,10 +2145,12 @@ llvm::Value *CodeGen::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::Value 
                  op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
   if (isFloat && bitwise) {
     // `x |= v` where x is a double: on 32-bit integers, as in JavaScript (Sema
-    // made v an int), and the result goes back as a double.
+    // made v an int), and the result goes back as a double; that of `>>>=`
+    // is unsigned.
     llvm::Value *result =
         emitArithmetic(op, builder_.CreateCall(rt_.toInt32, {lhs}), rhs, Type::intTy());
-    return builder_.CreateSIToFP(result, lhs->getType());
+    return op == BinaryOp::UShr ? builder_.CreateUIToFP(result, lhs->getType())
+                                : builder_.CreateSIToFP(result, lhs->getType());
   }
   if (bitwise && lhs->getType() != rhs->getType()) {
     // `x |= v` where x is a long and v an int: on 32-bit integers too (Sema
@@ -2426,7 +2429,12 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
   case Builtin::IsSafeInteger:
   case Builtin::FromCharCode:
   case Builtin::FromCodePoint:
+  case Builtin::UriEncodeComponent:
+  case Builtin::UriEncode:
+  case Builtin::UriDecodeComponent:
+  case Builtin::UriDecode:
   case Builtin::NumToFixed:
+  case Builtin::NumToRadix:
     return emitNumberBuiltin(call);
   case Builtin::None:
     break;
@@ -2447,6 +2455,7 @@ llvm::Value *CodeGen::emitCall(CallExpr *call) {
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:
   case Builtin::FromJsonClass:
+  case Builtin::ReflectMethod:
     return emitReflectCall(call);
   case Builtin::ArrForEach:
   case Builtin::ArrMap:
@@ -3027,7 +3036,11 @@ llvm::Value *CodeGen::emitMember(MemberExpr *member) {
     return emitBoundMethod(member);
   if (member->object->type->nonOptional()->isJson())
     return emitJsonMember(member);
-  if (member->object->type->isBytes())
+  // A union of binary data too, whose members keep the length alike.
+  const Type *objectType = member->object->type;
+  if (objectType->isBytes() ||
+      (objectType->isUnion() &&
+       llvm::all_of(objectType->members(), [](const Type *m) { return m->isBytes(); })))
     return emitBytesMember(member);
   if (member->object->type->isObject() || member->object->type->isUnion())
     return emitFieldRead(member);

@@ -1,0 +1,98 @@
+CryptoKey {
+  type: 'private',
+  extractable: true,
+  algorithm: { name: 'ECDSA', namedCurve: 'P-256' },
+  usages: [ 'sign' ]
+} { name: 'ECDSA', namedCurve: 'P-256' }
+ecdsa 64 true
+ecdsa other hash false
+{
+  key_ops: [ 'sign' ],
+  ext: true,
+  kty: 'EC',
+  x: 'uWIM2JbLJ21D4deDZ4pLWk7ZvpnBMyYhxIGbcRcen1U',
+  y: 'sQRlYorTbSKstwQqsy8PKTT_cfCiEDKT6imQK7X1U1E',
+  crv: 'P-256',
+  d: 'oN9C2OR5_7yJBJoC5shMWHOcuJoLwE2eSVf61squ5A0'
+}
+04b9620cd896cb276d43e1d783678a4b5a4ed9be99c1332621c4819b71171e9f55b10465628ad36d22acb7042ab32f0f2934ff71f0a2103293ea29902bb5f55351
+true
+true
+ed25519 65de010929a50a05ce8a82938d598a9af0680a9c6fdf0a820745d3affaf90b865bedf658646c055f02d1e810deb46b64f5a558bc1562da08634e6efce950a70e
+true false
+{
+  key_ops: [ 'sign' ],
+  ext: true,
+  alg: 'Ed25519',
+  crv: 'Ed25519',
+  d: 'y4oDR01e2B3CeMWoLfDUx4GfuEyob7ZQE5lOpoMx3H8',
+  x: 'QtnFfC6wvYbVATYWrpuFGQCymTTuLxerB-YwpIwITDU',
+  kty: 'OKP'
+} {
+  key_ops: [ 'verify' ],
+  ext: true,
+  alg: 'Ed25519',
+  crv: 'Ed25519',
+  x: 'QtnFfC6wvYbVATYWrpuFGQCymTTuLxerB-YwpIwITDU',
+  kty: 'OKP'
+}
+42d9c57c2eb0bd86d5013616ae9b851900b29934ee2f17ab07e630a48c084c35
+CryptoKey {
+  type: 'public',
+  extractable: true,
+  algorithm: {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 1024,
+    publicExponent: [Uint8Array],
+    hash: [Object]
+  },
+  usages: [ 'verify' ]
+}
+pkcs1 6fdf1efcacca0b69ba0deb4af50a9c95d1533753f7ba90c5be3ec1236b92c7a0f4dfc48f1737a15b730a23d667f840ed90bff36d285616be87f99c0d8ebd4e74dcc27e7b4065e1fe461d6d90f37106bff9e5d78d8d98f6dd4a8351a298c0baf474298a7b5dec00e428194ba83b78531dff28ff402d7ff702ac0fb5f1aa8c9e6d
+true
+pss 128 true false
+oaep 128 the data
+OperationError The operation failed for an operation-specific reason
+{
+  key_ops: [ 'verify' ],
+  ext: true,
+  alg: 'RS256',
+  kty: 'RSA',
+  n: '7m2f_6MCFG6EpMV22Ac2JgQmDqlUZad3xOkQaF2k6oNcXIvnCXzWh-cnHq4wFmVVhTONnD4p8xGIWbfIoVhNHT-uPz99W_62DKv1mWgaqEJns5Lra-4as4nlgKHKfHjNbbLdT4q6KRBdnpsFL9mWvSCcFGIcelbncqOAe9pVriE',
+  e: 'AQAB'
+}
+ecdh 85f14729840566c6fa67d08ddfb5868e2eae7fb31067feb5f98e8e9893a1205b
+ecdh 85f14729840566c6fa67d08ddfb5868e2eae7fb31067feb5f98e8e9893a1205b
+ecdh 100 85f14729840566c6fa67d08dd0
+x25519 8251c3a6f68ddb62bcf1c24775e994a3d5230def5f1825b1df5ab7b24de54817
+x25519 8251c3a6f68ddb62bcf1c24775e994a3d5230def5f1825b1df5ab7b24de54817
+{
+  key_ops: [],
+  ext: true,
+  crv: 'X25519',
+  x: 'Z0GXO3a0-XVZOzvI1WR7eLpDrChf77y6LuMUJaaWtzI',
+  kty: 'OKP'
+}
+CryptoKey {
+  type: 'secret',
+  extractable: true,
+  algorithm: { name: 'AES-GCM', length: 128 },
+  usages: [ 'encrypt' ]
+} 85f14729840566c6fa67d08ddfb5868e
+true private P-521 [ 'key_ops', 'ext', 'kty', 'x', 'y', 'crv' ]
+132 true
+true OKP [ 'key_ops', 'ext', 'alg', 'crv', 'd', 'x', 'kty' ]
+true
+{
+  name: 'RSA-PSS',
+  modulusLength: 1024,
+  publicExponent: Uint8Array(3) [ 1, 0, 1 ],
+  hash: { name: 'SHA-256' }
+} PS256 12
+true
+OperationError The operation failed for an operation-specific reason
+ECDSA 241
+Ed25519 48
+X25519 48
+true
+true

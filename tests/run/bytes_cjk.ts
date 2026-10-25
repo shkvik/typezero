@@ -1,0 +1,107 @@
+// same-as-node
+// The multi-byte encodings of TextDecoder (docs/bytes.md, section 5): gbk,
+// gb18030, big5, euc-jp, iso-2022-jp, shift_jis and euc-kr, as the WHATWG
+// Encoding Standard decodes them; a broken sequence is U+FFFD, a fatal
+// decoder throws a TypeError, and `{ stream: true }` goes on in the next
+// call, also inside a character. Only what node decodes the same way is
+// here: node decodes some bytes of big5, euc-jp, shift_jis and euc-kr as ICU
+// does, not as the standard (tests/run/bytes_cjk_whatwg.ts).
+
+const digits = "0123456789abcdef"
+function hex(s: string): string {
+  const out: string[] = []
+  for (let i = 0; i < s.length; i++) {
+    let c = s.charCodeAt(i)
+    let h = ""
+    do {
+      h = digits.charAt(c & 15) + h
+      c = c >> 4
+    } while (c > 0)
+    out.push(h)
+  }
+  return out.join(" ")
+}
+function show(name: string, bytes: Uint8Array) {
+  const text = new TextDecoder(name).decode(bytes)
+  console.log(name, JSON.stringify(text), hex(text))
+}
+
+// Text.
+show("gbk", new Uint8Array([0xd6, 0xd0, 0xce, 0xc4, 0x20, 0xba, 0xba, 0xd7, 0xd6, 0x80]))
+show("gb18030", new Uint8Array([0xd6, 0xd0, 0x81, 0x30, 0x81, 0x30, 0x84, 0x31, 0xa4, 0x39]))
+show("gb18030", new Uint8Array([0x94, 0x39, 0xfc, 0x36, 0x81, 0x30, 0x89, 0x38, 0xa8, 0xa6]))
+show("big5", new Uint8Array([0xa4, 0xa4, 0xa4, 0xe5, 0x20, 0xc1, 0x63, 0xc5, 0xe9, 0xa1, 0x40]))
+show("euc-jp", new Uint8Array([0xc6, 0xfc, 0xcb, 0xdc, 0xb8, 0xec, 0x8e, 0xb1, 0xa4, 0xa2]))
+show("euc-jp", new Uint8Array([0x8f, 0xb0, 0xa1, 0x8f, 0xa2, 0xb7, 0x41]))
+show("iso-2022-jp", new Uint8Array([0x1b, 0x24, 0x42, 0x46, 0x7c, 0x4b, 0x5c, 0x1b, 0x28, 0x42, 0x21]))
+show("iso-2022-jp", new Uint8Array([0x1b, 0x28, 0x4a, 0x5c, 0x7e, 0x1b, 0x28, 0x49, 0x31, 0x5f, 0x1b, 0x28, 0x42]))
+show("shift_jis", new Uint8Array([0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0xb1, 0x82, 0xa0, 0x81, 0x40]))
+show("euc-kr", new Uint8Array([0xc7, 0xd1, 0xb1, 0xb9, 0xbe, 0xee, 0x20, 0xb0, 0xa1, 0xa1, 0xa1]))
+
+// Broken sequences: a leading byte at the end, a byte that cannot follow it
+// (an ASCII one starts over), a byte that leads nothing.
+show("gbk", new Uint8Array([0x41, 0xd6]))
+show("gbk", new Uint8Array([0xd6, 0x41, 0xff, 0x42]))
+show("gb18030", new Uint8Array([0x81, 0x30, 0x41, 0x81, 0x30, 0x81, 0x7f, 0x84, 0x32, 0xa4, 0x39]))
+show("gb18030", new Uint8Array([0xe3, 0x32, 0x9a, 0x36, 0xfe, 0x39, 0xfe, 0x39, 0x81]))
+show("big5", new Uint8Array([0xa4, 0x20, 0xa4, 0x7f, 0xa4]))
+show("euc-jp", new Uint8Array([0xc6, 0x41, 0x8e, 0x41, 0xff, 0xc6]))
+show("iso-2022-jp", new Uint8Array([0x1b, 0x24, 0x42, 0x46, 0x1b, 0x28, 0x42, 0x0e, 0x80, 0x1b, 0x28, 0x58, 0x41]))
+show("iso-2022-jp", new Uint8Array([0x1b, 0x24, 0x42, 0x1b, 0x28, 0x42, 0x41, 0x1b, 0x24, 0x42, 0x46]))
+show("shift_jis", new Uint8Array([0x93, 0x20, 0xff, 0xa0, 0x93]))
+show("euc-kr", new Uint8Array([0xc7, 0x20, 0xc7, 0xff, 0xff, 0xc7]))
+
+// A fatal decoder throws at the first broken sequence.
+const broken = [
+  { name: "gbk", bad: 0xd6 },
+  { name: "big5", bad: 0xa4 },
+  { name: "euc-jp", bad: 0xc6 },
+  { name: "iso-2022-jp", bad: 0x1b },
+  { name: "shift_jis", bad: 0x93 },
+  { name: "euc-kr", bad: 0xc7 },
+]
+for (const { name, bad } of broken) {
+  const decoder = new TextDecoder(name, { fatal: true })
+  try {
+    console.log(decoder.fatal, decoder.decode(new Uint8Array([0x41, bad & 0xff])))
+  } catch (e) {
+    console.log(String(e))
+  }
+  console.log(decoder.decode(new Uint8Array([0x42])))
+}
+
+// A stream: each chunk gives the characters it ends.
+function chunks(name: string, parts: int[][]) {
+  const decoder = new TextDecoder(name)
+  const out: string[] = []
+  for (const part of parts) out.push(decoder.decode(Uint8Array.from(part, x => x & 0xff), { stream: true }))
+  out.push(decoder.decode())
+  console.log(name, JSON.stringify(out))
+}
+chunks("gbk", [[0xd6], [0xd0, 0xce], [], [0xc4]])
+chunks("gb18030", [[0x81], [0x30], [0x81], [0x30, 0x94, 0x39], [0xfc, 0x36]])
+chunks("big5", [[0xa4], [0xa4, 0xa4], [0xe5]])
+chunks("euc-jp", [[0x8f], [0xb0], [0xa1, 0x8e], [0xb1, 0xc6], [0xfc]])
+chunks("iso-2022-jp", [[0x1b], [0x24], [0x42, 0x46], [0x7c, 0x1b, 0x28], [0x42, 0x41]])
+chunks("shift_jis", [[0x93], [0xfa, 0x96], [0x7b]])
+chunks("euc-kr", [[0xc7], [0xd1, 0xb1], [0xb9]])
+chunks("euc-kr", [[0xc7, 0xd1, 0xb1]])
+chunks("utf-8", [[0xef], [0xbb], [0xbf, 0xe2, 0x82], [0xac, 0xf0, 0x9f], [0x98, 0x80]])
+chunks("utf-8", [[0xe2, 0x82]])
+chunks("utf-16le", [[0xff], [0xfe, 0x41], [0x00, 0x3d, 0xd8], [0x00], [0xde]])
+chunks("utf-16be", [[0xd8, 0x3d], [0x00, 0x41]])
+chunks("windows-1251", [[0xcf], [0xf0, 0xe8]])
+
+// A decoder starts a new stream after a call without `stream`: its BOM is
+// dropped again.
+const again = new TextDecoder("utf-8")
+console.log(again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x61]), { stream: true }), again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x62])), again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x63])))
+console.log(JSON.stringify(new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x64]))))
+
+// Labels known only when the program runs: the program holds every table.
+const labels = ["GB2312", " gbk ", "x-gbk", "gb18030", "big5-hkscs", "EUC-JP", "csISO2022JP", "x-sjis", "ks_c_5601-1987", "windows-1252"]
+for (const label of labels) {
+  const decoder = new TextDecoder(label)
+  console.log(JSON.stringify(label), decoder.encoding, hex(decoder.decode(new Uint8Array([0xb0, 0xa1, 0x41]))))
+}
+console.log(new TextDecoder("SHIFT_JIS"))

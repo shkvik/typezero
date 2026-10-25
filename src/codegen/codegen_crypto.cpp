@@ -47,6 +47,13 @@ llvm::Value *CodeGen::emitCryptoCall(CallExpr *call) {
     params.push_back(ptr);
     args.push_back(out);
   }
+  // A job of Web Crypto settles the promise it gets later (runtime/crypto_subtle*.c).
+  llvm::Value *promise = nullptr;
+  if (fn.result == 'P') {
+    promise = newPromise(call->type->promised());
+    params.push_back(ptr);
+    args.push_back(promise);
+  }
   llvm::Value *null = llvm::ConstantPointerNull::get(builder_.getPtrTy());
   for (size_t i = 0; i < exprs.size(); ++i) {
     llvm::Value *v = values[i];
@@ -104,11 +111,19 @@ llvm::Value *CodeGen::emitCryptoCall(CallExpr *call) {
     }
   }
 
-  llvm::Type *ret = fn.result == 'o' || fn.result == 'p'                       ? ptr
-                    : fn.result == 'f' || fn.result == 't'                     ? f64
-                    : fn.result == 'v' || fn.result == 's' || fn.result == 'S' ? voidTy
-                                                                               : i32;
+  llvm::Type *ret = fn.result == 'o' || fn.result == 'p' ? ptr
+                    : fn.result == 'f' || fn.result == 't' ? f64
+                    : fn.result == 'v' || fn.result == 's' || fn.result == 'S' || fn.result == 'P'
+                        ? voidTy
+                        : i32;
   llvm::Value *result = builder_.CreateCall(processFunction(fn.name, ret, params), args);
+  if (promise) {
+    // It rejects the promise rather than throwing.
+    for (size_t i = 0; i < exprs.size(); ++i)
+      if (values[i])
+        releaseValue(values[i], exprs[i]->type);
+    return promise;
+  }
   // What the call gives back of its receiver (or first argument) keeps its reference.
   llvm::Value *self = nullptr;
   if (fn.result == 'S') {

@@ -336,7 +336,14 @@ void tz_work_queue(TzWork *w) {
     return;
   }
   if (!tz_io_threads) {
-    start_port();
+    // The sockets of net.c may have made the port already, and wait on it.
+#ifdef _WIN32
+    if (!tz_io_port)
+      start_port();
+#else
+    if (tz_io_pipe[0] < 0)
+      start_port();
+#endif
     start_pool();
   }
   push_work(w);

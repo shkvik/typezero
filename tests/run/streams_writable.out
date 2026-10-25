@@ -1,0 +1,25 @@
+_write abc buffer len=3
+write1 true
+write2 false
+write3 false
+needDrain true len 8
+ended true
+_write de buffer len=8
+_write fgh buffer len=6
+cb de
+_write end buffer len=3
+_final
+prefinish
+end cb
+finish finished=true
+close
+string chunk string hi utf8
+string chunk string there utf8
+write e false
+corked 1
+_writev a|b|c
+cb err boom
+_writev d
+error boom
+close e
+v finish

@@ -5,6 +5,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/DataLayout.h"
@@ -1129,6 +1130,11 @@ private:
   // retained, or null.
   llvm::Value *nativeSignal(llvm::Value *signal, const Type *type, bool retain = false);
   static bool isAbortSignal(const Type *type);
+  // The intrinsics of node:stream (codegen_stream.cpp): LibChunk,
+  // LibIsChunk and LibOverrides. emitChunkAs: the value of `to` the unknown
+  // `u` (borrowed) holds, owned, going to `fail` if it holds none.
+  llvm::Value *emitStreamBuiltin(CallExpr *call);
+  llvm::Value *emitChunkAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail);
   llvm::Constant *metaKeyConstant(const void *key);
   void finishMetadata(SourceFile &file, llvm::Instruction *init);
   llvm::DenseMap<const void *, llvm::Constant *> metaKeys_;
@@ -1150,6 +1156,37 @@ private:
   // `u`, an unknown (borrowed), as an owned value of `to`; control goes to
   // `fail`, with nothing owned, if it holds no such value.
   llvm::Value *emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail);
+  // The classes whose objects are of the object type `type`: a class and
+  // those down its chain, or those that implement an interface; and whether
+  // the class number `id` is that of one of `classes` or of a class down the
+  // chain of one.
+  std::vector<const ClassDecl *> classesOfType(const Type *type);
+  llvm::Value *classIdIn(llvm::Value *id, llvm::ArrayRef<const ClassDecl *> classes);
+  // How well the unknown `u` (borrowed) fits a parameter of type `to`, an
+  // i32, to choose among the variants of a method or a constructor when the
+  // program runs (docs/overloads.md, section 6): 0 not at all, 1 only through
+  // the check (an integral double for an int, anything for an unknown), 2 by
+  // widening (an int for a double, an object for a class up its chain), 3
+  // exactly.
+  llvm::Value *emitUnknownFit(llvm::Value *u, const Type *to);
+  // The position among `variants` of the one the arguments `args[0..count)`
+  // (unknowns, borrowed) fit best, as a call that compiles chooses: each
+  // argument fits it no worse than any other variant that takes them, and one
+  // better; -1 if none takes them, -2 if several fit equally well. A method
+  // takes only a `this` of its class, whose number `selfId` gives (null for
+  // constructors).
+  llvm::Value *emitChooseVariant(llvm::ArrayRef<const FunctionDecl *> variants,
+                                 llvm::Value *selfId, llvm::Value *args, llvm::Value *count);
+  // The variants of the method `name` an object of `cls` has, as reflection
+  // gives them: its own and those up its chain none of them overrides.
+  std::vector<const FunctionDecl *> reflectVariants(const ClassDecl *cls, llvm::StringRef name);
+  // The function value Reflect.get gives of a method of several variants:
+  // of `type`, `(this: unknown, ...args: unknown[]) => unknown`, which chooses
+  // the variant by its arguments when it is called. The info of the value.
+  llvm::Constant *reflectDispatchInfo(const ClassDecl *cls,
+                                      llvm::ArrayRef<const FunctionDecl *> variants,
+                                      const Type *&type);
+  std::map<std::pair<const ClassDecl *, std::string>, llvm::Constant *> reflectDispatchers_;
   // The arguments `args[0..count)` (unknowns, borrowed) for the parameters
   // `params` and the rest parameter `rest` (an array type, or null), appended
   // to `values`; `min` of them are surely there. On a mismatch, what was
@@ -1165,6 +1202,11 @@ private:
   llvm::StructType *classInfoType();
   llvm::StructType *reflectMethodTy();
   llvm::Constant *classInfoGlobal(const ClassDecl *cls);
+  // `ptr (ptr args, i32 count)`: an object of the class from arguments as
+  // unknowns, checked against its constructors; its body is emitted at the
+  // end. The description has it, and so does Reflect.construct of the class
+  // known when compiling.
+  llvm::Function *constructFunction(const ClassDecl *cls);
   void emitConstructThunk(const ClassDecl *cls, llvm::Function *fn);
   // A method as a function value of `type`, `(this: unknown, ...params) =>
   // R`, which checks its `this`: the info of the value.
@@ -1181,9 +1223,17 @@ private:
   llvm::DenseMap<const ClassDecl *, llvm::Function *> classConverters_;
   std::vector<const ClassDecl *> pendingConverters_;
   llvm::DenseMap<const FunctionDecl *, llvm::Constant *> reflectAdapters_;
+  // Of Builtin::ReflectMethod: the box of each method's function, by its
+  // info.
+  llvm::DenseMap<const llvm::Constant *, llvm::GlobalVariable *> reflectBoxes_;
   llvm::DenseMap<const Type *, llvm::Function *> invokers_;
   llvm::SetVector<const Type *> unknownFunctionTypes_; // that reach an unknown
+  llvm::MapVector<const ClassDecl *, llvm::Function *> constructFunctions_;
   bool usesApply_ = false;
+  // What the program looks up through the descriptions: `new` of a class
+  // known only when it runs (and Reflect.construct), Reflect.get, and
+  // fromJson(cls, j). A description that nothing looks up is not emitted.
+  bool reflectsNew_ = false, reflectsGet_ = false, reflectsJson_ = false;
   llvm::StructType *classInfoTy_ = nullptr;
   llvm::StructType *reflectMethodTy_ = nullptr;
 
@@ -1545,6 +1595,7 @@ private:
     llvm::FunctionCallee parseInt;
     llvm::FunctionCallee parseFloat;
     llvm::FunctionCallee numToFixed;
+    llvm::FunctionCallee numToRadix;
     llvm::FunctionCallee toInt32;
     llvm::FunctionCallee mathRound;
     llvm::FunctionCallee mathPow;

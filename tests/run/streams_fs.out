@@ -1,0 +1,11 @@
+pending true hwm 16 flags r end Infinity
+open number, ready, data 16, data 16, data 4, end, close
+bytesRead 36 destroyed true
+slice "world" string
+latin1 36
+write true false needDrain true
+end cb 11
+out "1234567890!"
+appended "1234567890!appended"
+copy "HELLO WORLD\nHELLO WORLD\nHELLO WORLD\n"
+missing true

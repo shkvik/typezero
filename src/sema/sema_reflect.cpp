@@ -9,8 +9,14 @@
 // objects, and, when the program looks into objects by name, the classes
 // whose objects may get there (as an `object`, an `unknown`, or made by
 // reflection) get their methods. Where the class and the name are known when
-// compiling, the call is what it stands for: `Reflect.construct(User, [a])`
-// is `new User(a)`, `Reflect.get(user, "name")` reads the field.
+// compiling, the call is what it stands for (docs/decorators.md, plan step
+// 5): `Reflect.construct(User, [a])` is `new User(a)`, `Reflect.get(user,
+// "name")` reads the field, Reflect.get of a method gives its function
+// without the description, Reflect.apply of that function calls the method
+// when the checks would let the arguments through, and Reflect.construct of
+// a known class with arguments known only when the program runs calls the
+// function that checks them and makes the object. A class nothing else
+// reaches by reflection is then not described at all.
 
 #include "sema/sema.h"
 
@@ -42,14 +48,90 @@ void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
     out.insert(cls);
 }
 
+Expr *stripImplicit(Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit())
+      break;
+    expr = conv->operand;
+  }
+  return expr;
+}
+
+// Whether every value of type `arg` passes the check that Reflect.apply makes
+// of an argument for a parameter of type `param` (CodeGen::emitUnknownAs),
+// so that a call known when compiling may skip it. Where the check is
+// stricter than the types (an object literal, a union, whose member the
+// check picks in its own order), it is kept.
+bool reflectAccepts(const Type *arg, const Type *param) {
+  if (param->isUnknown())
+    return true;
+  if (param->isOptional())
+    return arg->isUndefined() ||
+           reflectAccepts(arg->isOptional() ? arg->inner() : arg, param->inner());
+  if (arg->isOptional() || arg->isUnion() || param->isUnion())
+    return false;
+  const Type *value = arg->isLiteral() ? arg->literalBase() : arg;
+  switch (param->kind()) {
+  case Type::Kind::Int:
+    return value->kind() == Type::Kind::Int;
+  case Type::Kind::Long:
+    return value->kind() == Type::Kind::Int || value->kind() == Type::Kind::Long;
+  case Type::Kind::Double:
+    return value->kind() == Type::Kind::Int || value->kind() == Type::Kind::Long ||
+           value->kind() == Type::Kind::Double;
+  case Type::Kind::Bool:
+    return value->isBool();
+  case Type::Kind::String:
+    return value->isString();
+  case Type::Kind::Array:
+  case Type::Kind::Function:
+  case Type::Kind::Decimal:
+  case Type::Kind::Result:
+  case Type::Kind::Json:
+    return arg == param; // a box of exactly the type
+  case Type::Kind::ClassRef: {
+    const ClassDecl *cls = arg->classRef();
+    if (!cls || !cls->type)
+      return false;
+    if (param->classRef())
+      return cls == param->classRef();
+    const Type *made = param->constructed();
+    return made->isAnyObject() || (made->classDecl() && cls->type->isSubtypeOf(made));
+  }
+  case Type::Kind::Object: {
+    // An object of a class, which its number tells.
+    const ClassDecl *cls = arg->classDecl();
+    if (!cls || cls->literal || cls->builtin || !arg->isClass())
+      return param->isDate() && arg->isDate();
+    if (param->isAnyObject())
+      return true;
+    return (param->isClass() || param->isBase() || !param->bases().empty()) &&
+           arg->isSubtypeOf(param);
+  }
+  default:
+    return false;
+  }
+}
+
 } // namespace
 
-void Sema::noteReflectedConversion(const Type *from, const Type *to) {
+bool Sema::onlyChecked() const {
+  return trial_ || llvm::any_of(functions_, [](const FunctionDecl *fn) {
+           return (!fn->typeParams.empty() && !fn->isInstance) ||
+                  (fn->cls && (fn->cls->isGeneric() || fn->cls->checkOnly));
+         });
+}
+
+void Sema::noteReflectedConversion(const Type *from, const Type *to, const CastExpr *cast) {
+  // Code that is never emitted reaches no class.
+  if (onlyChecked())
+    return;
   // A class that becomes some class known only when the program runs, which
-  // `new` and Reflect.construct make objects of.
+  // `new` and Reflect.construct make objects of; unless a copy for the class
+  // known when compiling drops the conversion (see exactClassArgs).
   if (to->nonOptional()->isConstructor()) {
     if (ClassDecl *cls = const_cast<ClassDecl *>(from->nonOptional()->classRef()))
-      cls->reflectNew = true;
+      constructorCasts_[cast] = cls;
     return;
   }
   // Objects that code looks into only through reflection.
@@ -59,6 +141,8 @@ void Sema::noteReflectedConversion(const Type *from, const Type *to) {
 }
 
 void Sema::finishReflection() {
+  for (const auto &entry : constructorCasts_)
+    entry.second->reflectNew = true;
   if (!reflectionUsed_) {
     // Nothing looks into a class by name: none is described.
     for (ClassDecl *cls : classes_)
@@ -157,6 +241,94 @@ std::string Sema::classJsonProblem(const ClassDecl *cls) {
   return problem;
 }
 
+FunctionDecl *Sema::knownReflectMethod(ClassDecl *cls, llvm::StringRef name, bool &several) {
+  // The variants up the chain, as the description has them: a generic one
+  // is a function for each copy, and Reflect.get gives none of them.
+  std::vector<FunctionDecl *> methods = methodsNamed(cls, name, /*isStatic=*/false);
+  llvm::erase_if(methods, [](const FunctionDecl *fn) { return !fn->typeParams.empty(); });
+  if (methods.empty())
+    return nullptr;
+  for (FunctionDecl *fn : methods) {
+    if (!fn->sym || fn->isAbstract || fn->access != Access::Public ||
+        soleImplementation(cls, fn) != fn)
+      return nullptr;
+    const Type *ret = returnType(fn->sym);
+    if (!ret || ret->isError())
+      return nullptr;
+  }
+  // A class down the chain that declares a method of the name again, another
+  // variant, would give its own.
+  std::function<bool(const ClassDecl *)> declaresAgain = [&](const ClassDecl *c) {
+    return llvm::any_of(c->children, [&](const ClassDecl *child) {
+      return llvm::any_of(ownMethods(child),
+                          [&](const FunctionDecl *m) { return m->name == name; }) ||
+             declaresAgain(child);
+    });
+  };
+  if (declaresAgain(cls))
+    return nullptr;
+  several = methods.size() > 1;
+  return methods.front();
+}
+
+const FunctionDecl *Sema::heldReflectMethod(const Expr *f) {
+  f = stripImplicit(const_cast<Expr *>(f));
+  if (auto *name = dyn_cast<NameExpr>(f))
+    return name->var ? name->var->reflectMethod : nullptr;
+  // `Reflect.apply(Reflect.get(o, "m"), ...)`, whose object has no effects
+  // to keep; of several variants, the arguments choose when it runs.
+  if (auto *got = dyn_cast<CallExpr>(f); got && got->builtin == Builtin::ReflectMethod &&
+                                         !severalVariants_.contains(got) &&
+                                         isa<NameExpr>(stripImplicit(got->args[0])))
+    return got->method->decl;
+  return nullptr;
+}
+
+Expr *Sema::directReflectApply(CallExpr *call, const FunctionDecl *fn) {
+  // `this`: an object of the method's class, which the function checks.
+  Expr *self = stripImplicit(call->args[1]);
+  const ClassDecl *cls = self->type->isOptional() ? nullptr : self->type->classDecl();
+  if (!cls || cls->literal || !cls->derivesFrom(fn->cls))
+    return nullptr;
+  auto *list = dyn_cast<ArrayLitExpr>(call->args[2]);
+  if (!list)
+    return nullptr;
+  FuncSymbol *sym = fn->sym;
+  resolveParams(sym);
+  std::vector<Expr *> args;
+  for (const ArrayLitExpr::Element &e : list->elements) {
+    if (e.spread || e.hole)
+      return nullptr;
+    args.push_back(stripImplicit(e.expr));
+  }
+  // As many as it takes, each of a type the check lets through.
+  size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
+  if (args.size() < sym->minArgs || (!sym->hasRest && args.size() > fixed))
+    return nullptr;
+  for (size_t i = 0; i < args.size(); ++i) {
+    const Type *param = i < fixed ? sym->params[i] : sym->params.back()->inner();
+    if (!param || !reflectAccepts(args[i]->type, param))
+      return nullptr;
+  }
+  // `self.m(args)`, of this very method, which no class down the chain
+  // declares again.
+  auto *member = ctx_.make<MemberExpr>(call->loc(), self, fn->name);
+  member->type = functionType(sym);
+  auto *direct = ctx_.make<CallExpr>(call->loc(), member, std::move(args));
+  direct->method = sym;
+  direct->type = returnType(sym);
+  std::vector<bool> given(direct->args.size(), true);
+  Expr *result =
+      checkArguments(direct, sym->params, sym->minArgs, sym->hasRest, call->loc(), &given);
+  if (!result->type->isVoid())
+    return convert(result, Type::unknown());
+  // Undefined, after the call.
+  Expr *nothing = convert(checkExpr(ctx_.make<UndefinedExpr>(call->loc())), Type::unknown());
+  auto *seq = ctx_.make<SequenceExpr>(call->loc(), std::vector<Expr *>{result, nothing});
+  seq->type = Type::unknown();
+  return seq;
+}
+
 // An array of the arguments of Reflect.apply or Reflect.construct: of any
 // values, each an unknown when the program runs; a literal is one of
 // unknowns.
@@ -199,7 +371,8 @@ Expr *Sema::checkReflection(CallExpr *call, MemberExpr *member, const Type *expe
       call->args[1] = checkExpr(call->args[1]);
       return call;
     }
-    const Type *base = type->nonOptional();
+    // `T extends object` in a generic function: its copies take the classes.
+    const Type *base = apparentType(type->nonOptional());
     if (base->isJson()) {
       diags_.error(target->loc(), "Reflect.get takes an object of the language; read a key of a "
                                   "Json as JavaScript does, 'j[key]'");
@@ -212,29 +385,59 @@ Expr *Sema::checkReflection(CallExpr *call, MemberExpr *member, const Type *expe
       call->args[1] = checkExpr(call->args[1]);
       return call;
     }
-    if (object && key && !type->isOptional() && base->isObject() && !base->isAnyObject() &&
+    // An object of a class known when compiling, also where a copy of a
+    // generic function passes its T on as an unknown, as the generic code
+    // does (see noteForced).
+    Expr *seen = stripImplicit(target);
+    const Type *seenType = seen->type;
+    ClassDecl *cls =
+        seenType->isObject() && !seenType->isAnyObject() ? classOf(seenType) : nullptr;
+    if (key && !seenType->isOptional() &&
         llvm::all_of(key->value, [](char16_t c) { return c < 128; })) {
       std::string name;
       for (char16_t c : key->value)
         name.push_back(char(c));
-      ClassDecl *cls = classOf(base);
       if (cls)
         completeClass(cls);
       const ClassField *declared = cls ? findField(cls, name) : nullptr;
-      if (base->field(name) && (!cls || (declared && declared->access == Access::Public))) {
+      bool open = !cls || (declared && declared->access == Access::Public);
+      // A field: read as it is.
+      if (object && !type->isOptional() && base->isObject() && !base->isAnyObject() &&
+          base->field(name) && open) {
         auto *read = ctx_.make<MemberExpr>(
             key->loc(), ctx_.make<NameExpr>(object->loc(), object->name), ctx_.keepName(name));
         return convert(checkExpr(read), Type::unknown());
       }
+      if (cls && !cls->literal && seenType->field(name) && open) {
+        auto *read = ctx_.make<MemberExpr>(key->loc(), seen, ctx_.keepName(name));
+        return convert(checkClassMember(read, nullptr), Type::unknown());
+      }
+      // A method: its function, as the description would give it.
+      bool several = false;
+      if (FunctionDecl *method = cls && !cls->literal && !seenType->field(name)
+                                     ? knownReflectMethod(cls, name, several)
+                                     : nullptr) {
+        call->args.resize(1);
+        target = seen;
+        call->builtin = Builtin::ReflectMethod;
+        call->method = method->sym;
+        call->type = Type::unknown();
+        if (several)
+          severalVariants_.insert(call);
+        return call;
+      }
     }
     call->args[1] = checkArg(call->args[1], Type::string());
     // Objects of these classes are looked into by name.
-    if (type->isUnknown() || base->isAnyObject() || !base->classDecl())
+    if (onlyChecked()) {
+      // Never emitted.
+    } else if (type->isUnknown() || base->isAnyObject() || !base->classDecl()) {
       reflectGetAny_ = true;
-    else
+    } else {
       classesIn(base, reflectedObjects_);
+    }
     target = convert(target, Type::unknown());
-    reflectionUsed_ = true;
+    reflectionUsed_ |= !onlyChecked();
     call->builtin = Builtin::ReflectGet;
     call->type = Type::unknown();
     return call;
@@ -244,6 +447,7 @@ Expr *Sema::checkReflection(CallExpr *call, MemberExpr *member, const Type *expe
       return call;
     Expr *&f = call->args[0];
     f = checkExpr(f);
+    const FunctionDecl *held = heldReflectMethod(f);
     if (!f->type->isError() && !f->type->isUnknown() && !f->type->isFunction())
       diags_.error(f->loc(), "Reflect.apply calls a function, and this is a '" + f->type->name() +
                                  "'");
@@ -257,8 +461,13 @@ Expr *Sema::checkReflection(CallExpr *call, MemberExpr *member, const Type *expe
       self = convert(self, Type::unknown());
     call->args[2] = checkReflectArgs(call->args[2]);
     calledFunction();
-    reflectionUsed_ = true;
-    reflectGetAny_ = true; // the method of an object it got by name
+    if (held && !f->type->isError() && !self->type->isError() && !call->args[2]->type->isError())
+      if (Expr *direct = directReflectApply(call, held))
+        return direct;
+    if (!onlyChecked()) {
+      reflectionUsed_ = true;
+      reflectGetAny_ = true; // the method of an object it got by name
+    }
     call->builtin = Builtin::ReflectApply;
     call->type = Type::unknown();
     return call;
@@ -298,18 +507,25 @@ Expr *Sema::checkReflection(CallExpr *call, MemberExpr *member, const Type *expe
     create->callee = ctx_.make<NameExpr>(name->loc(), name->name);
     return checkValueNew(create, expected);
   }
-  if (const ClassDecl *known = type->classRef()) {
-    if (!known->type) {
-      diags_.error(cls->loc(), "'" + known->name + "' of JavaScript cannot be made through "
-                                                   "reflection");
+  // A class known when compiling, with arguments known only when the
+  // program runs: the function of the class that checks them makes the
+  // object, without its description. An abstract one fails when the program
+  // runs, through the description, as JavaScript fails then.
+  bool known = false;
+  if (const ClassDecl *made = type->classRef()) {
+    if (!made->type) {
+      diags_.error(cls->loc(), "'" + made->name + "' of JavaScript cannot be made through "
+                                                  "reflection");
       call->args[1] = checkReflectArgs(call->args[1]);
       return call;
     }
-    cls = convert(cls, Type::constructorOf(known->type));
+    known = !made->isAbstract;
+    if (!known)
+      cls = convert(cls, Type::constructorOf(made->type));
   }
   call->args[1] = checkReflectArgs(call->args[1]);
   calledFunction();
-  reflectionUsed_ = true;
+  reflectionUsed_ |= !known && !onlyChecked();
   call->builtin = Builtin::ReflectConstruct;
   call->type = constructedBy(cls->type);
   return call;
@@ -342,8 +558,10 @@ Expr *Sema::checkFromJsonClass(CallExpr *call, NameExpr *name) {
     call->type = known->type;
   } else {
     // Any class it may be, through its description.
-    reflectionUsed_ = true;
-    jsonReflect_ = true;
+    if (!onlyChecked()) {
+      reflectionUsed_ = true;
+      jsonReflect_ = true;
+    }
     call->type = type->constructed();
   }
   call->builtin = Builtin::FromJsonClass;

@@ -304,6 +304,9 @@ void FilePort::modules() {
       } else if (isName(i + 1, "type") && is(i + 2, Tok::LBrace)) {
         add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
         exportList(i + 2, close_[i + 2]);
+      } else if (isName(i + 1, "type") && is(i + 2, Tok::Star)) {
+        // `export type * from "./types"`: the types are exported as everything is.
+        add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
       } else if (is(i + 1, Tok::LBrace)) {
         exportList(i + 1, close_[i + 1]);
       }

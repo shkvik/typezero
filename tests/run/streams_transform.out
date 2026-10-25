@@ -1,0 +1,15 @@
+_transform hello buffer
+data HELLO
+_transform  world buffer
+data  WORLD
+_flush
+data !
+word a string
+word bb string
+word ccc string
+pt write false
+end
+finish
+pt data abc
+close
+pt end

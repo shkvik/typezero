@@ -1,0 +1,73 @@
+// Readable of node:stream (docs/streams.md): flowing mode with 'data',
+// paused mode with 'readable' and read(), unshift(), pause() and resume(),
+// in node's order of events and calls of _read(). undefined ends a stream,
+// as null does in node (tz has no null): the expected output is node's with
+// push(null).
+import { Readable } from "node:stream"
+const log = (s: string) => console.log(s)
+
+// Flowing: the chunks of read(), then 'end' and 'close'.
+let n = 0
+const r = new Readable({
+  read(size) {
+    log(`read ${size}`)
+    n++
+    if (n <= 3) this.push(`chunk${n}`)
+    else this.push(undefined)
+  },
+})
+r.on("data", (chunk) => log(`data ${chunk.toString()}`))
+r.on("end", () => log("end"))
+r.on("pause", () => log("pause"))
+r.on("resume", () => log("resume"))
+process.nextTick(() => log("tick"))
+setImmediate(() => log("immediate"))
+log("sync done")
+
+// Paused: 'readable', and read() until it gives undefined.
+r.on("close", () => {
+  log("close")
+  const chunks = ["ab", "cd", "ef"]
+  const p = new Readable({
+    highWaterMark: 4,
+    read(size) {
+      const next = chunks.shift()
+      log(`_read ${size} -> ${next ?? "EOF"}`)
+      if (next == undefined) this.push(undefined)
+      else setTimeout(() => this.push(next), 1)
+    },
+  })
+  p.on("readable", () => {
+    log(`readable len=${p.readableLength}`)
+    let chunk: Buffer | undefined
+    while ((chunk = p.read()) != undefined) log(`read ${chunk.toString()}`)
+    log(`after loop ended=${p.readableEnded}`)
+  })
+  p.on("end", () => log("p end"))
+  p.on("close", () => {
+    log(`p close destroyed=${p.destroyed}`)
+    p.removeAllListeners()
+    more()
+  })
+})
+
+// read(n), unshift(), pause() and resume().
+function more() {
+  const s = new Readable({ read() {} })
+  s.push("hello ")
+  s.push("world")
+  log(`len ${s.readableLength}`)
+  const first = s.read(3)
+  log(`read3 ${first?.toString()}`)
+  s.unshift(Buffer.from("XY"))
+  log(`len ${s.readableLength}`)
+  const all = s.read()
+  log(`all ${all?.toString()}`)
+  s.push(undefined)
+  s.on("end", () => log("s end"))
+  s.resume()
+  log(`paused ${s.isPaused()}`)
+  s.pause()
+  log(`paused ${s.isPaused()}`)
+  s.resume()
+}

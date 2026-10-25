@@ -1,0 +1,44 @@
+// same-as-node
+// StringDecoder of node:string_decoder: the same text as node for every way
+// of cutting UTF-8 (bad bytes too), UTF-16LE, base64, hex and latin1 into
+// chunks.
+import { StringDecoder } from "node:string_decoder"
+const samples = [
+  Buffer.from("héllo wörld — 😀 привет", "utf8"),
+  Buffer.from([0xe2, 0x82, 0x61, 0xff, 0xf0, 0x9f, 0x98, 0x80, 0xc3]),
+  Buffer.from([0xf0, 0x9f, 0x98, 0xe2, 0x82, 0xac, 0x80, 0x80, 0xed, 0xa0, 0x80, 0x41]),
+  Buffer.from([0xc3, 0x28, 0xa0, 0xa1, 0xe2, 0x28, 0xa1, 0xf0, 0x28, 0x8c, 0xbc]),
+]
+let seed = 7
+function rand(n: int): int {
+  seed = (seed * 75 + 74) % 65537
+  return seed % n
+}
+for (let k = 0; k < 20; k++) {
+  const bytes = Buffer.alloc(12)
+  for (let i = 0; i < bytes.length; i++) {
+    const r = rand(10)
+    bytes[i] = (r < 3 ? 0x41 + rand(26) : r < 5 ? 0x80 + rand(64) : r < 7 ? 0xc0 + rand(32) : r < 9 ? 0xe0 + rand(16) : 0xf0 + rand(8)) & 0xff
+  }
+  samples.push(bytes)
+}
+const encodings = ["utf8", "utf16le", "base64", "hex", "latin1"]
+for (const enc of encodings) {
+  for (const sample of samples) {
+    const results: string[] = []
+    for (let cut = 0; cut <= sample.length; cut++) {
+      for (let cut2 = cut; cut2 <= sample.length; cut2 += 3) {
+        const d = new StringDecoder(enc)
+        const out = d.write(sample.subarray(0, cut)) + "|" + d.write(sample.subarray(cut, cut2)) + "|" + d.end(sample.subarray(cut2))
+        results.push(out)
+      }
+    }
+    console.log(enc, JSON.stringify(results.join(",")).length, JSON.stringify(results.slice(0, 3)))
+    let all = 0
+    for (const r of results) for (let i = 0; i < r.length; i++) all = (all * 31 + r.charCodeAt(i)) & 0xffffff
+    console.log(all)
+  }
+}
+const d = new StringDecoder("utf8")
+console.log(d.encoding, JSON.stringify(d.write(Buffer.from([0xe2]))), d.lastNeed, d.lastTotal)
+console.log(JSON.stringify(d.end()))

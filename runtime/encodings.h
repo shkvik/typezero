@@ -252,7 +252,7 @@ static inline const char *tz_encoding_name(const char *label) {
 }
 
 // Whether node decodes the encoding of that name with more than a byte for
-// some characters, which tz does not support yet.
+// some characters: one of runtime/cjk.c.
 static inline int tz_encoding_multi_byte(const char *name) {
   static const char *const names[] = {"gbk", "gb18030", "big5", "euc-jp", "iso-2022-jp", "shift_jis", "euc-kr"};
   for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i)

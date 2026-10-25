@@ -11,7 +11,7 @@ changed:
     5  '===' and '!==' became '==' and '!='
     3  'export default' became a named export
     1  'import * as' became named imports
-    2  'import type' and 'export type' lost 'type'
+    3  'import type' and 'export type' lost 'type'
     2  'null' and 'void 0' became 'undefined'
     1  'var' became 'let'
     1  '| null' next to Json was dropped: a Json holds null itself
@@ -34,6 +34,7 @@ import { Options } from "./options"
 import { Level, levels } from "./options"
 export { voice as loud } from "./voice"
 export { levels }
+export * from "./units.js"
 
 export function greet(name: string, options?: Options): string {
   let level: Level = options == undefined ? "normal" : options.level

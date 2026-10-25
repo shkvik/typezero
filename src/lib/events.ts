@@ -56,10 +56,20 @@ class ThisListener {
   constructor(readonly listener: unknown) {}
 }
 
-// What the compiler says a listener is (src/sema/sema_events.cpp).
+// A listener of the code of node:stream (src/lib/stream.ts) that takes the
+// first argument of its event as an unknown, whatever the type its emitter
+// emits it with: the chunk of a 'data' event, which is a Buffer, a string or
+// a T of an object-mode stream. It prints as the function it holds.
+class UnknownArgListener {
+  constructor(readonly listener: unknown) {}
+}
+
+// What the compiler says a listener is (src/sema/sema_events.cpp); a
+// listener of the built-in modules may be kUnknownArg too.
 const kPlain = 0
 const kAsync = 1
 const kThis = 2
+const kUnknownArg = 3
 
 // The listeners of an event that has more than one, in the order they run:
 // node's array, which it prints as (TZ_LAYOUT_LIBRARY). An object of a class
@@ -116,8 +126,8 @@ class OutOfRangeError extends RangeError {
 }
 
 // What the emitters have in common, whatever their events: EventEmitter
-// below adds the event map, a type only.
-class EventEmitterBase {
+// below adds the event map, a type only. node:stream builds on it too.
+export class EventEmitterBase {
   // node's _events, _eventsCount and _maxListeners, which print with those
   // names, first, and Symbol(shapeMode) and Symbol(kCapture), which print
   // after the fields of the classes down the chain, as node prints symbols
@@ -173,6 +183,35 @@ class EventEmitterBase {
     return true
   }
 
+  // emit() of an event that is not 'error', whose first argument the
+  // listeners of kUnknownArg get as `boxed`, the unknown that holds it, and
+  // the others as it is: the 'data' events of node:stream, whose own
+  // listeners take the chunk as the stream keeps it.
+  emitWithUnknown<A extends unknown[]>(type: string, boxed: unknown, ...args: A): boolean {
+    const handler = this.#events[type]
+    if (handler == undefined) return false
+    if (handler instanceof ListenerList) {
+      const listeners = handler.begin()
+      try {
+        for (const listener of listeners) this.#runWithUnknown(type, listener, boxed, ...args)
+      } finally {
+        handler.done(listeners)
+      }
+    } else {
+      this.#runWithUnknown(type, handler, boxed, ...args)
+    }
+    return true
+  }
+
+  #runWithUnknown<A extends unknown[]>(type: string, listener: unknown, boxed: unknown,
+                                       ...args: A) {
+    if (listener instanceof UnknownArgListener) {
+      __tz_listener<(arg: unknown) => void>(listener.listener)(boxed)
+      return
+    }
+    this.#run(type, listener, ...args)
+  }
+
   // One listener of `type` with the arguments, as node's emit applies it;
   // a listener of once() takes the steps of onceWrapper.
   #run<A extends unknown[]>(type: string, listener: unknown, ...args: A) {
@@ -190,6 +229,10 @@ class EventEmitterBase {
     }
     if (fn instanceof ThisListener) {
       __tz_listener<(this: unknown, ...args: A) => void>(fn.listener).call(this, ...args)
+      return
+    }
+    if (fn instanceof UnknownArgListener) {
+      __tz_listener<(arg: unknown) => void>(fn.listener)(firstArg(...args))
       return
     }
     __tz_listener<(...args: A) => void>(fn)(...args)
@@ -262,24 +305,24 @@ class EventEmitterBase {
 
   // `kind` says what the listener is (kPlain, kAsync, kThis); the compiler
   // gives it.
-  addListener(type: string, listener: unknown, kind = kPlain) {
+  addListener(type: string, listener: unknown, kind: int = kPlain) {
     return this.#addListener(type, wrap(listener, kind), false)
   }
 
-  on(type: string, listener: unknown, kind = kPlain) {
+  on(type: string, listener: unknown, kind: int = kPlain) {
     return this.#addListener(type, wrap(listener, kind), false)
   }
 
-  prependListener(type: string, listener: unknown, kind = kPlain) {
+  prependListener(type: string, listener: unknown, kind: int = kPlain) {
     return this.#addListener(type, wrap(listener, kind), true)
   }
 
-  once(type: string, listener: unknown, kind = kPlain) {
+  once(type: string, listener: unknown, kind: int = kPlain) {
     this.on(type, new OnceWrapper(wrap(listener, kind)))
     return this
   }
 
-  prependOnceListener(type: string, listener: unknown, kind = kPlain) {
+  prependOnceListener(type: string, listener: unknown, kind: int = kPlain) {
     this.prependListener(type, new OnceWrapper(wrap(listener, kind)))
     return this
   }
@@ -384,7 +427,7 @@ class EventEmitterBase {
 
   #callable<A extends unknown[]>(type: string, listener: unknown): (...args: A) => void {
     if (listener instanceof OnceWrapper || listener instanceof AsyncListener ||
-        listener instanceof ThisListener)
+        listener instanceof ThisListener || listener instanceof UnknownArgListener)
       return (...args: A) => this.#run(type, listener, ...args)
     return __tz_listener<(...args: A) => void>(listener)
   }
@@ -576,6 +619,7 @@ export function setMaxListeners(
 function wrap(listener: unknown, kind: int): unknown {
   if (kind == kAsync) return new AsyncListener(listener)
   if (kind == kThis) return new ThisListener(listener)
+  if (kind == kUnknownArg) return new UnknownArgListener(listener)
   return listener
 }
 
@@ -584,6 +628,7 @@ function original(listener: unknown): unknown {
   if (listener instanceof OnceWrapper) return original(listener.listener)
   if (listener instanceof AsyncListener) return listener.listener
   if (listener instanceof ThisListener) return listener.listener
+  if (listener instanceof UnknownArgListener) return listener.listener
   return listener
 }
 

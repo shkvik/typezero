@@ -1,6 +1,7 @@
 #include "driver/linker.h"
 
 #include "lld/Common/Driver.h"
+#include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <vector>
@@ -40,8 +41,12 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
   std::string messages;
   llvm::raw_string_ostream stdoutStream(messages);
   llvm::raw_string_ostream stderrStream(messages);
+  // A fatal error of LLD (such as an output it cannot write) ends the process
+  // at once, without its message, unless crash recovery brings it back here.
+  llvm::CrashRecoveryContext::Enable();
   lld::Result result =
       lld::lldMain(argv, stdoutStream, stderrStream, {{lld::WinLink, &lld::coff::link}});
+  llvm::CrashRecoveryContext::Disable();
   errors = std::move(messages);
   return result.retCode == 0;
 }

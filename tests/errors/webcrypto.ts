@@ -1,0 +1,73 @@
+// Web Crypto (docs/crypto.md, step 4): an algorithm, a format or usages written in the call (or in
+// a constant), which node would reject when the program runs, are errors here.
+const subtle = crypto.subtle
+const raw = new Uint8Array(32)
+// expect-error: unknown algorithm 'SHA-265' of digest; Web Crypto hashes with 'SHA-1', 'SHA-256', 'SHA-384' or 'SHA-512'
+await subtle.digest("SHA-265", raw)
+// expect-error: 'SHA3-256' is an algorithm node 24 has as an experiment, which tz has not yet
+await subtle.digest("SHA3-256", raw)
+// expect-error: 'HMAC' is no algorithm of digest; it hashes with 'SHA-1'
+await subtle.digest({ name: "HMAC" }, raw)
+// expect-error: the algorithm 'HMAC' of importKey needs 'hash' (HmacImportParams); add it, e.g. 'hash: "SHA-256"'
+await subtle.importKey("raw", raw, { name: "HMAC" }, false, ["sign"])
+// expect-error: 'HMAC' of importKey takes its parameters (HmacImportParams): write an object, e.g. { name: "HMAC", hash: "SHA-256" }
+await subtle.importKey("raw", raw, "HMAC", false, ["sign"])
+// expect-error: 'MD5' is no SHA hash, which HmacImportParams takes; use 'SHA-256'
+await subtle.importKey("raw", raw, { name: "HMAC", hash: "MD5" }, false, ["sign"])
+// expect-error: unknown hash 'SHA-999' of HmacImportParams
+await subtle.importKey("raw", raw, { name: "HMAC", hash: { name: "SHA-999" } }, false, ["sign"])
+// expect-error: 'encrypt' is no usage of an HMAC key; it takes 'sign' and 'verify'
+await subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["encrypt"])
+// expect-error: a key without usages can do nothing, and node rejects it ('Usages cannot be empty'); give its usages, e.g. 'sign' and 'verify'
+await subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, [])
+// expect-error: 'HMAC' keys are not imported as 'spki' (node: 'Unable to import HMAC using spki format'); it takes 'raw' or 'jwk'
+await subtle.importKey("spki", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+// expect-error: 'deriveBits' is no usage of a public ECDH key; it takes none: pass []
+await subtle.importKey("spki", raw, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"])
+// expect-error: unknown namedCurve 'P-255'; Web Crypto has 'P-256', 'P-384' and 'P-521'
+await subtle.importKey("spki", raw, { name: "ECDSA", namedCurve: "P-255" }, false, ["verify"])
+// expect-error: 'verify' is no usage of a private ECDSA key; it takes 'sign'
+await subtle.importKey("pkcs8", raw, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"])
+// expect-error: usage 'sing' does not exist; the usages are 'encrypt', 'decrypt', 'sign', 'verify'
+await subtle.importKey("raw", raw, "AES-GCM", false, ["sing"])
+// expect-error: the key data of 'jwk' is a JsonWebKey; found 'Uint8Array'
+await subtle.importKey("jwk", raw, "AES-GCM", false, ["encrypt"])
+// expect-error: the key data of 'raw' is bytes (a BufferSource); found 'JsonWebKey'
+await subtle.importKey("raw", { kty: "oct", k: "AA" }, "AES-GCM", false, ["encrypt"])
+// expect-error: unknown key format 'pem'; it is 'raw', 'pkcs8', 'spki' or 'jwk'
+await subtle.importKey("pem", raw, "AES-GCM", false, ["encrypt"])
+// expect-error: an AES key is 128, 192 or 256 bits long
+await subtle.generateKey({ name: "AES-GCM", length: 100 }, true, ["encrypt"])
+// expect-error: the algorithm 'AES-GCM' of generateKey needs 'length' (AesKeyGenParams)
+await subtle.generateKey({ name: "AES-GCM" }, true, ["encrypt"])
+// expect-error: the private key of the pair would have no usages, which node rejects ('Usages cannot be empty'); add 'sign'
+await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["verify"])
+// expect-error: 'Ed448' is an algorithm node 24 has as an experiment, which tz has not yet
+await subtle.generateKey("Ed448", true, ["sign"])
+const aes = await subtle.generateKey({ name: "AES-GCM", length: 128 }, true, ["encrypt"])
+// expect-error: the tag of AES-GCM is 32, 64, 96, 104, 112, 120 or 128 bits long
+await subtle.encrypt({ name: "AES-GCM", iv: raw, tagLength: 100 }, aes, raw)
+// expect-error: the algorithm 'AES-CBC' of encrypt needs 'iv' (AesCbcParams); add it, e.g. 'iv: new Uint8Array(16)'
+await subtle.encrypt({ name: "AES-CBC" }, aes, raw)
+// expect-error: 'HMAC' is no algorithm of encrypt; it encrypts with 'AES-CBC', 'AES-CTR', 'AES-GCM' or 'RSA-OAEP'
+await subtle.encrypt("HMAC", aes, raw)
+const pbkdf2 = await subtle.importKey("raw", raw, "PBKDF2", false, ["deriveKey"])
+// expect-error: deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, not 'ECDSA'
+await subtle.deriveKey({ name: "PBKDF2", salt: raw, iterations: 1, hash: "SHA-256" }, pbkdf2, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"])
+// expect-error: the algorithm 'PBKDF2' of deriveBits needs 'iterations' (Pbkdf2Params)
+await subtle.deriveBits({ name: "PBKDF2", salt: raw, hash: "SHA-256" }, pbkdf2, 256)
+// expect-error: unknown algorithm 'AES-KX' of wrapKey; Web Crypto wraps keys with 'AES-KW'
+await subtle.wrapKey("raw", aes, aes, "AES-KX")
+// A constant that holds the algorithm is read as if it were written in the call.
+// expect-error: the algorithm 'HMAC' of importKey needs 'hash' (HmacImportParams)
+const algorithm = { name: "HMAC" }
+await subtle.importKey("raw", raw, algorithm, false, ["sign"])
+const key = await subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"])
+// expect-error: property 'handle' does not exist on type 'CryptoKey'; it has 'type', 'extractable', 'algorithm' and 'usages'
+console.log(key.handle)
+// expect-error: a CryptoKey is made by crypto.subtle: importKey, generateKey, deriveKey or unwrapKey
+new CryptoKey()
+// expect-error: there is one SubtleCrypto: crypto.subtle
+new SubtleCrypto()
+// expect-error: 'globalThis.process' is not supported: tz has only 'globalThis.crypto'; write 'process'
+console.log(globalThis.process)

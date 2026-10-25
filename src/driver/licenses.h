@@ -13,6 +13,9 @@ namespace tz {
 // `tz licenses app.exe` prints their licenses, which must go along with the exe.
 struct Embedded {
   bool openssl = false;
+  // The indexes of the WHATWG Encoding Standard: the program decodes a
+  // multi-byte encoding of TextDecoder (runtime/cjk.c).
+  bool whatwg = false;
 };
 
 // What of the runtime the module calls, by the names of its functions and constants: node:crypto
@@ -22,6 +25,9 @@ struct CryptoUse {
   bool full = false;
 };
 CryptoUse cryptoUse(const llvm::Module &module);
+// Whether the module names a multi-byte encoding of the runtime (tz_cjk_encoding_*), whose
+// indexes come from the WHATWG Encoding Standard.
+bool usesEncodingIndexes(const llvm::Module &module);
 
 // Writes what the program embeds into it, in a section `tz licenses` reads.
 void addLicenseManifest(llvm::Module &module, const Embedded &embedded);

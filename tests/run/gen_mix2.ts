@@ -1,0 +1,77 @@
+// same-as-node --experimental-transform-types
+// Conditional, template literal and mapped types (docs/generics.md, step 5)
+// over the types of the built-in modules, and writes through a wider type
+// (docs/objects.md, step 5) that pass through them: the type of what fetch
+// gives once awaited, the names of the events of an emitter as a union and
+// as handler names, the arguments of an event found with `infer`, and a
+// Dog[] that the listeners of an emitter and the entries of a Map see as an
+// Animal[] and only read (tests/errors/gen_mix2.ts is the write that is
+// not allowed).
+import { EventEmitter } from "node:events"
+
+type Events = { start: [id: int]; done: [id: int, ms: double] }
+type EventName = keyof Events
+type HandlerName = `on${Capitalize<EventName>}`
+type ArgsOf<K extends EventName> = Events[K]
+type First<T> = T extends [infer A, ...infer _Rest] ? A : never
+type Fetched = Awaited<ReturnType<typeof fetch>>
+type StatusOf<T> = T extends { status: infer S } ? S : never
+type Handlers = { [K in EventName as `on${Capitalize<K>}`]: (id: First<ArgsOf<K>>) => void }
+
+class Jobs extends EventEmitter<Events> {
+  run(id: int) {
+    this.emit("start", id)
+    this.emit("done", id, id * 1.5)
+  }
+}
+
+const names: EventName[] = ["start", "done"]
+const handlerNames: HandlerName[] = ["onStart", "onDone"]
+console.log(names.join(","), handlerNames.join(","))
+
+const log: string[] = []
+const handlers: Handlers = {
+  onStart: (id) => log.push(`start ${id}`),
+  onDone: (id) => log.push(`done ${id}`),
+}
+const jobs = new Jobs()
+jobs.on("start", (id) => handlers.onStart(id))
+jobs.on("done", (id, ms) => {
+  handlers.onDone(id)
+  log.push(`in ${ms}`)
+})
+jobs.run(2)
+console.log(log.join("; "))
+const firstId: First<ArgsOf<"done">> = 7
+console.log(firstId + 1)
+
+// What fetch gives, by its type alone: no request is made.
+function describe(r: Fetched): StatusOf<Fetched> {
+  return r.status
+}
+const made: Fetched = new Response("body", { status: 201 })
+console.log(describe(made), made.ok)
+
+// A Dog[] seen as an Animal[] by listeners and through a Map: read only.
+class Animal {
+  constructor(public name: string) {}
+}
+class Dog extends Animal {
+  bark() {
+    return `${this.name}: woof`
+  }
+}
+class Zoo extends EventEmitter<{ show: [all: Animal[]] }> {
+  show(all: Animal[]) {
+    this.emit("show", all)
+  }
+}
+const dogs: Dog[] = [new Dog("Rex"), new Dog("Ace")]
+const zoo = new Zoo()
+zoo.on("show", (all) => console.log(all.map((a) => a.name).join(" & ")))
+zoo.show(dogs)
+const byKeeper = new Map<string, Animal[]>([["ann", dogs]])
+console.log(byKeeper.get("ann")?.length, dogs.map((d) => d.bark()).join(", "))
+const others: Animal[] = []
+others.push(new Animal("Tom")) // another array: nothing reaches the Dog[]
+console.log(others.length)

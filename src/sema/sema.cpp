@@ -273,6 +273,9 @@ void Sema::check(SourceFile &file) {
   // main's stack frame. That includes the arrows of top-level code.
   for (Stmt *item : file.items)
     collectNames(item, namesInFunctions_, /*inFunction=*/isa<FunctionDecl>(item));
+  // `crypto.subtle` reads the SubtleCrypto of tz:webcrypto by a name no code writes, in
+  // functions too (sema_webcrypto.cpp).
+  namesInFunctions_.insert(kSubtleName);
   noteImportsInFunctions(file);
 
   // Top-level code runs in order, file by file in the order they load; its
@@ -1112,11 +1115,12 @@ const Type *Sema::unify(const Type *a, const Type *b) {
 Expr *Sema::convert(Expr *expr, const Type *to) {
   if (expr->type == to || expr->type->isError() || to->isError())
     return expr;
-  // What reflection may reach (see sema_reflect.cpp).
-  if (const Type *target = to->nonOptional();
-      target->isConstructor() || target->isAnyObject() || target->isUnknown() ||
-      (target->isArray() && target->inner()->isUnknown()))
-    noteReflectedConversion(expr->type, to);
+  // What reflection may reach (see sema_reflect.cpp), through the conversion
+  // made below.
+  const Type *reflected = to->nonOptional();
+  bool reflects = reflected->isConstructor() || reflected->isAnyObject() ||
+                  reflected->isUnknown() ||
+                  (reflected->isArray() && reflected->inner()->isUnknown());
   // Generic code converts a value of type T here; instances will too.
   if (expr->type->isParam() && !mentionsParam(to))
     noteForced(expr, to);
@@ -1155,6 +1159,8 @@ Expr *Sema::convert(Expr *expr, const Type *to) {
   // is all checked (sema_widen.cpp).
   if (widensWrites(expr->type, to))
     widenings_.insert(cast);
+  if (reflects)
+    noteReflectedConversion(expr->type, to, cast);
   return cast;
 }
 
@@ -1387,6 +1393,18 @@ void Sema::declareFunction(FunctionDecl *fn, VarSymbol *var, bool scoped) {
       fn->typeArgs = sym->typeParams = declareTypeParams(fn->typeParams, &sym->typeDefaults);
     }
   }
+  // A hook of node:stream in the program's own stream class (`_read()`,
+  // `_transform(chunk, encoding, callback)`): the parameters the stream
+  // passes, those left out too, as node allows (sema_stream.cpp).
+  std::optional<std::vector<const Type *>> hook =
+      fn->cls ? streamHookParams(fn) : std::nullopt;
+  if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest; }))
+    for (size_t i = fn->params.size(); i < hook->size(); ++i) {
+      Param hidden;
+      hidden.name = ctx_.hiddenName();
+      hidden.loc = fn->loc();
+      fn->params.push_back(hidden);
+    }
   bool afterOptional = false;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
@@ -1402,6 +1420,11 @@ void Sema::declareFunction(FunctionDecl *fn, VarSymbol *var, bool scoped) {
       if (!type)
         type = resolveType(*param.type, /*allowVoid=*/false);
       listContext_ = outerList;
+      // `_read(size: number)` of node: the size is an int.
+      if (hook && i < hook->size() && type && type->isFloat() && (*hook)[i]->isInt())
+        type = (*hook)[i];
+    } else if (hook && i < hook->size() && !param.rest) {
+      type = (*hook)[i];
     } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
       // `function f(n = 10)`: n is an int.
     } else if (param.defaultValue && !param.rest && !fn->source.empty()) {
@@ -1660,22 +1683,34 @@ void Sema::checkStmt(Stmt *stmt) {
     break;
   }
   case Stmt::Kind::If:
+    ++branchDepth_;
     checkIf(cast<IfStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::While:
+    ++branchDepth_;
     checkWhile(cast<WhileStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::DoWhile:
+    ++branchDepth_;
     checkDoWhile(cast<DoWhileStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::For:
+    ++branchDepth_;
     checkFor(cast<ForStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::ForOf:
+    ++branchDepth_;
     checkForOf(cast<ForOfStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::Switch:
+    ++branchDepth_;
     checkSwitch(cast<SwitchStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::Labeled:
     checkLabeled(cast<LabeledStmt>(stmt));
@@ -1694,7 +1729,9 @@ void Sema::checkStmt(Stmt *stmt) {
     flow_.unreachable = true;
     break;
   case Stmt::Kind::Try:
+    ++branchDepth_;
     checkTry(cast<TryStmt>(stmt));
+    --branchDepth_;
     break;
   case Stmt::Kind::Empty:
   case Stmt::Kind::Debugger:
@@ -2295,6 +2332,13 @@ void Sema::checkVarDecl(VarDeclStmt *decl) {
       d.sym = declareVar(d.name, d.loc, type, decl->isConst);
     }
     noteRegexVariable(d.sym, value, decl->isConst, block, index);
+    // `const m = Reflect.get(user, "save")`: the method it holds.
+    if (decl->isConst && !d.destructured)
+      if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
+          got && got->builtin == Builtin::ReflectMethod && !severalVariants_.contains(got))
+        d.sym->reflectMethod = got->method->decl;
+    if (decl->isConst && value && (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value)))
+      constLiterals_[d.sym] = value;
     if (!places.empty())
       destinations_[d.sym] = std::move(places);
     if (untyped)
@@ -2925,6 +2969,13 @@ Expr *Sema::checkName(NameExpr *name) {
     noteUse(entry.var, name->loc());
     name->type = varType(entry.var);
     checkVisible(name, entry.var);
+    // A stream after its setEncoding() (sema_stream.cpp).
+    if (!streamViews_.empty()) {
+      FieldPath path;
+      path.var = entry.var;
+      if (const Type *view = streamViewOf(path, name->loc()))
+        return convert(name, view);
+    }
     // Of a type parameter, with its type known here from `typeof`.
     if (const Type *narrowed = narrowedType(entry.var))
       return convert(name, narrowed);
@@ -2957,6 +3008,8 @@ Expr *Sema::checkName(NameExpr *name) {
       return checkClassValue(name, cls);
   static const llvm::StringLiteral builtins[] = {"String", "Number", "parseInt", "parseFloat", "isNaN",
                                                  "isFinite", "Boolean"};
+  static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
+                                             "decodeURIComponent", "decodeURI"};
   // The global objects, by what is used of them first.
   static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {
       {"process", "process.argv"}, {"console", "console.log(x)"}, {"Date", "Date.now()"},
@@ -2992,10 +3045,11 @@ Expr *Sema::checkName(NameExpr *name) {
     diags_.error(name->loc(), "'" + name->name + "' can only be called: '" + name->name + "(...)'");
   else if (name->name == "this")
     diags_.error(name->loc(), "'this' exists only in the methods of classes, which are not supported yet");
-  else if (llvm::is_contained(builtins, name->name))
+  else if (llvm::is_contained(builtins, name->name) || llvm::is_contained(uris, name->name))
     diags_.error(name->loc(), "'" + name->name + "' can be used as a value only where a function type "
-                                                 "is expected, e.g. 'const f: (s: string) => double = " +
-                                  name->name + "'");
+                                                 "is expected, e.g. 'const f: (s: string) => " +
+                                  (llvm::is_contained(uris, name->name) ? "string" : "double") +
+                                  " = " + name->name + "'");
   else if (name->name == "super")
     diags_.error(name->loc(), "'super' is not a value: call the constructor of the class "
                               "extended, 'super(...)', or a method of it, 'super.m(...)'");
@@ -3514,12 +3568,8 @@ Expr *Sema::checkBinary(BinaryExpr *bin, const Type *expected, bool wraps) {
       return bin;
     }
     if (l->isFloat()) {
-      // JavaScript's `x >>> n` is unsigned, and an int cannot hold it.
-      if (bin->op == BinaryOp::UShr) {
-        diags_.error(bin->lhs->loc(), "operator '>>>' cannot be applied to type 'double'; "
-                                      "convert it to int with 'x | 0' first");
-        return bin;
-      }
+      // A double becomes a 32-bit integer first, as in JavaScript: ToInt32,
+      // whose bits are those of ToUint32, which `>>>` reads them as below.
       bin->lhs = toInt32(bin->lhs);
       l = Type::intTy();
     }
@@ -4086,9 +4136,9 @@ Expr *Sema::checkAssign(AssignExpr *assign) {
       } else if (!type->isError() && !valueType->isError()) {
         if (integerOnly && valueType->isFloat())
           assign->value = toInt32(assign->value); // as with `x | v`
-        if (integerOnly && type->isFloat() && valueType->isNumeric() && op != BinaryOp::UShr) {
+        if (integerOnly && type->isFloat() && valueType->isNumeric()) {
           // `x |= v` on a double works on 32-bit integers, as in JavaScript;
-          // the result goes back into x as a double.
+          // the result goes back into x as a double (of `>>>=`, unsigned).
           assign->value = toInt32(assign->value);
         } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
           reportOperandTypes(assign->loc(), spelling.c_str(), type, valueType);
@@ -4433,6 +4483,9 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
       member->object = convert(member->object, common);
       receiver = common;
     }
+    if (receiver->isClass() && isSubtleClass(receiver, "SubtleCrypto") && !inLibrary(call->loc()))
+      if (Expr *subtle = checkSubtleCall(call, member, expected))
+        return subtle;
     if (receiver->isClass())
       return checkMethodCall(call, member, expected);
     rejectTypeArgs();
@@ -4498,6 +4551,10 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
         libFunctions_.lookup(entry.func->decl->name) == entry.func->decl)
       if (Expr *events = checkEventsFunction(call, entry.func->decl->name, name->loc()))
         return events;
+    // pipeline() and the others of node:stream (sema_stream.cpp).
+    if (entry.func && !entry.var && entry.func->decl && isa<FunctionDecl>(entry.func->decl))
+      if (Expr *streams = checkStreamFunction(call, entry.func->decl, name->loc()))
+        return streams;
     if (entry.func && !entry.var)
       return checkDirectCall(call, entry.func, name->loc(), expected); // a top-level function
     // A function declared in a block, or a constant arrow: called directly,
@@ -4511,6 +4568,13 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
       return checkDirectCall(call, known->sym, name->loc());
     }
     if (!entry.var && !entry.func) {
+      // `TypeError("bad")` makes the error as `new TypeError("bad")` does, as JavaScript has
+      // its kinds of Error (not other classes) callable.
+      if (entry.cls && entry.cls == errorKindClass(name->name) && name->typeArgs.empty() &&
+          !call->optional && !call->hasSpread()) {
+        auto *made = ctx_.make<NewExpr>(call->loc(), name->name, std::vector<TypeRef>{}, call->args);
+        return checkExpr(made, expected);
+      }
       // `Function("a", "return a")`, which is a value only as a class.
       if (const char *why = !entry.cls ? whyUnsupported(name->name) : nullptr)
         diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
@@ -4528,8 +4592,13 @@ Expr *Sema::checkCall(CallExpr *call, const Type *expected) {
   if (call->optional)
     call->callee = chainLink(call->callee);
   const Type *type = call->callee->type;
-  if (type->isFunction())
-    return checkValueCall(call, type);
+  if (type->isFunction()) {
+    Expr *checked = checkValueCall(call, type);
+    // The callback of a Transform's transform() (sema_stream.cpp).
+    if (calleeName && calleeName->var && !streamCallbacks_.empty())
+      noteStreamCallback(call, calleeName->var);
+    return checked;
+  }
   if (type->isOptional() && type->inner()->isFunction())
     diags_.error(call->callee->loc(), "the function may be undefined; check it first, or call it with "
                                       "'?.()', which gives undefined then");
@@ -4712,6 +4781,10 @@ Expr *Sema::checkConsoleLog(CallExpr *call) {
 }
 
 bool Sema::isGlobalName(const Expr *expr, llvm::StringRef name) const {
+  // `globalThis.crypto` is the global crypto (Web Crypto, sema_webcrypto.cpp).
+  if (auto *m = dyn_cast<MemberExpr>(expr); m && name == "crypto" && m->name == "crypto" &&
+                                              !m->optional && isGlobalName(m->object, "globalThis"))
+    return true;
   auto *n = dyn_cast<NameExpr>(expr);
   if (!n || n->name != name)
     return false;
@@ -4949,6 +5022,15 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
     return checkRegExpStaticMember(member);
   if (isGlobalName(member->object, "crypto"))
     return checkWebCryptoMember(member);
+  if (isGlobalName(member->object, "globalThis")) {
+    diags_.error(member->loc(), member->name == "crypto"
+                                    ? std::string("'globalThis.crypto' is used as "
+                                                  "'globalThis.crypto.subtle' and the like")
+                                    : "'globalThis." + member->name +
+                                          "' is not supported: tz has only 'globalThis.crypto'; "
+                                          "write '" + member->name + "'");
+    return member;
+  }
   if (Expr *bytes = checkBytesStaticMember(member))
     return bytes;
   if (isGlobalName(member->object, "Intl")) {
@@ -5002,6 +5084,12 @@ Expr *Sema::checkMember(MemberExpr *member, const Type *expected) {
     return checkResultMember(member);
   if (type->isTuple())
     return checkTupleMember(member);
+  // What a CryptoKey of Web Crypto is lies in its handle, which only tz:webcrypto reads.
+  if (member->name == "handle" && isSubtleClass(type, "CryptoKey") && !inLibrary(member->loc())) {
+    diags_.error(member->loc(), "property 'handle' does not exist on type 'CryptoKey'; it has "
+                                "'type', 'extractable', 'algorithm' and 'usages'");
+    return member;
+  }
   if (type->isClass())
     return checkClassMember(member, expected);
   if (type->isRegExp())

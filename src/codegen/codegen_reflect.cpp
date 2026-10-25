@@ -38,6 +38,9 @@ namespace {
 constexpr uint32_t kLayoutClass = 2097152;
 constexpr uint32_t kLayoutDate = 1024;
 
+// A count no program reaches, as literals have (see codegen.cpp).
+constexpr int64_t kStaticRefCount = int64_t(1) << 62;
+
 // What a class is called in messages: its name, or what it extends.
 std::string className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
@@ -58,6 +61,28 @@ std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
 // Unknowns as the values of parameters
 //===----------------------------------------------------------------------===//
 
+llvm::Value *CodeGen::classIdIn(llvm::Value *id, llvm::ArrayRef<const ClassDecl *> classes) {
+  llvm::Value *any = builder_.getFalse();
+  for (const ClassDecl *cls : classes) {
+    unsigned last = std::max(cls->id, cls->lastId);
+    llvm::Value *from = builder_.CreateSub(id, builder_.getInt32(cls->id));
+    any = builder_.CreateOr(any, builder_.CreateICmpULE(from, builder_.getInt32(last - cls->id)));
+  }
+  return any;
+}
+
+std::vector<const ClassDecl *> CodeGen::classesOfType(const Type *type) {
+  std::vector<const ClassDecl *> classes;
+  if (const ClassDecl *cls = type->classDecl()) {
+    classes.push_back(cls);
+    return classes;
+  }
+  for (const ClassDecl *cls : emittedClasses_)
+    if (cls->type && !cls->literal && cls->type->isSubtypeOf(type))
+      classes.push_back(cls);
+  return classes;
+}
+
 llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicBlock *fail) {
   llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
   // Goes on where `ok` holds.
@@ -72,31 +97,6 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
     llvm::Value *ok = builder_.CreateCall(unknownFunction(name, i32, {ptr, ptr}), {u, slot});
     test(builder_.CreateICmpNE(ok, builder_.getInt32(0)));
     return builder_.CreateLoad(out, slot);
-  };
-  // Whether the class number `id` is that of one of `classes` or of a class
-  // down the chain of one.
-  auto idIn = [&](llvm::Value *id, llvm::ArrayRef<const ClassDecl *> classes) {
-    llvm::Value *any = builder_.getFalse();
-    for (const ClassDecl *cls : classes) {
-      unsigned last = std::max(cls->id, cls->lastId);
-      any = builder_.CreateOr(
-          any, builder_.CreateICmpULE(builder_.CreateSub(id, builder_.getInt32(cls->id)),
-                                      builder_.getInt32(last - cls->id)));
-    }
-    return any;
-  };
-  // The classes whose objects are of the object type `type`: a class and
-  // those down its chain, or those that implement an interface.
-  auto classesOf = [&](const Type *type) {
-    std::vector<const ClassDecl *> classes;
-    if (const ClassDecl *cls = type->classDecl()) {
-      classes.push_back(cls);
-      return classes;
-    }
-    for (const ClassDecl *cls : emittedClasses_)
-      if (cls->type && !cls->literal && cls->type->isSubtypeOf(type))
-        classes.push_back(cls);
-    return classes;
   };
   if (to->isUnknown()) {
     retainValue(u, to);
@@ -180,7 +180,7 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
         // TzClass: { rc, layout, parent, i32 id, ... }.
         llvm::Value *id = builder_.CreateLoad(
             i32, builder_.CreateConstInBoundsGEP1_64(builder_.getInt8Ty(), u, 24), "class");
-        test(idIn(id, classesOf(to->constructed())));
+        test(classIdIn(id, classesOfType(to->constructed())));
       }
       return u; // never counted
     }
@@ -191,7 +191,7 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
                                  builder_.getInt32(0)));
     } else if (!to->isAnyObject()) {
       std::vector<const ClassDecl *> classes = to->isClass() || to->isBase() || !to->bases().empty()
-                                                   ? classesOf(to)
+                                                   ? classesOfType(to)
                                                    : std::vector<const ClassDecl *>();
       if (classes.empty()) { // no check tells a literal type apart
         builder_.CreateBr(fail);
@@ -199,7 +199,7 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
         return llvm::Constant::getNullValue(lower(to));
       }
       test(builder_.CreateNot(isClass));
-      test(idIn(loadLayout(6), classes));
+      test(classIdIn(loadLayout(6), classes));
     }
     retainValue(u, to);
     return u;
@@ -209,6 +209,294 @@ llvm::Value *CodeGen::emitUnknownAs(llvm::Value *u, const Type *to, llvm::BasicB
     startDeadBlock();
     return llvm::Constant::getNullValue(lower(to));
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Choosing among variants when the program runs
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+// TZ_T_* of runtime/tzrt.h, and the kinds tz_unknown_kind gives.
+enum : uint32_t { kBoxInt = 1, kBoxLong = 2, kBoxDouble = 3 };
+enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
+
+// Whether a value of type `a` goes where one of `b` is without an explicit
+// conversion, as a parameter of `a` is narrower than one of `b`: the rule a
+// call that compiles prefers a variant by (docs/overloads.md, section 2).
+bool narrower(const Type *a, const Type *b) {
+  if (a == b || b->isUnknown())
+    return true;
+  if (b->isOptional())
+    return a->isUndefined() || narrower(a->isOptional() ? a->inner() : a, b->inner());
+  if (a->isOptional())
+    return false;
+  if (b->isUnion())
+    return llvm::any_of(b->members(), [&](const Type *m) { return narrower(a, m); });
+  if (a->isLiteral())
+    return narrower(a->literalBase(), b);
+  if (a->isInt())
+    return b->kind() == Type::Kind::Long || b->isFloat() || b->isDecimal();
+  if (a->kind() == Type::Kind::Long)
+    return b->isFloat() || b->isDecimal();
+  if (a->isObject() && b->isObject())
+    return b->isAnyObject() || a->isSubtypeOf(b);
+  return false;
+}
+
+} // namespace
+
+llvm::Value *CodeGen::emitUnknownFit(llvm::Value *u, const Type *to) {
+  llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
+  auto level = [&](uint32_t n) { return builder_.getInt32(n); };
+  auto pick = [&](llvm::Value *cond, uint32_t yes, llvm::Value *no) {
+    return builder_.CreateSelect(cond, level(yes), no);
+  };
+  if (to->isUnknown())
+    return level(1);
+  if (to->isOptional())
+    return builder_.CreateSelect(builder_.CreateIsNull(u), level(3),
+                                 emitUnknownFit(u, to->inner()));
+  if (to->isUnion()) {
+    // As well as the member it fits best.
+    llvm::Value *best = level(0);
+    for (const Type *member : to->members()) {
+      llvm::Value *fit = emitUnknownFit(u, member);
+      best = builder_.CreateSelect(builder_.CreateICmpUGT(fit, best), fit, best);
+    }
+    return best;
+  }
+  if (to->isLiteral())
+    return level(0); // no check tells one value of a type apart
+  auto boxKind = [&] {
+    return builder_.CreateCall(unknownFunction("tz_unknown_box_kind", i32, {ptr}), {u});
+  };
+  auto kind = [&] {
+    return builder_.CreateCall(unknownFunction("tz_unknown_kind", i32, {ptr}), {u});
+  };
+  // Whether tz_unknown_to_X takes it, for a number.
+  auto takes = [&](const char *name, llvm::Type *out) {
+    llvm::Value *slot = createStackSlot(out, "fit.value");
+    llvm::Value *ok = builder_.CreateCall(unknownFunction(name, i32, {ptr, ptr}), {u, slot});
+    return builder_.CreateICmpNE(ok, builder_.getInt32(0));
+  };
+  switch (to->kind()) {
+  case Type::Kind::Int: {
+    llvm::Value *box = boxKind();
+    return pick(builder_.CreateICmpEQ(box, level(kBoxInt)), 3,
+                pick(takes("tz_unknown_to_int", i32), 1, level(0)));
+  }
+  case Type::Kind::Long: {
+    llvm::Value *box = boxKind();
+    return pick(builder_.CreateICmpEQ(box, level(kBoxLong)), 3,
+                pick(builder_.CreateICmpEQ(box, level(kBoxInt)), 2,
+                     pick(takes("tz_unknown_to_long", builder_.getInt64Ty()), 1, level(0))));
+  }
+  case Type::Kind::Double: {
+    llvm::Value *box = boxKind();
+    llvm::Value *integer = builder_.CreateOr(builder_.CreateICmpEQ(box, level(kBoxInt)),
+                                             builder_.CreateICmpEQ(box, level(kBoxLong)));
+    return pick(builder_.CreateICmpEQ(box, level(kBoxDouble)), 3,
+                pick(integer, 2, pick(takes("tz_unknown_to_double", builder_.getDoubleTy()), 1,
+                                      level(0))));
+  }
+  case Type::Kind::Bool:
+    return pick(builder_.CreateICmpEQ(kind(), level(kKindBoolean)), 3, level(0));
+  case Type::Kind::String:
+    return pick(builder_.CreateICmpEQ(kind(), level(kKindString)), 3, level(0));
+  case Type::Kind::Array:
+  case Type::Kind::Function:
+  case Type::Kind::Decimal:
+  case Type::Kind::Result:
+  case Type::Kind::Json: {
+    llvm::Value *holds = builder_.CreateCall(
+        unknownFunction("tz_unknown_holds", i32, {ptr, ptr}), {u, typeDescriptor(to)});
+    return pick(builder_.CreateICmpNE(holds, level(0)), 3, level(0));
+  }
+  case Type::Kind::Object:
+  case Type::Kind::Dict:
+  case Type::Kind::ClassRef:
+    break;
+  default:
+    return level(0);
+  }
+  // An object of the language: its layout tells, as for emitUnknownAs.
+  llvm::Value *layout =
+      builder_.CreateCall(unknownFunction("tz_unknown_layout", ptr, {ptr}), {u}, "layout");
+  llvm::BasicBlock *entry = builder_.GetInsertBlock();
+  llvm::BasicBlock *objectBlock = newBlock("fit.object");
+  llvm::BasicBlock *endBlock = newBlock("fit.end");
+  builder_.CreateCondBr(builder_.CreateIsNotNull(layout), objectBlock, endBlock);
+  switchTo(objectBlock);
+  auto loadLayout = [&](unsigned field) {
+    return builder_.CreateLoad(i32, builder_.CreateStructGEP(layoutDescTy_, layout, field));
+  };
+  llvm::Value *flags = loadLayout(3);
+  llvm::Value *isClass = builder_.CreateICmpNE(
+      builder_.CreateAnd(flags, builder_.getInt32(kLayoutClass)), builder_.getInt32(0));
+  llvm::Value *fit = level(0);
+  if (to->isClassRef()) {
+    if (const ClassDecl *cls = to->classRef()) {
+      fit = pick(builder_.CreateICmpEQ(u, classObject(cls)), 3, level(0));
+    } else if (to->constructed()->isAnyObject()) {
+      fit = pick(isClass, 2, level(0));
+    } else {
+      // TzClass: { rc, layout, parent, i32 id, ... }; read only of a class.
+      llvm::Value *at = builder_.CreateSelect(
+          isClass, builder_.CreateConstGEP1_64(builder_.getInt8Ty(), u, 24), layout);
+      llvm::Value *id = builder_.CreateLoad(i32, at, "class");
+      fit = pick(builder_.CreateAnd(isClass, classIdIn(id, classesOfType(to->constructed()))), 2,
+                 level(0));
+    }
+  } else if (to->isDict()) {
+    fit = pick(builder_.CreateICmpEQ(layout, dictLayout(to).descriptor), 3, level(0));
+  } else if (to->isDate()) {
+    fit = pick(builder_.CreateICmpNE(builder_.CreateAnd(flags, builder_.getInt32(kLayoutDate)),
+                                     builder_.getInt32(0)),
+               3, level(0));
+  } else if (to->isAnyObject()) {
+    fit = level(1);
+  } else if (to->isClass() || to->isBase() || !to->bases().empty()) {
+    std::vector<const ClassDecl *> classes = classesOfType(to);
+    if (!classes.empty()) {
+      llvm::Value *id = loadLayout(6);
+      llvm::Value *in = builder_.CreateAnd(builder_.CreateNot(isClass), classIdIn(id, classes));
+      llvm::Value *exact = builder_.getFalse();
+      if (const ClassDecl *cls = to->classDecl())
+        exact = builder_.CreateICmpEQ(id, builder_.getInt32(cls->id));
+      fit = pick(builder_.CreateAnd(in, exact), 3, pick(in, 2, level(0)));
+    }
+  }
+  llvm::BasicBlock *objectEnd = builder_.GetInsertBlock();
+  builder_.CreateBr(endBlock);
+  switchTo(endBlock);
+  llvm::PHINode *phi = builder_.CreatePHI(i32, 2, "fit");
+  phi->addIncoming(level(0), entry);
+  phi->addIncoming(fit, objectEnd);
+  return phi;
+}
+
+llvm::Value *CodeGen::emitChooseVariant(llvm::ArrayRef<const FunctionDecl *> variants,
+                                        llvm::Value *selfId, llvm::Value *args,
+                                        llvm::Value *count) {
+  llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
+  // args[i], or undefined past the end, read from a slot that holds it then.
+  llvm::Value *missing = createStackSlot(ptr, "variant.missing");
+  builder_.CreateStore(llvm::ConstantPointerNull::get(builder_.getPtrTy()), missing);
+  auto given = [&](size_t i) {
+    return builder_.CreateICmpULT(builder_.getInt32(uint32_t(i)), count);
+  };
+  auto argAt = [&](size_t i) {
+    llvm::Value *at = builder_.CreateGEP(ptr, args, builder_.getInt64(i));
+    return builder_.CreateLoad(ptr, builder_.CreateSelect(given(i), at, missing), "arg");
+  };
+  struct Variant {
+    const FuncSymbol *sym;
+    size_t fixed;
+    llvm::Value *ok;
+    // How the arguments fit, up to the most parameters a variant has before
+    // a rest: of a rest parameter, its element.
+    std::vector<llvm::Value *> fits;
+    const Type *param(size_t i) const {
+      if (i < fixed)
+        return sym->params[i];
+      return sym->hasRest ? sym->params.back()->inner() : nullptr;
+    }
+  };
+  size_t compared = 0;
+  for (const FunctionDecl *fn : variants)
+    compared = std::max(compared, fn->sym->params.size() - (fn->sym->hasRest ? 1 : 0));
+  std::vector<Variant> all;
+  for (const FunctionDecl *fn : variants) {
+    const FuncSymbol *sym = fn->sym;
+    Variant v{sym, sym->hasRest ? sym->params.size() - 1 : sym->params.size(), nullptr, {}};
+    llvm::Value *ok = builder_.CreateICmpUGE(count, builder_.getInt32(uint32_t(sym->minArgs)));
+    if (!sym->hasRest)
+      ok = builder_.CreateAnd(ok,
+                              builder_.CreateICmpULE(count, builder_.getInt32(uint32_t(v.fixed))));
+    if (selfId)
+      ok = builder_.CreateAnd(ok, classIdIn(selfId, {fn->cls}));
+    for (size_t i = 0; i < compared; ++i) {
+      const Type *param = v.param(i);
+      if (!param) {
+        v.fits.push_back(nullptr);
+        continue;
+      }
+      // Left out, a parameter that may be: no worse than given.
+      llvm::Value *fit = builder_.CreateSelect(given(i), emitUnknownFit(argAt(i), param),
+                                               builder_.getInt32(3));
+      if (i < v.fixed)
+        ok = builder_.CreateAnd(ok, builder_.CreateICmpNE(fit, builder_.getInt32(0)));
+      v.fits.push_back(fit);
+    }
+    if (sym->hasRest) {
+      // Each of the rest fits the element.
+      const Type *element = sym->params.back()->inner();
+      llvm::BasicBlock *entry = builder_.GetInsertBlock();
+      llvm::BasicBlock *loopBlock = newBlock("variant.rest");
+      llvm::BasicBlock *bodyBlock = newBlock("variant.rest.body");
+      llvm::BasicBlock *doneBlock = newBlock("variant.rest.done");
+      builder_.CreateBr(loopBlock);
+      switchTo(loopBlock);
+      llvm::PHINode *i = builder_.CreatePHI(i32, 2, "i");
+      llvm::PHINode *fits = builder_.CreatePHI(builder_.getInt1Ty(), 2, "fits");
+      i->addIncoming(builder_.getInt32(uint32_t(v.fixed)), entry);
+      fits->addIncoming(builder_.getTrue(), entry);
+      builder_.CreateCondBr(builder_.CreateICmpULT(i, count), bodyBlock, doneBlock);
+      switchTo(bodyBlock);
+      llvm::Value *at = builder_.CreateZExt(i, builder_.getInt64Ty());
+      llvm::Value *u = builder_.CreateLoad(ptr, builder_.CreateInBoundsGEP(ptr, args, at));
+      llvm::Value *fit = emitUnknownFit(u, element);
+      i->addIncoming(builder_.CreateAdd(i, builder_.getInt32(1)), builder_.GetInsertBlock());
+      fits->addIncoming(builder_.CreateAnd(fits, builder_.CreateICmpNE(fit, builder_.getInt32(0))),
+                        builder_.GetInsertBlock());
+      builder_.CreateBr(loopBlock);
+      switchTo(doneBlock);
+      ok = builder_.CreateAnd(ok, fits);
+    }
+    v.ok = ok;
+    all.push_back(std::move(v));
+  }
+  // Whether `a` fits better than `b`: each argument no worse, one better;
+  // or the same, and `a` takes no rest where `b` does.
+  auto better = [&](const Variant &a, const Variant &b) {
+    llvm::Value *noWorse = builder_.getTrue(), *anyBetter = builder_.getFalse(),
+                *anyWorse = builder_.getFalse();
+    for (size_t i = 0; i < compared; ++i) {
+      const Type *pa = a.param(i), *pb = b.param(i);
+      if (!pa || !pb)
+        continue; // one of them takes no argument there: it fits no such call
+      bool toB = narrower(pa, pb), toA = narrower(pb, pa);
+      llvm::Value *fa = a.fits[i], *fb = b.fits[i];
+      llvm::Value *same = builder_.CreateICmpEQ(fa, fb);
+      llvm::Value *higher = builder_.CreateICmpUGT(fa, fb), *lower = builder_.CreateICmpULT(fa, fb);
+      llvm::Value *ge = toB ? builder_.CreateOr(higher, same) : higher;
+      llvm::Value *gt = toB && !toA ? builder_.CreateOr(higher, same) : higher;
+      llvm::Value *lt = toA && !toB ? builder_.CreateOr(lower, same) : lower;
+      llvm::Value *in = given(i);
+      noWorse = builder_.CreateAnd(noWorse, builder_.CreateOr(builder_.CreateNot(in), ge));
+      anyBetter = builder_.CreateOr(anyBetter, builder_.CreateAnd(in, gt));
+      anyWorse = builder_.CreateOr(anyWorse, builder_.CreateAnd(in, lt));
+    }
+    llvm::Value *plainer = builder_.getInt1(!a.sym->hasRest && b.sym->hasRest);
+    return builder_.CreateAnd(
+        noWorse, builder_.CreateOr(anyBetter,
+                                   builder_.CreateAnd(builder_.CreateNot(anyWorse), plainer)));
+  };
+  llvm::Value *anyOk = builder_.getFalse();
+  for (const Variant &v : all)
+    anyOk = builder_.CreateOr(anyOk, v.ok);
+  llvm::Value *chosen = builder_.CreateSelect(anyOk, builder_.getInt32(uint32_t(-2)),
+                                              builder_.getInt32(uint32_t(-1)));
+  for (size_t a = all.size(); a-- > 0;) {
+    llvm::Value *best = all[a].ok;
+    for (size_t b = 0; b < all.size(); ++b)
+      if (b != a)
+        best = builder_.CreateAnd(
+            best, builder_.CreateOr(builder_.CreateNot(all[b].ok), better(all[a], all[b])));
+    chosen = builder_.CreateSelect(best, builder_.getInt32(uint32_t(a)), chosen, "variant");
+  }
+  return chosen;
 }
 
 void CodeGen::emitReflectMismatch(llvm::StringRef what, llvm::Value *index, const Type *expected,
@@ -335,8 +623,9 @@ llvm::Constant *CodeGen::classInfoGlobal(const ClassDecl *cls) {
 }
 
 // (ptr args, i32 count) -> ptr: a new object of the class from arguments as
-// unknowns, through the first constructor variant that takes them (with one,
-// a mismatch names the argument); NULL after throwing.
+// unknowns, through its constructor (a mismatch names the argument); of
+// several, through the variant the arguments fit best, as for a method
+// (docs/overloads.md, section 6). NULL after throwing.
 void CodeGen::emitConstructThunk(const ClassDecl *cls, llvm::Function *fn) {
   llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
   beginFunction(fn, nullptr);
@@ -352,15 +641,30 @@ void CodeGen::emitConstructThunk(const ClassDecl *cls, llvm::Function *fn) {
   std::vector<FunctionDecl *> ctors = constructorsOf(cls);
   bool precise = ctors.size() <= 1;
   llvm::BasicBlock *none = precise ? nullptr : newBlock("reflect.none");
+  llvm::BasicBlock *several = precise ? nullptr : newBlock("reflect.several");
   // A class without a constructor takes no arguments.
   std::vector<const FuncSymbol *> variants;
   for (FunctionDecl *ctor : ctors)
     variants.push_back(ctor->sym);
   if (variants.empty())
     variants.push_back(nullptr);
+  // Of several, the one the arguments fit best.
+  std::vector<llvm::BasicBlock *> starts;
+  if (!precise) {
+    std::vector<const FunctionDecl *> choices(ctors.begin(), ctors.end());
+    llvm::Value *chosen = emitChooseVariant(choices, nullptr, args, count);
+    llvm::SwitchInst *which = builder_.CreateSwitch(chosen, none, unsigned(ctors.size() + 1));
+    which->addCase(builder_.getInt32(uint32_t(-2)), several);
+    for (size_t v = 0; v < ctors.size(); ++v) {
+      starts.push_back(newBlock("reflect.variant"));
+      which->addCase(builder_.getInt32(uint32_t(v)), starts.back());
+    }
+  }
   for (size_t v = 0; v < variants.size(); ++v) {
     const FuncSymbol *sym = variants[v];
-    llvm::BasicBlock *next = v + 1 < variants.size() ? newBlock("reflect.variant") : none;
+    if (!precise)
+      switchTo(starts[v]);
+    llvm::BasicBlock *next = none; // which the choice rules out
     size_t min = sym ? sym->minArgs : 0;
     bool rest = sym && sym->hasRest;
     std::vector<const Type *> params = sym ? sym->params : std::vector<const Type *>();
@@ -403,18 +707,20 @@ void CodeGen::emitConstructThunk(const ClassDecl *cls, llvm::Function *fn) {
     llvm::Value *made = take(held);
     emitCleanups(0);
     builder_.CreateRet(made);
-    if (next && next != none)
-      switchTo(next);
   }
-  if (none) {
-    switchTo(none);
-    std::string message = what + ": no constructor of " + className(cls) +
-                          " takes these arguments";
+  auto throwText = [&](const std::string &message) {
     llvm::Value *text = stringLiteral(std::u16string(message.begin(), message.end()));
     builder_.CreateCall(unknownFunction("tz_throw_str", builder_.getVoidTy(),
                                         {i32, ptr, builder_.getInt64Ty()}),
                         {builder_.getInt32(1), stringObj(text), stringMeta(text)});
     fail();
+  };
+  if (none) {
+    switchTo(none);
+    throwText(what + ": no constructor of " + className(cls) + " takes these arguments");
+    switchTo(several);
+    throwText(what + ": the arguments fit several constructors of " + className(cls) +
+              " equally well");
   }
   startDeadBlock();
   popScope();
@@ -489,6 +795,136 @@ llvm::Constant *CodeGen::reflectAdapterInfo(const FunctionDecl *fn, const Type *
   finish(ret->isVoid() ? nullptr : result);
   function_ = outer;
   return global;
+}
+
+std::vector<const FunctionDecl *> CodeGen::reflectVariants(const ClassDecl *cls,
+                                                           llvm::StringRef name) {
+  auto overrides = [](const FunctionDecl *fn, const FunctionDecl *base) {
+    for (const FunctionDecl *p = fn; p; p = p->overrides)
+      if (p == base)
+        return true;
+    return false;
+  };
+  std::vector<const FunctionDecl *> found;
+  for (const ClassDecl *c = cls; c; c = c->parent) {
+    std::vector<const FunctionDecl *> own(c->methods.begin(), c->methods.end());
+    for (const ClassField &f : c->fields)
+      if (f.method)
+        own.push_back(f.method);
+    for (const FunctionDecl *fn : own)
+      if (fn->name == name && !fn->isStatic && !fn->isAbstract && fn->typeParams.empty() &&
+          fn->sym && fn->sym->ret &&
+          llvm::none_of(found, [&](const FunctionDecl *v) { return overrides(v, fn); }))
+        found.push_back(fn);
+  }
+  return found;
+}
+
+// (env, this: unknown, args: unknown[]) -> unknown: checks that the `this`
+// is an object of the class that declares the variants highest up its
+// chain, chooses the variant the arguments fit best (or throws a TypeError:
+// none fits, or several equally well), and calls it. The callee owns its
+// `this` and its arguments, as a function with a `this` parameter does.
+llvm::Constant *CodeGen::reflectDispatchInfo(const ClassDecl *cls,
+                                             llvm::ArrayRef<const FunctionDecl *> variants,
+                                             const Type *&type) {
+  const Type *unknown = Type::unknown(), *list = Type::array(unknown);
+  type = Type::function({unknown, list}, 1, /*hasRest=*/true, unknown, /*hasThis=*/true);
+  llvm::StringRef name = variants.front()->name;
+  llvm::Constant *&found = reflectDispatchers_[{cls, name.str()}];
+  if (found)
+    return found;
+  std::string base = "tz." + symbolPrefixes_.lookup(cls) + className(cls) + "." + name.str();
+  auto *dispatch = llvm::Function::Create(closureFnType(type), llvm::GlobalValue::InternalLinkage,
+                                          base + ".dispatch", module_.get());
+  setFunctionAttributes(dispatch);
+  llvm::Constant *info = llvm::ConstantStruct::get(
+      fnInfoTy_, {dispatch, stringLiteral(std::u16string(name.begin(), name.end()))});
+  found = new llvm::GlobalVariable(*module_, fnInfoTy_, /*isConstant=*/true,
+                                   llvm::GlobalValue::PrivateLinkage, info,
+                                   base + ".dispatch.info");
+
+  llvm::IRBuilderBase::InsertPointGuard guard(builder_);
+  llvm::Function *outer = std::exchange(function_, dispatch);
+  builder_.SetInsertPoint(llvm::BasicBlock::Create(ctx_, "entry", dispatch));
+  llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
+  llvm::Value *null = llvm::ConstantPointerNull::get(builder_.getPtrTy());
+  llvm::Value *self = dispatch->getArg(1), *array = dispatch->getArg(2);
+  auto release = [&] {
+    releaseValue(array, list);
+    releaseValue(self, unknown);
+  };
+  auto fail = [&](const std::string &message) {
+    llvm::Value *text = stringLiteral(std::u16string(message.begin(), message.end()));
+    builder_.CreateCall(unknownFunction("tz_throw_str", builder_.getVoidTy(),
+                                        {i32, ptr, builder_.getInt64Ty()}),
+                        {builder_.getInt32(1), stringObj(text), stringMeta(text)});
+    release();
+    builder_.CreateRet(null);
+  };
+  const ClassDecl *top = nullptr;
+  for (const FunctionDecl *fn : variants)
+    if (!top || top->derivesFrom(fn->cls))
+      top = fn->cls;
+  std::string what = className(cls) + "." + name.str();
+  // The `this`.
+  llvm::BasicBlock *wrongBlock = newBlock("this.wrong");
+  llvm::BasicBlock *testBlock = newBlock("this.test");
+  llvm::BasicBlock *okBlock = newBlock("this.ok");
+  llvm::Value *layout =
+      builder_.CreateCall(unknownFunction("tz_unknown_layout", ptr, {ptr}), {self}, "layout");
+  builder_.CreateCondBr(builder_.CreateIsNotNull(layout), testBlock, wrongBlock);
+  switchTo(testBlock);
+  llvm::Value *id =
+      builder_.CreateLoad(i32, builder_.CreateStructGEP(layoutDescTy_, layout, 6), "class");
+  builder_.CreateCondBr(classIdIn(id, {top}), okBlock, wrongBlock);
+  switchTo(wrongBlock);
+  fail(className(top) + "." + name.str() + " was called with a 'this' that is not an instance of " +
+       className(top));
+  // The variant.
+  switchTo(okBlock);
+  llvm::Value *count = builder_.CreateTrunc(arrayLength(array), i32, "count");
+  llvm::Value *args = arrayData(array);
+  llvm::Value *chosen = emitChooseVariant(variants, id, args, count);
+  llvm::BasicBlock *noneBlock = newBlock("variant.none");
+  llvm::BasicBlock *severalBlock = newBlock("variant.several");
+  llvm::SwitchInst *which = builder_.CreateSwitch(chosen, noneBlock, unsigned(variants.size() + 1));
+  which->addCase(builder_.getInt32(uint32_t(-2)), severalBlock);
+  for (size_t v = 0; v < variants.size(); ++v) {
+    const FuncSymbol *sym = variants[v]->sym;
+    llvm::BasicBlock *callBlock = newBlock("variant.call");
+    which->addCase(builder_.getInt32(uint32_t(v)), callBlock);
+    switchTo(callBlock);
+    std::vector<const Type *> params = sym->params;
+    const Type *rest = sym->hasRest ? params.back() : nullptr;
+    if (rest)
+      params.pop_back();
+    std::vector<llvm::Value *> values{self}; // borrowed, as a method takes its object
+    emitReflectArgs(args, count, sym->minArgs, params, rest, values,
+                    [&](llvm::Value *, const Type *, llvm::Value *) {
+                      fail("Reflect.apply: no variant of " + what + " takes these arguments");
+                    });
+    llvm::Value *result = builder_.CreateCall(methodCode(variants[v]), values);
+    llvm::BasicBlock *thrownBlock = newBlock("variant.thrown");
+    llvm::BasicBlock *doneBlock = newBlock("variant.done");
+    builder_.CreateCondBr(builder_.CreateIsNotNull(builder_.CreateLoad(ptr, thrownGlobal())),
+                          thrownBlock, doneBlock,
+                          llvm::MDBuilder(ctx_).createUnlikelyBranchWeights());
+    switchTo(thrownBlock);
+    release();
+    builder_.CreateRet(null);
+    switchTo(doneBlock);
+    llvm::Value *value =
+        sym->ret->isVoid() ? null : emitConversion(result, sym->ret, Type::unknown());
+    release();
+    builder_.CreateRet(value);
+  }
+  switchTo(noneBlock);
+  fail("Reflect.apply: no variant of " + what + " takes these arguments");
+  switchTo(severalBlock);
+  fail("Reflect.apply: the arguments fit several variants of " + what + " equally well");
+  function_ = outer;
+  return found;
 }
 
 // (ptr f, ptr self, ptr args, i32 count) -> ptr: calls the function value
@@ -657,26 +1093,39 @@ void CodeGen::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
   finishFunction();
 }
 
+llvm::Function *CodeGen::constructFunction(const ClassDecl *cls) {
+  if (llvm::Function *found = constructFunctions_.lookup(cls))
+    return found;
+  llvm::Type *ptr = builder_.getPtrTy();
+  auto *fn = llvm::Function::Create(
+      llvm::FunctionType::get(ptr, {ptr, builder_.getInt32Ty()}, false),
+      llvm::GlobalValue::InternalLinkage,
+      "tz.construct." + symbolPrefixes_.lookup(cls) + className(cls), module_.get());
+  setFunctionAttributes(fn);
+  constructFunctions_[cls] = fn; // its body comes once the program is emitted
+  return fn;
+}
+
 void CodeGen::finishReflection(SourceFile &file, llvm::Instruction *init) {
   // The bodies of the functions that make objects of classes from Json, which
   // may need those of more classes.
   for (size_t i = 0; i < pendingConverters_.size(); ++i)
     emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
-  bool reflected = false;
-  for (Stmt *item : file.items)
-    if (auto *cls = dyn_cast<ClassDecl>(item);
-        cls && cls->isEmitted() && (cls->reflectNew || cls->reflectMethods))
-      reflected = true;
-  if (!reflected && !usesApply_)
-    return;
+  // A class is described only if the program looks up what the description
+  // holds: when every `new` and Reflect call is of classes known when
+  // compiling, none is.
+  auto described = [&](const ClassDecl *cls) {
+    return cls->isEmitted() && !cls->literal && !cls->builtin &&
+           ((reflectsNew_ && cls->reflectNew) || (reflectsGet_ && cls->reflectMethods) ||
+            (reflectsJson_ && cls->reflectJson));
+  };
   llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
   llvm::Constant *null = llvm::ConstantPointerNull::get(builder_.getPtrTy());
   std::vector<const ClassDecl *> classes;
   unsigned count = 1;
   for (Stmt *item : file.items) {
     auto *cls = dyn_cast<ClassDecl>(item);
-    if (!cls || !cls->isEmitted() || cls->literal || cls->builtin ||
-        !(cls->reflectNew || cls->reflectMethods))
+    if (!cls || !described(cls))
       continue;
     classes.push_back(cls);
     count = std::max(count, cls->id + 1);
@@ -685,24 +1134,17 @@ void CodeGen::finishReflection(SourceFile &file, llvm::Instruction *init) {
   std::vector<const Type *> invoked;
   for (const ClassDecl *cls : classes) {
     llvm::Constant *construct = null;
-    if (cls->reflectNew && !cls->isAbstract) {
-      auto *fn = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr, i32}, false),
-                                        llvm::GlobalValue::InternalLinkage,
-                                        "tz.construct." + symbolPrefixes_.lookup(cls) +
-                                            className(cls),
-                                        module_.get());
-      setFunctionAttributes(fn);
-      emitConstructThunk(cls, fn);
-      construct = fn;
-    }
+    if (reflectsNew_ && cls->reflectNew && !cls->isAbstract)
+      construct = constructFunction(cls);
     llvm::Constant *fromJson = null;
-    if (cls->reflectJson && !cls->isAbstract)
+    if (reflectsJson_ && cls->reflectJson && !cls->isAbstract)
       fromJson = classFromJsonFunction(cls);
-    // Its methods, and those up its chain it does not override: the first
-    // variant of each name, as JavaScript has one.
+    // Its methods, and those up its chain it does not override, by name: of
+    // several variants, the function that chooses one by the arguments
+    // (docs/overloads.md, section 6).
     std::vector<llvm::Constant *> methods;
     llvm::StringSet<> named;
-    for (const ClassDecl *c = cls; c && cls->reflectMethods; c = c->parent) {
+    for (const ClassDecl *c = cls; c && reflectsGet_ && cls->reflectMethods; c = c->parent) {
       std::vector<FunctionDecl *> own;
       for (FunctionDecl *fn : c->methods)
         own.push_back(fn);
@@ -710,11 +1152,15 @@ void CodeGen::finishReflection(SourceFile &file, llvm::Instruction *init) {
         if (f.method)
           own.push_back(f.method);
       for (FunctionDecl *fn : own) {
-        if (fn->isStatic || fn->isAbstract || !fn->typeParams.empty() || !fn->sym ||
-            !fn->sym->ret || !named.insert(fn->name).second)
+        if (fn->isStatic || named.contains(fn->name))
           continue;
+        std::vector<const FunctionDecl *> variants = reflectVariants(cls, fn->name);
+        if (variants.empty())
+          continue;
+        named.insert(fn->name);
         const Type *type = nullptr;
-        llvm::Constant *info = reflectAdapterInfo(fn, type);
+        llvm::Constant *info = variants.size() == 1 ? reflectAdapterInfo(variants[0], type)
+                                                    : reflectDispatchInfo(cls, variants, type);
         invoked.push_back(type);
         methods.push_back(llvm::ConstantStruct::get(
             reflectMethodTy(), {utf8Constant(fn->name),
@@ -737,9 +1183,25 @@ void CodeGen::finishReflection(SourceFile &file, llvm::Instruction *init) {
         llvm::ConstantStruct::get(classInfoType(), {construct, fromJson, table,
                                                     builder_.getInt32(uint32_t(methods.size()))}));
   }
+  // The bodies of the functions that make objects from unknowns, which the
+  // descriptions and Reflect.construct of classes known when compiling call.
+  for (size_t i = 0; i < constructFunctions_.size(); ++i) {
+    auto [cls, fn] = *(constructFunctions_.begin() + i);
+    if (fn->empty())
+      emitConstructThunk(cls, fn);
+  }
   for (size_t i = 0; i < pendingConverters_.size(); ++i)
     if (classConverters_.lookup(pendingConverters_[i])->empty())
       emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
+  // The objects of the other classes point to no description.
+  for (auto &[cls, global] : classInfos_)
+    if (global && !llvm::is_contained(classes, cls)) {
+      global->replaceAllUsesWith(null);
+      global->eraseFromParent();
+      global = nullptr;
+    }
+  if (!reflectsNew_ && !reflectsGet_ && !reflectsJson_ && !usesApply_)
+    return;
 
   // The objects of the classes by number, and the invokers of the types of
   // the functions that may reach Reflect.apply.
@@ -791,6 +1253,7 @@ llvm::StructType *CodeGen::reflectMethodTy() {
 // the class the value is.
 llvm::Value *CodeGen::emitReflectNew(NewExpr *expr) {
   llvm::Type *ptr = builder_.getPtrTy(), *i32 = builder_.getInt32Ty();
+  reflectsNew_ = true;
   llvm::Value *cls = emitExpr(expr->callee); // a class is never counted
   std::vector<llvm::Value *> values = emitHeldValues(expr->args);
   auto *arrayType = llvm::ArrayType::get(ptr, std::max<size_t>(values.size(), 1));
@@ -816,6 +1279,7 @@ llvm::Value *CodeGen::emitReflectCall(CallExpr *call) {
                                {cls});
   }
   case Builtin::ReflectGet: {
+    reflectsGet_ = true;
     std::vector<llvm::Value *> values = emitHeldValues(call->args);
     llvm::Value *result = builder_.CreateCall(
         unknownFunction("tz_reflect_get", ptr, {ptr, ptr, i64}),
@@ -838,8 +1302,16 @@ llvm::Value *CodeGen::emitReflectCall(CallExpr *call) {
   }
   case Builtin::ReflectConstruct: {
     std::vector<llvm::Value *> values = emitHeldValues(call->args);
-    llvm::Value *object = builder_.CreateCall(
-        unknownFunction("tz_reflect_construct", ptr, {ptr, ptr}), {values[0], values[1]}, "object");
+    llvm::Value *object;
+    if (const ClassDecl *known = call->args[0]->type->classRef()) {
+      // A class known when compiling: its function, without its description.
+      object = builder_.CreateCall(unknownFunction("tz_reflect_make", ptr, {ptr, ptr}),
+                                   {constructFunction(known), values[1]}, "object");
+    } else {
+      reflectsNew_ = true;
+      object = builder_.CreateCall(unknownFunction("tz_reflect_construct", ptr, {ptr, ptr}),
+                                   {values[0], values[1]}, "object");
+    }
     releaseValue(values[1], call->args[1]->type);
     emitThrowCheck();
     return object;
@@ -848,16 +1320,45 @@ llvm::Value *CodeGen::emitReflectCall(CallExpr *call) {
     llvm::Value *cls = emitExpr(call->args[0]);
     Operand json = emitOperand(call->args[1], /*canBorrow=*/true);
     llvm::Value *object;
-    if (const ClassDecl *known = call->args[0]->type->classRef())
+    if (const ClassDecl *known = call->args[0]->type->classRef()) {
       object = builder_.CreateCall(
           classFromJsonFunction(known),
           {json.value, llvm::ConstantPointerNull::get(builder_.getPtrTy())}, "object");
-    else
+    } else {
+      reflectsJson_ = true;
       object = builder_.CreateCall(unknownFunction("tz_reflect_from_json", ptr, {ptr, ptr}),
                                    {cls, json.value}, "object");
+    }
     dropOperand(json);
     emitThrowCheck();
     return object;
+  }
+  case Builtin::ReflectMethod: {
+    // The object only says which class: its method, as the description
+    // would give it, is a function value without an environment, in a box
+    // that lives as long as the program, as the object of a class does.
+    Operand object = emitOperand(call->args[0], /*canBorrow=*/true);
+    dropOperand(object);
+    // Of several variants, the function that chooses one.
+    const FunctionDecl *method = call->method->decl;
+    const ClassDecl *cls = call->args[0]->type->classDecl();
+    std::vector<const FunctionDecl *> variants = reflectVariants(cls, method->name);
+    const Type *type = nullptr;
+    llvm::Constant *info = variants.size() > 1 ? reflectDispatchInfo(cls, variants, type)
+                                               : reflectAdapterInfo(method, type);
+    unknownFunctionTypes_.insert(type); // Reflect.apply may call it
+    llvm::GlobalVariable *&box = reflectBoxes_[info];
+    if (!box) {
+      llvm::Constant *init = llvm::ConstantStruct::getAnon(
+          {builder_.getInt64(kStaticRefCount),
+           module_->getOrInsertGlobal("tz_box_layout", builder_.getInt8Ty()),
+           typeDescriptor(type),
+           llvm::ConstantStruct::get(fnTy_, {info, llvm::ConstantPointerNull::get(ptr)})});
+      box = new llvm::GlobalVariable(*module_, init->getType(), /*isConstant=*/false,
+                                     llvm::GlobalValue::InternalLinkage, init,
+                                     info->getName() + ".box");
+    }
+    return box;
   }
   default:
     llvm_unreachable("not a builtin of reflection");

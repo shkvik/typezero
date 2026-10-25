@@ -541,10 +541,12 @@ bool isContextSensitive(const Expr *arg) {
   if (auto *lit = dyn_cast<ObjectLitExpr>(arg))
     return llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return isContextSensitive(p.value); });
   if (auto *name = dyn_cast<NameExpr>(arg))
-    return name->typeArgs.empty() && llvm::is_contained(llvm::ArrayRef<llvm::StringRef>{"String", "Number", "parseInt",
-                                                                                      "parseFloat", "isNaN", "isFinite",
-                                                                                      "Boolean"},
-                                                        name->name);
+    return name->typeArgs.empty() &&
+           llvm::is_contained(
+               llvm::ArrayRef<llvm::StringRef>{"String", "Number", "parseInt", "parseFloat",
+                                               "isNaN", "isFinite", "Boolean", "encodeURIComponent",
+                                               "encodeURI", "decodeURIComponent", "decodeURI"},
+               name->name);
   if (auto *member = dyn_cast<MemberExpr>(arg))
     if (auto *object = dyn_cast<NameExpr>(member->object))
       return object->name == "Math" || object->name == "Number" || object->name == "String" ||
@@ -1527,9 +1529,11 @@ std::vector<const Type *> Sema::exactClassArgs(CallExpr *call, const FuncSymbol 
     if (!param || !param->isConstructor() || !mentionsAnyOf(param, generic->typeParams))
       continue;
     Expr *arg = call->args[i];
+    std::vector<const CastExpr *> dropped;
     while (auto *conv = dyn_cast<CastExpr>(arg)) {
       if (!conv->isImplicit())
         break;
+      dropped.push_back(conv);
       arg = conv->operand;
     }
     const ClassDecl *cls = arg->type->classRef();
@@ -1538,6 +1542,9 @@ std::vector<const Type *> Sema::exactClassArgs(CallExpr *call, const FuncSymbol 
     exact.resize(generic->params.size(), nullptr);
     exact[i] = arg->type;
     call->args[i] = arg;
+    // The class no longer becomes a Constructor here.
+    for (const CastExpr *conv : dropped)
+      constructorCasts_.erase(conv);
   }
   return exact;
 }

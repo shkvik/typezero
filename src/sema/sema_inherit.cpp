@@ -36,7 +36,7 @@ namespace tz {
 namespace {
 
 // The classes of errors built into JavaScript; tz has Error, TypeError,
-// RangeError and SyntaxError of them (see sema_error.cpp).
+// RangeError, SyntaxError and URIError of them (see sema_error.cpp).
 bool isErrorClass(llvm::StringRef name) {
   static const char *const names[] = {"Error",       "TypeError",      "RangeError",
                                       "SyntaxError", "ReferenceError", "EvalError",
@@ -181,7 +181,7 @@ void Sema::resolveClassBases(ClassDecl *cls) {
     } else if (!found && isErrorClass(ref.name)) {
       diags_.error(ref.loc, "'" + ref.name +
                                 "' is not built in; extend Error, or one of its kinds that are: "
-                                "TypeError, RangeError, SyntaxError");
+                                "TypeError, RangeError, SyntaxError, URIError");
     } else if (found) {
       std::string message =
           "'" + ref.name.str() + "' is not a class, and a class can extend only a class";
@@ -610,6 +610,11 @@ void Sema::linkOverrides(ClassDecl *cls) {
                                       (inherited.size() == 1 ? "is " : "are ") +
                                       variantList(inherited) +
                                       "; an override takes the same parameters");
+      }
+      // A hook of node:stream with other parameters (sema_stream.cpp).
+      if (!inherited.empty() && isStreamHook(fn, /*linked=*/true)) {
+        reportStreamHook(fn, inherited);
+        continue;
       }
       // One more variant of the name: it must differ from the inherited ones.
       for (FunctionDecl *v : inherited)

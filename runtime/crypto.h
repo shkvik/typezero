@@ -70,7 +70,7 @@ typedef struct TzHash {
 } TzHash;
 
 TzHash *tz_crypto_hash_alloc(const TzMd *md, int hmac);
-// PBKDF2 of `md` into `out`, for scrypt.
+// PBKDF2 of `md` into `out`, for scrypt and the threads of the pool.
 void tz_crypto_pbkdf2_raw(const TzMd *md, const uint8_t *password, size_t password_length,
                           const uint8_t *salt, size_t salt_length, double iterations, uint8_t *out,
                           size_t length);
@@ -79,6 +79,14 @@ int tz_crypto_check_integer(double value, const char *name, double min, double m
 // Starts a context of `md` in `ctx`.
 void tz_crypto_md_start(const TzMd *md, void *ctx);
 void tz_crypto_md_end(const TzMd *md, void *ctx);
+// The digest, HMAC (md->size bytes into `out`) and HKDF of data at once, for the threads of the
+// pool too: they use the memory of the system, not the allocator of the runtime.
+void tz_crypto_digest_raw(const TzMd *md, const uint8_t *data, size_t length, uint8_t *out);
+void tz_crypto_hmac_raw(const TzMd *md, const uint8_t *key, size_t key_length, const uint8_t *data,
+                        size_t length, uint8_t *out);
+void tz_crypto_hkdf_raw(const TzMd *md, const uint8_t *key, size_t key_length, const uint8_t *salt,
+                        size_t salt_length, const uint8_t *info, size_t info_length, uint8_t *out,
+                        size_t length);
 
 //===----------------------------------------------------------------------===//
 // Ciphers
@@ -133,6 +141,9 @@ struct TzCipher {
   uint8_t last[16];  // a decipher holds back the last whole block for the padding
   int32_t has_last;
   int32_t aad_set;
+  // A cipher of a job of the pool (Web Crypto, crypto_subtle.c), which must not throw there: a
+  // failure is only the -1 of `final`.
+  int32_t quiet;
   _Alignas(16) uint8_t ctx[];
 };
 

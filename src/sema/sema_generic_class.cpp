@@ -318,6 +318,8 @@ void Sema::fillInstance(ClassDecl *inst) {
       addInstanceBase(type);
     }
   }
+  // A Duplex of node:stream is a Writable too (sema_stream.cpp).
+  addStreamBases(inst, inst->loc());
   // The fields, in the order of the generic class: the copy is parsed from
   // its text. The static ones are the generic class's.
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
@@ -482,6 +484,10 @@ Expr *Sema::checkGenericNew(NewExpr *expr, ClassDecl *generic, const Type *expec
   if (generic->library && generic->name == "EventEmitter")
     if (Expr *emitter = checkEmitterNew(expr, generic, expected))
       return emitter;
+  // `new Readable({...})` (sema_stream.cpp).
+  if (generic->library && isStreamClass(generic))
+    if (Expr *stream = checkStreamNew(expr, generic, expected))
+      return stream;
   // `new Box<int>(1)`: the instance, as any class.
   if (!expr->typeArgs.empty()) {
     std::vector<const Type *> args;

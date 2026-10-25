@@ -1,0 +1,80 @@
+// same-as-node --experimental-transform-types
+// Web Crypto with the rest (docs/crypto.md, step 4): a server of tz:http
+// that signs what it sends with crypto.subtle and a client that checks the
+// signature, a key a generic cache keeps, an EventEmitter that reports the
+// checks, a Dog[] seen as an Animal[] only read on the way, and a catch
+// that gets the error a rejected verify gives.
+import { serve } from "tz:http"
+import { EventEmitter } from "node:events"
+
+const enc = new TextEncoder()
+const hex = (b: ArrayBuffer) => Buffer.from(b).toString("hex")
+
+class Cache<K, V> {
+  #items = new Map<K, V>()
+  async get(key: K, make: () => Promise<V>): Promise<V> {
+    const have = this.#items.get(key)
+    if (have != undefined) return have
+    const made = await make()
+    this.#items.set(key, made)
+    return made
+  }
+}
+const keys = new Cache<string, CryptoKey>()
+const hmac = (secret: string) =>
+  keys.get(secret, () =>
+    crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+      "sign",
+      "verify",
+    ]),
+  )
+
+class Animal {
+  constructor(public name: string) {}
+}
+class Dog extends Animal {}
+function names(all: Animal[]) {
+  return all.map((a) => a.name).join(",")
+}
+const dogs: Dog[] = [new Dog("Rex"), new Dog("Ace")]
+
+const server = serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+  const body = new URL(req.url).pathname == "/dogs" ? names(dogs) : "nothing"
+  const sig = await crypto.subtle.sign("HMAC", await hmac("server key"), enc.encode(body))
+  return new Response(body, { headers: { "x-signature": hex(sig) } })
+})
+
+class Checks extends EventEmitter<{ checked: [path: string, ok: boolean] }> {}
+const checks = new Checks()
+checks.on("checked", (path, ok) => console.log(`checked ${path}: ${ok}`))
+
+async function fetchSigned(path: string, secret: string) {
+  const res = await fetch(new URL(path, server.url))
+  const body = await res.text()
+  const sig = Buffer.from(res.headers.get("x-signature") ?? "", "hex")
+  const ok = await crypto.subtle.verify("HMAC", await hmac(secret), sig, enc.encode(body))
+  checks.emit("checked", path, ok)
+  return body
+}
+
+console.log(await fetchSigned("/dogs", "server key"))
+console.log(await fetchSigned("/cats", "server key"))
+console.log(await fetchSigned("/dogs", "another key"))
+const [a, b] = await Promise.all([fetchSigned("/x", "server key"), fetchSigned("/y", "server key")])
+console.log(a, b)
+
+try {
+  // A key that may only sign cannot verify: the promise is rejected.
+  const signOnly = await crypto.subtle.importKey(
+    "raw",
+    enc.encode("k"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  await crypto.subtle.verify("HMAC", signOnly, new Uint8Array(32), enc.encode("x"))
+} catch (e) {
+  if (e instanceof DOMException) console.log(e.name, e.message)
+}
+console.log(hex(await crypto.subtle.digest("SHA-256", enc.encode(names(dogs)))))
+await server.stop()

@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -309,17 +310,30 @@ TzHash *tz_crypto_hash_copy(TzHash *h, double length) {
   return copy;
 }
 
+// Memory for the contexts of a computation, which the threads of the pool make too (Web Crypto,
+// crypto_subtle.c): from the system, as the allocator of the runtime is the main thread's.
+static void *scratch(size_t size) {
+  void *p = malloc(size ? size : 1);
+  if (!p)
+    tz_panic("out of memory", -1);
+  return p;
+}
+
 // The digest of data at once, into `out` (h->size bytes).
 static void digest_once(const TzMd *md, const uint8_t *data, size_t length, uint8_t *out) {
   _Alignas(16) uint8_t stack[512];
-  void *ctx = md->ctx_size <= sizeof stack ? stack : tz_alloc(md->ctx_size);
+  void *ctx = md->ctx_size <= sizeof stack ? stack : scratch(md->ctx_size);
   tz_crypto_md_start(md, ctx);
   if (length)
     md->ops->update(ctx, data, length);
   md->ops->final(ctx, out, md->size);
   tz_crypto_md_end(md, ctx);
   if (ctx != stack)
-    tz_free(ctx);
+    free(ctx);
+}
+
+void tz_crypto_digest_raw(const TzMd *md, const uint8_t *data, size_t length, uint8_t *out) {
+  digest_once(md, data, length, out);
 }
 
 // crypto.hash(algorithm, data, outputEncoding): the digest as a Buffer for 'buffer'.
@@ -410,7 +424,7 @@ static void hmac_with(const TzMd *md, const uint8_t *keyed, uint8_t *work, const
 }
 
 static uint8_t *contexts(const TzMd *md, size_t count) {
-  return (uint8_t *)tz_alloc(count * md->ctx_size);
+  return (uint8_t *)scratch(count * md->ctx_size);
 }
 
 static void free_contexts(const TzMd *md, uint8_t *ctx, size_t count, int keyed) {
@@ -418,7 +432,15 @@ static void free_contexts(const TzMd *md, uint8_t *ctx, size_t count, int keyed)
     for (size_t i = 0; i < count; ++i)
       md->ops->cleanup(ctx + i * md->ctx_size);
   memset(ctx, 0, count * md->ctx_size);
-  tz_free(ctx);
+  free(ctx);
+}
+
+void tz_crypto_hmac_raw(const TzMd *md, const uint8_t *key, size_t key_length, const uint8_t *data,
+                        size_t length, uint8_t *out) {
+  uint8_t *keyed = contexts(md, 4), *work = keyed + 2 * md->ctx_size;
+  hmac_key(md, keyed, key, key_length);
+  hmac_with(md, keyed, work, data, length, out);
+  free_contexts(md, keyed, 2, 1);
 }
 
 //===----------------------------------------------------------------------===//
@@ -431,7 +453,7 @@ void tz_crypto_pbkdf2_raw(const TzMd *md, const uint8_t *password, size_t passwo
                           size_t length) {
   uint8_t *keyed = contexts(md, 4), *work = keyed + 2 * md->ctx_size;
   hmac_key(md, keyed, password, password_length);
-  uint8_t *salted = (uint8_t *)tz_alloc(salt_length + 4);
+  uint8_t *salted = (uint8_t *)scratch(salt_length + 4);
   if (salt_length)
     memcpy(salted, salt, salt_length);
   size_t size = md->size, done = 0;
@@ -454,7 +476,7 @@ void tz_crypto_pbkdf2_raw(const TzMd *md, const uint8_t *password, size_t passwo
   }
   memset(u, 0, sizeof u);
   memset(t, 0, sizeof t);
-  tz_free(salted);
+  free(salted);
   free_contexts(md, keyed, 2, 1);
 }
 
@@ -523,41 +545,49 @@ TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, 
              "more than 1024 bytes. Received %zu",
              info.length);
   } else {
-    size_t size = md->size;
     result = tz_abuf_new((int64_t)keylen);
-    uint8_t *keyed = contexts(md, 4), *work = keyed + 2 * md->ctx_size;
-    uint8_t prk[64], t[64];
-    // Extract: PRK = HMAC(salt, ikm); no salt is a string of zeros.
-    uint8_t zeros[64] = {0};
-    hmac_key(md, keyed, salt.length ? salt.data : zeros, salt.length ? salt.length : size);
-    hmac_with(md, keyed, work, key.data ? key.data : zeros, key.length, prk);
-    free_contexts(md, keyed, 2, 1);
-    // Expand: T(i) = HMAC(PRK, T(i-1) | info | i).
-    keyed = contexts(md, 4);
-    work = keyed + 2 * md->ctx_size;
-    hmac_key(md, keyed, prk, size);
-    uint8_t *message = (uint8_t *)tz_alloc(size + info.length + 1);
-    size_t done = 0, previous = 0;
-    for (uint32_t i = 1; done < (size_t)keylen; ++i) {
-      if (previous)
-        memcpy(message, t, previous);
-      if (info.length)
-        memcpy(message + previous, info.data, info.length);
-      message[previous + info.length] = (uint8_t)i;
-      hmac_with(md, keyed, work, message, previous + info.length + 1, t);
-      previous = size;
-      size_t n = (size_t)keylen - done < size ? (size_t)keylen - done : size;
-      memcpy(result->data + done, t, n);
-      done += n;
-    }
-    tz_free(message);
-    free_contexts(md, keyed, 2, 1);
-    memset(prk, 0, sizeof prk);
+    tz_crypto_hkdf_raw(md, key.data, key.length, salt.data, salt.length, info.data, info.length,
+                       result->data, (size_t)keylen);
   }
   tz_crypto_data_done(&info);
   tz_crypto_data_done(&salt);
   tz_crypto_data_done(&key);
   return result;
+}
+
+void tz_crypto_hkdf_raw(const TzMd *md, const uint8_t *key, size_t key_length, const uint8_t *salt,
+                        size_t salt_length, const uint8_t *info, size_t info_length, uint8_t *out,
+                        size_t length) {
+  size_t size = md->size;
+  uint8_t *keyed = contexts(md, 4), *work = keyed + 2 * md->ctx_size;
+  uint8_t prk[64], t[64];
+  // Extract: PRK = HMAC(salt, ikm); no salt is a string of zeros.
+  uint8_t zeros[64] = {0};
+  hmac_key(md, keyed, salt_length ? salt : zeros, salt_length ? salt_length : size);
+  hmac_with(md, keyed, work, key ? key : zeros, key_length, prk);
+  free_contexts(md, keyed, 2, 1);
+  // Expand: T(i) = HMAC(PRK, T(i-1) | info | i).
+  keyed = contexts(md, 4);
+  work = keyed + 2 * md->ctx_size;
+  hmac_key(md, keyed, prk, size);
+  uint8_t *message = (uint8_t *)scratch(size + info_length + 1);
+  size_t done = 0, previous = 0;
+  for (uint32_t i = 1; done < length; ++i) {
+    if (previous)
+      memcpy(message, t, previous);
+    if (info_length)
+      memcpy(message + previous, info, info_length);
+    message[previous + info_length] = (uint8_t)i;
+    hmac_with(md, keyed, work, message, previous + info_length + 1, t);
+    previous = size;
+    size_t n = length - done < size ? length - done : size;
+    memcpy(out + done, t, n);
+    done += n;
+  }
+  free(message);
+  free_contexts(md, keyed, 2, 1);
+  memset(prk, 0, sizeof prk);
+  memset(t, 0, sizeof t);
 }
 
 //===----------------------------------------------------------------------===//
@@ -952,13 +982,19 @@ int64_t tz_crypto_block_update(TzCipher *c, const uint8_t *in, size_t length, ui
   return written;
 }
 
+// OpenSSL's error of a final block, unless the cipher is a job's (see TzCipher::quiet).
+static void block_fail(const TzCipher *c, const char *message) {
+  if (!c->quiet)
+    tz_throw(TZ_ERROR, "%s", message);
+}
+
 // The final block of such a cipher: the padding added, or checked and taken off.
 int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   const size_t size = c->alg->block;
   if (!c->decrypt) {
     if (!c->padding) {
       if (c->pending) {
-        tz_throw(TZ_ERROR, "error:1C80006B:Provider routines::wrong final block length");
+        block_fail(c, "error:1C80006B:Provider routines::wrong final block length");
         return -1;
       }
       return 0;
@@ -971,13 +1007,13 @@ int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   }
   if (!c->padding) {
     if (c->pending) {
-      tz_throw(TZ_ERROR, "error:1C80006B:Provider routines::wrong final block length");
+      block_fail(c, "error:1C80006B:Provider routines::wrong final block length");
       return -1;
     }
     return 0;
   }
   if ((size_t)c->pending != size) {
-    tz_throw(TZ_ERROR, "error:1C80006B:Provider routines::wrong final block length");
+    block_fail(c, "error:1C80006B:Provider routines::wrong final block length");
     return -1;
   }
   blocks(c, c->block, size, out);
@@ -987,7 +1023,7 @@ int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   for (size_t i = 0; !bad && i < pad; ++i)
     bad |= out[size - 1 - i] != pad;
   if (bad) {
-    tz_throw(TZ_ERROR, "error:1C800064:Provider routines::bad decrypt");
+    block_fail(c, "error:1C800064:Provider routines::bad decrypt");
     return -1;
   }
   return (int64_t)(size - pad);

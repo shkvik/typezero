@@ -637,12 +637,6 @@ Expr *Sema::checkBytesNew(NewExpr *expr, const Type *type) {
                                          "'windows-1251', 'latin1'");
           return call;
         }
-        if (tz_encoding_multi_byte(found)) {
-          diags_.error(label->loc(), "the encoding '" + std::string(found) +
-                                         "' is not supported yet: of the old encodings, only "
-                                         "those of one byte per character are");
-          return call;
-        }
         name = std::u16string(found, found + strlen(found));
       } else {
         // Known only when the program runs: the program then holds the
@@ -925,6 +919,50 @@ Expr *Sema::checkBytesMember(MemberExpr *member) {
   }
   diags_.error(member->loc(), "property '" + name + "' does not exist on type '" + type->name() + "'");
   return member;
+}
+
+// The properties lie at the same place in every view (TzBytes), and the
+// length of an ArrayBuffer where a view keeps its length: CodeGen reads them
+// the same way whatever the member is, and finds the size of an element by
+// the member's class number where the members' differ.
+Expr *Sema::checkBytesUnionMember(MemberExpr *member) {
+  const Type *type = member->object->type;
+  llvm::StringRef name = member->name;
+  auto has = [&](const Type *m) {
+    if (name == "byteLength")
+      return m->isByteView() || m->bytes() == Bytes::ArrayBuffer;
+    if (name == "byteOffset" || name == "buffer")
+      return m->isByteView();
+    return name == "length" && m->isTypedArray();
+  };
+  static const llvm::StringLiteral others[] = {"BYTES_PER_ELEMENT", "maxByteLength", "resizable",
+                                               "detached",          "encoding",      "fatal",
+                                               "ignoreBOM"};
+  if (llvm::is_contained(others, name)) {
+    diags_.error(member->loc(), "property '" + name + "' of '" + type->name() +
+                                    "' is not supported yet; narrow it first");
+    return member;
+  }
+  llvm::ArrayRef<const Type *> members = type->members();
+  if (const Type *const *lacking = llvm::find_if_not(members, has); lacking != members.end()) {
+    std::string message = "property '" + name.str() + "' does not exist on '" +
+                          (*lacking)->name().str() + "', which '" + type->name().str() +
+                          "' may be; narrow it first";
+    if (const Type *const *with = llvm::find_if(members, has); with != members.end())
+      message += ", e.g. 'if (x instanceof " + (*with)->name().str() + ")'";
+    diags_.error(member->loc(), message);
+    return member;
+  }
+  if (name == "length") {
+    member->type = Type::intTy(); // read by CodeGen, as of each member
+    return member;
+  }
+  if (name == "buffer")
+    return builtinCall(member->loc(), member, Builtin::BytesBuffer, {},
+                       Type::bytesType(Bytes::ArrayBuffer));
+  return builtinCall(member->loc(), member,
+                     name == "byteLength" ? Builtin::BytesByteLength : Builtin::BytesByteOffset, {},
+                     Type::intTy());
 }
 
 Expr *Sema::checkBytesStaticMember(MemberExpr *member) {
@@ -1571,20 +1609,23 @@ Expr *Sema::checkTextMethod(CallExpr *call, MemberExpr *member) {
   if (type->bytes() == Bytes::TextDecoder && name == "decode") {
     if (!checkArity(call, member->loc(), 0, 2))
       return call;
-    if (call->args.size() == 2) {
-      call->args[1] = checkExpr(call->args[1]);
-      diags_.error(call->args[1]->loc(), "the options of 'decode' ({ stream: true }) are not "
-                                         "supported yet; decode the bytes whole");
-      return call;
-    }
     if (!call->args.empty()) {
+      // `decode(undefined, { stream: false })` ends a stream with no bytes.
       Expr *input = call->args[0] = checkExpr(call->args[0]);
       const Type *t = input->type;
-      if (!t->isError() && !t->isByteView() && t->bytes() != Bytes::ArrayBuffer) {
+      if (!t->isError() && !t->isUndefined() && !t->isByteView() &&
+          t->bytes() != Bytes::ArrayBuffer) {
         diags_.error(input->loc(), "'decode' takes a typed array, a DataView or an ArrayBuffer, "
                                    "found '" + t->name() + "'");
         return call;
       }
+    }
+    // `{ stream: true }`: the bytes go on in the next call, which may end a
+    // character they begin (docs/bytes.md, section 5).
+    if (call->args.size() == 2) {
+      const Type *options = Type::object({{"stream", Type::optional(Type::boolTy()), false}});
+      Expr *given = checkExpr(call->args[1], options);
+      call->args[1] = coerce(given, options, "the options of 'decode'");
     }
     call->builtin = Builtin::TextDecode;
     call->type = Type::string();

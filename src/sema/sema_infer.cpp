@@ -99,6 +99,8 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
   saved.module = module_;
   saved.instance = checkingInstance_;
   saved.capture = diags_.capture();
+  saved.scopeBranches = scopeBranches_;
+  saved.branchDepth = branchDepth_;
   flow_ = Flow();
   if (NestedGroup *group = fn ? fn->group : nullptr) {
     // A function declared in a block sees what is visible in the block,
@@ -135,6 +137,9 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
       diags_.setCapture(&lateErrors_[owner]);
     }
   }
+  // The branches around the scopes it sees: a function's body is not one.
+  scopeBranches_.resize(scopes_.size(), 0);
+  branchDepth_ = scopeBranches_.empty() ? 0 : scopeBranches_.back();
   // An arrow is checked where it is written.
   currentFunction_ = nullptr;
   targets_.clear();
@@ -147,6 +152,8 @@ Sema::BodyState Sema::enterBody(const FunctionDecl *fn) {
 
 void Sema::leaveBody(BodyState &saved) {
   flow_ = std::move(saved.flow);
+  scopeBranches_ = std::move(saved.scopeBranches);
+  branchDepth_ = saved.branchDepth;
   scopes_ = std::move(saved.scopes);
   typeScopes_ = std::move(saved.typeScopes);
   functions_ = std::move(saved.functions);

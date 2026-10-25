@@ -31,8 +31,10 @@ constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 // Built-in functions called by name; they change no variables and arrays.
-const llvm::StringRef kGlobalFunctions[] = {"String",   "Number", "parseInt",
-                                            "parseFloat", "isNaN", "isFinite", "Boolean"};
+const llvm::StringRef kGlobalFunctions[] = {
+    "String",   "Number",  "parseInt",           "parseFloat", "isNaN",
+    "isFinite", "Boolean", "encodeURIComponent", "encodeURI",  "decodeURIComponent",
+    "decodeURI"};
 
 // The variable `expr` reads, looking through the conversion Sema inserts for
 // a narrowed `T | undefined` variable.

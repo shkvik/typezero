@@ -550,6 +550,10 @@ private:
     case Builtin::StrPadStart:
     case Builtin::StrPadEnd:
     case Builtin::FromCodePoint:
+    case Builtin::UriEncodeComponent: // a lone surrogate
+    case Builtin::UriEncode:
+    case Builtin::UriDecodeComponent: // an escape that is not UTF-8
+    case Builtin::UriDecode:
     case Builtin::ResultUnsafeUnwrap:
     case Builtin::ResultUnsafeUnwrapErr:
       intrinsic(caught);
@@ -557,6 +561,9 @@ private:
     case Builtin::NumToFixed:
       if (!c->args.empty())
         intrinsic(caught);
+      break;
+    case Builtin::NumToRadix:
+      intrinsic(caught);
       break;
     case Builtin::RegExpNew: // a SyntaxError
     case Builtin::JsonParse:

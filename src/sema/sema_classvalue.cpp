@@ -188,7 +188,7 @@ Expr *Sema::checkValueNew(NewExpr *expr, const Type *expected) {
       arg = convert(arg, Type::unknown());
   }
   calledFunction(); // the code of the class runs
-  reflectionUsed_ = true;
+  reflectionUsed_ |= !onlyChecked();
   expr->type = type->constructed();
   return expr;
 }
@@ -222,10 +222,7 @@ Expr *Sema::checkClassExpr(ClassExpr *expr, const Type *expected) {
 void Sema::makeLateClass(ClassDecl *cls) {
   // In generic code that is no copy (a generic class, a trial copy of a
   // function), the class is only checked.
-  cls->checkOnly = trial_ || llvm::any_of(functions_, [](const FunctionDecl *fn) {
-                     return (!fn->typeParams.empty() && !fn->isInstance) ||
-                            (fn->cls && (fn->cls->isGeneric() || fn->cls->checkOnly));
-                   });
+  cls->checkOnly = onlyChecked();
   // A class expression is declared here; a declaration with a value as its
   // base (`class A extends Mixin(B)`) was, with the types.
   if (!cls->type) {

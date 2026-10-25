@@ -1,0 +1,62 @@
+import { parse } from './parse.js';
+import { unsafeStringify } from './stringify.js';
+import { UUIDTypes } from './types.js';
+
+export function stringToBytes(str: string) {
+  // tz: the UTF-8 of TextEncoder, as the TODO of uuid has it; tz has no
+  // unescape(encodeURIComponent(str)), which gives the same bytes.
+  return new TextEncoder().encode(str);
+}
+
+export const DNS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+export const URL = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
+
+type HashFunction = (bytes: Uint8Array) => Uint8Array;
+
+export function v35<TBuf extends Uint8Array = never>(
+  version: 0x30 | 0x50,
+  hash: HashFunction,
+  value: string | Uint8Array,
+  namespace: UUIDTypes<Uint8Array>,
+  buf?: TBuf,
+  offset?: number,
+): UUIDTypes<TBuf> {
+  const valueBytes: Uint8Array =
+    typeof value == 'string' ? stringToBytes(value) : value;
+  const namespaceBytes: Uint8Array =
+    typeof namespace == 'string' ? parse(namespace) : namespace;
+
+  if (namespaceBytes.length != 16) {
+    throw TypeError(
+      'Namespace must be array-like (16 iterable integer values, 0-255)',
+    );
+  }
+
+  // Compute hash of namespace and value, Per 4.3
+  // Future: Use spread syntax when supported on all platforms, e.g. `bytes =
+  // hashfunc([...namespace, ... value])`
+  const input = new Uint8Array(16 + valueBytes.length);
+  input.set(namespaceBytes);
+  input.set(valueBytes, namespaceBytes.length);
+  // tz: the first 16 bytes of the hash, in an array of 16 whose bytes need no checks.
+  const bytes = new Uint8Array(16);
+  bytes.set(hash(input).subarray(0, 16));
+
+  bytes[6] = ((bytes[6] & 0x0f) | version) & 0xff;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  if (buf) {
+    const at = offset ?? 0;
+    if (at < 0 || at + 16 > buf.length) {
+      throw new RangeError(
+        `UUID byte range ${at}:${at + 15} is out of buffer bounds`,
+      );
+    }
+
+    buf.set(bytes, at | 0);
+
+    return buf;
+  }
+
+  return unsafeStringify(bytes);
+}

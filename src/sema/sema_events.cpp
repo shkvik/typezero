@@ -179,6 +179,8 @@ Expr *Sema::checkLibCall(CallExpr *call, NameExpr *name) {
     checkArgsLoosely();
     return call;
   }
+  if (name->name.starts_with("__tz_subtle_"))
+    return checkSubtleIntrinsic(call, name);
   struct Intrinsic {
     llvm::StringLiteral name;
     Builtin builtin;
@@ -187,7 +189,18 @@ Expr *Sema::checkLibCall(CallExpr *call, NameExpr *name) {
   // Those that take a type; the others are declared by the code that
   // calls them (sema_library.cpp).
   static const Intrinsic intrinsics[] = {{"__tz_listener", Builtin::LibListener, 1, 1},
-                                         {"__tz_as", Builtin::LibAs, 1, 1}};
+                                         {"__tz_as", Builtin::LibAs, 1, 1},
+                                         {"__tz_chunk", Builtin::LibChunk, 1, 1},
+                                         {"__tz_isChunk", Builtin::LibIsChunk, 1, 1},
+                                         {"__tz_chunkKind", Builtin::LibChunkKind, 0, 1},
+                                         {"__tz_typeName", Builtin::LibTypeName, 0, 1},
+                                         {"__tz_overrides", Builtin::LibOverrides, 2, 0},
+                                         {"__tz_fsOpen", Builtin::LibFsOpen, 3, 0},
+                                         {"__tz_fsRead", Builtin::LibFsRead, 5, 0},
+                                         {"__tz_fsWrite", Builtin::LibFsWrite, 5, 0},
+                                         {"__tz_fsClose", Builtin::LibFsClose, 2, 0},
+                                         {"__tz_stdinChunk", Builtin::LibStdinChunk, 1, 0},
+                                         {"__tz_stdWrite", Builtin::LibStdWrite, 2, 0}};
   const Intrinsic *intrinsic =
       llvm::find_if(intrinsics, [&](const Intrinsic &i) { return i.name == name->name; });
   if (intrinsic == std::end(intrinsics) || call->args.size() != intrinsic->args ||
@@ -222,6 +235,18 @@ Expr *Sema::checkLibCall(CallExpr *call, NameExpr *name) {
       diags_.error(name->loc(), "'__tz_as' takes a class");
     call->type = Type::optional(typeArg);
     break;
+  case Builtin::LibChunk:
+  case Builtin::LibIsChunk:
+  case Builtin::LibChunkKind:
+  case Builtin::LibTypeName:
+  case Builtin::LibOverrides:
+  case Builtin::LibFsOpen:
+  case Builtin::LibFsRead:
+  case Builtin::LibFsWrite:
+  case Builtin::LibFsClose:
+  case Builtin::LibStdinChunk:
+  case Builtin::LibStdWrite:
+    return checkStreamIntrinsic(call, name, typeArg);
   default:
     break;
   }
@@ -241,8 +266,11 @@ const Type *Sema::eventMapOf(const Type *type) const {
   const ClassDecl *emitter = libraryClass("EventEmitter");
   if (!emitter)
     return nullptr;
+  // The streams of node:stream have theirs from StreamEmitter (see
+  // src/lib/stream.ts).
+  const ClassDecl *streams = libraryClass("StreamEmitter");
   for (const ClassDecl *c = classOf(type); c; c = c->parent)
-    if (c->generic == emitter && !c->typeArgs.empty())
+    if (c->generic && (c->generic == emitter || c->generic == streams) && !c->typeArgs.empty())
       return c->typeArgs[0];
   return nullptr;
 }

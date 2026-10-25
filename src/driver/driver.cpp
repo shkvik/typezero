@@ -24,6 +24,7 @@
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
@@ -498,6 +499,21 @@ bool emitObjectFile(llvm::Module &module, llvm::TargetMachine &tm, llvm::StringR
   return written && supported;
 }
 
+// Whether `path` is a file that nothing forbids writing but that cannot be
+// opened for it: in Windows, an executable that is running.
+bool inUse(llvm::StringRef path) {
+  namespace fs = llvm::sys::fs;
+  if (!fs::is_regular_file(path) || fs::access(path, fs::AccessMode::Write))
+    return false;
+  int fd;
+  std::error_code ec = fs::openFileForWrite(path, fd, fs::CD_OpenExisting, fs::OF_Append);
+  if (!ec) {
+    llvm::sys::Process::SafelyCloseFileDescriptor(fd);
+    return false;
+  }
+  return ec == std::errc::permission_denied;
+}
+
 int build(const Options &opts, llvm::StringRef output, const char *argv0) {
   // The target comes first: code generation needs its data layout to know
   // the size of values.
@@ -520,7 +536,7 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
                ? 0
                : kExitError;
   CryptoUse crypto = cryptoUse(*module);
-  addLicenseManifest(*module, {crypto.any});
+  addLicenseManifest(*module, {crypto.any, usesEncodingIndexes(*module)});
 
   std::string runtime = runtimeFile(argv0, triple.isOSWindows() ? "tzrt.lib" : "libtzrt.a");
   if (!llvm::sys::fs::exists(runtime)) {
@@ -557,7 +573,11 @@ int build(const Options &opts, llvm::StringRef output, const char *argv0) {
 
   std::string errors;
   if (!linkExecutable(triple, inputs, output, errors)) {
-    llvm::errs() << errors << "tz: linking failed\n";
+    if (inUse(output))
+      llvm::errs() << "tz: cannot write '" << output
+                   << "': it is in use, probably still running; stop it and build again\n";
+    else
+      llvm::errs() << errors << "tz: linking failed\n";
     return kExitError;
   }
   if (!errors.empty())

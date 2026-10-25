@@ -103,14 +103,17 @@ tz run                   # без файла — "main" из tz.json
   (`double`, как `5.0`) и `5..toString()`.
 - Истинность как в JS, но без чисел: в условии (`if`, `while`, `for`, `?:`, `!`, `&&`, `||`,
   `Boolean(x)`, `filter(Boolean)`) можно `boolean`, строку (пустая — ложь) и `T | undefined` у
-  `boolean`, строк, массивов, функций и объектов (`undefined` — ложь). `&&` и `||` дают одно
+  `boolean`, строк, массивов, функций, объектов и классов как значений (`typeof User |
+  undefined`, `Constructor | undefined`; `undefined` — ложь). `&&` и `||` дают одно
   из значений: `nick || "аноним"` — строка, `list && list.length` — `int | undefined`. Проверка
   без вызовов: у строки — длина, у `T | undefined` — есть ли значение. `filter(Boolean)` и
   `filter(x => x != undefined)` оставляют элементы со значением, и тип это знает:
   из `(string | undefined)[]` получается `string[]`.
 - Все функции и константы `Math`; `Number(x)`, `+s`, `parseInt`, `parseFloat`, `isNaN`,
   `isFinite`, `Number.isInteger` и остальные функции и константы `Number`, `NaN`, `Infinity`,
-  `x.toFixed(n)`.
+  `x.toFixed(n)`, `x.toString(radix)` с основанием от 2 до 36 (цифры и дробь — как пишет V8:
+  `(255).toString(16)` — `"ff"`, `(0.5).toString(2)` — `"0.1"`; основание-литерал вне 2…36 —
+  ошибка компиляции, иначе `RangeError` node).
 - `decimal` — точные десятичные числа любой длины, как в BigNumber.js, но с обычными операторами
   ([decimal.md](docs/decimal.md)): `const price: decimal = 19.99`, `price * 3 + 0.01`,
   `0.1 + 0.2 == 0.3`. Литерал там, где ждут `decimal`, и рядом с `decimal` читается из текста
@@ -133,7 +136,10 @@ tz run                   # без файла — "main" из tz.json
   `toUpperCase` / `toLowerCase` (по всем правилам Unicode, как в V8: `"ß"` → `"SS"`),
   `replaceAll` со строкой (`$&` и прочие подстановки работают), `String(x)`, `x.toString()`,
   `String.fromCharCode`, `String.fromCodePoint`; по правилам языков — `localeCompare` и
-  `normalize` (см. «Языки: Intl»).
+  `normalize` (см. «Языки: Intl»). `encodeURIComponent`, `encodeURI`, `decodeURIComponent` и
+  `decodeURI` — как в node, с `URIError: URI malformed` у одиночного суррогата и неверного
+  `%`-кода; это функция рантайма над однобайтовой или двухбайтовой строкой, а строка, в которой
+  нечего менять, возвращается без копии.
 - Регулярные выражения (см. «Регулярные выражения»): литералы `/…/` со всем синтаксисом JS и всеми
   флагами `dgimsuvy` — машинный код без взрыва перебора, `new RegExp(s, flags)`, `test`, `exec`,
   `match`, `matchAll`, `search`, `replace` / `replaceAll` (с текстом замены и с функцией),
@@ -232,11 +238,11 @@ tz run                   # без файла — "main" из tz.json
   `InstanceType<typeof K>`. Отражение: `Reflect.get`, `Reflect.apply`, `Reflect.construct` с
   проверкой при выполнении; `fromJson(User, j)` делает объект класса через его конструктор.
 - Исключения (см. «Исключения»): `throw`, `try` / `catch` / `finally` (и `catch` без переменной),
-  `Error`, `TypeError`, `RangeError`, `SyntaxError`, `new Error(message, { cause })`, `e.message`,
-  `e.name`, `e.cause`, `e.stack`, `e.toString()` и `` `${e}` ``, `instanceof` для видов; свои
-  классы ошибок (`class HttpError extends Error`) с полями. Бывшие паники — деление целого на
-  ноль, `x!` на `undefined`, `Math.round` за пределами `int`, `new Array(-1)`, ошибки `decimal`,
-  регулярок и `Json`, переполнение стека — исключения, которые можно поймать.
+  `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`, `new Error(message, { cause })`,
+  `e.message`, `e.name`, `e.cause`, `e.stack`, `e.toString()` и `` `${e}` ``, `instanceof` для
+  видов; свои классы ошибок (`class HttpError extends Error`) с полями. Бывшие паники — деление
+  целого на ноль, `x!` на `undefined`, `Math.round` за пределами `int`, `new Array(-1)`, ошибки
+  `decimal`, регулярок и `Json`, переполнение стека — исключения, которые можно поймать.
 - Async (см. «Async»), пока в одном потоке и ровно как node: `async` функции, стрелки и методы,
   `await` (и на верхнем уровне файла), `Promise<T>` с `then` / `catch` / `finally`,
   `new Promise((resolve, reject) => ...)`, `Promise.resolve` / `reject` / `all` / `allSettled` /
@@ -272,7 +278,9 @@ tz run                   # без файла — "main" из tz.json
   присваивание и `delete` меняют переменные процесса), `process.exit(code)`, `process.exitCode`,
   `process.cwd()`,
   `process.platform`, `process.execPath`, `process.stdout.write(s)` и `process.stderr.write(s)` (без
-  перевода строки), `process.stdout.isTTY`; `Date.now()` и `performance.now()`.
+  перевода строки; строка, `Buffer` или `Uint8Array`), `process.stdout.isTTY`, `process.stdin` —
+  `Readable`, а `process.stdout` и `process.stderr` — `Writable` (см. «Потоки»); `Date.now()` и
+  `performance.now()`.
 - Встроенные модули (см. «Встроенные модули»), API node, импорт по имени: `node:path` (все функции,
   `sep`, `delimiter`, `posix` и `win32`), `node:os`, `import { argv, env } from "node:process"`,
   файлы из `node:fs` (`readFileSync(path, "utf8")`, `writeFileSync`, `appendFileSync`, `existsSync`,
@@ -288,6 +296,12 @@ tz run                   # без файла — "main" из tz.json
   async-итератор для `for await`. Глобальные, как в node:
   `EventTarget`, `Event`, `CustomEvent<T>`, `AbortController`, `AbortSignal` (`timeout`, `any`),
   `DOMException`.
+- Потоки (см. «Потоки»): `node:stream` — `Readable`, `Writable`, `Duplex`, `Transform`,
+  `PassThrough`, `pipe`, `pipeline`, `finished`, `compose`, `Readable.from`, `for await`, тот же
+  порядок событий, что в node; тип кусков известен при компиляции (`Readable<string>`, в
+  `objectMode` — выводится из `push()`), `setEncoding` меняет его дальше по коду;
+  `createReadStream` / `createWriteStream` из `node:fs`, `node:stream/promises`,
+  `node:stream/consumers`, `node:string_decoder`.
 - Криптография (см. «Криптография»): `node:crypto` на OpenSSL 3.5, как в node 24 — хеши
   (`createHash`, `hash`), HMAC, `randomBytes` / `randomUUID` / `randomInt` / `getRandomValues`,
   `timingSafeEqual`, `pbkdf2Sync`, `scryptSync`, `argon2Sync`, `hkdfSync`, шифры (`createCipheriv`:
@@ -344,7 +358,9 @@ tz run                   # без файла — "main" из tz.json
 Память выделяет собственный аллокатор рантайма (как mimalloc, упрощённый для одного потока):
 сегменты по 4 МБ, выровненные на 4 МБ, страницы по 64 КБ для блоков одного размера, большие
 объекты — отдельными кусками у ОС. Выделение и освобождение маленького блока — несколько
-инструкций; на миллионах строк это вдвое быстрее `malloc` из C.
+инструкций; на миллионах строк это вдвое быстрее `malloc` из C. Четыре последних освобождённых
+больших блока до 1 МБ остаются для следующих: поток файла кусками по 64 КБ (и строки из них) не
+ходит за каждым к ОС.
 
 ## Функции и замыкания
 
@@ -395,20 +411,22 @@ try {
 }
 ```
 
-- **Бросать можно только `Error`**: `Error`, `TypeError`, `RangeError`, `SyntaxError`
+- **Бросать можно только `Error`**: `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`
   (`throw "нет файла"` — ошибка с подсказкой `throw new Error("нет файла")`). Поэтому у пойманного
   значения всегда есть `message`, `name` и `stack`, и в `catch (e)` у `e` тип `Error`. В
   `catch (e: unknown)` из strict TS `e` — `unknown`, как в TS: до `instanceof Error` у него нет
   полей. `throw u` у `unknown` бросает лежащий в нём `Error`, а что-то другое — `TypeError` («only
-  an Error can be thrown»). Вид различает `instanceof`.
+  an Error can be thrown»). Вид различает `instanceof`. `TypeError("…")` без `new` — то же, что с
+  `new`, как в JS (только у видов `Error`, не у своих классов).
 - **Свои ошибки** — обычные классы-наследники `Error` или его видов (см. «Наследование и
   интерфейсы»): `class HttpError extends Error { constructor(public status: int, message: string)
-  { super(message); this.name = "HttpError" } }`. `TypeError`, `RangeError` и `SyntaxError` — сами
-  наследники `Error`, поэтому `instanceof Error` верно для всех, а `catch` сужает `e` до класса
-  ветки `instanceof`. `name` наследника вида — имя вида (`"RangeError"`), как у прототипа в JS,
-  пока класс не задаст своё. `console.log` печатает после текста поля наследника и причину, как
-  node: `[HttpError: not found] { status: 404 }`; `JSON.stringify` пишет поля и `name`, если его
-  задали, без `message` и `cause` (в JS они не перечисляются): `{"status":404,"name":"HttpError"}`.
+  { super(message); this.name = "HttpError" } }`. `TypeError`, `RangeError`, `SyntaxError` и
+  `URIError` — сами наследники `Error`, поэтому `instanceof Error` верно для всех, а `catch`
+  сужает `e` до класса ветки `instanceof`. `name` наследника вида — имя вида (`"RangeError"`), как
+  у прототипа в JS, пока класс не задаст своё. `console.log` печатает после текста поля
+  наследника и причину, как node: `[HttpError: not found] { status: 404 }`; `JSON.stringify` пишет
+  поля и `name`, если его задали, без `message` и `cause` (в JS они не перечисляются):
+  `{"status":404,"name":"HttpError"}`.
   `new Error(message, { cause })` хранит причину в `e.cause` (`Error | undefined`). `message` и
   `name` можно менять; `` `${e}` ``, `String(e)` и `e.toString()` дают `"TypeError: текст"`, как
   `Error.prototype.toString`.
@@ -637,6 +655,13 @@ console.log(c, inc == c.inc)   // Counter { step: 2, count: 2 } true
   подходит он так, как подходят получившиеся типы; при прочих равных вариант без generics лучше
   (`exact(x: int)` и `exact<T>(x: T)` с `exact(1)` — первый), как в C#. node такой код
   выполняет неправильно (последнее тело затирает остальные), поэтому он работает только в tz.
+  Декоратор на варианте получает этот вариант, `design:paramtypes` — его параметры. Отражение
+  выбирает вариант при выполнении по тем же правилам, по тому, что лежит в аргументах:
+  `Reflect.get(obj, "add")` даёт функцию, которая выбирает вариант при вызове (`2` — `add(k:
+  int)`, `2.5` — `add(k: double)`, объект `Dog` — `pet(d: Dog)`, а не `pet(a: Animal)`), так же
+  `new cls(...)` и `Reflect.construct` выбирают конструктор; ни одного подходящего или два
+  одинаково хороших — `TypeError` (`the arguments fit several variants of Vec.label equally
+  well`).
 
 ```ts
 class Vec {
@@ -898,7 +923,8 @@ Reflect.getMetadata(Table, User)        // "users", тип string | undefined
   `Constructor` (класс, известный только при выполнении) — ошибки, как и статическое поле, которое
   хранит объект класса, сделанный до подмены.
 - **Все записи — на самом классе**, по имени члена, поэтому `static`-член и член объектов с одним
-  именем (или два варианта перегрузки), оба с декораторами, — ошибка.
+  именем (или два варианта перегрузки), оба с декораторами, — ошибка; так же два конструктора с
+  декорированными параметрами: `design:paramtypes` класса был бы один на оба.
 - **Обобщённый класс** декорируется один раз, как сам класс (в TS он и есть один): цель —
   `Stack`, а не `Stack<int>`, а `design:*` — по объявлению, где параметр типа — `Object`, `T[]` —
   `Array`. Декоратор, который берёт описание метода обобщённого класса, пока ошибка: у каждого
@@ -961,20 +987,33 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   вызовом в `extends` (`class Moderator extends Timestamped(User) {}`) делается там, где
   выполняется.
 - **Отражение** — для классов, известных только при выполнении. `new k(...)` и
-  `Reflect.construct(k, args)` проверяют аргументы по конструктору (у нескольких вариантов —
-  первый, который их берёт); `Reflect.get(obj, name)` даёт поле как `unknown`, метод — как функцию
-  `(this: unknown, ...)`, которая проверяет свой `this`, а чего нет — `undefined`;
-  `Reflect.apply(f, thisArg, args)` вызывает функцию из `unknown`, проверяя аргументы по её
-  параметрам. Не тот аргумент, не столько аргументов, не тот `this`, абстрактный класс —
-  `TypeError` с объяснением: `new Point: argument 2: expected int, got 2.5`. Аргументы — массив
-  любых значений. Описание класса попадает в exe, только если программа пользуется отражением, и
-  только у классов, до которых оно доходит: тех, что стали `Constructor`, и тех, чьи объекты стали
-  `object` или `unknown` или попали в `Reflect.get`, с их наследниками.
-- **Известный класс — без отражения.** `Reflect.construct(User, [a, b])` — это `new User(a, b)`,
-  `Reflect.get(user, "name")` — чтение поля. Обобщённая функция, которая берёт `cls:
-  Constructor<T>`, для `make(Point, ...)` получает копию, где `cls` — сам `Point`: `new cls(...)`,
-  `x instanceof cls`, `fromJson(cls, j)` в ней прямые, а аргументы конструктора проверяются при
-  компиляции (ошибка — у вызова). Так `container.resolve(UserService)` делает объект напрямую.
+  `Reflect.construct(k, args)` проверяют аргументы по конструктору (у нескольких вариантов — по
+  тому, который подходит лучше, см. «Перегрузка» в «Классах»); `Reflect.get(obj, name)` даёт
+  поле как `unknown`, метод — как функцию `(this: unknown, ...)`, которая проверяет свой `this`
+  (у метода с вариантами — функцию, которая выбирает вариант при вызове), а чего нет —
+  `undefined`; `Reflect.apply(f, thisArg, args)` вызывает функцию из `unknown`, проверяя
+  аргументы по её параметрам. Не тот аргумент, не столько аргументов, не тот `this`,
+  абстрактный класс — `TypeError` с объяснением: `new Point: argument 2: expected int, got 2.5`.
+  Аргументы — массив любых значений. Описание класса попадает в exe, только если программа
+  ищет в нём (`new` класса из значения, `Reflect.get` метода по имени из строки, `fromJson` у
+  `Constructor`), и только у классов, до которых это доходит: тех, что стали `Constructor`, и
+  тех, чьи объекты стали `object` или `unknown` или попали в `Reflect.get`, с их наследниками.
+- **Известный класс — без отражения** ([decorators.md](docs/decorators.md), шаг 5).
+  `Reflect.construct(User, [a, b])` — это `new User(a, b)`, `Reflect.get(user, "name")` — чтение
+  поля. Обобщённая функция, которая берёт `cls: Constructor<T>` или объект `T`, для
+  `make(Point, ...)` получает копию, где `cls` — сам `Point`: `new cls(...)`, `x instanceof cls`,
+  `fromJson(cls, j)` в ней прямые, а аргументы конструктора проверяются при компиляции (ошибка
+  — у вызова). `Reflect.get(obj, "greet")` у объекта известного класса даёт функцию метода без
+  описания класса (метод с этим именем не объявляет ни один наследник), а `Reflect.apply` этой
+  функции (из константы или прямо из `Reflect.get`) — прямой вызов `obj.greet(...)`, если `this`
+  — объект этого класса, а аргументы — литерал массива, который проверки пропустили бы
+  (`int` в `double`, объект класса-наследника); иначе проверки остаются, с теми же `TypeError`.
+  `Reflect.construct(User, args)` с аргументами, известными только при выполнении, проверяет их
+  функцией класса, тоже без описания. Так `container.get(UserService)` у `get<T>(cls:
+  Constructor<T>)` с `new cls()` или `Reflect.construct` делает объект напрямую, и в exe нет
+  описания `UserService` ([tests/cli/reflect_unfold.cmake](tests/cli/reflect_unfold.cmake) ищет
+  его в `--emit-llvm`); `bench/di_known` — 103 мс против 579 мс у того же DI через описание
+  (`bench/di_reflect`), exe — 184 КБ против 264 КБ.
 - **`fromJson(cls, j)`** — объект класса из `Json` через его конструктор
   ([narrowing.md](docs/narrowing.md), раздел 3): ключи с именами параметров конструктора — его
   аргументы, каждый проверяется, как поле у `fromJson<T>`; потом публичные поля, которые можно
@@ -1111,7 +1150,9 @@ function show(x: string | int) {
   сужает: после `let s: Shape = { kind: "circle", r: 1 }` у `s` есть `s.r`, пока ей не присвоят
   другое. Факт о поле забывается по тем же правилам, что «поле не `undefined`» (см. «Объекты»).
 - **Поле, которое есть у всех членов**, читается через объединение: одна загрузка, если у всех оно
-  на одном месте, иначе место выбирается по номеру класса. Поле литерального типа, метка, лежит
+  на одном месте, иначе место выбирается по номеру класса. Так же у байтовых массивов:
+  `byteLength`, `byteOffset`, `buffer` и `length` (`d.byteLength` у `Uint8Array | DataView |
+  Buffer | ArrayBuffer`), если они есть у каждого члена. Поле литерального типа, метка, лежит
   первым, сразу за заголовком объекта, поэтому `s.kind` — всегда одна загрузка, а `switch` по нему
   — `switch` по числам. Метод, который есть у всех членов,
   вызывается через класс или интерфейс, которым они все объявлены, а если такого нет — у каждого
@@ -1514,8 +1555,27 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   однобайтовые кодировки WHATWG (`windows-1251`, `koi8-r`, `iso-8859-5`, `ibm866`, …) с их
   метками, `fatal` и `ignoreBOM`. Таблица кодировки попадает в программу, только если метку
   видно в коде (одна — 256 байт; метка, известная только при выполнении, — все 29, ~7 КБ);
-  таблицы и метки [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у самого node. Многобайтовые
-  кодировки (`gbk`, `shift_jis`, …) и `decode(…, { stream: true })` пока — ошибки компиляции.
+  таблицы и метки [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у самого node.
+- **Многобайтовые кодировки** `TextDecoder`: `gbk` и `gb18030`, `big5`, `euc-jp`, `iso-2022-jp`,
+  `shift_jis`, `euc-kr` — декодеры стандарта WHATWG ([cjk.c](runtime/cjk.c)) с его таблицами,
+  которые [gen_cjk_tables.mjs](runtime/gen_cjk_tables.mjs) делает из файлов
+  `index-*.txt` стандарта ([cjk_tables.h](runtime/cjk_tables.h), лицензия BSD-3-Clause —
+  её печатает `tz licenses`). Таблица и декодеры (3 КБ) тоже попадают в exe, только если
+  кодировку видно в коде: `gbk` и `gb18030` — +53 КБ, `euc-kr` — +51 КБ, `big5` — +43 КБ,
+  `euc-jp` — +40 КБ, `shift_jis` и `iso-2022-jp` — +26 КБ (у трёх японских одна таблица JIS X
+  0208, все три — +40 КБ), метка, известная только при выполнении, — все таблицы, +196 КБ. Неправильная
+  последовательность — «�», ASCII-байт после ведущего начинает заново, `fatal` — `TypeError`
+  `The encoded data was not valid for encoding euc-kr`. TextEncoder, как и по стандарту, —
+  только UTF-8. node 24 декодирует `big5`, `euc-jp`, `shift_jis` и `euc-kr` конвертерами ICU,
+  а не по стандарту: у него нет символов HKSCS в Big5 (`0x8740` — `U+F266` вместо `䏰`) и
+  расширения windows-949 в EUC-KR (`0x8141` — `U+0081 A` вместо `갂`), `0x80` в Shift_JIS — «�»
+  вместо `U+0080`, а `0x1A`, `0x1C` и `0x7F` переставлены; tz декодирует, как браузеры.
+- **`decode(bytes, { stream: true })`** — кусок потока: символ, который начался в нём, но не
+  кончился, ждёт следующего вызова, BOM пропускается только в начале потока, вызов без
+  `stream` кончает поток (незаконченный символ — «�»), и следующий начинает новый. Так у всех
+  кодировок, и у UTF-8 и UTF-16 тоже. node 24 у `gbk` и `gb18030` бросает `TypeError` и без
+  `fatal`, если неправильная четырёхбайтовая последовательность разрезана между кусками; tz
+  даёт «�».
 - **Ошибки при выполнении** — те же исключения, что в node, с его текстом:
   `new Uint8Array(-1)` — `RangeError: Invalid typed array length: -1`, неверное смещение вида —
   `RangeError: start offset of Int32Array should be a multiple of 4`, `Buffer.from(s, enc)` с
@@ -1528,8 +1588,11 @@ out[2] = text[0] ?? 0                               // можно: элемен�
 - **В объединениях и словарях**: `Uint8Array | string`, `Packet | Float64Array` и другие сужают
   `typeof`, `instanceof Uint8Array` (и другого вида) и `Buffer.isBuffer(x)`. `Buffer` — это
   `Uint8Array`, поэтому `instanceof Uint8Array` верно и для `Buffer`, а `u instanceof Buffer` у
-  `Uint8Array` проверяется при выполнении и сужает `u` до `Buffer`. В `Map`, `Set`, `Result`,
-  `Promise` и обобщённых функциях байтовые массивы лежат по ссылке, как в node.
+  `Uint8Array` проверяется при выполнении и сужает `u` до `Buffer`. Без сужения через объединение
+  читаются `byteLength`, `byteOffset`, `buffer` и `length`, если они есть у всех членов: у
+  `Uint8Array | Float64Array` `byteLength` умножает длину на размер элемента того, что лежит в
+  значении. В `Map`, `Set`, `Result`, `Promise` и обобщённых функциях байтовые массивы лежат по
+  ссылке, как в node.
 - **`embedBytes("table.bin")`** вшивает файл в exe и даёт `Uint8Array` его байтов: один на всю
   программу, без копирования при запуске, с длиной, известной компилятору, поэтому
   `t[x & 0xff]` у таблицы из 256 байт — без проверки.
@@ -1656,8 +1719,8 @@ for (const entry of readdirSync(".", { withFileTypes: true }))
   `availableParallelism()`, `totalmem()`, `freemem()`, `arch()`, `type()`, `release()`, `version()`,
   `machine()`, `uptime()`, `endianness()`, `loadavg()`, `userInfo()` — из тех же источников, что у
   node (libuv): `release()` — настоящая версия Windows, `version()` — «Windows 11 Home».
-- **`node:process`** — `argv`, `env`, `exit`, `exitCode`, `cwd`, `platform`, `execPath`, `stdout`,
-  `stderr`: то же, что у глобального `process`.
+- **`node:process`** — `argv`, `env`, `exit`, `exitCode`, `cwd`, `platform`, `execPath`, `stdin`,
+  `stdout`, `stderr`: то же, что у глобального `process`.
 - **`node:buffer`** — `Buffer`: тот же, что глобальный.
 - **`node:fs`** — синхронные функции: `readFileSync`, `writeFileSync`, `appendFileSync`,
   `existsSync`, `accessSync`, `chmodSync`, `truncateSync`, `statSync` и `lstatSync`
@@ -1669,6 +1732,7 @@ for (const entry of readdirSync(".", { withFileTypes: true }))
   `Stats { dev: ..., mode: 33206, ... }`. Даты `atime`, `mtime`, `ctime` и `birthtime` делаются
   при чтении из `atimeMs` и других, округлённых до миллисекунды, как их делают геттеры node,
   поэтому ни `console.log`, ни `JSON.stringify` их не показывают; каждое чтение — новая дата.
+  Файл кусками — `createReadStream` и `createWriteStream` (см. «Потоки»).
 - **Текст и байты**: `readFileSync(path, "utf8")` (или `{ encoding: "utf8" }`) — `string`, битый
   UTF-8 становится «�», как в node; другие кодировки `Buffer` (`"latin1"`, `"hex"`, `"base64"`...)
   тоже дают `string`, а без кодировки — `Buffer` с байтами файла. `writeFileSync` и
@@ -1862,6 +1926,76 @@ const [user] = await once(bus, "user")
   (`this.on("x", () => this.y())` в его классе), — цикл, а циклы пока не освобождаются (см.
   «Строки и память»).
 
+## Потоки
+
+```ts
+import { createReadStream, createWriteStream } from "node:fs"
+import { Readable, Transform } from "node:stream"
+import { pipeline } from "node:stream/promises"
+
+const upper = new Transform({
+  transform(chunk, encoding, callback) {                        // chunk: Buffer
+    callback(undefined, chunk.toString().toUpperCase())
+  },
+})
+await pipeline(createReadStream("in.txt"), upper, createWriteStream("out.txt"))
+
+for await (const text of createReadStream("log.txt", "utf8")) console.log(text.length)  // string
+const users = Readable.from([ann, bob])                         // Readable<User>
+```
+
+- **Код — node.** `node:stream` написан на tz ([src/lib/stream.ts](src/lib/stream.ts)) переносом
+  `lib/internal/streams` из node 24 поверх `EventEmitter`: `Readable` (поток и пауза, `read()`,
+  `unshift`, событие `readable`), `Writable` (`cork` / `uncork`, `writev`, `final`), `Duplex`,
+  `Transform`, `PassThrough`, `pipe` (ошибку дальше не передаёт, как в node), `pipeline` и
+  `finished` (с колбэком и из `node:stream/promises`, где `pipeline` берёт и async-генераторы),
+  `compose`, `addAbortSignal`, `Readable.from` (массив, итератор, async-итератор, строка),
+  `for await` (выход из цикла уничтожает поток), `destroy` с ошибкой, `_construct`. «Не успеваю» —
+  как в node: `highWaterMark` (16 КБ в Windows, 16 кусков в `objectMode`), `write()` даёт `false`,
+  потом `drain`, `pipe` ставит источник на паузу. Порядок событий и вызовов `_read` и `_write` —
+  тот же: тесты сверены с node строка в строку.
+- **Тип кусков** известен при компиляции ([streams.md](docs/streams.md)): `Readable<T>`,
+  `Writable<T>`, `Duplex<W, R>`, `Transform<W, R>`. По умолчанию — `Buffer`; кодировка при создании
+  (`{ encoding: "utf8" }`, `createReadStream(path, "utf8")`) — `string`; в `objectMode` — тип того,
+  что программа кладёт в `push()`, пишет в `write()` и `end()` и отдаёт колбэку `transform`
+  (выводится по всей программе, как карта событий из `emit`), или явно:
+  `new Readable<User>({ objectMode: true, read() {} })`. Этот тип получают слушатель `data`,
+  `read()`, `for await` и `_write`; `write("текст")` в поток байтов можно, как в node, а `push(42)`
+  в него и `pipe` потока `User` в поток `Buffer` — ошибки компиляции.
+- **`setEncoding("utf8")`** меняет тип кусков у той же константы (или пути через `readonly`
+  поля) с этого места до конца блока: дальше `on("data", s => ...)` получает `string`, а половина
+  буквы, которую разрезал кусок, ждёт следующего. Если поток до этого уже ушёл — передан в функцию,
+  сохранён, получил слушателей, его видит функция, написанная раньше, — или `setEncoding` стоит в
+  `if` или цикле, это ошибка с подсказкой задать кодировку при создании.
+- **Свои классы**: `class Upper extends Transform` заменяет `_read`, `_write`, `_writev`,
+  `_transform`, `_flush`, `_final`, `_destroy` и `_construct` с теми параметрами, что передаёт
+  поток; их типы можно не писать, а `_read()` — без `size`, как в node. Метод с другими
+  параметрами — ошибка: иначе это был бы ещё один вариант перегрузки, которого поток не вызывает.
+- **Отличия от node**: конец потока — `push(undefined)` (`null` в tz нет), `read()` без данных
+  даёт `undefined`.
+- **Файлы**: `createReadStream(path, options)` и `createWriteStream(path, options)` из `node:fs` —
+  `ReadStream` и `WriteStream` с опциями node (`encoding`, `start` и `end`, `highWaterMark` —
+  64 КБ, `flags`, `mode`, `fd`, `autoClose`, `emitClose`, `flush`, `signal`), событиями `open`,
+  `ready` и `close` и полями `bytesRead`, `bytesWritten`, `path`, `pending`. Чтение и запись — в
+  пуле потоков рантайма (`runtime/fs.c`), как у node через libuv.
+- **`process.stdin`** — `Readable` (байты, после `setEncoding` — строки): читает, только когда его
+  слушают, из того же буфера, что `readLine` и `readFileSync(0)`. **`process.stdout`** и
+  **`process.stderr`** — `Writable`, когда программа пользуется ими как потоком (`pipe` в них,
+  `write` с кодировкой или колбэком, `on`, передаёт их дальше): пишут сразу, в одном порядке с
+  `console.log`. Так же — `stdin`, `stdout` и `stderr` из `node:process`. Простой
+  `process.stdout.write(x)` строки или байтов потоков не подключает: с ними сборка дольше примерно
+  на секунду.
+- **`node:stream/consumers`** — `text`, `json` (даёт `Json`), `buffer`, `arrayBuffer`;
+  **`node:string_decoder`** — `StringDecoder` (`utf8`, `utf16le`, `latin1`, `base64`, `hex` и
+  другие) с теми же строками, что у node, при любом разрезе кусков.
+- **Скорость** (`bench/stream_lines`): 32 МБ, 800 тыс. строк через `createReadStream` → `Transform`
+  на строки → `Transform` с `includes` и `toUpperCase` → `Writable` — 136 мс против 150 мс у Go
+  (горутины и каналы) и 187 мс у node.
+- **Пока нет**: web-потоки (`ReadableStream`, `toWeb` / `fromWeb`), `Readable.wrap`, операторы
+  `Readable` (`map`, `filter`, `toArray`...), `Duplex.from`, `compose` функций, свои события у
+  наследников потоков, асинхронные функции `node:child_process`; `Hash`, `Cipheriv` и другие
+  объекты `node:crypto` — ещё не потоки.
+
 ## Криптография
 
 ```ts
@@ -1935,7 +2069,8 @@ const signature = sign(undefined, Buffer.from("message"), privateKey)
   `generateKeyPairSync` для `rsa`, `rsa-pss`, `dsa`, `ec`, `ed25519`, `ed448`, `x25519`, `x448` (с
   `publicKeyEncoding` / `privateKeyEncoding` результат — строка, `Buffer` или `Json`), `sign` /
   `verify` с `padding`, `saltLength` и `dsaEncoding: "ieee-p1363"`, `diffieHellman`, `constants`.
-  Глобальный `crypto` Web Crypto — пока `crypto.randomUUID()` и `crypto.getRandomValues(a)`.
+  Глобальный `crypto` Web Crypto — `crypto.randomUUID()`, `crypto.getRandomValues(a)` и
+  `crypto.subtle` (ниже), в том числе как `globalThis.crypto`.
 - **Скорость** (Ryzen 9 9950X3D, Windows, [bench](bench/README.md)): AES-256-GCM — 22 ГБ/с (Go —
   7,5 ГБ/с, node на той же программе — в 12 раз медленнее tz), ChaCha20-Poly1305 — 5,9 ГБ/с (Go
   с `golang.org/x/crypto` — 3,5), SHA-256 — 2,7 ГБ/с, как у Go; подпись RSA-2048 — 5 600 в
@@ -1945,10 +2080,66 @@ const signature = sign(undefined, Buffer.from("message"), privateKey)
   если он там есть, и Node.js (MIT) и V8 (BSD), по которым написаны части рантайма, — их отдают
   вместе с exe (`tz licenses app.exe > LICENSES.txt`). Список пишется в exe при сборке (секция
   `.tzlic`), тексты лежат рядом с `tz.exe` в `licenses`. ICU и библиотеки Windows не вшиваются.
-- Пока нет: `crypto.subtle` (Web Crypto, шаг 4 плана), `publicEncrypt` / `privateDecrypt`,
+- Пока нет: `publicEncrypt` / `privateDecrypt`,
   `createDiffieHellman`, `generatePrime`, `checkPrime`, `asymmetricKeyDetails` (у node в нём
   `bigint`), `KeyObject.from`, `ECDH.convertKey`. Опции пишут объектом-литералом в вызове, как у
   `node:fs`; `argon2Sync` принимает литерал без spread.
+
+**Web Crypto** — `crypto.subtle`, как в node, на том же OpenSSL; написан на tz
+([src/lib/webcrypto.ts](src/lib/webcrypto.ts), по коду node 24):
+
+```ts
+const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+const mac = await crypto.subtle.sign("HMAC", key, data)                // так пишут hono и jose
+const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, data)
+const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey)       // JsonWebKey
+```
+
+- **Что есть**: `digest` (SHA-1, SHA-256, SHA-384, SHA-512), `generateKey`, `importKey` /
+  `exportKey` в `raw`, `pkcs8`, `spki` и `jwk`, `sign` / `verify` (HMAC, ECDSA, Ed25519,
+  RSASSA-PKCS1-v1_5, RSA-PSS), `encrypt` / `decrypt` (AES-GCM, AES-CBC, AES-CTR, RSA-OAEP),
+  `deriveBits` / `deriveKey` (PBKDF2, HKDF, ECDH, X25519), `wrapKey` / `unwrapKey` (AES-KW и шифры
+  выше). `CryptoKey` (`type`, `extractable`, `algorithm`, `usages`) печатается как в node. Типы
+  lib.dom — `CryptoKey`, `CryptoKeyPair`, `JsonWebKey`, `BufferSource`, `KeyUsage`,
+  `HmacImportParams` и другие словари — видны без импорта; все словари алгоритмов — один тип
+  `Algorithm` с необязательными полями, поэтому литерал алгоритма в переменной или в `return`
+  подходит без аннотаций. `generateKey` с алгоритмом в вызове даёт `CryptoKey` или `CryptoKeyPair`,
+  `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK можно отдать и как `Json`:
+  `importKey("jwk", JSON.parse(text), ...)`.
+- **Как в node**: всё возвращает `Promise`; ошибки — `DOMException` с именами, кодами и текстами
+  node (`NotSupportedError: Unrecognized algorithm name`, `InvalidAccessError: Unable to use this key
+  to sign`, `OperationError`, `DataError: Invalid keyData`, `SyntaxError: Usages cannot be empty when
+  creating a key.` и даже `InvalidAccessException: key is not extractable`, как у node), `TypeError`
+  Web IDL для пропущенного параметра (`Failed to normalize algorithm: ... because 'hash' is required
+  in 'HmacImportParams'.`); имена алгоритмов без учёта регистра; ключи JWK — в порядке node. Тесты
+  сверяются с node байт в байт: ключи и векторы фиксированы, у случайного печатаются длины и
+  результаты `verify`.
+- **Работа — в пуле потоков**, как у node в libuv: хеши, подписи, шифры, KDF и генерация пар ключей
+  не держат поток программы. PBKDF2 на 3 млн итераций идёт 0,2 с, а таймеры тикают; четыре таких
+  через `Promise.all` идут параллельно. Данные копируются при вызове, как требует спецификация.
+  `importKey` и `exportKey` — сразу, как в node. Результат приходит в следующем обороте цикла:
+  микрозадачи, поставленные раньше, выполняются до него.
+- **Ошибки компиляции** — то, что node отверг бы при работе, если это видно в коде: в вызове или в
+  константе (`const algorithm = { name: "HMAC", hash: "SHA-256" }`, как у hono). Неизвестный
+  алгоритм или хеш, экспериментальный алгоритм node 24, алгоритм не той операции (`digest("HMAC")`),
+  пропущенный параметр с примером (`'iv: new Uint8Array(16)'`), неверная длина ключа AES или тега
+  AES-GCM, неизвестная кривая, недопустимые usages (`'deriveBits' is no usage of a public ECDH key;
+  it takes none: pass []`), пустые usages, формат, в котором семейство не импортируется, данные не
+  того вида для формата, `new CryptoKey()` и `key.handle`. Остальное — при выполнении, как в node.
+- **Два слоя**: что ключ умеет, решает его семейство, а `importKey` / `generateKey` / `deriveKey` /
+  `unwrapKey` с алгоритмом в коде вызывают код только своего семейства. Поэтому программа с HMAC,
+  AES, PBKDF2 и HKDF берёт прямой слой OpenSSL (`digest` — 382 КБ, HMAC — 472 КБ, AES-GCM —
+  1,2 МБ), а с асимметричными ключами — весь (4,3 МБ).
+- **Скорость** ([bench](bench/README.md)): 2 ГиБ SHA-256 кусками по 16 МиБ через `Promise.all` —
+  0,65 с (node — 0,89 с), 200 000 подписей HMAC — 0,37 с (node — 1,16 с); у Go с горутинами на
+  32 ядрах — 0,35 и 0,22 с: пул tz, как у node, — 4 потока (`UV_THREADPOOL_SIZE`).
+- Пока нет: экспериментальные алгоритмы node 24 (SHA-3, cSHAKE, Ed448, X448, AES-OCB,
+  ChaCha20-Poly1305, KMAC, Argon2, ML-DSA, ML-KEM) — ошибка компиляции с именем в коде и
+  `NotSupportedError` иначе; форматы `raw-public` / `raw-secret` / `raw-seed`, `getPublicKey`,
+  `SubtleCrypto.supports`, `KeyObject.toCryptoKey`; `webcrypto` и `subtle` из `node:crypto` —
+  ошибка с подсказкой взять глобальный `crypto`. `CryptoKeyPair` печатается без
+  `[Object: null prototype]`.
 
 ## Модули
 
@@ -2086,8 +2277,14 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   сеттеры, прототипы, `arguments`, `require`, перегрузки функций, типы-шаблоны и `Uppercase<>`,
   пакеты npm, импорты ради побочных действий. Копия — в каталог с именем пакета или в `-o`;
   `--in-place` меняет сам каталог; `--entry` называет вход, если пакет его не называет.
-- **Адаптированный пакет** — [tests/packages/ms](tests/packages/ms): ms 4.0.0 после `tz port` и
+- **Адаптированные пакеты** — [tests/packages/ms](tests/packages/ms): ms 4.0.0 после `tz port` и
   ручных правок (они перечислены в начале файла); его использует тест `tests/run/packages`.
+  [tests/packages/uuid](tests/packages/uuid) — uuid 14.0.3 (`v1`, `v3`, `v4`, `v5`, `v6`, `v7`,
+  `NIL`, `MAX`, `parse`, `stringify`, `validate`, `version`, `v1ToV6`, `v6ToV1`; правки — в начале
+  `src/index.ts`): перегрузок у функций нет, поэтому `v4<TBuf extends Uint8Array = never>(options?,
+  buf?: TBuf, offset?)` даёт `string | TBuf` — без буфера это `string`, а с буфером `string |
+  Uint8Array`; `v3.DNS` (свойство функции) — экспорт `DNS` и `URL`. Тест
+  `tests/run/packages_uuid` печатает ровно то же, что оригинальный uuid 14.0.3 в node.
 
 ## JSON
 
@@ -2758,6 +2955,9 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   бита, и там он остаётся `int`: `(h >>> 0) | 0`. Записать такой `long` в `int` — ошибка, и
   `x >>>= n` у `int` со сдвигом, который может быть нулём, — тоже. Литералы в сдвигах, как и в
   `&` и `|`, не берут тип из контекста: `const w: long = -1 >>> 0` — `4294967295`, как в node.
+  `double` слева становится 32-битным целым, как в JS (ToUint32), и дальше — как у `int`:
+  `-1.5 >>> 0` — `4294967295`, `2.0 ** 40 + 5.5 >>> 0` — `5`, `NaN >>> 0` — `0`; `x >>>= n` у
+  `double` оставляет в нём беззнаковый результат.
 - Число или `boolean` + строка — ошибка компиляции, и в `+=` тоже: в JS `10 + "1"` — `"101"`, и
   `count + input` со строкой из ввода склеивает вместо сложения. Текст собирают шаблоном,
   подсказка даёт готовый: `"Итого: " + total` → `` `Итого: ${total}` ``, `"" + n` →
@@ -2775,6 +2975,10 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   `for (let i = 0; ...)` или `forEach`.
 - `eval(...)`, `new Function(...)` и `new Proxy(...)` — ошибки: код из строки в скомпилированной
   программе выполнить нечем, а поля читаются и пишутся прямо в памяти, перехватить это нельзя.
+- `escape` и `unescape` из приложения B — ошибки, как `RegExp.$1`: их `%uXXXX` не читает никто,
+  кроме них самих. Подсказка — `encodeURIComponent` / `decodeURIComponent`, а для старого
+  способа получить байты UTF-8, `unescape(encodeURIComponent(s))`, — `new TextEncoder().encode(s)`
+  (и `new TextDecoder().decode(bytes)` для обратного `decodeURIComponent(escape(s))`).
 - `void x` годится там же, где литерал `undefined`: в `T | undefined`, в `== undefined`, в
   `console.log`. Функция, которая возвращает только `void f()` (как `() => void f()`), ничего не
   возвращает — её тип возврата `void`.
@@ -2789,8 +2993,9 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   зависит от типа: `if (count)` → `count != 0`, `while (stack.length)` → `stack.length > 0`, у
   `double` — на выбор `!= 0`, `> 0` или `!Number.isNaN(x)`, у `int | undefined` — `!= undefined`
   или `??` (`timeout || 1000` → `timeout ?? 1000`).
-- Массив и функция без `| undefined` — всегда правда, проверять их — ошибка: `if (items)` →
-  `items.length > 0`, `if (check)` → `check()`, `items || []` — правая часть не нужна. Так же
+- Массив, функция, объект и класс без `| undefined` — всегда правда, проверять их — ошибка: `if
+  (items)` → `items.length > 0`, `if (check)` → `check()`, `items || []` — правая часть не нужна,
+  `if (User)` — «a class is always truthy». Так же
   для `T | undefined`, уже проверенного выше (`if (!list) return`, потом `if (list)`).
 - Присваивание в условии — ошибка, и в двойных скобках тоже: `if (level = 0)` → `level == 0`,
   `while (line = next())` → `while ((line = next()) != undefined)`.
@@ -2928,7 +3133,9 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   можно, у числа — ошибка с подсказкой (`??=` или `if (n == 0) n = ...`). Цель — переменная
   или элемент массива с простым индексом.
 - `process.stdout.isTTY` — `boolean`, как в типах node: `false`, если вывод не в терминал (сам node
-  даёт `undefined`). `process.stdout.write` принимает только строку и возвращает `true`;
+  даёт `undefined`). `process.stdout.write(x)` берёт строку, `Buffer` или `Uint8Array` и
+  возвращает `true`; с кодировкой, колбэком или как значение `process.stdout` — `Writable`
+  (см. «Потоки»);
   `process.exit` и `process.exitCode` — целое `int` (или `undefined`).
 - `process.env` — `Record<string, string>`: значение по имени — `string | undefined`, а `delete` и
   присваивание меняют переменные процесса (их увидят программы, запущенные потом). Присвоить можно
@@ -2957,9 +3164,10 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   код больше 2^31 (падение программы в Windows, `0xC0000005`) отрицателен. Предупреждение node
   DEP0190 об аргументах с `shell: true` tz не печатает; в `stdio` — только три потока.
 - `new Array(-1)` и отрицательная длина — исключение `RangeError: Invalid array length`, как в JS.
-- Бросать можно только `Error` (`TypeError`, `RangeError`, `SyntaxError`), и `catch (e)` без типа
-  получает `Error` (в TS — `unknown`), в том числе свой класс-наследник. `e.stack` собирается по
-  пути исключения наверх, поэтому в нём нет функций выше той, что его поймала, а у исключения,
+- Бросать можно только `Error` (`TypeError`, `RangeError`, `SyntaxError`, `URIError`), и
+  `catch (e)` без типа получает `Error` (в TS — `unknown`), в том числе свой класс-наследник.
+  `e.stack` собирается по пути исключения наверх, поэтому в нём нет функций выше той, что его
+  поймала, а у исключения,
   которое не бросали, мест нет вовсе (node записывает стек при создании). `name` — поле самого
   объекта (в JS — свойство прототипа); поэтому `JSON.stringify` пишет `name`, если оно не имя
   встроенного вида, и ставит его после полей класса (в JS — там, где его присвоили).
@@ -3088,8 +3296,9 @@ function box<T>(x: T): T extends string ? { text: T } : { value: T } { ... }
   запись, которую не позволяет свой: не кладёт в массив другое `Animal`, не пишет в поле не `Dog`,
   не меняет `readonly`-поле. Компилятор следит, куда значение попадает: в переменные и параметры,
   в `this` методов (метод родителя, вызванный у наследника, видит его как родителя), в колбэки, в
-  поля и элементы массивов, в результаты функций, в функции-значения. Новый массив из элементов
-  (`[...dogs]`, `slice`, `filter`) — уже не тот массив. Иначе ошибка у вызова или присваивания,
+  поля и элементы массивов, в результаты функций, в функции-значения, а брошенное или
+  отклонённое — туда, где ошибки ловят (`catch`, колбэки `catch` и `then`, `reason` у
+  `allSettled`). Новый массив из элементов (`[...dogs]`, `slice`, `filter`) — уже не тот массив. Иначе ошибка у вызова или присваивания,
   со строкой записи: `adopt(dogs)` — «line 6 puts a 'Cat' into it, and an array of 'Dog' cannot
   hold one; pass a copy, '[...dogs]'». tsc такие записи пропускает. Анализ осторожный: запись
   через функцию-значение он связывает со всеми функциями, которые программа берёт как значения,
@@ -3257,8 +3466,8 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `src/codegen` | генерация LLVM IR через `IRBuilder`; массивы и методы с колбэками — `codegen_array.cpp`; `Math`, `Number` и т.п. — `codegen_builtins.cpp`; значения функций, окружения и коробки — `codegen_closure.cpp`; раскладки объектов, их описания, литералы (и со spread), кортежи, поля и `Object.keys` — `codegen_object.cpp`; методы, конструкторы, `new`, статические поля, `instanceof` — `codegen_class.cpp`; таблицы методов, таблицы интерфейсов и вызовы через них — `codegen_inherit.cpp`; `process` и часы — `codegen_process.cpp`; `decimal` — `codegen_decimal.cpp`; `Result`, его методы и `yield*` — `codegen_result.cpp`; хвостовые вызовы — `codegen_tail.cpp`; генераторы как корутины LLVM и на месте, их закрытие, итераторы массивов и ленивые цепочки в один цикл — `codegen_iter.cpp`; какие функции могут бросить (по всей программе), путь исключения наверх, `try` / `catch` / `finally`, проверка стека, класс `Error` и `Result.fromThrowable` — `codegen_throw.cpp`; регулярки, описания совпадений и `replace` с функцией — `codegen_regex.cpp`; машинный код литералов регулярок — `codegen_regex_native.cpp`; `Json`, `JSON.parse` / `stringify`, `embedJson` и функции `JSON.parse<T>` — `codegen_json.cpp`; объединения: представление, метки, атомы литералов, преобразования, поля и методы объединений объектов — `codegen_union.cpp`; даты и `Intl.DateTimeFormat` — `codegen_date.cpp`; async-функции как корутины, `Promise`, реакции `then` / `catch` / `finally`, `Promise.all` и другие, таймеры, `ResultAsync` — `codegen_async.cpp`; async-генераторы и `for await` — `codegen_async_iter.cpp`; `node:fs/promises`, `node:readline`, `node:timers/promises` и что они берут от сигнала отмены — `codegen_async_io.cpp`; встроенные модули и функции, которыми рантайм делает объекты (`SystemError`, `Stats`...) — `codegen_node.cpp`; запуск программ и функции, которыми рантайм делает результат `spawnSync` и `ExecSyncError`, — `codegen_child.cpp`; словари `Record`, `Map` и `Set` — `codegen_dict.cpp`; байтовые массивы, чтения и записи `DataView` и `Buffer` на месте, TBAA байтов и `embedBytes` — `codegen_bytes.cpp`; `unknown`, классы как значения и `join` кортежа — `codegen_unknown.cpp`; объявление класса с декораторами, заглушки и переходники методов, которые декоратор может подменить, метаданные — `codegen_decorate.cpp`; какие типы могут образовать циклы, код групп, слои 1 и 2 и проверки отладочного режима — `codegen_cycles.cpp`; вызовы функций `node:crypto` по их описанию и `generateKeyPairSync` — `codegen_crypto.cpp`; описания классов для отражения, `new` класса-значения, проверка значений `unknown` по параметрам, `Reflect.get` / `apply` / `construct`, `fromJson` классов — `codegen_reflect.cpp`; встроенные функции `__tz_*` модулей на tz — `codegen_events.cpp`; остальной `Intl`, опции для рантайма и привязанные `format` / `compare` — `codegen_intl.cpp`; вызовы рантайма из встроенных модулей на tz, геттеры в описаниях их классов для печати, переходники результата функций — `codegen_library.cpp` |
 | `src/driver` | командная строка, загрузка файлов программы по импортам и их порядок, пакеты по имени, встроенные модули на tz и глобальные имена `tz:web`, `tz:url` и `tz:fetch` (`loader.cpp`), проходы проверки для карт событий из `emit`, пайплайн оптимизаций, объектный файл, встроенный LLD; какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses.cpp`) |
 | `src/pkg` | проекты и пакеты: `tz.json`, `tz.lock`, выбор версий и граф пакетов программы (`project.cpp`), semver (`semver.cpp`), кэш, JSR и git (`fetch.cpp`), HTTP через WinHTTP (`net.cpp`), JSON с позициями для ошибок и правок (`json.cpp`), импорты файла без парсера (`scan.cpp`), `tz init` / `add` / `remove` / `update` (`commands.cpp`), `tz port` (`port.cpp`) |
-| `src/lib` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`: `node:events` (`events.ts`), `tz:http` (`http.ts`) и глобальные — файл, который их называет, получает их сам: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.ts`), `URL` и `URLSearchParams` (`url.ts`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.ts`). Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>` и `__tz_as<C>` — компилятора |
-| `runtime` | рантайм на C: аллокатор (`alloc.c`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`tzrt.c`); исключение в полёте, места стека ошибки, текст `e.stack`, не пойманное исключение (`error.c`); аргументы, переменные окружения, код выхода и часы (`process.c`); строки (`string.c`); массивы (`array.c`); `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect.c`); разбор чисел и `toFixed` (`number.c`); `Math` (`math.c`); окружения замыканий и объекты (`closure.c`); точные десятичные числа `decimal` (`decimal.c`); значения `Json`, `JSON.parse` как в V8, `JSON.stringify` любого значения и проверки `JSON.parse<T>` (`json.c`); `Object.keys` / `values` / `entries` (`object.c`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode.c`); регулярки: разбор и компиляция в программу (`regex_compile.c`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex.c`); даты: поля, установка полей и строки (`date.c`), разбор строк, как в V8 (`date_parse.c`, общий с `tz`), местный пояс (`date_zone.c`) и языки (`date_format.c`) по ICU системы, которую `icu.c` загружает при первом обращении; `Promise`, очередь микрозадач и `nextTick`, необработанные отклонения, таймеры и цикл событий, как в node, `node:timers/promises`, async-итераторы и async-генераторы (`async.c`); пул потоков и ожидание ввода-вывода в фазе poll — IOCP в Windows (`io.c`); сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal.c`); `node:path` в обоих стилях (`path.c`); `node:fs` и `node:fs/promises`, ошибки ОС `SystemError` как в libuv, stdin, `readLine` и `node:readline` (`fs.c`); `node:child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child.c`); `node:os` (`os.c`); хеш-таблица словарей `Record`, `Map` и `Set` (`map.c`); `ArrayBuffer`, типизированные массивы и их методы (`bytes.c`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer.c`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у node (`encodings.h`); коробки `unknown`, `typeof` и `===` у них (`unknown.c`); записи метаданных (`meta.c`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group.c`); сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net.c`); HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http.c`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress.c`); отражение: `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect.c`); что просят встроенные модули на tz через `__tz_*` (`library.c`); остальной `Intl`: языки, опции и части `formatToParts` (`intl.c`), числа и `PluralRules` (`intl_number.c`), `Collator`, `normalize` и `Segmenter` (`intl_text.c`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names.c`). Отдельно, в `tzcrypto.lib`, — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto.c`), хеши (`crypto_md.c`), AES (`crypto_aes.c`) и ChaCha20-Poly1305 (`crypto_chacha.c`), scrypt (`crypto_scrypt.c`) и Argon2 (`crypto_argon2.c`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp.c`), ключи, подписи и обмен ключами (`crypto_keys.c`), сертификаты (`crypto_x509.c`) |
+| `src/lib` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`: `node:events` (`events.ts`), `tz:http` (`http.ts`), `node:stream` (`stream.ts`), `node:stream/promises` (`stream_promises.ts`), `node:stream/consumers` (`stream_consumers.ts`), `node:string_decoder` (`string_decoder.ts`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.ts`) и глобальные — файл, который их называет, получает их сам: `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.ts`), `URL` и `URLSearchParams` (`url.ts`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.ts`). Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
+| `runtime` | рантайм на C: аллокатор (`alloc.c`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`tzrt.c`); исключение в полёте, места стека ошибки, текст `e.stack`, не пойманное исключение (`error.c`); аргументы, переменные окружения, код выхода и часы (`process.c`); строки (`string.c`); массивы (`array.c`); `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect.c`); разбор чисел и `toFixed` (`number.c`); `Math` (`math.c`); окружения замыканий и объекты (`closure.c`); точные десятичные числа `decimal` (`decimal.c`); значения `Json`, `JSON.parse` как в V8, `JSON.stringify` любого значения и проверки `JSON.parse<T>` (`json.c`); `Object.keys` / `values` / `entries` (`object.c`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode.c`); регулярки: разбор и компиляция в программу (`regex_compile.c`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex.c`); даты: поля, установка полей и строки (`date.c`), разбор строк, как в V8 (`date_parse.c`, общий с `tz`), местный пояс (`date_zone.c`) и языки (`date_format.c`) по ICU системы, которую `icu.c` загружает при первом обращении; `Promise`, очередь микрозадач и `nextTick`, необработанные отклонения, таймеры и цикл событий, как в node, `node:timers/promises`, async-итераторы и async-генераторы (`async.c`); пул потоков и ожидание ввода-вывода в фазе poll — IOCP в Windows (`io.c`); сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal.c`); `node:path` в обоих стилях (`path.c`); `node:fs` и `node:fs/promises`, ошибки ОС `SystemError` как в libuv, stdin, `readLine` и `node:readline`, чтение и запись кусками для потоков файлов (`fs.c`); что просит `node:stream`: проверка куска, байты в stdout и stderr (`stream.c`); `node:child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child.c`); `node:os` (`os.c`); хеш-таблица словарей `Record`, `Map` и `Set` (`map.c`); `ArrayBuffer`, типизированные массивы и их методы (`bytes.c`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer.c`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/gen_encodings.mjs) берёт у node (`encodings.h`); коробки `unknown`, `typeof` и `===` у них (`unknown.c`); записи метаданных (`meta.c`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group.c`); сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён (`net.c`); HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http.c`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress.c`); отражение: `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect.c`); что просят встроенные модули на tz через `__tz_*` (`library.c`); остальной `Intl`: языки, опции и части `formatToParts` (`intl.c`), числа и `PluralRules` (`intl_number.c`), `Collator`, `normalize` и `Segmenter` (`intl_text.c`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names.c`). Отдельно, в `tzcrypto.lib`, — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto.c`), хеши (`crypto_md.c`), AES (`crypto_aes.c`) и ChaCha20-Poly1305 (`crypto_chacha.c`), scrypt (`crypto_scrypt.c`) и Argon2 (`crypto_argon2.c`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp.c`), ключи, подписи и обмен ключами (`crypto_keys.c`), сертификаты (`crypto_x509.c`) |
 | `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними) |
 | `tests` | `run/*.ts` с ожидаемым выводом в `*.out`; `errors/*.ts` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.ts`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
 | `bench` | одни и те же программы на typezero и Go и скрипт сравнения; сервер «Hello, World!» на tz, Go и node и нагрузка на него (`http.ps1`) |

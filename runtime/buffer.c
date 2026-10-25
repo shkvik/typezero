@@ -985,16 +985,22 @@ void tz_text_encode_into(void *obj, uint64_t meta, TzBytes *dst, int32_t *out) {
 }
 
 // The encodings of a TextDecoder; a single-byte one has its table (see
-// encodings.h), which the program holds.
-enum { TEXT_UTF8, TEXT_UTF16LE, TEXT_UTF16BE, TEXT_SINGLE_BYTE };
+// encodings.h), a multi-byte one its TzCjkEncoding (cjk.c), which the
+// program holds.
+enum { TEXT_UTF8, TEXT_UTF16LE, TEXT_UTF16BE, TEXT_SINGLE_BYTE, TEXT_CJK };
 
 typedef struct {
   int64_t rc;
   const TzLayout *layout;
   int32_t encoding;
   int32_t fatal, ignore_bom;
-  int32_t reserved;
-  const TzEncodingTable *table;
+  // The last decode had `stream: true`: the stream goes on from `state`,
+  // and `bom_seen` says whether its first character, which may be a BOM, is
+  // behind.
+  int32_t streaming;
+  const void *table;
+  uint32_t state[4];
+  int32_t bom_seen;
 } TzTextDecoder;
 
 const char *tz_text_decoder_name(const void *decoder) {
@@ -1006,8 +1012,10 @@ const char *tz_text_decoder_name(const void *decoder) {
     return "utf-16le";
   case TEXT_UTF16BE:
     return "utf-16be";
+  case TEXT_CJK:
+    return ((const TzCjkEncoding *)d->table)->name;
   default:
-    return d->table->name;
+    return ((const TzEncodingTable *)d->table)->name;
   }
 }
 
@@ -1021,17 +1029,17 @@ void tz_text_decoder_encoding(TzStr *out, const void *decoder) {
   *out = tz_str_from_ascii(name, strlen(name));
 }
 
-// A decoder of an encoding Sema found by its label: TEXT_* and, for a
-// single-byte one, its table.
-void *tz_text_decoder_make(int32_t encoding, const TzEncodingTable *table, int32_t fatal,
+// A decoder of an encoding Sema found by its label: TEXT_* and, for an old
+// encoding, its table.
+void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal,
                            int32_t ignore_bom) {
   TzTextDecoder *d = (TzTextDecoder *)tz_obj_alloc(sizeof(TzTextDecoder));
+  memset(d, 0, sizeof *d);
   d->rc = 1;
   d->layout = &tz_bytes_layouts[TZ_BYTES_TEXT_DECODER];
   d->encoding = encoding;
   d->fatal = fatal;
   d->ignore_bom = ignore_bom;
-  d->reserved = 0;
   d->table = table;
   return d;
 }
@@ -1042,10 +1050,11 @@ static int is_space(uint32_t c) {
 
 // `new TextDecoder(label)` of a label known only when the program runs:
 // found among the labels of the Encoding standard, with the tables of the
-// single-byte encodings the program holds (`count` of them, all there are).
-// An unknown label is a RangeError, as in node.
+// old encodings the program holds (all there are: `count` of one byte and
+// `cjk_count` of several). An unknown label is a RangeError, as in node.
 void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const *tables,
-                          int32_t count, int32_t fatal, int32_t ignore_bom) {
+                          int32_t count, const TzCjkEncoding *const *cjk, int32_t cjk_count,
+                          int32_t fatal, int32_t ignore_bom) {
   Units u;
   units_of(&u, obj, meta);
   // ASCII whitespace around the label does not count.
@@ -1077,6 +1086,9 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
     for (int32_t i = 0; i < count; ++i)
       if (strcmp(tables[i]->name, name) == 0)
         return tz_text_decoder_make(TEXT_SINGLE_BYTE, tables[i], fatal, ignore_bom);
+    for (int32_t i = 0; i < cjk_count; ++i)
+      if (strcmp(cjk[i]->name, name) == 0)
+        return tz_text_decoder_make(TEXT_CJK, cjk[i], fatal, ignore_bom);
   }
   TzStr s = {obj, meta};
   TzBuf text;
@@ -1094,79 +1106,220 @@ TZ_COLD static void invalid_data(const char *encoding) {
   tz_throw(TZ_TYPE_ERROR, "The encoded data was not valid for encoding %s", encoding);
 }
 
-// decode(bytes): the text, from bytes the caller holds.
-void tz_text_decode(TzStr *out, const void *decoder, const uint8_t *data, int64_t n) {
-  const TzTextDecoder *d = (const TzTextDecoder *)decoder;
+// A character of UTF-8 or UTF-16: the first of a stream is dropped if it is
+// a BOM, unless the decoder keeps it.
+static void put_text(TzTextDecoder *d, TzBuf *out, uint32_t cp) {
+  if (!d->bom_seen) {
+    d->bom_seen = 1;
+    if (cp == 0xFEFF && !d->ignore_bom)
+      return;
+  }
+  if (cp >= 0x10000) {
+    cp -= 0x10000;
+    tz_buf_push(out, (uint16_t)(0xD800 + (cp >> 10)));
+    tz_buf_push(out, (uint16_t)(0xDC00 + (cp & 0x3FF)));
+  } else {
+    tz_buf_push(out, (uint16_t)cp);
+  }
+}
+
+// The WHATWG UTF-8 decoder (see decode_utf8), byte by byte from the state of
+// the stream: the code point so far, the bytes it needs and has, and the
+// bounds of the next one. Returns 0 at the first error when fatal.
+static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n, int stream) {
+  uint32_t cp = d->state[0], needed = d->state[1], seen = d->state[2];
+  uint32_t lower = needed ? d->state[3] & 0xFF : 0x80, upper = needed ? d->state[3] >> 8 : 0xBF;
+  int64_t i = 0;
+  for (;;) {
+    if (i == n) {
+      if (stream)
+        break;
+      // The end of the stream, inside a character.
+      if (needed) {
+        cp = needed = seen = 0;
+        if (d->fatal)
+          return 0;
+        put_text(d, out, 0xFFFD);
+      }
+      break;
+    }
+    uint32_t b = s[i];
+    if (!needed) {
+      ++i;
+      if (b < 0x80) {
+        put_text(d, out, b);
+      } else if (b >= 0xC2 && b <= 0xDF) {
+        needed = 1;
+        cp = b & 0x1F;
+      } else if (b >= 0xE0 && b <= 0xEF) {
+        if (b == 0xE0)
+          lower = 0xA0;
+        if (b == 0xED)
+          upper = 0x9F;
+        needed = 2;
+        cp = b & 0xF;
+      } else if (b >= 0xF0 && b <= 0xF4) {
+        if (b == 0xF0)
+          lower = 0x90;
+        if (b == 0xF4)
+          upper = 0x8F;
+        needed = 3;
+        cp = b & 0x7;
+      } else {
+        if (d->fatal)
+          return 0;
+        put_text(d, out, 0xFFFD);
+      }
+      continue;
+    }
+    if (b < lower || b > upper) {
+      // The byte that broke the character starts over.
+      cp = needed = seen = 0;
+      lower = 0x80;
+      upper = 0xBF;
+      if (d->fatal)
+        return 0;
+      put_text(d, out, 0xFFFD);
+      continue;
+    }
+    ++i;
+    lower = 0x80;
+    upper = 0xBF;
+    cp = (cp << 6) | (b & 0x3F);
+    if (++seen != needed)
+      continue;
+    put_text(d, out, cp);
+    cp = needed = seen = 0;
+  }
+  d->state[0] = cp;
+  d->state[1] = needed;
+  d->state[2] = seen;
+  d->state[3] = lower | upper << 8;
+  return 1;
+}
+
+// The WHATWG UTF-16 decoder, from the state of the stream: a byte of the
+// next code unit (plus one, 0 for none) and a leading surrogate (0 for none).
+static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n, int stream,
+                        int big) {
+  int lead_byte = (int)d->state[0] - 1;
+  uint32_t lead_surrogate = d->state[1];
+  int back[2], restored = 0; // the bytes of a unit after a lone surrogate, the next one last
+  int64_t i = 0;
+  for (;;) {
+    int b;
+    if (restored)
+      b = back[--restored];
+    else if (i < n)
+      b = s[i++];
+    else if (stream)
+      break;
+    else
+      b = -1;
+    if (b < 0) {
+      // The end of the stream, inside a character.
+      if (lead_byte >= 0 || lead_surrogate) {
+        lead_byte = -1;
+        lead_surrogate = 0;
+        if (d->fatal)
+          return 0;
+        put_text(d, out, 0xFFFD);
+      }
+      break;
+    }
+    if (lead_byte < 0) {
+      lead_byte = b;
+      continue;
+    }
+    uint32_t unit = big ? (uint32_t)(lead_byte << 8 | b) : (uint32_t)(b << 8 | lead_byte);
+    lead_byte = -1;
+    if (lead_surrogate) {
+      uint32_t lead = lead_surrogate;
+      lead_surrogate = 0;
+      if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        put_text(d, out, 0x10000 + ((lead - 0xD800) << 10) + (unit - 0xDC00));
+        continue;
+      }
+      // The unit starts over.
+      int high = (int)(unit >> 8), low = (int)(unit & 0xFF);
+      back[restored++] = big ? low : high;
+      back[restored++] = big ? high : low;
+      if (d->fatal)
+        return 0;
+      put_text(d, out, 0xFFFD);
+      continue;
+    }
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+      lead_surrogate = unit;
+      continue;
+    }
+    if (unit >= 0xDC00 && unit <= 0xDFFF) {
+      if (d->fatal)
+        return 0;
+      put_text(d, out, 0xFFFD);
+      continue;
+    }
+    put_text(d, out, unit);
+  }
+  d->state[0] = (uint32_t)(lead_byte + 1);
+  d->state[1] = lead_surrogate;
+  return 1;
+}
+
+// decode(bytes, { stream }): the text, from bytes the caller holds. A call
+// without `stream` ends the stream, and the next one starts a new one.
+void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, int32_t stream) {
+  TzTextDecoder *d = (TzTextDecoder *)decoder;
   // On an error, the empty string, which holds no memory.
   *out = tz_str_from_ascii("", 0);
-  TzBuf text;
-  tz_buf_init(&text);
-  switch (d->encoding) {
-  case TEXT_UTF8:
+  if (!d->streaming) {
+    memset(d->state, 0, sizeof d->state);
+    d->bom_seen = 0;
+  }
+  // The whole text of a stream of UTF-8 at once.
+  if (d->encoding == TEXT_UTF8 && !d->streaming && !stream && !d->fatal) {
     if (!d->ignore_bom && n >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
       data += 3;
       n -= 3;
     }
-    if (!d->fatal) {
-      *out = utf8_string(data, n);
-      return;
-    }
-    if (!decode_utf8(&text, data, n, 1)) {
-      tz_buf_free(&text);
-      invalid_data("utf-8");
-      return;
-    }
+    *out = utf8_string(data, n);
+    return;
+  }
+  d->streaming = stream;
+  TzBuf text;
+  tz_buf_init(&text);
+  int ok = 1;
+  switch (d->encoding) {
+  case TEXT_UTF8:
+    ok = utf8_stream(d, &text, data, n, stream);
     break;
   case TEXT_UTF16LE:
-  case TEXT_UTF16BE: {
-    int big = d->encoding == TEXT_UTF16BE;
-    int64_t i = 0;
-    if (!d->ignore_bom && n >= 2 && data[0] == (big ? 0xFE : 0xFF) &&
-        data[1] == (big ? 0xFF : 0xFE))
-      i = 2;
-    for (; i + 1 < n; i += 2) {
-      uint32_t c = big ? (uint32_t)(data[i] << 8 | data[i + 1]) : (uint32_t)(data[i + 1] << 8 | data[i]);
-      if (c >= 0xD800 && c <= 0xDBFF && i + 3 < n) {
-        uint32_t next = big ? (uint32_t)(data[i + 2] << 8 | data[i + 3])
-                            : (uint32_t)(data[i + 3] << 8 | data[i + 2]);
-        if (next >= 0xDC00 && next <= 0xDFFF) {
-          tz_buf_push(&text, (uint16_t)c);
-          tz_buf_push(&text, (uint16_t)next);
-          i += 2;
-          continue;
-        }
-      }
-      if (c >= 0xD800 && c <= 0xDFFF) {
-        if (d->fatal) {
-          tz_buf_free(&text);
-          invalid_data(big ? "utf-16be" : "utf-16le");
-          return;
-        }
-        c = 0xFFFD;
-      }
-      tz_buf_push(&text, (uint16_t)c);
-    }
-    if (i < n) { // an odd byte at the end
-      if (d->fatal) {
-        tz_buf_free(&text);
-        invalid_data(big ? "utf-16be" : "utf-16le");
-        return;
-      }
-      tz_buf_push(&text, 0xFFFD);
+  case TEXT_UTF16BE:
+    ok = utf16_stream(d, &text, data, n, stream, d->encoding == TEXT_UTF16BE);
+    break;
+  case TEXT_CJK: {
+    const TzCjkEncoding *encoding = (const TzCjkEncoding *)d->table;
+    ok = encoding->decode(encoding, d->state, &text, data, n, stream, d->fatal);
+    break;
+  }
+  default: {
+    const TzEncodingTable *table = (const TzEncodingTable *)d->table;
+    for (int64_t i = 0; i < n && ok; ++i) {
+      uint16_t c = data[i] < 0x80 ? data[i] : table->high[data[i] - 0x80];
+      if (c == 0xFFFD && d->fatal)
+        ok = 0;
+      else
+        tz_buf_push(&text, c);
     }
     break;
   }
-  default:
-    for (int64_t i = 0; i < n; ++i) {
-      uint16_t c = data[i] < 0x80 ? data[i] : d->table->high[data[i] - 0x80];
-      if (c == 0xFFFD && d->fatal) {
-        tz_buf_free(&text);
-        invalid_data(d->table->name);
-        return;
-      }
-      tz_buf_push(&text, c);
-    }
-    break;
+  }
+  if (!ok) {
+    // The next decode starts a new stream.
+    d->streaming = 0;
+    tz_buf_free(&text);
+    invalid_data(tz_text_decoder_name(d));
+    return;
   }
   *out = tz_buf_take(&text);
 }

@@ -24,6 +24,9 @@
 //      the function returns whether there is one
 //   b  a boolean; i an int; j an int, undefined when negative; f a double; t a Date from a
 //      time in milliseconds
+//   P  a Promise of the type Sema gave, which CodeGen makes and passes first; the function
+//      settles it later, from a job of the pool (Web Crypto, runtime/crypto_subtle*.c), and never
+//      throws
 
 #include "llvm/ADT/StringRef.h"
 
@@ -115,6 +118,19 @@ enum class CryptoFn : unsigned {
   X509CheckIssued,
   X509CheckPrivateKey,
   X509Verify,
+  // Web Crypto: the intrinsics __tz_subtle_* of src/lib/webcrypto.ts (sema_webcrypto.cpp).
+  SubtleDigest,
+  SubtleHmac,
+  SubtleHmacVerify,
+  SubtlePbkdf2,
+  SubtleHkdf,
+  SubtleAes,
+  SubtleAesKw,
+  SubtleSign,
+  SubtleVerify,
+  SubtleRsaOaep,
+  SubtleDerive,
+  SubtleGenerate,
 };
 
 inline constexpr CryptoFunction kCryptoFunctions[] = {
@@ -194,6 +210,18 @@ inline constexpr CryptoFunction kCryptoFunctions[] = {
     {"tz_openssl_x509_check_issued", 'b', "oo"},
     {"tz_openssl_x509_check_private_key", 'b', "oo"},
     {"tz_openssl_x509_verify", 'b', "oo"},
+    {"tz_crypto_subtle_digest", 'P', "md"},
+    {"tz_crypto_subtle_hmac", 'P', "mdd"},
+    {"tz_crypto_subtle_hmac_verify", 'P', "mddd"},
+    {"tz_crypto_subtle_pbkdf2", 'P', "mddff"},
+    {"tz_crypto_subtle_hkdf", 'P', "mdddf"},
+    {"tz_crypto_subtle_aes", 'P', "cdbddiid"},
+    {"tz_crypto_subtle_aes_kw", 'P', "dbd"},
+    {"tz_openssl_subtle_sign", 'P', "oisid"},
+    {"tz_openssl_subtle_verify", 'P', "oisidd"},
+    {"tz_openssl_subtle_rsa_oaep", 'P', "osdbd"},
+    {"tz_openssl_subtle_derive", 'P', "oo"},
+    {"tz_openssl_subtle_generate", 'P', "iffs"},
 };
 
 // The hashes and the ciphers of the direct layer: the name node gives each, and the constant of

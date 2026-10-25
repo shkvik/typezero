@@ -1,0 +1,40 @@
+import { NonSharedArrayBuffer } from './types.js';
+import { validate } from './validate.js';
+
+function parse(uuid: string): NonSharedArrayBuffer {
+  if (!validate(uuid)) {
+    throw TypeError('Invalid UUID');
+  }
+
+  // tz: `>>>` takes an int, so each double is cut to its 32 bits first, as `>>>` does it.
+  let v: number;
+  return Uint8Array.of(
+    ((v = parseInt(uuid.slice(0, 8), 16)) | 0) >>> 24,
+    ((v | 0) >>> 16) & 0xff,
+    ((v | 0) >>> 8) & 0xff,
+    v & 0xff,
+
+    // Parse ........-####-....-....-............
+    (((v = parseInt(uuid.slice(9, 13), 16)) | 0) >>> 8) & 0xff,
+    v & 0xff,
+
+    // Parse ........-....-####-....-............
+    (((v = parseInt(uuid.slice(14, 18), 16)) | 0) >>> 8) & 0xff,
+    v & 0xff,
+
+    // Parse ........-....-....-####-............
+    (((v = parseInt(uuid.slice(19, 23), 16)) | 0) >>> 8) & 0xff,
+    v & 0xff,
+
+    // Parse ........-....-....-....-############
+    // (Use "/" to avoid 32-bit truncation when bit-shifting high-order bytes)
+    ((v = parseInt(uuid.slice(24, 36), 16)) / 0x10000000000) & 0xff,
+    (v / 0x100000000) & 0xff,
+    ((v | 0) >>> 24) & 0xff,
+    ((v | 0) >>> 16) & 0xff,
+    ((v | 0) >>> 8) & 0xff,
+    v & 0xff,
+  );
+}
+
+export { parse };

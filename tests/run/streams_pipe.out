@@ -1,0 +1,29 @@
+dst pipe
+last is c true
+c got x
+c got y
+src resume
+write part1;
+src pause
+pipeline error bad e1=true e2=true
+finished c ok
+pipeline done true
+dst drain
+src resume
+write part2;
+src pause
+dst drain
+src resume
+write part3;
+src pause
+dst drain
+src resume
+write part4;
+src pause
+dst drain
+src resume
+write part5;
+src pause
+src end
+dst finish part1;part2;part3;part4;part5;
+dst unpipe

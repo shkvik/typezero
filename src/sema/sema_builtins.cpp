@@ -60,6 +60,12 @@ const char *whyUnsupported(llvm::StringRef name) {
     return "files are imported by name: 'import { a } from \"./x\"'";
   if (name == "module" || name == "exports")
     return "files export by name: 'export function f() {...}', or 'export { a, b }'";
+  if (name == "escape")
+    return "it is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; "
+           "encode with 'encodeURIComponent(s)'";
+  if (name == "unescape")
+    return "it is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with "
+           "'decodeURIComponent(s)'";
   return nullptr;
 }
 
@@ -246,11 +252,12 @@ Expr *Sema::checkMinMaxSpread(CallExpr *call, const Type *hint) {
 }
 
 // String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x),
-// decimal(x).
+// decimal(x), the functions of URIs.
 Expr *Sema::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  static const llvm::StringLiteral names[] = {"String",   "Number",  "parseInt", "parseFloat",
-                                              "isNaN",    "isFinite", "Boolean", "decimal",
-                                              "BigInt"};
+  static const llvm::StringLiteral names[] = {
+      "String",    "Number",  "parseInt", "parseFloat",         "isNaN",     "isFinite",
+      "Boolean",   "decimal", "BigInt",   "encodeURIComponent", "encodeURI", "decodeURIComponent",
+      "decodeURI", "escape",  "unescape"};
   if (isGlobalName(name, "RegExp")) // `RegExp(s)` is `new RegExp(s)`
     return rejectSpread(call) ? call : checkRegExpConstructor(name->loc(), call->args);
   if (isGlobalName(name, "Date"))
@@ -267,6 +274,41 @@ Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc 
     return call;
   if (fn == "decimal")
     return checkDecimalCall(call, loc);
+  if (fn == "escape" || fn == "unescape")
+    return reportLegacyEscape(call, fn, loc);
+  static const std::pair<llvm::StringLiteral, Builtin> uris[] = {
+      {"encodeURIComponent", Builtin::UriEncodeComponent},
+      {"encodeURI", Builtin::UriEncode},
+      {"decodeURIComponent", Builtin::UriDecodeComponent},
+      {"decodeURI", Builtin::UriDecode}};
+  for (const auto &[name, builtin] : uris) {
+    if (fn != name)
+      continue;
+    // `decodeURIComponent(escape(s))`, the old way to read UTF-8 bytes kept
+    // in a string (see reportLegacyEscape).
+    if (auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
+        inner && fn == "decodeURIComponent" && isGlobalName(inner->callee, "escape")) {
+      diags_.error(loc, "'decodeURIComponent(escape(s))' reads the UTF-8 bytes that s holds as "
+                        "characters, a legacy trick; keep the bytes in a Uint8Array and decode "
+                        "them with 'new TextDecoder().decode(bytes)'");
+      // The error is the idiom's, not that of escape() in it.
+      for (Expr *&arg : inner->args)
+        arg = checkExpr(arg);
+      inner->type = Type::error();
+      return call;
+    }
+    if (!checkArity(call, loc, 1, 1))
+      return call;
+    // encodeURIComponent takes a number or a boolean too, as its text.
+    Expr *arg = checkExpr(call->args[0], Type::string());
+    if (fn == "encodeURIComponent" && (arg->type->isNumeric() || arg->type->isBool()))
+      call->args[0] = toStringOperand(arg);
+    else
+      call->args[0] = coerce(arg, Type::string());
+    call->builtin = builtin;
+    call->type = Type::string();
+    return call;
+  }
   if (fn == "BigInt") {
     reportBigInt(loc, "'BigInt'");
     for (Expr *&arg : call->args)
@@ -342,6 +384,26 @@ Expr *Sema::checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc 
   return call;
 }
 
+// The `%uXXXX` escapes of escape() are no encoding that URIs or anything else
+// read, as regex.md treats RegExp.$1. `unescape(encodeURIComponent(s))` is
+// the old way to get the UTF-8 of s, a byte in each character.
+Expr *Sema::reportLegacyEscape(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
+  auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
+  if (fn == "unescape" && inner && isGlobalName(inner->callee, "encodeURIComponent"))
+    diags_.error(loc, "'unescape(encodeURIComponent(s))' makes a string of the UTF-8 bytes of s, "
+                      "a legacy trick; get the bytes themselves with 'new "
+                      "TextEncoder().encode(s)'");
+  else if (fn == "escape")
+    diags_.error(loc, "'escape' is a legacy function whose '%uXXXX' escapes nothing decodes but "
+                      "'unescape'; encode with 'encodeURIComponent(s)'");
+  else
+    diags_.error(loc, "'unescape' is a legacy function that decodes the '%uXXXX' escapes of "
+                      "'escape'; decode with 'decodeURIComponent(s)'");
+  for (Expr *&arg : call->args)
+    arg = checkExpr(arg);
+  return call;
+}
+
 // String.fromCharCode, String.fromCodePoint, and the functions of Number.
 Expr *Sema::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   bool isString = isGlobalName(member->object, "String");
@@ -402,8 +464,19 @@ Expr *Sema::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expe
   return call;
 }
 
-// x.toString() and x.toFixed(digits) of a number.
+// x.toString(), x.toString(radix) and x.toFixed(digits) of a number.
 Expr *Sema::checkNumberMethod(CallExpr *call, MemberExpr *member) {
+  if (member->name == "toString" && call->args.size() == 1) {
+    // The digits in base 2 to 36, as JavaScript writes them: `(255).toString(16)` is "ff".
+    if (auto *lit = dyn_cast<IntLitExpr>(call->args[0]); lit && (lit->value < 2 || lit->value > 36))
+      diags_.error(lit->loc(), "toString() takes a radix from 2 to 36, found " +
+                                   std::to_string(lit->value));
+    member->object = convert(member->object, Type::doubleTy());
+    call->args[0] = checkPosition(call->args[0]);
+    call->builtin = Builtin::NumToRadix;
+    call->type = Type::string();
+    return call;
+  }
   if (member->name == "toString") {
     if (!checkArity(call, member->loc(), 0, 0))
       return call;
@@ -812,8 +885,20 @@ Expr *Sema::checkNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  if (ClassDecl *cls = lookupValue(expr->name).cls)
+  if (ClassDecl *cls = lookupValue(expr->name).cls) {
+    // As node's constructors of them throw 'Illegal constructor'.
+    if (cls->library && !inLibrary(expr->loc()) &&
+        (cls == libraryClass("CryptoKey") || cls == libraryClass("SubtleCrypto"))) {
+      diags_.error(expr->loc(), cls->name == "CryptoKey"
+                                    ? std::string("a CryptoKey is made by crypto.subtle: "
+                                                  "importKey, generateKey, deriveKey or "
+                                                  "unwrapKey")
+                                    : std::string("there is one SubtleCrypto: crypto.subtle"));
+      checkArgsLoosely();
+      return expr;
+    }
     return checkClassNew(expr, finalClass(cls), expected);
+  }
   if (const NodeName *n = nodeName(expr->name); n && n->module == NodeModule::Crypto)
     return checkCryptoNew(expr, n->name);
   if (const char *why = whyUnsupported(expr->name)) {

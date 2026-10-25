@@ -1,0 +1,62 @@
+import { validate } from './validate.js';
+
+/**
+ * Convert array of 16 byte values to UUID string format of the form:
+ * XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+ */
+const byteToHex: string[] = [];
+
+for (let i = 0; i < 256; ++i) {
+  byteToHex.push((i + 0x100).toString(16).slice(1));
+}
+
+export function unsafeStringify(arr: Uint8Array, offset = 0): string {
+  // Note: Be careful editing this code!  It's been tuned for performance
+  // and works in ways you may not expect. See https://github.com/uuidjs/uuid/pull/434
+  //
+  // Note to future-self: No, you can't remove the `toLowerCase()` call.
+  // REF: https://github.com/uuidjs/uuid/pull/677#issuecomment-1757351351
+  //
+  // tz: a byte past the end of `arr` is no index of byteToHex; it gives '' where JavaScript
+  // writes "undefined", and stringify() rejects both.
+  const hex = (i: int) => byteToHex[arr[offset + i] ?? 256] ?? '';
+  return (
+    hex(0) +
+    hex(1) +
+    hex(2) +
+    hex(3) +
+    '-' +
+    hex(4) +
+    hex(5) +
+    '-' +
+    hex(6) +
+    hex(7) +
+    '-' +
+    hex(8) +
+    hex(9) +
+    '-' +
+    hex(10) +
+    hex(11) +
+    hex(12) +
+    hex(13) +
+    hex(14) +
+    hex(15)
+  ).toLowerCase();
+}
+
+function stringify(arr: Uint8Array, offset = 0) {
+  const uuid = unsafeStringify(arr, offset);
+
+  // Consistency check for valid UUID.  If this throws, it's likely due to one
+  // of the following:
+  // - One or more input array values don't map to a hex octet (leading to
+  // "undefined" in the uuid)
+  // - Invalid input values for the RFC `version` or `variant` fields
+  if (!validate(uuid)) {
+    throw TypeError('Stringified UUID is invalid');
+  }
+
+  return uuid;
+}
+
+export { stringify };

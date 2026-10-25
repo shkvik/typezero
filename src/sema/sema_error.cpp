@@ -7,9 +7,9 @@
 // which no file declares and every file sees (Sema::lookup finds it after
 // the program's own names). Its stack is no field: an error collects the
 // places it passes on its way up (see codegen_throw.cpp), and `e.stack` makes
-// the text from them. TypeError, RangeError and SyntaxError are classes that
-// extend Error, built in too: they take its constructor, and their `name` is
-// their own.
+// the text from them. TypeError, RangeError, SyntaxError and URIError are
+// classes that extend Error, built in too: they take its constructor, and
+// their `name` is their own.
 //
 // `class ParseError extends Error` takes errorClass_ as its base like any
 // other class (sema_inherit.cpp). Its constructor's `super(message, options)`

@@ -360,8 +360,11 @@ std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path) {
       return what + " takes a callback, which tz does not have (docs/crypto.md, section 5); "
                     "import '" +
              sync.str() + "' and use what it returns";
-  if (name == "webcrypto" || name == "subtle")
-    return what + " is not supported yet: Web Crypto comes later (docs/crypto.md, step 4)";
+  if (name == "webcrypto")
+    return what + " is the global crypto of Web Crypto, which needs no import: use "
+                  "'crypto.subtle', 'crypto.getRandomValues' and 'crypto.randomUUID'";
+  if (name == "subtle")
+    return what + " is the global crypto.subtle, which needs no import: use 'crypto.subtle'";
   if (llvm::is_contained(kExports, name))
     return what + " is not supported yet";
   return "'" + path.str() + "' has no export named '" + name.str() + "'";
@@ -1672,9 +1675,8 @@ Expr *Sema::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {
 Expr *Sema::checkWebCryptoMember(MemberExpr *member) {
   member->type = Type::error();
   if (member->name == "subtle")
-    diags_.error(member->loc(), "'crypto.subtle' is not supported yet: Web Crypto comes later "
-                                "(docs/crypto.md, step 4); use the functions of 'node:crypto'");
-  else if (member->name == "randomUUID" || member->name == "getRandomValues")
+    return subtleObject(member);
+  if (member->name == "randomUUID" || member->name == "getRandomValues")
     diags_.error(member->loc(), "'crypto." + member->name + "' can only be called");
   else
     diags_.error(member->loc(), "'crypto." + member->name +

@@ -1,0 +1,49 @@
+// same-as-node
+// Web Crypto (docs/crypto.md, step 4): crypto.subtle, digests and HMAC, as hono and jose use them,
+// with types inferred and no annotations; the jobs run on the pool, after the microtasks.
+const enc = new TextEncoder()
+const hex = (b: ArrayBuffer) => Buffer.from(b).toString("hex")
+
+console.log(crypto.subtle, globalThis.crypto.subtle == crypto.subtle)
+for (const name of ["SHA-1", "SHA-256", "sha-384", "SHA-512"])
+  console.log(name, hex(await crypto.subtle.digest(name, enc.encode("hello"))))
+console.log(hex(await crypto.subtle.digest({ name: "SHA-256" }, new ArrayBuffer(0))))
+console.log(hex(await globalThis.crypto.subtle.digest("SHA-256", new Uint16Array([1, 2]))))
+const pending = crypto.subtle.digest("SHA-256", enc.encode("x"))
+void Promise.resolve().then(() => console.log("a microtask first"))
+console.log((await pending).byteLength, "then the job of the pool")
+
+const key = await crypto.subtle.importKey("raw", enc.encode("secret"), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+console.log(key)
+const sig = await crypto.subtle.sign("HMAC", key, enc.encode("message"))
+console.log(hex(sig))
+console.log(await crypto.subtle.verify("HMAC", key, sig, enc.encode("message")))
+console.log(await crypto.subtle.verify("HMAC", key, sig, enc.encode("massage")))
+console.log(await crypto.subtle.verify("HMAC", key, sig.slice(1), enc.encode("message")))
+
+// The algorithm in a constant, and its name for sign, as hono signs cookies.
+const algorithm = { name: "HMAC", hash: "SHA-256" }
+const getCryptoKey = async (secret: string): Promise<CryptoKey> =>
+  await crypto.subtle.importKey("raw", enc.encode(secret), algorithm, false, ["sign", "verify"])
+const makeSignature = async (value: string, secret: string) => {
+  const signature = await crypto.subtle.sign(algorithm.name, await getCryptoKey(secret), enc.encode(value))
+  return Buffer.from(signature).toString("base64")
+}
+console.log(await makeSignature("session=42", "s3cret"))
+
+const k2 = await crypto.subtle.importKey("raw", enc.encode("k"), { name: "HMAC", hash: { name: "SHA-512" } }, true, ["sign"])
+console.log(k2.algorithm, k2.usages, k2.type, k2.extractable)
+console.log(hex(await crypto.subtle.sign({ name: "HMAC" }, k2, enc.encode("x"))))
+console.log(await crypto.subtle.exportKey("jwk", k2))
+console.log(hex(await crypto.subtle.exportKey("raw", k2)))
+const k3 = await crypto.subtle.importKey("jwk", { kty: "oct", k: "c2VjcmV0", alg: "HS256", ext: true }, { name: "HMAC", hash: "SHA-256" }, true, ["sign"])
+console.log(k3.algorithm, hex(await crypto.subtle.sign("HMAC", k3, enc.encode("message"))) == hex(sig))
+const k4 = await crypto.subtle.importKey("jwk", JSON.parse('{"kty":"oct","k":"AQID","key_ops":["verify"]}'), { name: "HMAC", hash: "SHA-1" }, false, ["verify"])
+console.log(k4.algorithm, k4.usages)
+
+const g = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-384" }, true, ["sign", "verify", "sign"])
+console.log(g, (await crypto.subtle.exportKey("raw", g)).byteLength)
+const g2 = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-1", length: 64 }, true, ["verify"])
+console.log(g2.algorithm, (await crypto.subtle.exportKey("jwk", g2)).alg)
+const mac = await crypto.subtle.sign("HMAC", g, enc.encode("data"))
+console.log(mac.byteLength, await crypto.subtle.verify("HMAC", g, mac, enc.encode("data")))

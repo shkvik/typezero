@@ -24,8 +24,8 @@ const h = "7" as int
 const j: int = d
 // expect-error: type 'long' is not assignable to type 'int'; Math.trunc(x)
 const k: int = l
-// expect-error: operator '>>>' cannot be applied to type 'double'
-const m = d >>> 0
+// expect-error: type 'long' is not assignable to type 'int'; '>>>' is unsigned in JavaScript
+const m: int = d >>> 0
 // expect-error: expected 1 argument, but got 2
 const n = Math.floor(d, 2)
 // expect-error: property 'sqrtt' does not exist on 'Math'

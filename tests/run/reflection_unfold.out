@@ -1,0 +1,11 @@
+users: hello ann x1 1
+users: hello bob x2 users
+1
+2 [ 'first', 'second' ]
+undefined staff
+users undefined
+Point { x: 3, y: 4 } 7 3 4
+11
+users: hello cy x2 users true
+no greet undefined false
+15 7

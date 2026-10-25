@@ -340,6 +340,25 @@ void Sema::checkDecoratedNames(ClassDecl *cls) {
       diags_.note(a.loc, "the other one is here");
       break;
     }
+  // The decorators of the parameters of a constructor write on the class
+  // itself, and the compiler writes its 'design:paramtypes' there: of two
+  // constructors, those would be one (docs/overloads.md, section 6).
+  const FunctionDecl *first = nullptr;
+  for (const FunctionDecl *ctor : cls->constructors) {
+    if (!decoratedParams(ctor))
+      continue;
+    if (!first) {
+      first = ctor;
+      continue;
+    }
+    diags_.error(ctor->loc(), "two constructors of '" + cls->name.str() +
+                                  "' have decorated parameters, and the record "
+                                  "'design:paramtypes' the compiler writes for the class would be "
+                                  "one: metadata is kept on the class itself (docs/decorators.md, "
+                                  "section 3); decorate the parameters of one of them");
+    diags_.note(first->loc(), "the other one is here");
+    break;
+  }
 }
 
 void Sema::decorateClass(ClassDecl *cls) {

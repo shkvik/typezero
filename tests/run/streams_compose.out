@@ -1,0 +1,9 @@
+pt into a duplex
+pt finished true true
+composed HEY!
+composed done
+slow error AbortError
+slow close
+construct
+write after construct true x
+c finished true

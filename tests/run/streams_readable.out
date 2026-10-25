@@ -1,0 +1,37 @@
+sync done
+read 16384
+resume
+read 16384
+data chunk1
+read 16384
+data chunk2
+read 16384
+data chunk3
+tick
+end
+close
+_read 4 -> ab
+immediate
+readable len=2
+_read 4 -> cd
+read ab
+after loop ended=false
+readable len=2
+_read 4 -> ef
+read cd
+after loop ended=false
+readable len=2
+_read 4 -> EOF
+read ef
+after loop ended=false
+readable len=0
+after loop ended=false
+p end
+p close destroyed=true
+len 11
+read3 hel
+len 10
+all XYlo world
+paused false
+paused true
+s end

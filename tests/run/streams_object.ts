@@ -1,0 +1,93 @@
+// Object-mode streams: their chunk types, given or found from what the
+// program pushes and writes (docs/streams.md, section 2), pipeline() of
+// node:stream/promises with async generators, and node:stream/consumers.
+// undefined ends a stream, as null does in node: the output is node's with
+// push(null).
+import { Readable, Transform, Writable } from "node:stream"
+import { pipeline } from "node:stream/promises"
+import { text, json, buffer } from "node:stream/consumers"
+interface User {
+  name: string
+  age: int
+}
+const log = (s: string) => console.log(s)
+const users = new Readable<User>({
+  objectMode: true,
+  read() {},
+})
+users.push({ name: "ann", age: 31 })
+users.push({ name: "bob", age: 25 })
+users.push(undefined)
+const toLine = new Transform<User, string>({
+  writableObjectMode: true,
+  encoding: "utf8",
+  transform(user, encoding, callback) {
+    callback(undefined, `${user.name}:${user.age}\n`)
+  },
+})
+const lines: string[] = []
+const sink = new Writable<string>({
+  decodeStrings: false,
+  write(chunk, encoding, callback) {
+    lines.push(chunk)
+    callback()
+  },
+})
+await pipeline(users, toLine, sink)
+log(`lines ${JSON.stringify(lines)}`)
+
+const r2 = Readable.from(["a", "b", "c"])
+log(`text ${await text(r2)}`)
+const r3 = Readable.from([Buffer.from('{"x": [1, 2'), Buffer.from("]}")])
+const j = await json(r3)
+log(`json ${JSON.stringify(j)}`)
+const r4 = Readable.from(["héllo", " wörld"])
+const b = await buffer(r4)
+log(`buffer ${b.length} ${b.toString("hex")}`)
+await pipeline(
+  Readable.from(["x", "y"]),
+  async function* (source) {
+    for await (const chunk of source) yield chunk.toUpperCase()
+  },
+  async function (source) {
+    for await (const chunk of source) log(`sink ${chunk}`)
+  },
+)
+log("done")
+
+// The chunk types found from the program: what read() pushes, what
+// transform() gives its callback, what write() is declared to take.
+class Point {
+  x: int
+  y: int
+  constructor(x: int, y: int) {
+    this.x = x
+    this.y = y
+  }
+}
+let n = 0
+const points = new Readable({
+  objectMode: true,
+  read() {
+    n++
+    if (n <= 3) this.push(new Point(n, n * n))
+    else this.push(undefined)
+  },
+})
+const sum = new Transform({
+  objectMode: true,
+  transform(p: Point, encoding, callback) {
+    callback(undefined, { label: `p${p.x}`, total: p.x + p.y })
+  },
+})
+const totals = new Writable({
+  objectMode: true,
+  write(item: { label: string; total: int }, encoding, callback) {
+    log(`${item.label} = ${item.total}`)
+    callback()
+  },
+})
+points.on("data", (p) => log(`point ${p.x},${p.y}`))
+points.pipe(sum)
+sum.pipe(totals)
+totals.on("finish", () => log("finish"))

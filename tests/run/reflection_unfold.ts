@@ -1,0 +1,91 @@
+// same-as-node
+// Reflection where the class is known when compiling (docs/decorators.md,
+// plan step 5). A generic function that takes `Constructor<T>` or an object
+// of T gets a copy for the class a call gives, and in it `new cls()`,
+// Reflect.construct, Reflect.get of a field or of a method by a literal name
+// and Reflect.apply of that method are the `new`, the read and the call
+// themselves, without the description of the class and without the checks
+// the compiler proved (tests/cli/reflect_unfold.cmake shows the description
+// gone from the IR). The same functions with classes known only when the
+// program runs go through the descriptions, with the same results.
+
+class Logger {
+  lines: string[] = []
+  log(text: string) {
+    this.lines.push(text)
+    return this.lines.length
+  }
+}
+
+class UserService {
+  name = "users"
+  greet(who: string, times: int) {
+    return `${this.name}: hello ${who} x${times}`
+  }
+  rename(to: string): void {
+    this.name = to
+  }
+}
+
+class Point {
+  x: int
+  y: int
+  constructor(x: int, y: int) {
+    this.x = x
+    this.y = y
+  }
+  sum() {
+    return this.x + this.y
+  }
+}
+
+// A small container, as a library writes it.
+class Container {
+  made = 0
+  get<T extends object>(cls: Constructor<T>): T {
+    this.made++
+    return new cls()
+  }
+  build<T extends object>(cls: Constructor<T>, args: unknown[]): T {
+    this.made++
+    return Reflect.construct(cls, args)
+  }
+}
+
+function greetVia<T extends object>(obj: T, who: string): unknown {
+  const greet = Reflect.get(obj, "greet")
+  if (typeof greet != "function") return "no greet"
+  return Reflect.apply(greet, obj, [who, 2])
+}
+
+function nameOf<T extends object>(obj: T): unknown {
+  return Reflect.get(obj, "name")
+}
+
+const c = new Container()
+const users = c.get(UserService)
+console.log(users.greet("ann", 1), c.made)
+console.log(greetVia(users, "bob"), nameOf(users))
+
+// At the place of the call too: the object and the name are known.
+const logger = c.get(Logger)
+const log = Reflect.get(logger, "log")
+if (typeof log == "function") console.log(Reflect.apply(log, logger, ["first"]))
+console.log(Reflect.apply(Reflect.get(logger, "log"), logger, ["second"]), logger.lines)
+console.log(Reflect.apply(Reflect.get(users, "rename"), users, ["staff"]), users.name)
+console.log(Reflect.get(c.get(UserService), "name"), Reflect.get(logger, "missing"))
+
+// Arguments known only when the program runs: the function of the class
+// checks them, as the description would.
+const p = c.build(Point, [3, 4])
+console.log(p, p.sum(), Reflect.get(p, "x"), c.made)
+console.log(Reflect.construct(Point, [5, 6]).sum())
+
+// The same functions with classes known only when the program runs.
+const kinds: Constructor[] = [UserService, Logger]
+for (const kind of kinds) {
+  const made = c.get(kind)
+  console.log(greetVia(made, "cy"), nameOf(made), made instanceof UserService)
+}
+const points: Constructor<Point>[] = [Point]
+for (const kind of points) console.log(c.build(kind, [7, 8]).sum(), c.made)

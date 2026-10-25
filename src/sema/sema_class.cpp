@@ -1084,6 +1084,8 @@ Expr *Sema::checkMethodCall(CallExpr *call, MemberExpr *member, const Type *expe
       return checked;
   if (Expr *checked = checkFsClassMethod(call, member, cls))
     return checked;
+  if (Expr *checked = checkStreamCall(call, member, cls))
+    return checked;
   if (isEmitterClass(cls))
     if (Expr *checked = checkEmitterCall(call, member, cls, /*super=*/false))
       return checked;
@@ -1168,6 +1170,9 @@ Expr *Sema::checkClassStaticCall(CallExpr *call, MemberExpr *member, ClassDecl *
       return events;
     return checkDirectCall(call, libFunctions_.lookup(member->name)->sym, member->loc(), expected);
   }
+  // `Readable.from(iterable)` (sema_stream.cpp).
+  if (cls->library && cls->name == "Readable" && member->name == "from")
+    return checkStreamFrom(call, member);
   std::vector<FunctionDecl *> methods = methodsNamed(cls, member->name, /*isStatic=*/true);
   if (methods.empty()) {
     // A static field that holds a function, or an error.

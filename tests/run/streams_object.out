@@ -1,0 +1,14 @@
+lines ["ann:31\n","bob:25\n"]
+text abc
+json {"x":[1,2]}
+buffer 13 68c3a96c6c6f2077c3b6726c64
+sink X
+sink Y
+done
+point 1,1
+p1 = 2
+point 2,4
+p2 = 6
+point 3,9
+p3 = 12
+finish

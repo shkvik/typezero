@@ -5,7 +5,7 @@ import {
   timingSafeEqual, generateKeyPairSync, createSecretKey, argon2Sync, sign, KeyObject,
   // expect-error: 'scrypt' of 'node:crypto' takes a callback, which tz does not have (docs/crypto.md, section 5); import 'scryptSync' and use what it returns
   scrypt,
-  // expect-error: 'webcrypto' of 'node:crypto' is not supported yet: Web Crypto comes later (docs/crypto.md, step 4)
+  // expect-error: 'webcrypto' of 'node:crypto' is the global crypto of Web Crypto, which needs no import: use 'crypto.subtle'
   webcrypto,
   // expect-error: 'publicEncrypt' of 'node:crypto' is not supported yet
   publicEncrypt,
@@ -52,8 +52,8 @@ const key = createSecretKey(Buffer.alloc(16))
 console.log(key.asymmetricKeyDetails)
 // expect-error: the private key is a string or bytes (a Buffer, a typed array or a DataView, an ArrayBuffer, a KeyObject); found 'int'
 sign("sha256", Buffer.alloc(1), 5)
-// expect-error: 'crypto.subtle' is not supported yet: Web Crypto comes later (docs/crypto.md, step 4)
-console.log(crypto.subtle)
+// expect-error: 'crypto.sublte' does not exist; the global crypto has 'randomUUID', 'getRandomValues' and 'subtle'
+console.log(crypto.sublte)
 // expect-error: 'new KeyObject' is not how node makes one: use 'createSecretKey', 'createPublicKey' or 'createPrivateKey'
 const made = new KeyObject()
 const hasher = createHash("sha256")

@@ -1,0 +1,102 @@
+// Classes of the program that extend those of node:stream and replace the
+// methods the stream calls (_read, _write, _transform...): they take the
+// parameters node passes, whose types may be left out, as may the last of
+// them (`_read()`), as in node. undefined ends a stream, as null does in
+// node: the output is node's with push(null).
+import { Duplex, Readable, Transform, Writable } from "node:stream"
+import { finished, pipeline } from "node:stream/promises"
+
+class Counter extends Readable {
+  #n = 0
+  limit: number
+  constructor(limit: number) {
+    super()
+    this.limit = limit
+  }
+  _read() {
+    this.#n++
+    if (this.#n > this.limit) this.push(undefined)
+    else this.push(`${this.#n}\n`)
+  }
+}
+
+class Upper extends Transform {
+  _transform(chunk, encoding, callback) {
+    callback(undefined, chunk.toString().toUpperCase())
+  }
+  _flush(callback) {
+    this.push("done\n")
+    callback()
+  }
+}
+
+class Collect extends Writable {
+  parts: string[] = []
+  _write(chunk: Buffer, encoding: string, callback: (error?: Error) => void) {
+    this.parts.push(chunk.toString())
+    callback()
+  }
+  _final(callback) {
+    console.log("final", this.parts.length)
+    callback()
+  }
+  _destroy(error, callback) {
+    console.log("destroy", error == undefined)
+    callback(error)
+  }
+}
+
+const sink = new Collect()
+await pipeline(new Counter(3), new Upper(), sink)
+console.log(JSON.stringify(sink.parts.join("")), sink.destroyed)
+
+// A class of strings: _write() gets them as they were written.
+class Lines extends Writable<string> {
+  constructor() {
+    super({ decodeStrings: false })
+  }
+  _write(line, encoding, callback) {
+    console.log("line", JSON.stringify(line), encoding)
+    callback()
+  }
+}
+const lines = new Lines()
+lines.write("one")
+lines.end("two")
+await finished(lines)
+
+// _read(size: number), as the types of node have it: the highWaterMark.
+class Sized extends Readable {
+  sent = 0
+  _read(size: number) {
+    if (this.sent > 0) {
+      this.push(undefined)
+      return
+    }
+    this.sent = size
+    console.log("size", size)
+    this.push(Buffer.alloc(3, 120))
+  }
+}
+const sized = new Sized({ highWaterMark: 100 })
+sized.on("data", (b) => console.log("data", b.toString()))
+await finished(sized)
+
+// A Duplex that gives back what is written to it.
+class Echo extends Duplex {
+  _read(size) {}
+  _write(chunk, encoding, callback) {
+    this.push(chunk)
+    callback()
+  }
+  _final(callback) {
+    this.push(undefined)
+    callback()
+  }
+}
+const echo = new Echo()
+echo.on("data", (b) => console.log("echo", b.toString()))
+echo.write("ping")
+echo.end("pong")
+await finished(echo)
+console.log("end")

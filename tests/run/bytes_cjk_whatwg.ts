@@ -1,0 +1,46 @@
+// The multi-byte encodings where node decodes otherwise than the WHATWG
+// Encoding Standard, which tz follows (docs/bytes.md, section 5): node 24
+// decodes big5, euc-jp, shift_jis and euc-kr with the converters of ICU, and
+// throws a TypeError, even without `fatal`, at some broken sequences of gbk
+// cut by `{ stream: true }`. Each line says what node gives.
+
+const digits = "0123456789abcdef"
+function hex(s: string): string {
+  const out: string[] = []
+  for (let i = 0; i < s.length; i++) {
+    let c = s.charCodeAt(i)
+    let h = ""
+    do {
+      h = digits.charAt(c & 15) + h
+      c = c >> 4
+    } while (c > 0)
+    out.push(h)
+  }
+  return out.join(" ")
+}
+function show(name: string, bytes: int[], node: string) {
+  const text = new TextDecoder(name).decode(Uint8Array.from(bytes, x => x & 0xff))
+  console.log(name, hex(text), `(node: ${node})`)
+}
+
+// Big5 is Big5-HKSCS: the characters of Hong Kong, also past U+FFFF, and
+// four pointers of two code points each. 0x80 and 0xFF lead nothing.
+show("big5", [0x87, 0x40, 0x87, 0x45], "f266 f26b, private use")
+show("big5", [0x88, 0x62, 0x88, 0x64, 0x88, 0xa3, 0x88, 0xa5], "f325 f327 f344 f346")
+show("big5", [0xa3, 0xc0, 0x80, 0xff], "fffd 80 f8f8")
+// EUC-KR is windows-949: the Hangul syllables of KS X 1001 and the rest.
+show("euc-kr", [0x81, 0x41, 0xb0, 0x41], "81 41 fffd 41")
+show("euc-kr", [0x80, 0xc9, 0xa1], "80 e000")
+// EUC-JP: 0x80 to 0x8D lead nothing, and a leading byte of JIS X 0212 that
+// another byte breaks is one error.
+show("euc-jp", [0x80, 0x8d, 0x8f, 0xb0, 0x41, 0x8e, 0xe0], "80 8d fffd fffd 41 a2")
+// Shift_JIS: 0x80 is U+0080, 0x1A, 0x1C and 0x7F are themselves, and the
+// pointers 8836 to 10715 are the private use area (EUDC of Windows).
+show("shift_jis", [0x80, 0x1a, 0x1c, 0x7f, 0xf0, 0x40, 0xf9, 0xfc], "fffd 1c 7f 1a e000 e757")
+show("shift_jis", [0x93, 0xfd, 0x93, 0x7f], "fffd fffd fffd 1a")
+
+// A stream of gbk cut inside a broken sequence of four bytes.
+const stream = new TextDecoder("gbk")
+const parts = [stream.decode(new Uint8Array([0x81, 0x30]), { stream: true }),
+  stream.decode(new Uint8Array([0x41]), { stream: true }), stream.decode()]
+console.log("gbk", parts.map(hex), "(node: TypeError)")

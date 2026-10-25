@@ -2066,6 +2066,355 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
 }
 
 //===----------------------------------------------------------------------===//
+// URIs: encodeURIComponent, encodeURI, decodeURIComponent, decodeURI
+//===----------------------------------------------------------------------===//
+
+// Sets of ASCII characters, as the bits of two words: those below 64 and the
+// others. The functions of the component keep its unreserved characters
+// (letters, digits and -_.!~*'()) as they are; those of the whole URI also
+// keep the reserved ones (;/?:@&=+$,#), and decodeURI keeps their escapes.
+#define URI_BIT(c) (1ull << ((c) & 63))
+#define URI_RANGE(a, b) ((~0ull >> (63 - ((b) & 63))) & (~0ull << ((a) & 63)))
+#define URI_UNRESERVED_LOW                                                                         \
+  (URI_RANGE('0', '9') | URI_BIT('!') | URI_BIT('\'') | URI_BIT('(') | URI_BIT(')') |            \
+   URI_BIT('*') | URI_BIT('-') | URI_BIT('.'))
+#define URI_UNRESERVED_HIGH                                                                        \
+  (URI_RANGE('A', 'Z') | URI_RANGE('a', 'z') | URI_BIT('_') | URI_BIT('~'))
+#define URI_RESERVED_LOW                                                                           \
+  (URI_BIT(';') | URI_BIT('/') | URI_BIT('?') | URI_BIT(':') | URI_BIT('&') | URI_BIT('=') |      \
+   URI_BIT('+') | URI_BIT('$') | URI_BIT(',') | URI_BIT('#'))
+#define URI_RESERVED_HIGH URI_BIT('@')
+
+// The 256 values F(c) of a table indexed by a byte.
+#define URI_EACH8(F, c)                                                                            \
+  F(c), F((c) + 1), F((c) + 2), F((c) + 3), F((c) + 4), F((c) + 5), F((c) + 6), F((c) + 7)
+#define URI_EACH64(F, c)                                                                           \
+  URI_EACH8(F, c), URI_EACH8(F, (c) + 8), URI_EACH8(F, (c) + 16), URI_EACH8(F, (c) + 24),         \
+      URI_EACH8(F, (c) + 32), URI_EACH8(F, (c) + 40), URI_EACH8(F, (c) + 48),                     \
+      URI_EACH8(F, (c) + 56)
+#define URI_EACH256(F)                                                                             \
+  { URI_EACH64(F, 0), URI_EACH64(F, 64), URI_EACH64(F, 128), URI_EACH64(F, 192) }
+
+// What a code unit below 256 becomes: itself (1), %XX (3) or the two escapes
+// of its UTF-8 (6), as tables for one-byte strings, built from the sets.
+#define URI_LENGTH(c, low, high)                                                                   \
+  ((c) >= 128 ? 6 : (((c) < 64 ? (low) : (high)) >> ((c) & 63)) & 1 ? 1 : 3)
+#define URI_COMPONENT_LENGTH(c) URI_LENGTH(c, URI_UNRESERVED_LOW, URI_UNRESERVED_HIGH)
+#define URI_FULL_LENGTH(c)                                                                         \
+  URI_LENGTH(c, URI_UNRESERVED_LOW | URI_RESERVED_LOW, URI_UNRESERVED_HIGH | URI_RESERVED_HIGH)
+// The value of a hex digit, -1 for any other character.
+#define URI_HEX(c)                                                                                 \
+  ((c) >= '0' && (c) <= '9'                      ? (c) - '0'                                    \
+   : ((c) | 0x20) >= 'a' && ((c) | 0x20) <= 'f' ? ((c) | 0x20) - 'a' + 10                         \
+                                                 : -1)
+
+static const uint8_t kUriComponentLengths[256] = URI_EACH256(URI_COMPONENT_LENGTH);
+static const uint8_t kUriLengths[256] = URI_EACH256(URI_FULL_LENGTH);
+static const int8_t kHexDigits[256] = URI_EACH256(URI_HEX);
+
+static void uri_malformed(TzStr *out) {
+  tz_throw(TZ_URI_ERROR, "URI malformed");
+  *out = kEmpty;
+}
+
+// The UTF-8 of every character outside the set as %XX escapes, upper case, as
+// V8 writes them. The result is ASCII, so its length is counted first; a
+// string without anything to escape is its own result. A lone surrogate has
+// no UTF-8: a URIError.
+static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *lengths) {
+  static const char hex[] = "0123456789ABCDEF";
+  TzStr s = make_str(obj, meta);
+  TzStr f = flat(s);
+  uint32_t len = str_len(f.meta);
+  const uint8_t *bytes = (const uint8_t *)units(&f);
+  const uint16_t *wide = (const uint16_t *)bytes;
+  int two = is_two(f.meta);
+  uint64_t total = 0;
+  if (!two) {
+    for (uint32_t i = 0; i < len; ++i)
+      total += lengths[bytes[i]];
+  } else {
+    for (uint32_t i = 0; i < len; ++i) {
+      uint32_t c = wide[i];
+      if (c < 0x100) {
+        total += lengths[c];
+      } else if (c < 0x800) {
+        total += 6;
+      } else if (c < 0xD800 || c > 0xDFFF) {
+        total += 9;
+      } else if (c <= 0xDBFF && i + 1 < len && wide[i + 1] >= 0xDC00 && wide[i + 1] <= 0xDFFF) {
+        total += 12;
+        ++i;
+      } else {
+        uri_malformed(out);
+        return;
+      }
+    }
+  }
+  if (total == len) {
+    retain(s);
+    *out = s;
+    return;
+  }
+  if (total > MAX_LENGTH) {
+    tz_throw(TZ_RANGE_ERROR, "Invalid string length");
+    *out = kEmpty;
+    return;
+  }
+  char local[INLINE_MAX];
+  char *text = tz_str_ascii_units((size_t)total, out);
+  char *p = text ? text : local;
+  if (!two) {
+    for (uint32_t i = 0; i < len; ++i) {
+      uint32_t c = bytes[i];
+      uint8_t length = lengths[c];
+      if (length == 1) {
+        *p++ = (char)c;
+        continue;
+      }
+      if (length == 6) { // the first byte of two, C2 or C3
+        p[0] = '%';
+        p[1] = 'C';
+        p[2] = hex[c >> 6];
+        p += 3;
+        c = 0x80 | (c & 0x3F);
+      }
+      p[0] = '%';
+      p[1] = hex[c >> 4];
+      p[2] = hex[c & 15];
+      p += 3;
+    }
+    if (!text)
+      *out = string_from_ascii(local, (size_t)total);
+    return;
+  }
+  for (uint32_t i = 0; i < len;) {
+    // The characters kept, as they are, then one escaped.
+    while (i < len && wide[i] < 0x80 && lengths[wide[i]] == 1)
+      *p++ = (char)wide[i++];
+    if (i == len)
+      break;
+    uint32_t c = wide[i++];
+    if (c >= 0xD800 && c <= 0xDBFF) // a pair, as the count found
+      c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t)(wide[i++] - 0xDC00);
+    uint8_t utf8[4];
+    int n;
+    if (c < 0x80) {
+      utf8[0] = (uint8_t)c, n = 1;
+    } else if (c < 0x800) {
+      utf8[0] = (uint8_t)(0xC0 | c >> 6), utf8[1] = (uint8_t)(0x80 | (c & 0x3F)), n = 2;
+    } else if (c < 0x10000) {
+      utf8[0] = (uint8_t)(0xE0 | c >> 12), utf8[1] = (uint8_t)(0x80 | ((c >> 6) & 0x3F));
+      utf8[2] = (uint8_t)(0x80 | (c & 0x3F)), n = 3;
+    } else {
+      utf8[0] = (uint8_t)(0xF0 | c >> 18), utf8[1] = (uint8_t)(0x80 | ((c >> 12) & 0x3F));
+      utf8[2] = (uint8_t)(0x80 | ((c >> 6) & 0x3F)), utf8[3] = (uint8_t)(0x80 | (c & 0x3F));
+      n = 4;
+    }
+    for (int k = 0; k < n; ++k) {
+      p[0] = '%';
+      p[1] = hex[utf8[k] >> 4];
+      p[2] = hex[utf8[k] & 15];
+      p += 3;
+    }
+  }
+  if (!text)
+    *out = string_from_ascii(local, (size_t)total);
+}
+
+void tz_uri_encode_component(TzStr *out, void *obj, uint64_t meta) {
+  uri_encode(out, obj, meta, kUriComponentLengths);
+}
+
+void tz_uri_encode(TzStr *out, void *obj, uint64_t meta) {
+  uri_encode(out, obj, meta, kUriLengths);
+}
+
+static inline int hex_digit(uint32_t c) { return c < 256 ? kHexDigits[c] : -1; }
+
+// The byte of the escape %XX at `at` of the units, or -1 if there is none.
+static inline int uri_escape_at(const void *u, int two, uint32_t len, uint32_t at) {
+  if (at + 2 >= len)
+    return -1;
+  const uint8_t *bytes = (const uint8_t *)u;
+  const uint16_t *wide = (const uint16_t *)u;
+  uint32_t c = two ? wide[at] : bytes[at];
+  int hi = hex_digit(two ? wide[at + 1] : bytes[at + 1]);
+  int lo = hex_digit(two ? wide[at + 2] : bytes[at + 2]);
+  return c == '%' && (hi | lo) >= 0 ? hi << 4 | lo : -1;
+}
+
+// The character that the escapes from `at` on stand for, in `*c`: one ASCII
+// character, or the UTF-8 of one in as many escapes as its first byte says.
+// Returns how many units they take, or 0 when they are no escapes, are cut
+// short or are not UTF-8 (overlong, a surrogate, past U+10FFFF).
+static inline uint32_t uri_unescape(const void *u, int two, uint32_t len, uint32_t at,
+                                    uint32_t *c) {
+  static const uint32_t smallest[5] = {0, 0, 0x80, 0x800, 0x10000};
+  int b = uri_escape_at(u, two, len, at);
+  if (b < 0)
+    return 0;
+  if (b < 0x80) {
+    *c = (uint32_t)b;
+    return 3;
+  }
+  int count = b >= 0xF8 ? 0 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 0;
+  if (count == 0)
+    return 0;
+  uint32_t v = (uint32_t)b & (0x7Fu >> count);
+  for (int k = 1; k < count; ++k) {
+    int more = uri_escape_at(u, two, len, at + 3 * (uint32_t)k);
+    if (more < 0 || (more & 0xC0) != 0x80)
+      return 0;
+    v = v << 6 | (uint32_t)(more & 0x3F);
+  }
+  if (v < smallest[count] || (v >= 0xD800 && v <= 0xDFFF) || v > 0x10FFFF)
+    return 0;
+  *c = v;
+  return 3 * (uint32_t)count;
+}
+
+// Whether decodeURI keeps the escape of `c` as it was written: c is reserved.
+static inline int uri_keeps_escape(uint32_t c, int keep_reserved) {
+  return keep_reserved && c < 0x80 && kUriLengths[c] == 1 && kUriComponentLengths[c] != 1;
+}
+
+// uri_decode, two bytes a unit, from unit `i` of the string on, after the `n`
+// one-byte units of the result before it in `prefix`; called with `two` a
+// constant, so that each kind of string gets a loop of its own. `room` units
+// hold the result.
+static inline void uri_decode_wide(TzStr *out, const void *u, int two, uint32_t len, uint32_t i,
+                                   int keep_reserved, const uint8_t *prefix, uint32_t n,
+                                   uint32_t room) {
+  Buffer *b = buffer_new(room, 1);
+  uint16_t *result = (uint16_t *)buffer_units(b);
+  uint32_t all = 0;
+  for (uint32_t k = 0; k < n; ++k)
+    result[k] = prefix[k];
+  uint32_t next = find_unit(u, two, i, len, '%');
+  for (;;) {
+    for (; i < next; ++i) {
+      uint16_t unit = two ? ((const uint16_t *)u)[i] : ((const uint8_t *)u)[i];
+      result[n++] = unit;
+      all |= unit;
+    }
+    if (i == len)
+      break;
+    uint32_t c, taken = uri_unescape(u, two, len, i, &c);
+    if (taken == 0) {
+      tz_str_free(b);
+      uri_malformed(out);
+      return;
+    }
+    if (uri_keeps_escape(c, keep_reserved)) {
+      for (uint32_t k = 0; k < 3; ++k)
+        result[n++] = two ? ((const uint16_t *)u)[i + k] : ((const uint8_t *)u)[i + k];
+    } else if (c >= 0x10000) {
+      result[n++] = (uint16_t)(0xD800 + ((c - 0x10000) >> 10));
+      result[n++] = (uint16_t)(0xDC00 + (c & 0x3FF));
+      all |= 0xD800;
+    } else {
+      result[n++] = (uint16_t)c;
+      all |= c;
+    }
+    i += taken;
+    next = find_unit(u, two, i, len, '%');
+  }
+  // A string that the units of the prefix and the rest let be one-byte is
+  // made so; so is a short one, and one much shorter than its room gets a
+  // buffer of its own length.
+  if (all <= 0xFF || n <= INLINE_MAX || n < room / 2) {
+    *out = string_from_units(result, n, 1);
+    tz_str_free(b);
+    return;
+  }
+  b->used = n;
+  *out = make_str(b, make_meta(n, 0, 1, 0, F_HEAP));
+}
+
+// uri_decode of a one-byte string, one byte a unit for as long as the
+// result's characters fit in one, straight into the buffer of the result;
+// from the first that does not on, uri_decode_wide goes on.
+static void uri_decode_bytes(TzStr *out, const uint8_t *u, uint32_t len, uint32_t next,
+                             int keep_reserved, int ascii, uint32_t room) {
+  uint32_t c;
+  // A string whose first escape is already of two bytes, as with Cyrillic or
+  // Chinese, needs no buffer of one byte a unit.
+  if (uri_unescape(u, 0, len, next, &c) && c > 0xFF) {
+    uri_decode_wide(out, u, 0, len, next, keep_reserved, u, next, room);
+    return;
+  }
+  Buffer *b = buffer_new(room, 0);
+  uint8_t *dst = (uint8_t *)buffer_units(b);
+  memcpy(dst, u, next);
+  uint32_t n = next, i = next;
+  while (i < len) {
+    if (u[i] != '%') {
+      dst[n++] = u[i++];
+      continue;
+    }
+    uint32_t taken = uri_unescape(u, 0, len, i, &c);
+    if (taken == 0) {
+      tz_str_free(b);
+      uri_malformed(out);
+      return;
+    }
+    if (c > 0xFF) {
+      uri_decode_wide(out, u, 0, len, i, keep_reserved, dst, n, room);
+      tz_str_free(b);
+      return;
+    }
+    if (uri_keeps_escape(c, keep_reserved)) {
+      dst[n] = u[i], dst[n + 1] = u[i + 1], dst[n + 2] = u[i + 2];
+      n += 3;
+    } else {
+      dst[n++] = (uint8_t)c;
+      ascii &= c < 0x80;
+    }
+    i += taken;
+  }
+  // A short result is inline, and one much shorter than its room gets a
+  // buffer of its own length.
+  if (n <= INLINE_MAX || n < room / 2) {
+    *out = string_from_units(dst, n, 0);
+    tz_str_free(b);
+    return;
+  }
+  b->used = n;
+  *out = make_str(b, make_meta(n, 0, 0, ascii, F_HEAP));
+}
+
+// Every escape replaced by what it stands for (see uri_unescape); a `%`
+// without two hex digits and escapes that are not UTF-8 are URIErrors. With
+// `keep_reserved` (decodeURI) the escapes of reserved characters stay as
+// they were written. A string without escapes is its own result.
+static void uri_decode(TzStr *out, void *obj, uint64_t meta, int keep_reserved) {
+  TzStr s = make_str(obj, meta);
+  TzStr f = flat(s);
+  uint32_t len = str_len(f.meta);
+  const void *u = units(&f);
+  int two = is_two(f.meta);
+  uint32_t next = find_unit(u, two, 0, len, '%');
+  if (next == len) {
+    retain(s);
+    *out = s;
+    return;
+  }
+  // The result is no longer than the string. Counting its length first would
+  // cost about as much as decoding it.
+  if (two)
+    uri_decode_wide(out, u, 1, len, 0, keep_reserved, NULL, 0, len);
+  else
+    uri_decode_bytes(out, (const uint8_t *)u, len, next, keep_reserved, is_ascii(f.meta), len);
+}
+
+void tz_uri_decode_component(TzStr *out, void *obj, uint64_t meta) {
+  uri_decode(out, obj, meta, 0);
+}
+
+void tz_uri_decode(TzStr *out, void *obj, uint64_t meta) { uri_decode(out, obj, meta, 1); }
+
+//===----------------------------------------------------------------------===//
 // Numbers from strings (number.c does the parsing)
 //===----------------------------------------------------------------------===//
 

@@ -39,6 +39,8 @@
 #define UNITS (SEGMENT_SIZE / UNIT_SIZE)   // 64
 #define MAX_SMALL ((size_t)32 << 10)       // larger objects are huge
 #define HUGE_HEADER 64                     // keeps huge blocks 64-byte aligned
+#define HUGE_SPARES 4                      // freed huge blocks kept for reuse
+#define HUGE_SPARE_UNITS 16                // of up to 1 MiB each
 // Size classes: multiples of 8 up to 64, then four per power of two.
 #define BINS 44
 
@@ -58,7 +60,7 @@ typedef struct Page {
 
 typedef struct Segment {
   uint32_t kind;
-  uint32_t unused;
+  uint32_t huge_units; // huge: the units of the block (committed)
   void *os_base; // what to give back to the OS
   size_t os_size;
   uint64_t free_units; // bit u set: unit u holds no page
@@ -77,6 +79,7 @@ struct {
   Page *bins[BINS];   // pages with room, per size class
   Segment *segments;  // small segments, those with free units first
   Segment *spare;     // one empty segment kept for reuse
+  Segment *huge_spares[HUGE_SPARES]; // freed huge blocks of up to 1 MiB
 } tz_heap;
 
 //===----------------------------------------------------------------------===//
@@ -292,12 +295,25 @@ static void *huge_alloc(size_t size) {
   size_t total = (HUGE_HEADER + size + UNIT_SIZE - 1) & ~(UNIT_SIZE - 1);
   if (total < size)
     out_of_memory(size);
+  // A block freed before, of about the size: a stream of 64 KiB chunks (as
+  // node:fs reads them) frees one and allocates the next for each chunk,
+  // which the OS makes slow (the mapping, a fault on the first write to each
+  // page, the unmapping).
+  size_t units = total / UNIT_SIZE;
+  for (unsigned i = 0; i < HUGE_SPARES; ++i) {
+    Segment *s = tz_heap.huge_spares[i];
+    if (s && s->huge_units >= units && s->huge_units <= 2 * units) {
+      tz_heap.huge_spares[i] = NULL;
+      return (char *)s + HUGE_HEADER;
+    }
+  }
   void *base;
   size_t reserved;
   Segment *s = (Segment *)os_alloc_aligned(total, &base, &reserved);
   if (!s)
     out_of_memory(size);
   s->kind = KIND_HUGE;
+  s->huge_units = units <= UINT32_MAX ? (uint32_t)units : UINT32_MAX;
   s->os_base = base;
   s->os_size = reserved;
   return (char *)s + HUGE_HEADER;
@@ -360,6 +376,12 @@ static inline Page *page_of(Segment *s, const void *p) {
 TZ_NOINLINE void tz_free_slow(void *p) {
   Segment *s = segment_of(p);
   if (s->kind == KIND_HUGE) {
+    if (s->huge_units <= HUGE_SPARE_UNITS)
+      for (unsigned i = 0; i < HUGE_SPARES; ++i)
+        if (!tz_heap.huge_spares[i]) {
+          tz_heap.huge_spares[i] = s;
+          return;
+        }
     os_free(s->os_base, s->os_size);
     return;
   }

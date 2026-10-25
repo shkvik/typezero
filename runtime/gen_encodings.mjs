@@ -111,7 +111,7 @@ lines.push("  return NULL;");
 lines.push("}");
 lines.push("");
 lines.push("// Whether node decodes the encoding of that name with more than a byte for");
-lines.push("// some characters, which tz does not support yet.");
+lines.push("// some characters: one of runtime/cjk.c.");
 lines.push("static inline int tz_encoding_multi_byte(const char *name) {");
 lines.push("  static const char *const names[] = {" +
   [...multiByte].filter((n) => !n.startsWith("utf")).map((n) => `"${n}"`).join(", ") + "};");

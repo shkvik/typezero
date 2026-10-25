@@ -1,0 +1,58 @@
+gbk "中文 汉字€" 4e2d 6587 20 6c49 5b57 20ac
+gb18030 "中￿" 4e2d 80 ffff
+gb18030 "😀ßé" d83d de00 df e9
+big5 "中文 繁體　" 4e2d 6587 20 7e41 9ad4 3000
+euc-jp "日本語ｱあ" 65e5 672c 8a9e ff71 3042
+euc-jp "丂～A" 4e02 ff5e 41
+iso-2022-jp "日本!" 65e5 672c 21
+iso-2022-jp "¥‾ｱﾟ" a5 203e ff71 ff9f
+shift_jis "日本語ｱあ　" 65e5 672c 8a9e ff71 3042 3000
+euc-kr "한국어 가　" d55c ad6d c5b4 20 ac00 3000
+gbk "A�" 41 fffd
+gbk "諥�B" 8ae5 fffd 42
+gb18030 "�0A�0��" fffd 30 41 fffd 30 fffd 7f fffd
+gb18030 "���" fffd fffd fffd
+big5 "� ��" fffd 20 fffd 7f fffd
+euc-jp "�A�A��" fffd 41 fffd 41 fffd fffd
+iso-2022-jp "����(XA" fffd fffd fffd fffd 28 58 41
+iso-2022-jp "�A�" fffd 41 fffd
+shift_jis "� ���" fffd 20 fffd fffd fffd
+euc-kr "� ���" fffd 20 fffd fffd fffd
+TypeError: The encoded data was not valid for encoding gbk
+B
+TypeError: The encoded data was not valid for encoding big5
+B
+TypeError: The encoded data was not valid for encoding euc-jp
+B
+TypeError: The encoded data was not valid for encoding iso-2022-jp
+B
+TypeError: The encoded data was not valid for encoding shift_jis
+B
+TypeError: The encoded data was not valid for encoding euc-kr
+B
+gbk ["","中","","文",""]
+gb18030 ["","","","","😀",""]
+big5 ["","中","文",""]
+euc-jp ["","","丂","ｱ","日",""]
+iso-2022-jp ["","","","日","A",""]
+shift_jis ["","日","本",""]
+euc-kr ["","한","국",""]
+euc-kr ["한","�"]
+utf-8 ["","","","€","😀",""]
+utf-8 ["","�"]
+utf-16le ["","","A","","😀",""]
+utf-16be ["","�A",""]
+windows-1251 ["П","ри",""]
+a ﻿b c
+"﻿d"
+"GB2312" gbk 554a 41
+" gbk " gbk 554a 41
+"x-gbk" gbk 554a 41
+"gb18030" gb18030 554a 41
+"big5-hkscs" big5 965b 41
+"EUC-JP" euc-jp 4e9c 41
+"csISO2022JP" iso-2022-jp fffd fffd 41
+"x-sjis" shift_jis ff70 ff61 41
+"ks_c_5601-1987" euc-kr ac00 41
+"windows-1252" windows-1252 b0 a1 41
+TextDecoder { encoding: 'shift_jis', fatal: false, ignoreBOM: false }

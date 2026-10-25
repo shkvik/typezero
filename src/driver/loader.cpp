@@ -6,6 +6,7 @@
 #include "sema/sema.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
@@ -65,6 +66,11 @@ private:
   // that names one gets it as if it imported it, unless it declares or
   // imports that name itself.
   void importLibraryGlobals(Module *module, llvm::StringRef text);
+  // The streams of node:fs and of process, written in tz (src/lib/fs_stream.ts):
+  // the names createReadStream, createWriteStream, ReadStream and WriteStream
+  // that a file imports from node:fs come from there, and a file that uses
+  // process.stdin, process.stdout or process.stderr as a stream loads it.
+  void importFsStreams(Module *module, llvm::StringRef text);
 
   llvm::SourceMgr &sourceMgr_;
   AstContext &ctx_;
@@ -134,6 +140,7 @@ Module *Loader::parse(const std::string &filePath, const std::string &realPath, 
   Lexer lexer(text, diags_);
   module->file = Parser(lexer, ctx_, diags_).parseSourceFile();
   importLibraryGlobals(module, text);
+  importFsStreams(module, text);
   byRealPath_[realPath] = module;
   realPaths_[module] = realPath;
   states_[module] = State::New;
@@ -190,6 +197,15 @@ Module *Loader::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
     return libraryModule("http.ts", "tz:http", loc);
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch"))
     return libraryModule(spec.drop_front(3).str() + ".ts", spec, loc);
+  // node:stream and the modules on it (docs/streams.md).
+  if (spec == "node:stream" || spec == "stream")
+    return libraryModule("stream.ts", "node:stream", loc);
+  if (spec == "node:stream/promises" || spec == "stream/promises")
+    return libraryModule("stream_promises.ts", "node:stream/promises", loc);
+  if (spec == "node:stream/consumers" || spec == "stream/consumers")
+    return libraryModule("stream_consumers.ts", "node:stream/consumers", loc);
+  if (spec == "node:string_decoder" || spec == "string_decoder")
+    return libraryModule("string_decoder.ts", "node:string_decoder", loc);
   if (isBuiltinModule(spec)) {
     if (std::string problem = builtinModuleProblem(spec); !problem.empty())
       diags_.error(loc, problem);
@@ -481,6 +497,46 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"RequestRedirect", "fetch.ts", "tz:fetch"},
     {"ReadableStreamReadResult", "fetch.ts", "tz:fetch"},
     {"UnderlyingSource", "fetch.ts", "tz:fetch"},
+    // Those of Web Crypto: the types of TypeScript's lib.dom that its
+    // functions take and give.
+    {"CryptoKey", "webcrypto.ts", "tz:webcrypto"},
+    {"CryptoKeyPair", "webcrypto.ts", "tz:webcrypto"},
+    {"SubtleCrypto", "webcrypto.ts", "tz:webcrypto"},
+    {"JsonWebKey", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaOtherPrimesInfo", "webcrypto.ts", "tz:webcrypto"},
+    {"BufferSource", "webcrypto.ts", "tz:webcrypto"},
+    {"KeyUsage", "webcrypto.ts", "tz:webcrypto"},
+    {"KeyFormat", "webcrypto.ts", "tz:webcrypto"},
+    {"KeyType", "webcrypto.ts", "tz:webcrypto"},
+    {"NamedCurve", "webcrypto.ts", "tz:webcrypto"},
+    {"BigInteger", "webcrypto.ts", "tz:webcrypto"},
+    {"Algorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"AlgorithmIdentifier", "webcrypto.ts", "tz:webcrypto"},
+    {"HashAlgorithmIdentifier", "webcrypto.ts", "tz:webcrypto"},
+    {"KeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"AesKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"HmacKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"EcKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaHashedKeyAlgorithm", "webcrypto.ts", "tz:webcrypto"},
+    {"AesCbcParams", "webcrypto.ts", "tz:webcrypto"},
+    {"AesCtrParams", "webcrypto.ts", "tz:webcrypto"},
+    {"AesGcmParams", "webcrypto.ts", "tz:webcrypto"},
+    {"AesKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
+    {"AesDerivedKeyParams", "webcrypto.ts", "tz:webcrypto"},
+    {"HmacImportParams", "webcrypto.ts", "tz:webcrypto"},
+    {"HmacKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
+    {"EcKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
+    {"EcKeyImportParams", "webcrypto.ts", "tz:webcrypto"},
+    {"EcdsaParams", "webcrypto.ts", "tz:webcrypto"},
+    {"EcdhKeyDeriveParams", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaHashedKeyGenParams", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaHashedImportParams", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaPssParams", "webcrypto.ts", "tz:webcrypto"},
+    {"RsaOaepParams", "webcrypto.ts", "tz:webcrypto"},
+    {"Pbkdf2Params", "webcrypto.ts", "tz:webcrypto"},
+    {"HkdfParams", "webcrypto.ts", "tz:webcrypto"},
 };
 
 } // namespace
@@ -488,20 +544,29 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
 void Loader::importLibraryGlobals(Module *module, llvm::StringRef text) {
   // Where the file first names each, as an identifier of its code (not in
   // a comment or a string, nor a property after `.`): the tokens tell, and
-  // the parser reported the syntax.
+  // the parser reported the syntax. `crypto.subtle` names the object of
+  // tz:webcrypto too, which Sema reads under a name of its own.
   llvm::StringMap<const char *> mentions;
+  const char *subtle = nullptr;
   bool muted = diags_.setMuted(true);
   Lexer lexer(text, diags_);
   bool property = false;
+  Token before[2];
   for (Token token = lexer.next(); !token.is(Tok::Eof); token = lexer.next()) {
     if (token.is(Tok::Identifier) && !property &&
         llvm::any_of(kLibraryGlobals,
                      [&](const LibraryGlobal &global) { return global.name == token.text; }))
       mentions.try_emplace(token.text, token.text.data());
+    if (!subtle && token.is(Tok::Identifier) && token.text == "subtle" &&
+        (before[1].is(Tok::Dot) || before[1].is(Tok::QuestionDot)) &&
+        before[0].is(Tok::Identifier) && before[0].text == "crypto")
+      subtle = token.text.data();
     property = token.is(Tok::Dot) || token.is(Tok::QuestionDot);
+    before[0] = before[1];
+    before[1] = token;
   }
   diags_.setMuted(muted);
-  if (mentions.empty())
+  if (mentions.empty() && !subtle)
     return;
   llvm::StringSet<> own;
   for (const Stmt *item : module->file.items) {
@@ -525,27 +590,139 @@ void Loader::importLibraryGlobals(Module *module, llvm::StringRef text) {
   }
   // One import for each module of the globals the file names.
   std::vector<ImportDecl> imports;
+  auto importOf = [&](llvm::StringRef file, llvm::StringRef path,
+                      llvm::SMLoc loc) -> ImportDecl * {
+    auto it = llvm::find_if(imports, [&](const ImportDecl &d) { return d.path == path; });
+    if (it != imports.end())
+      return &*it;
+    ImportDecl decl;
+    decl.implicit = true;
+    decl.path = path.str();
+    decl.loc = decl.pathLoc = loc;
+    decl.from = libraryModule(file, path, loc);
+    if (!decl.from)
+      return nullptr;
+    imports.push_back(std::move(decl));
+    return &imports.back();
+  };
   for (const LibraryGlobal &global : kLibraryGlobals) {
     const char *at = own.contains(global.name) ? nullptr : mentions.lookup(global.name);
     if (!at)
       continue;
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(at);
-    auto it = llvm::find_if(imports, [&](const ImportDecl &d) { return d.path == global.module; });
-    if (it == imports.end()) {
-      ImportDecl decl;
-      decl.implicit = true;
-      decl.path = global.module.str();
-      decl.loc = decl.pathLoc = loc;
-      decl.from = libraryModule(global.file, global.module, loc);
-      if (!decl.from)
-        continue;
-      imports.push_back(std::move(decl));
-      it = imports.end() - 1;
-    }
-    it->names.push_back({global.name, loc, global.name, loc});
+    if (ImportDecl *decl = importOf(global.file, global.module, loc))
+      decl->names.push_back({global.name, loc, global.name, loc});
+  }
+  // `crypto.subtle`: the object of tz:webcrypto, which Sema reads under a
+  // name of its own.
+  if (subtle) {
+    llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);
+    if (ImportDecl *decl = importOf("webcrypto.ts", "tz:webcrypto", loc))
+      decl->names.push_back({"subtle", loc, kSubtleName, loc});
   }
   for (ImportDecl &decl : imports)
     module->file.imports.push_back(std::move(decl));
+}
+
+void Loader::importFsStreams(Module *module, llvm::StringRef text) {
+  static constexpr llvm::StringLiteral kNames[] = {"createReadStream", "createWriteStream",
+                                                    "ReadStream", "WriteStream"};
+  ImportDecl streams;
+  streams.implicit = true;
+  for (ImportDecl &decl : module->file.imports) {
+    if (decl.path != "node:fs" && decl.path != "fs")
+      continue;
+    for (size_t i = 0; i < decl.names.size();) {
+      if (!llvm::is_contained(kNames, decl.names[i].name)) {
+        ++i;
+        continue;
+      }
+      if (!streams.loc.isValid())
+        streams.loc = streams.pathLoc = decl.pathLoc;
+      streams.names.push_back(decl.names[i]);
+      decl.names.erase(decl.names.begin() + long(i));
+    }
+  }
+  // `process.stdin`, and `process.stdout` or `process.stderr` but in
+  // `.write(chunk)` and `.isTTY`, and but the input and the output of
+  // readline: the tokens tell, as for the web globals. A write with an
+  // encoding or a callback needs the stream. The same of the names that
+  // node:process gives them (`import { stdin } from "node:process"`).
+  llvm::StringMap<llvm::StringRef> imported; // the name in the file: stdin, stdout or stderr
+  llvm::SmallPtrSet<const char *, 4> importedAt;
+  for (const ImportDecl &decl : module->file.imports) {
+    if (decl.path != "node:process" && decl.path != "process")
+      continue;
+    for (const ModuleName &n : decl.names)
+      if (n.name == "stdin" || n.name == "stdout" || n.name == "stderr") {
+        imported[n.as] = n.name;
+        importedAt.insert(n.loc.getPointer());
+        importedAt.insert(n.asLoc.getPointer());
+      }
+  }
+  if (streams.names.empty()) {
+    bool muted = diags_.setMuted(true);
+    Lexer lexer(text, diags_);
+    std::vector<Token> tokens;
+    for (Token token = lexer.next(); !token.is(Tok::Eof); token = lexer.next())
+      tokens.push_back(token);
+    diags_.setMuted(muted);
+    auto is = [&](size_t i, Tok kind, llvm::StringRef text) {
+      return i < tokens.size() && tokens[i].is(kind) && (text.empty() || tokens[i].text == text);
+    };
+    // Whether the call whose `(` is at `i` has more than one argument.
+    auto severalArgs = [&](size_t i) {
+      if (!is(i, Tok::LParen, ""))
+        return false;
+      int depth = 0;
+      for (size_t j = i; j < tokens.size(); ++j) {
+        Tok kind = tokens[j].kind;
+        if (kind == Tok::LParen || kind == Tok::LBracket || kind == Tok::LBrace ||
+            kind == Tok::TemplateHead)
+          ++depth;
+        else if (kind == Tok::RParen || kind == Tok::RBracket || kind == Tok::RBrace ||
+                 kind == Tok::TemplateTail)
+          --depth;
+        if (depth == 0)
+          return false;
+        if (depth == 1 && kind == Tok::Comma)
+          return true;
+      }
+      return false;
+    };
+    for (size_t at = 0; at < tokens.size() && !streams.loc.isValid(); ++at) {
+      if (!is(at, Tok::Identifier, "") || (at > 0 && is(at - 1, Tok::Dot, "")))
+        continue;
+      // The token of the stream: `process.stdout`, or `stdout` imported.
+      size_t last = at;
+      llvm::StringRef stream;
+      if (tokens[at].text == "process" && is(at + 1, Tok::Dot, "") &&
+          is(at + 2, Tok::Identifier, "")) {
+        last = at + 2;
+        stream = tokens[last].text;
+      } else if (auto found = imported.find(tokens[at].text);
+                 found != imported.end() && !importedAt.contains(tokens[at].text.data())) {
+        stream = found->second;
+      }
+      if (stream != "stdin" && stream != "stdout" && stream != "stderr")
+        continue;
+      bool member = is(last + 1, Tok::Dot, "") && is(last + 2, Tok::Identifier, "");
+      llvm::StringRef name = member ? tokens[last + 2].text : llvm::StringRef();
+      if (stream != "stdin" && (name == "isTTY" || (name == "write" && !severalArgs(last + 3))))
+        continue;
+      // `{ input: process.stdin, output: process.stdout }` of readline.
+      if (at >= 2 && is(at - 1, Tok::Colon, "") &&
+          (is(at - 2, Tok::Identifier, "input") || is(at - 2, Tok::Identifier, "output")))
+        continue;
+      streams.loc = streams.pathLoc = llvm::SMLoc::getFromPointer(tokens[at].text.data());
+    }
+  }
+  if (!streams.loc.isValid())
+    return;
+  streams.path = "node:internal/fs/streams";
+  streams.from = libraryModule("fs_stream.ts", "node:internal/fs/streams", streams.loc);
+  if (streams.from)
+    module->file.imports.push_back(std::move(streams));
 }
 
 std::string Loader::relativeName(llvm::StringRef realPath) const {

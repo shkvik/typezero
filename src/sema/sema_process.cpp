@@ -76,6 +76,10 @@ Expr *Sema::checkProcessCall(CallExpr *call, MemberExpr *member) {
   bool isStdout = isProcessMember(member->object, "stdout");
   if (isStdout || isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
+    // The stream of node:stream, where the program uses it as one
+    // (sema_stream.cpp): it writes at once too.
+    if (name != "isTTY" && libFunctions_.lookup("processStdout"))
+      return nullptr;
     if (name != "write") {
       if (name == "isTTY")
         diags_.error(member->loc(), "'" + stream + ".isTTY' is a boolean, not a function");
@@ -87,9 +91,15 @@ Expr *Sema::checkProcessCall(CallExpr *call, MemberExpr *member) {
     }
     if (rejectSpread(call) || !checkArity(call, member->loc(), 1, 1))
       return call;
-    // Text only, without the encoding and the callback of Node; the result
-    // is always true, as nothing waits to be written.
-    call->args[0] = checkArg(call->args[0], Type::string());
+    // Text, or the bytes of a Buffer or a Uint8Array as they are; the result
+    // is always true, as nothing waits to be written. A write with the
+    // encoding or the callback of node is one of the stream of node:stream,
+    // which the loader brings then.
+    Expr *chunk = checkExpr(call->args[0], Type::string());
+    const Type *type = chunk->type;
+    if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8)
+      chunk = coerce(chunk, Type::string());
+    call->args[0] = chunk;
     call->builtin = isStdout ? Builtin::ProcessStdoutWrite : Builtin::ProcessStderrWrite;
     call->type = Type::boolTy();
     return call;
@@ -146,6 +156,11 @@ Expr *Sema::checkProcessMember(MemberExpr *member) {
   bool isStdout = isProcessMember(member->object, "stdout");
   if (isStdout || isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
+    // A field of the stream of node:stream (sema_stream.cpp); a terminal
+    // has none of its own yet.
+    if (name != "isTTY" && name != "columns" && name != "rows" &&
+        libFunctions_.lookup("processStdout"))
+      return nullptr;
     if (name == "isTTY") {
       // Whether the stream is a terminal. A boolean, as the types of Node
       // say; Node itself has undefined instead of false.
@@ -157,8 +172,9 @@ Expr *Sema::checkProcessMember(MemberExpr *member) {
       diags_.error(member->loc(), "'" + stream + ".write' can only be called: '" + stream +
                                       ".write(text)'");
     else
-      diags_.error(member->loc(), "'" + stream + "." + name +
-                                      "' is not supported yet; only 'write(text)' and 'isTTY' are");
+      diags_.error(member->loc(), "'" + stream + "." + name + "' is not supported yet; only " +
+                                      "'isTTY', 'write()' and the rest of a Writable of " +
+                                      "node:stream are");
     member->type = Type::error();
     return member;
   }
@@ -177,6 +193,9 @@ Expr *Sema::checkProcessMember(MemberExpr *member) {
 
   if (!isGlobalName(member->object, "process"))
     return nullptr;
+  if (name == "stdin" || name == "stdout" || name == "stderr")
+    if (Expr *stream = processStream(member))
+      return stream;
   if (name == "argv")
     return builtinCall(member->loc(), member, Builtin::ProcessArgv, {}, Type::array(Type::string()));
   if (name == "exitCode") // undefined until the program sets it

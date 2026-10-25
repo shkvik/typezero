@@ -1,0 +1,62 @@
+// same-as-node
+// fs.createReadStream() and fs.createWriteStream() (docs/streams.md, step
+// 3): their events, chunks of highWaterMark, start and end, an encoding
+// that gives strings, backpressure, the "a" flag, pipeline() from one file
+// through a Transform to another, and a file that is not there.
+import { createReadStream, createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Transform } from "node:stream"
+import { finished, pipeline } from "node:stream/promises"
+const dir = mkdtempSync(join(tmpdir(), "tz-streams-"))
+const src = join(dir, "in.txt")
+writeFileSync(src, "hello world\n".repeat(3))
+
+const events: string[] = []
+const r = createReadStream(src, { highWaterMark: 16 })
+r.on("open", (fd) => events.push(`open ${typeof fd}`))
+r.on("ready", () => events.push("ready"))
+r.on("data", (c) => events.push(`data ${c.length}`))
+r.on("end", () => events.push("end"))
+r.on("close", () => events.push("close"))
+console.log(`pending ${r.pending} hwm ${r.readableHighWaterMark} flags ${r.flags} end ${r.end}`)
+await finished(r)
+console.log(events.join(", "))
+console.log(`bytesRead ${r.bytesRead} destroyed ${r.destroyed}`)
+
+const slice = createReadStream(src, { encoding: "utf8", start: 6, end: 10 })
+for await (const s of slice) console.log(`slice ${JSON.stringify(s)} ${typeof s}`)
+const latin = createReadStream(src, "latin1")
+let text = ""
+latin.on("data", (s) => (text += s))
+await finished(latin)
+console.log(`latin1 ${text.length}`)
+
+const out = join(dir, "out.txt")
+const w = createWriteStream(out, { highWaterMark: 8 })
+console.log(`write ${w.write("12345")} ${w.write("67890")} needDrain ${w.writableNeedDrain}`)
+w.on("drain", () => console.log("drain"))
+w.end("!", () => console.log(`end cb ${w.bytesWritten}`))
+await finished(w)
+console.log(`out ${JSON.stringify(readFileSync(out, "utf8"))}`)
+const more = createWriteStream(out, { flags: "a" })
+more.end("appended")
+await finished(more)
+console.log(`appended ${JSON.stringify(readFileSync(out, "utf8"))}`)
+
+const upper = new Transform({
+  transform(chunk, enc, cb) {
+    cb(undefined, chunk.toString().toUpperCase())
+  },
+})
+const copy = join(dir, "copy.txt")
+await pipeline(createReadStream(src), upper, createWriteStream(copy))
+console.log(`copy ${JSON.stringify(readFileSync(copy, "utf8"))}`)
+
+const missing = createReadStream(join(dir, "no-such-file.txt"))
+try {
+  await finished(missing)
+} catch (e) {
+  console.log(`missing ${e instanceof Error ? e.message.startsWith("ENOENT: no such file") : "?"}`)
+}
+rmSync(dir, { recursive: true })

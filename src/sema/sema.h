@@ -43,6 +43,10 @@ enum class NodeModule {
 // (sema_crypto.cpp).
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
+// The name a file that says `crypto.subtle` imports the SubtleCrypto of tz:webcrypto under
+// (src/driver/loader.cpp), which Sema reads it by (sema_webcrypto.cpp).
+inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
+
 // Why the built-in module `path` (see isBuiltinModule) cannot be imported:
 // it is not there yet, or there is none; empty for the modules tz has. The
 // loader reports it.
@@ -207,13 +211,22 @@ private:
   void pushScope() {
     scopes_.emplace_back();
     typeScopes_.emplace_back();
+    scopeBranches_.push_back(branchDepth_);
   }
   void popScope() {
     if (!untyped_.empty())
       reportUntyped();
     scopes_.pop_back();
     typeScopes_.pop_back();
+    if (!scopeBranches_.empty())
+      scopeBranches_.pop_back();
   }
+  // How many statements that may run their parts or not (if, loops,
+  // switch, try) the code being checked is in, and that count where each
+  // scope began: a setEncoding() in a branch of the scope of its stream
+  // leaves the type of the stream unknown after it (sema_stream.cpp).
+  int branchDepth_ = 0;
+  std::vector<int> scopeBranches_;
   void declare(llvm::StringRef name, llvm::SMLoc loc, ScopeEntry entry);
   ScopeEntry lookup(llvm::StringRef name) const;
   VarSymbol *declareVar(llvm::StringRef name, llvm::SMLoc loc, const Type *type, bool isConst);
@@ -489,6 +502,8 @@ private:
     Module *module = nullptr;
     Instance *instance = nullptr;
     std::vector<Diagnostics::Captured> *capture = nullptr;
+    std::vector<int> scopeBranches;
+    int branchDepth = 0;
   };
   // Saves the state and starts a fresh one for checking the body of `fn`:
   // only the globals of its file are visible to a top-level function, and to
@@ -514,6 +529,12 @@ private:
     // With voidResult: an async function may go here, and its Promise is
     // dropped (the callback of a timer); elsewhere that is an error.
     bool asyncVoid = false;
+    // The function takes `this` first (Type::hasThis): params[0] is its
+    // type. A function or method written without a `this` parameter gets
+    // one, `{ read() { this.push(x) } }` where a `(this: Readable, size:
+    // int) => void` goes; an arrow, whose `this` is that around it, a
+    // hidden one it does not use.
+    bool hasThis = false;
   };
   static Signature signatureOf(const Type *fnType);
   // `self`: the constant the function is assigned to (`const f = () => ...`),
@@ -995,6 +1016,15 @@ private:
   Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
+  // Web Crypto (sema_webcrypto.cpp): the intrinsics __tz_subtle_* of
+  // src/lib/webcrypto.ts, the calls of the program on its SubtleCrypto (the
+  // algorithms, formats and usages it writes, checked here, and the function
+  // of the algorithm's family they go to), `crypto.subtle` and the members
+  // of a CryptoKey the program may read.
+  Expr *checkSubtleIntrinsic(CallExpr *call, NameExpr *name);
+  Expr *checkSubtleCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  Expr *subtleObject(MemberExpr *member);
+  bool isSubtleClass(const Type *type, llvm::StringRef name) const;
   Expr *checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc);
   Expr *cryptoConstant(MemberExpr *member);
   // The class of node:crypto that `name` names in a type, or null.
@@ -1027,6 +1057,9 @@ private:
   Expr *checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected);
   Expr *checkGlobalFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                             const Type *expected);
+  // escape(s) and unescape(s), legacy functions that are errors; the hint
+  // names what replaces them, or what the idiom around them means.
+  Expr *reportLegacyEscape(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
   // String.fromCharCode, Number.isNaN...
   Expr *checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected);
   Expr *checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected);
@@ -1670,6 +1703,9 @@ private:
   void checkBytesStore(IndexExpr *index, const Expr *value, std::optional<BinaryOp> op,
                        llvm::SMLoc loc);
   Expr *checkBytesMember(MemberExpr *member);
+  // `d.byteLength` of `Uint8Array | DataView | ArrayBuffer`, and the other
+  // properties every member of a union of binary data has.
+  Expr *checkBytesUnionMember(MemberExpr *member);
   Expr *checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected);
   // Uint8Array.from, Buffer.alloc...; null if `member` is no static member
   // of binary data.
@@ -1801,11 +1837,35 @@ private:
   // no Json gives...), or empty; finds the fields the Json sets after the
   // constructor runs (ClassDecl::jsonFields).
   std::string classJsonProblem(const ClassDecl *cls);
-  // A value of `from` goes where one of `to` is: the classes reflection may
-  // reach through it (see ClassDecl::reflectNew).
-  void noteReflectedConversion(const Type *from, const Type *to);
+  // A value of `from` goes where one of `to` is, through `cast`: the classes
+  // reflection may reach through it (see ClassDecl::reflectNew).
+  void noteReflectedConversion(const Type *from, const Type *to, const CastExpr *cast);
   // At the end: which classes reflection reaches.
   void finishReflection();
+  // The code being checked is never emitted: the generic body of a generic
+  // function or class, which its copies stand for, or a trial copy (see
+  // inferCycle). What it does reaches no class by reflection.
+  bool onlyChecked() const;
+  // Reflection where the class is known when compiling (docs/decorators.md,
+  // plan step 5). The method no class down the chain of `cls` declares
+  // again, under its name, which Reflect.get(object, name) gives for an
+  // object of `cls`: the function that takes its `this`, or of `several`
+  // variants, the one that chooses (docs/overloads.md, section 6). Null for
+  // none.
+  FunctionDecl *knownReflectMethod(ClassDecl *cls, llvm::StringRef name, bool &several);
+  // The Reflect.get calls of a method with several variants.
+  llvm::SmallPtrSet<const CallExpr *, 4> severalVariants_;
+  // The method of one variant `f` surely holds, as Reflect.get of an object
+  // of a class known when compiling gave it, or null.
+  const FunctionDecl *heldReflectMethod(const Expr *f);
+  // Reflect.apply(f, self, [args]) of such a method `fn`, with a `self` of
+  // its class and arguments that the checks would let through: the call
+  // itself, `self.m(args)`, as an unknown; null if it cannot be one.
+  Expr *directReflectApply(CallExpr *call, const FunctionDecl *fn);
+  // The classes converted to `Constructor`, by the conversion: one that a
+  // copy for a class known when compiling drops (see exactClassArgs) makes
+  // no class reachable.
+  llvm::DenseMap<const CastExpr *, ClassDecl *> constructorCasts_;
   // The classes whose objects become objects or unknowns, those whose objects
   // Reflect.get looks into by their type, and whether it looks into any.
   llvm::SmallPtrSet<ClassDecl *, 8> escaped_;
@@ -1969,6 +2029,113 @@ private:
   // node:events, also as `EventEmitter.once(...)`: `fn` is the function's
   // name there. Null for the other functions of the module.
   Expr *checkEventsFunction(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  // Streams (sema_stream.cpp, docs/streams.md): node:stream, which tz has
+  // written in tz (src/lib/stream.ts), and what the compiler adds to it.
+  //
+  // A class of node:stream or one that extends it; the chunk types its
+  // readable and writable sides have (null for a side it has not).
+  bool isStreamClass(const ClassDecl *cls) const;
+  struct StreamChunks {
+    const Type *readable = nullptr;
+    const Type *writable = nullptr;
+  };
+  StreamChunks streamChunksOf(const ClassDecl *cls) const;
+  // The parameters of the method of node:stream that a method of the
+  // program's own stream class overrides by its name, a hook the stream
+  // calls (`_read`, `_write`, `_transform`...); none for another method.
+  // The method may leave out their types, or the last of them, as in node
+  // (see declareFunction); with others it is an error, as a variant of the
+  // name the stream would never call (see linkOverrides).
+  std::optional<std::vector<const Type *>> streamHookParams(const FunctionDecl *fn);
+  // Whether the method has the name of a hook in a class of the program
+  // that extends one of node:stream; before the classes are linked, whether
+  // it may be one.
+  bool isStreamHook(const FunctionDecl *fn, bool linked) const;
+  void reportStreamHook(const FunctionDecl *fn, llvm::ArrayRef<FunctionDecl *> inherited);
+  // Makes an instance of Duplex<W, R> a Writable<W> too.
+  void addStreamBases(ClassDecl *inst, llvm::SMLoc loc);
+  // `new Readable({...})` and the others without type arguments: the chunk
+  // types its options say (an encoding gives strings); null when the place
+  // it goes gives them, or for another class.
+  Expr *checkStreamNew(NewExpr *expr, ClassDecl *generic, const Type *expected);
+  // setEncoding() of the program on a stream known by a constant (or a
+  // read-only field of one): from that call on, the constant is seen as a
+  // stream of strings (a StreamView); an error where the code before let the
+  // stream go elsewhere, which sees its chunks as Buffers.
+  Expr *checkSetEncoding(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  // The class of node:stream that sees a stream of `cls` with an encoding.
+  const Type *encodedStreamType(ClassDecl *cls, llvm::SMLoc loc);
+  struct StreamView {
+    FieldPath path;
+    llvm::SMLoc from;
+    const Type *type;
+  };
+  std::vector<StreamView> streamViews_;
+  // The type a stream of `path` is seen as at `loc`, after setEncoding();
+  // null if none.
+  const Type *streamViewOf(const FieldPath &path, llvm::SMLoc loc) const;
+  // The chunk type of an object-mode side at `site` without one: the
+  // placeholder of a round that looks for it, what the program puts into it
+  // in the last round, or null if nothing does. recordStreamChunk notes a
+  // chunk of `value` put into a side of the placeholder `chunk` (false if it
+  // is none).
+  const Type *inferredChunkType(const std::string &site, llvm::SMLoc loc);
+  bool recordStreamChunk(const Type *chunk, const Type *value, llvm::SMLoc loc);
+  // The callback parameters of transform() and flush() written in the
+  // options of an object-mode Transform whose chunk type a round looks for:
+  // what they are called with is what it gives.
+  struct StreamCallbackSite {
+    const FunctionDecl *fn;
+    llvm::StringRef param;
+    const Type *chunk;
+  };
+  std::vector<StreamCallbackSite> streamCallbacks_;
+  void noteStreamCallback(CallExpr *call, const VarSymbol *var);
+  // `__tz_chunk<T>(u)` and the other intrinsics of node:stream.
+  Expr *checkStreamIntrinsic(CallExpr *call, NameExpr *name, const Type *typeArg);
+  // `(error?: Error) => void`, the callback of write() and end().
+  const Type *streamCallbackType();
+  // A chunk the program pushes to (writes to, `writing`) a stream of
+  // `chunk`, converted to an unknown; with `eof`, undefined ends it.
+  // `checked`: the argument is checked already.
+  Expr *streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing,
+                       llvm::StringRef method, bool checked);
+  // push(), unshift(), write() and end() of the program on a stream: calls
+  // of the code of Stream with the chunk as an unknown; null for the other
+  // methods.
+  Expr *checkStreamCall(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  // fs.createReadStream(path, options?) and createWriteStream(), which
+  // `decl` of src/lib/fs_stream.ts declares: an encoding gives a stream of
+  // strings.
+  Expr *checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
+  // process.stdin, process.stdout or process.stderr read as a stream: the
+  // stream of src/lib/fs_stream.ts; null if the program does not use them
+  // as streams (the loader did not load it).
+  Expr *processStream(MemberExpr *member);
+  // What stands for process.stdin in a StreamView.
+  VarSymbol *processStdinVar();
+  VarSymbol *processStdin_ = nullptr;
+  // `src.pipe(dest, options?)`: the chunks of src must be what dest takes.
+  Expr *checkStreamPipe(CallExpr *call, MemberExpr *member, ClassDecl *cls);
+  // `Readable.from(iterable, options?)`.
+  const Type *streamFromOptionsType();
+  Expr *checkStreamFrom(CallExpr *call, MemberExpr *member);
+  // pipeline(), finished() and compose() of node:stream, and pipeline() of
+  // node:stream/promises, which `decl` declares; null for other functions.
+  Expr *checkStreamFunction(CallExpr *call, FunctionDecl *decl, llvm::SMLoc loc);
+  // `{ signal: AbortSignal }`, what the functions of pipeline() get.
+  const Type *streamSignalOptionsType();
+  // A stage of pipeline(), checked: a stream (`stream`), or a function or
+  // an iterable as a PipelineStage; `chunk` is the type of the chunks before
+  // it, and becomes that of those after it. `sinkValue` gets what the
+  // Promise of a last function gives.
+  Expr *streamStage(Expr *&arg, const Type *&chunk, bool first, bool last, bool &stream,
+                    const Type **sinkValue);
+  // Whether a stream that takes `writable` takes chunks of `chunk`.
+  bool streamTakes(const Type *writable, const Type *chunk);
+  // An iterator over the values of an iterable (the entries of a Map),
+  // `xs.values()`; null for anything else.
+  Expr *valuesIteratorOf(Expr *collection);
   // `call` of the function `name` of the emitter's code, generic with
   // `bound`, whose arguments `given` marks as checked.
   Expr *callLibraryFunction(CallExpr *call, llvm::StringRef name,
@@ -2002,6 +2169,9 @@ private:
   llvm::StringMap<FunctionDecl *> libFunctions_;
   llvm::StringMap<TypeAliasDecl *> libTypes_;
   std::vector<std::pair<const char *, const char *>> libraryRanges_;
+  // Constants initialized with a literal (an object, a string), which the checks of Web Crypto
+  // read where the constant is an algorithm (sema_webcrypto.cpp).
+  llvm::DenseMap<const VarSymbol *, const Expr *> constLiterals_;
 
   // Converts a value to a string for `+` and template literals.
   Expr *toStringOperand(Expr *expr);

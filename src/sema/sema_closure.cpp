@@ -281,6 +281,7 @@ Sema::Signature Sema::signatureOf(const Type *fnType) {
   sig.ret = fnType->ret();
   // As in TypeScript, a function whose result is dropped may return anything.
   sig.voidResult = fnType->ret()->isVoid();
+  sig.hasThis = fnType->hasThis();
   return sig;
 }
 
@@ -306,6 +307,18 @@ Expr *Sema::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) {
     fn->typeArgs.assign(fn->typeParams.size(), Type::error());
     typeScopes_.emplace_back();
     bindTypeParams(fn->typeParams, fn->typeArgs);
+  }
+
+  // A function of a type that takes `this`, written without a `this`
+  // parameter: it gets one (see Signature::hasThis).
+  bool thisFromContext = false;
+  if (sig && sig->hasThis && !sig->params.empty() &&
+      (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow)) {
+    Param self;
+    self.name = fn->isArrow ? ctx_.hiddenName() : llvm::StringRef("this");
+    self.loc = fe->loc();
+    fn->params.insert(fn->params.begin(), self);
+    thisFromContext = true;
   }
 
   // Parameters: an annotation, or the type the context passes.
@@ -347,7 +360,9 @@ Expr *Sema::checkFunctionExpr(FunctionExpr *fe, const Signature *sig) {
       type = passed = Type::error();
     }
     // `function (this: unknown, ...)`: the `this` it gets (Type::hasThis).
-    if (i == 0 && param.name == "this" && param.type && !param.rest) {
+    if (i == 0 && thisFromContext) {
+      sym->hasThis = true;
+    } else if (i == 0 && param.name == "this" && param.type && !param.rest) {
       if (fn->isArrow)
         diags_.error(param.loc, "an arrow function cannot have a 'this' parameter: it sees the "
                                 "'this' of the function around it; write a 'function'");
@@ -688,7 +703,8 @@ FunctionExpr *Sema::builtinFunctionValue(Expr *arg, const Signature &expected, u
   if (auto *n = dyn_cast<NameExpr>(arg)) {
     static const std::pair<llvm::StringLiteral, unsigned> globals[] = {
         {"String", 1}, {"Number", 1}, {"parseInt", 2}, {"parseFloat", 1}, {"isNaN", 1}, {"isFinite", 1},
-        {"Boolean", 1}};
+        {"Boolean", 1}, {"encodeURIComponent", 1}, {"encodeURI", 1}, {"decodeURIComponent", 1},
+        {"decodeURI", 1}};
     for (const auto &[global, count] : globals)
       if (isGlobalName(n, global)) {
         name = global;

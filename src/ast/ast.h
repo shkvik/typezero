@@ -58,6 +58,10 @@ struct VarSymbol {
   // A variable that holds the regex of this literal all along (a constant,
   // or a `let` nothing assigns to): its flags and groups are known.
   const RegexLitExpr *regex = nullptr;
+  // A constant that holds the method Reflect.get gave of an object of a
+  // class known when compiling (see Builtin::ReflectMethod): Reflect.apply of
+  // it may call the method itself.
+  const FunctionDecl *reflectMethod = nullptr;
 
   // Closures copy the value of a variable that never changes after they are
   // created; any other variable they capture lives in a box on the heap,
@@ -542,8 +546,15 @@ enum class Builtin {
   IsSafeInteger, // Number.isSafeInteger
   FromCharCode,  // String.fromCharCode
   FromCodePoint, // String.fromCodePoint
+  // encodeURIComponent, encodeURI, decodeURIComponent, decodeURI.
+  UriEncodeComponent,
+  UriEncode,
+  UriDecodeComponent,
+  UriDecode,
   // x.toFixed(digits) of a number.
   NumToFixed,
+  // x.toString(radix) of a number.
+  NumToRadix,
   // Methods of string; the receiver is the object of the callee MemberExpr.
   StrCharCodeAt,
   StrCharAt,
@@ -1073,6 +1084,28 @@ enum class Builtin {
   // side of the AbortSignal, or undefined.
   LibListener,
   LibAs,
+  // node:stream (src/sema/sema_stream.cpp): `__tz_chunk<T>(u)`, the T the
+  // unknown u holds; `__tz_isChunk<T>(u)`, whether it holds one;
+  // `__tz_chunkKind<T>()` and `__tz_typeName<T>()`, constants of each copy;
+  // `__tz_overrides(o, "m")`, whether the class of the object o replaces the
+  // method m of the class the code knows it by.
+  LibChunk,
+  LibIsChunk,
+  LibChunkKind,
+  LibTypeName,
+  LibOverrides,
+  // The I/O of the streams of node:fs and process (src/lib/fs_stream.ts),
+  // each a Promise but the last: `__tz_fsOpen(path, flags, mode)` of the
+  // descriptor, `__tz_fsRead(fd, buffer, offset, length, position)` and
+  // `__tz_fsWrite(...)` of the bytes moved, `__tz_fsClose(fd, fsync)`,
+  // `__tz_stdinChunk(max)` of the next Buffer of stdin (undefined at its
+  // end), and `__tz_stdWrite(fd, buffer)`, which writes to stdout or stderr.
+  LibFsOpen,
+  LibFsRead,
+  LibFsWrite,
+  LibFsClose,
+  LibStdinChunk,
+  LibStdWrite,
   LibNativeSignal,
   // Reflection (docs/decorators.md, section 6), through the descriptions of
   // the classes: the name of a class known only when the program runs (its
@@ -1084,6 +1117,11 @@ enum class Builtin {
   ReflectApply,
   ReflectConstruct,
   FromJsonClass,
+  // Reflect.get(object, "m") of an object of a class known when compiling,
+  // whose method `method` no class down its chain declares again: the
+  // function that takes its `this`, as an unknown, without the description of
+  // the class. The object is evaluated and dropped.
+  ReflectMethod,
 };
 
 inline bool isLibBuiltin(Builtin builtin) {
@@ -2042,7 +2080,7 @@ inline bool derivesFromError(const ClassDecl *cls) {
 // the classes JavaScript derives from it, each a class that extends Error,
 // in the order TZ_ERROR_* in runtime/tzrt.h numbers them.
 inline constexpr llvm::StringLiteral kErrorKinds[] = {"Error", "TypeError", "RangeError",
-                                                      "SyntaxError"};
+                                                      "SyntaxError", "URIError"};
 
 // The position of `name` in kErrorKinds, or -1.
 inline int errorKindIndex(llvm::StringRef name) {

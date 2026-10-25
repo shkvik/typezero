@@ -1,0 +1,75 @@
+%00%01%02%03%04%05%06%07%08%09%0A%0B%0C%0D%0E%0F%10%11%12%13%14%15%16%17%18%19%1A%1B%1C%1D%1E%1F%20!%22%23%24%25%26'()*%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%7F
+%00%01%02%03%04%05%06%07%08%09%0A%0B%0C%0D%0E%0F%10%11%12%13%14%15%16%17%18%19%1A%1B%1C%1D%1E%1F%20!%22#$%25&'()*+,-./0123456789:;%3C=%3E?@ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%7F
+%3B%2F%3F%3A%40%26%3D%2B%24%2C%23 ;/?:@&=+$,#
+-_.!~*'() -_.!~*'()
+a%20b%26c%3Dd%2Fe%3Ff%23g http://x.org/a%20b?q=1&r=%C3%A9#top
+%C3%A9%20%C3%BF%20%C2%80%20%C2%A0 %D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82
+%E0%A4%AD%E0%A4%BE%E0%A4%B0%E0%A4%A4%20%E2%82%AC %F0%9F%98%80%20%F0%9D%84%9E %F0%9F%98%80
+ plain %25
+42 1.5 true
+lone high URIError: URI malformed true URIError
+lone low URIError: URI malformed true URIError
+high at the end URIError: URI malformed true URIError
+two highs URIError: URI malformed true URIError
+reversed pair URIError: URI malformed true URIError
+éé при
+भ€ 😀!
+ABc d no escapes 
+%3B%2F%3F%3A%40%26%3D%2B%24%2C%23 ;/?:@&=+$,#
+%2f%2F%3a%23%A é a%2Bb+c
+true
+true
+true
+true
+component % URIError: URI malformed true URIError
+uri % URIError: URI malformed true URIError
+component abc% URIError: URI malformed true URIError
+uri abc% URIError: URI malformed true URIError
+component %4 URIError: URI malformed true URIError
+uri %4 URIError: URI malformed true URIError
+component %zz URIError: URI malformed true URIError
+uri %zz URIError: URI malformed true URIError
+component %G0 URIError: URI malformed true URIError
+uri %G0 URIError: URI malformed true URIError
+component %E0%A4%A URIError: URI malformed true URIError
+uri %E0%A4%A URIError: URI malformed true URIError
+component %E0%A4 URIError: URI malformed true URIError
+uri %E0%A4 URIError: URI malformed true URIError
+component %C3 URIError: URI malformed true URIError
+uri %C3 URIError: URI malformed true URIError
+component %C3%28 URIError: URI malformed true URIError
+uri %C3%28 URIError: URI malformed true URIError
+component %80 URIError: URI malformed true URIError
+uri %80 URIError: URI malformed true URIError
+component %BF URIError: URI malformed true URIError
+uri %BF URIError: URI malformed true URIError
+component %C0%80 URIError: URI malformed true URIError
+uri %C0%80 URIError: URI malformed true URIError
+component %C1%BF URIError: URI malformed true URIError
+uri %C1%BF URIError: URI malformed true URIError
+component %E0%80%80 URIError: URI malformed true URIError
+uri %E0%80%80 URIError: URI malformed true URIError
+component %ED%A0%80 URIError: URI malformed true URIError
+uri %ED%A0%80 URIError: URI malformed true URIError
+component %ED%BF%BF URIError: URI malformed true URIError
+uri %ED%BF%BF URIError: URI malformed true URIError
+component %F0%80%80%80 URIError: URI malformed true URIError
+uri %F0%80%80%80 URIError: URI malformed true URIError
+component %F4%90%80%80 URIError: URI malformed true URIError
+uri %F4%90%80%80 URIError: URI malformed true URIError
+component %F5%80%80%80 URIError: URI malformed true URIError
+uri %F5%80%80%80 URIError: URI malformed true URIError
+component %F8%80%80%80%80 URIError: URI malformed true URIError
+uri %F8%80%80%80%80 URIError: URI malformed true URIError
+component %FF URIError: URI malformed true URIError
+uri %FF URIError: URI malformed true URIError
+component %E0%A4%AD% URIError: URI malformed true URIError
+uri %E0%A4%AD% URIError: URI malformed true URIError
+component x%E2%82 URIError: URI malformed true URIError
+uri x%E2%82 URIError: URI malformed true URIError
+reserved then bad URIError: URI malformed true URIError
+644 %C3%BC%20aaaaaa%C3%BC%20aaaaaa%C3%BC%20a true
+901 true
+a b c a%2520b%2520c
+[ 'a%20b', 'c%2Fd', '%C3%A9' ] [ 'a b' ]
+URIError made true URIError: made

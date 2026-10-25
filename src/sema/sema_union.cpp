@@ -514,9 +514,14 @@ Expr *Sema::checkUnionMember(MemberExpr *member) {
                                     typeOfName(type->members().front()) + "\"'");
     return member;
   }
+  if (llvm::all_of(type->members(), [](const Type *m) { return m->isBytes(); }))
+    return checkBytesUnionMember(member);
   std::vector<const Type *> fieldTypes;
   const Type *lacking = nullptr;
   for (const Type *m : type->members()) {
+    // A class whose fields are not known yet, as no code used it before.
+    if (ClassDecl *cls = classOf(m))
+      completeClass(cls);
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     if (const ClassDecl *cls = classOf(m)) {
       const ClassDecl *owner = nullptr;
@@ -584,6 +589,8 @@ const Type *Sema::checkUnionFieldTarget(MemberExpr *member) {
   const Type *type = member->object->type;
   const Type *field = nullptr;
   for (const Type *m : type->members()) {
+    if (ClassDecl *incomplete = classOf(m))
+      completeClass(incomplete);
     const Field *f = m->isObject() ? m->field(member->name) : nullptr;
     const ClassDecl *cls = classOf(m);
     const ClassDecl *owner = nullptr;

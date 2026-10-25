@@ -18,11 +18,17 @@
 // A write is checked if the converted value reaches what it writes to at the
 // level of some narrowed part: an element put into an array that is a Dog[]
 // at heart, of a type other than Dog. A call of a function value may call any
-// function the program uses as a value. A value that reaches a place the
-// check does not follow (`yield`, `throw`, the resolvers of a Promise, a
-// built-in that keeps it) is checked against every write of the program but
-// those of the built-in modules written in tz, which write only to what they
-// make. The error shows at the conversion and names the write.
+// function the program uses as a value. What is thrown or rejected goes to
+// where errors come back: the variables of `catch`, the callbacks of
+// `catch` and of `then` for a rejection, `reason` of what `allSettled`
+// gives, `errors` of an AggregateError. A value that reaches a place the
+// check does not follow (`yield`, the values given to the resolvers of a
+// Promise, a built-in that keeps it) is checked against every write of the
+// program but those of the built-in modules written in tz, which write only
+// to what they make. Types tell where a value cannot be: in a string or a
+// number, in a variable of a type it cannot be seen as (nor hold it, nor be
+// a part of it), behind a write through a type its part cannot be seen as.
+// The error shows at the conversion and names the write.
 
 #include "sema/sema.h"
 
@@ -31,6 +37,7 @@
 #include "llvm/Support/SourceMgr.h"
 
 #include <cctype>
+#include <functional>
 #include <map>
 #include <set>
 #include <tuple>
@@ -171,14 +178,18 @@ Refs holding(const Refs &refs) {
 
 void append(Refs &to, const Refs &from) { to.insert(to.end(), from.begin(), from.end()); }
 
-// Whether values of `type` may hold references to what a conversion widened:
-// not numbers, strings or booleans.
+// Whether values of `type` may hold references to what a conversion widened,
+// or be one: not numbers, strings or booleans, nor the objects of the runtime
+// that hold only those (bytes, dates, regular expressions, Intl and crypto
+// objects), which no conversion widens.
 bool holdsReferences(const Type *type) {
   if (!type)
     return true;
   type = type->nonOptional();
   return !(type->isNumeric() || type->isBool() || type->isString() || type->isLiteral() ||
-           type->isDecimal() || type->isVoid() || type->isUndefined() || type->isNever());
+           type->isDecimal() || type->isVoid() || type->isUndefined() || type->isNever() ||
+           type->isBytes() || type->isDate() || type->isRegExp() || type->isIntl() ||
+           type->isCrypto());
 }
 
 // The type of a value before the conversions Sema added to it.
@@ -199,6 +210,7 @@ public:
         llvm::function_ref<bool(const Type *, const Type *)> convertible)
       : widenings_(widenings), narrowings_(narrowings), convertible_(convertible) {
     unknown_ = node(NodeKind::Unknown, nullptr, "");
+    thrown_ = node(NodeKind::Unknown, nullptr, "thrown");
   }
 
   void walkProgram(SourceFile &file) {
@@ -221,12 +233,21 @@ public:
         passArguments(call.call, fn, call.args);
         edges[size_t(returned(fn))].push_back({call.result, 0, 0});
       }
+    // A Result made from what a function throws or a promise rejects holds
+    // the error, which this check does not follow there.
+    if (resultOfErrors_)
+      escape({{thrown_, 0, 0}});
   }
 
   std::vector<std::vector<Edge>> edges;
   std::vector<Write> writes;
   std::vector<Conversion> conversions;
   int unknown_ = 0;
+  // By node: the type of the variable or of what the function returns, which
+  // the value a node holds is one of; null for other nodes.
+  std::vector<const Type *> types;
+  // What `throw` throws and what a promise is rejected with.
+  int thrown_ = 0;
 
 private:
   int node(NodeKind kind, const void *key, llvm::StringRef name) {
@@ -236,7 +257,7 @@ private:
       edges.emplace_back();
     return it->second;
   }
-  int var(const VarSymbol *v) { return node(NodeKind::Var, v, ""); }
+  int var(const VarSymbol *v) { return holder(node(NodeKind::Var, v, ""), v->type); }
   int fieldNode(llvm::StringRef name) { return node(NodeKind::Field, nullptr, name); }
   // What containers of `type` hold: the elements of arrays of a type, the
   // keys and values of a kind of dictionary, what promises of a type give;
@@ -246,7 +267,7 @@ private:
       return -1;
     type = type->nonOptional();
     if (type->isArray())
-      return node(NodeKind::Elements, type->inner(), "");
+      return holder(node(NodeKind::Elements, type->inner(), ""), type->inner());
     if (type->isDict() || type->isPromise())
       return node(NodeKind::Values, type, "");
     return -1;
@@ -277,9 +298,25 @@ private:
     if (fn && functionSet_.insert(fn).second)
       functionValues_.push_back(fn);
   }
-  int returned(const FunctionDecl *fn) { return node(NodeKind::Return, fn, ""); }
+  int returned(const FunctionDecl *fn) {
+    return holder(node(NodeKind::Return, fn, ""), fn->sym ? fn->sym->ret : nullptr);
+  }
 
+  // A node of a type that holds no references (a string, a number) holds
+  // nothing a conversion widened, whatever flows to it.
+  int holder(int id, const Type *type) {
+    if (size_t(id) >= plain_.size()) {
+      plain_.resize(edges.size());
+      types.resize(edges.size());
+    }
+    if (!holdsReferences(type))
+      plain_[size_t(id)] = true;
+    types[size_t(id)] = type;
+    return id;
+  }
   void flow(const Refs &refs, int to) {
+    if (size_t(to) < plain_.size() && plain_[size_t(to)])
+      return;
     for (const Ref &r : refs)
       edges[size_t(r.node)].push_back({to, r.off, r.md});
   }
@@ -422,10 +459,12 @@ private:
           escape(refs);
       }
       break;
-    case Stmt::Kind::Throw: escape(expr(cast<ThrowStmt>(s)->value)); break;
+    case Stmt::Kind::Throw: flow(expr(cast<ThrowStmt>(s)->value), thrown_); break;
     case Stmt::Kind::Try: {
       auto *t = cast<TryStmt>(s);
       stmt(t->block);
+      if (t->handler && t->param.sym)
+        flow({{thrown_, 0, 0}}, var(t->param.sym));
       stmt(t->handler);
       stmt(t->finalizer);
       break;
@@ -571,13 +610,13 @@ private:
 
   Refs call(CallExpr *c) {
     // The functions the executor of a Promise gets are the runtime's: what
-    // they get is not followed.
+    // the first gets is not followed, what the second gets is a rejection.
     if (c->builtin == Builtin::PromiseNew)
       for (const Expr *arg : c->args)
         if (auto *f = dyn_cast<FunctionExpr>(ownExpr(arg)))
-          for (const Param &p : f->fn->params)
-            if (p.sym)
-              runtimeFunctions_.insert(p.sym);
+          for (size_t i = 0; i < f->fn->params.size(); ++i)
+            if (const VarSymbol *p = f->fn->params[i].sym)
+              (i == 1 ? runtimeRejects_ : runtimeFunctions_).insert(p);
     auto *member = llvm::dyn_cast_or_null<MemberExpr>(c->callee);
     Refs receiver;
     const Type *receiverType = nullptr;
@@ -611,8 +650,12 @@ private:
       // the runtime's.
       int result = node(NodeKind::CallResult, c, "");
       valueCalls_.push_back({c, args, result});
-      if ((callee && callee->var && runtimeFunctions_.count(callee->var)) ||
-          (member && (member->name == "resolve" || member->name == "reject")))
+      if ((callee && callee->var && runtimeRejects_.count(callee->var)) ||
+          (member && member->name == "reject")) {
+        for (const Refs &a : args)
+          flow(a, thrown_);
+      } else if ((callee && callee->var && runtimeFunctions_.count(callee->var)) ||
+                 (member && member->name == "resolve"))
         for (size_t i = 0; i < args.size(); ++i) {
           escape(args[i]);
           if (const Type *value = c->args[i]->type; value && !value->isVoid())
@@ -683,6 +726,47 @@ private:
       callback(arg, given);
       if (auto *f = dyn_cast<FunctionExpr>(ownExpr(arg)))
         results.push_back({returned(f->fn), 0, 0});
+    }
+    // Where rejections come back: the callback of `catch`, the second one of
+    // `then`, `reason` of what `allSettled` gives, the `errors` of the
+    // AggregateError of `any`.
+    switch (c->builtin) {
+    // The intrinsics of the built-in modules written in tz: `__tz_as<C>(x)`
+    // and `__tz_chunk<T>(u)` give x itself seen as another type,
+    // `__tz_listener<F>(f)` a function that calls f; the others give
+    // numbers, strings and the runtime's objects, and keep nothing.
+    case Builtin::LibAs:
+    case Builtin::LibChunk:
+    case Builtin::LibListener: return args.empty() ? Refs() : args[0];
+    case Builtin::LibIsChunk:
+    case Builtin::LibChunkKind:
+    case Builtin::LibTypeName:
+    case Builtin::LibOverrides:
+    case Builtin::LibFsOpen:
+    case Builtin::LibFsRead:
+    case Builtin::LibFsWrite:
+    case Builtin::LibFsClose:
+    case Builtin::LibStdinChunk:
+    case Builtin::LibStdWrite:
+    case Builtin::LibNativeSignal: return {};
+    case Builtin::PromiseReject:
+      for (const Refs &a : args)
+        flow(a, thrown_);
+      return {};
+    case Builtin::PromiseCatch:
+      if (!c->args.empty())
+        callback(c->args[0], {{thrown_, 0, 0}});
+      break;
+    case Builtin::PromiseThen:
+      if (c->args.size() > 1)
+        callback(c->args[1], {{thrown_, 0, 0}});
+      break;
+    case Builtin::PromiseAllSettled: flow({{thrown_, 0, 0}}, fieldNode("reason")); break;
+    case Builtin::PromiseAny: flow(holding({{thrown_, 0, 0}}), fieldNode("errors")); break;
+    case Builtin::ResultFromThrowable:
+    case Builtin::ResultAsyncFromPromise:
+    case Builtin::ResultAsyncFromThrowable: resultOfErrors_ = true; break;
+    default: break;
     }
     // `new Map(entries)`, `new Set(values)`: into the dictionary, its keys
     // and values by its type, two levels inside the entries (one of a Set's
@@ -789,7 +873,16 @@ private:
     }
   }
 
+  // What the value of `e` may hold or be: nothing for a string, a number,
+  // or another type that holds no references, whatever it was made of.
   Refs expr(Expr *e) {
+    Refs refs = exprRefs(e);
+    if (e && e->type && !holdsReferences(e->type))
+      return {};
+    return refs;
+  }
+
+  Refs exprRefs(Expr *e) {
     if (!e)
       return {};
     switch (e->kind()) {
@@ -975,6 +1068,10 @@ private:
   std::set<const FunctionDecl *> functionSet_;
   std::vector<ValueCall> valueCalls_;
   std::set<const VarSymbol *> runtimeFunctions_;
+  std::set<const VarSymbol *> runtimeRejects_;
+  std::vector<bool> plain_; // by node: of a type that holds no references
+  // Whether the program makes a Result of what is thrown or rejected.
+  bool resultOfErrors_ = false;
 };
 
 } // namespace
@@ -1027,6 +1124,78 @@ void Sema::checkWidenings(SourceFile &file) {
       return false;
     return !n.narrow || !w.value || !isImplicitlyConvertible(w.value, n.narrow);
   };
+  // Whether a write may change the part `n` is about: it writes through a
+  // type the part may be seen as (an Animal[] or an unknown[] of a Dog[],
+  // not a string[]).
+  auto mayBe = [](const Write &w, const Narrowing &n) {
+    const Type *through = w.through ? w.through->nonOptional() : nullptr;
+    if (!through || !n.owner || mentionsParam(through) || through->isUnknown() ||
+        through->isAnyObject())
+      return true;
+    if (n.element)
+      return !through->isArray() || !n.narrow || mentionsParam(through->inner()) ||
+             isImplicitlyConvertible(n.narrow, through->inner());
+    return isImplicitlyConvertible(n.owner, through);
+  };
+  // Whether a place of `type` may hold a value of `value`'s type `depth`
+  // levels inside what it holds (0: the value itself). Arrays, tuples, unions
+  // and dictionaries say what they hold; an object may be of a class further
+  // down its chain, with fields of its own.
+  std::function<bool(const Type *, const Type *, int)> mayHold = [&](const Type *type,
+                                                                     const Type *value,
+                                                                     int depth) -> bool {
+    if (!type)
+      return true;
+    type = type->nonOptional();
+    if (type->isUnknown() || type->isAnyObject() || type->isError() || mentionsParam(type))
+      return true;
+    if (depth == 0)
+      return isImplicitlyConvertible(value, type);
+    if (!holdsReferences(type))
+      return false;
+    if (type->isArray())
+      return mayHold(type->inner(), value, depth - 1);
+    if (type->isDict())
+      return mayHold(type->keyType(), value, depth - 1) ||
+             mayHold(type->valueType(), value, depth - 1);
+    if (type->isUnion())
+      return llvm::any_of(type->members(),
+                          [&](const Type *m) { return mayHold(m, value, depth); });
+    if (type->isTuple())
+      return llvm::any_of(type->fields(),
+                          [&](const Field &f) { return mayHold(f.type, value, depth - 1); });
+    return true;
+  };
+  // Whether a value of `type` may be a part of a value of `whole`'s type
+  // `depth` levels inside it: an element of an array, a field of an object
+  // of a class nothing extends (which has no fields but its own).
+  std::function<bool(const Type *, const Type *, int)> mayBePart = [&](const Type *type,
+                                                                       const Type *whole,
+                                                                       int depth) -> bool {
+    if (!type || !whole)
+      return true;
+    type = type->nonOptional();
+    whole = whole->nonOptional();
+    if (depth == 0)
+      return mayHold(type, whole, 0) || mayHold(whole, type, 0);
+    if (whole->isUnknown() || whole->isAnyObject() || whole->isError() || mentionsParam(whole))
+      return true;
+    if (!holdsReferences(whole))
+      return false;
+    if (whole->isArray())
+      return mayBePart(type, whole->inner(), depth - 1);
+    if (whole->isDict())
+      return mayBePart(type, whole->keyType(), depth - 1) ||
+             mayBePart(type, whole->valueType(), depth - 1);
+    if (whole->isUnion())
+      return llvm::any_of(whole->members(),
+                          [&](const Type *m) { return mayBePart(type, m, depth); });
+    const ClassDecl *cls = whole->classDecl();
+    if (whole->isTuple() || (cls && cls->children.empty()))
+      return llvm::any_of(whole->fields(),
+                          [&](const Field &f) { return mayBePart(type, f.type, depth - 1); });
+    return true;
+  };
   std::set<const char *> reported;
   for (const Conversion &conv : flows.conversions) {
     if (conv.narrowings.empty() || !reported.insert(conv.loc.getPointer()).second)
@@ -1042,6 +1211,14 @@ void Sema::checkWidenings(SourceFile &file) {
       todo.pop_back();
       if (off > kMaxDepth || off < -16 || md > 16 || !seen.insert({node, off, md}).second)
         continue;
+      // A variable that holds the converted value, holds it inside or is a
+      // part of it is of a type that may: a listener of Event is no place of
+      // a Dog[], nor a pair of strings a part of one.
+      if (size_t(node) < flows.types.size())
+        if (const Type *type = flows.types[size_t(node)];
+            type && (off <= 0 ? !mayHold(type, conv.from, -off) && !mayHold(type, conv.to, -off)
+                              : !mayBePart(type, conv.from, off)))
+          continue;
       // A place the check does not follow: any write may meet it (below).
       if (node == flows.unknown_) {
         unknown = true;
@@ -1058,7 +1235,7 @@ void Sema::checkWidenings(SourceFile &file) {
         if (node == conv.initializes && depth == 0)
           continue;
         for (const Narrowing &n : conv.narrowings)
-          if (breaks(write, n, depth)) {
+          if (breaks(write, n, depth) && mayBe(write, n)) {
             found = &write;
             broken = &n;
             break;
@@ -1070,18 +1247,8 @@ void Sema::checkWidenings(SourceFile &file) {
         todo.push_back({e.to, off + e.off, std::max({e.md, md - e.off, 0})});
     }
     // What reached a place the check does not follow may meet any write of
-    // the program through a type its part may be seen as (an Animal[] or an
-    // unknown[] of a Dog[], not a string[]); the built-in modules (src/lib)
-    // write only to what they make, and what reaches them they follow.
-    auto mayBe = [&](const Write &w, const Narrowing &n) {
-      const Type *through = w.through ? w.through->nonOptional() : nullptr;
-      if (!through || !n.owner)
-        return true;
-      if (n.element)
-        return through->isArray() && n.narrow &&
-               isImplicitlyConvertible(n.narrow, through->inner());
-      return isImplicitlyConvertible(n.owner, through);
-    };
+    // the program; the built-in modules (src/lib) write only to what they
+    // make, and what reaches them they follow.
     if (!found && unknown)
       for (const Write &write : flows.writes) {
         if (inLibrary(write.loc))

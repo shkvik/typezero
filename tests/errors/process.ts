@@ -25,16 +25,14 @@ process.argv()
 process.on("exit", () => {})
 // expect-error: 'process' can only be used through its properties, e.g. 'process.argv'
 const p = process
-// expect-error: type 'int' is not assignable to type 'string'
+// expect-error: 'write' of a stream of Buffer takes a string, a Buffer or a Uint8Array, but this is 'int'
 process.stdout.write(5)
-// expect-error: type 'int' is not assignable to type 'string'
+// expect-error: 'write' of a stream of Buffer takes a string, a Buffer or a Uint8Array, but this is 'int'
 process.stderr.write(5)
 // expect-error: 'process.stdout.isTTY' is a boolean, not a function
 process.stdout.isTTY()
-// expect-error: 'process.stdout.columns' is not supported yet; only 'write(text)' and 'isTTY' are
+// expect-error: 'process.stdout.columns' is not supported yet; only 'isTTY', 'write()' and the rest of a Writable of node:stream are
 console.log(process.stdout.columns)
-// expect-error: 'process.stdout' can only be used as 'process.stdout.write(text)'
-const out = process.stdout
 // expect-error: 'console.table' is not supported yet; only 'console.log', 'info', 'debug', 'error' and 'warn' are
 console.table([1, 2])
 // expect-error: an expression of type 'void' cannot be printed

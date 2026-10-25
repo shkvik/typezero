@@ -1,0 +1,9 @@
+// same-as-node
+// merge-stderr
+// A write of process.stdout with an encoding or a callback: that of the
+// Writable of node:stream, whose callback comes after the code that wrote.
+process.stdout.write("first\n", () => console.log("written first"))
+process.stdout.write("6869210a", "hex")
+process.stderr.write(Buffer.from("to stderr\n"), (err) => console.log("stderr", err == undefined))
+console.log("after the writes")
+console.log(process.stdout.writable, process.stdout.writableLength)

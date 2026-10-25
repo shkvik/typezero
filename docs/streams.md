@@ -1,7 +1,7 @@
 # Потоки node
 
-Решения, принятые 24 октября 2026 года. Пока ничего из этого не реализовано: порядок работ — в
-конце, в разделе «План реализации».
+Решения, принятые 24 октября 2026 года. Шаги 1–3 плана сделаны 24–25 октября (из шага 3 — без
+асинхронных функций `node:child_process`); что осталось — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -83,13 +83,13 @@ child.stdout.on("data", s => s.length)          // s: string
 На каждом шаге: тесты `tests/run` с `// same-as-node`, ошибки в `tests/errors`, прогон под
 `TZ_CHECK_LEAKS=1`, обновление README.
 
-1. **Потоки** — перенос `lib/internal/streams` на tz поверх `EventEmitter`
+1. **Потоки** (сделано) — перенос `lib/internal/streams` на tz поверх `EventEmitter`
    ([events.md](events.md), шаг 1), `Readable<T>` / `Writable<T>`, `pipe`, `pipeline`,
    `for await` ([iterators.md](iterators.md), шаг 4), `node:stream/consumers`,
    `node:string_decoder`. Нужен `Buffer` ([bytes.md](bytes.md), шаг 2).
-2. **Типы кусков** — по кодировке при создании, вывод для `objectMode`, `setEncoding` с
+2. **Типы кусков** (сделано) — по кодировке при создании, вывод для `objectMode`, `setEncoding` с
    ошибкой на поток, который уже ушёл в другое место.
-3. **Потоки у файлов и процессов** — `fs.createReadStream` / `createWriteStream`,
+3. **Потоки у файлов и процессов** (сделано, кроме асинхронных функций `node:child_process`) — `fs.createReadStream` / `createWriteStream`,
    `process.stdin`, асинхронные функции `node:child_process` ([process.md](process.md)).
 4. **Web-потоки и переходы** между ними; `node:http` ([net.md](net.md), раздел 7).
 5. **Позже** — `sendfile` / `TransmitFile` для `pipeline` из файла в сокет.

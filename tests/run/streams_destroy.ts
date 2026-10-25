@@ -1,0 +1,50 @@
+// destroy() with an error and _destroy(), 'error' then 'close'; a write
+// after end(); a Duplex with read(), write() and final(); push() after the
+// end. undefined ends a stream, as null does in node: the output is node's
+// with push(null).
+import { Duplex, PassThrough, Readable, Writable } from "node:stream"
+const log = (s: string) => console.log(s)
+const r = new Readable({
+  read() {},
+  destroy(err, cb) {
+    log(`_destroy ${err?.message}`)
+    cb(err)
+  },
+})
+r.on("error", (e) => log(`r error ${e.message} errored=${r.errored?.message}`))
+r.on("close", () => log(`r close closed=${r.closed} destroyed=${r.destroyed}`))
+r.destroy(new Error("oops"))
+log(`destroyed now ${r.destroyed}`)
+r.destroy(new Error("again"))
+
+const w = new Writable({ write(c, e, cb) { cb() } })
+w.on("close", () => log("w close"))
+w.on("error", (e) => log(`w error ${e.message}`))
+w.end()
+w.write("late", (err) => log(`late cb ${err?.message}`))
+
+const d = new Duplex({
+  read() {},
+  write(chunk, enc, cb) {
+    log(`duplex write ${chunk.toString()}`)
+    this.push(chunk.toString().split("").reverse().join(""))
+    cb()
+  },
+  final(cb) {
+    this.push(undefined)
+    cb()
+  },
+})
+d.on("data", (c) => log(`duplex data ${c.toString()}`))
+d.on("end", () => log("duplex end"))
+d.on("finish", () => log("duplex finish"))
+d.on("close", () => log("duplex close"))
+d.write("abc")
+d.end()
+
+const p = new PassThrough()
+p.on("error", (e) => log(`p error ${e.message}`))
+p.push("x")
+p.push(undefined)
+p.push("after eof")
+

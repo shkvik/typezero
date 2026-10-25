@@ -1,0 +1,18 @@
+a@x
+false ann true ann User { name: 'ann', email: 'a@x' }
+none
+true - false undefined User { name: 'x', email: 'y' }
+3
+no q { x: 0, y: 0 }
+1
+unset
+2
+b
+no class undefined false
+6
+2 [ 'ann', 'ann' ]
+[ 1 ]
+[ 'z' ]
+[ 1, 2 ]
+ann ? c
+nothing empty text text t object number

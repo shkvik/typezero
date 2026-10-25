@@ -122,11 +122,11 @@ bool isLiteral(const Expr *expr) {
 }
 
 // What `a && b` gives when a is falsy: a itself, which is undefined if it is
-// an array, a function or an object.
+// an array, a function, an object or a class.
 const Type *falsyType(const Type *type) {
   const Type *base = type->nonOptional();
   return base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
-                 base->isDict()
+                 base->isDict() || base->isClassRef()
              ? Type::undefinedTy()
              : type;
 }
@@ -287,10 +287,14 @@ Expr *Sema::checkLogical(BinaryExpr *bin, const Type *expected, Flow &whenTrue, 
 bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
   // A type parameter tests as its constraint: `T extends string` as a string.
   const Type *type = expr->type, *base = apparentType(type->nonOptional());
+  // Nothing but undefined, as an optional parameter of a type `never` in a copy of a generic
+  // function (`buf?: TBuf` with TBuf = never): always false, which the copy may well test.
+  if (type->isUndefined() || base->isNever())
+    return true;
   if (type->isError() || base->isBool() || base->isString() ||
       (type->isOptional() &&
        (base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
-        base->isIterator() || base->isDict() || base->isPromise())))
+        base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef())))
     return true;
   // `T extends string | boolean`: none of them is a number.
   if (base->isParam() && !base->alternatives().empty() &&
@@ -420,11 +424,18 @@ bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
   } else {
     // An array, a function or an object, which is always truthy.
     const NameExpr *narrowed = narrowedVariable(expr);
-    bool isArray = base->isArray(), isPromise = base->isPromise(),
-         isObject = base->isObject() || base->isIterator() || base->isDict() ||
-                    base->isClassRef() || isPromise;
+    bool isArray = base->isArray(), isPromise = base->isPromise(), isClass = base->isClassRef(),
+         isObject = base->isObject() || base->isIterator() || base->isDict() || isClass ||
+                    isPromise;
+    // The name of a class itself, `if (User)`, which no type makes undefined.
+    const Expr *bare = expr;
+    while (isa<CastExpr>(bare) && cast<CastExpr>(bare)->isImplicit())
+      bare = cast<CastExpr>(bare)->operand;
+    auto *name = dyn_cast<NameExpr>(bare);
+    bool className = isClass && name && name->cls && !name->var;
     const char *what = isArray     ? "an array"
                        : isPromise ? "a Promise"
+                       : isClass   ? "a class"
                        : isObject  ? "an object"
                                    : "a function";
     if (narrowed)
@@ -450,7 +461,7 @@ bool Sema::checkTruthy(const Expr *expr, TruthUse use, const Expr *other) {
                          : "; drop the assignment";
     else if ((narrowed || isObject) && use == TruthUse::And)
       message += "; drop '" + x + " &&'";
-    else if (narrowed)
+    else if (narrowed || className)
       message += isArray ? "; drop the check, or check the length: '" + length + "'" : "; drop the check";
     else if (isArray)
       message += "; check its length: '" + length + "'";

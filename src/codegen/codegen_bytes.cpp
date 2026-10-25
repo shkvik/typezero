@@ -45,7 +45,21 @@ const EncodingTable kEncodingTables[] = {TZ_ENCODING_TABLES(TZ_ENCODING_TABLE)};
 #undef TZ_ENCODING_TABLE
 
 // The encodings of TextDecoder, numbered as in runtime/buffer.c.
-enum { kTextUtf8, kTextUtf16le, kTextUtf16be, kTextSingleByte };
+enum { kTextUtf8, kTextUtf16le, kTextUtf16be, kTextSingleByte, kTextCjk };
+
+// The multi-byte encodings (runtime/cjk.c), each a TzCjkEncoding of the
+// runtime that names its indexes: a program that refers to one gets those
+// from the linker, and no others.
+const char *const kCjkEncodings[] = {"gbk",         "gb18030",   "big5",  "euc-jp",
+                                     "iso-2022-jp", "shift_jis", "euc-kr"};
+
+llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
+  std::string symbol = "tz_cjk_encoding_" + name.str();
+  for (char &c : symbol)
+    if (c == '-')
+      c = '_';
+  return module.getOrInsertGlobal(symbol, llvm::Type::getInt8Ty(module.getContext()));
+}
 
 int64_t constantOf(const Expr *e) { return int64_t(cast<IntLitExpr>(e)->value); }
 
@@ -704,9 +718,23 @@ llvm::Value *CodeGen::emitBytesCall(CallExpr *call) {
   case Builtin::BytesByteLength: {
     Operand self = emitOperand(member->object, /*canBorrow=*/true);
     llvm::Value *length = bytesLength(self.value);
+    auto sizeOf = [](const Type *t) { return t->isTypedArray() ? t->elementSize() : 1u; };
+    llvm::Value *size = builder_.getInt64(sizeOf(self.type));
+    if (self.type->isUnion()) {
+      // Of the member the value is, by its class number, where elements of
+      // more than a byte are among them.
+      llvm::Value *id = nullptr;
+      for (const Type *m : self.type->members()) {
+        if (sizeOf(m) == 1)
+          continue;
+        if (!id)
+          id = objectClassId(self.value);
+        size = builder_.CreateSelect(builder_.CreateICmpEQ(id, builder_.getInt32(plainTypeId(m))),
+                                     builder_.getInt64(sizeOf(m)), size);
+      }
+    }
     dropOperand(self);
-    unsigned size = self.type->isTypedArray() ? self.type->elementSize() : 1;
-    return builder_.CreateTrunc(builder_.CreateMul(length, builder_.getInt64(size)), i32);
+    return builder_.CreateTrunc(builder_.CreateMul(length, size), i32);
   }
   case Builtin::BytesByteOffset: {
     Operand self = emitOperand(member->object, /*canBorrow=*/true);
@@ -1299,30 +1327,40 @@ llvm::Value *CodeGen::emitBytesCall(CallExpr *call) {
       std::string name;
       for (char16_t c : cast<StringLitExpr>(call->args[1])->value)
         name += char(c);
+      bool multi = tz_encoding_multi_byte(name.c_str());
       int which = name == "utf-8"      ? kTextUtf8
                   : name == "utf-16le" ? kTextUtf16le
                   : name == "utf-16be" ? kTextUtf16be
+                  : multi              ? kTextCjk
                                        : kTextSingleByte;
-      llvm::Value *table = which == kTextSingleByte
-                               ? encodingTable(name)
-                               : llvm::ConstantPointerNull::get(builder_.getPtrTy());
+      llvm::Value *table = llvm::ConstantPointerNull::get(builder_.getPtrTy());
+      if (which == kTextSingleByte)
+        table = encodingTable(name);
+      else if (which == kTextCjk)
+        table = cjkEncodingOf(*module_, name);
       return builder_.CreateCall(fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
                                  {builder_.getInt32(uint32_t(which)), table, fatal, ignore},
                                  "decoder");
     }
     // A label known only now: the program holds every table.
-    std::vector<llvm::Constant *> tables;
+    std::vector<llvm::Constant *> tables, cjk;
     for (const EncodingTable &t : kEncodingTables)
       tables.push_back(encodingTable(t.name));
-    auto *tablesTy = llvm::ArrayType::get(builder_.getPtrTy(), tables.size());
-    auto *all = new llvm::GlobalVariable(*module_, tablesTy, /*isConstant=*/true,
-                                         llvm::GlobalValue::PrivateLinkage,
-                                         llvm::ConstantArray::get(tablesTy, tables), "tz.encodings");
+    for (const char *name : kCjkEncodings)
+      cjk.push_back(cjkEncodingOf(*module_, name));
+    auto list = [&](std::vector<llvm::Constant *> &items, const char *name) {
+      auto *type = llvm::ArrayType::get(builder_.getPtrTy(), items.size());
+      return new llvm::GlobalVariable(*module_, type, /*isConstant=*/true,
+                                      llvm::GlobalValue::PrivateLinkage,
+                                      llvm::ConstantArray::get(type, items), name);
+    };
+    llvm::Value *all = list(tables, "tz.encodings"), *allCjk = list(cjk, "tz.encodings.cjk");
     takeOperand(label);
     llvm::Value *made = builder_.CreateCall(
-        fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, i32, i32}),
+        fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32}),
         {stringObj(label.value), stringMeta(label.value), all,
-         builder_.getInt32(uint32_t(tables.size())), fatal, ignore},
+         builder_.getInt32(uint32_t(tables.size())), allCjk,
+         builder_.getInt32(uint32_t(cjk.size())), fatal, ignore},
         "decoder");
     dropOperand(label);
     emitThrowCheck(); // RangeError: the encoding is not supported
@@ -1333,16 +1371,27 @@ llvm::Value *CodeGen::emitBytesCall(CallExpr *call) {
     llvm::Value *data = llvm::ConstantPointerNull::get(builder_.getPtrTy());
     llvm::Value *length = builder_.getInt64(0);
     Operand input{nullptr, false, nullptr};
-    if (!call->args.empty()) {
+    if (!call->args.empty() && !call->args[0]->type->isUndefined()) {
       input = emitOperand(call->args[0], /*canBorrow=*/true);
       data = bytesData(input.value);
       length = bytesLength(input.value);
       if (input.type->isTypedArray())
         length = builder_.CreateMul(length, builder_.getInt64(input.type->elementSize()));
     }
+    // `{ stream: true }`: the text goes on in the next call.
+    llvm::Value *stream = builder_.getInt32(0);
+    if (call->args.size() > 1) {
+      Operand options = emitOperand(call->args[1], /*canBorrow=*/true);
+      const Type *t = options.type->field("stream")->type;
+      llvm::Value *loaded =
+          builder_.CreateLoad(lower(t), fieldAddress(options.value, options.type, "stream"));
+      llvm::Value *given = builder_.CreateAnd(optionalHas(loaded, t), optionalValue(loaded, t));
+      stream = builder_.CreateZExt(given, i32);
+      dropOperand(options);
+    }
     takeOperand(self);
-    llvm::Value *text = callReturningString(fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64}),
-                                            {self.value, data, length});
+    llvm::Value *text = callReturningString(fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64, i32}),
+                                            {self.value, data, length, stream});
     if (input.value)
       dropOperand(input);
     dropOperand(self);

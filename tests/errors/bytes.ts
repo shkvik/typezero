@@ -87,8 +87,8 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   console.log(Buffer.from("x", "utf9"))
   // expect-error: 'utf-17' is not an encoding TextDecoder knows
   console.log(new TextDecoder("utf-17"))
-  // expect-error: the encoding 'gbk' is not supported yet
-  console.log(new TextDecoder("gbk"))
+  // expect-error: 'iso-2022-kr' is not an encoding TextDecoder knows
+  console.log(new TextDecoder("iso-2022-kr"))
   // expect-error: a value of type 'ArrayBuffer' cannot be converted to a string
   console.log(`${buffer}`)
   // expect-error: type 'ArrayBuffer' cannot be indexed; read its bytes through a view
@@ -104,8 +104,10 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   u.push(1)
   // expect-error: property 'map' does not exist on type 'Uint8Array'; methods must be called
   console.log(u.map)
-  // expect-error: the options of 'decode' ({ stream: true }) are not supported yet
-  console.log(new TextDecoder().decode(u, { stream: true }))
+  // expect-error: type 'string' is not assignable to type 'boolean | undefined' of field 'stream'
+  console.log(new TextDecoder("gbk").decode(u, { stream: "yes" }))
+  // expect-error: 'decode' takes a typed array, a DataView or an ArrayBuffer, found 'string'
+  console.log(new TextDecoder("shift_jis").decode("text"))
   // expect-error: 'SharedArrayBuffer' is not supported yet
   const shared: SharedArrayBuffer | undefined = undefined
   // expect-error: JSON has no binary data

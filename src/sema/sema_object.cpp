@@ -182,6 +182,15 @@ Expr *Sema::checkObjectLit(ObjectLitExpr *lit, const Type *expected) {
         if (m->isRecord())
           return checkRecordLit(lit, m);
   }
+  // A method where the type expected has a function that takes `this`,
+  // `{ read() { this.push(x) } }` for `read?: (this: Readable, size: int) =>
+  // void`, is that function: its `this` is what the caller gives.
+  if (target)
+    for (ObjectLitExpr::Property &prop : lit->props)
+      if (const Field *wanted = prop.method ? target->field(prop.name) : nullptr;
+          wanted && wanted->type->nonOptional()->isFunction() &&
+          wanted->type->nonOptional()->hasThis())
+        prop.method = false;
   if (llvm::any_of(lit->props, [](const ObjectLitExpr::Property &p) { return p.method; }))
     return checkMethodLiteral(lit, target);
   if (lit->hasSpread())
@@ -1001,6 +1010,11 @@ void Sema::forgetFieldsOf(Flow &flow, const VarSymbol *var) {
 }
 
 Expr *Sema::narrowedField(MemberExpr *member) {
+  // A stream after its setEncoding() (sema_stream.cpp).
+  if (!streamViews_.empty())
+    if (std::optional<FieldPath> path = fieldPath(member))
+      if (const Type *view = streamViewOf(*path, member->loc()))
+        return convert(member, view);
   if (flow_.narrowedFields.empty())
     return member;
   std::optional<FieldPath> path = fieldPath(member);

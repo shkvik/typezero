@@ -1,0 +1,13 @@
+_destroy oops
+destroyed now true
+duplex write abc
+r error oops errored=oops
+r close closed=true destroyed=true
+late cb write after end
+w error write after end
+w close
+duplex data cba
+duplex finish
+p error stream.push() after EOF
+duplex end
+duplex close

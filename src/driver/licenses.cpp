@@ -34,6 +34,9 @@ const Project kProjects[] = {
     {"node", "Node.js: the runtime of tz follows parts of it, such as console.log and node:path",
      "MIT", "Node.js.txt"},
     {"v8", "V8: the runtime of tz follows its parser of dates", "BSD-3-Clause", "V8.txt"},
+    {"whatwg",
+     "WHATWG Encoding Standard: the indexes of the multi-byte encodings of TextDecoder",
+     "BSD-3-Clause", "WHATWG.txt"},
 };
 
 } // namespace
@@ -55,11 +58,20 @@ CryptoUse cryptoUse(const llvm::Module &module) {
   return use;
 }
 
+bool usesEncodingIndexes(const llvm::Module &module) {
+  for (const llvm::GlobalVariable &var : module.globals())
+    if (var.getName().starts_with("tz_cjk_encoding_"))
+      return true;
+  return false;
+}
+
 void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
   std::string text = kHeader.str();
   if (embedded.openssl)
     text += "openssl\n";
   text += "node\nv8\n";
+  if (embedded.whatwg)
+    text += "whatwg\n";
   llvm::Constant *data = llvm::ConstantDataArray::getString(module.getContext(), text);
   auto *manifest = new llvm::GlobalVariable(module, data->getType(), /*isConstant=*/true,
                                             llvm::GlobalValue::PrivateLinkage, data, "tz.licenses");

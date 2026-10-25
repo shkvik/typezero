@@ -1,0 +1,80 @@
+// same-as-node --experimental-transform-types
+// Streams with the rest (docs/streams.md, steps 1–3): an async generator of
+// records through a Transform in object mode and one to lines into a file,
+// a server of tz:http that sends what a read stream of the file gives,
+// hashes and Web Crypto over the chunks, an EventEmitter that reports the
+// stages, stream objects that hold each other (pipe, listeners), and a
+// Dog[] that a stream of Animal[] only reads.
+import { createReadStream, createWriteStream, mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { Readable, Transform, Writable } from "node:stream"
+import { pipeline } from "node:stream/promises"
+import { text } from "node:stream/consumers"
+import { createHash } from "node:crypto"
+import { EventEmitter } from "node:events"
+import { serve } from "tz:http"
+
+class Animal {
+  constructor(public name: string, public legs: int) {}
+}
+class Dog extends Animal {}
+const dogs: Dog[] = [new Dog("Rex", 4), new Dog("Ace", 3)]
+
+class Stages extends EventEmitter<{ stage: [name: string, count: int] }> {}
+const stages = new Stages()
+stages.on("stage", (name, count) => console.log(`stage ${name}: ${count}`))
+
+async function* herd(all: Animal[]) {
+  for (const a of all) yield a
+}
+
+const dir = mkdtempSync(join(tmpdir(), "tz-streams-mix-"))
+const file = join(dir, "herd.txt")
+let records = 0
+const toLine = new Transform({
+  objectMode: true,
+  transform(a: Animal, _encoding, callback) {
+    records++
+    callback(undefined, `${a.name} ${a.legs}\n`)
+  },
+  flush(callback) {
+    stages.emit("stage", "lines", records)
+    callback()
+  },
+})
+await pipeline(Readable.from(herd(dogs)), toLine, createWriteStream(file))
+console.log("written", dogs.map((d) => d.name).join(","))
+
+// The file back, a hash of its chunks, and its lines counted by a Writable.
+const hash = createHash("sha256")
+let lines = 0
+const counter = new Writable({
+  write(chunk: Buffer, _encoding, callback) {
+    hash.update(chunk)
+    lines += chunk.toString().split("\n").length - 1
+    callback()
+  },
+})
+await pipeline(createReadStream(file), counter)
+stages.emit("stage", "counted", lines)
+console.log("sha256", hash.digest("hex"))
+
+// A pipe of a read stream into a PassThrough-like Transform, and the text it gives.
+const upper = new Transform({
+  transform(chunk: Buffer, _encoding, callback) {
+    callback(undefined, chunk.toString().toUpperCase())
+  },
+})
+console.log(JSON.stringify(await text(createReadStream(file).pipe(upper))))
+
+// A server that sends the file as it reads it.
+const server = serve({ port: 0, hostname: "127.0.0.1" }, async () => {
+  const body = await text(createReadStream(file, "utf8"))
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body))
+  return new Response(body, { headers: { "x-digest": Buffer.from(digest).toString("hex") } })
+})
+const res = await fetch(new URL("/", server.url))
+console.log(JSON.stringify(await res.text()), res.headers.get("x-digest")?.slice(0, 16))
+await server.stop()
+rmSync(dir, { recursive: true })
