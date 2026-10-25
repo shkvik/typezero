@@ -1,9 +1,0 @@
-// The editor's view of the programs in this repository (tsc in VS Code): the
-// tests, the examples and the benchmarks, with the declarations next to the tz
-// of build/dev (docs/modules.md, section 6). The programs of tests/errors are
-// wrong on purpose, and src/lib calls the intrinsics of the runtime, so they
-// are left out.
-{
-  "extends": "./build/dev/bin/types/tsconfig.json",
-  "include": ["tests/run/**/*.ts", "examples/**/*.ts", "bench/**/*.ts"]
-}

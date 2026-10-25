@@ -1,6 +1,5 @@
 #include "pkg/commands.h"
 
-#include "pkg/editor.h"
 #include "pkg/fetch.h"
 #include "pkg/json.h"
 #include "pkg/project.h"
@@ -9,7 +8,6 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -70,7 +68,7 @@ std::string relativePath(llvm::StringRef from, llvm::StringRef to) {
 }
 
 // Prepares the packages of the project as tz.json would be with `deps`, and
-// writes tz.json if that works, and the editor's paths of the packages.
+// writes tz.json if that works.
 bool applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
                        const PrepareOptions &options, Lock *before, Lock *after) {
   std::string text = withDependencies(project, deps);
@@ -80,13 +78,7 @@ bool applyDependencies(const Manifest &project, const std::vector<Dependency> &d
   Graph graph;
   if (!preparePackages(edited, options, graph, before, after))
     return false;
-  if (text != project.text && !writeText(project.path, text))
-    return false;
-  // The editor's paths of the packages; if they cannot be written, the error
-  // says so, and the packages stay changed.
-  if (editorSetUp(project.dir))
-    writeEditorConfig(project.dir, &graph);
-  return true;
+  return text == project.text || writeText(project.path, text);
 }
 
 // "/x", "C:/x", "C:\x": a path, not a source with a scheme like "git:".
@@ -208,29 +200,6 @@ void printChanges(const Lock &before, const Lock &after) {
     llvm::outs() << "the packages are up to date\n";
 }
 
-// Sets the editor up for the project in `dir` (see editor.h): its
-// tsconfig.json, and .tz/ in its .gitignore if it has one.
-bool setUpEditor(llvm::StringRef dir) {
-  llvm::SmallString<256> ignore(dir);
-  path::append(ignore, ".gitignore");
-  if (auto buffer = llvm::MemoryBuffer::getFile(ignore)) {
-    llvm::StringRef text = (*buffer)->getBuffer();
-    llvm::SmallVector<llvm::StringRef, 16> lines;
-    text.split(lines, '\n');
-    bool listed = llvm::any_of(lines, [](llvm::StringRef line) {
-      line = line.trim();
-      return line == "/.tz/" || line == ".tz/" || line == "/.tz" || line == ".tz";
-    });
-    if (!listed &&
-        !writeText(ignore, text.str() + (text.empty() || text.ends_with("\n") ? "" : "\n") +
-                               "/.tz/\n"))
-      return false;
-  }
-  llvm::SmallString<256> config(dir);
-  path::append(config, "tsconfig.json");
-  return writeText(config, kProjectTsconfig);
-}
-
 } // namespace
 
 int commandInit(llvm::ArrayRef<const char *> args) {
@@ -253,22 +222,9 @@ int commandInit(llvm::ArrayRef<const char *> args) {
     path::append(result, name);
     return std::string(result);
   };
-  std::string where = args.empty() ? std::string() : " in " + std::string(args[0]);
   if (fs::exists(file("tz.json"))) {
-    // A project made before tz set the editor up gets it now.
-    if (fs::exists(file("tsconfig.json"))) {
-      report("there is a tz.json already in " + dir);
-      return kExitError;
-    }
-    Manifest project;
-    if (!readManifest(file("tz.json"), project) || !setUpEditor(project.dir))
-      return kExitError;
-    Graph graph;
-    bool packages = preparePackages(project, PrepareOptions(), graph);
-    if (!writeEditorConfig(project.dir, packages ? &graph : nullptr))
-      return kExitError;
-    llvm::outs() << "created tsconfig.json for the editor" << where << "\n";
-    return 0;
+    report("there is a tz.json already in " + dir);
+    return kExitError;
   }
   std::string name = path::filename(dir).str();
   std::string error;
@@ -284,22 +240,17 @@ int commandInit(llvm::ArrayRef<const char *> args) {
     created.push_back("main.ts");
   }
   if (!fs::exists(file(".gitignore"))) {
-    // What tz build makes, and the editor's settings tz writes. tz.lock
-    // belongs in git: it makes every build use the same sources.
-    if (!writeText(file(".gitignore"), "*.exe\n*.ll\n/" + name + "\n/.tz/\n"))
+    // What tz build makes. tz.lock belongs in git: it makes every build use
+    // the same sources.
+    if (!writeText(file(".gitignore"), "*.exe\n*.ll\n/" + name + "\n"))
       return kExitError;
     created.push_back(".gitignore");
-  }
-  bool tsconfig = !fs::exists(file("tsconfig.json"));
-  if (tsconfig) {
-    if (!setUpEditor(dir) || !writeEditorConfig(dir, nullptr))
-      return kExitError;
-    created.push_back("tsconfig.json");
   }
   llvm::outs() << "created ";
   for (size_t i = 0; i < created.size(); ++i)
     llvm::outs() << (i == 0 ? "" : i + 1 == created.size() ? " and " : ", ") << created[i];
-  llvm::outs() << where << "; run the program with 'tz run'\n";
+  llvm::outs() << (args.empty() ? std::string() : " in " + std::string(args[0]))
+               << "; run the program with 'tz run'\n";
   return 0;
 }
 
