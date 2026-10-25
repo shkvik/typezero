@@ -28,16 +28,20 @@ static const CaseRun *find_run(const CaseRun *runs, size_t n, uint32_t cp) {
   size_t lo = 0, hi = n;
   while (lo < hi) {
     size_t mid = (lo + hi) / 2;
-    if (runs[mid].start <= cp)
+    if (runs[mid].start <= cp) {
       lo = mid + 1;
-    else
+    } else {
       hi = mid;
+    }
   }
-  if (lo == 0)
+  if (lo == 0) {
     return NULL;
+  }
   const CaseRun *run = &runs[lo - 1];
-  if (cp > run->end || (cp - run->start) % run->stride != 0)
+  if (cp > run->end || (cp - run->start) % run->stride != 0) {
     return NULL;
+  }
+
   return run;
 }
 
@@ -45,13 +49,15 @@ static int in_ranges(const CodeRange *ranges, size_t n, uint32_t cp) {
   size_t lo = 0, hi = n;
   while (lo < hi) {
     size_t mid = (lo + hi) / 2;
-    if (ranges[mid].end < cp)
+    if (ranges[mid].end < cp) {
       lo = mid + 1;
-    else if (ranges[mid].start > cp)
+    } else if (ranges[mid].start > cp) {
       hi = mid;
-    else
+    } else {
       return 1;
+    }
   }
+
   return 0;
 }
 
@@ -68,14 +74,16 @@ int tz_case_map(uint32_t cp, int upper, uint32_t out[3]) {
     } else if (special[mid].cp > cp) {
       hi = mid;
     } else {
-      for (uint32_t k = 0; k < special[mid].count; ++k)
+      for (uint32_t k = 0; k < special[mid].count; ++k) {
         out[k] = special[mid].to[k];
+      }
       return (int)special[mid].count;
     }
   }
   const CaseRun *run = upper ? find_run(upper_runs, COUNT(upper_runs), cp)
                              : find_run(lower_runs, COUNT(lower_runs), cp);
   out[0] = run ? (uint32_t)((int32_t)cp + run->delta) : cp;
+
   return 1;
 }
 
@@ -88,8 +96,20 @@ int tz_is_case_ignorable(uint32_t cp) {
 // WhiteSpace and LineTerminator of JavaScript, which trim() removes.
 int tz_is_js_space(uint32_t unit) {
   switch (unit) {
-  case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x20: case 0xA0:
-  case 0x1680: case 0x2028: case 0x2029: case 0x202F: case 0x205F: case 0x3000: case 0xFEFF:
+  case 0x09:
+  case 0x0A:
+  case 0x0B:
+  case 0x0C:
+  case 0x0D:
+  case 0x20:
+  case 0xA0:
+  case 0x1680:
+  case 0x2028:
+  case 0x2029:
+  case 0x202F:
+  case 0x205F:
+  case 0x3000:
+  case 0xFEFF:
     return 1;
   default:
     return unit >= 0x2000 && unit <= 0x200A;

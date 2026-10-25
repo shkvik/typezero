@@ -26,7 +26,6 @@
 // output interleaves as in Node.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,8 +50,9 @@ static void release(void *object) { tz_obj_release((TzObject *)object); }
 // that nothing catches ends the program, as an uncaught exception in Node.
 static void call(TzFunction fn) {
   ((void (*)(TzObject *))fn.info->code)(fn.env);
-  if (tz_thrown)
+  if (tz_thrown) {
     tz_uncaught();
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -75,15 +75,17 @@ int32_t tz_ahead_private(void *object);
 
 void tz_microtask(TzReactor *r) {
 #if TZ_PARALLEL
-  if (!tz_thread.turn && tz_ahead_local(r))
+  if (!tz_thread.turn && tz_ahead_local(r)) {
     return;
+  }
 #endif
   TZ_ORDERED();
   r->next = NULL;
-  if (tz_micro_tail)
+  if (tz_micro_tail) {
     tz_micro_tail->next = r;
-  else
+  } else {
     tz_micro_head = r;
+  }
   tz_micro_tail = r;
 }
 
@@ -104,14 +106,16 @@ void tz_run_microtasks(void) {
     TzReactor *r = tz_micro_head;
 #if TZ_PARALLEL
     if (tz_ahead_on) {
-      if (r->next)
+      if (r->next) {
         tz_ahead_dispatch(r);
+      }
       tz_ahead_popped(r);
     }
 #endif
     tz_micro_head = r->next;
-    if (!tz_micro_head)
+    if (!tz_micro_head) {
       tz_micro_tail = NULL;
+    }
     // The job may queue its reactor again (an async function that awaits
     // once more), which sets these anew.
     TzPromise *source = r->source;
@@ -127,8 +131,9 @@ void tz_run_microtasks(void) {
     }
 #endif
     r->run(r, source);
-    if (source)
+    if (source) {
       release(source);
+    }
     tz_obj_release(owner);
   }
 }
@@ -168,6 +173,7 @@ TzPromise *tz_promise_new(const TzLayout *layout) {
   memset(p, 0, size);
   p->rc = 1;
   p->layout = layout;
+
   return p;
 }
 
@@ -184,30 +190,34 @@ void tz_promise_drop(void *object) {
   // A member lets go of what it settled with as a member does.
   int member = p->rc < 0;
   if (p->state == TZ_PROMISE_FULFILLED) {
-    if (type && member)
+    if (type && member) {
       tz_value_release_in(p, type, value_of(p));
-    else if (type)
+    } else if (type) {
       tz_value_release(type, value_of(p));
+    }
   } else if (p->state == TZ_PROMISE_REJECTED) {
-    if (member && p->error)
+    if (member && p->error) {
       tz_value_release_in(p, &error_type, &p->error);
-    else
+    } else {
       release(p->error);
+    }
   }
   // Reactions to a promise that can no longer settle never run. A member
   // holds them as a member holds what is in its fields (tz_promise_react).
   for (TzReactor *r = p->head; r;) {
     TzReactor *next = r->next;
-    if (member && r->owner->rc < 0)
+    if (member && r->owner->rc < 0) {
       tz_group_unstore(p, r->owner);
-    else
+    } else {
       tz_obj_release(r->owner);
+    }
     r = next;
   }
-  if (member)
+  if (member) {
     tz_group_obj_free(p);
-  else
+  } else {
     tz_obj_free(p);
+  }
 }
 
 #if TZ_PARALLEL
@@ -229,12 +239,14 @@ void tz_trigger_hold(void) { tz_held_count = 0; }
 TzPromise *tz_trigger_release(int32_t queue) {
   int32_t n = tz_held_count;
   tz_held_count = -1;
-  if (n == 1 && !queue)
+  if (n == 1 && !queue) {
     return tz_held[0];
+  }
   for (int32_t i = 0; i < n; ++i) {
     trigger(tz_held[i]);
     release(tz_held[i]);
   }
+
   return NULL;
 }
 
@@ -243,8 +255,10 @@ TzPromise *tz_trigger_release(int32_t queue) {
 int32_t tz_trigger_take(TzPromise **out) {
   int32_t n = tz_held_count;
   tz_held_count = -1;
-  for (int32_t i = 0; i < n; ++i)
+  for (int32_t i = 0; i < n; ++i) {
     out[i] = tz_held[i];
+  }
+
   return n < 0 ? 0 : n;
 }
 #endif
@@ -274,8 +288,9 @@ static void trigger(TzPromise *p) {
   }
 #endif
   TzReactor *head = p->head;
-  if (!head)
+  if (!head) {
     return;
+  }
 #if TZ_PARALLEL
   if (!tz_thread.turn) {
     // In a piece ahead of its event, settling what may run ahead with it
@@ -285,10 +300,12 @@ static void trigger(TzPromise *p) {
       TzReactor *next = r->next;
       r->source = p;
       retain(p);
-      if (p->rc < 0 && r->owner->rc < 0)
+      if (p->rc < 0 && r->owner->rc < 0) {
         tz_group_take(p, r->owner);
-      if (!tz_ahead_local(r))
+      }
+      if (!tz_ahead_local(r)) {
         tz_microtask(r);
+      }
       r = next;
     }
     return;
@@ -298,13 +315,15 @@ static void trigger(TzPromise *p) {
     r->source = p;
     retain(p);
     // The queue holds the reaction now, counted (see tz_promise_react).
-    if (p->rc < 0 && r->owner->rc < 0)
+    if (p->rc < 0 && r->owner->rc < 0) {
       tz_group_take(p, r->owner);
+    }
   }
-  if (tz_micro_tail)
+  if (tz_micro_tail) {
     tz_micro_tail->next = head;
-  else
+  } else {
     tz_micro_head = head;
+  }
   tz_micro_tail = p->tail;
   p->head = p->tail = NULL;
 }
@@ -313,13 +332,16 @@ static void trigger(TzPromise *p) {
 // Whether all that waits for `p` may run ahead in the piece that settles it,
 // one ahead of its event (parallel.c): their microtasks stay with it.
 static int reactions_ahead(const TzPromise *p) {
-  if (!tz_ahead_early())
+  if (!tz_ahead_early()) {
     return 0;
+  }
   for (const TzReactor *r = p->head; r; r = r->next) {
     uintptr_t ahead = r->ahead;
-    if (!ahead || ahead >= ((uintptr_t)1 << 20)) // see MAX_SITE in parallel.c
+    if (!ahead || ahead >= ((uintptr_t)1 << 20)) { // see MAX_SITE in parallel.c
       return 0;
+    }
   }
+
   return 1;
 }
 #endif
@@ -330,8 +352,9 @@ void tz_promise_fulfill(TzPromise *p) {
   // nothing waits for it yet or what does may run ahead here, or whose
   // reactions wait to be handed on.
   if (!tz_thread.turn && tz_held_count < 0 &&
-      !(tz_ahead_private(p) && (!p->head || reactions_ahead(p))))
+      !(tz_ahead_private(p) && (!p->head || reactions_ahead(p)))) {
     tz_order_wait();
+  }
 #endif
   p->state = TZ_PROMISE_FULFILLED;
   // What it holds now is inside its group.
@@ -339,11 +362,13 @@ void tz_promise_fulfill(TzPromise *p) {
 #if TZ_PARALLEL
   // Its awaiters may go on with it on other threads (publish.c); a promise
   // done as an iterator holds none.
-  if (type && !(p->flags & TZ_PROMISE_DONE))
+  if (type && !(p->flags & TZ_PROMISE_DONE)) {
     tz_publish_value(type, value_of(p));
+  }
 #endif
-  if (p->rc < 0 && type)
+  if (p->rc < 0 && type) {
     tz_group_store_value(p, type, value_of(p));
+  }
   trigger(p);
 }
 
@@ -354,14 +379,16 @@ void tz_promise_reject(TzPromise *p, void *error) {
 #if TZ_PARALLEL
   tz_publish_object(error);
 #endif
-  if (p->rc < 0 && error)
+  if (p->rc < 0 && error) {
     tz_group_store(p, error);
+  }
   if (!(p->flags & (HANDLED | LISTED))) {
     if (tz_rejection_count == tz_rejection_capacity) {
       size_t capacity = tz_rejection_capacity ? tz_rejection_capacity * 2 : 8;
       TzPromise **grown = (TzPromise **)tz_alloc(capacity * sizeof *grown);
-      if (tz_rejection_count)
+      if (tz_rejection_count) {
         memcpy(grown, tz_rejections, tz_rejection_count * sizeof *grown);
+      }
       tz_free(tz_rejections);
       tz_rejections = grown;
       tz_rejection_capacity = capacity;
@@ -375,9 +402,11 @@ void tz_promise_reject(TzPromise *p, void *error) {
 
 int32_t tz_promise_lock(TzPromise *p) {
   TZ_ORDERED();
-  if (p->flags & LOCKED)
+  if (p->flags & LOCKED) {
     return 0;
+  }
   p->flags |= LOCKED;
+
   return 1;
 }
 
@@ -386,15 +415,17 @@ void tz_promise_react(TzPromise *p, TzReactor *r) {
   p->flags |= HANDLED;
   if (p->state == TZ_PROMISE_PENDING) {
     r->next = NULL;
-    if (p->tail)
+    if (p->tail) {
       p->tail->next = r;
-    else
+    } else {
       p->head = r;
+    }
     p->tail = r;
     // The reference to what the reaction lives in is the promise's own now:
     // inside its group when both are members, as a store into a field.
-    if (p->rc < 0)
+    if (p->rc < 0) {
       tz_group_store(p, r->owner);
+    }
     return;
   }
   r->source = p;
@@ -407,8 +438,9 @@ void tz_promise_react(TzPromise *p, TzReactor *r) {
 // (tz_thread.await_lock, net.c) goes once the await is set.
 static void await_unlock(void) {
   TzLock *lock = (TzLock *)tz_thread.await_lock;
-  if (!lock)
+  if (!lock) {
     return;
+  }
   tz_thread.await_lock = NULL;
   --tz_thread.conn_locks;
   tz_unlock(lock);
@@ -421,34 +453,40 @@ static void await_unlock(void) {
 // reach; or a value that is no promise. What is settled already goes on
 // after this piece, on this thread.
 static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
-  if (!ahead || !tz_ahead_early())
+  if (!ahead || !tz_ahead_early()) {
     return 0;
+  }
   if (!p) {
     r->ahead = (uintptr_t)ahead;
     retain(r->owner);
-    if (!tz_ahead_local(r))
+    if (!tz_ahead_local(r)) {
       tz_microtask(r); // cannot be: the piece is early and the reaction may run ahead
+    }
     return 1;
   }
-  if (!tz_thread.await_lock && !tz_ahead_private(p))
+  if (!tz_thread.await_lock && !tz_ahead_private(p)) {
     return 0;
+  }
   if (p->state == TZ_PROMISE_PENDING) {
     r->ahead = (uintptr_t)ahead;
     retain(r->owner);
     p->flags |= HANDLED;
     r->next = NULL;
-    if (p->tail)
+    if (p->tail) {
       p->tail->next = r;
-    else
+    } else {
       p->head = r;
+    }
     p->tail = r;
-    if (p->rc < 0)
+    if (p->rc < 0) {
       tz_group_store(p, r->owner);
+    }
     await_unlock();
     return 1;
   }
-  if (p->state != TZ_PROMISE_FULFILLED)
+  if (p->state != TZ_PROMISE_FULFILLED) {
     return 0;
+  }
   await_unlock();
   r->ahead = (uintptr_t)ahead;
   retain(r->owner);
@@ -459,14 +497,16 @@ static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
     // Cannot be: the piece is early and the reaction may run ahead.
     tz_microtask(r);
   }
+
   return 1;
 }
 #endif
 
 void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead) {
 #if TZ_PARALLEL
-  if (!tz_thread.turn && await_ahead(r, p, ahead))
+  if (!tz_thread.turn && await_ahead(r, p, ahead)) {
     return;
+  }
   // The source of the promise stays locked until the reaction is set, but
   // while this waits for the turn (tz_order_wait lets go of it).
   TzLock *source = (TzLock *)tz_thread.await_lock;
@@ -489,10 +529,11 @@ void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead) {
 #endif
   // The coroutine waits: its object stays while the reactor is queued.
   retain(r->owner);
-  if (!p)
+  if (!p) {
     tz_microtask(r);
-  else
+  } else {
     tz_promise_react(p, r);
+  }
 #if TZ_PARALLEL
   await_unlock();
 #endif
@@ -529,8 +570,9 @@ static void follow_drop(void *object) {
   Follow *f = (Follow *)object;
   release(f->target);
   release(f->origin);
-  if (f->first)
+  if (f->first) {
     release(f->first);
+  }
   tz_obj_free(f);
 }
 
@@ -538,10 +580,11 @@ static const TzObjectDesc follow_desc = {follow_drop};
 
 static void follow_settle(TzReactor *r, TzPromise *source) {
   Follow *f = (Follow *)((char *)r - offsetof(Follow, reactor));
-  if (f->first && source->state == TZ_PROMISE_REJECTED)
+  if (f->first && source->state == TZ_PROMISE_REJECTED) {
     settle_like(f->target, source);
-  else
+  } else {
     settle_like(f->target, f->first ? f->origin : source);
+  }
 }
 
 static void follow_then(TzReactor *r, TzPromise *source) {
@@ -563,6 +606,7 @@ static Follow *new_follow(TzPromise *target, TzPromise *origin) {
   f->target = target;
   f->origin = origin;
   f->first = NULL;
+
   return f;
 }
 
@@ -612,6 +656,7 @@ TzArray *tz_promise_resolve_all(const TzArray *values, const TzLayout *layout,
     }
     ((TzPromise **)out->data)[i] = p;
   }
+
   return out;
 }
 
@@ -635,10 +680,11 @@ static const TzObjectDesc later_desc = {later_drop};
 static void later_run(TzReactor *r, TzPromise *source) {
   (void)source;
   Later *later = (Later *)((char *)r - offsetof(Later, reactor));
-  if (later->reaction)
+  if (later->reaction) {
     tz_promise_react(later->promise, later->reaction);
-  else
+  } else {
     tz_promise_fulfill(later->promise);
+  }
 }
 
 static void queue_later(TzPromise *p, TzReactor *reaction) {
@@ -669,6 +715,7 @@ void tz_promise_react_later(TzPromise *p, TzReactor *r) { queue_later(p, r); }
 TzPromise *tz_promise_resolved(const TzLayout *layout) {
   TzPromise *p = tz_promise_new(layout);
   p->state = TZ_PROMISE_FULFILLED;
+
   return p;
 }
 
@@ -676,6 +723,7 @@ TzPromise *tz_promise_rejected(const TzLayout *layout, void *error) {
   TZ_ORDERED();
   TzPromise *p = tz_promise_new(layout);
   tz_promise_reject(p, error);
+
   return p;
 }
 
@@ -704,14 +752,16 @@ static void combine_drop(void *object) {
   Combine *c = (Combine *)object;
   release(c->result);
   if (c->shape->tuple) {
-    if (c->container)
+    if (c->container) {
       release(c->container);
+    }
   } else if (c->container) {
     TzArray *array = (TzArray *)c->container;
-    if (tz_rc_is_member(array->rc)) // a member of a group (group.c)
+    if (tz_rc_is_member(array->rc)) { // a member of a group (group.c)
       tz_group_release(array);
-    else if (tz_rc_dec(&array->rc))
+    } else if (tz_rc_dec(&array->rc)) {
       tz_arr_free(array);
+    }
   }
   tz_obj_free(c);
 }
@@ -736,6 +786,7 @@ static char *slot_of(Combine *c, uint32_t i, const TzType **type) {
   }
   TzArray *array = (TzArray *)c->container;
   *type = array->type;
+
   return array->data + (size_t)i * array->type->size;
 }
 
@@ -760,12 +811,14 @@ static void *settled_result(const TzCombine *shape, const TzPromise *source) {
     }
     int kind = optional ? optional->inner->kind : 0;
     if (optional && kind != TZ_T_OBJECT && kind != TZ_T_JSON && kind != TZ_T_UNION &&
-        kind != TZ_T_ATOM)
+        kind != TZ_T_ATOM) {
       object[shape->value_offset + optional->inner->size] = 1;
+    }
   } else {
     retain(source->error);
     *(void **)(object + shape->reason_offset) = source->error;
   }
+
   return object;
 }
 
@@ -782,8 +835,9 @@ static void combine_done(Combine *c) {
     tz_promise_reject(c->result, error);
     return;
   }
-  if (c->container)
+  if (c->container) {
     *(void **)value_of(c->result) = c->container;
+  }
   c->container = NULL;
   tz_promise_fulfill(c->result);
 }
@@ -803,8 +857,9 @@ static void settle_from(Combine *c, uint32_t i, const TzPromise *source) {
 static void element_run(TzReactor *r, TzPromise *source) {
   Element *e = (Element *)((char *)r - offsetof(Element, reactor));
   Combine *c = e->all;
-  if (c->result->state != TZ_PROMISE_PENDING)
+  if (c->result->state != TZ_PROMISE_PENDING) {
     return;
+  }
   int fulfilled = source->state == TZ_PROMISE_FULFILLED;
   const TzType *type;
   char *slot;
@@ -818,16 +873,16 @@ static void element_run(TzReactor *r, TzPromise *source) {
       tz_promise_reject(c->result, source->error);
       return;
     }
-    if (!c->container)
+    if (!c->container) {
       break; // Promise<void>: nothing to collect
+    }
     slot = slot_of(c, e->index, &type);
     memcpy(slot, value_of(source), type->size);
     tz_value_retain(type, slot);
     break;
   case TZ_COMBINE_ALL_SETTLED:
     slot = slot_of(c, e->index, &type);
-    *(void **)slot =
-        settled_result(c->shape->each ? &c->shape->each[e->index] : c->shape, source);
+    *(void **)slot = settled_result(c->shape->each ? &c->shape->each[e->index] : c->shape, source);
     break;
   case TZ_COMBINE_ANY:
     if (fulfilled) {
@@ -836,8 +891,9 @@ static void element_run(TzReactor *r, TzPromise *source) {
     }
     break;
   }
-  if (--c->remaining == 0)
+  if (--c->remaining == 0) {
     combine_done(c);
+  }
 }
 
 TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *shape) {
@@ -881,9 +937,11 @@ TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *
     tz_promise_react(p, &e->reactor);
   }
   // Promise.race of nothing never settles; the others are done at once.
-  if (--c->remaining == 0 && kind != TZ_COMBINE_RACE)
+  if (--c->remaining == 0 && kind != TZ_COMBINE_RACE) {
     combine_done(c);
+  }
   release(c);
+
   return result;
 }
 
@@ -937,10 +995,11 @@ void tz_next_tick(const TzFunctionInfo *info, TzObject *env) {
   t->next = NULL;
   t->callback.info = info;
   t->callback.env = env;
-  if (tz_tick_tail)
+  if (tz_tick_tail) {
     tz_tick_tail->next = t;
-  else
+  } else {
     tz_tick_head = t;
+  }
   tz_tick_tail = t;
 }
 
@@ -961,6 +1020,7 @@ static int process_rejections(void) {
     release(tz_rejections[i]);
   }
   tz_rejection_count = 0;
+
   return 0;
 }
 
@@ -972,8 +1032,9 @@ void tz_after_callback(void) {
     while (tz_tick_head) {
       Tick *t = tz_tick_head;
       tz_tick_head = t->next;
-      if (!tz_tick_head)
+      if (!tz_tick_head) {
         tz_tick_tail = NULL;
+      }
       TzFunction callback = t->callback;
       tz_free(t);
       call(callback);
@@ -1035,12 +1096,15 @@ static void heap_down(size_t i) {
   size_t n = tz_timer_heap_size;
   for (;;) {
     size_t child = 2 * i + 1;
-    if (child >= n)
+    if (child >= n) {
       break;
-    if (child + 1 < n && list_before(tz_timer_heap[child + 1], tz_timer_heap[child]))
+    }
+    if (child + 1 < n && list_before(tz_timer_heap[child + 1], tz_timer_heap[child])) {
       ++child;
-    if (!list_before(tz_timer_heap[child], list))
+    }
+    if (!list_before(tz_timer_heap[child], list)) {
       break;
+    }
     heap_set(i, tz_timer_heap[child]);
     i = child;
   }
@@ -1051,8 +1115,9 @@ static void heap_insert(TimerList *list) {
   if (tz_timer_heap_size == tz_timer_heap_capacity) {
     size_t capacity = tz_timer_heap_capacity ? tz_timer_heap_capacity * 2 : 8;
     TimerList **grown = (TimerList **)tz_alloc(capacity * sizeof *grown);
-    if (tz_timer_heap_size)
+    if (tz_timer_heap_size) {
       memcpy(grown, tz_timer_heap, tz_timer_heap_size * sizeof *grown);
+    }
     tz_free(tz_timer_heap);
     tz_timer_heap = grown;
     tz_timer_heap_capacity = capacity;
@@ -1064,32 +1129,38 @@ static void heap_insert(TimerList *list) {
 static void heap_remove(TimerList *list) {
   size_t i = list->position;
   TimerList *last = tz_timer_heap[--tz_timer_heap_size];
-  if (i == tz_timer_heap_size)
+  if (i == tz_timer_heap_size) {
     return;
+  }
   heap_set(i, last);
   heap_up(i);
   heap_down(last->position);
 }
 
 static TimerList *find_list(int64_t msecs) {
-  for (size_t i = 0; i < tz_timer_list_count; ++i)
-    if (tz_timer_lists[i]->msecs == msecs)
+  for (size_t i = 0; i < tz_timer_list_count; ++i) {
+    if (tz_timer_lists[i]->msecs == msecs) {
       return tz_timer_lists[i];
+    }
+  }
+
   return NULL;
 }
 
 // Out of the heap and the map; freed unless listOnTimeout is in it.
 static void drop_list(TimerList *list) {
   heap_remove(list);
-  for (size_t i = 0; i < tz_timer_list_count; ++i)
+  for (size_t i = 0; i < tz_timer_list_count; ++i) {
     if (tz_timer_lists[i] == list) {
       tz_timer_lists[i] = tz_timer_lists[--tz_timer_list_count];
       break;
     }
-  if (list->processing)
+  }
+  if (list->processing) {
     list->removed = 1;
-  else
+  } else {
     tz_free(list);
+  }
 }
 
 static void timer_drop(void *object) {
@@ -1116,8 +1187,9 @@ static void insert(TzTimer *t, double after, int64_t start) {
     if (tz_timer_list_count == tz_timer_list_capacity) {
       size_t capacity = tz_timer_list_capacity ? tz_timer_list_capacity * 2 : 8;
       TimerList **grown = (TimerList **)tz_alloc(capacity * sizeof *grown);
-      if (tz_timer_list_count)
+      if (tz_timer_list_count) {
         memcpy(grown, tz_timer_lists, tz_timer_list_count * sizeof *grown);
+      }
       tz_free(tz_timer_lists);
       tz_timer_lists = grown;
       tz_timer_list_capacity = capacity;
@@ -1128,10 +1200,11 @@ static void insert(TzTimer *t, double after, int64_t start) {
   t->list = list;
   t->next = NULL;
   t->prev = list->tail;
-  if (list->tail)
+  if (list->tail) {
     list->tail->next = t;
-  else
+  } else {
     list->head = t;
+  }
   list->tail = t;
   retain(t);
 }
@@ -1139,16 +1212,19 @@ static void insert(TzTimer *t, double after, int64_t start) {
 // L.remove: out of its list, which held it.
 static void unlink_timer(TzTimer *t) {
   TimerList *list = t->list;
-  if (!list)
+  if (!list) {
     return;
-  if (t->prev)
+  }
+  if (t->prev) {
     t->prev->next = t->next;
-  else
+  } else {
     list->head = t->next;
-  if (t->next)
+  }
+  if (t->next) {
     t->next->prev = t->prev;
-  else
+  } else {
     list->tail = t->prev;
+  }
   t->prev = t->next = NULL;
   t->list = NULL;
   release(t);
@@ -1156,8 +1232,9 @@ static void unlink_timer(TzTimer *t) {
 
 TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, int32_t repeat) {
   TZ_ORDERED();
-  if (!(after >= 1 && after <= TIMEOUT_MAX))
+  if (!(after >= 1 && after <= TIMEOUT_MAX)) {
     after = 1; // as Node and browsers do, also for NaN
+  }
   TzTimer *t = (TzTimer *)tz_obj_alloc(sizeof(TzTimer));
   memset(t, 0, sizeof *t);
   t->rc = 1;
@@ -1169,25 +1246,29 @@ TzTimer *tz_timer_new(const TzFunctionInfo *info, TzObject *env, double after, i
   t->refed = 1;
   ++tz_timer_refs;
   insert(t, after, loop_now());
+
   return t;
 }
 
 // clearTimeout() and clearInterval(): unenroll() of Node.
 void tz_timer_clear(TzTimer *t) {
   TZ_ORDERED();
-  if (!t || t->immediate || t->cleared)
+  if (!t || t->immediate || t->cleared) {
     return;
+  }
   t->cleared = 1; // `_onTimeout = null`
-  if (t->destroyed)
+  if (t->destroyed) {
     return;
+  }
   t->destroyed = 1;
   TimerList *list = t->list;
   retain(t);
   unlink_timer(t);
   if (t->refed) {
     // Only a list emptied by a timer that keeps the loop alive goes.
-    if (list && !list->head && !list->removed && find_list(list->msecs) == list)
+    if (list && !list->head && !list->removed && find_list(list->msecs) == list) {
       drop_list(list);
+    }
     --tz_timer_refs;
   }
   t->idle_timeout = -1;
@@ -1208,12 +1289,14 @@ void tz_timer_ref(TzTimer *t, int32_t ref) {
   }
   if (ref && !t->refed) {
     t->refed = 1;
-    if (!t->destroyed)
+    if (!t->destroyed) {
       ++tz_timer_refs;
+    }
   } else if (!ref && t->refed) {
     t->refed = 0;
-    if (!t->destroyed)
+    if (!t->destroyed) {
       --tz_timer_refs;
+    }
   }
 }
 
@@ -1222,15 +1305,17 @@ int32_t tz_timer_has_ref(const TzTimer *t) { return t->refed; }
 // refresh(): the same timer again from now, at the end of its list.
 void tz_timer_refresh(TzTimer *t) {
   TZ_ORDERED();
-  if (t->immediate || t->idle_timeout < 0)
+  if (t->immediate || t->idle_timeout < 0) {
     return;
+  }
   retain(t);
   unlink_timer(t);
   insert(t, t->idle_timeout, loop_now());
   if (t->destroyed) {
     t->destroyed = 0;
-    if (t->refed)
+    if (t->refed) {
       ++tz_timer_refs;
+    }
   }
   release(t);
 }
@@ -1247,31 +1332,39 @@ TzTimer *tz_immediate_new(const TzFunctionInfo *info, TzObject *env) {
   t->refed = 1;
   ++tz_immediate_refs;
   t->prev = tz_immediate_tail;
-  if (tz_immediate_tail)
+  if (tz_immediate_tail) {
     tz_immediate_tail->next = t;
-  else
+  } else {
     tz_immediate_head = t;
+  }
   tz_immediate_tail = t;
+
   return t;
 }
 
 void tz_immediate_clear(TzTimer *t) {
   TZ_ORDERED();
-  if (!t || !t->immediate || t->destroyed)
+  if (!t || !t->immediate || t->destroyed) {
     return;
+  }
   t->destroyed = 1;
-  if (t->refed)
+  if (t->refed) {
     --tz_immediate_refs;
+  }
   t->refed = 0;
   // Out of the queue, or of the batch being run.
-  if (t->next)
+  if (t->next) {
     t->next->prev = t->prev;
-  if (t->prev)
+  }
+  if (t->prev) {
     t->prev->next = t->next;
-  if (t == tz_immediate_head)
+  }
+  if (t == tz_immediate_head) {
     tz_immediate_head = t->next;
-  if (t == tz_immediate_tail)
+  }
+  if (t == tz_immediate_tail) {
     tz_immediate_tail = t->prev;
+  }
   t->next = t->prev = NULL;
   release(t);
 }
@@ -1287,18 +1380,22 @@ static void list_on_timeout(TimerList *list, int64_t now) {
       // The rest of the list comes later.
       list->expiry = t->idle_start + msecs > now + 1 ? t->idle_start + msecs : now + 1;
       list->id = tz_timer_list_id++;
-      if (!list->removed)
+      if (!list->removed) {
         heap_down(list->position);
+      }
       list->processing = 0;
-      if (list->removed)
+      if (list->removed) {
         tz_free(list);
+      }
       return;
     }
-    if (ran)
+    if (ran) {
       tz_after_callback();
+    }
     ran = 1;
-    if (list->head != t)
+    if (list->head != t) {
       continue; // the nextTick callbacks cleared it
+    }
     retain(t);
     unlink_timer(t);
     int64_t start = t->repeat ? loop_now() : 0;
@@ -1308,16 +1405,18 @@ static void list_on_timeout(TimerList *list, int64_t now) {
       insert(t, t->idle_timeout, start);
     } else if (!t->list && !t->destroyed) {
       t->destroyed = 1;
-      if (t->refed)
+      if (t->refed) {
         --tz_timer_refs;
+      }
     }
     release(t);
   }
   list->processing = 0;
-  if (!list->removed && find_list(msecs) == list)
+  if (!list->removed && find_list(msecs) == list) {
     drop_list(list);
-  else if (list->removed)
+  } else if (list->removed) {
     tz_free(list);
+  }
 }
 
 // processTimers of Node: the lists that expired, by when, each followed by
@@ -1327,15 +1426,18 @@ static void run_timers(void) {
   int ran = 0;
   while (tz_timer_heap_size) {
     TimerList *list = tz_timer_heap[0];
-    if (list->expiry > now)
+    if (list->expiry > now) {
       break;
-    if (ran)
+    }
+    if (ran) {
       tz_after_callback();
+    }
     ran = 1;
     list_on_timeout(list, now);
   }
-  if (ran)
+  if (ran) {
     tz_after_callback();
+  }
 }
 
 // processImmediate of Node: those set before it started, each followed by
@@ -1344,32 +1446,34 @@ static void run_timers(void) {
 // found: clearImmediate() unlinks the others from the batch.
 static void run_immediates(void) {
   TzTimer *first = tz_immediate_head, *prev = NULL;
-  if (!first)
+  if (!first) {
     return;
+  }
   tz_immediate_head = tz_immediate_tail = NULL;
   for (;;) {
     TzTimer *t = prev ? prev->next : first;
-    if (!t)
+    if (!t) {
       break;
+    }
     t->destroyed = 1;
-    if (t->refed)
+    if (t->refed) {
       --tz_immediate_refs;
+    }
     t->refed = 0;
     TzFunction callback = t->callback;
     t->callback.env = NULL;
     call(callback);
     tz_obj_release(callback.env);
-    if (prev)
+    if (prev) {
       release(prev);
+    }
     prev = t;
     tz_after_callback();
   }
   release(prev);
 }
 
-static int loop_alive(void) {
-  return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive();
-}
+static int loop_alive(void) { return tz_timer_refs > 0 || tz_immediate_refs > 0 || tz_io_alive(); }
 
 // The loop of libuv, once the top-level code ran: it ends when no timer,
 // immediate or work of the pool keeps it alive. The top-level code of an ES
@@ -1378,19 +1482,22 @@ static int loop_alive(void) {
 // phase waits for the pool (io.c) until the next timer is due; with an
 // immediate to run, it does not wait.
 void tz_async_run(int32_t es_module) {
-  if (es_module)
+  if (es_module) {
     tz_run_microtasks();
+  }
   tz_after_callback();
-  if (loop_alive())
+  if (loop_alive()) {
     run_timers();
+  }
   while (loop_alive()) {
     int64_t wait = -1;
     if (tz_immediate_head) {
       wait = 0;
     } else if (tz_timer_heap_size) {
       wait = tz_timer_heap[0]->expiry - loop_now();
-      if (wait < 0)
+      if (wait < 0) {
         wait = 0;
+      }
     }
     tz_io_poll(wait);
     run_immediates();
@@ -1426,20 +1533,23 @@ typedef struct Wait {
 struct Wait *tz_waits;
 
 static void unlist_wait(Wait *w) {
-  if (w->prev)
+  if (w->prev) {
     w->prev->next = w->next;
-  else if (tz_waits == w)
+  } else if (tz_waits == w) {
     tz_waits = w->next;
-  if (w->next)
+  }
+  if (w->next) {
     w->next->prev = w->prev;
+  }
   w->prev = w->next = NULL;
 }
 
 // The value a pending promise holds, which nothing else would release.
 static void drop_pending_value(TzPromise *p) {
   const TzType *type = value_type(p);
-  if (p->state != TZ_PROMISE_PENDING || !type)
+  if (p->state != TZ_PROMISE_PENDING || !type) {
     return;
+  }
   tz_value_release(type, value_of(p));
   memset(value_of(p), 0, type->size);
 }
@@ -1456,8 +1566,9 @@ static void wait_drop(void *object) {
   }
   drop_pending_value(w->promise);
   release(w->promise);
-  if (w->signal)
+  if (w->signal) {
     release(w->signal);
+  }
   tz_obj_free(w);
 }
 
@@ -1465,8 +1576,9 @@ static const TzObjectDesc wait_desc = {wait_drop};
 
 static void wait_fired(TzObject *env) {
   Wait *w = (Wait *)env;
-  if (w->done)
+  if (w->done) {
     return;
+  }
   w->done = 1;
   tz_promise_fulfill(w->inner ? w->inner : w->promise);
 }
@@ -1475,14 +1587,16 @@ static const TzFunctionInfo wait_info = {(void *)wait_fired, {NULL, 0}};
 
 static void wait_aborted(TzAbortListener *l) {
   Wait *w = (Wait *)((char *)l - offsetof(Wait, listener));
-  if (w->done)
+  if (w->done) {
     return;
+  }
   w->done = 1;
   ++w->base.rc;
-  if (w->immediate)
+  if (w->immediate) {
     tz_immediate_clear(w->timer);
-  else
+  } else {
     tz_timer_clear(w->timer);
+  }
   drop_pending_value(w->inner);
   tz_promise_reject(w->inner, tz_abort_error(w->signal));
   tz_obj_release(&w->base);
@@ -1529,16 +1643,18 @@ void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *sig
     ++w->base.rc; // the reaction's
     tz_promise_react(w->inner, &w->reactor);
     w->next = tz_waits;
-    if (tz_waits)
+    if (tz_waits) {
       tz_waits->prev = w;
+    }
     tz_waits = w;
   }
   ++w->base.rc; // the timer's
   TzTimer *timer = immediate ? tz_immediate_new(&wait_info, &w->base)
                              : tz_timer_new(&wait_info, &w->base, delay, 0);
   w->timer = timer;
-  if (!ref)
+  if (!ref) {
     tz_timer_ref(timer, 0);
+  }
   release(timer);
   release(w);
 }
@@ -1635,10 +1751,11 @@ static void agen_enqueue(TzAsyncGen *g, TzPromise *p, int32_t close) {
   s->promise = p;
   retain(p);
   s->close = close;
-  if (g->tail)
+  if (g->tail) {
     g->tail->next = s;
-  else
+  } else {
     g->head = s;
+  }
   g->tail = s;
 }
 
@@ -1646,9 +1763,11 @@ static TzAgenStep *agen_pop(TzAsyncGen *g) {
   TzAgenStep *s = g->head;
   if (s) {
     g->head = s->next;
-    if (!g->head)
+    if (!g->head) {
       g->tail = NULL;
+    }
   }
+
   return s;
 }
 
@@ -1729,8 +1848,9 @@ void tz_agen_next(void *it, TzPromise *p) {
     return;
   }
   agen_enqueue(g, p, 0);
-  if (g->state == AGEN_START || g->state == AGEN_YIELD)
+  if (g->state == AGEN_START || g->state == AGEN_YIELD) {
     agen_resume(g);
+  }
 }
 
 // return() of an async generator: `for await` left early.
@@ -1738,10 +1858,11 @@ void tz_agen_close(void *it, TzPromise *p) {
   TZ_ORDERED();
   TzAsyncGen *g = (TzAsyncGen *)it;
   agen_enqueue(g, p, 1);
-  if (g->state == AGEN_START || g->state == AGEN_DONE)
+  if (g->state == AGEN_START || g->state == AGEN_DONE) {
     agen_await_return(g);
-  else if (g->state == AGEN_YIELD)
+  } else if (g->state == AGEN_YIELD) {
     agen_resume(g);
+  }
 }
 
 // `yield` of the body, after it awaited the value: AsyncGeneratorYield. The
@@ -1753,19 +1874,22 @@ int32_t tz_agen_yield(TzAsyncGen *g, void *value, const TzType *type) {
   TzAgenStep *s = agen_pop(g);
   if (s) {
     const TzType *held = value_type(s->promise);
-    if (held)
+    if (held) {
       memcpy(value_of(s->promise), value, held->size);
-    else if (type && type->size)
+    } else if (type && type->size) {
       tz_value_release(type, value); // a return() whose finally yields
+    }
     tz_promise_fulfill(s->promise);
     release(s->promise);
     tz_free(s);
   } else if (type && type->size) {
     tz_value_release(type, value);
   }
-  if (g->head)
+  if (g->head) {
     return g->head->close;
+  }
   g->state = AGEN_YIELD;
+
   return -1;
 }
 
@@ -1779,10 +1903,11 @@ void tz_agen_finish(TzAsyncGen *g, void *error) {
   g->state = AGEN_DONE;
   TzAgenStep *s = agen_pop(g);
   if (s) {
-    if (error)
+    if (error) {
       tz_promise_reject(s->promise, error);
-    else
+    } else {
       fulfill_done(s->promise);
+    }
     release(s->promise);
     tz_free(s);
   } else if (error) {
@@ -1854,10 +1979,11 @@ static void interval_stop(Interval *it, void *error) {
   TzPromise *p = it->waiting;
   it->waiting = NULL;
   if (p) {
-    if (error)
+    if (error) {
       tz_promise_reject(p, error);
-    else
+    } else {
       fulfill_done(p);
+    }
     release(p);
   } else if (error) {
     release(error);
@@ -1869,10 +1995,12 @@ static void interval_drop(void *object) {
   TZ_ORDERED();
   Interval *it = (Interval *)object;
   interval_stop(it, NULL);
-  if (it->signal)
+  if (it->signal) {
     release(it->signal);
-  if (it->type)
+  }
+  if (it->type) {
     tz_value_release(it->type, it->value);
+  }
   tz_obj_free(it);
 }
 
@@ -1890,8 +2018,9 @@ static const TzObjectDesc interval_tick_desc = {interval_tick_drop};
 
 static void interval_fired(TzObject *env) {
   Interval *it = ((IntervalTick *)env)->interval;
-  if (it->done)
+  if (it->done) {
     return;
+  }
   TzPromise *p = it->waiting;
   if (!p) {
     ++it->fired;
@@ -1906,8 +2035,9 @@ static const TzFunctionInfo interval_info = {(void *)interval_fired, {NULL, 0}};
 
 static void interval_aborted(TzAbortListener *l) {
   Interval *it = (Interval *)((char *)l - offsetof(Interval, listener));
-  if (it->done)
+  if (it->done) {
     return;
+  }
   // A step waiting is rejected now; else the next one is.
   it->aborted = it->waiting == NULL;
   interval_stop(it, tz_abort_error(it->signal));
@@ -1925,8 +2055,9 @@ static void interval_start(Interval *it) {
   tick->base.desc = &interval_tick_desc;
   tick->interval = it;
   it->timer = tz_timer_new(&interval_info, &tick->base, it->delay, 1);
-  if (!it->ref)
+  if (!it->ref) {
     tz_timer_ref(it->timer, 0);
+  }
   if (it->signal) {
     it->listener.run = interval_aborted;
     tz_signal_listen(it->signal, &it->listener);
@@ -1935,8 +2066,9 @@ static void interval_start(Interval *it) {
 
 static void interval_next(void *object, TzPromise *p) {
   Interval *it = (Interval *)object;
-  if (!it->started)
+  if (!it->started) {
     interval_start(it);
+  }
   if (it->aborted) {
     // The generator of Node throws once, then it is done.
     it->aborted = 0;
@@ -1980,14 +2112,16 @@ void *tz_timers_interval(double delay, const void *value, const TzType *type, Tz
   it->base.rc = 1;
   it->base.layout = &tz_interval_layout.base;
   it->type = type;
-  if (size)
+  if (size) {
     memcpy(it->value, value, size);
+  }
   it->delay = delay;
   it->ref = ref;
   if (signal) {
     it->signal = signal;
     retain(signal);
   }
+
   return it;
 }
 
@@ -2013,8 +2147,9 @@ static const TzObjectDesc report_desc = {report_drop};
 static void report_run(TzReactor *r, TzPromise *source) {
   Report *report = (Report *)((char *)r - offsetof(Report, reactor));
   if (source) { // the reaction to the top-level code's promise
-    if (source->state != TZ_PROMISE_REJECTED)
+    if (source->state != TZ_PROMISE_REJECTED) {
       return;
+    }
     retain(source->error);
     report->error = source->error;
   }
@@ -2037,6 +2172,7 @@ static Report *new_report(void *error, int32_t turns) {
   report->reactor.ahead = 0;
   report->error = error;
   report->turns = turns;
+
   return report;
 }
 
@@ -2052,8 +2188,9 @@ TZ_NORETURN void tz_async_main_failed(void) {
 void tz_async_main(TzPromise *main) {
   tz_promise_react(main, &new_report(NULL, 5)->reactor);
   tz_async_run(1);
-  if (main->state != TZ_PROMISE_PENDING)
+  if (main->state != TZ_PROMISE_PENDING) {
     return;
+  }
   // Waits for something that nothing will do: as Node, with code 13.
   tz_err_begin();
   static const char text[] = "Warning: Detected unsettled top-level await";
@@ -2082,8 +2219,9 @@ void tz_async_shutdown(void) {
   tz_immediate_tail = NULL;
   while (tz_timer_heap_size) {
     TimerList *list = tz_timer_heap[0];
-    while (list->head)
+    while (list->head) {
       unlink_timer(list->head);
+    }
     drop_list(list);
   }
   tz_free(tz_timer_heap);

@@ -2,7 +2,6 @@
 // OpenSSL and words what it finds in them.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>
@@ -34,8 +33,9 @@ static const TzLayout certificate_layout = TZ_CRYPTO_LAYOUT(certificate_drop, "X
 // new X509Certificate(buffer): PEM or DER, a string or bytes.
 Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   TzCryptoData d;
-  if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "buffer"))
+  if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "buffer")) {
     return NULL;
+  }
   BIO *bio = BIO_new_mem_buf(d.data, (int)d.length);
   X509 *cert = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
   if (!cert) {
@@ -53,6 +53,7 @@ Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   c->rc = 1;
   c->layout = &certificate_layout;
   c->cert = cert;
+
   return c;
 }
 
@@ -99,8 +100,9 @@ void tz_openssl_x509_valid_to(TzStr *out, const Certificate *c) {
 // validFromDate and validToDate: the time in milliseconds, of which the program makes a Date.
 static double time_ms(const ASN1_TIME *t) {
   struct tm tm;
-  if (!ASN1_TIME_to_tm(t, &tm))
+  if (!ASN1_TIME_to_tm(t, &tm)) {
     return 0.0 / 0.0;
+  }
   int64_t y = tm.tm_year + 1900, m = tm.tm_mon + 1;
   // Days since 1970 of the civil date (Howard Hinnant's days_from_civil).
   y -= m <= 2;
@@ -109,6 +111,7 @@ static double time_ms(const ASN1_TIME *t) {
   int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + tm.tm_mday - 1;
   int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
   int64_t days = era * 146097 + doe - 719468;
+
   return (double)(((days * 24 + tm.tm_hour) * 60 + tm.tm_min) * 60 + tm.tm_sec) * 1000.0;
 }
 
@@ -139,8 +142,9 @@ void tz_openssl_x509_fingerprint(TzStr *out, const Certificate *c, int32_t bits)
   char text[3 * EVP_MAX_MD_SIZE];
   size_t o = 0;
   for (unsigned int i = 0; i < n; ++i) {
-    if (i)
+    if (i) {
       text[o++] = ':';
+    }
     text[o++] = hex[digest[i] >> 4];
     text[o++] = hex[digest[i] & 15];
   }
@@ -152,13 +156,15 @@ int32_t tz_openssl_x509_subject_alt_name(TzStr *out, const Certificate *c) {
   GENERAL_NAMES *names =
       (GENERAL_NAMES *)X509_get_ext_d2i(c->cert, NID_subject_alt_name, NULL, NULL);
   *out = tz_str_from_ascii("", 0);
-  if (!names)
+  if (!names) {
     return 0;
+  }
   BIO *bio = BIO_new(BIO_s_mem());
   for (int i = 0; i < sk_GENERAL_NAME_num(names); ++i) {
     const GENERAL_NAME *name = sk_GENERAL_NAME_value(names, i);
-    if (i)
+    if (i) {
       BIO_puts(bio, ", ");
+    }
     if (name->type == GEN_DNS || name->type == GEN_EMAIL || name->type == GEN_URI) {
       const ASN1_IA5STRING *s = name->type == GEN_DNS     ? name->d.dNSName
                                 : name->type == GEN_EMAIL ? name->d.rfc822Name
@@ -172,6 +178,7 @@ int32_t tz_openssl_x509_subject_alt_name(TzStr *out, const Certificate *c) {
   GENERAL_NAMES_free(names);
   tz_str_release_value(*out);
   bio_text(out, bio);
+
   return 1;
 }
 
@@ -180,8 +187,9 @@ int32_t tz_openssl_x509_info_access(TzStr *out, const Certificate *c) {
   AUTHORITY_INFO_ACCESS *info =
       (AUTHORITY_INFO_ACCESS *)X509_get_ext_d2i(c->cert, NID_info_access, NULL, NULL);
   *out = tz_str_from_ascii("", 0);
-  if (!info)
+  if (!info) {
     return 0;
+  }
   BIO *bio = BIO_new(BIO_s_mem());
   for (int i = 0; i < sk_ACCESS_DESCRIPTION_num(info); ++i) {
     const ACCESS_DESCRIPTION *d = sk_ACCESS_DESCRIPTION_value(info, i);
@@ -193,6 +201,7 @@ int32_t tz_openssl_x509_info_access(TzStr *out, const Certificate *c) {
   AUTHORITY_INFO_ACCESS_free(info);
   tz_str_release_value(*out);
   bio_text(out, bio);
+
   return 1;
 }
 
@@ -200,8 +209,9 @@ int32_t tz_openssl_x509_info_access(TzStr *out, const Certificate *c) {
 TzArray *tz_openssl_x509_key_usage(const Certificate *c) {
   EXTENDED_KEY_USAGE *usage =
       (EXTENDED_KEY_USAGE *)X509_get_ext_d2i(c->cert, NID_ext_key_usage, NULL, NULL);
-  if (!usage)
+  if (!usage) {
     return NULL;
+  }
   TzArray *array = tz_arr_new(&tz_string_type, 0, sk_ASN1_OBJECT_num(usage));
   for (int i = 0; i < sk_ASN1_OBJECT_num(usage); ++i) {
     char oid[80];
@@ -210,6 +220,7 @@ TzArray *tz_openssl_x509_key_usage(const Certificate *c) {
     tz_arr_push_value(array, &s);
   }
   EXTENDED_KEY_USAGE_free(usage);
+
   return array;
 }
 
@@ -221,6 +232,7 @@ TzBytes *tz_openssl_x509_raw(const Certificate *c) {
   int n = i2d_X509(c->cert, &der);
   TzBytes *b = tz_crypto_buffer(der, n > 0 ? (size_t)n : 0);
   OPENSSL_free(der);
+
   return b;
 }
 
@@ -240,6 +252,7 @@ TzKey *tz_openssl_x509_public_key(const Certificate *c) {
     tz_openssl_throw(TZ_ERROR, "Failed to get the public key");
     return NULL;
   }
+
   return tz_openssl_key_of(pkey, 0);
 }
 
@@ -249,18 +262,24 @@ TzKey *tz_openssl_x509_public_key(const Certificate *c) {
 static unsigned int check_flags(int32_t subject, int32_t has, int32_t wildcards, int32_t partial,
                                 int32_t multi, int32_t single) {
   unsigned int flags = 0;
-  if (subject == 1)
+  if (subject == 1) {
     flags |= X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT;
-  else if (subject == 2)
+  } else if (subject == 2) {
     flags |= X509_CHECK_FLAG_NEVER_CHECK_SUBJECT;
-  if ((has & 1) && !wildcards)
+  }
+  if ((has & 1) && !wildcards) {
     flags |= X509_CHECK_FLAG_NO_WILDCARDS;
-  if ((has & 2) && !partial)
+  }
+  if ((has & 2) && !partial) {
     flags |= X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS;
-  if ((has & 4) && multi)
+  }
+  if ((has & 4) && multi) {
     flags |= X509_CHECK_FLAG_MULTI_LABEL_WILDCARDS;
-  if ((has & 8) && single)
+  }
+  if ((has & 8) && single) {
     flags |= X509_CHECK_FLAG_SINGLE_LABEL_SUBDOMAINS;
+  }
+
   return flags;
 }
 
@@ -275,9 +294,11 @@ int32_t tz_openssl_x509_check_host(TzStr *out, const Certificate *c, void *obj, 
       X509_check_host(c->cert, name, n,
                       check_flags(subject, has, wildcards, partial, multi, single), &peer) == 1;
   *out = tz_str_from_ascii("", 0);
-  if (ok && peer)
+  if (ok && peer) {
     tz_crypto_text(out, (const uint8_t *)peer, strlen(peer), TZ_ENC_UTF8);
+  }
   OPENSSL_free(peer);
+
   return ok;
 }
 
@@ -287,8 +308,10 @@ int32_t tz_openssl_x509_check_email(TzStr *out, const Certificate *c, void *obj,
   size_t n = tz_crypto_cstr(obj, meta, email, sizeof email);
   int ok = X509_check_email(c->cert, email, n, check_flags(subject, 0, 0, 0, 0, 0)) == 1;
   *out = tz_str_from_ascii("", 0);
-  if (ok)
+  if (ok) {
     tz_crypto_text(out, (const uint8_t *)email, n, TZ_ENC_UTF8);
+  }
+
   return ok;
 }
 
@@ -297,8 +320,10 @@ int32_t tz_openssl_x509_check_ip(TzStr *out, const Certificate *c, void *obj, ui
   size_t n = tz_crypto_cstr(obj, meta, ip, sizeof ip);
   int ok = X509_check_ip_asc(c->cert, ip, 0) == 1;
   *out = tz_str_from_ascii("", 0);
-  if (ok)
+  if (ok) {
     tz_crypto_text(out, (const uint8_t *)ip, n, TZ_ENC_UTF8);
+  }
+
   return ok;
 }
 
@@ -306,6 +331,7 @@ int32_t tz_openssl_x509_check_ip(TzStr *out, const Certificate *c, void *obj, ui
 int32_t tz_openssl_x509_check_issued(const Certificate *c, const Certificate *issuer) {
   int ok = X509_check_issued(issuer->cert, c->cert) == X509_V_OK;
   ERR_clear_error();
+
   return ok;
 }
 
@@ -317,6 +343,7 @@ int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key
   }
   int ok = X509_check_private_key(c->cert, (EVP_PKEY *)key->pkey) == 1;
   ERR_clear_error();
+
   return ok;
 }
 
@@ -329,5 +356,6 @@ int32_t tz_openssl_x509_verify(const Certificate *c, const TzKey *key) {
   }
   int ok = X509_verify(c->cert, (EVP_PKEY *)key->pkey) > 0;
   ERR_clear_error();
+
   return ok;
 }

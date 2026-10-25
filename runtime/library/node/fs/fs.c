@@ -22,7 +22,6 @@
 #endif
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,9 +31,9 @@
 #include <io.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -61,14 +60,17 @@ static void bytes_free(Bytes *b) {
 }
 
 static void bytes_reserve(Bytes *b, size_t extra) {
-  if (b->length + extra <= b->capacity)
+  if (b->length + extra <= b->capacity) {
     return;
+  }
   size_t capacity = b->capacity + b->capacity / 2 + 256;
-  if (capacity < b->length + extra)
+  if (capacity < b->length + extra) {
     capacity = b->length + extra;
+  }
   uint8_t *data = (uint8_t *)tz_alloc(capacity);
-  if (b->length)
+  if (b->length) {
     memcpy(data, b->data, b->length);
+  }
   tz_free(b->data);
   b->data = data;
   b->capacity = capacity;
@@ -91,10 +93,11 @@ static void bytes_consume(Bytes *b, size_t n) {
 static uint8_t *utf8_encode(uint8_t *p, const uint16_t *s, size_t n) {
   for (size_t i = 0; i < n; ++i) {
     uint32_t c = s[i];
-    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF)
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (s[++i] - 0xDC00);
-    else if (c >= 0xD800 && c <= 0xDFFF)
+    } else if (c >= 0xD800 && c <= 0xDFFF) {
       c = 0xFFFD;
+    }
     if (c < 0x80) {
       *p++ = (uint8_t)c;
     } else if (c < 0x800) {
@@ -111,6 +114,7 @@ static uint8_t *utf8_encode(uint8_t *p, const uint16_t *s, size_t n) {
       *p++ = (uint8_t)(0x80 | (c & 0x3F));
     }
   }
+
   return p;
 }
 
@@ -136,22 +140,26 @@ typedef struct {
 } Raw;
 
 static void raw_reserve(Raw *r, size_t extra) {
-  if (r->length + extra <= r->capacity)
+  if (r->length + extra <= r->capacity) {
     return;
+  }
   size_t capacity = r->capacity + r->capacity / 2 + 256;
-  if (capacity < r->length + extra)
+  if (capacity < r->length + extra) {
     capacity = r->length + extra;
+  }
   uint8_t *data = (uint8_t *)realloc(r->data, capacity);
-  if (!data)
+  if (!data) {
     abort(); // on a thread of the pool, which cannot report it
+  }
   r->data = data;
   r->capacity = capacity;
 }
 
 static void raw_append(Raw *r, const void *data, size_t n) {
   raw_reserve(r, n);
-  if (n)
+  if (n) {
     memcpy(r->data + r->length, data, n);
+  }
   r->length += n;
 }
 
@@ -174,10 +182,12 @@ static size_t raw_count(const Raw *r) { return r->length / 2; }
 // mark stays, as in Node.
 static TzStr str_of_utf8(const uint8_t *s, size_t n) {
   size_t ascii = 0;
-  while (ascii < n && s[ascii] < 0x80)
+  while (ascii < n && s[ascii] < 0x80) {
     ++ascii;
-  if (ascii == n)
+  }
+  if (ascii == n) {
     return tz_str_from_ascii((const char *)s, n);
+  }
   TzBuf b;
   tz_buf_init(&b);
   tz_buf_bytes(&b, s, ascii);
@@ -197,17 +207,21 @@ static TzStr str_of_utf8(const uint8_t *s, size_t n) {
     } else if (lead >= 0xE0 && lead <= 0xEF) {
       need = 2;
       c = lead & 0x0F;
-      if (lead == 0xE0)
+      if (lead == 0xE0) {
         lower = 0xA0;
-      if (lead == 0xED)
+      }
+      if (lead == 0xED) {
         upper = 0x9F;
+      }
     } else if (lead >= 0xF0 && lead <= 0xF4) {
       need = 3;
       c = lead & 0x07;
-      if (lead == 0xF0)
+      if (lead == 0xF0) {
         lower = 0x90;
-      if (lead == 0xF4)
+      }
+      if (lead == 0xF4) {
         upper = 0x8F;
+      }
     } else {
       tz_buf_push(&b, 0xFFFD);
       ++i;
@@ -215,8 +229,9 @@ static TzStr str_of_utf8(const uint8_t *s, size_t n) {
     }
     size_t j = i + 1, k = 0;
     for (; k < need && j < n; ++k, ++j) {
-      if (s[j] < lower || s[j] > upper)
+      if (s[j] < lower || s[j] > upper) {
         break;
+      }
       lower = 0x80;
       upper = 0xBF;
       c = (c << 6) | (s[j] & 0x3F);
@@ -234,6 +249,7 @@ static TzStr str_of_utf8(const uint8_t *s, size_t n) {
       tz_buf_push(&b, (uint16_t)c);
     }
   }
+
   return tz_buf_take(&b);
 }
 
@@ -459,6 +475,7 @@ static Failure win32_failure(DWORD error) {
     index = E_UNKNOWN;
     break;
   }
+
   return (Failure){index, kErrors[index].windows};
 }
 #else
@@ -572,6 +589,7 @@ static Failure errno_failure(int e) {
     index = E_UNKNOWN;
     break;
   }
+
   return (Failure){index, -e};
 }
 #endif
@@ -583,6 +601,7 @@ static TzOptStr opt_of(const TzBuf *text) {
     o.value = tz_str_from_utf16(text->data, text->length);
     o.has = 1;
   }
+
   return o;
 }
 
@@ -685,25 +704,30 @@ static int path_init(Path *p, void *obj, uint64_t meta) {
   tz_buf_init(&p->given);
   tz_buf_str(&p->given, (TzStr){obj, meta});
   for (size_t i = 0; i < p->given.length; ++i) {
-    if (p->given.data[i] != 0)
+    if (p->given.data[i] != 0) {
       continue;
+    }
     TzBuf m;
     tz_buf_init(&m);
     tz_buf_ascii(&m, "The argument 'path' must be a string, Uint8Array, or URL without null bytes. "
                      "Received '");
-    for (size_t k = 0; k < p->given.length; ++k)
-      if (p->given.data[k] == 0)
+    for (size_t k = 0; k < p->given.length; ++k) {
+      if (p->given.data[k] == 0) {
         tz_buf_ascii(&m, "\\x00");
-      else
+      } else {
         tz_buf_push(&m, p->given.data[k]);
+      }
+    }
     tz_buf_push(&m, '\'');
     TzStr message = tz_buf_take(&m);
     tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
     tz_str_release_value(message);
     tz_buf_free(&p->given);
+
     return 0;
   }
   path_from_units(p);
+
   return 1;
 }
 
@@ -763,15 +787,18 @@ static int parse_flags(const TzBuf *flag, OpenFlags *f) {
   };
   for (size_t k = 0; k < sizeof table / sizeof *table; ++k) {
     size_t n = strlen(table[k].text), i = 0;
-    if (n != flag->length)
+    if (n != flag->length) {
       continue;
-    while (i < n && flag->data[i] == (uint8_t)table[k].text[i])
+    }
+    while (i < n && flag->data[i] == (uint8_t)table[k].text[i]) {
       ++i;
+    }
     if (i == n) {
       *f = table[k].flags;
       return 1;
     }
   }
+
   return 0;
 }
 
@@ -792,6 +819,7 @@ static int flags_of(void *obj, uint64_t meta, OpenFlags *f) {
     tz_str_release_value(message);
   }
   tz_buf_free(&flag);
+
   return ok;
 }
 
@@ -819,18 +847,21 @@ static File open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure)
                       : f.truncate             ? TRUNCATE_EXISTING
                                                : OPEN_EXISTING;
   DWORD attributes = FILE_ATTRIBUTE_NORMAL;
-  if (f.create && !(mode & 0200))
+  if (f.create && !(mode & 0200)) {
     attributes |= FILE_ATTRIBUTE_READONLY;
+  }
   HANDLE h = CreateFileW(wide(p), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                          NULL, disposition, attributes | FILE_FLAG_BACKUP_SEMANTICS, NULL);
   if (h == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
     // To create a file where a directory is.
-    if (error == ERROR_FILE_EXISTS && f.create && !f.exclusive)
+    if (error == ERROR_FILE_EXISTS && f.create && !f.exclusive) {
       *failure = (Failure){E_EISDIR, kErrors[E_EISDIR].windows};
-    else
+    } else {
       *failure = win32_failure(error);
+    }
   }
+
   return h;
 }
 
@@ -839,20 +870,23 @@ static void close_file(File f) { CloseHandle(f); }
 // Reads to the end; false with the error thrown ("read", without a path).
 static int read_all(File f, Bytes *out, TzMaker make) {
   LARGE_INTEGER size;
-  if (GetFileSizeEx(f, &size) && size.QuadPart > 0 && size.QuadPart < ((int64_t)1 << 31))
+  if (GetFileSizeEx(f, &size) && size.QuadPart > 0 && size.QuadPart < ((int64_t)1 << 31)) {
     bytes_reserve(out, (size_t)size.QuadPart + 1);
+  }
   for (;;) {
     bytes_reserve(out, 65536);
     DWORD got = 0;
     if (!ReadFile(f, out->data + out->length, 65536, &got, NULL)) {
       DWORD error = GetLastError();
-      if (error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE)
+      if (error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE) {
         return 1;
+      }
       fail_win32(make, error, "read", NULL, NULL);
       return 0;
     }
-    if (got == 0)
+    if (got == 0) {
       return 1;
+    }
     out->length += got;
   }
 }
@@ -867,13 +901,16 @@ static int write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
     data += written;
     n -= written;
   }
+
   return 1;
 }
 
 static File fd_file(int32_t fd) {
-  if (fd == 0)
+  if (fd == 0) {
     return GetStdHandle(STD_INPUT_HANDLE);
+  }
   intptr_t h = _get_osfhandle(fd);
+
   return h == -1 || h == -2 ? NO_FILE : (HANDLE)h;
 }
 
@@ -886,17 +923,23 @@ typedef int File;
 
 static File open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure) {
   int flags = f.read && f.write ? O_RDWR : f.write ? O_WRONLY : O_RDONLY;
-  if (f.append)
+  if (f.append) {
     flags |= O_APPEND;
-  if (f.create)
+  }
+  if (f.create) {
     flags |= O_CREAT;
-  if (f.truncate)
+  }
+  if (f.truncate) {
     flags |= O_TRUNC;
-  if (f.exclusive)
+  }
+  if (f.exclusive) {
     flags |= O_EXCL;
+  }
   int fd = open(native(p), flags | O_CLOEXEC, mode);
-  if (fd < 0)
+  if (fd < 0) {
     *failure = errno_failure(errno);
+  }
+
   return fd;
 }
 
@@ -907,13 +950,15 @@ static int read_all(File f, Bytes *out, TzMaker make) {
     bytes_reserve(out, 65536);
     ssize_t got = read(f, out->data + out->length, 65536);
     if (got < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       fail_errno(make, errno, "read", NULL, NULL);
       return 0;
     }
-    if (got == 0)
+    if (got == 0) {
       return 1;
+    }
     out->length += (size_t)got;
   }
 }
@@ -922,14 +967,16 @@ static int write_all(File f, const uint8_t *data, size_t n, TzMaker make) {
   while (n > 0) {
     ssize_t written = write(f, data, n);
     if (written < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       fail_errno(make, errno, "write", NULL, NULL);
       return 0;
     }
     data += written;
     n -= (size_t)written;
   }
+
   return 1;
 }
 
@@ -943,8 +990,10 @@ static void fail_bad_fd(TzMaker make, const char *syscall) {
 static File open_file(const Path *p, OpenFlags f, int32_t mode, TzMaker make) {
   Failure failure;
   File file = open_raw(p, f, mode, &failure);
-  if (file == NO_FILE)
+  if (file == NO_FILE) {
     throw_failure(make, failure, "open", &p->shown, NULL);
+  }
+
   return file;
 }
 
@@ -962,8 +1011,9 @@ uint16_t tz_in_surrogate; // the first half of a pair the console split
 
 // Reads more of stdin; false at its end.
 static int in_fill(void) {
-  if (tz_in_eof)
+  if (tz_in_eof) {
     return 0;
+  }
 #ifdef _WIN32
   HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
   DWORD mode;
@@ -982,13 +1032,16 @@ static int in_fill(void) {
     }
     uint16_t units[4097];
     size_t n = 0;
-    if (tz_in_surrogate)
+    if (tz_in_surrogate) {
       units[n++] = tz_in_surrogate;
+    }
     tz_in_surrogate = 0;
-    for (DWORD i = 0; i < got; ++i)
+    for (DWORD i = 0; i < got; ++i) {
       units[n++] = text[i];
-    if (n > 0 && units[n - 1] >= 0xD800 && units[n - 1] <= 0xDBFF)
+    }
+    if (n > 0 && units[n - 1] >= 0xD800 && units[n - 1] <= 0xDBFF) {
       tz_in_surrogate = units[--n];
+    }
     bytes_utf8(&tz_in, units, n);
     return 1;
   }
@@ -999,13 +1052,15 @@ static int in_fill(void) {
     return 0;
   }
   tz_in.length += got;
+
   return 1;
 #else
   bytes_reserve(&tz_in, 65536);
   for (;;) {
     ssize_t got = read(0, tz_in.data + tz_in.length, 65536);
-    if (got < 0 && errno == EINTR)
+    if (got < 0 && errno == EINTR) {
       continue;
+    }
     if (got <= 0) {
       tz_in_eof = 1;
       return 0;
@@ -1020,17 +1075,20 @@ static int in_fill(void) {
 // without its "\n" or "\r\n". At the end of the input, false.
 int32_t tz_io_read_line(TzStr *out, void *question_obj, uint64_t question_meta,
                         int32_t has_question) {
-  if (has_question)
+  if (has_question) {
     tz_stdout_write(question_obj, question_meta);
+  }
   tz_out_flush(1);
   size_t scanned = 0;
   for (;;) {
     for (size_t i = scanned; i < tz_in.length; ++i) {
-      if (tz_in.data[i] != '\n')
+      if (tz_in.data[i] != '\n') {
         continue;
+      }
       size_t end = i > 0 && tz_in.data[i - 1] == '\r' ? i - 1 : i;
       *out = str_of_utf8(tz_in.data, end);
       bytes_consume(&tz_in, i + 1);
+
       return 1;
     }
     scanned = tz_in.length;
@@ -1065,11 +1123,13 @@ static void read_stdin(Bytes *data) {
 static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag_obj,
                      uint64_t flag_meta, TzMaker make) {
   OpenFlags flags;
-  if (!flags_of(flag_obj, flag_meta, &flags))
+  if (!flags_of(flag_obj, flag_meta, &flags)) {
     return 0;
+  }
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return 0;
+  }
   int ok = 0;
   File f = open_file(&p, flags, 0666, make);
   if (f != NO_FILE) {
@@ -1077,6 +1137,7 @@ static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag
     close_file(f);
   }
   path_free(&p);
+
   return ok;
 }
 
@@ -1090,14 +1151,17 @@ static int read_fd(Bytes *data, int32_t fd, TzMaker make) {
     fail_bad_fd(make, "read");
     return 0;
   }
+
   return read_all(f, data, make);
 }
 
 // The text of what was read: utf8 as it is, any other encoding of Buffer
 // (numbered as in buffer.c) decoded.
 static TzStr text_of(const Bytes *data, int32_t encoding) {
-  if (encoding == 0)
+  if (encoding == 0) {
     return str_of_utf8(data->data, data->length);
+  }
+
   return tz_buffer_decode(data->data, (int64_t)data->length, encoding);
 }
 
@@ -1107,8 +1171,9 @@ void tz_fs_read_file(TzStr *out, void *path_obj, uint64_t path_meta, void *flag_
   out->meta = 0;
   Bytes data;
   bytes_init(&data);
-  if (read_path(&data, path_obj, path_meta, flag_obj, flag_meta, make))
+  if (read_path(&data, path_obj, path_meta, flag_obj, flag_meta, make)) {
     *out = text_of(&data, encoding);
+  }
   bytes_free(&data);
 }
 
@@ -1117,8 +1182,9 @@ void tz_fs_read_fd(TzStr *out, int32_t fd, int32_t encoding, TzMaker make) {
   out->meta = 0;
   Bytes data;
   bytes_init(&data);
-  if (read_fd(&data, fd, make))
+  if (read_fd(&data, fd, make)) {
     *out = text_of(&data, encoding);
+  }
   bytes_free(&data);
 }
 
@@ -1129,9 +1195,11 @@ TzBytes *tz_fs_read_file_bytes(void *path_obj, uint64_t path_meta, void *flag_ob
   Bytes data;
   bytes_init(&data);
   TzBytes *b = NULL;
-  if (read_path(&data, path_obj, path_meta, flag_obj, flag_meta, make))
+  if (read_path(&data, path_obj, path_meta, flag_obj, flag_meta, make)) {
     b = tz_buffer_copy_of(data.data, (int64_t)data.length);
+  }
   bytes_free(&data);
+
   return b;
 }
 
@@ -1139,9 +1207,11 @@ TzBytes *tz_fs_read_fd_bytes(int32_t fd, TzMaker make) {
   Bytes data;
   bytes_init(&data);
   TzBytes *b = NULL;
-  if (read_fd(&data, fd, make))
+  if (read_fd(&data, fd, make)) {
     b = tz_buffer_copy_of(data.data, (int64_t)data.length);
+  }
   bytes_free(&data);
+
   return b;
 }
 
@@ -1149,11 +1219,13 @@ TzBytes *tz_fs_read_fd_bytes(int32_t fd, TzMaker make) {
 static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, size_t length,
                        void *flag_obj, uint64_t flag_meta, int32_t mode, TzMaker make) {
   OpenFlags flags;
-  if (!flags_of(flag_obj, flag_meta, &flags))
+  if (!flags_of(flag_obj, flag_meta, &flags)) {
     return;
+  }
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
   File f = open_file(&p, flags, mode, make);
   if (f != NO_FILE) {
     write_all(f, data, length, make);
@@ -1218,8 +1290,8 @@ void tz_fs_write_fd(int32_t fd, void *data_obj, uint64_t data_meta, int32_t enco
 
 // writeFileSync and appendFileSync of a typed array, a Buffer or a DataView:
 // its bytes.
-void tz_fs_write_file_bytes(void *path_obj, uint64_t path_meta, const TzBytes *b,
-                            void *flag_obj, uint64_t flag_meta, int32_t mode, TzMaker make) {
+void tz_fs_write_file_bytes(void *path_obj, uint64_t path_meta, const TzBytes *b, void *flag_obj,
+                            uint64_t flag_meta, int32_t mode, TzMaker make) {
   write_path(path_obj, path_meta, b->data, (size_t)tz_bytes_byte_length(b), flag_obj, flag_meta,
              mode, make);
 }
@@ -1237,8 +1309,9 @@ int32_t tz_fs_exists(void *path_obj, uint64_t path_meta) {
   tz_buf_init(&given);
   tz_buf_str(&given, (TzStr){path_obj, path_meta});
   int ok = given.length > 0;
-  for (size_t i = 0; i < given.length && ok; ++i)
+  for (size_t i = 0; i < given.length && ok; ++i) {
     ok = given.data[i] != 0;
+  }
   if (ok) {
     Path p;
     path_of_units(&p, given.data, given.length);
@@ -1250,32 +1323,37 @@ int32_t tz_fs_exists(void *path_obj, uint64_t path_meta) {
     path_free(&p);
   }
   tz_buf_free(&given);
+
   return ok;
 }
 
 void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
 #ifdef _WIN32
   // As libuv: only writing can be denied, to a read-only file.
   DWORD attributes = GetFileAttributesW(wide(&p));
-  if (attributes == INVALID_FILE_ATTRIBUTES)
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
     fail_win32(make, GetLastError(), "access", &p, NULL);
-  else if ((mode & 2) && (attributes & FILE_ATTRIBUTE_READONLY) &&
-           !(attributes & FILE_ATTRIBUTE_DIRECTORY))
+  } else if ((mode & 2) && (attributes & FILE_ATTRIBUTE_READONLY) &&
+             !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
     fail_index(make, E_EPERM, "access", &p);
+  }
 #else
-  if (access(native(&p), mode) != 0)
+  if (access(native(&p), mode) != 0) {
     fail_errno(make, errno, "access", &p, NULL);
+  }
 #endif
   path_free(&p);
 }
 
 void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
 #ifdef _WIN32
   // Windows keeps only whether a file is read-only: the owner's write bit.
   DWORD attributes = GetFileAttributesW(wide(&p));
@@ -1284,31 +1362,36 @@ void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make)
   } else {
     DWORD changed = mode & 0200 ? attributes & ~(DWORD)FILE_ATTRIBUTE_READONLY
                                 : attributes | FILE_ATTRIBUTE_READONLY;
-    if (changed != attributes && !SetFileAttributesW(wide(&p), changed))
+    if (changed != attributes && !SetFileAttributesW(wide(&p), changed)) {
       fail_win32(make, GetLastError(), "chmod", &p, NULL);
+    }
   }
 #else
-  if (chmod(native(&p), (mode_t)mode) != 0)
+  if (chmod(native(&p), (mode_t)mode) != 0) {
     fail_errno(make, errno, "chmod", &p, NULL);
+  }
 #endif
   path_free(&p);
 }
 
 void tz_fs_truncate(void *path_obj, uint64_t path_meta, int64_t length, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
   OpenFlags flags = {1, 1, 0, 0, 0, 0}; // "r+"
   File f = open_file(&p, flags, 0666, make);
   if (f != NO_FILE) {
 #ifdef _WIN32
     LARGE_INTEGER at;
     at.QuadPart = length < 0 ? 0 : length;
-    if (!SetFilePointerEx(f, at, NULL, FILE_BEGIN) || !SetEndOfFile(f))
+    if (!SetFilePointerEx(f, at, NULL, FILE_BEGIN) || !SetEndOfFile(f)) {
       fail_win32(make, GetLastError(), "ftruncate", NULL, NULL);
+    }
 #else
-    if (ftruncate(f, length < 0 ? 0 : length) != 0)
+    if (ftruncate(f, length < 0 ? 0 : length) != 0) {
       fail_errno(make, errno, "ftruncate", NULL, NULL);
+    }
 #endif
     close_file(f);
   }
@@ -1340,13 +1423,16 @@ static double ms_of(LARGE_INTEGER time) {
     rest += 10000000;
     --seconds;
   }
+
   return (double)seconds * 1000 + (double)(rest * 100) / 1e6;
 }
 
 static int is_link_tag(HANDLE h) {
   FILE_ATTRIBUTE_TAG_INFO tag;
-  if (!GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag, sizeof tag))
+  if (!GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag, sizeof tag)) {
     return 0;
+  }
+
   return tag.ReparseTag == IO_REPARSE_TAG_SYMLINK || tag.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT;
 }
 
@@ -1356,8 +1442,9 @@ static DWORD stat_of(const wchar_t *path, int follow, TzStatsParts *st) {
       CreateFileW(path, FILE_READ_ATTRIBUTES,
                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
                   FILE_FLAG_BACKUP_SEMANTICS | (follow ? 0 : FILE_FLAG_OPEN_REPARSE_POINT), NULL);
-  if (h == INVALID_HANDLE_VALUE)
+  if (h == INVALID_HANDLE_VALUE) {
     return GetLastError();
+  }
   BY_HANDLE_FILE_INFORMATION info;
   FILE_BASIC_INFO basic;
   FILE_STANDARD_INFO standard;
@@ -1384,6 +1471,7 @@ static DWORD stat_of(const wchar_t *path, int follow, TzStatsParts *st) {
   st->mtime_ms = ms_of(basic.LastWriteTime);
   st->ctime_ms = ms_of(basic.ChangeTime);
   st->birthtime_ms = ms_of(basic.CreationTime);
+
   return 0;
 }
 #else
@@ -1391,8 +1479,9 @@ static double ms_of(struct timespec t) { return (double)t.tv_sec * 1000 + (doubl
 
 static int stat_of(const char *path, int follow, TzStatsParts *st) {
   struct stat s;
-  if ((follow ? stat(path, &s) : lstat(path, &s)) != 0)
+  if ((follow ? stat(path, &s) : lstat(path, &s)) != 0) {
     return errno;
+  }
   st->dev = (double)s.st_dev;
   st->mode = (double)s.st_mode;
   st->nlink = (double)s.st_nlink;
@@ -1414,6 +1503,7 @@ static int stat_of(const char *path, int follow, TzStatsParts *st) {
   st->ctime_ms = ms_of(s.st_ctim);
   st->birthtime_ms = ms_of(s.st_ctim);
 #endif
+
   return 0;
 }
 #endif
@@ -1424,8 +1514,9 @@ static int stat_of(const char *path, int follow, TzStatsParts *st) {
 void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t throw_if_missing,
                  TzMaker make_stats, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return NULL;
+  }
   TzStatsParts st;
   void *result = NULL;
   const char *syscall = follow ? "stat" : "lstat";
@@ -1433,21 +1524,24 @@ void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t thr
   DWORD error = stat_of(wide(&p), follow, &st);
   if (error) {
     Failure f = win32_failure(error);
-    if (throw_if_missing || (f.index != E_ENOENT && f.index != E_ENOTDIR))
+    if (throw_if_missing || (f.index != E_ENOENT && f.index != E_ENOTDIR)) {
       fail_win32(make, error, syscall, &p, NULL);
+    }
   } else {
     result = make_stats(&st);
   }
 #else
   int error = stat_of(native(&p), follow, &st);
   if (error) {
-    if (throw_if_missing || (error != ENOENT && error != ENOTDIR))
+    if (throw_if_missing || (error != ENOENT && error != ENOTDIR)) {
       fail_errno(make, error, syscall, &p, NULL);
+    }
   } else {
     result = make_stats(&st);
   }
 #endif
   path_free(&p);
+
   return result;
 }
 
@@ -1467,8 +1561,9 @@ typedef struct {
 } Entries;
 
 static void entries_free(Entries *e) {
-  for (size_t i = 0; i < e->count; ++i)
+  for (size_t i = 0; i < e->count; ++i) {
     tz_buf_free(&e->items[i].name);
+  }
   tz_free(e->items);
   e->items = NULL;
   e->count = e->capacity = 0;
@@ -1478,8 +1573,9 @@ static Entry *entries_add(Entries *e) {
   if (e->count == e->capacity) {
     size_t capacity = e->capacity * 2 + 16;
     Entry *items = (Entry *)tz_alloc(capacity * sizeof(Entry));
-    if (e->count)
+    if (e->count) {
       memcpy(items, e->items, e->count * sizeof(Entry));
+    }
     tz_free(e->items);
     e->items = items;
     e->capacity = capacity;
@@ -1487,6 +1583,7 @@ static Entry *entries_add(Entries *e) {
   Entry *entry = &e->items[e->count++];
   tz_buf_init(&entry->name);
   entry->kind = 0;
+
   return entry;
 }
 
@@ -1506,8 +1603,9 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   TzBuf pattern;
   tz_buf_init(&pattern);
   tz_buf_units(&pattern, p->wide.data, p->wide.length - 1);
-  if (pattern.length == 0 || pattern.data[pattern.length - 1] != '\\')
+  if (pattern.length == 0 || pattern.data[pattern.length - 1] != '\\') {
     tz_buf_push(&pattern, '\\');
+  }
   tz_buf_push(&pattern, '*');
   tz_buf_push(&pattern, 0);
   WIN32_FIND_DATAW data;
@@ -1516,15 +1614,17 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   tz_buf_free(&pattern);
   if (find == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
-    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES)
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) {
       return 1; // empty, as the root of an empty drive is
+    }
     fail_win32(make, error, "scandir", p, NULL);
     return 0;
   }
   do {
     const wchar_t *name = data.cFileName;
-    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0)))
+    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) {
       continue;
+    }
     Entry *entry = entries_add(out);
     tz_buf_units(&entry->name, (const uint16_t *)name, wcslen(name));
     DWORD a = data.dwFileAttributes;
@@ -1534,6 +1634,7 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
                                                      : S_REG;
   } while (FindNextFileW(find, &data));
   FindClose(find);
+
   return 1;
 }
 
@@ -1541,6 +1642,7 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
 // stat does for readdirSync with `recursive`.
 static int is_directory(const Path *p) {
   TzStatsParts st;
+
   return stat_of(wide(p), 1, &st) == 0 && ((uint32_t)st.mode & S_KIND) == S_DIR;
 }
 #else
@@ -1553,10 +1655,12 @@ static int compare_entries(const void *a, const void *b) {
   bytes_utf8(&v, y->name.data, y->name.length);
   size_t n = u.length < v.length ? u.length : v.length;
   int c = n ? memcmp(u.data, v.data, n) : 0;
-  if (c == 0)
+  if (c == 0) {
     c = u.length < v.length ? -1 : u.length > v.length;
+  }
   bytes_free(&u);
   bytes_free(&v);
+
   return c;
 }
 
@@ -1569,8 +1673,9 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   }
   struct dirent *d;
   while ((d = readdir(dir)) != NULL) {
-    if (d->d_name[0] == '.' && (d->d_name[1] == 0 || (d->d_name[1] == '.' && d->d_name[2] == 0)))
+    if (d->d_name[0] == '.' && (d->d_name[1] == 0 || (d->d_name[1] == '.' && d->d_name[2] == 0))) {
       continue;
+    }
     Entry *entry = entries_add(out);
     TzStr name = str_of_utf8((const uint8_t *)d->d_name, strlen(d->d_name));
     tz_buf_str(&entry->name, name);
@@ -1604,11 +1709,13 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   }
   closedir(dir);
   qsort(out->items, out->count, sizeof(Entry), compare_entries);
+
   return 1;
 }
 
 static int is_directory(const Path *p) {
   struct stat s;
+
   return stat(native(p), &s) == 0 && S_ISDIR(s.st_mode);
 }
 #endif
@@ -1625,8 +1732,9 @@ static int is_directory(const Path *p) {
 TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, const TzType *element,
                        TzMaker make_dirent, TzMaker make) {
   Path base;
-  if (!path_init(&base, path_obj, path_meta))
+  if (!path_init(&base, path_obj, path_meta)) {
     return NULL;
+  }
   TzArray *result = tz_arr_new(element, 0, 16);
   // The directories to list: as the program sees them (joined to the path
   // given), and relative to it.
@@ -1709,26 +1817,33 @@ TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, co
   tz_free(queue);
   path_free(&base);
   if (!ok) {
-    if (tz_rc_dec(&result->rc))
+    if (tz_rc_dec(&result->rc)) {
       tz_arr_free(result);
+    }
     return NULL;
   }
+
   return result;
 }
 
 #ifdef _WIN32
 static DWORD make_dir(const uint16_t *path) {
-  if (CreateDirectoryW((const wchar_t *)path, NULL))
+  if (CreateDirectoryW((const wchar_t *)path, NULL)) {
     return 0;
+  }
   DWORD error = GetLastError();
+
   return error == ERROR_INVALID_NAME || error == ERROR_DIRECTORY ? ERROR_INVALID_PARAMETER : error;
 }
 
 // Where the last `\` of a path is, or -1.
 static ptrdiff_t last_separator(const uint16_t *units, size_t n) {
-  for (size_t i = n; i > 0; --i)
-    if (units[i - 1] == '\\')
+  for (size_t i = n; i > 0; --i) {
+    if (units[i - 1] == '\\') {
       return (ptrdiff_t)i - 1;
+    }
+  }
+
   return -1;
 }
 #endif
@@ -1750,16 +1865,18 @@ static int mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t 
   if (!recursive) {
     DWORD error = make_dir(raw_wide(&target));
     raw_free(&target);
-    if (!error)
+    if (!error) {
       return 0;
+    }
     *failure = win32_failure(error);
     return -1;
   }
   // A stack of the paths to make, the target first: a parent that is not
   // there goes on top of its child. Each ends with a zero.
   Raw *stack = (Raw *)malloc(sizeof(Raw) * 8);
-  if (!stack)
+  if (!stack) {
     abort();
+  }
   size_t depth = 1, capacity = 8;
   stack[0] = target;
   int made = 0, failed = 0;
@@ -1784,8 +1901,9 @@ static int mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t 
         if (depth + 2 > capacity) {
           capacity *= 2;
           Raw *bigger = (Raw *)realloc(stack, sizeof(Raw) * capacity);
-          if (!bigger)
+          if (!bigger) {
             abort();
+          }
           stack = bigger;
         }
         Raw parent = {NULL, 0, 0};
@@ -1798,8 +1916,9 @@ static int mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t 
     } else {
       // There already (or with nowhere to go up, as if it were): fine if it
       // is a directory.
-      if (f.index == E_ENOENT)
+      if (f.index == E_ENOENT) {
         f = (Failure){E_EEXIST, kErrors[E_EEXIST].windows};
+      }
       TzStatsParts st;
       DWORD stat_error = stat_of((const wchar_t *)units, 1, &st);
       if (stat_error == 0 && ((uint32_t)st.mode & S_KIND) != S_DIR) {
@@ -1812,17 +1931,20 @@ static int mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t 
         *failure = win32_failure(stat_error);
       }
     }
-    if (failed && at)
+    if (failed && at) {
       raw_append(at, next.data, next.length - 2);
+    }
     raw_free(&next);
   }
-  for (size_t i = 0; i < depth; ++i)
+  for (size_t i = 0; i < depth; ++i) {
     raw_free(&stack[i]);
+  }
   free(stack);
   if (failed) {
     raw_free(first);
     return -1;
   }
+
   return made;
 }
 #else
@@ -1834,15 +1956,17 @@ static int mkdir_raw(const uint8_t *path, size_t n, int32_t recursive, int32_t m
   if (!recursive) {
     int error = mkdir((const char *)target.data, (mode_t)mode) == 0 ? 0 : errno;
     raw_free(&target);
-    if (!error)
+    if (!error) {
       return 0;
+    }
     *failure = errno_failure(error);
     return -1;
   }
   // The same on bytes, at '/'.
   Raw *stack = (Raw *)malloc(sizeof(Raw) * 8);
-  if (!stack)
+  if (!stack) {
     abort();
+  }
   size_t depth = 1, capacity = 8;
   stack[0] = target;
   int made = 0, failed = 0, error_number = 0;
@@ -1863,8 +1987,9 @@ static int mkdir_raw(const uint8_t *path, size_t n, int32_t recursive, int32_t m
         if (depth + 2 > capacity) {
           capacity *= 2;
           Raw *bigger = (Raw *)realloc(stack, sizeof(Raw) * capacity);
-          if (!bigger)
+          if (!bigger) {
             abort();
+          }
           stack = bigger;
         }
         Raw parent = {NULL, 0, 0};
@@ -1885,18 +2010,21 @@ static int mkdir_raw(const uint8_t *path, size_t n, int32_t recursive, int32_t m
         error_number = error == EEXIST && depth > 0 ? ENOTDIR : EEXIST;
       }
     }
-    if (failed && at)
+    if (failed && at) {
       raw_append(at, next.data, next.length - 1);
+    }
     raw_free(&next);
   }
-  for (size_t i = 0; i < depth; ++i)
+  for (size_t i = 0; i < depth; ++i) {
     raw_free(&stack[i]);
+  }
   free(stack);
   if (failed) {
     raw_free(first);
     *failure = errno_failure(error_number);
     return -1;
   }
+
   return made;
 }
 #endif
@@ -1906,6 +2034,7 @@ static TzStr made_dir(const Raw *first) {
 #ifdef _WIN32
   return tz_str_from_utf16(raw_wide(first), raw_count(first));
 #else
+
   return str_of_utf8(first->data, first->length);
 #endif
 }
@@ -1917,8 +2046,9 @@ int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recu
   out->obj = NULL;
   out->meta = 0;
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return 0;
+  }
   Raw first = {NULL, 0, 0};
   Failure failure;
 #ifdef _WIN32
@@ -1934,6 +2064,7 @@ int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recu
   }
   raw_free(&first);
   path_free(&p);
+
   return made;
 }
 
@@ -1944,8 +2075,9 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
   out->obj = NULL;
   out->meta = 0;
   Path prefix;
-  if (!path_init(&prefix, prefix_obj, prefix_meta))
+  if (!path_init(&prefix, prefix_obj, prefix_meta)) {
     return;
+  }
   for (int attempt = 0;; ++attempt) {
     TzBuf name;
     tz_buf_init(&name);
@@ -1953,8 +2085,9 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
     for (int i = 0; i < 6; ++i) {
       unsigned int r;
 #ifdef _WIN32
-      if (rand_s(&r) != 0)
+      if (rand_s(&r) != 0) {
         r = (unsigned int)GetTickCount() * 2654435761u + (unsigned int)i;
+      }
 #else
       r = (unsigned int)rand() ^ (unsigned int)time(NULL) ^ ((unsigned int)getpid() << 8);
 #endif
@@ -1994,14 +2127,17 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
 
 void tz_fs_rmdir(void *path_obj, uint64_t path_meta, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
 #ifdef _WIN32
-  if (!RemoveDirectoryW(wide(&p)))
+  if (!RemoveDirectoryW(wide(&p))) {
     fail_win32(make, GetLastError(), "rmdir", &p, NULL);
+  }
 #else
-  if (rmdir(native(&p)) != 0)
+  if (rmdir(native(&p)) != 0) {
     fail_errno(make, errno, "rmdir", &p, NULL);
+  }
 #endif
   path_free(&p);
 }
@@ -2012,21 +2148,27 @@ void tz_fs_rmdir(void *path_obj, uint64_t path_meta, TzMaker make) {
 // error.
 static DWORD unlink_path(const wchar_t *path) {
   DWORD attributes = GetFileAttributesW(path);
-  if (attributes == INVALID_FILE_ATTRIBUTES)
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
     return GetLastError();
+  }
   if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
-    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
       return ERROR_ACCESS_DENIED;
+    }
     return RemoveDirectoryW(path) ? 0 : GetLastError();
   }
   if ((attributes & FILE_ATTRIBUTE_READONLY) &&
-      !SetFileAttributesW(path, attributes & ~(DWORD)FILE_ATTRIBUTE_READONLY))
+      !SetFileAttributesW(path, attributes & ~(DWORD)FILE_ATTRIBUTE_READONLY)) {
     return GetLastError();
-  if (DeleteFileW(path))
+  }
+  if (DeleteFileW(path)) {
     return 0;
+  }
   DWORD error = GetLastError();
-  if (attributes & FILE_ATTRIBUTE_READONLY)
+  if (attributes & FILE_ATTRIBUTE_READONLY) {
     SetFileAttributesW(path, attributes);
+  }
+
   return error;
 }
 
@@ -2058,74 +2200,90 @@ static DWORD remove_tree(Raw *path, int *depth) {
   if (find != INVALID_HANDLE_VALUE) {
     do {
       const wchar_t *name = data.cFileName;
-      if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0)))
+      if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) {
         continue;
+      }
       raw_unit(path, '\\');
       raw_units(path, (const uint16_t *)name, wcslen(name));
       int below = 0;
       error = remove_tree(path, &below);
-      if (below > deepest)
+      if (below > deepest) {
         deepest = below;
+      }
       path->length = length;
     } while (!error && FindNextFileW(find, &data));
     FindClose(find);
   }
   *depth = deepest + 1;
-  if (error)
+  if (error) {
     return error;
+  }
   raw_unit(path, 0);
-  if ((attributes & FILE_ATTRIBUTE_READONLY))
+  if ((attributes & FILE_ATTRIBUTE_READONLY)) {
     SetFileAttributesW((const wchar_t *)path->data, attributes & ~(DWORD)FILE_ATTRIBUTE_READONLY);
-  if (!RemoveDirectoryW((const wchar_t *)path->data))
+  }
+  if (!RemoveDirectoryW((const wchar_t *)path->data)) {
     error = GetLastError();
+  }
   path->length = length;
+
   return error;
 }
 #else
 static int remove_tree(Raw *path, int *depth) {
   size_t length = path->length; // with the zero
   struct stat s;
-  if (lstat((const char *)path->data, &s) != 0)
+  if (lstat((const char *)path->data, &s) != 0) {
     return errno;
-  if (!S_ISDIR(s.st_mode))
+  }
+  if (!S_ISDIR(s.st_mode)) {
     return unlink((const char *)path->data) == 0 ? 0 : errno;
+  }
   DIR *dir = opendir((const char *)path->data);
-  if (!dir)
+  if (!dir) {
     return errno;
+  }
   int error = 0, deepest = 0;
   struct dirent *d;
   while (!error && (d = readdir(dir)) != NULL) {
-    if (d->d_name[0] == '.' && (d->d_name[1] == 0 || (d->d_name[1] == '.' && d->d_name[2] == 0)))
+    if (d->d_name[0] == '.' && (d->d_name[1] == 0 || (d->d_name[1] == '.' && d->d_name[2] == 0))) {
       continue;
+    }
     path->length = length - 1;
     raw_append(path, "/", 1);
     raw_append(path, d->d_name, strlen(d->d_name) + 1);
     int below = 0;
     error = remove_tree(path, &below);
-    if (below > deepest)
+    if (below > deepest) {
       deepest = below;
+    }
   }
   closedir(dir);
   *depth = deepest + 1;
   path->length = length - 1;
   raw_append(path, "", 1);
-  if (!error && rmdir((const char *)path->data) != 0)
+  if (!error && rmdir((const char *)path->data) != 0) {
     error = errno;
+  }
+
   return error;
 }
 #endif
 
 void tz_fs_unlink(void *path_obj, uint64_t path_meta, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
 #ifdef _WIN32
   DWORD error = unlink_path(wide(&p));
-  if (error)
+  if (error) {
     fail_win32(make, error, "unlink", &p, NULL);
+  }
 #else
-  if (unlink(native(&p)) != 0)
+  if (unlink(native(&p)) != 0) {
     fail_errno(make, errno, "unlink", &p, NULL);
+  }
 #endif
   path_free(&p);
 }
@@ -2149,14 +2307,16 @@ static int rm_raw(const Path *p, int32_t recursive, int32_t force, Failure *fail
   Failure missing = error ? errno_failure(error) : (Failure){0, 0};
 #endif
   if (error) {
-    if (force && (missing.index == E_ENOENT || missing.index == E_ENOTDIR))
+    if (force && (missing.index == E_ENOENT || missing.index == E_ENOTDIR)) {
       return RM_DONE;
+    }
     *failure = missing;
     *syscall = "lstat";
     return RM_FAILED;
   }
-  if (((uint32_t)st.mode & S_KIND) == S_DIR && !recursive)
+  if (((uint32_t)st.mode & S_KIND) == S_DIR && !recursive) {
     return RM_DIRECTORY;
+  }
   Raw tree = {NULL, 0, 0};
 #ifdef _WIN32
   raw_units(&tree, p->wide.data, p->wide.length - 1);
@@ -2177,6 +2337,7 @@ static int rm_raw(const Path *p, int32_t recursive, int32_t force, Failure *fail
     return RM_FAILED;
   }
 #endif
+
   return RM_DONE;
 }
 
@@ -2199,8 +2360,9 @@ static void throw_rm_directory(const Path *p, TzMaker make) {
 
 void tz_fs_rm(void *path_obj, uint64_t path_meta, int32_t recursive, int32_t force, TzMaker make) {
   Path p;
-  if (!path_init(&p, path_obj, path_meta))
+  if (!path_init(&p, path_obj, path_meta)) {
     return;
+  }
   Failure failure;
   const char *syscall = NULL;
   int depth;
@@ -2224,18 +2386,21 @@ void tz_fs_rm(void *path_obj, uint64_t path_meta, int32_t recursive, int32_t for
 void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                   TzMaker make) {
   Path from, to;
-  if (!path_init(&from, from_obj, from_meta))
+  if (!path_init(&from, from_obj, from_meta)) {
     return;
+  }
   if (!path_init(&to, to_obj, to_meta)) {
     path_free(&from);
     return;
   }
 #ifdef _WIN32
-  if (!MoveFileExW(wide(&from), wide(&to), MOVEFILE_REPLACE_EXISTING))
+  if (!MoveFileExW(wide(&from), wide(&to), MOVEFILE_REPLACE_EXISTING)) {
     fail_win32(make, GetLastError(), "rename", &from, &to);
+  }
 #else
-  if (rename(native(&from), native(&to)) != 0)
+  if (rename(native(&from), native(&to)) != 0) {
     fail_errno(make, errno, "rename", &from, &to);
+  }
 #endif
   path_free(&from);
   path_free(&to);
@@ -2246,8 +2411,9 @@ void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_
 void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                      int32_t mode, TzMaker make) {
   Path from, to;
-  if (!path_init(&from, from_obj, from_meta))
+  if (!path_init(&from, from_obj, from_meta)) {
     return;
+  }
   if (!path_init(&to, to_obj, to_meta)) {
     path_free(&from);
     return;
@@ -2262,8 +2428,9 @@ void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t 
     TzStatsParts a, b;
     int same = win32_failure(error).index == E_EBUSY && stat_of(wide(&from), 1, &a) == 0 &&
                stat_of(wide(&to), 1, &b) == 0 && a.dev == b.dev && a.ino == b.ino;
-    if (!same)
+    if (!same) {
       fail_win32(make, error, "copyfile", &from, &to);
+    }
   }
 #else
   int in = -1, out = -1;
@@ -2281,11 +2448,12 @@ void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t 
     } else {
       char chunk[65536];
       ssize_t got;
-      while ((got = read(in, chunk, sizeof chunk)) > 0)
+      while ((got = read(in, chunk, sizeof chunk)) > 0) {
         if (write(out, chunk, (size_t)got) != got) {
           fail_errno(make, errno, "copyfile", &from, &to);
           break;
         }
+      }
       close(out);
     }
     close(in);
@@ -2300,8 +2468,9 @@ void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t 
 static int final_path(const Path *p, TzBuf *out) {
   HANDLE h = CreateFileW(wide(p), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                          OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-  if (h == INVALID_HANDLE_VALUE)
+  if (h == INVALID_HANDLE_VALUE) {
     return 0;
+  }
   wchar_t small[MAX_PATH + 8];
   wchar_t *buffer = small;
   DWORD capacity = MAX_PATH + 8;
@@ -2324,8 +2493,10 @@ static int final_path(const Path *p, TzBuf *out) {
       tz_buf_units(out, s, n);
     }
   }
-  if (buffer != small)
+  if (buffer != small) {
     tz_free(buffer);
+  }
+
   return ok;
 }
 
@@ -2333,22 +2504,27 @@ static int final_path(const Path *p, TzBuf *out) {
 static size_t root_length(const TzBuf *p) {
   const uint16_t *s = p->data;
   size_t n = p->length, i = 0;
-  if (n >= 2 && s[1] == ':')
+  if (n >= 2 && s[1] == ':') {
     i = 2;
-  else if (n >= 2 && (s[0] == '\\' || s[0] == '/') && (s[1] == '\\' || s[1] == '/')) {
+  } else if (n >= 2 && (s[0] == '\\' || s[0] == '/') && (s[1] == '\\' || s[1] == '/')) {
     size_t j = 2;
-    while (j < n && s[j] != '\\' && s[j] != '/')
+    while (j < n && s[j] != '\\' && s[j] != '/') {
       ++j;
+    }
     if (j > 2 && j < n) {
       size_t k = j + 1;
-      while (k < n && s[k] != '\\' && s[k] != '/')
+      while (k < n && s[k] != '\\' && s[k] != '/') {
         ++k;
-      if (k > j + 1)
+      }
+      if (k > j + 1) {
         i = k;
+      }
     }
   }
-  while (i < n && (s[i] == '\\' || s[i] == '/'))
+  while (i < n && (s[i] == '\\' || s[i] == '/')) {
     ++i;
+  }
+
   return i;
 }
 #endif
@@ -2361,8 +2537,9 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
   out->obj = NULL;
   out->meta = 0;
   Path given;
-  if (!path_init(&given, path_obj, path_meta))
+  if (!path_init(&given, path_obj, path_meta)) {
     return;
+  }
 #ifdef _WIN32
   TzBuf p;
   tz_buf_init(&p);
@@ -2381,8 +2558,9 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
     int restarted = 0;
     // The root first, then each part.
     for (size_t end = pos;; ++end) {
-      if (end < p.length && p.data[end] != '\\' && p.data[end] != '/')
+      if (end < p.length && p.data[end] != '\\' && p.data[end] != '/') {
         continue;
+      }
       Path at;
       path_of_units(&at, p.data, end);
       DWORD attributes = GetFileAttributesW(wide(&at));
@@ -2413,16 +2591,19 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
         tz_buf_free(&target);
       }
       path_free(&at);
-      if (restarted || end >= p.length)
+      if (restarted || end >= p.length) {
         break;
+      }
     }
-    if (!restarted)
+    if (!restarted) {
       break;
+    }
   }
-  if (ok)
+  if (ok) {
     *out = tz_buf_take(&p);
-  else
+  } else {
     tz_buf_free(&p);
+  }
 #else
   char *real = realpath(native(&given), NULL);
   if (!real) {
@@ -2467,19 +2648,22 @@ static Listed *listed_add(ListedList *list) {
   if (list->count == list->capacity) {
     size_t capacity = list->capacity * 2 + 16;
     Listed *items = (Listed *)realloc(list->items, capacity * sizeof(Listed));
-    if (!items)
+    if (!items) {
       abort();
+    }
     list->items = items;
     list->capacity = capacity;
   }
   Listed *entry = &list->items[list->count++];
   memset(entry, 0, sizeof *entry);
+
   return entry;
 }
 
 static void listed_free(ListedList *list) {
-  for (size_t i = 0; i < list->count; ++i)
+  for (size_t i = 0; i < list->count; ++i) {
     raw_free(&list->items[i].name);
+  }
   free(list->items);
   list->items = NULL;
   list->count = list->capacity = 0;
@@ -2505,11 +2689,11 @@ typedef struct FsRequest {
   int failed;
   Failure failure;
   const char *syscall;
-  int shows;       // the paths the error shows: 0, 1 (path) or 2 (and dest)
-  int directory;   // rm of a directory without `recursive`
-  Raw name;        // mkdir: the first made; mkdtemp: the name; realpath: the
-                   // path
-  Raw at;          // the path that failed, of mkdir and readdir: the system's form
+  int shows;     // the paths the error shows: 0, 1 (path) or 2 (and dest)
+  int directory; // rm of a directory without `recursive`
+  Raw name;      // mkdir: the first made; mkdtemp: the name; realpath: the
+                 // path
+  Raw at;        // the path that failed, of mkdir and readdir: the system's form
   int made;
   TzStatsParts st;
   ListedList entries; // readdir, in the order Node gives them
@@ -2525,21 +2709,25 @@ static FsRequest *fsp_new(TzPromise *p, TzMaker make) {
   r->promise = p;
   tz_ref_retain(p); // it may be a member of a group (async.c)
   r->make = make;
+
   return r;
 }
 
 static void fsp_free(FsRequest *r) {
-  if (r->paths > 0)
+  if (r->paths > 0) {
     path_free(&r->path);
-  if (r->paths > 1)
+  }
+  if (r->paths > 1) {
     path_free(&r->dest);
+  }
   raw_free(&r->data);
   raw_free(&r->name);
   raw_free(&r->at);
   listed_free(&r->entries);
   free(r->dirs);
-  if (r->signal)
+  if (r->signal) {
     tz_instance_release((TzInstance *)r->signal);
+  }
   tz_obj_release((TzObject *)r->promise);
   tz_free(r);
 }
@@ -2562,20 +2750,24 @@ static int fsp_path(FsRequest *r, void *obj, uint64_t meta) {
     return 0;
   }
   ++r->paths;
+
   return 1;
 }
 
 // A request with a signal that was aborted already is rejected with an
 // AbortError, as Node checks it first.
 static int fsp_signal(FsRequest *r, void *signal) {
-  if (!signal)
+  if (!signal) {
     return 1;
+  }
   tz_ref_retain(signal); // a member of a group (signal.c)
   r->signal = signal;
-  if (!tz_signal_aborted(signal))
+  if (!tz_signal_aborted(signal)) {
     return 1;
+  }
   tz_promise_reject(r->promise, tz_abort_error(signal));
   fsp_free(r);
+
   return 0;
 }
 
@@ -2614,8 +2806,9 @@ static int fsp_succeeded(FsRequest *r) {
     fsp_free(r);
     return 0;
   }
-  if (!r->failed)
+  if (!r->failed) {
     return 1;
+  }
   if (r->at.length) {
     // A path inside the one given failed: the error shows it, as the
     // program would name it, without the prefix of the system's form.
@@ -2643,27 +2836,31 @@ static int fsp_succeeded(FsRequest *r) {
                   r->shows > 1 ? &r->dest.shown : NULL);
   }
   fsp_reject_thrown(r);
+
   return 0;
 }
 
 // Fulfills the promise with the `size` bytes at `value` (which it takes
 // over), or none, and frees the request.
 static void fsp_fulfill(FsRequest *r, const void *value, size_t size) {
-  if (size)
+  if (size) {
     memcpy((char *)r->promise + TZ_PROMISE_VALUE, value, size);
+  }
   tz_promise_fulfill(r->promise);
   fsp_free(r);
 }
 
 static void fsp_done_void(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (fsp_succeeded(r))
+  if (fsp_succeeded(r)) {
     fsp_fulfill(r, NULL, 0);
+  }
 }
 
 // The number of pieces of `length` bytes Node reads or writes a file in.
 static uint32_t chunks_of(size_t length) {
   const size_t chunk = 512 * 1024; // kReadFileBufferLength, kWriteFileMaxChunkSize
+
   return (uint32_t)((length + chunk - 1) / chunk);
 }
 
@@ -2678,11 +2875,13 @@ static DWORD read_raw(File f, Raw *out) {
   // its size, which the heap of the system gives the threads at once, where
   // big blocks would make them wait for each other.
   LARGE_INTEGER size;
-  if (GetFileSizeEx(f, &size) && size.QuadPart >= 0 && size.QuadPart < ((int64_t)1 << 31))
+  if (GetFileSizeEx(f, &size) && size.QuadPart >= 0 && size.QuadPart < ((int64_t)1 << 31)) {
     raw_reserve(out, (size_t)size.QuadPart + 1);
+  }
   for (;;) {
-    if (out->length == out->capacity)
+    if (out->length == out->capacity) {
       raw_reserve(out, 65536);
+    }
     DWORD room = (DWORD)(out->capacity - out->length < 0x40000000 ? out->capacity - out->length
                                                                   : 0x40000000);
     DWORD got = 0;
@@ -2690,8 +2889,9 @@ static DWORD read_raw(File f, Raw *out) {
       DWORD error = GetLastError();
       return error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE ? 0 : error;
     }
-    if (got == 0)
+    if (got == 0) {
       return 0;
+    }
     out->length += got;
   }
 }
@@ -2699,29 +2899,35 @@ static DWORD read_raw(File f, Raw *out) {
 static DWORD write_raw(File f, const uint8_t *data, size_t n) {
   while (n > 0) {
     DWORD chunk = n > 0x40000000 ? 0x40000000 : (DWORD)n, written = 0;
-    if (!WriteFile(f, data, chunk, &written, NULL))
+    if (!WriteFile(f, data, chunk, &written, NULL)) {
       return GetLastError();
+    }
     data += written;
     n -= written;
   }
+
   return 0;
 }
 #else
 static int read_raw(File f, Raw *out) {
   struct stat st;
-  if (fstat(f, &st) == 0 && S_ISREG(st.st_mode) && st.st_size < ((off_t)1 << 31))
+  if (fstat(f, &st) == 0 && S_ISREG(st.st_mode) && st.st_size < ((off_t)1 << 31)) {
     raw_reserve(out, (size_t)st.st_size + 1);
+  }
   for (;;) {
-    if (out->length == out->capacity)
+    if (out->length == out->capacity) {
       raw_reserve(out, 65536);
+    }
     ssize_t got = read(f, out->data + out->length, out->capacity - out->length);
     if (got < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       return errno;
     }
-    if (got == 0)
+    if (got == 0) {
       return 0;
+    }
     out->length += (size_t)got;
   }
 }
@@ -2730,13 +2936,15 @@ static int write_raw(File f, const uint8_t *data, size_t n) {
   while (n > 0) {
     ssize_t written = write(f, data, n);
     if (written < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       return errno;
     }
     data += written;
     n -= (size_t)written;
   }
+
   return 0;
 }
 #endif
@@ -2755,25 +2963,27 @@ static void read_file_work(TzWork *w) {
 #else
   int error = read_raw(f, &r->data);
 #endif
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, "read", 0);
+  }
   close_file(f);
   r->work.turns = 3 + (r->data.length ? chunks_of(r->data.length) : 1);
 }
 
 static void read_file_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (!fsp_succeeded(r))
+  if (!fsp_succeeded(r)) {
     return;
+  }
   // The main thread makes the value: a Buffer, or the text.
   if (r->encoding < 0) {
     TzBytes *b = tz_buffer_copy_of(r->data.data, (int64_t)r->data.length);
     fsp_fulfill(r, &b, sizeof b);
     return;
   }
-  TzStr text = r->encoding == 0 ? str_of_utf8(r->data.data, r->data.length)
-                                : tz_buffer_decode(r->data.data, (int64_t)r->data.length,
-                                                   r->encoding);
+  TzStr text = r->encoding == 0
+                   ? str_of_utf8(r->data.data, r->data.length)
+                   : tz_buffer_decode(r->data.data, (int64_t)r->data.length, r->encoding);
   fsp_fulfill(r, &text, sizeof text);
 }
 
@@ -2781,14 +2991,16 @@ void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *fl
                       uint64_t flag_meta, void *signal, int32_t encoding, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
   r->encoding = encoding;
-  if (!fsp_signal(r, signal))
+  if (!fsp_signal(r, signal)) {
     return;
+  }
   if (!flags_of(flag_obj, flag_meta, &r->flags)) {
     fsp_reject_thrown(r);
     return;
   }
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   fsp_queue(r, read_file_work, read_file_done);
 }
 
@@ -2805,8 +3017,9 @@ static void write_file_work(TzWork *w) {
 #else
   int error = write_raw(f, r->data.data, r->data.length);
 #endif
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, "write", 0);
+  }
   close_file(f);
   // open, the writes and close.
   r->work.turns = 2 + chunks_of(r->data.length);
@@ -2814,19 +3027,21 @@ static void write_file_work(TzWork *w) {
 
 // What writeFile and appendFile write: a request for the path, the flag and
 // the mode, or NULL once it is settled with an error.
-static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta,
-                                void *flag_obj, uint64_t flag_meta, int32_t mode, void *signal,
-                                TzMaker make) {
+static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
+                                uint64_t flag_meta, int32_t mode, void *signal, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_signal(r, signal))
+  if (!fsp_signal(r, signal)) {
     return NULL;
+  }
   if (!flags_of(flag_obj, flag_meta, &r->flags)) {
     fsp_reject_thrown(r);
     return NULL;
   }
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return NULL;
+  }
   r->mode = mode;
+
   return r;
 }
 
@@ -2835,10 +3050,10 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
 void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *data_obj,
                        uint64_t data_meta, void *flag_obj, uint64_t flag_meta, int32_t mode,
                        void *signal, int32_t encoding, TzMaker make) {
-  FsRequest *r =
-      write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
-  if (!r)
+  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
+  if (!r) {
     return;
+  }
   if (encoding != 0) {
     // The bytes of the text in that encoding, a copy the thread writes.
     TzBytes *b = tz_buffer_from_string(data_obj, data_meta, encoding);
@@ -2864,10 +3079,10 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
 void tz_fsp_write_file_bytes(TzPromise *p, void *path_obj, uint64_t path_meta, const TzBytes *b,
                              void *flag_obj, uint64_t flag_meta, int32_t mode, void *signal,
                              TzMaker make) {
-  FsRequest *r =
-      write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
-  if (!r)
+  FsRequest *r = write_request(p, path_obj, path_meta, flag_obj, flag_meta, mode, signal, make);
+  if (!r) {
     return;
+  }
   size_t length = (size_t)tz_bytes_byte_length(b);
   raw_reserve(&r->data, length + 1);
   memcpy(r->data.data, b->data, length);
@@ -2884,21 +3099,24 @@ static void access_work(TzWork *w) {
 #ifdef _WIN32
   // As libuv: only writing can be denied, to a read-only file.
   DWORD attributes = GetFileAttributesW(wide(&r->path));
-  if (attributes == INVALID_FILE_ATTRIBUTES)
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
     fsp_fail_system(r, GetLastError(), "access", 1);
-  else if ((r->mode & 2) && (attributes & FILE_ATTRIBUTE_READONLY) &&
-           !(attributes & FILE_ATTRIBUTE_DIRECTORY))
+  } else if ((r->mode & 2) && (attributes & FILE_ATTRIBUTE_READONLY) &&
+             !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
     fsp_fail(r, (Failure){E_EPERM, kErrors[E_EPERM].windows}, "access", 1);
+  }
 #else
-  if (access(native(&r->path), r->mode) != 0)
+  if (access(native(&r->path), r->mode) != 0) {
     fsp_fail_system(r, errno, "access", 1);
+  }
 #endif
 }
 
 void tz_fsp_access(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->mode = mode;
   fsp_queue(r, access_work, fsp_done_void);
 }
@@ -2914,18 +3132,21 @@ static void chmod_work(TzWork *w) {
   }
   DWORD changed = r->mode & 0200 ? attributes & ~(DWORD)FILE_ATTRIBUTE_READONLY
                                  : attributes | FILE_ATTRIBUTE_READONLY;
-  if (changed != attributes && !SetFileAttributesW(wide(&r->path), changed))
+  if (changed != attributes && !SetFileAttributesW(wide(&r->path), changed)) {
     fsp_fail_system(r, GetLastError(), "chmod", 1);
+  }
 #else
-  if (chmod(native(&r->path), (mode_t)r->mode) != 0)
+  if (chmod(native(&r->path), (mode_t)r->mode) != 0) {
     fsp_fail_system(r, errno, "chmod", 1);
+  }
 #endif
 }
 
 void tz_fsp_chmod(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->mode = mode;
   fsp_queue(r, chmod_work, fsp_done_void);
 }
@@ -2943,11 +3164,13 @@ static void truncate_work(TzWork *w) {
 #ifdef _WIN32
   LARGE_INTEGER at;
   at.QuadPart = r->length < 0 ? 0 : r->length;
-  if (!SetFilePointerEx(f, at, NULL, FILE_BEGIN) || !SetEndOfFile(f))
+  if (!SetFilePointerEx(f, at, NULL, FILE_BEGIN) || !SetEndOfFile(f)) {
     fsp_fail_system(r, GetLastError(), "ftruncate", 0);
+  }
 #else
-  if (ftruncate(f, r->length < 0 ? 0 : r->length) != 0)
+  if (ftruncate(f, r->length < 0 ? 0 : r->length) != 0) {
     fsp_fail_system(r, errno, "ftruncate", 0);
+  }
 #endif
   close_file(f);
 }
@@ -2955,8 +3178,9 @@ static void truncate_work(TzWork *w) {
 void tz_fsp_truncate(TzPromise *p, void *path_obj, uint64_t path_meta, int64_t length,
                      TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->length = length;
   fsp_queue(r, truncate_work, fsp_done_void);
 }
@@ -2969,14 +3193,16 @@ static void stat_work(TzWork *w) {
 #else
   int error = stat_of(native(&r->path), r->follow, &r->st);
 #endif
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, syscall, 1);
+  }
 }
 
 static void stat_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (!fsp_succeeded(r))
+  if (!fsp_succeeded(r)) {
     return;
+  }
   void *stats = r->make_item(&r->st);
   fsp_fulfill(r, &stats, sizeof stats);
 }
@@ -2984,8 +3210,9 @@ static void stat_done(TzWork *w) {
 void tz_fsp_stat(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t follow,
                  TzMaker make_stats, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->follow = follow;
   r->make_item = make_stats;
   fsp_queue(r, stat_work, stat_done);
@@ -3013,8 +3240,9 @@ static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *ou
     return 0;
   }
   pattern.length -= 2;
-  if (n == 0 || path[n - 1] != '\\')
+  if (n == 0 || path[n - 1] != '\\') {
     raw_unit(&pattern, '\\');
+  }
   raw_unit(&pattern, '*');
   raw_unit(&pattern, 0);
   WIN32_FIND_DATAW data;
@@ -3023,15 +3251,17 @@ static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *ou
   raw_free(&pattern);
   if (find == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
-    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES)
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) {
       return 1; // empty, as the root of an empty drive is
+    }
     *failure = win32_failure(error);
     return 0;
   }
   do {
     const wchar_t *name = data.cFileName;
-    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0)))
+    if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) {
       continue;
+    }
     Listed *entry = listed_add(out);
     raw_units(&entry->name, (const uint16_t *)name, wcslen(name));
     DWORD a = data.dwFileAttributes;
@@ -3042,6 +3272,7 @@ static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *ou
     entry->dir = dir;
   } while (FindNextFileW(find, &data));
   FindClose(find);
+
   return 1;
 }
 #else
@@ -3049,6 +3280,7 @@ static int compare_listed(const void *a, const void *b) {
   const Raw *x = &((const Listed *)a)->name, *y = &((const Listed *)b)->name;
   size_t n = x->length < y->length ? x->length : y->length;
   int c = n ? memcmp(x->data, y->data, n) : 0;
+
   return c ? c : x->length < y->length ? -1 : x->length > y->length;
 }
 
@@ -3066,25 +3298,43 @@ static int list_raw(const uint8_t *path, size_t n, uint32_t dir, ListedList *out
   size_t first = out->count;
   struct dirent *e;
   while ((e = readdir(d)) != NULL) {
-    if (e->d_name[0] == '.' && (e->d_name[1] == 0 || (e->d_name[1] == '.' && e->d_name[2] == 0)))
+    if (e->d_name[0] == '.' && (e->d_name[1] == 0 || (e->d_name[1] == '.' && e->d_name[2] == 0))) {
       continue;
+    }
     Listed *entry = listed_add(out);
     raw_append(&entry->name, e->d_name, strlen(e->d_name));
     entry->dir = dir;
     switch (e->d_type) {
-    case DT_REG: entry->kind = S_REG; break;
-    case DT_DIR: entry->kind = S_DIR; break;
-    case DT_LNK: entry->kind = S_LNK; break;
-    case DT_CHR: entry->kind = S_CHR; break;
-    case DT_BLK: entry->kind = S_BLK; break;
-    case DT_FIFO: entry->kind = S_FIFO; break;
-    case DT_SOCK: entry->kind = S_SOCK; break;
-    default: entry->kind = 0; break;
+    case DT_REG:
+      entry->kind = S_REG;
+      break;
+    case DT_DIR:
+      entry->kind = S_DIR;
+      break;
+    case DT_LNK:
+      entry->kind = S_LNK;
+      break;
+    case DT_CHR:
+      entry->kind = S_CHR;
+      break;
+    case DT_BLK:
+      entry->kind = S_BLK;
+      break;
+    case DT_FIFO:
+      entry->kind = S_FIFO;
+      break;
+    case DT_SOCK:
+      entry->kind = S_SOCK;
+      break;
+    default:
+      entry->kind = 0;
+      break;
     }
   }
   closedir(d);
   // Sorted by their bytes, as libuv's scandir sorts them.
   qsort(out->items + first, out->count - first, sizeof(Listed), compare_listed);
+
   return 1;
 }
 #endif
@@ -3116,13 +3366,15 @@ static void readdir_work(TzWork *w) {
   raw_append(&root, r->path.utf8.data, r->path.utf8.length - 1);
 #endif
   r->dirs = (uint32_t *)malloc(sizeof(uint32_t) * 16);
-  if (!r->dirs)
+  if (!r->dirs) {
     abort();
+  }
   r->dir_capacity = 16;
   r->dirs[r->dir_count++] = UINT32_MAX;
   Pending *stack = (Pending *)malloc(sizeof(Pending) * 8);
-  if (!stack)
+  if (!stack) {
     abort();
+  }
   size_t depth = 0, capacity = 8;
   Pending first = {0, root, {NULL, 0, 0}};
   Failure failure;
@@ -3141,16 +3393,19 @@ static void readdir_work(TzWork *w) {
       Listed *result = listed_add(&r->entries);
       *result = at.entries.items[i];
       memset(&at.entries.items[i], 0, sizeof(Listed));
-      if (!r->recursive)
+      if (!r->recursive) {
         continue;
+      }
       Raw child = {NULL, 0, 0};
       raw_append(&child, at.path.data, at.path.length);
 #ifdef _WIN32
-      if (raw_count(&child) == 0 || raw_wide(&child)[raw_count(&child) - 1] != '\\')
+      if (raw_count(&child) == 0 || raw_wide(&child)[raw_count(&child) - 1] != '\\') {
         raw_unit(&child, '\\');
+      }
 #else
-      if (child.length == 0 || child.data[child.length - 1] != '/')
+      if (child.length == 0 || child.data[child.length - 1] != '/') {
         raw_append(&child, "/", 1);
+      }
 #endif
       raw_append(&child, result->name.data, result->name.length);
       int descend;
@@ -3166,8 +3421,8 @@ static void readdir_work(TzWork *w) {
         child.length -= 2;
 #else
         raw_append(&child, "", 1);
-        descend = stat_of((const char *)child.data, 1, &st) == 0 &&
-                  ((uint32_t)st.mode & S_KIND) == S_DIR;
+        descend =
+            stat_of((const char *)child.data, 1, &st) == 0 && ((uint32_t)st.mode & S_KIND) == S_DIR;
         child.length -= 1;
 #endif
       }
@@ -3178,8 +3433,9 @@ static void readdir_work(TzWork *w) {
       if (r->dir_count == r->dir_capacity) {
         r->dir_capacity *= 2;
         uint32_t *dirs = (uint32_t *)realloc(r->dirs, sizeof(uint32_t) * r->dir_capacity);
-        if (!dirs)
+        if (!dirs) {
           abort();
+        }
         r->dirs = dirs;
       }
       uint32_t number = (uint32_t)r->dir_count;
@@ -3197,16 +3453,18 @@ static void readdir_work(TzWork *w) {
       if (depth == capacity) {
         capacity *= 2;
         Pending *bigger = (Pending *)realloc(stack, sizeof(Pending) * capacity);
-        if (!bigger)
+        if (!bigger) {
           abort();
+        }
         stack = bigger;
       }
       stack[depth++] = next;
     }
     listed_free(&at.entries);
     raw_free(&at.path);
-    if (failed)
+    if (failed) {
       break;
+    }
   }
   for (size_t i = 0; i < depth; ++i) {
     listed_free(&stack[i].entries);
@@ -3219,6 +3477,7 @@ static TzStr str_of_system(const Raw *name) {
 #ifdef _WIN32
   return tz_str_from_utf16(raw_wide(name), raw_count(name));
 #else
+
   return str_of_utf8(name->data, name->length);
 #endif
 }
@@ -3235,8 +3494,9 @@ static void buf_system(TzBuf *out, const Raw *name) {
 
 static void readdir_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (!fsp_succeeded(r))
+  if (!fsp_succeeded(r)) {
     return;
+  }
   size_t count = r->entries.count;
   TzArray *result = tz_arr_new(r->element, 0, (int64_t)count);
   // Each directory as the program sees it (joined to the path given) for
@@ -3297,8 +3557,9 @@ static void readdir_done(TzWork *w) {
 void tz_fsp_readdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive,
                     const TzType *element, TzMaker make_dirent, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->recursive = recursive;
   r->element = element;
   r->make_item = make_dirent;
@@ -3319,10 +3580,12 @@ static void mkdir_work(TzWork *w) {
   r->made = mkdir_raw(r->path.utf8.data, r->path.utf8.length - 1, r->recursive, r->mode, &r->name,
                       &failure, &r->at);
 #endif
-  if (r->made < 0)
+  if (r->made < 0) {
     fsp_fail(r, failure, "mkdir", 1);
-  if (!r->recursive)
+  }
+  if (!r->recursive) {
     return;
+  }
   // Node makes the directories a call at a time: one that fails for each
   // parent missing, then one for each made; or one and a stat when the
   // directory is there.
@@ -3331,13 +3594,15 @@ static void mkdir_work(TzWork *w) {
 #ifdef _WIN32
     const uint16_t *target = r->path.wide.data;
     size_t n = r->path.wide.length - 1, from = raw_count(&r->name);
-    for (size_t i = from; i < n; ++i)
+    for (size_t i = from; i < n; ++i) {
       levels += target[i] == '\\';
+    }
 #else
     const uint8_t *target = r->path.utf8.data;
     size_t n = r->path.utf8.length - 1, from = r->name.length;
-    for (size_t i = from; i < n; ++i)
+    for (size_t i = from; i < n; ++i) {
       levels += target[i] == '/';
+    }
 #endif
     ++levels;
   }
@@ -3346,8 +3611,9 @@ static void mkdir_work(TzWork *w) {
 
 static void mkdir_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (!fsp_succeeded(r))
+  if (!fsp_succeeded(r)) {
     return;
+  }
   // `string | undefined`: the first directory made, with `recursive`.
   TzOptStr first;
   memset(&first, 0, sizeof first);
@@ -3358,11 +3624,12 @@ static void mkdir_done(TzWork *w) {
   fsp_fulfill(r, &first, sizeof first);
 }
 
-void tz_fsp_mkdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive,
-                  int32_t mode, TzMaker make) {
+void tz_fsp_mkdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive, int32_t mode,
+                  TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->recursive = recursive;
   r->mode = mode;
   fsp_queue(r, mkdir_work, mkdir_done);
@@ -3376,13 +3643,15 @@ static void mkdtemp_work(TzWork *w) {
 #ifdef _WIN32
   DWORD error = make_dir(r->dest.wide.data);
   r->made = error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS;
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, "mkdtemp", 1);
+  }
 #else
   int error = mkdir(native(&r->dest), 0700) == 0 ? 0 : errno;
   r->made = error == EEXIST;
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, "mkdtemp", 1);
+  }
 #endif
 }
 
@@ -3422,8 +3691,9 @@ static void mkdtemp_try(FsRequest *r) {
   for (int i = 0; i < 6; ++i) {
     unsigned int n;
 #ifdef _WIN32
-    if (rand_s(&n) != 0)
+    if (rand_s(&n) != 0) {
       n = (unsigned int)GetTickCount() * 2654435761u + (unsigned int)i;
+    }
 #else
     n = (unsigned int)rand() ^ (unsigned int)time(NULL) ^ ((unsigned int)getpid() << 8);
 #endif
@@ -3437,19 +3707,22 @@ static void mkdtemp_try(FsRequest *r) {
 
 void tz_fsp_mkdtemp(TzPromise *p, void *prefix_obj, uint64_t prefix_meta, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, prefix_obj, prefix_meta))
+  if (!fsp_path(r, prefix_obj, prefix_meta)) {
     return;
+  }
   mkdtemp_try(r);
 }
 
 static void rmdir_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
-  if (!RemoveDirectoryW(wide(&r->path)))
+  if (!RemoveDirectoryW(wide(&r->path))) {
     fsp_fail_system(r, GetLastError(), "rmdir", 1);
+  }
 #else
-  if (rmdir(native(&r->path)) != 0)
+  if (rmdir(native(&r->path)) != 0) {
     fsp_fail_system(r, errno, "rmdir", 1);
+  }
 #endif
 }
 
@@ -3457,20 +3730,22 @@ static void unlink_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
   DWORD error = unlink_path(wide(&r->path));
-  if (error)
+  if (error) {
     fsp_fail_system(r, error, "unlink", 1);
+  }
 #else
-  if (unlink(native(&r->path)) != 0)
+  if (unlink(native(&r->path)) != 0) {
     fsp_fail_system(r, errno, "unlink", 1);
+  }
 #endif
 }
 
 // rmdir and unlink: `which` is 0 for rmdir.
-void tz_fsp_remove(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t which,
-                   TzMaker make) {
+void tz_fsp_remove(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t which, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   fsp_queue(r, which ? unlink_work : rmdir_work, fsp_done_void);
 }
 
@@ -3480,8 +3755,9 @@ static void rm_work(TzWork *w) {
   const char *syscall = NULL;
   int depth = 0;
   int found = rm_raw(&r->path, r->recursive, r->force, &failure, &syscall, &depth);
-  if (found == RM_FAILED)
+  if (found == RM_FAILED) {
     fsp_fail(r, failure, syscall, 1);
+  }
   r->directory = found == RM_DIRECTORY;
   // Node checks with lstat, then its rimraf goes down the tree: lstat and
   // unlink for a file, lstat, rmdir, readdir and rmdir again for a
@@ -3502,8 +3778,9 @@ static void rm_done(TzWork *w) {
 void tz_fsp_rm(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursive, int32_t force,
                TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   r->recursive = recursive;
   r->force = force;
   fsp_queue(r, rm_work, rm_done);
@@ -3516,19 +3793,22 @@ void tz_fsp_rm(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recursi
 static void rename_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
-  if (!MoveFileExW(wide(&r->path), wide(&r->dest), MOVEFILE_REPLACE_EXISTING))
+  if (!MoveFileExW(wide(&r->path), wide(&r->dest), MOVEFILE_REPLACE_EXISTING)) {
     fsp_fail_system(r, GetLastError(), "rename", 2);
+  }
 #else
-  if (rename(native(&r->path), native(&r->dest)) != 0)
+  if (rename(native(&r->path), native(&r->dest)) != 0) {
     fsp_fail_system(r, errno, "rename", 2);
+  }
 #endif
 }
 
-void tz_fsp_rename(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
-                   uint64_t to_meta, TzMaker make) {
+void tz_fsp_rename(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
+                   TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, from_obj, from_meta) || !fsp_path(r, to_obj, to_meta))
+  if (!fsp_path(r, from_obj, from_meta) || !fsp_path(r, to_obj, to_meta)) {
     return;
+  }
   fsp_queue(r, rename_work, fsp_done_void);
 }
 
@@ -3543,8 +3823,9 @@ static void copy_file_work(TzWork *w) {
     TzStatsParts a, b;
     int same = win32_failure(error).index == E_EBUSY && stat_of(wide(&r->path), 1, &a) == 0 &&
                stat_of(wide(&r->dest), 1, &b) == 0 && a.dev == b.dev && a.ino == b.ino;
-    if (!same)
+    if (!same) {
       fsp_fail_system(r, error, "copyfile", 2);
+    }
   }
 #else
   int in = -1, out = -1;
@@ -3563,11 +3844,12 @@ static void copy_file_work(TzWork *w) {
     } else {
       char chunk[65536];
       ssize_t got;
-      while ((got = read(in, chunk, sizeof chunk)) > 0)
+      while ((got = read(in, chunk, sizeof chunk)) > 0) {
         if (write(out, chunk, (size_t)got) != got) {
           fsp_fail_system(r, errno, "copyfile", 2);
           break;
         }
+      }
       close(out);
     }
     close(in);
@@ -3578,8 +3860,9 @@ static void copy_file_work(TzWork *w) {
 void tz_fsp_copy_file(TzPromise *p, void *from_obj, uint64_t from_meta, void *to_obj,
                       uint64_t to_meta, int32_t mode, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, from_obj, from_meta) || !fsp_path(r, to_obj, to_meta))
+  if (!fsp_path(r, from_obj, from_meta) || !fsp_path(r, to_obj, to_meta)) {
     return;
+  }
   r->mode = mode;
   fsp_queue(r, copy_file_work, fsp_done_void);
 }
@@ -3634,16 +3917,18 @@ static void realpath_work(TzWork *w) {
 
 static void realpath_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  if (!fsp_succeeded(r))
+  if (!fsp_succeeded(r)) {
     return;
+  }
   TzStr path = str_of_system(&r->name);
   fsp_fulfill(r, &path, sizeof path);
 }
 
 void tz_fsp_realpath(TzPromise *p, void *path_obj, uint64_t path_meta, TzMaker make) {
   FsRequest *r = fsp_new(p, make);
-  if (!fsp_path(r, path_obj, path_meta))
+  if (!fsp_path(r, path_obj, path_meta)) {
     return;
+  }
   fsp_queue(r, realpath_work, realpath_done);
 }
 
@@ -3696,7 +3981,7 @@ typedef struct Readline {
   TzInstance base;
   int32_t output; // where questions go: 1 stdout, 2 stderr, 0 nowhere
   int32_t closed;
-  int32_t skip_lf; // a line ended with "\r": a "\n" right after it goes with it
+  int32_t skip_lf;  // a line ended with "\r": a "\n" right after it goes with it
   TzSignal *signal; // of createInterface: an abort closes it
   TzAbortListener listener;
   Asker *head, *tail;
@@ -3729,28 +4014,32 @@ static void stdin_read_work(TzWork *w) {
     raw_reserve(&r->data, 4096 * 2);
     DWORD got = 0;
     if (!ReadConsoleW(h, (wchar_t *)r->data.data, 4096, &got, NULL) || got == 0 ||
-        ((const uint16_t *)r->data.data)[0] == 0x1A)
+        ((const uint16_t *)r->data.data)[0] == 0x1A) {
       r->ended = 1; // a line that starts with Ctrl+Z ends the input
-    else
+    } else {
       r->data.length = (size_t)got * 2;
+    }
     return;
   }
   raw_reserve(&r->data, 65536);
   DWORD got = 0;
-  if (!ReadFile(h, r->data.data, 65536, &got, NULL) || got == 0)
+  if (!ReadFile(h, r->data.data, 65536, &got, NULL) || got == 0) {
     r->ended = 1;
-  else
+  } else {
     r->data.length = got;
+  }
 #else
   raw_reserve(&r->data, 65536);
   for (;;) {
     ssize_t got = read(0, r->data.data, 65536);
-    if (got < 0 && errno == EINTR)
+    if (got < 0 && errno == EINTR) {
       continue;
-    if (got <= 0)
+    }
+    if (got <= 0) {
       r->ended = 1;
-    else
+    } else {
       r->data.length = (size_t)got;
+    }
     return;
   }
 #endif
@@ -3771,13 +4060,16 @@ static void stdin_read_done(TzWork *w) {
     size_t n = r->data.length / 2;
     uint16_t joined[4097];
     size_t k = 0;
-    if (tz_in_surrogate)
+    if (tz_in_surrogate) {
       joined[k++] = tz_in_surrogate;
+    }
     tz_in_surrogate = 0;
-    for (size_t i = 0; i < n; ++i)
+    for (size_t i = 0; i < n; ++i) {
       joined[k++] = units[i];
-    if (k > 0 && joined[k - 1] >= 0xD800 && joined[k - 1] <= 0xDBFF)
+    }
+    if (k > 0 && joined[k - 1] >= 0xD800 && joined[k - 1] <= 0xDBFF) {
       tz_in_surrogate = joined[--k];
+    }
     bytes_utf8(&tz_in, joined, k);
 #endif
   } else {
@@ -3789,8 +4081,9 @@ static void stdin_read_done(TzWork *w) {
   free(r);
   // The interfaces take their lines, in the order they were made; then
   // process.stdin as a stream takes what is left.
-  for (size_t i = 0; i < tz_readline_count; ++i)
+  for (size_t i = 0; i < tz_readline_count; ++i) {
     readline_serve(tz_readlines[i]);
+  }
   stdin_serve_chunks();
 }
 
@@ -3798,15 +4091,17 @@ static void stdin_read_done(TzWork *w) {
 // program alive.
 static void stdin_read(int ref) {
   if (tz_stdin_read) {
-    if (ref)
+    if (ref) {
       tz_work_ref(&tz_stdin_read->work);
+    }
     return;
   }
   // What waits to be written goes first: it may be the question.
   tz_out_flush(1);
   StdinRead *r = (StdinRead *)calloc(1, sizeof(StdinRead));
-  if (!r)
+  if (!r) {
     abort();
+  }
   r->work.work = stdin_read_work;
   r->work.done = stdin_read_done;
   r->work.unref = !ref;
@@ -3836,6 +4131,7 @@ static int line_end(size_t start, size_t *end, size_t *next) {
       return 1;
     }
   }
+
   return 0;
 }
 
@@ -3844,8 +4140,9 @@ static int line_end(size_t start, size_t *end, size_t *next) {
 static int take_line(Readline *rl, TzStr *line) {
   size_t start = 0;
   if (rl->skip_lf && tz_in.length > 0) {
-    if (tz_in.data[0] == '\n')
+    if (tz_in.data[0] == '\n') {
       start = 1;
+    }
     rl->skip_lf = 0;
   }
   size_t end, next;
@@ -3856,8 +4153,9 @@ static int take_line(Readline *rl, TzStr *line) {
     return 1;
   }
   if (!tz_in_eof) {
-    if (start)
+    if (start) {
       bytes_consume(&tz_in, start);
+    }
     return 0;
   }
   if (tz_in.length == start) {
@@ -3866,13 +4164,15 @@ static int take_line(Readline *rl, TzStr *line) {
   }
   *line = str_of_utf8(tz_in.data + start, tz_in.length - start);
   tz_in.length = 0;
+
   return 1;
 }
 
 static void asker_free(Asker *a) {
   tz_signal_unlisten(&a->listener);
-  if (a->signal)
+  if (a->signal) {
     tz_instance_release((TzInstance *)a->signal);
+  }
   tz_obj_release((TzObject *)a->promise);
   tz_free(a);
 }
@@ -3884,11 +4184,13 @@ static void readline_unlink(Readline *rl, Asker *a) {
     prev = *link;
     link = &(*link)->next;
   }
-  if (!*link)
+  if (!*link) {
     return;
+  }
   *link = a->next;
-  if (rl->tail == a)
+  if (rl->tail == a) {
     rl->tail = prev;
+  }
   a->next = NULL;
 }
 
@@ -3896,8 +4198,9 @@ static void readline_unlink(Readline *rl, Asker *a) {
 // done; questions wait for nothing more, as in Node, where they never
 // settle then.
 static void readline_shut(Readline *rl) {
-  if (rl->closed)
+  if (rl->closed) {
     return;
+  }
   rl->closed = 1;
   tz_signal_unlisten(&rl->listener);
   Asker **link = &rl->head;
@@ -3908,22 +4211,26 @@ static void readline_shut(Readline *rl) {
       continue;
     }
     *link = a->next;
-    if (rl->tail == a)
+    if (rl->tail == a) {
       rl->tail = NULL;
+    }
     a->promise->flags |= TZ_PROMISE_DONE;
     tz_promise_fulfill(a->promise);
     asker_free(a);
   }
   rl->tail = NULL;
-  for (Asker *a = rl->head; a; a = a->next)
+  for (Asker *a = rl->head; a; a = a->next) {
     rl->tail = a;
+  }
   // A read in flight no longer keeps the program alive for it.
   if (tz_stdin_read && !tz_stdin_read->work.unref) {
     int needed = 0;
-    for (size_t i = 0; i < tz_readline_count && !needed; ++i)
+    for (size_t i = 0; i < tz_readline_count && !needed; ++i) {
       needed = tz_readlines[i] != rl && !tz_readlines[i]->closed && tz_readlines[i]->head;
-    if (!needed)
+    }
+    if (!needed) {
       tz_work_unref(&tz_stdin_read->work);
+    }
   }
 }
 
@@ -3934,16 +4241,18 @@ static void readline_serve(Readline *rl) {
   while (rl->head && !rl->closed) {
     TzStr line;
     if (!take_line(rl, &line)) {
-      if (tz_in_eof)
+      if (tz_in_eof) {
         readline_shut(rl);
-      else
+      } else {
         stdin_read(1);
+      }
       break;
     }
     Asker *a = rl->head;
     rl->head = a->next;
-    if (!rl->head)
+    if (!rl->head) {
       rl->tail = NULL;
+    }
     *(TzStr *)((char *)a->promise + TZ_PROMISE_VALUE) = line;
     tz_promise_fulfill(a->promise);
     asker_free(a);
@@ -3958,11 +4267,13 @@ static Asker *readline_ask(Readline *rl, TzPromise *p, int32_t step) {
   tz_ref_retain(p); // it may be a member of a group (async.c)
   a->step = step;
   a->readline = rl;
-  if (rl->tail)
+  if (rl->tail) {
     rl->tail->next = a;
-  else
+  } else {
     rl->head = a;
+  }
   rl->tail = a;
+
   return a;
 }
 
@@ -3979,8 +4290,9 @@ void *tz_readline_new(int32_t output, TzSignal *signal) {
   if (tz_readline_count == tz_readline_capacity) {
     size_t capacity = tz_readline_capacity * 2 + 4;
     Readline **grown = (Readline **)tz_alloc(sizeof(Readline *) * capacity);
-    if (tz_readline_count)
+    if (tz_readline_count) {
       memcpy(grown, tz_readlines, sizeof(Readline *) * tz_readline_count);
+    }
     tz_free(tz_readlines);
     tz_readlines = grown;
     tz_readline_capacity = capacity;
@@ -3996,6 +4308,7 @@ void *tz_readline_new(int32_t output, TzSignal *signal) {
       tz_signal_listen(signal, &rl->listener);
     }
   }
+
   return rl;
 }
 
@@ -4003,11 +4316,12 @@ static void readline_drop(void *object) {
   // It leaves lists of the runtime: in node's order (parallel.c).
   TZ_ORDERED();
   Readline *rl = (Readline *)object;
-  for (size_t i = 0; i < tz_readline_count; ++i)
+  for (size_t i = 0; i < tz_readline_count; ++i) {
     if (tz_readlines[i] == rl) {
       tz_readlines[i] = tz_readlines[--tz_readline_count];
       break;
     }
+  }
   if (tz_readline_count == 0) {
     tz_free(tz_readlines);
     tz_readlines = NULL;
@@ -4019,8 +4333,9 @@ static void readline_drop(void *object) {
     rl->head = a->next;
     asker_free(a);
   }
-  if (rl->signal)
+  if (rl->signal) {
     tz_instance_release((TzInstance *)rl->signal);
+  }
   tz_obj_free(rl);
 }
 
@@ -4067,10 +4382,11 @@ void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t 
     tz_promise_reject(p, tz_abort_error(signal));
     return;
   }
-  if (rl->output == 1)
+  if (rl->output == 1) {
     tz_stdout_write(query_obj, query_meta);
-  else if (rl->output == 2)
+  } else if (rl->output == 2) {
     tz_stderr_write(query_obj, query_meta);
+  }
   Asker *a = readline_ask(rl, p, 0);
   if (signal) {
     a->signal = signal;
@@ -4119,14 +4435,17 @@ static FdRequest *fd_new(TzPromise *p, TzMaker make) {
   tz_rc_inc(&p->rc);
   r->make = make;
   r->position = -1;
+
   return r;
 }
 
 static void fd_free(FdRequest *r) {
-  if (r->has_path)
+  if (r->has_path) {
     path_free(&r->path);
-  if (r->bytes)
+  }
+  if (r->bytes) {
     tz_instance_release((TzInstance *)r->bytes);
+  }
   tz_obj_release((TzObject *)r->promise);
   tz_free(r);
 }
@@ -4181,8 +4500,9 @@ static void fd_open_work(TzWork *w) {
   }
 #ifdef _WIN32
   int crt = r->flags.read && r->flags.write ? _O_RDWR : r->flags.write ? _O_WRONLY : _O_RDONLY;
-  if (r->flags.append)
+  if (r->flags.append) {
     crt |= _O_APPEND;
+  }
   int fd = _open_osfhandle((intptr_t)f, crt | _O_BINARY);
   if (fd < 0) {
     CloseHandle(f);
@@ -4227,8 +4547,9 @@ static void fd_read_work(TzWork *w) {
   at_position.OffsetHigh = (DWORD)(r->position >> 32);
   if (!ReadFile(h, at, (DWORD)r->length, &got, r->position >= 0 ? &at_position : NULL)) {
     DWORD error = GetLastError();
-    if (error != ERROR_HANDLE_EOF && error != ERROR_BROKEN_PIPE)
+    if (error != ERROR_HANDLE_EOF && error != ERROR_BROKEN_PIPE) {
       fd_fail(r, error, "read");
+    }
     got = 0;
   }
   r->done = got;
@@ -4236,10 +4557,12 @@ static void fd_read_work(TzWork *w) {
   for (;;) {
     ssize_t got = r->position >= 0 ? pread(r->fd, at, (size_t)r->length, (off_t)r->position)
                                    : read(r->fd, at, (size_t)r->length);
-    if (got < 0 && errno == EINTR)
+    if (got < 0 && errno == EINTR) {
       continue;
-    if (got < 0)
+    }
+    if (got < 0) {
       fd_fail(r, errno, "read");
+    }
     r->done = got < 0 ? 0 : got;
     return;
   }
@@ -4260,18 +4583,20 @@ static void fd_write_work(TzWork *w) {
   memset(&at_position, 0, sizeof at_position);
   at_position.Offset = (DWORD)(r->position & 0xFFFFFFFF);
   at_position.OffsetHigh = (DWORD)(r->position >> 32);
-  if (!WriteFile(h, at, (DWORD)r->length, &written, r->position >= 0 ? &at_position : NULL))
+  if (!WriteFile(h, at, (DWORD)r->length, &written, r->position >= 0 ? &at_position : NULL)) {
     fd_fail(r, GetLastError(), "write");
+  }
   r->done = written;
 #else
   for (;;) {
-    ssize_t written = r->position >= 0
-                          ? pwrite(r->fd, at, (size_t)r->length, (off_t)r->position)
-                          : write(r->fd, at, (size_t)r->length);
-    if (written < 0 && errno == EINTR)
+    ssize_t written = r->position >= 0 ? pwrite(r->fd, at, (size_t)r->length, (off_t)r->position)
+                                       : write(r->fd, at, (size_t)r->length);
+    if (written < 0 && errno == EINTR) {
       continue;
-    if (written < 0)
+    }
+    if (written < 0) {
       fd_fail(r, errno, "write");
+    }
     r->done = written < 0 ? 0 : written;
     return;
   }
@@ -4309,11 +4634,13 @@ void tz_fss_write(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, int32_t 
 static void fd_close_work(TzWork *w) {
   FdRequest *r = (FdRequest *)w;
 #ifdef _WIN32
-  if (fd_file(r->fd) == NO_FILE || _close(r->fd) != 0)
+  if (fd_file(r->fd) == NO_FILE || _close(r->fd) != 0) {
     fd_fail(r, ERROR_INVALID_HANDLE, "close");
+  }
 #else
-  if (close(r->fd) != 0)
+  if (close(r->fd) != 0) {
     fd_fail(r, errno, "close");
+  }
 #endif
 }
 
@@ -4321,11 +4648,13 @@ static void fd_fsync_work(TzWork *w) {
   FdRequest *r = (FdRequest *)w;
 #ifdef _WIN32
   HANDLE h = fd_file(r->fd);
-  if (h == NO_FILE || !FlushFileBuffers(h))
+  if (h == NO_FILE || !FlushFileBuffers(h)) {
     fd_fail(r, h == NO_FILE ? ERROR_INVALID_HANDLE : GetLastError(), "fsync");
+  }
 #else
-  if (fsync(r->fd) != 0)
+  if (fsync(r->fd) != 0) {
     fd_fail(r, errno, "fsync");
+  }
 #endif
 }
 
@@ -4356,8 +4685,9 @@ static void stdin_serve_chunks(void) {
   while (tz_chunk_head && (tz_in.length > 0 || tz_in_eof)) {
     ChunkWaiter *w = tz_chunk_head;
     tz_chunk_head = w->next;
-    if (!tz_chunk_head)
+    if (!tz_chunk_head) {
       tz_chunk_tail = NULL;
+    }
     TzBytes *chunk = NULL; // undefined: the end
     if (tz_in.length > 0) {
       size_t n = tz_in.length < (size_t)w->max ? tz_in.length : (size_t)w->max;
@@ -4369,22 +4699,25 @@ static void stdin_serve_chunks(void) {
     tz_obj_release((TzObject *)w->promise);
     free(w);
   }
-  if (tz_chunk_head && !tz_in_eof)
+  if (tz_chunk_head && !tz_in_eof) {
     stdin_read(1);
+  }
 }
 
 // A Promise of the next chunk of stdin, a Buffer, or undefined at its end.
 void tz_stdin_chunk(TzPromise *p, int32_t max) {
   ChunkWaiter *w = (ChunkWaiter *)calloc(1, sizeof(ChunkWaiter));
-  if (!w)
+  if (!w) {
     abort();
+  }
   w->promise = p;
   tz_rc_inc(&p->rc);
   w->max = max > 0 ? max : 65536;
-  if (tz_chunk_tail)
+  if (tz_chunk_tail) {
     tz_chunk_tail->next = w;
-  else
+  } else {
     tz_chunk_head = w;
+  }
   tz_chunk_tail = w;
   stdin_serve_chunks();
 }

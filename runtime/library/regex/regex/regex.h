@@ -165,6 +165,7 @@ static inline int tz_re_mandatory(const uint32_t *program, uint32_t capture) {
 // several groups of one name, one of them does.
 static inline int tz_re_name_mandatory(const uint32_t *program, uint32_t capture) {
   uint32_t words = (program[TZ_RE_H_CAPTURES] + 31) / 32;
+
   return (program[program[TZ_RE_H_MANDATORY] + words + capture / 32] >> (capture % 32)) & 1;
 }
 static inline uint32_t tz_re_source_length(const uint32_t *program) {

@@ -1,9 +1,7 @@
 #pragma once
 
 #include "compiler/program/ast/ast.h"
-
 #include "llvm/ADT/STLFunctionalExtras.h"
-
 #include <cstdint>
 #include <optional>
 #include <vector>

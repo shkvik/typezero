@@ -12,7 +12,6 @@
 // against its parameters.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdio.h>
 #include <string.h>
 
@@ -37,6 +36,7 @@ void tz_reflect_init(TzClass *const *classes, uint32_t count, const TzInvokerEnt
 
 static const TzBox *as_box(const void *u) {
   const TzInstance *o = (const TzInstance *)u;
+
   return o && o->layout == &tz_box_layout ? (const TzBox *)u : NULL;
 }
 
@@ -49,14 +49,16 @@ static int same_name(const char *name, uint32_t length, TzStr key) {
   for (uint32_t i = 0; i < length;) {
     uint8_t c = (uint8_t)name[i];
     uint32_t cp = c, n = 1;
-    if (c >= 0xF0)
+    if (c >= 0xF0) {
       cp = c & 0x07, n = 4;
-    else if (c >= 0xE0)
+    } else if (c >= 0xE0) {
       cp = c & 0x0F, n = 3;
-    else if (c >= 0xC0)
+    } else if (c >= 0xC0) {
       cp = c & 0x1F, n = 2;
-    for (uint32_t j = 1; j < n && i + j < length; ++j)
+    }
+    for (uint32_t j = 1; j < n && i + j < length; ++j) {
       cp = (cp << 6) | ((uint8_t)name[i + j] & 0x3F);
+    }
     i += n;
     uint16_t want[2];
     uint32_t count = 1;
@@ -68,13 +70,16 @@ static int same_name(const char *name, uint32_t length, TzStr key) {
       want[0] = (uint16_t)cp;
     }
     for (uint32_t j = 0; j < count; ++j, ++k) {
-      if (k >= units)
+      if (k >= units) {
         return 0;
+      }
       uint16_t unit = two ? ((const uint16_t *)data)[k] : ((const uint8_t *)data)[k];
-      if (unit != want[j])
+      if (unit != want[j]) {
         return 0;
+      }
     }
   }
+
   return k == units;
 }
 
@@ -95,12 +100,13 @@ static void describe(const void *u, char *out, size_t size) {
   }
   if (u && !box) {
     const TzLayout *layout = ((const TzInstance *)u)->layout;
-    if (layout->flags & TZ_LAYOUT_CLASS)
+    if (layout->flags & TZ_LAYOUT_CLASS) {
       snprintf(out, size, "the class %.*s", (int)layout->name_length, layout->name);
-    else if (layout->name && layout->name_length)
+    } else if (layout->name && layout->name_length) {
       snprintf(out, size, "an object of class %.*s", (int)layout->name_length, layout->name);
-    else
+    } else {
       snprintf(out, size, "an object");
+    }
     return;
   }
   if (box && box->type->kind == TZ_T_ARRAY) {
@@ -123,12 +129,13 @@ void tz_reflect_mismatch(const char *what, uint32_t what_length, int32_t index,
 void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32_t max,
                       uint32_t count) {
   char takes[64];
-  if (max < 0)
+  if (max < 0) {
     snprintf(takes, sizeof takes, "%d or more arguments", (int)min);
-  else if (min == max)
+  } else if (min == max) {
     snprintf(takes, sizeof takes, "%d argument%s", (int)min, min == 1 ? "" : "s");
-  else
+  } else {
     snprintf(takes, sizeof takes, "%d to %d arguments", (int)min, (int)max);
+  }
   tz_throw(TZ_TYPE_ERROR, "%.*s: expected %s, got %u", (int)what_length, what, takes, count);
 }
 
@@ -140,14 +147,16 @@ void tz_class_name(TzStr *out, const TzClass *cls) {
   for (uint32_t i = 0; i < layout->name_length;) {
     uint8_t c = (uint8_t)name[i];
     uint32_t cp = c, n = 1;
-    if (c >= 0xF0)
+    if (c >= 0xF0) {
       cp = c & 0x07, n = 4;
-    else if (c >= 0xE0)
+    } else if (c >= 0xE0) {
       cp = c & 0x0F, n = 3;
-    else if (c >= 0xC0)
+    } else if (c >= 0xC0) {
       cp = c & 0x1F, n = 2;
-    for (uint32_t j = 1; j < n && i + j < layout->name_length; ++j)
+    }
+    for (uint32_t j = 1; j < n && i + j < layout->name_length; ++j) {
       cp = (cp << 6) | ((uint8_t)name[i + j] & 0x3F);
+    }
     i += n;
     if (cp >= 0x10000) {
       tz_buf_push(&buf, (uint16_t)(0xD800 + ((cp - 0x10000) >> 10)));
@@ -165,11 +174,13 @@ void tz_class_name(TzStr *out, const TzClass *cls) {
 
 // Whether `u` is a class, which `new` takes; throws a TypeError if not.
 static const TzClass *as_class(const void *u) {
-  if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_CLASS))
+  if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_CLASS)) {
     return (const TzClass *)u;
+  }
   char given[160];
   describe(u, given, sizeof given);
   tz_throw(TZ_TYPE_ERROR, "%s is not a constructor", given);
+
   return NULL;
 }
 
@@ -185,6 +196,7 @@ void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
              layout->name);
     return NULL;
   }
+
   return cls->info->construct(args, count);
 }
 
@@ -199,32 +211,37 @@ static void as_unknowns(const TzArray *array, void **out) {
 }
 
 static void release_unknowns(void **values, uint32_t count) {
-  for (uint32_t i = 0; i < count; ++i)
+  for (uint32_t i = 0; i < count; ++i) {
     tz_instance_release((TzInstance *)values[i]);
+  }
 }
 
 void *tz_reflect_construct(const TzClass *cls, const TzArray *args) {
-  if (!as_class(cls))
+  if (!as_class(cls)) {
     return NULL;
+  }
   void *small[8];
   void **values = args->length <= 8 ? small : (void **)tz_alloc(args->length * sizeof(void *));
   as_unknowns(args, values);
   void *result = tz_reflect_new(cls, values, args->length);
   release_unknowns(values, args->length);
-  if (values != small)
+  if (values != small) {
     tz_free(values);
+  }
+
   return result;
 }
 
-void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count),
-                      const TzArray *args) {
+void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count), const TzArray *args) {
   void *small[8];
   void **values = args->length <= 8 ? small : (void **)tz_alloc(args->length * sizeof(void *));
   as_unknowns(args, values);
   void *result = construct(values, args->length);
   release_unknowns(values, args->length);
-  if (values != small)
+  if (values != small) {
     tz_free(values);
+  }
+
   return result;
 }
 
@@ -234,11 +251,14 @@ void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count),
 
 // The description of the class of an object, if reflection reaches it.
 static const TzClassInfo *info_of(const TzInstance *object) {
-  if (object->layout->flags & TZ_LAYOUT_CLASS)
+  if (object->layout->flags & TZ_LAYOUT_CLASS) {
     return NULL; // the static methods are not described
+  }
   uint32_t id = object->layout->class_id;
-  if (!id || id >= tz_reflect_store.class_count || !tz_reflect_store.classes[id])
+  if (!id || id >= tz_reflect_store.class_count || !tz_reflect_store.classes[id]) {
     return NULL;
+  }
+
   return tz_reflect_store.classes[id]->info;
 }
 
@@ -254,10 +274,12 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
   const TzLayout *layout = object->layout;
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
-    if (field->offset == TZ_FIELD_METHOD || !same_name(field->name, field->name_length, key))
+    if (field->offset == TZ_FIELD_METHOD || !same_name(field->name, field->name_length, key)) {
       continue;
+    }
     char *value = (char *)object + field->offset;
     tz_value_retain(field->type, value);
+
     return tz_unknown_of(field->type, value);
   }
   if ((layout->flags & TZ_LAYOUT_CLASS) && same_name("name", 4, key)) {
@@ -267,14 +289,18 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
   }
   // A method, as a function that takes its `this`.
   const TzClassInfo *info = info_of(object);
-  if (info)
+  if (info) {
     for (uint32_t i = 0; i < info->method_count; ++i) {
       const TzReflectMethod *method = &info->methods[i];
-      if (!same_name(method->name, method->name_length, key))
+      if (!same_name(method->name, method->name_length, key)) {
         continue;
+      }
       TzFunction fn = {method->info, NULL};
+
       return tz_unknown_box(method->type, &fn);
     }
+  }
+
   return NULL;
 }
 
@@ -292,9 +318,11 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
     return NULL;
   }
   TzInvoker invoke = NULL;
-  for (uint32_t i = 0; i < tz_reflect_store.invoker_count && !invoke; ++i)
-    if (tz_reflect_store.invokers[i].type == box->type)
+  for (uint32_t i = 0; i < tz_reflect_store.invoker_count && !invoke; ++i) {
+    if (tz_reflect_store.invokers[i].type == box->type) {
       invoke = tz_reflect_store.invokers[i].invoke;
+    }
+  }
   if (!invoke) { // Sema gives one to each type of function that can be here
     tz_throw(TZ_TYPE_ERROR, "Reflect.apply cannot call this function");
     return NULL;
@@ -304,8 +332,10 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   as_unknowns(args, values);
   void *result = invoke((const TzFunction *)TZ_BOX_VALUE(box), self, values, args->length);
   release_unknowns(values, args->length);
-  if (values != small)
+  if (values != small) {
     tz_free(values);
+  }
+
   return result;
 }
 
@@ -320,6 +350,7 @@ void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
              layout->name);
     return NULL;
   }
+
   return cls->info->from_json(json, NULL);
 }
 
@@ -333,19 +364,28 @@ void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
 
 static int box_number(const void *u, double *out) {
   const TzBox *box = as_box(u);
-  if (!box)
+  if (!box) {
     return 0;
+  }
   const char *value = TZ_BOX_VALUE(box);
   switch (box->type->kind) {
-  case TZ_T_INT: *out = *(const int32_t *)value; return 1;
-  case TZ_T_LONG: *out = (double)*(const int64_t *)value; return 1;
-  case TZ_T_DOUBLE: *out = *(const double *)value; return 1;
+  case TZ_T_INT:
+    *out = *(const int32_t *)value;
+    return 1;
+  case TZ_T_LONG:
+    *out = (double)*(const int64_t *)value;
+    return 1;
+  case TZ_T_DOUBLE:
+    *out = *(const double *)value;
+    return 1;
   case TZ_T_JSON:
-    if (tz_json_kind(*(const TzJson *const *)value) != TZ_JSON_NUMBER)
+    if (tz_json_kind(*(const TzJson *const *)value) != TZ_JSON_NUMBER) {
       return 0;
+    }
     *out = tz_unknown_number(u);
     return 1;
-  default: return 0;
+  default:
+    return 0;
   }
 }
 
@@ -353,9 +393,11 @@ int32_t tz_unknown_to_double(const void *u, double *out) { return box_number(u, 
 
 int32_t tz_unknown_to_int(const void *u, int32_t *out) {
   double n;
-  if (!box_number(u, &n) || n != (double)(int32_t)n || (n == 0 && 1 / n < 0))
+  if (!box_number(u, &n) || n != (double)(int32_t)n || (n == 0 && 1 / n < 0)) {
     return 0;
+  }
   *out = (int32_t)n;
+
   return 1;
 }
 
@@ -367,23 +409,29 @@ int32_t tz_unknown_to_long(const void *u, int64_t *out) {
   }
   double n;
   if (!box_number(u, &n) || n < -9223372036854775808.0 || n >= 9223372036854775808.0 ||
-      n != (double)(int64_t)n)
+      n != (double)(int64_t)n) {
     return 0;
+  }
   *out = (int64_t)n;
+
   return 1;
 }
 
 int32_t tz_unknown_to_bool(const void *u, int32_t *out) {
-  if (tz_unknown_kind(u) != TZ_KIND_BOOLEAN)
+  if (tz_unknown_kind(u) != TZ_KIND_BOOLEAN) {
     return 0;
+  }
   *out = tz_unknown_bool(u);
+
   return 1;
 }
 
 int32_t tz_unknown_to_string(const void *u, TzStr *out) {
-  if (tz_unknown_kind(u) != TZ_KIND_STRING)
+  if (tz_unknown_kind(u) != TZ_KIND_STRING) {
     return 0;
+  }
   tz_unknown_string(out, u);
+
   return 1;
 }
 
@@ -391,10 +439,12 @@ int32_t tz_unknown_to_string(const void *u, TzStr *out) {
 // Json, any Json.
 int32_t tz_unknown_to_box(const void *u, const TzType *type, void *out) {
   const TzBox *box = as_box(u);
-  if (!box || (box->type != type && !(type->kind == TZ_T_JSON && box->type->kind == TZ_T_JSON)))
+  if (!box || (box->type != type && !(type->kind == TZ_T_JSON && box->type->kind == TZ_T_JSON))) {
     return 0;
+  }
   memcpy(out, TZ_BOX_VALUE(box), type->size);
   tz_value_retain(type, out);
+
   return 1;
 }
 
@@ -406,10 +456,12 @@ const TzLayout *tz_unknown_layout(const void *u) {
 
 uint32_t tz_unknown_box_kind(const void *u) {
   const TzBox *box = as_box(u);
+
   return box ? box->type->kind : 0;
 }
 
 int32_t tz_unknown_holds(const void *u, const TzType *type) {
   const TzBox *box = as_box(u);
+
   return box && (box->type == type || (type->kind == TZ_T_JSON && box->type->kind == TZ_T_JSON));
 }

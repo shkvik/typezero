@@ -3,7 +3,6 @@
 // that OpenSSL makes (EVP_PBE_scrypt_ex), which node reports.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <limits.h>
 #include <string.h>
 
@@ -33,8 +32,9 @@ static void salsa20_8(uint32_t b[16]) {
     x[12] ^= rotl(x[15] + x[14], 7), x[13] ^= rotl(x[12] + x[15], 9);
     x[14] ^= rotl(x[13] + x[12], 13), x[15] ^= rotl(x[14] + x[13], 18);
   }
-  for (int i = 0; i < 16; ++i)
+  for (int i = 0; i < 16; ++i) {
     b[i] += x[i];
+  }
 }
 
 // BlockMix of 2r blocks of 64 bytes from `in` to `out`.
@@ -42,8 +42,9 @@ static void block_mix(const uint32_t *in, uint32_t *out, uint64_t r) {
   uint32_t x[16];
   memcpy(x, in + (2 * r - 1) * 16, sizeof x);
   for (uint64_t i = 0; i < 2 * r; ++i) {
-    for (int k = 0; k < 16; ++k)
+    for (int k = 0; k < 16; ++k) {
       x[k] ^= in[i * 16 + k];
+    }
     salsa20_8(x);
     // The even blocks go to the first half, the odd ones to the second.
     memcpy(out + ((i & 1) * r + i / 2) * 16, x, sizeof x);
@@ -53,9 +54,10 @@ static void block_mix(const uint32_t *in, uint32_t *out, uint64_t r) {
 // ROMix of one block B of 128r bytes, with V of N blocks and X, T of one each.
 static void ro_mix(uint8_t *b, uint64_t r, uint64_t n, uint32_t *v, uint32_t *x, uint32_t *t) {
   size_t words = (size_t)(32 * r);
-  for (size_t i = 0; i < words; ++i)
+  for (size_t i = 0; i < words; ++i) {
     x[i] = (uint32_t)b[4 * i] | (uint32_t)b[4 * i + 1] << 8 | (uint32_t)b[4 * i + 2] << 16 |
            (uint32_t)b[4 * i + 3] << 24;
+  }
   for (uint64_t i = 0; i < n; ++i) {
     memcpy(v + i * words, x, words * 4);
     block_mix(x, t, r);
@@ -64,8 +66,9 @@ static void ro_mix(uint8_t *b, uint64_t r, uint64_t n, uint32_t *v, uint32_t *x,
   for (uint64_t i = 0; i < n; ++i) {
     const uint32_t *last = x + (2 * r - 1) * 16;
     uint64_t j = ((uint64_t)last[0] | (uint64_t)last[1] << 32) & (n - 1);
-    for (size_t k = 0; k < words; ++k)
+    for (size_t k = 0; k < words; ++k) {
       x[k] ^= v[j * words + k];
+    }
     block_mix(x, t, r);
     memcpy(x, t, words * 4);
   }
@@ -80,20 +83,27 @@ static void ro_mix(uint8_t *b, uint64_t r, uint64_t n, uint32_t *v, uint32_t *x,
 // Whether OpenSSL takes the parameters: 0 for wrong ones, -1 for ones over the memory limit.
 static int check(uint64_t n, uint64_t r, uint64_t p, uint64_t maxmem) {
   const uint64_t pr_max = (1u << 30) - 1;
-  if (r == 0 || p == 0 || n < 2 || (n & (n - 1)))
+  if (r == 0 || p == 0 || n < 2 || (n & (n - 1))) {
     return 0;
-  if (p > pr_max / r)
+  }
+  if (p > pr_max / r) {
     return -1;
-  if (16 * r <= 63 && n >= ((uint64_t)1 << (16 * r)))
+  }
+  if (16 * r <= 63 && n >= ((uint64_t)1 << (16 * r))) {
     return -1;
+  }
   uint64_t blen = p * 128 * r;
-  if (blen > INT_MAX)
+  if (blen > INT_MAX) {
     return -1;
-  if (n + 2 > (UINT64_MAX / (32 * sizeof(uint32_t))) / r)
+  }
+  if (n + 2 > (UINT64_MAX / (32 * sizeof(uint32_t))) / r) {
     return -1;
+  }
   uint64_t vlen = 32 * r * (n + 2) * sizeof(uint32_t);
-  if (blen > UINT64_MAX - vlen || blen + vlen > maxmem)
+  if (blen > UINT64_MAX - vlen || blen + vlen > maxmem) {
     return -1;
+  }
+
   return 1;
 }
 
@@ -105,8 +115,9 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
       !tz_crypto_check_integer(cost, "N", 0, 4294967295.0) ||
       !tz_crypto_check_integer(block_size, "r", 0, 4294967295.0) ||
       !tz_crypto_check_integer(parallelization, "p", 0, 4294967295.0) ||
-      !tz_crypto_check_integer(maxmem, "maxmem", 0, 9007199254740991.0))
+      !tz_crypto_check_integer(maxmem, "maxmem", 0, 9007199254740991.0)) {
     return NULL;
+  }
   // A zero is the default, as node takes it.
   uint64_t n = cost ? (uint64_t)cost : 16384, r = block_size ? (uint64_t)block_size : 8;
   uint64_t p = parallelization ? (uint64_t)parallelization : 1;
@@ -118,8 +129,9 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
     return NULL;
   }
   TzCryptoData password, salt;
-  if (!tz_crypto_data(&password, pt, pv, TZ_ENC_UTF8, "password"))
+  if (!tz_crypto_data(&password, pt, pv, TZ_ENC_UTF8, "password")) {
     return NULL;
+  }
   if (!tz_crypto_data(&salt, st, sv, TZ_ENC_UTF8, "salt")) {
     tz_crypto_data_done(&password);
     return NULL;
@@ -132,8 +144,9 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
     uint32_t *x = v + 32 * r * n, *t = x + 32 * r;
     tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password.data, password.length, salt.data,
                          salt.length, 1, b, blen);
-    for (uint64_t i = 0; i < p; ++i)
+    for (uint64_t i = 0; i < p; ++i) {
       ro_mix(b + i * 128 * r, r, n, v, x, t);
+    }
     tz_crypto_pbkdf2_raw(&tz_crypto_md_sha256, password.data, password.length, b, blen, 1,
                          result->data, (size_t)keylen);
     memset(b, 0, blen);
@@ -142,5 +155,6 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
   }
   tz_crypto_data_done(&salt);
   tz_crypto_data_done(&password);
+
   return result;
 }

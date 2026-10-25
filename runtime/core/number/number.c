@@ -3,22 +3,23 @@
 // double, which String(x) writes.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "runtime/core/number/number_tables.h"
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
 // The value of `c` as a digit of any radix up to 36, or 36 for a non-digit.
 static int digit_value(char c) {
-  if (c >= '0' && c <= '9')
+  if (c >= '0' && c <= '9') {
     return c - '0';
+  }
   c |= 0x20; // lower case
-  if (c >= 'a' && c <= 'z')
+  if (c >= 'a' && c <= 'z') {
     return c - 'a' + 10;
+  }
+
   return 36;
 }
 
@@ -37,18 +38,22 @@ static size_t decimal_length(const char *text, size_t i, size_t n) {
       ++digits;
     }
   }
-  if (digits == 0)
+  if (digits == 0) {
     return 0;
+  }
   if (j < n && (text[j] == 'e' || text[j] == 'E')) {
     size_t k = j + 1;
-    if (k < n && (text[k] == '+' || text[k] == '-'))
+    if (k < n && (text[k] == '+' || text[k] == '-')) {
       ++k;
+    }
     if (k < n && is_digit(text[k])) {
-      while (k < n && is_digit(text[k]))
+      while (k < n && is_digit(text[k])) {
         ++k;
+      }
       j = k;
     }
   }
+
   return j - i;
 }
 
@@ -64,10 +69,11 @@ static const double exact_pow10[23] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6, 
 static int decimal_value_fast(const char *text, size_t n, double *out) {
   size_t i = 0;
   int negative = 0;
-  if (i < n && (text[i] == '+' || text[i] == '-'))
+  if (i < n && (text[i] == '+' || text[i] == '-')) {
     negative = text[i++] == '-';
+  }
   uint64_t m = 0;
-  int digits = 0;   // significant ones, in m
+  int digits = 0;  // significant ones, in m
   int32_t e10 = 0; // the value is m * 10^e10
   int point = 0;
   for (; i < n; ++i) {
@@ -76,38 +82,44 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
       point = 1;
       continue;
     }
-    if (!is_digit(c))
+    if (!is_digit(c)) {
       break;
+    }
     if (m == 0 && c == '0') { // a leading zero
       e10 -= point;
       continue;
     }
-    if (++digits > 19)
+    if (++digits > 19) {
       return 0;
+    }
     m = m * 10 + (uint64_t)(c - '0');
     e10 -= point;
   }
   if (i < n) { // the exponent, which decimal_length made sure has digits
     ++i;
     int exponent_negative = 0;
-    if (text[i] == '+' || text[i] == '-')
+    if (text[i] == '+' || text[i] == '-') {
       exponent_negative = text[i++] == '-';
+    }
     int32_t exponent = 0;
     for (; i < n; ++i) {
-      if (exponent > 100000)
+      if (exponent > 100000) {
         return 0;
+      }
       exponent = exponent * 10 + (text[i] - '0');
     }
     e10 += exponent_negative ? -exponent : exponent;
   }
   double value;
-  if (m == 0)
+  if (m == 0) {
     value = 0;
-  else if (m > (1ull << 53) || e10 < -22 || e10 > 22)
+  } else if (m > (1ull << 53) || e10 < -22 || e10 > 22) {
     return 0;
-  else
+  } else {
     value = e10 >= 0 ? (double)m * exact_pow10[e10] : (double)m / exact_pow10[-e10];
+  }
   *out = negative ? -value : value;
+
   return 1;
 }
 
@@ -115,25 +127,30 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
 // rounded as JavaScript requires.
 static double decimal_value(const char *text, size_t n) {
   double fast;
-  if (decimal_value_fast(text, n, &fast))
+  if (decimal_value_fast(text, n, &fast)) {
     return fast;
+  }
   char local[64];
   char *copy = n < sizeof local ? local : (char *)tz_alloc(n + 1);
   memcpy(copy, text, n);
   copy[n] = 0;
   double value = strtod(copy, NULL);
-  if (copy != local)
+  if (copy != local) {
     tz_free(copy);
+  }
+
   return value;
 }
 
 // Number(s) once the whitespace around s is gone: a decimal number,
 // Infinity, or 0x, 0o and 0b followed by digits; anything else is NaN.
 double tz_number_from_ascii(const char *text, size_t n, int complete) {
-  if (!complete)
+  if (!complete) {
     return NAN;
-  if (n == 0)
+  }
+  if (n == 0) {
     return 0;
+  }
   if (n > 2 && text[0] == '0') {
     char kind = text[1] | 0x20;
     int radix = kind == 'x' ? 16 : kind == 'o' ? 8 : kind == 'b' ? 2 : 0;
@@ -141,19 +158,23 @@ double tz_number_from_ascii(const char *text, size_t n, int complete) {
       double value = 0;
       for (size_t i = 2; i < n; ++i) {
         int digit = digit_value(text[i]);
-        if (digit >= radix)
+        if (digit >= radix) {
           return NAN;
+        }
         value = value * radix + digit;
       }
       return value;
     }
   }
   size_t i = text[0] == '+' || text[0] == '-' ? 1 : 0;
-  if (n - i == 8 && memcmp(text + i, "Infinity", 8) == 0)
+  if (n - i == 8 && memcmp(text + i, "Infinity", 8) == 0) {
     return text[0] == '-' ? -INFINITY : INFINITY;
+  }
   size_t length = decimal_length(text, i, n);
-  if (length == 0 || length != n - i) // a sign alone is not a number either
+  if (length == 0 || length != n - i) { // a sign alone is not a number either
     return NAN;
+  }
+
   return decimal_value(text, n);
 }
 
@@ -162,12 +183,14 @@ double tz_number_from_ascii(const char *text, size_t n, int complete) {
 double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
   size_t i = 0;
   int negative = 0;
-  if (i < n && (text[i] == '+' || text[i] == '-'))
+  if (i < n && (text[i] == '+' || text[i] == '-')) {
     negative = text[i++] == '-';
+  }
   int strip_prefix = 1;
   if (radix != 0) {
-    if (radix < 2 || radix > 36)
+    if (radix < 2 || radix > 36) {
       return NAN;
+    }
     strip_prefix = radix == 16;
   } else {
     radix = 10;
@@ -177,29 +200,36 @@ double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
     radix = 16;
   }
   size_t start = i;
-  while (i < n && digit_value(text[i]) < radix)
+  while (i < n && digit_value(text[i]) < radix) {
     ++i;
-  if (i == start)
+  }
+  if (i == start) {
     return NAN;
+  }
   double value;
   if (radix == 10) {
     value = decimal_value(text + start, i - start); // correctly rounded, also when long
   } else {
     value = 0;
-    for (size_t k = start; k < i; ++k)
+    for (size_t k = start; k < i; ++k) {
       value = value * radix + digit_value(text[k]);
+    }
   }
+
   return negative ? -value : value; // "-0" gives -0, as in JavaScript
 }
 
 // parseFloat: the longest decimal number (or Infinity) at the start.
 double tz_parse_float_ascii(const char *text, size_t n) {
   size_t i = n > 0 && (text[0] == '+' || text[0] == '-') ? 1 : 0;
-  if (n - i >= 8 && memcmp(text + i, "Infinity", 8) == 0)
+  if (n - i >= 8 && memcmp(text + i, "Infinity", 8) == 0) {
     return text[0] == '-' ? -INFINITY : INFINITY;
+  }
   size_t length = decimal_length(text, i, n);
-  if (length == 0)
+  if (length == 0) {
     return NAN;
+  }
+
   return decimal_value(text, i + length);
 }
 
@@ -218,8 +248,9 @@ typedef struct {
 
 static void big_set(Big *b, uint64_t value) {
   b->n = 0;
-  for (; value; value >>= 32)
+  for (; value; value >>= 32) {
     b->limb[b->n++] = (uint32_t)value;
+  }
 }
 
 static void big_mul_small(Big *b, uint32_t factor) {
@@ -229,8 +260,9 @@ static void big_mul_small(Big *b, uint32_t factor) {
     b->limb[i] = (uint32_t)t;
     carry = t >> 32;
   }
-  if (carry)
+  if (carry) {
     b->limb[b->n++] = (uint32_t)carry;
+  }
 }
 
 // Divides by `divisor` in place and returns the remainder.
@@ -241,24 +273,30 @@ static uint32_t big_div_small(Big *b, uint32_t divisor) {
     b->limb[i] = (uint32_t)(t / divisor);
     rest = t % divisor;
   }
-  while (b->n > 0 && b->limb[b->n - 1] == 0)
+  while (b->n > 0 && b->limb[b->n - 1] == 0) {
     --b->n;
+  }
+
   return (uint32_t)rest;
 }
 
 static int big_bit_length(const Big *b) {
-  if (b->n == 0)
+  if (b->n == 0) {
     return 0;
+  }
   int bits = 32 * (b->n - 1);
-  for (uint32_t top = b->limb[b->n - 1]; top; top >>= 1)
+  for (uint32_t top = b->limb[b->n - 1]; top; top >>= 1) {
     ++bits;
+  }
+
   return bits;
 }
 
 static void big_shift_left(Big *b, int k) {
   int words = k / 32, bits = k % 32;
-  if (b->n == 0)
+  if (b->n == 0) {
     return;
+  }
   uint32_t carry = 0;
   int n = b->n;
   uint32_t shifted[BIG_LIMBS + 1] = {0};
@@ -269,8 +307,9 @@ static void big_shift_left(Big *b, int k) {
   shifted[n + words] = carry;
   b->n = n + words + 1;
   memcpy(b->limb, shifted, sizeof b->limb);
-  while (b->n > 0 && b->limb[b->n - 1] == 0)
+  while (b->n > 0 && b->limb[b->n - 1] == 0) {
     --b->n;
+  }
 }
 
 static void big_shift_right(Big *b, int k) {
@@ -281,24 +320,28 @@ static void big_shift_right(Big *b, int k) {
   }
   for (int i = 0; i + words < b->n; ++i) {
     uint64_t pair = b->limb[i + words];
-    if (i + words + 1 < b->n)
+    if (i + words + 1 < b->n) {
       pair |= (uint64_t)b->limb[i + words + 1] << 32;
+    }
     b->limb[i] = (uint32_t)(pair >> bits);
   }
   b->n -= words;
-  while (b->n > 0 && b->limb[b->n - 1] == 0)
+  while (b->n > 0 && b->limb[b->n - 1] == 0) {
     --b->n;
+  }
 }
 
 // b += 2^k
 static void big_add_power_of_two(Big *b, int k) {
   int word = k / 32;
-  while (b->n <= word)
+  while (b->n <= word) {
     b->limb[b->n++] = 0;
+  }
   uint64_t carry = (uint64_t)1 << (k % 32);
   for (int i = word; carry && i < BIG_LIMBS; ++i) {
-    if (i == b->n)
+    if (i == b->n) {
       b->limb[b->n++] = 0;
+    }
     uint64_t t = (uint64_t)b->limb[i] + carry;
     b->limb[i] = (uint32_t)t;
     carry = t >> 32;
@@ -324,8 +367,9 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
     return;
   }
   int negative = x < 0; // not -0
-  if (negative)
+  if (negative) {
     x = -x;
+  }
   Big n;
   int e = 0;
   big_set(&n, 0);
@@ -334,8 +378,9 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
     big_set(&n, (uint64_t)ldexp(fraction, 53));
     e -= 53;
   }
-  for (int64_t i = 0; i < digits; ++i)
+  for (int64_t i = 0; i < digits; ++i) {
     big_mul_small(&n, 10);
+  }
   if (e >= 0) {
     big_shift_left(&n, e);
   } else if (big_bit_length(&n) < -e) { // below one half
@@ -348,18 +393,22 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   // The decimal digits of n, at least digits + 1 of them.
   char reversed[160];
   int count = 0;
-  while (n.n > 0)
+  while (n.n > 0) {
     reversed[count++] = (char)('0' + big_div_small(&n, 10));
-  while (count < digits + 1)
+  }
+  while (count < digits + 1) {
     reversed[count++] = '0';
+  }
   char text[170];
   size_t len = 0;
-  if (negative)
+  if (negative) {
     text[len++] = '-';
+  }
   for (int i = count - 1; i >= 0; --i) {
     text[len++] = reversed[i];
-    if (i == digits && digits > 0)
+    if (i == digits && digits > 0) {
       text[len++] = '.';
+    }
   }
   *out = tz_str_from_ascii(text, len);
 }
@@ -370,6 +419,7 @@ static int radix_exponent(double value) {
   uint64_t bits;
   memcpy(&bits, &value, sizeof bits);
   int biased = (int)((bits >> 52) & 0x7ff);
+
   return biased == 0 ? 1 - 1075 : biased - 1075;
 }
 
@@ -379,6 +429,7 @@ static double next_up(double value) {
   memcpy(&bits, &value, sizeof bits);
   ++bits;
   memcpy(&value, &bits, sizeof bits);
+
   return value;
 }
 
@@ -400,13 +451,15 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
   char buffer[SIZE];
   int integer_cursor = SIZE / 2, fraction_cursor = SIZE / 2;
   int negative = x < 0;
-  if (negative)
+  if (negative) {
     x = -x;
+  }
   double integer = floor(x), fraction = x - integer;
   // The fraction has digits only to the precision of the double.
   double delta = 0.5 * (next_up(x) - x);
-  if (delta < next_up(0.0))
+  if (delta < next_up(0.0)) {
     delta = next_up(0.0);
+  }
   if (fraction >= delta) {
     buffer[fraction_cursor++] = '.';
     do {
@@ -444,8 +497,9 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
     buffer[--integer_cursor] = chars[(int)remainder];
     integer = (integer - remainder) / (double)radix;
   } while (integer > 0);
-  if (negative)
+  if (negative) {
     buffer[--integer_cursor] = '-';
+  }
   *out = tz_str_from_ascii(buffer + integer_cursor, (size_t)(fraction_cursor - integer_cursor));
 }
 
@@ -475,6 +529,7 @@ static int pow5_divides(uint64_t value, uint32_t p) {
     value /= 5;
     ++count;
   }
+
   return count >= p;
 }
 
@@ -487,6 +542,7 @@ static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
 #ifdef __SIZEOF_INT128__
   unsigned __int128 low = (unsigned __int128)m * mul[0];
   unsigned __int128 high = (unsigned __int128)m * mul[1];
+
   return (uint64_t)(((low >> 64) + high) >> (j - 64));
 #else
   // The four products of the 32-bit halves.
@@ -502,6 +558,7 @@ static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
   uint64_t sum = parts[0][1] + parts[1][0];
   uint64_t high = parts[1][1] + (sum < parts[0][1]);
   int32_t shift = j - 64;
+
   return (high << (64 - shift)) | (sum >> shift);
 #endif
 }
@@ -518,8 +575,7 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
   uint64_t output;
   int32_t e10;
   int32_t e2 = (int32_t)biased - 1075;
-  if (biased != 0 && e2 <= 0 && e2 >= -52 &&
-      (mantissa & ((1ull << -e2) - 1)) == 0) {
+  if (biased != 0 && e2 <= 0 && e2 >= -52 && (mantissa & ((1ull << -e2) - 1)) == 0) {
     // An integer below 2^53: its own digits, without the zeros at the end.
     output = ((1ull << 52) | mantissa) >> -e2;
     e10 = 0;
@@ -557,12 +613,13 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
       vm = mul_shift(4 * m2 - 1 - mm_shift, pow5_inv[q], i);
       if (q <= 21) {
         // Only one of mp, mv and mm can be a multiple of 5.
-        if (mv % 5 == 0)
+        if (mv % 5 == 0) {
           vr_zeros = pow5_divides(mv, q);
-        else if (even)
+        } else if (even) {
           vm_zeros = pow5_divides(mv - 1 - mm_shift, q);
-        else
+        } else {
           vp -= pow5_divides(mv + 2, q);
+        }
       }
     } else {
       uint32_t q = log10_pow5(-e2) - (-e2 > 1);
@@ -577,10 +634,11 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
         // mv has at least two trailing zero bits, mp one, mm one only when
         // mm_shift is 1.
         vr_zeros = 1;
-        if (even)
+        if (even) {
           vm_zeros = mm_shift == 1;
-        else
+        } else {
           --vp;
+        }
       } else if (q < 63) {
         vr_zeros = pow2_divides(mv, q);
       }
@@ -611,8 +669,9 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
           ++removed;
         }
       }
-      if (vr_zeros && last == 5 && vr % 2 == 0)
+      if (vr_zeros && last == 5 && vr % 2 == 0) {
         last = 4; // exactly halfway: round to even
+      }
       output = vr + ((vr == vm && (!even || !vm_zeros)) || last >= 5);
     } else {
       int round_up = 0;
@@ -641,8 +700,10 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
     reversed[count++] = (char)('0' + output % 10);
     output /= 10;
   } while (output != 0);
-  for (int i = 0; i < count; ++i)
+  for (int i = 0; i < count; ++i) {
     digits[i] = reversed[count - 1 - i];
+  }
   *exponent = e10;
+
   return count;
 }

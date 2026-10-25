@@ -11,7 +11,6 @@
 
 #include "runtime/library/date/date/date.h"
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdio.h>
 
@@ -68,6 +67,7 @@ double tz_date_equivalent_time(double t) {
   int recent = (leap ? 1956 : 1967) + (week_day * 12) % 28;
   int year = 2008 + (recent + 3 * 28 - 2008) % 28;
   double days = tz_date_make_day(year, f.month, 1) + f.day - 1;
+
   return days * MS_PER_DAY + (double)f.time_in_day;
 }
 
@@ -77,8 +77,10 @@ static double to_local(double t) { return t + tz_date_offset(t); }
 // A local time made from fields as UTC: the time value, NaN if out of range
 // (V8's SetLocalDateValue).
 static double from_local(double local) {
-  if (!(local >= -TZ_DATE_MAX_LOCAL_TIME && local <= TZ_DATE_MAX_LOCAL_TIME))
+  if (!(local >= -TZ_DATE_MAX_LOCAL_TIME && local <= TZ_DATE_MAX_LOCAL_TIME)) {
     return NAN;
+  }
+
   return tz_date_time_clip(tz_date_local_to_utc(local));
 }
 
@@ -93,12 +95,14 @@ double tz_date_from_fields(double year, double month, double date, double hours,
                            double seconds, double ms, int32_t local) {
   if (!isnan(year)) {
     double y = trunc(year);
-    if (y >= 0 && y <= 99)
+    if (y >= 0 && y <= 99) {
       year = 1900 + y;
+    }
   }
   double day = tz_date_make_day(year, month, date);
   double time = tz_date_make_time(hours, minutes, seconds, ms);
   double value = tz_date_make_date(day, time);
+
   return local ? from_local(value) : tz_date_time_clip(value);
 }
 
@@ -113,25 +117,32 @@ double tz_date_parse(void *obj, uint64_t meta) {
   uint16_t small[64];
   uint16_t *wide = small;
   if (!two) {
-    if (length > 64)
+    if (length > 64) {
       wide = (uint16_t *)tz_alloc(length * sizeof(uint16_t));
-    for (uint32_t i = 0; i < length; ++i)
+    }
+    for (uint32_t i = 0; i < length; ++i) {
       wide[i] = ((const uint8_t *)units)[i];
+    }
   }
   TzDateFields f;
   int ok = tz_date_parse_fields(two ? (const uint16_t *)units : wide, length, &f);
-  if (wide != small)
+  if (wide != small) {
     tz_free(wide);
-  if (!ok)
+  }
+  if (!ok) {
     return NAN;
+  }
   double day = tz_date_make_day(f.year, f.month, f.day);
   double time = tz_date_make_time(f.hour, f.minute, f.second, f.ms);
   double value = tz_date_make_date(day, time);
-  if (isnan(f.offset))
+  if (isnan(f.offset)) {
     return from_local(value);
+  }
   value -= f.offset * 1000.0;
-  if (!(value >= -TZ_DATE_MAX_TIME && value <= TZ_DATE_MAX_TIME))
+  if (!(value >= -TZ_DATE_MAX_TIME && value <= TZ_DATE_MAX_TIME)) {
     return NAN;
+  }
+
   return tz_date_time_clip(value);
 }
 
@@ -162,10 +173,12 @@ static double field_of(const Fields *f, int32_t field) {
 
 // getUTCFullYear() and the others.
 double tz_date_utc_field(double t, int32_t field) {
-  if (isnan(t))
+  if (isnan(t)) {
     return NAN;
+  }
   Fields f;
   break_down(t, &f);
+
   return field_of(&f, field);
 }
 
@@ -173,13 +186,16 @@ double tz_date_utc_field(double t, int32_t field) {
 // V8 gives them, also of the offsets with seconds that times before
 // standard time had.
 double tz_date_local_field(double t, int32_t field) {
-  if (isnan(t))
+  if (isnan(t)) {
     return NAN;
+  }
   double local = to_local(t);
-  if (field == TZ_DATE_OFFSET)
+  if (field == TZ_DATE_OFFSET) {
     return (double)(((int64_t)t - (int64_t)local) / 60000);
+  }
   Fields f;
   break_down(local, &f);
+
   return field_of(&f, field);
 }
 
@@ -191,8 +207,9 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
   double args[4] = {a, b, c, d};
   if (isnan(t)) {
     // setFullYear starts from +0 then, the others give NaN.
-    if (field != TZ_DATE_YEAR)
+    if (field != TZ_DATE_YEAR) {
       return NAN;
+    }
     t = 0;
   } else if (local) {
     t = to_local(t);
@@ -209,26 +226,32 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
     break;
   case TZ_DATE_SECONDS:
     s = args[0];
-    if (count > 1)
+    if (count > 1) {
       ms = args[1];
+    }
     time = tz_date_make_time(h, m, s, ms);
     break;
   case TZ_DATE_MINUTES:
     m = args[0];
-    if (count > 1)
+    if (count > 1) {
       s = args[1];
-    if (count > 2)
+    }
+    if (count > 2) {
       ms = args[2];
+    }
     time = tz_date_make_time(h, m, s, ms);
     break;
   case TZ_DATE_HOURS:
     h = args[0];
-    if (count > 1)
+    if (count > 1) {
       m = args[1];
-    if (count > 2)
+    }
+    if (count > 2) {
       s = args[2];
-    if (count > 3)
+    }
+    if (count > 3) {
       ms = args[3];
+    }
     time = tz_date_make_time(h, m, s, ms);
     break;
   case TZ_DATE_DATE:
@@ -236,20 +259,24 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
     break;
   case TZ_DATE_MONTH:
     month = args[0];
-    if (count > 1)
+    if (count > 1) {
       date = args[1];
+    }
     day = tz_date_make_day(year, month, date);
     break;
   default: // TZ_DATE_YEAR
     year = args[0];
-    if (count > 1)
+    if (count > 1) {
       month = args[1];
-    if (count > 2)
+    }
+    if (count > 2) {
       date = args[2];
+    }
     day = tz_date_make_day(year, month, date);
     break;
   }
   double value = tz_date_make_date(day, time);
+
   return local ? from_local(value) : tz_date_time_clip(value);
 }
 
@@ -266,9 +293,11 @@ static TzStr ascii(const char *text, int length) {
 static int iso_text(char *out, size_t size, double t) {
   Fields f;
   break_down(t, &f);
-  if (f.year >= 0 && f.year <= 9999)
+  if (f.year >= 0 && f.year <= 9999) {
     return snprintf(out, size, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", f.year, f.month + 1, f.day,
                     f.hour, f.minute, f.second, f.ms);
+  }
+
   return snprintf(out, size, "%c%06d-%02d-%02dT%02d:%02d:%02d.%03dZ", f.year < 0 ? '-' : '+',
                   f.year < 0 ? -f.year : f.year, f.month + 1, f.day, f.hour, f.minute, f.second,
                   f.ms);
@@ -296,6 +325,7 @@ int32_t tz_date_json(TzStr *out, double t) {
   }
   char text[40];
   *out = ascii(text, iso_text(text, sizeof text, t));
+
   return 1;
 }
 
@@ -342,15 +372,17 @@ void tz_date_local_string(TzStr *out, double t, int32_t mode) {
   int offset_minutes = (offset < 0 ? -offset : offset) % 60;
   char text[64];
   int n = 0;
-  if (mode != TZ_DATE_TEXT_TIME)
+  if (mode != TZ_DATE_TEXT_TIME) {
     n = snprintf(text, sizeof text, f.year < 0 ? "%s %s %02d %05d" : "%s %s %02d %04d",
                  week_days[f.week_day], months[f.month], f.day, f.year);
+  }
   if (mode == TZ_DATE_TEXT_DATE) {
     *out = ascii(text, n);
     return;
   }
-  if (mode != TZ_DATE_TEXT_TIME)
+  if (mode != TZ_DATE_TEXT_TIME) {
     text[n++] = ' ';
+  }
   n += snprintf(text + n, sizeof text - (size_t)n, "%02d:%02d:%02d GMT%c%02d%02d (", f.hour,
                 f.minute, f.second, offset < 0 ? '-' : '+', offset_hours, offset_minutes);
   TzBuf b;

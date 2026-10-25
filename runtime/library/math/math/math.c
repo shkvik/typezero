@@ -3,7 +3,6 @@
 // them, and with them the call to the C library.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 
 #ifdef _WIN32
@@ -17,8 +16,10 @@
 // JavaScript's `**` and Math.pow: unlike C's pow, 1 ** NaN and
 // (-1) ** Infinity are NaN.
 TZ_HOT double tz_math_pow(double x, double y) {
-  if (isnan(y) || (fabs(x) == 1 && isinf(y)))
+  if (isnan(y) || (fabs(x) == 1 && isinf(y))) {
     return NAN;
+  }
+
   return pow(x, y);
 }
 
@@ -34,16 +35,19 @@ TZ_HOT int64_t tz_math_pow_long(int64_t base, int64_t exponent) {
       tz_throw_zero_power();
       return 0;
     }
-    if (base == 1 || base == -1)
+    if (base == 1 || base == -1) {
       return (exponent & 1) ? base : 1;
+    }
     return 0;
   }
   uint64_t result = 1, factor = (uint64_t)base;
   for (uint64_t e = (uint64_t)exponent; e; e >>= 1) {
-    if (e & 1)
+    if (e & 1) {
       result *= factor;
+    }
     factor *= factor;
   }
+
   return (int64_t)result;
 }
 
@@ -79,17 +83,21 @@ double tz_math_hypot(const double *values, int64_t n) {
   int nan = 0;
   for (int64_t i = 0; i < n; ++i) {
     double v = fabs(values[i]);
-    if (isnan(v))
+    if (isnan(v)) {
       nan = 1;
-    else if (v > max)
+    } else if (v > max) {
       max = v;
+    }
   }
-  if (isinf(max))
+  if (isinf(max)) {
     return INFINITY;
-  if (nan)
+  }
+  if (nan) {
     return NAN;
-  if (max == 0)
+  }
+  if (max == 0) {
     return 0;
+  }
   double sum = 0, compensation = 0;
   for (int64_t i = 0; i < n; ++i) {
     double scaled = fabs(values[i]) / max;
@@ -98,6 +106,7 @@ double tz_math_hypot(const double *values, int64_t n) {
     compensation = (preliminary - sum) - summand;
     sum = preliminary;
   }
+
   return sqrt(sum) * max;
 }
 
@@ -113,6 +122,7 @@ static uint64_t splitmix64(uint64_t *x) {
   uint64_t z = (*x += 0x9E3779B97F4A7C15ull);
   z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
   z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+
   return z ^ (z >> 31);
 }
 
@@ -130,18 +140,21 @@ TZ_NOINLINE void tz_random_seed(void) {
 #endif
   tz_random_state[0] = splitmix64(&seed);
   tz_random_state[1] = splitmix64(&seed);
-  if ((tz_random_state[0] | tz_random_state[1]) == 0)
+  if ((tz_random_state[0] | tz_random_state[1]) == 0) {
     tz_random_state[0] = 1;
+  }
 }
 
 TZ_HOT double tz_math_random(void) {
-  if ((tz_random_state[0] | tz_random_state[1]) == 0)
+  if ((tz_random_state[0] | tz_random_state[1]) == 0) {
     tz_random_seed();
+  }
   uint64_t s1 = tz_random_state[0];
   uint64_t s0 = tz_random_state[1];
   tz_random_state[0] = s0;
   s1 ^= s1 << 23;
   tz_random_state[1] = s1 ^ s0 ^ (s1 >> 17) ^ (s0 >> 26);
+
   // The top 53 bits make a double in [0, 1).
   return (double)((tz_random_state[1] + s0) >> 11) * (1.0 / 9007199254740992.0);
 }

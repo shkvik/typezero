@@ -9,9 +9,7 @@
 // its deps/nbytes).
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include "runtime/library/bytes/encodings/encodings.h"
-
 #include <stdio.h>
 #include <string.h>
 
@@ -50,15 +48,19 @@ static inline uint32_t unit_at(const Units *u, uint32_t i) {
 
 static int lower_equal(const Units *u, const char *name) {
   size_t n = strlen(name);
-  if (u->length != n)
+  if (u->length != n) {
     return 0;
+  }
   for (size_t i = 0; i < n; ++i) {
     uint32_t c = unit_at(u, (uint32_t)i);
-    if (c >= 'A' && c <= 'Z')
+    if (c >= 'A' && c <= 'Z') {
       c += 'a' - 'A';
-    if (c != (unsigned char)name[i])
+    }
+    if (c != (unsigned char)name[i]) {
       return 0;
+    }
   }
+
   return 1;
 }
 
@@ -68,16 +70,19 @@ int32_t tz_buffer_encoding(void *obj, uint64_t meta) {
     const char *name;
     int32_t encoding;
   } names[] = {
-      {"utf8", ENC_UTF8},       {"utf-8", ENC_UTF8},         {"utf16le", ENC_UTF16LE},
-      {"utf-16le", ENC_UTF16LE}, {"ucs2", ENC_UTF16LE},      {"ucs-2", ENC_UTF16LE},
-      {"latin1", ENC_LATIN1},   {"binary", ENC_LATIN1},      {"ascii", ENC_ASCII},
-      {"base64", ENC_BASE64},   {"base64url", ENC_BASE64URL}, {"hex", ENC_HEX},
+      {"utf8", ENC_UTF8},        {"utf-8", ENC_UTF8},          {"utf16le", ENC_UTF16LE},
+      {"utf-16le", ENC_UTF16LE}, {"ucs2", ENC_UTF16LE},        {"ucs-2", ENC_UTF16LE},
+      {"latin1", ENC_LATIN1},    {"binary", ENC_LATIN1},       {"ascii", ENC_ASCII},
+      {"base64", ENC_BASE64},    {"base64url", ENC_BASE64URL}, {"hex", ENC_HEX},
   };
   Units u;
   units_of(&u, obj, meta);
-  for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i)
-    if (lower_equal(&u, names[i].name))
+  for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i) {
+    if (lower_equal(&u, names[i].name)) {
       return names[i].encoding;
+    }
+  }
+
   return -1;
 }
 
@@ -95,6 +100,7 @@ int32_t tz_buffer_encoding_checked(void *obj, uint64_t meta) {
     tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
     tz_str_release_value(message);
   }
+
   return encoding;
 }
 
@@ -114,8 +120,10 @@ static uint32_t code_point(const Units *u, uint32_t i, uint32_t *taken) {
       return 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00);
     }
   }
-  if (c >= 0xD800 && c <= 0xDFFF)
+  if (c >= 0xD800 && c <= 0xDFFF) {
     return 0xFFFD;
+  }
+
   return c;
 }
 
@@ -137,14 +145,16 @@ static uint8_t *put_utf8(uint8_t *out, uint32_t cp) {
     *out++ = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
     *out++ = (uint8_t)(0x80 | (cp & 0x3F));
   }
+
   return out;
 }
 
 static int64_t utf8_length(const Units *u) {
   if (!u->two) {
     int64_t n = u->length;
-    for (uint32_t i = 0; i < u->length; ++i)
+    for (uint32_t i = 0; i < u->length; ++i) {
       n += ((const uint8_t *)u->units)[i] >= 0x80;
+    }
     return n;
   }
   int64_t n = 0;
@@ -153,6 +163,7 @@ static int64_t utf8_length(const Units *u) {
     n += utf8_size(code_point(u, i, &taken));
     i += taken;
   }
+
   return n;
 }
 
@@ -166,9 +177,9 @@ static const uint8_t kBase64Digits[256] = {
     DIGITS8('a', 26), DIGITS8('i', 34), DIGITS8('q', 42), D('y', 50), D('z', 51),
     DIGITS8('0', 52), D('8', 60),       D('9', 61),       D('+', 62), D('-', 62),
     D('/', 63),       D('_', 63)};
-static const uint8_t kHexDigits[256] = {
-    DIGITS8('0', 0), D('8', 8), D('9', 9), DIGITS4('a', 10), D('e', 14), D('f', 15),
-    DIGITS4('A', 10), D('E', 14), D('F', 15)};
+static const uint8_t kHexDigits[256] = {DIGITS8('0', 0),  D('8', 8),  D('9', 9),
+                                        DIGITS4('a', 10), D('e', 14), D('f', 15),
+                                        DIGITS4('A', 10), D('E', 14), D('F', 15)};
 #undef DIGITS8
 #undef DIGITS4
 #undef D
@@ -189,10 +200,12 @@ static int64_t byte_length(const Units *u, int32_t encoding) {
     return n * 2;
   case ENC_BASE64:
   case ENC_BASE64URL:
-    if (n > 0 && unit_at(u, (uint32_t)n - 1) == '=')
+    if (n > 0 && unit_at(u, (uint32_t)n - 1) == '=') {
       --n;
-    if (n > 1 && unit_at(u, (uint32_t)n - 1) == '=')
+    }
+    if (n > 1 && unit_at(u, (uint32_t)n - 1) == '=') {
       --n;
+    }
     return (n * 3) >> 2;
   case ENC_HEX:
     return n >> 1;
@@ -204,6 +217,7 @@ static int64_t byte_length(const Units *u, int32_t encoding) {
 int32_t tz_buffer_byte_length(void *obj, uint64_t meta, int32_t encoding) {
   Units u;
   units_of(&u, obj, meta);
+
   return (int32_t)byte_length(&u, encoding);
 }
 
@@ -217,23 +231,29 @@ static int base64_group(uint8_t *dst, size_t dstlen, const Units *u, size_t *i, 
       uint32_t c = unit_at(u, (uint32_t)*i);
       lo = unbase64(c);
       *i += 1;
-      if (lo < 64)
+      if (lo < 64) {
         break;
-      if (c == '=' || *i >= n)
+      }
+      if (c == '=' || *i >= n) {
         return 0;
+      }
     }
-    if (step == 1)
+    if (step == 1) {
       dst[(*k)++] = (uint8_t)(((hi & 0x3F) << 2) | ((lo & 0x30) >> 4));
-    else if (step == 2)
+    } else if (step == 2) {
       dst[(*k)++] = (uint8_t)(((hi & 0x0F) << 4) | ((lo & 0x3C) >> 2));
-    else if (step == 3)
+    } else if (step == 3) {
       dst[(*k)++] = (uint8_t)(((hi & 0x03) << 6) | (lo & 0x3F));
-    if (*i >= n)
+    }
+    if (*i >= n) {
       return 0;
-    if (*k >= dstlen)
+    }
+    if (*k >= dstlen) {
       return 0;
+    }
     hi = lo;
   }
+
   return 1;
 }
 
@@ -244,8 +264,9 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
   size_t size = n;
   if (size >= 2 && unit_at(u, (uint32_t)size - 1) == '=') {
     --size;
-    if (unit_at(u, (uint32_t)size - 1) == '=')
+    if (unit_at(u, (uint32_t)size - 1) == '=') {
       --size;
+    }
   }
   size_t decoded = n < 2 ? 0 : size > 1 ? (size / 4) * 3 + (size % 4 + 1) / 2 : 0;
   size_t available = dstlen < decoded ? dstlen : decoded;
@@ -257,8 +278,9 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
     while (i < max_i && k < max_k) {
       uint32_t a = kBase64Digits[s[i]], b = kBase64Digits[s[i + 1]];
       uint32_t c = kBase64Digits[s[i + 2]], d = kBase64Digits[s[i + 3]];
-      if (!a || !b || !c || !d)
+      if (!a || !b || !c || !d) {
         break;
+      }
       uint32_t v = (a - 1) << 18 | (b - 1) << 12 | (c - 1) << 6 | (d - 1);
       dst[k] = (uint8_t)(v >> 16);
       dst[k + 1] = (uint8_t)(v >> 8);
@@ -275,8 +297,9 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
       slow |= d[j] >= 64;
     }
     if (slow) {
-      if (!base64_group(dst, dstlen, u, &i, &k))
+      if (!base64_group(dst, dstlen, u, &i, &k)) {
         return k;
+      }
       max_i = i + (n - i) / 4 * 4;
     } else {
       dst[k + 0] = (uint8_t)((d[0] << 2) | (d[1] >> 4));
@@ -286,8 +309,10 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
       k += 3;
     }
   }
-  if (i < n && k < dstlen)
+  if (i < n && k < dstlen) {
     base64_group(dst, dstlen, u, &i, &k);
+  }
+
   return k;
 }
 
@@ -304,12 +329,14 @@ static int64_t encode_into(uint8_t *out, int64_t capacity, const Units *u, int32
       for (uint32_t i = 0; i < n; ++i) {
         uint8_t b = s[i];
         if (b < 0x80) {
-          if (written + 1 > capacity)
+          if (written + 1 > capacity) {
             break;
+          }
           out[written++] = b;
         } else {
-          if (written + 2 > capacity)
+          if (written + 2 > capacity) {
             break;
+          }
           out[written++] = (uint8_t)(0xC0 | (b >> 6));
           out[written++] = (uint8_t)(0x80 | (b & 0x3F));
         }
@@ -320,8 +347,9 @@ static int64_t encode_into(uint8_t *out, int64_t capacity, const Units *u, int32
       uint32_t taken;
       uint32_t cp = code_point(u, i, &taken);
       int size = utf8_size(cp);
-      if (written + size > capacity)
+      if (written + size > capacity) {
         break;
+      }
       put_utf8(out + written, cp);
       written += size;
       i += taken;
@@ -346,36 +374,42 @@ static int64_t encode_into(uint8_t *out, int64_t capacity, const Units *u, int32
       const uint8_t *s = (const uint8_t *)u->units;
       for (int64_t i = 0; i < count; ++i) {
         int a = kHexDigits[s[2 * i]], b = kHexDigits[s[2 * i + 1]];
-        if (!a || !b)
+        if (!a || !b) {
           return i;
+        }
         out[i] = (uint8_t)((a - 1) << 4 | (b - 1));
       }
       return count;
     }
     for (int64_t i = 0; i < count; ++i) {
       int a = unhex(unit_at(u, (uint32_t)(2 * i))), b = unhex(unit_at(u, (uint32_t)(2 * i + 1)));
-      if (a < 0 || b < 0)
+      if (a < 0 || b < 0) {
         return i;
+      }
       out[i] = (uint8_t)((a << 4) | b);
     }
     return count;
   }
   default: { // latin1 and ascii: the low byte of each unit
     int64_t count = (int64_t)n < capacity ? (int64_t)n : capacity;
-    if (!u->two)
+    if (!u->two) {
       memcpy(out, u->units, (size_t)count);
-    else
-      for (int64_t i = 0; i < count; ++i)
+    } else {
+      for (int64_t i = 0; i < count; ++i) {
         out[i] = (uint8_t)unit_at(u, (uint32_t)i);
+      }
+    }
     return count;
   }
   }
 }
 
 static TzBytes *buffer_of(int64_t length) {
-  if (length > MAX_LENGTH)
+  if (length > MAX_LENGTH) {
     tz_panicf("a Buffer of %lld bytes exceeds the maximum of %lld", (long long)length,
               (long long)MAX_LENGTH);
+  }
+
   return tz_bytes_new_unset(TZ_BYTES_BUFFER, length);
 }
 
@@ -387,13 +421,16 @@ TzBytes *tz_buffer_from_string(void *obj, uint64_t meta, int32_t encoding) {
   int64_t written = encode_into(b->data, size, &u, encoding);
   // byteLength may overestimate for base64 and hex, as in node.
   b->length = (int32_t)written;
+
   return b;
 }
 
 TzBytes *tz_buffer_copy_of(const uint8_t *data, int64_t length) {
   TzBytes *b = buffer_of(length);
-  if (length)
+  if (length) {
     memcpy(b->data, data, (size_t)length);
+  }
+
   return b;
 }
 
@@ -419,22 +456,27 @@ static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
       need = 1;
       cp = b & 0x1F;
     } else if (b >= 0xE0 && b <= 0xEF) {
-      if (b == 0xE0)
+      if (b == 0xE0) {
         lower = 0xA0;
-      if (b == 0xED)
+      }
+      if (b == 0xED) {
         upper = 0x9F;
+      }
       need = 2;
       cp = b & 0xF;
     } else if (b >= 0xF0 && b <= 0xF4) {
-      if (b == 0xF0)
+      if (b == 0xF0) {
         lower = 0x90;
-      if (b == 0xF4)
+      }
+      if (b == 0xF4) {
         upper = 0x8F;
+      }
       need = 3;
       cp = b & 0x7;
     } else {
-      if (fatal)
+      if (fatal) {
         return 0;
+      }
       tz_buf_push(out, 0xFFFD);
       ++i;
       continue;
@@ -442,8 +484,9 @@ static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
     ++i;
     uint32_t seen = 0;
     while (seen < need) {
-      if (i >= n || s[i] < lower || s[i] > upper)
+      if (i >= n || s[i] < lower || s[i] > upper) {
         break;
+      }
       cp = (cp << 6) | (s[i] & 0x3F);
       lower = 0x80;
       upper = 0xBF;
@@ -452,8 +495,9 @@ static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
     }
     if (seen < need) {
       // The byte that broke the sequence starts over.
-      if (fatal)
+      if (fatal) {
         return 0;
+      }
       tz_buf_push(out, 0xFFFD);
       continue;
     }
@@ -465,18 +509,22 @@ static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
       tz_buf_push(out, (uint16_t)cp);
     }
   }
+
   return 1;
 }
 
 static TzStr utf8_string(const uint8_t *s, int64_t n) {
   int64_t ascii = 0;
-  while (ascii < n && s[ascii] < 0x80)
+  while (ascii < n && s[ascii] < 0x80) {
     ++ascii;
-  if (ascii == n)
+  }
+  if (ascii == n) {
     return tz_str_from_ascii((const char *)s, (size_t)n);
+  }
   TzBuf out;
   tz_buf_init(&out);
   decode_utf8(&out, s, n, 0);
+
   return tz_buf_take(&out);
 }
 
@@ -488,8 +536,9 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
     return tz_str_from_ascii((const char *)s, (size_t)n);
   case ENC_ASCII: {
     char *text = (char *)tz_alloc((size_t)n + 1);
-    for (int64_t i = 0; i < n; ++i)
+    for (int64_t i = 0; i < n; ++i) {
       text[i] = (char)(s[i] & 0x7F);
+    }
     TzStr str = tz_str_from_ascii(text, (size_t)n);
     tz_free(text);
     return str;
@@ -497,8 +546,9 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
   case ENC_UTF16LE: {
     int64_t count = n / 2;
     uint16_t *units = (uint16_t *)tz_alloc((size_t)count * 2 + 2);
-    for (int64_t i = 0; i < count; ++i)
+    for (int64_t i = 0; i < count; ++i) {
       units[i] = (uint16_t)(s[2 * i] | (s[2 * i + 1] << 8));
+    }
     TzStr str = tz_str_from_utf16(units, (size_t)count);
     tz_free(units);
     return str;
@@ -508,14 +558,16 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
     TzStr str;
     char small[16];
     char *text = tz_str_ascii_units((size_t)n * 2, &str);
-    if (!text)
+    if (!text) {
       text = small;
+    }
     for (int64_t i = 0; i < n; ++i) {
       text[2 * i] = digits[s[i] >> 4];
       text[2 * i + 1] = digits[s[i] & 15];
     }
-    if (text == small)
+    if (text == small) {
       str = tz_str_from_ascii(small, (size_t)n * 2);
+    }
     return str;
   }
   default: { // base64, base64url
@@ -523,13 +575,15 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
     const char *digits = url ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
                              : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t length = (size_t)n / 3 * 4;
-    if (n % 3)
+    if (n % 3) {
       length += url ? (size_t)(n % 3) + 1 : 4;
+    }
     TzStr str;
     char small[16];
     char *text = tz_str_ascii_units(length, &str);
-    if (!text)
+    if (!text) {
       text = small;
+    }
     size_t k = 0;
     int64_t i = 0;
     for (; i + 2 < n; i += 3) {
@@ -543,30 +597,35 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
       uint32_t v = (uint32_t)s[i] << 16 | (i + 1 < n ? (uint32_t)s[i + 1] << 8 : 0);
       text[k++] = digits[v >> 18];
       text[k++] = digits[(v >> 12) & 63];
-      if (i + 1 < n)
+      if (i + 1 < n) {
         text[k++] = digits[(v >> 6) & 63];
-      else if (!url)
+      } else if (!url) {
         text[k++] = '=';
-      if (!url)
+      }
+      if (!url) {
         text[k++] = '=';
+      }
     }
-    if (text == small)
+    if (text == small) {
       str = tz_str_from_ascii(small, k);
+    }
     return str;
   }
   }
 }
 
 TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding) {
-  if (length == 0)
+  if (length == 0) {
     return tz_str_from_ascii("", 0);
+  }
+
   return encode_text(data, length, encoding);
 }
 
 // buf.toString(encoding, start?, end?): positions clamped to the bytes, as
 // node does (`has`: 1 start, 2 end).
-void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start,
-                         int64_t end, int32_t has) {
+void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start, int64_t end,
+                         int32_t has) {
   int64_t n = b->length;
   int64_t from = (has & 1) ? (start < 0 ? 0 : start) : 0;
   int64_t to = (has & 2) ? (end > n ? n : end) : n;
@@ -588,14 +647,16 @@ TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
              (long long)MAX_LENGTH, (long long)size);
     return NULL;
   }
+
   return zero ? tz_bytes_new(TZ_BYTES_BUFFER, size) : buffer_of(size);
 }
 
 // Buffer.from(arrayBuffer, offset?, length?): the same memory (`has`: 1
 // offset, 2 length); the buffer is borrowed.
 TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, int32_t has) {
-  if (!(has & 1))
+  if (!(has & 1)) {
     offset = 0;
+  }
   if (offset < 0) {
     tz_throw(TZ_RANGE_ERROR, "Start offset %lld is outside the bounds of the buffer",
              (long long)offset);
@@ -622,6 +683,7 @@ TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, i
   b->offset = (int32_t)offset;
   b->buffer = buffer;
   tz_rc_inc(&buffer->rc);
+
   return b;
 }
 
@@ -631,30 +693,37 @@ TzBytes *tz_buffer_concat(const TzArray *list, int64_t total, int32_t has_total)
   TzBytes *const *items = (TzBytes *const *)list->data;
   if (!has_total) {
     total = 0;
-    for (uint32_t i = 0; i < list->length; ++i)
+    for (uint32_t i = 0; i < list->length; ++i) {
       total += items[i]->length;
+    }
   }
   TzBytes *b = tz_buffer_alloc(total, 0);
-  if (!b)
+  if (!b) {
     return NULL;
+  }
   int64_t at = 0;
   for (uint32_t i = 0; i < list->length && at < total; ++i) {
     int64_t n = items[i]->length;
-    if (n > total - at)
+    if (n > total - at) {
       n = total - at;
+    }
     memcpy(b->data + at, items[i]->data, (size_t)n);
     at += n;
   }
-  if (at < total)
+  if (at < total) {
     memset(b->data + at, 0, (size_t)(total - at));
+  }
+
   return b;
 }
 
 static int compare_memory(const uint8_t *a, int64_t an, const uint8_t *b, int64_t bn) {
   int64_t n = an < bn ? an : bn;
   int c = n ? memcmp(a, b, (size_t)n) : 0;
-  if (c != 0)
+  if (c != 0) {
     return c < 0 ? -1 : 1;
+  }
+
   return an < bn ? -1 : an > bn ? 1 : 0;
 }
 
@@ -663,31 +732,37 @@ int32_t tz_bytes_compare(const TzBytes *a, const TzBytes *b) {
 }
 
 int32_t tz_bytes_equal(const TzBytes *a, const TzBytes *b) {
-  return a->length == b->length && (a->length == 0 || memcmp(a->data, b->data, (size_t)a->length) == 0);
+  return a->length == b->length &&
+         (a->length == 0 || memcmp(a->data, b->data, (size_t)a->length) == 0);
 }
 
 TZ_COLD static void out_of_range(const char *name, int64_t value, int64_t max) {
-  if (max < 0)
+  if (max < 0) {
     tz_throw(TZ_RANGE_ERROR, "The value of \"%s\" is out of range. It must be >= 0. Received %lld",
              name, (long long)value);
-  else
+  } else {
     tz_throw(TZ_RANGE_ERROR,
              "The value of \"%s\" is out of range. It must be >= 0 && <= %lld. Received %lld", name,
              (long long)max, (long long)value);
+  }
 }
 
 // buf.compare(target, targetStart?, targetEnd?, sourceStart?, sourceEnd?);
 // `has` holds a bit for each, from 1 on.
 int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, int64_t tstart,
                                 int64_t tend, int64_t sstart, int64_t send, int32_t has) {
-  if (!(has & 1))
+  if (!(has & 1)) {
     tstart = 0;
-  if (!(has & 2))
+  }
+  if (!(has & 2)) {
     tend = target->length;
-  if (!(has & 4))
+  }
+  if (!(has & 4)) {
     sstart = 0;
-  if (!(has & 8))
+  }
+  if (!(has & 8)) {
     send = source->length;
+  }
   if (tstart < 0) {
     out_of_range("targetStart", tstart, -1);
     return 0;
@@ -704,10 +779,13 @@ int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, in
     out_of_range("sourceEnd", send, source->length);
     return 0;
   }
-  if (sstart >= send)
+  if (sstart >= send) {
     return tstart >= tend ? 0 : -1;
-  if (tstart >= tend)
+  }
+  if (tstart >= tend) {
     return 1;
+  }
+
   return compare_memory(source->data + sstart, send - sstart, target->data + tstart, tend - tstart);
 }
 
@@ -715,12 +793,15 @@ int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, in
 // bytes it copied (`has`: 1, 2 and 4).
 int32_t tz_buffer_copy(const TzBytes *source, TzBytes *target, int64_t tstart, int64_t sstart,
                        int64_t send, int32_t has) {
-  if (!(has & 1))
+  if (!(has & 1)) {
     tstart = 0;
-  if (!(has & 2))
+  }
+  if (!(has & 2)) {
     sstart = 0;
-  if (!(has & 4))
+  }
+  if (!(has & 4)) {
     send = source->length;
+  }
   if (tstart < 0) {
     out_of_range("targetStart", tstart, -1);
     return 0;
@@ -733,22 +814,27 @@ int32_t tz_buffer_copy(const TzBytes *source, TzBytes *target, int64_t tstart, i
     out_of_range("sourceEnd", send, -1);
     return 0;
   }
-  if (send > source->length)
+  if (send > source->length) {
     send = source->length;
-  if (tstart >= target->length || sstart >= send)
+  }
+  if (tstart >= target->length || sstart >= send) {
     return 0;
+  }
   int64_t n = send - sstart;
-  if (n > target->length - tstart)
+  if (n > target->length - tstart) {
     n = target->length - tstart;
+  }
   memmove(target->data + tstart, source->data + sstart, (size_t)n);
+
   return (int32_t)n;
 }
 
 // buf.write(string, offset?, length?, encoding): returns the bytes written.
-int32_t tz_buffer_write_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset,
-                               int64_t length, int32_t has, int32_t encoding) {
-  if (!(has & 1))
+int32_t tz_buffer_write_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset, int64_t length,
+                               int32_t has, int32_t encoding) {
+  if (!(has & 1)) {
     offset = 0;
+  }
   if (offset < 0 || offset > b->length) {
     out_of_range("offset", offset, b->length);
     return 0;
@@ -763,6 +849,7 @@ int32_t tz_buffer_write_string(TzBytes *b, void *obj, uint64_t meta, int64_t off
   }
   Units u;
   units_of(&u, obj, meta);
+
   return (int32_t)encode_into(b->data + offset, room, &u, encoding);
 }
 
@@ -774,6 +861,7 @@ static uint8_t *bytes_of_string(void *obj, uint64_t meta, int32_t encoding, int6
   int64_t size = byte_length(&u, encoding);
   uint8_t *bytes = (uint8_t *)tz_alloc((size_t)size + 1);
   *n = encode_into(bytes, size, &u, encoding);
+
   return bytes;
 }
 
@@ -784,19 +872,26 @@ static int32_t find_bytes(const TzBytes *b, const uint8_t *needle, int64_t n, in
   int64_t length = b->length;
   if (mode == 1) {
     int64_t start = has_from ? (from < 0 ? from + length : from) : length;
-    if (start > length - n)
+    if (start > length - n) {
       start = length - n;
-    for (int64_t i = start; i >= 0; --i)
-      if (n == 0 || memcmp(b->data + i, needle, (size_t)n) == 0)
+    }
+    for (int64_t i = start; i >= 0; --i) {
+      if (n == 0 || memcmp(b->data + i, needle, (size_t)n) == 0) {
         return (int32_t)i;
+      }
+    }
     return -1;
   }
   int64_t start = has_from ? (from < 0 ? (from + length < 0 ? 0 : from + length) : from) : 0;
-  if (n == 0)
+  if (n == 0) {
     return mode == 2 ? 1 : (int32_t)(start < length ? start : length);
-  for (int64_t i = start; i + n <= length; ++i)
-    if (b->data[i] == needle[0] && memcmp(b->data + i, needle, (size_t)n) == 0)
+  }
+  for (int64_t i = start; i + n <= length; ++i) {
+    if (b->data[i] == needle[0] && memcmp(b->data + i, needle, (size_t)n) == 0) {
       return mode == 2 ? 1 : (int32_t)i;
+    }
+  }
+
   return mode == 2 ? 0 : -1;
 }
 
@@ -806,6 +901,7 @@ int32_t tz_buffer_index_of_string(const TzBytes *b, void *obj, uint64_t meta, in
   uint8_t *needle = bytes_of_string(obj, meta, encoding, &n);
   int32_t found = find_bytes(b, needle, n, from, has_from, mode);
   tz_free(needle);
+
   return found;
 }
 
@@ -817,6 +913,7 @@ int32_t tz_buffer_index_of_bytes(const TzBytes *b, const TzBytes *needle, int64_
 int32_t tz_buffer_index_of_byte(const TzBytes *b, int32_t value, int64_t from, int32_t has_from,
                                 int32_t mode) {
   uint8_t byte = (uint8_t)value;
+
   return find_bytes(b, &byte, 1, from, has_from, mode);
 }
 
@@ -834,8 +931,9 @@ static void fill_with(TzBytes *b, const uint8_t *bytes, int64_t n, int64_t offse
     out_of_range("end", to, b->length);
     return;
   }
-  for (int64_t i = from, k = 0; i < to; ++i, k = k + 1 == n ? 0 : k + 1)
+  for (int64_t i = from, k = 0; i < to; ++i, k = k + 1 == n ? 0 : k + 1) {
     b->data[i] = n ? bytes[k] : 0;
+  }
 }
 
 void tz_buffer_fill_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset, int64_t end,
@@ -866,8 +964,9 @@ void tz_buffer_fill_bytes(TzBytes *b, const TzBytes *value, int64_t offset, int6
                           int32_t has) {
   // A copy first: the value may lie in the bytes being filled.
   uint8_t *bytes = (uint8_t *)tz_alloc((size_t)value->length + 1);
-  if (value->length)
+  if (value->length) {
     memcpy(bytes, value->data, (size_t)value->length);
+  }
   fill_with(b, bytes, value->length, offset, end, has);
   tz_free(bytes);
 }
@@ -880,12 +979,13 @@ void tz_buffer_fill_byte(TzBytes *b, int32_t value, int64_t offset, int64_t end,
 // The error of read…() and write…() at `offset` for `size` bytes, as node
 // words it (its boundsError).
 TZ_COLD void tz_buffer_bounds_error(int64_t offset, int64_t size, int64_t length) {
-  if (length - size < 0)
+  if (length - size < 0) {
     tz_throw(TZ_RANGE_ERROR, "Attempt to access memory outside buffer bounds");
-  else
+  } else {
     tz_throw(TZ_RANGE_ERROR,
              "The value of \"offset\" is out of range. It must be >= 0 and <= %lld. Received %lld",
              (long long)(length - size), (long long)offset);
+  }
 }
 
 static int check_var(const TzBytes *b, int64_t offset, int64_t size) {
@@ -899,33 +999,39 @@ static int check_var(const TzBytes *b, int64_t offset, int64_t size) {
     tz_buffer_bounds_error(offset, size, b->length);
     return 0;
   }
+
   return 1;
 }
 
 // readUIntLE(offset, byteLength) and the like: `flags` 1 signed, 2 big-endian.
 int64_t tz_buffer_read_var(const TzBytes *b, int64_t offset, int64_t size, int32_t flags) {
-  if (!check_var(b, offset, size))
+  if (!check_var(b, offset, size)) {
     return 0;
+  }
   uint64_t v = 0;
   for (int64_t i = 0; i < size; ++i) {
     int64_t at = (flags & 2) ? offset + i : offset + size - 1 - i;
     v = (v << 8) | b->data[at];
   }
-  if ((flags & 1) && (v >> (size * 8 - 1)) & 1)
+  if ((flags & 1) && (v >> (size * 8 - 1)) & 1) {
     v |= ~(uint64_t)0 << (size * 8);
+  }
+
   return (int64_t)v;
 }
 
 int64_t tz_buffer_write_var(TzBytes *b, int64_t value, int64_t offset, int64_t size,
                             int32_t flags) {
-  if (!check_var(b, offset, size))
+  if (!check_var(b, offset, size)) {
     return 0;
+  }
   uint64_t v = (uint64_t)value;
   for (int64_t i = 0; i < size; ++i) {
     int64_t at = (flags & 2) ? offset + size - 1 - i : offset + i;
     b->data[at] = (uint8_t)v;
     v >>= 8;
   }
+
   return offset + size;
 }
 
@@ -935,12 +1041,13 @@ void tz_buffer_swap(TzBytes *b, int32_t size) {
     tz_throw(TZ_RANGE_ERROR, "Buffer size must be a multiple of %d-bits", size * 8);
     return;
   }
-  for (int64_t i = 0; i < b->length; i += size)
+  for (int64_t i = 0; i < b->length; i += size) {
     for (int32_t j = 0; j < size / 2; ++j) {
       uint8_t t = b->data[i + j];
       b->data[i + j] = b->data[i + size - 1 - j];
       b->data[i + size - 1 - j] = t;
     }
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -951,6 +1058,7 @@ void *tz_text_encoder_new(void) {
   TzInstance *e = (TzInstance *)tz_obj_alloc(sizeof(TzInstance));
   e->rc = 1;
   e->layout = &tz_bytes_layouts[TZ_BYTES_TEXT_ENCODER];
+
   return e;
 }
 
@@ -961,6 +1069,7 @@ TzBytes *tz_text_encode(void *obj, uint64_t meta) {
   int64_t size = utf8_length(&u);
   TzBytes *b = tz_bytes_new_unset(TZ_BYTES_U8, size);
   encode_into(b->data, size, &u, ENC_UTF8);
+
   return b;
 }
 
@@ -975,8 +1084,9 @@ void tz_text_encode_into(void *obj, uint64_t meta, TzBytes *dst, int32_t *out) {
     uint32_t taken;
     uint32_t cp = code_point(&u, i, &taken);
     int size = utf8_size(cp);
-    if (written + size > dst->length)
+    if (written + size > dst->length) {
       break;
+    }
     put_utf8(dst->data + written, cp);
     written += size;
     i += taken;
@@ -1022,6 +1132,7 @@ const char *tz_text_decoder_name(const void *decoder) {
 
 int32_t tz_text_decoder_flag(const void *decoder, int32_t which) {
   const TzTextDecoder *d = (const TzTextDecoder *)decoder;
+
   return which == 0 ? d->fatal : d->ignore_bom;
 }
 
@@ -1032,8 +1143,7 @@ void tz_text_decoder_encoding(TzStr *out, const void *decoder) {
 
 // A decoder of an encoding Sema found by its label: TEXT_* and, for an old
 // encoding, its table.
-void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal,
-                           int32_t ignore_bom) {
+void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal, int32_t ignore_bom) {
   TzTextDecoder *d = (TzTextDecoder *)tz_obj_alloc(sizeof(TzTextDecoder));
   memset(d, 0, sizeof *d);
   d->rc = 1;
@@ -1042,6 +1152,7 @@ void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal,
   d->fatal = fatal;
   d->ignore_bom = ignore_bom;
   d->table = table;
+
   return d;
 }
 
@@ -1060,10 +1171,12 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
   units_of(&u, obj, meta);
   // ASCII whitespace around the label does not count.
   uint32_t start = 0, end = u.length;
-  while (start < end && is_space(unit_at(&u, start)))
+  while (start < end && is_space(unit_at(&u, start))) {
     ++start;
-  while (end > start && is_space(unit_at(&u, end - 1)))
+  }
+  while (end > start && is_space(unit_at(&u, end - 1))) {
     --end;
+  }
   char label[64];
   size_t n = 0;
   int ok = end - start < sizeof label;
@@ -1078,18 +1191,25 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
   label[n] = 0;
   const char *name = ok ? tz_encoding_name(label) : NULL;
   if (name) {
-    if (strcmp(name, "utf-8") == 0)
+    if (strcmp(name, "utf-8") == 0) {
       return tz_text_decoder_make(TEXT_UTF8, NULL, fatal, ignore_bom);
-    if (strcmp(name, "utf-16le") == 0)
+    }
+    if (strcmp(name, "utf-16le") == 0) {
       return tz_text_decoder_make(TEXT_UTF16LE, NULL, fatal, ignore_bom);
-    if (strcmp(name, "utf-16be") == 0)
+    }
+    if (strcmp(name, "utf-16be") == 0) {
       return tz_text_decoder_make(TEXT_UTF16BE, NULL, fatal, ignore_bom);
-    for (int32_t i = 0; i < count; ++i)
-      if (strcmp(tables[i]->name, name) == 0)
+    }
+    for (int32_t i = 0; i < count; ++i) {
+      if (strcmp(tables[i]->name, name) == 0) {
         return tz_text_decoder_make(TEXT_SINGLE_BYTE, tables[i], fatal, ignore_bom);
-    for (int32_t i = 0; i < cjk_count; ++i)
-      if (strcmp(cjk[i]->name, name) == 0)
+      }
+    }
+    for (int32_t i = 0; i < cjk_count; ++i) {
+      if (strcmp(cjk[i]->name, name) == 0) {
         return tz_text_decoder_make(TEXT_CJK, cjk[i], fatal, ignore_bom);
+      }
+    }
   }
   TzStr s = {obj, meta};
   TzBuf text;
@@ -1100,6 +1220,7 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
   TzStr message = tz_buf_take(&text);
   tz_throw_str(TZ_RANGE_ERROR, message.obj, message.meta);
   tz_str_release_value(message);
+
   return NULL;
 }
 
@@ -1112,8 +1233,9 @@ TZ_COLD static void invalid_data(const char *encoding) {
 static void put_text(TzTextDecoder *d, TzBuf *out, uint32_t cp) {
   if (!d->bom_seen) {
     d->bom_seen = 1;
-    if (cp == 0xFEFF && !d->ignore_bom)
+    if (cp == 0xFEFF && !d->ignore_bom) {
       return;
+    }
   }
   if (cp >= 0x10000) {
     cp -= 0x10000;
@@ -1133,13 +1255,15 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
   int64_t i = 0;
   for (;;) {
     if (i == n) {
-      if (stream)
+      if (stream) {
         break;
+      }
       // The end of the stream, inside a character.
       if (needed) {
         cp = needed = seen = 0;
-        if (d->fatal)
+        if (d->fatal) {
           return 0;
+        }
         put_text(d, out, 0xFFFD);
       }
       break;
@@ -1153,22 +1277,27 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
         needed = 1;
         cp = b & 0x1F;
       } else if (b >= 0xE0 && b <= 0xEF) {
-        if (b == 0xE0)
+        if (b == 0xE0) {
           lower = 0xA0;
-        if (b == 0xED)
+        }
+        if (b == 0xED) {
           upper = 0x9F;
+        }
         needed = 2;
         cp = b & 0xF;
       } else if (b >= 0xF0 && b <= 0xF4) {
-        if (b == 0xF0)
+        if (b == 0xF0) {
           lower = 0x90;
-        if (b == 0xF4)
+        }
+        if (b == 0xF4) {
           upper = 0x8F;
+        }
         needed = 3;
         cp = b & 0x7;
       } else {
-        if (d->fatal)
+        if (d->fatal) {
           return 0;
+        }
         put_text(d, out, 0xFFFD);
       }
       continue;
@@ -1178,8 +1307,9 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
       cp = needed = seen = 0;
       lower = 0x80;
       upper = 0xBF;
-      if (d->fatal)
+      if (d->fatal) {
         return 0;
+      }
       put_text(d, out, 0xFFFD);
       continue;
     }
@@ -1187,8 +1317,9 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
     lower = 0x80;
     upper = 0xBF;
     cp = (cp << 6) | (b & 0x3F);
-    if (++seen != needed)
+    if (++seen != needed) {
       continue;
+    }
     put_text(d, out, cp);
     cp = needed = seen = 0;
   }
@@ -1196,6 +1327,7 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
   d->state[1] = needed;
   d->state[2] = seen;
   d->state[3] = lower | upper << 8;
+
   return 1;
 }
 
@@ -1209,21 +1341,23 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
   int64_t i = 0;
   for (;;) {
     int b;
-    if (restored)
+    if (restored) {
       b = back[--restored];
-    else if (i < n)
+    } else if (i < n) {
       b = s[i++];
-    else if (stream)
+    } else if (stream) {
       break;
-    else
+    } else {
       b = -1;
+    }
     if (b < 0) {
       // The end of the stream, inside a character.
       if (lead_byte >= 0 || lead_surrogate) {
         lead_byte = -1;
         lead_surrogate = 0;
-        if (d->fatal)
+        if (d->fatal) {
           return 0;
+        }
         put_text(d, out, 0xFFFD);
       }
       break;
@@ -1245,8 +1379,9 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
       int high = (int)(unit >> 8), low = (int)(unit & 0xFF);
       back[restored++] = big ? low : high;
       back[restored++] = big ? high : low;
-      if (d->fatal)
+      if (d->fatal) {
         return 0;
+      }
       put_text(d, out, 0xFFFD);
       continue;
     }
@@ -1255,8 +1390,9 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
       continue;
     }
     if (unit >= 0xDC00 && unit <= 0xDFFF) {
-      if (d->fatal)
+      if (d->fatal) {
         return 0;
+      }
       put_text(d, out, 0xFFFD);
       continue;
     }
@@ -1264,6 +1400,7 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
   }
   d->state[0] = (uint32_t)(lead_byte + 1);
   d->state[1] = lead_surrogate;
+
   return 1;
 }
 
@@ -1307,10 +1444,11 @@ void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, i
     const TzEncodingTable *table = (const TzEncodingTable *)d->table;
     for (int64_t i = 0; i < n && ok; ++i) {
       uint16_t c = data[i] < 0x80 ? data[i] : table->high[data[i] - 0x80];
-      if (c == 0xFFFD && d->fatal)
+      if (c == 0xFFFD && d->fatal) {
         ok = 0;
-      else
+      } else {
         tz_buf_push(&text, c);
+      }
     }
     break;
   }

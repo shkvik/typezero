@@ -83,8 +83,8 @@ typedef struct HttpState {
   uint8_t refused;       // answered with an error already: what the program writes goes
   uint8_t ending;        // the server stops: no request after the one being handled
   int64_t remaining;
-  int64_t body_read;    // bytes of the body given so far
-  double max_body;      // of a request to a server; 0: no limit
+  int64_t body_read; // bytes of the body given so far
+  double max_body;   // of a request to a server; 0: no limit
   // A promise of the program waiting for the next head, body chunk or
   // whole body, and what it waits for.
   TzPromise *waiting;
@@ -117,9 +117,9 @@ struct NetConn {
   uint8_t orphan;  // the program let go of it: freed once no operation waits
   uint8_t eof;     // the other side ended its half
   uint8_t reading, writing;
-  uint8_t server; // accepted by a listener
-  int32_t error;  // the error of the system that broke it, 0 if none
-  int32_t ops;    // operations in flight
+  uint8_t server;        // accepted by a listener
+  int32_t error;         // the error of the system that broke it, 0 if none
+  int32_t ops;           // operations in flight
   NetListener *listener; // of a server's connection, while both live
   NetConn *prev, *next;  // in the listener's list
   double last_active;    // when it last read or wrote, in ms of the clock

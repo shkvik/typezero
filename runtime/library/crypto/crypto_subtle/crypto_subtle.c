@@ -12,7 +12,6 @@
 // verification with -1), which the library turns into node's OperationError.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,10 +33,10 @@ typedef struct SubtleJob {
   size_t lengths[PARTS];
   TzArrayBuffer *out; // the result, which `written` bytes of are made
   size_t written;
-  double count;  // iterations, or the length of the output
-  int32_t flag;  // decrypt
-  int32_t tag;   // bytes of the tag of AES-GCM
-  int32_t bits;  // of the counter of AES-CTR
+  double count;   // iterations, or the length of the output
+  int32_t flag;   // decrypt
+  int32_t tag;    // bytes of the tag of AES-GCM
+  int32_t bits;   // of the counter of AES-CTR
   int32_t result; // of a verification: 1, 0, or -1 for a failure
   int failed;
 } SubtleJob;
@@ -47,6 +46,7 @@ static SubtleJob *job_new(TzPromise *p) {
   memset(j, 0, sizeof *j);
   j->promise = p;
   tz_ref_retain(p);
+
   return j;
 }
 
@@ -62,27 +62,32 @@ static int job_copy(SubtleJob *j, int part, const TzType *type, const void *valu
     return 0;
   }
   j->bytes[part] = (uint8_t *)malloc(d.length ? d.length : 1);
-  if (!j->bytes[part])
+  if (!j->bytes[part]) {
     tz_panic("out of memory", -1);
-  if (d.length)
+  }
+  if (d.length) {
     memcpy(j->bytes[part], d.data, d.length);
+  }
   j->lengths[part] = d.length;
   tz_crypto_data_done(&d);
+
   return 1;
 }
 
 static void job_free(SubtleJob *j) {
-  for (int i = 0; i < PARTS; ++i)
+  for (int i = 0; i < PARTS; ++i) {
     if (j->bytes[i]) {
       memset(j->bytes[i], 0, j->lengths[i]);
       free(j->bytes[i]);
     }
+  }
   if (j->cipher) {
     memset(j->cipher, 0, sizeof(TzCipher) + j->alg->ctx_size);
     tz_obj_free(j->cipher);
   }
-  if (j->out)
+  if (j->out) {
     tz_instance_release((TzInstance *)j->out);
+  }
   tz_obj_release((TzObject *)j->promise);
   tz_free(j);
 }
@@ -90,8 +95,9 @@ static void job_free(SubtleJob *j) {
 static void job_work(TzWork *w) {
   SubtleJob *j = (SubtleJob *)w;
   // One that failed already (its result could not be made) only comes back.
-  if (!j->failed)
+  if (!j->failed) {
     j->run(j);
+  }
 }
 
 // Back on the main thread: the ArrayBuffer of the result, cut to what was written, or
@@ -145,8 +151,9 @@ static void digest_run(SubtleJob *j) {
 void tz_crypto_subtle_digest(TzPromise *p, const TzMd *md, const TzType *dt, const void *dv) {
   SubtleJob *j = job_new(p);
   j->md = md;
-  if (job_copy(j, DATA, dt, dv))
+  if (job_copy(j, DATA, dt, dv)) {
     job_queue(j, digest_run, md->size);
+  }
 }
 
 static void hmac_run(SubtleJob *j) {
@@ -157,13 +164,13 @@ static void hmac_run(SubtleJob *j) {
 
 static void hmac_verify_run(SubtleJob *j) {
   uint8_t mac[64];
-  tz_crypto_hmac_raw(j->md, j->bytes[KEY], j->lengths[KEY], j->bytes[DATA], j->lengths[DATA],
-                     mac);
+  tz_crypto_hmac_raw(j->md, j->bytes[KEY], j->lengths[KEY], j->bytes[DATA], j->lengths[DATA], mac);
   // In constant time, as CRYPTO_memcmp does it for node.
   int equal = j->lengths[EXTRA] == j->md->size;
   volatile uint8_t diff = 0;
-  for (size_t i = 0; equal && i < j->md->size; ++i)
+  for (size_t i = 0; equal && i < j->md->size; ++i) {
     diff |= mac[i] ^ j->bytes[EXTRA][i];
+  }
   j->result = equal && diff == 0;
   memset(mac, 0, sizeof mac);
 }
@@ -174,8 +181,9 @@ void tz_crypto_subtle_hmac(TzPromise *p, const TzMd *md, const TzType *kt, const
                            const TzType *dt, const void *dv) {
   SubtleJob *j = job_new(p);
   j->md = md;
-  if (job_copy(j, KEY, kt, kv) && job_copy(j, DATA, dt, dv))
+  if (job_copy(j, KEY, kt, kv) && job_copy(j, DATA, dt, dv)) {
     job_queue(j, hmac_run, md->size);
+  }
 }
 
 void tz_crypto_subtle_hmac_verify(TzPromise *p, const TzMd *md, const TzType *kt, const void *kv,
@@ -183,8 +191,9 @@ void tz_crypto_subtle_hmac_verify(TzPromise *p, const TzMd *md, const TzType *kt
                                   const void *dv) {
   SubtleJob *j = job_new(p);
   j->md = md;
-  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv) && job_copy(j, DATA, dt, dv))
+  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv) && job_copy(j, DATA, dt, dv)) {
     job_queue(j, hmac_verify_run, -1);
+  }
 }
 
 static void pbkdf2_run(SubtleJob *j) {
@@ -200,8 +209,9 @@ void tz_crypto_subtle_pbkdf2(TzPromise *p, const TzMd *md, const TzType *kt, con
   SubtleJob *j = job_new(p);
   j->md = md;
   j->count = iterations;
-  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv))
+  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv)) {
     job_queue(j, pbkdf2_run, (int64_t)length);
+  }
 }
 
 static void hkdf_run(SubtleJob *j) {
@@ -222,8 +232,9 @@ void tz_crypto_subtle_hkdf(TzPromise *p, const TzMd *md, const TzType *kt, const
                            double length) {
   SubtleJob *j = job_new(p);
   j->md = md;
-  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv) && job_copy(j, MORE, it, iv))
+  if (job_copy(j, KEY, kt, kv) && job_copy(j, EXTRA, st, sv) && job_copy(j, MORE, it, iv)) {
     job_queue(j, hkdf_run, (int64_t)length);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -233,14 +244,16 @@ void tz_crypto_subtle_hkdf(TzPromise *p, const TzMd *md, const TzType *kt, const
 // The cipher, made ready by the thread: false (the job failed) for a key of another length.
 static int cipher_start(SubtleJob *j, const uint8_t *iv, size_t iv_length) {
   TzCipher *c = j->cipher;
-  if (j->lengths[KEY] != j->alg->key_length)
+  if (j->lengths[KEY] != j->alg->key_length) {
     return 0;
+  }
   memset(c, 0, sizeof(TzCipher) + j->alg->ctx_size);
   c->alg = j->alg;
   c->decrypt = j->flag;
   c->padding = 1;
   c->quiet = 1;
   c->tag_length = j->tag ? j->tag : 16;
+
   return j->alg->ops->init(c, j->bytes[KEY], j->lengths[KEY], iv, iv_length);
 }
 
@@ -256,9 +269,11 @@ static void gcm_run(SubtleJob *j) {
     j->failed = 1;
     return;
   }
-  if (j->flag)
+  if (j->flag) {
     memcpy(c->tag, in + length, tag);
-  if (j->bytes[MORE] && j->lengths[MORE] && !j->alg->ops->aad(c, j->bytes[MORE], j->lengths[MORE], -1)) {
+  }
+  if (j->bytes[MORE] && j->lengths[MORE] &&
+      !j->alg->ops->aad(c, j->bytes[MORE], j->lengths[MORE], -1)) {
     j->failed = 1;
     return;
   }
@@ -298,8 +313,10 @@ typedef unsigned __int128 u128;
 
 static u128 block_number(const uint8_t *b) {
   u128 v = 0;
-  for (int i = 0; i < 16; ++i)
+  for (int i = 0; i < 16; ++i) {
     v = (v << 8) | b[i];
+  }
+
   return v;
 }
 
@@ -319,20 +336,23 @@ static void ctr_run(SubtleJob *j) {
   }
   uint8_t *out = j->out->data;
   size_t first = length;
-  if (j->bits < 128 && left < blocks)
+  if (j->bits < 128 && left < blocks) {
     first = (size_t)left * 16;
+  }
   if (!cipher_start(j, j->bytes[EXTRA], 16)) {
     j->failed = 1;
     return;
   }
-  if (first)
+  if (first) {
     j->alg->ops->update(j->cipher, j->bytes[DATA], first, out);
+  }
   if (first < length) {
     // The counter, wrapped to zero.
     uint8_t zeroed[16];
     memcpy(zeroed, j->bytes[EXTRA], 16);
-    for (int k = 0; k < j->bits; ++k)
-      zeroed[15 - k / 8] &= (uint8_t) ~(1u << (k % 8));
+    for (int k = 0; k < j->bits; ++k) {
+      zeroed[15 - k / 8] &= (uint8_t)~(1u << (k % 8));
+    }
     cipher_start(j, zeroed, 16);
     j->alg->ops->update(j->cipher, j->bytes[DATA] + first, length - first, out + first);
   }
@@ -351,20 +371,24 @@ void tz_crypto_subtle_aes(TzPromise *p, const TzCipherAlg *alg, const TzType *kt
   j->flag = decrypt;
   j->tag = tag;
   j->bits = bits;
-  if (!job_copy(j, KEY, kt, kv) || !job_copy(j, EXTRA, it, iv) || !job_copy(j, DATA, dt, dv))
+  if (!job_copy(j, KEY, kt, kv) || !job_copy(j, EXTRA, it, iv) || !job_copy(j, DATA, dt, dv)) {
     return;
-  if (at && !job_copy(j, MORE, at, av))
+  }
+  if (at && !job_copy(j, MORE, at, av)) {
     return;
+  }
   j->cipher = (TzCipher *)tz_obj_alloc((int64_t)(sizeof(TzCipher) + alg->ctx_size));
   memset(j->cipher, 0, sizeof(TzCipher) + alg->ctx_size);
   size_t length = j->lengths[DATA];
   switch (alg->kind) {
   case TZ_CIPHER_AEAD:
     // Data shorter than its tag, which the library rejects first, fails.
-    if (decrypt && length < (size_t)tag)
+    if (decrypt && length < (size_t)tag) {
       j->failed = 1;
-    job_queue(j, gcm_run, decrypt ? (j->failed ? 0 : (int64_t)(length - (size_t)tag))
-                                  : (int64_t)(length + (size_t)tag));
+    }
+    job_queue(j, gcm_run,
+              decrypt ? (j->failed ? 0 : (int64_t)(length - (size_t)tag))
+                      : (int64_t)(length + (size_t)tag));
     break;
   case TZ_CIPHER_BLOCK:
     job_queue(j, cbc_run, (int64_t)(decrypt ? length : length + 16 - length % 16));

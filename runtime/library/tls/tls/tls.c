@@ -40,7 +40,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
-
 #include "runtime/library/tls/tls/tls_roots.h"
 
 // node 24's tls.DEFAULT_CIPHERS: the suites of TLS 1.3, and the ciphers of TLS 1.2.
@@ -98,6 +97,7 @@ static void *tls_error(TzMaker make, const char *code, const char *message, int3
   parts.errno_value = number;
   parts.code = ascii(code);
   parts.syscall = ascii("");
+
   return make(&parts);
 }
 
@@ -129,15 +129,19 @@ static void *ssl_error(TzMaker make, unsigned long error) {
   char message[256];
   ERR_error_string_n(error, message, sizeof message);
   const char *lib = "";
-  for (size_t i = 0; i < sizeof kLibs / sizeof kLibs[0]; ++i)
-    if (kLibs[i].lib == ERR_GET_LIB(error))
+  for (size_t i = 0; i < sizeof kLibs / sizeof kLibs[0]; ++i) {
+    if (kLibs[i].lib == ERR_GET_LIB(error)) {
       lib = kLibs[i].name;
+    }
+  }
   char code[160];
   int n = snprintf(code, sizeof code, "ERR_%s%s", strcmp(lib, "SSL_") == 0 ? "" : "OSSL_", lib);
   const char *reason = ERR_reason_error_string(error);
-  for (const char *r = reason ? reason : "unknown"; *r && n + 1 < (int)sizeof code; ++r)
+  for (const char *r = reason ? reason : "unknown"; *r && n + 1 < (int)sizeof code; ++r) {
     code[n++] = *r == ' ' ? '_' : *r >= 'a' && *r <= 'z' ? (char)(*r - 32) : *r;
+  }
   code[n] = 0;
+
   return tls_error(make, code, message, 0);
 }
 
@@ -199,6 +203,7 @@ static void *verify_error(TzMaker make, long result) {
            hint ? "; if the root CA is installed locally, try running the program with "
                   "NODE_USE_SYSTEM_CA=1"
                 : "");
+
   return tls_error(make, verify_code(result), message, 0);
 }
 
@@ -216,8 +221,9 @@ static void text_add(Text *t, const char *s, size_t n) {
   if (t->length + n + 1 > t->cap) {
     size_t cap = t->cap * 2 + n + 64;
     char *data = (char *)tz_alloc(cap);
-    if (t->length)
+    if (t->length) {
       memcpy(data, t->data, t->length);
+    }
     tz_free(t->data);
     t->data = data;
     t->cap = cap;
@@ -246,6 +252,7 @@ static int bio_write(BIO *bio, const char *data, size_t length, size_t *written)
   memcpy(net_seal_reserve(c, length), data, length);
   c->sealed_len += (uint32_t)length;
   *written = length;
+
   return 1;
 }
 
@@ -257,15 +264,18 @@ static int bio_read(BIO *bio, char *out, size_t length, size_t *got) {
   size_t have = c->raw_end - c->raw_start;
   *got = 0;
   if (!have) {
-    if (!c->raw_eof)
+    if (!c->raw_eof) {
       BIO_set_retry_read(bio);
+    }
     return 0;
   }
-  if (length > have)
+  if (length > have) {
     length = have;
+  }
   memcpy(out, c->raw + c->raw_start, length);
   c->raw_start += (uint32_t)length;
   *got = length;
+
   return 1;
 }
 
@@ -287,6 +297,7 @@ static long bio_ctrl(BIO *bio, int cmd, long num, void *ptr) {
 
 static int bio_create(BIO *bio) {
   BIO_set_init(bio, 1);
+
   return 1;
 }
 
@@ -299,6 +310,7 @@ static BIO_METHOD *bio_method(void) {
     BIO_meth_set_create(m, bio_create);
     tz_tls_bio_method = m;
   }
+
   return tz_tls_bio_method;
 }
 
@@ -312,8 +324,9 @@ static void tls_seal(NetConn *c);
 // the connection breaks with NET_TLS_FAILED.
 static void fail(NetConn *c, unsigned long error) {
   Tls *t = (Tls *)c->tls;
-  if (t->failed)
+  if (t->failed) {
     return;
+  }
   t->failed = 1;
   t->failure = error;
   ERR_clear_error();
@@ -326,29 +339,34 @@ static void fail(NetConn *c, unsigned long error) {
 static unsigned long handshake_error(NetConn *c) {
   unsigned long error = ERR_peek_error();
   if (c->raw_eof && c->raw_start == c->raw_end &&
-      (!error || ERR_GET_REASON(error) == SSL_R_UNEXPECTED_EOF_WHILE_READING))
+      (!error || ERR_GET_REASON(error) == SSL_R_UNEXPECTED_EOF_WHILE_READING)) {
     return 0;
+  }
+
   return error ? error : ERR_PACK(ERR_LIB_SSL, 0, SSL_R_UNEXPECTED_EOF_WHILE_READING);
 }
 
 static int tls_open(NetConn *c) {
   Tls *t = (Tls *)c->tls;
-  if (t->failed)
+  if (t->failed) {
     return 1;
+  }
   if (!t->handshaken) {
     ERR_clear_error();
     int r = SSL_do_handshake(t->ssl);
     if (r != 1) {
       int e = SSL_get_error(t->ssl, r);
-      if ((e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) && !c->raw_eof)
+      if ((e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) && !c->raw_eof) {
         return 0;
+      }
       fail(c, handshake_error(c));
       return 1;
     }
     t->handshaken = 1;
     // A client checks the server before the program goes on (handshake_input).
-    if (!t->server)
+    if (!t->server) {
       return 1;
+    }
   }
   int produced = 0;
   for (;;) {
@@ -363,8 +381,9 @@ static int tls_open(NetConn *c) {
     }
     int e = SSL_get_error(t->ssl, r);
     if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
-      if (!c->raw_eof || c->raw_start != c->raw_end)
+      if (!c->raw_eof || c->raw_start != c->raw_end) {
         return produced;
+      }
       c->eof = 1;
       return 1;
     }
@@ -380,8 +399,9 @@ static int tls_open(NetConn *c) {
 
 static void tls_seal(NetConn *c) {
   Tls *t = (Tls *)c->tls;
-  if (!t->handshaken || t->failed || t->shut || !c->out_len)
+  if (!t->handshaken || t->failed || t->shut || !c->out_len) {
     return;
+  }
   size_t written = 0;
   ERR_clear_error();
   if (SSL_write_ex(t->ssl, c->out, c->out_len, &written) != 1) {
@@ -393,8 +413,9 @@ static void tls_seal(NetConn *c) {
 
 static void tls_shutdown(NetConn *c) {
   Tls *t = (Tls *)c->tls;
-  if (t->shut)
+  if (t->shut) {
     return;
+  }
   if (!t->handshaken || t->failed) {
     // Nothing goes out to a peer that was not checked.
     c->out_len = 0;
@@ -412,6 +433,7 @@ static void tls_shutdown(NetConn *c) {
 
 static void *tls_failure(NetConn *c, TzMaker make) {
   Tls *t = (Tls *)c->tls;
+
   return t->failure ? ssl_error(make, t->failure) : disconnected(make);
 }
 
@@ -449,6 +471,7 @@ static Tls *tls_new(NetConn *c, SSL_CTX *ctx) {
   SSL_set_bio(t->ssl, bio, bio);
   c->tls = t;
   c->tls_ops = &tls_ops;
+
   return t;
 }
 
@@ -469,13 +492,15 @@ static void add_mozilla_roots(X509_STORE *store) {
   int r = inflate(&z, Z_FINISH);
   size_t length = z.total_out;
   inflateEnd(&z);
-  if (r != Z_STREAM_END || length != TLS_ROOTS_SIZE)
+  if (r != Z_STREAM_END || length != TLS_ROOTS_SIZE) {
     tz_panicf("the root certificates of TLS are damaged");
+  }
   const unsigned char *p = der, *end = der + length;
   while (p < end) {
     X509 *cert = d2i_X509(NULL, &p, (long)(end - p));
-    if (!cert)
+    if (!cert) {
       tz_panicf("the root certificates of TLS are damaged");
+    }
     X509_STORE_add_cert(store, cert);
     X509_free(cert);
   }
@@ -498,14 +523,16 @@ static void add_extra_roots(X509_STORE *store) {
   FILE *f = NULL;
 #ifdef _WIN32
   const wchar_t *wide = _wgetenv(L"NODE_EXTRA_CA_CERTS");
-  if (!wide || !*wide)
+  if (!wide || !*wide) {
     return;
+  }
   WideCharToMultiByte(CP_UTF8, 0, wide, -1, name, sizeof name, NULL, NULL);
   f = _wfopen(wide, L"rb");
 #else
   const char *given = getenv("NODE_EXTRA_CA_CERTS");
-  if (!given || !*given)
+  if (!given || !*given) {
     return;
+  }
   snprintf(name, sizeof name, "%s", given);
   f = fopen(given, "rb");
 #endif
@@ -520,8 +547,9 @@ static void add_extra_roots(X509_STORE *store) {
   Text data = {NULL, 0, 0};
   char chunk[16384];
   size_t n;
-  while ((n = fread(chunk, 1, sizeof chunk, f)) > 0)
+  while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) {
     text_add(&data, chunk, n);
+  }
   fclose(f);
   BIO *bio = BIO_new_mem_buf(text_of(&data), (int)data.length);
   ERR_clear_error();
@@ -550,17 +578,21 @@ static void add_extra_roots(X509_STORE *store) {
 // server authentication, as node takes the system's (IsCertTrustedForServerAuth).
 static int for_servers(PCCERT_CONTEXT cert) {
   DWORD size = 0;
-  if (!CertGetEnhancedKeyUsage(cert, 0, NULL, &size))
+  if (!CertGetEnhancedKeyUsage(cert, 0, NULL, &size)) {
     return 0;
+  }
   CERT_ENHKEY_USAGE *usage = (CERT_ENHKEY_USAGE *)tz_alloc(size);
   int ok = 0;
   if (CertGetEnhancedKeyUsage(cert, 0, usage, &size)) {
-    if (usage->cUsageIdentifier == 0)
+    if (usage->cUsageIdentifier == 0) {
       ok = GetLastError() == (DWORD)CRYPT_E_NOT_FOUND;
-    for (DWORD i = 0; i < usage->cUsageIdentifier; ++i)
+    }
+    for (DWORD i = 0; i < usage->cUsageIdentifier; ++i) {
       ok |= strcmp(usage->rgpszUsageIdentifier[i], szOID_PKIX_KP_SERVER_AUTH) == 0;
+    }
   }
   tz_free(usage);
+
   return ok;
 }
 #endif
@@ -572,12 +604,14 @@ static void add_system_roots(X509_STORE *store) {
   static const wchar_t *const kStores[] = {L"ROOT", L"CA", L"TrustedPeople"};
   for (size_t i = 0; i < sizeof kStores / sizeof kStores[0]; ++i) {
     HCERTSTORE system = CertOpenSystemStoreW(0, kStores[i]);
-    if (!system)
+    if (!system) {
       continue;
+    }
     PCCERT_CONTEXT cert = NULL;
     while ((cert = CertEnumCertificatesInStore(system, cert)) != NULL) {
-      if (!for_servers(cert))
+      if (!for_servers(cert)) {
         continue;
+      }
       const unsigned char *p = cert->pbCertEncoded;
       X509 *x = d2i_X509(NULL, &p, (long)cert->cbCertEncoded);
       if (x) {
@@ -598,10 +632,12 @@ static X509_STORE *trusted_roots(void) {
   add_mozilla_roots(store);
   const char *system = getenv("NODE_USE_SYSTEM_CA");
   tz_tls_system_roots = system && strcmp(system, "1") == 0;
-  if (tz_tls_system_roots)
+  if (tz_tls_system_roots) {
     add_system_roots(store);
+  }
   add_extra_roots(store);
   ERR_clear_error();
+
   return store;
 }
 
@@ -625,12 +661,14 @@ static void configure(SSL_CTX *ctx) {
 static int verify_all(int ok, X509_STORE_CTX *store) {
   (void)ok;
   (void)store;
+
   return 1;
 }
 
 static SSL_CTX *client_context(void) {
-  if (tz_tls_client)
+  if (tz_tls_client) {
     return tz_tls_client;
+  }
   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
   configure(ctx);
   SSL_CTX_set_cert_store(ctx, trusted_roots());
@@ -638,6 +676,7 @@ static SSL_CTX *client_context(void) {
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_all);
   SSL_CTX_set_alpn_protos(ctx, kAlpn, sizeof kAlpn - 1);
   tz_tls_client = ctx;
+
   return ctx;
 }
 
@@ -649,6 +688,7 @@ static int select_alpn(SSL *ssl, const unsigned char **out, unsigned char *out_l
   unsigned char *chosen = NULL;
   int status = SSL_select_next_proto(&chosen, out_length, kAlpn, sizeof kAlpn - 1, in, in_length);
   *out = chosen;
+
   return status == OPENSSL_NPN_NEGOTIATED ? SSL_TLSEXT_ERR_OK : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
@@ -680,9 +720,11 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
   X509_free(leaf);
   if (ok) {
     X509 *ca;
-    while ((ca = PEM_read_bio_X509(bio, NULL, NULL, NULL)) != NULL)
-      if (SSL_CTX_add0_chain_cert(ctx, ca) != 1)
+    while ((ca = PEM_read_bio_X509(bio, NULL, NULL, NULL)) != NULL) {
+      if (SSL_CTX_add0_chain_cert(ctx, ca) != 1) {
         X509_free(ca);
+      }
+    }
     ERR_clear_error(); // the end, a PEM without a start line
   }
   BIO_free(bio);
@@ -705,6 +747,7 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
     SSL_CTX_free(ctx);
     return NULL;
   }
+
   return ctx;
 }
 
@@ -714,10 +757,13 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
 
 // An address written as one: its bytes (4 or 16); 0 for a name.
 static int address_of(const char *host, unsigned char *out) {
-  if (inet_pton(AF_INET, host, out) == 1)
+  if (inet_pton(AF_INET, host, out) == 1) {
     return 4;
-  if (inet_pton(AF_INET6, host, out) == 1)
+  }
+  if (inet_pton(AF_INET6, host, out) == 1) {
     return 16;
+  }
+
   return 0;
 }
 
@@ -725,12 +771,14 @@ static int address_of(const char *host, unsigned char *out) {
 static int split_dots(char *s, char **parts, int max) {
   int count = 0;
   for (char *p = s;;) {
-    if (count == max)
+    if (count == max) {
       return -1;
+    }
     parts[count++] = p;
     char *dot = strchr(p, '.');
-    if (!dot)
+    if (!dot) {
       return count;
+    }
     *dot = 0;
     p = dot + 1;
   }
@@ -741,36 +789,47 @@ static int split_dots(char *s, char **parts, int max) {
 // label only, not in an IDNA label, and not over a top-level domain.
 static int name_matches(const char *host, const unsigned char *given, size_t length) {
   char pattern[256], name[256];
-  if (length == 0 || length >= sizeof pattern || strlen(host) >= sizeof name)
+  if (length == 0 || length >= sizeof pattern || strlen(host) >= sizeof name) {
     return 0;
+  }
   for (size_t i = 0; i < length; ++i) {
     unsigned char ch = given[i];
     // Control characters, blanks and anything outside ASCII (an IDNA U-label) never match.
-    if (ch < 0x21 || ch > 0x7F)
+    if (ch < 0x21 || ch > 0x7F) {
       return 0;
+    }
     pattern[i] = ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : (char)ch;
   }
   pattern[length] = 0;
-  if (pattern[length - 1] == '.')
+  if (pattern[length - 1] == '.') {
     pattern[length - 1] = 0;
+  }
   snprintf(name, sizeof name, "%s", host);
   char *hosts[128], *patterns[128];
   int h = split_dots(name, hosts, 128), p = split_dots(pattern, patterns, 128);
-  if (h < 0 || p < 0 || h != p)
+  if (h < 0 || p < 0 || h != p) {
     return 0;
-  for (int i = 0; i < p; ++i)
-    if (!*patterns[i])
+  }
+  for (int i = 0; i < p; ++i) {
+    if (!*patterns[i]) {
       return 0;
-  for (int i = h - 1; i > 0; --i)
-    if (strcmp(hosts[i], patterns[i]) != 0)
+    }
+  }
+  for (int i = h - 1; i > 0; --i) {
+    if (strcmp(hosts[i], patterns[i]) != 0) {
       return 0;
+    }
+  }
   const char *sub = hosts[0], *wild = patterns[0];
   const char *star = strchr(wild, '*');
-  if (!star || strstr(wild, "xn--"))
+  if (!star || strstr(wild, "xn--")) {
     return strcmp(sub, wild) == 0;
-  if (strchr(star + 1, '*') || p <= 2)
+  }
+  if (strchr(star + 1, '*') || p <= 2) {
     return 0;
+  }
   size_t prefix = (size_t)(star - wild), suffix = strlen(star + 1), n = strlen(sub);
+
   return prefix + suffix <= n && strncmp(sub, wild, prefix) == 0 &&
          strcmp(sub + n - suffix, star + 1) == 0;
 }
@@ -780,8 +839,9 @@ static int name_matches(const char *host, const unsigned char *given, size_t len
 static void put_alt_name(Text *t, const char *prefix, const unsigned char *s, size_t n) {
   text_put(t, prefix);
   int safe = 1;
-  for (size_t i = 0; i < n && safe; ++i)
+  for (size_t i = 0; i < n && safe; ++i) {
     safe = s[i] >= ' ' && s[i] <= '~' && s[i] != '"' && s[i] != '\\' && s[i] != ',' && s[i] != '\'';
+  }
   if (safe) {
     text_add(t, (const char *)s, n);
     return;
@@ -822,9 +882,10 @@ static void put_general_name(Text *t, const GENERAL_NAME *g) {
       snprintf(text, sizeof text, "IP Address:%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
     } else if (g->d.ip->length == 16) {
       int n = snprintf(text, sizeof text, "IP Address:");
-      for (int j = 0; j < 8; ++j)
+      for (int j = 0; j < 8; ++j) {
         n += snprintf(text + n, sizeof text - (size_t)n, j ? ":%X" : "%X",
                       (b[2 * j] << 8) | b[2 * j + 1]);
+      }
     } else {
       snprintf(text, sizeof text, "IP Address:<invalid length=%d>", g->d.ip->length);
     }
@@ -835,8 +896,9 @@ static void put_general_name(Text *t, const GENERAL_NAME *g) {
   GENERAL_NAME_print(bio, (GENERAL_NAME *)g);
   char *data = NULL;
   long n = BIO_get_mem_data(bio, &data);
-  if (n > 0)
+  if (n > 0) {
     text_add(t, data, (size_t)n);
+  }
   BIO_free(bio);
 }
 
@@ -845,11 +907,13 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
   char host[256];
   snprintf(host, sizeof host, "%s", given);
   size_t length = strlen(host);
-  if (length && host[length - 1] == '.')
+  if (length && host[length - 1] == '.') {
     host[--length] = 0;
+  }
   char lowered[256];
-  for (size_t i = 0; i <= length; ++i)
+  for (size_t i = 0; i <= length; ++i) {
     lowered[i] = host[i] >= 'A' && host[i] <= 'Z' ? (char)(host[i] + 32) : host[i];
+  }
   unsigned char address[16];
   int address_length = address_of(host, address);
 
@@ -858,23 +922,27 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
   GENERAL_NAMES *names = (GENERAL_NAMES *)X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
   for (int i = 0; i < sk_GENERAL_NAME_num(names); ++i) {
     const GENERAL_NAME *g = sk_GENERAL_NAME_value(names, i);
-    if (i)
+    if (i) {
       text_put(&altnames, ", ");
+    }
     put_general_name(&altnames, g);
     if (g->type == GEN_DNS) {
       ++dns;
       if (!address_length && name_matches(lowered, ASN1_STRING_get0_data(g->d.dNSName),
-                                          (size_t)ASN1_STRING_length(g->d.dNSName)))
+                                          (size_t)ASN1_STRING_length(g->d.dNSName))) {
         valid = 1;
+      }
     } else if (g->type == GEN_IPADD && (g->d.ip->length == 4 || g->d.ip->length == 16)) {
       char text[64];
       inet_ntop(g->d.ip->length == 4 ? AF_INET : AF_INET6, g->d.ip->data, text, sizeof text);
-      if (ips.length)
+      if (ips.length) {
         text_put(&ips, ", ");
+      }
       text_put(&ips, text);
       if (address_length == g->d.ip->length &&
-          memcmp(address, g->d.ip->data, (size_t)address_length) == 0)
+          memcmp(address, g->d.ip->data, (size_t)address_length) == 0) {
         valid = 1;
+      }
     }
   }
   GENERAL_NAMES_free(names);
@@ -902,13 +970,16 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
       unsigned char *utf8 = NULL;
       int n =
           ASN1_STRING_to_UTF8(&utf8, X509_NAME_ENTRY_get_data(X509_NAME_get_entry(subject, at)));
-      if (n < 0)
+      if (n < 0) {
         continue;
-      if (count++)
+      }
+      if (count++) {
         text_put(&cn, ",");
+      }
       text_add(&cn, (const char *)utf8, (size_t)n);
-      if (name_matches(lowered, utf8, (size_t)n))
+      if (name_matches(lowered, utf8, (size_t)n)) {
         valid = 1;
+      }
       OPENSSL_free(utf8);
     }
     if (!count) {
@@ -932,6 +1003,7 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
   tz_free(altnames.data);
   tz_free(ips.data);
   tz_free(reason.data);
+
   return error;
 }
 
@@ -940,16 +1012,19 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
 static void *check_peer(Tls *t) {
   X509 *cert = SSL_get1_peer_certificate(t->ssl);
   long result = X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
-  if (cert)
+  if (cert) {
     result = SSL_get_verify_result(t->ssl);
-  else if (SSL_version(t->ssl) == TLS1_3_VERSION && SSL_session_reused(t->ssl))
+  } else if (SSL_version(t->ssl) == TLS1_3_VERSION && SSL_session_reused(t->ssl)) {
     result = X509_V_OK;
+  }
   void *error = NULL;
-  if (result != X509_V_OK)
+  if (result != X509_V_OK) {
     error = verify_error(t->make, result);
-  else if (cert && !SSL_session_reused(t->ssl))
+  } else if (cert && !SSL_session_reused(t->ssl)) {
     error = check_identity(t->make, t->host, cert);
+  }
   X509_free(cert);
+
   return error;
 }
 
@@ -960,17 +1035,19 @@ static void *check_peer(Tls *t) {
 // The handshake of a client came to its end, or broke.
 static void handshake_input(NetConn *c) {
   Tls *t = (Tls *)c->tls;
-  if (!t || !t->promise)
+  if (!t || !t->promise) {
     return;
+  }
   void *error;
-  if (c->error == NET_TLS_FAILED)
+  if (c->error == NET_TLS_FAILED) {
     error = tls_failure(c, t->make);
-  else if (c->error)
+  } else if (c->error) {
     error = net_system_error(t->make, c->error, "read", NULL, 0);
-  else if (!t->handshaken)
+  } else if (!t->handshaken) {
     error = disconnected(t->make);
-  else
+  } else {
     error = check_peer(t);
+  }
   stop_waiting(t);
   if (error) {
     net_reject(&t->promise, error);
@@ -986,10 +1063,11 @@ static void abort_handshake(TzAbortListener *l) {
   t->signal = NULL;
   void *reason = tz_signal_reason(signal);
   tz_instance_release((TzInstance *)signal);
-  if (t->promise)
+  if (t->promise) {
     net_reject(&t->promise, reason);
-  else
+  } else {
     tz_instance_release((TzInstance *)reason);
+  }
   net_abort(t->conn);
 }
 
@@ -1010,8 +1088,9 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
   tz_instance_release((TzInstance *)host);
   unsigned char address[16];
   // SNI names a host, never an address, as node sends it.
-  if (!address_of(t->host, address))
+  if (!address_of(t->host, address)) {
     SSL_set_tlsext_host_name(t->ssl, t->host);
+  }
   SSL_set_connect_state(t->ssl);
   c->on_input = handshake_input;
   if (signal) {
@@ -1048,8 +1127,9 @@ void *tz_tls_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
                     void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
                     TzMaker make) {
   SSL_CTX *ctx = server_context(cert_obj, cert_meta, key_obj, key_meta);
-  if (!ctx)
+  if (!ctx) {
     return NULL;
+  }
   NetListener *l = (NetListener *)tz_net_listen(host_obj, host_meta, port, max_body, make);
   if (!l) {
     SSL_CTX_free(ctx);
@@ -1058,5 +1138,6 @@ void *tz_tls_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   l->tls = ctx;
   l->tls_accept = accept_tls;
   l->tls_release = release_context;
+
   return l;
 }

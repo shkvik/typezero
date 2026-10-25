@@ -1,0 +1,526 @@
+#include "compiler/library/json/json_static_checker/json_static_checker.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/call_checker/call_checker.h"
+#include "compiler/check/expr/argument_checker/argument_checker.h"
+#include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
+#include "compiler/library/json/json_checker/json_checker.h"
+#include "compiler/library/json/json_type_checker/json_type_checker.h"
+#include "compiler/library/reflect/reflect_checker/reflect_checker.h"
+#include "compiler/whole_program/flows/flows.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/ConvertUTF.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+using llvm::dyn_cast_or_null;
+
+namespace tz {
+
+namespace {
+
+std::string toUtf8(const std::u16string &text) {
+  std::string utf8;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
+      utf8);
+
+  return utf8;
+}
+
+// A problem with the text of a JSON file, and where it is (a byte offset).
+struct JsonProblem {
+  std::string message;
+  size_t offset = 0;
+};
+
+// Checks the text of a file that embedJson reads, with the grammar of
+// JSON.parse (runtime/library/json/json/json.c), so that the program cannot
+// fail to parse it.
+JsonProblem checkJsonText(llvm::StringRef s) {
+  size_t i = 0, n = s.size();
+  auto whitespace = [&] {
+    while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) {
+      ++i;
+    }
+  };
+  auto digits = [&] {
+    size_t start = i;
+    while (i < n && llvm::isDigit(s[i])) {
+      ++i;
+    }
+
+    return i > start;
+  };
+  auto problem = [&](std::string message) { return JsonProblem{std::move(message), i}; };
+  // A string from its opening quote; empty on success.
+  auto string = [&]() -> std::string {
+    ++i;
+    for (;;) {
+      if (i >= n) {
+        return "the string is not closed";
+      }
+      unsigned char c = static_cast<unsigned char>(s[i]);
+      if (c == '"') {
+        ++i;
+        return "";
+      }
+      if (c < 0x20) {
+        return "a control character in a string must be escaped, e.g. '\\n' for a line break";
+      }
+      if (c != '\\') {
+        ++i;
+        continue;
+      }
+      if (++i >= n) {
+        return "the string is not closed";
+      }
+      char e = s[i];
+      if (e == 'u') {
+        for (int k = 0; k < 4; ++k) {
+          if (++i >= n || !llvm::isHexDigit(s[i])) {
+            return "'\\u' needs four hexadecimal digits";
+          }
+        }
+      } else if (!llvm::StringRef("\"\\/bfnrt").contains(e)) {
+        return "'\\" + std::string(1, e) + "' is not an escape of JSON";
+      }
+      ++i;
+    }
+  };
+  auto key = [&]() -> std::string {
+    whitespace();
+    if (i >= n || s[i] != '"') {
+      return "expected a property name in double quotes";
+    }
+    if (std::string m = string(); !m.empty()) {
+      return m;
+    }
+    whitespace();
+    if (i >= n || s[i] != ':') {
+      return "expected ':' after a property name";
+    }
+    ++i;
+
+    return "";
+  };
+
+  std::vector<char> open; // '[' and '{' around the value being read
+  for (;;) {
+    whitespace();
+    if (i >= n) {
+      return problem("the text ends where a value should be");
+    }
+    char c = s[i];
+    if (c == '"') {
+      size_t start = i;
+      if (std::string m = string(); !m.empty()) {
+        JsonProblem p = problem(m);
+        if (m == "the string is not closed") {
+          p.offset = start;
+        }
+        return p;
+      }
+    } else if (c == '-' || llvm::isDigit(c)) {
+      if (c == '-') {
+        ++i;
+      }
+      if (i < n && s[i] == '0') {
+        ++i;
+        if (i < n && llvm::isDigit(s[i])) {
+          return problem("a number cannot start with 0 followed by more digits");
+        }
+      } else if (!digits()) {
+        return problem("expected digits after '-'");
+      }
+      if (i < n && s[i] == '.') {
+        ++i;
+        if (!digits()) {
+          return problem("expected digits after the decimal point");
+        }
+      }
+      if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+        ++i;
+        if (i < n && (s[i] == '+' || s[i] == '-')) {
+          ++i;
+        }
+        if (!digits()) {
+          return problem("expected digits in the exponent");
+        }
+      }
+    } else if (c == '{' || c == '[') {
+      ++i;
+      whitespace();
+      if (i < n && s[i] == (c == '{' ? '}' : ']')) {
+        ++i;
+      } else {
+        open.push_back(c);
+        if (c == '{') {
+          if (std::string m = key(); !m.empty()) {
+            return problem(m);
+          }
+        }
+        continue;
+      }
+    } else if (s.substr(i).starts_with("true") || s.substr(i).starts_with("null")) {
+      i += 4;
+    } else if (s.substr(i).starts_with("false")) {
+      i += 5;
+    } else {
+      unsigned char u = static_cast<unsigned char>(c);
+      return problem(u >= 0x21 && u < 0x7F ? "expected a value, found '" + std::string(1, c) + "'"
+                                           : std::string("expected a value"));
+    }
+    // The value ends the arrays and objects it completes.
+    for (;;) {
+      whitespace();
+      if (open.empty()) {
+        if (i < n) {
+          return problem("unexpected text after the value");
+        }
+        return {};
+      }
+      char container = open.back();
+      if (i < n && s[i] == ',') {
+        ++i;
+        if (container == '{') {
+          if (std::string m = key(); !m.empty()) {
+            return problem(m);
+          }
+        }
+        break;
+      }
+      if (i < n && s[i] == (container == '{' ? '}' : ']')) {
+        ++i;
+        open.pop_back();
+        continue;
+      }
+      return problem(container == '{' ? "expected ',' or '}' after a property value"
+                                      : "expected ',' or ']' after an array element");
+    }
+  }
+}
+
+// A class among `type`, its arrays and its fields with a method toJSON,
+// which JSON.stringify in JavaScript would call; null if none.
+const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
+  while (type->isOptional() || type->isArray()) {
+    type = type->inner();
+  }
+  if (type->isResult()) {
+    if (const ClassDecl *cls = classWithToJson(type->okType(), seen)) {
+      return cls;
+    }
+    return classWithToJson(type->errType(), seen);
+  }
+  // A Record writes its values; a Map and a Set write `{}`.
+  if (type->isRecord()) {
+    return classWithToJson(type->valueType(), seen);
+  }
+  if (!type->isObject() || !seen.insert(type).second) {
+    return nullptr;
+  }
+  if (const ClassDecl *cls = type->classDecl()) {
+    for (const FunctionDecl *fn : cls->methods) {
+      if (fn->name == "toJSON" && !fn->isStatic) {
+        return cls;
+      }
+    }
+  }
+  for (const Field &f : type->fields()) {
+    if (const ClassDecl *cls = classWithToJson(f.type, seen)) {
+      return cls;
+    }
+  }
+
+  return nullptr;
+}
+
+// Whether JSON.stringify of a value of `type` may give undefined: for
+// undefined itself, a function, or a `T | undefined`.
+bool mayStringifyToUndefined(const Type *type) {
+  return type->isUndefined() || type->isOptional() || type->isFunction() || type->isNever() ||
+         type->isUnknown();
+}
+
+} // namespace
+
+JsonStaticChecker::JsonStaticChecker(Sema &sema) : sema_(sema) {}
+
+Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
+  call->type = Type::error();
+  auto checkArgsLoosely = [&] {
+    for (Expr *&arg : call->args) {
+      if (!JsonChecker::isNullName(arg)) {
+        arg = sema_.exprChecker().checkExpr(arg);
+      }
+    }
+  };
+  if (sema_.callChecker().rejectSpread(call)) {
+    return call;
+  }
+  llvm::StringRef fn = member->name;
+  if (fn == "parse") {
+    if (call->args.size() == 2) {
+      sema_.diags_.error(call->args[1]->loc(), "the reviver of JSON.parse is not supported; convert the "
+                                         "Json it gives, or give the type: 'JSON.parse<T>(text)'");
+      checkArgsLoosely();
+      return call;
+    }
+    if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
+      return call;
+    }
+    call->args[0] = sema_.argumentChecker().checkArg(call->args[0], Type::string());
+    if (member->typeArgs.empty()) {
+      call->builtin = Builtin::JsonParse;
+      call->type = Type::json();
+      return call;
+    }
+    if (member->typeArgs.size() != 1) {
+      sema_.diags_.error(member->loc(), "JSON.parse takes one type argument, the type to build: "
+                                  "'JSON.parse<User>(text)'");
+      return call;
+    }
+    const Type *target = sema_.typeResolver().resolveType(member->typeArgs[0], /*allowVoid=*/false);
+    if (!sema_.jsonTypeChecker().checkFromJsonType(target, member->typeArgs[0].loc, "JSON.parse")) {
+      return call;
+    }
+    call->builtin = Builtin::JsonParseAs;
+    call->type = target;
+    return call;
+  }
+  if (!member->typeArgs.empty()) {
+    sema_.diags_.error(member->loc(), "only JSON.parse takes a type argument");
+  }
+  if (fn != "stringify") {
+    sema_.diags_.error(member->loc(), "'JSON." + fn + "' does not exist; JSON has parse and stringify");
+    checkArgsLoosely();
+    return call;
+  }
+  if (!sema_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
+    return call;
+  }
+  // JSON.stringify(value, replacer, space): the replacer may only be null or
+  // undefined, and is dropped; the space is a number or a string.
+  Expr *value = call->args[0] = sema_.exprChecker().checkExpr(call->args[0]);
+  bool ok = !value->type->isError();
+  if (value->type->isVoid()) {
+    sema_.diags_.error(value->loc(), "an expression of type 'void' has no value to write as JSON");
+    ok = false;
+  }
+  llvm::SmallPtrSet<const Type *, 8> seen;
+  if (const ClassDecl *cls = ok ? classWithToJson(value->type, seen) : nullptr) {
+    sema_.diags_.error(value->loc(), "JSON.stringify does not call the method toJSON of class '" +
+                                   cls->name +
+                                   "': tz calls no code by itself; call it, e.g. "
+                                   "'JSON.stringify(x.toJSON())'");
+    ok = false;
+  }
+  std::vector<Expr *> args{value};
+  if (call->args.size() >= 2) {
+    Expr *replacer = call->args[1];
+    if (!JsonChecker::isNullName(replacer) && !isa<UndefinedExpr>(replacer)) {
+      replacer = sema_.exprChecker().checkExpr(replacer);
+      if (!replacer->type->isError()) {
+        sema_.diags_.error(replacer->loc(), "a replacer is not supported: tz calls no code by itself; "
+                                      "build the value to write first, and pass 'null' here");
+      }
+      ok = false;
+    }
+  }
+  if (call->args.size() == 3) {
+    Expr *space = call->args[2];
+    if (!JsonChecker::isNullName(space) && !isa<UndefinedExpr>(space)) {
+      space = sema_.exprChecker().checkExpr(space);
+      const Type *type = space->type;
+      if (type->isNumeric()) {
+        args.push_back(sema_.typeRelations().convert(space, Type::doubleTy()));
+      } else if (type->isString()) {
+        args.push_back(space);
+      } else if (!type->isError()) {
+        sema_.diags_.error(space->loc(), "the space of JSON.stringify is a number of spaces or a "
+                                   "string, found '" +
+                                       type->name() + "'");
+        ok = false;
+      }
+    }
+  }
+  if (!ok) {
+    return call;
+  }
+  call->args = std::move(args);
+  call->builtin = Builtin::JsonStringify;
+  call->type =
+      mayStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
+
+  return call;
+}
+
+bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::string &bytes, std::string &shown,
+                        std::string &full) {
+  Expr *arg = call->args[0];
+  std::string example =
+      (fn + (fn == "embedText" ? "(\"./page.html\")" : "(\"./data.json\")")).str();
+  std::u16string path;
+  if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
+    path = lit->value;
+  } else if (auto *tmpl = dyn_cast<TemplateExpr>(arg); tmpl && tmpl->exprs.empty()) {
+    path = tmpl->quasis[0];
+  } else {
+    call->args[0] = sema_.exprChecker().checkExpr(arg);
+    sema_.diags_.error(arg->loc(), "the path of " + fn +
+                                 " must be a string literal: the file is read "
+                                 "when the program is compiled, e.g. '" +
+                                 example + "'");
+    return false;
+  }
+  shown = toUtf8(path);
+  if (llvm::StringRef(shown).contains('\\')) {
+    sema_.diags_.error(arg->loc(), "write '/' in the path, not '\\', as on every system");
+    return false;
+  }
+  if (shown.empty() || llvm::sys::path::is_absolute(shown) || shown[0] == '/') {
+    sema_.diags_.error(arg->loc(), "the path of " + fn +
+                                 " is relative to the file it is written in, "
+                                 "e.g. '" +
+                                 example + "'");
+    return false;
+  }
+  llvm::SourceMgr &sources = sema_.diags_.sourceMgr();
+  unsigned id = sources.FindBufferContainingLoc(call->loc());
+  llvm::StringRef source = id ? sources.getMemoryBuffer(id)->getBufferIdentifier() : "";
+  llvm::SmallString<256> path8(llvm::sys::path::parent_path(source));
+  llvm::sys::path::append(path8, shown);
+  llvm::sys::path::remove_dots(path8, /*remove_dot_dot=*/true);
+  llvm::sys::path::native(path8);
+  full = std::string(path8);
+  auto buffer =
+      llvm::MemoryBuffer::getFile(full, /*IsText=*/false, /*RequiresNullTerminator=*/false);
+  if (!buffer) {
+    sema_.diags_.error(arg->loc(), "cannot read '" + shown + "': " + buffer.getError().message());
+    return false;
+  }
+  bytes = (*buffer)->getBuffer().str();
+
+  return true;
+}
+
+Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
+  static const llvm::StringLiteral names[] = {"embedJson", "embedText", "embedBytes", "fromJson"};
+  if (!llvm::any_of(names, [&](llvm::StringRef n) { return sema_.callChecker().isGlobalName(name, n); })) {
+    return nullptr;
+  }
+  llvm::StringRef fn = name->name;
+  call->type = Type::error();
+  auto checkArgsLoosely = [&] {
+    for (Expr *&arg : call->args) {
+      arg = sema_.exprChecker().checkExpr(arg);
+    }
+  };
+  if (sema_.callChecker().rejectSpread(call)) {
+    return call;
+  }
+
+  if (fn == "fromJson") {
+    // fromJson(User, j): through the constructor of a class.
+    if (name->typeArgs.empty() && call->args.size() == 2) {
+      return sema_.reflectChecker().checkFromJsonClass(call, name);
+    }
+    if (name->typeArgs.size() != 1) {
+      sema_.diags_.error(name->loc(), "fromJson needs the type to build, e.g. 'fromJson<User>(j)', or "
+                                "the class to make an object of, 'fromJson(User, j)'");
+      checkArgsLoosely();
+      return call;
+    }
+    if (!sema_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
+      return call;
+    }
+    // A `Json | undefined` too: undefined is for an optional type to take.
+    Expr *arg = sema_.exprChecker().checkExpr(call->args[0], Type::json());
+    call->args[0] = sema_.typeRelations().coerce(arg, arg->type->isOptional() || arg->type->isUndefined()
+                                    ? Type::optional(Type::json())
+                                    : Type::json());
+    const Type *target = sema_.typeResolver().resolveType(name->typeArgs[0], /*allowVoid=*/false);
+    if (!sema_.jsonTypeChecker().checkFromJsonType(target, name->typeArgs[0].loc, "fromJson")) {
+      return call;
+    }
+    call->builtin = Builtin::FromJson;
+    call->type = target;
+    return call;
+  }
+  if (!name->typeArgs.empty()) {
+    sema_.diags_.error(name->loc(), "'" + fn + "' takes no type arguments");
+  }
+
+  if (fn == "embedBytes") {
+    return sema_.bufferStaticChecker().checkEmbedBytes(call, name);
+  }
+  if (!sema_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
+    return call;
+  }
+  std::string bytes, shown, full;
+  if (!readEmbedded(call, fn, bytes, shown, full)) {
+    return call;
+  }
+  llvm::StringRef text(bytes);
+  // A file saved with a byte order mark: require() of a JSON file skips it
+  // in node too.
+  if (fn == "embedJson") {
+    text.consume_front("\xEF\xBB\xBF");
+  }
+  llvm::SmallVector<llvm::UTF16, 64> units;
+  if (!llvm::convertUTF8ToUTF16String(text, units)) {
+    sema_.diags_.error(call->args[0]->loc(), "'" + shown + "' is not text in UTF-8");
+    return call;
+  }
+  std::u16string content(units.begin(), units.end());
+
+  if (fn == "embedText") {
+    auto *lit = sema_.ctx_.make<StringLitExpr>(call->loc(), std::move(content));
+    lit->type = Type::string();
+    return lit;
+  }
+  if (JsonProblem problem = checkJsonText(text); !problem.message.empty()) {
+    // The line and the column in the file, which a note shows.
+    size_t line = 1, column = 1;
+    for (size_t i = 0; i < problem.offset && i < text.size(); ++i) {
+      if (text[i] == '\n') {
+        ++line;
+        column = 1;
+      } else if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+        ++column;
+      }
+    }
+    sema_.diags_.error(call->args[0]->loc(), "'" + shown + "' is not valid JSON: " + problem.message +
+                                           " (line " + std::to_string(line) + ", column " +
+                                           std::to_string(column) + ")");
+    llvm::SourceMgr &sources = sema_.diags_.sourceMgr();
+    unsigned id =
+        sources.AddNewSourceBuffer(llvm::MemoryBuffer::getMemBufferCopy(text, full), llvm::SMLoc());
+    const char *start = sources.getMemoryBuffer(id)->getBufferStart();
+    sema_.diags_.note(llvm::SMLoc::getFromPointer(start + std::min(problem.offset, text.size())),
+                "the JSON is wrong here");
+    return call;
+  }
+  // The text, and the file it came from: one file gives one value, whichever
+  // file of the program embeds it (see CodeGen::emitJsonCall).
+  llvm::SMLoc loc = call->args[0]->loc();
+  auto *lit = sema_.ctx_.make<StringLitExpr>(loc, std::move(content));
+  lit->type = Type::string();
+  llvm::SmallVector<llvm::UTF16, 64> path;
+  llvm::convertUTF8ToUTF16String(full, path);
+  auto *file = sema_.ctx_.make<StringLitExpr>(loc, std::u16string(path.begin(), path.end()));
+  file->type = Type::string();
+  call->args = {lit, file};
+  call->builtin = Builtin::EmbedJson;
+  call->type = Type::json();
+
+  return call;
+}
+
+} // namespace tz

@@ -37,7 +37,6 @@
 // system decides, which Node may as well.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -95,8 +94,10 @@ int tz_io_pipe[2] = {-1, -1};
 static int32_t pool_size(void) {
   const char *value = getenv("UV_THREADPOOL_SIZE");
   int32_t n = value ? (int32_t)atoi(value) : 4;
-  if (n <= 0)
+  if (n <= 0) {
     n = 1;
+  }
+
   return n > MAX_THREADS ? MAX_THREADS : n;
 }
 
@@ -105,9 +106,11 @@ static int32_t pool_size(void) {
 static TzWork *take_work(void) {
   TzWork *w = tz_io_queue_head;
   tz_io_queue_head = w->next;
-  if (!tz_io_queue_head)
+  if (!tz_io_queue_head) {
     tz_io_queue_tail = NULL;
+  }
   w->next = NULL;
+
   return w;
 }
 
@@ -117,8 +120,9 @@ static DWORD WINAPI pool_thread(void *arg) {
   (void)arg;
   for (;;) {
     AcquireSRWLockExclusive(&tz_io_lock);
-    while (!tz_io_queue_head)
+    while (!tz_io_queue_head) {
       SleepConditionVariableSRW(&tz_io_wake, &tz_io_lock, INFINITE, 0);
+    }
     TzWork *w = take_work();
     ReleaseSRWLockExclusive(&tz_io_lock);
     w->work(w);
@@ -128,16 +132,18 @@ static DWORD WINAPI pool_thread(void *arg) {
 
 static void start_port(void) {
   tz_io_port = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
-  if (!tz_io_port)
+  if (!tz_io_port) {
     tz_panicf("cannot create the completion port of the loop (error %lu)", GetLastError());
+  }
 }
 
 static void start_pool(void) {
   int32_t n = pool_size();
   for (int32_t i = 0; i < n; ++i) {
     HANDLE thread = CreateThread(NULL, 0, pool_thread, NULL, 0, NULL);
-    if (!thread)
+    if (!thread) {
       tz_panicf("cannot start a thread of the pool (error %lu)", GetLastError());
+    }
     CloseHandle(thread);
   }
   tz_io_threads = n;
@@ -145,10 +151,11 @@ static void start_pool(void) {
 
 static void push_work(TzWork *w) {
   AcquireSRWLockExclusive(&tz_io_lock);
-  if (tz_io_queue_tail)
+  if (tz_io_queue_tail) {
     tz_io_queue_tail->next = w;
-  else
+  } else {
     tz_io_queue_head = w;
+  }
   tz_io_queue_tail = w;
   ReleaseSRWLockExclusive(&tz_io_lock);
   WakeConditionVariable(&tz_io_wake);
@@ -162,9 +169,10 @@ static void CALLBACK timer_fired(void *arg, DWORD low, DWORD high) {
 }
 
 static void sleep_ms(int64_t ms) {
-  if (!tz_io_timer)
+  if (!tz_io_timer) {
     tz_io_timer =
         CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  }
   if (tz_io_timer) {
     LARGE_INTEGER due;
     due.QuadPart = -ms * 10000; // relative, in 100 ns
@@ -181,17 +189,19 @@ static void sleep_ms(int64_t ms) {
 static void gather(int64_t timeout) {
   if (!tz_io_port) {
     // Nothing was ever queued: only the timers wait.
-    if (timeout > 0)
+    if (timeout > 0) {
       sleep_ms(timeout);
+    }
     return;
   }
   OVERLAPPED_ENTRY entries[64];
   DWORD wait = timeout < 0 ? INFINITE : 0;
   BOOL alertable = FALSE, timed = FALSE;
   if (timeout > 0) {
-    if (!tz_io_timer)
+    if (!tz_io_timer) {
       tz_io_timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
                                            TIMER_ALL_ACCESS);
+    }
     LARGE_INTEGER due;
     due.QuadPart = -timeout * 10000;
     timed = tz_io_timer && SetWaitableTimer(tz_io_timer, &due, 0, timer_fired, NULL, FALSE);
@@ -205,8 +215,9 @@ static void gather(int64_t timeout) {
   for (;;) {
     ULONG count = 0;
     BOOL ok = GetQueuedCompletionStatusEx(tz_io_port, entries, 64, &count, wait, alertable);
-    if (!ok)
+    if (!ok) {
       count = 0; // timed out, or the timer fired
+    }
     for (ULONG i = 0; i < count; ++i) {
       if (entries[i].lpCompletionKey) {
         // A wait of the runtime's own (net.c): its function takes it.
@@ -216,15 +227,17 @@ static void gather(int64_t timeout) {
       TzWork *w = (TzWork *)entries[i].lpOverlapped;
       w->next = NULL;
       w->due = w->queued + (w->turns ? w->turns : 1);
-      if (tz_io_due_tail)
+      if (tz_io_due_tail) {
         tz_io_due_tail->next = w;
-      else
+      } else {
         tz_io_due_head = w;
+      }
       tz_io_due_tail = w;
     }
     // Whatever else came meanwhile, without waiting.
-    if (count < 64)
+    if (count < 64) {
       break;
+    }
     wait = 0;
     alertable = FALSE;
   }
@@ -239,10 +252,11 @@ static void gather(int64_t timeout) {
       back = w->next;
       w->next = NULL;
       w->due = w->queued + (w->turns ? w->turns : 1);
-      if (tz_io_due_tail)
+      if (tz_io_due_tail) {
         tz_io_due_tail->next = w;
-      else
+      } else {
         tz_io_due_head = w;
+      }
       tz_io_due_tail = w;
     }
   }
@@ -260,17 +274,19 @@ static void *pool_thread(void *arg) {
   (void)arg;
   for (;;) {
     pthread_mutex_lock(&tz_io_lock);
-    while (!tz_io_queue_head)
+    while (!tz_io_queue_head) {
       pthread_cond_wait(&tz_io_wake, &tz_io_lock);
+    }
     TzWork *w = take_work();
     pthread_mutex_unlock(&tz_io_lock);
     w->work(w);
     pthread_mutex_lock(&tz_io_lock);
     int wake = tz_io_back_head == NULL;
-    if (tz_io_back_tail)
+    if (tz_io_back_tail) {
       tz_io_back_tail->next = w;
-    else
+    } else {
       tz_io_back_head = w;
+    }
     tz_io_back_tail = w;
     pthread_mutex_unlock(&tz_io_lock);
     if (wake) {
@@ -279,12 +295,14 @@ static void *pool_thread(void *arg) {
       }
     }
   }
+
   return NULL;
 }
 
 static void start_port(void) {
-  if (pipe(tz_io_pipe) != 0)
+  if (pipe(tz_io_pipe) != 0) {
     tz_panicf("cannot create the pipe of the loop (errno %d)", errno);
+  }
   fcntl(tz_io_pipe[0], F_SETFL, fcntl(tz_io_pipe[0], F_GETFL) | O_NONBLOCK);
   fcntl(tz_io_pipe[0], F_SETFD, FD_CLOEXEC);
   fcntl(tz_io_pipe[1], F_SETFD, FD_CLOEXEC);
@@ -297,8 +315,9 @@ static void start_pool(void) {
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
   for (int32_t i = 0; i < n; ++i) {
     pthread_t thread;
-    if (pthread_create(&thread, &attr, pool_thread, NULL) != 0)
+    if (pthread_create(&thread, &attr, pool_thread, NULL) != 0) {
       tz_panicf("cannot start a thread of the pool");
+    }
   }
   pthread_attr_destroy(&attr);
   tz_io_threads = n;
@@ -306,10 +325,11 @@ static void start_pool(void) {
 
 static void push_work(TzWork *w) {
   pthread_mutex_lock(&tz_io_lock);
-  if (tz_io_queue_tail)
+  if (tz_io_queue_tail) {
     tz_io_queue_tail->next = w;
-  else
+  } else {
     tz_io_queue_head = w;
+  }
   tz_io_queue_tail = w;
   pthread_mutex_unlock(&tz_io_lock);
   pthread_cond_signal(&tz_io_wake);
@@ -323,8 +343,9 @@ static void sleep_ms(int64_t ms) {
 
 static void gather(int64_t timeout) {
   if (tz_io_pipe[0] < 0) {
-    if (timeout > 0)
+    if (timeout > 0) {
       sleep_ms(timeout);
+    }
     return;
   }
   struct pollfd p = {tz_io_pipe[0], POLLIN, 0};
@@ -342,10 +363,11 @@ static void gather(int64_t timeout) {
     back = w->next;
     w->next = NULL;
     w->due = w->queued + (w->turns ? w->turns : 1);
-    if (tz_io_due_tail)
+    if (tz_io_due_tail) {
       tz_io_due_tail->next = w;
-    else
+    } else {
       tz_io_due_head = w;
+    }
     tz_io_due_tail = w;
   }
 }
@@ -356,26 +378,30 @@ void tz_work_queue(TzWork *w) {
   w->next = NULL;
   w->settles = NULL;
   w->queued = tz_io_polls;
-  if (!w->unref)
+  if (!w->unref) {
     PENDING_ADD(1);
+  }
   if (!w->work) {
     // Nothing for the pool: it only waits for its turn.
     w->due = w->queued + (w->turns ? w->turns : 1);
-    if (tz_io_due_tail)
+    if (tz_io_due_tail) {
       tz_io_due_tail->next = w;
-    else
+    } else {
       tz_io_due_head = w;
+    }
     tz_io_due_tail = w;
     return;
   }
   if (!tz_io_threads) {
     // The sockets of net.c may have made the port already, and wait on it.
 #ifdef _WIN32
-    if (!tz_io_port)
+    if (!tz_io_port) {
       start_port();
+    }
 #else
-    if (tz_io_pipe[0] < 0)
+    if (tz_io_pipe[0] < 0) {
       start_port();
+    }
 #endif
     start_pool();
   }
@@ -395,8 +421,9 @@ void tz_io_begin(TzWork *w) {
 #else
   w->queued = tz_io_polls;
 #endif
-  if (!w->unref)
+  if (!w->unref) {
     PENDING_ADD(1);
+  }
 }
 
 #if TZ_PARALLEL && defined(_WIN32)
@@ -405,35 +432,40 @@ void tz_io_wake_loop(void);
 void tz_io_due_remote(TzWork *w) {
   w->next = NULL;
   AcquireSRWLockExclusive(&tz_io_remote_lock);
-  if (tz_io_remote_tail)
+  if (tz_io_remote_tail) {
     tz_io_remote_tail->next = w;
-  else
+  } else {
     tz_io_remote_head = w;
+  }
   tz_io_remote_tail = w;
   ReleaseSRWLockExclusive(&tz_io_remote_lock);
   tz_io_wake_loop();
 }
 
 void tz_io_done_remote(TzWork *w) {
-  if (!w->unref && PENDING_ADD(-1) == 0)
+  if (!w->unref && PENDING_ADD(-1) == 0) {
     tz_io_wake_loop(); // the loop may end now
+  }
 }
 #endif
 
 void tz_io_due(TzWork *w) {
   w->next = NULL;
   w->due = w->queued + (w->turns ? w->turns : 1);
-  if (tz_io_due_tail)
+  if (tz_io_due_tail) {
     tz_io_due_tail->next = w;
-  else
+  } else {
     tz_io_due_head = w;
+  }
   tz_io_due_tail = w;
 }
 
 #ifdef _WIN32
 void *tz_io_port_handle(void) {
-  if (!tz_io_port)
+  if (!tz_io_port) {
     start_port();
+  }
+
   return tz_io_port;
 }
 #endif
@@ -442,15 +474,17 @@ void *tz_io_port_handle(void) {
 void tz_work_ref_count(int32_t n) { PENDING_ADD(n); }
 
 void tz_work_ref(TzWork *w) {
-  if (!w->unref)
+  if (!w->unref) {
     return;
+  }
   w->unref = 0;
   PENDING_ADD(1);
 }
 
 void tz_work_unref(TzWork *w) {
-  if (w->unref)
+  if (w->unref) {
     return;
+  }
   w->unref = 1;
   PENDING_ADD(-1);
 }
@@ -479,8 +513,9 @@ static void done_holding(TzWork *w) {
   w->done(w);
   TzPromise *one = tz_trigger_release(0);
   if (one) {
-    if (!tz_ahead_defer(one))
+    if (!tz_ahead_defer(one)) {
       tz_promise_trigger(one);
+    }
     tz_obj_release((TzObject *)one);
   }
 }
@@ -498,13 +533,15 @@ void tz_io_poll(int64_t timeout) {
 #endif
   // A work back already is due now or in one of the next few polls: the
   // loop goes on turning without waiting.
-  if (tz_io_due_head || (timeout < 0 && !PENDING()))
+  if (tz_io_due_head || (timeout < 0 && !PENDING())) {
     timeout = 0;
+  }
 #if TZ_PARALLEL
   // What ran ahead and is ready: delivered as events of this phase. What
   // still runs wakes the wait below once it is ready.
-  if (tz_ahead_on)
+  if (tz_ahead_on) {
     tz_ahead_deliver();
+  }
 #endif
   gather(timeout);
   TzWork *list = tz_io_due_head;
@@ -515,15 +552,17 @@ void tz_io_poll(int64_t timeout) {
     w->next = NULL;
     if (w->due > poll) {
       // Not yet: back to the end of the list, with what came meanwhile.
-      if (tz_io_due_tail)
+      if (tz_io_due_tail) {
         tz_io_due_tail->next = w;
-      else
+      } else {
         tz_io_due_head = w;
+      }
       tz_io_due_tail = w;
       continue;
     }
-    if (!w->unref)
+    if (!w->unref) {
       PENDING_ADD(-1);
+    }
 #if TZ_PARALLEL
     if (tz_ahead_on) {
       done_holding(w);
@@ -535,8 +574,9 @@ void tz_io_poll(int64_t timeout) {
     tz_after_callback();
   }
 #if TZ_PARALLEL
-  if (tz_ahead_on)
+  if (tz_ahead_on) {
     tz_ahead_deliver();
+  }
 #endif
 }
 
@@ -546,8 +586,9 @@ void tz_io_poll(int64_t timeout) {
 static void woken(OVERLAPPED_ENTRY *entry) { (void)entry; }
 
 void tz_io_wake_loop(void) {
-  if (tz_io_port)
+  if (tz_io_port) {
     PostQueuedCompletionStatus(tz_io_port, 0, (ULONG_PTR)woken, NULL);
+  }
 }
 #else
 void tz_io_wake_loop(void) {

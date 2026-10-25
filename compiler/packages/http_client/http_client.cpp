@@ -1,5 +1,4 @@
-#include "compiler/packages/net/net.h"
-
+#include "compiler/packages/http_client/http_client.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -18,11 +17,13 @@
 namespace tz::pkg {
 
 std::string fileUrlPath(llvm::StringRef url) {
-  if (!url.consume_front("file://"))
+  if (!url.consume_front("file://")) {
     return "";
+  }
   // "file:///C:/x" has an empty host; "file://C:/x" is written too.
-  if (url.size() > 2 && url[0] == '/' && llvm::isAlpha(url[1]) && url[2] == ':')
+  if (url.size() > 2 && url[0] == '/' && llvm::isAlpha(url[1]) && url[2] == ':') {
     url = url.drop_front();
+  }
   std::string path;
   for (size_t i = 0; i < url.size(); ++i) {
     unsigned hi, lo;
@@ -34,6 +35,7 @@ std::string fileUrlPath(llvm::StringRef url) {
       path += url[i];
     }
   }
+
   return path;
 }
 
@@ -43,12 +45,14 @@ FetchResult readFile(const std::string &path, std::string &body, std::string &er
   auto buffer = llvm::MemoryBuffer::getFile(path, /*IsText=*/false,
                                             /*RequiresNullTerminator=*/false);
   if (!buffer) {
-    if (buffer.getError() == std::errc::no_such_file_or_directory)
+    if (buffer.getError() == std::errc::no_such_file_or_directory) {
       return FetchResult::NotFound;
+    }
     error = buffer.getError().message();
     return FetchResult::Failed;
   }
   body = (*buffer)->getBuffer().str();
+
   return FetchResult::Ok;
 }
 
@@ -57,8 +61,7 @@ FetchResult readFile(const std::string &path, std::string &body, std::string &er
 std::string winhttpError(DWORD code) {
   wchar_t *text = nullptr;
   DWORD length = FormatMessageW(FORMAT_MESSAGE_FROM_HMODULE | FORMAT_MESSAGE_FROM_SYSTEM |
-                                    FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                                    FORMAT_MESSAGE_IGNORE_INSERTS,
+                                    FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
                                 GetModuleHandleW(L"winhttp.dll"), code, 0,
                                 reinterpret_cast<wchar_t *>(&text), 0, nullptr);
   std::string message;
@@ -67,6 +70,7 @@ std::string winhttpError(DWORD code) {
     LocalFree(text);
   }
   message = llvm::StringRef(message).trim().str();
+
   return message.empty() ? "error " + std::to_string(code) : message;
 }
 
@@ -74,21 +78,25 @@ std::string winhttpError(DWORD code) {
 // requests, and a package of a hundred files is a hundred requests.
 HINTERNET session() {
   static HINTERNET handle = [] {
-    HINTERNET h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!h) // before Windows 8.1
-      h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+                              WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!h) { // before Windows 8.1
+      h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+                      WINHTTP_NO_PROXY_BYPASS, 0);
+    }
+
     return h;
   }();
+
   return handle;
 }
 
 struct Handle {
   HINTERNET h = nullptr;
   ~Handle() {
-    if (h)
+    if (h) {
       WinHttpCloseHandle(h);
+    }
   }
 };
 
@@ -109,8 +117,9 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
   }
   std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
   std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
-  if (parts.lpszExtraInfo)
+  if (parts.lpszExtraInfo) {
     path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+  }
 
   HINTERNET s = session();
   if (!s) {
@@ -119,14 +128,15 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
   }
   Handle connection{WinHttpConnect(s, host.c_str(), parts.nPort, 0)};
   Handle request;
-  if (connection.h)
-    request.h = WinHttpOpenRequest(connection.h, L"GET", path.c_str(), nullptr,
-                                   WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                   parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE
-                                                                          : 0);
+  if (connection.h) {
+    request.h =
+        WinHttpOpenRequest(connection.h, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+                           WINHTTP_DEFAULT_ACCEPT_TYPES,
+                           parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+  }
   if (!request.h ||
-      !WinHttpSendRequest(request.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA,
-                          0, 0, 0) ||
+      !WinHttpSendRequest(request.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0,
+                          0, 0) ||
       !WinHttpReceiveResponse(request.h, nullptr)) {
     error = winhttpError(GetLastError());
     return FetchResult::Failed;
@@ -141,8 +151,9 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
       error = winhttpError(GetLastError());
       return FetchResult::Failed;
     }
-    if (available == 0)
+    if (available == 0) {
       break;
+    }
     size_t old = body.size();
     body.resize(old + available);
     DWORD read = 0;
@@ -152,12 +163,14 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
     }
     body.resize(old + read);
   }
-  if (status == 404 || status == 410)
+  if (status == 404 || status == 410) {
     return FetchResult::NotFound;
+  }
   if (status != 200) {
     error = "the server answered " + std::to_string(status);
     return FetchResult::Failed;
   }
+
   return FetchResult::Ok;
 }
 
@@ -186,12 +199,14 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
     return FetchResult::Failed;
   }
   llvm::StringRef http = llvm::StringRef(answer).trim();
-  if (http == "404" || http == "410")
+  if (http == "404" || http == "410") {
     return FetchResult::NotFound;
+  }
   if (http != "200") {
     error = "the server answered " + http.str();
     return FetchResult::Failed;
   }
+
   return readFile(std::string(out), body, error);
 }
 
@@ -201,11 +216,14 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
 
 FetchResult fetchUrl(const std::string &url, std::string &body, std::string &error) {
   llvm::StringRef ref(url);
-  if (ref.starts_with("file://"))
+  if (ref.starts_with("file://")) {
     return readFile(fileUrlPath(ref), body, error);
-  if (ref.starts_with("https://") || ref.starts_with("http://"))
+  }
+  if (ref.starts_with("https://") || ref.starts_with("http://")) {
     return httpGet(url, body, error);
+  }
   error = "'" + url + "' is not an http://, https:// or file:// address";
+
   return FetchResult::Failed;
 }
 

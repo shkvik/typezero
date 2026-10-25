@@ -4,7 +4,6 @@
 // Strings live in string.c, the rest of process in process.c.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -40,8 +39,8 @@ Stream tz_err_stream;
 static void stream_init(Stream *s, DWORD which) {
   DWORD mode;
   s->handle = GetStdHandle(which);
-  s->isConsole = s->handle != NULL && s->handle != INVALID_HANDLE_VALUE &&
-                 GetConsoleMode(s->handle, &mode);
+  s->isConsole =
+      s->handle != NULL && s->handle != INVALID_HANDLE_VALUE && GetConsoleMode(s->handle, &mode);
 }
 
 // Returns the length of the longest prefix of `data` that does not end in the
@@ -52,21 +51,25 @@ static size_t utf8_complete_prefix(const char *data, size_t len) {
     --i;
     ++continuation;
   }
-  if (i == 0)
+  if (i == 0) {
     return len;
+  }
   unsigned char lead = (unsigned char)data[i - 1];
   size_t need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+
   return continuation + 1 >= need ? len : i - 1;
 }
 
 static void stream_write(Stream *s, const char *data, size_t len) {
-  if (s->handle == NULL || s->handle == INVALID_HANDLE_VALUE)
+  if (s->handle == NULL || s->handle == INVALID_HANDLE_VALUE) {
     return;
+  }
   if (!s->isConsole) {
     while (len > 0) {
       DWORD chunk = len > 0x40000000 ? 0x40000000 : (DWORD)len, written = 0;
-      if (!WriteFile(s->handle, data, chunk, &written, NULL) || written == 0)
+      if (!WriteFile(s->handle, data, chunk, &written, NULL) || written == 0) {
         return;
+      }
       data += written;
       len -= written;
     }
@@ -79,8 +82,9 @@ static void stream_write(Stream *s, const char *data, size_t len) {
     size_t chunk = len < 4096 ? len : utf8_complete_prefix(data, 4096);
     int count = MultiByteToWideChar(CP_UTF8, 0, data, (int)chunk, wide, 4096);
     DWORD written;
-    if (count > 0)
+    if (count > 0) {
       WriteConsoleW(s->handle, wide, (DWORD)count, &written, NULL);
+    }
     data += chunk;
     len -= chunk;
   }
@@ -95,14 +99,16 @@ static void stream_init(Stream *s, int fd) {
 
 static size_t utf8_complete_prefix(const char *data, size_t len) {
   (void)data;
+
   return len;
 }
 
 static void stream_write(Stream *s, const char *data, size_t len) {
   while (len > 0) {
     ssize_t written = write(s->fd, data, len);
-    if (written <= 0)
+    if (written <= 0) {
       return;
+    }
     data += written;
     len -= (size_t)written;
   }
@@ -211,12 +217,15 @@ static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
     crash_trace(info);
     return EXCEPTION_CONTINUE_SEARCH;
   }
-  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
+  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
     return EXCEPTION_CONTINUE_SEARCH;
-  static const char message[] = "tz: the runtime ran out of stack (Maximum call stack size exceeded)\n";
+  }
+  static const char message[] =
+      "tz: the runtime ran out of stack (Maximum call stack size exceeded)\n";
   tz_out_flush(1);
   stream_write(&tz_err_stream, message, sizeof message - 1);
   TerminateProcess(GetCurrentProcess(), 2);
+
   return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
@@ -286,11 +295,11 @@ void tz_rt_shutdown(void) {
   int64_t decimals = tz_dec_live_objects();
   if ((strings != 0 || arrays != 0 || objects != 0 || decimals != 0) && getenv("TZ_CHECK_LEAKS")) {
     char message[224];
-    int len = snprintf(message, sizeof message,
-                       "tz: %lld string object(s), %lld array(s), %lld long decimal(s) and %lld "
-                       "object(s) or closure environment(s) leaked\n",
-                       (long long)strings, (long long)arrays, (long long)decimals,
-                       (long long)objects);
+    int len =
+        snprintf(message, sizeof message,
+                 "tz: %lld string object(s), %lld array(s), %lld long decimal(s) and %lld "
+                 "object(s) or closure environment(s) leaked\n",
+                 (long long)strings, (long long)arrays, (long long)decimals, (long long)objects);
     tz_out_flush(1);
     stream_write(&tz_err_stream, message, (size_t)len);
   }
@@ -304,27 +313,32 @@ void tz_rt_shutdown(void) {
 void tz_print_char(int32_t c) {
   char ch = (char)c;
   tz_out_write(&ch, 1);
-  if (c == '\n' && tz_out_target->isConsole)
+  if (c == '\n' && tz_out_target->isConsole) {
     tz_out_flush(0);
+  }
 }
 
 // process.stdout.write(text). A console shows the text at once, as Node does,
 // line or not: it may be a prompt.
 int32_t tz_stdout_write(void *obj, uint64_t meta) {
   tz_print_string(obj, meta);
-  if (tz_out_target->isConsole)
+  if (tz_out_target->isConsole) {
     tz_out_flush(0);
+  }
+
   return 1;
 }
 
 void tz_std_write_bytes(int32_t fd, const uint8_t *data, size_t len) {
-  if (fd == 2)
+  if (fd == 2) {
     tz_err_begin();
+  }
   tz_out_write((const char *)data, len);
-  if (fd == 2)
+  if (fd == 2) {
     tz_err_end();
-  else if (tz_out_target->isConsole)
+  } else if (tz_out_target->isConsole) {
     tz_out_flush(0);
+  }
 }
 
 // process.stderr.write(text)
@@ -332,6 +346,7 @@ int32_t tz_stderr_write(void *obj, uint64_t meta) {
   tz_err_begin();
   tz_print_string(obj, meta);
   tz_err_end();
+
   return 1;
 }
 
@@ -345,25 +360,28 @@ static void print_u64(uint64_t value, int negative) {
     *--p = (char)('0' + value % 10);
     value /= 10;
   } while (value != 0);
-  if (negative)
+  if (negative) {
     *--p = '-';
+  }
   tz_out_write(p, (size_t)(buf + sizeof buf - p));
 }
 
 void tz_print_i64(int64_t value) {
-  if (value < 0)
+  if (value < 0) {
     print_u64(0 - (uint64_t)value, 1);
-  else
+  } else {
     print_u64((uint64_t)value, 0);
+  }
 }
 
 void tz_print_i32(int32_t value) { tz_print_i64(value); }
 
 void tz_print_bool(int32_t value) {
-  if (value)
+  if (value) {
     tz_out_write("true", 4);
-  else
+  } else {
     tz_out_write("false", 5);
+  }
 }
 
 // Formats `value` like JavaScript's Number.prototype.toString(): the shortest
@@ -397,8 +415,9 @@ size_t tz_format_f64(double value, char *out) {
   if (k <= n && n <= 21) {
     memcpy(p, digits, (size_t)k);
     p += k;
-    for (int i = k; i < n; ++i)
+    for (int i = k; i < n; ++i) {
       *p++ = '0';
+    }
   } else if (0 < n && n <= 21) {
     memcpy(p, digits, (size_t)n);
     p += n;
@@ -408,8 +427,9 @@ size_t tz_format_f64(double value, char *out) {
   } else if (-6 < n && n <= 0) {
     *p++ = '0';
     *p++ = '.';
-    for (int i = n; i < 0; ++i)
+    for (int i = n; i < 0; ++i) {
       *p++ = '0';
+    }
     memcpy(p, digits, (size_t)k);
     p += k;
   } else {
@@ -422,12 +442,15 @@ size_t tz_format_f64(double value, char *out) {
     *p++ = 'e';
     *p++ = n - 1 < 0 ? '-' : '+';
     int e = abs(n - 1); // 7 to 324
-    if (e >= 100)
+    if (e >= 100) {
       *p++ = (char)('0' + e / 100);
-    if (e >= 10)
+    }
+    if (e >= 10) {
       *p++ = (char)('0' + e / 10 % 10);
+    }
     *p++ = (char)('0' + e % 10);
   }
+
   return (size_t)(p - out);
 }
 
@@ -449,20 +472,26 @@ void tz_print_f64(double value) {
 // result has the sign of the argument (Math.round(-0.4) is -0).
 TZ_HOT double tz_math_round(double x) {
   double r = floor(x);
-  if (x - r >= 0.5)
+  if (x - r >= 0.5) {
     r += 1;
+  }
+
   return r == 0 ? copysign(0.0, x) : r;
 }
 
 // tz_to_int32 for a double outside the int range.
 TZ_NOINLINE int32_t tz_to_int32_slow(double x) {
-  if (!isfinite(x))
+  if (!isfinite(x)) {
     return 0;
+  }
   double m = fmod(trunc(x), 4294967296.0);
-  if (m < 0)
+  if (m < 0) {
     m += 4294967296.0;
-  if (m >= 2147483648.0)
+  }
+  if (m >= 2147483648.0) {
     m -= 4294967296.0;
+  }
+
   return (int32_t)m;
 }
 
@@ -470,8 +499,10 @@ TZ_NOINLINE int32_t tz_to_int32_slow(double x) {
 // fraction is dropped and the rest wraps around modulo 2^32; NaN and the
 // infinities become 0.
 TZ_HOT int32_t tz_to_int32(double x) {
-  if (x > -2147483649.0 && x < 2147483648.0)
+  if (x > -2147483649.0 && x < 2147483648.0) {
     return (int32_t)x;
+  }
+
   return tz_to_int32_slow(x);
 }
 
@@ -487,6 +518,7 @@ TZ_COLD void tz_throw_does_not_fit(double x, int32_t bits) {
 
 TZ_COLD int32_t tz_checked_int32_of_long(int64_t x) {
   tz_throw(TZ_RANGE_ERROR, "%lld does not fit in int", (long long)x);
+
   return 0;
 }
 
@@ -505,8 +537,9 @@ TZ_COLD void tz_iter_bad_count(int64_t count) {
 // happens; other systems have no such check yet and always go on.
 void tz_debugger(void) {
 #ifdef _WIN32
-  if (IsDebuggerPresent())
+  if (IsDebuggerPresent()) {
     __builtin_debugtrap();
+  }
 #endif
 }
 
@@ -528,9 +561,11 @@ TZ_NORETURN void tz_panicf(const char *format, ...) {
   va_start(args, format);
   int len = vsnprintf(message, sizeof message, format, args);
   va_end(args);
-  if (len < 0)
+  if (len < 0) {
     len = 0;
-  if ((size_t)len >= sizeof message)
+  }
+  if ((size_t)len >= sizeof message) {
     len = (int)sizeof message - 1;
+  }
   tz_panic(message, len);
 }

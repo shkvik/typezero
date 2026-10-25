@@ -1,16 +1,17 @@
 #pragma once
 
+#include "compiler/program/errors/errors.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
-
 #include <string>
 #include <vector>
 
 namespace tz {
 
-// Reports compiler diagnostics as `file:line:col: error: message`, followed by
-// the offending source line and a caret under the location.
+// Collects what a pass reports: errors, warnings and notes at places of the
+// program, and the errors of tz itself. The command line prints them
+// (cli/error_printer).
 class Diagnostics {
 public:
   explicit Diagnostics(llvm::SourceMgr &sourceMgr) : sourceMgr_(sourceMgr) {}
@@ -20,12 +21,15 @@ public:
   // `file:line:col: warning: message`: something that is likely wrong but
   // compiles (see checkIntOverflow); it does not stop the build.
   void warning(llvm::SMLoc loc, const llvm::Twine &message);
+  // `tz: message`: an error of tz itself, at no place of the program.
+  void tool(const llvm::Twine &message);
 
   // While muted, diagnostics are dropped: Sema checks copies of code that it
   // checks again for real (see Sema::inferCycle). Returns the old setting.
   bool setMuted(bool muted) {
     bool old = muted_;
     muted_ = muted;
+
     return old;
   }
 
@@ -39,16 +43,13 @@ public:
   std::vector<Captured> *setCapture(std::vector<Captured> *capture) {
     std::vector<Captured> *old = capture_;
     capture_ = capture;
+
     return old;
   }
   std::vector<Captured> *capture() const { return capture_; }
 
-  // While recording, what would be printed is kept instead, in order, until
-  // replay() prints it: the driver checks a program in rounds when its event
-  // maps come from its emit() calls (see EventInference in sema.h), and
-  // shows only what the last round says.
-  void setRecording(bool recording) { recording_ = recording; }
-  void replay();
+  // What was reported since the last take, in order.
+  Errors take();
   // Warnings in the code of tz's own library (library/) are dropped: they
   // would tell the program's author about code that is not theirs.
   void quietRange(const char *begin, const char *end) { quiet_.push_back({begin, end}); }
@@ -68,13 +69,7 @@ private:
   unsigned errorsSeen_ = 0;
   bool muted_ = false;
   std::vector<Captured> *capture_ = nullptr;
-  struct Recorded {
-    llvm::SourceMgr::DiagKind kind;
-    llvm::SMLoc loc;
-    std::string message;
-  };
-  bool recording_ = false;
-  std::vector<Recorded> recorded_;
+  Errors errors_;
   std::vector<std::pair<const char *, const char *>> quiet_;
 };
 

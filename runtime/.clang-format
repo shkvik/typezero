@@ -1,0 +1,3 @@
+BasedOnStyle: InheritParentConfig
+# The order of the includes of the C runtime matters: OpenSSL, windows.h and the tables.
+SortIncludes: Never

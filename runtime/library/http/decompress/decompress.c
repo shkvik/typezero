@@ -5,9 +5,7 @@
 // (122 KB) too.
 
 #include "runtime/library/net/net/net.h"
-
 #include <string.h>
-
 #include "zlib.h"
 #include <brotli/decode.h>
 
@@ -29,10 +27,12 @@ typedef struct Decoder {
 
 static void decoder_drop(void *object) {
   Decoder *d = (Decoder *)object;
-  if (d->started)
+  if (d->started) {
     inflateEnd(&d->z);
-  if (d->br)
+  }
+  if (d->br) {
     BrotliDecoderDestroyInstance(d->br);
+  }
   tz_free(d->out);
   tz_obj_free(d);
 }
@@ -41,6 +41,7 @@ static const TzLayout decoder_layout = {decoder_drop, NULL, 0, 0, "Decoder", 7, 
 
 static voidpf z_alloc(voidpf opaque, uInt items, uInt size) {
   (void)opaque;
+
   return tz_alloc((size_t)items * size);
 }
 
@@ -51,6 +52,7 @@ static void z_free(voidpf opaque, voidpf address) {
 
 static void *br_alloc(void *opaque, size_t size) {
   (void)opaque;
+
   return tz_alloc(size);
 }
 
@@ -67,8 +69,10 @@ void *tz_zlib_new(int32_t kind, TzMaker make) {
   d->rc = 1;
   d->layout = &decoder_layout;
   d->kind = kind;
-  if (kind == CODING_BR)
+  if (kind == CODING_BR) {
     d->br = BrotliDecoderCreateInstance(br_alloc, br_free, NULL);
+  }
+
   return d;
 }
 
@@ -76,26 +80,27 @@ static uint8_t *room(Decoder *d, size_t *available) {
   if (d->capacity - d->length < 16384) {
     size_t cap = d->capacity * 2 + 32768;
     uint8_t *out = (uint8_t *)tz_alloc(cap);
-    if (d->length)
+    if (d->length) {
       memcpy(out, d->out, d->length);
+    }
     tz_free(d->out);
     d->out = out;
     d->capacity = cap;
   }
   *available = d->capacity - d->length;
+
   return d->out + d->length;
 }
 
 // An error as node's zlib gives it: "incorrect header check".
-static void fail(const char *message) {
-  tz_thrown = net_error(TZ_ERROR, message, NULL);
-}
+static void fail(const char *message) { tz_thrown = net_error(TZ_ERROR, message, NULL); }
 
 static int start_zlib(Decoder *d, const uint8_t *data, size_t length) {
   // Deflate is zlib's format by its RFC, but some servers send it raw: a
   // zlib stream starts with a header whose check holds.
-  if (d->kind == CODING_DEFLATE && length >= 2)
+  if (d->kind == CODING_DEFLATE && length >= 2) {
     d->raw = !((data[0] & 0x0F) == 8 && ((data[0] << 8) | data[1]) % 31 == 0);
+  }
   d->z.zalloc = z_alloc;
   d->z.zfree = z_free;
   int bits = d->kind == CODING_GZIP ? 16 + MAX_WBITS : d->raw ? -MAX_WBITS : MAX_WBITS;
@@ -104,6 +109,7 @@ static int start_zlib(Decoder *d, const uint8_t *data, size_t length) {
     return 0;
   }
   d->started = 1;
+
   return 1;
 }
 
@@ -126,16 +132,20 @@ static int feed(Decoder *d, const uint8_t *data, size_t length) {
         d->ended = 1;
         return 1;
       }
-      if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT)
+      if (r == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
         return 1;
+      }
     }
   }
-  if (!length)
+  if (!length) {
     return 1;
-  if (d->ended) // what follows the end of the data is dropped, as node does
+  }
+  if (d->ended) { // what follows the end of the data is dropped, as node does
     return 1;
-  if (!d->started && !start_zlib(d, data, length))
+  }
+  if (!d->started && !start_zlib(d, data, length)) {
     return 0;
+  }
   d->z.next_in = (Bytef *)data;
   d->z.avail_in = (uInt)length;
   for (;;) {
@@ -155,20 +165,23 @@ static int feed(Decoder *d, const uint8_t *data, size_t length) {
       d->ended = 1;
       return 1;
     }
-    if (r == Z_BUF_ERROR && d->z.avail_in == 0)
+    if (r == Z_BUF_ERROR && d->z.avail_in == 0) {
       return 1;
+    }
     if (r != Z_OK) {
       fail(d->z.msg ? d->z.msg : "invalid compressed data");
       return 0;
     }
-    if (d->z.avail_in == 0 && d->z.avail_out != 0)
+    if (d->z.avail_in == 0 && d->z.avail_out != 0) {
       return 1;
+    }
   }
 }
 
 static TzBytes *take(Decoder *d) {
   TzBytes *b = net_bytes(d->out, d->length);
   d->length = 0;
+
   return b;
 }
 
@@ -177,8 +190,10 @@ void *tz_zlib_push(void *decoder, void *chunk, TzMaker make) {
   (void)make;
   Decoder *d = (Decoder *)decoder;
   const TzBytes *b = (const TzBytes *)chunk;
-  if (!feed(d, b->data, (size_t)tz_bytes_byte_length(b)))
+  if (!feed(d, b->data, (size_t)tz_bytes_byte_length(b))) {
     return NULL;
+  }
+
   return take(d);
 }
 
@@ -191,5 +206,6 @@ void *tz_zlib_end(void *decoder, TzMaker make) {
     fail("unexpected end of file");
     return NULL;
   }
+
   return take(d);
 }

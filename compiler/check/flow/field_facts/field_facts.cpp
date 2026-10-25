@@ -1,0 +1,89 @@
+#include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
+#include "compiler/check/objects/object_check_helpers/object_check_helpers.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/ConvertUTF.h"
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+using llvm::dyn_cast_or_null;
+
+namespace tz {
+
+FieldFacts::FieldFacts(Sema &sema) : sema_(sema) {}
+
+std::optional<Sema::FieldPath> FieldFacts::fieldPath(const Expr *expr) const {
+  auto *member = dyn_cast<MemberExpr>(unnarrowed(expr));
+  if (!member || member->optional || !member->object->type ||
+      !(member->object->type->isObject() || member->object->type->isUnion())) {
+    return std::nullopt;
+  }
+  const Expr *object = unnarrowed(member->object);
+  Sema::FieldPath path;
+  if (auto *name = dyn_cast<NameExpr>(object)) {
+    if (!name->var) {
+      return std::nullopt;
+    }
+    path.var = name->var;
+  } else if (std::optional<Sema::FieldPath> outer = fieldPath(object)) {
+    path = std::move(*outer);
+  } else {
+    return std::nullopt;
+  }
+  path.names.push_back(member->name);
+
+  return path;
+}
+
+bool FieldFacts::isFieldDefined(const Sema::FieldPath &path) const {
+  return llvm::is_contained(sema_.flow_.definedFields, path);
+}
+
+void FieldFacts::defineField(Sema::Flow &flow, const Sema::FieldPath &path) {
+  if (!llvm::is_contained(flow.definedFields, path)) {
+    flow.definedFields.push_back(path);
+  }
+}
+
+void FieldFacts::fieldsAssigned(llvm::StringRef name) {
+  // Any object with a field of this name may be the one assigned to.
+  llvm::erase_if(sema_.flow_.definedFields,
+                 [&](const Sema::FieldPath &path) { return llvm::is_contained(path.names, name); });
+  llvm::erase_if(sema_.flow_.narrowedFields,
+                 [&](const auto &entry) { return llvm::is_contained(entry.first.names, name); });
+}
+
+void FieldFacts::forgetFieldsOf(Sema::Flow &flow, const VarSymbol *var) {
+  llvm::erase_if(flow.definedFields, [&](const Sema::FieldPath &path) { return path.var == var; });
+  llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first.var == var; });
+}
+
+Expr *FieldFacts::narrowedField(MemberExpr *member) {
+  // A stream after its setEncoding() (sema_stream.cpp).
+  if (!sema_.streamViews_.empty()) {
+    if (std::optional<Sema::FieldPath> path = fieldPath(member)) {
+      if (const Type *view = sema_.setEncodingChecker().streamViewOf(*path, member->loc())) {
+        return sema_.typeRelations().convert(member, view);
+      }
+    }
+  }
+  if (sema_.flow_.narrowedFields.empty()) {
+    return member;
+  }
+  std::optional<Sema::FieldPath> path = fieldPath(member);
+  if (!path) {
+    return member;
+  }
+  for (const auto &[narrowed, type] : sema_.flow_.narrowedFields) {
+    if (narrowed == *path) {
+      return sema_.typeRelations().convert(member, type);
+    }
+  }
+
+  return member;
+}
+
+} // namespace tz

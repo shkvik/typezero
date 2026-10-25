@@ -29,7 +29,6 @@
 //      and never throws
 
 #include "llvm/ADT/StringRef.h"
-
 #include <cstddef>
 
 namespace tz {

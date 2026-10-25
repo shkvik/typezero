@@ -1,0 +1,216 @@
+#include "compiler/check/expr/target_checker/target_checker.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/name_checker/name_checker.h"
+#include "compiler/check/expr/member_checker/member_checker.h"
+#include "compiler/check/classes/class_member_checker/class_member_checker.h"
+#include "compiler/check/classes/static_checker/static_checker.h"
+#include "compiler/check/functions/nested_functions/nested_functions.h"
+#include "compiler/check/objects/dict_checker/dict_checker.h"
+#include "compiler/check/top_level_checker/top_level_checker.h"
+#include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/types/utility_types/utility_types.h"
+#include "compiler/check/types/union_checker/union_checker.h"
+#include "compiler/library/json/json_checker/json_checker.h"
+#include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSet.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <cmath>
+#include <functional>
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+using llvm::dyn_cast_or_null;
+
+namespace tz {
+
+TargetChecker::TargetChecker(Sema &sema) : sema_(sema) {}
+
+const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
+  if (auto *name = dyn_cast<NameExpr>(target)) {
+    VarSymbol *var = checkVarTarget(name);
+    return var ? var->type : Type::error();
+  }
+
+  if (auto *index = dyn_cast<IndexExpr>(target)) {
+    index->object = sema_.exprChecker().checkExpr(index->object);
+    const Type *type = index->object->type;
+    index->type = Type::error();
+    if (sema_.utilityTypes().checkGenericIndex(index)) {
+      return index->type;
+    }
+    if (type->nonOptional()->isJson()) {
+      return sema_.jsonChecker().checkJsonTarget(index);
+    }
+    if (type->isDict()) {
+      return sema_.dictChecker().checkDictTarget(index, compound);
+    }
+    // An element of a typed array; the index and the value are checked once
+    // the value is known (see checkBytesStore).
+    if (type->isTypedArray()) {
+      index->index = sema_.memberChecker().checkPosition(index->index);
+      index->type = type->elementType();
+      return index->type;
+    }
+    if (type->isBytes()) {
+      index->index = sema_.exprChecker().checkExpr(index->index);
+      sema_.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed; " +
+                                     (type->bytes() == Type::Bytes::DataView
+                                          ? "write its bytes with setUint8(i, value) and the like"
+                                          : "write its bytes through a view, e.g. 'new "
+                                            "Uint8Array(buffer)[i] = value'"));
+      return Type::error();
+    }
+    // `o[key] = v` with a constant key assigns the field it names.
+    if (type->isObject()) {
+      Expr *checked = sema_.keyedFieldChecker().checkKeyedField(index, /*write=*/true);
+      if (index->keyed) { // a field chosen by a key of literals
+        return index->type;
+      }
+      auto *member = dyn_cast<MemberExpr>(checked);
+      if (!member) {
+        return Type::error();
+      }
+      target = member;
+      return sema_.classMemberChecker().checkFieldTarget(member, compound);
+    }
+    if (type->isOptional() && (type->inner()->isObject() || type->inner()->isDict())) {
+      index->index = sema_.exprChecker().checkExpr(index->index);
+      sema_.diags_.error(index->object->loc(),
+                   "the value may be undefined; check it before assigning to it");
+      return Type::error();
+    }
+    index->index = sema_.memberChecker().checkPosition(index->index);
+    if (type->isError()) {
+      return type;
+    }
+    if (type->isArray()) {
+      index->type = type->inner();
+      return index->type;
+    }
+    if (type->isString()) {
+      sema_.diags_.error(index->loc(), "strings are immutable; a character cannot be assigned to");
+    } else if (type->isOptional() && type->inner()->isArray()) {
+      sema_.diags_.error(index->object->loc(), "the array may be undefined; check it first");
+    } else {
+      sema_.diags_.error(index->loc(), "type '" + type->name() + "' cannot be indexed");
+    }
+    return Type::error();
+  }
+
+  if (auto *member = dyn_cast<MemberExpr>(target)) {
+    auto *name = dyn_cast<NameExpr>(member->object);
+    if (ClassDecl *cls = name ? sema_.scopes().lookup(name->name).cls : nullptr) {
+      return sema_.staticChecker().checkStaticTarget(target, cls);
+    }
+    if (name && name->name == "this") {
+      sema_.thisMember_ = member->name;
+    }
+    member->object = sema_.exprChecker().checkExpr(member->object);
+    sema_.thisMember_ = {};
+    const Type *type = member->object->type;
+    member->type = Type::error();
+    if (type->isError()) {
+      return type;
+    }
+    if (type->nonOptional()->isJson()) {
+      return sema_.jsonChecker().checkJsonTarget(member);
+    }
+    // A static field through a class as a value known when compiling.
+    if (ClassDecl *cls = const_cast<ClassDecl *>(type->classRef());
+        cls && cls->type && isa<NameExpr>(member->object)) {
+      return sema_.staticChecker().checkStaticTarget(target, cls);
+    }
+    if (type->isDict()) {
+      return sema_.dictChecker().checkDictTarget(member, compound);
+    }
+    if (type->isOptional() && type->inner()->isDict()) {
+      sema_.diags_.error(member->object->loc(), "the value may be undefined; check it before assigning "
+                                          "to '" +
+                                              member->name + "'");
+      return Type::error();
+    }
+    // A field of every member of a union: through a type they all are, or
+    // in each, where it has one type (sema_union.cpp).
+    if (type->isUnion()) {
+      if (const Type *common = sema_.unionChecker().commonBaseWith(type, member->name)) {
+        member->object = sema_.typeRelations().convert(member->object, common);
+        return sema_.classMemberChecker().checkFieldTarget(member, compound);
+      }
+      return sema_.unionChecker().checkUnionFieldTarget(member);
+    }
+    if (type->nonOptional()->isBytes()) {
+      sema_.diags_.error(member->loc(), member->name == "length" || member->name == "byteLength"
+                                      ? "the length of '" + type->nonOptional()->name().str() +
+                                            "' cannot change; make a new one of the length wanted"
+                                      : "property '" + member->name.str() + "' of type '" +
+                                            type->nonOptional()->name().str() +
+                                            "' cannot be assigned to");
+      return Type::error();
+    }
+    if (type->isRuntimeObject()) {
+      return sema_.runtimeObjectChecker().checkRuntimeTarget(member, compound);
+    }
+    if (type->isObject() || (type->isOptional() && type->inner()->isObject())) {
+      return sema_.classMemberChecker().checkFieldTarget(member, compound);
+    }
+    if (type->isArray() && member->name == "length") {
+      if (compound) {
+        sema_.diags_.error(member->loc(), "only '=' can change the length of an array");
+        return Type::error();
+      }
+      member->type = Type::intTy();
+      return Type::longTy(); // a new length is computed as long, like positions
+    }
+    if (type->isString() && member->name == "length") {
+      sema_.diags_.error(member->loc(), "the length of a string cannot be changed");
+    } else {
+      sema_.diags_.error(member->loc(), "property '" + member->name + "' of type '" + type->name() +
+                                      "' cannot be assigned to");
+    }
+    return Type::error();
+  }
+
+  if (isa<ArrayLitExpr>(target)) {
+    sema_.diags_.error(target->loc(),
+                 "destructuring assignment can only be a statement, e.g. '[a, b] = [b, a]'");
+  } else if (isa<ObjectLitExpr>(target)) {
+    sema_.diags_.error(target->loc(),
+                 "destructuring assignment can only be a statement, e.g. '({ a, b } = o)'");
+  } else {
+    sema_.diags_.error(target->loc(),
+                 "only variables, fields, array elements and 'length' can be assigned to");
+  }
+
+  return Type::error();
+}
+
+VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
+  if (name->name == "this") {
+    sema_.diags_.error(name->loc(), "cannot assign to 'this'");
+    return nullptr;
+  }
+  Sema::ScopeEntry entry = sema_.topLevelChecker().lookupValue(name->name);
+  if (!entry.var) {
+    sema_.nameChecker().checkName(name); // reports the error
+    return nullptr;
+  }
+  name->var = entry.var;
+  name->type = sema_.scopes().varType(entry.var);
+  sema_.scopes().checkVisible(name, entry.var);
+  if (entry.var->isConst) {
+    sema_.diags_.error(name->loc(), "cannot assign to '" + name->name + "' because it is a " +
+                                  (entry.var->function ? "function" : "constant"));
+  } else {
+    sema_.topLevelChecker().reportImportAssign(name, entry.var);
+  }
+  entry.var->reassigned = true;
+  sema_.nestedFunctions().noteUse(entry.var, name->loc());
+
+  return entry.var;
+}
+
+} // namespace tz

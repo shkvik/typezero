@@ -3,7 +3,6 @@
 // generateKeyPairSync, ECDH and diffieHellman, as node does them over OpenSSL.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/decoder.h>
@@ -55,6 +54,7 @@ static const char *key_type_name(const EVP_PKEY *pkey) {
   case EVP_PKEY_X448:
     return "x448";
   }
+
   return EVP_PKEY_get0_type_name(pkey);
 }
 
@@ -62,8 +62,9 @@ static void key_asymmetric_type(TzStr *out, const TzKey *key) {
   const char *name = key_type_name((const EVP_PKEY *)key->pkey);
   char lower[32];
   size_t n = 0;
-  for (; name && name[n] && n < sizeof lower - 1; ++n)
+  for (; name && name[n] && n < sizeof lower - 1; ++n) {
     lower[n] = name[n] >= 'A' && name[n] <= 'Z' ? (char)(name[n] + 32) : name[n];
+  }
   lower[n] = 0;
   *out = ascii(lower);
 }
@@ -72,6 +73,7 @@ static int32_t key_equals(const TzKey *a, const TzKey *b) {
   int equal = EVP_PKEY_eq((const EVP_PKEY *)a->pkey, (const EVP_PKEY *)b->pkey);
   // Keys of two types are not equal; OpenSSL notes an error, which is no error here.
   ERR_clear_error();
+
   return equal == 1;
 }
 
@@ -93,6 +95,7 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key) {
   key->type = private_key ? TZ_KEY_PRIVATE : TZ_KEY_PUBLIC;
   key->pkey = pkey;
   key->ops = &key_ops;
+
   return key;
 }
 
@@ -100,25 +103,31 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key) {
 static EVP_PKEY *public_half(const EVP_PKEY *pkey) {
   unsigned char *der = NULL;
   int n = i2d_PUBKEY(pkey, &der);
-  if (n <= 0)
+  if (n <= 0) {
     return NULL;
+  }
   const unsigned char *p = der;
   EVP_PKEY *pub = d2i_PUBKEY(NULL, &p, n);
   OPENSSL_free(der);
+
   return pub;
 }
 
 // A KeyObject given where a key goes, or NULL.
 static const TzKey *key_object(const TzType *type, const void *value) {
-  if (!type)
+  if (!type) {
     return NULL;
+  }
   type = tz_resolve(type, &value);
-  if (type->kind != TZ_T_OBJECT || !*(void *const *)value)
+  if (type->kind != TZ_T_OBJECT || !*(void *const *)value) {
     return NULL;
+  }
   const TzKey *key = *(const TzKey *const *)value;
   if (key->layout == &tz_crypto_secret_key_layout || key->layout == &tz_crypto_public_key_layout ||
-      key->layout == &tz_crypto_private_key_layout)
+      key->layout == &tz_crypto_private_key_layout) {
     return key;
+  }
+
   return NULL;
 }
 
@@ -131,25 +140,32 @@ static EVP_PKEY *decode(const TzCryptoData *d, const char *input, const char *st
   EVP_PKEY *pkey = NULL;
   OSSL_DECODER_CTX *ctx =
       OSSL_DECODER_CTX_new_for_pkey(&pkey, input, structure, NULL, selection, NULL, NULL);
-  if (!ctx)
+  if (!ctx) {
     return NULL;
-  if (passphrase && passphrase->data)
+  }
+  if (passphrase && passphrase->data) {
     OSSL_DECODER_CTX_set_passphrase(ctx, passphrase->data, passphrase->length);
+  }
   const unsigned char *p = d->data;
   size_t n = d->length;
   OSSL_DECODER_from_data(ctx, &p, &n);
   OSSL_DECODER_CTX_free(ctx);
+
   return pkey;
 }
 
 // The structure of a DER key by node's name of its type.
 static const char *der_structure(const char *type) {
-  if (strcmp(type, "spki") == 0)
+  if (strcmp(type, "spki") == 0) {
     return "SubjectPublicKeyInfo";
-  if (strcmp(type, "pkcs8") == 0)
+  }
+  if (strcmp(type, "pkcs8") == 0) {
     return "PrivateKeyInfo";
-  if (strcmp(type, "pkcs1") == 0 || strcmp(type, "sec1") == 0)
+  }
+  if (strcmp(type, "pkcs1") == 0 || strcmp(type, "sec1") == 0) {
     return "type-specific";
+  }
+
   return NULL;
 }
 
@@ -157,6 +173,7 @@ static TzJson *json_get(const TzJson *j, const char *key) {
   TzStr k = ascii(key);
   TzJson *value = tz_json_get(j, k.obj, k.meta);
   tz_str_release_value(k);
+
   return value;
 }
 
@@ -164,9 +181,11 @@ static TzJson *json_get(const TzJson *j, const char *key) {
 static int jwk_string(const TzJson *jwk, const char *key, char *out, size_t size) {
   TzJson *value = json_get(jwk, key);
   int ok = value && value->kind == TZ_JSON_STRING;
-  if (ok)
+  if (ok) {
     tz_crypto_cstr(value->u.string.obj, value->u.string.meta, out, size);
+  }
   tz_json_release(value);
+
   return ok;
 }
 
@@ -174,21 +193,26 @@ static int jwk_string(const TzJson *jwk, const char *key, char *out, size_t size
 static TzBytes *jwk_bytes(const TzJson *jwk, const char *key) {
   TzJson *value = json_get(jwk, key);
   TzBytes *b = NULL;
-  if (value && value->kind == TZ_JSON_STRING)
+  if (value && value->kind == TZ_JSON_STRING) {
     b = tz_buffer_from_string(value->u.string.obj, value->u.string.meta, TZ_ENC_BASE64URL);
+  }
   tz_json_release(value);
+
   return b;
 }
 
 static void release_bytes(TzBytes *b) {
-  if (b)
+  if (b) {
     tz_instance_release((TzInstance *)b);
+  }
 }
 
 static int push_bn(OSSL_PARAM_BLD *bld, const char *name, const TzBytes *b, BIGNUM **keep) {
-  if (!b)
+  if (!b) {
     return 1;
+  }
   *keep = BN_bin2bn(b->data, b->length, NULL);
+
   return OSSL_PARAM_BLD_push_BN(bld, name, *keep);
 }
 
@@ -196,23 +220,30 @@ static EVP_PKEY *from_params(const char *type, OSSL_PARAM_BLD *bld, int private_
   OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, type, NULL);
   EVP_PKEY *pkey = NULL;
-  if (ctx && params && EVP_PKEY_fromdata_init(ctx) > 0)
+  if (ctx && params && EVP_PKEY_fromdata_init(ctx) > 0) {
     EVP_PKEY_fromdata(ctx, &pkey, private_key ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY, params);
+  }
   EVP_PKEY_CTX_free(ctx);
   OSSL_PARAM_free(params);
+
   return pkey;
 }
 
 // The name OpenSSL gives the curve of a JWK.
 static const char *jwk_curve(const char *crv) {
-  if (strcmp(crv, "P-256") == 0)
+  if (strcmp(crv, "P-256") == 0) {
     return "prime256v1";
-  if (strcmp(crv, "P-384") == 0)
+  }
+  if (strcmp(crv, "P-384") == 0) {
     return "secp384r1";
-  if (strcmp(crv, "P-521") == 0)
+  }
+  if (strcmp(crv, "P-521") == 0) {
     return "secp521r1";
-  if (strcmp(crv, "secp256k1") == 0)
+  }
+  if (strcmp(crv, "secp256k1") == 0) {
     return "secp256k1";
+  }
+
   return NULL;
 }
 
@@ -225,26 +256,29 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
   EVP_PKEY *pkey = NULL;
   if (strcmp(kty, "OKP") == 0) {
     const char *type = NULL;
-    if (jwk_string(jwk, "crv", crv, sizeof crv))
+    if (jwk_string(jwk, "crv", crv, sizeof crv)) {
       type = strcmp(crv, "Ed25519") == 0  ? "ED25519"
              : strcmp(crv, "Ed448") == 0  ? "ED448"
              : strcmp(crv, "X25519") == 0 ? "X25519"
              : strcmp(crv, "X448") == 0   ? "X448"
                                           : NULL;
+    }
     if (!type) {
       tz_throw(TZ_TYPE_ERROR, "The property 'key.crv' must be one of: 'Ed25519', 'Ed448', "
                               "'X25519', 'X448'.");
       return NULL;
     }
     TzBytes *d = private_key ? jwk_bytes(jwk, "d") : NULL, *x = jwk_bytes(jwk, "x");
-    if (private_key && d)
+    if (private_key && d) {
       pkey = EVP_PKEY_new_raw_private_key_ex(NULL, type, NULL, d->data, (size_t)d->length);
-    else if (!private_key && x)
+    } else if (!private_key && x) {
       pkey = EVP_PKEY_new_raw_public_key_ex(NULL, type, NULL, x->data, (size_t)x->length);
+    }
     release_bytes(d);
     release_bytes(x);
-    if (!pkey)
+    if (!pkey) {
       tz_throw(TZ_TYPE_ERROR, "Invalid JWK %s key", crv);
+    }
     return pkey;
   }
   OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
@@ -258,19 +292,23 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
     BIGNUM *bn[8] = {0};
     TzBytes *parts[8] = {0};
     int count = private_key ? 8 : 2, ok = 1;
-    for (int i = 0; i < count; ++i)
+    for (int i = 0; i < count; ++i) {
       parts[i] = jwk_bytes(jwk, names[i]);
+    }
     ok = parts[0] && parts[1] && (!private_key || parts[2]);
-    for (int i = 0; ok && i < count; ++i)
+    for (int i = 0; ok && i < count; ++i) {
       ok = push_bn(bld, params[i], parts[i], &bn[i]);
-    if (ok)
+    }
+    if (ok) {
       pkey = from_params("RSA", bld, private_key);
+    }
     for (int i = 0; i < 8; ++i) {
       release_bytes(parts[i]);
       BN_clear_free(bn[i]);
     }
-    if (!pkey)
+    if (!pkey) {
       tz_throw(TZ_TYPE_ERROR, "Invalid JWK RSA key");
+    }
   } else if (strcmp(kty, "EC") == 0) {
     const char *group = jwk_string(jwk, "crv", crv, sizeof crv) ? jwk_curve(crv) : NULL;
     if (!group) {
@@ -292,16 +330,18 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
       ok = OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, group, 0) &&
            OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY, point, 1 + 2 * n) &&
            push_bn(bld, OSSL_PKEY_PARAM_PRIV_KEY, d, &priv);
-      if (ok)
+      if (ok) {
         pkey = from_params("EC", bld, private_key);
+      }
       tz_free(point);
     }
     release_bytes(x);
     release_bytes(y);
     release_bytes(d);
     BN_clear_free(priv);
-    if (!pkey)
+    if (!pkey) {
       tz_throw(TZ_TYPE_ERROR, "Invalid JWK EC key");
+    }
   } else {
     tz_throw(TZ_TYPE_ERROR,
              "The property 'key.kty' must be one of: 'RSA', 'EC', 'OKP'. "
@@ -309,6 +349,7 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
              kty);
   }
   OSSL_PARAM_BLD_free(bld);
+
   return pkey;
 }
 
@@ -343,15 +384,17 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
     return pkey ? tz_openssl_key_of(pkey, private_key) : NULL;
   }
   TzCryptoData d, passphrase;
-  if (!tz_crypto_data(&d, kt, kv, encoding, "key"))
+  if (!tz_crypto_data(&d, kt, kv, encoding, "key")) {
     return NULL;
+  }
   if (!tz_crypto_data(&passphrase, (has & 2) ? pt : NULL, pv, TZ_ENC_UTF8, "passphrase")) {
     tz_crypto_data_done(&d);
     return NULL;
   }
   char type[16] = "";
-  if (has & 1)
+  if (has & 1) {
     tz_crypto_cstr(type_obj, type_meta, type, sizeof type);
+  }
   const char *input = format == 1 ? "DER" : "PEM";
   const char *structure = format == 1 && type[0] ? der_structure(type) : NULL;
   EVP_PKEY *pkey = NULL;
@@ -386,6 +429,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
     return NULL;
   }
   ERR_clear_error();
+
   return tz_openssl_key_of(pkey, is_private);
 }
 
@@ -396,6 +440,7 @@ TzKey *tz_openssl_public_of(const TzKey *key) {
     tz_openssl_throw(TZ_ERROR, "Failed to get the public key");
     return NULL;
   }
+
   return tz_openssl_key_of(pub, 0);
 }
 
@@ -443,17 +488,20 @@ static unsigned char *encode(const TzKey *key, const char *output, const char *t
   OSSL_ENCODER_CTX *ctx = OSSL_ENCODER_CTX_new_for_pkey(pkey, selection, output, structure, NULL);
   unsigned char *data = NULL;
   int ok = ctx && OSSL_ENCODER_CTX_get_num_encoders(ctx) > 0;
-  if (ok && cipher[0])
+  if (ok && cipher[0]) {
     ok = OSSL_ENCODER_CTX_set_cipher(ctx, cipher, NULL) &&
          OSSL_ENCODER_CTX_set_passphrase(ctx, passphrase, passphrase_length);
-  if (ok)
+  }
+  if (ok) {
     ok = OSSL_ENCODER_to_data(ctx, &data, length);
+  }
   OSSL_ENCODER_CTX_free(ctx);
   if (!ok) {
     tz_openssl_throw(TZ_ERROR, "Failed to encode the key");
     OPENSSL_free(data);
     return NULL;
   }
+
   return data;
 }
 
@@ -461,8 +509,9 @@ static void export_pem(TzStr *out, const TzKey *key, const char *type, const cha
                        const uint8_t *passphrase, size_t passphrase_length) {
   size_t length;
   unsigned char *data = encode(key, "PEM", type, cipher, passphrase, passphrase_length, &length);
-  if (!data)
+  if (!data) {
     return;
+  }
   tz_str_release_value(*out);
   tz_crypto_text(out, data, length, TZ_ENC_UTF8);
   OPENSSL_free(data);
@@ -472,10 +521,12 @@ static TzBytes *export_der(const TzKey *key, const char *type, const char *ciphe
                            const uint8_t *passphrase, size_t passphrase_length) {
   size_t length;
   unsigned char *data = encode(key, "DER", type, cipher, passphrase, passphrase_length, &length);
-  if (!data)
+  if (!data) {
     return NULL;
+  }
   TzBytes *b = tz_crypto_buffer(data, length);
   OPENSSL_free(data);
+
   return b;
 }
 
@@ -497,8 +548,9 @@ static void put_base64url(TzJson *jwk, const char *key, const uint8_t *data, siz
 // A number of the key as base64url, in `size` bytes (0: as few as it takes).
 static int put_bn(TzJson *jwk, const char *key, const EVP_PKEY *pkey, const char *param, int size) {
   BIGNUM *bn = NULL;
-  if (!EVP_PKEY_get_bn_param(pkey, param, &bn))
+  if (!EVP_PKEY_get_bn_param(pkey, param, &bn)) {
     return 0;
+  }
   int n = size ? size : BN_num_bytes(bn);
   uint8_t *bytes = (uint8_t *)tz_alloc((size_t)n + 1);
   BN_bn2binpad(bn, bytes, n);
@@ -506,6 +558,7 @@ static int put_bn(TzJson *jwk, const char *key, const EVP_PKEY *pkey, const char
   memset(bytes, 0, (size_t)n);
   tz_free(bytes);
   BN_clear_free(bn);
+
   return 1;
 }
 
@@ -564,8 +617,9 @@ static TzJson *export_jwk(const TzKey *key) {
       EC_GROUP_free(g);
     }
     put_text(jwk, "crv", crv);
-    if (private_key)
+    if (private_key) {
       put_bn(jwk, "d", pkey, OSSL_PKEY_PARAM_PRIV_KEY, size);
+    }
     return jwk;
   }
   const char *crv = id == EVP_PKEY_ED25519  ? "Ed25519"
@@ -586,9 +640,11 @@ static TzJson *export_jwk(const TzKey *key) {
     memset(raw, 0, sizeof raw);
   }
   length = sizeof raw;
-  if (EVP_PKEY_get_raw_public_key(pkey, raw, &length))
+  if (EVP_PKEY_get_raw_public_key(pkey, raw, &length)) {
     put_base64url(jwk, "x", raw, length);
+  }
   put_text(jwk, "kty", "OKP");
+
   return jwk;
 }
 
@@ -610,12 +666,14 @@ static EVP_PKEY *signing_key(const TzType *kt, const void *kv, int private_key, 
     return (EVP_PKEY *)key->pkey;
   }
   TzKey *made = tz_openssl_create_key(private_key, kt, kv, TZ_ENC_UTF8, 0, 0, NULL, 0, NULL, NULL);
-  if (!made)
+  if (!made) {
     return NULL;
+  }
   EVP_PKEY *pkey = (EVP_PKEY *)made->pkey;
   made->pkey = NULL;
   tz_instance_release((TzInstance *)made);
   *owned = 1;
+
   return pkey;
 }
 
@@ -627,20 +685,25 @@ typedef struct {
 
 static int apply_options(EVP_PKEY_CTX *pctx, const EVP_PKEY *pkey, const SignOptions *o) {
   int id = EVP_PKEY_get_base_id(pkey);
-  if (id != EVP_PKEY_RSA && id != EVP_PKEY_RSA_PSS)
+  if (id != EVP_PKEY_RSA && id != EVP_PKEY_RSA_PSS) {
     return 1;
-  if ((o->has & 1) && EVP_PKEY_CTX_set_rsa_padding(pctx, o->padding) <= 0)
+  }
+  if ((o->has & 1) && EVP_PKEY_CTX_set_rsa_padding(pctx, o->padding) <= 0) {
     return 0;
-  if ((o->has & 2) && EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, o->salt_length) <= 0)
+  }
+  if ((o->has & 2) && EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, o->salt_length) <= 0) {
     return 0;
+  }
+
   return 1;
 }
 
 // The size of each half of a P1363 signature of an ECDSA or DSA key.
 static int p1363_half(const EVP_PKEY *pkey) {
   int id = EVP_PKEY_get_base_id(pkey);
-  if (id == EVP_PKEY_EC)
+  if (id == EVP_PKEY_EC) {
     return (EVP_PKEY_get_bits(pkey) + 7) / 8;
+  }
   if (id == EVP_PKEY_DSA) {
     BIGNUM *q = NULL;
     EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_FFC_Q, &q);
@@ -648,6 +711,7 @@ static int p1363_half(const EVP_PKEY *pkey) {
     BN_free(q);
     return n;
   }
+
   return 0;
 }
 
@@ -664,19 +728,22 @@ static TzBytes *der_to_p1363(unsigned char *sig, size_t length, int half) {
     BN_bn2binpad(ss, b->data + half, half);
     ECDSA_SIG_free(s);
   }
+
   return b;
 }
 
 // r and s of `half` bytes each as a DER signature (OPENSSL_free), or NULL.
 static unsigned char *p1363_to_der(const uint8_t *sig, size_t length, int half, size_t *out) {
-  if (length != (size_t)(2 * half))
+  if (length != (size_t)(2 * half)) {
     return NULL;
+  }
   ECDSA_SIG *s = ECDSA_SIG_new();
   ECDSA_SIG_set0(s, BN_bin2bn(sig, half, NULL), BN_bin2bn(sig + half, half, NULL));
   unsigned char *der = NULL;
   int n = i2d_ECDSA_SIG(s, &der);
   ECDSA_SIG_free(s);
   *out = n > 0 ? (size_t)n : 0;
+
   return n > 0 ? der : NULL;
 }
 
@@ -717,6 +784,7 @@ static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
   int half = o->p1363 ? p1363_half(pkey) : 0;
   b = half ? der_to_p1363(sig, sig_length, half) : tz_crypto_buffer(sig, sig_length);
   OPENSSL_free(sig);
+
   return b;
 }
 
@@ -727,8 +795,9 @@ static int32_t verify_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md
   int half = o->p1363 ? p1363_half(pkey) : 0;
   if (half) {
     der = p1363_to_der(sig, sig_length, half, &sig_length);
-    if (!der)
+    if (!der) {
       return 0;
+    }
     sig = der;
   }
   int ok;
@@ -747,20 +816,24 @@ static int32_t verify_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md
   }
   OPENSSL_free(der);
   ERR_clear_error();
+
   return ok;
 }
 
 // The name of the hash of crypto.sign and verify: NULL for undefined (Ed25519, or the default of
 // the key); `name` holds it.
 static const char *algorithm(const TzType *at, const void *av, char *name, size_t size) {
-  if (!at)
+  if (!at) {
     return NULL;
+  }
   const void *value = av;
   const TzType *type = tz_resolve(at, &value);
-  if (type->kind != TZ_T_STRING)
+  if (type->kind != TZ_T_STRING) {
     return NULL;
+  }
   const TzStr *s = (const TzStr *)value;
   tz_crypto_cstr(s->obj, s->meta, name, size);
+
   return name;
 }
 
@@ -773,16 +846,19 @@ TzBytes *tz_openssl_sign(const TzType *at, const void *av, const TzType *dt, con
   const char *md = algorithm(at, av, name, sizeof name);
   int owned;
   EVP_PKEY *pkey = signing_key(kt, kv, 1, &owned);
-  if (!pkey)
+  if (!pkey) {
     return NULL;
+  }
   TzCryptoData d;
   TzBytes *sig = NULL;
   if (tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data")) {
     sig = sign_with(pkey, md, NULL, d.data, d.length, &o, 0);
     tz_crypto_data_done(&d);
   }
-  if (owned)
+  if (owned) {
     EVP_PKEY_free(pkey);
+  }
+
   return sig;
 }
 
@@ -794,8 +870,9 @@ int32_t tz_openssl_verify(const TzType *at, const void *av, const TzType *dt, co
   const char *md = algorithm(at, av, name, sizeof name);
   int owned;
   EVP_PKEY *pkey = signing_key(kt, kv, 0, &owned);
-  if (!pkey)
+  if (!pkey) {
     return 0;
+  }
   TzCryptoData d, s;
   int32_t ok = 0;
   if (tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data")) {
@@ -805,8 +882,10 @@ int32_t tz_openssl_verify(const TzType *at, const void *av, const TzType *dt, co
     }
     tz_crypto_data_done(&d);
   }
-  if (owned)
+  if (owned) {
     EVP_PKEY_free(pkey);
+  }
+
   return ok;
 }
 
@@ -814,11 +893,13 @@ int32_t tz_openssl_verify(const TzType *at, const void *av, const TzType *dt, co
 // verify() sign.
 TzHash *tz_openssl_sign_new(void *obj, uint64_t meta, int32_t verify) {
   const TzMd *md = tz_openssl_md(obj, meta, 0);
-  if (!md)
+  if (!md) {
     return NULL;
+  }
   TzHash *h = tz_crypto_hash_alloc(md, 0);
   h->layout = verify ? &tz_crypto_verify_layout : &tz_crypto_sign_layout;
   tz_crypto_md_start(md, h->ctx);
+
   return h;
 }
 
@@ -831,6 +912,7 @@ static int sign_digest(TzHash *h, uint8_t *out) {
   h->md->ops->final(h->ctx, out, h->md->size);
   tz_crypto_md_end(h->md, h->ctx);
   h->done = 1;
+
   return 1;
 }
 
@@ -839,17 +921,21 @@ TzBytes *tz_openssl_sign_final(TzHash *h, const TzType *kt, const void *kv, int3
   SignOptions o = {padding, salt_length, p1363, has};
   int owned;
   EVP_PKEY *pkey = signing_key(kt, kv, 1, &owned);
-  if (!pkey)
+  if (!pkey) {
     return NULL;
+  }
   TzBytes *sig = NULL;
   int id = EVP_PKEY_get_base_id(pkey);
   uint8_t digest[64];
-  if (id == EVP_PKEY_ED25519 || id == EVP_PKEY_ED448)
+  if (id == EVP_PKEY_ED25519 || id == EVP_PKEY_ED448) {
     tz_throw(TZ_ERROR, "Unsupported crypto operation");
-  else if (sign_digest(h, digest))
+  } else if (sign_digest(h, digest)) {
     sig = sign_with(pkey, NULL, tz_openssl_md_of(h->md), digest, h->md->size, &o, 1);
-  if (owned)
+  }
+  if (owned) {
     EVP_PKEY_free(pkey);
+  }
+
   return sig;
 }
 
@@ -859,19 +945,23 @@ int32_t tz_openssl_verify_final(TzHash *h, const TzType *kt, const void *kv, con
   SignOptions o = {padding, salt_length, p1363, has};
   int owned;
   EVP_PKEY *pkey = signing_key(kt, kv, 0, &owned);
-  if (!pkey)
+  if (!pkey) {
     return 0;
+  }
   int32_t ok = 0;
   uint8_t digest[64];
   TzCryptoData s;
   if (tz_crypto_data(&s, st, sv, encoding, "signature")) {
-    if (sign_digest(h, digest))
+    if (sign_digest(h, digest)) {
       ok = verify_with(pkey, NULL, tz_openssl_md_of(h->md), digest, h->md->size, s.data, s.length,
                        &o, 1);
+    }
     tz_crypto_data_done(&s);
   }
-  if (owned)
+  if (owned) {
     EVP_PKEY_free(pkey);
+  }
+
   return ok;
 }
 
@@ -882,8 +972,10 @@ int32_t tz_openssl_verify_final(TzHash *h, const TzType *kt, const void *kv, con
 // The NID of a curve as node takes its name: a NIST name ("P-256") or OpenSSL's.
 static int curve_nid(const char *name) {
   int nid = EC_curve_nist2nid(name);
-  if (nid == NID_undef)
+  if (nid == NID_undef) {
     nid = OBJ_sn2nid(name);
+  }
+
   return nid;
 }
 
@@ -909,9 +1001,11 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     tz_crypto_cstr(name_obj, name_meta, name, sizeof name);
     static const char *const names[] = {"rsa",     "rsa-pss", "dsa",    "ec",
                                         "ed25519", "ed448",   "x25519", "x448"};
-    for (int i = 0; i < 8; ++i)
-      if (strcmp(name, names[i]) == 0)
+    for (int i = 0; i < 8; ++i) {
+      if (strcmp(name, names[i]) == 0) {
         type = i;
+      }
+    }
     if (type < 0) {
       tz_throw(TZ_TYPE_ERROR, "The argument 'type' must be a supported key type. Received '%s'",
                name);
@@ -938,8 +1032,9 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     ok = EVP_PKEY_CTX_set_dsa_paramgen_bits(ctx, (int)modulus_length) > 0;
   } else if (ok && type == PAIR_EC) {
     char curve[64] = "";
-    if (has & 1)
+    if (has & 1) {
       tz_crypto_cstr(curve_obj, curve_meta, curve, sizeof curve);
+    }
     int nid = curve_nid(curve);
     if (nid == NID_undef) {
       EVP_PKEY_CTX_free(ctx);
@@ -949,13 +1044,15 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     ok = EVP_PKEY_CTX_set_group_name(ctx, OBJ_nid2sn(nid)) > 0;
   }
   EVP_PKEY *pkey = NULL;
-  if (ok)
+  if (ok) {
     ok = EVP_PKEY_generate(ctx, &pkey) > 0;
+  }
   EVP_PKEY_CTX_free(ctx);
   if (!ok) {
     tz_openssl_throw(TZ_ERROR, "Key generation job failed");
     return NULL;
   }
+
   return tz_openssl_key_of(pkey, 1);
 }
 
@@ -997,6 +1094,7 @@ Ecdh *tz_openssl_ecdh_new(void *obj, uint64_t meta) {
   e->nid = nid;
   e->group = group;
   e->key = NULL;
+
   return e;
 }
 
@@ -1015,9 +1113,11 @@ static EVP_PKEY *ec_key(const Ecdh *e, const BIGNUM *priv, const EC_POINT *pub) 
   EVP_PKEY *pkey = NULL;
   if (OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, OBJ_nid2sn(e->nid), 0) &&
       OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY, point, n) &&
-      (!priv || OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY, priv)))
+      (!priv || OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY, priv))) {
     pkey = from_params("EC", bld, priv != NULL);
+  }
   OSSL_PARAM_BLD_free(bld);
+
   return pkey;
 }
 
@@ -1026,13 +1126,16 @@ static size_t public_point(const Ecdh *e, int32_t format, uint8_t *out) {
   uint8_t raw[256];
   size_t n = 0;
   if (!e->key || !EVP_PKEY_get_octet_string_param(e->key, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY, raw,
-                                                  sizeof raw, &n))
+                                                  sizeof raw, &n)) {
     return 0;
+  }
   EC_POINT *p = EC_POINT_new(e->group);
   size_t length = 0;
-  if (EC_POINT_oct2point(e->group, p, raw, n, NULL))
+  if (EC_POINT_oct2point(e->group, p, raw, n, NULL)) {
     length = EC_POINT_point2oct(e->group, p, form_of(format), out, 256, NULL);
+  }
   EC_POINT_free(p);
+
   return length;
 }
 
@@ -1043,6 +1146,7 @@ TzBytes *tz_openssl_ecdh_get_public_key(Ecdh *e, int32_t format) {
     tz_throw(TZ_ERROR, "Failed to get ECDH public key");
     return NULL;
   }
+
   return tz_crypto_buffer(point, n);
 }
 
@@ -1054,6 +1158,7 @@ TzBytes *tz_openssl_ecdh_generate_keys(Ecdh *e, int32_t format) {
   }
   EVP_PKEY_free(e->key);
   e->key = key;
+
   return tz_openssl_ecdh_get_public_key(e, format);
 }
 
@@ -1068,22 +1173,25 @@ TzBytes *tz_openssl_ecdh_get_private_key(Ecdh *e) {
   TzBytes *b = tz_buffer_alloc(n, 0);
   BN_bn2bin(priv, b->data);
   BN_clear_free(priv);
+
   return b;
 }
 
 // setPrivateKey(privateKey, encoding): the receiver is handed back.
 void tz_openssl_ecdh_set_private_key(Ecdh *e, const TzType *kt, const void *kv, int32_t encoding) {
   TzCryptoData d;
-  if (!tz_crypto_data(&d, kt, kv, encoding, "key"))
+  if (!tz_crypto_data(&d, kt, kv, encoding, "key")) {
     return;
+  }
   BIGNUM *priv = BN_bin2bn(d.data, (int)d.length, NULL);
   tz_crypto_data_done(&d);
   const BIGNUM *order = EC_GROUP_get0_order(e->group);
   EVP_PKEY *key = NULL;
   if (!BN_is_zero(priv) && BN_cmp(priv, order) < 0) {
     EC_POINT *pub = EC_POINT_new(e->group);
-    if (EC_POINT_mul(e->group, pub, priv, NULL, NULL, NULL))
+    if (EC_POINT_mul(e->group, pub, priv, NULL, NULL, NULL)) {
       key = ec_key(e, priv, pub);
+    }
     EC_POINT_free(pub);
   }
   BN_clear_free(priv);
@@ -1111,8 +1219,10 @@ static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
     }
   }
   EVP_PKEY_CTX_free(ctx);
-  if (!b)
+  if (!b) {
     tz_openssl_throw(TZ_ERROR, "Failed to compute the shared secret");
+  }
+
   return b;
 }
 
@@ -1120,8 +1230,9 @@ static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
 TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *kv,
                                         int32_t encoding) {
   TzCryptoData d;
-  if (!tz_crypto_data(&d, kt, kv, encoding, "otherPublicKey"))
+  if (!tz_crypto_data(&d, kt, kv, encoding, "otherPublicKey")) {
     return NULL;
+  }
   EC_POINT *point = EC_POINT_new(e->group);
   int valid = EC_POINT_oct2point(e->group, point, d.data, d.length, NULL);
   tz_crypto_data_done(&d);
@@ -1133,11 +1244,13 @@ TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *k
     return NULL;
   }
   TzBytes *secret = NULL;
-  if (!e->key)
+  if (!e->key) {
     tz_throw(TZ_ERROR, "Failed to compute ECDH key");
-  else
+  } else {
     secret = derive(e->key, theirs);
+  }
   EVP_PKEY_free(theirs);
+
   return secret;
 }
 
@@ -1160,5 +1273,6 @@ TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
              key_type_name(b));
     return NULL;
   }
+
   return derive((EVP_PKEY *)a, (EVP_PKEY *)b);
 }

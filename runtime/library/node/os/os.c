@@ -12,7 +12,6 @@
 #endif
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +46,7 @@ static TzStr env_str(const char *name, int *found) {
     }
     tz_buf_free(&b);
   }
+
   return value;
 }
 
@@ -57,12 +57,14 @@ static int registry_value(const wchar_t *key, const wchar_t *name, DWORD flags, 
                           DWORD *size) {
   HMODULE advapi = LoadLibraryW(L"advapi32.dll");
   RegGetValueFn get = advapi ? (RegGetValueFn)(void *)GetProcAddress(advapi, "RegGetValueW") : NULL;
+
   return get && get(HKEY_LOCAL_MACHINE, key, name, flags, NULL, out, size) == ERROR_SUCCESS;
 }
 #else
 // An environment variable, or NULL if it is unset or empty.
 static const char *env_text(const char *name) {
   const char *value = getenv(name);
+
   return value && value[0] ? value : NULL;
 }
 
@@ -74,8 +76,9 @@ static TzStr str_of_text(const char *text) {
     uint32_t c = *s;
     size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 0;
     size_t k = 1;
-    while (len > 1 && k < len && (s[k] & 0xC0) == 0x80)
+    while (len > 1 && k < len && (s[k] & 0xC0) == 0x80) {
       ++k;
+    }
     if (len == 0 || k < len) {
       tz_buf_push(&b, 0xFFFD);
       s += k;
@@ -83,8 +86,9 @@ static TzStr str_of_text(const char *text) {
     }
     if (len > 1) {
       c &= 0x3Fu >> (len - 1);
-      for (size_t i = 1; i < len; ++i)
+      for (size_t i = 1; i < len; ++i) {
         c = (c << 6) | (s[i] & 0x3Fu);
+      }
     }
     s += len;
     if (c >= 0x10000) {
@@ -95,6 +99,7 @@ static TzStr str_of_text(const char *text) {
       tz_buf_push(&b, (uint16_t)c);
     }
   }
+
   return tz_buf_take(&b);
 }
 #endif
@@ -110,15 +115,19 @@ static void homedir(TzStr *out) {
     path = env_str("HOMEPATH", &has_path);
     TzBuf b;
     tz_buf_init(&b);
-    if (found)
+    if (found) {
       tz_buf_str(&b, drive);
-    if (has_path)
+    }
+    if (has_path) {
       tz_buf_str(&b, path);
+    }
     *out = tz_buf_take(&b);
-    if (found)
+    if (found) {
       tz_str_release_value(drive);
-    if (has_path)
+    }
+    if (has_path) {
       tz_str_release_value(path);
+    }
   }
 #else
   const char *home = env_text("HOME");
@@ -135,15 +144,17 @@ static void tmpdir(TzStr *out) {
 #ifdef _WIN32
   int found;
   TzStr value = env_str("TEMP", &found);
-  if (!found)
+  if (!found) {
     value = env_str("TMP", &found);
+  }
   if (found) {
     tz_buf_str(&b, value);
     tz_str_release_value(value);
   } else {
     value = env_str("SystemRoot", &found);
-    if (!found)
+    if (!found) {
       value = env_str("windir", &found);
+    }
     if (found) {
       tz_buf_str(&b, value);
       tz_str_release_value(value);
@@ -152,19 +163,23 @@ static void tmpdir(TzStr *out) {
     }
     tz_buf_ascii(&b, "\\temp");
   }
-  if (b.length > 1 && b.data[b.length - 1] == '\\' && b.data[b.length - 2] != ':')
+  if (b.length > 1 && b.data[b.length - 1] == '\\' && b.data[b.length - 2] != ':') {
     --b.length;
+  }
 #else
   const char *dir = env_text("TMPDIR");
-  if (!dir)
+  if (!dir) {
     dir = env_text("TMP");
-  if (!dir)
+  }
+  if (!dir) {
     dir = env_text("TEMP");
+  }
   TzStr value = str_of_text(dir ? dir : "/tmp");
   tz_buf_str(&b, value);
   tz_str_release_value(value);
-  if (b.length > 1 && b.data[b.length - 1] == '/')
+  if (b.length > 1 && b.data[b.length - 1] == '/') {
     --b.length;
+  }
 #endif
   *out = tz_buf_take(&b);
 }
@@ -179,8 +194,9 @@ static void windows_version(OSVERSIONINFOW *info) {
   info->dwOSVersionInfoSize = sizeof *info;
   RtlGetVersionFn get =
       (RtlGetVersionFn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
-  if (get)
+  if (get) {
     get(info);
+  }
 }
 #endif
 
@@ -198,12 +214,14 @@ void tz_os_string(TzStr *out, int32_t which) {
 #ifdef _WIN32
     wchar_t name[256];
     DWORD size = 256;
-    if (!GetComputerNameExW(ComputerNameDnsHostname, name, &size))
+    if (!GetComputerNameExW(ComputerNameDnsHostname, name, &size)) {
       size = 0;
+    }
     *out = tz_str_from_utf16((const uint16_t *)name, size);
 #else
-    if (gethostname(text, sizeof text) != 0)
+    if (gethostname(text, sizeof text) != 0) {
       text[0] = 0;
+    }
     text[sizeof text - 1] = 0;
     *out = str_of_text(text);
 #endif
@@ -237,8 +255,9 @@ void tz_os_string(TzStr *out, int32_t which) {
              (unsigned long)info.dwMinorVersion, (unsigned long)info.dwBuildNumber);
 #else
     struct utsname u;
-    if (uname(&u) == 0)
+    if (uname(&u) == 0) {
       snprintf(text, sizeof text, "%s", u.release);
+    }
 #endif
     break;
   }
@@ -269,8 +288,9 @@ void tz_os_string(TzStr *out, int32_t which) {
     return;
 #else
     struct utsname u;
-    if (uname(&u) == 0)
+    if (uname(&u) == 0) {
       snprintf(text, sizeof text, "%s", u.version);
+    }
     break;
 #endif
   }
@@ -294,8 +314,9 @@ void tz_os_string(TzStr *out, int32_t which) {
     }
 #else
     struct utsname u;
-    if (uname(&u) == 0)
+    if (uname(&u) == 0) {
       snprintf(text, sizeof text, "%s", u.machine);
+    }
 #endif
     break;
   }
@@ -308,19 +329,24 @@ void tz_os_string(TzStr *out, int32_t which) {
 // os.totalmem(), os.freemem() and os.uptime().
 double tz_os_number(int32_t which) {
 #ifdef _WIN32
-  if (which == 2)
+  if (which == 2) {
     return (double)GetTickCount64() / 1000;
+  }
   MEMORYSTATUSEX memory;
   memory.dwLength = sizeof memory;
-  if (!GlobalMemoryStatusEx(&memory))
+  if (!GlobalMemoryStatusEx(&memory)) {
     return 0;
+  }
+
   return which == 0 ? (double)memory.ullTotalPhys : (double)memory.ullAvailPhys;
 #elif defined(__linux__)
   struct sysinfo info;
-  if (sysinfo(&info) != 0)
+  if (sysinfo(&info) != 0) {
     return 0;
-  if (which == 2)
+  }
+  if (which == 2) {
     return (double)info.uptime;
+  }
   return (double)(which == 0 ? info.totalram : info.freeram) * info.mem_unit;
 #else
   if (which == 2) {
@@ -329,6 +355,7 @@ double tz_os_number(int32_t which) {
     return (double)now.tv_sec;
   }
   long pages = sysconf(which == 0 ? _SC_PHYS_PAGES : _SC_AVPHYS_PAGES);
+
   return (double)pages * (double)sysconf(_SC_PAGESIZE);
 #endif
 }
@@ -337,9 +364,11 @@ static int32_t processor_count(void) {
 #ifdef _WIN32
   SYSTEM_INFO info;
   GetSystemInfo(&info);
+
   return info.dwNumberOfProcessors > 0 ? (int32_t)info.dwNumberOfProcessors : 1;
 #else
   long n = sysconf(_SC_NPROCESSORS_ONLN);
+
   return n > 0 ? (int32_t)n : 1;
 #endif
 }
@@ -367,9 +396,10 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
   NtQuerySystemInformationFn query = (NtQuerySystemInformationFn)(void *)GetProcAddress(
       GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation");
   ULONG got = 0;
-  if (query)
+  if (query) {
     query(8 /* SystemProcessorPerformanceInformation */, times,
           (ULONG)(sizeof(ProcessorTimes) * (size_t)count), &got);
+  }
   for (int32_t i = 0; i < count; ++i) {
     wchar_t key[128];
     swprintf(key, 128, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\%d", (int)i);
@@ -377,8 +407,9 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
     registry_value(key, L"~MHz", RRF_RT_REG_DWORD, &speed, &size);
     wchar_t model[256];
     size = sizeof model;
-    if (!registry_value(key, L"ProcessorNameString", RRF_RT_REG_SZ, model, &size))
+    if (!registry_value(key, L"ProcessorNameString", RRF_RT_REG_SZ, model, &size)) {
       model[0] = 0;
+    }
     TzCpuParts parts;
     parts.model = tz_str_from_utf16((const uint16_t *)model, wcslen(model));
     parts.speed = (double)speed;
@@ -397,7 +428,7 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
   FILE *info = fopen("/proc/cpuinfo", "r");
   if (info) {
     char line[512];
-    while (fgets(line, sizeof line, info))
+    while (fgets(line, sizeof line, info)) {
       if (strncmp(line, "model name", 10) == 0) {
         char *colon = strchr(line, ':');
         if (colon) {
@@ -406,6 +437,7 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
         }
         break;
       }
+    }
     fclose(info);
   }
   for (int32_t i = 0; i < count; ++i) {
@@ -416,6 +448,7 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
     tz_arr_push_value(cpus, &cpu);
   }
 #endif
+
   return cpus;
 }
 
@@ -426,8 +459,10 @@ TzArray *tz_os_loadavg(const TzType *element) {
   getloadavg(load, 3);
 #endif
   TzArray *a = tz_arr_new(element, 0, 3);
-  for (int i = 0; i < 3; ++i)
+  for (int i = 0; i < 3; ++i) {
     tz_arr_push_value(a, &load[i]);
+  }
+
   return a;
 }
 
@@ -446,8 +481,9 @@ void *tz_os_user_info(TzMaker make) {
   GetUserNameFn get = advapi ? (GetUserNameFn)(void *)GetProcAddress(advapi, "GetUserNameW") : NULL;
   wchar_t name[257];
   DWORD size = 257;
-  if (!get || !get(name, &size))
+  if (!get || !get(name, &size)) {
     size = 1;
+  }
   parts.username = tz_str_from_utf16((const uint16_t *)name, size - 1);
   homedir(&parts.homedir);
 #else
@@ -461,5 +497,6 @@ void *tz_os_user_info(TzMaker make) {
     parts.shell.has = 1;
   }
 #endif
+
   return make(&parts);
 }

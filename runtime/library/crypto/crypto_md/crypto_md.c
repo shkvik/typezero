@@ -5,14 +5,11 @@
 
 // The low-level functions are deprecated for programs; OpenSSL keeps them for itself, as this.
 #include "internal/deprecated.h"
-
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/md5.h>
 #include <openssl/ripemd.h>
 #include <openssl/sha.h>
 #include <string.h>
-
 #include "crypto/sha.h"
 #include "internal/sha3.h"
 #include "internal/sm3.h"

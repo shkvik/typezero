@@ -5,13 +5,10 @@
 // names.
 
 #include "internal/deprecated.h"
-
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/aes.h>
 #include <openssl/crypto.h>
 #include <string.h>
-
 #include "crypto/modes.h"
 
 extern unsigned int OPENSSL_ia32cap_P[];
@@ -28,10 +25,11 @@ void aesni_ctr32_encrypt_blocks(const unsigned char *in, unsigned char *out, siz
 #if defined(TZ_AES_GCM) || defined(TZ_AES_CTR)
 // The key schedule for encryption, by the CPU.
 static void encrypt_key(const uint8_t *key, size_t length, AES_KEY *ks) {
-  if (AESNI_CAPABLE)
+  if (AESNI_CAPABLE) {
     aesni_set_encrypt_key(key, (int)length * 8, ks);
-  else
+  } else {
     AES_set_encrypt_key(key, (int)length * 8, ks);
+  }
 }
 #endif
 
@@ -88,14 +86,16 @@ static int gcm_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
   CRYPTO_gcm128_init(&g->gcm, &g->ks, block_function());
   g->ctr = AESNI_CAPABLE ? (ctr128_f)aesni_ctr32_encrypt_blocks : NULL;
   CRYPTO_gcm128_setiv(&g->gcm, iv, iv_length);
+
   return 1;
 }
 
 static int gcm_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaintext_length) {
   (void)plaintext_length;
   Gcm *g = (Gcm *)c->ctx;
-  if (!g->vaes)
+  if (!g->vaes) {
     return CRYPTO_gcm128_aad(&g->gcm, aad, length) == 0;
+  }
   // vaes_gcm_aadupdate: whole blocks through the assembly, the rest into the hash.
   GCM128_CONTEXT *gcm = &g->gcm;
   gcm->len.u[0] += length;
@@ -118,9 +118,11 @@ static int gcm_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaint
     aad += blocks;
     length -= blocks;
   }
-  for (size_t i = 0; i < length; ++i)
+  for (size_t i = 0; i < length; ++i) {
     gcm->Xi.c[15 - i] ^= aad[i];
+  }
   gcm->ares = (unsigned int)length;
+
   return 1;
 }
 
@@ -133,10 +135,11 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
       ossl_gcm_gmult_avx512(gcm->Xi.u, gcm);
       gcm->ares = 0;
     }
-    if (c->decrypt)
+    if (c->decrypt) {
       ossl_aes_gcm_decrypt_avx512(gcm->key, gcm, &gcm->mres, in, length, out);
-    else
+    } else {
       ossl_aes_gcm_encrypt_avx512(gcm->key, gcm, &gcm->mres, in, length, out);
+    }
     return (int64_t)length;
   }
   // generic_aes_gcm_cipher_update: AES-NI and GHASH stitched in one pass when both are there.
@@ -145,24 +148,28 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
       g->ctr == (ctr128_f)aesni_ctr32_encrypt_blocks && gcm->funcs.ghash == gcm_ghash_avx;
   if (g->ctr && stitched && length >= (c->decrypt ? 16u : 32u)) {
     size_t res = (16 - gcm->mres) % 16;
-    if ((c->decrypt ? CRYPTO_gcm128_decrypt : CRYPTO_gcm128_encrypt)(gcm, in, out, res))
+    if ((c->decrypt ? CRYPTO_gcm128_decrypt : CRYPTO_gcm128_encrypt)(gcm, in, out, res)) {
       return -1;
+    }
     bulk = (c->decrypt ? aesni_gcm_decrypt : aesni_gcm_encrypt)(in + res, out + res, length - res,
                                                                 gcm->key, gcm->Yi.c, gcm->Xi.u);
     gcm->len.u[1] += bulk;
     bulk += res;
   }
   int failed;
-  if (g->ctr)
+  if (g->ctr) {
     failed = (c->decrypt ? CRYPTO_gcm128_decrypt_ctr32 : CRYPTO_gcm128_encrypt_ctr32)(
         gcm, in + bulk, out + bulk, length - bulk, g->ctr);
-  else
+  } else {
     failed = (c->decrypt ? CRYPTO_gcm128_decrypt : CRYPTO_gcm128_encrypt)(gcm, in, out, length);
+  }
   if (failed) {
-    if (!c->quiet)
+    if (!c->quiet) {
       tz_throw(TZ_ERROR, "Trying to add data in unsupported state");
+    }
     return -1;
   }
+
   return (int64_t)length;
 }
 
@@ -187,10 +194,12 @@ static int64_t gcm_final(TzCipher *c, uint8_t *out) {
     ok = 1;
   }
   if (!ok) {
-    if (!c->quiet)
+    if (!c->quiet) {
       tz_throw(TZ_ERROR, "Unsupported state or unable to authenticate data");
+    }
     return -1;
   }
+
   return 0;
 }
 
@@ -220,20 +229,23 @@ static int cbc_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
                     size_t iv_length) {
   Cbc *k = (Cbc *)c->ctx;
   int bits = (int)key_length * 8;
-  if (AESNI_CAPABLE)
+  if (AESNI_CAPABLE) {
     (c->decrypt ? aesni_set_decrypt_key : aesni_set_encrypt_key)(key, bits, &k->ks);
-  else
+  } else {
     (c->decrypt ? AES_set_decrypt_key : AES_set_encrypt_key)(key, bits, &k->ks);
+  }
   memcpy(k->iv, iv, iv_length);
+
   return 1;
 }
 
 static void cbc_blocks(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
   Cbc *k = (Cbc *)c->ctx;
-  if (AESNI_CAPABLE)
+  if (AESNI_CAPABLE) {
     aesni_cbc_encrypt(in, out, length, &k->ks, k->iv, !c->decrypt);
-  else
+  } else {
     AES_cbc_encrypt(in, out, length, &k->ks, k->iv, !c->decrypt);
+  }
 }
 
 static int64_t cbc_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
@@ -273,23 +285,27 @@ static int ctr_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
   Ctr *k = (Ctr *)c->ctx;
   encrypt_key(key, key_length, &k->ks);
   memcpy(k->counter, iv, iv_length);
+
   return 1;
 }
 
 static int64_t ctr_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
   Ctr *k = (Ctr *)c->ctx;
-  if (AESNI_CAPABLE)
+  if (AESNI_CAPABLE) {
     CRYPTO_ctr128_encrypt_ctr32(in, out, length, &k->ks, k->counter, k->stream, &k->used,
                                 (ctr128_f)aesni_ctr32_encrypt_blocks);
-  else
+  } else {
     CRYPTO_ctr128_encrypt(in, out, length, &k->ks, k->counter, k->stream, &k->used,
                           (block128_f)AES_encrypt);
+  }
+
   return (int64_t)length;
 }
 
 static int64_t ctr_final(TzCipher *c, uint8_t *out) {
   (void)c;
   (void)out;
+
   return 0;
 }
 

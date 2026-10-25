@@ -43,7 +43,6 @@
 #endif
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -393,9 +392,12 @@ static const Signal kSignals[] = {
 
 // The name of a signal, as Node's signo_string gives it; NULL for none.
 static const char *signal_name(int number) {
-  for (size_t i = 0; i < sizeof kSignals / sizeof kSignals[0]; ++i)
-    if (kSignals[i].number == number)
+  for (size_t i = 0; i < sizeof kSignals / sizeof kSignals[0]; ++i) {
+    if (kSignals[i].number == number) {
       return kSignals[i].name;
+    }
+  }
+
   return NULL;
 }
 
@@ -410,9 +412,12 @@ static void buf_take_units(TzBuf *to, const TzBuf *from) {
 }
 
 static int has_zero(const TzBuf *b) {
-  for (size_t i = 0; i < b->length; ++i)
-    if (b->data[i] == 0)
+  for (size_t i = 0; i < b->length; ++i) {
+    if (b->data[i] == 0) {
       return 1;
+    }
+  }
+
   return 0;
 }
 
@@ -497,11 +502,13 @@ typedef struct {
 static void out_append(Out *o, const uint8_t *data, size_t n) {
   if (o->length + n > o->capacity) {
     size_t capacity = o->capacity * 2 + 4096;
-    if (capacity < o->length + n)
+    if (capacity < o->length + n) {
       capacity = o->length + n;
+    }
     uint8_t *grown = (uint8_t *)tz_alloc(capacity);
-    if (o->length)
+    if (o->length) {
       memcpy(grown, o->data, o->length);
+    }
     tz_free(o->data);
     o->data = grown;
     o->capacity = capacity;
@@ -520,20 +527,23 @@ static TzBuf *list_add(List *l) {
   if (l->count == l->capacity) {
     size_t capacity = l->capacity * 2 + 8;
     TzBuf *grown = (TzBuf *)tz_alloc(capacity * sizeof(TzBuf));
-    if (l->count)
+    if (l->count) {
       memcpy(grown, l->items, l->count * sizeof(TzBuf));
+    }
     tz_free(l->items);
     l->items = grown;
     l->capacity = capacity;
   }
   TzBuf *b = &l->items[l->count++];
   tz_buf_init(b);
+
   return b;
 }
 
 static void list_free(List *l) {
-  for (size_t i = 0; i < l->count; ++i)
+  for (size_t i = 0; i < l->count; ++i) {
     tz_buf_free(&l->items[i]);
+  }
   tz_free(l->items);
   l->items = NULL;
   l->count = l->capacity = 0;
@@ -541,11 +551,15 @@ static void list_free(List *l) {
 
 static int units_equal(const TzBuf *b, const char *text) {
   size_t n = strlen(text);
-  if (b->length != n)
+  if (b->length != n) {
     return 0;
-  for (size_t i = 0; i < n; ++i)
-    if (b->data[i] != (unsigned char)text[i])
+  }
+  for (size_t i = 0; i < n; ++i) {
+    if (b->data[i] != (unsigned char)text[i]) {
       return 0;
+    }
+  }
+
   return 1;
 }
 
@@ -572,21 +586,25 @@ static void call_free(Call *c) {
   list_free(&c->args);
   tz_buf_free(&c->cwd);
   list_free(&c->env);
-  if (c->input)
+  if (c->input) {
     tz_instance_release((TzInstance *)c->input);
+  }
 }
 
 #ifdef _WIN32
 // The value of a variable of this process, or 0 without it.
 static int get_env(TzBuf *out, const wchar_t *name) {
   DWORD n = GetEnvironmentVariableW(name, NULL, 0);
-  if (n == 0)
+  if (n == 0) {
     return 0;
+  }
   wchar_t *value = (wchar_t *)tz_alloc(n * sizeof(wchar_t));
   DWORD got = GetEnvironmentVariableW(name, value, n);
-  if (got < n)
+  if (got < n) {
     tz_buf_units(out, (const uint16_t *)value, got);
+  }
   tz_free(value);
+
   return got < n;
 }
 
@@ -597,18 +615,22 @@ static int is_cmd(const TzBuf *file) {
   for (int exe = 1; exe >= 0; --exe) {
     const char *tail = exe ? "cmd.exe" : "cmd";
     size_t k = strlen(tail);
-    if (n < k)
+    if (n < k) {
       continue;
+    }
     int same = 1;
     for (size_t i = 0; i < k && same; ++i) {
       uint16_t c = s[n - k + i];
-      if (c >= 'A' && c <= 'Z')
+      if (c >= 'A' && c <= 'Z') {
         c += 'a' - 'A';
+      }
       same = c == (unsigned char)tail[i];
     }
-    if (same && (n == k || s[n - k - 1] == '\\'))
+    if (same && (n == k || s[n - k - 1] == '\\')) {
       return 1;
+    }
   }
+
   return 0;
 }
 #endif
@@ -649,27 +671,32 @@ static int collect_env(Call *c) {
     wchar_t *block = GetEnvironmentStringsW();
     for (const wchar_t *p = block; p && *p; p += wcslen(p) + 1) {
       const wchar_t *equals = wcschr(p + 1, L'=');
-      if (*p == L'=' || !equals)
+      if (*p == L'=' || !equals) {
         continue;
+      }
       tz_buf_units(list_add(&names), (const uint16_t *)p, (size_t)(equals - p));
       tz_buf_units(list_add(&pairs), (const uint16_t *)p, wcslen(p));
     }
-    if (block)
+    if (block) {
       FreeEnvironmentStringsW(block);
+    }
 #else
     extern char **environ;
     for (char **p = environ; p && *p; ++p) {
       const char *equals = strchr(*p, '=');
-      if (!equals)
+      if (!equals) {
         continue;
+      }
       // Kept as bytes, one unit each: they go back to the system as they
       // came (see utf8_of).
       TzBuf *name = list_add(&names);
-      for (const char *q = *p; q < equals; ++q)
+      for (const char *q = *p; q < equals; ++q) {
         tz_buf_push(name, (uint8_t)*q);
+      }
       TzBuf *pair = list_add(&pairs);
-      for (const char *q = *p; *q; ++q)
+      for (const char *q = *p; *q; ++q) {
         tz_buf_push(pair, (uint8_t)*q);
+      }
     }
 #endif
   }
@@ -682,11 +709,13 @@ static int collect_env(Call *c) {
     while (j > 0) {
       const TzBuf *a = &names.items[order[j - 1]], *b = &names.items[i];
       size_t k = 0;
-      while (k < a->length && k < b->length && a->data[k] == b->data[k])
+      while (k < a->length && k < b->length && a->data[k] == b->data[k]) {
         ++k;
+      }
       int greater = k < a->length && (k == b->length || a->data[k] > b->data[k]);
-      if (!greater)
+      if (!greater) {
         break;
+      }
       order[j] = order[j - 1];
       --j;
     }
@@ -698,21 +727,25 @@ static int collect_env(Call *c) {
     for (size_t k = 0; k < c->env.count && !seen; ++k) {
       const TzBuf *kept = &c->env.items[k];
       size_t eq = 0;
-      while (eq < kept->length && kept->data[eq] != '=')
+      while (eq < kept->length && kept->data[eq] != '=') {
         ++eq;
+      }
       seen = CompareStringOrdinal((const wchar_t *)kept->data, (int)eq, (const wchar_t *)name->data,
                                   (int)name->length, TRUE) == CSTR_EQUAL;
     }
-    if (!seen)
+    if (!seen) {
       buf_take_units(list_add(&c->env), &pairs.items[order[i]]);
+    }
   }
   tz_free(order);
 #else
-  for (size_t i = 0; i < pairs.count; ++i)
+  for (size_t i = 0; i < pairs.count; ++i) {
     buf_take_units(list_add(&c->env), &pairs.items[i]);
+  }
 #endif
   list_free(&pairs);
   list_free(&names);
+
   return 1;
 }
 
@@ -784,8 +817,9 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   if (shell == SHELL_PATH) {
     tz_buf_str(&path, req->shell);
     // An empty one is none, as `if (options.shell)` reads it in Node.
-    if (path.length == 0)
+    if (path.length == 0) {
       shell = SHELL_NONE;
+    }
   }
   if (shell != SHELL_NONE) {
     if (has_zero(&path)) {
@@ -806,10 +840,11 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     list_free(&given);
     c->file.length = 0;
 #ifdef _WIN32
-    if (shell == SHELL_PATH)
+    if (shell == SHELL_PATH) {
       buf_take_units(&c->file, &path);
-    else if (!get_env(&c->file, L"comspec"))
+    } else if (!get_env(&c->file, L"comspec")) {
       tz_buf_ascii(&c->file, "cmd.exe");
+    }
     if (is_cmd(&c->file)) {
       // '/d /s /c' with the command in quotes, unquoted inside.
       tz_buf_ascii(list_add(&given), "/d");
@@ -825,10 +860,11 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
       buf_take_units(list_add(&given), &command);
     }
 #else
-    if (shell == SHELL_PATH)
+    if (shell == SHELL_PATH) {
       buf_take_units(&c->file, &path);
-    else
+    } else {
       tz_buf_ascii(&c->file, "/bin/sh");
+    }
     tz_buf_ascii(list_add(&given), "-c");
     buf_take_units(list_add(&given), &command);
 #endif
@@ -836,13 +872,15 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   }
   tz_buf_free(&path);
   buf_take_units(list_add(&c->args), (req->has & HAS_ARGV0) ? &argv0 : &c->file);
-  for (size_t i = 0; i < given.count; ++i)
+  for (size_t i = 0; i < given.count; ++i) {
     buf_take_units(list_add(&c->args), &given.items[i]);
+  }
   list_free(&given);
   tz_buf_free(&argv0);
 
-  if (!collect_env(c))
+  if (!collect_env(c)) {
     return 0;
+  }
 
   // spawnSync: the timeout, maxBuffer and the signal.
   if (req->has & HAS_TIMEOUT) {
@@ -867,9 +905,11 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     tz_buf_init(&name);
     tz_buf_str(&name, req->kill_name);
     int found = -1;
-    for (size_t i = 0; i < sizeof kSignals / sizeof kSignals[0] && found < 0; ++i)
-      if (units_equal(&name, kSignals[i].name))
+    for (size_t i = 0; i < sizeof kSignals / sizeof kSignals[0] && found < 0; ++i) {
+      if (units_equal(&name, kSignals[i].name)) {
         found = kSignals[i].number;
+      }
+    }
     if (found < 0) {
       TzBuf m;
       tz_buf_init(&m);
@@ -899,6 +939,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     tz_rc_inc(&req->input_bytes->rc);
     c->input = req->input_bytes;
   }
+
   return 1;
 }
 
@@ -919,13 +960,15 @@ typedef struct {
 } Outcome;
 
 static void set_error(Outcome *o, int error) {
-  if (o->error == X_NONE)
+  if (o->error == X_NONE) {
     o->error = error;
+  }
 }
 
 static void set_pipe_error(Outcome *o, int error) {
-  if (o->pipe_error == X_NONE)
+  if (o->pipe_error == X_NONE) {
     o->pipe_error = error;
+  }
 }
 
 #ifdef _WIN32
@@ -936,23 +979,27 @@ static void set_pipe_error(Outcome *o, int error) {
 static int is_batch_file(const TzBuf *file) {
   size_t end = file->length;
   while (end > 0 && (file->data[end - 1] == '.' || file->data[end - 1] == ' ' ||
-                     (file->data[end - 1] >= '\t' && file->data[end - 1] <= '\r')))
+                     (file->data[end - 1] >= '\t' && file->data[end - 1] <= '\r'))) {
     --end;
+  }
   size_t start = end;
   while (start > 0) {
     uint16_t c = file->data[start - 1];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
       break;
+    }
     --start;
   }
-  if (start == end || start == 0 || file->data[start - 1] != '.' || end - start != 3)
+  if (start == end || start == 0 || file->data[start - 1] != '.' || end - start != 3) {
     return 0;
+  }
   char ext[4];
   for (int i = 0; i < 3; ++i) {
     uint16_t c = file->data[start + (size_t)i];
     ext[i] = (char)(c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c);
   }
   ext[3] = 0;
+
   return strcmp(ext, "bat") == 0 || strcmp(ext, "cmd") == 0;
 }
 
@@ -983,25 +1030,30 @@ static wchar_t *search_path_join_test(const wchar_t *dir, size_t dir_len, const 
   wchar_t *pos = result;
   wcsncpy(pos, cwd, cwd_len);
   pos += cwd_len;
-  if (cwd_len && wcsrchr(L"\\/:", pos[-1]) == NULL)
+  if (cwd_len && wcsrchr(L"\\/:", pos[-1]) == NULL) {
     *pos++ = L'\\';
+  }
   wcsncpy(pos, dir, dir_len);
   pos += dir_len;
-  if (dir_len && wcsrchr(L"\\/:", pos[-1]) == NULL)
+  if (dir_len && wcsrchr(L"\\/:", pos[-1]) == NULL) {
     *pos++ = L'\\';
+  }
   wcsncpy(pos, name, name_len);
   pos += name_len;
   if (ext_len) {
-    if (name_len && pos[-1] != L'.')
+    if (name_len && pos[-1] != L'.') {
       *pos++ = L'.';
+    }
     wcsncpy(pos, ext, ext_len);
     pos += ext_len;
   }
   *pos = 0;
   DWORD attrs = GetFileAttributesW(result);
-  if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+  if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
     return result;
+  }
   tz_free(result);
+
   return NULL;
 }
 
@@ -1012,10 +1064,13 @@ static wchar_t *path_search_walk_ext(const wchar_t *dir, size_t dir_len, const w
                                      int name_has_ext) {
   wchar_t *result;
   if (name_has_ext &&
-      (result = search_path_join_test(dir, dir_len, name, name_len, L"", 0, cwd, cwd_len)))
+      (result = search_path_join_test(dir, dir_len, name, name_len, L"", 0, cwd, cwd_len))) {
     return result;
-  if ((result = search_path_join_test(dir, dir_len, name, name_len, L"com", 3, cwd, cwd_len)))
+  }
+  if ((result = search_path_join_test(dir, dir_len, name, name_len, L"com", 3, cwd, cwd_len))) {
     return result;
+  }
+
   return search_path_join_test(dir, dir_len, name, name_len, L"exe", 3, cwd, cwd_len);
 }
 
@@ -1025,47 +1080,58 @@ static wchar_t *path_search_walk_ext(const wchar_t *dir, size_t dir_len, const w
 // directory of PATH, which may be quoted. NULL if there is none.
 static wchar_t *search_path(const wchar_t *file, const wchar_t *cwd, const wchar_t *path) {
   size_t file_len = wcslen(file), cwd_len = wcslen(cwd);
-  if (file_len == 0 || (file_len == 1 && file[0] == L'.'))
+  if (file_len == 0 || (file_len == 1 && file[0] == L'.')) {
     return NULL;
+  }
   const wchar_t *name = file + file_len;
-  while (name > file && name[-1] != L'\\' && name[-1] != L'/' && name[-1] != L':')
+  while (name > file && name[-1] != L'\\' && name[-1] != L'/' && name[-1] != L':') {
     --name;
+  }
   int file_has_dir = name != file;
   const wchar_t *dot = wcschr(name, L'.');
   int name_has_ext = dot != NULL && dot[1] != 0;
-  if (file_has_dir)
+  if (file_has_dir) {
     return path_search_walk_ext(file, (size_t)(name - file), name, file_len - (size_t)(name - file),
                                 cwd, cwd_len, name_has_ext);
+  }
   wchar_t *result = NULL;
-  if (NeedCurrentDirectoryForExePathW(L""))
+  if (NeedCurrentDirectoryForExePathW(L"")) {
     result = path_search_walk_ext(L"", 0, file, file_len, cwd, cwd_len, name_has_ext);
+  }
   const wchar_t *dir_end = path;
   while (result == NULL) {
-    if (dir_end == NULL || *dir_end == 0)
+    if (dir_end == NULL || *dir_end == 0) {
       break;
-    if (dir_end != path || *path == L';')
+    }
+    if (dir_end != path || *path == L';') {
       ++dir_end;
+    }
     const wchar_t *dir_start = dir_end;
     if (*dir_start == L'"' || *dir_start == L'\'') {
       dir_end = wcschr(dir_start + 1, *dir_start);
-      if (dir_end == NULL)
+      if (dir_end == NULL) {
         dir_end = wcschr(dir_start, 0);
+      }
     }
     dir_end = wcschr(dir_end, L';');
-    if (dir_end == NULL)
+    if (dir_end == NULL) {
       dir_end = wcschr(dir_start, 0);
-    if (dir_end == dir_start)
+    }
+    if (dir_end == dir_start) {
       continue;
+    }
     const wchar_t *dir = dir_start;
     size_t dir_len = (size_t)(dir_end - dir_start);
     if (dir[0] == L'"' || dir[0] == L'\'') {
       ++dir;
       --dir_len;
     }
-    if (dir_len > 0 && (dir[dir_len - 1] == L'"' || dir[dir_len - 1] == L'\''))
+    if (dir_len > 0 && (dir[dir_len - 1] == L'"' || dir[dir_len - 1] == L'\'')) {
       --dir_len;
+    }
     result = path_search_walk_ext(dir, dir_len, file, file_len, cwd, cwd_len, name_has_ext);
   }
+
   return result;
 }
 
@@ -1110,8 +1176,9 @@ static void quote_cmd_arg(TzBuf *out, const TzBuf *arg) {
     }
   }
   tz_buf_push(out, '"');
-  for (size_t i = rev.length; i > 0; --i)
+  for (size_t i = rev.length; i > 0; --i) {
     tz_buf_push(out, rev.data[i - 1]);
+  }
   tz_buf_push(out, '"');
   tz_buf_free(&rev);
 }
@@ -1129,8 +1196,9 @@ static wchar_t *make_env_block(Call *c) {
     for (size_t i = 0; i < c->env.count && !present; ++i) {
       const TzBuf *pair = &c->env.items[i];
       size_t eq = 0;
-      while (eq < pair->length && pair->data[eq] != '=')
+      while (eq < pair->length && pair->data[eq] != '=') {
         ++eq;
+      }
       present = CompareStringOrdinal((const wchar_t *)pair->data, (int)eq, required[r], len,
                                      TRUE) == CSTR_EQUAL;
     }
@@ -1149,25 +1217,29 @@ static wchar_t *make_env_block(Call *c) {
   for (size_t i = 1; i < n; ++i) {
     TzBuf moving = c->env.items[i];
     size_t moving_eq = 0;
-    while (moving_eq < moving.length && moving.data[moving_eq] != '=')
+    while (moving_eq < moving.length && moving.data[moving_eq] != '=') {
       ++moving_eq;
+    }
     size_t j = i;
     while (j > 0) {
       const TzBuf *before = &c->env.items[j - 1];
       size_t eq = 0;
-      while (eq < before->length && before->data[eq] != '=')
+      while (eq < before->length && before->data[eq] != '=') {
         ++eq;
+      }
       if (CompareStringOrdinal((const wchar_t *)before->data, (int)eq, (const wchar_t *)moving.data,
-                               (int)moving_eq, TRUE) != CSTR_GREATER_THAN)
+                               (int)moving_eq, TRUE) != CSTR_GREATER_THAN) {
         break;
+      }
       c->env.items[j] = c->env.items[j - 1];
       --j;
     }
     c->env.items[j] = moving;
   }
   size_t total = 2;
-  for (size_t i = 0; i < n; ++i)
+  for (size_t i = 0; i < n; ++i) {
     total += c->env.items[i].length + 1;
+  }
   wchar_t *block = (wchar_t *)tz_alloc(total * sizeof(wchar_t));
   wchar_t *p = block;
   for (size_t i = 0; i < n; ++i) {
@@ -1176,17 +1248,23 @@ static wchar_t *make_env_block(Call *c) {
     *p++ = 0;
   }
   *p++ = 0;
-  if (n == 0)
+  if (n == 0) {
     *p = 0;
+  }
+
   return block;
 }
 
 // PATH of the block (find_path), NULL without one.
 static const wchar_t *find_path(const wchar_t *env) {
-  for (; env && *env; env += wcslen(env) + 1)
+  for (; env && *env; env += wcslen(env) + 1) {
     if ((env[0] == L'P' || env[0] == L'p') && (env[1] == L'A' || env[1] == L'a') &&
-        (env[2] == L'T' || env[2] == L't') && (env[3] == L'H' || env[3] == L'h') && env[4] == L'=')
+        (env[2] == L'T' || env[2] == L't') && (env[3] == L'H' || env[3] == L'h') &&
+        env[4] == L'=') {
       return env + 5;
+    }
+  }
+
   return NULL;
 }
 
@@ -1212,9 +1290,11 @@ static BOOL CALLBACK init_job(PINIT_ONCE once, PVOID param, PVOID *context) {
     job = NULL;
   }
   // As libuv does: this process too, which ties the job to its session.
-  if (job)
+  if (job) {
     AssignProcessToJobObject(job, GetCurrentProcess());
+  }
   tz_child_job = job;
+
   return TRUE;
 }
 
@@ -1250,11 +1330,13 @@ static DWORD make_pipe(HANDLE *parent, HANDLE *child, int readable) {
     h = CreateNamedPipeW(name, server, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 65536,
                          65536, 0, NULL);
     if (h == INVALID_HANDLE_VALUE && GetLastError() != ERROR_PIPE_BUSY &&
-        GetLastError() != ERROR_ACCESS_DENIED)
+        GetLastError() != ERROR_ACCESS_DENIED) {
       return GetLastError();
+    }
   }
-  if (h == INVALID_HANDLE_VALUE)
+  if (h == INVALID_HANDLE_VALUE) {
     return GetLastError();
+  }
   SECURITY_ATTRIBUTES sa = {sizeof sa, NULL, TRUE};
   HANDLE c = CreateFileW(name, client, 0, &sa, OPEN_EXISTING, 0, NULL);
   if (c == INVALID_HANDLE_VALUE) {
@@ -1273,12 +1355,14 @@ static DWORD make_pipe(HANDLE *parent, HANDLE *child, int readable) {
   CloseHandle(ov.hEvent);
   *parent = h;
   *child = c;
+
   return 0;
 }
 
 static void pipe_close(Pipe *p) {
-  if (!p->handle)
+  if (!p->handle) {
     return;
+  }
   if (p->pending) {
     DWORD n;
     CancelIoEx(p->handle, &p->ov);
@@ -1291,17 +1375,20 @@ static void pipe_close(Pipe *p) {
 
 // Starts the next read of an output pipe; false at its end.
 static int pipe_read(Pipe *p, Outcome *o) {
-  if (!p->chunk)
+  if (!p->chunk) {
     p->chunk = (uint8_t *)tz_alloc(65536);
+  }
   ResetEvent(p->ov.hEvent);
   if (ReadFile(p->handle, p->chunk, 65536, NULL, &p->ov) || GetLastError() == ERROR_IO_PENDING) {
     p->pending = 1;
     return 1;
   }
   DWORD error = GetLastError();
-  if (error != ERROR_BROKEN_PIPE)
+  if (error != ERROR_BROKEN_PIPE) {
     set_pipe_error(o, win32_error(error));
+  }
   pipe_close(p);
+
   return 0;
 }
 
@@ -1319,12 +1406,14 @@ static void run(Call *c, Outcome *o) {
   TzBuf line;
   tz_buf_init(&line);
   for (size_t i = 0; i < c->args.count; ++i) {
-    if (i > 0)
+    if (i > 0) {
       tz_buf_push(&line, ' ');
-    if (c->verbatim)
+    }
+    if (c->verbatim) {
       buf_take_units(&line, &c->args.items[i]);
-    else
+    } else {
       quote_cmd_arg(&line, &c->args.items[i]);
+    }
   }
   tz_buf_push(&line, 0);
   wchar_t *env = make_env_block(c);
@@ -1342,8 +1431,9 @@ static void run(Call *c, Outcome *o) {
   tz_buf_push(&cwd, 0);
   if (cwd.length - 1 >= MAX_PATH) {
     DWORD n = GetShortPathNameW((wchar_t *)cwd.data, (wchar_t *)cwd.data, (DWORD)cwd.length);
-    if (n > 0 && n < cwd.length)
+    if (n > 0 && n < cwd.length) {
       cwd.data[n] = 0;
+    }
   }
   TzBuf parent_path;
   tz_buf_init(&parent_path);
@@ -1371,13 +1461,15 @@ static void run(Call *c, Outcome *o) {
       DWORD access = i == 0 ? FILE_GENERIC_READ : FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES;
       child[i] = CreateFileW(L"NUL", access, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING,
                              0, NULL);
-      if (child[i] == INVALID_HANDLE_VALUE)
+      if (child[i] == INVALID_HANDLE_VALUE) {
         failure = GetLastError();
+      }
       crt_flags[i] = 0x01 | 0x40; // FOPEN | FDEV
     } else if (kind == STDIO_PIPE) {
       failure = make_pipe(&pipes[i].handle, &child[i], i == 0);
-      if (!failure)
+      if (!failure) {
         pipes[i].ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+      }
       crt_flags[i] = 0x01 | 0x08; // FOPEN | FPIPE
     } else {
       inherits = 1;
@@ -1389,8 +1481,9 @@ static void run(Call *c, Outcome *o) {
         child[i] = INVALID_HANDLE_VALUE;
         // A missing stdin, stdout or stderr is no error: the child goes
         // without it.
-        if (fd > 2)
+        if (fd > 2) {
           failure = ERROR_INVALID_HANDLE;
+        }
         continue;
       }
       switch (GetFileType(child[i])) {
@@ -1417,21 +1510,25 @@ static void run(Call *c, Outcome *o) {
   wchar_t *application = NULL;
   if (!failure) {
     application = search_path((const wchar_t *)file.data, (const wchar_t *)cwd.data, path);
-    if (!application)
+    if (!application) {
       failure = ERROR_FILE_NOT_FOUND;
+    }
   }
 
   // Only these handles go to the child.
   HANDLE inherited[3];
   DWORD inherited_count = 0;
   for (int i = 0; i < 3; ++i) {
-    if (child[i] == INVALID_HANDLE_VALUE)
+    if (child[i] == INVALID_HANDLE_VALUE) {
       continue;
+    }
     int dup = 0;
-    for (DWORD k = 0; k < inherited_count; ++k)
+    for (DWORD k = 0; k < inherited_count; ++k) {
       dup |= inherited[k] == child[i];
-    if (!dup)
+    }
+    if (!dup) {
       inherited[inherited_count++] = child[i];
+    }
   }
   LPPROC_THREAD_ATTRIBUTE_LIST attributes = NULL;
   if (!failure && inherited_count > 0) {
@@ -1459,26 +1556,31 @@ static void run(Call *c, Outcome *o) {
     startup.StartupInfo.hStdError = child[2];
     startup.lpAttributeList = attributes;
     DWORD flags = CREATE_UNICODE_ENVIRONMENT;
-    if (attributes)
+    if (attributes) {
       flags |= EXTENDED_STARTUPINFO_PRESENT;
+    }
     // windowsHide: no console window unless a stream is inherited.
-    if (req->windows_hide && !inherits)
+    if (req->windows_hide && !inherits) {
       flags |= CREATE_NO_WINDOW;
+    }
     startup.StartupInfo.wShowWindow = req->windows_hide ? SW_HIDE : SW_SHOWDEFAULT;
-    if (req->detached)
+    if (req->detached) {
       flags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED;
+    }
     // The output of this program first, so that it comes before the
     // child's where they share a stream.
-    if (inherits)
+    if (inherits) {
       tz_out_flush(1);
+    }
     if (!CreateProcessW(application, (wchar_t *)line.data, NULL, NULL, inherited_count > 0, flags,
                         env, (const wchar_t *)cwd.data, &startup.StartupInfo, &info)) {
       failure = GetLastError();
     } else {
       if (!req->detached) {
         InitOnceExecuteOnce(&tz_child_job_once, init_job, NULL, NULL);
-        if (tz_child_job)
+        if (tz_child_job) {
           AssignProcessToJobObject(tz_child_job, info.hProcess);
+        }
       } else if (ResumeThread(info.hThread) == (DWORD)-1) {
         failure = GetLastError();
         TerminateProcess(info.hProcess, 1);
@@ -1497,15 +1599,18 @@ static void run(Call *c, Outcome *o) {
   tz_buf_free(&cwd);
   tz_buf_free(&parent_path);
   tz_buf_free(&file);
-  for (int i = 0; i < 3; ++i)
-    if (child[i] != INVALID_HANDLE_VALUE)
+  for (int i = 0; i < 3; ++i) {
+    if (child[i] != INVALID_HANDLE_VALUE) {
       CloseHandle(child[i]);
+    }
+  }
   if (failure) {
     o->error = win32_error(failure);
     for (int i = 0; i < 3; ++i) {
       pipe_close(&pipes[i]);
-      if (pipes[i].ov.hEvent)
+      if (pipes[i].ov.hEvent) {
         CloseHandle(pipes[i].ov.hEvent);
+      }
     }
     return;
   }
@@ -1518,9 +1623,11 @@ static void run(Call *c, Outcome *o) {
   ULONGLONG deadline = c->timeout > 0 ? GetTickCount64() + (ULONGLONG)c->timeout : 0;
   int exited = 0, killed = 0;
   double buffered = 0;
-  for (int i = 1; i < 3; ++i)
-    if (pipes[i].handle)
+  for (int i = 1; i < 3; ++i) {
+    if (pipes[i].handle) {
       pipe_read(&pipes[i], o);
+    }
+  }
   if (pipes[0].handle) {
     if (c->input && c->input->length > 0) {
       ResetEvent(pipes[0].ov.hEvent);
@@ -1548,13 +1655,15 @@ static void run(Call *c, Outcome *o) {
       waits[n] = info.hProcess;
       which[n++] = -1;
     }
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 3; ++i) {
       if (pipes[i].handle && pipes[i].pending) {
         waits[n] = pipes[i].ov.hEvent;
         which[n++] = i;
       }
-    if (n == 0)
+    }
+    if (n == 0) {
       break;
+    }
     DWORD wait = INFINITE;
     if (deadline) {
       ULONGLONG now = GetTickCount64();
@@ -1579,16 +1688,18 @@ static void run(Call *c, Outcome *o) {
       p->pending = 0;
       if (i == 0) {
         // The input is written: its end tells the child so.
-        if (!ok)
+        if (!ok) {
           set_pipe_error(o, error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
                                 ? X_EPIPE
                                 : win32_error(error));
+        }
         pipe_close(p);
         continue;
       }
       if (!ok) {
-        if (error != ERROR_BROKEN_PIPE)
+        if (error != ERROR_BROKEN_PIPE) {
           set_pipe_error(o, win32_error(error));
+        }
         pipe_close(p);
         continue;
       }
@@ -1621,12 +1732,14 @@ static void run(Call *c, Outcome *o) {
           DWORD status;
           DWORD error = GetLastError();
           if (!(error == ERROR_ACCESS_DENIED && GetExitCodeProcess(info.hProcess, &status) &&
-                status != STILL_ACTIVE))
+                status != STILL_ACTIVE)) {
             set_error(o, win32_error(error));
+          }
         }
       }
-      for (int i = 0; i < 3; ++i)
+      for (int i = 0; i < 3; ++i) {
         pipe_close(&pipes[i]);
+      }
     }
   }
   DWORD status = 0;
@@ -1635,8 +1748,9 @@ static void run(Call *c, Outcome *o) {
   CloseHandle(info.hProcess);
   for (int i = 0; i < 3; ++i) {
     pipe_close(&pipes[i]);
-    if (pipes[i].ov.hEvent)
+    if (pipes[i].ov.hEvent) {
       CloseHandle(pipes[i].ov.hEvent);
+    }
     tz_free(pipes[i].chunk);
   }
 }
@@ -1652,10 +1766,11 @@ static char *utf8_of(const TzBuf *b) {
   for (size_t i = 0; i < b->length; ++i) {
     uint32_t c = b->data[i];
     if (c >= 0xD800 && c <= 0xDBFF && i + 1 < b->length && b->data[i + 1] >= 0xDC00 &&
-        b->data[i + 1] <= 0xDFFF)
+        b->data[i + 1] <= 0xDFFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (b->data[++i] - 0xDC00);
-    else if (c >= 0xD800 && c <= 0xDFFF)
+    } else if (c >= 0xD800 && c <= 0xDFFF) {
       c = 0xFFFD;
+    }
     if (c < 0x80) {
       out[n++] = (char)c;
     } else if (c < 0x800) {
@@ -1686,14 +1801,18 @@ static int64_t now_ms(void) {
 // environment (libuv's uv__spawn_find_path_in_env); NULL for a path, which
 // is used as it is, or a name that is in none of its directories.
 static char *find_program(const char *file, char **envp) {
-  if (strchr(file, '/'))
+  if (strchr(file, '/')) {
     return NULL;
+  }
   const char *path = NULL;
-  for (char **e = envp; *e && !path; ++e)
-    if (strncmp(*e, "PATH=", 5) == 0)
+  for (char **e = envp; *e && !path; ++e) {
+    if (strncmp(*e, "PATH=", 5) == 0) {
       path = *e + 5;
-  if (!path)
+    }
+  }
+  if (!path) {
     path = "/usr/local/bin:/bin:/usr/bin";
+  }
   size_t file_len = strlen(file);
   for (const char *p = path;;) {
     const char *end = strchr(p, ':');
@@ -1706,11 +1825,13 @@ static char *find_program(const char *file, char **envp) {
       candidate[len] = '/';
       memcpy(candidate + len + 1, file, file_len + 1);
     }
-    if (access(candidate, X_OK) == 0)
+    if (access(candidate, X_OK) == 0) {
       return candidate;
+    }
     tz_free(candidate);
-    if (!end)
+    if (!end) {
       break;
+    }
     p = end + 1;
   }
   return NULL;
@@ -1719,20 +1840,23 @@ static char *find_program(const char *file, char **envp) {
 static void run(Call *c, Outcome *o) {
   const TzSpawnRequest *req = c->req;
   char **argv = (char **)tz_alloc((c->args.count + 1) * sizeof(char *));
-  for (size_t i = 0; i < c->args.count; ++i)
+  for (size_t i = 0; i < c->args.count; ++i) {
     argv[i] = utf8_of(&c->args.items[i]);
+  }
   argv[c->args.count] = NULL;
   char **envp = (char **)tz_alloc((c->env.count + 1) * sizeof(char *));
-  for (size_t i = 0; i < c->env.count; ++i)
+  for (size_t i = 0; i < c->env.count; ++i) {
     envp[i] = utf8_of(&c->env.items[i]);
+  }
   envp[c->env.count] = NULL;
   char *file = utf8_of(&c->file);
   char *cwd = c->has_cwd ? utf8_of(&c->cwd) : NULL;
   char *program = find_program(file, envp);
   int failure = 0, inherits = 0;
   // A name not found in PATH is not looked for elsewhere, as execvp does.
-  if (!program && !strchr(file, '/'))
+  if (!program && !strchr(file, '/')) {
     failure = ENOENT;
+  }
 
   int parent[3] = {-1, -1, -1}, child[3] = {-1, -1, -1};
   posix_spawn_file_actions_t actions;
@@ -1753,12 +1877,14 @@ static void run(Call *c, Outcome *o) {
     } else {
       inherits = 1;
       int fd = kind - STDIO_INHERIT;
-      if (fd != i)
+      if (fd != i) {
         posix_spawn_file_actions_adddup2(&actions, fd, i);
+      }
     }
   }
-  if (cwd && !failure)
+  if (cwd && !failure) {
     failure = posix_spawn_file_actions_addchdir_np(&actions, cwd);
+  }
   posix_spawnattr_t attr;
   posix_spawnattr_init(&attr);
   short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
@@ -1767,43 +1893,54 @@ static void run(Call *c, Outcome *o) {
   sigfillset(&all);
   posix_spawnattr_setsigmask(&attr, &none);
   posix_spawnattr_setsigdefault(&attr, &all);
-  if (req->detached)
+  if (req->detached) {
     flags |= POSIX_SPAWN_SETSID;
+  }
   posix_spawnattr_setflags(&attr, flags);
-  if (req->has & (HAS_UID | HAS_GID))
+  if (req->has & (HAS_UID | HAS_GID)) {
     failure = ENOTSUP; // TODO(linux): setuid and setgid in the child, as libuv does
+  }
   pid_t pid = 0;
   if (!failure) {
-    if (inherits)
+    if (inherits) {
       tz_out_flush(1);
+    }
     failure = posix_spawn(&pid, program ? program : file, &actions, &attr, argv, envp);
   }
   posix_spawn_file_actions_destroy(&actions);
   posix_spawnattr_destroy(&attr);
-  for (int i = 0; i < 3; ++i)
-    if (child[i] >= 0)
+  for (int i = 0; i < 3; ++i) {
+    if (child[i] >= 0) {
       close(child[i]);
-  for (size_t i = 0; i < c->args.count; ++i)
+    }
+  }
+  for (size_t i = 0; i < c->args.count; ++i) {
     tz_free(argv[i]);
+  }
   tz_free(argv);
-  for (size_t i = 0; i < c->env.count; ++i)
+  for (size_t i = 0; i < c->env.count; ++i) {
     tz_free(envp[i]);
+  }
   tz_free(envp);
   tz_free(file);
   tz_free(cwd);
   tz_free(program);
   if (failure) {
     o->error = errno_error(failure);
-    for (int i = 0; i < 3; ++i)
-      if (parent[i] >= 0)
+    for (int i = 0; i < 3; ++i) {
+      if (parent[i] >= 0) {
         close(parent[i]);
+      }
+    }
     return;
   }
   o->started = 1;
   o->pid = (int32_t)pid;
-  for (int i = 0; i < 3; ++i)
-    if (parent[i] >= 0)
+  for (int i = 0; i < 3; ++i) {
+    if (parent[i] >= 0) {
       fcntl(parent[i], F_SETFL, fcntl(parent[i], F_GETFL) | O_NONBLOCK);
+    }
+  }
   size_t written = 0;
   size_t input_length = c->input ? (size_t)tz_bytes_byte_length(c->input) : 0;
   if (parent[0] >= 0 && input_length == 0) {
@@ -1821,29 +1958,33 @@ static void run(Call *c, Outcome *o) {
     struct pollfd fds[3];
     int which[3];
     nfds_t n = 0;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 3; ++i) {
       if (parent[i] >= 0) {
         fds[n].fd = parent[i];
         fds[n].events = i == 0 ? POLLOUT : POLLIN;
         fds[n].revents = 0;
         which[n++] = i;
       }
-    if (n == 0 && exited)
+    }
+    if (n == 0 && exited) {
       break;
+    }
     int wait = -1;
     if (deadline) {
       int64_t left = deadline - now_ms();
       wait = left > 0 ? (int)left : 0;
     }
     // Without pipes, the wait for the end is a poll of nothing in steps.
-    if (n == 0 && (wait < 0 || wait > 10))
+    if (n == 0 && (wait < 0 || wait > 10)) {
       wait = 10;
+    }
     int stop = 0;
     int r = poll(fds, n, wait);
     if (!exited) {
       pid_t done = waitpid(pid, &wstatus, WNOHANG);
-      if (done == pid)
+      if (done == pid) {
         exited = 1;
+      }
     }
     if (r < 0 && errno != EINTR) {
       set_error(o, errno_error(errno));
@@ -1855,15 +1996,18 @@ static void run(Call *c, Outcome *o) {
     }
     for (nfds_t k = 0; k < n && r > 0 && !stop; ++k) {
       int i = which[k];
-      if (!fds[k].revents)
+      if (!fds[k].revents) {
         continue;
+      }
       if (i == 0) {
         ssize_t w = write(parent[0], c->input->data + written, input_length - written);
-        if (w > 0)
+        if (w > 0) {
           written += (size_t)w;
+        }
         if ((w < 0 && errno != EAGAIN) || written == input_length) {
-          if (w < 0)
+          if (w < 0) {
             set_pipe_error(o, errno_error(errno));
+          }
           close(parent[0]);
           parent[0] = -1;
         }
@@ -1878,8 +2022,9 @@ static void run(Call *c, Outcome *o) {
           stop = 1;
         }
       } else if (got == 0 || errno != EAGAIN) {
-        if (got < 0)
+        if (got < 0) {
           set_pipe_error(o, errno_error(errno));
+        }
         close(parent[i]);
         parent[i] = -1;
       }
@@ -1890,11 +2035,12 @@ static void run(Call *c, Outcome *o) {
         set_error(o, errno_error(errno));
         kill(pid, SIGKILL);
       }
-      for (int i = 0; i < 3; ++i)
+      for (int i = 0; i < 3; ++i) {
         if (parent[i] >= 0) {
           close(parent[i]);
           parent[i] = -1;
         }
+      }
     }
   }
   tz_free(chunk);
@@ -1920,6 +2066,7 @@ static TzStr syscall_of(const Call *c) {
   tz_buf_init(&b);
   tz_buf_ascii(&b, "spawnSync ");
   buf_take_units(&b, &c->file);
+
   return tz_buf_take(&b);
 }
 
@@ -1931,6 +2078,7 @@ static TzStr errno_message(const Call *c, int error) {
   buf_take_units(&b, &c->file);
   tz_buf_push(&b, ' ');
   tz_buf_ascii(&b, kErrors[error].code);
+
   return tz_buf_take(&b);
 }
 
@@ -1944,6 +2092,7 @@ static void *system_error(const Call *c, int error, TzMaker make) {
   parts.syscall = syscall_of(c);
   parts.path.value = str_of_buf(&c->file);
   parts.path.has = 1;
+
   return make(&parts);
 }
 
@@ -1953,14 +2102,16 @@ static void fill_output(const Call *c, const Outcome *o, TzSpawnParts *parts) {
   int32_t encoding = c->req->encoding;
   parts->text_mode = encoding > 0;
   for (int i = 1; i < 3; ++i) {
-    if (c->req->stdio[i] != STDIO_PIPE)
+    if (c->req->stdio[i] != STDIO_PIPE) {
       continue;
+    }
     parts->piped[i] = 1;
     const Out *out = &o->out[i];
-    if (encoding > 0)
+    if (encoding > 0) {
       parts->text[i] = tz_buffer_decode(out->data, (int64_t)out->length, encoding - 1);
-    else
+    } else {
       parts->bytes[i] = tz_buffer_copy_of(out->data, (int64_t)out->length);
+    }
   }
 }
 
@@ -1969,8 +2120,9 @@ static void release_output(TzSpawnParts *parts, int from) {
     tz_str_release_value(parts->text[i]);
     parts->text[i].obj = NULL;
     parts->text[i].meta = 0;
-    if (parts->bytes[i])
+    if (parts->bytes[i]) {
       tz_instance_release((TzInstance *)parts->bytes[i]);
+    }
     parts->bytes[i] = NULL;
   }
 }
@@ -1995,18 +2147,20 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
     }
   }
   if (req->mode == TZ_CHILD_SPAWN) {
-    if (error != X_NONE)
+    if (error != X_NONE) {
       parts.error = system_error(c, error, make_system_error);
+    }
     return make(&parts);
   }
 
   // execSync and execFileSync: stderr goes on to this program's, unless the
   // call said where it goes.
   if (!(req->has & HAS_STDIO) && o->started && parts.piped[2]) {
-    if (parts.text_mode)
+    if (parts.text_mode) {
       tz_stderr_write(parts.text[2].obj, parts.text[2].meta);
-    else
+    } else {
       tz_std_write_bytes(2, o->out[2].data, o->out[2].length);
+    }
   }
   if (error != X_NONE && !o->started) {
     release_output(&parts, 0);
@@ -2071,6 +2225,7 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
   parts.message = tz_buf_take(&m);
   parts.name = ascii("Error");
   tz_thrown = make(&parts);
+
   return NULL;
 }
 
@@ -2090,8 +2245,10 @@ void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_sy
   o.error = o.pipe_error = X_NONE;
   run(&c, &o);
   void *result = finish(&c, &o, out, make_system_error, make);
-  for (int i = 0; i < 3; ++i)
+  for (int i = 0; i < 3; ++i) {
     tz_free(o.out[i].data);
+  }
   call_free(&c);
+
   return result;
 }

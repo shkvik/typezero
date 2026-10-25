@@ -10,7 +10,7 @@
 // relies on: the main thread keeps that order, as the loop of async.c runs
 // the microtasks, the timers and what I/O brings, one after another. A piece
 // that comes after an await and may run at the same time as others
-// (compiler/check/parallel/parallel.h) has a reactor marked `ahead`. When such
+// (compiler/parallel/parallel_analysis/parallel_analysis.h) has a reactor marked `ahead`. When such
 // a reactor waits in the microtask queue behind the one the main thread is
 // about to run, the main thread hands it to an idle thread of the pool as a
 // job. The thread resumes the coroutine right away, ahead of its turn, and runs
@@ -44,7 +44,6 @@
 // number of processors by default; 1 runs everything on the main thread.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,8 +72,9 @@ int32_t tz_thread_count;
 
 void tz_thread_register(void) {
   int32_t i = __atomic_fetch_add(&tz_thread_count, 1, __ATOMIC_ACQ_REL);
-  if (i >= MAX_THREADS)
+  if (i >= MAX_THREADS) {
     tz_panic("too many threads", 16);
+  }
   tz_thread.index = i;
   __atomic_store_n(&tz_thread_list[i], &tz_thread, __ATOMIC_RELEASE);
 }
@@ -88,9 +88,11 @@ int64_t tz_thread_sum(size_t offset) {
   int64_t sum = 0;
   for (int32_t i = 0; i < n; ++i) {
     TzThread *t = __atomic_load_n(&tz_thread_list[i], __ATOMIC_ACQUIRE);
-    if (t)
+    if (t) {
       sum += __atomic_load_n((const int64_t *)((const char *)t + offset), __ATOMIC_RELAXED);
+    }
   }
+
   return sum;
 }
 
@@ -112,9 +114,9 @@ typedef struct TzJob {
   int32_t forward;
   // Delivered: the microtask after its event that lends it the turn.
   TzReactor grant;
-  uint32_t site;      // the await it goes on from (see Sites)
-  int64_t started;    // when its thread started it (ticks)
-  int64_t ahead;      // how long it ran ahead of its turn (ticks)
+  uint32_t site;   // the await it goes on from (see Sites)
+  int64_t started; // when its thread started it (ticks)
+  int64_t ahead;   // how long it ran ahead of its turn (ticks)
   // Run ahead of the event of I/O that settled its promise (see Events):
   // its thread wakes the poll phase once it waits for its turn.
   int32_t early;
@@ -124,6 +126,7 @@ typedef struct TzJob {
 static inline int64_t ticks(void) {
   LARGE_INTEGER now;
   QueryPerformanceCounter(&now);
+
   return now.QuadPart;
 }
 
@@ -131,12 +134,14 @@ static inline int64_t ticks(void) {
 // side often answers within microseconds.
 static void wait_state(int32_t *state, int32_t seen) {
   for (int spin = 0; spin < 4000; ++spin) {
-    if (__atomic_load_n(state, __ATOMIC_ACQUIRE) != seen)
+    if (__atomic_load_n(state, __ATOMIC_ACQUIRE) != seen) {
       return;
+    }
     YieldProcessor();
   }
-  while (__atomic_load_n(state, __ATOMIC_ACQUIRE) == seen)
+  while (__atomic_load_n(state, __ATOMIC_ACQUIRE) == seen) {
     WaitOnAddress(state, &seen, sizeof seen, INFINITE);
+  }
 }
 
 static void set_state(int32_t *state, int32_t value) {
@@ -159,10 +164,10 @@ int32_t tz_ahead_on;
 HANDLE tz_pool_port;
 #define POOL_JOB ((ULONG_PTR)1)
 SRWLOCK tz_pool_lock = SRWLOCK_INIT;
-int32_t tz_pool_queued;  // jobs posted, not taken yet
-int32_t tz_pool_idle;    // threads waiting on the port
-int32_t tz_pool_started; // threads started
-int32_t tz_pool_running; // threads running a job (atomic)
+int32_t tz_pool_queued;    // jobs posted, not taken yet
+int32_t tz_pool_idle;      // threads waiting on the port
+int32_t tz_pool_started;   // threads started
+int32_t tz_pool_running;   // threads running a job (atomic)
 int32_t tz_pool_size = -1; // the threads it may have: TZ_THREADS - 1, and the spares
 int32_t tz_pool_base;      // TZ_THREADS - 1
 int64_t tz_pool_spare_at;  // when the pool last looked for a spare (ticks)
@@ -181,8 +186,8 @@ typedef struct {
   uint32_t runs;
   uint32_t probe;
   uint32_t counted; // the reactors kept, and those timed on the main thread
-  uint32_t every; // a short site gives one of this many to a thread
-  double average; // ticks
+  uint32_t every;   // a short site gives one of this many to a thread
+  double average;   // ticks
 } Site;
 extern Site *tz_ahead_sites;
 extern uint32_t tz_ahead_site_count;
@@ -207,27 +212,33 @@ const char *tz_thread_where[64];
 static DWORD WINAPI watchdog(void *arg) {
   Sleep((DWORD)(intptr_t)arg * 1000);
   TzJob *j = tz_pool_main_waits;
-  fprintf(stderr, "tz watchdog: main waits for job %p (state %d), group lock %d, flatten lock %d, "
-                  "queued %d idle %d running %d started %d\n",
+  fprintf(stderr,
+          "tz watchdog: main waits for job %p (state %d), group lock %d, flatten lock %d, "
+          "queued %d idle %d running %d started %d\n",
           (void *)j, j ? j->state : -1, tz_group_lock_owner, tz_str_flatten_lock, tz_pool_queued,
           tz_pool_idle, tz_pool_running, tz_pool_started);
-  for (int i = 0; i < 64; ++i)
-    if (tz_thread_where[i])
+  for (int i = 0; i < 64; ++i) {
+    if (tz_thread_where[i]) {
       fprintf(stderr, "  thread %d: %s\n", i, tz_thread_where[i]);
+    }
+  }
   for (int32_t i = 1; i < tz_thread_total(); ++i) {
     TzThread *t = tz_thread_at(i);
     TzJob *job = t ? t->job : NULL;
-    if (job)
+    if (job) {
       fprintf(stderr, "  thread %d runs job %p: state %d, early %d, reactor %p\n", i, (void *)job,
               job->state, job->early, (void *)job->reactor);
+    }
   }
   extern TzJob *tz_ahead_early_head;
-  for (TzJob *job = tz_ahead_early_head; job; job = job->later)
+  for (TzJob *job = tz_ahead_early_head; job; job = job->later) {
     fprintf(stderr, "  early job %p: state %d\n", (void *)job, job->state);
+  }
   extern TzReactor *tz_micro_head;
-  fprintf(stderr, "  microtask queue %s; pending I/O %d\n", tz_micro_head ? "has reactors" : "empty",
-          tz_io_alive());
+  fprintf(stderr, "  microtask queue %s; pending I/O %d\n",
+          tz_micro_head ? "has reactors" : "empty", tz_io_alive());
   fflush(stderr);
+
   return 0;
 }
 
@@ -238,16 +249,19 @@ struct {
 } tz_pool_stop_at[8];
 
 static void print_stats(void) {
-  for (int i = 0; i < 8 && tz_pool_stop_at[i].at; ++i)
+  for (int i = 0; i < 8 && tz_pool_stop_at[i].at; ++i) {
     fprintf(stderr, "  stopped ahead at +0x%llx: %lld times\n",
             (unsigned long long)tz_pool_stop_at[i].at, (long long)tz_pool_stop_at[i].count);
+  }
   fprintf(stderr, "tz: %lld pieces handed out, %lld ran ahead, %lld taken back, %lld waited for\n",
           (long long)tz_pool_stat_dispatched, (long long)tz_pool_stat_ran,
           (long long)tz_pool_stat_taken, (long long)tz_pool_stat_waited);
-  for (uint32_t i = 0; i < tz_ahead_site_count && i < 8; ++i)
-    if (tz_ahead_sites[i].runs)
-      fprintf(stderr, "  site %u: %u runs, %.0f ticks on average\n", i + 1,
-              tz_ahead_sites[i].runs, tz_ahead_sites[i].average);
+  for (uint32_t i = 0; i < tz_ahead_site_count && i < 8; ++i) {
+    if (tz_ahead_sites[i].runs) {
+      fprintf(stderr, "  site %u: %u runs, %.0f ticks on average\n", i + 1, tz_ahead_sites[i].runs,
+              tz_ahead_sites[i].average);
+    }
+  }
 }
 
 extern TzReactor *tz_micro_head, *tz_micro_tail; // async.c
@@ -260,20 +274,23 @@ static void run_early(TzJob *job) {
   TzPromise *source = job->source;
   TzObject *owner = r->owner;
   r->run(r, source);
-  if (source)
+  if (source) {
     tz_obj_release((TzObject *)source);
+  }
   tz_obj_release(owner);
   while (tz_thread.local_head) {
     TzReactor *next = tz_thread.local_head;
     tz_thread.local_head = next->next;
-    if (!tz_thread.local_head)
+    if (!tz_thread.local_head) {
       tz_thread.local_tail = NULL;
+    }
     TzPromise *got = next->source;
     TzObject *of = next->owner;
     next->source = NULL;
     next->run(next, got);
-    if (got)
+    if (got) {
       tz_obj_release((TzObject *)got);
+    }
     tz_obj_release(of);
   }
 }
@@ -286,12 +303,14 @@ static int run_job(TzJob *job) {
   tz_thread.turn = 0;
   job->ahead = -1;
   __atomic_fetch_add(&tz_pool_stat_ran, 1, __ATOMIC_RELAXED);
-  if (job->early)
+  if (job->early) {
     run_early(job);
-  else
+  } else {
     r->run(r, job->source);
-  if (job->ahead < 0) // it never waited: all of it ran ahead
+  }
+  if (job->ahead < 0) { // it never waited: all of it ran ahead
     job->ahead = ticks() - job->started;
+  }
   tz_thread.turn = 0;
   __atomic_store_n(&tz_thread.job, NULL, __ATOMIC_RELEASE);
   int32_t early = job->early;
@@ -302,8 +321,10 @@ static int run_job(TzJob *job) {
     return 0;
   }
   set_state(&job->state, JOB_DONE);
-  if (early)
+  if (early) {
     tz_io_wake_loop();
+  }
+
   return 1;
 }
 
@@ -315,15 +336,17 @@ static DWORD WINAPI worker_main(void *arg) {
   tz_thread.worker = 1;
   for (;;) {
     // What other threads freed of this one's memory goes back first.
-    if (__atomic_load_n(&tz_thread.heap.remote, __ATOMIC_RELAXED))
+    if (__atomic_load_n(&tz_thread.heap.remote, __ATOMIC_RELAXED)) {
       tz_heap_collect();
+    }
     OVERLAPPED_ENTRY entry;
     ULONG count = 0;
     __atomic_fetch_add(&tz_pool_idle, 1, __ATOMIC_RELAXED);
     BOOL ok = GetQueuedCompletionStatusEx(tz_pool_port, &entry, 1, &count, INFINITE, FALSE);
     __atomic_fetch_sub(&tz_pool_idle, 1, __ATOMIC_RELAXED);
-    if (!ok || count == 0)
+    if (!ok || count == 0) {
       continue;
+    }
     __atomic_fetch_add(&tz_pool_running, 1, __ATOMIC_RELAXED);
     if (entry.lpCompletionKey == POOL_JOB) {
       TzJob *job = (TzJob *)entry.lpOverlapped;
@@ -342,40 +365,48 @@ static DWORD WINAPI worker_main(void *arg) {
     }
     __atomic_fetch_sub(&tz_pool_running, 1, __ATOMIC_RELAXED);
   }
+
   return 0;
 }
 
 static int32_t pool_size(void) {
-  if (tz_pool_size >= 0)
+  if (tz_pool_size >= 0) {
     return tz_pool_size;
+  }
   int32_t threads = 0;
   const char *value = getenv("TZ_THREADS");
-  if (value && *value)
+  if (value && *value) {
     threads = atoi(value);
+  }
   if (threads <= 0) {
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     threads = info.dwNumberOfProcessors > 0 ? (int32_t)info.dwNumberOfProcessors : 1;
   }
-  if (threads > MAX_THREADS / 2)
+  if (threads > MAX_THREADS / 2) {
     threads = MAX_THREADS / 2;
+  }
   tz_pool_size = threads - 1;
   tz_pool_base = tz_pool_size;
   if (tz_pool_size > 0) {
     // As many threads at once as want to run: spares too (see grow_pool).
     tz_pool_port = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, MAX_THREADS);
-    if (!tz_pool_port)
+    if (!tz_pool_port) {
       tz_pool_size = tz_pool_base = 0;
+    }
   }
-  if ((tz_pool_stat_where = getenv("TZ_PARALLEL_STATS") != NULL))
+  if ((tz_pool_stat_where = getenv("TZ_PARALLEL_STATS") != NULL)) {
     atexit(print_stats);
+  }
   tz_pool_stress = getenv("TZ_PARALLEL_STRESS") != NULL;
   if (getenv("TZ_PARALLEL_WATCHDOG")) {
     HANDLE t = CreateThread(NULL, 0, watchdog,
                             (void *)(intptr_t)atoi(getenv("TZ_PARALLEL_WATCHDOG")), 0, NULL);
-    if (t)
+    if (t) {
       CloseHandle(t);
+    }
   }
+
   return tz_pool_size;
 }
 
@@ -398,8 +429,9 @@ static void start_one(int32_t limit) {
 static void start_thread(void) {
   if (__atomic_load_n(&tz_pool_started, __ATOMIC_RELAXED) >= tz_pool_size ||
       __atomic_load_n(&tz_pool_idle, __ATOMIC_RELAXED) >=
-          __atomic_load_n(&tz_pool_queued, __ATOMIC_RELAXED))
+          __atomic_load_n(&tz_pool_queued, __ATOMIC_RELAXED)) {
     return;
+  }
   start_one(tz_pool_size);
 }
 
@@ -414,10 +446,13 @@ static void push_job(TzJob *job) {
 // has no threads; with the first of them, all the threads of the pool
 // start, which take what comes for them.
 void *tz_pool_port_handle(void) {
-  if (!tz_ahead_on)
+  if (!tz_ahead_on) {
     return NULL;
-  while (__atomic_load_n(&tz_pool_started, __ATOMIC_RELAXED) < tz_pool_base)
+  }
+  while (__atomic_load_n(&tz_pool_started, __ATOMIC_RELAXED) < tz_pool_base) {
     start_one(tz_pool_base);
+  }
+
   return tz_pool_port;
 }
 
@@ -448,26 +483,31 @@ double tz_ahead_worth;
 static Site *site_of(uint32_t n) {
   if (n > tz_ahead_site_count) {
     uint32_t count = tz_ahead_site_count ? tz_ahead_site_count : 64;
-    while (count < n)
+    while (count < n) {
       count *= 2;
+    }
     Site *grown = (Site *)realloc(tz_ahead_sites, count * sizeof(Site));
-    if (!grown)
+    if (!grown) {
       return NULL;
+    }
     memset(grown + tz_ahead_site_count, 0, (count - tz_ahead_site_count) * sizeof(Site));
     tz_ahead_sites = grown;
     tz_ahead_site_count = count;
   }
+
   return &tz_ahead_sites[n - 1];
 }
 
 static void learn(uint32_t n, int64_t spent) {
   Site *s = site_of(n);
-  if (!s)
+  if (!s) {
     return;
+  }
   s->average = s->runs ? s->average * 0.75 + (double)spent * 0.25 : (double)spent;
   ++s->runs;
-  if (s->average >= tz_ahead_worth)
+  if (s->average >= tz_ahead_worth) {
     s->every = 0; // long again: probed often once it is short
+  }
 }
 
 static int is_short(const Site *s) { return s->runs >= 4 && s->average < tz_ahead_worth; }
@@ -477,15 +517,20 @@ static int is_short(const Site *s) { return s->runs >= 4 && s->average < tz_ahea
 // as many, down to one of 65 536: a probe costs the main thread the wait for
 // a thread to wake up.
 static int worth_a_thread(Site *s) {
-  if (tz_pool_stress || !is_short(s))
+  if (tz_pool_stress || !is_short(s)) {
     return 1;
-  if (s->every < 256)
+  }
+  if (s->every < 256) {
     s->every = 256;
-  if (++s->probe < s->every)
+  }
+  if (++s->probe < s->every) {
     return 0;
+  }
   s->probe = 0;
-  if (s->every < 65536)
+  if (s->every < 65536) {
     s->every *= 2;
+  }
+
   return 1;
 }
 
@@ -507,27 +552,32 @@ static int worth_a_thread(Site *s) {
 #define SPARE_AFTER 10e-3 // seconds
 
 static int grow_pool(void) {
-  if (tz_pool_base <= 0 || tz_pool_size >= 2 * tz_pool_base)
+  if (tz_pool_base <= 0 || tz_pool_size >= 2 * tz_pool_base) {
     return 0;
+  }
   int64_t now = ticks();
   LARGE_INTEGER frequency;
   QueryPerformanceFrequency(&frequency);
   int64_t after = (int64_t)((double)frequency.QuadPart * SPARE_AFTER);
   // Not more often than that either.
-  if (now - tz_pool_spare_at < after)
+  if (now - tz_pool_spare_at < after) {
     return 0;
+  }
   tz_pool_spare_at = now;
   int32_t n = tz_thread_total();
   for (int32_t i = 1; i < n; ++i) {
     TzThread *t = tz_thread_at(i);
     TzJob *job = t ? __atomic_load_n(&t->job, __ATOMIC_ACQUIRE) : NULL;
-    if (!job)
+    if (!job) {
       return 0; // a thread is free, or about to be
+    }
     int64_t started = __atomic_load_n(&job->started, __ATOMIC_RELAXED);
-    if (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) != JOB_RUNNING || now - started < after)
+    if (__atomic_load_n(&job->state, __ATOMIC_ACQUIRE) != JOB_RUNNING || now - started < after) {
       return 0;
+    }
   }
   __atomic_fetch_add(&tz_pool_size, 1, __ATOMIC_RELAXED);
+
   return 1;
 }
 
@@ -538,13 +588,15 @@ static int grow_pool(void) {
 TzReactor *tz_ahead_last;
 
 void tz_ahead_popped(TzReactor *r) {
-  if (r == tz_ahead_last)
+  if (r == tz_ahead_last) {
     tz_ahead_last = NULL;
+  }
 }
 
 void tz_ahead_dispatch(TzReactor *head) {
-  if (pool_room() <= 0 && !grow_pool())
+  if (pool_room() <= 0 && !grow_pool()) {
     return;
+  }
   if (tz_ahead_worth == 0) {
     LARGE_INTEGER frequency;
     QueryPerformanceFrequency(&frequency);
@@ -556,17 +608,20 @@ void tz_ahead_dispatch(TzReactor *head) {
     uintptr_t site = r->ahead;
     if (site != 0 && site < EXAMINED) {
       Site *s = site_of((uint32_t)site);
-      if (!s)
+      if (!s) {
         return;
+      }
       if (!worth_a_thread(s)) {
         r->ahead = site | EXAMINED;
       } else {
         // Without room it waits for the next look, or a spare thread.
-        if (pool_room() <= 0 && !grow_pool())
+        if (pool_room() <= 0 && !grow_pool()) {
           return;
+        }
         TzJob *job = (TzJob *)malloc(sizeof(TzJob));
-        if (!job)
+        if (!job) {
           return;
+        }
         job->reactor = r;
         job->source = r->source;
         job->state = JOB_QUEUED;
@@ -591,8 +646,10 @@ void tz_ahead_dispatch(TzReactor *head) {
 // takes their event still runs them where it is (see Events).
 int32_t tz_ahead_keep(int32_t site) {
   Site *s = site_of((uint32_t)site);
-  if (!s || tz_pool_stress || !is_short(s))
+  if (!s || tz_pool_stress || !is_short(s)) {
     return site;
+  }
+
   return (++s->counted & 63) == 0 ? site : (int32_t)(site | EXAMINED);
 }
 
@@ -636,22 +693,26 @@ static void inbox_push(TzJob *job, int wake) {
   job->later = NULL;
   tz_work_ref_count(1); // the loop waits for it
   AcquireSRWLockExclusive(&tz_ahead_inbox_lock);
-  if (tz_ahead_inbox_tail)
+  if (tz_ahead_inbox_tail) {
     tz_ahead_inbox_tail->later = job;
-  else
+  } else {
     tz_ahead_inbox_head = job;
+  }
   tz_ahead_inbox_tail = job;
   ReleaseSRWLockExclusive(&tz_ahead_inbox_lock);
-  if (wake)
+  if (wake) {
     tz_io_wake_loop();
+  }
 }
 
 // Whether no other thread can reach the object: not shared, nor a member of
 // a group that is.
 static int is_private(void *object) {
   int64_t rc = ((TzObject *)object)->rc;
-  if (tz_rc_is_member(rc))
+  if (tz_rc_is_member(rc)) {
     return !tz_group_published(object);
+  }
+
   return rc > 0;
 }
 
@@ -659,20 +720,24 @@ int32_t tz_ahead_private(void *object) { return is_private(object); }
 
 int32_t tz_ahead_early(void) {
   TzJob *job = tz_thread.job;
+
   return job && job->early;
 }
 
 int32_t tz_ahead_local(TzReactor *r) {
   TzJob *job = tz_thread.job;
   uintptr_t ahead = r->ahead;
-  if (!job || !job->early || (ahead & ~EXAMINED) == 0 || ahead >= MAX_SITE)
+  if (!job || !job->early || (ahead & ~EXAMINED) == 0 || ahead >= MAX_SITE) {
     return 0;
+  }
   r->next = NULL;
-  if (tz_thread.local_tail)
+  if (tz_thread.local_tail) {
     tz_thread.local_tail->next = r;
-  else
+  } else {
     tz_thread.local_head = r;
+  }
   tz_thread.local_tail = r;
+
   return 1;
 }
 
@@ -696,26 +761,31 @@ TZ_THREAD_LOCAL uint32_t tz_ahead_probe;
 // its group is shared.
 int32_t tz_ahead_here(TzPromise *p) {
   TzReactor *r = p->head;
-  if (!r || r != p->tail)
+  if (!r || r != p->tail) {
     return 0;
+  }
   uintptr_t ahead = r->ahead;
-  if ((ahead & ~EXAMINED) == 0 || ahead >= MAX_SITE)
+  if ((ahead & ~EXAMINED) == 0 || ahead >= MAX_SITE) {
     return 0;
+  }
   uint32_t site = (uint32_t)(ahead & ~EXAMINED);
   int32_t *turned = site < TURNED_SITES ? &tz_ahead_turned[site] : NULL;
   if (turned && __atomic_load_n(turned, __ATOMIC_RELAXED) > TURNED_MAX / 2 &&
-      ++tz_ahead_probe % TURNED_PROBE != 0 && !tz_pool_stress)
+      ++tz_ahead_probe % TURNED_PROBE != 0 && !tz_pool_stress) {
     return 0;
+  }
   TzJob *job = (TzJob *)malloc(sizeof(TzJob));
-  if (!job)
+  if (!job) {
     return 0;
+  }
   // As the promise's trigger would queue it (async.c), held by the queue
   // with what held it.
   p->head = p->tail = NULL;
   r->next = NULL;
   r->source = NULL;
-  if (tz_rc_is_member(p->rc))
+  if (tz_rc_is_member(p->rc)) {
     tz_group_take(p, r->owner);
+  }
   job->reactor = r;
   job->source = p;
   job->state = JOB_RUNNING;
@@ -729,9 +799,11 @@ int32_t tz_ahead_here(TzPromise *p) {
   int waited = run_job(job);
   if (turned) {
     int32_t now = __atomic_load_n(turned, __ATOMIC_RELAXED);
-    if (waited ? now < TURNED_MAX : now > 0)
+    if (waited ? now < TURNED_MAX : now > 0) {
       __atomic_store_n(turned, waited ? now + 1 : now - 1, __ATOMIC_RELAXED);
+    }
   }
+
   return 1;
 }
 
@@ -739,8 +811,9 @@ int32_t tz_ahead_here(TzPromise *p) {
 // to the queue, in the poll phase of the main thread, as an event.
 void tz_ahead_forward(TzPromise *p) {
   TzJob *job = (TzJob *)malloc(sizeof(TzJob));
-  if (!job)
+  if (!job) {
     tz_panic("out of memory", 13);
+  }
   memset(job, 0, sizeof *job);
   job->source = p;
   job->forward = 1;
@@ -750,25 +823,30 @@ void tz_ahead_forward(TzPromise *p) {
 
 int32_t tz_ahead_defer(TzPromise *p) {
   TzReactor *r = p->head;
-  if (!r || r != p->tail || !is_private(p) || (pool_room() <= 0 && !grow_pool()))
+  if (!r || r != p->tail || !is_private(p) || (pool_room() <= 0 && !grow_pool())) {
     return 0;
+  }
   uintptr_t site = r->ahead;
-  if (site == 0 || site >= EXAMINED)
+  if (site == 0 || site >= EXAMINED) {
     return 0;
+  }
   Site *s = site_of((uint32_t)site);
-  if (!s || !worth_a_thread(s))
+  if (!s || !worth_a_thread(s)) {
     return 0;
+  }
   TzJob *job = (TzJob *)malloc(sizeof(TzJob));
-  if (!job)
+  if (!job) {
     return 0;
+  }
   // As the promise's trigger would queue it (async.c), held by the queue,
   // without the queue.
   p->head = p->tail = NULL;
   r->next = NULL;
   r->source = NULL;
   tz_obj_retain((TzObject *)p);
-  if (tz_rc_is_member(p->rc))
+  if (tz_rc_is_member(p->rc)) {
     tz_group_take(p, r->owner);
+  }
   job->reactor = r;
   job->source = p;
   job->state = JOB_QUEUED;
@@ -778,14 +856,16 @@ int32_t tz_ahead_defer(TzPromise *p) {
   job->forward = 0;
   job->later = NULL;
   r->ahead = (uintptr_t)job;
-  if (tz_ahead_early_tail)
+  if (tz_ahead_early_tail) {
     tz_ahead_early_tail->later = job;
-  else
+  } else {
     tz_ahead_early_head = job;
+  }
   tz_ahead_early_tail = job;
   tz_work_ref_count(1); // the loop waits for its event
   ++tz_pool_stat_dispatched;
   push_job(job);
+
   return 1;
 }
 
@@ -799,8 +879,9 @@ static void grant_turn(TzReactor *r, TzPromise *source) {
   tz_pool_main_waits = job;
   for (;;) {
     int32_t now = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
-    if (now == JOB_DONE)
+    if (now == JOB_DONE) {
       break;
+    }
     wait_state(&job->state, now);
   }
   tz_pool_main_waits = NULL;
@@ -819,10 +900,11 @@ int32_t tz_ahead_deliver(void) {
     tz_ahead_inbox_head = tz_ahead_inbox_tail = NULL;
     ReleaseSRWLockExclusive(&tz_ahead_inbox_lock);
     if (in) {
-      if (tz_ahead_early_tail)
+      if (tz_ahead_early_tail) {
         tz_ahead_early_tail->later = in;
-      else
+      } else {
         tz_ahead_early_head = in;
+      }
       tz_ahead_early_tail = in_tail;
     }
   }
@@ -838,8 +920,9 @@ int32_t tz_ahead_deliver(void) {
       continue;
     }
     *at = job->later;
-    if (tz_ahead_early_tail == job)
+    if (tz_ahead_early_tail == job) {
       tz_ahead_early_tail = last;
+    }
     tz_work_ref_count(-1);
     if (job->forward) {
       TzPromise *p = job->source;
@@ -861,6 +944,7 @@ int32_t tz_ahead_deliver(void) {
     }
     tz_after_callback();
   }
+
   return tz_ahead_early_head != NULL;
 }
 
@@ -874,8 +958,9 @@ void tz_ahead_run(TzReactor *r, TzPromise *source) {
     // thread that pops it.
     site = ((TzJob *)ahead)->site;
     if (finish_job(r, &source)) {
-      if (source)
+      if (source) {
         tz_obj_release((TzObject *)source);
+      }
       return;
     }
   }
@@ -890,8 +975,9 @@ void tz_ahead_run(TzReactor *r, TzPromise *source) {
   } else {
     r->run(r, source);
   }
-  if (source)
+  if (source) {
     tz_obj_release((TzObject *)source);
+  }
 }
 
 static int32_t finish_job(TzReactor *r, TzPromise **source) {
@@ -912,14 +998,16 @@ static int32_t finish_job(TzReactor *r, TzPromise **source) {
   r->ahead = 0;
   // Running, or waiting for its turn: lend it the turn.
   for (;;) {
-    if (state == JOB_DONE)
+    if (state == JOB_DONE) {
       break;
+    }
     if (state == JOB_RUNNING || state == JOB_WAITING) {
       int32_t seen = state;
       if (__atomic_compare_exchange_n(&job->state, &state, JOB_GRANTED, 0, __ATOMIC_ACQ_REL,
                                       __ATOMIC_ACQUIRE)) {
-        if (seen == JOB_WAITING)
+        if (seen == JOB_WAITING) {
           WakeByAddressAll(&job->state);
+        }
         break;
       }
       continue; // `state` holds what it is now
@@ -931,13 +1019,15 @@ static int32_t finish_job(TzReactor *r, TzPromise **source) {
   tz_pool_main_waits = job;
   for (;;) {
     int32_t now = __atomic_load_n(&job->state, __ATOMIC_ACQUIRE);
-    if (now == JOB_DONE)
+    if (now == JOB_DONE) {
       break;
+    }
     wait_state(&job->state, now);
   }
   tz_pool_main_waits = NULL;
   learn(job->site, job->ahead);
   free(job);
+
   return 1;
 }
 
@@ -947,8 +1037,9 @@ TZ_NOINLINE void tz_order_wait(void) {
     // A thread without a job holds the turn while it runs: the main one. A
     // thread of the pool takes what comes for connections without one
     // (net.c), and touches nothing of the order then.
-    if (tz_thread.worker)
+    if (tz_thread.worker) {
       tz_panic("the parallel runtime: an ordered access outside a piece", 55);
+    }
     tz_thread.turn = 1;
     return;
   }
@@ -960,8 +1051,9 @@ TZ_NOINLINE void tz_order_wait(void) {
     --tz_thread.conn_locks;
     tz_unlock(lock);
   }
-  if (tz_thread.conn_locks)
+  if (tz_thread.conn_locks) {
     tz_panic("the parallel runtime: waits for the turn holding a connection", 61);
+  }
   job->ahead = ticks() - job->started;
   // Ahead of an event the main thread did not hear of: now it does.
   if (job->early && !job->listed) {
@@ -972,34 +1064,39 @@ TZ_NOINLINE void tz_order_wait(void) {
   // developers of tz (the callers, as offsets in the executable).
   if (tz_pool_stat_where) {
     uintptr_t at = (uintptr_t)__builtin_return_address(0) - (uintptr_t)GetModuleHandleA(NULL);
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 8; ++i) {
       if (tz_pool_stop_at[i].at == at || !tz_pool_stop_at[i].at) {
         tz_pool_stop_at[i].at = at;
         __atomic_fetch_add(&tz_pool_stop_at[i].count, 1, __ATOMIC_RELAXED);
         break;
       }
+    }
   }
   int32_t running = JOB_RUNNING;
   if (__atomic_compare_exchange_n(&job->state, &running, JOB_WAITING, 0, __ATOMIC_ACQ_REL,
                                   __ATOMIC_ACQUIRE)) {
     WakeByAddressAll(&job->state);
-    if (job->early)
+    if (job->early) {
       tz_io_wake_loop(); // its event may come now
-    if (tz_thread.index < 64)
+    }
+    if (tz_thread.index < 64) {
       tz_thread_where[tz_thread.index] = "waits for its turn";
+    }
     wait_state(&job->state, JOB_WAITING);
-    if (tz_thread.index < 64)
+    if (tz_thread.index < 64) {
       tz_thread_where[tz_thread.index] = "has its turn";
+    }
   }
   // GRANTED: the main thread waits for this piece now.
   tz_thread.turn = 1;
   // The microtasks it queued ahead of its turn, which the queue, empty in
   // the poll phase, takes first.
   if (tz_thread.local_head) {
-    if (tz_micro_tail)
+    if (tz_micro_tail) {
       tz_micro_tail->next = tz_thread.local_head;
-    else
+    } else {
       tz_micro_head = tz_thread.local_head;
+    }
     tz_micro_tail = tz_thread.local_tail;
     tz_thread.local_head = tz_thread.local_tail = NULL;
   }
@@ -1021,10 +1118,13 @@ int32_t tz_thread_total(void) { return 1; }
 
 TzThread *tz_thread_at(int32_t i) {
   (void)i;
+
   return &tz_thread;
 }
 
-int64_t tz_thread_sum(size_t offset) { return *(const int64_t *)((const char *)&tz_thread + offset); }
+int64_t tz_thread_sum(size_t offset) {
+  return *(const int64_t *)((const char *)&tz_thread + offset);
+}
 
 void tz_order_enter(void) {}
 

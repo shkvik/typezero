@@ -24,7 +24,6 @@
 // each; the objects of the runtime by their kinds here.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,11 +38,14 @@ void tz_rc_shared_add(int64_t *rc, int64_t n) {
 
 int tz_rc_shared_dec(int64_t *rc) {
 #if TZ_PARALLEL
-  if (__atomic_sub_fetch(rc, 1, __ATOMIC_ACQ_REL) != TZ_RC_SHARED)
+  if (__atomic_sub_fetch(rc, 1, __ATOMIC_ACQ_REL) != TZ_RC_SHARED) {
     return 0;
+  }
   *rc = 0;
+
   return 1;
 #else
+
   return --*rc == 0;
 #endif
 }
@@ -71,34 +73,42 @@ uint32_t tz_publish_mask;
 
 static uint32_t descriptor_hash(const void *d) {
   uint64_t h = (uint64_t)(uintptr_t)d * UINT64_C(0x9E3779B97F4A7C15);
+
   return (uint32_t)(h >> 32);
 }
 
 void tz_publish_init(const TzPublishEntry *entries, uint32_t count) {
   uint32_t size = 16;
-  while (size < count * 2)
+  while (size < count * 2) {
     size *= 2;
+  }
   tz_publish_slots = (const TzPublishEntry **)calloc(size, sizeof *tz_publish_slots);
-  if (!tz_publish_slots)
+  if (!tz_publish_slots) {
     tz_panic("out of memory", 13);
+  }
   tz_publish_mask = size - 1;
   for (uint32_t i = 0; i < count; ++i) {
     uint32_t at = descriptor_hash(entries[i].descriptor) & tz_publish_mask;
-    while (tz_publish_slots[at] && tz_publish_slots[at]->descriptor != entries[i].descriptor)
+    while (tz_publish_slots[at] && tz_publish_slots[at]->descriptor != entries[i].descriptor) {
       at = (at + 1) & tz_publish_mask;
+    }
     tz_publish_slots[at] = &entries[i];
   }
 }
 
 static void (*publisher_of(const void *descriptor))(void *) {
-  if (!tz_publish_slots)
+  if (!tz_publish_slots) {
     return NULL;
-  for (uint32_t at = descriptor_hash(descriptor) & tz_publish_mask;; at = (at + 1) & tz_publish_mask) {
+  }
+  for (uint32_t at = descriptor_hash(descriptor) & tz_publish_mask;;
+       at = (at + 1) & tz_publish_mask) {
     const TzPublishEntry *e = tz_publish_slots[at];
-    if (!e)
+    if (!e) {
       return NULL;
-    if (e->descriptor == descriptor)
+    }
+    if (e->descriptor == descriptor) {
       return e->publish;
+    }
   }
 }
 
@@ -122,8 +132,9 @@ static void pending_push(void *object) {
   if (pending.count == pending.capacity) {
     size_t capacity = pending.capacity ? pending.capacity * 2 : 64;
     void **items = (void **)realloc(pending.items, capacity * sizeof *items);
-    if (!items)
+    if (!items) {
       tz_panic("out of memory", 13);
+    }
     pending.items = items;
     pending.capacity = capacity;
   }
@@ -145,12 +156,14 @@ static int mark(void *object) {
     *rc = TZ_RC_SHARED + count;
     return 1;
   }
+
   return 0; // shared already, or never freed
 }
 
 static void publish_ref(void *object) {
-  if (!object)
+  if (!object) {
     return;
+  }
   int64_t rc = ((TzObject *)object)->rc;
   if (tz_rc_is_member(rc)) {
     // Its group, the whole of it (group.c), each member to have its
@@ -158,8 +171,9 @@ static void publish_ref(void *object) {
     tz_group_publish(object, push_member);
     return;
   }
-  if (mark(object))
+  if (mark(object)) {
     pending_push(object);
+  }
 }
 
 // What an object holds, now that it is marked (or its group published).
@@ -182,14 +196,17 @@ static void publish_contents(void *item) {
   if (flags & TZ_LAYOUT_DICT) {
     tz_map_publish((TzMap *)object);
   } else if (flags & TZ_LAYOUT_PROMISE) {
-    if (layout->count)
+    if (layout->count) {
       tz_publish_value(layout->fields[0].type, (char *)object + TZ_PROMISE_VALUE);
+    }
     TzPromise *p = (TzPromise *)object;
-    if (p->state == TZ_PROMISE_REJECTED)
+    if (p->state == TZ_PROMISE_REJECTED) {
       publish_ref(p->error);
+    }
   } else if (flags & TZ_LAYOUT_BYTES) {
-    if (tz_bytes_kind(object) != TZ_BYTES_ARRAY_BUFFER)
+    if (tz_bytes_kind(object) != TZ_BYTES_ARRAY_BUFFER) {
       publish_ref(((TzBytes *)object)->buffer);
+    }
   } else if (flags & TZ_LAYOUT_BOX) {
     TzBox *box = (TzBox *)object;
     tz_publish_value(box->type, box + 1);
@@ -198,34 +215,39 @@ static void publish_contents(void *item) {
   } else {
     // Fields by the layout: those of the runtime's objects that have any.
     if (getenv("TZ_PUBLISH_DEBUG")) {
-      fprintf(stderr, "publish fallback: object %p layout %p drop %p count %u flags %x\n",
-              object, (const void *)layout, (void *)layout->drop, layout->count, layout->flags);
+      fprintf(stderr, "publish fallback: object %p layout %p drop %p count %u flags %x\n", object,
+              (const void *)layout, (void *)layout->drop, layout->count, layout->flags);
       fflush(stderr);
     }
     for (uint32_t i = 0; i < layout->count; ++i) {
       const TzField *f = &layout->fields[i];
-      if (f->offset != TZ_FIELD_METHOD && f->offset != TZ_FIELD_GETTER)
+      if (f->offset != TZ_FIELD_METHOD && f->offset != TZ_FIELD_GETTER) {
         tz_publish_value(f->type, (char *)object + f->offset);
+      }
     }
   }
 }
 
 static void publish_array_contents(TzArray *a) {
-  if (!tz_is_managed(a->type))
+  if (!tz_is_managed(a->type)) {
     return;
+  }
   size_t size = a->type->size;
-  for (uint32_t i = 0; i < a->length; ++i)
+  for (uint32_t i = 0; i < a->length; ++i) {
     tz_publish_value(a->type, a->data + (size_t)i * size);
+  }
 }
 
 // Publishes everything pending: the outermost call does, so that one walk
 // takes no stack for the objects it finds.
 static void drain(void) {
-  if (pending.active)
+  if (pending.active) {
     return;
+  }
   pending.active = 1;
-  while (pending.count)
+  while (pending.count) {
     publish_contents(pending.items[--pending.count]);
+  }
   pending.active = 0;
 }
 
@@ -242,14 +264,16 @@ void tz_publish_contents(void *member, int32_t array) {
 // An array goes by its type, not by a layout: its elements are published
 // here, through the same list for the objects among them.
 static void publish_array(TzArray *a) {
-  if (!a)
+  if (!a) {
     return;
+  }
   if (tz_rc_is_member(a->rc)) {
     tz_group_publish(a, push_member);
     return;
   }
-  if (!mark(a))
+  if (!mark(a)) {
     return;
+  }
   // Elements now: an array is no object with a layout, which the list
   // expects. Arrays of arrays nest only as deep as the types do.
   publish_array_contents(a);
@@ -269,8 +293,9 @@ void tz_publish_value(const TzType *type, void *value) {
     publish_array(*(TzArray **)value);
     break;
   case TZ_T_OPTIONAL:
-    if (tz_optional_has(type, value))
+    if (tz_optional_has(type, value)) {
       tz_publish_value(type->inner, value);
+    }
     break;
   case TZ_T_FUNCTION:
     publish_ref(((TzFunction *)value)->env);
@@ -304,14 +329,16 @@ void tz_publish_object(void *object) {
 
 void tz_store_barrier(void *owner, const TzType *type, void *value) {
   int64_t rc = ((TzObject *)owner)->rc;
-  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner)))
+  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner))) {
     tz_publish_value(type, value);
+  }
 }
 
 void tz_store_barrier_ref(void *owner, void *object) {
   int64_t rc = ((TzObject *)owner)->rc;
-  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner)))
+  if (tz_rc_is_shared(rc) || (tz_rc_is_member(rc) && tz_group_published(owner))) {
     tz_publish_object(object);
+  }
 }
 
 #else

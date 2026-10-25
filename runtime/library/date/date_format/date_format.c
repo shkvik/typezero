@@ -12,7 +12,6 @@
 
 #include "runtime/library/date/date/date.h"
 #include "runtime/library/intl/intl/intl.h"
-
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,8 +108,9 @@ static const char *method_name(int kind) {
 
 static void copy_text(char *out, const char *text) {
   size_t n = strlen(text);
-  if (n >= TEXT)
+  if (n >= TEXT) {
     n = TEXT - 1;
+  }
   memcpy(out, text, n);
   out[n] = 0;
 }
@@ -118,25 +118,31 @@ static void copy_text(char *out, const char *text) {
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
 static int equal_ignoring_case(const char *a, const char *b) {
-  for (; *a && *b; ++a, ++b)
-    if (lower((unsigned char)*a) != lower((unsigned char)*b))
+  for (; *a && *b; ++a, ++b) {
+    if (lower((unsigned char)*a) != lower((unsigned char)*b)) {
       return 0;
+    }
+  }
+
   return *a == *b;
 }
 
 // UTF-16 to and from ASCII, for patterns and zone names.
 static int32_t widen(const char *text, TzUChar *out, int32_t capacity) {
   int32_t n = 0;
-  for (; text[n] && n < capacity - 1; ++n)
+  for (; text[n] && n < capacity - 1; ++n) {
     out[n] = (unsigned char)text[n];
+  }
   out[n] = 0;
+
   return n;
 }
 
 static void narrow_text(const TzUChar *units, int32_t length, char *out, size_t size) {
   size_t n = 0;
-  for (int32_t i = 0; i < length && n + 1 < size; ++i)
+  for (int32_t i = 0; i < length && n + 1 < size; ++i) {
     out[n++] = units[i] < 0x80 ? (char)units[i] : '?';
+  }
   out[n] = 0;
 }
 
@@ -148,15 +154,18 @@ static void narrow_text(const TzUChar *units, int32_t length, char *out, size_t 
 // and when it is no value of the option, with a RangeError thrown (see
 // tz_throw) and `*failed` set.
 static const char *option(const TzDateOptions *o, int index, char *out, int kind, int *failed) {
-  if (!(o->present & (1u << index)))
+  if (!(o->present & (1u << index))) {
     return NULL;
+  }
   int ok = tz_intl_ascii(o->values[index], out, TEXT);
-  if (!ok)
+  if (!ok) {
     out[0] = 0;
+  }
   if (allowed[index][0]) {
     int found = 0;
-    for (int i = 0; ok && allowed[index][i] && !found; ++i)
+    for (int i = 0; ok && allowed[index][i] && !found; ++i) {
       found = strcmp(allowed[index][i], out) == 0;
+    }
     if (!found) {
       tz_throw(TZ_RANGE_ERROR, "Value %s out of range for %s options property %s", ok ? out : "?",
                method_name(kind), option_names[index]);
@@ -164,6 +173,7 @@ static const char *option(const TzDateOptions *o, int index, char *out, int kind
       return NULL;
     }
   }
+
   return out;
 }
 
@@ -172,28 +182,33 @@ static const char *option(const TzDateOptions *o, int index, char *out, int kind
 static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUChar *id,
                         int32_t *id_length) {
   static const char *const utc[] = {"UTC", "GMT", "Etc/UTC", "Etc/GMT"};
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     if (equal_ignoring_case(name, utc[i])) {
       copy_text(resolved, "UTC");
       *id_length = widen("UTC", id, TEXT);
       return 1;
     }
+  }
   // An offset: ±HH, ±HHMM or ±HH:MM.
   if (name[0] == '+' || name[0] == '-') {
     const char *p = name + 1;
     int digits[4], n = 0;
     for (; *p && n < 4; ++p) {
-      if (*p == ':' && n == 2 && p[1])
+      if (*p == ':' && n == 2 && p[1]) {
         continue;
-      if (*p < '0' || *p > '9')
+      }
+      if (*p < '0' || *p > '9') {
         return 0;
+      }
       digits[n++] = *p - '0';
     }
-    if (*p || (n != 2 && n != 4))
+    if (*p || (n != 2 && n != 4)) {
       return 0;
+    }
     int hours = digits[0] * 10 + digits[1], minutes = n == 4 ? digits[2] * 10 + digits[3] : 0;
-    if (hours > 23 || minutes > 59 || (n == 2 && strchr(name, ':')))
+    if (hours > 23 || minutes > 59 || (n == 2 && strchr(name, ':'))) {
       return 0;
+    }
     char text[TEXT];
     text[0] = name[0];
     text[1] = (char)('0' + hours / 10);
@@ -212,15 +227,17 @@ static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUC
   // canonical form.
   TzUErrorCode status = 0;
   void *zones = icu->ucal_openTimeZones(&status);
-  if (TZ_U_FAILURE(status))
+  if (TZ_U_FAILURE(status)) {
     return 0;
+  }
   int found = 0;
   int32_t length;
   const TzUChar *zone;
   while (!found && (zone = icu->uenum_unext(zones, &length, &status)) != NULL) {
     char text[TEXT];
-    if (length >= TEXT)
+    if (length >= TEXT) {
       continue;
+    }
     narrow_text(zone, length, text, sizeof text);
     if (equal_ignoring_case(text, name)) {
       found = 1;
@@ -233,13 +250,15 @@ static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUC
         n = length;
       }
       narrow_text(buffer, n, resolved, TEXT);
-      if (strcmp(resolved, "Etc/UTC") == 0 || strcmp(resolved, "Etc/GMT") == 0)
+      if (strcmp(resolved, "Etc/UTC") == 0 || strcmp(resolved, "Etc/GMT") == 0) {
         copy_text(resolved, "UTC");
+      }
       memcpy(id, zone, (size_t)length * sizeof(TzUChar));
       *id_length = length;
     }
   }
   icu->uenum_close(zones);
+
   return found;
 }
 
@@ -252,17 +271,19 @@ static int hour_cycle_of(const TzUChar *pattern, int32_t length) {
   int quoted = 0;
   for (int32_t i = 0; i < length; ++i) {
     TzUChar c = pattern[i];
-    if (c == '\'')
+    if (c == '\'') {
       quoted = !quoted;
-    else if (!quoted && c == 'h')
+    } else if (!quoted && c == 'h') {
       return HC_H12;
-    else if (!quoted && c == 'H')
+    } else if (!quoted && c == 'H') {
       return HC_H23;
-    else if (!quoted && c == 'k')
+    } else if (!quoted && c == 'k') {
       return HC_H24;
-    else if (!quoted && c == 'K')
+    } else if (!quoted && c == 'K') {
       return HC_H11;
+    }
   }
+
   return HC_NONE;
 }
 
@@ -283,15 +304,17 @@ static TzUChar hour_char(int hc) {
 
 // V8's ReplaceHourCycleInPattern: every hour outside quotes in the cycle hc.
 static void replace_hour_cycle(TzUChar *pattern, int32_t length, int hc) {
-  if (hc == HC_NONE)
+  if (hc == HC_NONE) {
     return;
+  }
   int quoted = 0;
   for (int32_t i = 0; i < length; ++i) {
     TzUChar c = pattern[i];
-    if (c == '\'')
+    if (c == '\'') {
       quoted = !quoted;
-    else if (!quoted && (c == 'h' || c == 'H' || c == 'k' || c == 'K'))
+    } else if (!quoted && (c == 'h' || c == 'H' || c == 'k' || c == 'K')) {
       pattern[i] = hour_char(hc);
+    }
   }
 }
 
@@ -301,10 +324,12 @@ static int32_t best_pattern(const TzIcu *icu, void *generator, const TzUChar *sk
   TzUErrorCode status = 0;
   int32_t n = icu->udatpg_getBestPatternWithOptions(
       generator, skeleton, length, TZ_UDATPG_MATCH_HOUR_FIELD_LENGTH, pattern, capacity, &status);
-  if (TZ_U_FAILURE(status) || n >= capacity)
+  if (TZ_U_FAILURE(status) || n >= capacity) {
     return -1;
+  }
   pattern[n] = 0;
   replace_hour_cycle(pattern, n, hc);
+
   return n;
 }
 
@@ -315,11 +340,15 @@ static int32_t best_pattern(const TzIcu *icu, void *generator, const TzUChar *sk
 static const char *const style_names[] = {"full", "long", "medium", "short"};
 
 static int style_of(const char *value) {
-  if (!value)
+  if (!value) {
     return TZ_UDAT_NONE;
-  for (int i = 0; i < 4; ++i)
-    if (strcmp(style_names[i], value) == 0)
+  }
+  for (int i = 0; i < 4; ++i) {
+    if (strcmp(style_names[i], value) == 0) {
       return i; // UDAT_FULL to UDAT_SHORT
+    }
+  }
+
   return TZ_UDAT_NONE;
 }
 
@@ -355,15 +384,18 @@ static void resolve_parts(Resolved *r, const TzUChar *pattern, int32_t length) {
        {"zzzz", "z", "OOOO", "O", "vvvv", "v"},
        {"long", "short", "longOffset", "shortOffset", "longGeneric", "shortGeneric"}},
   };
-  for (size_t i = 0; i < sizeof parts / sizeof parts[0]; ++i)
-    for (int k = 0; k < 10 && parts[i].letters[k]; ++k)
+  for (size_t i = 0; i < sizeof parts / sizeof parts[0]; ++i) {
+    for (int k = 0; k < 10 && parts[i].letters[k]; ++k) {
       if (strstr(text, parts[i].letters[k])) {
         copy_text(r->values[parts[i].option], parts[i].values[k]);
         break;
       }
+    }
+  }
   int digits = 0;
-  for (const char *p = text; *p && digits < 3; ++p)
+  for (const char *p = text; *p && digits < 3; ++p) {
     digits += *p == 'S';
+  }
   r->fractional = digits;
 }
 
@@ -371,10 +403,12 @@ static void resolve_parts(Resolved *r, const TzUChar *pattern, int32_t length) {
 // it gives NULL.
 static Resolved *refuse(Resolved *r, void *generator, int32_t kind, const char *format,
                         const char *value) {
-  if (generator)
+  if (generator) {
     tz_icu()->udatpg_close(generator);
+  }
   tz_free(r);
   tz_throw(kind, format, value);
+
   return NULL;
 }
 
@@ -382,15 +416,17 @@ static Resolved *refuse(Resolved *r, void *generator, int32_t kind, const char *
 // for options JavaScript rejects.
 static Resolved *create(const TzDateOptions *o, int kind) {
   const TzIcu *icu = tz_icu();
-  if (!icu)
+  if (!icu) {
     no_icu();
+  }
   TzUErrorCode status = 0;
 
   // The language asked for, with its keywords, as ICU names it, and the one
   // ICU has data for (intl.c).
   char requested[160], found[TEXT];
-  if (!tz_intl_resolve_locale(icu, (o->present & LOCALE_BIT) != 0, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, (o->present & LOCALE_BIT) != 0, o->locale, requested, found)) {
     return NULL;
+  }
   // The keywords of the language: -u-ca-, -u-nu- and -u-hc-.
   char keyword_calendar[TEXT] = "", keyword_numbers[TEXT] = "", keyword_hours[TEXT] = "";
   struct {
@@ -411,22 +447,26 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   char buffers[TZ_DTO_COUNT][TEXT];
   const char *values[TZ_DTO_COUNT];
   int failed = 0;
-  for (int i = 0; i < TZ_DTO_COUNT && !failed; ++i)
+  for (int i = 0; i < TZ_DTO_COUNT && !failed; ++i) {
     values[i] = option(o, i, buffers[i], kind, &failed);
+  }
   if (failed) {
     tz_free(r);
     return NULL;
   }
-  if (values[TZ_DTO_CALENDAR] && !tz_intl_is_keyword_type(values[TZ_DTO_CALENDAR]))
+  if (values[TZ_DTO_CALENDAR] && !tz_intl_is_keyword_type(values[TZ_DTO_CALENDAR])) {
     return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid calendar : %s", values[TZ_DTO_CALENDAR]);
-  if (values[TZ_DTO_NUMBERING_SYSTEM] && !tz_intl_is_keyword_type(values[TZ_DTO_NUMBERING_SYSTEM]))
+  }
+  if (values[TZ_DTO_NUMBERING_SYSTEM] &&
+      !tz_intl_is_keyword_type(values[TZ_DTO_NUMBERING_SYSTEM])) {
     return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid numberingSystem : %s",
                   values[TZ_DTO_NUMBERING_SYSTEM]);
+  }
   int fractional = 0;
   if (!isnan(o->fractional)) {
-    if (!(o->fractional >= 1 && o->fractional <= 3))
-      return refuse(r, NULL, TZ_RANGE_ERROR, "fractionalSecondDigits value is out of range.%s",
-                    "");
+    if (!(o->fractional >= 1 && o->fractional <= 3)) {
+      return refuse(r, NULL, TZ_RANGE_ERROR, "fractionalSecondDigits value is out of range.%s", "");
+    }
     fractional = (int)floor(o->fractional);
   }
 
@@ -497,10 +537,11 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     status = 0;
     int32_t parsed;
     n = icu->uloc_forLanguageTag(full, locale, (int32_t)sizeof locale - 1, &parsed, &status);
-    if (TZ_U_FAILURE(status) || n <= 0)
+    if (TZ_U_FAILURE(status) || n <= 0) {
       copy_text(locale, found);
-    else
+    } else {
       locale[n] = 0;
+    }
   }
 
   // The zone.
@@ -508,9 +549,10 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   int32_t zone_length = 0;
   if (values[TZ_DTO_TIME_ZONE]) {
     if (!resolve_zone(icu, values[TZ_DTO_TIME_ZONE], r->values[TZ_DTO_TIME_ZONE], zone,
-                      &zone_length))
+                      &zone_length)) {
       return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid time zone specified: %s",
                     values[TZ_DTO_TIME_ZONE]);
+    }
   } else {
     zone_length = tz_date_zone_id(zone, TEXT);
     narrow_text(zone, zone_length, r->values[TZ_DTO_TIME_ZONE], TEXT);
@@ -519,21 +561,24 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   // The hour cycle (ECMA-402, CreateDateTimeFormat, steps 24 to 28).
   status = 0;
   void *generator = icu->udatpg_open(locale, &status);
-  if (TZ_U_FAILURE(status))
+  if (TZ_U_FAILURE(status)) {
     no_icu();
+  }
   int hc_default = HC_NONE;
   if (icu->udatpg_getDefaultHourCycle) {
     status = 0;
     int cycle = icu->udatpg_getDefaultHourCycle(generator, &status);
-    if (!TZ_U_FAILURE(status))
+    if (!TZ_U_FAILURE(status)) {
       hc_default = cycle == 0 ? HC_H11 : cycle == 1 ? HC_H12 : cycle == 2 ? HC_H23 : HC_H24;
+    }
   }
   if (hc_default == HC_NONE) {
     TzUChar j[2] = {'j', 0}, pattern[TEXT];
     int32_t length = best_pattern(icu, generator, j, 1, HC_NONE, pattern, TEXT);
     hc_default = length > 0 ? hour_cycle_of(pattern, length) : HC_H23;
-    if (hc_default == HC_NONE)
+    if (hc_default == HC_NONE) {
       hc_default = HC_H23;
+    }
   }
   // The hour cycle of hours asked for and of the styles: hourCycle, or with
   // hour12 the language's cycle of 12 or of 24 hours, or -u-hc-, or the
@@ -568,23 +613,28 @@ static Resolved *create(const TzDateOptions *o, int kind) {
 
   const char *date_style = values[TZ_DTO_DATE_STYLE], *time_style = values[TZ_DTO_TIME_STYLE];
   int explicit_parts = fractional > 0;
-  for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_TIME_ZONE_NAME; ++i)
+  for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_TIME_ZONE_NAME; ++i) {
     explicit_parts |= values[i] != NULL;
+  }
   TzUChar pattern[256];
   int32_t pattern_length = -1;
   void *format = NULL;
   if (date_style || time_style) {
-    if (explicit_parts)
+    if (explicit_parts) {
       return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "option");
-    if (kind == TZ_DATE_LOCALE_DATE && time_style)
+    }
+    if (kind == TZ_DATE_LOCALE_DATE && time_style) {
       return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "timeStyle");
-    if (kind == TZ_DATE_LOCALE_TIME && date_style)
+    }
+    if (kind == TZ_DATE_LOCALE_TIME && date_style) {
       return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "dateStyle");
+    }
     status = 0;
     format = icu->udat_open(style_of(time_style), style_of(date_style), locale, zone, zone_length,
                             NULL, -1, &status);
-    if (TZ_U_FAILURE(status))
+    if (TZ_U_FAILURE(status)) {
       no_icu();
+    }
     status = 0;
     pattern_length = icu->udat_toPattern(format, 0, pattern, 255, &status);
     if (time_style && !TZ_U_FAILURE(status) && pattern_length < 255 &&
@@ -598,8 +648,9 @@ static Resolved *create(const TzDateOptions *o, int kind) {
       int32_t m = 0;
       for (int32_t i = 0; !TZ_U_FAILURE(status) && i < length && length < 255; ++i) {
         TzUChar c = skeleton[i];
-        if (c == 'a' || c == 'b' || c == 'B')
+        if (c == 'a' || c == 'b' || c == 'B') {
           continue;
+        }
         replaced[m++] = c == 'h' || c == 'H' || c == 'k' || c == 'K' ? hour_char(hc) : c;
       }
       int32_t made = best_pattern(icu, generator, replaced, m, hc, pattern, 255);
@@ -608,35 +659,46 @@ static Resolved *create(const TzDateOptions *o, int kind) {
         status = 0;
         format = icu->udat_open(TZ_UDAT_PATTERN, TZ_UDAT_PATTERN, locale, zone, zone_length,
                                 pattern, made, &status);
-        if (TZ_U_FAILURE(status))
+        if (TZ_U_FAILURE(status)) {
           no_icu();
+        }
         pattern_length = made;
       }
     }
-    if (date_style)
+    if (date_style) {
       copy_text(r->values[TZ_DTO_DATE_STYLE], date_style);
-    if (time_style)
+    }
+    if (time_style) {
       copy_text(r->values[TZ_DTO_TIME_STYLE], time_style);
+    }
   } else {
     // What is shown when no part is asked for (ToDateTimeOptions).
     int need_defaults = 1;
-    if (kind != TZ_DATE_LOCALE_TIME)
-      for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_DAY; ++i)
-        if (i != TZ_DTO_ERA && values[i])
+    if (kind != TZ_DATE_LOCALE_TIME) {
+      for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_DAY; ++i) {
+        if (i != TZ_DTO_ERA && values[i]) {
           need_defaults = 0;
-    if (kind != TZ_DATE_LOCALE_DATE) {
-      for (int i = TZ_DTO_DAY_PERIOD; i <= TZ_DTO_SECOND; ++i)
-        if (values[i])
-          need_defaults = 0;
-      if (fractional)
-        need_defaults = 0;
+        }
+      }
     }
-    if (need_defaults && kind != TZ_DATE_LOCALE_TIME)
+    if (kind != TZ_DATE_LOCALE_DATE) {
+      for (int i = TZ_DTO_DAY_PERIOD; i <= TZ_DTO_SECOND; ++i) {
+        if (values[i]) {
+          need_defaults = 0;
+        }
+      }
+      if (fractional) {
+        need_defaults = 0;
+      }
+    }
+    if (need_defaults && kind != TZ_DATE_LOCALE_TIME) {
       values[TZ_DTO_YEAR] = values[TZ_DTO_MONTH] = values[TZ_DTO_DAY] = "numeric";
+    }
     int hour_defaulted =
         need_defaults && (kind == TZ_DATE_LOCALE_ALL || kind == TZ_DATE_LOCALE_TIME);
-    if (hour_defaulted)
+    if (hour_defaulted) {
       values[TZ_DTO_HOUR] = values[TZ_DTO_MINUTE] = values[TZ_DTO_SECOND] = "numeric";
+    }
     int hc_skeleton = hour_defaulted ? hc_defaults : hc;
     // The skeleton, part by part in the order of ECMA-402's Table 7.
     static const struct {
@@ -663,22 +725,28 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     int32_t length = 0;
     for (size_t i = 0; i < sizeof parts / sizeof parts[0]; ++i) {
       int index = parts[i].option;
-      if (index == TZ_DTO_TIME_ZONE_NAME)
-        for (int k = 0; k < fractional; ++k)
+      if (index == TZ_DTO_TIME_ZONE_NAME) {
+        for (int k = 0; k < fractional; ++k) {
           skeleton[length++] = 'S';
+        }
+      }
       const char *value = values[index];
-      if (!value)
+      if (!value) {
         continue;
+      }
       for (int k = 0; k < 6 && parts[i].values[k]; ++k) {
-        if (strcmp(parts[i].values[k], value) != 0)
+        if (strcmp(parts[i].values[k], value) != 0) {
           continue;
+        }
         if (index == TZ_DTO_HOUR) {
           skeleton[length++] = hour_char(hc_skeleton);
-          if (k == 0)
+          if (k == 0) {
             skeleton[length++] = hour_char(hc_skeleton);
+          }
         } else {
-          for (const char *p = parts[i].letters[k]; *p; ++p)
+          for (const char *p = parts[i].letters[k]; *p; ++p) {
             skeleton[length++] = (TzUChar)*p;
+          }
         }
         break;
       }
@@ -686,13 +754,15 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     skeleton[length] = 0;
     int hc_pattern = values[TZ_DTO_HOUR] && !hour_defaulted ? hc : HC_NONE;
     pattern_length = best_pattern(icu, generator, skeleton, length, hc_pattern, pattern, 255);
-    if (pattern_length < 0)
+    if (pattern_length < 0) {
       no_icu();
+    }
     status = 0;
     format = icu->udat_open(TZ_UDAT_PATTERN, TZ_UDAT_PATTERN, locale, zone, zone_length, pattern,
                             pattern_length, &status);
-    if (TZ_U_FAILURE(status))
+    if (TZ_U_FAILURE(status)) {
       no_icu();
+    }
     resolve_parts(r, pattern, pattern_length);
   }
   icu->udatpg_close(generator);
@@ -721,14 +791,16 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   void *system = icu->unumsys_open(locale, &status);
   copy_text(r->values[TZ_DTO_NUMBERING_SYSTEM],
             !TZ_U_FAILURE(status) && system ? icu->unumsys_getName(system) : "latn");
-  if (system)
+  if (system) {
     icu->unumsys_close(system);
+  }
   int hc_shown = pattern_length > 0 ? hour_cycle_of(pattern, pattern_length) : HC_NONE;
   if (hc_shown != HC_NONE) {
     static const char *const cycles[] = {"", "h11", "h12", "h23", "h24"};
     copy_text(r->values[TZ_DTO_HOUR_CYCLE], cycles[hc_shown]);
     r->hour12 = hc_shown == HC_H11 || hc_shown == HC_H12;
   }
+
   return r;
 }
 
@@ -755,8 +827,10 @@ static int32_t format_units(Resolved *r, double t, TzUChar *buffer, int32_t capa
     n = fields ? icu->udat_formatForFields(r->format, t, *heap, n + 1, fields, &status)
                : icu->udat_format(r->format, t, *heap, n + 1, NULL, &status);
   }
-  if (TZ_U_FAILURE(status))
+  if (TZ_U_FAILURE(status)) {
     n = 0;
+  }
+
   return n;
 }
 
@@ -767,11 +841,14 @@ static TzStr format_string(Resolved *r, double t) {
   // no-break space before "AM" and in other places where a space was, which
   // broke pages that read the text (https://crbug.com/1414292).
   TzUChar *text = heap ? heap : buffer;
-  for (int32_t i = 0; i < n; ++i)
-    if (text[i] == 0x202F)
+  for (int32_t i = 0; i < n; ++i) {
+    if (text[i] == 0x202F) {
       text[i] = ' ';
+    }
+  }
   TzStr s = tz_str_from_utf16(heap ? heap : buffer, (size_t)n);
   tz_free(heap);
+
   return s;
 }
 
@@ -792,10 +869,12 @@ static Cache *cache_of(TzThread *t) {
   Cache *c = (Cache *)t->caches[TZ_CACHE_DATE_FORMAT];
   if (!c) {
     c = (Cache *)calloc(1, sizeof *c);
-    if (!c)
+    if (!c) {
       tz_panic("out of memory", 13);
+    }
     t->caches[TZ_CACHE_DATE_FORMAT] = c;
   }
+
   return c;
 }
 
@@ -807,18 +886,20 @@ static void key_of(TzBuf *key, int kind, const TzDateOptions *o) {
   tz_buf_push(key, (uint16_t)(isnan(o->fractional) ? 0xFFFF : (uint16_t)o->fractional));
   for (int i = -1; i < TZ_DTO_COUNT; ++i) {
     uint32_t bit = i < 0 ? LOCALE_BIT : 1u << i;
-    if (!(o->present & bit))
+    if (!(o->present & bit)) {
       continue;
+    }
     TzStr s = i < 0 ? o->locale : o->values[i];
     uint32_t n;
     int two;
     const void *units = tz_str_units(&s, &n, &two);
     tz_buf_push(key, (uint16_t)(n >> 16));
     tz_buf_push(key, (uint16_t)n);
-    if (two)
+    if (two) {
       tz_buf_units(key, (const uint16_t *)units, n);
-    else
+    } else {
       tz_buf_bytes(key, (const uint8_t *)units, n);
+    }
   }
 }
 
@@ -847,6 +928,7 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
   }
   e->resolved = r;
   e->key = key;
+
   return r;
 }
 
@@ -855,8 +937,9 @@ void tz_date_format_shutdown(void) {
   for (int32_t t = 0; t < tz_thread_total(); ++t) {
     TzThread *thread = tz_thread_at(t);
     Cache *cache = thread ? (Cache *)thread->caches[TZ_CACHE_DATE_FORMAT] : NULL;
-    if (!cache)
+    if (!cache) {
       continue;
+    }
     for (int i = 0; i < CACHED; ++i) {
       CacheEntry *e = &cache->entries[i];
       if (e->resolved) {
@@ -884,12 +967,14 @@ void tz_date_locale(TzStr *out, double t, int32_t kind, const TzDateOptions *o) 
 // NULL for options JavaScript rejects, with the error thrown.
 void *tz_dtf_new(const TzDateOptions *o) {
   Resolved *r = create(o, TZ_DATE_LOCALE_FORMAT);
-  if (!r)
+  if (!r) {
     return NULL;
+  }
   TzDateFormat *f = (TzDateFormat *)tz_obj_alloc(sizeof(TzDateFormat));
   f->rc = 1;
   f->layout = &dtf_layout;
   f->resolved = r;
+
   return f;
 }
 
@@ -980,13 +1065,15 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
   for (;;) {
     field = icu->ufieldpositer_next(iterator, &begin, &end);
     int last = field < 0;
-    if (last)
+    if (last) {
       begin = end = n;
+    }
     for (int k = 0; k < 2; ++k) {
       // The literal text before the field, then the field.
       int32_t from = k == 0 ? previous : begin, to = k == 0 ? begin : end;
-      if (from >= to)
+      if (from >= to) {
         continue;
+      }
       TzInstance *part = (TzInstance *)tz_obj_alloc(size);
       memset(part, 0, (size_t)size);
       part->rc = 1;
@@ -996,12 +1083,14 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
       *(TzStr *)((char *)part + value_offset) = tz_str_from_utf16(text + from, (size_t)(to - from));
       tz_arr_push_value(parts, &part);
     }
-    if (last)
+    if (last) {
       break;
+    }
     previous = end;
   }
   icu->ufieldpositer_close(iterator);
   tz_free(heap);
+
   return parts;
 }
 
@@ -1010,6 +1099,7 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
 int32_t tz_dtf_option(TzStr *out, TzDateFormat *f, int32_t which) {
   const char *text = which < 0 ? f->resolved->locale : f->resolved->values[which];
   *out = tz_str_from_ascii(text, strlen(text));
+
   return text[0] != 0;
 }
 

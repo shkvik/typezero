@@ -1,5 +1,4 @@
 #include "compiler/load/lexer/lexer.h"
-
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 
@@ -7,100 +6,192 @@ namespace tz {
 
 const char *tokSpelling(Tok kind) {
   switch (kind) {
-  case Tok::Eof: return "end of file";
-  case Tok::Identifier: return "identifier";
-  case Tok::IntLiteral: return "integer literal";
-  case Tok::FloatLiteral: return "number literal";
-  case Tok::StringLiteral: return "string literal";
+  case Tok::Eof:
+    return "end of file";
+  case Tok::Identifier:
+    return "identifier";
+  case Tok::IntLiteral:
+    return "integer literal";
+  case Tok::FloatLiteral:
+    return "number literal";
+  case Tok::StringLiteral:
+    return "string literal";
   case Tok::TemplateString:
-  case Tok::TemplateHead: return "template literal";
+  case Tok::TemplateHead:
+    return "template literal";
   case Tok::TemplateMiddle:
-  case Tok::TemplateTail: return "'}'";
-  case Tok::RegexLiteral: return "regular expression";
-  case Tok::KwAs: return "'as'";
-  case Tok::KwBreak: return "'break'";
-  case Tok::KwCase: return "'case'";
-  case Tok::KwConst: return "'const'";
-  case Tok::KwContinue: return "'continue'";
-  case Tok::KwDebugger: return "'debugger'";
-  case Tok::KwDefault: return "'default'";
-  case Tok::KwDelete: return "'delete'";
-  case Tok::KwDo: return "'do'";
-  case Tok::KwElse: return "'else'";
-  case Tok::KwEnum: return "'enum'";
-  case Tok::KwFalse: return "'false'";
-  case Tok::KwFor: return "'for'";
-  case Tok::KwFunction: return "'function'";
-  case Tok::KwIf: return "'if'";
-  case Tok::KwIn: return "'in'";
-  case Tok::KwLet: return "'let'";
-  case Tok::KwNew: return "'new'";
-  case Tok::KwReturn: return "'return'";
-  case Tok::KwSwitch: return "'switch'";
-  case Tok::KwTrue: return "'true'";
-  case Tok::KwTypeof: return "'typeof'";
-  case Tok::KwVar: return "'var'";
-  case Tok::KwVoid: return "'void'";
-  case Tok::KwWhile: return "'while'";
-  case Tok::LParen: return "'('";
-  case Tok::RParen: return "')'";
-  case Tok::LBrace: return "'{'";
-  case Tok::RBrace: return "'}'";
-  case Tok::LBracket: return "'['";
-  case Tok::RBracket: return "']'";
-  case Tok::Comma: return "','";
-  case Tok::Semi: return "';'";
-  case Tok::Colon: return "':'";
-  case Tok::Dot: return "'.'";
-  case Tok::Ellipsis: return "'...'";
-  case Tok::Question: return "'?'";
-  case Tok::QuestionQuestion: return "'??'";
-  case Tok::QuestionDot: return "'?.'";
-  case Tok::Arrow: return "'=>'";
-  case Tok::At: return "'@'";
-  case Tok::Plus: return "'+'";
-  case Tok::Minus: return "'-'";
-  case Tok::Star: return "'*'";
-  case Tok::StarStar: return "'**'";
-  case Tok::Slash: return "'/'";
-  case Tok::Percent: return "'%'";
-  case Tok::PlusPlus: return "'++'";
-  case Tok::MinusMinus: return "'--'";
-  case Tok::Amp: return "'&'";
-  case Tok::Pipe: return "'|'";
-  case Tok::Caret: return "'^'";
-  case Tok::Tilde: return "'~'";
-  case Tok::Bang: return "'!'";
-  case Tok::AmpAmp: return "'&&'";
-  case Tok::PipePipe: return "'||'";
-  case Tok::Shl: return "'<<'";
-  case Tok::Shr: return "'>>'";
-  case Tok::UShr: return "'>>>'";
-  case Tok::Less: return "'<'";
-  case Tok::LessEq: return "'<='";
-  case Tok::Greater: return "'>'";
-  case Tok::GreaterEq: return "'>='";
-  case Tok::EqEq: return "'=='";
-  case Tok::EqEqEq: return "'==='";
-  case Tok::BangEq: return "'!='";
-  case Tok::BangEqEq: return "'!=='";
-  case Tok::Assign: return "'='";
-  case Tok::PlusAssign: return "'+='";
-  case Tok::MinusAssign: return "'-='";
-  case Tok::StarAssign: return "'*='";
-  case Tok::StarStarAssign: return "'**='";
-  case Tok::SlashAssign: return "'/='";
-  case Tok::PercentAssign: return "'%='";
-  case Tok::AmpAssign: return "'&='";
-  case Tok::PipeAssign: return "'|='";
-  case Tok::CaretAssign: return "'^='";
-  case Tok::ShlAssign: return "'<<='";
-  case Tok::ShrAssign: return "'>>='";
-  case Tok::UShrAssign: return "'>>>='";
-  case Tok::QuestionQuestionAssign: return "'??='";
-  case Tok::AmpAmpAssign: return "'&&='";
-  case Tok::PipePipeAssign: return "'||='";
+  case Tok::TemplateTail:
+    return "'}'";
+  case Tok::RegexLiteral:
+    return "regular expression";
+  case Tok::KwAs:
+    return "'as'";
+  case Tok::KwBreak:
+    return "'break'";
+  case Tok::KwCase:
+    return "'case'";
+  case Tok::KwConst:
+    return "'const'";
+  case Tok::KwContinue:
+    return "'continue'";
+  case Tok::KwDebugger:
+    return "'debugger'";
+  case Tok::KwDefault:
+    return "'default'";
+  case Tok::KwDelete:
+    return "'delete'";
+  case Tok::KwDo:
+    return "'do'";
+  case Tok::KwElse:
+    return "'else'";
+  case Tok::KwEnum:
+    return "'enum'";
+  case Tok::KwFalse:
+    return "'false'";
+  case Tok::KwFor:
+    return "'for'";
+  case Tok::KwFunction:
+    return "'function'";
+  case Tok::KwIf:
+    return "'if'";
+  case Tok::KwIn:
+    return "'in'";
+  case Tok::KwLet:
+    return "'let'";
+  case Tok::KwNew:
+    return "'new'";
+  case Tok::KwReturn:
+    return "'return'";
+  case Tok::KwSwitch:
+    return "'switch'";
+  case Tok::KwTrue:
+    return "'true'";
+  case Tok::KwTypeof:
+    return "'typeof'";
+  case Tok::KwVar:
+    return "'var'";
+  case Tok::KwVoid:
+    return "'void'";
+  case Tok::KwWhile:
+    return "'while'";
+  case Tok::LParen:
+    return "'('";
+  case Tok::RParen:
+    return "')'";
+  case Tok::LBrace:
+    return "'{'";
+  case Tok::RBrace:
+    return "'}'";
+  case Tok::LBracket:
+    return "'['";
+  case Tok::RBracket:
+    return "']'";
+  case Tok::Comma:
+    return "','";
+  case Tok::Semi:
+    return "';'";
+  case Tok::Colon:
+    return "':'";
+  case Tok::Dot:
+    return "'.'";
+  case Tok::Ellipsis:
+    return "'...'";
+  case Tok::Question:
+    return "'?'";
+  case Tok::QuestionQuestion:
+    return "'??'";
+  case Tok::QuestionDot:
+    return "'?.'";
+  case Tok::Arrow:
+    return "'=>'";
+  case Tok::At:
+    return "'@'";
+  case Tok::Plus:
+    return "'+'";
+  case Tok::Minus:
+    return "'-'";
+  case Tok::Star:
+    return "'*'";
+  case Tok::StarStar:
+    return "'**'";
+  case Tok::Slash:
+    return "'/'";
+  case Tok::Percent:
+    return "'%'";
+  case Tok::PlusPlus:
+    return "'++'";
+  case Tok::MinusMinus:
+    return "'--'";
+  case Tok::Amp:
+    return "'&'";
+  case Tok::Pipe:
+    return "'|'";
+  case Tok::Caret:
+    return "'^'";
+  case Tok::Tilde:
+    return "'~'";
+  case Tok::Bang:
+    return "'!'";
+  case Tok::AmpAmp:
+    return "'&&'";
+  case Tok::PipePipe:
+    return "'||'";
+  case Tok::Shl:
+    return "'<<'";
+  case Tok::Shr:
+    return "'>>'";
+  case Tok::UShr:
+    return "'>>>'";
+  case Tok::Less:
+    return "'<'";
+  case Tok::LessEq:
+    return "'<='";
+  case Tok::Greater:
+    return "'>'";
+  case Tok::GreaterEq:
+    return "'>='";
+  case Tok::EqEq:
+    return "'=='";
+  case Tok::EqEqEq:
+    return "'==='";
+  case Tok::BangEq:
+    return "'!='";
+  case Tok::BangEqEq:
+    return "'!=='";
+  case Tok::Assign:
+    return "'='";
+  case Tok::PlusAssign:
+    return "'+='";
+  case Tok::MinusAssign:
+    return "'-='";
+  case Tok::StarAssign:
+    return "'*='";
+  case Tok::StarStarAssign:
+    return "'**='";
+  case Tok::SlashAssign:
+    return "'/='";
+  case Tok::PercentAssign:
+    return "'%='";
+  case Tok::AmpAssign:
+    return "'&='";
+  case Tok::PipeAssign:
+    return "'|='";
+  case Tok::CaretAssign:
+    return "'^='";
+  case Tok::ShlAssign:
+    return "'<<='";
+  case Tok::ShrAssign:
+    return "'>>='";
+  case Tok::UShrAssign:
+    return "'>>>='";
+  case Tok::QuestionQuestionAssign:
+    return "'??='";
+  case Tok::AmpAmpAssign:
+    return "'&&='";
+  case Tok::PipePipeAssign:
+    return "'||='";
   }
+
   return "token";
 }
 
@@ -114,18 +205,23 @@ static bool isIdentChar(char c) { return isIdentStart(c) || llvm::isDigit(c); }
 
 Lexer::Lexer(llvm::StringRef source, Diagnostics &diags)
     : cur_(source.begin()), end_(source.end()), diags_(diags) {
-  if (source.starts_with("\xEF\xBB\xBF"))
+  if (source.starts_with("\xEF\xBB\xBF")) {
     cur_ += 3;
+  }
   // A `#!` line lets programs be run as scripts on Unix.
-  if (source.substr(cur_ - source.begin()).starts_with("#!"))
-    while (cur_ < end_ && *cur_ != '\n')
+  if (source.substr(cur_ - source.begin()).starts_with("#!")) {
+    while (cur_ < end_ && *cur_ != '\n') {
       ++cur_;
+    }
+  }
 }
 
 bool Lexer::match(char c) {
-  if (peek() != c)
+  if (peek() != c) {
     return false;
+  }
   ++cur_;
+
   return true;
 }
 
@@ -134,6 +230,7 @@ Token Lexer::make(Tok kind, const char *start, bool newlineBefore) const {
   tok.kind = kind;
   tok.text = llvm::StringRef(start, cur_ - start);
   tok.newlineBefore = newlineBefore;
+
   return tok;
 }
 
@@ -147,15 +244,17 @@ bool Lexer::skipTrivia() {
     } else if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
       ++cur_;
     } else if (c == '/' && peek(1) == '/') {
-      while (cur_ < end_ && *cur_ != '\n')
+      while (cur_ < end_ && *cur_ != '\n') {
         ++cur_;
+      }
     } else if (c == '/' && peek(1) == '*') {
       const char *start = cur_;
       cur_ += 2;
       bool closed = false;
       while (cur_ < end_) {
-        if (*cur_ == '\n')
+        if (*cur_ == '\n') {
           newline = true;
+        }
         if (*cur_ == '*' && peek(1) == '/') {
           cur_ += 2;
           closed = true;
@@ -163,28 +262,34 @@ bool Lexer::skipTrivia() {
         }
         ++cur_;
       }
-      if (!closed)
+      if (!closed) {
         diags_.error(llvm::SMLoc::getFromPointer(start), "unterminated comment");
+      }
     } else {
       break;
     }
   }
+
   return newline;
 }
 
 Token Lexer::next() {
   bool nl = skipTrivia();
   const char *start = cur_;
-  if (cur_ >= end_)
+  if (cur_ >= end_) {
     return make(Tok::Eof, start, nl);
+  }
 
   char c = *cur_++;
   switch (c) {
-  case '(': return make(Tok::LParen, start, nl);
-  case ')': return make(Tok::RParen, start, nl);
+  case '(':
+    return make(Tok::LParen, start, nl);
+  case ')':
+    return make(Tok::RParen, start, nl);
   case '{':
-    if (!templateBraces_.empty())
+    if (!templateBraces_.empty()) {
       ++templateBraces_.back();
+    }
     return make(Tok::LBrace, start, nl);
   case '}':
     if (!templateBraces_.empty()) {
@@ -197,81 +302,123 @@ Token Lexer::next() {
     return make(Tok::RBrace, start, nl);
   case '`':
     return lexTemplate(start, /*continuation=*/false, nl);
-  case '[': return make(Tok::LBracket, start, nl);
-  case ']': return make(Tok::RBracket, start, nl);
-  case ',': return make(Tok::Comma, start, nl);
-  case ';': return make(Tok::Semi, start, nl);
-  case ':': return make(Tok::Colon, start, nl);
+  case '[':
+    return make(Tok::LBracket, start, nl);
+  case ']':
+    return make(Tok::RBracket, start, nl);
+  case ',':
+    return make(Tok::Comma, start, nl);
+  case ';':
+    return make(Tok::Semi, start, nl);
+  case ':':
+    return make(Tok::Colon, start, nl);
   case '?':
-    if (match('?'))
+    if (match('?')) {
       return make(match('=') ? Tok::QuestionQuestionAssign : Tok::QuestionQuestion, start, nl);
+    }
     // `a?.5:1` is a conditional with the number .5.
     if (peek() == '.' && !llvm::isDigit(peek(1))) {
       ++cur_;
       return make(Tok::QuestionDot, start, nl);
     }
     return make(Tok::Question, start, nl);
-  case '~': return make(Tok::Tilde, start, nl);
+  case '~':
+    return make(Tok::Tilde, start, nl);
   case '.':
-    if (llvm::isDigit(peek()))
+    if (llvm::isDigit(peek())) {
       return lexNumber(start, nl);
+    }
     if (peek() == '.' && peek(1) == '.') {
       cur_ += 2;
       return make(Tok::Ellipsis, start, nl);
     }
     return make(Tok::Dot, start, nl);
   case '+':
-    if (match('+')) return make(Tok::PlusPlus, start, nl);
-    if (match('=')) return make(Tok::PlusAssign, start, nl);
+    if (match('+')) {
+      return make(Tok::PlusPlus, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::PlusAssign, start, nl);
+    }
     return make(Tok::Plus, start, nl);
   case '-':
-    if (match('-')) return make(Tok::MinusMinus, start, nl);
-    if (match('=')) return make(Tok::MinusAssign, start, nl);
+    if (match('-')) {
+      return make(Tok::MinusMinus, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::MinusAssign, start, nl);
+    }
     return make(Tok::Minus, start, nl);
   case '*':
-    if (match('*'))
+    if (match('*')) {
       return make(match('=') ? Tok::StarStarAssign : Tok::StarStar, start, nl);
-    if (match('=')) return make(Tok::StarAssign, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::StarAssign, start, nl);
+    }
     return make(Tok::Star, start, nl);
   case '/':
-    if (match('=')) return make(Tok::SlashAssign, start, nl);
+    if (match('=')) {
+      return make(Tok::SlashAssign, start, nl);
+    }
     return make(Tok::Slash, start, nl);
   case '%':
-    if (match('=')) return make(Tok::PercentAssign, start, nl);
+    if (match('=')) {
+      return make(Tok::PercentAssign, start, nl);
+    }
     return make(Tok::Percent, start, nl);
   case '&':
-    if (match('&')) return make(match('=') ? Tok::AmpAmpAssign : Tok::AmpAmp, start, nl);
-    if (match('=')) return make(Tok::AmpAssign, start, nl);
+    if (match('&')) {
+      return make(match('=') ? Tok::AmpAmpAssign : Tok::AmpAmp, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::AmpAssign, start, nl);
+    }
     return make(Tok::Amp, start, nl);
   case '|':
-    if (match('|')) return make(match('=') ? Tok::PipePipeAssign : Tok::PipePipe, start, nl);
-    if (match('=')) return make(Tok::PipeAssign, start, nl);
+    if (match('|')) {
+      return make(match('=') ? Tok::PipePipeAssign : Tok::PipePipe, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::PipeAssign, start, nl);
+    }
     return make(Tok::Pipe, start, nl);
   case '^':
-    if (match('=')) return make(Tok::CaretAssign, start, nl);
+    if (match('=')) {
+      return make(Tok::CaretAssign, start, nl);
+    }
     return make(Tok::Caret, start, nl);
   case '!':
-    if (match('='))
+    if (match('=')) {
       return make(match('=') ? Tok::BangEqEq : Tok::BangEq, start, nl);
+    }
     return make(Tok::Bang, start, nl);
   case '=':
-    if (match('='))
+    if (match('=')) {
       return make(match('=') ? Tok::EqEqEq : Tok::EqEq, start, nl);
-    if (match('>'))
+    }
+    if (match('>')) {
       return make(Tok::Arrow, start, nl);
+    }
     return make(Tok::Assign, start, nl);
   case '<':
-    if (match('<'))
+    if (match('<')) {
       return make(match('=') ? Tok::ShlAssign : Tok::Shl, start, nl);
-    if (match('=')) return make(Tok::LessEq, start, nl);
+    }
+    if (match('=')) {
+      return make(Tok::LessEq, start, nl);
+    }
     return make(Tok::Less, start, nl);
   case '>':
     if (match('>')) {
-      if (match('>'))
+      if (match('>')) {
         return make(match('=') ? Tok::UShrAssign : Tok::UShr, start, nl);
+      }
       return make(match('=') ? Tok::ShrAssign : Tok::Shr, start, nl);
     }
-    if (match('=')) return make(Tok::GreaterEq, start, nl);
+    if (match('=')) {
+      return make(Tok::GreaterEq, start, nl);
+    }
     return make(Tok::Greater, start, nl);
   case '"':
   case '\'':
@@ -280,20 +427,24 @@ Token Lexer::next() {
     return make(Tok::At, start, nl);
   case '#':
     // `#x`, a private name of a class: an identifier that keeps its `#`.
-    if (isIdentStart(peek()))
+    if (isIdentStart(peek())) {
       return lexIdentifier(start, nl);
+    }
     break;
   default:
     break;
   }
 
-  if (llvm::isDigit(c))
+  if (llvm::isDigit(c)) {
     return lexNumber(start, nl);
-  if (isIdentStart(c))
+  }
+  if (isIdentStart(c)) {
     return lexIdentifier(start, nl);
+  }
 
   diags_.error(llvm::SMLoc::getFromPointer(start),
                "unexpected character '" + llvm::Twine(llvm::StringRef(start, 1)) + "'");
+
   return next();
 }
 
@@ -303,15 +454,19 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
   if (*start == '0' && (second == 'x' || second == 'X' || second == 'b' || second == 'B' ||
                         second == 'o' || second == 'O')) {
     ++cur_;
-    while (llvm::isAlnum(peek()) || peek() == '_')
+    while (llvm::isAlnum(peek()) || peek() == '_') {
       ++cur_;
-    if (cur_[-1] == 'n' && cur_ - start > 3) // `0xffn`, a bigint (see below)
+    }
+    if (cur_[-1] == 'n' && cur_ - start > 3) { // `0xffn`, a bigint (see below)
       --cur_;
+    }
   } else {
-    if (*start == '.')
+    if (*start == '.') {
       isFloat = true;
-    while (llvm::isDigit(peek()) || peek() == '_')
+    }
+    while (llvm::isDigit(peek()) || peek() == '_') {
       ++cur_;
+    }
     // As in JavaScript, the point may end the number: `5.` is 5, and in
     // `5..toString()` the second point reads the property.
     if (!isFloat && peek() == '.' && isIdentStart(peek(1)) && peek(1) != 'e' && peek(1) != 'E') {
@@ -320,27 +475,32 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
       // parses as meant and this is the only error.
       llvm::StringRef number(start, static_cast<size_t>(cur_ - start));
       const char *name = cur_ + 1, *nameEnd = name;
-      while (nameEnd < end_ && isIdentChar(*nameEnd))
+      while (nameEnd < end_ && isIdentChar(*nameEnd)) {
         ++nameEnd;
+      }
       llvm::StringRef property(name, static_cast<size_t>(nameEnd - name));
-      diags_.error(llvm::SMLoc::getFromPointer(name),
-                   "a point right after a number belongs to the number, so a name cannot follow it; "
-                   "write '" + number + ".." + property + "' or '(" + number + ")." + property + "'");
+      diags_.error(
+          llvm::SMLoc::getFromPointer(name),
+          "a point right after a number belongs to the number, so a name cannot follow it; "
+          "write '" +
+              number + ".." + property + "' or '(" + number + ")." + property + "'");
       return make(Tok::IntLiteral, start, newlineBefore);
     }
     if (!isFloat && peek() == '.') {
       isFloat = true;
       ++cur_;
-      while (llvm::isDigit(peek()) || peek() == '_')
+      while (llvm::isDigit(peek()) || peek() == '_') {
         ++cur_;
+      }
     }
     char e = peek();
-    if ((e == 'e' || e == 'E') &&
-        (llvm::isDigit(peek(1)) || ((peek(1) == '+' || peek(1) == '-') && llvm::isDigit(peek(2))))) {
+    if ((e == 'e' || e == 'E') && (llvm::isDigit(peek(1)) || ((peek(1) == '+' || peek(1) == '-') &&
+                                                              llvm::isDigit(peek(2))))) {
       isFloat = true;
       cur_ += 2;
-      while (llvm::isDigit(peek()) || peek() == '_')
+      while (llvm::isDigit(peek()) || peek() == '_') {
         ++cur_;
+      }
     }
   }
 
@@ -348,17 +508,21 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
   if (peek() == 'n' && !isIdentChar(peek(1))) {
     Token tok = make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
     diags_.error(llvm::SMLoc::getFromPointer(start),
-                 "'" + tok.text + "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
-                 "fit in 'long', longer ones in 'decimal' (e.g. 'const n: decimal = " +
+                 "'" + tok.text +
+                     "n' is a bigint, and there is no bigint: integers up to 9.2e18 "
+                     "fit in 'long', longer ones in 'decimal' (e.g. 'const n: decimal = " +
                      tok.text + "')");
     ++cur_;
     return tok;
   }
   if (isIdentStart(peek())) {
-    diags_.error(llvm::SMLoc::getFromPointer(cur_), "an identifier cannot directly follow a number");
-    while (isIdentChar(peek()))
+    diags_.error(llvm::SMLoc::getFromPointer(cur_),
+                 "an identifier cannot directly follow a number");
+    while (isIdentChar(peek())) {
       ++cur_;
+    }
   }
+
   return make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
 }
 
@@ -369,11 +533,14 @@ Token Lexer::lexString(const char *start, char quote, bool newlineBefore) {
       break;
     }
     char c = *cur_++;
-    if (c == quote)
+    if (c == quote) {
       break;
-    if (c == '\\' && cur_ < end_)
+    }
+    if (c == '\\' && cur_ < end_) {
       ++cur_;
+    }
   }
+
   return make(Tok::StringLiteral, start, newlineBefore);
 }
 
@@ -384,15 +551,17 @@ Token Lexer::lexTemplate(const char *start, bool continuation, bool newlineBefor
       return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
     }
     char c = *cur_++;
-    if (c == '`')
+    if (c == '`') {
       return make(continuation ? Tok::TemplateTail : Tok::TemplateString, start, newlineBefore);
+    }
     if (c == '$' && peek() == '{') {
       ++cur_;
       templateBraces_.push_back(0);
       return make(continuation ? Tok::TemplateMiddle : Tok::TemplateHead, start, newlineBefore);
     }
-    if (c == '\\' && cur_ < end_)
+    if (c == '\\' && cur_ < end_) {
       ++cur_;
+    }
   }
 }
 
@@ -413,8 +582,9 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
     }
     char c = *cur_++;
     if (c == '\\') {
-      if (cur_ < end_ && !lineBreak())
+      if (cur_ < end_ && !lineBreak()) {
         ++cur_;
+      }
     } else if (c == '[') {
       inClass = true;
     } else if (c == ']') {
@@ -423,14 +593,17 @@ Token Lexer::regex(const char *start, bool newlineBefore) {
       break;
     }
   }
-  while (cur_ < end_ && isIdentChar(*cur_))
+  while (cur_ < end_ && isIdentChar(*cur_)) {
     ++cur_;
+  }
+
   return make(Tok::RegexLiteral, start, newlineBefore);
 }
 
 Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
-  while (isIdentChar(peek()))
+  while (isIdentChar(peek())) {
     ++cur_;
+  }
   llvm::StringRef text(start, cur_ - start);
   Tok kind = llvm::StringSwitch<Tok>(text)
                  .Case("as", Tok::KwAs)
@@ -459,6 +632,7 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
                  .Case("void", Tok::KwVoid)
                  .Case("while", Tok::KwWhile)
                  .Default(Tok::Identifier);
+
   return make(kind, start, newlineBefore);
 }
 
@@ -500,8 +674,10 @@ static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
   }
   i += extra + 1;
   static const uint32_t minimum[] = {0, 0x80, 0x800, 0x10000};
-  if (cp < minimum[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+  if (cp < minimum[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
     return 0xFFFD;
+  }
+
   return cp;
 }
 
@@ -509,10 +685,12 @@ static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
 static bool parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value) {
   value = 0;
   for (size_t n = 0; n < count; ++n, ++i) {
-    if (i >= s.size() || !llvm::isHexDigit(s[i]))
+    if (i >= s.size() || !llvm::isHexDigit(s[i])) {
       return false;
+    }
     value = value * 16 + llvm::hexDigitValue(s[i]);
   }
+
   return true;
 }
 
@@ -524,14 +702,17 @@ static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
     size_t digits = 0;
     while (i < s.size() && llvm::isHexDigit(s[i])) {
       cp = cp * 16 + llvm::hexDigitValue(s[i++]);
-      if (++digits > 6)
+      if (++digits > 6) {
         return false;
+      }
     }
-    if (digits == 0 || i >= s.size() || s[i] != '}' || cp > 0x10FFFF)
+    if (digits == 0 || i >= s.size() || s[i] != '}' || cp > 0x10FFFF) {
       return false;
+    }
     ++i;
     return true;
   }
+
   return parseHex(s, i, 4, cp);
 }
 
@@ -554,20 +735,36 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
 
     llvm::SMLoc escapeLoc = llvm::SMLoc::getFromPointer(raw.data() + i);
     ++i;
-    if (i >= raw.size())
+    if (i >= raw.size()) {
       break;
+    }
     char e = raw[i++];
     switch (e) {
-    case 'n': out += u'\n'; break;
-    case 't': out += u'\t'; break;
-    case 'r': out += u'\r'; break;
-    case 'b': out += u'\b'; break;
-    case 'f': out += u'\f'; break;
-    case 'v': out += u'\v'; break;
-    case '0': out += u'\0'; break;
+    case 'n':
+      out += u'\n';
+      break;
+    case 't':
+      out += u'\t';
+      break;
+    case 'r':
+      out += u'\r';
+      break;
+    case 'b':
+      out += u'\b';
+      break;
+    case 'f':
+      out += u'\f';
+      break;
+    case 'v':
+      out += u'\v';
+      break;
+    case '0':
+      out += u'\0';
+      break;
     case '\r': // line continuation
-      if (i < raw.size() && raw[i] == '\n')
+      if (i < raw.size() && raw[i] == '\n') {
         ++i;
+      }
       break;
     case '\n':
       break;
@@ -597,13 +794,16 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
       break;
     }
   }
+
   return true;
 }
 
 bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags) {
   llvm::StringRef raw = tok.text.drop_front();
-  if (!raw.empty() && raw.back() == tok.text.front())
+  if (!raw.empty() && raw.back() == tok.text.front()) {
     raw = raw.drop_back();
+  }
+
   return decodeText(raw, /*isTemplate=*/false, out, diags);
 }
 
@@ -611,10 +811,13 @@ bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &dia
 // trailing '`' or '${'.
 static llvm::StringRef templateText(const Token &tok) {
   llvm::StringRef raw = tok.text.drop_front();
-  if (raw.ends_with("${"))
+  if (raw.ends_with("${")) {
     return raw.drop_back(2);
-  if (raw.ends_with("`"))
+  }
+  if (raw.ends_with("`")) {
     return raw.drop_back();
+  }
+
   return raw;
 }
 
@@ -625,16 +828,19 @@ bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diag
 void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags) {
   llvm::StringRef text = tok.text.drop_front();
   size_t slash = text.rfind('/');
-  if (slash == llvm::StringRef::npos)
+  if (slash == llvm::StringRef::npos) {
     slash = text.size(); // unterminated, reported already
+  }
   llvm::StringRef body = text.take_front(slash);
   llvm::StringRef suffix = text.drop_front(std::min(slash + 1, text.size()));
   pattern.clear();
-  for (size_t i = 0; i < body.size();)
+  for (size_t i = 0; i < body.size();) {
     appendUtf16(pattern, decodeUtf8(body, i));
+  }
   flags.clear();
-  for (size_t i = 0; i < suffix.size();)
+  for (size_t i = 0; i < suffix.size();) {
     appendUtf16(flags, decodeUtf8(suffix, i));
+  }
 }
 
 void decodeTemplateRaw(const Token &tok, std::u16string &out) {

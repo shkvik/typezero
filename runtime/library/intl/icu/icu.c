@@ -2,7 +2,6 @@
 
 #include "runtime/library/intl/icu/icu.h"
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <string.h>
 
 #ifdef _WIN32
@@ -24,8 +23,9 @@ static int load(void) {
   if (!common) {
     common = LoadLibraryExW(L"icuuc.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     i18n = LoadLibraryExW(L"icuin.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!common || !i18n)
+    if (!common || !i18n) {
       return 0;
+    }
   }
   TzIcu *f = &tz_icu_functions;
   int ok = 1;
@@ -151,6 +151,7 @@ static int load(void) {
 #undef REQUIRED
 #undef LOAD_OPTIONAL
 #undef LOAD_EITHER
+
   return ok;
 }
 
@@ -179,12 +180,14 @@ const TzIcu *tz_icu(void) {
       int32_t n =
           tz_icu_functions.uloc_getBaseName(tz_icu_functions.uloc_getDefault(), tz_icu_locale,
                                             (int32_t)sizeof tz_icu_locale - 1, &status);
-      if (TZ_U_FAILURE(status) || n <= 0)
+      if (TZ_U_FAILURE(status) || n <= 0) {
         strcpy(tz_icu_locale, "en_US");
+      }
     }
     __atomic_store_n(&tz_icu_state, state, __ATOMIC_RELEASE);
     tz_unlock(&tz_icu_lock);
   }
+
   return tz_icu_state > 0 ? &tz_icu_functions : NULL;
 }
 

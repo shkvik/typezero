@@ -1,0 +1,349 @@
+#include "compiler/check/flow/union_narrowing/union_narrowing.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/check/flow/field_facts/field_facts.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/union_check_helpers/union_check_helpers.h"
+#include "compiler/whole_program/flows/flows.h"
+#include "llvm/Support/ConvertUTF.h"
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+using llvm::dyn_cast_or_null;
+
+namespace tz {
+
+namespace {
+
+std::string toUtf8(const std::u16string &text) {
+  std::string utf8;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
+      utf8);
+
+  return utf8;
+}
+
+// The members of a type: those of a union, or the type itself (so `type`
+// must outlive the result).
+llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
+  return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+}
+
+// The variable `expr` reads, through the conversions Sema adds where it is
+// narrowed.
+const VarSymbol *readVariable(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit() || conv->shortCircuit) {
+      return nullptr;
+    }
+    expr = conv->operand;
+  }
+  auto *name = dyn_cast<NameExpr>(expr);
+
+  return name ? name->var : nullptr;
+}
+
+} // namespace
+
+// `type` with only the members `keep` accepts; null if none is left.
+static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const Type *)> keep) {
+  bool undefined = type->isOptional();
+  const Type *value = type->nonOptional();
+  std::vector<const Type *> kept;
+  for (const Type *m : membersOf(value)) {
+    if (keep(m)) {
+      kept.push_back(m);
+    }
+  }
+  bool keepsUndefined = undefined && keep(Type::undefinedTy());
+  if (kept.empty()) {
+    return keepsUndefined ? type : nullptr; // only undefined: nothing to learn
+  }
+  const Type *result = Type::unionOf(kept);
+
+  return keepsUndefined ? Type::optional(result) : result;
+}
+
+UnionNarrowing::UnionNarrowing(Sema &sema) : sema_(sema) {}
+
+void UnionNarrowing::narrowVariable(Sema::Flow &flow, const VarSymbol *var, const Type *type) {
+  llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
+  if (!type) { // no member is left: nothing reaches here
+    flow.narrowed.push_back({var, Type::never()});
+    return;
+  }
+  if (type == var->type) {
+    return;
+  }
+  if (var->type->isOptional() && type == var->type->inner()) {
+    flow.defined.insert(var);
+    return;
+  }
+  flow.narrowed.push_back({var, type});
+  if (!type->isOptional()) {
+    flow.defined.insert(var);
+  }
+}
+
+std::optional<Sema::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *expr) const {
+  const Type *declared = nullptr;
+  Sema::NarrowTarget target;
+  if (const VarSymbol *var = readVariable(expr); var && var->type) {
+    target.var = var;
+    declared = var->type;
+  } else {
+    // A field read through fields from a variable: `o.shape`.
+    const Expr *read = expr;
+    while (auto *conv = dyn_cast<CastExpr>(read)) {
+      if (!conv->isImplicit() || conv->shortCircuit) {
+        return std::nullopt;
+      }
+      read = conv->operand;
+    }
+    auto *member = dyn_cast<MemberExpr>(read);
+    std::optional<Sema::FieldPath> path = member ? sema_.fieldFacts().fieldPath(member) : std::nullopt;
+    if (!path) {
+      return std::nullopt;
+    }
+    target.path = std::move(*path);
+    declared = member->type;
+  }
+  const Type *base = declared->nonOptional();
+  if (!base->isUnion() && !base->isLiteral() && !base->isBool()) {
+    return std::nullopt;
+  }
+  target.declared = declared;
+
+  return target;
+}
+
+const Type *UnionNarrowing::targetType(const Sema::Flow &flow, const Sema::NarrowTarget &target) const {
+  if (target.var) {
+    return sema_.literalTypes().typeIn(flow, target.var);
+  }
+  for (const auto &[path, type] : flow.narrowedFields) {
+    if (path == *target.path) {
+      return type;
+    }
+  }
+  if (target.declared->isOptional() && llvm::is_contained(flow.definedFields, *target.path)) {
+    return target.declared->inner();
+  }
+
+  return target.declared;
+}
+
+void UnionNarrowing::narrowTargetTo(Sema::Flow &flow, const Sema::NarrowTarget &target, const Type *type) const {
+  if (target.var) {
+    narrowVariable(flow, target.var, type);
+    return;
+  }
+  const Sema::FieldPath &path = *target.path;
+  llvm::erase_if(flow.narrowedFields, [&](const auto &entry) { return entry.first == path; });
+  if (type && !type->isOptional()) {
+    FieldFacts::defineField(flow, path);
+  }
+  if (type == target.declared ||
+      (type && target.declared->isOptional() && type == target.declared->inner())) {
+    return;
+  }
+  flow.narrowedFields.push_back({path, type ? type : Type::never()});
+}
+
+void UnionNarrowing::addUnionFacts(const Expr *cond, Sema::Flow &whenTrue, Sema::Flow &whenFalse) const {
+  auto narrow = [&](Sema::Flow &flow, const Sema::NarrowTarget &target,
+                    llvm::function_ref<bool(const Type *)> keep) {
+    const Type *now = targetType(flow, target);
+    if (now->isNever()) {
+      return;
+    }
+    narrowTargetTo(flow, target, keepMembers(now, keep));
+  };
+
+  // `Array.isArray(x)`
+  if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
+    if (std::optional<Sema::NarrowTarget> target = narrowTarget(call->args[0])) {
+      narrow(whenTrue, *target, [](const Type *m) { return m->isArray(); });
+      narrow(whenFalse, *target, [](const Type *m) { return !m->isArray(); });
+    }
+    return;
+  }
+  // The tag of a union of objects, `s.kind` (in `s.kind == "circle"` and in
+  // `if (r.ok)`): the members whose tag `keep` accepts.
+  // With `s?.kind`, undefined gives undefined, which `undefinedKept` says
+  // whether to keep.
+  auto narrowByTag = [&](const MemberExpr *member, Sema::Flow &flow,
+                         llvm::function_ref<bool(const Type *)> keep, bool undefinedKept = true) {
+    const Expr *object = member->object;
+    if (member->optional) {
+      auto *link = dyn_cast<CastExpr>(object);
+      if (!link || !link->shortCircuit) {
+        return false;
+      }
+      object = link->operand;
+    }
+    std::optional<Sema::NarrowTarget> target = narrowTarget(object);
+    if (!target || !target->declared->nonOptional()->isUnion()) {
+      return false;
+    }
+    // A union, or one member of it left by checks before this one.
+    const Type *now = targetType(flow, *target)->nonOptional();
+    if (!now->isUnion() && !now->isObject()) {
+      return false;
+    }
+    llvm::StringRef name = member->name;
+    auto tag = [&](const Type *m) -> const Type * {
+      const Field *f = m->isObject() ? m->field(name) : nullptr;
+
+      return f ? f->type : nullptr;
+    };
+    if (llvm::any_of(membersOf(now), [&](const Type *m) { return !tag(m); })) {
+      return false;
+    }
+    narrow(flow, *target,
+           [&](const Type *m) { return m->isUndefined() ? undefinedKept : keep(tag(m)); });
+
+    return true;
+  };
+  // `if (r.ok)`, of `{ ok: true; value: int } | { ok: false; error: E }`.
+  if (auto *member = dyn_cast<MemberExpr>(cond)) {
+    auto mayBe = [](const Type *t, bool truthy) {
+      if (!t->isLiteral()) {
+        return true;
+      }
+      bool value = t->isStringLiteral() ? !t->literalText().empty() : t->literalNumber() != 0;
+
+      return value == truthy;
+    };
+    narrowByTag(member, whenTrue, [&](const Type *t) { return mayBe(t, true); });
+    narrowByTag(member, whenFalse, [&](const Type *t) { return mayBe(t, false); });
+    return;
+  }
+  auto *bin = dyn_cast<BinaryExpr>(cond);
+  if (!bin) {
+    return;
+  }
+
+  // `x instanceof C`: the members that are a C, and C itself if a member is
+  // what C extends.
+  if (bin->op == BinaryOp::InstanceOf) {
+    const Type *cls = bin->rhs->type;
+    std::optional<Sema::NarrowTarget> target = narrowTarget(bin->lhs);
+    if (!target || !cls) {
+      return;
+    }
+    // A class known only when the program runs: of a class T, as T.
+    if (cls->isConstructor()) {
+      cls = cls->constructed();
+      if (!cls->isClass()) {
+        return;
+      }
+    }
+    // `x instanceof Buffer`: a Buffer, or a Uint8Array that is one.
+    if (cls->isBuffer()) {
+      const Type *now = targetType(whenTrue, *target)->nonOptional();
+      std::vector<const Type *> kept;
+      for (const Type *m : membersOf(now)) {
+        if (m->isBuffer() || m->bytes() == Type::Bytes::Uint8) {
+          kept.push_back(cls);
+        }
+      }
+      narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
+      narrow(whenFalse, *target, [&](const Type *m) { return !m->isBuffer(); });
+      return;
+    }
+    // `x instanceof Date` (or Map, Set, Uint8Array...): the members Sema
+    // gave the right side.
+    if (!cls->isClass()) {
+      const Type *those = cls;
+      llvm::ArrayRef<const Type *> matching = membersOf(those);
+      narrow(whenTrue, *target, [&](const Type *m) { return llvm::is_contained(matching, m); });
+      narrow(whenFalse, *target, [&](const Type *m) { return !llvm::is_contained(matching, m); });
+      return;
+    }
+    const Type *now = targetType(whenTrue, *target)->nonOptional();
+    std::vector<const Type *> kept;
+    for (const Type *m : membersOf(now)) {
+      if (m->isObject() && m->isSubtypeOf(cls)) {
+        kept.push_back(m);
+      } else if (m->isObject() && cls->isSubtypeOf(m)) {
+        kept.push_back(cls);
+      }
+    }
+    narrowTargetTo(whenTrue, *target, kept.empty() ? nullptr : Type::unionOf(kept));
+    narrow(whenFalse, *target,
+           [&](const Type *m) { return !(m->isObject() && m->isSubtypeOf(cls)); });
+    return;
+  }
+
+  // `"radius" in s`
+  if (bin->op == BinaryOp::In) {
+    std::optional<Sema::NarrowTarget> target = narrowTarget(bin->rhs);
+    auto *key = dyn_cast<StringLitExpr>(bin->lhs);
+    if (!target || !key) {
+      return;
+    }
+    std::string name = toUtf8(key->value);
+    auto has = [&](const Type *m) { return m->isObject() && m->field(name); };
+    narrow(whenTrue, *target, has);
+    narrow(whenFalse, *target, [&](const Type *m) { return !has(m) && !m->isUndefined(); });
+    return;
+  }
+
+  if (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne) {
+    return;
+  }
+  Sema::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
+  Sema::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
+  for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
+    // `typeof x == "string"`
+    if (auto *typeOf = dyn_cast<UnaryExpr>(side); typeOf && typeOf->op == UnaryOp::TypeOf) {
+      auto *text = dyn_cast<StringLitExpr>(other);
+      std::optional<Sema::NarrowTarget> target = text ? narrowTarget(typeOf->operand) : std::nullopt;
+      if (!target || !target->declared->nonOptional()->isUnion()) {
+        continue;
+      }
+      std::string kind = toUtf8(text->value);
+      auto gives = [&](const Type *m) { return llvm::StringRef(typeOfName(m)) == kind; };
+      narrow(equal, *target, gives);
+      narrow(different, *target, [&](const Type *m) { return !gives(m); });
+      continue;
+    }
+    const Type *literal = writtenLiteral(other);
+    if (!literal) {
+      if (const Type *type = other->type; type && type->isLiteral()) {
+        literal = type; // `s.kind == c.kind`, with c a Circle
+      }
+    }
+    if (!literal) {
+      continue;
+    }
+    // `s.kind == "circle"`: the members whose tag may be that; with
+    // `s?.kind`, s is not undefined then.
+    const auto *member = dyn_cast<MemberExpr>(side);
+    if (auto *chain = dyn_cast<OptionalChainExpr>(side)) {
+      member = dyn_cast<MemberExpr>(chain->chain);
+    }
+    if (member &&
+        narrowByTag(
+            member, equal, [&](const Type *t) { return TypeRelations::isImplicitlyConvertible(literal, t); },
+            /*undefinedKept=*/false)) {
+      narrowByTag(member, different, [&](const Type *t) { return t != literal; });
+      continue;
+    }
+    // `x == "up"`, of a union holding that literal.
+    if (std::optional<Sema::NarrowTarget> target = narrowTarget(side)) {
+      const Type *now = targetType(equal, *target)->nonOptional();
+      if (llvm::is_contained(membersOf(now), literal)) {
+        narrowTargetTo(equal, *target, literal);
+        narrow(different, *target, [&](const Type *m) { return m != literal; });
+      } else if (now->isBool() && literal->literalBase()->isBool()) {
+        narrowTargetTo(equal, *target, literal);
+        narrowTargetTo(different, *target, Type::boolLiteral(literal->literalNumber() == 0));
+      }
+    }
+  }
+}
+
+} // namespace tz

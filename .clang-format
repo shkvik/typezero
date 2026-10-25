@@ -1,0 +1,5 @@
+BasedOnStyle: LLVM
+ColumnLimit: 100
+InsertBraces: true
+FixNamespaceComments: false
+IncludeBlocks: Merge

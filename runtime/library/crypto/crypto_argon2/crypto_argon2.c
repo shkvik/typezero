@@ -3,7 +3,6 @@
 // lanes are filled one after another; the result does not depend on that.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <string.h>
 
 // The BLAKE2b of OpenSSL (see crypto_md.c).
@@ -89,8 +88,9 @@ static uint64_t blamka(uint64_t x, uint64_t y) {
 // The permutation P over 16 words of `v`, at the positions in `at`.
 static void permute(uint64_t *v, const int at[16]) {
   uint64_t *x[16];
-  for (int i = 0; i < 16; ++i)
+  for (int i = 0; i < 16; ++i) {
     x[i] = &v[at[i]];
+  }
   G(*x[0], *x[4], *x[8], *x[12]);
   G(*x[1], *x[5], *x[9], *x[13]);
   G(*x[2], *x[6], *x[10], *x[14]);
@@ -105,16 +105,20 @@ static void permute(uint64_t *v, const int at[16]) {
 // first pass.
 static void fill_block(const Block *prev, const Block *ref, Block *next, int with_xor) {
   Block r, t;
-  for (int i = 0; i < BLOCK_WORDS; ++i)
+  for (int i = 0; i < BLOCK_WORDS; ++i) {
     r.v[i] = ref->v[i] ^ prev->v[i];
+  }
   t = r;
-  if (with_xor)
-    for (int i = 0; i < BLOCK_WORDS; ++i)
+  if (with_xor) {
+    for (int i = 0; i < BLOCK_WORDS; ++i) {
       t.v[i] ^= next->v[i];
+    }
+  }
   int at[16];
   for (int i = 0; i < 8; ++i) {
-    for (int k = 0; k < 16; ++k)
+    for (int k = 0; k < 16; ++k) {
       at[k] = 16 * i + k;
+    }
     permute(r.v, at);
   }
   for (int i = 0; i < 8; ++i) {
@@ -124,8 +128,9 @@ static void fill_block(const Block *prev, const Block *ref, Block *next, int wit
     }
     permute(r.v, at);
   }
-  for (int i = 0; i < BLOCK_WORDS; ++i)
+  for (int i = 0; i < BLOCK_WORDS; ++i) {
     next->v[i] = t.v[i] ^ r.v[i];
+  }
 }
 
 typedef struct {
@@ -143,12 +148,13 @@ static uint32_t index_alpha(const Instance *in, uint32_t pass, uint32_t slice, u
                             uint32_t pseudo_rand, int same_lane) {
   uint32_t area;
   if (pass == 0) {
-    if (slice == 0)
+    if (slice == 0) {
       area = index - 1;
-    else if (same_lane)
+    } else if (same_lane) {
       area = slice * in->segment_length + index - 1;
-    else
+    } else {
       area = slice * in->segment_length + (index == 0 ? (uint32_t)-1 : 0);
+    }
   } else if (same_lane) {
     area = in->lane_length - in->segment_length + index - 1;
   } else {
@@ -158,8 +164,10 @@ static uint32_t index_alpha(const Instance *in, uint32_t pass, uint32_t slice, u
   relative = relative * relative >> 32;
   relative = area - 1 - ((uint64_t)area * relative >> 32);
   uint32_t start = 0;
-  if (pass != 0)
+  if (pass != 0) {
     start = slice == SYNC_POINTS - 1 ? 0 : (slice + 1) * in->segment_length;
+  }
+
   return (uint32_t)((start + relative) % in->lane_length);
 }
 
@@ -179,25 +187,29 @@ static void fill_segment(const Instance *in, uint32_t pass, uint32_t lane, uint3
   uint32_t start = 0;
   if (pass == 0 && slice == 0) {
     start = 2; // the first two blocks of each lane are made from H0
-    if (independent)
+    if (independent) {
       next_addresses(&address, &input, &zero);
+    }
   }
   uint32_t current = lane * in->lane_length + slice * in->segment_length + start;
   uint32_t previous = current % in->lane_length == 0 ? current + in->lane_length - 1 : current - 1;
   for (uint32_t i = start; i < in->segment_length; ++i, ++current, ++previous) {
-    if (current % in->lane_length == 1)
+    if (current % in->lane_length == 1) {
       previous = current - 1;
+    }
     uint64_t pseudo_rand;
     if (independent) {
-      if (i % BLOCK_WORDS == 0)
+      if (i % BLOCK_WORDS == 0) {
         next_addresses(&address, &input, &zero);
+      }
       pseudo_rand = address.v[i % BLOCK_WORDS];
     } else {
       pseudo_rand = in->memory[previous].v[0];
     }
     uint64_t ref_lane = (pseudo_rand >> 32) % in->lanes;
-    if (pass == 0 && slice == 0)
+    if (pass == 0 && slice == 0) {
       ref_lane = lane;
+    }
     uint32_t ref_index = index_alpha(in, pass, slice, i, (uint32_t)pseudo_rand, ref_lane == lane);
     const Block *ref = in->memory + in->lane_length * ref_lane + ref_index;
     fill_block(in->memory + previous, ref, in->memory + current, pass != 0);
@@ -207,22 +219,26 @@ static void fill_segment(const Instance *in, uint32_t pass, uint32_t lane, uint3
 static void load_block(Block *b, const uint8_t *bytes) {
   for (int i = 0; i < BLOCK_WORDS; ++i) {
     uint64_t w = 0;
-    for (int k = 7; k >= 0; --k)
+    for (int k = 7; k >= 0; --k) {
       w = w << 8 | bytes[8 * i + k];
+    }
     b->v[i] = w;
   }
 }
 
 static void store_block(uint8_t *bytes, const Block *b) {
-  for (int i = 0; i < BLOCK_WORDS; ++i)
-    for (int k = 0; k < 8; ++k)
+  for (int i = 0; i < BLOCK_WORDS; ++i) {
+    for (int k = 0; k < 8; ++k) {
       bytes[8 * i + k] = (uint8_t)(b->v[i] >> (8 * k));
+    }
+  }
 }
 
 static void put_data(Blake2bCtx *c, const TzCryptoData *d) {
   put32(c, (uint32_t)d->length);
-  if (d->length)
+  if (d->length) {
     ossl_blake2b_update(c, d->data, d->length);
+  }
 }
 
 // argon2Sync(algorithm, { message, nonce, parallelism, tagLength, memory, passes, secret,
@@ -248,8 +264,9 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
     }
   }
   TzCryptoData message, nonce, secret, data;
-  if (!tz_crypto_data(&message, mt, mv, TZ_ENC_UTF8, "parameters.message"))
+  if (!tz_crypto_data(&message, mt, mv, TZ_ENC_UTF8, "parameters.message")) {
     return NULL;
+  }
   if (!tz_crypto_data(&nonce, nt, nv, TZ_ENC_UTF8, "parameters.nonce")) {
     tz_crypto_data_done(&message);
     return NULL;
@@ -258,8 +275,9 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
   tz_crypto_data(&data, NULL, NULL, TZ_ENC_UTF8, "");
   TzBytes *result = NULL;
   if (!tz_crypto_data(&secret, st, sv, TZ_ENC_UTF8, "parameters.secret") ||
-      !tz_crypto_data(&data, at, av, TZ_ENC_UTF8, "parameters.associatedData"))
+      !tz_crypto_data(&data, at, av, TZ_ENC_UTF8, "parameters.associatedData")) {
     goto done;
+  }
   if (nonce.length < 8) {
     tz_throw(TZ_RANGE_ERROR,
              "The value of \"parameters.nonce.byteLength\" is out of range. It "
@@ -270,10 +288,12 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
   if (!tz_crypto_check_integer(parallelism, "parameters.parallelism", 1, 16777215) ||
       !tz_crypto_check_integer(tag_length, "parameters.tagLength", 4, 4294967295.0) ||
       !tz_crypto_check_integer(memory, "parameters.memory", 8 * parallelism, 4294967295.0) ||
-      !tz_crypto_check_integer(passes, "parameters.passes", 1, 4294967295.0))
+      !tz_crypto_check_integer(passes, "parameters.passes", 1, 4294967295.0)) {
     goto done;
-  if (!(result = tz_buffer_alloc((int64_t)tag_length, 0)))
+  }
+  if (!(result = tz_buffer_alloc((int64_t)tag_length, 0))) {
     goto done;
+  }
   {
     uint32_t p = (uint32_t)parallelism, m = (uint32_t)memory, t = (uint32_t)passes;
     uint32_t tag = (uint32_t)tag_length;
@@ -303,7 +323,7 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
     in.type = (uint32_t)type;
     in.memory = (Block *)tz_alloc((size_t)in.memory_blocks * sizeof(Block));
     uint8_t bytes[BLOCK_BYTES];
-    for (uint32_t lane = 0; lane < p; ++lane)
+    for (uint32_t lane = 0; lane < p; ++lane) {
       for (uint32_t k = 0; k < 2; ++k) {
         for (int i = 0; i < 4; ++i) {
           h0[64 + i] = (uint8_t)(k >> (8 * i));
@@ -312,14 +332,20 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
         hash_long(bytes, BLOCK_BYTES, h0, sizeof h0);
         load_block(&in.memory[lane * in.lane_length + k], bytes);
       }
-    for (uint32_t pass = 0; pass < t; ++pass)
-      for (uint32_t slice = 0; slice < SYNC_POINTS; ++slice)
-        for (uint32_t lane = 0; lane < p; ++lane)
+    }
+    for (uint32_t pass = 0; pass < t; ++pass) {
+      for (uint32_t slice = 0; slice < SYNC_POINTS; ++slice) {
+        for (uint32_t lane = 0; lane < p; ++lane) {
           fill_segment(&in, pass, lane, slice);
+        }
+      }
+    }
     Block final = in.memory[in.lane_length - 1];
-    for (uint32_t lane = 1; lane < p; ++lane)
-      for (int i = 0; i < BLOCK_WORDS; ++i)
+    for (uint32_t lane = 1; lane < p; ++lane) {
+      for (int i = 0; i < BLOCK_WORDS; ++i) {
         final.v[i] ^= in.memory[lane * in.lane_length + in.lane_length - 1].v[i];
+      }
+    }
     store_block(bytes, &final);
     hash_long(result->data, tag, bytes, sizeof bytes);
     memset(in.memory, 0, (size_t)in.memory_blocks * sizeof(Block));
@@ -332,5 +358,6 @@ done:
   tz_crypto_data_done(&secret);
   tz_crypto_data_done(&nonce);
   tz_crypto_data_done(&message);
+
   return result;
 }

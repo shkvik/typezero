@@ -1,0 +1,341 @@
+#include "compiler/check/classes/class_bases/class_bases.h"
+#include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
+#include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
+#include "compiler/declare/module_declarer/module_declarer.h"
+#include "compiler/whole_program/wide_writes/wide_writes.h"
+#include "compiler/library/events/event_map_inference/event_map_inference.h"
+#include "compiler/library/fs/fs_declarer/fs_declarer.h"
+#include "compiler/whole_program/flows/flows.h"
+#include "llvm/ADT/STLExtras.h"
+#include <functional>
+
+using llvm::cast;
+using llvm::dyn_cast;
+using llvm::isa;
+using llvm::dyn_cast_or_null;
+
+namespace tz {
+
+namespace {
+
+// The classes of errors built into JavaScript; tz has Error, TypeError,
+// RangeError, SyntaxError and URIError of them (see sema_error.cpp).
+bool isErrorClass(llvm::StringRef name) {
+  static const char *const names[] = {"Error",       "TypeError",      "RangeError",
+                                      "SyntaxError", "ReferenceError", "EvalError",
+                                      "URIError",    "AggregateError"};
+
+  return llvm::is_contained(names, name);
+}
+
+const char *accessName(Access access) {
+  return access == Access::Public      ? "public"
+         : access == Access::Protected ? "protected"
+                                       : "private";
+}
+
+} // namespace
+
+ClassBases::ClassBases(Sema &sema) : sema_(sema) {}
+
+void ClassBases::addBase(const Type *type, const Type *base) {
+  const_cast<Type *>(type)->addBase(base);
+  // CodeGen lays out the types of the code it emits: not those of a copy
+  // checked to infer a type, nor of a generic body (its instances have their
+  // own).
+  bool emitted = !sema_.trial_ && llvm::none_of(sema_.functions_, [](const FunctionDecl *fn) {
+    return !fn->typeParams.empty() && !fn->isInstance;
+  });
+  if (sema_.file_ && emitted && !llvm::is_contained(sema_.file_->subtypes, type)) {
+    sema_.file_->subtypes.push_back(type);
+  }
+}
+
+void ClassBases::resolveClassBases(ClassDecl *cls) {
+  cls->resolvingBase = true;
+  if (cls->base) {
+    const TypeRef &ref = *cls->base;
+    bool named = ref.kind == TypeRef::Kind::Name || ref.kind == TypeRef::Kind::Generic;
+    Stmt *found = named ? sema_.typeDeclarer().lookupType(ref.name) : nullptr;
+    auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
+    bool instance = false;
+    // `extends EventEmitter` without a map: the one found from the emits of
+    // the program (sema_events.cpp).
+    if (parent && parent->library && parent->name == "EventEmitter" &&
+        ref.kind == TypeRef::Kind::Name) {
+      const Type *events = sema_.eventMapInference().inferredEventMap("class " + sema_.eventMapInference().placeOf(cls->loc()) + " " + cls->name.str());
+      parent = events ? sema_.genericClassInstantiator().instantiateClass(parent, {events}, ref.loc) : nullptr;
+      instance = true;
+      if (!events) {
+        sema_.diags_.error(ref.loc, "'EventEmitter' needs its event map here, e.g. 'extends "
+                              "EventEmitter<{ data: [chunk: string]; end: [] }>'");
+      }
+      if (!parent) {
+        found = nullptr;
+      }
+    } else if (parent && (parent->isGeneric() || ref.kind == TypeRef::Kind::Generic)) {
+      const Type *type = sema_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+      parent = ClassDeclarer::classOf(type);
+      instance = true;
+      if (!parent) {
+        found = nullptr;
+      }
+    }
+    if (!named) {
+      sema_.diags_.error(ref.loc, "a class can extend only a class, by its name");
+    } else if (instance && !parent) {
+      // An error in the type arguments, reported.
+    } else if (parent && (parent == cls || parent->resolvingBase)) {
+      sema_.diags_.error(ref.loc,
+                   "class '" + cls->name + "' cannot extend itself" +
+                       (parent == cls ? std::string() : " through '" + parent->name.str() + "'"));
+    } else if (sema_.fsDeclarer().isRuntimeClass(parent)) {
+      sema_.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
+                                "': only the functions of " +
+                                (parent == sema_.execSyncErrorClass_ ? "node:child_process" : "node:fs") +
+                                " make its objects" +
+                                (derivesFromError(parent) ? "; extend Error" : ""));
+    } else if (parent && parent->baseExpr && !parent->resolved) {
+      // Its fields are known only where its declaration runs.
+      sema_.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
+                                "', whose base is a value, made where its declaration runs; "
+                                "write it as an expression there: 'const " +
+                                cls->name + " = class extends " + parent->name + " { ... }'");
+    } else if (parent) {
+      // In its own file, where the names it uses mean what they mean there,
+      // and without the type parameters of this class.
+      std::vector<llvm::StringMap<Stmt *>> outer = sema_.typeScopes_;
+      sema_.typeScopes_.resize(1);
+      if (Module *home = sema_.declModules_.lookup(parent);
+          home && home != sema_.module_ && sema_.scopes_.size() == 1) {
+        Module *here = sema_.module_;
+        sema_.moduleDeclarer().useModule(home);
+        sema_.classDeclarer().resolveClass(parent);
+        sema_.moduleDeclarer().useModule(here);
+      } else {
+        sema_.classDeclarer().resolveClass(parent);
+      }
+      sema_.typeScopes_ = std::move(outer);
+      cls->parent = parent;
+      parent->children.push_back(cls);
+      addBase(cls->type, parent->type);
+    } else if (!found && isErrorClass(ref.name)) {
+      sema_.diags_.error(ref.loc, "'" + ref.name +
+                                "' is not built in; extend Error, or one of its kinds that are: "
+                                "TypeError, RangeError, SyntaxError, URIError");
+    } else if (found) {
+      std::string message =
+          "'" + ref.name.str() + "' is not a class, and a class can extend only a class";
+      if (isa<TypeAliasDecl>(found)) {
+        message += "; to say that '" + cls->name.str() +
+                   "' has what an interface lists, write "
+                   "'implements " +
+                   ref.name.str() + "'";
+      }
+      sema_.diags_.error(ref.loc, message);
+    } else {
+      sema_.diags_.error(ref.loc, "cannot find class '" + ref.name + "'");
+    }
+  }
+  for (const TypeRef &ref : cls->interfaces) {
+    const Type *type = sema_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+    if (type->isError()) {
+      continue;
+    }
+    if (type->isClass()) {
+      sema_.diags_.error(ref.loc, "'" + type->name() +
+                                "' is a class, and a class implements only "
+                                "interfaces" +
+                                (cls->base ? std::string()
+                                           : "; to take its fields and methods, write 'extends " +
+                                                 type->name().str() + "'"));
+    } else if (!type->isObject() || type->isTuple() || type->isAnyObject() ||
+               type->isIncomplete()) {
+      sema_.diags_.error(ref.loc, "'" + type->name() +
+                                "' is not an interface; a class implements object "
+                                "types, such as 'interface Named { name: string }'");
+    } else if (!llvm::is_contained(cls->implemented, type)) {
+      cls->implemented.push_back(type);
+      addBase(cls->type, type);
+    }
+  }
+  cls->resolvingBase = false;
+
+  // A field declared up the chain already: this declaration gives it another
+  // initial value, and its type must stay (checked in completeClass).
+  for (ClassField &f : cls->fields) {
+    if (f.isStatic) {
+      continue;
+    }
+    const ClassDecl *owner = nullptr;
+    const ClassField *inherited = cls->parent ? findField(cls->parent, f.name, &owner) : nullptr;
+    // An arrow in a field that is a method up the chain: this one overrides it
+    // (see linkOverrides).
+    if (inherited && inherited->method) {
+      continue;
+    }
+    if (!inherited) {
+      if (f.isOverride) {
+        sema_.diags_.error(f.loc, cls->parent ? "'" + f.name + "' is marked 'override', but '" +
+                                              cls->parent->name + "' has no field '" + f.name + "'"
+                                        : "'override' says that '" + f.name +
+                                              "' is a field of the class that '" + cls->name +
+                                              "' extends, and it extends none");
+      }
+      continue;
+    }
+    if (inherited->access == Access::Private) {
+      sema_.diags_.error(f.loc, "'" + f.name + "' is private in class '" + owner->name +
+                              "', so a class that extends it cannot declare it again");
+      continue;
+    }
+    if (f.access > inherited->access) {
+      sema_.diags_.error(f.loc, "'" + f.name + "' is " + accessName(inherited->access) + " in '" +
+                              owner->name + "', so it cannot be " + accessName(f.access) + " in '" +
+                              cls->name + "'");
+    }
+    // Without a value, JavaScript defines the field again as undefined
+    // once the constructor up the chain has set it.
+    if (!f.init && !f.parameter) {
+      sema_.diags_.error(f.loc, "'" + f.name + "' is a field of '" + owner->name +
+                              "' already; declared again without a value, JavaScript would set "
+                              "it to undefined after the constructor of '" +
+                              owner->name + "' set it: drop the declaration, or give it a value");
+    }
+    f.redeclared = true;
+  }
+}
+
+std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias, std::vector<const Type *> &bases,
+                                         std::vector<Overload> &overloads) {
+  std::vector<Field> fields;
+  std::vector<std::string> origins; // the interface each field comes from
+  for (const TypeRef &ref : alias->bases) {
+    Stmt *found = ref.kind == TypeRef::Kind::Name ? sema_.typeDeclarer().lookupType(ref.name) : nullptr;
+    if (auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
+        other && (other == alias || other->resolving)) {
+      sema_.diags_.error(ref.loc,
+                   "interface '" + alias->name + "' cannot extend itself" +
+                       (other == alias ? std::string() : " through '" + other->name.str() + "'"));
+      continue;
+    }
+    const Type *base = sema_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+    if (base->isError()) {
+      continue;
+    }
+    if (base->isClass()) {
+      sema_.diags_.error(ref.loc, "'" + base->name() +
+                                "' is a class, and an interface extends only "
+                                "interfaces");
+      continue;
+    }
+    if (!base->isObject() || base->isTuple() || base->isIncomplete() || base->isAnyObject()) {
+      sema_.diags_.error(ref.loc, "'" + base->name() +
+                                "' is not an interface; an interface extends "
+                                "object types, such as 'interface Named { name: string }'");
+      continue;
+    }
+    if (llvm::is_contained(bases, base)) {
+      continue;
+    }
+    bases.push_back(base);
+    for (const Overload &o : base->overloads()) {
+      auto it = llvm::find_if(overloads, [&](const Overload &p) { return p.name == o.name; });
+      if (it == overloads.end()) {
+        overloads.push_back(o);
+      } else if (it->signatures != o.signatures) {
+        sema_.diags_.error(ref.loc, "interface '" + alias->name + "' gets method '" + o.name +
+                                  "' from two interfaces with different signatures");
+      }
+    }
+    // By the name written: one with the same fields is the same type, which
+    // has the name of the first.
+    std::string baseName = ref.name.str();
+    for (const Field &f : base->fields()) {
+      auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });
+      if (it == fields.end()) {
+        fields.push_back(f);
+        origins.push_back(baseName);
+      } else if (it->type != f.type) {
+        sema_.diags_.error(ref.loc, "interface '" + alias->name + "' gets field '" + f.name + "' from '" +
+                                  origins[size_t(it - fields.begin())] + "' as '" +
+                                  it->type->name() + "' and from '" + baseName + "' as '" +
+                                  f.type->name() + "'; a field has one type");
+      } else {
+        // Read-only only if both say so: code that sees the object as the
+        // other one may change it.
+        it->readonly = it->readonly && f.readonly;
+      }
+    }
+  }
+  const TypeRef &own = alias->type;
+  std::vector<Overload> ownOverloads;
+  std::vector<Field> ownFields = sema_.typeResolver().resolveFields(own, &ownOverloads);
+  for (const Overload &o : ownOverloads) {
+    bool clash = llvm::any_of(fields, [&](const Field &f) { return f.name == o.name; }) ||
+                 llvm::any_of(overloads, [&](const Overload &p) { return p.name == o.name; });
+    if (clash) {
+      sema_.diags_.error(alias->loc(), "interface '" + alias->name + "' declares method '" + o.name +
+                                     "' again; an interface cannot change the members of one "
+                                     "it extends");
+    } else {
+      overloads.push_back(o);
+    }
+  }
+  for (Field &f : ownFields) {
+    if (llvm::any_of(overloads, [&](const Overload &o) { return o.name == f.name; })) {
+      sema_.diags_.error(alias->loc(), "interface '" + alias->name + "' declares '" + f.name +
+                                     "' again; an interface cannot change the members of one "
+                                     "it extends");
+      continue;
+    }
+    llvm::SMLoc loc = alias->loc();
+    for (size_t i = 0; i < own.names.size(); ++i) {
+      if (own.names[i] == f.name) {
+        loc = own.locs[i];
+      }
+    }
+    auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });
+    if (it == fields.end()) {
+      fields.push_back(f);
+      origins.push_back(alias->name.str());
+      continue;
+    }
+    const std::string &origin = origins[size_t(it - fields.begin())];
+    // An interface may narrow a field of one it extends to a type of the same
+    // references, or make it read-only; code that writes through the wider
+    // one is found by the check of the whole program (sema_widen.cpp).
+    if (it->type != f.type && !f.type->isError() && !it->type->isError() &&
+        !WideWrites::sameReference(f.type, it->type)) {
+      sema_.diags_.error(loc, "field '" + f.name + "' of '" + alias->name + "' is '" + f.type->name() +
+                            "', and '" + origin + "' declares it as '" + it->type->name() +
+                            "'; an interface can narrow a field of one it extends only to objects "
+                            "of a type down the chain of its type, such as 'Dog' for 'Animal', "
+                            "which lie in memory as they do");
+      continue;
+    }
+    sema_.narrowedFields_ |= it->type != f.type || (f.readonly && !it->readonly);
+    it->type = f.type;
+    it->readonly = f.readonly;
+  }
+
+  return fields;
+}
+
+const ClassField *ClassBases::findField(const ClassDecl *cls, llvm::StringRef name,
+                                  const ClassDecl **owner) {
+  for (const ClassDecl *c = cls; c; c = c->parent) {
+    if (const ClassField *f = c->field(name)) {
+      if (owner) {
+        *owner = c;
+      }
+      return f;
+    }
+  }
+
+  return nullptr;
+}
+
+} // namespace tz

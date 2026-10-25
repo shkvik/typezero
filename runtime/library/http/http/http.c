@@ -16,7 +16,6 @@
 // its connection closed.
 
 #include "runtime/library/net/net/net.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -44,20 +43,22 @@ TZ_THREAD_LOCAL int64_t tz_http_date_second = -1;
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
-
-
 //===----------------------------------------------------------------------===//
 // Characters
 //===----------------------------------------------------------------------===//
 
 // tchar of RFC 9110.
 static int is_token(uint8_t c) {
-  if (c >= 'a' && c <= 'z')
+  if (c >= 'a' && c <= 'z') {
     return 1;
-  if (c >= 'A' && c <= 'Z')
+  }
+  if (c >= 'A' && c <= 'Z') {
     return 1;
-  if (c >= '0' && c <= '9')
+  }
+  if (c >= '0' && c <= '9') {
     return 1;
+  }
+
   return c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'' || c == '*' ||
          c == '+' || c == '-' || c == '.' || c == '^' || c == '_' || c == '`' || c == '|' ||
          c == '~';
@@ -70,11 +71,15 @@ static uint8_t lower(uint8_t c) { return c >= 'A' && c <= 'Z' ? (uint8_t)(c + 32
 
 static int equals_lower(const uint8_t *s, size_t n, const char *lowered) {
   size_t m = strlen(lowered);
-  if (n != m)
+  if (n != m) {
     return 0;
-  for (size_t i = 0; i < n; ++i)
-    if (lower(s[i]) != (uint8_t)lowered[i])
+  }
+  for (size_t i = 0; i < n; ++i) {
+    if (lower(s[i]) != (uint8_t)lowered[i]) {
       return 0;
+    }
+  }
+
   return 1;
 }
 
@@ -83,28 +88,34 @@ static int is_space(uint8_t c) { return c == ' ' || c == '\t'; }
 // Bytes as a string, each a character (latin1), as node reads heads.
 static TzStr latin1(const uint8_t *s, size_t n) {
   int ascii_only = 1;
-  for (size_t i = 0; i < n && ascii_only; ++i)
+  for (size_t i = 0; i < n && ascii_only; ++i) {
     ascii_only = s[i] < 0x80;
-  if (ascii_only)
+  }
+  if (ascii_only) {
     return tz_str_from_ascii((const char *)s, n);
+  }
   TzBuf b;
   tz_buf_init(&b);
   tz_buf_bytes(&b, s, n);
+
   return tz_buf_take(&b);
 }
 
 static TzStr lowered(const uint8_t *s, size_t n) {
   char small[64];
   if (n <= sizeof small) {
-    for (size_t i = 0; i < n; ++i)
+    for (size_t i = 0; i < n; ++i) {
       small[i] = (char)lower(s[i]);
+    }
     return tz_str_from_ascii(small, n);
   }
   char *big = (char *)tz_alloc(n);
-  for (size_t i = 0; i < n; ++i)
+  for (size_t i = 0; i < n; ++i) {
     big[i] = (char)lower(s[i]);
+  }
   TzStr text = tz_str_from_ascii(big, n);
   tz_free(big);
+
   return text;
 }
 
@@ -119,8 +130,9 @@ static void clear_head(HttpState *h) {
   memset(&h->method, 0, sizeof h->method);
   memset(&h->target, 0, sizeof h->target);
   memset(&h->status_text, 0, sizeof h->status_text);
-  if (h->headers && tz_rc_dec(&h->headers->rc))
+  if (h->headers && tz_rc_dec(&h->headers->rc)) {
     tz_arr_free(h->headers);
+  }
   h->headers = NULL;
 }
 
@@ -150,8 +162,9 @@ static void settle_value(NetConn *c, const void *value, size_t size) {
   HttpState *h = &c->http;
   stop_listening(h);
   h->wait_kind = WAIT_NONE;
-  if (h->waiting)
+  if (h->waiting) {
     net_fulfill(&h->waiting, value, size);
+  }
 }
 
 static void settle_int(NetConn *c, int32_t value) { settle_value(c, &value, sizeof value); }
@@ -160,19 +173,23 @@ static void settle_error(NetConn *c, void *error) {
   HttpState *h = &c->http;
   stop_listening(h);
   h->wait_kind = WAIT_NONE;
-  if (h->waiting)
+  if (h->waiting) {
     net_reject(&h->waiting, error);
-  else
+  } else {
     tz_instance_release((TzInstance *)error);
+  }
 }
 
 // The connection broke while a client waited: "fetch failed" has this as
 // its cause, as undici's SocketError "other side closed".
 static void *broken_error(NetConn *c) {
-  if (c->error == NET_TLS_FAILED)
+  if (c->error == NET_TLS_FAILED) {
     return c->tls_ops->error(c, c->http.make);
-  if (c->error && c->error != -1)
+  }
+  if (c->error && c->error != -1) {
     return net_system_error(c->http.make, c->error, "read", NULL, 0);
+  }
+
   return net_error(TZ_ERROR, "other side closed", NULL);
 }
 
@@ -187,10 +204,11 @@ static void abort_wait(TzAbortListener *l) {
   void *reason = tz_signal_reason(signal);
   tz_instance_release((TzInstance *)signal);
   h->wait_kind = WAIT_NONE;
-  if (h->waiting)
+  if (h->waiting) {
     net_reject(&h->waiting, reason);
-  else
+  } else {
     tz_instance_release((TzInstance *)reason);
+  }
   // The rest of the message will not be read.
   h->keep_alive = 0;
   net_abort(c);
@@ -220,6 +238,7 @@ static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker 
     tz_signal_listen(h->signal, &h->abort);
   }
   c->on_input = input;
+
   return 1;
 }
 
@@ -232,14 +251,17 @@ static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker 
 // alone.
 static ptrdiff_t line_end(const uint8_t *s, size_t at, size_t end) {
   for (size_t i = at; i < end; ++i) {
-    if (s[i] == '\n')
+    if (s[i] == '\n') {
       return -2;
+    }
     if (s[i] == '\r') {
-      if (i + 1 == end)
+      if (i + 1 == end) {
         return -1;
+      }
       return s[i + 1] == '\n' ? (ptrdiff_t)i : -2;
     }
   }
+
   return -1;
 }
 
@@ -261,32 +283,40 @@ static int content_length(const uint8_t *v, size_t n, int64_t *out) {
   int64_t found = -1;
   size_t i = 0;
   while (i < n) {
-    while (i < n && is_space(v[i]))
+    while (i < n && is_space(v[i])) {
       ++i;
+    }
     size_t start = i;
     int64_t value = 0;
     while (i < n && v[i] >= '0' && v[i] <= '9') {
-      if (value > (INT64_MAX - 9) / 10)
+      if (value > (INT64_MAX - 9) / 10) {
         return 0;
+      }
       value = value * 10 + (v[i] - '0');
       ++i;
     }
-    if (i == start)
+    if (i == start) {
       return 0;
-    while (i < n && is_space(v[i]))
+    }
+    while (i < n && is_space(v[i])) {
       ++i;
-    if (found >= 0 && found != value)
+    }
+    if (found >= 0 && found != value) {
       return 0;
+    }
     found = value;
     if (i < n) {
-      if (v[i] != ',')
+      if (v[i] != ',') {
         return 0;
+      }
       ++i;
     }
   }
-  if (found < 0)
+  if (found < 0) {
     return 0;
+  }
   *out = found;
+
   return 1;
 }
 
@@ -294,40 +324,51 @@ static int content_length(const uint8_t *v, size_t n, int64_t *out) {
 static int transfer_encoding(const uint8_t *v, size_t n, Framing *f) {
   size_t i = 0;
   while (i < n) {
-    while (i < n && (is_space(v[i]) || v[i] == ','))
+    while (i < n && (is_space(v[i]) || v[i] == ',')) {
       ++i;
+    }
     size_t start = i;
-    while (i < n && v[i] != ',' && v[i] != ';' && !is_space(v[i]))
+    while (i < n && v[i] != ',' && v[i] != ';' && !is_space(v[i])) {
       ++i;
+    }
     size_t length = i - start;
-    while (i < n && v[i] != ',') // parameters of a coding
+    while (i < n && v[i] != ',') { // parameters of a coding
       ++i;
-    if (!length)
+    }
+    if (!length) {
       continue;
-    if (f->chunked) // chunked must be the last, and only once
+    }
+    if (f->chunked) { // chunked must be the last, and only once
       return 0;
-    if (equals_lower(v + start, length, "chunked"))
+    }
+    if (equals_lower(v + start, length, "chunked")) {
       f->chunked = 1;
-    else
+    } else {
       f->coded = 1;
+    }
   }
+
   return 1;
 }
 
 static void connection_tokens(const uint8_t *v, size_t n, Framing *f) {
   size_t i = 0;
   while (i < n) {
-    while (i < n && (is_space(v[i]) || v[i] == ','))
+    while (i < n && (is_space(v[i]) || v[i] == ',')) {
       ++i;
+    }
     size_t start = i;
-    while (i < n && v[i] != ',' && !is_space(v[i]))
+    while (i < n && v[i] != ',' && !is_space(v[i])) {
       ++i;
-    if (equals_lower(v + start, i - start, "close"))
+    }
+    if (equals_lower(v + start, i - start, "close")) {
       f->close = 1;
-    else if (equals_lower(v + start, i - start, "keep-alive"))
+    } else if (equals_lower(v + start, i - start, "keep-alive")) {
       f->keep_alive = 1;
-    while (i < n && v[i] != ',')
+    }
+    while (i < n && v[i] != ',') {
       ++i;
+    }
   }
 }
 
@@ -354,24 +395,29 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
       break;
     }
     size_t colon = at;
-    while (colon < line && is_token(s[colon]))
+    while (colon < line && is_token(s[colon])) {
       ++colon;
+    }
     if (colon == at || colon == line || s[colon] != ':') {
       ok = 0;
       break;
     }
     size_t v = colon + 1, ve = line;
-    while (v < ve && is_space(s[v]))
+    while (v < ve && is_space(s[v])) {
       ++v;
-    while (ve > v && is_space(s[ve - 1]))
+    }
+    while (ve > v && is_space(s[ve - 1])) {
       --ve;
-    for (size_t k = v; k < ve; ++k)
+    }
+    for (size_t k = v; k < ve; ++k) {
       if (!is_value(s[k])) {
         ok = 0;
         break;
       }
-    if (!ok)
+    }
+    if (!ok) {
       break;
+    }
     if (++count > HTTP_MAX_HEADERS) {
       ok = 0;
       break;
@@ -397,8 +443,9 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
     } else if (equals_lower(name, name_length, "host")) {
       ++f->hosts;
     } else if (server && equals_lower(name, name_length, "expect")) {
-      if (equals_lower(s + v, ve - v, "100-continue"))
+      if (equals_lower(s + v, ve - v, "100-continue")) {
         f->expect_continue = 1;
+      }
     }
     TzStr pair[2] = {lowered(name, name_length), latin1(s + v, ve - v)};
     tz_arr_push_value(headers, &pair[0]);
@@ -406,14 +453,17 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
     at = line + 2;
   }
   (void)lengths;
-  if (ok && encodings && !f->chunked && !f->coded)
+  if (ok && encodings && !f->chunked && !f->coded) {
     f->coded = 1; // an empty Transfer-Encoding
+  }
   if (!ok) {
-    if (tz_rc_dec(&headers->rc))
+    if (tz_rc_dec(&headers->rc)) {
       tz_arr_free(headers);
+    }
     return 0;
   }
   *out = headers;
+
   return 1;
 }
 
@@ -421,88 +471,158 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
 // CR, or -1 if it has not come yet.
 static ptrdiff_t head_end(NetConn *c) {
   const uint8_t *s = c->in;
-  for (size_t i = c->in_start; i + 3 < c->in_end; ++i)
-    if (s[i] == '\r' && s[i + 1] == '\n' && s[i + 2] == '\r' && s[i + 3] == '\n')
+  for (size_t i = c->in_start; i + 3 < c->in_end; ++i) {
+    if (s[i] == '\r' && s[i + 1] == '\n' && s[i + 2] == '\r' && s[i + 3] == '\n') {
       return (ptrdiff_t)(i + 2);
+    }
+  }
+
   return -1;
 }
 
 // "HTTP/1.1": the version, 10 or 11; 0 if malformed, -1 for another major.
 static int version_of(const uint8_t *s, size_t n) {
   if (n != 8 || memcmp(s, "HTTP/", 5) != 0 || s[6] != '.' || s[5] < '0' || s[5] > '9' ||
-      s[7] < '0' || s[7] > '9')
+      s[7] < '0' || s[7] > '9') {
     return 0;
-  if (s[5] != '1')
+  }
+  if (s[5] != '1') {
     return -1;
+  }
+
   return s[7] == '0' ? 10 : 11;
 }
 
 static const char *reason_of(int status) {
   switch (status) {
-  case 100: return "Continue";
-  case 101: return "Switching Protocols";
-  case 102: return "Processing";
-  case 103: return "Early Hints";
-  case 200: return "OK";
-  case 201: return "Created";
-  case 202: return "Accepted";
-  case 203: return "Non-Authoritative Information";
-  case 204: return "No Content";
-  case 205: return "Reset Content";
-  case 206: return "Partial Content";
-  case 207: return "Multi-Status";
-  case 208: return "Already Reported";
-  case 226: return "IM Used";
-  case 300: return "Multiple Choices";
-  case 301: return "Moved Permanently";
-  case 302: return "Found";
-  case 303: return "See Other";
-  case 304: return "Not Modified";
-  case 305: return "Use Proxy";
-  case 307: return "Temporary Redirect";
-  case 308: return "Permanent Redirect";
-  case 400: return "Bad Request";
-  case 401: return "Unauthorized";
-  case 402: return "Payment Required";
-  case 403: return "Forbidden";
-  case 404: return "Not Found";
-  case 405: return "Method Not Allowed";
-  case 406: return "Not Acceptable";
-  case 407: return "Proxy Authentication Required";
-  case 408: return "Request Timeout";
-  case 409: return "Conflict";
-  case 410: return "Gone";
-  case 411: return "Length Required";
-  case 412: return "Precondition Failed";
-  case 413: return "Payload Too Large";
-  case 414: return "URI Too Long";
-  case 415: return "Unsupported Media Type";
-  case 416: return "Range Not Satisfiable";
-  case 417: return "Expectation Failed";
-  case 418: return "I'm a Teapot";
-  case 421: return "Misdirected Request";
-  case 422: return "Unprocessable Entity";
-  case 423: return "Locked";
-  case 424: return "Failed Dependency";
-  case 425: return "Too Early";
-  case 426: return "Upgrade Required";
-  case 428: return "Precondition Required";
-  case 429: return "Too Many Requests";
-  case 431: return "Request Header Fields Too Large";
-  case 451: return "Unavailable For Legal Reasons";
-  case 500: return "Internal Server Error";
-  case 501: return "Not Implemented";
-  case 502: return "Bad Gateway";
-  case 503: return "Service Unavailable";
-  case 504: return "Gateway Timeout";
-  case 505: return "HTTP Version Not Supported";
-  case 506: return "Variant Also Negotiates";
-  case 507: return "Insufficient Storage";
-  case 508: return "Loop Detected";
-  case 509: return "Bandwidth Limit Exceeded";
-  case 510: return "Not Extended";
-  case 511: return "Network Authentication Required";
-  default: return "";
+  case 100:
+    return "Continue";
+  case 101:
+    return "Switching Protocols";
+  case 102:
+    return "Processing";
+  case 103:
+    return "Early Hints";
+  case 200:
+    return "OK";
+  case 201:
+    return "Created";
+  case 202:
+    return "Accepted";
+  case 203:
+    return "Non-Authoritative Information";
+  case 204:
+    return "No Content";
+  case 205:
+    return "Reset Content";
+  case 206:
+    return "Partial Content";
+  case 207:
+    return "Multi-Status";
+  case 208:
+    return "Already Reported";
+  case 226:
+    return "IM Used";
+  case 300:
+    return "Multiple Choices";
+  case 301:
+    return "Moved Permanently";
+  case 302:
+    return "Found";
+  case 303:
+    return "See Other";
+  case 304:
+    return "Not Modified";
+  case 305:
+    return "Use Proxy";
+  case 307:
+    return "Temporary Redirect";
+  case 308:
+    return "Permanent Redirect";
+  case 400:
+    return "Bad Request";
+  case 401:
+    return "Unauthorized";
+  case 402:
+    return "Payment Required";
+  case 403:
+    return "Forbidden";
+  case 404:
+    return "Not Found";
+  case 405:
+    return "Method Not Allowed";
+  case 406:
+    return "Not Acceptable";
+  case 407:
+    return "Proxy Authentication Required";
+  case 408:
+    return "Request Timeout";
+  case 409:
+    return "Conflict";
+  case 410:
+    return "Gone";
+  case 411:
+    return "Length Required";
+  case 412:
+    return "Precondition Failed";
+  case 413:
+    return "Payload Too Large";
+  case 414:
+    return "URI Too Long";
+  case 415:
+    return "Unsupported Media Type";
+  case 416:
+    return "Range Not Satisfiable";
+  case 417:
+    return "Expectation Failed";
+  case 418:
+    return "I'm a Teapot";
+  case 421:
+    return "Misdirected Request";
+  case 422:
+    return "Unprocessable Entity";
+  case 423:
+    return "Locked";
+  case 424:
+    return "Failed Dependency";
+  case 425:
+    return "Too Early";
+  case 426:
+    return "Upgrade Required";
+  case 428:
+    return "Precondition Required";
+  case 429:
+    return "Too Many Requests";
+  case 431:
+    return "Request Header Fields Too Large";
+  case 451:
+    return "Unavailable For Legal Reasons";
+  case 500:
+    return "Internal Server Error";
+  case 501:
+    return "Not Implemented";
+  case 502:
+    return "Bad Gateway";
+  case 503:
+    return "Service Unavailable";
+  case 504:
+    return "Gateway Timeout";
+  case 505:
+    return "HTTP Version Not Supported";
+  case 506:
+    return "Variant Also Negotiates";
+  case 507:
+    return "Insufficient Storage";
+  case 508:
+    return "Loop Detected";
+  case 509:
+    return "Bandwidth Limit Exceeded";
+  case 510:
+    return "Not Extended";
+  case 511:
+    return "Network Authentication Required";
+  default:
+    return "";
   }
 }
 
@@ -535,8 +655,9 @@ static int read_request(NetConn *c) {
   HttpState *h = &c->http;
   // Empty lines before a request are allowed (RFC 9112, 2.2).
   while (c->in_end - c->in_start >= 2 && c->in[c->in_start] == '\r' &&
-         c->in[c->in_start + 1] == '\n')
+         c->in[c->in_start + 1] == '\n') {
     c->in_start += 2;
+  }
   ptrdiff_t end = head_end(c);
   if (end < 0) {
     if (c->in_end - c->in_start > HTTP_MAX_HEAD) {
@@ -551,18 +672,20 @@ static int read_request(NetConn *c) {
       return -1;
     }
     // A line that ends with LF alone, or a CR alone, is no line of HTTP.
-    for (size_t i = c->in_start; i < c->in_end; ++i)
+    for (size_t i = c->in_start; i < c->in_end; ++i) {
       if ((c->in[i] == '\n' && (i == c->in_start || c->in[i - 1] != '\r')) ||
           (c->in[i] == '\r' && i + 1 < c->in_end && c->in[i + 1] != '\n')) {
         refuse(c, 400);
         return -1;
       }
+    }
     // A line that already ends badly need not wait for more.
     if (c->eof || c->error) {
-      if (c->in_end > c->in_start)
+      if (c->in_end > c->in_start) {
         refuse(c, 400);
-      else
+      } else {
         settle_int(c, 0);
+      }
       return -1;
     }
     return 0;
@@ -580,16 +703,18 @@ static int read_request(NetConn *c) {
   }
   // METHOD SP target SP HTTP/1.1
   size_t line = (size_t)eol, i = at;
-  while (i < line && is_token(s[i]))
+  while (i < line && is_token(s[i])) {
     ++i;
+  }
   size_t method_end = i;
   if (method_end == at || i >= line || s[i] != ' ') {
     refuse(c, 400);
     return -1;
   }
   size_t target = ++i;
-  while (i < line && s[i] > 0x20 && s[i] != 0x7F)
+  while (i < line && s[i] > 0x20 && s[i] != 0x7F) {
     ++i;
+  }
   size_t target_end = i;
   if (target_end == target || i >= line || s[i] != ' ') {
     refuse(c, 400);
@@ -608,17 +733,20 @@ static int read_request(NetConn *c) {
   }
   // The rules against smuggling: one way to tell where the body ends.
   int bad = (f.chunked || f.coded) && (f.length >= 0 || version == 10);
-  if (version == 11 && f.hosts != 1)
+  if (version == 11 && f.hosts != 1) {
     bad = 1;
+  }
   if (bad || f.coded) {
-    if (tz_rc_dec(&headers->rc))
+    if (tz_rc_dec(&headers->rc)) {
       tz_arr_free(headers);
+    }
     refuse(c, bad ? 400 : 501);
     return -1;
   }
   if (h->max_body > 0 && f.length >= 0 && (double)f.length > h->max_body) {
-    if (tz_rc_dec(&headers->rc))
+    if (tz_rc_dec(&headers->rc)) {
       tz_arr_free(headers);
+    }
     refuse(c, 413);
     return -1;
   }
@@ -638,6 +766,7 @@ static int read_request(NetConn *c) {
   h->continue_sent = 0;
   c->in_start = (uint32_t)end + 2;
   c->busy = 1;
+
   return 1;
 }
 
@@ -666,8 +795,9 @@ static int read_response(NetConn *c) {
     size_t line = eol > 0 ? (size_t)eol : at;
     int status = 0;
     if (version > 0 && s[at + 8] == ' ') {
-      for (size_t k = at + 9; k < at + 12; ++k)
+      for (size_t k = at + 9; k < at + 12; ++k) {
         status = s[k] >= '0' && s[k] <= '9' ? status * 10 + (s[k] - '0') : -1000;
+      }
     }
     if (version <= 0 || status < 100 || status > 999 || (line > at + 12 && s[at + 12] != ' ')) {
       settle_error(c, net_error(TZ_ERROR, "the response is not HTTP/1.1", NULL));
@@ -683,15 +813,18 @@ static int read_response(NetConn *c) {
     }
     c->in_start = (uint32_t)end + 2;
     if (status < 200 && status != 101) { // 100 Continue, 103 Early Hints
-      if (tz_rc_dec(&headers->rc))
+      if (tz_rc_dec(&headers->rc)) {
         tz_arr_free(headers);
+      }
       continue;
     }
     if ((f.chunked || f.coded) && f.length >= 0) {
-      if (tz_rc_dec(&headers->rc))
+      if (tz_rc_dec(&headers->rc)) {
         tz_arr_free(headers);
-      settle_error(c, net_error(TZ_ERROR, "the response has both Content-Length and "
-                                          "Transfer-Encoding",
+      }
+      settle_error(c, net_error(TZ_ERROR,
+                                "the response has both Content-Length and "
+                                "Transfer-Encoding",
                                 NULL));
       net_abort(c);
       return -1;
@@ -704,14 +837,16 @@ static int read_response(NetConn *c) {
     h->version = version;
     h->keep_alive = version == 11 ? !f.close : f.keep_alive && !f.close;
     int none = h->head_request || status == 204 || status == 304 || status == 101;
-    h->body = none                 ? BODY_NONE
-              : f.chunked          ? BODY_CHUNKED
-              : f.length >= 0      ? (f.length > 0 ? BODY_LENGTH : BODY_NONE)
-                                   : BODY_TO_END;
-    if (h->body == BODY_TO_END || f.coded)
+    h->body = none            ? BODY_NONE
+              : f.chunked     ? BODY_CHUNKED
+              : f.length >= 0 ? (f.length > 0 ? BODY_LENGTH : BODY_NONE)
+                              : BODY_TO_END;
+    if (h->body == BODY_TO_END || f.coded) {
       h->keep_alive = 0;
-    if (f.coded && !f.chunked)
+    }
+    if (f.coded && !f.chunked) {
       h->body = BODY_TO_END;
+    }
     h->remaining = f.length > 0 ? f.length : 0;
     h->chunk_state = CHUNK_SIZE;
     h->body_done = h->body == BODY_NONE;
@@ -730,8 +865,9 @@ static int read_response(NetConn *c) {
 static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
   HttpState *h = &c->http;
   for (;;) {
-    if (h->body_done)
+    if (h->body_done) {
       return 2;
+    }
     size_t have = c->in_end - c->in_start;
     const uint8_t *s = c->in + c->in_start;
     switch (h->body) {
@@ -755,23 +891,27 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
         h->body_done = 1;
         return 2;
       }
-      if (!have)
+      if (!have) {
         return c->eof || c->error ? -1 : 0;
+      }
       *length = have < (uint64_t)h->remaining ? have : (size_t)h->remaining;
       *data = s;
       c->in_start += (uint32_t)*length;
       h->remaining -= (int64_t)*length;
-      if (h->remaining == 0)
+      if (h->remaining == 0) {
         h->body_done = 1;
+      }
       return 1;
     case BODY_CHUNKED:
       switch (h->chunk_state) {
       case CHUNK_SIZE: {
         ptrdiff_t eol = line_end(c->in, c->in_start, c->in_end);
-        if (eol == -2)
+        if (eol == -2) {
           return -1;
-        if (eol < 0)
+        }
+        if (eol < 0) {
           return have > HTTP_MAX_LINE || c->eof || c->error ? -1 : 0;
+        }
         size_t i = c->in_start, end = (size_t)eol;
         int64_t size = 0;
         size_t digits = 0;
@@ -781,53 +921,66 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
                   : d >= 'a' && d <= 'f' ? d - 'a' + 10
                   : d >= 'A' && d <= 'F' ? d - 'A' + 10
                                          : -1;
-          if (v < 0)
+          if (v < 0) {
             break;
-          if (++digits > 15)
+          }
+          if (++digits > 15) {
             return -1;
+          }
           size = size * 16 + v;
           ++i;
         }
-        if (!digits)
+        if (!digits) {
           return -1;
+        }
         // Extensions after ';', which mean nothing here.
-        while (i < end && is_space(c->in[i]))
+        while (i < end && is_space(c->in[i])) {
           ++i;
-        if (i < end && c->in[i] != ';')
+        }
+        if (i < end && c->in[i] != ';') {
           return -1;
-        for (; i < end; ++i)
-          if (!is_value(c->in[i]))
+        }
+        for (; i < end; ++i) {
+          if (!is_value(c->in[i])) {
             return -1;
+          }
+        }
         c->in_start = (uint32_t)end + 2;
         h->remaining = size;
         h->chunk_state = size ? CHUNK_DATA : CHUNK_TRAILER;
         continue;
       }
       case CHUNK_DATA:
-        if (!have)
+        if (!have) {
           return c->eof || c->error ? -1 : 0;
+        }
         *length = have < (uint64_t)h->remaining ? have : (size_t)h->remaining;
         *data = s;
         c->in_start += (uint32_t)*length;
         h->remaining -= (int64_t)*length;
-        if (h->remaining == 0)
+        if (h->remaining == 0) {
           h->chunk_state = CHUNK_DATA_END;
+        }
         return 1;
       case CHUNK_DATA_END:
-        if (have < 2)
+        if (have < 2) {
           return c->eof || c->error ? -1 : 0;
-        if (s[0] != '\r' || s[1] != '\n')
+        }
+        if (s[0] != '\r' || s[1] != '\n') {
           return -1;
+        }
         c->in_start += 2;
         h->chunk_state = CHUNK_SIZE;
         continue;
       case CHUNK_TRAILER: {
         // Fields of the trailer, which are dropped, up to an empty line.
         ptrdiff_t eol = line_end(c->in, c->in_start, c->in_end);
-        if (eol == -2)
+        if (eol == -2) {
           return -1;
-        if (eol < 0)
+        }
+        if (eol < 0) {
           return have > HTTP_MAX_HEAD || c->eof || c->error ? -1 : 0;
+        }
         size_t start = c->in_start;
         c->in_start = (uint32_t)eol + 2;
         if ((size_t)eol == start) {
@@ -835,10 +988,12 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
           return 2;
         }
         size_t colon = start;
-        while (colon < (size_t)eol && is_token(c->in[colon]))
+        while (colon < (size_t)eol && is_token(c->in[colon])) {
           ++colon;
-        if (colon == start || colon == (size_t)eol || c->in[colon] != ':')
+        }
+        if (colon == start || colon == (size_t)eol || c->in[colon] != ':') {
           return -1;
+        }
         continue;
       }
       }
@@ -850,9 +1005,11 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
 
 // What breaks a body, for the promise that waits for it.
 static void *body_error(NetConn *c) {
-  if (c->server)
+  if (c->server) {
     return net_error(TZ_TYPE_ERROR, "the body of the request is malformed or was cut off", NULL);
+  }
   void *cause = broken_error(c);
+
   return net_error(TZ_TYPE_ERROR, "terminated", cause);
 }
 
@@ -863,8 +1020,9 @@ static void *too_large(void) {
 // 100 Continue, once the program reads the body of a request that asked.
 static void send_continue(NetConn *c) {
   HttpState *h = &c->http;
-  if (!h->expect_continue || h->continue_sent)
+  if (!h->expect_continue || h->continue_sent) {
     return;
+  }
   h->continue_sent = 1;
   static const char text[] = "HTTP/1.1 100 Continue\r\n\r\n";
   net_write(c, text, sizeof text - 1);
@@ -886,10 +1044,11 @@ static void feed_body(NetConn *c) {
     if (got < 0) {
       // A server answers a malformed body itself, as node does: its handler
       // gets the error and what it answers goes.
-      if (c->server && !c->eof && !c->error)
+      if (c->server && !c->eof && !c->error) {
         answer_error(c, 400);
-      else
+      } else {
         net_abort(c);
+      }
       h->keep_alive = 0;
       settle_error(c, body_error(c));
       return;
@@ -912,8 +1071,9 @@ static void feed_body(NetConn *c) {
       if (h->all_length + length > h->all_capacity) {
         size_t cap = h->all_capacity * 2 + length + 4096;
         uint8_t *all = (uint8_t *)tz_alloc(cap);
-        if (h->all_length)
+        if (h->all_length) {
           memcpy(all, h->all, h->all_length);
+        }
         tz_free(h->all);
         h->all = all;
         h->all_capacity = cap;
@@ -942,16 +1102,20 @@ static int discard_body(NetConn *c, int *wait) {
     size_t length;
     int got = take_body(c, &data, &length);
     if (got == 0) {
-      if (h->body_read > HTTP_MAX_DISCARD)
+      if (h->body_read > HTTP_MAX_DISCARD) {
         return 0;
+      }
       *wait = 1;
       return 1;
     }
-    if (got < 0)
+    if (got < 0) {
       return 0;
-    if (got == 1)
+    }
+    if (got == 1) {
       h->body_read += (int64_t)length;
+    }
   }
+
   return 1;
 }
 
@@ -978,8 +1142,9 @@ static void input(NetConn *c) {
       net_read(c);
       return;
     }
-    if (got > 0)
+    if (got > 0) {
       settle_int(c, 1);
+    }
     return;
   }
   case WAIT_RESPONSE: {
@@ -988,8 +1153,9 @@ static void input(NetConn *c) {
       net_read(c);
       return;
     }
-    if (got > 0)
+    if (got > 0) {
       settle_int(c, h->status);
+    }
     return;
   }
   case WAIT_CHUNK:
@@ -1014,10 +1180,12 @@ void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
   c->busy = 0;
-  if (!c->http.version) // the first request
+  if (!c->http.version) { // the first request
     c->http.keep_alive = !c->http.ending;
-  if (begin_wait(c, p, WAIT_REQUEST, NULL, make))
+  }
+  if (begin_wait(c, p, WAIT_REQUEST, NULL, make)) {
     input(c);
+  }
 #if TZ_PARALLEL
   tz_thread.await_lock = &c->lock;
 #else
@@ -1031,8 +1199,9 @@ void tz_http_response(TzPromise *p, void *conn, void *signal, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
-  if (begin_wait(c, p, WAIT_RESPONSE, signal, make))
+  if (begin_wait(c, p, WAIT_RESPONSE, signal, make)) {
     input(c);
+  }
   conn_unlock(c);
 }
 
@@ -1067,6 +1236,7 @@ void tz_http_read_all(TzPromise *p, void *conn, void *signal, TzMaker make) {
 static TzStr take_str(TzStr *s) {
   TzStr taken = *s;
   memset(s, 0, sizeof *s);
+
   return taken;
 }
 
@@ -1089,9 +1259,11 @@ void *tz_http_headers(void *conn, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
   TzArray *headers = c->http.headers;
-  if (!headers)
+  if (!headers) {
     return tz_arr_new(&tz_string_type, 0, 0);
+  }
   c->http.headers = NULL;
+
   return headers;
 }
 
@@ -1099,6 +1271,7 @@ void *tz_http_headers(void *conn, TzMaker make) {
 // end of the connection).
 int32_t tz_http_has_body(void *conn, TzMaker make) {
   (void)make;
+
   return ((NetConn *)conn)->http.body != BODY_NONE;
 }
 
@@ -1109,9 +1282,10 @@ int32_t tz_http_reusable(void *conn, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
-  int32_t reusable = c->http.keep_alive && c->http.body_done && !c->closed && !c->error &&
-                     !c->eof && !c->closing;
+  int32_t reusable =
+      c->http.keep_alive && c->http.body_done && !c->closed && !c->error && !c->eof && !c->closing;
   conn_unlock(c);
+
   return reusable;
 }
 
@@ -1121,6 +1295,7 @@ int32_t tz_http_keep_alive(void *conn, TzMaker make) {
   conn_lock(c);
   int32_t keep = c->http.keep_alive;
   conn_unlock(c);
+
   return keep;
 }
 
@@ -1150,6 +1325,7 @@ static const char *http_date(void) {
     strftime(tz_http_date, sizeof tz_http_date, "%a, %d %b %Y %H:%M:%S GMT", &t);
     tz_http_date_second = (int64_t)now;
   }
+
   return tz_http_date;
 }
 
@@ -1164,8 +1340,9 @@ static size_t utf8_of(TzStr text, uint8_t *out) {
     const uint8_t *s = (const uint8_t *)units;
     for (uint32_t i = 0; i < n; ++i) {
       if (s[i] < 0x80) {
-        if (out)
+        if (out) {
           out[length] = s[i];
+        }
         ++length;
       } else {
         if (out) {
@@ -1180,10 +1357,11 @@ static size_t utf8_of(TzStr text, uint8_t *out) {
   const uint16_t *s = (const uint16_t *)units;
   for (uint32_t i = 0; i < n; ++i) {
     uint32_t c = s[i];
-    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF)
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (s[++i] - 0xDC00);
-    else if (c >= 0xD800 && c <= 0xDFFF)
+    } else if (c >= 0xD800 && c <= 0xDFFF) {
       c = 0xFFFD;
+    }
     uint8_t buf[4];
     size_t k;
     if (c < 0x80) {
@@ -1205,10 +1383,12 @@ static size_t utf8_of(TzStr text, uint8_t *out) {
       buf[3] = (uint8_t)(0x80 | (c & 0x3F));
       k = 4;
     }
-    if (out)
+    if (out) {
       memcpy(out + length, buf, k);
+    }
     length += k;
   }
+
   return length;
 }
 
@@ -1220,12 +1400,15 @@ static int head_bytes(TzStr text, uint8_t *out, size_t *length) {
   const void *units = tz_str_units(&text, &n, &two);
   for (uint32_t i = 0; i < n; ++i) {
     uint32_t c = two ? ((const uint16_t *)units)[i] : ((const uint8_t *)units)[i];
-    if (c == '\r' || c == '\n' || c == 0 || c > 0xFF)
+    if (c == '\r' || c == '\n' || c == 0 || c > 0xFF) {
       return 0;
-    if (out)
+    }
+    if (out) {
       out[i] = (uint8_t)c;
+    }
   }
   *length = n;
+
   return 1;
 }
 
@@ -1233,8 +1416,9 @@ static void put(NetConn *c, const char *text) { net_write(c, text, strlen(text))
 
 static void put_str(NetConn *c, TzStr text) {
   size_t n;
-  if (!head_bytes(text, NULL, &n))
+  if (!head_bytes(text, NULL, &n)) {
     return;
+  }
   uint8_t *at = net_reserve(c, n);
   head_bytes(text, at, &n);
   net_wrote(c, n);
@@ -1250,28 +1434,33 @@ static void put_headers(NetConn *c, const TzArray *headers, int *date, int64_t *
     TzStr name = items[i], value = items[i + 1];
     size_t n, m;
     char lowered_name[32];
-    if (!head_bytes(name, NULL, &n) || !head_bytes(value, NULL, &m) || n == 0)
+    if (!head_bytes(name, NULL, &n) || !head_bytes(value, NULL, &m) || n == 0) {
       continue;
+    }
     if (n < sizeof lowered_name) {
       head_bytes(name, (uint8_t *)lowered_name, &n);
-      for (size_t k = 0; k < n; ++k)
+      for (size_t k = 0; k < n; ++k) {
         lowered_name[k] = (char)lower((uint8_t)lowered_name[k]);
+      }
       lowered_name[n] = 0;
       if (strcmp(lowered_name, "transfer-encoding") == 0 ||
-          strcmp(lowered_name, "connection") == 0 || strcmp(lowered_name, "keep-alive") == 0)
+          strcmp(lowered_name, "connection") == 0 || strcmp(lowered_name, "keep-alive") == 0) {
         continue;
+      }
       if (strcmp(lowered_name, "content-length") == 0) {
         uint8_t digits[24];
         size_t d;
         if (m < sizeof digits && head_bytes(value, digits, &d)) {
           int64_t parsed;
-          if (content_length(digits, d, &parsed))
+          if (content_length(digits, d, &parsed)) {
             *length = parsed;
+          }
         }
         continue;
       }
-      if (strcmp(lowered_name, "date") == 0)
+      if (strcmp(lowered_name, "date") == 0) {
         *date = 1;
+      }
     }
     put_str(c, name);
     put(c, ": ");
@@ -1288,16 +1477,14 @@ enum {
   RESPOND_BYTES = 8, // the body is the bytes, not the text
 };
 
-static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta,
-                    void *headers, void *body_obj, uint64_t body_meta, void *bytes,
-                    int32_t flags);
+static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
+                    void *body_obj, uint64_t body_meta, void *bytes, int32_t flags);
 
 // `__tz_http_respond(conn, status, statusText, headers, text, bytes,
 // flags)`: the head and the body of a response, in one write. Without the
 // turn: it touches only the connection, under its lock.
-void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_meta,
-                     void *headers, void *body_obj, uint64_t body_meta, void *bytes,
-                     int32_t flags, TzMaker make) {
+void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
+                     void *body_obj, uint64_t body_meta, void *bytes, int32_t flags, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
@@ -1305,18 +1492,20 @@ void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_m
   conn_unlock(c);
 }
 
-static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta,
-                    void *headers, void *body_obj, uint64_t body_meta, void *bytes,
-                    int32_t flags) {
+static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
+                    void *body_obj, uint64_t body_meta, void *bytes, int32_t flags) {
   HttpState *h = &c->http;
-  if (c->closed || c->error || h->refused)
+  if (c->closed || c->error || h->refused) {
     return;
-  if (flags & RESPOND_CLOSE)
+  }
+  if (flags & RESPOND_CLOSE) {
     h->keep_alive = 0;
+  }
   // A body the program did not read (or a request that asked to send one
   // first) keeps the connection only if it is small.
-  if (h->expect_continue && !h->continue_sent)
+  if (h->expect_continue && !h->continue_sent) {
     h->keep_alive = 0;
+  }
   char line[160];
   TzStr status_text = {text_obj, text_meta};
   uint32_t text_length;
@@ -1344,9 +1533,10 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
   TzStr body = {body_obj, body_meta};
   const TzBytes *data = (const TzBytes *)bytes;
   size_t length = 0;
-  if (!(flags & RESPOND_STREAM))
+  if (!(flags & RESPOND_STREAM)) {
     length = (flags & RESPOND_BYTES) ? (data ? (size_t)tz_bytes_byte_length(data) : 0)
                                      : utf8_of(body, NULL);
+  }
   if (flags & RESPOND_STREAM) {
     if (given >= 0) {
       h->response_mode = SEND_RAW;
@@ -1361,29 +1551,33 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
     }
   } else if (status != 204 && status != 304 && !(status >= 100 && status < 200)) {
     // HEAD tells the length the body would have had.
-    snprintf(line, sizeof line, "content-length: %llu\r\n",
-             (unsigned long long)((flags & RESPOND_NO_BODY) && given >= 0 ? (size_t)given
-                                                                          : length));
+    snprintf(
+        line, sizeof line, "content-length: %llu\r\n",
+        (unsigned long long)((flags & RESPOND_NO_BODY) && given >= 0 ? (size_t)given : length));
     put(c, line);
   }
-  if (!h->keep_alive)
+  if (!h->keep_alive) {
     put(c, "connection: close\r\n");
-  else if (h->version == 10)
+  } else if (h->version == 10) {
     put(c, "connection: keep-alive\r\n");
+  }
   put(c, "\r\n");
   if (!no_body && !(flags & RESPOND_STREAM) && length) {
     uint8_t *at = net_reserve(c, length);
-    if (flags & RESPOND_BYTES)
+    if (flags & RESPOND_BYTES) {
       memcpy(at, data->data, length);
-    else
+    } else {
       utf8_of(body, at);
+    }
     net_wrote(c, length);
   }
-  if (no_body && (flags & RESPOND_STREAM))
+  if (no_body && (flags & RESPOND_STREAM)) {
     h->response_mode = SEND_RAW;
+  }
   net_flush(c);
-  if (!(flags & RESPOND_STREAM) && !h->keep_alive)
+  if (!(flags & RESPOND_STREAM) && !h->keep_alive) {
     net_close(c);
+  }
 }
 
 // `__tz_http_request(conn, method, target, headers, text, bytes, flags)`:
@@ -1432,10 +1626,11 @@ static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *ta
   put(c, "\r\n");
   if (length) {
     uint8_t *at = net_reserve(c, length);
-    if (flags & RESPOND_BYTES)
+    if (flags & RESPOND_BYTES) {
       memcpy(at, data->data, length);
-    else
+    } else {
       utf8_of(body, at);
+    }
     net_wrote(c, length);
   }
   // What the response to it will be read as.
@@ -1488,8 +1683,9 @@ static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
     net_fulfill(&old, NULL, 0);
   }
   c->drain = p;
-  if (net_pending_output(c) < NET_HIGH_WATER_MARK || c->closed || c->error)
+  if (net_pending_output(c) < NET_HIGH_WATER_MARK || c->closed || c->error) {
     net_fulfill(&c->drain, NULL, 0);
+  }
 }
 
 // `__tz_http_end(conn)`: the end of a body that streams.
@@ -1499,11 +1695,13 @@ void tz_http_end(void *conn, TzMaker make) {
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
   if (!c->closed && !c->error && !c->http.refused) {
-    if (c->http.response_mode == SEND_CHUNKED)
+    if (c->http.response_mode == SEND_CHUNKED) {
       net_write(c, "0\r\n\r\n", 5);
+    }
     net_flush(c);
-    if (c->server && !c->http.keep_alive)
+    if (c->server && !c->http.keep_alive) {
       net_close(c);
+    }
   }
   conn_unlock(c);
 }

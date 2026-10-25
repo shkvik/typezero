@@ -8,7 +8,6 @@
 // system (icu.h, intl.h).
 
 #include "runtime/library/intl/intl/intl.h"
-
 #include <math.h>
 #include <string.h>
 
@@ -77,28 +76,34 @@ static const char *const matchers[] = {"lookup", "best fit", NULL};
 // Whether the language has the collation (a BCP 47 type, "phonebk"), which
 // is not the standard one or that of search.
 static int has_collation(const TzIcu *icu, const char *locale, const char *collation) {
-  if (strcmp(collation, "standard") == 0 || strcmp(collation, "search") == 0)
+  if (strcmp(collation, "standard") == 0 || strcmp(collation, "search") == 0) {
     return 0;
+  }
   const char *legacy = icu->uloc_toLegacyType("co", collation);
-  if (!legacy)
+  if (!legacy) {
     legacy = collation;
+  }
   TzUErrorCode status = 0;
   void *values = icu->ucol_getKeywordValuesForLocale("collation", locale, 0, &status);
-  if (TZ_U_FAILURE(status) || !values)
+  if (TZ_U_FAILURE(status) || !values) {
     return 0;
+  }
   int found = 0;
   int32_t length;
   const char *value;
-  while (!found && (value = icu->uenum_next(values, &length, &status)) != NULL)
+  while (!found && (value = icu->uenum_next(values, &length, &status)) != NULL) {
     found = strcmp(value, legacy) == 0;
+  }
   icu->uenum_close(values);
+
   return found;
 }
 
 static void append_keyword(char *tag, size_t size, int *opened, const char *key,
                            const char *value) {
-  if (strlen(tag) + strlen(key) + strlen(value) + 6 >= size)
+  if (strlen(tag) + strlen(key) + strlen(value) + 6 >= size) {
     return;
+  }
   strcat(tag, *opened ? "-" : "-u-");
   *opened = 1;
   strcat(tag, key);
@@ -111,8 +116,9 @@ static void append_keyword(char *tag, size_t size, int *opened, const char *key,
 TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const usages[] = {"sort", "search", NULL};
   static const char *const case_firsts[] = {"upper", "lower", "false", NULL};
   static const char *const sensitivities[] = {"base", "accent", "case", "variant", NULL};
@@ -121,16 +127,18 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   const char *usage = tz_intl_option(o, TZ_IO_USAGE, usages, b[0], method, &failed);
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[1], method, &failed);
   const char *collation = tz_intl_option(o, TZ_IO_COLLATION, NULL, b[2], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   if (collation && !tz_intl_is_keyword_type(collation)) {
     tz_throw(TZ_RANGE_ERROR, "Invalid collation : %s", collation);
     return NULL;
   }
   int numeric = tz_intl_bool_option(o, TZ_IO_NUMERIC);
   const char *case_first = tz_intl_option(o, TZ_IO_CASE_FIRST, case_firsts, b[3], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   usage = usage ? usage : "sort";
   int search = strcmp(usage, "search") == 0;
 
@@ -158,10 +166,11 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
                  strcmp(keyword_kf, "false") == 0;
   const char *chosen = NULL;
   if (!search) {
-    if (collation && has_collation(icu, found, collation))
+    if (collation && has_collation(icu, found, collation)) {
       chosen = collation;
-    else if (keyword_co[0] && has_collation(icu, found, keyword_co))
+    } else if (keyword_co[0] && has_collation(icu, found, keyword_co)) {
       chosen = keyword_co;
+    }
   }
 
   TzCollator *c =
@@ -170,12 +179,15 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   char tag[TZ_INTL_LOCALE];
   int opened = 0;
   tz_intl_tag(icu, found, tag, sizeof tag);
-  if (chosen)
+  if (chosen) {
     append_keyword(tag, sizeof tag, &opened, "co", chosen);
-  if (kf_valid)
+  }
+  if (kf_valid) {
     append_keyword(tag, sizeof tag, &opened, "kf", keyword_kf);
-  if (kn_valid)
+  }
+  if (kn_valid) {
     append_keyword(tag, sizeof tag, &opened, "kn", kn_true ? "" : "false");
+  }
   tz_intl_copy(r->locale, sizeof r->locale, tag);
   tz_intl_set_text(r, TZ_IO_USAGE, usage);
   tz_intl_set_text(r, TZ_IO_COLLATION, chosen ? chosen : "default");
@@ -191,20 +203,23 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
     status = 0;
   }
   c->collator = icu->ucol_open(id, &status);
-  if (TZ_U_FAILURE(status) || !c->collator)
+  if (TZ_U_FAILURE(status) || !c->collator) {
     tz_intl_no_icu();
+  }
   void *coll = c->collator;
   status = 0;
-  if (numeric >= 0 || kn_valid)
+  if (numeric >= 0 || kn_valid) {
     icu->ucol_setAttribute(coll, UCOL_NUMERIC_COLLATION,
                            (numeric >= 0 ? numeric : kn_true) ? UCOL_ON : UCOL_OFF, &status);
+  }
   const char *first = case_first ? case_first : kf_valid ? keyword_kf : NULL;
-  if (first)
+  if (first) {
     icu->ucol_setAttribute(coll, UCOL_CASE_FIRST,
                            strcmp(first, "upper") == 0   ? UCOL_UPPER_FIRST
                            : strcmp(first, "lower") == 0 ? UCOL_LOWER_FIRST
                                                          : UCOL_OFF,
                            &status);
+  }
   icu->ucol_setAttribute(coll, UCOL_NORMALIZATION_MODE, UCOL_ON, &status);
   const char *sensitivity =
       tz_intl_option(o, TZ_IO_SENSITIVITY, sensitivities, b[4], method, &failed);
@@ -225,9 +240,10 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   } else {
     icu->ucol_setAttribute(coll, UCOL_STRENGTH, UCOL_TERTIARY, &status);
   }
-  if (ignore_punctuation >= 0)
+  if (ignore_punctuation >= 0) {
     icu->ucol_setAttribute(coll, UCOL_ALTERNATE_HANDLING,
                            ignore_punctuation ? UCOL_SHIFTED : UCOL_NON_IGNORABLE, &status);
+  }
   tz_intl_set_text(r, TZ_IO_SENSITIVITY, sensitivity);
   // What the collator does, as ICU says (Thai ignores punctuation).
   status = 0;
@@ -240,13 +256,15 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
                    resolved_first == UCOL_UPPER_FIRST   ? "upper"
                    : resolved_first == UCOL_LOWER_FIRST ? "lower"
                                                         : "false");
+
   return r;
 }
 
 static void collator_drop(void *object) {
   TzCollator *c = (TzCollator *)object;
-  if (c->collator)
+  if (c->collator) {
     tz_icu()->ucol_close(c->collator);
+  }
   tz_obj_free(c);
 }
 
@@ -258,6 +276,7 @@ static int32_t compare(const void *collator, TzStr a, TzStr b) {
   int32_t result = tz_icu()->ucol_strcoll(collator, units_a, length_a, units_b, length_b);
   tz_free(heap_a);
   tz_free(heap_b);
+
   return result;
 }
 
@@ -265,6 +284,7 @@ static int32_t compare(const void *collator, TzStr a, TzStr b) {
 int32_t tz_collator_compare(TzCollator *c, void *a_obj, uint64_t a_meta, void *b_obj,
                             uint64_t b_meta) {
   TzStr a = {a_obj, a_meta}, b = {b_obj, b_meta};
+
   return compare(c->collator, a, b);
 }
 
@@ -272,9 +292,11 @@ int32_t tz_collator_compare(TzCollator *c, void *a_obj, uint64_t a_meta, void *b
 int32_t tz_str_locale_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta,
                               const TzIntlOptions *o) {
   TzIntl *c = tz_intl_cached(TZ_INTL_COLLATOR, o, "String.prototype.localeCompare");
-  if (!c)
+  if (!c) {
     return 0;
+  }
   TzStr a = {a_obj, a_meta}, b = {b_obj, b_meta};
+
   return compare(((TzCollator *)c)->collator, a, b);
 }
 
@@ -296,10 +318,13 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
     TzStr f = {form_obj, form_meta};
     char text[8];
     form = -1;
-    if (tz_intl_ascii(f, text, sizeof text))
-      for (int i = 0; i < 4; ++i)
-        if (strcmp(forms[i], text) == 0)
+    if (tz_intl_ascii(f, text, sizeof text)) {
+      for (int i = 0; i < 4; ++i) {
+        if (strcmp(forms[i], text) == 0) {
           form = i;
+        }
+      }
+    }
     if (form < 0) {
       tz_throw(TZ_RANGE_ERROR, "The normalization form should be one of NFC, NFD, NFKC, NFKD.");
       *out = tz_str_from_ascii("", 0);
@@ -311,8 +336,9 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
   int two;
   const void *units = tz_str_units(&s, &n, &two);
   int ascii = !two;
-  for (uint32_t i = 0; ascii && i < n; ++i)
+  for (uint32_t i = 0; ascii && i < n; ++i) {
     ascii = ((const uint8_t *)units)[i] < 0x80;
+  }
   if (ascii) {
     tz_str_retain_value(s);
     *out = s;
@@ -324,8 +350,9 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
                            : form == 1 ? icu->unorm2_getNFDInstance(&status)
                            : form == 2 ? icu->unorm2_getNFKCInstance(&status)
                                        : icu->unorm2_getNFKDInstance(&status);
-  if (TZ_U_FAILURE(status))
+  if (TZ_U_FAILURE(status)) {
     tz_intl_no_icu();
+  }
   TzUChar buffer[256], *heap;
   int32_t length;
   const TzUChar *text = tz_intl_utf16(&s, buffer, 256, &heap, &length);
@@ -349,8 +376,9 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
     made = icu->unorm2_normalize(normalizer, text, length, result, capacity, &status);
   }
   *out = TZ_U_FAILURE(status) ? tz_str_from_ascii("", 0) : tz_str_from_utf16(result, (size_t)made);
-  if (result != local)
+  if (result != local) {
     tz_free(result);
+  }
   tz_free(heap);
 }
 
@@ -362,16 +390,18 @@ TzIntl *tz_seg_create(const TzIntlOptions *o) {
   const char *method = "Intl.Segmenter";
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const granularities[] = {"grapheme", "word", "sentence", NULL};
   char b[2][TZ_INTL_TEXT];
   int failed = 0;
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[0], method, &failed);
   const char *granularity =
       tz_intl_option(o, TZ_IO_GRANULARITY, granularities, b[1], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   granularity = granularity ? granularity : "grapheme";
   TzSegmenter *s =
       (TzSegmenter *)tz_intl_alloc(sizeof(TzSegmenter), TZ_INTL_SEGMENTER, &segmenter_layout);
@@ -381,6 +411,7 @@ TzIntl *tz_seg_create(const TzIntlOptions *o) {
   s->type = strcmp(granularity, "word") == 0       ? UBRK_WORD
             : strcmp(granularity, "sentence") == 0 ? UBRK_SENTENCE
                                                    : UBRK_CHARACTER;
+
   return &s->base;
 }
 
@@ -402,21 +433,25 @@ void *tz_seg_segment(TzSegmenter *s, void *obj, uint64_t meta) {
   int two;
   const void *units = tz_str_units(&input, &n, &two);
   segments->units = (TzUChar *)tz_alloc(((size_t)n + 1) * sizeof(TzUChar));
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n; ++i) {
     segments->units[i] = two ? ((const uint16_t *)units)[i] : ((const uint8_t *)units)[i];
+  }
   segments->length = (int32_t)n;
   TzUErrorCode status = 0;
   segments->iterator =
       icu->ubrk_open(s->type, s->icu_locale, segments->units, segments->length, &status);
-  if (TZ_U_FAILURE(status) || !segments->iterator)
+  if (TZ_U_FAILURE(status) || !segments->iterator) {
     tz_intl_no_icu();
+  }
+
   return segments;
 }
 
 static void segments_drop(void *object) {
   TzSegments *s = (TzSegments *)object;
-  if (s->iterator)
+  if (s->iterator) {
     tz_icu()->ubrk_close(s->iterator);
+  }
   tz_str_release_value(s->input);
   tz_free(s->units);
   tz_obj_free(s);
@@ -441,6 +476,7 @@ static void *segment_data(TzSegments *s, int32_t start, int32_t end, const TzInt
     word_like[0] = tz_icu()->ubrk_getRuleStatus(s->iterator) >= WORD_NONE_LIMIT;
     word_like[1] = 1;
   }
+
   return data;
 }
 
@@ -454,6 +490,7 @@ TzArray *tz_segments_array(TzSegments *s, const TzIntlShape *shape) {
     tz_arr_push_value(out, &data);
     start = end;
   }
+
   return out;
 }
 
@@ -461,11 +498,13 @@ TzArray *tz_segments_array(TzSegments *s, const TzIntlShape *shape) {
 // outside the text. The index is a number of JavaScript: NaN is 0.
 void *tz_segments_containing(TzSegments *s, double index, const TzIntlShape *shape) {
   double n = isnan(index) ? 0 : trunc(index);
-  if (n < 0 || n >= s->length)
+  if (n < 0 || n >= s->length) {
     return NULL;
+  }
   const TzIcu *icu = tz_icu();
   int32_t at = (int32_t)n;
   int32_t start = icu->ubrk_isBoundary(s->iterator, at) ? at : icu->ubrk_preceding(s->iterator, at);
   int32_t end = icu->ubrk_following(s->iterator, at);
+
   return segment_data(s, start, end, shape);
 }

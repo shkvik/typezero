@@ -16,14 +16,14 @@
 
 // TZ_HOT marks the fast paths that programs call in their loops. tz copies
 // those a program calls into the program, so that the optimizer can inline
-// them there (see linkRuntime in compiler/cli/driver/driver.cpp); every other
+// them there (see compiler/optimize/runtime_linker/runtime_linker.cpp); every other
 // call goes to tzrt.lib. Two rules follow:
 //
 //   - State is never `static`: a copied function must reach the one variable
-//     in tzrt.lib, not a copy of its own. The driver rejects static state.
+//     in tzrt.lib, not a copy of its own. RuntimeLinker rejects static state.
 //   - A TZ_HOT function stays small: it calls its slow path as a separate
 //     TZ_NOINLINE function that is not `static`, which stays in tzrt.lib.
-//     The driver does not copy a function that would bring more than about
+//     RuntimeLinker does not copy a function that would bring more than about
 //     a hundred instructions along.
 //
 // TZ_COLD: rarely called; the optimizer keeps calls to it out of the hot path.
@@ -32,7 +32,7 @@
 // that run on one thread, and with TZ_PARALLEL, tzrt_mt for those whose
 // async code runs in parallel (docs/async.md, section 8; parallel.c), which
 // tz links when the program has pieces that may
-// (compiler/check/parallel/parallel.h). TZ_THREAD_LOCAL marks the state each
+// (compiler/parallel/parallel_analysis/parallel_analysis.h). TZ_THREAD_LOCAL marks the state each
 // thread of tzrt_mt has a copy of, as the error in flight; in tzrt it is an
 // ordinary variable. Layouts are the same in both: tzcrypto.lib, built once,
 // goes with either, and must not touch that state itself (TZ_NO_THREAD_STATE).
@@ -138,10 +138,13 @@ typedef struct TzUnionType {
 // literal type (an int32, see TzAtomType), have zero for undefined.
 static inline int tz_optional_has(const TzType *type, const void *value) {
   if (type->inner->kind == TZ_T_OBJECT || type->inner->kind == TZ_T_JSON ||
-      type->inner->kind == TZ_T_UNKNOWN)
+      type->inner->kind == TZ_T_UNKNOWN) {
     return *(void *const *)value != NULL;
-  if (type->inner->kind == TZ_T_UNION || type->inner->kind == TZ_T_ATOM)
+  }
+  if (type->inner->kind == TZ_T_UNION || type->inner->kind == TZ_T_ATOM) {
     return *(const int32_t *)value != 0;
+  }
+
   return ((const uint8_t *)value)[type->inner->size] != 0;
 }
 
@@ -246,14 +249,16 @@ static inline void tz_rc_inc(int64_t *rc) { tz_rc_add(rc, 1); }
 static inline int tz_rc_dec(int64_t *rc) {
   if (*rc < 0) {
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
-    if (__atomic_sub_fetch(rc, 1, __ATOMIC_ACQ_REL) != TZ_RC_SHARED)
+    if (__atomic_sub_fetch(rc, 1, __ATOMIC_ACQ_REL) != TZ_RC_SHARED) {
       return 0;
+    }
     *rc = 0; // the last reference: the object is this thread's alone
     return 1;
 #else
     return tz_rc_shared_dec(rc);
 #endif
   }
+
   return --*rc == 0;
 }
 
@@ -331,24 +336,28 @@ void tz_group_check_owned(const void *object, const struct TzFrame *at, const ch
 
 static inline void tz_ref_retain(void *object) {
   TzObject *o = (TzObject *)object;
-  if (o->rc >= 0)
+  if (o->rc >= 0) {
     ++o->rc;
-  else
+  } else {
     tz_group_retain(o);
+  }
 }
 
 static inline void tz_obj_retain(TzObject *o) {
-  if (o)
+  if (o) {
     tz_ref_retain(o);
+  }
 }
 
 static inline void tz_obj_release(TzObject *o) {
-  if (!o)
+  if (!o) {
     return;
-  if (o->rc < 0)
+  }
+  if (o->rc < 0) {
     tz_group_release(o);
-  else if (--o->rc == 0)
+  } else if (--o->rc == 0) {
     o->desc->drop(o);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -375,9 +384,9 @@ typedef struct TzField {
 // `[Object: null prototype] { ... }`.
 enum {
   TZ_LAYOUT_TUPLE = 1,
-  TZ_LAYOUT_GENERATOR = 2,       // Object [Generator] {}
-  TZ_LAYOUT_ARRAY_ITERATOR = 4,  // Object [Array Iterator] {}
-  TZ_LAYOUT_STRING_ITERATOR = 8, // Object [String Iterator] {}
+  TZ_LAYOUT_GENERATOR = 2,        // Object [Generator] {}
+  TZ_LAYOUT_ARRAY_ITERATOR = 4,   // Object [Array Iterator] {}
+  TZ_LAYOUT_STRING_ITERATOR = 8,  // Object [String Iterator] {}
   TZ_LAYOUT_ITERATOR_HELPER = 16, // Object [Iterator Helper] {}
   TZ_LAYOUT_REGEX = 32,
   TZ_LAYOUT_MATCH = 64,
@@ -395,10 +404,10 @@ enum {
   TZ_LAYOUT_DICT_VALUES = 16384,
   TZ_LAYOUT_DICT_ENTRIES = 32768,
   TZ_LAYOUT_DICT_OF_SET = 65536,
-  TZ_LAYOUT_PROMISE = 131072,     // Promise { value } (async.c)
-  TZ_LAYOUT_TIMER = 262144,       // Timeout {} and Immediate {}, by the layout's name; so the
-                                  // objects of node:crypto, Hash {}
-                                  // (runtime/library/crypto/crypto/crypto.h)
+  TZ_LAYOUT_PROMISE = 131072, // Promise { value } (async.c)
+  TZ_LAYOUT_TIMER = 262144,   // Timeout {} and Immediate {}, by the layout's name; so the
+                              // objects of node:crypto, Hash {}
+                              // (runtime/library/crypto/crypto/crypto.h)
   // An object of binary data (bytes.c): its TZ_BYTES_* kind is in the bits
   // from TZ_LAYOUT_BYTES_SHIFT on.
   TZ_LAYOUT_BYTES = 524288,
@@ -463,11 +472,15 @@ typedef struct TzLayout {
 // out.
 static inline int tz_field_is_symbol(const TzLayout *layout, const TzField *field) {
   static const char prefix[] = "Symbol(";
-  if (!(layout->flags & TZ_LAYOUT_LIBRARY) || field->name_length < sizeof prefix - 1)
+  if (!(layout->flags & TZ_LAYOUT_LIBRARY) || field->name_length < sizeof prefix - 1) {
     return 0;
-  for (size_t i = 0; i < sizeof prefix - 1; ++i)
-    if (field->name[i] != prefix[i])
+  }
+  for (size_t i = 0; i < sizeof prefix - 1; ++i) {
+    if (field->name[i] != prefix[i]) {
       return 0;
+    }
+  }
+
   return 1;
 }
 
@@ -485,12 +498,14 @@ typedef struct TzGetterType {
 } TzGetterType;
 
 static inline void tz_instance_release(TzInstance *o) {
-  if (!o)
+  if (!o) {
     return;
-  if (o->rc < 0)
+  }
+  if (o->rc < 0) {
     tz_group_release(o);
-  else if (--o->rc == 0)
+  } else if (--o->rc == 0) {
     o->layout->drop(o);
+  }
 }
 
 // Weak references (group.c): a WeakRef is an object whose layout's drop
@@ -540,6 +555,7 @@ static inline const TzType *tz_resolve(const TzType *type, const void **value) {
       return &tz_string_type;
     }
   }
+
   return type;
 }
 
@@ -612,8 +628,8 @@ typedef struct TzArray {
   const TzType *type; // of the elements
   char *data;         // the first element
   uint32_t length;
-  uint32_t capacity;  // elements that fit from `data` on
-  char *alloc;        // the separate buffer, or NULL for inline elements
+  uint32_t capacity; // elements that fit from `data` on
+  char *alloc;       // the separate buffer, or NULL for inline elements
 } TzArray;
 
 int64_t tz_arr_live_objects(void);
@@ -733,8 +749,9 @@ void tz_json_shutdown(void);
 // Frees a node whose count reached zero, and everything that dies with it.
 void tz_json_free(TzJson *j);
 static inline void tz_json_release(TzJson *j) {
-  if (j && tz_rc_dec(&j->rc))
+  if (j && tz_rc_dec(&j->rc)) {
     tz_json_free(j);
+  }
 }
 // The positions of the entries of an object in the order JavaScript gives
 // its keys: those that are array indices first, by their value, then the
@@ -788,10 +805,10 @@ enum {
 typedef struct TzMap {
   int64_t rc;
   const TzMapLayout *layout;
-  char *entries;           // room for `capacity`, `used` of them in use
-  uint32_t *index;         // positions + 1 by hash (0 for none), or NULL
-  uint32_t count;          // live entries: the size
-  uint32_t used;           // live and deleted entries, in the order added
+  char *entries;   // room for `capacity`, `used` of them in use
+  uint32_t *index; // positions + 1 by hash (0 for none), or NULL
+  uint32_t count;  // live entries: the size
+  uint32_t used;   // live and deleted entries, in the order added
   uint32_t capacity;
   uint32_t index_mask;     // the index has index_mask + 1 slots
   uint32_t iterating;      // iterations in progress
@@ -897,8 +914,7 @@ int32_t tz_lib_pid(void *(*make)(const void *));
 void tz_lib_inspect(TzStr *out, const void *u, void *(*make)(const void *));
 // `__tz_chunk<T>(u)` of an unknown that holds no T (stream.c): ends the
 // program.
-TZ_COLD TZ_NORETURN void tz_lib_bad_chunk(const void *u, const char *type,
-                                          uint32_t type_length);
+TZ_COLD TZ_NORETURN void tz_lib_bad_chunk(const void *u, const char *type, uint32_t type_length);
 // Whether the unknown `u` (borrowed) holds binary data of `kind` (TZ_BYTES_*).
 int32_t tz_lib_is_bytes(const void *u, int32_t kind);
 
@@ -966,8 +982,7 @@ void *tz_reflect_construct(const TzClass *cls, const TzArray *args);
 // Reflect.construct(C, args) of a class known when compiling: its function
 // `construct` (as TzClassInfo has it) makes the object from the array of
 // any values (borrowed), without the description of the class.
-void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count),
-                      const TzArray *args);
+void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count), const TzArray *args);
 // Reflect.get(target, key): a field as an unknown, a method as a function,
 // or undefined (NULL); a target that is no object is a TypeError.
 void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta);
@@ -1229,19 +1244,22 @@ static inline void tz_lock(TzLock *l) {
   }
   for (unsigned spin = 0;; ++spin) {
     int32_t none = 0;
-    if (__atomic_compare_exchange_n(&l->owner, &none, me, 1, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+    if (__atomic_compare_exchange_n(&l->owner, &none, me, 1, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
       break;
-    if (spin > 64)
+    }
+    if (spin > 64) {
       tz_thread_yield();
-    else
+    } else {
       tz_cpu_relax();
+    }
   }
   l->depth = 1;
 }
 
 static inline void tz_unlock(TzLock *l) {
-  if (--l->depth == 0)
+  if (--l->depth == 0) {
     __atomic_store_n(&l->owner, 0, __ATOMIC_RELEASE);
+  }
 }
 #else
 static inline void tz_lock(TzLock *l) { (void)l; }
@@ -1264,15 +1282,15 @@ void tz_store_barrier_ref(void *owner, void *object);
 // only what no other piece that may run at the same time writes; before the
 // first thing that is not so, it waits for its turn: tz_order_enter(),
 // which the program calls before such an access (CodeGen, from the decisions
-// of compiler/check/parallel/parallel.h), and TZ_ORDERED(), which the functions
-// of the runtime that touch its shared state (the queues, the promises, the
-// timers, the output...) begin with. On the main thread, and once the thread
-// has its turn, both cost a test.
+// of compiler/parallel/parallel_analysis/parallel_analysis.h), and TZ_ORDERED(), which the
+// functions of the runtime that touch its shared state (the queues, the promises, the timers, the
+// output...) begin with. On the main thread, and once the thread has its turn, both cost a test.
 #if TZ_PARALLEL && !defined(TZ_NO_THREAD_STATE)
 TZ_NOINLINE void tz_order_wait(void);
 static inline void tz_order_enter_inline(void) {
-  if (!tz_thread.turn)
+  if (!tz_thread.turn) {
     tz_order_wait();
+  }
 }
 #define TZ_ORDERED() tz_order_enter_inline()
 #else
@@ -1356,7 +1374,7 @@ typedef struct TzReactor TzReactor;
 // `ahead`: when the piece of async code it goes on with may run ahead of
 // its turn on a thread of the parallel runtime, the number of the await it
 // goes on from (CodeGen sets it at each await, from the decisions of
-// compiler/check/parallel/parallel.h), 0 when not; once a thread took it on,
+// compiler/parallel/parallel_analysis/parallel_analysis.h), 0 when not; once a thread took it on,
 // the TzJob it runs as (parallel.c). Every other reactor has 0.
 struct TzReactor {
   TzReactor *next;
@@ -1644,8 +1662,8 @@ static inline int64_t tz_bytes_byte_length(const TzBytes *b) {
 }
 // buf.toString(encoding, start?, end?), `has` saying which positions were
 // given (1 start, 2 end).
-void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start,
-                         int64_t end, int32_t has);
+void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start, int64_t end,
+                         int32_t has);
 // Appends the text of a typed array, as join() gives it.
 void tz_buf_bytes_join(TzBuf *out, const TzBytes *b, const TzBuf *sep);
 // Appends `<Buffer 68 65>`, and `ArrayBuffer`'s `<00 01>`: the hex of the

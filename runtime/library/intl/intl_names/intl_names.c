@@ -6,7 +6,6 @@
 // The data of the languages is the ICU of the system (icu.h, intl.h).
 
 #include "runtime/library/intl/intl/intl.h"
-
 #include <math.h>
 #include <string.h>
 
@@ -63,6 +62,7 @@ static TzStr text_of(const TzIcu *icu, const void *value, TzUErrorCode *status) 
   int32_t length = 0;
   const TzUChar *text =
       TZ_U_FAILURE(*status) ? NULL : icu->ufmtval_getString(value, &length, status);
+
   return text && !TZ_U_FAILURE(*status) ? tz_str_from_utf16(text, (size_t)length)
                                         : tz_str_from_ascii("", 0);
 }
@@ -75,23 +75,26 @@ TzIntl *tz_rtf_create(const TzIntlOptions *o) {
   const char *method = "Intl.RelativeTimeFormat";
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const numerics[] = {"always", "auto", NULL};
   char b[4][TZ_INTL_TEXT];
   int failed = 0;
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[0], method, &failed);
   const char *numbering = tz_intl_option(o, TZ_IO_NUMBERING_SYSTEM, NULL, b[1], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   if (numbering && !tz_intl_is_keyword_type(numbering)) {
     tz_throw(TZ_RANGE_ERROR, "Invalid numberingSystem : %s", numbering);
     return NULL;
   }
   const char *style = tz_intl_option(o, TZ_IO_STYLE, widths, b[2], method, &failed);
   const char *numeric = tz_intl_option(o, TZ_IO_NUMERIC, numerics, b[3], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   style = style ? style : "long";
   numeric = numeric ? numeric : "always";
   TzRelativeTimeFormat *f = (TzRelativeTimeFormat *)tz_intl_alloc(
@@ -125,22 +128,26 @@ TzIntl *tz_rtf_create(const TzIntlOptions *o) {
   void *numbers = icu->unumsys_open(id, &status);
   tz_intl_set_text(r, TZ_IO_NUMBERING_SYSTEM,
                    !TZ_U_FAILURE(status) && numbers ? icu->unumsys_getName(numbers) : "latn");
-  if (numbers)
+  if (numbers) {
     icu->unumsys_close(numbers);
+  }
   tz_intl_set_text(r, TZ_IO_STYLE, style);
   tz_intl_set_text(r, TZ_IO_NUMERIC, numeric);
   status = 0;
   f->formatter =
       icu->ureldatefmt_open(id, NULL, width_of(style), UDISPCTX_CAPITALIZATION_NONE, &status);
-  if (TZ_U_FAILURE(status) || !f->formatter)
+  if (TZ_U_FAILURE(status) || !f->formatter) {
     tz_intl_no_icu();
+  }
+
   return r;
 }
 
 static void rtf_drop(void *object) {
   TzRelativeTimeFormat *f = (TzRelativeTimeFormat *)object;
-  if (f->formatter)
+  if (f->formatter) {
     tz_icu()->ureldatefmt_close(f->formatter);
+  }
   tz_obj_free(f);
 }
 
@@ -150,16 +157,20 @@ static int rtf_unit(TzStr unit, const char **singular) {
   static const char *const units[] = {"year", "quarter", "month",  "week",
                                       "day",  "hour",    "minute", "second"};
   char text[16];
-  if (!tz_intl_ascii(unit, text, sizeof text))
+  if (!tz_intl_ascii(unit, text, sizeof text)) {
     return -1;
+  }
   size_t n = strlen(text);
-  if (n > 1 && text[n - 1] == 's')
+  if (n > 1 && text[n - 1] == 's') {
     text[n - 1] = 0;
-  for (int i = 0; i < 8; ++i)
+  }
+  for (int i = 0; i < 8; ++i) {
     if (strcmp(units[i], text) == 0) {
       *singular = units[i];
       return i;
     }
+  }
+
   return -1;
 }
 
@@ -182,10 +193,12 @@ static void *rtf_result(TzRelativeTimeFormat *f, double value, void *unit_obj, u
   const TzIcu *icu = tz_icu();
   TzUErrorCode status = 0;
   void *result = icu->ureldatefmt_openResult(&status);
-  if (strcmp(f->base.text[TZ_IO_NUMERIC], "auto") == 0)
+  if (strcmp(f->base.text[TZ_IO_NUMERIC], "auto") == 0) {
     icu->ureldatefmt_formatToResult(f->formatter, value, which, result, &status);
-  else
+  } else {
     icu->ureldatefmt_formatNumericToResult(f->formatter, value, which, result, &status);
+  }
+
   return result;
 }
 
@@ -228,16 +241,19 @@ TzArray *tz_rtf_format_to_parts(TzRelativeTimeFormat *f, double value, void *uni
   const char *singular;
   void *result = rtf_result(f, value, unit_obj, unit_meta,
                             "Intl.RelativeTimeFormat.prototype.formatToParts()", &singular);
-  if (!result)
+  if (!result) {
     return NULL;
+  }
   const TzIcu *icu = tz_icu();
   TzUErrorCode status = 0;
   const void *formatted = icu->ureldatefmt_resultAsValue(result, &status);
   TzArray *parts = tz_arr_new(shape->type, 0, 4);
-  if (!TZ_U_FAILURE(status))
+  if (!TZ_U_FAILURE(status)) {
     tz_intl_push_value_parts(parts, shape, formatted, UFIELD_CATEGORY_NUMBER, rtf_part_type, NULL,
                              singular);
+  }
   icu->ureldatefmt_closeResult(result);
+
   return parts;
 }
 
@@ -249,16 +265,18 @@ TzIntl *tz_lf_create(const TzIntlOptions *o) {
   const char *method = "Intl.ListFormat";
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const types[] = {"conjunction", "disjunction", "unit", NULL};
   char b[3][TZ_INTL_TEXT];
   int failed = 0;
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[0], method, &failed);
   const char *type = tz_intl_option(o, TZ_IO_TYPE, types, b[1], method, &failed);
   const char *style = tz_intl_option(o, TZ_IO_STYLE, widths, b[2], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   type = type ? type : "conjunction";
   style = style ? style : "long";
   TzListFormat *f =
@@ -270,15 +288,18 @@ TzIntl *tz_lf_create(const TzIntlOptions *o) {
   TzUErrorCode status = 0;
   int which = strcmp(type, "disjunction") == 0 ? 1 : strcmp(type, "unit") == 0 ? 2 : 0;
   f->formatter = icu->ulistfmt_openForType(found, which, width_of(style), &status);
-  if (TZ_U_FAILURE(status) || !f->formatter)
+  if (TZ_U_FAILURE(status) || !f->formatter) {
     tz_intl_no_icu();
+  }
+
   return r;
 }
 
 static void lf_drop(void *object) {
   TzListFormat *f = (TzListFormat *)object;
-  if (f->formatter)
+  if (f->formatter) {
     tz_icu()->ulistfmt_close(f->formatter);
+  }
   tz_obj_free(f);
 }
 
@@ -295,17 +316,20 @@ static void *lf_result(TzListFormat *f, const TzArray *list, TzUErrorCode *statu
     // Each item stays where it is while ICU reads its units.
     items[i] = ((const TzStr *)list->data)[i];
     strings[i] = tz_intl_utf16(&items[i], NULL, 0, &heaps[i], &lengths[i]);
-    if (!strings[i])
+    if (!strings[i]) {
       strings[i] = empty;
+    }
   }
   void *result = icu->ulistfmt_openResult(status);
   icu->ulistfmt_formatStringsToResult(f->formatter, strings, lengths, (int32_t)n, result, status);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n; ++i) {
     tz_free(heaps[i]);
+  }
   tz_free(heaps);
   tz_free(items);
   tz_free(lengths);
   tz_free(strings);
+
   return result;
 }
 
@@ -319,6 +343,7 @@ void tz_lf_format(TzStr *out, TzListFormat *f, const TzArray *list) {
 
 static const char *lf_part_type(int32_t field, void *ctx) {
   (void)ctx;
+
   return field == ULISTFMT_ELEMENT_FIELD ? "element" : "literal";
 }
 
@@ -328,9 +353,11 @@ TzArray *tz_lf_format_to_parts(TzListFormat *f, const TzArray *list, const TzInt
   void *result = lf_result(f, list, &status);
   const void *value = icu->ulistfmt_resultAsValue(result, &status);
   TzArray *parts = tz_arr_new(shape->type, 0, 8);
-  if (!TZ_U_FAILURE(status))
+  if (!TZ_U_FAILURE(status)) {
     tz_intl_push_value_parts(parts, shape, value, UFIELD_CATEGORY_LIST, lf_part_type, NULL, NULL);
+  }
   icu->ulistfmt_closeResult(result);
+
   return parts;
 }
 
@@ -342,8 +369,9 @@ TzIntl *tz_dn_create(const TzIntlOptions *o) {
   const char *method = "Intl.DisplayNames";
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const types[] = {"language", "region",        "script", "currency",
                                       "calendar", "dateTimeField", NULL};
   static const char *const fallbacks[] = {"code", "none", NULL};
@@ -359,8 +387,9 @@ TzIntl *tz_dn_create(const TzIntlOptions *o) {
   }
   const char *fallback = tz_intl_option(o, TZ_IO_FALLBACK, fallbacks, b[3], method, &failed);
   const char *display = tz_intl_option(o, TZ_IO_LANGUAGE_DISPLAY, displays, b[4], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   style = style ? style : "long";
   fallback = fallback ? fallback : "code";
   display = display ? display : "dialect";
@@ -372,39 +401,48 @@ TzIntl *tz_dn_create(const TzIntlOptions *o) {
   tz_intl_set_text(r, TZ_IO_STYLE, style);
   tz_intl_set_text(r, TZ_IO_TYPE, type);
   tz_intl_set_text(r, TZ_IO_FALLBACK, fallback);
-  if (strcmp(type, "language") == 0)
+  if (strcmp(type, "language") == 0) {
     tz_intl_set_text(r, TZ_IO_LANGUAGE_DISPLAY, display);
+  }
   int contexts[3] = {strcmp(style, "long") == 0 ? UDISPCTX_LENGTH_FULL : UDISPCTX_LENGTH_SHORT,
                      strcmp(display, "dialect") == 0 ? UDISPCTX_DIALECT_NAMES
                                                      : UDISPCTX_STANDARD_NAMES,
                      strcmp(fallback, "code") == 0 ? UDISPCTX_SUBSTITUTE : UDISPCTX_NO_SUBSTITUTE};
   TzUErrorCode status = 0;
   d->names = icu->uldn_openForContext(found, contexts, 3, &status);
-  if (TZ_U_FAILURE(status) || !d->names)
+  if (TZ_U_FAILURE(status) || !d->names) {
     tz_intl_no_icu();
+  }
   if (strcmp(type, "dateTimeField") == 0) {
     status = 0;
     d->generator = icu->udatpg_open(found, &status);
-    if (TZ_U_FAILURE(status))
+    if (TZ_U_FAILURE(status)) {
       tz_intl_no_icu();
+    }
   }
+
   return r;
 }
 
 static void dn_drop(void *object) {
   TzDisplayNames *d = (TzDisplayNames *)object;
   const TzIcu *icu = tz_icu();
-  if (d->names)
+  if (d->names) {
     icu->uldn_close(d->names);
-  if (d->generator)
+  }
+  if (d->generator) {
     icu->udatpg_close(d->generator);
+  }
   tz_obj_free(d);
 }
 
 static int all_of(const char *text, int (*test)(char)) {
-  for (; *text; ++text)
-    if (!test(*text))
+  for (; *text; ++text) {
+    if (!test(*text)) {
       return 0;
+    }
+  }
+
   return 1;
 }
 
@@ -417,17 +455,21 @@ static int checked_code(const TzIcu *icu, const char *type, const char *code, ch
                         size_t size) {
   size_t n = strlen(code);
   if (strcmp(type, "region") == 0) {
-    if (!((n == 2 && all_of(code, is_alpha)) || (n == 3 && all_of(code, is_digit))))
+    if (!((n == 2 && all_of(code, is_alpha)) || (n == 3 && all_of(code, is_digit)))) {
       return 0;
+    }
   } else if (strcmp(type, "script") == 0) {
-    if (n != 4 || !all_of(code, is_alpha))
+    if (n != 4 || !all_of(code, is_alpha)) {
       return 0;
+    }
   } else if (strcmp(type, "currency") == 0) {
-    if (n != 3 || !all_of(code, is_alpha))
+    if (n != 3 || !all_of(code, is_alpha)) {
       return 0;
+    }
   } else if (strcmp(type, "calendar") == 0) {
-    if (!tz_intl_is_keyword_type(code))
+    if (!tz_intl_is_keyword_type(code)) {
       return 0;
+    }
     const char *legacy = icu->uloc_toLegacyType("ca", code);
     tz_intl_copy(id, size, legacy ? legacy : code);
     return 1;
@@ -441,17 +483,20 @@ static int checked_code(const TzIcu *icu, const char *type, const char *code, ch
     int32_t m =
         icu->uloc_forLanguageTag(code, parsed_id, (int32_t)sizeof parsed_id - 1, &parsed, &status);
     if (TZ_U_FAILURE(status) || m <= 0 || parsed != (int32_t)n || strchr(parsed_id, '@') ||
-        !is_alpha(code[0]) || strncmp(code, "root", 4) == 0)
+        !is_alpha(code[0]) || strncmp(code, "root", 4) == 0) {
       return 0;
+    }
     parsed_id[m] = 0;
     status = 0;
     m = icu->uloc_canonicalize(parsed_id, id, (int32_t)size - 1, &status);
-    if (TZ_U_FAILURE(status) || m <= 0)
+    if (TZ_U_FAILURE(status) || m <= 0) {
       return 0;
+    }
     id[m] = 0;
     return 1;
   }
   tz_intl_copy(id, size, code);
+
   return 1;
 }
 
@@ -463,9 +508,12 @@ static int date_field(const char *code) {
   } fields[] = {{"era", 0},        {"year", 1},    {"quarter", 2}, {"month", 3},
                 {"weekOfYear", 4}, {"weekday", 6}, {"day", 9},     {"dayPeriod", 10},
                 {"hour", 11},      {"minute", 12}, {"second", 13}, {"timeZoneName", 15}};
-  for (size_t i = 0; i < sizeof fields / sizeof fields[0]; ++i)
-    if (strcmp(fields[i].name, code) == 0)
+  for (size_t i = 0; i < sizeof fields / sizeof fields[0]; ++i) {
+    if (strcmp(fields[i].name, code) == 0) {
       return fields[i].field;
+    }
+  }
+
   return -1;
 }
 
@@ -488,27 +536,29 @@ int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_me
   int32_t n = 0;
   TzUErrorCode status = 0;
   const void *names = d->names;
-  if (strcmp(type, "language") == 0)
+  if (strcmp(type, "language") == 0) {
     n = icu->uldn_localeDisplayName(names, id, name, 256, &status);
-  else if (strcmp(type, "region") == 0)
+  } else if (strcmp(type, "region") == 0) {
     n = icu->uldn_regionDisplayName(names, id, name, 256, &status);
-  else if (strcmp(type, "script") == 0)
+  } else if (strcmp(type, "script") == 0) {
     n = icu->uldn_scriptDisplayName(names, id, name, 256, &status);
-  else if (strcmp(type, "currency") == 0) {
+  } else if (strcmp(type, "currency") == 0) {
     // Its long name, which ICU says it has not when it gives the code back
     // (U_USING_DEFAULT_WARNING); LocaleDisplayNames would give the code.
     TzUChar units[4] = {(TzUChar)id[0], (TzUChar)id[1], (TzUChar)id[2], 0};
     const TzUChar *text =
         icu->ucurr_getName(units, d->icu_locale, UCURR_LONG_NAME, NULL, &n, &status);
-    if (status == U_USING_DEFAULT_WARNING || !text || n >= 256)
+    if (status == U_USING_DEFAULT_WARNING || !text || n >= 256) {
       status = U_ILLEGAL_ARGUMENT_ERROR;
-    else
+    } else {
       memcpy(name, text, (size_t)n * sizeof(TzUChar));
-  } else if (strcmp(type, "calendar") == 0)
+    }
+  } else if (strcmp(type, "calendar") == 0) {
     n = icu->uldn_keyValueDisplayName(names, "calendar", id, name, 256, &status);
-  else
+  } else {
     n = icu->udatpg_getFieldDisplayName(d->generator, field, width_of(d->base.text[TZ_IO_STYLE]),
                                         name, 256, &status);
+  }
   if (!TZ_U_FAILURE(status) && n > 0 && n < 256) {
     *out = tz_str_from_utf16(name, (size_t)n);
     return 1;
@@ -519,5 +569,6 @@ int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_me
     *out = given;
     return 1;
   }
+
   return 0;
 }

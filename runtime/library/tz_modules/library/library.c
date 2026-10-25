@@ -20,6 +20,7 @@ void *tz_lib_bare(void *map, TzMaker make) {
   (void)make;
   ((TzMap *)map)->flags |= TZ_MAP_BARE;
   tz_ref_retain(map); // it may be a member of a group (group.c)
+
   return map;
 }
 
@@ -39,8 +40,9 @@ void tz_lib_class_name(TzStr *out, const void *o, TzMaker make) {
   }
   TzBuf b;
   tz_buf_init(&b);
-  for (uint32_t i = 0; i < layout->name_length; ++i) // class names are identifiers
+  for (uint32_t i = 0; i < layout->name_length; ++i) { // class names are identifiers
     tz_buf_push(&b, (uint8_t)layout->name[i]);
+  }
   *out = tz_buf_take(&b);
 }
 
@@ -48,8 +50,10 @@ void tz_lib_class_name(TzStr *out, const void *o, TzMaker make) {
 int32_t tz_lib_pid(TzMaker make) {
   (void)make;
 #ifdef _WIN32
+
   return (int32_t)GetCurrentProcessId();
 #else
+
   return (int32_t)getpid();
 #endif
 }

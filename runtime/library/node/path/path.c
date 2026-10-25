@@ -5,7 +5,6 @@
 // these functions too, as Node does on Windows before it calls the system.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <string.h>
 
 typedef struct {
@@ -20,10 +19,13 @@ static int is_drive_letter(uint16_t c) { return (c >= 'A' && c <= 'Z') || (c >= 
 static Span span_of(const TzBuf *b) { return (Span){b->data, b->length}; }
 
 static Span span_sub(Span s, size_t from, size_t to) {
-  if (to > s.n)
+  if (to > s.n) {
     to = s.n;
-  if (from > to)
+  }
+  if (from > to) {
     from = to;
+  }
+
   return (Span){s.s + from, to - from};
 }
 
@@ -36,16 +38,22 @@ static int span_equal(Span a, Span b) {
 }
 
 static ptrdiff_t last_index_of(const TzBuf *b, uint16_t unit) {
-  for (size_t i = b->length; i > 0; --i)
-    if (b->data[i - 1] == unit)
+  for (size_t i = b->length; i > 0; --i) {
+    if (b->data[i - 1] == unit) {
       return (ptrdiff_t)(i - 1);
+    }
+  }
+
   return -1;
 }
 
 static int contains(Span s, uint16_t unit) {
-  for (size_t i = 0; i < s.n; ++i)
-    if (s.s[i] == unit)
+  for (size_t i = 0; i < s.n; ++i) {
+    if (s.s[i] == unit) {
       return 1;
+    }
+  }
+
   return 0;
 }
 
@@ -68,6 +76,7 @@ static int equal_ignoring_case(Span a, Span b) {
   int equal = span_equal(span_of(&x), span_of(&y));
   tz_buf_free(&x);
   tz_buf_free(&y);
+
   return equal;
 }
 
@@ -79,12 +88,13 @@ static void normalize_string(TzBuf *res, Span path, int allow_above_root, uint16
   int dots = 0;
   uint16_t code = 0;
   for (size_t i = 0; i <= path.n; ++i) {
-    if (i < path.n)
+    if (i < path.n) {
       code = path.s[i];
-    else if (is_separator(code))
+    } else if (is_separator(code)) {
       break;
-    else
+    } else {
       code = '/';
+    }
     if (is_separator(code)) {
       if (last_slash == (ptrdiff_t)i - 1 || dots == 1) {
         // Nothing: an empty segment or `.`.
@@ -114,14 +124,16 @@ static void normalize_string(TzBuf *res, Span path, int allow_above_root, uint16
           }
         }
         if (allow_above_root) {
-          if (res->length > 0)
+          if (res->length > 0) {
             tz_buf_push(res, separator);
+          }
           tz_buf_ascii(res, "..");
           last_segment_length = 2;
         }
       } else {
-        if (res->length > 0)
+        if (res->length > 0) {
           tz_buf_push(res, separator);
+        }
         put(res, span_sub(path, (size_t)(last_slash + 1), i));
         last_segment_length = (ptrdiff_t)i - last_slash - 1;
       }
@@ -142,18 +154,22 @@ static void cwd(TzBuf *out, int win32) {
   size_t start = out->length;
   tz_buf_str(out, dir);
   tz_str_release_value(dir);
-  if (win32)
+  if (win32) {
     return;
+  }
 #ifdef _WIN32
   // path.posix on Windows: the separators become '/', and the drive goes.
-  if (out->length == start)
+  if (out->length == start) {
     return;
+  }
   size_t first = out->length - 1; // slice(-1), as Node does without a '/'
   for (size_t i = out->length; i > start; --i) {
-    if (out->data[i - 1] == '\\')
+    if (out->data[i - 1] == '\\') {
       out->data[i - 1] = '/';
-    if (out->data[i - 1] == '/')
+    }
+    if (out->data[i - 1] == '/') {
       first = i - 1;
+    }
   }
   memmove(out->data + start, out->data + first, (out->length - first) * sizeof(uint16_t));
   out->length -= first - start;
@@ -178,22 +194,28 @@ typedef struct {
 // right after the root.
 static int match_unc(Span path, UncRoot *root) {
   size_t len = path.n, j = 2, last = j;
-  while (j < len && !is_any_sep(path.s[j]))
+  while (j < len && !is_any_sep(path.s[j])) {
     ++j;
-  if (!(j < len && j != last))
+  }
+  if (!(j < len && j != last)) {
     return 0;
+  }
   root->server = last;
   root->server_end = j;
   last = j;
-  while (j < len && is_any_sep(path.s[j]))
+  while (j < len && is_any_sep(path.s[j])) {
     ++j;
-  if (!(j < len && j != last))
+  }
+  if (!(j < len && j != last)) {
     return 0;
+  }
   last = j;
-  while (j < len && !is_any_sep(path.s[j]))
+  while (j < len && !is_any_sep(path.s[j])) {
     ++j;
+  }
   root->share = last;
   root->share_end = j;
+
   return j == len || j != last;
 }
 
@@ -209,12 +231,14 @@ static void resolve_posix(TzBuf *out, const Span *paths, size_t count) {
   int absolute = 0;
   for (ptrdiff_t i = (ptrdiff_t)count - 1; i >= -1 && !absolute; --i) {
     piece.length = 0;
-    if (i >= 0)
+    if (i >= 0) {
       put(&piece, paths[i]);
-    else
+    } else {
       cwd(&piece, 0);
-    if (piece.length == 0)
+    }
+    if (piece.length == 0) {
       continue;
+    }
     // `${path}/${resolvedPath}`
     tz_buf_push(&piece, '/');
     put(&piece, span_of(&resolved));
@@ -252,8 +276,9 @@ static void drive_cwd(TzBuf *out, Span device) {
     tz_buf_str(out, value);
     tz_str_release_value(value);
   }
-  if (!found || out->length == 0)
+  if (!found || out->length == 0) {
     cwd(out, 1);
+  }
   // Not on this drive: its root.
   Span path = span_of(out);
   if (!equal_ignoring_case(span_sub(path, 0, 2), device) && at(path, 2) == '\\') {
@@ -273,8 +298,9 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
   for (ptrdiff_t i = (ptrdiff_t)count - 1; i >= -1; --i) {
     piece.length = 0;
     if (i >= 0) {
-      if (paths[i].n == 0)
+      if (paths[i].n == 0) {
         continue;
+      }
       put(&piece, paths[i]);
     } else if (device_buf.length == 0) {
       cwd(&piece, 1);
@@ -330,12 +356,14 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
       }
     }
     tz_buf_free(&device);
-    if (skip)
+    if (skip) {
       continue;
+    }
 
     if (resolved_absolute) {
-      if (device_buf.length > 0)
+      if (device_buf.length > 0) {
         break;
+      }
     } else {
       // `${path.slice(rootEnd)}\\${resolvedTail}`
       TzBuf joined;
@@ -346,8 +374,9 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
       tz_buf_free(&tail);
       tail = joined;
       resolved_absolute = is_absolute;
-      if (is_absolute && device_buf.length > 0)
+      if (is_absolute && device_buf.length > 0) {
         break;
+      }
     }
   }
   normalize_string(&normal, span_of(&tail), !resolved_absolute, '\\', is_any_sep);
@@ -368,10 +397,11 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
 }
 
 static void resolve(TzBuf *out, const Span *paths, size_t count, int win32) {
-  if (win32)
+  if (win32) {
     resolve_win32(out, paths, count);
-  else
+  } else {
     resolve_posix(out, paths, count);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -391,11 +421,13 @@ static void normalize_posix(TzBuf *out, Span path) {
   if (normal.length == 0) {
     tz_buf_ascii(out, absolute ? "/" : trailing ? "./" : ".");
   } else {
-    if (absolute)
+    if (absolute) {
       tz_buf_push(out, '/');
+    }
     put(out, span_of(&normal));
-    if (trailing)
+    if (trailing) {
       tz_buf_push(out, '/');
+    }
   }
   tz_buf_free(&normal);
 }
@@ -409,22 +441,27 @@ static int is_reserved_name(Span path, ptrdiff_t colon) {
   // slice(0, colonIndex) of JavaScript: -1 drops the last unit.
   size_t end = colon >= 0 ? (size_t)colon : path.n > 0 ? path.n - 1 : 0;
   Span device = span_sub(path, 0, end);
-  if (device.n < 3 || device.n > 4)
+  if (device.n < 3 || device.n > 4) {
     return 0;
+  }
   for (size_t k = 0; k < sizeof names / sizeof *names; ++k) {
     size_t n = strlen(names[k]);
-    if (n != device.n)
+    if (n != device.n) {
       continue;
+    }
     size_t i = 0;
     for (; i < n; ++i) {
       uint16_t c = device.s[i];
-      if (c >= 'a' && c <= 'z')
+      if (c >= 'a' && c <= 'z') {
         c = (uint16_t)(c - 'a' + 'A');
-      if (c != (uint8_t)names[k][i])
+      }
+      if (c != (uint8_t)names[k][i]) {
         break;
+      }
     }
-    if (i == n)
+    if (i == n) {
       return 1;
+    }
   }
   // COM¹ and the like, superscript digits that Windows reads as digits too.
   if (device.n == 4) {
@@ -434,13 +471,17 @@ static int is_reserved_name(Span path, ptrdiff_t colon) {
       return (a == 'C' && b == 'O' && c == 'M') || (a == 'L' && b == 'P' && c == 'T');
     }
   }
+
   return 0;
 }
 
 static ptrdiff_t index_of_from(Span s, uint16_t unit, size_t from) {
-  for (size_t i = from; i < s.n; ++i)
-    if (s.s[i] == unit)
+  for (size_t i = from; i < s.n; ++i) {
+    if (s.s[i] == unit) {
       return (ptrdiff_t)i;
+    }
+  }
+
   return -1;
 }
 
@@ -453,10 +494,11 @@ static void normalize_win32(TzBuf *out, Span path) {
   uint16_t code = path.s[0];
   if (len == 1) {
     // A single '/' becomes '\\'; anything else stays.
-    if (is_posix_sep(code))
+    if (is_posix_sep(code)) {
       tz_buf_push(out, '\\');
-    else
+    } else {
       put(out, path);
+    }
     return;
   }
   size_t root_end = 0;
@@ -526,12 +568,15 @@ static void normalize_win32(TzBuf *out, Span path) {
 
   TzBuf tail;
   tz_buf_init(&tail);
-  if (root_end < len)
+  if (root_end < len) {
     normalize_string(&tail, span_sub(path, root_end, len), !is_absolute, '\\', is_any_sep);
-  if (tail.length == 0 && !is_absolute)
+  }
+  if (tail.length == 0 && !is_absolute) {
     tz_buf_push(&tail, '.');
-  if (tail.length > 0 && is_any_sep(path.s[len - 1]))
+  }
+  if (tail.length > 0 && is_any_sep(path.s[len - 1])) {
     tz_buf_push(&tail, '\\');
+  }
 
   int dot_prefix = 0;
   if (!is_absolute && !has_device && contains(path, ':')) {
@@ -542,9 +587,11 @@ static void normalize_win32(TzBuf *out, Span path) {
       dot_prefix = 1;
     } else {
       for (ptrdiff_t index = index_of_from(path, ':', 0); index != -1 && !dot_prefix;
-           index = index_of_from(path, ':', (size_t)index + 1))
-        if ((size_t)index == len - 1 || is_any_sep(at(path, (size_t)index + 1)))
+           index = index_of_from(path, ':', (size_t)index + 1)) {
+        if ((size_t)index == len - 1 || is_any_sep(at(path, (size_t)index + 1))) {
           dot_prefix = 1;
+        }
+      }
     }
     if (dot_prefix) {
       tz_buf_ascii(out, ".\\");
@@ -559,13 +606,15 @@ static void normalize_win32(TzBuf *out, Span path) {
     put(out, span_of(&device));
     put(out, span_of(&tail));
   } else if (!has_device) {
-    if (is_absolute)
+    if (is_absolute) {
       tz_buf_push(out, '\\');
+    }
     put(out, span_of(&tail));
   } else {
     put(out, span_of(&device));
-    if (is_absolute)
+    if (is_absolute) {
       tz_buf_push(out, '\\');
+    }
     put(out, span_of(&tail));
   }
   tz_buf_free(&tail);
@@ -573,10 +622,11 @@ static void normalize_win32(TzBuf *out, Span path) {
 }
 
 static void normalize(TzBuf *out, Span path, int win32) {
-  if (win32)
+  if (win32) {
     normalize_win32(out, path);
-  else
+  } else {
     normalize_posix(out, path);
+  }
 }
 
 static void join_posix(TzBuf *out, const Span *paths, size_t count) {
@@ -584,17 +634,20 @@ static void join_posix(TzBuf *out, const Span *paths, size_t count) {
   tz_buf_init(&joined);
   int any = 0;
   for (size_t i = 0; i < count; ++i) {
-    if (paths[i].n == 0)
+    if (paths[i].n == 0) {
       continue;
-    if (any)
+    }
+    if (any) {
       tz_buf_push(&joined, '/');
+    }
     put(&joined, paths[i]);
     any = 1;
   }
-  if (!any)
+  if (!any) {
     tz_buf_push(out, '.');
-  else
+  } else {
     normalize_posix(out, span_of(&joined));
+  }
   tz_buf_free(&joined);
 }
 
@@ -604,12 +657,14 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
   Span first = {NULL, 0};
   int any = 0;
   for (size_t i = 0; i < count; ++i) {
-    if (paths[i].n == 0)
+    if (paths[i].n == 0) {
       continue;
-    if (any)
+    }
+    if (any) {
       tz_buf_push(&joined, '\\');
-    else
+    } else {
       first = paths[i];
+    }
     put(&joined, paths[i]);
     any = 1;
   }
@@ -627,16 +682,18 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
     if (first.n > 1 && is_any_sep(first.s[1])) {
       ++slashes;
       if (first.n > 2) {
-        if (is_any_sep(first.s[2]))
+        if (is_any_sep(first.s[2])) {
           ++slashes;
-        else
+        } else {
           needs_replace = 0;
+        }
       }
     }
   }
   if (needs_replace) {
-    while (slashes < joined.length && is_any_sep(joined.data[slashes]))
+    while (slashes < joined.length && is_any_sep(joined.data[slashes])) {
       ++slashes;
+    }
     if (slashes >= 2) {
       joined.data[0] = '\\';
       memmove(joined.data + 1, joined.data + slashes, (joined.length - slashes) * sizeof(uint16_t));
@@ -648,19 +705,23 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
   Span whole = span_of(&joined);
   int reserved = 0;
   for (size_t i = 0; i < whole.n && !reserved;) {
-    while (i < whole.n && whole.s[i] == '\\')
+    while (i < whole.n && whole.s[i] == '\\') {
       ++i;
+    }
     size_t start = i;
-    while (i < whole.n && whole.s[i] != '\\')
+    while (i < whole.n && whole.s[i] != '\\') {
       ++i;
+    }
     Span part = span_sub(whole, start, i);
     ptrdiff_t colon = index_of_from(part, ':', 0);
-    if (part.n > 0 && colon != -1 && is_reserved_name(part, colon))
+    if (part.n > 0 && colon != -1 && is_reserved_name(part, colon)) {
       reserved = 1;
+    }
   }
   if (reserved) {
-    for (size_t i = 0; i < whole.n; ++i)
+    for (size_t i = 0; i < whole.n; ++i) {
       tz_buf_push(out, whole.s[i] == '/' ? '\\' : whole.s[i]);
+    }
   } else {
     normalize_win32(out, whole);
   }
@@ -672,8 +733,9 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
 //===----------------------------------------------------------------------===//
 
 static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
-  if (span_equal(from_in, to_in))
+  if (span_equal(from_in, to_in)) {
     return;
+  }
   TzBuf fb, tb;
   tz_buf_init(&fb);
   tz_buf_init(&tb);
@@ -689,10 +751,12 @@ static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
     int done = 0;
     for (; i < length; ++i) {
       uint16_t c = from.s[from_start + i];
-      if (c != to.s[to_start + i])
+      if (c != to.s[to_start + i]) {
         break;
-      if (c == '/')
+      }
+      if (c == '/') {
         last_common = (ptrdiff_t)i;
+      }
     }
     if (i == length) {
       if (to_len > length) {
@@ -704,19 +768,21 @@ static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
           done = 1;
         }
       } else if (from_len > length) {
-        if (from.s[from_start + i] == '/')
+        if (from.s[from_start + i] == '/') {
           last_common = (ptrdiff_t)i;
-        else if (i == 0)
+        } else if (i == 0) {
           last_common = 0;
+        }
       }
     }
     if (!done) {
       size_t written = 0;
-      for (i = from_start + (size_t)(last_common + 1); i <= from_end; ++i)
+      for (i = from_start + (size_t)(last_common + 1); i <= from_end; ++i) {
         if (i == from_end || from.s[i] == '/') {
           tz_buf_ascii(out, written ? "/.." : "..");
           written = 1;
         }
+      }
       put(out, span_sub(to, to_start + (size_t)last_common, to.n));
     }
   }
@@ -727,21 +793,26 @@ static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
 // Splits at '\\' as split('\\') does, without an empty last part.
 static size_t split_backslash(Span s, Span *parts, size_t max) {
   size_t count = 0, start = 0;
-  for (size_t i = 0; i <= s.n; ++i)
+  for (size_t i = 0; i <= s.n; ++i) {
     if (i == s.n || s.s[i] == '\\') {
-      if (count < max)
+      if (count < max) {
         parts[count] = span_sub(s, start, i);
+      }
       ++count;
       start = i + 1;
     }
-  if (count > 0 && count <= max && parts[count - 1].n == 0)
+  }
+  if (count > 0 && count <= max && parts[count - 1].n == 0) {
     --count;
+  }
+
   return count;
 }
 
 static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
-  if (span_equal(from_in, to_in))
+  if (span_equal(from_in, to_in)) {
     return;
+  }
   TzBuf fo, to_b, fl, tl;
   tz_buf_init(&fo);
   tz_buf_init(&to_b);
@@ -750,13 +821,15 @@ static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
   resolve_win32(&fo, &from_in, 1);
   resolve_win32(&to_b, &to_in, 1);
   Span from_orig = span_of(&fo), to_orig = span_of(&to_b);
-  if (span_equal(from_orig, to_orig))
+  if (span_equal(from_orig, to_orig)) {
     goto done;
+  }
   lower(&fl, from_orig);
   lower(&tl, to_orig);
   Span from = span_of(&fl), to = span_of(&tl);
-  if (span_equal(from, to))
+  if (span_equal(from, to)) {
     goto done;
+  }
 
   if (from_orig.n != from.n || to_orig.n != to.n) {
     // Lower case changed the lengths: compare part by part.
@@ -767,29 +840,35 @@ static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
     from_count = split_backslash(from_orig, fp, from_count + 1);
     to_count = split_backslash(to_orig, tp, to_count + 1);
     size_t length = from_count < to_count ? from_count : to_count, i = 0;
-    for (; i < length; ++i)
-      if (!equal_ignoring_case(fp[i], tp[i]))
+    for (; i < length; ++i) {
+      if (!equal_ignoring_case(fp[i], tp[i])) {
         break;
+      }
+    }
     if (i == 0) {
       put(out, to_orig);
     } else if (i == length) {
       if (to_count > length) {
         for (size_t k = i; k < to_count; ++k) {
-          if (k > i)
+          if (k > i) {
             tz_buf_push(out, '\\');
+          }
           put(out, tp[k]);
         }
       } else if (from_count > length) {
-        for (size_t k = 0; k + 1 + i < from_count; ++k)
+        for (size_t k = 0; k + 1 + i < from_count; ++k) {
           tz_buf_ascii(out, "..\\");
+        }
         tz_buf_ascii(out, "..");
       }
     } else {
-      for (size_t k = i; k < from_count; ++k)
+      for (size_t k = i; k < from_count; ++k) {
         tz_buf_ascii(out, "..\\");
+      }
       for (size_t k = i; k < to_count; ++k) {
-        if (k > i)
+        if (k > i) {
           tz_buf_push(out, '\\');
+        }
         put(out, tp[k]);
       }
     }
@@ -800,28 +879,34 @@ static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
 
   {
     size_t from_start = 0;
-    while (from_start < from.n && from.s[from_start] == '\\')
+    while (from_start < from.n && from.s[from_start] == '\\') {
       ++from_start;
+    }
     size_t from_end = from.n;
-    while (from_end - 1 > from_start && from.s[from_end - 1] == '\\')
+    while (from_end - 1 > from_start && from.s[from_end - 1] == '\\') {
       --from_end;
+    }
     size_t from_len = from_end - from_start;
     size_t to_start = 0;
-    while (to_start < to.n && to.s[to_start] == '\\')
+    while (to_start < to.n && to.s[to_start] == '\\') {
       ++to_start;
+    }
     size_t to_end = to.n;
-    while (to_end - 1 > to_start && to.s[to_end - 1] == '\\')
+    while (to_end - 1 > to_start && to.s[to_end - 1] == '\\') {
       --to_end;
+    }
     size_t to_len = to_end - to_start;
 
     size_t length = from_len < to_len ? from_len : to_len, i = 0;
     ptrdiff_t last_common = -1;
     for (; i < length; ++i) {
       uint16_t c = from.s[from_start + i];
-      if (c != to.s[to_start + i])
+      if (c != to.s[to_start + i]) {
         break;
-      if (c == '\\')
+      }
+      if (c == '\\') {
         last_common = (ptrdiff_t)i;
+      }
     }
     if (i != length) {
       if (last_common == -1) {
@@ -840,26 +925,30 @@ static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
         }
       }
       if (from_len > length) {
-        if (from.s[from_start + i] == '\\')
+        if (from.s[from_start + i] == '\\') {
           last_common = (ptrdiff_t)i;
-        else if (i == 2)
+        } else if (i == 2) {
           last_common = 3;
+        }
       }
-      if (last_common == -1)
+      if (last_common == -1) {
         last_common = 0;
+      }
     }
     size_t written = 0;
-    for (i = from_start + (size_t)(last_common + 1); i <= from_end; ++i)
+    for (i = from_start + (size_t)(last_common + 1); i <= from_end; ++i) {
       if (i == from_end || from.s[i] == '\\') {
         tz_buf_ascii(out, written ? "\\.." : "..");
         written = 1;
       }
+    }
     to_start += (size_t)last_common;
     if (written) {
       put(out, span_sub(to_orig, to_start, to_end));
     } else {
-      if (at(to_orig, to_start) == '\\')
+      if (at(to_orig, to_start) == '\\') {
         ++to_start;
+      }
       put(out, span_sub(to_orig, to_start, to_end));
     }
   }
@@ -901,6 +990,7 @@ static Span dirname_posix(Span path, const char **literal) {
     *literal = "//";
     return path;
   }
+
   return span_sub(path, 0, (size_t)end);
 }
 
@@ -915,8 +1005,9 @@ static Span dirname_win32(Span path, const char **literal) {
   size_t offset = 0;
   uint16_t code = path.s[0];
   if (len == 1) {
-    if (is_any_sep(code))
+    if (is_any_sep(code)) {
       return path;
+    }
     *literal = ".";
     return path;
   }
@@ -926,8 +1017,9 @@ static Span dirname_win32(Span path, const char **literal) {
     if (is_any_sep(path.s[1])) {
       UncRoot unc;
       if (match_unc(path, &unc)) {
-        if (unc.share_end == len)
+        if (unc.share_end == len) {
           return path; // only a UNC root
+        }
         root_end = (ptrdiff_t)unc.share_end + 1;
         offset = unc.share_end + 1;
       }
@@ -955,6 +1047,7 @@ static Span dirname_win32(Span path, const char **literal) {
     }
     end = root_end;
   }
+
   return span_sub(path, 0, (size_t)end);
 }
 
@@ -963,11 +1056,13 @@ static Span basename_of(Span path, const Span *suffix, int win32) {
   size_t start = 0;
   ptrdiff_t end = -1;
   int matched_slash = 1;
-  if (win32 && path.n >= 2 && is_drive_letter(path.s[0]) && path.s[1] == ':')
+  if (win32 && path.n >= 2 && is_drive_letter(path.s[0]) && path.s[1] == ':') {
     start = 2;
+  }
   if (suffix && suffix->n > 0 && suffix->n <= path.n) {
-    if (span_equal(*suffix, path))
+    if (span_equal(*suffix, path)) {
       return (Span){path.s, 0};
+    }
     ptrdiff_t ext = (ptrdiff_t)suffix->n - 1, first_non_slash_end = -1;
     for (ptrdiff_t i = (ptrdiff_t)path.n - 1; i >= (ptrdiff_t)start; --i) {
       uint16_t code = path.s[i];
@@ -983,8 +1078,9 @@ static Span basename_of(Span path, const Span *suffix, int win32) {
         }
         if (ext >= 0) {
           if (code == suffix->s[ext]) {
-            if (--ext == -1)
+            if (--ext == -1) {
               end = i;
+            }
           } else {
             ext = -1;
             end = first_non_slash_end;
@@ -992,10 +1088,11 @@ static Span basename_of(Span path, const Span *suffix, int win32) {
         }
       }
     }
-    if ((ptrdiff_t)start == end)
+    if ((ptrdiff_t)start == end) {
       end = first_non_slash_end;
-    else if (end == -1)
+    } else if (end == -1) {
       end = (ptrdiff_t)path.n;
+    }
     return span_sub(path, start, (size_t)end);
   }
   for (ptrdiff_t i = (ptrdiff_t)path.n - 1; i >= (ptrdiff_t)start; --i) {
@@ -1009,8 +1106,10 @@ static Span basename_of(Span path, const Span *suffix, int win32) {
       end = i + 1;
     }
   }
-  if (end == -1)
+  if (end == -1) {
     return (Span){path.s, 0};
+  }
+
   return span_sub(path, start, (size_t)end);
 }
 
@@ -1040,28 +1139,34 @@ static LastPart last_part(Span path, size_t from, size_t start_part, int win32) 
       r.end = i + 1;
     }
     if (code == '.') {
-      if (r.start_dot == -1)
+      if (r.start_dot == -1) {
         r.start_dot = i;
-      else if (pre_dot_state != 1)
+      } else if (pre_dot_state != 1) {
         pre_dot_state = 1;
+      }
     } else if (r.start_dot != -1) {
       pre_dot_state = -1;
     }
   }
   // No dot, a dot right at the start of the part, or the part `..`.
   if (r.start_dot == -1 || r.end == -1 || pre_dot_state == 0 ||
-      (pre_dot_state == 1 && r.start_dot == r.end - 1 && r.start_dot == r.start_part + 1))
+      (pre_dot_state == 1 && r.start_dot == r.end - 1 && r.start_dot == r.start_part + 1)) {
     r.start_dot = -1;
+  }
+
   return r;
 }
 
 static Span extname_of(Span path, int win32) {
   size_t start = 0;
-  if (win32 && path.n >= 2 && path.s[1] == ':' && is_drive_letter(path.s[0]))
+  if (win32 && path.n >= 2 && path.s[1] == ':' && is_drive_letter(path.s[0])) {
     start = 2;
+  }
   LastPart part = last_part(path, start, start, win32);
-  if (part.start_dot == -1)
+  if (part.start_dot == -1) {
     return (Span){path.s, 0};
+  }
+
   return span_sub(path, (size_t)part.start_dot, (size_t)part.end);
 }
 
@@ -1079,12 +1184,14 @@ static Span *spans_of(TzArray *parts, TzBuf **bufs) {
     tz_buf_str(&(*bufs)[i], ((TzStr *)parts->data)[i]);
     spans[i] = span_of(&(*bufs)[i]);
   }
+
   return spans;
 }
 
 static void free_spans(Span *spans, TzBuf *bufs, size_t n) {
-  for (size_t i = 0; i < n; ++i)
+  for (size_t i = 0; i < n; ++i) {
     tz_buf_free(&bufs[i]);
+  }
   tz_free(bufs);
   tz_free(spans);
 }
@@ -1107,10 +1214,11 @@ void tz_path_join(TzStr *out, TzArray *parts, int32_t win32) {
   Span *spans = spans_of(parts, &bufs);
   TzBuf b;
   tz_buf_init(&b);
-  if (win32)
+  if (win32) {
     join_win32(&b, spans, parts->length);
-  else
+  } else {
     join_posix(&b, spans, parts->length);
+  }
   free_spans(spans, bufs, parts->length);
   finish(out, &b);
 }
@@ -1140,12 +1248,14 @@ int32_t tz_path_is_absolute(void *obj, uint64_t meta, int32_t win32) {
   text_init(&t, obj, meta);
   Span p = t.span;
   int absolute;
-  if (!win32)
+  if (!win32) {
     absolute = p.n > 0 && p.s[0] == '/';
-  else
+  } else {
     absolute = p.n > 0 && (is_any_sep(p.s[0]) || (p.n > 2 && is_drive_letter(p.s[0]) &&
                                                   p.s[1] == ':' && is_any_sep(p.s[2])));
+  }
   tz_buf_free(&t.buf);
+
   return absolute;
 }
 
@@ -1156,10 +1266,11 @@ void tz_path_dirname(TzStr *out, void *obj, uint64_t meta, int32_t win32) {
   Span dir = win32 ? dirname_win32(t.span, &literal) : dirname_posix(t.span, &literal);
   TzBuf b;
   tz_buf_init(&b);
-  if (literal)
+  if (literal) {
     tz_buf_ascii(&b, literal);
-  else
+  } else {
     put(&b, dir);
+  }
   tz_buf_free(&t.buf);
   finish(out, &b);
 }
@@ -1194,10 +1305,11 @@ void tz_path_relative(TzStr *out, void *from_obj, uint64_t from_meta, void *to_o
   text_init(&to, to_obj, to_meta);
   TzBuf b;
   tz_buf_init(&b);
-  if (win32)
+  if (win32) {
     relative_win32(&b, from.span, to.span);
-  else
+  } else {
     relative_posix(&b, from.span, to.span);
+  }
   tz_buf_free(&from.buf);
   tz_buf_free(&to.buf);
   finish(out, &b);
@@ -1216,17 +1328,19 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
   if (len > 0 && win32) {
     uint16_t code = path.s[0];
     if (len == 1) {
-      if (is_any_sep(code))
+      if (is_any_sep(code)) {
         root = dir = path;
-      else
+      } else {
         base = name = path;
+      }
       whole = 1;
     } else if (is_any_sep(code)) {
       root_end = 1;
       if (is_any_sep(path.s[1])) {
         UncRoot unc;
-        if (match_unc(path, &unc))
+        if (match_unc(path, &unc)) {
           root_end = unc.share_end == len ? len : unc.share_end + 1;
+        }
       }
     } else if (is_drive_letter(code) && path.s[1] == ':') {
       if (len <= 2 || (is_any_sep(path.s[2]) && len == 3)) {
@@ -1250,15 +1364,17 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
       }
       // A directory that is the root keeps its separator: `C:\abc` is in
       // `C:\`.
-      if (part.start_part > 0 && (size_t)part.start_part != root_end)
+      if (part.start_part > 0 && (size_t)part.start_part != root_end) {
         dir = span_sub(path, 0, (size_t)part.start_part - 1);
-      else
+      } else {
         dir = root;
+      }
     }
   } else if (len > 0) {
     int absolute = path.s[0] == '/';
-    if (absolute)
+    if (absolute) {
       root = span_sub(path, 0, 1);
+    }
     LastPart part = last_part(path, absolute ? 1 : 0, 0, 0);
     if (part.end != -1) {
       size_t from = part.start_part == 0 && absolute ? 1 : (size_t)part.start_part;
@@ -1270,10 +1386,11 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
         ext = span_sub(path, (size_t)part.start_dot, (size_t)part.end);
       }
     }
-    if (part.start_part > 0)
+    if (part.start_part > 0) {
       dir = span_sub(path, 0, (size_t)part.start_part - 1);
-    else if (absolute)
+    } else if (absolute) {
       dir = root;
+    }
   }
   TzParsedPath parts;
   parts.root = tz_str_from_utf16(root.s, root.n);
@@ -1282,6 +1399,7 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
   parts.ext = tz_str_from_utf16(ext.s, ext.n);
   parts.name = tz_str_from_utf16(name.s, name.n);
   tz_buf_free(&t.buf);
+
   return make(&parts);
 }
 
@@ -1291,8 +1409,9 @@ void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
   TzBuf f[5];
   for (int i = 0; i < 5; ++i) {
     tz_buf_init(&f[i]);
-    if (parts[i].has)
+    if (parts[i].has) {
       tz_buf_str(&f[i], parts[i].value);
+    }
   }
   Span root = span_of(&f[0]), dir = span_of(&f[1]), base = span_of(&f[2]), ext = span_of(&f[3]),
        name = span_of(&f[4]);
@@ -1302,29 +1421,33 @@ void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
   if (d.n > 0) {
     put(&b, d);
     // A root ends with its separator.
-    if (!span_equal(d, root))
+    if (!span_equal(d, root)) {
       tz_buf_push(&b, win32 ? '\\' : '/');
+    }
   }
   if (base.n > 0) {
     put(&b, base);
   } else {
     put(&b, name);
     if (ext.n > 0) {
-      if (ext.s[0] != '.')
+      if (ext.s[0] != '.') {
         tz_buf_push(&b, '.');
+      }
       put(&b, ext);
     }
   }
-  for (int i = 0; i < 5; ++i)
+  for (int i = 0; i < 5; ++i) {
     tz_buf_free(&f[i]);
+  }
   finish(out, &b);
 }
 
 // path.toNamespacedPath(): on win32, the `\\?\` form of an absolute path,
 // which takes long paths; posix paths stay as they are.
 static void namespaced(TzBuf *out, Span path) {
-  if (path.n == 0)
+  if (path.n == 0) {
     return;
+  }
   TzBuf resolved;
   tz_buf_init(&resolved);
   resolve_win32(&resolved, &path, 1);
@@ -1352,10 +1475,11 @@ void tz_path_to_namespaced(TzStr *out, void *obj, uint64_t meta, int32_t win32) 
   text_init(&t, obj, meta);
   TzBuf b;
   tz_buf_init(&b);
-  if (win32)
+  if (win32) {
     namespaced(&b, t.span);
-  else
+  } else {
     put(&b, t.span);
+  }
   tz_buf_free(&t.buf);
   finish(out, &b);
 }

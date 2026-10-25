@@ -5,7 +5,6 @@
 // system; the main thread holds each EVP_PKEY while its job runs and makes the results.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ec.h>
@@ -45,10 +44,13 @@ typedef struct KeyJob {
 
 static uint8_t *copy(const uint8_t *data, size_t length) {
   uint8_t *p = (uint8_t *)malloc(length ? length : 1);
-  if (!p)
+  if (!p) {
     tz_panic("out of memory", -1);
-  if (length)
+  }
+  if (length) {
     memcpy(p, data, length);
+  }
+
   return p;
 }
 
@@ -62,6 +64,7 @@ static KeyJob *job_new(TzPromise *p, int makes, const TzKey *key) {
     j->key = (EVP_PKEY *)key->pkey;
     EVP_PKEY_up_ref(j->key);
   }
+
   return j;
 }
 
@@ -87,8 +90,7 @@ static void job_free(KeyJob *j) {
 
 // Copies the data (and the signature or label): false with the promise rejected and the job
 // freed, for a value that is no bytes, which the library's types rule out.
-static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *xt,
-                    const void *xv) {
+static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *xt, const void *xv) {
   TzCryptoData d, x = {NULL, 0, NULL};
   if (!tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data") ||
       (xt && !tz_crypto_data(&x, xt, xv, TZ_ENC_UTF8, "data"))) {
@@ -106,6 +108,7 @@ static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *x
   }
   tz_crypto_data_done(&x);
   tz_crypto_data_done(&d);
+
   return 1;
 }
 
@@ -133,8 +136,9 @@ static void job_done(TzWork *w) {
     TzArrayBuffer *out = NULL;
     if (!j->failed) {
       out = tz_abuf_new((int64_t)j->out_length);
-      if (j->out_length)
+      if (j->out_length) {
         memcpy(out->data, j->out, j->out_length);
+      }
     }
     memcpy(value, &out, sizeof out);
   }
@@ -177,6 +181,7 @@ static EVP_MD_CTX *sign_context(KeyJob *j, int verify) {
     EVP_MD_CTX_free(ctx);
     return NULL;
   }
+
   return ctx;
 }
 
@@ -189,8 +194,9 @@ static void sign_run(KeyJob *j) {
     return;
   }
   uint8_t *sig = (uint8_t *)malloc(length ? length : 1);
-  if (!sig)
+  if (!sig) {
     tz_panic("out of memory", -1);
+  }
   int ok = EVP_DigestSign(ctx, sig, &length, j->data, j->data_length) > 0;
   EVP_MD_CTX_free(ctx);
   if (ok && j->kind == SIGN_ECDSA) {
@@ -262,8 +268,9 @@ void tz_openssl_subtle_sign(TzPromise *p, const TzKey *key, int32_t kind, void *
   j->kind = kind;
   j->salt_length = salt_length;
   name_of(j->md, sizeof j->md, md_obj, md_meta);
-  if (job_take(j, dt, dv, NULL, NULL))
+  if (job_take(j, dt, dv, NULL, NULL)) {
     job_queue(j, sign_run);
+  }
 }
 
 // verify(algorithm, key, signature, data): 1 or 0, or -1 when OpenSSL refuses the key or the
@@ -275,8 +282,9 @@ void tz_openssl_subtle_verify(TzPromise *p, const TzKey *key, int32_t kind, void
   j->kind = kind;
   j->salt_length = salt_length;
   name_of(j->md, sizeof j->md, md_obj, md_meta);
-  if (job_take(j, dt, dv, st, sv))
+  if (job_take(j, dt, dv, st, sv)) {
     job_queue(j, verify_run);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -296,14 +304,16 @@ static void oaep_run(KeyJob *j) {
     if (ok) {
       memcpy(label, j->extra, j->extra_length);
       ok = EVP_PKEY_CTX_set0_rsa_oaep_label(ctx, label, (int)j->extra_length) > 0;
-      if (!ok)
+      if (!ok) {
         OPENSSL_free(label);
+      }
     }
   }
   size_t length = 0;
-  if (ok)
+  if (ok) {
     ok = (j->flag ? EVP_PKEY_decrypt(ctx, NULL, &length, j->data, j->data_length)
                   : EVP_PKEY_encrypt(ctx, NULL, &length, j->data, j->data_length)) > 0;
+  }
   uint8_t *out = NULL;
   if (ok) {
     out = (uint8_t *)malloc(length ? length : 1);
@@ -323,13 +333,14 @@ static void oaep_run(KeyJob *j) {
 // encrypt and decrypt of RSA-OAEP: the hash of the key by OpenSSL's name, the label or
 // undefined.
 void tz_openssl_subtle_rsa_oaep(TzPromise *p, const TzKey *key, void *md_obj, uint64_t md_meta,
-                                const TzType *lt, const void *lv, int32_t decrypt,
-                                const TzType *dt, const void *dv) {
+                                const TzType *lt, const void *lv, int32_t decrypt, const TzType *dt,
+                                const void *dv) {
   KeyJob *j = job_new(p, MAKES_BYTES, key);
   j->flag = decrypt;
   name_of(j->md, sizeof j->md, md_obj, md_meta);
-  if (job_take(j, dt, dv, lt, lv))
+  if (job_take(j, dt, dv, lt, lv)) {
     job_queue(j, oaep_run);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -389,8 +400,9 @@ static void generate_run(KeyJob *j) {
     ok = nid != NID_undef && EVP_PKEY_CTX_set_group_name(ctx, OBJ_nid2sn(nid)) > 0;
   }
   EVP_PKEY *pkey = NULL;
-  if (ok)
+  if (ok) {
     ok = EVP_PKEY_generate(ctx, &pkey) > 0;
+  }
   EVP_PKEY_CTX_free(ctx);
   if (!ok) {
     EVP_PKEY_free(pkey);

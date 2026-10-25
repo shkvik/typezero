@@ -4,10 +4,8 @@
 // covers the AAD and the ciphertext, each padded to 16 bytes, and their lengths.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/crypto.h>
 #include <string.h>
-
 #include "crypto/poly1305.h"
 
 void ChaCha20_ctr32(unsigned char *out, const unsigned char *inp, size_t len,
@@ -33,23 +31,27 @@ static int chacha_init(TzCipher *c, const uint8_t *key, size_t key_length, const
   (void)key_length;
   (void)iv_length;
   Chacha *k = (Chacha *)c->ctx;
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 8; ++i) {
     k->key[i] = le32(key + 4 * i);
+  }
   k->counter[0] = 0;
-  for (int i = 0; i < 3; ++i)
+  for (int i = 0; i < 3; ++i) {
     k->counter[1 + i] = le32(iv + 4 * i);
+  }
   uint8_t block[64] = {0};
   ChaCha20_ctr32(block, block, sizeof block, k->key, k->counter);
   Poly1305_Init(&k->poly, block);
   memset(block, 0, sizeof block);
   k->counter[0] = 1;
+
   return 1;
 }
 
 static void pad16(Chacha *k, uint64_t length) {
   static const uint8_t zeros[16] = {0};
-  if (length % 16)
+  if (length % 16) {
     Poly1305_Update(&k->poly, zeros, 16 - (size_t)(length % 16));
+  }
 }
 
 static int chacha_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaintext_length) {
@@ -57,6 +59,7 @@ static int chacha_aad(TzCipher *c, const uint8_t *aad, size_t length, double pla
   Chacha *k = (Chacha *)c->ctx;
   Poly1305_Update(&k->poly, aad, length);
   k->aad_length += length;
+
   return 1;
 }
 
@@ -67,8 +70,9 @@ static void chacha_xor(Chacha *k, const uint8_t *in, size_t length, uint8_t *out
       *out++ = *in++ ^ k->stream[k->used++];
       --length;
     }
-    if (length == 0)
+    if (length == 0) {
       return;
+    }
     k->used = 0;
     ++k->counter[0];
   }
@@ -76,8 +80,9 @@ static void chacha_xor(Chacha *k, const uint8_t *in, size_t length, uint8_t *out
   length -= rest;
   while (length >= 64) {
     size_t blocks = length / 64;
-    if (blocks > (1u << 28))
+    if (blocks > (1u << 28)) {
       blocks = 1u << 28;
+    }
     unsigned int counter = k->counter[0] + (unsigned int)blocks;
     if (counter < blocks) { // the 32-bit counter wraps: stop there
       blocks -= counter;
@@ -92,8 +97,9 @@ static void chacha_xor(Chacha *k, const uint8_t *in, size_t length, uint8_t *out
   if (rest) {
     memset(k->stream, 0, sizeof k->stream);
     ChaCha20_ctr32(k->stream, k->stream, 64, k->key, k->counter);
-    for (size_t i = 0; i < rest; ++i)
+    for (size_t i = 0; i < rest; ++i) {
       out[i] = in[i] ^ k->stream[i];
+    }
     k->used = (unsigned int)rest;
   }
 }
@@ -104,12 +110,15 @@ static int64_t chacha_update(TzCipher *c, const uint8_t *in, size_t length, uint
     pad16(k, k->aad_length);
     k->data = 1;
   }
-  if (c->decrypt)
+  if (c->decrypt) {
     Poly1305_Update(&k->poly, in, length);
+  }
   chacha_xor(k, in, length, out);
-  if (!c->decrypt)
+  if (!c->decrypt) {
     Poly1305_Update(&k->poly, out, length);
+  }
   k->data_length += length;
+
   return (int64_t)length;
 }
 
@@ -139,6 +148,7 @@ static int64_t chacha_final(TzCipher *c, uint8_t *out) {
   } else {
     memcpy(c->tag, mac, sizeof mac);
   }
+
   return 0;
 }
 

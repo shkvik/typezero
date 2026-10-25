@@ -1,0 +1,6 @@
+runtime/core/number/number_tables.h
+runtime/core/unicode/unicode_tables.h
+runtime/library/bytes/cjk/cjk_tables.h
+runtime/library/bytes/encodings/encodings.h
+runtime/library/regex/regex_compile/regex_tables.h
+runtime/library/tls/tls/tls_roots.h

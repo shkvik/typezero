@@ -8,7 +8,6 @@
 // arrive whole; the code pages of the console play no part.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,9 +23,9 @@
 #endif
 
 // None of this is static: see the rules in tzrt.h.
-int32_t tz_exit_code;     // process.exitCode, or 0 if it is not set
+int32_t tz_exit_code; // process.exitCode, or 0 if it is not set
 int32_t tz_has_exit_code;
-TzArray *tz_argv;         // process.argv, made at its first use
+TzArray *tz_argv; // process.argv, made at its first use
 
 //===----------------------------------------------------------------------===//
 // Text from the system
@@ -53,10 +52,12 @@ static TzStr str_from_utf8(const char *text, size_t n) {
     int bad = (lead >= 0x80 && lead < 0xC2) || lead > 0xF4;
     uint32_t c = extra ? lead & (0x3Fu >> extra) : lead;
     size_t k = 1;
-    while (k <= extra && i + k < n && ((unsigned char)text[i + k] & 0xC0) == 0x80)
+    while (k <= extra && i + k < n && ((unsigned char)text[i + k] & 0xC0) == 0x80) {
       c = (c << 6) | ((unsigned char)text[i + k++] & 0x3F);
-    if (bad || k <= extra || (c >= 0xD800 && c <= 0xDFFF) || c > 0x10FFFF)
+    }
+    if (bad || k <= extra || (c >= 0xD800 && c <= 0xDFFF) || c > 0x10FFFF) {
       c = 0xFFFD;
+    }
     i += k;
     if (c >= 0x10000) {
       c -= 0x10000;
@@ -66,6 +67,7 @@ static TzStr str_from_utf8(const char *text, size_t n) {
       tz_buf_push(&b, (uint16_t)c);
     }
   }
+
   return tz_buf_take(&b);
 }
 
@@ -80,10 +82,11 @@ static char *utf8_of(TzStr s) {
   for (size_t i = 0; i < b.length; ++i) {
     uint32_t c = b.data[i];
     if (c >= 0xD800 && c <= 0xDBFF && i + 1 < b.length && b.data[i + 1] >= 0xDC00 &&
-        b.data[i + 1] <= 0xDFFF)
+        b.data[i + 1] <= 0xDFFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (b.data[++i] - 0xDC00);
-    else if (c >= 0xD800 && c <= 0xDFFF)
+    } else if (c >= 0xD800 && c <= 0xDFFF) {
       c = 0xFFFD;
+    }
     if (c < 0x80) {
       out[n++] = (char)c;
     } else if (c < 0x800) {
@@ -102,6 +105,7 @@ static char *utf8_of(TzStr s) {
   }
   out[n] = 0;
   tz_buf_free(&b);
+
   return out;
 }
 #endif
@@ -125,8 +129,9 @@ static TzStr exec_path(void) {
 #else
   char path[4096];
   ssize_t length = readlink("/proc/self/exe", path, sizeof path);
-  if (length > 0 && (size_t)length < sizeof path)
+  if (length > 0 && (size_t)length < sizeof path) {
     return str_from_utf8(path, (size_t)length);
+  }
   const char *argv0 = tz_posix_argc > 0 ? tz_posix_argv[0] : "";
   return str_from_utf8(argv0, strlen(argv0));
 #endif
@@ -177,6 +182,7 @@ TzArray *tz_process_argv(const TzType *string_type) {
   tz_rc_inc(&tz_argv->rc);
   TzArray *argv = tz_argv;
   tz_unlock(&tz_process_lock);
+
   return argv;
 }
 
@@ -192,8 +198,9 @@ int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
   tz_buf_init(&b);
   tz_buf_str(&b, name);
   int found = 1;
-  for (size_t i = 0; i < b.length; ++i)
+  for (size_t i = 0; i < b.length; ++i) {
     found &= b.data[i] != 0;
+  }
 #ifdef _WIN32
   tz_buf_push(&b, 0);
   if (found) {
@@ -204,18 +211,22 @@ int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
       // An empty variable also gives 0, but without this error.
       SetLastError(ERROR_SUCCESS);
       length = GetEnvironmentVariableW((const wchar_t *)b.data, value, capacity);
-      if (length < capacity)
+      if (length < capacity) {
         break;
-      if (value != small)
+      }
+      if (value != small) {
         tz_free(value);
+      }
       capacity = length; // the size needed, with the terminating zero
       value = (wchar_t *)tz_alloc(capacity * sizeof(wchar_t));
     }
     found = length > 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
-    if (found)
+    if (found) {
       *out = tz_str_from_utf16((const uint16_t *)value, length);
-    if (value != small)
+    }
+    if (value != small) {
       tz_free(value);
+    }
   }
 #else
   if (found) {
@@ -223,11 +234,13 @@ int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
     const char *value = getenv(key);
     tz_free(key);
     found = value != NULL;
-    if (found)
+    if (found) {
       *out = str_from_utf8(value, strlen(value));
+    }
   }
 #endif
   tz_buf_free(&b);
+
   return found;
 }
 
@@ -248,16 +261,18 @@ TzMap *tz_process_env_map(const TzMapLayout *layout) {
     wchar_t *block = GetEnvironmentStringsW();
     for (const wchar_t *p = block; p && *p; p += wcslen(p) + 1) {
       const wchar_t *equals = wcschr(p + 1, L'=');
-      if (*p == L'=' || !equals)
+      if (*p == L'=' || !equals) {
         continue;
+      }
       TzStr name = tz_str_from_utf16((const uint16_t *)p, (size_t)(equals - p));
       TzStr value = tz_str_from_utf16((const uint16_t *)(equals + 1), wcslen(equals + 1));
 #else
     extern char **environ;
     for (char **p = environ; p && *p; ++p) {
       const char *equals = strchr(*p, '=');
-      if (!equals)
+      if (!equals) {
         continue;
+      }
       TzStr name = str_from_utf8(*p, (size_t)(equals - *p));
       TzStr value = str_from_utf8(equals + 1, strlen(equals + 1));
 #endif
@@ -279,6 +294,7 @@ TzMap *tz_process_env_map(const TzMapLayout *layout) {
   tz_rc_inc(&tz_env_map->rc);
   TzMap *env = tz_env_map;
   tz_unlock(&tz_process_lock);
+
   return env;
 }
 
@@ -316,16 +332,19 @@ void tz_process_cwd(TzStr *out) {
   DWORD capacity = GetCurrentDirectoryW(0, NULL);
   wchar_t *path = (wchar_t *)tz_alloc((capacity + 1) * sizeof(wchar_t));
   DWORD length = GetCurrentDirectoryW(capacity + 1, path);
-  if (length > capacity)
+  if (length > capacity) {
     length = 0; // changed in between: hardly possible in one thread
-  if (length > 3 && path[length - 1] == L'\\')
+  }
+  if (length > 3 && path[length - 1] == L'\\') {
     --length;
+  }
   *out = tz_str_from_utf16((const uint16_t *)path, length);
   tz_free(path);
 #else
   char path[4096];
-  if (!getcwd(path, sizeof path))
+  if (!getcwd(path, sizeof path)) {
     path[0] = 0;
+  }
   *out = str_from_utf8(path, strlen(path));
 #endif
 }
@@ -348,6 +367,7 @@ TZ_NORETURN void tz_process_exit(int32_t code, int32_t has) { exit(has ? code : 
 
 int32_t tz_process_get_exit_code(int32_t *has) {
   *has = tz_has_exit_code;
+
   return tz_exit_code;
 }
 
@@ -362,12 +382,14 @@ int32_t tz_process_exit_status(void) { return tz_exit_code; }
 void tz_process_shutdown(void) {
   TzArray *a = tz_argv;
   tz_argv = NULL;
-  if (a && tz_rc_dec(&a->rc))
+  if (a && tz_rc_dec(&a->rc)) {
     tz_arr_free(a);
+  }
   TzMap *env = tz_env_map;
   tz_env_map = NULL;
-  if (env && tz_rc_dec(&env->rc))
+  if (env && tz_rc_dec(&env->rc)) {
     tz_map_drop(env);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -402,6 +424,7 @@ double tz_date_now(void) {
   GetSystemTimePreciseAsFileTime(&time);
   // 100-nanosecond intervals since 1601-01-01.
   uint64_t ticks = ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
+
   return (double)((int64_t)(ticks - 116444736000000000ull) / 10000);
 #else
   struct timespec now;
@@ -416,6 +439,7 @@ double tz_performance_now(void) {
   LARGE_INTEGER now;
   QueryPerformanceCounter(&now);
   int64_t ticks = now.QuadPart - tz_clock_start;
+
   // Whole seconds and the rest separately, so that nothing overflows.
   return (double)(ticks / tz_clock_frequency) * 1000.0 +
          (double)(ticks % tz_clock_frequency) * 1000.0 / (double)tz_clock_frequency;

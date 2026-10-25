@@ -122,8 +122,7 @@ typedef struct TzIcu {
   void (*unumf_close)(void *formatter);
   void *(*unumf_openResult)(TzUErrorCode *status);
   void (*unumf_closeResult)(void *result);
-  void (*unumf_formatInt)(const void *formatter, int64_t value, void *result,
-                          TzUErrorCode *status);
+  void (*unumf_formatInt)(const void *formatter, int64_t value, void *result, TzUErrorCode *status);
   void (*unumf_formatDouble)(const void *formatter, double value, void *result,
                              TzUErrorCode *status);
   void (*unumf_formatDecimal)(const void *formatter, const char *value, int32_t length,
@@ -188,8 +187,8 @@ typedef struct TzIcu {
   const void *(*ureldatefmt_resultAsValue)(const void *result, TzUErrorCode *status);
   void (*ureldatefmt_formatNumericToResult)(const void *formatter, double offset, int unit,
                                             void *result, TzUErrorCode *status);
-  void (*ureldatefmt_formatToResult)(const void *formatter, double offset, int unit,
-                                     void *result, TzUErrorCode *status);
+  void (*ureldatefmt_formatToResult)(const void *formatter, double offset, int unit, void *result,
+                                     TzUErrorCode *status);
   // ulistfmt
   void *(*ulistfmt_openForType)(const char *locale, int type, int width, TzUErrorCode *status);
   void (*ulistfmt_close)(void *formatter);
@@ -211,8 +210,8 @@ typedef struct TzIcu {
                                     int32_t capacity, TzUErrorCode *status);
   int32_t (*uldn_keyValueDisplayName)(const void *names, const char *key, const char *value,
                                       TzUChar *result, int32_t capacity, TzUErrorCode *status);
-  int32_t (*udatpg_getFieldDisplayName)(const void *generator, int field, int width,
-                                        TzUChar *name, int32_t capacity, TzUErrorCode *status);
+  int32_t (*udatpg_getFieldDisplayName)(const void *generator, int field, int width, TzUChar *name,
+                                        int32_t capacity, TzUErrorCode *status);
   const char *(*uloc_toLegacyType)(const char *keyword, const char *value);
 } TzIcu;
 

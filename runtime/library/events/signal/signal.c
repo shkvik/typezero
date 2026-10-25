@@ -23,7 +23,6 @@
 // TzAbortListener.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <string.h>
 
 extern TzErrorInfo tz_error_info;
@@ -42,6 +41,7 @@ int64_t tz_listen_order;
 // which these do not use.
 double tz_lib_order(TzMaker make) {
   (void)make;
+
   return (double)++tz_listen_order;
 }
 
@@ -54,8 +54,9 @@ static void signal_drop(void *object) {
   TZ_ORDERED();
   TzSignal *s = (TzSignal *)object;
   // What the runtime listens with holds the signal, so no listener is left.
-  if (s->reason)
+  if (s->reason) {
     tz_value_release_in(s, &tz_signal_reason_type, &s->reason);
+  }
   tz_group_obj_free(s);
 }
 
@@ -70,6 +71,7 @@ TzSignal *tz_signal_new(TzMaker make) {
   memset(s, 0, sizeof *s);
   s->rc = rc;
   s->layout = &tz_signal_layout;
+
   return s;
 }
 
@@ -78,29 +80,33 @@ void tz_signal_listen(TzSignal *s, TzAbortListener *l) {
   l->order = ++tz_listen_order;
   l->next = NULL;
   l->prev = s->tail;
-  if (s->tail)
+  if (s->tail) {
     s->tail->next = l;
-  else
+  } else {
     s->head = l;
+  }
   s->tail = l;
 }
 
 static void unlink_listener(TzSignal *s, TzAbortListener *l) {
-  if (l->prev)
+  if (l->prev) {
     l->prev->next = l->next;
-  else if (s->head == l)
+  } else if (s->head == l) {
     s->head = l->next;
-  if (l->next)
+  }
+  if (l->next) {
     l->next->prev = l->prev;
-  else if (s->tail == l)
+  } else if (s->tail == l) {
     s->tail = l->prev;
+  }
   l->next = l->prev = NULL;
   l->signal = NULL;
 }
 
 void tz_signal_unlisten(TzAbortListener *l) {
-  if (l->signal)
+  if (l->signal) {
     unlink_listener(l->signal, l);
+  }
 }
 
 int32_t tz_signal_aborted(const void *signal) {
@@ -111,8 +117,9 @@ int32_t tz_signal_aborted(const void *signal) {
 // unknown, retained); before any listener runs.
 void tz_lib_signal_abort(TzSignal *s, void *reason, TzMaker make) {
   (void)make;
-  if (s->aborted)
+  if (s->aborted) {
     return;
+  }
   s->aborted = 1;
   if (reason) {
     // Its own now, inside its group if both are members.
@@ -143,8 +150,10 @@ void *tz_unknown_error(void *u);
 
 void *tz_signal_reason(const void *signal) {
   void *reason = ((const TzSignal *)signal)->reason;
-  if (reason)
+  if (reason) {
     tz_ref_retain(reason); // an object of the program, which may be a member
+  }
+
   return tz_unknown_error(reason);
 }
 
@@ -162,5 +171,6 @@ void *tz_abort_error(const void *signal) {
     tz_ref_retain(reason); // an object of the program, which may be a member
     *(void **)((char *)error + tz_error_info.cause_offset) = reason;
   }
+
   return error;
 }

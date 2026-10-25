@@ -10,7 +10,6 @@
 // what needs the type at run time: typeof, the values a check showed, equality.
 
 #include "runtime/core/tzrt/tzrt.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +33,7 @@ void tz_static_drop(void *object) { (void)object; }
 
 static const TzBox *as_box(const void *u) {
   const TzInstance *o = (const TzInstance *)u;
+
   return o && o->layout == &tz_box_layout ? (const TzBox *)u : NULL;
 }
 
@@ -43,6 +43,7 @@ void *tz_unknown_box(const TzType *type, const void *value) {
   box->layout = &tz_box_layout;
   box->type = type;
   memcpy(TZ_BOX_VALUE(box), value, type->size);
+
   return box;
 }
 
@@ -57,6 +58,7 @@ void *tz_unknown_box_member(const TzType *type, const void *value) {
   box->type = type;
   memcpy(TZ_BOX_VALUE(box), value, type->size);
   tz_group_store_value(box, type, TZ_BOX_VALUE(box));
+
   return box;
 }
 
@@ -79,10 +81,14 @@ void *tz_unknown_of(const TzType *type, const void *value) {
 
 static int32_t json_kind(const TzJson *j) {
   switch (j->kind) {
-  case TZ_JSON_BOOL: return TZ_KIND_BOOLEAN;
-  case TZ_JSON_NUMBER: return TZ_KIND_NUMBER;
-  case TZ_JSON_STRING: return TZ_KIND_STRING;
-  default: return TZ_KIND_OBJECT; // null, an array, an object
+  case TZ_JSON_BOOL:
+    return TZ_KIND_BOOLEAN;
+  case TZ_JSON_NUMBER:
+    return TZ_KIND_NUMBER;
+  case TZ_JSON_STRING:
+    return TZ_KIND_STRING;
+  default:
+    return TZ_KIND_OBJECT; // null, an array, an object
   }
 }
 
@@ -91,23 +97,27 @@ extern TzErrorInfo tz_error_info; // error.c
 // `throw u` of an unknown (owned): the Error it holds, or a TypeError in place
 // of anything else, since only an Error can be thrown.
 void *tz_unknown_error(void *u) {
-  if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_ERROR))
+  if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_ERROR)) {
     return u;
+  }
   int32_t kind = tz_unknown_kind(u);
-  static const char *const names[] = {"undefined", "a number", "a string", "a boolean",
-                                      "an object", "a function"};
+  static const char *const names[] = {"undefined", "a number",  "a string",
+                                      "a boolean", "an object", "a function"};
   char text[96];
   int n = snprintf(text, sizeof text, "only an Error can be thrown, and this is %s",
                    kind >= 0 && kind <= 5 ? names[kind] : "not one");
-  if (u)
+  if (u) {
     tz_instance_release((TzInstance *)u);
+  }
   TzStr message = tz_str_from_ascii(text, (size_t)n);
+
   return tz_error_info.make(TZ_TYPE_ERROR, message.obj, message.meta);
 }
 
 int32_t tz_unknown_kind(const void *u) {
-  if (!u)
+  if (!u) {
     return TZ_KIND_UNDEFINED;
+  }
   const TzBox *box = as_box(u);
   if (!box) { // a class is a function in JavaScript
     const TzLayout *layout = ((const TzInstance *)u)->layout;
@@ -115,8 +125,9 @@ int32_t tz_unknown_kind(const void *u) {
     if ((layout->flags & TZ_LAYOUT_LIBRARY) &&
         ((layout->name_length == 11 && memcmp(layout->name, "OnceWrapper", 11) == 0) ||
          (layout->name_length == 13 && memcmp(layout->name, "AsyncListener", 13) == 0) ||
-         (layout->name_length == 12 && memcmp(layout->name, "ThisListener", 12) == 0)))
+         (layout->name_length == 12 && memcmp(layout->name, "ThisListener", 12) == 0))) {
       return TZ_KIND_FUNCTION;
+    }
     return layout->flags & TZ_LAYOUT_CLASS ? TZ_KIND_FUNCTION : TZ_KIND_OBJECT;
   }
   switch (box->type->kind) {
@@ -141,10 +152,14 @@ double tz_unknown_number(const void *u) {
   const TzBox *box = as_box(u);
   const char *value = TZ_BOX_VALUE(box);
   switch (box->type->kind) {
-  case TZ_T_INT: return *(const int32_t *)value;
-  case TZ_T_LONG: return (double)*(const int64_t *)value;
-  case TZ_T_DOUBLE: return *(const double *)value;
-  default: return (*(const TzJson *const *)value)->u.number.value;
+  case TZ_T_INT:
+    return *(const int32_t *)value;
+  case TZ_T_LONG:
+    return (double)*(const int64_t *)value;
+  case TZ_T_DOUBLE:
+    return *(const double *)value;
+  default:
+    return (*(const TzJson *const *)value)->u.number.value;
   }
 }
 
@@ -159,17 +174,22 @@ void tz_unknown_string(TzStr *out, const void *u) {
 int32_t tz_unknown_bool(const void *u) {
   const TzBox *box = as_box(u);
   const char *value = TZ_BOX_VALUE(box);
-  if (box->type->kind == TZ_T_BOOL)
+  if (box->type->kind == TZ_T_BOOL) {
     return *(const uint8_t *)value != 0;
+  }
+
   return (*(const TzJson *const *)value)->u.boolean != 0;
 }
 
 int32_t tz_unknown_is_array(const void *u) {
   const TzBox *box = as_box(u);
-  if (!box) // a tuple is an array in JavaScript
+  if (!box) { // a tuple is an array in JavaScript
     return u && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_TUPLE) != 0;
-  if (box->type->kind == TZ_T_ARRAY)
+  }
+  if (box->type->kind == TZ_T_ARRAY) {
     return 1;
+  }
+
   return box->type->kind == TZ_T_JSON &&
          (*(const TzJson *const *)TZ_BOX_VALUE(box))->kind == TZ_JSON_ARRAY;
 }
@@ -208,6 +228,7 @@ void *tz_unknown_array(const void *u, const TzType *array_type) {
   box->type = array_type;
   *(TzArray **)TZ_BOX_VALUE(box) = result;
   tz_ref_retain(result);
+
   return result;
 }
 
@@ -215,13 +236,20 @@ void *tz_unknown_array(const void *u, const TzType *array_type) {
 static int box_number(const TzBox *box, double *out) {
   const char *value = TZ_BOX_VALUE(box);
   switch (box->type->kind) {
-  case TZ_T_INT: *out = *(const int32_t *)value; return 1;
-  case TZ_T_LONG: *out = (double)*(const int64_t *)value; return 1;
-  case TZ_T_DOUBLE: *out = *(const double *)value; return 1;
+  case TZ_T_INT:
+    *out = *(const int32_t *)value;
+    return 1;
+  case TZ_T_LONG:
+    *out = (double)*(const int64_t *)value;
+    return 1;
+  case TZ_T_DOUBLE:
+    *out = *(const double *)value;
+    return 1;
   case TZ_T_JSON: {
     const TzJson *j = *(const TzJson *const *)value;
-    if (j->kind != TZ_JSON_NUMBER)
+    if (j->kind != TZ_JSON_NUMBER) {
       return 0;
+    }
     *out = j->u.number.value;
     return 1;
   }
@@ -240,27 +268,33 @@ static int box_string(const TzBox *box, TzStr *out) {
     *out = (*(const TzJson *const *)value)->u.string;
     return 1;
   }
+
   return 0;
 }
 
 // `a === b`: the same object, or values of the same kind that are equal, as
 // JavaScript compares what a box holds.
 int32_t tz_unknown_equal(const void *a, const void *b) {
-  if (a == b)
+  if (a == b) {
     return 1;
+  }
   const TzBox *x = as_box(a), *y = as_box(b);
-  if (!x || !y)
+  if (!x || !y) {
     return 0;
+  }
   double m, n;
-  if (box_number(x, &m))
+  if (box_number(x, &m)) {
     return box_number(y, &n) && m == n;
+  }
   TzStr s, t;
-  if (box_string(x, &s))
+  if (box_string(x, &s)) {
     return box_string(y, &t) && tz_str_equal(s.obj, s.meta, t.obj, t.meta);
+  }
   const char *p = TZ_BOX_VALUE(x), *q = TZ_BOX_VALUE(y);
   uint32_t kind = x->type->kind;
-  if (kind == TZ_T_JSON && y->type->kind == TZ_T_JSON)
+  if (kind == TZ_T_JSON && y->type->kind == TZ_T_JSON) {
     return tz_json_strict_equal(*(const TzJson *const *)p, *(const TzJson *const *)q);
+  }
   if (kind == TZ_T_JSON || y->type->kind == TZ_T_JSON) {
     // A boolean against a Json true or false.
     const TzJson *j = *(const TzJson *const *)(kind == TZ_T_JSON ? p : q);
@@ -268,8 +302,9 @@ int32_t tz_unknown_equal(const void *a, const void *b) {
     return j->kind == TZ_JSON_BOOL && other->type->kind == TZ_T_BOOL &&
            (j->u.boolean != 0) == (*(const uint8_t *)TZ_BOX_VALUE(other) != 0);
   }
-  if (kind != y->type->kind)
+  if (kind != y->type->kind) {
     return 0;
+  }
   switch (kind) {
   case TZ_T_BOOL:
     return (*(const uint8_t *)p != 0) == (*(const uint8_t *)q != 0);
@@ -303,8 +338,9 @@ void tz_unknown_unbox(const void *u, const TzType *type, void *out) {
       return;
     }
     memset(out, 0, type->size);
-    if (!u)
+    if (!u) {
       return;
+    }
     tz_unknown_unbox(u, type->inner, out);
     ((uint8_t *)out)[type->inner->size] = 1;
     return;

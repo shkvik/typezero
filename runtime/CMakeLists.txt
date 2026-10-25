@@ -3,8 +3,8 @@
 #
 #   tzrt.bc   LLVM bitcode. tz copies the small functions a program calls
 #             from it into the program before optimizing, so that their fast
-#             paths are inlined into the program (see linkRuntime in
-#             compiler/cli/driver/driver.cpp).
+#             paths are inlined into the program (see RuntimeLinker in
+#             compiler/optimize/runtime_linker/).
 #   tzrt.lib  the same code compiled, linked into every program: everything
 #             that was not inlined is called here.
 #

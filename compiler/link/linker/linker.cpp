@@ -1,9 +1,7 @@
 #include "compiler/link/linker/linker.h"
-
 #include "lld/Common/Driver.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/raw_ostream.h"
-
 #include <cstdlib>
 #include <vector>
 
@@ -36,12 +34,14 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
   args.push_back("/defaultlib:kernel32");
   // For the developers of tz: a PDB next to the program, which
   // llvm-symbolizer reads (see TZ_CRASH_TRACE in runtime/core/tzrt/tzrt.c).
-  if (std::getenv("TZ_LINK_DEBUG"))
+  if (std::getenv("TZ_LINK_DEBUG")) {
     args.push_back("/debug");
+  }
 
   std::vector<const char *> argv;
-  for (const std::string &arg : args)
+  for (const std::string &arg : args) {
     argv.push_back(arg.c_str());
+  }
 
   std::string messages;
   llvm::raw_string_ostream stdoutStream(messages);
@@ -53,6 +53,7 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
       lld::lldMain(argv, stdoutStream, stderrStream, {{lld::WinLink, &lld::coff::link}});
   llvm::CrashRecoveryContext::Disable();
   errors = std::move(messages);
+
   return result.retCode == 0;
 }
 

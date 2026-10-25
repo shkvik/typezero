@@ -4,7 +4,6 @@
 // program, so that the functions of crypto.c work on them as on those of the direct layer.
 
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/core_names.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>
@@ -29,9 +28,11 @@ void tz_openssl_throw(int32_t kind, const char *otherwise) {
 // Whether OpenSSL knows a name it cannot fetch: what node 24 turns off (md4, des-cbc), which it
 // reports as unsupported.
 static int unsupported(const char *name) {
-  if (OBJ_sn2nid(name) == NID_undef && OBJ_ln2nid(name) == NID_undef)
+  if (OBJ_sn2nid(name) == NID_undef && OBJ_ln2nid(name) == NID_undef) {
     return 0;
+  }
   tz_throw(TZ_ERROR, "error:0308010C:digital envelope routines::unsupported");
+
   return 1;
 }
 
@@ -54,10 +55,11 @@ static void evp_md_update(void *c, const uint8_t *p, size_t n) {
 }
 static void evp_md_final(void *c, uint8_t *out, size_t n) {
   EvpMd *e = (EvpMd *)c;
-  if (EVP_MD_get_flags(e->md) & EVP_MD_FLAG_XOF)
+  if (EVP_MD_get_flags(e->md) & EVP_MD_FLAG_XOF) {
     EVP_DigestFinalXOF(e->ctx, out, n);
-  else
+  } else {
     EVP_DigestFinal_ex(e->ctx, out, NULL);
+  }
 }
 static void evp_md_copy(void *to, const void *from) {
   EvpMd *t = (EvpMd *)to;
@@ -82,9 +84,12 @@ typedef struct Known {
 static Known *known_mds, *known_ciphers;
 
 static void *find_known(Known *list, const char *name) {
-  for (Known *k = list; k; k = k->next)
-    if (strcmp(k->name, name) == 0)
+  for (Known *k = list; k; k = k->next) {
+    if (strcmp(k->name, name) == 0) {
       return k->alg;
+    }
+  }
+
   return NULL;
 }
 
@@ -104,19 +109,21 @@ const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   char name[64];
   tz_crypto_cstr(obj, meta, name, sizeof name);
   const TzMd *found = (const TzMd *)find_known(known_mds, name);
-  if (found)
+  if (found) {
     return found;
+  }
   const EVP_MD *legacy = EVP_get_digestbyname(name);
   EVP_MD *md = EVP_MD_fetch(NULL, legacy ? EVP_MD_get0_name(legacy) : name, NULL);
   ERR_clear_error();
   if (!md) {
     if (!unsupported(name)) {
-      if (caller == 0)
+      if (caller == 0) {
         tz_throw(TZ_ERROR, "Digest method not supported");
-      else if (caller == 1)
+      } else if (caller == 1) {
         tz_throw(TZ_ERROR, "Digest method %s is not supported", name);
-      else
+      } else {
         tz_throw(TZ_TYPE_ERROR, "Invalid digest: %s", name);
+      }
     }
     return NULL;
   }
@@ -130,19 +137,23 @@ const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   made->ctx_size = sizeof(EvpMd);
   made->xof = (EVP_MD_get_flags(md) & EVP_MD_FLAG_XOF) != 0;
   made->size = (uint32_t)EVP_MD_get_size(md);
-  if (made->xof) // node's default lengths of SHAKE: its strength
+  if (made->xof) { // node's default lengths of SHAKE: its strength
     made->size = strstr(name, "128") ? 16 : 32;
+  }
   made->block = (uint32_t)EVP_MD_get_block_size(md);
   made->seed = seed;
   made->seed_size = sizeof(EvpMd);
   add_known(&known_mds, name, made);
+
   return made;
 }
 
 // The EVP_MD of a hash a key operation names (sign, verify, RSA-PSS), or NULL after throwing.
 EVP_MD *tz_openssl_md_of(const TzMd *md) {
-  if (md->ops == &evp_md_ops)
+  if (md->ops == &evp_md_ops) {
     return ((const EvpMd *)md->seed)->md;
+  }
+
   return NULL;
 }
 
@@ -168,33 +179,41 @@ static int evp_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
   e->ccm = mode == EVP_CIPH_CCM_MODE;
   int ok = EVP_CipherInit_ex(e->ctx, cipher, NULL, NULL, NULL, !c->decrypt);
   // As node does: the length of the nonce of an AEAD, whatever OpenSSL takes by default.
-  if (ok && c->alg->kind == TZ_CIPHER_AEAD)
+  if (ok && c->alg->kind == TZ_CIPHER_AEAD) {
     ok = EVP_CIPHER_CTX_ctrl(e->ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)iv_length, NULL) > 0;
-  if (ok && !c->decrypt && (e->ccm || mode == EVP_CIPH_OCB_MODE))
+  }
+  if (ok && !c->decrypt && (e->ccm || mode == EVP_CIPH_OCB_MODE)) {
     ok = EVP_CIPHER_CTX_ctrl(e->ctx, EVP_CTRL_AEAD_SET_TAG, c->tag_length, NULL) > 0;
-  if (ok)
+  }
+  if (ok) {
     ok = EVP_CipherInit_ex(e->ctx, NULL, NULL, key, iv_length ? iv : NULL, !c->decrypt);
+  }
   if (!ok) {
     tz_openssl_throw(TZ_TYPE_ERROR, "Invalid initialization vector");
     EVP_CIPHER_CTX_free(e->ctx);
     e->ctx = NULL;
   }
+
   return ok;
 }
 
 // The tag of a decipher goes to OpenSSL before the data (MaybePassAuthTagToOpenSSL of node).
 static int give_tag(TzCipher *c, EvpCipher *e) {
-  if (!c->decrypt || !c->tag_set || e->tag_given)
+  if (!c->decrypt || !c->tag_set || e->tag_given) {
     return 1;
+  }
   e->tag_given = 1;
+
   return EVP_CIPHER_CTX_ctrl(e->ctx, EVP_CTRL_AEAD_SET_TAG, c->tag_length, c->tag) > 0;
 }
 
 static int ccm_length(TzCipher *c, EvpCipher *e, double length) {
   int out;
-  if (!e->ccm || e->ccm_length_set)
+  if (!e->ccm || e->ccm_length_set) {
     return 1;
+  }
   e->ccm_length_set = 1;
+
   return give_tag(c, e) && EVP_CipherUpdate(e->ctx, NULL, &out, NULL, (int)length) > 0;
 }
 
@@ -205,6 +224,7 @@ static int evp_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaint
     return 0;
   }
   int out;
+
   return ccm_length(c, e, plaintext_length) && give_tag(c, e) &&
          EVP_CipherUpdate(e->ctx, NULL, &out, aad, (int)length) > 0;
 }
@@ -226,6 +246,7 @@ static int64_t evp_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
     tz_openssl_throw(TZ_ERROR, "Trying to add data in unsupported state");
     return -1;
   }
+
   return written;
 }
 
@@ -234,8 +255,9 @@ static int64_t evp_final(TzCipher *c, uint8_t *out) {
   EVP_CIPHER_CTX_set_padding(e->ctx, c->padding);
   int aead = c->alg->kind == TZ_CIPHER_AEAD;
   if (e->ccm && c->decrypt) {
-    if (!e->ccm_failed)
+    if (!e->ccm_failed) {
       return 0;
+    }
     tz_throw(TZ_ERROR, "Unsupported state or unable to authenticate data");
     return -1;
   }
@@ -249,8 +271,10 @@ static int64_t evp_final(TzCipher *c, uint8_t *out) {
     }
     return -1;
   }
-  if (aead && !c->decrypt)
+  if (aead && !c->decrypt) {
     EVP_CIPHER_CTX_ctrl(e->ctx, EVP_CTRL_AEAD_GET_TAG, c->tag_length, c->tag);
+  }
+
   return written;
 }
 
@@ -267,14 +291,16 @@ const TzCipherAlg *tz_openssl_cipher(void *obj, uint64_t meta) {
   char name[64];
   tz_crypto_cstr(obj, meta, name, sizeof name);
   const TzCipherAlg *found = (const TzCipherAlg *)find_known(known_ciphers, name);
-  if (found)
+  if (found) {
     return found;
+  }
   const EVP_CIPHER *legacy = EVP_get_cipherbyname(name);
   EVP_CIPHER *cipher = EVP_CIPHER_fetch(NULL, legacy ? EVP_CIPHER_get0_name(legacy) : name, NULL);
   ERR_clear_error();
   if (!cipher) {
-    if (!unsupported(name))
+    if (!unsupported(name)) {
       tz_throw(TZ_ERROR, "Unknown cipher");
+    }
     return NULL;
   }
   TzCipherAlg *made = (TzCipherAlg *)calloc(1, sizeof(TzCipherAlg) + strlen(name) + 1);
@@ -294,6 +320,7 @@ const TzCipherAlg *tz_openssl_cipher(void *obj, uint64_t meta) {
                                                                             : 0;
   made->seed = cipher;
   add_known(&known_ciphers, name, made);
+
   return made;
 }
 
@@ -319,14 +346,16 @@ static void add_name(Names *n, const char *name) {
 static void push_md(const EVP_MD *md, const char *from, const char *to, void *arg) {
   (void)md;
   (void)to;
-  if (!from)
+  if (!from) {
     return;
+  }
   const EVP_MD *real = EVP_get_digestbyname(from);
   const char *name = real ? EVP_MD_get0_name(real) : NULL;
   EVP_MD *fetched = name ? EVP_MD_fetch(NULL, name, NULL) : NULL;
   ERR_clear_error();
-  if (!fetched)
+  if (!fetched) {
     return;
+  }
   EVP_MD_free(fetched);
   add_name((Names *)arg, from);
 }
@@ -334,14 +363,16 @@ static void push_md(const EVP_MD *md, const char *from, const char *to, void *ar
 static void push_cipher(const EVP_CIPHER *cipher, const char *from, const char *to, void *arg) {
   (void)cipher;
   (void)to;
-  if (!from)
+  if (!from) {
     return;
+  }
   const EVP_CIPHER *real = EVP_get_cipherbyname(from);
   const char *name = real ? EVP_CIPHER_get0_name(real) : NULL;
   EVP_CIPHER *fetched = name ? EVP_CIPHER_fetch(NULL, name, NULL) : NULL;
   ERR_clear_error();
-  if (!fetched)
+  if (!fetched) {
     return;
+  }
   EVP_CIPHER_free(fetched);
   add_name((Names *)arg, from);
 }
@@ -354,9 +385,11 @@ static int same_lower(const char *a, const char *b) {
   for (; *a && *b; ++a, ++b) {
     char x = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a;
     char y = *b >= 'A' && *b <= 'Z' ? (char)(*b + 32) : *b;
-    if (x != y)
+    if (x != y) {
       return 0;
+    }
   }
+
   return *a == *b;
 }
 
@@ -366,8 +399,9 @@ static TzArray *name_array(Names *n) {
   size_t kept = 0;
   for (size_t i = 0; i < n->count; ++i) {
     size_t k = 0;
-    while (k < kept && !same_lower(n->names[k], n->names[i]))
+    while (k < kept && !same_lower(n->names[k], n->names[i])) {
       ++k;
+    }
     if (k < kept) {
       free(n->names[k]);
       n->names[k] = n->names[i];
@@ -383,18 +417,21 @@ static TzArray *name_array(Names *n) {
     free(n->names[i]);
   }
   free(n->names);
+
   return array;
 }
 
 TzArray *tz_openssl_get_hashes(void) {
   Names n = {0};
   EVP_MD_do_all_sorted(push_md, &n);
+
   return name_array(&n);
 }
 
 TzArray *tz_openssl_get_ciphers(void) {
   Names n = {0};
   EVP_CIPHER_do_all_sorted(push_cipher, &n);
+
   return name_array(&n);
 }
 
@@ -403,8 +440,10 @@ TzArray *tz_openssl_get_curves(void) {
   size_t count = EC_get_builtin_curves(NULL, 0);
   EC_builtin_curve *curves = (EC_builtin_curve *)calloc(count, sizeof *curves);
   EC_get_builtin_curves(curves, count);
-  for (size_t i = 0; i < count; ++i)
+  for (size_t i = 0; i < count; ++i) {
     add_name(&n, OBJ_nid2sn(curves[i].nid));
+  }
   free(curves);
+
   return name_array(&n);
 }

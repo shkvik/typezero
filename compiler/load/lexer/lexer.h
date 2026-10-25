@@ -2,7 +2,6 @@
 
 #include "compiler/load/token/token.h"
 #include "compiler/program/diagnostics/diagnostics.h"
-
 #include <string>
 #include <vector>
 

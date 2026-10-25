@@ -9,7 +9,6 @@
 // The data of the languages is the ICU of the system (icu.h, intl.h).
 
 #include "runtime/library/intl/intl/intl.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -59,16 +58,19 @@ static const char *const matchers[] = {"lookup", "best fit", NULL};
 // Appends a stem to a skeleton, after a space.
 static void put(char *skeleton, size_t size, const char *stem) {
   size_t n = strlen(skeleton), m = strlen(stem);
-  if (n + m + 2 > size)
+  if (n + m + 2 > size) {
     return;
-  if (n)
+  }
+  if (n) {
     skeleton[n++] = ' ';
+  }
   memcpy(skeleton + n, stem, m + 1);
 }
 
 static void repeat(char *out, size_t *n, char c, int count) {
-  for (int i = 0; i < count; ++i)
+  for (int i = 0; i < count; ++i) {
     out[(*n)++] = c;
+  }
   out[*n] = 0;
 }
 
@@ -99,9 +101,12 @@ static const char *rounding_stem(const char *mode) {
       {"halfTrunc", "rounding-mode-half-down"},
       {"halfEven", "rounding-mode-half-even"},
   };
-  for (size_t i = 0; i < sizeof modes / sizeof modes[0]; ++i)
-    if (strcmp(modes[i][0], mode) == 0)
+  for (size_t i = 0; i < sizeof modes / sizeof modes[0]; ++i) {
+    if (strcmp(modes[i][0], mode) == 0) {
       return modes[i][1];
+    }
+  }
+
   return "rounding-mode-half-up";
 }
 
@@ -117,11 +122,13 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   int failed = 0;
   int mnid = tz_intl_number_option(o, TZ_IO_MINIMUM_INTEGER_DIGITS, 1, 21, 1, &failed);
   int increment = tz_intl_number_option(o, TZ_IO_ROUNDING_INCREMENT, 1, 5000, 1, &failed);
-  if (failed)
+  if (failed) {
     return 0;
+  }
   int valid = 0;
-  for (size_t i = 0; i < sizeof increments / sizeof increments[0]; ++i)
+  for (size_t i = 0; i < sizeof increments / sizeof increments[0]; ++i) {
     valid |= increments[i] == increment;
+  }
   if (!valid) {
     tz_throw(TZ_RANGE_ERROR, "roundingIncrement value is out of range.");
     return 0;
@@ -132,8 +139,9 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
       tz_intl_option(o, TZ_IO_ROUNDING_PRIORITY, priorities, b2, method, &failed);
   const char *trailing =
       tz_intl_option(o, TZ_IO_TRAILING_ZERO_DISPLAY, trailings, b3, method, &failed);
-  if (failed)
+  if (failed) {
     return 0;
+  }
   mode = mode ? mode : "halfExpand";
   priority = priority ? priority : "auto";
   trailing = trailing ? trailing : "auto";
@@ -148,15 +156,17 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   int need_sd = 1, need_fd = 1, is_auto = strcmp(priority, "auto") == 0;
   if (is_auto) {
     need_sd = has_sd;
-    if (need_sd || (!has_fd && compact))
+    if (need_sd || (!has_fd && compact)) {
       need_fd = 0;
+    }
   }
   int mnsd = 0, mxsd = 0, mnfd = 0, mxfd = 0;
   if (need_sd) {
     if (has_sd) {
       mnsd = default_number(o, TZ_IO_MINIMUM_SIGNIFICANT_DIGITS, 1, 21, 1, &failed);
-      if (failed)
+      if (failed) {
         return 0;
+      }
       mxsd = default_number(o, TZ_IO_MAXIMUM_SIGNIFICANT_DIGITS, mnsd, 21, 21, &failed);
     } else {
       mnsd = 1;
@@ -166,10 +176,12 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   if (need_fd && !failed) {
     if (has_fd) {
       mnfd = default_number(o, TZ_IO_MINIMUM_FRACTION_DIGITS, 0, 100, -1, &failed);
-      if (!failed)
+      if (!failed) {
         mxfd = default_number(o, TZ_IO_MAXIMUM_FRACTION_DIGITS, 0, 100, -1, &failed);
-      if (failed)
+      }
+      if (failed) {
         return 0;
+      }
       if (!has_mnfd) {
         mnfd = mnfd_default < mxfd ? mnfd_default : mxfd;
       } else if (!has_mxfd) {
@@ -183,8 +195,9 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
       mxfd = mxfd_default;
     }
   }
-  if (failed)
+  if (failed) {
     return 0;
+  }
   enum { FRACTION, SIGNIFICANT, MORE, LESS } type;
   if (!need_sd && !need_fd) {
     // Compact without digits: 1.2K, but 12K.
@@ -272,10 +285,12 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   } else {
     snprintf(stem, sizeof stem, "%s/%s%c", fraction, significant, type == MORE ? 'r' : 's');
   }
-  if (strcmp(trailing, "stripIfInteger") == 0)
+  if (strcmp(trailing, "stripIfInteger") == 0) {
     strcat(stem, "/w");
+  }
   put(skeleton, size, stem);
   put(skeleton, size, rounding_stem(mode));
+
   return 1;
 }
 
@@ -298,30 +313,38 @@ static int is_sanctioned(const char *unit, size_t length) {
       "petabyte",    "pound",       "second",      "stone",
       "terabit",     "terabyte",    "week",        "yard",
       "year"};
-  for (size_t i = 0; i < sizeof units / sizeof units[0]; ++i)
-    if (strlen(units[i]) == length && strncmp(units[i], unit, length) == 0)
+  for (size_t i = 0; i < sizeof units / sizeof units[0]; ++i) {
+    if (strlen(units[i]) == length && strncmp(units[i], unit, length) == 0) {
       return 1;
+    }
+  }
+
   return 0;
 }
 
 // A unit, or two joined by "-per-" (IsWellFormedUnitIdentifier).
 static int is_well_formed_unit(const char *unit) {
   size_t length = strlen(unit);
-  if (is_sanctioned(unit, length))
+  if (is_sanctioned(unit, length)) {
     return 1;
+  }
   const char *per = strstr(unit, "-per-");
+
   return per && is_sanctioned(unit, (size_t)(per - unit)) &&
          is_sanctioned(per + 5, strlen(per + 5));
 }
 
 static int is_well_formed_currency(const char *code) {
-  if (strlen(code) != 3)
+  if (strlen(code) != 3) {
     return 0;
+  }
   for (int i = 0; i < 3; ++i) {
     char c = code[i];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
       return 0;
+    }
   }
+
   return 1;
 }
 
@@ -329,6 +352,7 @@ static int currency_digits(const TzIcu *icu, const char *code) {
   TzUChar units[4] = {(TzUChar)code[0], (TzUChar)code[1], (TzUChar)code[2], 0};
   TzUErrorCode status = 0;
   int32_t digits = icu->ucurr_getDefaultFractionDigits(units, &status);
+
   return TZ_U_FAILURE(status) || digits < 0 ? 2 : digits;
 }
 
@@ -339,15 +363,18 @@ static int currency_digits(const TzIcu *icu, const char *code) {
 static void *open_formatter(const TzIcu *icu, const char *skeleton, const char *locale) {
   TzUChar units[512];
   int32_t n = 0;
-  for (; skeleton[n] && n < 511; ++n)
+  for (; skeleton[n] && n < 511; ++n) {
     units[n] = (unsigned char)skeleton[n];
+  }
   units[n] = 0;
   char parse_error[128]; // UParseError
   TzUErrorCode status = 0;
   void *formatter =
       icu->unumf_openForSkeletonAndLocaleWithError(units, n, locale, parse_error, &status);
-  if (TZ_U_FAILURE(status) || !formatter)
+  if (TZ_U_FAILURE(status) || !formatter) {
     tz_panicf("the ICU of the system cannot format numbers as '%s'", skeleton);
+  }
+
   return formatter;
 }
 
@@ -356,12 +383,14 @@ static void *open_formatter(const TzIcu *icu, const char *skeleton, const char *
 static void with_numbering(const TzIcu *icu, const char *found, const char *system, char *id,
                            size_t size) {
   tz_intl_copy(id, size, found);
-  if (!system)
+  if (!system) {
     return;
+  }
   TzUErrorCode status = 0;
   icu->uloc_setKeywordValue("numbers", system, id, (int32_t)size, &status);
-  if (TZ_U_FAILURE(status))
+  if (TZ_U_FAILURE(status)) {
     tz_intl_copy(id, size, found);
+  }
 }
 
 static void numbering_of(const TzIcu *icu, const char *id, TzIntl *r) {
@@ -369,8 +398,9 @@ static void numbering_of(const TzIcu *icu, const char *id, TzIntl *r) {
   void *system = icu->unumsys_open(id, &status);
   tz_intl_set_text(r, TZ_IO_NUMBERING_SYSTEM,
                    !TZ_U_FAILURE(status) && system ? icu->unumsys_getName(system) : "latn");
-  if (system)
+  if (system) {
     icu->unumsys_close(system);
+  }
 }
 
 // The numbering system of the option, else of -u-nu-, among those the
@@ -388,14 +418,16 @@ static const char *choose_numbering(const TzIcu *icu, const char *requested, con
     *in_tag = 1;
     return keyword;
   }
+
   return NULL;
 }
 
 TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const styles[] = {"decimal", "percent", "currency", "unit", NULL};
   static const char *const currency_displays[] = {"code", "symbol", "narrowSymbol", "name", NULL};
   static const char *const currency_signs[] = {"standard", "accounting", NULL};
@@ -408,8 +440,9 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
   int failed = 0;
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[0], method, &failed);
   const char *numbering = tz_intl_option(o, TZ_IO_NUMBERING_SYSTEM, NULL, b[1], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   if (numbering && !tz_intl_is_keyword_type(numbering)) {
     tz_throw(TZ_RANGE_ERROR, "Invalid numberingSystem : %s", numbering);
     return NULL;
@@ -467,19 +500,21 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
   int mnfd_default = 0, mxfd_default = 3;
   if (strcmp(style, "currency") == 0) {
     char code[4] = {0};
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 3; ++i) {
       code[i] = (char)(currency[i] >= 'a' ? currency[i] - 32 : currency[i]);
+    }
     tz_intl_set_text(r, TZ_IO_CURRENCY, code);
     tz_intl_set_text(r, TZ_IO_CURRENCY_DISPLAY, currency_display);
     tz_intl_set_text(r, TZ_IO_CURRENCY_SIGN, currency_sign);
     snprintf(stem, sizeof stem, "currency/%s", code);
     put(skeleton, sizeof skeleton, stem);
-    if (strcmp(currency_display, "code") == 0)
+    if (strcmp(currency_display, "code") == 0) {
       put(skeleton, sizeof skeleton, "unit-width-iso-code");
-    else if (strcmp(currency_display, "name") == 0)
+    } else if (strcmp(currency_display, "name") == 0) {
       put(skeleton, sizeof skeleton, "unit-width-full-name");
-    else if (strcmp(currency_display, "narrowSymbol") == 0)
+    } else if (strcmp(currency_display, "narrowSymbol") == 0) {
       put(skeleton, sizeof skeleton, "unit-width-narrow");
+    }
     mnfd_default = mxfd_default = currency_digits(icu, code);
   } else if (strcmp(style, "unit") == 0) {
     tz_intl_set_text(r, TZ_IO_UNIT, unit);
@@ -531,8 +566,9 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
       grouping = "false";
     } else {
       const char *value = tz_intl_option(o, TZ_IO_USE_GROUPING, groupings, b[10], method, &failed);
-      if (value && strcmp(value, "true") != 0 && strcmp(value, "false") != 0)
+      if (value && strcmp(value, "true") != 0 && strcmp(value, "false") != 0) {
         grouping = value;
+      }
     }
   }
   const char *sign = tz_intl_option(o, TZ_IO_SIGN_DISPLAY, signs, b[11], method, &failed);
@@ -550,23 +586,26 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
                                         : "group-auto");
   int accounting = strcmp(r->text[TZ_IO_CURRENCY_SIGN], "accounting") == 0;
   const char *sign_stem = accounting ? "sign-accounting" : "sign-auto";
-  if (strcmp(sign, "never") == 0)
+  if (strcmp(sign, "never") == 0) {
     sign_stem = "sign-never";
-  else if (strcmp(sign, "always") == 0)
+  } else if (strcmp(sign, "always") == 0) {
     sign_stem = accounting ? "sign-accounting-always" : "sign-always";
-  else if (strcmp(sign, "exceptZero") == 0)
+  } else if (strcmp(sign, "exceptZero") == 0) {
     sign_stem = accounting ? "sign-accounting-except-zero" : "sign-except-zero";
-  else if (strcmp(sign, "negative") == 0)
+  } else if (strcmp(sign, "negative") == 0) {
     sign_stem = accounting ? "sign-accounting-negative" : "sign-negative";
+  }
   put(skeleton, sizeof skeleton, sign_stem);
   nf->formatter = open_formatter(icu, skeleton, id);
+
   return r;
 }
 
 static void nf_drop(void *object) {
   TzNumberFormat *nf = (TzNumberFormat *)object;
-  if (nf->formatter)
+  if (nf->formatter) {
     tz_icu()->unumf_close(nf->formatter);
+  }
   tz_obj_free(nf);
 }
 
@@ -582,12 +621,14 @@ void tz_nf_format_into(const void *formatter, const TzIntlNumber *n, void *resul
     tz_buf_decimal(&text, value);
     char local[128],
         *digits = text.length < sizeof local ? local : (char *)tz_alloc(text.length + 1);
-    for (size_t i = 0; i < text.length; ++i)
+    for (size_t i = 0; i < text.length; ++i) {
       digits[i] = (char)text.data[i];
+    }
     digits[text.length] = 0;
     icu->unumf_formatDecimal(formatter, digits, (int32_t)text.length, result, status);
-    if (digits != local)
+    if (digits != local) {
       tz_free(digits);
+    }
     tz_buf_free(&text);
   } else {
     icu->unumf_formatDouble(formatter, n->d, result, status);
@@ -606,6 +647,7 @@ static TzStr format_string(const void *formatter, const TzIntlNumber *n) {
   TzStr s = text && !TZ_U_FAILURE(status) ? tz_str_from_utf16(text, (size_t)length)
                                           : tz_str_from_ascii("", 0);
   icu->unumf_closeResult(result);
+
   return s;
 }
 
@@ -672,6 +714,7 @@ static NumberKind kind_of(const TzIntlNumber *n) {
     k.infinite = isinf(n->d);
     k.negative = signbit(n->d) != 0;
   }
+
   return k;
 }
 
@@ -685,10 +728,12 @@ TzArray *tz_nf_format_to_parts(TzNumberFormat *nf, int32_t kind, double d, int64
   tz_nf_format_into(nf->formatter, &n, result, &status);
   const void *value = icu->unumf_resultAsValue(result, &status);
   TzArray *parts = tz_arr_new(shape->type, 0, 8);
-  if (!TZ_U_FAILURE(status))
+  if (!TZ_U_FAILURE(status)) {
     tz_intl_push_value_parts(parts, shape, value, UFIELD_CATEGORY_NUMBER, number_part_type, &k,
                              NULL);
+  }
   icu->unumf_closeResult(result);
+
   return parts;
 }
 
@@ -712,15 +757,17 @@ TzIntl *tz_pr_create(const TzIntlOptions *o) {
   const char *method = "Intl.PluralRules";
   const TzIcu *icu = tz_intl_icu();
   char requested[160], found[64];
-  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found))
+  if (!tz_intl_resolve_locale(icu, o->has_locale, o->locale, requested, found)) {
     return NULL;
+  }
   static const char *const types[] = {"cardinal", "ordinal", NULL};
   char b[2][TZ_INTL_TEXT];
   int failed = 0;
   tz_intl_option(o, TZ_IO_LOCALE_MATCHER, matchers, b[0], method, &failed);
   const char *type = tz_intl_option(o, TZ_IO_TYPE, types, b[1], method, &failed);
-  if (failed)
+  if (failed) {
     return NULL;
+  }
   type = type ? type : "cardinal";
   TzPluralRules *pr =
       (TzPluralRules *)tz_intl_alloc(sizeof(TzPluralRules), TZ_INTL_PLURAL_RULES, &pr_layout);
@@ -734,19 +781,23 @@ TzIntl *tz_pr_create(const TzIntlOptions *o) {
   }
   TzUErrorCode status = 0;
   pr->rules = icu->uplrules_openForType(found, strcmp(type, "ordinal") == 0, &status);
-  if (TZ_U_FAILURE(status) || !pr->rules)
+  if (TZ_U_FAILURE(status) || !pr->rules) {
     tz_intl_no_icu();
+  }
   pr->formatter = open_formatter(icu, skeleton, found);
+
   return r;
 }
 
 static void pr_drop(void *object) {
   TzPluralRules *pr = (TzPluralRules *)object;
   const TzIcu *icu = tz_icu();
-  if (pr->rules)
+  if (pr->rules) {
     icu->uplrules_close(pr->rules);
-  if (pr->formatter)
+  }
+  if (pr->formatter) {
     icu->unumf_close(pr->formatter);
+  }
   tz_obj_free(pr);
 }
 
@@ -764,10 +815,11 @@ void tz_pr_select(TzStr *out, TzPluralRules *pr, int32_t kind, double d, int64_t
                        ? 0
                        : icu->uplrules_selectFormatted(pr->rules, result, keyword, 32, &status);
   icu->unumf_closeResult(result);
-  if (TZ_U_FAILURE(status) || length <= 0 || length >= 32)
+  if (TZ_U_FAILURE(status) || length <= 0 || length >= 32) {
     *out = tz_str_from_ascii("other", 5);
-  else
+  } else {
     *out = tz_str_from_utf16(keyword, (size_t)length);
+  }
 }
 
 // resolvedOptions().pluralCategories: those of the language, in the order
@@ -781,17 +833,22 @@ TzArray *tz_pr_categories(TzPluralRules *pr) {
   if (!TZ_U_FAILURE(status) && keywords) {
     int32_t length;
     const char *keyword;
-    while ((keyword = icu->uenum_next(keywords, &length, &status)) != NULL)
-      for (int i = 0; i < 6; ++i)
-        if (strcmp(order[i], keyword) == 0)
+    while ((keyword = icu->uenum_next(keywords, &length, &status)) != NULL) {
+      for (int i = 0; i < 6; ++i) {
+        if (strcmp(order[i], keyword) == 0) {
           present[i] = 1;
+        }
+      }
+    }
     icu->uenum_close(keywords);
   }
   TzArray *out = tz_arr_new(&tz_string_type, 0, 6);
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 6; ++i) {
     if (present[i]) {
       TzStr s = tz_str_from_ascii(order[i], strlen(order[i]));
       tz_arr_push_value(out, &s);
     }
+  }
+
   return out;
 }

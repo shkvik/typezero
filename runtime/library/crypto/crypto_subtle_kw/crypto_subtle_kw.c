@@ -4,9 +4,7 @@
 
 // The low-level AES functions are deprecated for programs; OpenSSL keeps them for itself.
 #include "internal/deprecated.h"
-
 #include "runtime/library/crypto/crypto/crypto.h"
-
 #include <openssl/aes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,8 +23,9 @@ static const uint8_t kDefaultIv[8] = {0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 
 
 static void kw_work(TzWork *w) {
   KwJob *j = (KwJob *)w;
-  if (j->failed)
+  if (j->failed) {
     return;
+  }
   size_t n = j->length / 8;
   int bits = (int)j->key_length * 8;
   AES_KEY ks;
@@ -42,36 +41,41 @@ static void kw_work(TzWork *w) {
     AES_set_encrypt_key(j->key, bits, &ks);
     memcpy(a, kDefaultIv, 8);
     memcpy(r, j->data, j->length);
-    for (uint64_t t = 1, s = 0; s < 6; ++s)
+    for (uint64_t t = 1, s = 0; s < 6; ++s) {
       for (size_t i = 0; i < n; ++i, ++t) {
         memcpy(b, a, 8);
         memcpy(b + 8, r + 8 * i, 8);
         AES_encrypt(b, b, &ks);
         memcpy(a, b, 8);
-        for (int k = 0; k < 8; ++k)
+        for (int k = 0; k < 8; ++k) {
           a[7 - k] ^= (uint8_t)(t >> (8 * k));
+        }
         memcpy(r + 8 * i, b + 8, 8);
       }
+    }
     memcpy(j->out->data, a, 8);
   } else {
     n -= 1;
     AES_set_decrypt_key(j->key, bits, &ks);
     memcpy(a, j->data, 8);
     memcpy(r, j->data + 8, 8 * n);
-    for (uint64_t t = 6 * (uint64_t)n, s = 0; s < 6; ++s)
+    for (uint64_t t = 6 * (uint64_t)n, s = 0; s < 6; ++s) {
       for (size_t i = n; i-- > 0; --t) {
-        for (int k = 0; k < 8; ++k)
+        for (int k = 0; k < 8; ++k) {
           a[7 - k] ^= (uint8_t)(t >> (8 * k));
+        }
         memcpy(b, a, 8);
         memcpy(b + 8, r + 8 * i, 8);
         AES_decrypt(b, b, &ks);
         memcpy(a, b, 8);
         memcpy(r + 8 * i, b + 8, 8);
       }
+    }
     // The integrity check, in constant time.
     volatile uint8_t diff = 0;
-    for (int k = 0; k < 8; ++k)
+    for (int k = 0; k < 8; ++k) {
       diff |= a[k] ^ kDefaultIv[k];
+    }
     j->failed = diff != 0;
   }
   memset(&ks, 0, sizeof ks);
@@ -91,18 +95,22 @@ static void kw_done(TzWork *w) {
   free(j->key);
   memset(j->data, 0, j->length);
   free(j->data);
-  if (j->out)
+  if (j->out) {
     tz_instance_release((TzInstance *)j->out);
+  }
   tz_obj_release((TzObject *)j->promise);
   tz_free(j);
 }
 
 static uint8_t *copy(const uint8_t *data, size_t length) {
   uint8_t *p = (uint8_t *)malloc(length ? length : 1);
-  if (!p)
+  if (!p) {
     tz_panic("out of memory", -1);
-  if (length)
+  }
+  if (length) {
     memcpy(p, data, length);
+  }
+
   return p;
 }
 

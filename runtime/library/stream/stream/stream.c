@@ -21,5 +21,6 @@ void tz_lib_std_write(int32_t fd, const TzBytes *b) {
 // which it holds as the object itself.
 int32_t tz_lib_is_bytes(const void *u, int32_t kind) {
   const TzLayout *layout = tz_unknown_layout(u);
+
   return layout && (int32_t)(layout->flags >> TZ_LAYOUT_BYTES_SHIFT) == kind;
 }

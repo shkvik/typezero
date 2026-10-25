@@ -1,7 +1,6 @@
 #pragma once
 
 #include "llvm/ADT/StringRef.h"
-
 #include <cstdint>
 #include <optional>
 #include <string>
