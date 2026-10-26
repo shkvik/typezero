@@ -6,6 +6,8 @@ format 2026-10-23T10:00Z 10 AM
 format not a date true false RangeError: Invalid time value
 parts 2026-10-23T10:00Z 10 AM
 parts not a date true false RangeError: Invalid time value
+1792749600000
+{ code: 'bad_date', message: 'Invalid Date', text: 'not a date' }
 zone Asia/Bishkek 6 AM
 zone Mars/Base true false RangeError: Invalid time zone specified: Mars/Base
 locale zone Asia/Bishkek 1/1/1970, 6:00:00 AM

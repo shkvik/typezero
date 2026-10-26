@@ -25,8 +25,9 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
-  const Type *value = call->type->promised();
-  llvm::Value *promise = lowering_.promiseLowerer().newPromise(value);
+  const Type *settled = call->type->promised();
+  const Type *value = settled->isResult() ? settled->okType() : settled;
+  llvm::Value *promise = lowering_.promiseLowerer().newPromise(settled);
   auto obj = [&](size_t i) { return lowering_.stringLowerer().stringObj(values[i]); };
   auto meta = [&](size_t i) { return lowering_.stringLowerer().stringMeta(values[i]); };
   auto flag = [&](size_t i) { return lowering_.builder_.CreateZExt(values[i], i32); };

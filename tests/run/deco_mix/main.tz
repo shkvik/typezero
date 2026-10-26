@@ -51,8 +51,11 @@ const widened: unknown | int | string = choice
 console.log(typeof widened, widened == "picked")
 
 // 4. `catch (e: unknown)`: an Error, shown by instanceof.
+function failing() {
+  throw new SyntaxError("Unexpected end of JSON input")
+}
 try {
-  JSON.parse("{")
+  failing()
 } catch (e: unknown) {
   if (e instanceof SyntaxError)
     console.log("syntax error:", e.name)

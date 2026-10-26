@@ -14,18 +14,18 @@ function digest(text: string) {
   return h
 }
 
-const dir = await mkdtemp(join(tmpdir(), "tz-parallel-files-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-parallel-files-")))
 const names: string[] = []
 for (let i = 0; i < 6; i++) {
   const name = join(dir, `f${i}.txt`)
-  await writeFile(name, "line of text ".repeat(2000 + i * 10))
+  must(await writeFile(name, "line of text ".repeat(2000 + i * 10)))
   names.push(name)
 }
 
 async function convert(name: string, i: int) {
-  const text = await readFile(name, "utf8")
+  const text = must(await readFile(name, "utf8"))
   const h = digest(text)
-  await writeFile(name + ".out", `${text.length} ${h}`)
+  must(await writeFile(name + ".out", `${text.length} ${h}`))
   return `${i}:${h}`
 }
 
@@ -33,4 +33,12 @@ const all = await Promise.all(names.map((n, i) => convert(n, i)))
 console.log(all.join(" "))
 const back = await Promise.all(names.map((n) => readFile(n + ".out", "utf8")))
 console.log(back.join(" | "))
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

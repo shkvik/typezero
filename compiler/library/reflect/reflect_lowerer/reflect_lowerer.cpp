@@ -3,6 +3,7 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
 #include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -86,10 +87,8 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
   auto failIfThrown = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
     llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateIsNotNull(
-            lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot())),
-        failBlock, goBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
+    lowering_.builder_.CreateCondBr(lowering_.throwLowerer().anyFailure(), failBlock, goBlock,
+                                    llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
     lowering_.functionFrame().switchTo(failBlock);
     release();
     lowering_.functionFrame().emitCleanups(0);
@@ -398,6 +397,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     return object;
   }
   case Builtin::FromJsonClass: {
+    lowering_.jsonLowerer().useErrors(call->type->errType());
     llvm::Value *cls = lowering_.exprLowerer().emitExpr(call->args[0]);
     Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[1], true);
     llvm::Value *object;
@@ -413,7 +413,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     }
     lowering_.refCounts().dropOperand(json);
     lowering_.throwLowerer().emitThrowCheck();
-    return object;
+    return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::ReflectMethod: {
     Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);

@@ -12,8 +12,8 @@ import { join } from "node:path"
 
 const dir = process.env.TLS_DIR ?? "."
 const tls = {
-  cert: readFileSync(join(dir, "localhost.pem"), "utf8"),
-  key: readFileSync(join(dir, "key.pem"), "utf8"),
+  cert: must(readFileSync(join(dir, "localhost.pem"), "utf8")),
+  key: must(readFileSync(join(dir, "key.pem"), "utf8")),
 }
 const enc = new TextEncoder()
 const server = serve({ port: 0, hostname: "127.0.0.1", tls }, async (req) => {
@@ -22,7 +22,7 @@ const server = serve({ port: 0, hostname: "127.0.0.1", tls }, async (req) => {
     case "/hello":
       return new Response(`hello over ${url.protocol}`)
     case "/echo":
-      return Response.json({ got: await req.json(), method: req.method })
+      return Response.json({ got: (await req.json()).unwrapOr(null), method: req.method })
     case "/stream":
       return new Response(
         new ReadableStream({
@@ -48,7 +48,7 @@ const echo = await fetch(`https://localhost:${port}/echo`, {
   method: "POST",
   body: JSON.stringify({ n: 1, s: "ж" }),
 })
-console.log(JSON.stringify(await echo.json()))
+console.log(JSON.stringify((await echo.json()).unwrapOr(null)))
 console.log(await (await fetch(`https://localhost:${port}/stream`)).text())
 const all = await Promise.all(
   ["/hello", "/missing", "/hello"].map(async (p) => {
@@ -65,3 +65,11 @@ try {
   if (e instanceof TypeError) console.log("http to https:", e.message)
 }
 await server.stop()
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

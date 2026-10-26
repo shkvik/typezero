@@ -154,6 +154,7 @@
 #include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "compiler/whole_program/load_order/load_order.h"
 #include "compiler/whole_program/unused/unused.h"
@@ -363,6 +364,7 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   streamSourcesPart_ = std::make_unique<StreamSources>(*this);
   streamPipelinePart_ = std::make_unique<StreamPipeline>(*this);
   tzModulesCheckerPart_ = std::make_unique<TzModulesChecker>(*this);
+  urlCheckerPart_ = std::make_unique<UrlChecker>(*this);
   weakRefCheckerPart_ = std::make_unique<WeakRefChecker>(*this);
 }
 

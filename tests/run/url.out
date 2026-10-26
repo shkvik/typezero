@@ -41,7 +41,7 @@ nope false true
 "./a/b" http://base.com/dir/a/b
 "http:foo" http://base.com/dir/foo
 http://base.com/dir/c true
-TypeError Invalid URL
+bad_url Invalid URL not a url
 http://me:s3cret@other.org:8080/new%20path?a=1#end
 https://me:s3cret@other.org/new%20path?a=1#end true
 https://me:s3cret@example.com:9000/new%20path?q=1%202#end

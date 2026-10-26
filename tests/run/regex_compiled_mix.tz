@@ -25,7 +25,9 @@ console.log(seen, "a1 b2".replace(/([a-z])(\d)/g, (m: string, l: string, d: stri
 
 // 2. The g flag of a regex the program makes.
 function make(flags: string): RegExp {
-  return new RegExp("o", flags)
+  const re = RegExp.parse("o", flags)
+  if (re.isErr()) throw new SyntaxError(re.error.message)
+  return re.value
 }
 attempt("replaceAll", () => "foo".replaceAll(make(""), "0"))
 attempt("replaceAll g", () => "foo".replaceAll(make("g"), "0"))
@@ -63,7 +65,7 @@ console.log(ru.match(/[а-яё]+/gi)?.join("|"), /привет/i.test(ru), ru.re
 console.log(ru.split(/[,!:.]\s*/), ru.search(/мир/), [...ru.matchAll(/(?<w>[ёе]\p{L}*)/giu)].map((m) => m.groups?.w).join())
 
 // 6. Strings from JSON and from the keys of a Map.
-const data = JSON.parse('{"users": ["ann@example.com", "bob at example", "кот@пример.рф"]}')
+const data = JSON.parse('{"users": ["ann@example.com", "bob at example", "кот@пример.рф"]}').unwrapOr(null)
 const users = data.users
 if (Array.isArray(users))
   for (const u of users) if (typeof u == "string") console.log(u, /^[^@\s]+@[^@\s]+$/u.test(u))

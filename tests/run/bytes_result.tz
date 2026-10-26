@@ -11,13 +11,13 @@ console.log(parseHex("cafe"), parseHex("xyz"))
 const sum = parseHex("010203").map(b => b.reduce((a, x) => a + x, 0))
 console.log(sum)
 
-const dir = mkdtempSync(join(tmpdir(), "tz-bytes-result-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-bytes-result-")))
 const file = join(dir, "a.bin")
-writeFileSync(file, new Uint8Array([9, 8, 7]))
+must(writeFileSync(file, new Uint8Array([9, 8, 7])))
 async function read(path: string): Promise<Result<Buffer, string>> {
   await undefined
   try {
-    return ok(readFileSync(path))
+    return ok(must(readFileSync(path)))
   } catch (e) {
     return err(e instanceof SystemError ? e.code : e.message)
   }
@@ -32,4 +32,12 @@ function either(n: int): Result<Uint8Array | string, string> {
 }
 for (const n of [-1, 0, 2])
   console.log(either(n).match(v => typeof v == "string" ? v : `${v.length} bytes`, e => e))
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

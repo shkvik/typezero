@@ -21,11 +21,11 @@ if (at >= 0) {
   if (what == "env") {
     console.log(process.env.TZ_MIX_SET ?? "-", process.env.TZ_MIX_GONE ?? "-", process.env.TZ_MIX_OWN ?? "-")
   } else if (what == "bytes") {
-    writeFileSync(1, Buffer.from([0, 1, 2, 127, 128, 254, 255]))
+    must(writeFileSync(1, Buffer.from([0, 1, 2, 127, 128, 254, 255])))
   } else if (what == "reverse") {
-    writeFileSync(1, readFileSync(0).reverse())
+    must(writeFileSync(1, must(readFileSync(0)).reverse()))
   } else if (what == "upper") {
-    process.stdout.write(readFileSync(0, "utf8").toUpperCase())
+    process.stdout.write(must(readFileSync(0, "utf8")).toUpperCase())
   } else if (what == "later") {
     // A child that waits itself before it prints and sets its code.
     const ms = Number(args[1] ?? "0") | 0
@@ -45,7 +45,7 @@ if (at >= 0) {
   execFileSync(process.execPath, [...self, "upper"], { stdio: "inherit" })
   console.log("after the child")
 
-  const dir = await mkdtemp(join(tmpdir(), "tz-child-mix-"))
+  const dir = must(await mkdtemp(join(tmpdir(), "tz-child-mix-")))
   const log: string[] = []
 
   // Files read and written on the pool while the children run.
@@ -107,8 +107,8 @@ if (at >= 0) {
   // Buffers out of children, through files and back into children.
   const bytes = execFileSync(process.execPath, [...self, "bytes"])
   console.log(bytes.length, bytes.toString("hex"), bytes.buffer.byteLength >= 7)
-  await writeFile(join(dir, "bytes.bin"), bytes)
-  const back = await readFile(join(dir, "bytes.bin"))
+  must(await writeFile(join(dir, "bytes.bin"), bytes))
+  const back = must(await readFile(join(dir, "bytes.bin")))
   console.log(back.equals(bytes), back[6], back.subarray(3, 5).toString("hex"))
   const reversed = execFileSync(process.execPath, [...self, "reverse"], { input: back })
   console.log(reversed.toString("hex"))
@@ -117,6 +117,14 @@ if (at >= 0) {
   const both = spawnSync(process.execPath, [...self, "upper"], { input: "привет" })
   console.log(both.stdout.toString(), both.stdout.length, both.stderr.length)
 
-  await rm(dir, { recursive: true })
+  must(await rm(dir, { recursive: true }))
   console.log("done")
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

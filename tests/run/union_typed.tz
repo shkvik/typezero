@@ -47,7 +47,7 @@ const tags: ("a" | "b" | int)[] = ["a", 1, "b", 1, "a"]
 console.log(count(tags, "a"), count(tags, 1), count(tags, "b"))
 
 // Checks of a Json give a union: `string | double`.
-const data = JSON.parse('{"id": 7, "name": "x", "list": [1]}')
+const data = must(JSON.parse('{"id": 7, "name": "x", "list": [1]}'))
 for (const key of ["id", "name", "list"]) {
   const value = data[key]
   if (typeof value == "string" || typeof value == "number") console.log(key, value, typeof value)
@@ -73,3 +73,11 @@ function area(s: Shape) {
   }
 }
 console.log(area({ kind: "circle", r: 1 }), area({ kind: "square", side: 2 }))
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

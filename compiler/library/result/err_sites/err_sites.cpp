@@ -1,4 +1,5 @@
 #include "compiler/library/result/err_sites/err_sites.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -75,8 +76,33 @@ std::string ErrSites::fileName(unsigned buffer) {
   return name;
 }
 
-llvm::Constant *ErrSites::site(llvm::SMLoc loc) {
+bool ErrSites::inLibrary(llvm::SMLoc loc) {
   if (!lowering_.sourceMgr_ || !loc.isValid()) {
+    return false;
+  }
+  unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc);
+  if (!buffer) {
+    return false;
+  }
+  llvm::StringRef id = lowering_.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
+
+  return id.starts_with("tz:") || id.starts_with("node:");
+}
+
+llvm::Value *ErrSites::stamp(llvm::Value *result, const Type *type, llvm::SMLoc loc) {
+  if (type->errType()->isNever()) {
+    return result;
+  }
+  Lowering::ResultLayout layout = lowering_.resultLowerer().resultLayout(type);
+  llvm::Value *old = lowering_.builder_.CreateExtractValue(result, layout.site, "site");
+  llvm::Value *site = lowering_.builder_.CreateSelect(lowering_.builder_.CreateIsNull(old),
+                                                      this->site(loc), old, "site");
+
+  return lowering_.builder_.CreateInsertValue(result, site, layout.site);
+}
+
+llvm::Constant *ErrSites::site(llvm::SMLoc loc) {
+  if (!lowering_.sourceMgr_ || !loc.isValid() || inLibrary(loc)) {
     return none();
   }
   unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc);

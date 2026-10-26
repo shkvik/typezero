@@ -959,8 +959,11 @@ export class URL {
     return parseUrl(input, parsedBase) != undefined
   }
 
-  static parse(input: string, base?: string): URL | undefined {
-    return URL.canParse(input, base) ? new URL(input, base) : undefined
+  static parse(input: string, base?: string | URL): Result<URL, UrlError> {
+    let baseText: string | undefined = undefined
+    if (base != undefined) baseText = typeof base == "string" ? base : base.href
+    if (!URL.canParse(input, baseText)) return err({ code: "bad_url", message: "Invalid URL", input })
+    return ok(new URL(input, baseText))
   }
 
   get href(): string {

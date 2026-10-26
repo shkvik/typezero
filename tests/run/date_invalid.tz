@@ -4,4 +4,4 @@
 // expect-exit: 1
 // expect-stderr: RangeError: Invalid time value
 const texts = ["2026-10-23T10:00Z", "not a date"]
-for (const text of texts) console.log(new Date(text).toISOString())
+for (const text of texts) console.log(new Date(Date.parse(text).unwrapOr(NaN)).toISOString())

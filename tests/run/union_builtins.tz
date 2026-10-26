@@ -51,12 +51,20 @@ console.log(byMixed, byMixed.get("up"), byMixed.get(1), mixed.includes("down"))
 
 function contents(path: string): string {
   try {
-    return readFileSync(path, "utf8")
+    return must(readFileSync(path, "utf8"))
   } catch (e) {
     if (e instanceof SystemError && e.code == "ENOENT") return `no file (${e.syscall})`
     throw e
   }
 }
 console.log(contents("./no/such/file.txt"))
-const st = statSync("./no/such/dir", { throwIfNoEntry: false })
+const st = must(statSync("./no/such/dir", { throwIfNoEntry: false }))
 console.log(st == undefined ? "nothing there" : `size ${st.size}`)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

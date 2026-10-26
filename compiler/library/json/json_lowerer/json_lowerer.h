@@ -23,6 +23,7 @@ public:
   llvm::Value *emitJsonCall(CallExpr *call);
   llvm::Value *emitJsonObjectLiteral(ObjectLitExpr *lit);
   llvm::Value *emitJsonObjectCall(CallExpr *call);
+  void useErrors(const Type *errorType);
 
 private:
   Lowering &lowering_;

@@ -246,6 +246,7 @@ class SetEncodingChecker;
 class StreamSources;
 class StreamPipeline;
 class TzModulesChecker;
+class UrlChecker;
 class WeakRefChecker;
 
 class Checker {
@@ -802,6 +803,7 @@ public:
   StreamSources &streamSources() const { return *streamSourcesPart_; }
   StreamPipeline &streamPipeline() const { return *streamPipelinePart_; }
   TzModulesChecker &tzModulesChecker() const { return *tzModulesCheckerPart_; }
+  UrlChecker &urlChecker() const { return *urlCheckerPart_; }
   WeakRefChecker &weakRefChecker() const { return *weakRefCheckerPart_; }
 
 private:
@@ -966,6 +968,7 @@ private:
   friend class StreamSources;
   friend class StreamPipeline;
   friend class TzModulesChecker;
+  friend class UrlChecker;
   friend class WeakRefChecker;
   std::unique_ptr<Scopes> scopesPart_;
   std::unique_ptr<TypeResolver> typeResolverPart_;
@@ -1123,6 +1126,7 @@ private:
   std::unique_ptr<StreamSources> streamSourcesPart_;
   std::unique_ptr<StreamPipeline> streamPipelinePart_;
   std::unique_ptr<TzModulesChecker> tzModulesCheckerPart_;
+  std::unique_ptr<UrlChecker> urlCheckerPart_;
   std::unique_ptr<WeakRefChecker> weakRefCheckerPart_;
 };
 

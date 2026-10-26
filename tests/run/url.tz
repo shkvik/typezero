@@ -33,22 +33,23 @@ const inputs = [
   "foo://",
 ]
 for (const s of inputs) {
-  const u = new URL(s)
+  const parsed = URL.parse(s)
+  if (parsed.isErr()) continue
+  const u = parsed.value
   console.log(u.href, "|", u.origin, "|", u.protocol, u.username, u.password, u.host, u.hostname,
               u.port, u.pathname, u.search, u.hash)
 }
 for (const s of ["http://h:65536/", "http://[::1/", "http://a b/", "http:///", "https://h:x/",
                  "http://192.168.0.257/", "nope"])
-  console.log(s, URL.canParse(s), URL.parse(s) == undefined)
+  console.log(s, URL.canParse(s), URL.parse(s).isErr())
 const base = "http://base.com/dir/file?q#f"
 for (const r of ["", "?x", "#y", "/abs", "../up", "//other.com/p", "./a/b", "http:foo"])
-  console.log(JSON.stringify(r), new URL(r, base).href)
-console.log(new URL("c", new URL(base)).href, URL.canParse("/x", "http://h"))
-try {
-  new URL("not a url")
-} catch (e) {
-  console.log(e.name, e.message)
-}
+  console.log(JSON.stringify(r), URL.parse(r, base).map((u) => u.href).unwrapOr("?"))
+const baseUrl = URL.parse(base)
+if (baseUrl.isOk())
+  console.log(new URL("c", baseUrl.value).href, URL.canParse("/x", "http://h"))
+const bad = URL.parse("not a url")
+if (bad.isErr()) console.log(bad.error.code, bad.error.message, bad.error.input)
 
 // The setters.
 const u = new URL("http://h/p?a=1#top")

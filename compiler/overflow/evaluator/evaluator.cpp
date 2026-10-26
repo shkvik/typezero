@@ -161,6 +161,9 @@ Val Evaluator::evalMember(const MemberExpr *member, State &st) {
   if (member->name == "length" && hasLength(objectType)) {
     return numVal(object.len.empty() ? someLength() : object.len);
   }
+  if (objectType->isResult() && member->name == "value" && object.elem) {
+    return *object.elem;
+  }
   if (!tracked(member->type)) {
     return Val();
   }
@@ -428,7 +431,7 @@ Val Evaluator::evalCast(const CastExpr *conv, State &st, bool wraps) {
     return numVal(check_.overflowWarnings().input(to, conv->loc(), "JSON"));
   }
   if (!isNumberType(to)) {
-    return hasLength(to) ? v : Val();
+    return hasLength(to) || (from->isResult() && to->isResult()) ? v : Val();
   }
   if (!isNumberType(from)) {
     return check_.overflowWarnings().trusted(to);

@@ -47,5 +47,5 @@ AppError: negative amount -3
     at checkAll (main.tz:52:42)
     at main.tz:150:3
 ParseError: line 10: cannot read 'bad'
-    at parseLine (parse.tz:19:29)
+    at parseLine (parse.tz:23:29)
     at main.tz:155:18

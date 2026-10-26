@@ -92,9 +92,15 @@ static void fsp_free(FsRequest *r) {
 }
 
 void tz_fs_fsp_reject_thrown(FsRequest *r) {
-  void *error = tz_thrown;
-  tz_thrown = NULL;
-  tz_promise_reject(r->promise, error);
+  void *failure = tz_failed;
+  if (failure) {
+    tz_failed = NULL;
+    tz_promise_fail(r->promise, failure);
+  } else {
+    void *error = tz_thrown;
+    tz_thrown = NULL;
+    tz_promise_reject(r->promise, error);
+  }
   fsp_free(r);
 }
 
@@ -187,10 +193,7 @@ int tz_fs_fsp_succeeded(FsRequest *r) {
 }
 
 void tz_fs_fsp_fulfill(FsRequest *r, const void *value, size_t size) {
-  if (size) {
-    memcpy((char *)r->promise + TZ_PROMISE_VALUE, value, size);
-  }
-  tz_promise_fulfill(r->promise);
+  tz_promise_succeed(r->promise, value, size);
   fsp_free(r);
 }
 

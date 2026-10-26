@@ -184,8 +184,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::FromCodePoint:
   case Builtin::UriEncodeComponent:
   case Builtin::UriEncode:
-  case Builtin::UriDecodeComponent:
-  case Builtin::UriDecode:
     intrinsic(caught);
     break;
   case Builtin::NumToFixed:
@@ -197,9 +195,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     intrinsic(caught);
     break;
   case Builtin::RegExpNew:
-  case Builtin::JsonParse:
-  case Builtin::JsonParseAs:
-  case Builtin::FromJson:
   case Builtin::ReflectGet:
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:

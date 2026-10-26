@@ -193,6 +193,7 @@ enum class Builtin {
   ErrorStack,
   ErrorToString,
   RegExpNew,
+  RegExpParse,
   RegExpEscape,
   RegExpTest,
   RegExpExec,

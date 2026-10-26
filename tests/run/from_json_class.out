@@ -11,10 +11,10 @@ Order {
   secret: 1
 } 335 1
 Item { name: 'ink', price: 225 } paid true
-TypeError: id: expected int, got 1.5
-TypeError: to.city: expected string, got undefined
-TypeError: items[0].price: expected int, got string
-TypeError: notes[0]: expected string, got number
-TypeError: expected Order, got array
+id expected int, got 1.5
+to.city expected string, got undefined
+items[0].price expected int, got string
+notes[0] expected string, got number
+ expected Order, got array
 Address { city: 'Rome' }
 Item { name: 'cup', price: 3 }

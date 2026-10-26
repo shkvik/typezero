@@ -78,9 +78,9 @@ if (at >= 0) {
   console.log(execFileSync(process.execPath, [...self, "args", userInput], { encoding: "utf8" }).trim())
 
   // A batch file runs only through the shell (CVE-2024-27980).
-  const dir = mkdtempSync(join(tmpdir(), "tz-child-"))
+  const dir = must(mkdtempSync(join(tmpdir(), "tz-child-")))
   const bat = join(dir, "hello.bat")
-  writeFileSync(bat, "@echo from batch %1\r\n")
+  must(writeFileSync(bat, "@echo from batch %1\r\n"))
   try {
     execFileSync(bat, ["x"])
   } catch (e) {
@@ -88,9 +88,17 @@ if (at >= 0) {
   }
   console.log(execFileSync(`"${bat}"`, ["x"], { shell: true, encoding: "utf8" }).trim())
   console.log(execSync(`"${bat}" y`, { encoding: "utf8", cwd: dir }).trim())
-  rmSync(dir, { recursive: true })
+  must(rmSync(dir, { recursive: true }))
 
   // windowsVerbatimArguments: the command line as it is, unquoted.
   console.log(execFileSync(process.execPath, [...self, "args", "\"a b\"", "c"], { encoding: "utf8", windowsVerbatimArguments: true }).trim())
   console.log(execFileSync(process.execPath, [...self, "args", "\"a b\"", "c"], { encoding: "utf8", windowsHide: true }).trim())
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

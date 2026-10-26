@@ -1,5 +1,6 @@
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
@@ -233,6 +234,30 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     lowering_.refCounts().dropOperand(pattern);
     lowering_.throwLowerer().emitThrowCheck();
     return regex;
+  }
+  case Builtin::RegExpParse: {
+    Lowering::Operand pattern =
+        lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
+    bool given = call->args.size() > 1;
+    Lowering::Operand flags{nullptr, false, nullptr};
+    if (given) {
+      flags = lowering_.refCounts().emitOperand(call->args[1], true);
+    }
+    llvm::Value *null = llvm::ConstantPointerNull::get(ptr);
+    llvm::Value *regex = lowering_.builder_.CreateCall(
+        regexFunction("tz_re_parse", ptr, {ptr, i64, ptr, i64, i32, ptr}),
+        {lowering_.stringLowerer().stringObj(pattern.value),
+         lowering_.stringLowerer().stringMeta(pattern.value),
+         given ? lowering_.stringLowerer().stringObj(flags.value) : null,
+         given ? lowering_.stringLowerer().stringMeta(flags.value) : lowering_.builder_.getInt64(0),
+         lowering_.builder_.getInt32(given ? 1 : 0),
+         lowering_.resultLowerer().failureMaker(call->type->errType())},
+        "regex");
+    if (given) {
+      lowering_.refCounts().dropOperand(flags);
+    }
+    lowering_.refCounts().dropOperand(pattern);
+    return lowering_.resultLowerer().catchFailure(regex, call->type, call->loc());
   }
   case Builtin::RegExpEscape: {
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);

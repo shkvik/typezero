@@ -19,6 +19,8 @@ public:
   llvm::Value *convertHalf(llvm::Value *half, const Type *from, const Type *to);
   llvm::Value *callWithHalf(llvm::Value *fn, const Type *fnType, llvm::Value *half,
                             const Type *halfType);
+  llvm::Value *catchFailure(llvm::Value *value, const Type *type, llvm::SMLoc loc);
+  llvm::Function *failureMaker(const Type *errorType);
   llvm::Value *emitResultCall(CallExpr *call);
   llvm::Value *emitResultMethod(CallExpr *call);
   llvm::Value *emitResultMember(MemberExpr *member);

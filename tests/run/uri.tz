@@ -1,6 +1,6 @@
 // same-as-node
-// encodeURIComponent, encodeURI, decodeURIComponent and decodeURI, with their
-// URIErrors.
+// encodeURIComponent, encodeURI with their URIErrors, and decodeURIComponent
+// and decodeURI, which give a Result (docs/errors.md, section 7).
 
 function attempt(what: string, f: () => string) {
   try {
@@ -34,39 +34,48 @@ attempt("two highs", () => encodeURIComponent("\uD83D😀"))
 attempt("reversed pair", () => encodeURIComponent("\uDE00\uD83D"))
 
 // Decoding: mixed case hex, all lengths, and what decodeURI keeps.
-console.log(decodeURIComponent("%c3%A9%C3%a9"), decodeURIComponent("%D0%BF%D1%80%D0%B8"))
-console.log(decodeURIComponent("%E0%A4%AD%e2%82%ac"), decodeURIComponent("%F0%9F%98%80!"))
-console.log(decodeURIComponent("%41%42c%20d"), decodeURIComponent("no escapes"),
-  decodeURIComponent(""))
+function component(text: string) {
+  return decodeURIComponent(text).unwrapOr("<malformed>")
+}
+function uri(text: string) {
+  return decodeURI(text).unwrapOr("<malformed>")
+}
+console.log(component("%c3%A9%C3%a9"), component("%D0%BF%D1%80%D0%B8"))
+console.log(component("%E0%A4%AD%e2%82%ac"), component("%F0%9F%98%80!"))
+console.log(component("%41%42c%20d"), component("no escapes"),
+  component(""))
 const escapedReserved = encodeURIComponent(reserved)
-console.log(decodeURI(escapedReserved), decodeURIComponent(escapedReserved))
-console.log(decodeURI("%2f%2F%3a%23%25%41%20%c3%a9"), decodeURI("a%2Bb+c"))
-console.log(decodeURIComponent(encodeURIComponent(ascii)) == ascii)
-console.log(decodeURI(encodeURI(ascii)) == ascii)
+console.log(uri(escapedReserved), component(escapedReserved))
+console.log(uri("%2f%2F%3a%23%25%41%20%c3%a9"), uri("a%2Bb+c"))
+console.log(component(encodeURIComponent(ascii)) == ascii)
+console.log(uri(encodeURI(ascii)) == ascii)
 const mixed = "Ünïcödé 😀 текст & ;/?:@&=+$,# " + ascii
-console.log(decodeURIComponent(encodeURIComponent(mixed)) == mixed)
-console.log(decodeURI(encodeURI(mixed)) == mixed)
+console.log(component(encodeURIComponent(mixed)) == mixed)
+console.log(uri(encodeURI(mixed)) == mixed)
 
 // Escapes that are not UTF-8, or not escapes at all.
 const bad = ["%", "abc%", "%4", "%zz", "%G0", "%E0%A4%A", "%E0%A4", "%C3", "%C3%28", "%80",
   "%BF", "%C0%80", "%C1%BF", "%E0%80%80", "%ED%A0%80", "%ED%BF%BF", "%F0%80%80%80",
   "%F4%90%80%80", "%F5%80%80%80", "%F8%80%80%80%80", "%FF", "%E0%A4%AD%", "x%E2%82"]
-for (const s of bad) {
-  attempt(`component ${s}`, () => decodeURIComponent(s))
-  attempt(`uri ${s}`, () => decodeURI(s))
+function show(what: string, r: Result<string, UriError>) {
+  console.log(what, r.match((t) => JSON.stringify(t), (e) => `${e.code}: ${e.message}`))
 }
-attempt("reserved then bad", () => decodeURI("%2F%"))
+for (const s of bad) {
+  show(`component ${s}`, decodeURIComponent(s))
+  show(`uri ${s}`, decodeURI(s))
+}
+show("reserved then bad", decodeURI("%2F%"))
 
 // Long strings, ropes, and strings that share memory with others.
 let long = ""
 for (let i = 0; i < 300; i++) long += i % 7 == 0 ? "ü " : "a"
 const encoded = encodeURIComponent(long)
-console.log(encoded.length, encoded.slice(0, 40), decodeURIComponent(encoded) == long)
+console.log(encoded.length, encoded.slice(0, 40), component(encoded) == long)
 const wide = "€".repeat(100) + "x"
-console.log(encodeURIComponent(wide).length, decodeURIComponent(encodeURIComponent(wide)) == wide)
+console.log(encodeURIComponent(wide).length, component(encodeURIComponent(wide)) == wide)
 const part = "prefix that is long enough: a%20b%20c".slice(28)
-console.log(decodeURIComponent(part), encodeURIComponent(part))
-console.log(["a b", "c/d", "é"].map(encodeURIComponent), ["a%20b"].map(decodeURIComponent))
+console.log(component(part), encodeURIComponent(part))
+console.log(["a b", "c/d", "é"].map(encodeURIComponent), ["a%20b"].map(component))
 
 // URIError is an Error like the others.
 const made = new URIError("made")

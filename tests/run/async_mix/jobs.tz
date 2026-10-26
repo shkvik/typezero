@@ -49,10 +49,10 @@ export class Folder implements Source {
   constructor(public dir: string) {}
   async read(key: string) {
     await undefined
-    return readFileSync(join(this.dir, key), "utf8")
+    return must(readFileSync(join(this.dir, key), "utf8"))
   }
   write(key: string, text: string) {
-    writeFileSync(join(this.dir, key), text)
+    must(writeFileSync(join(this.dir, key), text))
   }
 }
 
@@ -104,4 +104,12 @@ export async function readText(source: Source, key: string): Promise<Result<stri
   } catch (e) {
     return err(e instanceof SystemError ? `${e.code} ${e.syscall}` : e.message)
   }
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

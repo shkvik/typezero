@@ -6,22 +6,30 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdi
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-const dir = mkdtempSync(join(tmpdir(), "tz-юникод-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-юникод-")))
 const folder = join(dir, "папка ✓")
-mkdirSync(folder)
+must(mkdirSync(folder))
 const names = ["файл.txt", "😀 smile.txt", "日本語.md", "Ελληνικά", "ß.txt"]
 for (const name of names)
-  writeFileSync(join(folder, name), `${name}: текст 😀\n`)
-console.log(readdirSync(folder).sort())
+  must(writeFileSync(join(folder, name), `${name}: текст 😀\n`))
+console.log(must(readdirSync(folder)).sort())
 for (const name of names)
-  console.log(existsSync(join(folder, name)), statSync(join(folder, name)).size,
-              JSON.stringify(readFileSync(join(folder, name), "utf8")))
-renameSync(join(folder, "файл.txt"), join(folder, "переименован.txt"))
-console.log(existsSync(join(folder, "файл.txt")), readFileSync(join(folder, "переименован.txt"), "utf8"))
+  console.log(existsSync(join(folder, name)), must(statSync(join(folder, name))).size,
+              JSON.stringify(must(readFileSync(join(folder, name), "utf8"))))
+must(renameSync(join(folder, "файл.txt"), join(folder, "переименован.txt")))
+console.log(existsSync(join(folder, "файл.txt")), must(readFileSync(join(folder, "переименован.txt"), "utf8")))
 try {
-  readFileSync(join(folder, "нет такого.txt"), "utf8")
+  must(readFileSync(join(folder, "нет такого.txt"), "utf8"))
 } catch (e) {
   console.log(e.message.replaceAll(dir, "D"))
 }
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
 console.log(existsSync(dir))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

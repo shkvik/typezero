@@ -7,6 +7,7 @@
 typedef struct TzThread {
   void *thrown;
   char *stack_limit;
+  void *failed;
   int64_t live_objects, live_arrays, live_strings, live_decimals, live_json;
   int32_t turn;
   int32_t index;
@@ -23,6 +24,7 @@ enum { TZ_CACHE_INTL = 0, TZ_CACHE_DATE_FORMAT = 1 };
 #ifndef TZ_NO_THREAD_STATE
 extern TZ_THREAD_LOCAL TzThread tz_thread;
 #define tz_thrown (tz_thread.thrown)
+#define tz_failed (tz_thread.failed)
 #define tz_stack_limit (tz_thread.stack_limit)
 #define tz_live_objects (tz_thread.live_objects)
 #define tz_live_arrays (tz_thread.live_arrays)

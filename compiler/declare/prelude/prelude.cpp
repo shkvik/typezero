@@ -1,9 +1,11 @@
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include <cassert>
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -20,6 +22,11 @@ type Readonly<T> = { readonly [K in keyof T]: T[K] }
 type Pick<T, K extends keyof T> = { [P in K]: T[P] }
 type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
+type JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }
+type UriError = { code: "bad_uri"; message: string }
+type RegexError = { code: "bad_regex"; message: string }
+type UrlError = { code: "bad_url"; message: string; input: string }
+type DateError = { code: "bad_date"; message: string; text: string }
 )";
 
 }
@@ -38,6 +45,13 @@ void Prelude::declarePrelude() {
       checker_.builtinAliases_[alias->name] = alias;
     }
   }
+}
+
+const Type *Prelude::builtinType(llvm::StringRef name) {
+  TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name);
+  assert(alias && "the prelude declares the type");
+
+  return checker_.typeDeclarer().resolveAlias(alias);
 }
 
 }

@@ -8,6 +8,8 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
+#include "llvm/IR/MDBuilder.h"
 #include <functional>
 
 using llvm::BasicBlock;
@@ -156,6 +158,40 @@ llvm::Value *ResultLowerer::callWithHalf(llvm::Value *fn, const Type *fnType, ll
   lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
 
   return result;
+}
+
+llvm::Value *ResultLowerer::catchFailure(llvm::Value *value, const Type *type, llvm::SMLoc loc) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *slot = lowering_.throwLowerer().failedSlot();
+  llvm::Value *failure = lowering_.builder_.CreateLoad(ptr, slot, "failure");
+  BasicBlock *failBlock = lowering_.functionFrame().newBlock("call.failed");
+  BasicBlock *okBlock = lowering_.functionFrame().newBlock("call.ok");
+  BasicBlock *endBlock = lowering_.functionFrame().newBlock("call.end");
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(failure), failBlock, okBlock,
+                                  llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
+  lowering_.functionFrame().switchTo(failBlock);
+  lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), slot);
+  llvm::Value *failed = makeResult(type, lowering_.builder_.getFalse(), nullptr, failure,
+                                   lowering_.errSites().site(loc));
+  BasicBlock *failEnd = lowering_.builder_.GetInsertBlock();
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(okBlock);
+  llvm::Value *done = makeResult(type, lowering_.builder_.getTrue(),
+                                 type->okType()->isVoid() ? nullptr : value, nullptr);
+  BasicBlock *okEnd = lowering_.builder_.GetInsertBlock();
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(endBlock);
+  llvm::PHINode *phi = lowering_.builder_.CreatePHI(done->getType(), 2, "result");
+  phi->addIncoming(failed, failEnd);
+  phi->addIncoming(done, okEnd);
+
+  return phi;
+}
+
+llvm::Function *ResultLowerer::failureMaker(const Type *errorType) {
+  static const std::vector<MakerFields> orders = {{nullptr, {"code", "message"}}};
+
+  return lowering_.objectMaker().maker(errorType, orders);
 }
 
 llvm::Value *ResultLowerer::emitResultCall(CallExpr *call) {

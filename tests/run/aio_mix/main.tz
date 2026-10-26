@@ -10,18 +10,18 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Journal, LineFeed, Queue, calls, collect } from "./feeds.tz"
 
-const dir = await mkdtemp(join(tmpdir(), "tz-aio-mix-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-aio-mix-")))
 const file = join(dir, "data.bin")
 
 // 1. Bytes and text through node:fs/promises.
-await writeFile(file, new Uint8Array([0x68, 0x69, 0xe9]))
-await appendFile(file, Buffer.from("!"))
-const bytes = await readFile(file)
-console.log(bytes, bytes.length, await readFile(file, "latin1"), await readFile(file, { encoding: "hex" }))
-await writeFile(file, "café", "latin1")
-console.log(await readFile(file), await readFile(file, "base64"))
+must(await writeFile(file, new Uint8Array([0x68, 0x69, 0xe9])))
+must(await appendFile(file, Buffer.from("!")))
+const bytes = must(await readFile(file))
+console.log(bytes, bytes.length, must(await readFile(file, "latin1")), must(await readFile(file, { encoding: "hex" })))
+must(await writeFile(file, "café", "latin1"))
+console.log(must(await readFile(file)), must(await readFile(file, "base64")))
 try {
-  await readFile(join(dir, "missing.txt"))
+  must(await readFile(join(dir, "missing.txt")))
 } catch (e: unknown) {
   if (e instanceof SystemError)
     console.log("missing:", e.code, e.syscall)
@@ -29,7 +29,7 @@ try {
 const controller = new AbortController()
 controller.abort()
 try {
-  await readFile(file, { signal: controller.signal })
+  must(await readFile(file, { signal: controller.signal }))
 } catch (e: unknown) {
   if (e instanceof Error)
     console.log("cancelled:", e.name)
@@ -52,7 +52,7 @@ console.log(await waiting.catch(e => `stopped: ${e.name}`))
 
 // 3. A class that `for await` iterates, and an AsyncIterable parameter.
 const lines = join(dir, "lines.txt")
-await writeFile(lines, "alpha\nbeta\ngamma\n")
+must(await writeFile(lines, "alpha\nbeta\ngamma\n"))
 for await (const line of new LineFeed(lines))
   console.log("line", line)
 console.log(await collect(new LineFeed(lines)))
@@ -72,13 +72,13 @@ console.log(await collect(queue.drain()))
 async function* mixed(): AsyncGenerator<unknown> {
   yield 1
   yield "two"
-  yield await readFile(lines)
+  yield must(await readFile(lines))
 }
 for await (const v of mixed())
   console.log(typeof v, v instanceof Buffer ? v.length : v)
 
 // 5. A number read from a file stays a value from outside across awaits.
-await writeFile(lines, "12\n30\n")
+must(await writeFile(lines, "12\n30\n"))
 let sum = 0
 for await (const line of new LineFeed(lines)) {
   const n: int = parseInt(line)
@@ -87,4 +87,12 @@ for await (const line of new LineFeed(lines)) {
   sum += n
 }
 console.log(sum)
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

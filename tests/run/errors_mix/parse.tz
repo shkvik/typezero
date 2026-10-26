@@ -5,12 +5,16 @@ import { AppError, ParseError } from "./errors.tz"
 export type Entry = { name: string; amount: decimal; tags: string[] }
 
 export function lineRegex(separator: string): RegExp {
-  return new RegExp(`^(\\w+)${separator}\\s*(\\S+)(.*)$`)
+  const re = RegExp.parse(`^(\\w+)${separator}\\s*(\\S+)(.*)$`)
+  if (re.isErr()) throw new SyntaxError(re.error.message)
+  return re.value
 }
 
 export function tagsOf(text: string, flags: string): string[] {
   const tags: string[] = []
-  for (const m of text.matchAll(new RegExp("#(\\w+)", flags))) tags.push(m[1] ?? "")
+  const re = RegExp.parse("#(\\w+)", flags)
+  if (re.isErr()) throw new SyntaxError(re.error.message)
+  for (const m of text.matchAll(re.value)) tags.push(m[1] ?? "")
   return tags
 }
 
@@ -29,16 +33,20 @@ export function parseLine(line: string, n: int, separator: string, flags: string
 export type Config = { limit: decimal; rules: string[]; owner?: { name: string } }
 
 export function loadConfig(text: string): Config {
-  try {
-    return JSON.parse<Config>(text)
-  } catch (e) {
-    throw new AppError("bad config", 500, { cause: e })
+  const config = JSON.parse<Config>(text)
+  if (config.isErr()) {
+    const e = config.error
+    const text = e.path == "" ? e.message : `${e.path}: ${e.message}`
+    throw new AppError("bad config", 500, {
+      cause: e.code == "bad_json" ? new SyntaxError(text) : new TypeError(text),
+    })
   }
+  return config.value
 }
 
 // Reading a Json by hand: a key of null throws a TypeError.
 export function ownerName(text: string): string {
-  const j = JSON.parse(text)
+  const j = JSON.parse(text).unwrapOr(null)
   const name = j.owner.name
   return typeof name == "string" ? name : "?"
 }

@@ -7,6 +7,7 @@
 #include "compiler/check/expr/truth_checker/truth_checker.h"
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/date/date_checker/date_checker.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/library/math/math_checker/math_checker.h"
@@ -100,7 +101,9 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       call->args[0] = checker_.typeRelations().coerce(arg, Type::string());
     }
     call->builtin = builtin;
-    call->type = Type::string();
+    call->type = builtin == Builtin::UriDecodeComponent || builtin == Builtin::UriDecode
+                     ? Type::result(Type::string(), checker_.prelude().builtinType("UriError"))
+                     : Type::string();
     return call;
   }
   if (fn == "BigInt") {

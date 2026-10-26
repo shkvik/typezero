@@ -65,12 +65,11 @@ static void path_text(TzBuf *b, const TzJsonPath *path) {
 
 static void convert_error(const TzJsonPath *path, const char *type, int64_t type_length,
                           const TzJson *got, int show_number) {
+  TzBuf where;
+  tz_buf_init(&where);
+  path_text(&where, path);
   TzBuf b;
   tz_buf_init(&b);
-  path_text(&b, path);
-  if (b.length) {
-    tz_buf_ascii(&b, ": ");
-  }
   tz_buf_ascii(&b, "expected ");
   tz_buf_ascii_n(&b, type, (size_t)type_length);
   tz_buf_ascii(&b, ", got ");
@@ -80,7 +79,7 @@ static void convert_error(const TzJsonPath *path, const char *type, int64_t type
   } else {
     tz_buf_ascii(&b, tz_json_kind_name(got));
   }
-  tz_json_throw(TZ_TYPE_ERROR, &b);
+  tz_json_fail("bad_field", &b, &where);
 }
 
 void tz_json_expect_object(const TzJson *j, const TzJsonPath *path, const char *type,
@@ -233,15 +232,14 @@ void tz_json_mismatch(const TzJson *j, const TzJsonPath *path, const char *type,
     convert_error(path, type, type_length, j, 1);
     return;
   }
+  TzBuf where;
+  tz_buf_init(&where);
+  path_text(&where, path);
   TzBuf b;
   tz_buf_init(&b);
-  path_text(&b, path);
-  if (b.length) {
-    tz_buf_ascii(&b, ": ");
-  }
   tz_buf_ascii(&b, "expected ");
   tz_buf_ascii_n(&b, type, (size_t)type_length);
   tz_buf_ascii(&b, ", got ");
   tz_json_quote(&b, j->u.string);
-  tz_json_throw(TZ_TYPE_ERROR, &b);
+  tz_json_fail("bad_field", &b, &where);
 }

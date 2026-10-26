@@ -43,7 +43,7 @@ export function checkDue(due: Date, now: Date): Date {
 
 // The moment a text names, or an error that says which text.
 export function parseWhen(text: string): Date {
-  const d = new Date(text)
-  if (Number.isNaN(d.getTime())) throw new TypeError(`not a date: '${text}'`)
-  return d
+  const ms = Date.parse(text)
+  if (ms.isErr()) throw new TypeError(`not a date: '${text}'`)
+  return new Date(ms.value)
 }

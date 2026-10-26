@@ -189,7 +189,7 @@ TZ_NORETURN static void unexpected(Parser *p, int token, const char *message) {
     tz_buf_ascii(&b, " is not valid JSON");
   }
   tz_buf_free(&p->text);
-  tz_json_throw(TZ_SYNTAX_ERROR, &b);
+  tz_json_fail("bad_json", &b, NULL);
   __builtin_longjmp(p->fail, 1);
 }
 

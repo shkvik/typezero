@@ -26,7 +26,7 @@ const text = `{
   "meta": {"source": "web", "flags": [1, null]},
   "tags": [["a"], []]
 }`
-const order = JSON.parse<Order>(text)
+const order = must(JSON.parse<Order>(text))
 console.log(order)
 console.log(order.id + 1, order.items.length, order.address.zip ?? "no zip", order.note == undefined)
 let total: decimal = 0
@@ -34,19 +34,19 @@ for (const item of order.items) total += item.price * item.count
 console.log(total)
 
 // fromJson of a Json in hand: the whole of it, or a part.
-const parsed = JSON.parse(text)
-const again = fromJson<Order>(parsed)
+const parsed = must(JSON.parse(text))
+const again = must(fromJson<Order>(parsed))
 console.log(again.items[1]?.title, again.meta)
-const city = fromJson<string>(parsed.address.city)
-const counts = fromJson<int[]>(JSON.parse("[1, 2, 3]"))
-const missing = fromJson<int | undefined>(parsed.nothing)
-const nothing = fromJson<string | undefined>(parsed.note)
-const kept = fromJson<Json | undefined>(parsed.note)
+const city = must(fromJson<string>(parsed.address.city))
+const counts = must(fromJson<int[]>(must(JSON.parse("[1, 2, 3]"))))
+const missing = must(fromJson<int | undefined>(parsed.nothing))
+const nothing = must(fromJson<string | undefined>(parsed.note))
+const kept = must(fromJson<Json | undefined>(parsed.note))
 console.log(city, counts, missing, nothing, kept)
 
 // Recursive types.
 type Tree = { value: int; children: Tree[] }
-const tree = JSON.parse<Tree>('{"value": 1, "children": [{"value": 2, "children": []}, {"value": 3, "children": [{"value": 4, "children": []}]}]}')
+const tree = must(JSON.parse<Tree>('{"value": 1, "children": [{"value": 2, "children": []}, {"value": 3, "children": [{"value": 4, "children": []}]}]}'))
 function sum(t: Tree): int {
   let s = t.value
   // expect-warning: 's += sum(c)' may overflow int
@@ -54,3 +54,11 @@ function sum(t: Tree): int {
   return s
 }
 console.log(sum(tree), JSON.stringify(tree))
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

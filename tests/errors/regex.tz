@@ -72,7 +72,7 @@ function find(re: RegExp, text: string) {
 }
 // expect-error: 'replace' passes 5 arguments: the match, 2 groups, the offset and the string
 s.replace(/(a)(b)/, (all, a, b, offset, text, extra) => all)
-// expect-error: 'new RegExp' takes the pattern as a string
+// expect-error: 'new RegExp' of a pattern known only when the program runs may fail, and 'new' gives no Result; write 'RegExp.parse(pattern)'
 const copy = new RegExp(word)
 // expect-error: a function as the replacement needs a regex: 'replaceAll(/-/g, ...)'
 s.replaceAll("-", x => x)

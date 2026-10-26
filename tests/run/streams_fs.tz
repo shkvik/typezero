@@ -8,9 +8,9 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Transform } from "node:stream"
 import { finished, pipeline } from "node:stream/promises"
-const dir = mkdtempSync(join(tmpdir(), "tz-streams-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-streams-")))
 const src = join(dir, "in.txt")
-writeFileSync(src, "hello world\n".repeat(3))
+must(writeFileSync(src, "hello world\n".repeat(3)))
 
 const events: string[] = []
 const r = createReadStream(src, { highWaterMark: 16 })
@@ -38,11 +38,11 @@ console.log(`write ${w.write("12345")} ${w.write("67890")} needDrain ${w.writabl
 w.on("drain", () => console.log("drain"))
 w.end("!", () => console.log(`end cb ${w.bytesWritten}`))
 await finished(w)
-console.log(`out ${JSON.stringify(readFileSync(out, "utf8"))}`)
+console.log(`out ${JSON.stringify(must(readFileSync(out, "utf8")))}`)
 const more = createWriteStream(out, { flags: "a" })
 more.end("appended")
 await finished(more)
-console.log(`appended ${JSON.stringify(readFileSync(out, "utf8"))}`)
+console.log(`appended ${JSON.stringify(must(readFileSync(out, "utf8")))}`)
 
 const upper = new Transform({
   transform(chunk, enc, cb) {
@@ -51,7 +51,7 @@ const upper = new Transform({
 })
 const copy = join(dir, "copy.txt")
 await pipeline(createReadStream(src), upper, createWriteStream(copy))
-console.log(`copy ${JSON.stringify(readFileSync(copy, "utf8"))}`)
+console.log(`copy ${JSON.stringify(must(readFileSync(copy, "utf8")))}`)
 
 const missing = createReadStream(join(dir, "no-such-file.txt"))
 try {
@@ -59,4 +59,12 @@ try {
 } catch (e) {
   console.log(`missing ${e instanceof Error ? e.message.startsWith("ENOENT: no such file") : "?"}`)
 }
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

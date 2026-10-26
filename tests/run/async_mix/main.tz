@@ -70,7 +70,7 @@ async function greeting(who: string) {
 console.log(await greeting("tz"), process.env.NO_SUCH_VARIABLE ?? "unset")
 
 // 5. node:fs inside async functions, and the SystemError of a rejection.
-const dir = mkdtempSync(join(tmpdir(), "tz-async-mix-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-async-mix-")))
 const folder = new Folder(dir)
 folder.write("a.txt", "alpha")
 const sources: Source[] = [folder, new Memory()]
@@ -86,7 +86,7 @@ console.log(message)
 for (const s of sources)
   console.log(await readText(s, "a.txt"))
 console.log((await readText(folder, "a.txt")).map(t => t.length).match(n => `${n} letters`, e => e))
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
 
 // 6. Replacements worked out by async code first, then a regex with a
 // function that is not async.
@@ -124,3 +124,11 @@ async function queues() {
 }
 await queues()
 console.log(steps.join(", "))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

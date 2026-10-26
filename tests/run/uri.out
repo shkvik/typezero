@@ -21,53 +21,53 @@ true
 true
 true
 true
-component % URIError: URI malformed true URIError
-uri % URIError: URI malformed true URIError
-component abc% URIError: URI malformed true URIError
-uri abc% URIError: URI malformed true URIError
-component %4 URIError: URI malformed true URIError
-uri %4 URIError: URI malformed true URIError
-component %zz URIError: URI malformed true URIError
-uri %zz URIError: URI malformed true URIError
-component %G0 URIError: URI malformed true URIError
-uri %G0 URIError: URI malformed true URIError
-component %E0%A4%A URIError: URI malformed true URIError
-uri %E0%A4%A URIError: URI malformed true URIError
-component %E0%A4 URIError: URI malformed true URIError
-uri %E0%A4 URIError: URI malformed true URIError
-component %C3 URIError: URI malformed true URIError
-uri %C3 URIError: URI malformed true URIError
-component %C3%28 URIError: URI malformed true URIError
-uri %C3%28 URIError: URI malformed true URIError
-component %80 URIError: URI malformed true URIError
-uri %80 URIError: URI malformed true URIError
-component %BF URIError: URI malformed true URIError
-uri %BF URIError: URI malformed true URIError
-component %C0%80 URIError: URI malformed true URIError
-uri %C0%80 URIError: URI malformed true URIError
-component %C1%BF URIError: URI malformed true URIError
-uri %C1%BF URIError: URI malformed true URIError
-component %E0%80%80 URIError: URI malformed true URIError
-uri %E0%80%80 URIError: URI malformed true URIError
-component %ED%A0%80 URIError: URI malformed true URIError
-uri %ED%A0%80 URIError: URI malformed true URIError
-component %ED%BF%BF URIError: URI malformed true URIError
-uri %ED%BF%BF URIError: URI malformed true URIError
-component %F0%80%80%80 URIError: URI malformed true URIError
-uri %F0%80%80%80 URIError: URI malformed true URIError
-component %F4%90%80%80 URIError: URI malformed true URIError
-uri %F4%90%80%80 URIError: URI malformed true URIError
-component %F5%80%80%80 URIError: URI malformed true URIError
-uri %F5%80%80%80 URIError: URI malformed true URIError
-component %F8%80%80%80%80 URIError: URI malformed true URIError
-uri %F8%80%80%80%80 URIError: URI malformed true URIError
-component %FF URIError: URI malformed true URIError
-uri %FF URIError: URI malformed true URIError
-component %E0%A4%AD% URIError: URI malformed true URIError
-uri %E0%A4%AD% URIError: URI malformed true URIError
-component x%E2%82 URIError: URI malformed true URIError
-uri x%E2%82 URIError: URI malformed true URIError
-reserved then bad URIError: URI malformed true URIError
+component % bad_uri: URI malformed
+uri % bad_uri: URI malformed
+component abc% bad_uri: URI malformed
+uri abc% bad_uri: URI malformed
+component %4 bad_uri: URI malformed
+uri %4 bad_uri: URI malformed
+component %zz bad_uri: URI malformed
+uri %zz bad_uri: URI malformed
+component %G0 bad_uri: URI malformed
+uri %G0 bad_uri: URI malformed
+component %E0%A4%A bad_uri: URI malformed
+uri %E0%A4%A bad_uri: URI malformed
+component %E0%A4 bad_uri: URI malformed
+uri %E0%A4 bad_uri: URI malformed
+component %C3 bad_uri: URI malformed
+uri %C3 bad_uri: URI malformed
+component %C3%28 bad_uri: URI malformed
+uri %C3%28 bad_uri: URI malformed
+component %80 bad_uri: URI malformed
+uri %80 bad_uri: URI malformed
+component %BF bad_uri: URI malformed
+uri %BF bad_uri: URI malformed
+component %C0%80 bad_uri: URI malformed
+uri %C0%80 bad_uri: URI malformed
+component %C1%BF bad_uri: URI malformed
+uri %C1%BF bad_uri: URI malformed
+component %E0%80%80 bad_uri: URI malformed
+uri %E0%80%80 bad_uri: URI malformed
+component %ED%A0%80 bad_uri: URI malformed
+uri %ED%A0%80 bad_uri: URI malformed
+component %ED%BF%BF bad_uri: URI malformed
+uri %ED%BF%BF bad_uri: URI malformed
+component %F0%80%80%80 bad_uri: URI malformed
+uri %F0%80%80%80 bad_uri: URI malformed
+component %F4%90%80%80 bad_uri: URI malformed
+uri %F4%90%80%80 bad_uri: URI malformed
+component %F5%80%80%80 bad_uri: URI malformed
+uri %F5%80%80%80 bad_uri: URI malformed
+component %F8%80%80%80%80 bad_uri: URI malformed
+uri %F8%80%80%80%80 bad_uri: URI malformed
+component %FF bad_uri: URI malformed
+uri %FF bad_uri: URI malformed
+component %E0%A4%AD% bad_uri: URI malformed
+uri %E0%A4%AD% bad_uri: URI malformed
+component x%E2%82 bad_uri: URI malformed
+uri x%E2%82 bad_uri: URI malformed
+reserved then bad bad_uri: URI malformed
 644 %C3%BC%20aaaaaa%C3%BC%20aaaaaa%C3%BC%20a true
 901 true
 a b c a%2520b%2520c

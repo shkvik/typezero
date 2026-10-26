@@ -49,11 +49,19 @@ function withDefault(x: unknown = "default") {
 console.log(withDefault(), withDefault(3), withDefault(undefined))
 
 // A Json in an unknown is the value it holds.
-const parsed: unknown = JSON.parse('{"a": [1, "b"], "n": 2}')
+const parsed: unknown = must(JSON.parse('{"a": [1, "b"], "n": 2}'))
 console.log(typeof parsed, parsed)
-const two: unknown = JSON.parse("2")
+const two: unknown = must(JSON.parse("2"))
 if (typeof two == "number") console.log(two * 10)
 
 // What a function would be in JavaScript: typeof says so, nothing more.
 const f: unknown = (x: int) => x + 1
 console.log(typeof f, f)
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

@@ -15,6 +15,7 @@ public:
   bool nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
                    llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
   Expr *checkEncoding(Expr *encoding, llvm::StringRef fn, bool any);
+  const Type *systemError() const;
 
 private:
   Checker &checker_;

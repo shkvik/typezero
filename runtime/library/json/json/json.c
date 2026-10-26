@@ -180,6 +180,37 @@ void tz_json_throw(int32_t kind, TzBuf *text) {
   tz_str_release_value(message);
 }
 
+TzMaker tz_json_error_maker;
+
+void tz_json_errors(TzMaker make) { tz_json_error_maker = make; }
+
+typedef struct {
+  const char *code;
+  TzStr message;
+  TzStr path;
+} ErrorParts;
+
+void tz_json_fail(const char *code, TzBuf *message, TzBuf *path) {
+  if (!tz_json_error_maker) {
+    if (path) {
+      tz_buf_free(path);
+    }
+    tz_json_throw(strcmp(code, "bad_json") == 0 ? TZ_SYNTAX_ERROR : TZ_TYPE_ERROR, message);
+    return;
+  }
+  ErrorParts parts;
+  parts.code = code;
+  parts.message = tz_buf_take(message);
+  if (path) {
+    parts.path = tz_buf_take(path);
+  } else {
+    TzBuf empty;
+    tz_buf_init(&empty);
+    parts.path = tz_buf_take(&empty);
+  }
+  tz_failed = tz_json_error_maker(&parts);
+}
+
 void tz_json_view_init(View *v, TzStr s) {
   v->flat = s;
   v->units = tz_str_units(&v->flat, &v->length, &v->two);

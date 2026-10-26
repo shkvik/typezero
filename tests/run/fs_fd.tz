@@ -6,8 +6,16 @@ import { writeFileSync, appendFileSync } from "node:fs"
 
 for (let i = 0; i < 2; i++) {
   console.log("one", i)
-  writeFileSync(1, "two\n")
+  must(writeFileSync(1, "two\n"))
   console.log("three")
-  appendFileSync(1, "four, ünïcödé ✓\n")
+  must(appendFileSync(1, "four, ünïcödé ✓\n"))
 }
-writeFileSync(2, "to stderr\n")
+must(writeFileSync(2, "to stderr\n"))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

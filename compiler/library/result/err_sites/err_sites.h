@@ -10,6 +10,8 @@ public:
 
   llvm::Constant *site(llvm::SMLoc loc);
   llvm::Constant *none();
+  bool inLibrary(llvm::SMLoc loc);
+  llvm::Value *stamp(llvm::Value *result, const Type *type, llvm::SMLoc loc);
   llvm::Type *type();
 
 private:

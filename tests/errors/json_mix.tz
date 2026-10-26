@@ -9,7 +9,7 @@ interface Account {
 interface Rule {
   pattern: RegExp
 }
-const j = JSON.parse('"abc"')
+const j = JSON.parse('"abc"').unwrapOr(null)
 // expect-error: type 'Json' is not assignable to type 'string'; a Json may hold any JSON value: check what it holds first
 console.log(/a/.test(j))
 // expect-error: a Json has no method 'match' until a check shows what it holds

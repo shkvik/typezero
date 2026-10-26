@@ -6,6 +6,7 @@
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/library/math/math_checker/math_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
@@ -295,6 +296,13 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
                                                    Type::date());
     }
     if (type->isString()) {
+      if (!literalText(args[0])) {
+        checker_.diags_.error(arg->loc(),
+                              "'new Date' of a text known only when the program runs may fail, "
+                              "and 'new' gives no Result; write 'Date.parse(text)', which gives "
+                              "a Result with the milliseconds, and 'new Date(ms)'");
+        return failed();
+      }
       return checker_.processChecker().builtinCall(loc, callee, Builtin::DateFromString, {arg},
                                                    Type::date());
     }
@@ -361,7 +369,7 @@ Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
     checkDateLiteral(call->args[0]);
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     call->builtin = Builtin::DateParse;
-    call->type = Type::doubleTy();
+    call->type = Type::result(Type::doubleTy(), checker_.prelude().builtinType("DateError"));
     return call;
   }
   checkDateStaticMember(member);

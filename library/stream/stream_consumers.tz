@@ -12,7 +12,7 @@ export async function text(stream: Stream): Promise<string> {
   return str
 }
 
-export async function json(stream: Stream): Promise<Json> {
+export async function json(stream: Stream): Promise<Result<Json, JsonError>> {
   return JSON.parse(await text(stream))
 }
 

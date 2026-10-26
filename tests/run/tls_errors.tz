@@ -10,9 +10,9 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const dir = process.env.TLS_DIR ?? "."
-const key = readFileSync(join(dir, "key.pem"), "utf8")
+const key = must(readFileSync(join(dir, "key.pem"), "utf8"))
 for (const name of ["expired", "future", "wrongname", "self", "other", "chain", "rooted", "localhost"]) {
-  const cert = readFileSync(join(dir, `${name}.pem`), "utf8")
+  const cert = must(readFileSync(join(dir, `${name}.pem`), "utf8"))
   const server = serve({ port: 0, hostname: "127.0.0.1", tls: { cert, key } }, () => new Response("ok"))
   try {
     const res = await fetch(`https://localhost:${server.url.port}/`)
@@ -24,4 +24,12 @@ for (const name of ["expired", "future", "wrongname", "self", "other", "chain", 
     }
   }
   await server.stop()
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

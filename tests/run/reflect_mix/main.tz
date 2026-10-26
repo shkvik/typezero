@@ -48,9 +48,13 @@ console.log(Reflect.apply(greet, new User("bob", 40), []))
 
 // 3. A generic class over a class value, fromJson through its constructor and
 // an async generator; decorated async methods and async generators.
-const users = new Store(User).load(fromJson<Json[]>(JSON.parse('[{"name": "ann", "age": 30}, {"name": "cy", "age": 7}]')))
+const users = new Store(User).load(
+  JSON.parse('[{"name": "ann", "age": 30}, {"name": "cy", "age": 7}]')
+    .andThen((j) => fromJson<Json[]>(j))
+    .unwrapOr([]),
+)
 for await (const user of users.each()) console.log(user.greet(), user.age, user instanceof User)
-const notes = new Store(Note).load([JSON.parse('{"text": "a", "tags": ["t"]}')])
+const notes = new Store(Note).load([JSON.parse('{"text": "a", "tags": ["t"]}').unwrapOr(null)])
 for await (const n of notes.each()) console.log(n.text, n.tags)
 const names = new Names(["ann", "bob", "cy"])
 console.log(await names.first())

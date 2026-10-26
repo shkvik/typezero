@@ -105,6 +105,7 @@ bool makesNewObject(Builtin builtin) {
   case Builtin::DateFromFields:
   case Builtin::JsonParse:
   case Builtin::RegExpNew:
+  case Builtin::RegExpParse:
   case Builtin::WeakRefNew:
   case Builtin::CryptoKeyPair:
   case Builtin::ArrKeys:

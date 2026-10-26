@@ -11,7 +11,7 @@ export interface Settings {
 export class Store {
   data: Json
   constructor(text: string) {
-    this.data = JSON.parse(text)
+    this.data = JSON.parse(text).unwrapOr(null)
   }
   // The names of the users that have one, from whatever the file holds.
   names(): string[] {
@@ -27,8 +27,10 @@ export class Store {
 }
 
 export function readSettings(text: string): Result<Settings, string> {
-  const json = JSON.parse(text)
+  const parsed = JSON.parse(text)
+  if (parsed.isErr()) return err(parsed.error.message)
+  const json = parsed.value
   if (json == null || typeof json != "object" || Array.isArray(json))
     return err("settings must be an object")
-  return ok(fromJson<Settings>(json))
+  return fromJson<Settings>(json).mapErr((e) => `${e.path}: ${e.message}`)
 }

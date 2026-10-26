@@ -9,38 +9,46 @@ export class Store {
   // What each file held when it was last written, shared with the caller.
   written = new Map<string, Uint8Array>()
   constructor() {
-    this.dir = mkdtempSync(join(tmpdir(), "tz-bytes-mix-"))
+    this.dir = must(mkdtempSync(join(tmpdir(), "tz-bytes-mix-")))
   }
   path(name: string): string {
     return join(this.dir, name)
   }
   save(name: string, bytes: Uint8Array) {
-    writeFileSync(this.path(name), bytes)
+    must(writeFileSync(this.path(name), bytes))
     this.written.set(name, bytes)
   }
   saveText(name: string, text: string, encoding: "latin1" | "utf8") {
     if (encoding == "latin1")
-      writeFileSync(this.path(name), text, "latin1")
+      must(writeFileSync(this.path(name), text, "latin1"))
     else
-      writeFileSync(this.path(name), text)
+      must(writeFileSync(this.path(name), text))
   }
   append(name: string, more: Buffer | DataView) {
-    appendFileSync(this.path(name), more)
+    must(appendFileSync(this.path(name), more))
   }
   load(name: string): Buffer {
-    return readFileSync(this.path(name))
+    return must(readFileSync(this.path(name)))
   }
   hex(name: string): string {
-    return readFileSync(this.path(name), "hex")
+    return must(readFileSync(this.path(name), "hex"))
   }
   text(name: string): string {
-    return readFileSync(this.path(name), { encoding: "latin1" })
+    return must(readFileSync(this.path(name), { encoding: "latin1" }))
   }
   async loadLater(name: string): Promise<Buffer> {
     await new Promise<void>(resolve => setTimeout(resolve, 1))
     return this.load(name)
   }
   close() {
-    rmSync(this.dir, { recursive: true })
+    must(rmSync(this.dir, { recursive: true }))
   }
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

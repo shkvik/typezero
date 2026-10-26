@@ -32,7 +32,15 @@ export function kinds<T>(items: T[], path: (x: T) => string): string[] {
   return items.map((x) => {
     const p = path(x)
     if (!existsSync(p)) return "none"
-    const st: Stats = statSync(p)
+    const st: Stats = must(statSync(p))
     return st.isDirectory() ? "dir" : "file"
   })
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

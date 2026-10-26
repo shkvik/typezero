@@ -1,7 +1,7 @@
 // same-as-node
 // What regexes and Json throw when the program runs, caught: new RegExp of a
 // pattern or flags that are no regex, matchAll and replaceAll without g,
-// JSON.parse of a text that is not JSON, a key of null or undefined, a value
+// a key of null or undefined (JSON.parse gives a Result instead), a value
 // inside itself, and an error of a replace callback, which goes on from
 // replace. Nothing they built is left behind (the run checks for leaks).
 function attempt(what: string, f: () => string) {
@@ -13,7 +13,9 @@ function attempt(what: string, f: () => string) {
   }
 }
 function regex(pattern: string, flags: string): RegExp {
-  return new RegExp(pattern, flags)
+  const re = RegExp.parse(pattern, flags)
+  if (re.isErr()) throw new SyntaxError(re.error.message)
+  return re.value
 }
 const patterns = ["a+", "(", "[z-a]"]
 for (const p of patterns) attempt("pattern " + p, () => String(regex(p, "g").test("aaa")))
@@ -25,8 +27,10 @@ attempt("replaceAll fn", () => "banana".replaceAll(plain, (m: string) => m.toUpp
 const global = regex("a", "g")
 attempt("matchAll g", () => [..."banana".matchAll(global)].length.toString())
 attempt("replaceAll g", () => "banana".replaceAll(global, "o"))
-attempt("parse", () => JSON.stringify(JSON.parse('{"a": [1, 2,]}')))
-const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}')
+attempt("parse", () =>
+  JSON.parse('{"a": [1, 2,]}').match((j) => JSON.stringify(j), (e) => `${e.code}: ${e.message}`),
+)
+const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}').unwrapOr(null)
 attempt("read", () => JSON.stringify(j.owner.name) ?? "nothing")
 attempt("read index", () => JSON.stringify(j.users[3][0]) ?? "nothing")
 attempt("keys", () => Object.keys(j.owner).join())
@@ -34,7 +38,7 @@ attempt("set null", () => {
   j.owner.name = "Bob"
   return "set"
 })
-const self = JSON.parse('{"a": 1}')
+const self = JSON.parse('{"a": 1}').unwrapOr(null)
 self.me = self
 attempt("cycle", () => JSON.stringify(self))
 self.me = null

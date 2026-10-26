@@ -13,9 +13,9 @@ import { tmpdir } from "node:os"
 import { Jobs, collect } from "./jobs.tz"
 
 const log = (s: string) => console.log(s)
-const dir = await mkdtemp(join(tmpdir(), "tz-events-mix-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-events-mix-")))
 const files = ["a", "bb", "ccc"]
-for (const name of files) await writeFile(join(dir, name + ".txt"), name.repeat(4))
+for (const name of files) must(await writeFile(join(dir, name + ".txt"), name.repeat(4)))
 
 const jobs = new Jobs()
 // An async listener: emit does not wait for it.
@@ -76,5 +76,13 @@ setTimeout(() => jobs.emit("finished"), 1)
 log(`once: ${(await once(jobs, "finished", { signal: AbortSignal.timeout(500) })).length}`)
 clearTimeout(alive)
 
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
 log("end")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

@@ -42,7 +42,10 @@ export class Store<T extends object> {
   constructor(readonly kind: Constructor<T>) {}
 
   load(data: Json[]) {
-    for (const j of data) this.items.push(fromJson(this.kind, j))
+    for (const j of data) {
+      const item = fromJson(this.kind, j)
+      if (item.isOk()) this.items.push(item.value)
+    }
     return this
   }
 

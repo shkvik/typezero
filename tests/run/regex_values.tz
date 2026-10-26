@@ -54,7 +54,7 @@ console.log(holder.re.exec("foo boo")?.index, holder.re.lastIndex)
 // Many regexes made while the program runs.
 let total = 0
 for (let i = 0; i < 1000; i++) {
-  const re = new RegExp(`${i % 10}+`, "g")
-  total += ("1223334444" + String(i)).replace(re, "").length
+  const re = RegExp.parse(`${i % 10}+`, "g")
+  if (re.isOk()) total += ("1223334444" + String(i)).replace(re.value, "").length
 }
 console.log(total)

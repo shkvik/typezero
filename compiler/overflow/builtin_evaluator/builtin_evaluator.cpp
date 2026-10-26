@@ -96,8 +96,10 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   case Builtin::FromJson: {
     const Reason *why = check_.overflowWarnings().reason(Origin::Input, call->loc(), "JSON");
     llvm::SmallPtrSet<const Type *, 8> seen;
-    jsonValues(type, why, seen);
-    return jsonVal(type, why);
+    jsonValues(type->okType(), why, seen);
+    Val result;
+    result.elem = share(jsonVal(type->okType(), why));
+    return result;
   }
   case Builtin::StrCharCodeAt:
     return numVal(range(0, 65535));
@@ -242,8 +244,12 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
     return numVal(range(0, kMaxTime));
   case Builtin::DateGetTime:
   case Builtin::DateUTC:
-  case Builtin::DateParse:
     return numVal(range(-kMaxTime, kMaxTime));
+  case Builtin::DateParse: {
+    Val result;
+    result.elem = share(numVal(range(-kMaxTime, kMaxTime)));
+    return result;
+  }
   case Builtin::DateGetUTC:
   case Builtin::DateGetLocal:
     return numVal(range(-300000, 300000));

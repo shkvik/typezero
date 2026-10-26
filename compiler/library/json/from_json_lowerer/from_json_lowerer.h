@@ -9,6 +9,7 @@ public:
   explicit FromJsonLowerer(Lowering &lowering);
 
   llvm::Value *emitFromJson(const Type *type, llvm::Value *json, llvm::Value *path);
+  llvm::Value *emitFromJsonOrSkip(const Type *type, llvm::Value *json, llvm::Value *path);
   llvm::Function *fromJsonFunction(const Type *type);
 
 private:

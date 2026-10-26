@@ -95,7 +95,7 @@ const pair: [string, int] = ["a", 1]
 Reflect.construct(some, pair)
 // expect-error: Reflect.construct makes an object of a class, and this is a 'int'
 Reflect.construct(5, [])
-const j = JSON.parse("{}")
+const j = JSON.parse("{}").unwrapOr(null)
 // expect-error: Reflect.get takes an object of the language; read a key of a Json as JavaScript does
 Reflect.get(j, "x")
 // expect-error: the third argument of Reflect.construct, the class whose prototype the object gets, is not supported

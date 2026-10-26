@@ -33,7 +33,12 @@ std::optional<std::string> FsFeature::exportProblem(NodeModule module, llvm::Str
 Expr *FsFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
                                  llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
   if (module == NodeModule::Fs) {
-    return checker.fsChecker().checkFsCall(call, fn, loc);
+    Expr *checked = checker.fsChecker().checkFsCall(call, fn, loc);
+    if (auto *done = llvm::dyn_cast<CallExpr>(checked);
+        done && isFsBuiltin(done->builtin) && !done->type->isError()) {
+      done->type = Type::result(done->type, checker.fsChecker().systemError());
+    }
+    return checked;
   }
   if (module == NodeModule::FsPromises) {
     return checker.fsPromisesChecker().checkFsPromisesCall(call, fn, loc);
@@ -64,7 +69,7 @@ Expr *FsFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {
 bool FsFeature::lowers(Builtin builtin) const { return isFsModuleBuiltin(builtin); }
 
 llvm::Value *FsFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
-  return lowering.fsLowerer().emitFsCall(call);
+  return lowering.fsLowerer().emitFsResult(call);
 }
 
 }

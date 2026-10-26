@@ -108,20 +108,25 @@ try {
   console.log(e.message)
 }
 
-// 6. JSON.parse into a Record: checked, and the errors thrown.
+// 6. JSON.parse into a Record: checked, and the errors as Results.
 for (const text of ['{"a": 1, "b": 2}', '{"a": 1, "b": "two"}', "[1]"]) {
-  try {
-    const r = JSON.parse<Record<string, int>>(text)
-    console.log(r, Object.values(r).reduce((x, y) => x + y, 0))
-  } catch (e) {
-    console.log(`${e}`)
-  }
+  const r = JSON.parse<Record<string, int>>(text)
+  if (r.isOk()) console.log(r.value, Object.values(r.value).reduce((x, y) => x + y, 0))
+  else console.log(r.error.code, r.error.path, r.error.message)
 }
 
 // 7. What node:fs and node:path give, grouped.
-const dir = mkdtempSync(join(tmpdir(), "tz-dict-mix-"))
-for (const f of ["a.ts", "b.ts", "c.md"]) writeFileSync(join(dir, f), f)
-const byExt = Map.groupBy(readdirSync(dir), (f) => extname(f))
-const byFirst = Object.groupBy(readdirSync(dir, { withFileTypes: true }), (e) => e.name[0] ?? "")
+const dir = must(mkdtempSync(join(tmpdir(), "tz-dict-mix-")))
+for (const f of ["a.ts", "b.ts", "c.md"]) must(writeFileSync(join(dir, f), f))
+const byExt = Map.groupBy(must(readdirSync(dir)), (f) => extname(f))
+const byFirst = Object.groupBy(must(readdirSync(dir, { withFileTypes: true })), (e) => e.name[0] ?? "")
 console.log(byExt, Object.entries(byFirst).map(([k, es]) => `${k}:${es?.map((e) => e.name)}`).join())
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

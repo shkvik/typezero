@@ -1,5 +1,7 @@
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/err_sites/err_sites.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
@@ -9,6 +11,7 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
@@ -168,6 +171,42 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
   return options;
 }
 
+llvm::Value *DateLowerer::parseResult(llvm::Value *time, llvm::Value *text, CallExpr *call) {
+  static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
+  const Type *type = call->type, *errorType = type->errType();
+  llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("date.bad");
+  llvm::BasicBlock *goodBlock = lowering_.functionFrame().newBlock("date.good");
+  llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("date.parsed");
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateFCmpUNO(time, time), badBlock,
+                                  goodBlock);
+  lowering_.functionFrame().switchTo(badBlock);
+  llvm::StructType *partsType = llvm::StructType::get(
+      lowering_.ctx_, {lowering_.builder_.getPtrTy(), lowering_.strTy_, lowering_.strTy_});
+  llvm::Value *parts = lowering_.functionFrame().createStackSlot(partsType, "date.error");
+  lowering_.builder_.CreateStore(lowering_.stringLowerer().utf8Constant("bad_date"),
+                                 lowering_.builder_.CreateStructGEP(partsType, parts, 0));
+  lowering_.builder_.CreateStore(lowering_.stringLowerer().stringLiteral(u"Invalid Date"),
+                                 lowering_.builder_.CreateStructGEP(partsType, parts, 1));
+  lowering_.refCounts().retainValue(text, Type::string());
+  lowering_.builder_.CreateStore(text, lowering_.builder_.CreateStructGEP(partsType, parts, 2));
+  llvm::Value *error =
+      lowering_.builder_.CreateCall(lowering_.objectMaker().maker(errorType, orders), {parts});
+  llvm::Value *bad = lowering_.resultLowerer().makeResult(
+      type, lowering_.builder_.getFalse(), nullptr, error, lowering_.errSites().site(call->loc()));
+  llvm::BasicBlock *badEnd = lowering_.builder_.GetInsertBlock();
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(goodBlock);
+  llvm::Value *good =
+      lowering_.resultLowerer().makeResult(type, lowering_.builder_.getTrue(), time, nullptr);
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(endBlock);
+  llvm::PHINode *phi = lowering_.builder_.CreatePHI(good->getType(), 2, "date.result");
+  phi->addIncoming(bad, badEnd);
+  phi->addIncoming(good, goodBlock);
+
+  return phi;
+}
+
 llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
@@ -220,8 +259,13 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
         lowering_.processLowerer().processFunction("tz_date_parse", f64, {ptr, i64}),
         {lowering_.stringLowerer().stringObj(text.value),
          lowering_.stringLowerer().stringMeta(text.value)});
+    if (call->builtin == Builtin::DateParse) {
+      llvm::Value *result = parseResult(time, text.value, call);
+      lowering_.refCounts().dropOperand(text);
+      return result;
+    }
     lowering_.refCounts().dropOperand(text);
-    return call->builtin == Builtin::DateParse ? time : newDate(time);
+    return newDate(time);
   }
   case Builtin::DateFromFields:
   case Builtin::DateUTC: {

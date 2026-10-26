@@ -20,7 +20,7 @@ export class LineFeed {
     this.path = path
   }
   async *[Symbol.asyncIterator]() {
-    const text = await readFile(this.path, "utf8")
+    const text = must(await readFile(this.path, "utf8"))
     for (const line of text.split("\n"))
       if (line != "")
         yield line
@@ -59,4 +59,12 @@ export async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   for await (const x of source)
     out.push(x)
   return out
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

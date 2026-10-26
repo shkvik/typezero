@@ -19,6 +19,7 @@
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cstring>
@@ -106,8 +107,12 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
       checkArgsLoosely();
       return expr;
     }
-    return checker_.methodCallChecker().checkClassNew(expr, ClassValueChecker::finalClass(cls),
-                                                      expected);
+    Expr *checked = checker_.methodCallChecker().checkClassNew(
+        expr, ClassValueChecker::finalClass(cls), expected);
+    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library && cls->name == "URL") {
+      checker_.urlChecker().checkUrlNew(made);
+    }
+    return checked;
   }
   if (const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(expr->name);
       n && n->module == NodeModule::Crypto) {

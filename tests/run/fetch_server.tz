@@ -13,7 +13,7 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
     case "/hello":
       return new Response(`hello ${url.searchParams.get("name") ?? "world"}`)
     case "/users": {
-      const user = await req.json()
+      const user = (await req.json()).unwrapOr(null)
       return Response.json({ id: 1, user, method: req.method }, { status: 201 })
     }
     case "/boom":

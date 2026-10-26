@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
 #include "compiler/library/json/json_type_checker/json_type_checker.h"
@@ -268,7 +269,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
     call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     if (member->typeArgs.empty()) {
       call->builtin = Builtin::JsonParse;
-      call->type = Type::json();
+      call->type = Type::result(Type::json(), checker_.prelude().builtinType("JsonError"));
       return call;
     }
     if (member->typeArgs.size() != 1) {
@@ -282,7 +283,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
       return call;
     }
     call->builtin = Builtin::JsonParseAs;
-    call->type = target;
+    call->type = Type::result(target, checker_.prelude().builtinType("JsonError"));
     return call;
   }
   if (!member->typeArgs.empty()) {
@@ -443,7 +444,7 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
       return call;
     }
     call->builtin = Builtin::FromJson;
-    call->type = target;
+    call->type = Type::result(target, checker_.prelude().builtinType("JsonError"));
     return call;
   }
   if (!name->typeArgs.empty()) {

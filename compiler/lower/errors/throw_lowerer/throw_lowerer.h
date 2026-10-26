@@ -11,6 +11,8 @@ public:
   llvm::GlobalVariable *thrownGlobal();
   llvm::Value *thrownSlot();
   llvm::Value *thrownSlot(llvm::IRBuilderBase &b);
+  llvm::Value *failedSlot();
+  llvm::Value *anyFailure();
   void emitThrowCheck();
   void emitThrowCheckWith(llvm::function_ref<void()> release);
   void emitThrow(llvm::Value *error, llvm::SMLoc loc);

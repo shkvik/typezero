@@ -11,6 +11,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/fs/fs_declarer/fs_declarer.h"
 #include "compiler/library/json/json_type_checker/json_type_checker.h"
@@ -423,6 +424,7 @@ Expr *ReflectChecker::checkFromJsonClass(CallExpr *call, NameExpr *name) {
     }
     call->type = type->constructed();
   }
+  call->type = Type::result(call->type, checker_.prelude().builtinType("JsonError"));
   call->builtin = Builtin::FromJsonClass;
 
   return call;

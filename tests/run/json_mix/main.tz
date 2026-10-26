@@ -26,9 +26,9 @@ console.log(settings, settings.map(s => s.price * s.limit))
 console.log(readSettings("[1, 2]"), JSON.stringify(settings))
 
 // A Json as a generic value, in a Result and in an array.
-const doc = JSON.parse('{"title": "Report 2024-05", "pages": [3, 4]}')
+const doc = JSON.parse('{"title": "Report 2024-05", "pages": [3, 4]}').unwrapOr(null)
 const kept: Result<Json, string> = ok(doc)
-console.log(hold(doc), kept, [doc, JSON.parse("null")])
+console.log(hold(doc), kept, [doc, JSON.parse("null").unwrapOr(null)])
 
 // Regexes on what a Json holds, once a check shows it is a string.
 const title = doc.title

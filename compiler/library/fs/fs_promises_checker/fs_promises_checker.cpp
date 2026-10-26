@@ -52,7 +52,8 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
   for (const auto &[sync, async] : waiting) {
     if (call->builtin == sync) {
       call->builtin = async;
-      call->type = Type::promise(call->type);
+      call->type =
+          Type::promise(Type::result(call->type, checker_.fsChecker().systemError()));
       return call;
     }
   }

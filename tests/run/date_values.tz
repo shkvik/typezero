@@ -2,8 +2,8 @@
 // `Date | undefined`; and toJSON() of an invalid date, which is null in
 // JavaScript and undefined here.
 function parseDate(text: string): Result<Date, string> {
-  const d = new Date(text)
-  return isNaN(d.getTime()) ? err(`not a date: ${text}`) : ok(d)
+  const ms = Date.parse(text)
+  return ms.isErr() ? err(`not a date: ${text}`) : ok(new Date(ms.value))
 }
 const texts = ["2026-10-23T10:00:00Z", "someday"]
 for (const text of texts) {

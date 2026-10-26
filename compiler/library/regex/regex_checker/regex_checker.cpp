@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/objects/object_checker/object_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/process/process_checker/process_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "runtime/library/regex/regex/regex.h"
@@ -296,14 +297,28 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
     auto *lit = checker_.ctx_.make<RegexLitExpr>(loc, *pattern, *flags);
     return checkRegexLit(lit);
   }
-  args[0] = checker_.exprChecker().checkExpr(args[0]);
-  if (args[0]->type->isRegExp()) {
-    checker_.diags_.error(args[0]->loc(),
-                          "'new RegExp' takes the pattern as a string; for a copy of a "
-                          "regex with other flags write 'new RegExp(re.source, flags)'");
-
+  auto *escaped = dyn_cast<CallExpr>(args[0]);
+  auto *escape = escaped ? dyn_cast<MemberExpr>(escaped->callee) : nullptr;
+  bool fromEscape = escape && escape->name == "escape" &&
+                    checker_.callChecker().isGlobalName(escape->object, "RegExp");
+  if (!fromEscape || !flags) {
+    checker_.diags_.error(loc,
+                          "'new RegExp' of a pattern known only when the program runs may fail, "
+                          "and 'new' gives no Result; write 'RegExp.parse(pattern" +
+                              std::string(args.size() > 1 ? ", flags" : "") +
+                              ")', which gives a Result<RegExp, RegexError>");
     return loosely();
   }
+  std::vector<uint16_t> flagUnits(flags->begin(), flags->end());
+  uint32_t parsedFlags = 0;
+  if (!tz_re_parse_flags(flagUnits.data(), flagUnits.size(), &parsedFlags)) {
+    checker_.diags_.error(args[1]->loc(),
+                          "invalid regular expression flags '" + utf8(*flags) +
+                              "': the flags are d, g, i, m, s, u, v and y, each at most once, "
+                              "and not u with v");
+    return loosely();
+  }
+  args[0] = checker_.exprChecker().checkExpr(args[0]);
   args[0] = checker_.typeRelations().coerce(args[0], Type::string());
   if (args.size() > 1) {
     args[1] = checker_.argumentChecker().checkArg(args[1], Type::string());
@@ -315,6 +330,18 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
 
 Expr *RegexChecker::checkRegExpStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
+  if (member->name == "parse") {
+    if (checker_.callChecker().rejectSpread(call) ||
+        !checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+      return call;
+    }
+    for (Expr *&arg : call->args) {
+      arg = checker_.argumentChecker().checkArg(arg, Type::string());
+    }
+    call->builtin = Builtin::RegExpParse;
+    call->type = Type::result(Type::regExp(), checker_.prelude().builtinType("RegexError"));
+    return call;
+  }
   if (member->name != "escape") {
     checkRegExpStaticMember(member);
     for (Expr *&arg : call->args) {

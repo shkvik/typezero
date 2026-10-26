@@ -335,7 +335,10 @@ bool hasLength(const Type *type) {
   return type->isString() || type->isArray();
 }
 
-bool tracked(const Type *type) { return isNumberType(type) || hasLength(type); }
+bool tracked(const Type *type) {
+  return isNumberType(type) || hasLength(type) ||
+         (type && type->isResult() && tracked(type->okType()));
+}
 
 Val numVal(Num num) {
   Val v;

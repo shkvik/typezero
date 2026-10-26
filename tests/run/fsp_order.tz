@@ -9,9 +9,9 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 
 const log = (s: string) => console.log(s)
-const dir = await mkdtemp(join(tmpdir(), "tz-fsp-order-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-fsp-order-")))
 const file = join(dir, "a.txt")
-await writeFile(file, "content")
+must(await writeFile(file, "content"))
 
 // Three turns of immediates come before readFile, which takes four.
 setImmediate(() => {
@@ -21,19 +21,19 @@ setImmediate(() => {
     setImmediate(() => log("immediate 3"))
   })
 })
-log(`read ${await readFile(file, "utf8")}`)
+log(`read ${must(await readFile(file, "utf8"))}`)
 
 // Two before writeFile, which takes three: open, write and close.
 setImmediate(() => {
   log("immediate a")
   setImmediate(() => log("immediate b"))
 })
-await writeFile(file, "more")
+must(await writeFile(file, "more"))
 log("written")
 
 // In the poll phase, an immediate runs before a timer of 0 ms, and the
 // microtasks of each callback right after it.
-await stat(file)
+must(await stat(file))
 setTimeout(() => log("timeout 0"), 0)
 setImmediate(() => log("immediate after stat"))
 void Promise.resolve().then(() => log("microtask after stat"))
@@ -45,5 +45,13 @@ await new Promise<void>((resolve) => setTimeout(resolve, 20))
 const texts = await Promise.all([readFile(file, "utf8"), readFile(file, "utf8"), stat(dir)])
 log(`${texts[0]} ${texts[1]} ${texts[2].isDirectory()}`)
 
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
 log("end")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

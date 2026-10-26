@@ -1,6 +1,7 @@
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -92,6 +93,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
         lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt32(0170000)), kind);
   }
 
+  const Type *valueType = call->type->isResult() ? call->type->okType() : call->type;
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
   auto release = [&] {
     for (size_t i = 0; i < values.size(); ++i) {
@@ -126,7 +128,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   auto optionalString = [&](llvm::Value *out, llvm::Value *found) {
     return lowering_.optionalLowerer().makeOptional(
         lowering_.builder_.CreateLoad(lowering_.strTy_, out),
-        lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0)), call->type);
+        lowering_.builder_.CreateICmpNE(found, lowering_.builder_.getInt32(0)), valueType);
   };
 
   llvm::Value *result = nullptr;
@@ -143,7 +145,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     return optionalString(out, found);
   }
   case Builtin::FsReadFile:
-    if (call->type->isBytes()) {
+    if (valueType->isBytes()) {
       if (call->args[0]->type->isInt()) {
         return fsCall("tz_fs_read_fd_bytes", ptr, {i32}, {values[0]});
       }
@@ -186,9 +188,9 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     return nullptr;
   case Builtin::FsStat:
     return fsCall("tz_fs_stat", ptr, {ptr, i64, i32, i32, ptr},
-                  {obj(0), meta(0), flag(1), flag(2), objectMaker(call->type->nonOptional())});
+                  {obj(0), meta(0), flag(1), flag(2), objectMaker(valueType->nonOptional())});
   case Builtin::FsReaddir: {
-    const Type *element = call->type->inner();
+    const Type *element = valueType->inner();
     llvm::Value *dirent = element->isClass()
                               ? static_cast<llvm::Value *>(objectMaker(element))
                               : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -228,6 +230,15 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   release();
 
   return result;
+}
+
+llvm::Value *FsLowerer::emitFsResult(CallExpr *call) {
+  llvm::Value *value = emitFsCall(call);
+  if (!call->type->isResult()) {
+    return value;
+  }
+
+  return lowering_.resultLowerer().catchFailure(value, call->type, call->loc());
 }
 
 }

@@ -2,6 +2,7 @@
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -176,6 +177,17 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                                : "tz_uri_decode";
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
+    if (call->type->isResult()) {
+      llvm::Value *result = lowering_.stringLowerer().callReturningString(
+          lowering_.processLowerer().processFunction(
+              name, lowering_.builder_.getVoidTy(),
+              {ptr, ptr, lowering_.builder_.getInt64Ty(), ptr}),
+          {lowering_.stringLowerer().stringObj(text.value),
+           lowering_.stringLowerer().stringMeta(text.value),
+           lowering_.resultLowerer().failureMaker(call->type->errType())});
+      lowering_.refCounts().dropOperand(text);
+      return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+    }
     llvm::Value *result = lowering_.stringLowerer().callReturningString(
         lowering_.processLowerer().processFunction(name, lowering_.builder_.getVoidTy(),
                                                    {ptr, ptr, lowering_.builder_.getInt64Ty()}),

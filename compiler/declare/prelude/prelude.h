@@ -9,6 +9,7 @@ public:
   explicit Prelude(Checker &checker);
 
   void declarePrelude();
+  const Type *builtinType(llvm::StringRef name);
 
 private:
   Checker &checker_;

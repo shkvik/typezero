@@ -62,6 +62,8 @@ void tz_promise_trigger(TzPromise *p);
 void tz_promise_drop(void *promise);
 void tz_promise_fulfill(TzPromise *p);
 void tz_promise_reject(TzPromise *p, void *error);
+void tz_promise_succeed(TzPromise *p, const void *value, size_t size);
+void tz_promise_fail(TzPromise *p, void *error);
 TzPromise *tz_promise_new(const TzLayout *layout);
 void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead);
 void tz_after_callback(void);

@@ -110,6 +110,6 @@ for (const k of [ec.privateKey, ed.privateKey, x.privateKey]) console.log(k.algo
 console.log((await subtle.exportKey("pkcs8", rsa.privateKey)).byteLength > 600)
 // JSON text as a JWK.
 const text = JSON.stringify(await subtle.exportKey("jwk", ed.publicKey))
-const parsed = JSON.parse(text)
+const parsed = JSON.parse(text).unwrapOr(null)
 const fromText = await subtle.importKey("jwk", parsed, "Ed25519", true, ["verify"])
 console.log(await subtle.verify("Ed25519", fromText, edSig2, new Uint8Array(1)))

@@ -1,7 +1,8 @@
 // same-as-node
-// JSON.parse of a text that is not JSON throws the SyntaxError node throws.
-// expect-exit: 1
-// expect-stderr: SyntaxError: Expected ',' or '}' after property value in JSON at position 13 (line 3 column 3)
+// JSON.parse of a text that is not JSON gives an Err with the text of the
+// SyntaxError node throws (docs/modules.md, section 5).
 console.log(JSON.parse('{"ok": [1, 2]}'))
 const text = '{\n  "a": 1\n  "b": 2\n}'
-console.log(JSON.parse(text))
+const r = JSON.parse(text)
+if (r.isErr()) console.log(r.error)
+console.log(JSON.parse("").match((j) => "parsed", (e) => `${e.code}: ${e.message}`))

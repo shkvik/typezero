@@ -14,7 +14,7 @@ if (at >= 0) {
     process.stderr.write(args[2] ?? "")
     process.exitCode = Number(args[3] ?? "0") | 0
   } else if (what == "echo") {
-    process.stdout.write(readFileSync(0, "utf8").toUpperCase())
+    process.stdout.write(must(readFileSync(0, "utf8")).toUpperCase())
   } else if (what == "env") {
     console.log(process.env.TZ_CHILD_TEST ?? "-", process.env.TZ_OTHER ?? "-")
   } else if (what == "cwd") {
@@ -84,4 +84,12 @@ if (at >= 0) {
   const big = spawnSync(process.execPath, [...self, "big"], { maxBuffer: 1000, encoding: "utf8" })
   console.log(big.error?.code, big.error?.errno, big.signal, big.stdout.length > 1000)
   console.log(spawnSync(process.execPath, [...self, "big"], { encoding: "utf8" }).stdout.length)
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

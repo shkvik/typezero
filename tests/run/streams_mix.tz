@@ -29,7 +29,7 @@ async function* herd(all: Animal[]) {
   for (const a of all) yield a
 }
 
-const dir = mkdtempSync(join(tmpdir(), "tz-streams-mix-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-streams-mix-")))
 const file = join(dir, "herd.txt")
 let records = 0
 const toLine = new Transform({
@@ -77,4 +77,12 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async () => {
 const res = await fetch(new URL("/", server.url))
 console.log(JSON.stringify(await res.text()), res.headers.get("x-digest")?.slice(0, 16))
 await server.stop()
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

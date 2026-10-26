@@ -49,7 +49,9 @@ const checks = new Checks()
 checks.on("checked", (path, ok) => console.log(`checked ${path}: ${ok}`))
 
 async function fetchSigned(path: string, secret: string) {
-  const res = await fetch(new URL(path, server.url))
+  const url = URL.parse(path, server.url)
+  if (url.isErr()) return url.error.message
+  const res = await fetch(url.value)
   const body = await res.text()
   const sig = Buffer.from(res.headers.get("x-signature") ?? "", "hex")
   const ok = await crypto.subtle.verify("HMAC", await hmac(secret), sig, enc.encode(body))

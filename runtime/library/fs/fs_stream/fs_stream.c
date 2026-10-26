@@ -97,8 +97,8 @@ static void fd_done_int(TzWork *w) {
   FdRequest *r = (FdRequest *)w;
   if (r->failed) {
     tz_fs_throw_failure(r->make, r->failure, r->syscall, r->has_path ? &r->path.shown : NULL, NULL);
-    void *error = tz_thrown;
-    tz_thrown = NULL;
+    void *error = tz_failed;
+    tz_failed = NULL;
     tz_promise_reject(r->promise, error);
   } else {
     int32_t value = (int32_t)r->done;

@@ -57,18 +57,32 @@ interface Number {
 
 // JSON (docs/modules.md, section 5; docs/narrowing.md, section 3).
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
+type JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }
+type UriError = { code: "bad_uri"; message: string }
+type RegexError = { code: "bad_regex"; message: string }
+type UrlError = { code: "bad_url"; message: string; input: string }
+
+interface RegExpConstructor {
+  parse(source: string, flags?: string): Result<RegExp, RegexError>
+}
 
 interface JSON {
-  // JSON.parse<User>(text) checks every field and gives a User. Without a
-  // type argument the rest parameter wants a value of type never, so this
-  // declaration does not fit and tsc takes its own JSON.parse.
-  parse<T = never>(text: string, ...noTypeArgument: [T] extends [never] ? [never] : []): T
+  // JSON.parse<User>(text) checks every field and gives a Result with a User.
+  // Without a type argument the rest parameter wants a value of type never,
+  // so this declaration does not fit and tsc takes its own JSON.parse.
+  parse<T = never>(
+    text: string,
+    ...noTypeArgument: [T] extends [never] ? [never] : []
+  ): Result<T, JsonError>
 }
 
 // A Json value as type T, every field checked; with a class, made by its
 // constructor.
-declare function fromJson<T>(json: Json): T
-declare function fromJson<T>(cls: abstract new (...args: never[]) => T, json: Json): T
+declare function fromJson<T>(json: Json): Result<T, JsonError>
+declare function fromJson<T>(
+  cls: abstract new (...args: never[]) => T,
+  json: Json,
+): Result<T, JsonError>
 
 // Files built into the executable, read when the program is compiled; the
 // path is relative to the file of the call.

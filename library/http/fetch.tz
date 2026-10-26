@@ -1091,7 +1091,7 @@ export class Request {
     return this.#body.consumeText()
   }
 
-  async json(): Promise<Json> {
+  async json(): Promise<Result<Json, JsonError>> {
     return JSON.parse(await this.#body.consumeText())
   }
 
@@ -1241,7 +1241,7 @@ export class Response {
     return this.#body.consumeText()
   }
 
-  async json(): Promise<Json> {
+  async json(): Promise<Result<Json, JsonError>> {
     return JSON.parse(await this.#body.consumeText())
   }
 

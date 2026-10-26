@@ -9,6 +9,7 @@ public:
   explicit FsLowerer(Lowering &lowering);
 
   llvm::Value *emitFsCall(CallExpr *call);
+  llvm::Value *emitFsResult(CallExpr *call);
   llvm::Function *objectMaker(const Type *type);
   llvm::Function *systemErrorMaker();
 

@@ -3,7 +3,8 @@
 // What dates throw when the program runs, caught: toISOString(), format()
 // and formatToParts() of an invalid date (toJSON gives null), and a time
 // zone, a value of an option, a calendar, fractionalSecondDigits or a
-// language that only the running program shows to be wrong.
+// language that only the running program shows to be wrong. A text that is
+// no date is an Err of Date.parse.
 function attempt(what: string, f: () => string) {
   try {
     console.log(what, f())
@@ -12,12 +13,19 @@ function attempt(what: string, f: () => string) {
   }
 }
 const texts = ["2026-10-23T10:00Z", "not a date"]
-for (const text of texts) attempt(`iso ${text}`, () => new Date(text).toISOString())
-for (const text of texts) attempt(`json ${text}`, () => JSON.stringify({ at: new Date(text) }))
+function dateOf(text: string) {
+  return new Date(Date.parse(text).unwrapOr(NaN))
+}
+for (const text of texts) attempt(`iso ${text}`, () => dateOf(text).toISOString())
+for (const text of texts) attempt(`json ${text}`, () => JSON.stringify({ at: dateOf(text) }))
 const format = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: "numeric" })
-for (const text of texts) attempt(`format ${text}`, () => format.format(new Date(text)))
+for (const text of texts) attempt(`format ${text}`, () => format.format(dateOf(text)))
 for (const text of texts)
-  attempt(`parts ${text}`, () => format.formatToParts(new Date(text)).map((p) => p.value).join(""))
+  attempt(`parts ${text}`, () => format.formatToParts(dateOf(text)).map((p) => p.value).join(""))
+for (const text of texts) {
+  const ms = Date.parse(text)
+  console.log(ms.isOk() ? ms.value : ms.error)
+}
 const zones = ["Asia/Bishkek", "Mars/Base"]
 for (const timeZone of zones)
   attempt(`zone ${timeZone}`, () =>

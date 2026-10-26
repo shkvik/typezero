@@ -113,6 +113,26 @@ llvm::Value *FromJsonLowerer::emitFromJson(const Type *type, llvm::Value *json, 
   }
 }
 
+llvm::Value *FromJsonLowerer::emitFromJsonOrSkip(const Type *type, llvm::Value *json,
+                                                 llvm::Value *path) {
+  BasicBlock *convertBlock = lowering_.functionFrame().newBlock("json.convert");
+  BasicBlock *skipBlock = lowering_.functionFrame().newBlock("json.skip");
+  BasicBlock *endBlock = lowering_.functionFrame().newBlock("json.converted");
+  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNull(json), skipBlock, convertBlock);
+  lowering_.functionFrame().switchTo(convertBlock);
+  Value *value = emitFromJson(type, json, path);
+  BasicBlock *convertEnd = lowering_.builder_.GetInsertBlock();
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(skipBlock);
+  lowering_.builder_.CreateBr(endBlock);
+  lowering_.functionFrame().switchTo(endBlock);
+  llvm::PHINode *phi = lowering_.builder_.CreatePHI(value->getType(), 2, "converted");
+  phi->addIncoming(value, convertEnd);
+  phi->addIncoming(llvm::Constant::getNullValue(value->getType()), skipBlock);
+
+  return phi;
+}
+
 llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   if (llvm::Function *fn = fromJsonFunctions_.lookup(type)) {
     return fn;
@@ -146,10 +166,8 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   auto failIfThrown = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
     llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateIsNotNull(
-            lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot())),
-        failBlock, goBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
+    lowering_.builder_.CreateCondBr(lowering_.throwLowerer().anyFailure(), failBlock, goBlock,
+                                    llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
     lowering_.functionFrame().switchTo(failBlock);
     release();
     lowering_.builder_.CreateRet(llvm::Constant::getNullValue(fnType->getReturnType()));

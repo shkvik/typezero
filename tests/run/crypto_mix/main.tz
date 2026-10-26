@@ -18,7 +18,7 @@ console.log(key.length, key.toString("hex").slice(0, 16))
 type Point = { x: int; y: int }
 const point: Point = { x: 3, y: -4 }
 const back = open(key, seal(key, point))
-console.log(fromJson<Point>(back), open(key, seal(key, ["a", "b"])), open(key, seal(key, 42.5)))
+console.log(must(fromJson<Point>(back)), open(key, seal(key, ["a", "b"])), open(key, seal(key, 42.5)))
 const tampered = seal(key, "secret")
 if (tampered.length > 30) tampered[30] ^= 1
 try {
@@ -28,7 +28,7 @@ try {
 }
 
 // 2. A vault in a directory, written and read in parallel.
-const dir = await mkdtemp(join(tmpdir(), "tz-crypto-mix-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-crypto-mix-")))
 const vault = new Vault(dir, key)
 const stored: string[] = []
 vault.on("stored", (name, hexLength) => stored.push(`${name}:${hexLength}`))
@@ -67,4 +67,12 @@ console.log(timingSafeEqual(bytes, same), Buffer.from(bytes).toString("hex"))
 const roll = randomInt(1, 7)
 console.log(roll >= 1 && roll < 7, randomUUID().length)
 
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

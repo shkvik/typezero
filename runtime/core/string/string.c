@@ -1,4 +1,5 @@
 #include "runtime/core/string/string.h"
+#include "runtime/core/fail/fail.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/error/error.h"
@@ -2207,8 +2208,14 @@ static const uint8_t kUriComponentLengths[256] = URI_EACH256(URI_COMPONENT_LENGT
 static const uint8_t kUriLengths[256] = URI_EACH256(URI_FULL_LENGTH);
 static const int8_t kHexDigits[256] = URI_EACH256(URI_HEX);
 
+TZ_THREAD_LOCAL TzMaker tz_uri_fail;
+
 static void uri_malformed(TzStr *out) {
-  tz_throw(TZ_URI_ERROR, "URI malformed");
+  if (tz_uri_fail) {
+    tz_fail_ascii(tz_uri_fail, "bad_uri", "URI malformed");
+  } else {
+    tz_throw(TZ_URI_ERROR, "URI malformed");
+  }
   *out = kEmpty;
 }
 
@@ -2489,11 +2496,17 @@ static void uri_decode(TzStr *out, void *obj, uint64_t meta, int keep_reserved) 
   }
 }
 
-void tz_uri_decode_component(TzStr *out, void *obj, uint64_t meta) {
+void tz_uri_decode_component(TzStr *out, void *obj, uint64_t meta, TzMaker fail) {
+  tz_uri_fail = fail;
   uri_decode(out, obj, meta, 0);
+  tz_uri_fail = NULL;
 }
 
-void tz_uri_decode(TzStr *out, void *obj, uint64_t meta) { uri_decode(out, obj, meta, 1); }
+void tz_uri_decode(TzStr *out, void *obj, uint64_t meta, TzMaker fail) {
+  tz_uri_fail = fail;
+  uri_decode(out, obj, meta, 1);
+  tz_uri_fail = NULL;
+}
 
 static const char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local, size_t size,
                               size_t *n, char **owned) {

@@ -81,13 +81,13 @@ console.log(weekdays.join(), log.join(", "))
 console.log(JSON.stringify(events[0]), JSON.stringify(events[1]))
 console.log(JSON.stringify({ when: new Date(base), never: new Date(NaN), list: moments.slice(0, 1) }))
 const saved = JSON.stringify({ title: "x", at: new Date(base) })
-const back = JSON.parse<{ title: string; at: string }>(saved)
-console.log(back.title, new Date(back.at).getTime() == base)
+const back = must(JSON.parse<{ title: string; at: string }>(saved))
+console.log(back.title, Date.parse(back.at).unwrapOr(0) == base)
 
 // 7. What dates throw, caught.
 const bad = parseWhenLoosely("nope")
 function parseWhenLoosely(text: string): Date {
-  return new Date(text)
+  return new Date(Date.parse(text).unwrapOr(NaN))
 }
 try {
   console.log(bad.toISOString())
@@ -108,3 +108,11 @@ for (const timeZone of zones) {
   }
 }
 console.log(new Meeting("printed", new Date(base), 5))
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

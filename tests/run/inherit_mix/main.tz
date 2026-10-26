@@ -43,6 +43,14 @@ const counters: Counter[] = [new Counter(), new Backwards()]
 for (const c of counters) console.log([...c.steps(3)], [...c.steps("ab")])
 
 console.log(JSON.stringify(shapes[0]), JSON.stringify(new Circle(2)))
-const named = JSON.parse<Named>('{"name": "from json", "extra": 1}')
+const named = must(JSON.parse<Named>('{"name": "from json", "extra": 1}'))
 const asNamed: Named = new Circle(3)
 console.log(named, asNamed.name)
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

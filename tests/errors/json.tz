@@ -1,7 +1,7 @@
 // A Json may hold any JSON value: before a check shows what it holds, it is
 // no condition, no string, no number, and has no methods.
 type int = number
-const j = JSON.parse('{"a": 1, "items": [1]}')
+const j = JSON.parse('{"a": 1, "items": [1]}').unwrapOr(null)
 
 // expect-error: a Json cannot be a condition: it may hold 0, "", false or null
 if (j.a) console.log("a")

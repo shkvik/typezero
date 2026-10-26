@@ -1,0 +1,21 @@
+// 'new URL' cannot fail (docs/errors.md, section 7): a text known only when
+// the program runs goes through URL.parse, which gives a Result; a literal is
+// checked when the program is built.
+function make(text: string, base: string) {
+  // expect-error: 'new URL' of a text known only when the program runs may fail, and 'new' gives no Result; write 'URL.parse(text)'
+  const a = new URL(text)
+  // expect-error: 'new URL' with a base known only when the program runs may fail
+  const b = new URL("/x", base)
+  // expect-error: 'http://a b/' is not a valid URL
+  const c = new URL("http://a b/")
+  // expect-error: '/relative' is not a valid URL without a base
+  const d = new URL("/relative")
+  // expect-error: 'http://h:70000/' is not a valid URL
+  const e = new URL("http://h:70000/")
+  const known = new URL("https://example.com/a?b#c")
+  const relative = new URL("/path", known)
+  const copy = new URL(known)
+  const href = new URL(known.href)
+  console.log(a, b, c, d, e, relative, copy, href, URL.parse(text, base).isOk())
+}
+make("x", "y")

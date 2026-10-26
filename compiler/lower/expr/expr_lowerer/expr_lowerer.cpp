@@ -5,6 +5,7 @@
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
+#include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
@@ -159,8 +160,17 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     return lowering_.assignLowerer().emitAssign(cast<AssignExpr>(expr), true);
   case Expr::Kind::Update:
     return lowering_.assignLowerer().emitUpdate(cast<UpdateExpr>(expr));
-  case Expr::Kind::Call:
-    return lowering_.callLowerer().emitCall(cast<CallExpr>(expr));
+  case Expr::Kind::Call: {
+    auto *call = cast<CallExpr>(expr);
+    llvm::Value *value = lowering_.callLowerer().emitCall(call);
+    const FuncSymbol *callee = call->func ? call->func : call->method;
+    if (value && call->type && call->type->isResult() && callee && callee->decl &&
+        lowering_.errSites().inLibrary(callee->decl->loc()) &&
+        !lowering_.errSites().inLibrary(call->loc())) {
+      return lowering_.errSites().stamp(value, call->type, call->loc());
+    }
+    return value;
+  }
   case Expr::Kind::New: {
     auto *create = cast<NewExpr>(expr);
     if (create->reflect) {
@@ -209,8 +219,14 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     return emitOptionalChain(cast<OptionalChainExpr>(expr));
   case Expr::Kind::Yield:
     return lowering_.inlineGeneratorLowerer().emitYield(cast<YieldExpr>(expr));
-  case Expr::Kind::Await:
-    return lowering_.asyncLowerer().emitAwait(cast<AwaitExpr>(expr));
+  case Expr::Kind::Await: {
+    llvm::Value *value = lowering_.asyncLowerer().emitAwait(cast<AwaitExpr>(expr));
+    if (value && expr->type && expr->type->isResult() &&
+        !lowering_.errSites().inLibrary(expr->loc())) {
+      return lowering_.errSites().stamp(value, expr->type, expr->loc());
+    }
+    return value;
+  }
   }
   llvm_unreachable("unknown expression kind");
 }

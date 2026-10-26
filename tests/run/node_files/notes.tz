@@ -3,10 +3,18 @@ import { join as joinPath, basename } from "path"
 
 export function saveNote(dir: string, name: string, text: string) {
   const file = joinPath(dir, `${name}.txt`)
-  writeFileSync(file, text)
+  must(writeFileSync(file, text))
   return file
 }
 
 export function readNote(file: string) {
-  return `${basename(file, ".txt")}: ${readFileSync(file, "utf8")}`
+  return `${basename(file, ".txt")}: ${must(readFileSync(file, "utf8"))}`
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

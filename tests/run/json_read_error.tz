@@ -3,6 +3,6 @@
 // `?.` gives undefined instead.
 // expect-exit: 1
 // expect-stderr: TypeError: Cannot read properties of undefined (reading 'name')
-const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}')
+const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}').unwrapOr(null)
 console.log(j.users[0].name, j.users[1]?.name, j.owner?.name)
 console.log(j.users[1].name)

@@ -29,7 +29,7 @@ Request {
 ReadableStream { locked: false, state: 'readable', supportsBYOB: false }
 hi true
 TypeError Body is unusable: Body has already been read
-202 application/json { a: [ 1, 2 ] }
+202 application/json Ok { value: { a: [ 1, 2 ] } }
 307 http://x.com/a
 TypeError immutable
 0 error false

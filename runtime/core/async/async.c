@@ -292,6 +292,35 @@ void tz_promise_fulfill(TzPromise *p) {
   trigger(p);
 }
 
+void tz_promise_succeed(TzPromise *p, const void *value, size_t size) {
+  const TzType *type = value_type(p);
+  char *slot = (char *)value_of(p);
+  if (type && type->kind == TZ_T_RESULT) {
+    const TzResultType *result = (const TzResultType *)type;
+    memset(slot, 0, type->size);
+    if (size) {
+      memcpy(slot + result->value_offset, value, size);
+    }
+    slot[result->ok_offset] = 1;
+  } else if (size) {
+    memcpy(slot, value, size);
+  }
+  tz_promise_fulfill(p);
+}
+
+void tz_promise_fail(TzPromise *p, void *error) {
+  const TzType *type = value_type(p);
+  if (!type || type->kind != TZ_T_RESULT) {
+    tz_promise_reject(p, error);
+    return;
+  }
+  const TzResultType *result = (const TzResultType *)type;
+  char *slot = (char *)value_of(p);
+  memset(slot, 0, type->size);
+  memcpy(slot + result->error_offset, &error, sizeof error);
+  tz_promise_fulfill(p);
+}
+
 void tz_promise_reject(TzPromise *p, void *error) {
   TZ_ORDERED();
   p->state = TZ_PROMISE_REJECTED;

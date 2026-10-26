@@ -23,7 +23,7 @@ export function open(key: Buffer, sealed: Uint8Array): Json {
   const bytes = Buffer.from(sealed)
   const decipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(0, 12))
   decipher.setAuthTag(bytes.subarray(12, 28))
-  return JSON.parse(decipher.update(bytes.subarray(28), undefined, "utf8") + decipher.final("utf8"))
+  return JSON.parse(decipher.update(bytes.subarray(28), undefined, "utf8") + decipher.final("utf8")).unwrapOr(null)
 }
 
 export class Vault extends EventEmitter {
@@ -33,11 +33,19 @@ export class Vault extends EventEmitter {
 
   async put<T>(name: string, value: T) {
     const sealed = seal(this.key, value)
-    await writeFile(join(this.dir, name), sealed)
+    must(await writeFile(join(this.dir, name), sealed))
     this.emit("stored", name, createHash("sha256").update(sealed).digest("hex").length)
   }
 
   async get(name: string) {
-    return open(this.key, await readFile(join(this.dir, name)))
+    return open(this.key, must(await readFile(join(this.dir, name))))
   }
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

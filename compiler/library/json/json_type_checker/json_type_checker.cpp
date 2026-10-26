@@ -54,7 +54,7 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
     }
     if (type->isDate()) {
       return "JSON has no dates, and JSON.parse in JavaScript gives the string JSON.stringify "
-             "wrote; read it as a 'string' and make the date with 'new Date(text)'";
+             "wrote; read it as a 'string' and make the date with 'Date.parse(text)'";
     }
     if (type->isIntl()) {
       return type->intlKind() == IntlKind::Segments

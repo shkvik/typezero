@@ -23,14 +23,22 @@ console.log(JSON.stringify({ m: seen, s: days, r: due }))
 const sorted = [...seen.keys()].sort((a, b) => a.getTime() - b.getTime())
 console.log(sorted.length, sorted[0] == d1 || sorted[0] == d2)
 
-const dir = mkdtempSync(join(tmpdir(), "tz-dict-"))
-for (const f of ["a.ts", "b.ts", "c.md", "notes.txt"]) writeFileSync(join(dir, f), f)
-console.log(Object.groupBy(readdirSync(dir), (f) => extname(f)))
-const byKind = Map.groupBy(readdirSync(dir, { withFileTypes: true }), (e) => e.isFile())
+const dir = must(mkdtempSync(join(tmpdir(), "tz-dict-")))
+for (const f of ["a.ts", "b.ts", "c.md", "notes.txt"]) must(writeFileSync(join(dir, f), f))
+console.log(Object.groupBy(must(readdirSync(dir)), (f) => extname(f)))
+const byKind = Map.groupBy(must(readdirSync(dir, { withFileTypes: true })), (e) => e.isFile())
 console.log(byKind.get(true)?.map((e) => e.name).join(), byKind.has(false))
 const stats = new Map<string, Stats>()
-for (const f of readdirSync(dir)) stats.set(f, statSync(join(dir, f)))
+for (const f of must(readdirSync(dir))) stats.set(f, must(statSync(join(dir, f))))
 console.log([...stats].map(([f, s]) => `${f}:${s.size}`).join())
 const sizes = Object.fromEntries([...stats].map(([f, s]): [string, number] => [f, s.size]))
 console.log(sizes, Object.keys(sizes).length)
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

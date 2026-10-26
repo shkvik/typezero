@@ -26,7 +26,7 @@ function count<T extends object>(xs: object[], cls: Constructor<T>) {
   return `${cls.name}: ${n}`
 }
 function load<T extends object>(cls: Constructor<T>, text: string): T {
-  return fromJson(cls, JSON.parse(text))
+  return must(fromJson(cls, must(JSON.parse(text))))
 }
 
 const p = make(Point, 3, -4)
@@ -38,4 +38,12 @@ console.log(load(Point, '{"x": 1, "y": 2}').norm())
 const kinds: Constructor[] = [Point, Pair]
 for (const kind of kinds) {
   console.log(make(kind, 7, 8), count(things, kind), load(kind, '{"x": 1, "y": 2, "left": 3, "right": 4}'))
+}
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

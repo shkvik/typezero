@@ -62,8 +62,9 @@ export interface Validator {
 export class Pattern implements Validator {
   constructor(public source: string, public flags: string) {}
   validate(text: string): string {
-    const re = new RegExp(this.source, this.flags)
-    if (!re.test(text)) throw new AppError(`'${text}' does not match`, 422)
+    const re = RegExp.parse(this.source, this.flags)
+    if (re.isErr()) throw new SyntaxError(re.error.message)
+    if (!re.value.test(text)) throw new AppError(`'${text}' does not match`, 422)
     return text
   }
 }

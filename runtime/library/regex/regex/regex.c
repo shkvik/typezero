@@ -1,10 +1,12 @@
 #include "runtime/library/regex/regex/regex.h"
+#include "runtime/core/fail/fail.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
+#include <stdio.h>
 #include <string.h>
 
 enum {
@@ -930,8 +932,8 @@ static size_t utf8_of(const uint16_t *units, size_t n, char *out, size_t capacit
   return length;
 }
 
-TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f_meta,
-                           int32_t has_flags) {
+static TzRegex *from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f_meta,
+                            int32_t has_flags, TzMaker fail) {
   TzStr pattern = {p_obj, p_meta}, flag_text = {f_obj, f_meta};
   TzBuf p, f;
   tz_buf_init(&p);
@@ -946,7 +948,13 @@ TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f
     utf8_of(f.data, f.length, flags8, sizeof flags8);
     tz_buf_free(&p);
     tz_buf_free(&f);
-    tz_throw(TZ_SYNTAX_ERROR, "Invalid flags supplied to RegExp constructor '%s'", flags8);
+    char message[160];
+    snprintf(message, sizeof message, "Invalid flags supplied to RegExp constructor '%s'", flags8);
+    if (fail) {
+      tz_fail_utf8(fail, "bad_regex", message);
+    } else {
+      tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+    }
     return NULL;
   }
   const char *error = NULL;
@@ -957,7 +965,14 @@ TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f
     utf8_of(f.data, f.length, flags8, sizeof flags8);
     tz_buf_free(&p);
     tz_buf_free(&f);
-    tz_throw(TZ_SYNTAX_ERROR, "Invalid regular expression: /%s/%s: %s", pattern8, flags8, error);
+    char message[400];
+    snprintf(message, sizeof message, "Invalid regular expression: /%s/%s: %s", pattern8, flags8,
+             error);
+    if (fail) {
+      tz_fail_utf8(fail, "bad_regex", message);
+    } else {
+      tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+    }
     return NULL;
   }
   tz_buf_free(&p);
@@ -966,6 +981,16 @@ TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f
   re->owned = program;
 
   return re;
+}
+
+TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f_meta,
+                           int32_t has_flags) {
+  return from_string(p_obj, p_meta, f_obj, f_meta, has_flags, NULL);
+}
+
+TzRegex *tz_re_parse(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f_meta, int32_t has_flags,
+                     TzMaker fail) {
+  return from_string(p_obj, p_meta, f_obj, f_meta, has_flags, fail);
 }
 
 static void buf_source(TzBuf *out, const uint32_t *program) {

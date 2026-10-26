@@ -580,8 +580,14 @@ abstract class KeyHandle {
   }
 }
 
+function jsonFailure(e: JsonError) {
+  return new TypeError(e.path == "" ? e.message : `${e.path}: ${e.message}`)
+}
+
 function jwkOfKey(key: KeyObject): JsonWebKey {
-  return fromJson<JsonWebKey>(key.export({ format: "jwk" }))
+  const jwk = fromJson<JsonWebKey>(key.export({ format: "jwk" }))
+  if (jwk.isErr()) throw jsonFailure(jwk.error)
+  return jwk.value
 }
 
 function jsonOf(jwk: JsonWebKey): Json {
@@ -1546,12 +1552,18 @@ async function wrappedBytes(format: KeyFormat, key: CryptoKey, kw: boolean): Pro
 
 function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): BufferSource | JsonWebKey {
   if (format != "jwk") return bytes
+  let text = ""
   try {
-    return fromJson<JsonWebKey>(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)))
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
   } catch (err) {
     void err
     throw dataError("Invalid wrapped JWK key")
   }
+  const json = JSON.parse(text)
+  if (json.isErr()) throw dataError("Invalid wrapped JWK key")
+  const jwk = fromJson<JsonWebKey>(json.value)
+  if (jwk.isErr()) throw dataError("Invalid wrapped JWK key")
+  return jwk.value
 }
 
 function keyLength(algorithm: AlgorithmIdentifier): double | undefined {
@@ -1768,7 +1780,9 @@ export const subtle = new SubtleCrypto()
 
 function subtleJwkOf(json: Json | undefined): JsonWebKey {
   if (json == undefined) throw dataError("Invalid keyData")
-  return fromJson<JsonWebKey>(json)
+  const jwk = fromJson<JsonWebKey>(json)
+  if (jwk.isErr()) throw jsonFailure(jwk.error)
+  return jwk.value
 }
 
 async function subtleImportAny(

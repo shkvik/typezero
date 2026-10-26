@@ -26,9 +26,17 @@ console.log(maybe.get(undefined), maybe.get(0), maybe)
 const double = (x: int) => x * 2
 const handlers = new Map<(x: int) => int, string>([[double, "double"]])
 console.log(handlers.get(double), handlers.size)
-const parsed = JSON.parse('[1, "a", true, null, 1, "a"]')
+const parsed = must(JSON.parse('[1, "a", true, null, 1, "a"]'))
 const seen = new Set<Json>()
 if (Array.isArray(parsed)) for (const j of parsed) seen.add(j)
 console.log(seen.size, seen)
-const objects = JSON.parse('[{}, {}]')
+const objects = must(JSON.parse('[{}, {}]'))
 if (Array.isArray(objects)) console.log(new Set(objects).size)
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

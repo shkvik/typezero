@@ -8,13 +8,13 @@ import { readFile, writeFile, appendFile, mkdir, mkdtemp, readdir, stat, lstat, 
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
-const dir = await mkdtemp(join(tmpdir(), "tz-fsp-errors-"))
+const dir = must(await mkdtemp(join(tmpdir(), "tz-fsp-errors-")))
 const file = join(dir, "file.txt")
 const sub = join(dir, "sub")
 const missing = join(dir, "missing")
-await writeFile(file, "text")
-await mkdir(sub)
-await writeFile(join(sub, "inside.txt"), "inside")
+must(await writeFile(file, "text"))
+must(await mkdir(sub))
+must(await writeFile(join(sub, "inside.txt"), "inside"))
 
 async function show(what: string, run: () => Promise<void>) {
   try {
@@ -29,17 +29,17 @@ async function show(what: string, run: () => Promise<void>) {
   }
 }
 
-await show("read missing", async () => void (await readFile(missing, "utf8")))
-await show("read directory", async () => void (await readFile(sub, "utf8")))
-await show("read zero char", async () => void (await readFile("a\u0000b", "utf8")))
+await show("read missing", async () => void (must(await readFile(missing, "utf8"))))
+await show("read directory", async () => void (must(await readFile(sub, "utf8"))))
+await show("read zero char", async () => void (must(await readFile("a\u0000b", "utf8"))))
 await show("write missing dir", () => writeFile(join(missing, "x.txt"), "x"))
 await show("write exclusive", () => writeFile(file, "x", { flag: "wx" }))
 await show("write bad flag", () => writeFile(file, "x", { flag: "q" }))
 await show("append missing dir", () => appendFile(join(missing, "x.txt"), "x"))
-await show("mkdir existing", async () => void (await mkdir(sub)))
-await show("mkdir missing parent", async () => void (await mkdir(join(missing, "a"))))
-await show("mkdir under file", async () => void (await mkdir(join(file, "a", "b"), { recursive: true })))
-await show("mkdtemp missing", async () => void (await mkdtemp(join(missing, "t-"))))
+await show("mkdir existing", async () => void (must(await mkdir(sub))))
+await show("mkdir missing parent", async () => void (must(await mkdir(join(missing, "a")))))
+await show("mkdir under file", async () => void (must(await mkdir(join(file, "a", "b"), { recursive: true }))))
+await show("mkdtemp missing", async () => void (must(await mkdtemp(join(missing, "t-")))))
 await show("rmdir not empty", () => rmdir(sub))
 await show("rmdir missing", () => rmdir(missing))
 await show("unlink directory", () => unlink(sub))
@@ -48,11 +48,11 @@ await show("rm directory", () => rm(sub))
 await show("rm missing", () => rm(missing))
 await show("rename missing", () => rename(missing, join(dir, "other")))
 await show("copy missing", () => copyFile(missing, join(dir, "other")))
-await show("readdir file", async () => void (await readdir(file)))
-await show("readdir missing", async () => void (await readdir(missing)))
-await show("stat missing", async () => void (await stat(missing)))
-await show("lstat missing", async () => void (await lstat(missing)))
-await show("realpath missing", async () => void (await realpath(join(missing, "deeper"))))
+await show("readdir file", async () => void (must(await readdir(file))))
+await show("readdir missing", async () => void (must(await readdir(missing))))
+await show("stat missing", async () => void (must(await stat(missing))))
+await show("lstat missing", async () => void (must(await lstat(missing))))
+await show("realpath missing", async () => void (must(await realpath(join(missing, "deeper")))))
 await show("access missing", () => access(missing))
 await show("chmod missing", () => chmod(missing, 0o644))
 await show("truncate missing", () => truncate(missing))
@@ -61,5 +61,13 @@ await show("truncate missing", () => truncate(missing))
 const later = readFile(missing, "utf8")
 await show("awaited later", async () => void (await later))
 
-await rm(dir, { recursive: true })
+must(await rm(dir, { recursive: true }))
 console.log("done")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

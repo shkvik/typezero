@@ -12,6 +12,14 @@ console.log(page.length)
 console.log(page)
 
 type Config = { port: int; host: string; debug: boolean; users: { name: string; roles: string[] }[] }
-const typed = fromJson<Config>(config)
+const typed = must(fromJson<Config>(config))
 // expect-warning: 'typed.port + 1' may overflow int: 'typed.port' comes from JSON
 console.log(typed.port + 1, typed.users.length, typed.debug)
+
+function must<T>(r: Result<T, JsonError>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

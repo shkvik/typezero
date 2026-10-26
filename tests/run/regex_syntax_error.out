@@ -1,2 +1,7 @@
 true
 true
+{
+  code: 'bad_regex',
+  message: 'Invalid regular expression: /a(b/i: Unterminated group'
+}
+bad_regex Invalid flags supplied to RegExp constructor 'gg'

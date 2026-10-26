@@ -136,12 +136,14 @@ tz run                   # без файла — "main" из tz.json
   `toUpperCase` / `toLowerCase` (по всем правилам Unicode, как в V8: `"ß"` → `"SS"`),
   `replaceAll` со строкой (`$&` и прочие подстановки работают), `String(x)`, `x.toString()`,
   `String.fromCharCode`, `String.fromCodePoint`; по правилам языков — `localeCompare` и
-  `normalize` (см. «Языки: Intl»). `encodeURIComponent`, `encodeURI`, `decodeURIComponent` и
-  `decodeURI` — как в node, с `URIError: URI malformed` у одиночного суррогата и неверного
-  `%`-кода; это функция рантайма над однобайтовой или двухбайтовой строкой, а строка, в которой
+  `normalize` (см. «Языки: Intl»). `encodeURIComponent` и `encodeURI` — как в
+  node, с `URIError: URI malformed` у одиночного суррогата; `decodeURIComponent` и `decodeURI`
+  отдают `Result<string, UriError>`, где `UriError = { code: "bad_uri"; message: string }`, —
+  `Err` у неверного `%`-кода; это функция рантайма над однобайтовой или двухбайтовой строкой, а строка, в которой
   нечего менять, возвращается без копии.
 - Регулярные выражения (см. «Регулярные выражения»): литералы `/…/` со всем синтаксисом JS и всеми
-  флагами `dgimsuvy` — машинный код без взрыва перебора, `new RegExp(s, flags)`, `test`, `exec`,
+  флагами `dgimsuvy` — машинный код без взрыва перебора, `RegExp.parse(s, flags)` с `Result`,
+  `test`, `exec`,
   `match`, `matchAll`, `search`, `replace` / `replaceAll` (с текстом замены и с функцией),
   `split`, `lastIndex`, `source`, `flags`, `global` и другие флаги, `RegExp.escape`.
 - Даты (см. «Даты»): `Date` как в JS — `new Date()`, `new Date(ms)`,
@@ -318,11 +320,11 @@ tz run                   # без файла — "main" из tz.json
   и JSR, `tz.lock` с версиями и хешами, общий кэш исходников, `tz init`, `tz add`, `tz remove`,
   `tz update`, `tz build` и `tz run` без файла; `tz port` переносит TS-библиотеку в файлы `.tz`.
 - Редактор (см. «Редактор»): подсветка файлов `.tz` в VS Code.
-- JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)`,
+- JSON (см. «JSON»): тип `Json` (`null` бывает только в нём), `JSON.parse(text)` с `Result`,
   `JSON.stringify(x, null, space)` любого значения, чтение и запись ключей (`j.users[0].name`),
   сужение `typeof`, `Array.isArray` и `!= null`, `JSON.parse<User>(text)` и `fromJson<User>(j)`,
-  которые проверяют каждое поле, файлы, вшитые в exe: `embedJson("./config.json")`,
-  `embedText("./page.html")`.
+  которые проверяют каждое поле и отдают `Result`, файлы, вшитые в exe:
+  `embedJson("./config.json")`, `embedText("./page.html")`.
 - То, что нужно tsc, принимается и ничего не меняет: `readonly T[]` и `ReadonlyArray<T>`
   (изменения массива компилятор не запрещает). Целый литерал больше 64 бит — `double`, как в JS.
 
@@ -457,10 +459,8 @@ try {
   `RangeError: 3000000000 does not fit in int` (`Math.round` и `parseInt` там, где ждут целое),
   `RangeError: Invalid array length`, `RangeError: Invalid count value: -1` (`repeat`),
   `RangeError: Maximum call stack size exceeded`; у регулярок, `Json` и дат — их ошибки с текстами
-  node: `SyntaxError: Invalid regular expression: /(/: Unterminated group` (`new RegExp`),
-  `TypeError` у `matchAll` и `replaceAll` без `g`, `SyntaxError` у `JSON.parse`, `TypeError` у
-  `JSON.parse<T>`, у чтения ключа `null` или `undefined` и у значения, которое содержит себя, в
-  `JSON.stringify`, `RangeError: Invalid time value` у `toISOString()` неправильной даты. Рантайм
+  node: `TypeError` у `matchAll` и `replaceAll` без `g`, `TypeError` у чтения ключа `null` или
+  `undefined` и у значения, которое содержит себя, в `JSON.stringify`, `RangeError: Invalid time value` у `toISOString()` неправильной даты. Рантайм
   при этом освобождает всё, что успел построить. Ошибка колбэка `replace` выходит из `replace`.
   Код выхода 2 остался только у сбоев самого рантайма: кончилась память, строка длиннее 2^30
   символов.
@@ -1020,8 +1020,8 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   ([narrowing.md](docs/narrowing.md), раздел 3): ключи с именами параметров конструктора — его
   аргументы, каждый проверяется, как поле у `fromJson<T>`; потом публичные поля, которые можно
   менять, получают значения ключей, которые есть в `Json`. Классы внутри (параметры, поля,
-  элементы массивов) делаются так же, лишние ключи пропускаются, ошибка — `TypeError` с путём
-  (`to.city: expected string, got undefined`). Для `Constructor<T>` — через описание класса.
+  элементы массивов) делаются так же, лишние ключи пропускаются; результат — `Result`, ошибка —
+  `JsonError` с путём (`path: 'to.city'`, `message: 'expected string, got undefined'`). Для `Constructor<T>` — через описание класса.
   Абстрактный класс, несколько конструкторов, параметр, который не берётся из JSON, — ошибки
   компиляции.
 
@@ -1349,10 +1349,17 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   присваиваний): `m[k]` — `string` или `string | undefined`, `m.groups` — объект с полем на имя,
   лишний `m[4]` и `"$4"` в замене — ошибки. Нет совпадения — `undefined`. Колбэк `replace`
   получает совпадение, группы с их типами, позицию, строку и объект именованных групп.
-- **Регулярка, известная только при выполнении** (параметр, поле, `new RegExp(s)`): флаги и группы
+- **Регулярка, известная только при выполнении** (параметр, поле, `RegExp.parse(s)`): флаги и группы
   неизвестны, поэтому `match` — ошибка с подсказкой `exec` или `matchAll`, `m[k]` —
   `string | undefined`, колбэк `replace` получает только совпадение, а `m.groups` пока не
   поддерживается. `new RegExp` с литералами (`new RegExp("\\d+", "g")`) — то же, что литерал.
+- **`RegExp.parse(source, flags?)`** разбирает шаблон из строки, известной только при
+  выполнении, и отдаёт `Result<RegExp, RegexError>`, где `RegexError = { code: "bad_regex";
+  message: string }`, а `message` — текст `SyntaxError` из node (`Invalid regular expression:
+  /a(b/i: Unterminated group`, `Invalid flags supplied to RegExp constructor 'gg'`).
+  `new RegExp(s)` с переменной — ошибка компиляции с подсказкой `RegExp.parse`: `new` не может
+  отдать `Result`. Можно только `new RegExp(RegExp.escape(s), "флаги-литерал")`: такой шаблон
+  разбирается всегда.
 - **Ловушки JS — ошибки компиляции**: `test()` с `g`, `replace("-", "+")` со строкой (подсказка —
   `replaceAll` или регулярка), `replaceAll` и `matchAll` с регуляркой без `g`, `match`, `matchAll`
   и `search` со строкой, `"$4"` при трёх группах и `"$<x>"` без группы `x`, `/[😀]/` без `u`,
@@ -1369,7 +1376,7 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   оптимизирует вместе с программой, в двух вариантах: для строк по байту и по два байта на символ.
   Результаты — те же, что у интерпретатора (сверено с node на тысячах случайных регулярок, в том
   числе с запоминанием из следующего пункта с первого же шага). Интерпретатор выполняет только
-  регулярки `new RegExp(s)` и попадает в exe, только если они в программе есть. Срезано только то,
+  регулярки `RegExp.parse(s)` и попадает в exe, только если они в программе есть. Срезано только то,
   что всё равно не удалось бы:
   - начало совпадения ищется по 32 байта за раз по байтам, которые совпадение может иметь на
     одном–трёх смещениях от начала (у `(\d{4})-` на смещении 4 — `-`), а без них — по множеству
@@ -1389,12 +1396,12 @@ for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g)) console.lo
   тот же. Результат не меняется, а время — не больше длины текста на размер регулярки, как у
   bounded backtracker в Rust: `/(a+)+$/` на миллионе `a` и `!` — около 20 мс (node на 30 буквах —
   25 с), `/a.*x/` на миллионе `a` — не квадратично. Только с обратной ссылкой (`\1`) перебор не
-  ограничен, как в JS, и у `new RegExp(s)`: интерпретатор перебирает, как V8.
+  ограничен, как в JS, и у `RegExp.parse(s)`: интерпретатор перебирает, как V8.
 - **Unicode** — свойства `\p{…}` (General_Category, Script, Script_Extensions и двоичные, с
   короткими именами) и регистр для `/i` (простое приведение регистра с `u` и `v`, `toUpperCase`
   одного символа без них) берутся из таблиц, которые
   [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs) получает из самого Node.js. Таблицы
-  свойств попадают в exe, только если в программе есть `new RegExp` с неизвестным при сборке
+  свойств попадают в exe, только если в программе есть `RegExp.parse` с неизвестным при сборке
   шаблоном.
 - **`matchAll`** — ленивый итератор `IterableIterator<RegExpMatchArray>`, как в JS: совпадение
   ищется, когда его просят. `for...of`, spread, `Array.from` и цепочки методов прямо по
@@ -1456,7 +1463,12 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
 - **Разбор строк** — порт разборщика V8: формат ISO (дата без времени — UTC, со временем —
   местное) и всё, что V8 читает сверх него: `"2026/10/23"`, `"Oct 23 2026 10:00"`,
   `"Fri, 23 Oct 2026 10:00:00 GMT"`, текст `toString()`. Результаты сверены с node на сотнях
-  тысяч случайных строк в разных поясах.
+  тысяч случайных строк в разных поясах. Строку из переменной разбирает `Date.parse(text)` — он
+  отдаёт `Result<double, DateError>` с миллисекундами, где `DateError = { code: "bad_date";
+  message: string; text: string }`; `new Date(text)` с переменной — ошибка компиляции с
+  подсказкой `Date.parse` (`new Date` не может отдать `Result`), литерал проверяется при сборке.
+  Неправильная дата пока получается из чисел (`new Date(NaN)`): их доказательства придут с
+  числами ([numbers.md](docs/numbers.md)).
 - **Языки**: `toLocaleString` и `Intl.DateTimeFormat` собирают из опций скелет шаблона
   (`yMMMMd`) и берут у ICU лучший шаблон языка, как V8, с теми же правилами часов (`hour12`,
   `hourCycle`, `-u-hc-`), частей по умолчанию и `dateStyle` / `timeStyle`. Без языка — язык
@@ -1483,7 +1495,7 @@ new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "Asia/Bishkek" }
   по названиям дней недели.
 - **JSON**: `JSON.stringify` пишет дату её `toJSON()` — ISO-текстом, неправильную — `null`, и
   в объектах, массивах и классах тоже. `JSON.parse<T>` с датой в `T` — ошибка компиляции: в JSON
-  дат нет, и JS дал бы там строку; подсказка — поле `string` и `new Date(text)`.
+  дат нет, и JS дал бы там строку; подсказка — поле `string` и `Date.parse(text)`.
 
 ## Байтовые массивы
 
@@ -2103,8 +2115,8 @@ const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey)       // JsonWe
   `HmacImportParams` и другие словари — видны без импорта; все словари алгоритмов — один тип
   `Algorithm` с необязательными полями, поэтому литерал алгоритма в переменной или в `return`
   подходит без аннотаций. `generateKey` с алгоритмом в вызове даёт `CryptoKey` или `CryptoKeyPair`,
-  `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK можно отдать и как `Json`:
-  `importKey("jwk", JSON.parse(text), ...)`.
+  `exportKey("jwk")` — `JsonWebKey`, иначе `ArrayBuffer`. JWK из текста —
+  `JSON.parse<JsonWebKey>(text)`.
 - **Как в node**: всё возвращает `Promise`; ошибки — `DOMException` с именами, кодами и текстами
   node (`NotSupportedError: Unrecognized algorithm name`, `InvalidAccessError: Unable to use this key
   to sign`, `OperationError`, `DataError: Invalid keyData`, `SyntaxError: Usages cannot be empty when
@@ -2290,11 +2302,14 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
 ## JSON
 
 `Json` — встроенный тип значения JSON: `null`, `boolean`, число, строка, массив `Json` или объект
-из них ([modules.md](docs/modules.md), раздел 5). Его дают `JSON.parse(text)` и `embedJson(path)`.
+из них ([modules.md](docs/modules.md), раздел 5). Его дают `JSON.parse(text)` (в `Result`) и
+`embedJson(path)`.
 
 ```ts
 const config = embedJson("./config.json")        // файл читается при компиляции
-const user = JSON.parse(text)                     // Json
+const parsed = JSON.parse(text)                   // Result<Json, JsonError>
+if (parsed.isErr()) return parsed
+const user = parsed.value                         // Json
 console.log(user.address.city, user.tags[0])      // Json | undefined, как в JS
 const name = user.name
 if (typeof name == "string") console.log(name.toUpperCase())    // здесь name — string
@@ -2302,7 +2317,7 @@ const tags = user.tags
 if (Array.isArray(tags)) for (const t of tags) console.log(t)    // tags — Json[]
 const patch: Json = { phone: null, tags: ["a", 1] }               // null бывает только в Json
 type User = { name: string; age: int; phone?: string }
-const u = JSON.parse<User>(text)   // TypeError: age: expected int, got 30.5
+const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expected int, got 30.5', path: 'age' }
 ```
 
 - **Чтение** — как в JS: `j.name`, `j["content-type"]`, `j[0]`, `j.length` у массива и строки дают
@@ -2332,9 +2347,13 @@ const u = JSON.parse<User>(text)   // TypeError: age: expected int, got 30.5
   JS: `Object.keys(null)` — `TypeError`, а `for...in` по `null` и `undefined` не делает ни шага.
 - **Печать** — как в node, с тем же порядком ключей: ключи-индексы (`"1"`, `"2"`) первыми по
   возрастанию, остальные в порядке появления; повторный ключ в тексте заменяет значение, но не место.
-- **`JSON.parse(text)`** читает по грамматике V8, и ошибка — `SyntaxError` с тем же текстом, что в
-  node: `Unexpected token 'x', "[1, x]" is not valid JSON`, `Expected ',' or '}' after property value
-  in JSON at position 13 (line 3 column 3)`. Второй аргумент (reviver) — ошибка компиляции.
+- **`JSON.parse(text)`** читает по грамматике V8 и отдаёт `Result<Json, JsonError>`. Ошибка —
+  встроенный тип `JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }`:
+  у неразобранного текста `code` — `"bad_json"`, `message` — текст `SyntaxError` из node
+  (`Unexpected token 'x', "[1, x]" is not valid JSON`, `Expected ',' or '}' after property value
+  in JSON at position 13 (line 3 column 3)`), `path` — пустой. Второй аргумент (reviver) —
+  ошибка компиляции. `Response.json()`, `Request.json()` и `json()` из
+  `node:stream/consumers` отдают `Promise<Result<Json, JsonError>>`.
 - **`JSON.stringify(x, null, space)`** пишет любое значение: `Json`, объекты и экземпляры классов
   (поля в порядке печати, без `#private`, методов и функций), массивы, кортежи (как массивы),
   `decimal` — строкой (`"19.99"`, как BigNumber.js), `Result` — объектом со значением или
@@ -2354,16 +2373,17 @@ const u = JSON.parse<User>(text)   // TypeError: age: expected int, got 30.5
   объектов, словари `Record<string, T>` (ключи — в порядке текста), `Json` — как есть. `Map` и
   `Set` — ошибка с подсказкой прочитать `Record` или массив. Лишние ключи пропускаются; нет ключа или
   `null` у необязательного
-  поля — `undefined` (у `Json | undefined` `null` остаётся `null`). Ошибка — `TypeError` с путём:
-  `items[1].price: expected decimal, got string`, `count: expected int, got 2.5`, `address:
-  expected { city: string }, got undefined`. Класс — через `fromJson(User, j)`, который
+  поля — `undefined` (у `Json | undefined` `null` остаётся `null`). Результат — `Result<T, JsonError>`;
+  неподходящее значение — `code: "bad_field"` с путём в `path` (`items[1].price`, `count`) и
+  текстом в `message` (`expected decimal, got string`, `expected int, got 2.5`, `expected
+  { city: string }, got undefined`). Класс — через `fromJson(User, j)`, который
   вызывает его конструктор (см. «Классы как значения и отражение»); кортежи, функции, `RegExp` и
-  совпадения регулярок — ошибка компиляции: регулярку делает только литерал или `new RegExp`.
+  совпадения регулярок — ошибка компиляции: регулярку делает только литерал или `RegExp.parse`.
 - **Объединения и литеральные типы** в `T`: член выбирается по тому, что лежит в JSON (строка,
   число, `boolean`, массив, объект — как `typeof`), литерал — по значению (`"up" | "down"`,
   `0 | 1 | 2`, `"auto" | int`), объекты — по полю-метке, которое у каждого есть и имеет
-  литеральный тип со своим значением (`kind: "circle"`). Не подошло — `TypeError` с путём:
-  `kind: expected "circle" | "square", got "triangle"`, `[1]: expected 0 | 1 | 2, got 3`. Если
+  литеральный тип со своим значением (`kind: "circle"`). Не подошло — `Err` с путём и текстом:
+  `kind` и `expected "circle" | "square", got "triangle"`, `[1]` и `expected 0 | 1 | 2, got 3`. Если
   члена не выбрать (два числовых типа, объекты без метки, `Record` рядом с объектом), — ошибка
   компиляции у `JSON.parse<T>`. `Record<"w" | "h", int>` — объект с этими полями, `Record<string,
   T>` внутри `T` — словарь.
@@ -2699,8 +2719,9 @@ import { serve } from "tz:http"
 const server = serve({ port: 3000 }, async req => {
   const url = new URL(req.url)
   if (req.method == "POST" && url.pathname == "/users") {
-    const user = await req.json()                          // Json
-    return Response.json({ id: 1, user }, { status: 201 })
+    const user = await req.json()                          // Result<Json, JsonError>
+    if (user.isErr()) return new Response(user.error.message, { status: 400 })
+    return Response.json({ id: 1, user: user.value }, { status: 201 })
   }
   return new Response(`привет, ${url.searchParams.get("name") ?? "мир"}`)
 })
@@ -2742,7 +2763,7 @@ await server.stop()
   (`redirect count exceeded`, `unexpected redirect`, `bad port`); испорченное сжатие —
   `TypeError: terminated`; отмена — причина сигнала (`AbortError`, `TimeoutError`).
 - **`Request` и `Response`** — как в node, включая проверки конструкторов и тексты ошибок: `text()`,
-  `json()` (`Json`), `bytes()`, `arrayBuffer()`, `formData()` — один раз, тело как поток — `body`
+  `json()` (`Result<Json, JsonError>`), `bytes()`, `arrayBuffer()`, `formData()` — один раз, тело как поток — `body`
   (`for await (const chunk of req.body)`), `bodyUsed`, `clone()`, `Response.json`, `redirect`,
   `error`; `status`, `statusText`, `ok`, `headers`, `redirected`, `url`, `type`.
 - **`Headers`** — без учёта регистра, значения без пробелов по краям, `get` склеивает значения
@@ -2755,6 +2776,12 @@ await server.stop()
   кодирование, относительные адреса, `canParse`, `parse`, все сеттеры (`url.pathname = ...`),
   `url.searchParams`, который читает и меняет запрос адреса. Имена хостов не в ASCII — через NFKC,
   нижний регистр и Punycode, без таблиц UTS #46 (несколько символов они отображают иначе).
+- **`new URL` не может не получиться.** Адрес из строки, известной только при выполнении,
+  разбирает `URL.parse(input, base?)` — он отдаёт `Result<URL, UrlError>`, где `UrlError =
+  { code: "bad_url"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
+  компиляции с подсказкой `URL.parse`. В `new URL` можно передать литерал (он проверяется при
+  сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href` и `req.url` запроса;
+  относительный литерал — только с таким же основанием: `new URL("/path", req.url)`.
 - Печать — как в node: `Response { status: 200, ... }`, `Headers { 'content-type': '...' }`,
   `URLSearchParams { 'a' => '1' }`, `URL { href: ..., ... }`. Свойства этих классов — геттеры и
   сеттеры, как в JS: у классов программы их нет, а у встроенных модулей tz, написанных на tz, есть
@@ -3442,9 +3469,9 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   быть, — `string | undefined` (в TS — `string`), а `m.groups` — объект с полем на каждое имя (в
   TS — словарь, который может быть `undefined`). `split` регуляркой с группой, которой может не
   быть, даёт `(string | undefined)[]`, как и есть в JS. `lastIndex` — `int`.
-- Ошибки регулярок при выполнении — исключения с именем ошибки JS и текстом node:
-  `new RegExp("(")` — `SyntaxError: Invalid regular expression: /(/: Unterminated group`,
-  `matchAll` и `replaceAll` с регуляркой без `g`, известной только при выполнении, — `TypeError`.
+- Ошибки регулярок при выполнении: неверный шаблон — `Err` у `RegExp.parse` с текстом node
+  (`Invalid regular expression: /(/: Unterminated group`); `matchAll` и `replaceAll` с
+  регуляркой без `g`, известной только при выполнении, — исключение `TypeError`.
 - Свойства строк из `v` (`\p{RGI_Emoji}` и другие наборы эмодзи из нескольких символов) пока не
   поддерживаются. Где V8 отходит от спецификации, tz следует спецификации: с `/iv` `[\q{δ}]`
   совпадает и с `Δ`, `\p{ASCII}` — и с `ſ` (как `[\x00-\x7f]` в V8); одно имя у двух групп, одна

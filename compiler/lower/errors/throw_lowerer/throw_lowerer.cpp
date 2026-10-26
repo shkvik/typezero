@@ -56,6 +56,20 @@ llvm::Value *ThrowLowerer::thrownSlot(llvm::IRBuilderBase &b) {
                              : static_cast<llvm::Value *>(thrownGlobal());
 }
 
+llvm::Value *ThrowLowerer::failedSlot() {
+  return lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), thrownSlot(),
+                                                       16, "failed.slot");
+}
+
+llvm::Value *ThrowLowerer::anyFailure() {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+  llvm::Value *thrown = lowering_.builder_.CreateLoad(ptr, thrownSlot());
+  llvm::Value *failed = lowering_.builder_.CreateLoad(ptr, failedSlot());
+
+  return lowering_.builder_.CreateOr(lowering_.builder_.CreateIsNotNull(thrown),
+                                     lowering_.builder_.CreateIsNotNull(failed));
+}
+
 void ThrowLowerer::emitThrowCheck() {
   emitThrowCheckWith([] {});
 }

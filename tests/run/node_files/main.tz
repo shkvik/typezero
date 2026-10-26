@@ -6,8 +6,16 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { saveNote, readNote } from "./notes.tz"
 
-const dir = mkdtempSync(join(tmpdir(), "tz-notes-"))
+const dir = must(mkdtempSync(join(tmpdir(), "tz-notes-")))
 const file = saveNote(dir, "today", "купить хлеб")
 console.log(exists(file), readNote(file))
-rmSync(dir, { recursive: true })
+must(rmSync(dir, { recursive: true }))
 console.log(exists(dir))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

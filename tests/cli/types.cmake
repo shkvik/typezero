@@ -40,9 +40,9 @@ console.log(decimal.max(price, total), big)
 // JSON.
 type Config = { port: double; tags: string[] }
 const config = JSON.parse<Config>(embedText("./config.json"))
-const loose = JSON.parse("[1, 2]")
+const loose = JSON.parse("[1, 2]").unwrapOr(null)
 const json: Json = embedJson("./config.json")
-console.log(config.port, config.tags, loose[1], fromJson<Config>(json).port, embedBytes("./note.txt").length)
+if (config.isOk()) console.log(config.value.port, config.value.tags, loose[1], fromJson<Config>(json).map(c => c.port).unwrapOr(0), embedBytes("./note.txt").length)
 
 // Results.
 function half(x: int): Result<int, string> {
