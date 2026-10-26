@@ -44,9 +44,10 @@ const text = parseAge("42").match(
   памяти. Цепочка `.map(...).andThen(...).match(...)` компилируется в обычные `if` / `else`,
   лямбды встраиваются.
 - **`==` на `Result`** — ошибка компиляции. Сравнивают через `match`, `isOk()`, `value`.
-- **Забытый `Result` — ошибка компиляции.** `saveFile("")` без использования результата
-  значит, что ошибку никто не проверит. Если результат правда не нужен — присвоить переменной
-  или обработать `match`.
+- **`Result` нельзя выбросить нигде — ошибка компиляции.** Ни строкой (`saveFile("")` без
+  использования результата), ни через `void`, ни из колбэка, результат которого никто не
+  читает (раздел 4). Если результат правда не нужен — отказ пишут явно, например
+  `.then(() => {})`: его видно при чтении и можно найти поиском.
 - **API:** `ok`, `err`, `Result`, `Ok`, `Err`; `isOk`, `isErr`, `value`, `error`, `map`,
   `mapErr`, `andThen`, `orElse`, `match`, `unwrapOr`, `andTee`, `orTee`, `andThrough`;
   `Result.combine`, `Result.combineWithAllErrors`.
@@ -154,6 +155,27 @@ async function getUser(id: int) {
   `"node:timers/promises"` отдаёт `Result<void, AbortError>`.
 - **`process.on("uncaughtException")` и `process.on("unhandledRejection")`** — ошибка:
   ловить нечего.
+- **Задача, которую не ждут, разбирает ошибки сама.** `void` над `Promise<Result<...>>` —
+  ошибка: `Err` пропал бы молча. То же для колбэка, результат которого никто не читает
+  (слушатель события, таймер, `forEach`): функцию с `Result` нельзя передать туда, где ждут
+  `() => void` или `() => Promise<void>`. В TS `void` принимает что угодно, у нас нет. Поэтому
+  тип `Promise<void>` сам по себе гарантия: внутри все ошибки разобраны.
+  ```ts
+  void track(req.url)                  // ошибка: void выбрасывает Result
+
+  async function trackQuietly(url: string) {
+    const r = await track(url)
+    if (r.isErr()) lostTracks++
+  }
+  void trackQuietly(req.url)           // ок
+
+  setInterval(async () => cleanup(), 60_000)   // ошибка: таймер не читает Result
+  ```
+  Так строже, чем где-либо, кроме Zig: node роняет процесс на забытом отказе, Go в `go f()` и
+  Swift в `Task { }` теряют ошибку молча, Rust только предупреждает.
+- **Обработчик `serve` возвращает только `Response`.** Ошибку он разбирает сам и сам выбирает
+  ответ: плохой JSON — 400, повтор — 409, упавшая база — 500. Особой обработки `Result` у
+  `serve` нет: автоматический 500 на любой `Err` отвечал бы 500 и на ошибки клиента.
 
 ## 5. Событие `'error'` и потоки
 
@@ -367,13 +389,6 @@ average.tz:2:17: error: xs.length may be 0 here
 | `process.on("uncaughtException")` | ловить нечего |
 | `return await x` | `return x` |
 
-## Не решено
-
-- **Обработчик `serve` возвращает `Result`?** Предложение: `Err` → ответ 500 и сообщение в
-  stderr, `Ok` → его `Response`. Иначе обработчик сам строит ответ на ошибку.
-- **Задача через `void`**, которая возвращает `Promise<Result<...>>`: `Err` пропадёт молча.
-  Варианты: ошибка компиляции (разобрать `Result` внутри задачи) или печать `Err` в stderr.
-
 ## План реализации
 
 На каждом шаге: тесты `tests/run` (с `// same-as-node`, где поведение совпадает с JS), ошибки в
@@ -392,7 +407,8 @@ average.tz:2:17: error: xs.length may be 0 here
    объекты с меткой. Переписать `library/*.tz`.
 3. **`Promise` без отказа и события.** Убрать `reject`, `.catch`, `.finally`, `Promise.reject`,
    `allSettled`, `any`. Правило подписки на `'error'`; `for await`, `pipeline`, `finished`,
-   `once`, `end` — `Result`; `pipe()` и `uncaughtException` — ошибки.
+   `once`, `end` — `Result`; `pipe()` и `uncaughtException` — ошибки. `Result` не приводится
+   к `void`: `void` над `Promise<Result>` и колбэк с `Result` там, где ждут `void`, — ошибки.
 4. **Доказательства вместо падений** (раздел 7, кроме чисел): `x!`, `reduce`, `new Array(n)`,
    `repeat`, `fromCodePoint`, `toFixed`, чтение `Buffer`.
 5. **Без исключений.** Убрать `throw`, `try`, `catch`, `finally`, `Error` и наследников,
