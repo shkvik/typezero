@@ -1,7 +1,3 @@
-// The full layer (docs/crypto.md, section 3): asymmetric keys. KeyObjects from PEM, DER and JWK
-// and back, sign and verify (RSA, RSA-PSS, ECDSA, Ed25519, Ed448), createSign and createVerify,
-// generateKeyPairSync, ECDH and diffieHellman, as node does them over OpenSSL.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/closure/closure.h"
@@ -35,13 +31,8 @@ extern const TzLayout tz_crypto_sign_layout, tz_crypto_verify_layout;
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
-//===----------------------------------------------------------------------===//
-// KeyObjects of EVP_PKEYs
-//===----------------------------------------------------------------------===//
-
 static void key_release(void *pkey) { EVP_PKEY_free((EVP_PKEY *)pkey); }
 
-// The name node gives the type of a key: 'rsa', 'ec', 'ed25519'...
 static const char *key_type_name(const EVP_PKEY *pkey) {
   switch (EVP_PKEY_get_base_id(pkey)) {
   case EVP_PKEY_RSA:
@@ -80,7 +71,6 @@ static void key_asymmetric_type(TzStr *out, const TzKey *key) {
 
 static int32_t key_equals(const TzKey *a, const TzKey *b) {
   int equal = EVP_PKEY_eq((const EVP_PKEY *)a->pkey, (const EVP_PKEY *)b->pkey);
-  // Keys of two types are not equal; OpenSSL notes an error, which is no error here.
   ERR_clear_error();
 
   return equal == 1;
@@ -95,7 +85,6 @@ static TzJson *export_jwk(const TzKey *key);
 static const TzKeyOps key_ops = {key_release, key_equals, key_asymmetric_type,
                                  export_pem,  export_der, export_jwk};
 
-// A KeyObject that takes over `pkey`.
 TzKey *tz_openssl_key_of(void *pkey, int private_key) {
   TzKey *key = (TzKey *)tz_obj_alloc(sizeof(TzKey));
   memset(key, 0, sizeof *key);
@@ -108,7 +97,6 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key) {
   return key;
 }
 
-// The public half of a key, as a key of its own.
 static EVP_PKEY *public_half(const EVP_PKEY *pkey) {
   unsigned char *der = NULL;
   int n = i2d_PUBKEY(pkey, &der);
@@ -122,7 +110,6 @@ static EVP_PKEY *public_half(const EVP_PKEY *pkey) {
   return pub;
 }
 
-// A KeyObject given where a key goes, or NULL.
 static const TzKey *key_object(const TzType *type, const void *value) {
   if (!type) {
     return NULL;
@@ -139,10 +126,6 @@ static const TzKey *key_object(const TzType *type, const void *value) {
 
   return NULL;
 }
-
-//===----------------------------------------------------------------------===//
-// Reading keys: PEM, DER, JWK
-//===----------------------------------------------------------------------===//
 
 static EVP_PKEY *decode(const TzCryptoData *d, const char *input, const char *structure,
                         int selection, const TzCryptoData *passphrase) {
@@ -163,7 +146,6 @@ static EVP_PKEY *decode(const TzCryptoData *d, const char *input, const char *st
   return pkey;
 }
 
-// The structure of a DER key by node's name of its type.
 static const char *der_structure(const char *type) {
   if (strcmp(type, "spki") == 0) {
     return "SubjectPublicKeyInfo";
@@ -186,7 +168,6 @@ static TzJson *json_get(const TzJson *j, const char *key) {
   return value;
 }
 
-// A string member of a JWK into `out`, or 0.
 static int jwk_string(const TzJson *jwk, const char *key, char *out, size_t size) {
   TzJson *value = json_get(jwk, key);
   int ok = value && value->kind == TZ_JSON_STRING;
@@ -198,7 +179,6 @@ static int jwk_string(const TzJson *jwk, const char *key, char *out, size_t size
   return ok;
 }
 
-// A base64url member of a JWK as bytes, or NULL.
 static TzBytes *jwk_bytes(const TzJson *jwk, const char *key) {
   TzJson *value = json_get(jwk, key);
   TzBytes *b = NULL;
@@ -238,7 +218,6 @@ static EVP_PKEY *from_params(const char *type, OSSL_PARAM_BLD *bld, int private_
   return pkey;
 }
 
-// The name OpenSSL gives the curve of a JWK.
 static const char *jwk_curve(const char *crv) {
   if (strcmp(crv, "P-256") == 0) {
     return "prime256v1";
@@ -362,9 +341,6 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
   return pkey;
 }
 
-// createPublicKey(key) and createPrivateKey(key): the key as a string or bytes (PEM, or DER with
-// `format` 1), a JWK (`format` 2, a Json), or a KeyObject; `type` its DER type ('spki'...); a
-// passphrase for an encrypted private key (`has`: 1 type, 2 passphrase).
 TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *kv,
                              int32_t encoding, int32_t format, int32_t has, void *type_obj,
                              uint64_t type_meta, const TzType *pt, const void *pv) {
@@ -412,7 +388,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
     pkey = decode(&d, input, structure, EVP_PKEY_KEYPAIR, &passphrase);
   } else {
     pkey = decode(&d, input, structure, EVP_PKEY_PUBLIC_KEY, NULL);
-    if (!pkey && format != 1) { // a certificate: its key
+    if (!pkey && format != 1) {
       BIO *bio = BIO_new_mem_buf(d.data, (int)d.length);
       X509 *cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
       BIO_free(bio);
@@ -422,7 +398,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
         X509_free(cert);
       }
     }
-    if (!pkey) { // a private key: its public half
+    if (!pkey) {
       EVP_PKEY *both = decode(&d, input, structure, EVP_PKEY_KEYPAIR, &passphrase);
       if (both) {
         ERR_clear_error();
@@ -442,7 +418,6 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
   return tz_openssl_key_of(pkey, is_private);
 }
 
-// The public key of a private one, of generateKeyPairSync.
 TzKey *tz_openssl_public_of(const TzKey *key) {
   EVP_PKEY *pub = public_half((const EVP_PKEY *)key->pkey);
   if (!pub) {
@@ -453,11 +428,6 @@ TzKey *tz_openssl_public_of(const TzKey *key) {
   return tz_openssl_key_of(pub, 0);
 }
 
-//===----------------------------------------------------------------------===//
-// Writing keys
-//===----------------------------------------------------------------------===//
-
-// The data of a key in PEM or DER: NULL after throwing node's error.
 static unsigned char *encode(const TzKey *key, const char *output, const char *type,
                              const char *cipher, const uint8_t *passphrase,
                              size_t passphrase_length, size_t *length) {
@@ -554,7 +524,6 @@ static void put_base64url(TzJson *jwk, const char *key, const uint8_t *data, siz
   tz_str_release_value(k);
 }
 
-// A number of the key as base64url, in `size` bytes (0: as few as it takes).
 static int put_bn(TzJson *jwk, const char *key, const EVP_PKEY *pkey, const char *param, int size) {
   BIGNUM *bn = NULL;
   if (!EVP_PKEY_get_bn_param(pkey, param, &bn)) {
@@ -571,7 +540,6 @@ static int put_bn(TzJson *jwk, const char *key, const EVP_PKEY *pkey, const char
   return 1;
 }
 
-// export({ format: 'jwk' }), with the members in node's order.
 static TzJson *export_jwk(const TzKey *key) {
   const EVP_PKEY *pkey = (const EVP_PKEY *)key->pkey;
   int private_key = key->type == TZ_KEY_PRIVATE;
@@ -613,7 +581,7 @@ static TzJson *export_jwk(const TzKey *key) {
       put_text(jwk, "kty", "EC");
       put_base64url(jwk, "x", point + 1, (size_t)size);
       put_base64url(jwk, "y", point + 1 + size, (size_t)size);
-    } else { // compressed: the point in full
+    } else {
       EC_GROUP *g = EC_GROUP_new_by_curve_name(OBJ_sn2nid(group));
       EC_POINT *p = EC_POINT_new(g);
       uint8_t full[256];
@@ -657,11 +625,6 @@ static TzJson *export_jwk(const TzKey *key) {
   return jwk;
 }
 
-//===----------------------------------------------------------------------===//
-// Signatures
-//===----------------------------------------------------------------------===//
-
-// The key a signature takes: a KeyObject of the right type, or PEM or DER data of one.
 static EVP_PKEY *signing_key(const TzType *kt, const void *kv, int private_key, int *owned) {
   *owned = 0;
   const TzKey *key = key_object(kt, kv);
@@ -686,8 +649,6 @@ static EVP_PKEY *signing_key(const TzType *kt, const void *kv, int private_key, 
   return pkey;
 }
 
-// The options of a signature: RSA padding and salt length, and the encoding of DSA and ECDSA
-// signatures (0 'der', 1 'ieee-p1363'); `has` says which were given (1 padding, 2 saltLength).
 typedef struct {
   int32_t padding, salt_length, p1363, has;
 } SignOptions;
@@ -707,7 +668,6 @@ static int apply_options(EVP_PKEY_CTX *pctx, const EVP_PKEY *pkey, const SignOpt
   return 1;
 }
 
-// The size of each half of a P1363 signature of an ECDSA or DSA key.
 static int p1363_half(const EVP_PKEY *pkey) {
   int id = EVP_PKEY_get_base_id(pkey);
   if (id == EVP_PKEY_EC) {
@@ -724,7 +684,6 @@ static int p1363_half(const EVP_PKEY *pkey) {
   return 0;
 }
 
-// A DER signature (`sig`, freed) as r and s of `half` bytes each.
 static TzBytes *der_to_p1363(unsigned char *sig, size_t length, int half) {
   const unsigned char *p = sig;
   ECDSA_SIG *s = d2i_ECDSA_SIG(NULL, &p, (long)length);
@@ -741,7 +700,6 @@ static TzBytes *der_to_p1363(unsigned char *sig, size_t length, int half) {
   return b;
 }
 
-// r and s of `half` bytes each as a DER signature (OPENSSL_free), or NULL.
 static unsigned char *p1363_to_der(const uint8_t *sig, size_t length, int half, size_t *out) {
   if (length != (size_t)(2 * half)) {
     return NULL;
@@ -756,7 +714,6 @@ static unsigned char *p1363_to_der(const uint8_t *sig, size_t length, int half, 
   return n > 0 ? der : NULL;
 }
 
-// The signature of data, or of a digest already made (`digest`, of `md`).
 static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
                           const uint8_t *data, size_t length, const SignOptions *o, int digested) {
   unsigned char *sig = NULL;
@@ -829,8 +786,6 @@ static int32_t verify_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md
   return ok;
 }
 
-// The name of the hash of crypto.sign and verify: NULL for undefined (Ed25519, or the default of
-// the key); `name` holds it.
 static const char *algorithm(const TzType *at, const void *av, char *name, size_t size) {
   if (!at) {
     return NULL;
@@ -846,7 +801,6 @@ static const char *algorithm(const TzType *at, const void *av, char *name, size_
   return name;
 }
 
-// crypto.sign(algorithm, data, key) and crypto.verify(algorithm, data, key, signature).
 TzBytes *tz_openssl_sign(const TzType *at, const void *av, const TzType *dt, const void *dv,
                          const TzType *kt, const void *kv, int32_t padding, int32_t salt_length,
                          int32_t p1363, int32_t has) {
@@ -898,8 +852,6 @@ int32_t tz_openssl_verify(const TzType *at, const void *av, const TzType *dt, co
   return ok;
 }
 
-// createSign(algorithm) and createVerify(algorithm): a hash of the data, which sign() and
-// verify() sign.
 TzHash *tz_openssl_sign_new(void *obj, uint64_t meta, int32_t verify) {
   const TzMd *md = tz_openssl_md(obj, meta, 0);
   if (!md) {
@@ -912,7 +864,6 @@ TzHash *tz_openssl_sign_new(void *obj, uint64_t meta, int32_t verify) {
   return h;
 }
 
-// The digest of a Sign or a Verify, once: 0 after throwing.
 static int sign_digest(TzHash *h, uint8_t *out) {
   if (h->done) {
     tz_throw(TZ_ERROR, "Not initialised");
@@ -974,11 +925,6 @@ int32_t tz_openssl_verify_final(TzHash *h, const TzType *kt, const void *kv, con
   return ok;
 }
 
-//===----------------------------------------------------------------------===//
-// generateKeyPairSync
-//===----------------------------------------------------------------------===//
-
-// The NID of a curve as node takes its name: a NIST name ("P-256") or OpenSSL's.
 static int curve_nid(const char *name) {
   int nid = EC_curve_nist2nid(name);
   if (nid == NID_undef) {
@@ -999,9 +945,6 @@ enum {
   PAIR_X448
 };
 
-// generateKeyPairSync(type, options): the private key; the type as a PAIR_*, or -1 for a name
-// known only now; the curve of 'ec' (`has` 1); the modulus of 'rsa', 'rsa-pss' and 'dsa', with
-// the public exponent (`has` 2) or the divisor of 'dsa'.
 TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_meta,
                                     double modulus_length, double exponent, int32_t has,
                                     void *curve_obj, uint64_t curve_meta) {
@@ -1065,16 +1008,12 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
   return tz_openssl_key_of(pkey, 1);
 }
 
-//===----------------------------------------------------------------------===//
-// ECDH and diffieHellman
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   int64_t rc;
   const TzLayout *layout;
   int nid;
   EC_GROUP *group;
-  EVP_PKEY *key; // NULL before generateKeys or setPrivateKey
+  EVP_PKEY *key;
 } Ecdh;
 
 static void ecdh_drop(void *object) {
@@ -1086,7 +1025,6 @@ static void ecdh_drop(void *object) {
 
 static const TzLayout ecdh_layout = TZ_CRYPTO_LAYOUT(ecdh_drop, "ECDH");
 
-// createECDH(curveName).
 Ecdh *tz_openssl_ecdh_new(void *obj, uint64_t meta) {
   char name[64];
   tz_crypto_cstr(obj, meta, name, sizeof name);
@@ -1113,7 +1051,6 @@ static point_conversion_form_t form_of(int32_t format) {
                        : POINT_CONVERSION_UNCOMPRESSED;
 }
 
-// An EC key of the curve from its private number, with the public point computed.
 static EVP_PKEY *ec_key(const Ecdh *e, const BIGNUM *priv, const EC_POINT *pub) {
   uint8_t point[256];
   size_t n =
@@ -1130,7 +1067,6 @@ static EVP_PKEY *ec_key(const Ecdh *e, const BIGNUM *priv, const EC_POINT *pub) 
   return pkey;
 }
 
-// The public point of the key in `format`, into out (at least 256 bytes): its length, or 0.
 static size_t public_point(const Ecdh *e, int32_t format, uint8_t *out) {
   uint8_t raw[256];
   size_t n = 0;
@@ -1171,7 +1107,6 @@ TzBytes *tz_openssl_ecdh_generate_keys(Ecdh *e, int32_t format) {
   return tz_openssl_ecdh_get_public_key(e, format);
 }
 
-// getPrivateKey(): the private number, in as few bytes as it takes, as node gives it.
 TzBytes *tz_openssl_ecdh_get_private_key(Ecdh *e) {
   BIGNUM *priv = NULL;
   if (!e->key || !EVP_PKEY_get_bn_param(e->key, OSSL_PKEY_PARAM_PRIV_KEY, &priv)) {
@@ -1186,7 +1121,6 @@ TzBytes *tz_openssl_ecdh_get_private_key(Ecdh *e) {
   return b;
 }
 
-// setPrivateKey(privateKey, encoding): the receiver is handed back.
 void tz_openssl_ecdh_set_private_key(Ecdh *e, const TzType *kt, const void *kv, int32_t encoding) {
   TzCryptoData d;
   if (!tz_crypto_data(&d, kt, kv, encoding, "key")) {
@@ -1235,7 +1169,6 @@ static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
   return b;
 }
 
-// computeSecret(otherPublicKey, inputEncoding).
 TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *kv,
                                         int32_t encoding) {
   TzCryptoData d;
@@ -1263,7 +1196,6 @@ TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *k
   return secret;
 }
 
-// diffieHellman({ privateKey, publicKey }).
 TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
   if (priv->type != TZ_KEY_PRIVATE) {
     tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected private.",

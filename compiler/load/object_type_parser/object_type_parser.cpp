@@ -31,28 +31,24 @@ bool ObjectTypeParser::mappedTypeAhead() {
     return false;
   }
   Parser::Snapshot start = parser_.cursor().snapshot();
-  parser_.cursor().advance(); // '['
-  parser_.cursor().advance(); // the name
+  parser_.cursor().advance();
+  parser_.cursor().advance();
   bool in = parser_.tok_.is(Tok::KwIn);
   parser_.cursor().rewind(start);
 
   return in;
 }
 
-// `{ [K in Keys]: T }`, with `readonly`, `-readonly`, `?` and `-?`; the only
-// member of its object type.
 TypeRef ObjectTypeParser::parseMappedType(TypeRef &object, int readonlyChange) {
   TypeRef ref;
   ref.kind = TypeRef::Kind::Mapped;
   ref.loc = object.loc;
   ref.mappedReadonly = readonlyChange;
-  parser_.cursor().advance(); // '['
+  parser_.cursor().advance();
   ref.name = parser_.tok_.text;
-  parser_.cursor().advance(); // the name of the key
-  parser_.cursor().advance(); // 'in'
+  parser_.cursor().advance();
+  parser_.cursor().advance();
   ref.args.push_back(parser_.types().parseType());
-  // `[K in keyof T as `get${Capitalize<K>}`]`: the name each key gives. The
-  // `as` here is a part of the type, not the operator, which tz has not.
   std::optional<TypeRef> rename;
   if (parser_.cursor().accept(Tok::KwAs)) {
     rename = parser_.types().parseType();
@@ -88,18 +84,16 @@ TypeRef ObjectTypeParser::parseMappedType(TypeRef &object, int readonlyChange) {
     parser_.cursor().skipToClosingBrace();
     return ref;
   }
-  parser_.cursor().advance(); // '}'
+  parser_.cursor().advance();
 
   return ref;
 }
 
 bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
-  // `[Symbol.iterator]`, the one name of a member in brackets
-  // (docs/iterators.md, section 5).
   if (parser_.classes().symbolKeyAhead()) {
     llvm::SMLoc loc = parser_.tok_.loc();
-    parser_.cursor().advance(); // '['
-    parser_.cursor().advance(); // 'Symbol'
+    parser_.cursor().advance();
+    parser_.cursor().advance();
     if (!parser_.cursor().expect(Tok::Dot, "after 'Symbol'")) {
       return false;
     }
@@ -109,7 +103,6 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
       return false;
     }
     if (which == "asyncIterator") {
-      // What `for await` iterates (docs/iterators.md, step 4).
       name = "[Symbol.asyncIterator]";
       return true;
     }
@@ -130,7 +123,6 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
     return true;
   }
   if (parser_.tok_.is(Tok::StringLiteral)) {
-    // `"content-type": ...` names the field by the text of the string.
     std::u16string text;
     decodeStringLiteral(parser_.tok_, text, parser_.diags_);
     name = parser_.ctx_.keepName(toUtf8(text));
@@ -153,17 +145,14 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
   return false;
 }
 
-// `{ x: int; readonly y?: string }`. Fields are separated by `;`, `,` or line
-// breaks.
 TypeRef ObjectTypeParser::parseObjectType() {
   TypeRef ref;
   ref.kind = TypeRef::Kind::Object;
   ref.loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // '{'
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
     llvm::SMLoc loc = parser_.tok_.loc();
     bool readonly = false;
-    // `-readonly` and `+readonly` before a mapped type.
     int readonlyChange = 0;
     if ((parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Plus)) &&
         parser_.cursor().peek().is(Tok::Identifier) && parser_.cursor().peek().text == "readonly") {
@@ -182,9 +171,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
       return parseMappedType(ref, readonlyChange);
     }
     if (parser_.tok_.is(Tok::LBracket) && !parser_.classes().symbolKeyAhead()) {
-      // `{ [key: string]: T }` is a dictionary, `Record<string, T>`
-      // (docs/objects.md, section 9): an object has a fixed set of fields.
-      parser_.cursor().advance(); // '['
+      parser_.cursor().advance();
       if (!parser_.tok_.is(Tok::Identifier) || !parser_.cursor().peek().is(Tok::Colon)) {
         parser_.cursor().error(
             loc, "expected an index signature, '{ [key: string]: T }', or a mapped type, "
@@ -192,8 +179,8 @@ TypeRef ObjectTypeParser::parseObjectType() {
         parser_.cursor().skipToClosingBrace();
         return ref;
       }
-      parser_.cursor().advance(); // the name of the key
-      parser_.cursor().advance(); // ':'
+      parser_.cursor().advance();
+      parser_.cursor().advance();
       TypeRef key = parser_.types().parseType();
       if (!parser_.cursor().expect(Tok::RBracket, "after the type of the keys") ||
           !parser_.cursor().expect(Tok::Colon, "before the type of the values")) {
@@ -212,7 +199,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
         parser_.cursor().skipToClosingBrace();
         return ref;
       }
-      parser_.cursor().advance(); // '}'
+      parser_.cursor().advance();
       TypeRef record;
       record.kind = TypeRef::Kind::Generic;
       record.name = "Record";
@@ -240,7 +227,6 @@ TypeRef ObjectTypeParser::parseObjectType() {
       return ref;
     }
     if (parser_.tok_.is(Tok::LParen)) {
-      // `area(): double`: a read-only field that holds a function.
       TypeRef fn;
       if (!parser_.functionTypes().parseSignatureParams(fn) || parser_.recovering_) {
         parser_.cursor().skipToClosingBrace();
@@ -301,20 +287,16 @@ TypeRef ObjectTypeParser::parseObjectType() {
   return ref;
 }
 
-// `[string, int]`, and `[]`, the arguments of an event without any
-// (docs/events.md). Labels, as in `[name: string, age: int]`, are allowed
-// and change nothing.
 TypeRef ObjectTypeParser::parseTupleType() {
   TypeRef ref;
   ref.kind = TypeRef::Kind::Tuple;
   ref.loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // '['
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
-    // `...A`: the types a list of them stands for, which Checker checks.
     bool spread = parser_.cursor().accept(Tok::Ellipsis);
     if (parser_.tok_.is(Tok::Identifier) && parser_.cursor().peek().is(Tok::Colon)) {
-      parser_.cursor().advance(); // the label
-      parser_.cursor().advance(); // ':'
+      parser_.cursor().advance();
+      parser_.cursor().advance();
     }
     ref.args.push_back(parser_.types().parseType());
     ref.readonly.push_back(false);
@@ -335,4 +317,4 @@ TypeRef ObjectTypeParser::parseTupleType() {
   return ref;
 }
 
-} // namespace tz
+}

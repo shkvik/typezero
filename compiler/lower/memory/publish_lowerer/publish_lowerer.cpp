@@ -33,18 +33,12 @@ llvm::Value *spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *nam
   return slot;
 }
 
-// How Lowering walks the references in a value for the group functions: the
-// reference itself, or the environment of a function; anything else goes to
-// the runtime by its descriptor.
 enum class RefShape { None, Pointer, Function, Optional, Other };
 
-} // namespace
+}
 
 PublishLowerer::PublishLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// void publish(ptr object): every value the object holds, to the runtime,
-// which makes it shared (runtime/core/publish/publish.c); the boxes of the
-// variables it captures as objects.
 llvm::Function *
 PublishLowerer::publishFunction(const Type *type, llvm::StructType *layout,
                                 llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
@@ -118,7 +112,6 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
 
     return publish;
   };
-  // Making a layout may make more: by index, as the map grows.
   std::vector<std::pair<const Type *, llvm::Constant *>> layouts;
   for (const auto &[key, descriptor] : lowering_.layoutDescriptors_) {
     layouts.push_back({key.first, descriptor});
@@ -158,7 +151,7 @@ void PublishLowerer::finishPublishTable(llvm::Instruction *init) {
   }
   auto *arrayType = llvm::ArrayType::get(entryType, entries.size());
   auto *table = new llvm::GlobalVariable(
-      *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, entries), "tz.publish.table");
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(lowering_.processLowerer().processFunction("tz_publish_init",
@@ -192,4 +185,4 @@ void PublishLowerer::endValue(llvm::Value *value, const Type *type) {
        spillHere(lowering_.builder_, value, "ended")});
 }
 
-} // namespace tz
+}

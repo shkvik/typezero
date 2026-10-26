@@ -6,16 +6,13 @@ namespace tz {
 
 namespace {
 
-// Offsets stay far from the int64 limits so that sums along a chain of facts
-// cannot overflow.
 constexpr int64_t kMaxOffset = int64_t(1) << 40;
-// Enough for any realistic function; beyond it the oldest facts are dropped.
 constexpr size_t kMaxFacts = 64;
 
 constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
 constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 
-} // namespace
+}
 
 void Facts::add(Term lhs, Term rhs, int64_t offset) {
   if (lhs == rhs || offset > kMaxOffset || offset < -kMaxOffset) {
@@ -34,7 +31,6 @@ void Facts::add(Term lhs, Term rhs, int64_t offset) {
 }
 
 void Facts::addEqual(Term a, Term b, int64_t offset) {
-  // a == b + k  <=>  a < b + k + 1  and  b < a - k + 1
   add(a, b, offset + 1);
   add(b, a, 1 - offset);
 }
@@ -48,9 +44,6 @@ bool Facts::proves(Term lhs, Term rhs, int64_t offset) const {
   return least && *least <= offset;
 }
 
-// Shortest paths in the graph whose edge a -> b with weight w stands for
-// `a <= b + w`: a path from lhs to rhs of total weight w proves lhs <= rhs + w,
-// that is lhs < rhs + w + 1.
 std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
   if (lhs == rhs) {
     return 1;
@@ -76,23 +69,19 @@ std::optional<int64_t> Facts::bound(Term lhs, Term rhs) const {
     edges.push_back({node(fact.lhs), node(fact.rhs), fact.offset - 1});
   }
   size_t source = node(lhs), target = node(rhs);
-  // The range of every term.
   for (size_t i = 1; i < nodes.size(); ++i) {
     if (nodes[i].length) {
-      edges.push_back({i, 0, kMaxLength}); // length <= kMaxLength
-      edges.push_back({0, i, 0});          // 0 <= length
+      edges.push_back({i, 0, kMaxLength});
+      edges.push_back({0, i, 0});
     } else {
-      edges.push_back({i, 0, kIntMax});  // v <= INT_MAX
-      edges.push_back({0, i, -kIntMin}); // 0 <= v - INT_MIN
+      edges.push_back({i, 0, kIntMax});
+      edges.push_back({0, i, -kIntMin});
     }
   }
 
   constexpr int64_t kInf = std::numeric_limits<int64_t>::max();
   std::vector<int64_t> dist(nodes.size(), kInf);
   dist[source] = 0;
-  // Bellman-Ford. Contradictory facts (in unreachable code) form negative
-  // cycles; every distance found is still the weight of a real path, so any
-  // conclusion stays sound.
   for (size_t round = 0; round + 1 < nodes.size(); ++round) {
     bool changed = false;
     for (const Edge &e : edges) {
@@ -127,9 +116,9 @@ void Facts::forget(const VarSymbol *var) {
 void Facts::shift(Term term, int64_t delta) {
   for (Fact &fact : facts_) {
     if (fact.lhs == term && fact.rhs != term) {
-      fact.offset += delta; // old < r + c  =>  new = old + delta < r + c + delta
+      fact.offset += delta;
     } else if (fact.rhs == term && fact.lhs != term) {
-      fact.offset -= delta; // l < old + c  =>  l < new + c - delta
+      fact.offset -= delta;
     }
   }
   forgetIf([](const Fact &f) { return f.offset > kMaxOffset || f.offset < -kMaxOffset; });
@@ -151,4 +140,4 @@ Facts Facts::meet(const Facts &a, const Facts &b) {
   return result;
 }
 
-} // namespace tz
+}

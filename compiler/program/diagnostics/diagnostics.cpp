@@ -47,4 +47,4 @@ Errors Diagnostics::take() {
   return taken;
 }
 
-} // namespace tz
+}

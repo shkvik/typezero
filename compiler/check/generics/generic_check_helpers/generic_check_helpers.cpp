@@ -16,7 +16,6 @@ bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params,
                    llvm::SmallPtrSetImpl<const Type *> &seen) {
   switch (type->kind()) {
   case Type::Kind::Param:
-    // `T[K]` and the other computations, by what they are made of.
     if (type->typeOp() != TypeOp::None) {
       return llvm::any_of(type->operands(),
                           [&](const Type *t) { return t && mentionsAnyOf(t, params, seen); });
@@ -40,16 +39,14 @@ bool mentionsAnyOf(const Type *type, llvm::ArrayRef<const Type *> params,
   case Type::Kind::Dict:
     return mentionsAnyOf(type->keyType(), params, seen) ||
            mentionsAnyOf(type->valueType(), params, seen);
-  case Type::Kind::ClassRef: // `Constructor<T>`
+  case Type::Kind::ClassRef:
     return type->isConstructor() && mentionsAnyOf(type->constructed(), params, seen);
   case Type::Kind::Object:
-    // An async iterator, as an iterator.
     if (type->isAsyncIterator()) {
       return mentionsAnyOf(type->yielded(), params, seen) ||
              mentionsAnyOf(type->returned(), params, seen) ||
              mentionsAnyOf(type->sent(), params, seen);
     }
-    // A class made from a generic one: by its type arguments.
     if (!type->typeArgs().empty()) {
       return llvm::any_of(type->typeArgs(),
                           [&](const Type *t) { return mentionsAnyOf(t, params, seen); });
@@ -94,4 +91,4 @@ std::string constraintSpelling(const Type *param, const TypeParamDecl *decl) {
   return text;
 }
 
-} // namespace tz
+}

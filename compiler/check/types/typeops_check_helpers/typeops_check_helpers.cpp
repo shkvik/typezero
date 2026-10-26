@@ -32,4 +32,4 @@ std::vector<const Type *> distributedMembers(const Type *type) {
   return out;
 }
 
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// generateKeyPair and generateKeyPairSync.
 class KeyPairChecker {
 public:
   explicit KeyPairChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

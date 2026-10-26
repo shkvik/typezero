@@ -18,9 +18,6 @@
 
 namespace tz {
 
-// The modules built into tz that a program imports names from
-// (sema_node.cpp): node:fs, node:path (and its posix and win32 styles),
-// node:os, node:process, node:buffer, node:child_process, node:crypto and tz:io.
 enum class NodeModule {
   Fs,
   FsPromises,
@@ -38,53 +35,33 @@ enum class NodeModule {
   Crypto,
 };
 
-// What is wrong with importing `name` from node:crypto, written `path`, or nothing
-// (sema_crypto.cpp).
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
-// The name a file that says `crypto.subtle` imports the SubtleCrypto of tz:webcrypto under
-// (compiler/load/loader/loader.cpp), which Checker reads it by (sema_webcrypto.cpp).
 inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
 
-// Why the built-in module `path` (see isBuiltinModule) cannot be imported:
-// it is not there yet, or there is none; empty for the modules tz has. The
-// loader reports it.
 std::string builtinModuleProblem(llvm::StringRef path);
 
-// The values an integer expression may have, as far as Checker knows: the
-// bounds it found (see Checker::valueRange).
 struct ValueRange {
   std::optional<int64_t> lo, hi;
 };
 
-// The event maps of the emitters whose types do not give them, `new
-// EventEmitter()` and `class Server extends EventEmitter`, found from the
-// emit() calls of the whole program (docs/events.md, section 2). EventRounds
-// checks such a program in rounds, each with a syntax tree of its own: a
-// round records what the emits it checks pass, and gives the listeners of
-// the events known from the rounds before their types; once a round finds
-// nothing new, a last one checks the program with the maps as they are,
-// for real (see Checker::inferredEventMap).
 struct EventInference {
-  // A type as the next round makes it again: a class (and so a type that
-  // has one in it) by its file and name, as each round has declarations
-  // of its own; any other type as it is, the same in every round.
   struct Portable {
     enum class Kind {
       Same,
-      Class,    // name in file, of the type arguments `parts`
-      ClassRef, // the class itself as a value
-      Optional, // parts[0] | undefined
-      Array,    // parts[0][]
-      Tuple,    // the elements, `min` of them needed, a rest last if `rest`
-      Function, // the parameters then the result
+      Class,
+      ClassRef,
+      Optional,
+      Array,
+      Tuple,
+      Function,
       Union,
-      Object, // the fields, named by `names`
+      Object,
       Promise,
-      Dict,     // `dict` (Type::DictKind), the key and the value
-      Iterator, // yielded, returned, sent
-      Result,   // ok, err
-      Bad,      // what the next round cannot make: a literal with methods
+      Dict,
+      Iterator,
+      Result,
+      Bad,
     };
     Kind kind = Kind::Same;
     const Type *same = nullptr;
@@ -98,31 +75,15 @@ struct EventInference {
   };
   struct Event {
     std::string name;
-    Portable args;     // a tuple
-    std::string where; // of the first emit: "main.tz:12:5"
+    Portable args;
+    std::string where;
   };
-  // The events found so far, in the order found, by the place of the
-  // emitter: `new EventEmitter()`, or the class that extends EventEmitter.
   std::map<std::string, std::vector<Event>> maps;
-  bool open = false;    // set by Checker: some emitter's map comes from here
-  bool changed = false; // set by Checker: the round found more
-  bool final = false;   // set by EventRounds: the maps are complete
+  bool open = false;
+  bool changed = false;
+  bool final = false;
 };
 
-// Resolves names and checks types. Annotates the AST in place: every
-// expression gets a type, names get their symbols, and implicit conversions
-// become explicit CastExpr nodes, so code generation needs no type rules.
-//
-// Numeric rules: no implicit conversion loses information. int widens to long
-// and double on its own, long to double. A double becomes an int through a
-// bitwise operator (`x | 0`, JavaScript's ToInt32) or through Math.round and
-// the like where an integer is expected. There is no `as`. Integer literals
-// take the type the context expects (`let x: double = 1 / 2` divides floats).
-//
-// Checker also follows the flow of the program (see Flow): it narrows
-// `T | undefined` after checks such as `x !== undefined`, and it proves
-// indices in range. A read `a[i]` it can prove has type `T` and needs no check
-// at run time; any other read has type `T | undefined`, as in JavaScript.
 class DeclarePass;
 class FeatureRegistry;
 class InferPass;
@@ -292,10 +253,7 @@ class WeakRefChecker;
 class Checker {
 public:
   Checker(AstContext &ctx, Diagnostics &diags);
-  // What `await` of a value of `type` gives (see awaitedType), for Lowering.
   static const Type *awaitedTypeOf(const Type *type);
-  // Where the event maps found from emit() calls are kept between rounds
-  // (see EventInference); without it they are errors.
   void setEventInference(EventInference *inference) { inference_ = inference; }
 
 private:
@@ -305,7 +263,6 @@ private:
     EnumDecl *enumDecl = nullptr;
     ClassDecl *cls = nullptr;
   };
-  // A field reached from a variable through fields: `q.limit`, `a.b.c`.
   struct FieldPath {
     const VarSymbol *var = nullptr;
     llvm::SmallVector<llvm::StringRef, 2> names;
@@ -313,118 +270,73 @@ private:
       return var == other.var && names == other.names;
     }
   };
-  // What is known at the current point of the program: facts about ints and
-  // lengths, and the `T | undefined` variables and fields that hold a value.
   struct Flow {
     Facts facts;
     llvm::SmallPtrSet<const VarSymbol *, 4> defined;
     std::vector<FieldPath> definedFields;
-    // Fields of a union narrowed by checks: `o.shape` is a Circle inside
-    // `if (o.shape.kind == "circle")`. Forgotten as definedFields are.
     std::vector<std::pair<FieldPath, const Type *>> narrowedFields;
-    // Variables of a type parameter whose type a check showed: `x` of type
-    // T is a string inside `if (typeof x == "string")`.
     std::vector<std::pair<const VarSymbol *, const Type *>> narrowed;
-    // Result variables known to hold an Ok, or an Err (after `r.isOk()`).
     llvm::SmallPtrSet<const VarSymbol *, 2> okResults, errResults;
-    // In a constructor, or the initializers of the fields: the fields of
-    // `this` set so far (see sema_class.cpp). In the constructor of a class
-    // that extends another, `this` does not exist before `super(...)`.
     std::vector<llvm::StringRef> setFields;
     bool beforeSuper = false;
-    bool unreachable = false; // after return, break or continue
+    bool unreachable = false;
   };
-  // What a loop may change, found by scanning it before checking it (see
-  // sema_flow.cpp).
   struct LoopScan {
     struct Change {
-      unsigned count = 0;  // assignments and updates of the variable
-      int64_t delta = 0;   // the constant step of `x++`, `x += 2`, `x--`..., or 0
-      bool nested = false; // some are in a nested loop
+      unsigned count = 0;
+      int64_t delta = 0;
+      bool nested = false;
     };
-    llvm::StringMap<Change> changes; // by variable name
+    llvm::StringMap<Change> changes;
     bool callsFunctions = false;
     bool growsArrays = false;
     bool shrinksArrays = false;
-    // The fields assigned to, by name, of objects of any type.
     llvm::StringSet<> fieldWrites;
-    // Some element of some array may be removed or replaced (pop, shift,
-    // `a[i] = x`, fill...), and so released.
     bool releasesElements = false;
-    bool breaks = false; // a `break` may leave the loop
-    // While scanning: the switches around the current statement inside the
-    // loop, and the labels declared inside it.
+    bool breaks = false;
     unsigned switches = 0;
     llvm::SmallVector<llvm::StringRef, 2> innerLabels;
   };
-  // A statement that `break` (and for loops `continue`) can leave.
   struct JumpTarget {
     enum class Kind { Loop, Switch, Block };
     Kind kind;
     llvm::SmallVector<llvm::StringRef, 1> labels;
-    // What holds where a `break` leaves a switch or a labeled block. Loops do
-    // without: their head state holds at every `break` (see loopHead).
     Flow breaks;
   };
-  // Scopes
   void pushScope() {
     scopes_.emplace_back();
     typeScopes_.emplace_back();
     scopeBranches_.push_back(branchDepth_);
   }
   void popScope();
-  // How many statements that may run their parts or not (if, loops,
-  // switch, try) the code being checked is in, and that count where each
-  // scope began: a setEncoding() in a branch of the scope of its stream
-  // leaves the type of the stream unknown after it (sema_stream.cpp).
   int branchDepth_ = 0;
   std::vector<int> scopeBranches_;
-  // Generics (sema_generic.cpp). The body of a generic function is checked
-  // once, with opaque type parameters (Type::Kind::Param) that allow what
-  // TypeScript allows on any type: assigning, passing, returning, `==`,
-  // `typeof`, printing, and turning into a string. A call infers the type
-  // arguments and calls an instance: a copy of the function whose body is
-  // checked again with those types and every rule of the language, so that
-  // what our rules reject there (an object turned into a string, `<` on
-  // objects) is reported at the call. Type arguments that look the same in
-  // memory share one instance (see representation).
   struct Signature;
   struct Instance {
-    FunctionDecl *decl = nullptr; // the copy, which Lowering emits
+    FunctionDecl *decl = nullptr;
     FuncSymbol *generic = nullptr;
-    // An instance of a generic class instead (see instantiateClass): the
-    // class made, whose bodies are checked as those of a copy of a function.
     ClassDecl *cls = nullptr;
-    std::vector<const Type *> args;     // representations
-    std::vector<const Type *> concrete; // as the call that made it gave them
-    std::vector<const Type *> exact;    // see exactClassArgs
+    std::vector<const Type *> args;
+    std::vector<const Type *> concrete;
+    std::vector<const Type *> exact;
     llvm::SMLoc callLoc;
-    const Instance *requester = nullptr; // the instance whose body needs it
+    const Instance *requester = nullptr;
     bool checking = false, checked = false, failed = false;
-    // The first error in its body, where it is, and the instance that error
-    // comes from (itself, or one that it calls).
     std::string message;
     llvm::SMLoc errorLoc;
   };
-  // Whether two classes are one for access to private members: the same
-  // class, or instances of one generic class (and the generic class).
   static bool sameClass(const ClassDecl *a, const ClassDecl *b) {
     return a && b && a->staticOwner() == b->staticOwner();
   }
-  // The value of an enum member's initializer.
   struct Constant {
     bool isString = false;
     double number = 0;
     std::u16string text;
   };
-  // The variables the blocks being checked declare, for messages about
-  // using one before its declaration.
   struct BlockNames {
-    size_t functions; // functions_.size() in the block
+    size_t functions;
     std::vector<llvm::StringRef> names;
   };
-  // What checking a function body may change, so that one body can be
-  // checked in the middle of another.
   struct BodyState {
     Flow flow;
     std::vector<llvm::StringMap<ScopeEntry>> scopes;
@@ -447,33 +359,16 @@ private:
     std::vector<int> scopeBranches;
     int branchDepth = 0;
   };
-  // Closures (sema_closure.cpp): arrows, function expressions and functions
-  // declared inside blocks, the variables they capture, calls through
-  // function values, and the array methods that take callbacks.
-  //
-  // What a function is expected to be where it is written: the arguments it
-  // will get, and the result wanted (null: whatever the body returns). With
-  // `pad`, it takes all of params even if it names fewer, so that its type is
-  // the one expected; a callback of a built-in method takes just the
-  // parameters it names.
   struct Signature {
     std::vector<const Type *> params;
     size_t minArgs = 0;
     const Type *ret = nullptr;
-    bool voidResult = false; // what it returns is dropped (forEach)
+    bool voidResult = false;
     bool pad = true;
-    // With voidResult: an async function may go here, and its Promise is
-    // dropped (the callback of a timer); elsewhere that is an error.
     bool asyncVoid = false;
-    // The function takes `this` first (Type::hasThis): params[0] is its
-    // type. A function or method written without a `this` parameter gets
-    // one, `{ read() { this.push(x) } }` where a `(this: Readable, size:
-    // int) => void` goes; an arrow, whose `this` is that around it, a
-    // hidden one it does not use.
     bool hasThis = false;
   };
   FunctionDecl *currentDecl() const { return functions_.empty() ? nullptr : functions_.back(); }
-  // A function, or an array or optional of them.
   static bool holdsFunctions(const Type *type) {
     while (type->isOptional() || type->isArray()) {
       type = type->inner();
@@ -481,7 +376,6 @@ private:
 
     return type->isFunction();
   }
-  // The same for objects, dictionaries among them.
   static bool holdsObjects(const Type *type) {
     while (type->isOptional() || type->isArray()) {
       type = type->inner();
@@ -489,7 +383,6 @@ private:
 
     return type->isObject() || type->isDict();
   }
-  // Dates, which join() writes as toString() does.
   static bool holdsDates(const Type *type) {
     while (type->isOptional() || type->isArray()) {
       type = type->inner();
@@ -497,31 +390,13 @@ private:
 
     return type->isDate();
   }
-  // Truthiness (sema_truth.cpp). As in JavaScript, a condition may test a
-  // string or a value that may be undefined, but not a number; `&&` and `||`
-  // give one of their operands. `use` says how a tested value is used, for
-  // the hints of the errors.
   enum class TruthUse { Condition, Not, Or, And, OrAssign, AndAssign };
-  // Built-in modules (sema_node.cpp, docs/io.md): node:fs, node:path,
-  // node:os and node:process, also without "node:", and tz:io. A name a file
-  // imports from one stands for a function, a constant or a class of it, or
-  // for a namespace: `posix` of node:path, or `fs` of `import fs from "fs"`
-  // (an error, but its uses are checked as `readFileSync` would be).
   struct NodeName {
     NodeModule module;
-    llvm::StringRef name; // empty for the namespace
+    llvm::StringRef name;
   };
-  // While checkFsCall checks a function of node:fs/promises: it takes the
-  // name without Sync and its options, and no fd.
   bool fsAsync_ = false;
-  // Literals whose type comes from where the object goes
-  // (sema_destination.cpp). `const p = { x: 1, y: 2 }; len(p)` with
-  // `len(p: Point)` checks the literal as if the declaration said
-  // `const p: Point`, so x and y are doubles. The places are found by
-  // scanning the code that follows the declaration in its block: arguments of
-  // functions known by name, typed variables and fields, returns, push...
   struct DestinationScan;
-  // A Result, or an array or optional of them.
   static bool holdsResults(const Type *type) {
     while (type->isOptional() || type->isArray()) {
       type = type->inner();
@@ -529,20 +404,12 @@ private:
 
     return type->isResult();
   }
-  // Why a value of `type` cannot be built from a Json, or empty; a class
-  // through `classProblem`, or not at all without it.
   using ClassProblem = llvm::function_ref<std::string(const ClassDecl *)>;
-  // What a check narrows: a variable, or a field read through fields from
-  // one, of a union (or a literal type, or boolean), declared as `declared`.
   struct NarrowTarget {
     const VarSymbol *var = nullptr;
     std::optional<FieldPath> path;
     const Type *declared = nullptr;
   };
-  // Functions that test (sema_predicate.cpp, docs/narrowing.md): what holds
-  // about the parameters of a function when it returns true, and when it
-  // returns false, by their positions (-1 is `this`); the facts are about
-  // the parameters' symbols, `params`.
   struct PredicateSide {
     bool unreachable = false;
     std::vector<std::pair<int, const Type *>> narrowed;
@@ -556,7 +423,7 @@ private:
     const VarSymbol *self = nullptr;
   };
   struct PredicateBuild {
-    const FuncSymbol *fn; // null when the function returns no boolean
+    const FuncSymbol *fn;
     const FunctionDecl *decl;
     Flow whenTrue, whenFalse;
   };
@@ -568,34 +435,20 @@ private:
 
     return type->isPromise();
   }
-  // The callbacks of the methods of typed arrays, which are checked knowing
-  // the range of the element they get, and, for map, the range their result
-  // must fit in.
   struct ByteCallback {
-    unsigned param = 0; // the element's
+    unsigned param = 0;
     int64_t lo = 0, hi = 0;
-    const Type *target = nullptr; // map: the typed array the result goes to
+    const Type *target = nullptr;
   };
-  // The Reflect.get calls of a method with several variants.
   llvm::SmallPtrSet<const CallExpr *, 4> severalVariants_;
-  // The classes converted to `Constructor`, by the conversion: one that a
-  // copy for a class known when compiling drops (see exactClassArgs) makes
-  // no class reachable.
   llvm::DenseMap<const CastExpr *, ClassDecl *> constructorCasts_;
-  // The class being declared, whose constructors may take
-  // `...args: ConstructorArgs`.
   ClassDecl *declaringClass_ = nullptr;
   std::vector<ClassDecl *> lateClasses_;
   size_t lateChecked_ = 0;
-  // The copies of templates whose bodies made late classes: an error in the
-  // code of such a class is the copy's, reported where it is called.
   llvm::DenseMap<const ClassDecl *, Instance *> lateOwners_;
   std::map<Instance *, std::vector<Diagnostics::Captured>> lateErrors_;
-  // The program uses reflection: `new` of a Constructor, Reflect.get...
   bool reflectionUsed_ = false;
   llvm::DenseMap<const Type *, std::pair<const Type *, const Type *>> descriptorOrigins_;
-  // A decorator to apply: of the declaration itself, or (with `param` set) of
-  // a parameter of `owner`, a method or a constructor.
   struct DecoratorUse {
     const Decorator *decorator;
     int param = -1;
@@ -603,15 +456,10 @@ private:
   };
   struct MetaKeyType {
     const Type *type;
-    llvm::SMLoc loc; // the record that gave it
+    llvm::SMLoc loc;
   };
   llvm::DenseMap<const void *, MetaKeyType> metaTypes_;
   ClassDecl *libraryClass(llvm::StringRef name) const { return libClasses_.lookup(name); }
-  // A listener of the event `event` whose listeners get `args`: a function
-  // of them that returns nothing, an async one, or one that takes `this`
-  // (`kind`, as library/events/events.tz numbers them), converted to an
-  // unknown, as the emitter keeps it. `receiver` is the emitter, the `this` it
-  // gets.
   enum class ListenerKind { Plain, Async, This };
   struct StreamChunks {
     const Type *readable = nullptr;
@@ -623,9 +471,6 @@ private:
     const Type *type;
   };
   std::vector<StreamView> streamViews_;
-  // The callback parameters of transform() and flush() written in the
-  // options of an object-mode Transform whose chunk type a round looks for:
-  // what they are called with is what it gives.
   struct StreamCallbackSite {
     const FunctionDecl *fn;
     llvm::StringRef param;
@@ -637,17 +482,8 @@ private:
   llvm::StringMap<ClassDecl *> libClasses_;
   llvm::StringMap<FunctionDecl *> libFunctions_;
   llvm::StringMap<TypeAliasDecl *> libTypes_;
-  // Constants initialized with a literal (an object, a string), which the checks of Web Crypto
-  // read where the constant is an algorithm (sema_webcrypto.cpp).
   llvm::DenseMap<const VarSymbol *, const Expr *> constLiterals_;
   bool isDefined(const VarSymbol *var) const { return flow_.defined.contains(var); }
-  // Modules (sema_modules.cpp). Each file of a program has a top-level scope
-  // of its own, with its own declarations and what it imports. The scope of
-  // the file being checked (module_) is scopes_[0] and typeScopes_[0]; those
-  // of the others wait in their ModuleState.
-  //
-  // A top-level declaration of some file, which an import or an export names
-  // in the end, through any re-exports.
   struct Binding {
     Module *module = nullptr;
     llvm::StringRef name;
@@ -658,7 +494,7 @@ private:
   struct Export {
     Binding target;
     llvm::SMLoc loc;
-    const ExportDecl *all = nullptr; // `export * from`, which gave it
+    const ExportDecl *all = nullptr;
   };
   struct Import {
     Binding target;
@@ -667,147 +503,85 @@ private:
   struct ModuleState {
     llvm::StringMap<ScopeEntry> values;
     llvm::StringMap<Stmt *> types;
-    // The names the file declares at the top level, also those not checked
-    // yet, and its `let` and `const`.
     llvm::StringMap<llvm::SMLoc> declared;
     llvm::StringSet<> topLevelNames;
-    // Its imports, by the names they get in it; and those already reported
-    // as wrong.
     llvm::StringMap<Import> imports;
     llvm::StringSet<> badImports;
     llvm::SmallPtrSet<const VarSymbol *, 4> importedVars;
-    // What it imports from neverthrow: the names they get in it, and the
-    // names of neverthrow they stand for.
     llvm::StringMap<llvm::StringRef> neverthrow;
-    // What it imports from built-in modules, by the names they get in it.
     llvm::StringMap<NodeName> nodeNames;
     llvm::StringMap<Export> exports;
     bool exportsDone = false, exportsBusy = false;
-    // Its top-level code: the next statement to check, and what holds
-    // there when the check stopped early (see loadEarly).
     size_t next = 0;
     std::optional<Flow> flow;
-    bool busy = false;   // being checked
-    bool loaded = false; // all checked
+    bool busy = false;
+    bool loaded = false;
   };
   ModuleState &state(const Module *module) { return moduleStates_[module->order]; }
   AstContext &ctx_;
   Diagnostics &diags_;
   std::vector<llvm::StringMap<ScopeEntry>> scopes_;
-  std::vector<llvm::StringMap<Stmt *>> typeScopes_; // TypeAliasDecl or EnumDecl
-  FuncSymbol *currentFunction_ = nullptr;           // null in top-level code
+  std::vector<llvm::StringMap<Stmt *>> typeScopes_;
+  FuncSymbol *currentFunction_ = nullptr;
   std::vector<JumpTarget> targets_;
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
-  // Variables declared by the earlier cases of the switches being checked:
-  // the case being checked must not use them (see checkSwitch).
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
   llvm::StringSet<> namesInFunctions_;
-  // The names of the fields the program assigns to anywhere: only those can
-  // change during a call.
   llvm::StringSet<> assignedFields_;
-  // The statements of the block being checked, and the position in them of
-  // the one being checked: where a literal it declares may go is in the
-  // statements around it (see literalDestination and followingStatements).
   llvm::ArrayRef<Stmt *> block_;
   size_t blockIndex_ = 0;
-  // Those statements, for literalDestination.
   std::vector<const Stmt *> following_;
-  // Variables initialized by literals that go to several places whose types
-  // disagree, with those places: for the error at one of them.
   llvm::DenseMap<const VarSymbol *, std::vector<std::pair<const Type *, llvm::SMLoc>>>
       destinations_;
-  // Set by literalDestination when it finds such places.
   std::vector<std::pair<const Type *, llvm::SMLoc>> destinationConflict_;
-  // The values of the string constants, the keys `o[key]` may use.
   llvm::DenseMap<const VarSymbol *, std::string> constKeys_;
-  // The variables whose initializers are being checked, for the message
-  // about one that uses itself: `const o = { f: () => o.n }`.
   llvm::SmallVector<llvm::StringRef, 2> initializing_;
-  // Some link of the optional chain being checked may end it.
   bool chainShortCircuits_ = false;
-  // The last `+` of the chain `a + b + c` whose left side is about to be
-  // checked, and the first `+` of the chain being checked that joins a
-  // number or a boolean with a string: the chain reports it once, with a
-  // template made of all its parts.
   BinaryExpr *concatChain_ = nullptr;
   const BinaryExpr *mixedConcat_ = nullptr;
-  // Inferring the return type of currentFunction_: its return statements,
-  // and for a generator its yields.
   std::vector<ReturnStmt *> *returns_ = nullptr;
   std::vector<YieldExpr *> *yields_ = nullptr;
-  // Checking a copy of a function of a cycle (see inferCycle): a call within
-  // the cycle may not have a type yet.
   bool trial_ = false;
-  // Top-level code is still being checked; then a function inferred early,
-  // because top-level code calls it, cannot see the globals declared later.
   bool topLevelDone_ = false;
   const FuncSymbol *early_ = nullptr;
   std::vector<std::vector<FuncSymbol *>> cycles_;
   llvm::DenseMap<const FuncSymbol *, unsigned> cycleOf_;
-  // The variables declared without a type that the scopes being checked hold
-  // (see noteUntyped), with the types of the values assigned to them.
   struct Untyped {
     VarSymbol *var;
-    bool initUndefined; // `let x = undefined`
+    bool initUndefined;
     std::vector<const Type *> assigned;
   };
   std::vector<Untyped> untyped_;
   llvm::DenseMap<const VarSymbol *, int64_t> constVars_;
-  // The functions being checked, innermost last; empty in main's code.
   std::vector<FunctionDecl *> functions_;
-  // The groups of the blocks being checked: the names their functions
-  // assign, which a call may change.
   std::vector<NestedGroup *> groups_;
-  unsigned seq_ = 0; // see VarSymbol::declSeq
+  unsigned seq_ = 0;
   SourceFile *file_ = nullptr;
-  // The topics of the library, which the checks of calls ask (see compiler/library).
   const FeatureRegistry *features_ = nullptr;
-  // The functions of every file, as declared: what InferPass looks for cycles in.
   std::vector<FunctionDecl *> declaredFunctions_;
-  // Generic arrows that top-level constants name (see FunctionDecl::lifted).
   std::vector<FunctionDecl *> lifted_;
   std::deque<Instance> instanceStore_;
   std::vector<Instance *> pendingInstances_;
   Instance *checkingInstance_ = nullptr;
-  // Generic functions whose own body has errors: no instance of them is
-  // checked, which would only repeat those.
   llvm::SmallPtrSet<const FuncSymbol *, 4> brokenGenerics_;
-  // See exactTypeParam: by generic function, for each type parameter.
   llvm::DenseMap<const FuncSymbol *, std::vector<bool>> exactParams_;
-  // Generic classes: the instances by generic class and type arguments (the
-  // generic class for its own type parameters), the defaults of the type
-  // parameters, the instances made before the generic classes had their
-  // methods, which wait for them, and the instances being filled, innermost
-  // last, for those that need ever bigger ones.
   std::map<std::pair<const ClassDecl *, std::vector<const Type *>>, ClassDecl *> classInstances_;
   llvm::DenseMap<const ClassDecl *, std::vector<const Type *>> classDefaults_;
   std::vector<ClassDecl *> unfilled_;
   std::vector<const ClassDecl *> filling_;
   llvm::StringMap<TypeAliasDecl *> builtinAliases_;
-  // The types `infer` gives (bound) for its type parameters (params) while a
-  // type is matched against the pattern of a conditional type.
   struct InferMatch {
     llvm::ArrayRef<const Type *> params;
     std::vector<const Type *> bound;
   };
-  // What a conditional type that waits needs to be resolved again: its
-  // text, the names it uses that stand for types (whose types are the
-  // operands after `tag`), and what the other names it uses mean where it
-  // is written.
   struct ConditionalInfo {
     const TypeRef *ref = nullptr;
     const Type *tag = nullptr;
     std::vector<llvm::StringRef> bound;
     std::vector<std::pair<llvm::StringRef, Stmt *>> decls;
   };
-  // Inside the `extends` clause of a conditional type, where `infer` may be.
   unsigned extendsClause_ = 0;
-  // A conditional type that is the body of a type alias may end in another
-  // instance of an alias (`Len<R, [...Acc, H]>`): a tail call, which
-  // instantiateAlias makes in a loop rather than nested, so that it may go
-  // 1000 deep as in TypeScript. tailAllowed_ says the conditional type being
-  // resolved is such a body; tailCall_ is the call it ends in.
   struct TailCall {
     TypeAliasDecl *alias = nullptr;
     std::vector<const Type *> args;
@@ -816,28 +590,16 @@ private:
   std::optional<TailCall> tailCall_;
   llvm::DenseSet<const CastExpr *> widenings_;
   bool narrowedFields_ = false;
-  // The type of a rest parameter is being resolved: a tuple type there may
-  // have a rest element, `[int, ...string[]]`, a list of parameters.
   bool listContext_ = false;
-  // Where the types being substituted come from, for the instances of
-  // generic classes they make (see instantiateClass); none while unset.
   llvm::SMLoc instanceLoc_;
-  bool methodsDeclared_ = false; // every class of the program has its methods
-  bool classesLinked_ = false;   // linkClasses ran
-  // Generic classes whose own bodies have errors: no instance of them is
-  // checked, which would only repeat those.
+  bool methodsDeclared_ = false;
+  bool classesLinked_ = false;
   llvm::SmallPtrSet<const ClassDecl *, 2> brokenClasses_;
-  // Where an instance's body calls an instance whose body failed: the error
-  // is that one's.
   llvm::DenseMap<const char *, const Instance *> failedCalls_;
-  // The conversions generic code made of values of type parameters (see
-  // noteForced), by the position and kind of the expression.
   llvm::DenseMap<std::pair<const char *, unsigned>, const Type *> forced_;
-  // The instances of generic aliases, and the alias and arguments that made
-  // an object type (to substitute in it).
   struct AliasInstance {
     const Type *type = nullptr;
-    Type *self = nullptr; // while it is resolved, for the fields that refer to it
+    Type *self = nullptr;
     bool resolving = false;
     bool recursive = false;
   };
@@ -852,59 +614,31 @@ private:
 
     return nullptr;
   }
-  // See useModule. loading_ is the file whose top-level code is being
-  // checked; null after all of it is.
   std::vector<ModuleState> moduleStates_;
   Module *module_ = nullptr;
   Module *loading_ = nullptr;
-  // The file of each top-level function, type alias, enum, class and
-  // method.
   llvm::DenseMap<const Stmt *, Module *> declModules_;
-  // Classes (sema_class.cpp): the class whose code is being checked, which
-  // may use its private members; the constructor (or initializers) being
-  // checked and its `this`; whether the closures it creates may use `this`
-  // (every field was set where they are created); checking a static
-  // initializer, where `this` would be the class.
   ClassDecl *currentClass_ = nullptr;
   FunctionDecl *initFn_ = nullptr;
   const VarSymbol *initThis_ = nullptr;
   bool closureThisReady_ = true;
   bool staticInit_ = false;
-  // `this.x` is being checked, a use of `this` the rules allow: x.
   llvm::StringRef thisMember_;
-  // The callback being checked as an argument of a built-in such as map:
-  // what it is called with, which chooses the variant of a method.
   const Signature *callback_ = nullptr;
-  // The static fields of the class being declared that are set by now.
   llvm::SmallPtrSet<const VarSymbol *, 4> staticsSet_;
   unsigned classCount_ = 0;
   std::vector<ClassDecl *> classes_;
-  // The `super(...)` statements at the top level of the bodies of
-  // constructors: the only place where they are allowed.
   llvm::SmallPtrSet<const CallExpr *, 4> rootSupers_;
-  // Abstract methods without a return type: the implementation whose type
-  // they take; and overrides without one, whose type is that of the method
-  // they override, once known (see inheritedReturnType).
   llvm::DenseMap<const FunctionDecl *, FunctionDecl *> returnSources_;
   llvm::DenseMap<const FunctionDecl *, FunctionDecl *> inheritsReturn_;
-  // The functions whose return types are being inferred, innermost last,
-  // and those whose inference waits for a file checked out of turn: a call
-  // to one of these is a cycle the types cannot settle.
   std::vector<const FuncSymbol *> inferring_;
   llvm::SmallPtrSet<const FuncSymbol *, 4> suspended_;
-  // The callbacks of the methods of typed arrays (see ByteCallback).
   llvm::DenseMap<const FunctionDecl *, ByteCallback> byteCallbacks_;
-  // The class Error (see declareErrorClass).
   ClassDecl *errorClass_ = nullptr;
-  // Error and its built-in kinds, as kErrorKinds lists them.
   std::vector<ClassDecl *> errorKinds_;
-  // SystemError, which the functions of node:fs throw (docs/io.md), and the
-  // classes Stats and Dirent of node:fs.
   ClassDecl *systemErrorClass_ = nullptr;
   ClassDecl *statsClass_ = nullptr;
   ClassDecl *direntClass_ = nullptr;
-  // ExecSyncError, which execSync and execFileSync throw when the program
-  // they ran failed (docs/process.md).
   ClassDecl *execSyncErrorClass_ = nullptr;
   MemberExpr *pendingSetter_ = nullptr;
   llvm::DenseMap<const VarSymbol *, std::string> constPrefixes_;
@@ -1400,30 +1134,18 @@ private:
   std::unique_ptr<WeakRefChecker> weakRefCheckerPart_;
 };
 
-// A tuple type of generic code with lists of types spread into it, `[int,
-// ...A]`.
 bool spreadsLists(const Type *type);
 
-// Whether `type` mentions one of the type parameters `params`.
 bool typeMentions(const Type *type, llvm::ArrayRef<const Type *> params);
 
-// The instance of the generic class `generic` (or `generic` itself) that the
-// class `type` is, or that a class up its chain is; null if none.
 const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic);
 
-// "2 arguments", "1-3 arguments", "1 or more arguments".
 std::string argumentCount(unsigned min, unsigned max);
 
-// A language tag as BCP 47 writes it: "ru", "en-US", "zh-Hant-TW",
-// "de-DE-u-co-phonebk". What ICU would read wrongly ("en_US") is not one.
 bool isLanguageTag(const std::string &tag);
 
-// Why a compiled program cannot have the global `name` of JavaScript (eval,
-// Function, Proxy), or null for any other name.
 const char *whyUnsupported(llvm::StringRef name);
 
-// A function in messages: "'f'" and "function 'f'", or "the function" for an
-// arrow without a name.
 inline std::string quotedName(llvm::StringRef name) {
   return name.empty() ? "the function" : "'" + name.str() + "'";
 }
@@ -1431,31 +1153,20 @@ inline std::string functionLabel(llvm::StringRef name) {
   return name.empty() ? "the function" : "function '" + name.str() + "'";
 }
 
-// A variant of a method in messages, `add(v: Vec, k?: double)`, and a list
-// of them, "f(), f(x: int) and f(s: string)".
 std::string variantText(const FunctionDecl *fn);
 std::string variantList(llvm::ArrayRef<FunctionDecl *> variants);
 
-// The statements a literal declared by `stmts[i]` may go to: the ones after
-// it, and the functions declared before it, which may run later.
 std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t i);
 
-// The text `o.name` that reads a field of `object`, for hints;
-// `o["content-type"]` for a name that is not an identifier.
 std::string fieldText(const Expr *object, llvm::StringRef field);
 
-// The names a statement or an expression mentions. With `inFunction` unset,
-// only those inside the functions it contains.
 void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction = true);
 void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction = true);
-// The names of the methods `body` calls, `x.name(...)`.
 void collectMemberCalls(const Stmt *body, llvm::StringSet<> &names);
 
-// Calls `visit` on every expression inside `stmt`, those in the functions it
-// contains included, unless `intoFunctions` is unset.
 void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
                 bool intoFunctions = true);
 void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
                 bool intoFunctions = true);
 
-} // namespace tz
+}

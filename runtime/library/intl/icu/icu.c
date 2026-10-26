@@ -1,5 +1,3 @@
-// Loading the ICU of the system (see icu.h).
-
 #include "runtime/library/intl/icu/icu.h"
 #include "runtime/core/parallel/parallel.h"
 #include <stddef.h>
@@ -11,11 +9,10 @@
 #include <windows.h>
 #endif
 
-// None of this is static: see the rules in tzrt.h.
 TzIcu tz_icu_functions;
-int32_t tz_icu_state; // 0 not tried yet, 1 loaded, -1 none
+int32_t tz_icu_state;
 char tz_icu_locale[96];
-int32_t tz_icu_missing; // of the functions of Intl beyond dates
+int32_t tz_icu_missing;
 
 #ifdef _WIN32
 
@@ -83,8 +80,6 @@ static int load(void) {
   REQUIRED(i18n, udatpg_getBestPatternWithOptions);
   REQUIRED(i18n, udatpg_getSkeleton);
   LOAD_OPTIONAL(i18n, udatpg_getDefaultHourCycle);
-  // The rest of Intl, in whichever of the two libraries has them: those
-  // missing are counted, and tz_intl_icu checks.
   LOAD_EITHER(unumf_openForSkeletonAndLocaleWithError);
   LOAD_EITHER(unumf_close);
   LOAD_EITHER(unumf_openResult);
@@ -163,7 +158,6 @@ static int load(void) { return 0; }
 
 #endif
 
-// The threads load ICU once, under the lock; the state goes last.
 TzLock tz_icu_lock;
 
 const TzIcu *tz_icu(void) {
@@ -175,9 +169,6 @@ const TzIcu *tz_icu(void) {
     }
     int32_t state = load() ? 1 : -1;
     if (state > 0) {
-      // Windows adds the user's settings as keywords
-      // ("ru_RU@calendar=gregorian;hours=h23;..."); node's ICU knows only the
-      // language, and so do we.
       TzUErrorCode status = 0;
       int32_t n =
           tz_icu_functions.uloc_getBaseName(tz_icu_functions.uloc_getDefault(), tz_icu_locale,

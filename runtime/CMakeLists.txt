@@ -1,38 +1,12 @@
-# The runtime, built by clang of the same LLVM that tz is built with, in two
-# forms that land next to tz.exe, where tz looks for them:
-#
-#   tzrt.bc   LLVM bitcode. tz copies the small functions a program calls
-#             from it into the program before optimizing, so that their fast
-#             paths are inlined into the program (see RuntimeLinker in
-#             compiler/optimize/runtime_linker/).
-#   tzrt.lib  the same code compiled, linked into every program: everything
-#             that was not inlined is called here.
-#
-# Each comes twice: tzrt for programs that run on one thread, and tzrt_mt,
-# built with TZ_PARALLEL, for those whose async code runs in parallel on the
-# threads of the runtime (docs/async.md, section 8; see tzrt.h).
-#
-# CMake cannot build C with clang while tz itself is built with MSVC, so both
-# come from custom commands.
-#
-# Two trees, one folder per module (its .c, its .h, its tables and their
-# generator): core/, the runtime of the language, and library/, the C of the
-# topics of the library, named as in compiler/library/ and library/. Includes
-# name files from the root of the repository: "runtime/core/tzrt/tzrt.h".
-
 find_program(TZ_CLANG clang PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 find_program(TZ_LLVM_LINK llvm-link PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 find_program(TZ_LLVM_LIB llvm-lib PATHS ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH REQUIRED)
 
-# Every module is in tzrt but those of node:crypto and TLS, which make
-# tzcrypto.lib (below).
 file(GLOB_RECURSE sources CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
      ${CMAKE_CURRENT_SOURCE_DIR}/core/*.c ${CMAKE_CURRENT_SOURCE_DIR}/library/*.c)
 list(FILTER sources EXCLUDE REGEX "^library/(crypto|tls)/")
 file(GLOB_RECURSE extras CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
      ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${CMAKE_CURRENT_SOURCE_DIR}/*.mjs)
-# What fetch decodes with (decompress.c): zlib's inflate and brotli's
-# decoder, built as they come, without their warnings.
 set(third_party ${PROJECT_SOURCE_DIR}/third_party)
 set(third_party_sources
     zlib/adler32.c zlib/crc32.c zlib/inffast.c zlib/inflate.c zlib/inftrees.c zlib/zutil.c
@@ -42,11 +16,9 @@ set(third_party_sources
 set(includes -I${PROJECT_SOURCE_DIR} -I${third_party}/zlib -I${third_party}/brotli/include)
 set(flags -O2 -std=c17 -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS ${includes})
 if(WIN32)
-  list(APPEND flags -fms-runtime-lib=static) # the static CRT, as tz links it
+  list(APPEND flags -fms-runtime-lib=static)
 endif()
 
-# Each file to bitcode. -flto=full stops before the optimizations that only
-# pay off once everything is in one module (vectorization, unrolling).
 set(dir ${CMAKE_CURRENT_BINARY_DIR}/bitcode)
 file(MAKE_DIRECTORY ${dir} ${dir}/mt)
 set(bitcode_files)
@@ -72,7 +44,6 @@ foreach(source ${sources})
     VERBATIM)
   list(APPEND bitcode_files_mt ${bitcode})
 endforeach()
-# The code of others has no state of the runtime: both use the same.
 set(third_party_bitcode)
 foreach(source ${third_party_sources})
   string(REPLACE "/" "_" name ${source})
@@ -94,9 +65,6 @@ endforeach()
 list(APPEND bitcode_files ${third_party_bitcode})
 list(APPEND bitcode_files_mt ${third_party_bitcode})
 
-# One module for the whole runtime: tzrt.bc, and compiled as a whole into
-# tzrt.lib, so that the files' functions are inlined into each other too.
-# Each function gets its own section, so the linker drops the unused ones.
 foreach(variant tzrt tzrt_mt)
   if(variant STREQUAL "tzrt")
     set(files ${bitcode_files})
@@ -117,12 +85,6 @@ foreach(variant tzrt tzrt_mt)
     VERBATIM)
 endforeach()
 
-# node:crypto (docs/crypto.md, crypto.h): tzcrypto.lib, the glue between programs and OpenSSL,
-# which tz links only into programs that use it, and TLS for https (tls.c, docs/net.md), which
-# libssl goes with. Each part is an object of its own, so that a
-# program brings only the algorithms it names: crypto_md.c and crypto_aes.c are compiled once for
-# each family of hashes and each mode. Not in tzrt.bc: nothing of it is hot enough to copy into
-# programs.
 set(crypto library/crypto)
 set(crypto_parts
   "crypto ${crypto}/crypto/crypto.c"

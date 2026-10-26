@@ -104,4 +104,4 @@ Errors buildProgram(Program &program, const BuildOptions &options) {
   return link.run(object.value(), crypto, lowered.value().parallel);
 }
 
-} // namespace tz
+}

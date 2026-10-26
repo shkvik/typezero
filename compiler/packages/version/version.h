@@ -7,11 +7,9 @@
 
 namespace tz::pkg {
 
-// A semantic version, "1.2.3" or "1.2.3-beta.2" (build metadata after '+' is
-// ignored, as semver says), compared by semver's precedence.
 struct Version {
   uint64_t major = 0, minor = 0, patch = 0;
-  std::vector<std::string> pre; // "beta", "2"
+  std::vector<std::string> pre;
 
   static bool parse(llvm::StringRef text, Version &out);
   bool isPrerelease() const { return !pre.empty(); }
@@ -21,4 +19,4 @@ struct Version {
   std::string str() const;
 };
 
-} // namespace tz::pkg
+}

@@ -17,12 +17,11 @@
 
 namespace tz {
 
-// `a` or `a as b` in the braces of an import or an export.
 struct ModuleName {
-  llvm::StringRef name; // in the file it comes from
+  llvm::StringRef name;
   llvm::SMLoc loc;
-  llvm::StringRef as; // the name it gets; the same as `name` without `as`
+  llvm::StringRef as;
   llvm::SMLoc asLoc;
 };
 
-} // namespace tz
+}

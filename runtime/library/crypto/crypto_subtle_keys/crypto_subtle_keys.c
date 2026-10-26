@@ -1,9 +1,3 @@
-// Web Crypto (docs/crypto.md, step 4): the work of crypto.subtle with asymmetric keys, which only
-// the full layer can do (crypto.h), on the threads of the pool as crypto_subtle.c does it:
-// signatures (RSASSA-PKCS1-v1_5, RSA-PSS, ECDSA, Ed25519), RSA-OAEP, ECDH and X25519, and making
-// key pairs. The threads use OpenSSL, which is safe to share between threads, and memory of the
-// system; the main thread holds each EVP_PKEY while its job runs and makes the results.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/async/async.h"
@@ -26,25 +20,23 @@
 
 TzKey *tz_openssl_key_of(void *pkey, int private_key);
 
-// The kinds of signature, as library/crypto/webcrypto.tz numbers them.
 enum { SIGN_PKCS1 = 0, SIGN_PSS = 1, SIGN_ECDSA = 2, SIGN_EDDSA = 3 };
-// What a job makes: an ArrayBuffer (or undefined), a verification, or a private KeyObject.
 enum { MAKES_BYTES, MAKES_VERDICT, MAKES_KEY };
 
 typedef struct KeyJob {
-  TzWork work; // first: the pool knows the job by it
+  TzWork work;
   TzPromise *promise;
   void (*run)(struct KeyJob *j);
   int makes;
-  EVP_PKEY *key, *peer; // held
-  char md[32];          // the name of the hash, empty for none
+  EVP_PKEY *key, *peer;
+  char md[32];
   char curve[32];
   int32_t kind, salt_length, flag;
   double bits, exponent;
-  uint8_t *data, *extra; // copies: the data, and the signature or the label
+  uint8_t *data, *extra;
   size_t data_length, extra_length;
   int has_extra;
-  uint8_t *out; // malloc
+  uint8_t *out;
   size_t out_length;
   EVP_PKEY *made;
   int32_t result;
@@ -97,8 +89,6 @@ static void job_free(KeyJob *j) {
   tz_free(j);
 }
 
-// Copies the data (and the signature or label): false with the promise rejected and the job
-// freed, for a value that is no bytes, which the library's types rule out.
 static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *xt, const void *xv) {
   TzCryptoData d, x = {NULL, 0, NULL};
   if (!tz_crypto_data(&d, dt, dv, TZ_ENC_UTF8, "data") ||
@@ -124,7 +114,6 @@ static int job_take(KeyJob *j, const TzType *dt, const void *dv, const TzType *x
 static void job_work(TzWork *w) {
   KeyJob *j = (KeyJob *)w;
   j->run(j);
-  // The errors OpenSSL noted on this thread are no one's.
   ERR_clear_error();
 }
 
@@ -167,14 +156,8 @@ static void name_of(char *out, size_t size, void *obj, uint64_t meta) {
   tz_crypto_cstr(obj, meta, out, size);
 }
 
-//===----------------------------------------------------------------------===//
-// Signatures
-//===----------------------------------------------------------------------===//
-
-// The bytes of each of r and s of an ECDSA signature in IEEE P1363 form.
 static int p1363_half(const EVP_PKEY *pkey) { return (EVP_PKEY_get_bits(pkey) + 7) / 8; }
 
-// A context to sign or verify with the job's key, hash and options; NULL if OpenSSL refuses.
 static EVP_MD_CTX *sign_context(KeyJob *j, int verify) {
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
   EVP_PKEY_CTX *pctx = NULL;
@@ -209,7 +192,6 @@ static void sign_run(KeyJob *j) {
   int ok = EVP_DigestSign(ctx, sig, &length, j->data, j->data_length) > 0;
   EVP_MD_CTX_free(ctx);
   if (ok && j->kind == SIGN_ECDSA) {
-    // OpenSSL gives DER; Web Crypto wants r and s side by side.
     int half = p1363_half(j->key);
     const unsigned char *p = sig;
     ECDSA_SIG *s = d2i_ECDSA_SIG(NULL, &p, (long)length);
@@ -244,7 +226,6 @@ static void verify_run(KeyJob *j) {
   size_t length = j->extra_length;
   unsigned char *der = NULL;
   if (j->kind == SIGN_ECDSA) {
-    // r and s side by side, as DER; a signature of another length does not verify.
     int half = p1363_half(j->key);
     if (length != (size_t)(2 * half)) {
       EVP_MD_CTX_free(ctx);
@@ -268,8 +249,6 @@ static void verify_run(KeyJob *j) {
   EVP_MD_CTX_free(ctx);
 }
 
-// sign(algorithm, key, data) with a key of the full layer: `kind` a SIGN_*, the hash by
-// OpenSSL's name (empty for Ed25519), the salt length of RSA-PSS.
 void tz_openssl_subtle_sign(TzPromise *p, const TzKey *key, int32_t kind, void *md_obj,
                             uint64_t md_meta, int32_t salt_length, const TzType *dt,
                             const void *dv) {
@@ -282,8 +261,6 @@ void tz_openssl_subtle_sign(TzPromise *p, const TzKey *key, int32_t kind, void *
   }
 }
 
-// verify(algorithm, key, signature, data): 1 or 0, or -1 when OpenSSL refuses the key or the
-// options.
 void tz_openssl_subtle_verify(TzPromise *p, const TzKey *key, int32_t kind, void *md_obj,
                               uint64_t md_meta, int32_t salt_length, const TzType *st,
                               const void *sv, const TzType *dt, const void *dv) {
@@ -296,10 +273,6 @@ void tz_openssl_subtle_verify(TzPromise *p, const TzKey *key, int32_t kind, void
   }
 }
 
-//===----------------------------------------------------------------------===//
-// RSA-OAEP
-//===----------------------------------------------------------------------===//
-
 static void oaep_run(KeyJob *j) {
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(j->key, NULL);
   const EVP_MD *md = EVP_get_digestbyname(j->md);
@@ -307,7 +280,6 @@ static void oaep_run(KeyJob *j) {
            EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) > 0 &&
            EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) > 0 && EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) > 0;
   if (ok && j->has_extra && j->extra_length) {
-    // The context takes over the copy of the label.
     unsigned char *label = (unsigned char *)OPENSSL_malloc(j->extra_length);
     ok = label != NULL;
     if (ok) {
@@ -339,8 +311,6 @@ static void oaep_run(KeyJob *j) {
   j->out_length = length;
 }
 
-// encrypt and decrypt of RSA-OAEP: the hash of the key by OpenSSL's name, the label or
-// undefined.
 void tz_openssl_subtle_rsa_oaep(TzPromise *p, const TzKey *key, void *md_obj, uint64_t md_meta,
                                 const TzType *lt, const void *lv, int32_t decrypt, const TzType *dt,
                                 const void *dv) {
@@ -351,10 +321,6 @@ void tz_openssl_subtle_rsa_oaep(TzPromise *p, const TzKey *key, void *md_obj, ui
     job_queue(j, oaep_run);
   }
 }
-
-//===----------------------------------------------------------------------===//
-// ECDH and X25519
-//===----------------------------------------------------------------------===//
 
 static void derive_run(KeyJob *j) {
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(j->key, NULL);
@@ -376,8 +342,6 @@ static void derive_run(KeyJob *j) {
   j->out_length = length;
 }
 
-// deriveBits({ name: 'ECDH' | 'X25519', public }, privateKey): the whole shared secret, which the
-// library cuts to the length asked.
 void tz_openssl_subtle_derive(TzPromise *p, const TzKey *key, const TzKey *peer) {
   KeyJob *j = job_new(p, MAKES_BYTES, key);
   if (peer->pkey) {
@@ -387,11 +351,6 @@ void tz_openssl_subtle_derive(TzPromise *p, const TzKey *key, const TzKey *peer)
   job_queue(j, derive_run);
 }
 
-//===----------------------------------------------------------------------===//
-// Key pairs
-//===----------------------------------------------------------------------===//
-
-// The kinds of key pairs, as library/crypto/webcrypto.tz numbers them.
 enum { PAIR_RSA = 0, PAIR_EC = 1, PAIR_ED25519 = 2, PAIR_X25519 = 3 };
 
 static void generate_run(KeyJob *j) {
@@ -421,8 +380,6 @@ static void generate_run(KeyJob *j) {
   j->made = pkey;
 }
 
-// generateKey of a pair: the private KeyObject, whose public half the library takes; `kind` a
-// PAIR_*, the modulus and the public exponent of RSA, the curve of EC ('P-256'...).
 void tz_openssl_subtle_generate(TzPromise *p, int32_t kind, double bits, double exponent,
                                 void *curve_obj, uint64_t curve_meta) {
   KeyJob *j = job_new(p, MAKES_KEY, NULL);

@@ -16,8 +16,6 @@ using llvm::isa;
 
 namespace tz {
 
-// The values the returns of a function body give, outside the functions
-// nested in it.
 static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *)> each) {
   if (!stmt) {
     return;
@@ -71,7 +69,6 @@ static void forEachReturn(const Stmt *stmt, llvm::function_ref<void(const Expr *
   }
 }
 
-// `ok(v)` or `err(e)` as written, before it is checked.
 static bool isResultLiteral(const CallExpr *call) {
   auto *name = dyn_cast<NameExpr>(call->callee);
 
@@ -79,8 +76,6 @@ static bool isResultLiteral(const CallExpr *call) {
          !call->hasSpread() && !call->optional;
 }
 
-// A type that fits where the literal goes, without the read-only fields of
-// the place: the object itself may still be changed.
 static const Type *writable(const Type *type) {
   const Type *object = type->nonOptional();
   if (!object->isObject() ||
@@ -105,8 +100,6 @@ static const Type *writable(const Type *type) {
 Destination::Destination(Checker &checker) : checker_(checker) {}
 
 bool Destination::literalShaped(const Expr *expr) {
-  // An array literal too: `[1, 2]` that goes to a `double[]` holds doubles,
-  // and `["Ann", 30]` that goes to `[string, int]` is a tuple.
   if (isa<ObjectLitExpr>(expr) || isa<ArrayLitExpr>(expr)) {
     return true;
   }
@@ -114,12 +107,9 @@ bool Destination::literalShaped(const Expr *expr) {
     return literalShaped(cond->thenExpr) || literalShaped(cond->elseExpr);
   }
   if (auto *call = dyn_cast<CallExpr>(expr)) {
-    // `ok(1)`: a Result whose other half, and the type of its own, come from
-    // where it goes.
     if (isResultLiteral(call)) {
       return true;
     }
-    // `xs.map(x => ({ x, y: 0 }))`
     auto *member = dyn_cast<MemberExpr>(call->callee);
     if (!member || (member->name != "map" && member->name != "flatMap") || call->args.size() != 1) {
       return false;
@@ -138,7 +128,6 @@ bool Destination::literalShaped(const Expr *expr) {
 
 bool Destination::literalFits(const Expr *expr, const Type *type) const {
   type = type->nonOptional();
-  // Into a union: as the member it is written for (see literalMember).
   if (type->isUnion()) {
     if (auto *lit = dyn_cast<ObjectLitExpr>(expr)) {
       if (const Type *member = checker_.literalTypes().literalMember(lit, type)) {
@@ -157,7 +146,6 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
     std::vector<llvm::StringRef> names;
     for (const ObjectLitExpr::Property &prop : lit->props) {
       if (prop.spread) {
-        // The fields of the object spread, if its type is known.
         auto *name = dyn_cast<NameExpr>(prop.value);
         const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
         if (!var || !var->type || !var->type->isObject() || var->type->isTuple()) {
@@ -170,7 +158,7 @@ bool Destination::literalFits(const Expr *expr, const Type *type) const {
         }
         continue;
       }
-      if (prop.key) { // known only once checked
+      if (prop.key) {
         return false;
       }
       llvm::StringRef name = prop.name;
@@ -244,7 +232,7 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
   scan.name = d.name;
   scan.returns = checker_.currentFunction_ ? checker_.currentFunction_->ret : nullptr;
   scan.locals.emplace_back();
-  bool muted = checker_.diags_.setMuted(true); // types are resolved again where they are written
+  bool muted = checker_.diags_.setMuted(true);
   bool visible = true;
   for (const VarDeclarator &next : later) {
     if (next.init) {
@@ -273,9 +261,6 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
   }
   checker_.diags_.setMuted(muted);
 
-  // The places the literal fits, and one type that suits them all. A
-  // parameter of a generic function takes whatever comes, so it says nothing
-  // about the literal.
   std::vector<std::pair<const Type *, llvm::SMLoc>> places;
   for (auto [type, loc] : scan.found) {
     if (!type->isError() && !type->isVoid() && !mentionsParam(type) && literalFits(d.init, type)) {
@@ -292,8 +277,6 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
       break;
     }
   }
-  // Results meet as the returns of a function do: `let r = ok(1)` that is
-  // given `err("x")` later is a `Result<int, string>`.
   if (!chosen && llvm::all_of(places, [](const std::pair<const Type *, llvm::SMLoc> &place) {
         return place.first->isResult();
       })) {
@@ -315,11 +298,10 @@ const Type *Destination::literalDestination(const VarDeclarator &d,
 const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
   std::vector<const Type *> params;
   for (const Param &param : fn->params) {
-    // `Iterable<T>` makes it generic: no one type.
     if (!param.type || checker_.iterableChecker().isIterableRef(*param.type)) {
       return nullptr;
     }
-    const Type *type = checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+    const Type *type = checker_.typeResolver().resolveType(*param.type, false);
     params.push_back(param.optional || param.defaultValue ? Type::optional(type) : type);
   }
   bool hasRest = !fn->params.empty() && fn->params.back().rest;
@@ -328,4 +310,4 @@ const Type *Destination::declaredFunctionType(const FunctionDecl *fn) {
   return type->isFunction() ? type : nullptr;
 }
 
-} // namespace tz
+}

@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// Json, JSON.parse and JSON.stringify, embedJson and Array.isArray (docs/modules.md,
-// section 5).
 class JsonFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "json"; }
@@ -20,4 +18,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

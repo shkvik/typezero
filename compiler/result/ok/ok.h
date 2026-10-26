@@ -10,4 +10,4 @@ template <class T> struct Ok {
 
 template <class T> Ok<T> ok(T value) { return {std::move(value)}; }
 
-} // namespace tz
+}

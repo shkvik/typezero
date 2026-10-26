@@ -34,4 +34,4 @@ Result<Lowered, Errors> LowerPass::run(Program &program, const ParallelPlan &pla
   return ok(Lowered{std::move(module), lowering.parallel()});
 }
 
-} // namespace tz
+}

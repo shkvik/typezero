@@ -5,7 +5,6 @@
 
 namespace tz {
 
-// `target = value`, or a compound assignment such as `target += value`.
 class AssignExpr : public Expr {
 public:
   AssignExpr(llvm::SMLoc loc, std::optional<BinaryOp> op, Expr *target, Expr *value)
@@ -15,8 +14,7 @@ public:
   std::optional<BinaryOp> op;
   Expr *target;
   Expr *value;
-  // As in BinaryExpr.
   llvm::StringRef source;
 };
 
-} // namespace tz
+}

@@ -1,9 +1,3 @@
-// What fetch gets compressed (docs/net.md, section 2), decoded as it comes:
-// gzip and deflate by zlib's inflate, br by brotli's decoder, both in
-// third_party. Only fetch calls this file, so only a program that fetches
-// has it: the linker drops what nothing calls, the dictionary of brotli
-// (122 KB) too.
-
 #include "runtime/library/net/net/net.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/closure/closure.h"
@@ -21,12 +15,11 @@ typedef struct Decoder {
   int64_t rc;
   const TzLayout *layout;
   int32_t kind;
-  uint8_t started; // zlib's state is made
-  uint8_t ended;   // the stream of data is complete
-  uint8_t raw;     // deflate without the zlib wrapper, as some servers send it
+  uint8_t started;
+  uint8_t ended;
+  uint8_t raw;
   z_stream z;
   BrotliDecoderState *br;
-  // What the current piece decodes to.
   uint8_t *out;
   size_t length, capacity;
 } Decoder;
@@ -67,7 +60,6 @@ static void br_free(void *opaque, void *address) {
   tz_free(address);
 }
 
-// `__tz_zlib_new(kind)`: a decoder of gzip (1), deflate (2) or br (3).
 void *tz_zlib_new(int32_t kind, TzMaker make) {
   (void)make;
   Decoder *d = (Decoder *)tz_obj_alloc(sizeof(Decoder));
@@ -98,12 +90,9 @@ static uint8_t *room(Decoder *d, size_t *available) {
   return d->out + d->length;
 }
 
-// An error as node's zlib gives it: "incorrect header check".
 static void fail(const char *message) { tz_thrown = net_error(TZ_ERROR, message, NULL); }
 
 static int start_zlib(Decoder *d, const uint8_t *data, size_t length) {
-  // Deflate is zlib's format by its RFC, but some servers send it raw: a
-  // zlib stream starts with a header whose check holds.
   if (d->kind == CODING_DEFLATE && length >= 2) {
     d->raw = !((data[0] & 0x0F) == 8 && ((data[0] << 8) | data[1]) % 31 == 0);
   }
@@ -146,7 +135,7 @@ static int feed(Decoder *d, const uint8_t *data, size_t length) {
   if (!length) {
     return 1;
   }
-  if (d->ended) { // what follows the end of the data is dropped, as node does
+  if (d->ended) {
     return 1;
   }
   if (!d->started && !start_zlib(d, data, length)) {
@@ -162,7 +151,6 @@ static int feed(Decoder *d, const uint8_t *data, size_t length) {
     int r = inflate(&d->z, Z_NO_FLUSH);
     d->length += available - d->z.avail_out;
     if (r == Z_STREAM_END) {
-      // gzip may have several members, one after the other.
       if (d->kind == CODING_GZIP && d->z.avail_in >= 2 && d->z.next_in[0] == 0x1f &&
           d->z.next_in[1] == 0x8b) {
         inflateReset(&d->z);
@@ -191,7 +179,6 @@ static TzBytes *take(Decoder *d) {
   return b;
 }
 
-// `__tz_zlib_push(decoder, chunk)`: what the chunk decodes to.
 void *tz_zlib_push(void *decoder, void *chunk, TzMaker make) {
   (void)make;
   Decoder *d = (Decoder *)decoder;
@@ -203,8 +190,6 @@ void *tz_zlib_push(void *decoder, void *chunk, TzMaker make) {
   return take(d);
 }
 
-// `__tz_zlib_end(decoder)`: the rest, once the data has ended; an error if
-// it was cut off.
 void *tz_zlib_end(void *decoder, TzMaker make) {
   (void)make;
   Decoder *d = (Decoder *)decoder;

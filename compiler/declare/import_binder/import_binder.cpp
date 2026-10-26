@@ -21,14 +21,10 @@ void ImportBinder::resolveImports(Module *module) {
       checker_.resultTypes().importNeverthrow(module, decl);
       continue;
     }
-    // A built-in module written in tz (Module::builtin) is imported as any
-    // file is.
     if (isBuiltinModule(decl.path) && !decl.from) {
       checker_.builtinModuleChecker().importBuiltinModule(module, decl);
       continue;
     }
-    // `import events from "node:events"`, which the parser leaves to Checker
-    // for the modules built in.
     if (!decl.whole.empty() && decl.from && decl.from->builtin) {
       checker_.diags_.error(decl.wholeLoc,
                             std::string(decl.wholeIsDefault
@@ -42,7 +38,7 @@ void ImportBinder::resolveImports(Module *module) {
     }
     for (const ModuleName &name : decl.names) {
       if (!decl.from) {
-        here.badImports.insert(name.as); // the file is not loaded: reported
+        here.badImports.insert(name.as);
         continue;
       }
       std::optional<Checker::Binding> target =
@@ -70,7 +66,6 @@ void ImportBinder::resolveImports(Module *module) {
 
 void ImportBinder::bindImports() {
   Checker::ModuleState &here = checker_.state(checker_.module_);
-  // The classes of node:fs, as types and for `instanceof`.
   for (const auto &entry : here.nodeNames) {
     const Checker::NodeName &n = entry.getValue();
     ClassDecl *cls = n.module != NodeModule::Fs ? nullptr
@@ -88,7 +83,6 @@ void ImportBinder::bindImports() {
     llvm::StringRef alias = entry.getKey();
     const Checker::Binding &target = entry.getValue().target;
     Module *source = target.module;
-    // As a type.
     const llvm::StringMap<Stmt *> &types =
         source == checker_.module_ ? checker_.typeScopes_[0] : checker_.state(source).types;
     if (!checker_.typeScopes_[0].count(alias)) {
@@ -97,8 +91,6 @@ void ImportBinder::bindImports() {
         checker_.typeScopes_[0][alias] = type;
       }
     }
-    // As a value: a function or an enum, or a variable once the code of its
-    // file has declared it.
     const llvm::StringMap<Checker::ScopeEntry> &values =
         source == checker_.module_ ? checker_.scopes_[0] : checker_.state(source).values;
     if (checker_.scopes_[0].count(alias)) {
@@ -144,4 +136,4 @@ FunctionDecl *ImportBinder::cycleCallee(FunctionDecl *fn, llvm::StringRef name) 
   return found->second.func->decl;
 }
 
-} // namespace tz
+}

@@ -9,4 +9,4 @@ struct EmptyStmt : Stmt {
   static bool classof(const Stmt *s) { return s->kind() == Kind::Empty; }
 };
 
-} // namespace tz
+}

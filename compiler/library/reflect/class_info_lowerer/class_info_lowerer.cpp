@@ -24,13 +24,10 @@ namespace tz {
 
 namespace {
 
-// What a class is called in messages: its name, or what it extends.
 std::string className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
 
-// The constructors `new` of a class chooses from: its own, or those of the
-// nearest class up its chain that has any.
 std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (!c->constructors.empty()) {
@@ -41,12 +38,11 @@ std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
   return {};
 }
 
-} // namespace
+}
 
 ClassInfoLowerer::ClassInfoLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::StructType *ClassInfoLowerer::classInfoType() {
-  // TzClassInfo: { ptr construct, ptr from_json, ptr methods, i32 count }.
   if (!classInfoTy_) {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     classInfoTy_ = llvm::StructType::create(
@@ -59,9 +55,8 @@ llvm::StructType *ClassInfoLowerer::classInfoType() {
 llvm::Constant *ClassInfoLowerer::classInfoGlobal(const ClassDecl *cls) {
   llvm::GlobalVariable *&global = lowering_.classInfos_[cls];
   if (!global) {
-    // Filled at the end (finishReflection), once the program is emitted.
     global = new llvm::GlobalVariable(
-        *lowering_.module_, classInfoType(), /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, classInfoType(), true, llvm::GlobalValue::PrivateLinkage,
         llvm::Constant::getNullValue(classInfoType()),
         "tz.classinfo." + lowering_.symbolPrefixes_.lookup(cls) + className(cls));
   }
@@ -69,10 +64,6 @@ llvm::Constant *ClassInfoLowerer::classInfoGlobal(const ClassDecl *cls) {
   return global;
 }
 
-// (ptr args, i32 count) -> ptr: a new object of the class from arguments as
-// unknowns, through its constructor (a mismatch names the argument); of
-// several, through the variant the arguments fit best, as for a method
-// (docs/overloads.md, section 6). NULL after throwing.
 void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *fn) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   lowering_.functionBuilder().beginFunction(fn, nullptr);
@@ -90,7 +81,6 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
   llvm::BasicBlock *none = precise ? nullptr : lowering_.functionFrame().newBlock("reflect.none");
   llvm::BasicBlock *several =
       precise ? nullptr : lowering_.functionFrame().newBlock("reflect.several");
-  // A class without a constructor takes no arguments.
   std::vector<const FuncSymbol *> variants;
   for (FunctionDecl *ctor : ctors) {
     variants.push_back(ctor->sym);
@@ -98,7 +88,6 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
   if (variants.empty()) {
     variants.push_back(nullptr);
   }
-  // Of several, the one the arguments fit best.
   std::vector<llvm::BasicBlock *> starts;
   if (!precise) {
     std::vector<const FunctionDecl *> choices(ctors.begin(), ctors.end());
@@ -117,7 +106,7 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
     if (!precise) {
       lowering_.functionFrame().switchTo(starts[v]);
     }
-    llvm::BasicBlock *next = none; // which the choice rules out
+    llvm::BasicBlock *next = none;
     size_t min = sym ? sym->minArgs : 0;
     bool rest = sym && sym->hasRest;
     std::vector<const Type *> params = sym ? sym->params : std::vector<const Type *>();
@@ -125,7 +114,6 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
     if (rest) {
       params.pop_back();
     }
-    // How many it takes.
     llvm::Value *fits =
         lowering_.builder_.CreateICmpUGE(count, lowering_.builder_.getInt32(uint32_t(min)));
     if (!rest) {
@@ -191,15 +179,11 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
   lowering_.functionBuilder().finishFunction();
 }
 
-// The method as a function value that takes its `this`: `(env, this:
-// unknown, params...) -> R`, which checks that the `this` is an object of the
-// method's class (TypeError otherwise) and calls the method with it. The
-// callee owns its `this`, as a function with a `this` parameter does.
 llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, const Type *&type) {
   const FuncSymbol *sym = fn->sym;
   std::vector<const Type *> params{Type::unknown()};
   params.insert(params.end(), sym->params.begin(), sym->params.end());
-  type = Type::function(params, sym->minArgs + 1, sym->hasRest, sym->ret, /*hasThis=*/true);
+  type = Type::function(params, sym->minArgs + 1, sym->hasRest, sym->ret, true);
   if (llvm::Constant *found = reflectAdapters_.lookup(fn)) {
     return found;
   }
@@ -213,7 +197,7 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
       lowering_.fnInfoTy_, {adapter, lowering_.stringLowerer().stringLiteral(
                                          std::u16string(fn->name.begin(), fn->name.end()))});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
+      new llvm::GlobalVariable(*lowering_.module_, lowering_.fnInfoTy_, true,
                                llvm::GlobalValue::PrivateLinkage, info, name + ".reflect.info");
   reflectAdapters_[fn] = global;
 
@@ -265,7 +249,7 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
   finish(ret->isVoid() ? nullptr
                        : llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(ret)));
   lowering_.builder_.SetInsertPoint(callBlock);
-  std::vector<llvm::Value *> args{self}; // borrowed, as a method takes its object
+  std::vector<llvm::Value *> args{self};
   for (unsigned i = 2; i < adapter->arg_size(); ++i) {
     args.push_back(adapter->getArg(i));
   }
@@ -307,4 +291,4 @@ std::vector<const FunctionDecl *> ClassInfoLowerer::reflectVariants(const ClassD
   return found;
 }
 
-} // namespace tz
+}

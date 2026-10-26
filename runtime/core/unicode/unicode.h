@@ -1,5 +1,3 @@
-// Unicode: case mapping, and the spaces of JavaScript.
-
 #ifndef TZ_UNICODE_H
 #define TZ_UNICODE_H
 

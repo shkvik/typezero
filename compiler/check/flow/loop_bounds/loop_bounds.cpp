@@ -17,14 +17,12 @@ constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
 
 constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 
-// Larger constants are not tracked, which keeps all offsets small.
 constexpr uint64_t kMaxConstant = uint64_t(1) << 40;
 
 bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional()->isArray(); }
 
-} // namespace
+}
 
-// `var` or `var + k` with a constant k >= 0: returns k.
 static std::optional<int64_t>
 varPlus(const Expr *expr, const VarSymbol *var,
         llvm::function_ref<const VarSymbol *(llvm::StringRef)> lookupVar) {
@@ -77,7 +75,6 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   if (auto *member = dyn_cast<MemberExpr>(expr)) {
     auto *name = dyn_cast<NameExpr>(member->object);
     const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
-    // The bytes of binary data, which no buffer has more of than a length.
     if (member->name == "byteLength" && var && var->type->isBytes()) {
       return std::pair{int64_t(0), kMaxLength};
     }
@@ -93,7 +90,6 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
     return std::nullopt;
   }
   if (auto *bin = dyn_cast<BinaryExpr>(expr)) {
-    // `a.length - k`
     auto *lit = dyn_cast<IntLitExpr>(bin->rhs);
     if (bin->op != BinaryOp::Sub || !isa<MemberExpr>(bin->lhs) || !lit ||
         lit->value > kMaxConstant) {
@@ -110,9 +106,6 @@ std::optional<std::pair<int64_t, int64_t>> LoopBounds::syntacticIntRange(const E
   return std::nullopt;
 }
 
-// Whether `expr` stays <= limit (or >= limit) while the loop runs: by its
-// form, or as an int variable the loop does not change, from the facts known
-// on entry.
 bool LoopBounds::boundedAbove(const Expr *expr, int64_t limit,
                               const Checker::LoopScan &scan) const {
   if (std::optional<std::pair<int64_t, int64_t>> range = syntacticIntRange(expr)) {
@@ -141,14 +134,6 @@ bool LoopBounds::boundedBelow(const Expr *expr, int64_t limit,
          checker_.flow_.facts.proves(Term::zero(), Term::of(var), 1 - limit);
 }
 
-// Whether an `&&`-joined part of `cond` keeps `var + k` low enough while the
-// loop runs (`var + k < E` with E small enough) that `var += step` cannot
-// wrap around. Returns k.
-//
-// If var <= INT_MAX - k holds at the head, `var + k` does not wrap, so the
-// condition means var <= E - 1 - k, and after the step var <= E - 1 - k +
-// step, which stays <= INT_MAX - k when E <= INT_MAX + 1 - step. With `<=`
-// the bound is one lower.
 std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSymbol *var,
                                                    const Checker::LoopScan &scan,
                                                    int64_t step) const {
@@ -197,8 +182,6 @@ std::optional<int64_t> LoopBounds::condBoundsAbove(const Expr *cond, const VarSy
   return std::nullopt;
 }
 
-// The same for `var -= step`: `var > E` or `var >= E` keeps var - step at or
-// above INT_MIN.
 bool LoopBounds::condBoundsBelow(const Expr *cond, const VarSymbol *var,
                                  const Checker::LoopScan &scan, int64_t step) const {
   auto *bin = llvm::dyn_cast_or_null<BinaryExpr>(cond);
@@ -236,14 +219,6 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
     const Checker::LoopScan::Change &change = entry.second;
     const VarSymbol *var = checker_.scopes().lookup(name).var;
 
-    // An induction variable that only grows by a constant step per
-    // iteration, while the condition keeps it from wrapping around, keeps its
-    // lower bounds (`i >= 0`); one that only shrinks keeps its upper bounds
-    // (`i < a.length`).
-    //
-    // With a condition `i + k < E`, i stays <= INT_MAX - k if it starts so:
-    // then `i + k` never wraps around, and the condition keeps i + 1 below
-    // that bound. Checker records that invariant too.
     bool keepLower = false, keepUpper = false;
     std::optional<int64_t> invariant;
     if (induction && var && var->type->isInt() && change.count == 1 && !change.nested) {
@@ -282,7 +257,6 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
         head.defined.erase(defined);
       }
     }
-    // What a check or an assignment before the loop narrowed it to.
     llvm::erase_if(head.narrowed,
                    [&](const auto &narrowed) { return narrowed.first->name == name; });
     for (auto *results : {&head.okResults, &head.errResults}) {
@@ -314,4 +288,4 @@ Checker::Flow LoopBounds::loopHead(const Checker::LoopScan &scan, const Expr *co
   return head;
 }
 
-} // namespace tz
+}

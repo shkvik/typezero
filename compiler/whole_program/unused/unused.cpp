@@ -11,8 +11,6 @@ namespace tz {
 
 Unused::Unused(Checker &checker) : checker_(checker) {}
 
-// The entry file is compiled whole; of the files it imports, only the
-// functions the program reaches.
 void Unused::findUnused(SourceFile &program) {
   if (program.modules.size() < 2) {
     return;
@@ -53,4 +51,4 @@ void Unused::findUnused(SourceFile &program) {
   }
 }
 
-} // namespace tz
+}

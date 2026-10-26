@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// switch.
 class SwitchChecker {
 public:
   explicit SwitchChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

@@ -38,4 +38,4 @@ Result<ObjectFile, Errors> EmitPass::run(llvm::Module &module) const {
   return ok(std::move(object));
 }
 
-} // namespace tz
+}

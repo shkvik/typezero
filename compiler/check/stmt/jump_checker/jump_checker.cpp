@@ -78,7 +78,7 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
     body = labeled->body;
   }
   if (isLoop(body) || isa<SwitchStmt>(body)) {
-    checker_.pendingLabels_ = labels; // for the loop or switch to take
+    checker_.pendingLabels_ = labels;
     checker_.stmtChecker().checkStmt(body);
     return;
   }
@@ -87,7 +87,6 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
     checker_.diags_.error(body->loc(), "a declaration cannot have a label");
     return;
   }
-  // `label: { ... break label; ... }`
   checker_.pendingLabels_ = labels;
   pushTarget(Checker::JumpTarget::Kind::Block);
   checker_.stmtChecker().checkStmt(body);
@@ -96,4 +95,4 @@ void JumpChecker::checkLabeled(LabeledStmt *stmt) {
   checker_.flow_ = FlowChecker::join(checker_.flow_, breaks);
 }
 
-} // namespace tz
+}

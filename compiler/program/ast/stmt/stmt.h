@@ -42,4 +42,4 @@ private:
   llvm::SMLoc loc_;
 };
 
-} // namespace tz
+}

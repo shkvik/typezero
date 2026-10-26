@@ -20,8 +20,6 @@ namespace tz {
 
 namespace {
 
-// The classes of errors built into JavaScript; tz has Error, TypeError,
-// RangeError, SyntaxError and URIError of them (see sema_error.cpp).
 bool isErrorClass(llvm::StringRef name) {
   static const char *const names[] = {"Error",       "TypeError",      "RangeError",
                                       "SyntaxError", "ReferenceError", "EvalError",
@@ -36,15 +34,12 @@ const char *accessName(Access access) {
                                        : "private";
 }
 
-} // namespace
+}
 
 ClassBases::ClassBases(Checker &checker) : checker_(checker) {}
 
 void ClassBases::addBase(const Type *type, const Type *base) {
   const_cast<Type *>(type)->addBase(base);
-  // Lowering lays out the types of the code it emits: not those of a copy
-  // checked to infer a type, nor of a generic body (its instances have their
-  // own).
   bool emitted = !checker_.trial_ && llvm::none_of(checker_.functions_, [](const FunctionDecl *fn) {
     return !fn->typeParams.empty() && !fn->isInstance;
   });
@@ -61,8 +56,6 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     Stmt *found = named ? checker_.typeDeclarer().lookupType(ref.name) : nullptr;
     auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
     bool instance = false;
-    // `extends EventEmitter` without a map: the one found from the emits of
-    // the program (sema_events.cpp).
     if (parent && parent->library && parent->name == "EventEmitter" &&
         ref.kind == TypeRef::Kind::Name) {
       const Type *events = checker_.eventMapInference().inferredEventMap(
@@ -79,7 +72,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
         found = nullptr;
       }
     } else if (parent && (parent->isGeneric() || ref.kind == TypeRef::Kind::Generic)) {
-      const Type *type = checker_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+      const Type *type = checker_.typeResolver().resolveType(ref, false);
       parent = ClassDeclarer::classOf(type);
       instance = true;
       if (!parent) {
@@ -89,7 +82,6 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     if (!named) {
       checker_.diags_.error(ref.loc, "a class can extend only a class, by its name");
     } else if (instance && !parent) {
-      // An error in the type arguments, reported.
     } else if (parent && (parent == cls || parent->resolvingBase)) {
       checker_.diags_.error(
           ref.loc, "class '" + cls->name + "' cannot extend itself" +
@@ -101,15 +93,12 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
                        (parent == checker_.execSyncErrorClass_ ? "node:child_process" : "node:fs") +
                        " make its objects" + (derivesFromError(parent) ? "; extend Error" : ""));
     } else if (parent && parent->baseExpr && !parent->resolved) {
-      // Its fields are known only where its declaration runs.
       checker_.diags_.error(ref.loc,
                             "class '" + cls->name + "' cannot extend '" + parent->name +
                                 "', whose base is a value, made where its declaration runs; "
                                 "write it as an expression there: 'const " +
                                 cls->name + " = class extends " + parent->name + " { ... }'");
     } else if (parent) {
-      // In its own file, where the names it uses mean what they mean there,
-      // and without the type parameters of this class.
       std::vector<llvm::StringMap<Stmt *>> outer = checker_.typeScopes_;
       checker_.typeScopes_.resize(1);
       if (Module *home = checker_.declModules_.lookup(parent);
@@ -145,7 +134,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     }
   }
   for (const TypeRef &ref : cls->interfaces) {
-    const Type *type = checker_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+    const Type *type = checker_.typeResolver().resolveType(ref, false);
     if (type->isError()) {
       continue;
     }
@@ -169,16 +158,12 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
   }
   cls->resolvingBase = false;
 
-  // A field declared up the chain already: this declaration gives it another
-  // initial value, and its type must stay (checked in completeClass).
   for (ClassField &f : cls->fields) {
     if (f.isStatic) {
       continue;
     }
     const ClassDecl *owner = nullptr;
     const ClassField *inherited = cls->parent ? findField(cls->parent, f.name, &owner) : nullptr;
-    // An arrow in a field that is a method up the chain: this one overrides it
-    // (see linkOverrides).
     if (inherited && inherited->method) {
       continue;
     }
@@ -203,8 +188,6 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
                                        " in '" + owner->name + "', so it cannot be " +
                                        accessName(f.access) + " in '" + cls->name + "'");
     }
-    // Without a value, JavaScript defines the field again as undefined
-    // once the constructor up the chain has set it.
     if (!f.init && !f.parameter) {
       checker_.diags_.error(f.loc,
                             "'" + f.name + "' is a field of '" + owner->name +
@@ -220,7 +203,7 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                                                std::vector<const Type *> &bases,
                                                std::vector<Overload> &overloads) {
   std::vector<Field> fields;
-  std::vector<std::string> origins; // the interface each field comes from
+  std::vector<std::string> origins;
   for (const TypeRef &ref : alias->bases) {
     Stmt *found =
         ref.kind == TypeRef::Kind::Name ? checker_.typeDeclarer().lookupType(ref.name) : nullptr;
@@ -231,7 +214,7 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                        (other == alias ? std::string() : " through '" + other->name.str() + "'"));
       continue;
     }
-    const Type *base = checker_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+    const Type *base = checker_.typeResolver().resolveType(ref, false);
     if (base->isError()) {
       continue;
     }
@@ -261,8 +244,6 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                                            "' from two interfaces with different signatures");
       }
     }
-    // By the name written: one with the same fields is the same type, which
-    // has the name of the first.
     std::string baseName = ref.name.str();
     for (const Field &f : base->fields()) {
       auto it = llvm::find_if(fields, [&](const Field &g) { return g.name == f.name; });
@@ -275,8 +256,6 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
                                            "' as '" + it->type->name() + "' and from '" + baseName +
                                            "' as '" + f.type->name() + "'; a field has one type");
       } else {
-        // Read-only only if both say so: code that sees the object as the
-        // other one may change it.
         it->readonly = it->readonly && f.readonly;
       }
     }
@@ -317,9 +296,6 @@ std::vector<Field> ClassBases::interfaceFields(TypeAliasDecl *alias,
       continue;
     }
     const std::string &origin = origins[size_t(it - fields.begin())];
-    // An interface may narrow a field of one it extends to a type of the same
-    // references, or make it read-only; code that writes through the wider
-    // one is found by the check of the whole program (sema_widen.cpp).
     if (it->type != f.type && !f.type->isError() && !it->type->isError() &&
         !WideWrites::sameReference(f.type, it->type)) {
       checker_.diags_.error(
@@ -352,4 +328,4 @@ const ClassField *ClassBases::findField(const ClassDecl *cls, llvm::StringRef na
   return nullptr;
 }
 
-} // namespace tz
+}

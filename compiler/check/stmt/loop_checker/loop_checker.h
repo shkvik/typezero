@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// while, do while, for and for...of.
 class LoopChecker {
 public:
   explicit LoopChecker(Checker &checker);
@@ -19,4 +18,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

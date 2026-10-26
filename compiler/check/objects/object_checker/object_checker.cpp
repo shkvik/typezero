@@ -25,8 +25,6 @@ namespace tz {
 
 namespace {
 
-// Whether an instance of the class has keys that are methods: a literal's
-// methods, or arrows in fields of classes up the chain.
 bool hasMethodFields(const ClassDecl *cls) {
   if (cls->literal) {
     return true;
@@ -40,8 +38,6 @@ bool hasMethodFields(const ClassDecl *cls) {
   return false;
 }
 
-// What JavaScript objects get from Object.prototype, which tz objects do not
-// have.
 bool isInherited(llvm::StringRef name) {
   static const char *const names[] = {"toString",      "valueOf",        "hasOwnProperty",
                                       "isPrototypeOf", "toLocaleString", "propertyIsEnumerable",
@@ -60,7 +56,7 @@ std::string noField(const Type *type, llvm::StringRef name) {
   return message;
 }
 
-} // namespace
+}
 
 std::string fieldText(const Expr *object, llvm::StringRef field) {
   std::string text = "o";
@@ -76,8 +72,6 @@ std::string fieldText(const Expr *object, llvm::StringRef field) {
 
 ObjectChecker::ObjectChecker(Checker &checker) : checker_(checker) {}
 
-// The fields that hold a value, in the order the object got them, as the
-// object prints (see TzLayout in runtime/core/tzrt/tzrt.h).
 Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   llvm::StringRef fn = member->name;
   call->type = Type::error();
@@ -87,7 +81,7 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     }
   };
   if (fn == "groupBy") {
-    return checker_.dictMethods().checkGroupBy(call, member, /*map=*/false);
+    return checker_.dictMethods().checkGroupBy(call, member, false);
   }
   if (fn == "fromEntries") {
     return checker_.dictMethods().checkFromEntries(call, member, expected);
@@ -110,7 +104,6 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   if (type->isError()) {
     return call;
   }
-  // The keys of a Json, as JavaScript gives them for any value.
   if (type->nonOptional()->isJson()) {
     call->builtin = fn == "keys"     ? Builtin::ObjectKeys
                     : fn == "values" ? Builtin::ObjectValues
@@ -141,8 +134,6 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
     checker_.classDeclarer().completeClass(cls);
-    // Its first keys are node's _events and the others (sema_events.cpp),
-    // which the program cannot read.
     if (checker_.eventMaps().isEmitterClass(cls)) {
       checker_.diags_.error(arg->loc(),
                             "'Object." + fn +
@@ -158,10 +149,6 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
       return call;
     }
   }
-  // One array holds the values, of the union of the types of the fields
-  // (docs/objects.md, section 10). A field that does not hold a value is
-  // left out, so `limit?: int` gives an int. The object may be of a type
-  // down the declared chain, whose fields count too.
   const Type *element = nullptr;
   std::vector<std::pair<const Type *, const Field *>> fields;
   for (const Field &f : type->fields()) {
@@ -181,7 +168,7 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   for (auto [t0, field] : fields) {
     const Field &f = *field;
     if (t0->isClass() && llvm::StringRef(f.name).starts_with("#")) {
-      continue; // not a key in JavaScript
+      continue;
     }
     const Type *t = f.type->nonOptional();
     const Type *both = element ? Type::unionOf({element, t}) : t;
@@ -212,16 +199,11 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   return call;
 }
 
-// `for (const k in o)` walks Object.keys(o). Over an array JavaScript gives
-// the indices as strings, which is a trap: `i + 1` is "01".
 void ObjectChecker::checkForIn(ForOfStmt *stmt) {
-  // A variable, or process.env, which can be read again in the body.
   auto *variable = dyn_cast<NameExpr>(stmt->iterable);
   bool env = checker_.processChecker().isProcessMember(stmt->iterable, "env");
   Expr *object = checker_.exprChecker().checkExpr(stmt->iterable);
   const Type *type = object->type;
-  // As V8 does, a key deleted while the loop runs is not visited: the body
-  // starts with `if (!(k in r)) continue`.
   if (type->isRecord() && (variable || env) && !isa<VarDeclStmt>(stmt->body) &&
       !isa<FunctionDecl>(stmt->body)) {
     llvm::SMLoc loc = stmt->body->loc();
@@ -259,7 +241,7 @@ void ObjectChecker::checkForIn(ForOfStmt *stmt) {
     checker_.diags_.error(object->loc(),
                           "the object may be undefined; check it before walking its keys");
   } else if (type->nonOptional()->isJson()) {
-    ok = true; // the keys of a Json object (see checkObjectCall)
+    ok = true;
   } else if (type->isRecord()) {
     ok = true;
   } else if (type->isDict()) {
@@ -314,7 +296,6 @@ Expr *ObjectChecker::checkField(MemberExpr *member) {
   return member;
 }
 
-// `o.f(x)` calls the function in the field f, or a method of an interface.
 Expr *ObjectChecker::checkFieldCall(CallExpr *call, MemberExpr *member) {
   if (member->object->type->overload(member->name)) {
     return checker_.overloadResolver().checkOverloadCall(call, member);
@@ -393,7 +374,6 @@ std::string ObjectChecker::objectMismatch(const Type *from, const Type *to, bool
       std::string message = ("; field '" + f.name + "' is '" + f.type->name() + "' here and '" +
                              t->type->name() + "' in '" + to->name() + "'")
                                 .str();
-      // `const p = { x: 1 }` made x an int where a double is wanted.
       if (!conflict && f.type->nonOptional()->isNumeric() && t->type->nonOptional()->isNumeric()) {
         message +=
             ": give the object its type where it is created, e.g. 'const p: " + to->name().str() +
@@ -410,4 +390,4 @@ std::string ObjectChecker::objectMismatch(const Type *from, const Type *to, bool
   return "";
 }
 
-} // namespace tz
+}

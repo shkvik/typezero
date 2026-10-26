@@ -223,10 +223,6 @@ void Lowering::setParallelPlan(const ParallelPlan *plan) {
   if (!parallel_) {
     return;
   }
-  // A piece of code from an await on runs ahead of its turn when it may run
-  // at the same time as others in any task (the code of a function is one
-  // for all its tasks); the places where it touches what keeps node's order
-  // wait for the turn.
   for (const ParallelPlan::Piece &piece : plan->pieces) {
     if (piece.alone) {
       continue;
@@ -257,4 +253,4 @@ void Lowering::emitThrowCheckIf(bool throws) {
 }
 
 Lowering::~Lowering() = default;
-} // namespace tz
+}

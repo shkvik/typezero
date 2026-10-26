@@ -30,10 +30,8 @@ PrimaryParser::PrimaryParser(Parser &parser) : parser_(parser) {}
 
 Expr *PrimaryParser::parsePrimary() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  // `in` is an operator again inside brackets, even in a loop header.
   llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
   if (parser_.tok_.is(Tok::At)) {
-    // `{ @Log m() {} }`, `@Log function () {}`: what follows is still parsed.
     parser_.classes().rejectDecorators(parser_.classes().parseDecorators());
     if (parser_.recovering_) {
       return parser_.ctx_.make<IntLitExpr>(loc, 0);
@@ -56,8 +54,6 @@ Expr *PrimaryParser::parsePrimary() {
     return parser_.templates().parseTemplate();
   case Tok::Slash:
   case Tok::SlashAssign: {
-    // An expression starts here, so `/` starts a regex literal, which the
-    // lexer reads again from there (it took the `/` for division).
     if (parser_.hasPeeked_) {
       parser_.lexer_.restore(parser_.peekState_);
       parser_.hasPeeked_ = false;
@@ -78,8 +74,6 @@ Expr *PrimaryParser::parsePrimary() {
   }
   case Tok::Identifier: {
     if (parser_.tok_.text == "import") {
-      // `import("./x")` and `import.meta`: what follows parses as a call or
-      // a member of a placeholder.
       parser_.cursor().report(
           loc, parser_.cursor().peek().is(Tok::Dot)
                    ? "'import.meta' is not supported"
@@ -90,7 +84,7 @@ Expr *PrimaryParser::parsePrimary() {
       return parser_.ctx_.make<IntLitExpr>(loc, 0);
     }
     if (parser_.cursor().peek().is(Tok::Arrow) && !parser_.cursor().peek().newlineBefore) {
-      return parser_.functions().parseArrow(); // `x => ...`
+      return parser_.functions().parseArrow();
     }
     if (parser_.tok_.text == "async") {
       if (Expr *fn = parser_.functions().tryAsyncFunction()) {
@@ -99,13 +93,10 @@ Expr *PrimaryParser::parsePrimary() {
     }
     if (parser_.tok_.text == "class" &&
         (parser_.cursor().peek().is(Tok::Identifier) || parser_.cursor().peek().is(Tok::LBrace))) {
-      // `const C = class { ... }`, `return class extends Base { ... }`.
-      ClassDecl *cls = parser_.classes().parseClass(/*expression=*/true);
+      ClassDecl *cls = parser_.classes().parseClass(true);
       return parser_.ctx_.make<ClassExpr>(loc, cls);
     }
     if (parser_.tok_.text == "yield" && parser_.inGenerator_) {
-      // `1 + yield x` is an error in JavaScript: the operand must be in
-      // parentheses.
       parser_.cursor().report(loc, "'yield' must be in parentheses here, e.g. '1 + (yield x)'");
       return parser_.exprs().parseYield();
     }
@@ -117,7 +108,7 @@ Expr *PrimaryParser::parsePrimary() {
     return parser_.ctx_.make<NameExpr>(loc, name);
   }
   case Tok::KwFunction: {
-    FunctionDecl *fn = parser_.functions().parseFunction(/*expression=*/true);
+    FunctionDecl *fn = parser_.functions().parseFunction(true);
     return parser_.ctx_.make<FunctionExpr>(loc, fn);
   }
   case Tok::LParen: {
@@ -136,7 +127,6 @@ Expr *PrimaryParser::parsePrimary() {
   case Tok::KwNew:
     return parser_.calls().parseNew();
   case Tok::Less: {
-    // `<T>(x: T) => x`, a generic arrow.
     Parser::Snapshot start = parser_.cursor().snapshot();
     const char *text = parser_.tok_.text.data();
     bool muted = parser_.diags_.setMuted(true);
@@ -156,20 +146,16 @@ Expr *PrimaryParser::parsePrimary() {
   default:
     parser_.cursor().error(loc, llvm::Twine("expected an expression, found ") +
                                     tokSpelling(parser_.tok_.kind));
-    // Placeholder so callers never see null; the source will not compile anyway.
     return parser_.ctx_.make<IntLitExpr>(loc, 0);
   }
 }
 
 Expr *PrimaryParser::parseArrayLiteral() {
   auto *lit = parser_.ctx_.make<ArrayLitExpr>(parser_.tok_.loc());
-  parser_.cursor().advance(); // '['
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
     if (parser_.tok_.is(Tok::Comma)) {
-      // A hole: an error, unless the literal turns out to be a pattern, as in
-      // `[, b] = pair`.
-      lit->elements.push_back(
-          {parser_.ctx_.make<UndefinedExpr>(parser_.tok_.loc()), false, /*hole=*/true});
+      lit->elements.push_back({parser_.ctx_.make<UndefinedExpr>(parser_.tok_.loc()), false, true});
       parser_.cursor().advance();
       continue;
     }
@@ -184,12 +170,10 @@ Expr *PrimaryParser::parseArrayLiteral() {
   return lit;
 }
 
-// `{ x: 1, y }`
 Expr *PrimaryParser::parseObjectLiteral() {
   auto *lit = parser_.ctx_.make<ObjectLitExpr>(parser_.tok_.loc());
-  parser_.cursor().advance(); // '{'
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
-    // `{ @Log m() {} }`: what follows is still parsed.
     if (parser_.tok_.is(Tok::At)) {
       parser_.classes().rejectDecorators(parser_.classes().parseDecorators());
       if (parser_.recovering_) {
@@ -198,7 +182,6 @@ Expr *PrimaryParser::parseObjectLiteral() {
     }
     llvm::SMLoc loc = parser_.tok_.loc();
     if (parser_.cursor().accept(Tok::Ellipsis)) {
-      // `{ ...o }` copies the fields of o.
       ObjectLitExpr::Property spread;
       spread.loc = loc;
       spread.value = parser_.exprs().parseExpr();
@@ -210,12 +193,10 @@ Expr *PrimaryParser::parseObjectLiteral() {
       continue;
     }
     if (!parser_.classes().symbolKeyAhead() && parser_.cursor().accept(Tok::LBracket)) {
-      // `[key]: value`, where the key must be a constant (see Checker).
       ObjectLitExpr::Property prop;
       prop.loc = loc;
       prop.key = parser_.exprs().parseExpr();
       parser_.cursor().expect(Tok::RBracket, "to close the key");
-      // The field it names, if the key is known by now (see fieldNames).
       if (auto *name = dyn_cast<NameExpr>(prop.key)) {
         for (const std::string &text : parser_.stringConstants_.lookup(name->name)) {
           parser_.fieldNames_.insert(text);
@@ -240,7 +221,6 @@ Expr *PrimaryParser::parseObjectLiteral() {
       }
       continue;
     }
-    // `get x() {}`, `set x(v) {}`, `async f() {}`
     bool accessor =
         parser_.tok_.is(Tok::Identifier) &&
         (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
@@ -253,7 +233,6 @@ Expr *PrimaryParser::parseObjectLiteral() {
       parser_.cursor().skipToClosingBrace();
       return lit;
     }
-    // `async f() {}`
     bool isAsync =
         parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "async" &&
         !parser_.cursor().peek().is(Tok::Colon) && !parser_.cursor().peek().is(Tok::Comma) &&
@@ -263,7 +242,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
       parser_.cursor().advance();
     }
     const char *start = parser_.tok_.text.data();
-    bool generator = parser_.cursor().accept(Tok::Star); // `*items() { yield ... }`
+    bool generator = parser_.cursor().accept(Tok::Star);
     bool identifier = parser_.tok_.is(Tok::Identifier);
     llvm::StringRef name;
     if (!parser_.objectTypes().parseFieldName(name)) {
@@ -273,7 +252,6 @@ Expr *PrimaryParser::parseObjectLiteral() {
     Expr *value = nullptr;
     bool defaulted = false, method = false;
     if (parser_.tok_.is(Tok::LParen) || parser_.tok_.is(Tok::Less)) {
-      // `f() { ... }`: a method, which sees the object as `this`.
       auto *fn = parser_.ctx_.make<FunctionDecl>(loc, name);
       fn->isExpression = true;
       fn->isGenerator = generator;
@@ -298,12 +276,9 @@ Expr *PrimaryParser::parseObjectLiteral() {
     } else if (parser_.cursor().accept(Tok::Colon)) {
       value = parser_.exprs().parseExpr();
     } else if (identifier && (parser_.tok_.is(Tok::Comma) || parser_.tok_.is(Tok::RBrace))) {
-      // `{ x }` is `{ x: x }`.
       value = name == "undefined" ? static_cast<Expr *>(parser_.ctx_.make<UndefinedExpr>(loc))
                                   : parser_.ctx_.make<NameExpr>(loc, name);
     } else if (identifier && parser_.tok_.is(Tok::Assign)) {
-      // `{ x = 1 }`: a default value, which only a destructuring pattern
-      // such as `({ x = 1 } = o)` may have (Checker reports it otherwise).
       llvm::SMLoc assignLoc = parser_.tok_.loc();
       parser_.cursor().advance();
       value = parser_.ctx_.make<AssignExpr>(assignLoc, std::nullopt,
@@ -371,7 +346,7 @@ Expr *PrimaryParser::parseIntLiteral() {
   uint64_t value = 0;
   if (!text.getAsInteger(radix, value)) {
     auto *lit = parser_.ctx_.make<IntLitExpr>(loc, value);
-    lit->text = source; // a decimal reads its value from the text
+    lit->text = source;
     return lit;
   }
   for (char c : text) {
@@ -381,15 +356,14 @@ Expr *PrimaryParser::parseIntLiteral() {
       return parser_.ctx_.make<IntLitExpr>(loc, 0);
     }
   }
-  // Beyond 64 bits: the nearest double, as in JavaScript.
   double rounded = 0;
   if (radix == 10) {
     text.getAsDouble(rounded);
   } else {
     unsigned bits = static_cast<unsigned>(text.size()) * (radix == 16 ? 4 : radix == 8 ? 3 : 1);
     llvm::APFloat number(llvm::APFloat::IEEEdouble());
-    number.convertFromAPInt(llvm::APInt(bits, text, static_cast<uint8_t>(radix)),
-                            /*IsSigned=*/false, llvm::APFloat::rmNearestTiesToEven);
+    number.convertFromAPInt(llvm::APInt(bits, text, static_cast<uint8_t>(radix)), false,
+                            llvm::APFloat::rmNearestTiesToEven);
     rounded = number.convertToDouble();
   }
   auto *lit = parser_.ctx_.make<FloatLitExpr>(loc, rounded);
@@ -419,4 +393,4 @@ Expr *PrimaryParser::parseFloatLiteral() {
   return lit;
 }
 
-} // namespace tz
+}

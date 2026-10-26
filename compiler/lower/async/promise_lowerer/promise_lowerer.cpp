@@ -30,12 +30,11 @@ namespace tz {
 
 namespace {
 
-// Must match runtime/core/tzrt/tzrt.h.
-constexpr uint64_t kPromiseHeader = 48; // TZ_PROMISE_VALUE
+constexpr uint64_t kPromiseHeader = 48;
 
-constexpr uint32_t kLayoutPromise = 131072; // TZ_LAYOUT_PROMISE
+constexpr uint32_t kLayoutPromise = 131072;
 
-} // namespace
+}
 
 PromiseLowerer::PromiseLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -64,8 +63,7 @@ llvm::Constant *PromiseLowerer::promiseLayout(const Type *value) {
   uint32_t count = 0;
   if (promiseValueSize(value)) {
     auto *field = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.fieldDescTy_, /*isConstant=*/true,
-        llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, lowering_.fieldDescTy_, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(lowering_.fieldDescTy_,
                                   {lowering_.stringLowerer().utf8Constant(""),
                                    lowering_.builder_.getInt32(0),
@@ -80,12 +78,9 @@ llvm::Constant *PromiseLowerer::promiseLayout(const Type *value) {
       lowering_.asyncLowerer()
           .asyncFunction("tz_promise_drop", lowering_.builder_.getVoidTy(), {ptr})
           .getCallee());
-  // TZ_LAYOUT_GROUP: its promises are members of groups
-  // (runtime/core/async/async.c).
   uint32_t flags = kLayoutPromise | (lowering_.memory().promiseIsMember(value) ? 0x80000000u : 0u);
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.layoutDescTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.layoutDescTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.layoutDescTy_,
                                 {drop, fields, lowering_.builder_.getInt32(count),
                                  lowering_.builder_.getInt32(flags),
@@ -139,8 +134,6 @@ llvm::Value *PromiseLowerer::promiseField(llvm::Value *promise, unsigned field) 
   return lowering_.builder_.CreateStructGEP(lowering_.promiseObjTy_, promise, field);
 }
 
-// void (ptr promise, T value): `resolve` of `new Promise`, whose environment
-// is the promise. Only the first of resolve and reject counts.
 llvm::Constant *PromiseLowerer::resolverInfo(const Type *value) {
   llvm::Constant *&info = lowering_.resolverInfos_[value];
   if (info) {
@@ -179,8 +172,7 @@ llvm::Constant *PromiseLowerer::resolverInfo(const Type *value) {
   lowering_.function_ = outer;
   lowering_.builder_.restoreIP(point);
   info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.resolve");
@@ -188,7 +180,6 @@ llvm::Constant *PromiseLowerer::resolverInfo(const Type *value) {
   return info;
 }
 
-// void (ptr promise, ptr error): `reject`.
 llvm::Constant *PromiseLowerer::rejecterInfo() {
   if (rejecterInfo_) {
     return rejecterInfo_;
@@ -219,8 +210,7 @@ llvm::Constant *PromiseLowerer::rejecterInfo() {
   lowering_.function_ = outer;
   lowering_.builder_.restoreIP(point);
   rejecterInfo_ = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.reject");
@@ -228,8 +218,6 @@ llvm::Constant *PromiseLowerer::rejecterInfo() {
   return rejecterInfo_;
 }
 
-// The executor runs now with the two functions; an error it throws rejects
-// the promise, unless it is settled already.
 llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
   const Type *value = call->type->promised();
   Expr *executorExpr = call->args[0];
@@ -237,14 +225,11 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
   llvm::Value *executor = lowering_.exprLowerer().emitExpr(executorExpr);
   llvm::Value *promise = newPromise(value);
   std::vector<llvm::Value *> args;
-  // The promise may be a member of a group (promiseIsMember): counted as
-  // one.
   for (int i = 0; i < 2; ++i) {
     lowering_.builder_.CreateCall(lowering_.objRetainFn_, {promise});
     args.push_back(lowering_.closureLowerer().makeFunctionValue(
         i == 0 ? resolverInfo(value) : rejecterInfo(), promise));
   }
-  // An executor that names fewer parameters gets fewer.
   size_t takes = std::min<size_t>(fnType->params().size(), 2);
   for (size_t i = takes; i < args.size(); ++i) {
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {promise});
@@ -266,7 +251,6 @@ llvm::Value *PromiseLowerer::emitPromiseNew(CallExpr *call) {
     lowering_.functionFrame().switchTo(rejectBlock);
     lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                    lowering_.throwLowerer().thrownSlot());
-    // As reject does: nothing once the promise is settled.
     llvm::Value *locked = lowering_.builder_.CreateCall(
         lowering_.asyncLowerer().asyncFunction("tz_promise_lock", lowering_.builder_.getInt32Ty(),
                                                {lowering_.builder_.getPtrTy()}),
@@ -294,7 +278,7 @@ llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::PromiseResolve: {
     if (!call->args.empty() && call->args[0]->type->isPromise()) {
-      return lowering_.exprLowerer().emitExpr(call->args[0]); // that very promise
+      return lowering_.exprLowerer().emitExpr(call->args[0]);
     }
     llvm::Value *value = nullptr;
     if (!call->args.empty()) {
@@ -341,4 +325,4 @@ llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

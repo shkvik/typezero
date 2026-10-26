@@ -32,4 +32,4 @@ llvm::StringRef withoutParens(llvm::StringRef text) {
   return text;
 }
 
-} // namespace tz
+}

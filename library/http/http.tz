@@ -1,21 +1,3 @@
-// tz:http (docs/net.md, section 1): `serve(options, handler)`, a server of
-// HTTP/1.1 whose handler gets a Request and gives a Response, as in Deno and
-// Bun, and as hono's `app.fetch` is.
-//
-// Each connection is an async task that reads its requests one after the
-// other (keep-alive, pipelining); the requests of different connections are
-// handled at the same time. With the parallel runtime (docs/async.md,
-// section 8) the threads of the runtime take what comes for the connections
-// (runtime/library/net/net/net.c), and the piece that waits for the head of a
-// request runs on the thread that read it, ahead of its turn: the Request made
-// of it, the handler, the response, the wait for the next request. Only what
-// touches data other pieces may write waits for node's order: the handler's own
-// accesses, as the compiler marks them. The code here touches the server's own
-// fields only after __tz_order(), and the functions of the runtime it calls
-// need no turn, but those that do wait for it themselves. The bytes go through
-// the runtime (runtime/library/net/net/net.c, http.c), and with `tls: { cert,
-// key }` through TLS on each connection (runtime/library/tls/tls/tls.c): https.
-
 import {
   Request, Response, ReadableStream, SEND_BYTES, SEND_NO_BODY, SEND_STREAM,
   __serverRequest, __responseBody, __bodyKind, __bodyText, __bodyBytes, __bodyStream,
@@ -43,14 +25,11 @@ function __tz_http_respond(conn: object, status: int, statusText: string, header
 function __tz_http_write(conn: object, chunk: Uint8Array): Promise<void>
 function __tz_http_end(conn: object): void
 
-// What onListen gets.
 export interface ServeAddress {
   hostname: string
   port: int
 }
 
-// The certificate of a server of https, and its key: PEM, as node's
-// createServer takes them; the certificates of the chain after the first.
 export interface ServeTls {
   cert: string
   key: string
@@ -62,14 +41,11 @@ export interface ServeOptions {
   tls?: ServeTls
   signal?: AbortSignal
   onListen?: (address: ServeAddress) => void
-  // A request with a larger body is answered with 413, as in Bun.
   maxBodySize?: double
 }
 
 export type Handler = (request: Request) => Response | Promise<Response>
 
-// How long a connection may wait for its next request: node's
-// keepAliveTimeout.
 const KEEP_ALIVE_MS = 5000
 
 const BODY_TEXT = 1
@@ -83,7 +59,7 @@ export class Server {
   #hostname: string
   #port: int
   #base: string
-  #scheme: string // http or https
+  #scheme: string
   #stopping = false
   #open = 0
   #finished: Promise<void>
@@ -118,17 +94,13 @@ export class Server {
                    String(this.#port) + "/")
   }
 
-  // Resolved once the server has stopped and its last response is out.
   get finished(): Promise<void> {
     return this.#finished
   }
 
-  // Stops taking connections, ends those that wait for a request, and
-  // resolves once the requests being handled are answered.
   async stop(): Promise<void> {
     if (!this.#stopping) {
       this.#stopping = true
-      // The timer holds the server through its function: both go.
       const sweep = this.#sweep
       if (sweep != undefined) clearInterval(sweep)
       this.#sweep = undefined
@@ -167,23 +139,17 @@ export class Server {
                                         __tz_http_has_body(conn))
         let response: Response
         try {
-          // A handler that answers at once is not awaited: its answer goes
-          // out in the same piece.
           const answer = this.#handler(request)
           response = answer instanceof Response ? answer : await __tz_ahead(answer)
         } catch (e) {
-          // As Deno and Bun: the error goes to stderr, the client gets 500.
           console.error(e)
           response = new Response("Internal Server Error", { status: 500 })
         }
-        // A server that stops ends the connection after this response: the
-        // runtime knows (__tz_net_close_listener).
         const head = request.method == "HEAD"
         if (!respond(conn, response, head)) await respondStreaming(conn, response, head)
         if (!__tz_http_keep_alive(conn)) break
       }
     } catch (e) {
-      // The connection broke (a body that failed as it streamed): it ends.
     } finally {
       __tz_order()
       __tz_net_close(conn)
@@ -193,7 +159,6 @@ export class Server {
   }
 }
 
-// Writes a response whose body is all there; false for one that streams.
 function respond(conn: object, response: Response, head: boolean): boolean {
   const body = __responseBody(response)
   const kind = __bodyKind(body)
@@ -204,7 +169,6 @@ function respond(conn: object, response: Response, head: boolean): boolean {
   return true
 }
 
-// A body that streams goes out as it comes, in chunks.
 async function respondStreaming(conn: object, response: Response, head: boolean) {
   const body = __responseBody(response)
   __tz_http_respond(conn, response.status, response.statusText, response.headers.__flat(), "",
@@ -219,8 +183,6 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
         if (r.done) break
         chunk = r.value
       } catch (e) {
-        // The stream failed: the response cannot be completed, so the
-        // client sees the connection end, and the error goes to stderr.
         console.error(e)
         __tz_http_end_after(conn)
         __tz_net_close(conn)
@@ -229,7 +191,6 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
       try {
         await __tz_http_write(conn, chunk)
       } catch (e) {
-        // The client went away: the stream is cancelled, quietly.
         await reader.cancel()
         __tz_http_end_after(conn)
         return
@@ -239,9 +200,6 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
   __tz_http_end(conn)
 }
 
-// Starts a server: on `hostname` (0.0.0.0) and `port` (8000, 0 for any
-// free one, which server.port then tells), handling each request with
-// `handler`; of https with `tls`.
 export function serve(options: ServeOptions, handler: Handler): Server {
   const hostname = options.hostname ?? "0.0.0.0"
   const port = options.port ?? 8000
@@ -251,8 +209,6 @@ export function serve(options: ServeOptions, handler: Handler): Server {
                                     : __tz_tls_listen(hostname, port, maxBody, tls.cert, tls.key)
   const server = new Server(listener, hostname, handler, tls == undefined ? "http" : "https")
   server.__start()
-  // The signal stops the server, with a listener of its own: the program's
-  // onabort stays the program's.
   const signal = options.signal
   if (signal != undefined) {
     if (signal.aborted) void server.stop()

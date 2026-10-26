@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// ResultAsync of neverthrow.
 class ResultAsyncLowerer {
 public:
   explicit ResultAsyncLowerer(Lowering &lowering);
@@ -17,4 +16,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

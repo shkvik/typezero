@@ -1,7 +1,3 @@
-// scryptSync of the direct layer (docs/crypto.md, section 3): scrypt of RFC 7914 over
-// PBKDF2-HMAC-SHA256 of crypto.c and the SHA-256 of OpenSSL, with the checks of the parameters
-// that OpenSSL makes (EVP_PBE_scrypt_ex), which node reports.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
@@ -14,7 +10,6 @@ extern const TzMd tz_crypto_md_sha256;
 
 static uint32_t rotl(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 
-// Salsa20/8 of a block of 16 words, in place.
 static void salsa20_8(uint32_t b[16]) {
   uint32_t x[16];
   memcpy(x, b, sizeof x);
@@ -41,7 +36,6 @@ static void salsa20_8(uint32_t b[16]) {
   }
 }
 
-// BlockMix of 2r blocks of 64 bytes from `in` to `out`.
 static void block_mix(const uint32_t *in, uint32_t *out, uint64_t r) {
   uint32_t x[16];
   memcpy(x, in + (2 * r - 1) * 16, sizeof x);
@@ -50,12 +44,10 @@ static void block_mix(const uint32_t *in, uint32_t *out, uint64_t r) {
       x[k] ^= in[i * 16 + k];
     }
     salsa20_8(x);
-    // The even blocks go to the first half, the odd ones to the second.
     memcpy(out + ((i & 1) * r + i / 2) * 16, x, sizeof x);
   }
 }
 
-// ROMix of one block B of 128r bytes, with V of N blocks and X, T of one each.
 static void ro_mix(uint8_t *b, uint64_t r, uint64_t n, uint32_t *v, uint32_t *x, uint32_t *t) {
   size_t words = (size_t)(32 * r);
   for (size_t i = 0; i < words; ++i) {
@@ -84,7 +76,6 @@ static void ro_mix(uint8_t *b, uint64_t r, uint64_t n, uint32_t *v, uint32_t *x,
   }
 }
 
-// Whether OpenSSL takes the parameters: 0 for wrong ones, -1 for ones over the memory limit.
 static int check(uint64_t n, uint64_t r, uint64_t p, uint64_t maxmem) {
   const uint64_t pr_max = (1u << 30) - 1;
   if (r == 0 || p == 0 || n < 2 || (n & (n - 1))) {
@@ -111,7 +102,6 @@ static int check(uint64_t n, uint64_t r, uint64_t p, uint64_t maxmem) {
   return 1;
 }
 
-// scryptSync(password, salt, keylen, { N, r, p, maxmem }).
 TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, const void *sv,
                           double keylen, double cost, double block_size, double parallelization,
                           double maxmem) {
@@ -122,7 +112,6 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
       !tz_crypto_check_integer(maxmem, "maxmem", 0, 9007199254740991.0)) {
     return NULL;
   }
-  // A zero is the default, as node takes it.
   uint64_t n = cost ? (uint64_t)cost : 16384, r = block_size ? (uint64_t)block_size : 8;
   uint64_t p = parallelization ? (uint64_t)parallelization : 1;
   int ok = check(n, r, p, maxmem ? (uint64_t)maxmem : 32u << 20);

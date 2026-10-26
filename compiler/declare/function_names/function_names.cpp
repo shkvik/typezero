@@ -107,8 +107,6 @@ void collectNames(const Stmt *stmt, llvm::StringSet<> &names, bool inFunction) {
     break;
   }
   case Stmt::Kind::Class: {
-    // The methods and the initializers of the fields run as functions; the
-    // static initializers where the class is declared.
     auto *cls = cast<ClassDecl>(stmt);
     if (cls->baseExpr) {
       collectNames(cls->baseExpr, names, inFunction);
@@ -190,8 +188,6 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
     }
     break;
   case Expr::Kind::New: {
-    // Once checked, the arguments of a class's constructor are in its call.
-    // `new C()` may name a variable that holds a class.
     auto *create = cast<NewExpr>(expr);
     if (inFunction && !create->name.empty()) {
       names.insert(create->name);
@@ -231,7 +227,7 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
   case Expr::Kind::Await:
     sub(cast<AwaitExpr>(expr)->value);
     break;
-  case Expr::Kind::Class: // as a declaration of the class
+  case Expr::Kind::Class:
     collectNames(cast<ClassExpr>(expr)->decl, names, inFunction);
     break;
   default:
@@ -239,4 +235,4 @@ void collectNames(const Expr *expr, llvm::StringSet<> &names, bool inFunction) {
   }
 }
 
-} // namespace tz
+}

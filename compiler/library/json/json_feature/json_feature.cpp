@@ -9,7 +9,7 @@
 namespace tz {
 
 Expr *JsonFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type * /*expected*/) const {
+                                   const Type *) const {
   if (checker.callChecker().isGlobalName(member->object, "JSON")) {
     return checker.jsonStaticChecker().checkJsonStatic(call, member);
   }
@@ -21,7 +21,7 @@ Expr *JsonFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr 
 }
 
 Expr *JsonFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type * /*expected*/) const {
+                                   const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->nonOptional()->isJson()) {
     return nullptr;
@@ -31,7 +31,7 @@ Expr *JsonFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr 
 }
 
 Expr *JsonFeature::checkFunctionCall(Checker &checker, CallExpr *call, NameExpr *name,
-                                     const Type * /*expected*/) const {
+                                     const Type *) const {
   return checker.jsonStaticChecker().checkJsonGlobal(call, name);
 }
 
@@ -41,4 +41,4 @@ llvm::Value *JsonFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.jsonLowerer().emitJsonCall(call);
 }
 
-} // namespace tz
+}

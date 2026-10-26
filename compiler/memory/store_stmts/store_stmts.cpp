@@ -20,8 +20,6 @@ void StoreStmts::stmt(const Stmt *stmt) {
   switch (stmt->kind()) {
   case Stmt::Kind::Block: {
     auto *block = llvm::cast<BlockStmt>(stmt);
-    // The functions of a block share an environment, which holds what
-    // they capture.
     if (NestedGroup *group = block->group) {
       for (const VarSymbol *v : group->captures) {
         scanner_.edge(scanner_.stored(), scanner_.var(v));
@@ -74,7 +72,6 @@ void StoreStmts::stmt(const Stmt *stmt) {
   }
   case Stmt::Kind::ForOf: {
     auto *s = llvm::cast<ForOfStmt>(stmt);
-    // The loop reads the elements; an iterator it walks may hold it.
     StoreScanner::Sources iterable = scanner_.storeExprs().expr(s->iterable);
     if (s->iterable->type && s->iterable->type->isIterator()) {
       scanner_.store(iterable);
@@ -101,7 +98,6 @@ void StoreStmts::stmt(const Stmt *stmt) {
     break;
   case Stmt::Kind::Return: {
     StoreScanner::Sources value = scanner_.storeExprs().expr(llvm::cast<ReturnStmt>(stmt)->value);
-    // A generator's or an async function's result is held by its object.
     if (!scanner_.current_ || scanner_.current_->isGenerator || scanner_.current_->isAsync) {
       scanner_.store(value);
     } else {
@@ -156,4 +152,4 @@ void StoreStmts::bindArgs(const FunctionDecl *fn, const std::vector<StoreScanner
   }
 }
 
-} // namespace tz
+}

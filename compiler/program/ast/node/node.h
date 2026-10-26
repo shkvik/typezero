@@ -17,12 +17,9 @@
 
 namespace tz {
 
-// Base of every AST node. Nodes are owned by AstContext and linked by raw
-// pointers. Subclasses use LLVM-style RTTI (`classof`), since the compiler is
-// built without C++ RTTI.
 class Node {
 public:
   virtual ~Node() = default;
 };
 
-} // namespace tz
+}

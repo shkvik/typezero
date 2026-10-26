@@ -20,8 +20,6 @@ namespace tz {
 
 ResultCombineLowerer::ResultCombineLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// Result.combine: the values of the Results in an array, or the first Err;
-// combineWithAllErrors: the values, or every error.
 llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   if (call->args[0]->type->isTuple()) {
     return emitCombineTuple(call);
@@ -32,7 +30,7 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   const Type *resultType = call->type;
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
 
-  Lowering::Operand array = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+  Lowering::Operand array = lowering_.refCounts().emitOperand(call->args[0], true);
   llvm::Value *length = lowering_.arrayLowerer().arrayLength(array.value);
   llvm::Value *values = lowering_.groupLowerer().newArray(
       Type::array(valueType), lowering_.builder_.getInt64(0), length, "values");
@@ -66,16 +64,14 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   lowering_.builder_.CreateCondBr(lowering_.resultLowerer().resultIsOk(result, element), okBlock,
                                   errBlock);
 
-  // The array keeps its Results: what goes into the new arrays is counted
-  // again.
   lowering_.functionFrame().switchTo(okBlock);
-  llvm::Value *value = lowering_.resultLowerer().resultHalf(result, element, /*error=*/false);
+  llvm::Value *value = lowering_.resultLowerer().resultHalf(result, element, false);
   lowering_.refCounts().retainValue(value, valueType);
   lowering_.arrayLowerer().emitPush(values, {value}, valueType);
   lowering_.builder_.CreateBr(nextBlock);
 
   lowering_.functionFrame().switchTo(errBlock);
-  llvm::Value *error = lowering_.resultLowerer().resultHalf(result, element, /*error=*/true);
+  llvm::Value *error = lowering_.resultLowerer().resultHalf(result, element, true);
   lowering_.refCounts().retainValue(error, errorType);
   if (all) {
     if (collects) {
@@ -83,7 +79,6 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
     }
     lowering_.builder_.CreateBr(nextBlock);
   } else {
-    // The first Err is the result.
     lowering_.refCounts().releaseValue(values, Type::array(valueType));
     lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
                                        resultType, lowering_.builder_.getFalse(), nullptr, error),
@@ -102,7 +97,6 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
                                        resultType, lowering_.builder_.getTrue(), values, nullptr),
                                    resultSlot);
   } else {
-    // Any error makes the result an Err with all of them.
     llvm::Value *failed = lowering_.builder_.CreateICmpNE(
         lowering_.arrayLowerer().arrayLength(errors), lowering_.builder_.getInt64(0));
     llvm::Value *okResult = lowering_.resultLowerer().makeResult(
@@ -126,9 +120,6 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
 }
 
-// Result.combine([a, b]) of Results with values of different types: their
-// values make a tuple. The Results are evaluated first, as the elements of
-// the list are in JavaScript, and tested in order; no list is made.
 llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
   bool all = call->builtin == Builtin::ResultCombineWithAllErrors;
   auto *list = cast<ArrayLitExpr>(call->args[0]);
@@ -152,7 +143,7 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
 
   for (size_t i = 0; i < results.size(); ++i) {
     if (types[i]->errType()->isNever()) {
-      continue; // always an Ok
+      continue;
     }
     llvm::BasicBlock *errBlock = lowering_.functionFrame().newBlock("combine.err");
     llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("combine.next");
@@ -160,12 +151,11 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
                                     nextBlock, errBlock);
     lowering_.functionFrame().switchTo(errBlock);
     llvm::Value *error = lowering_.resultLowerer().convertHalf(
-        lowering_.resultLowerer().resultHalf(results[i], types[i], /*error=*/true),
-        types[i]->errType(), errorType);
+        lowering_.resultLowerer().resultHalf(results[i], types[i], true), types[i]->errType(),
+        errorType);
     if (errors) {
       lowering_.arrayLowerer().emitPush(errors, {error}, errorType);
     } else {
-      // The first Err is the result; the other Results are dropped.
       for (size_t j = 0; j < results.size(); ++j) {
         if (j != i) {
           lowering_.refCounts().releaseValue(results[j], types[j]);
@@ -181,7 +171,6 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
     lowering_.functionFrame().emitBlock(nextBlock);
   }
 
-  // The values go into a new tuple, unless some errors were collected.
   auto makeTuple = [&] {
     const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(tupleType);
     std::vector<unsigned> keys;
@@ -191,7 +180,7 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
     llvm::Value *tuple = lowering_.objectLayouts().allocObject(tupleType, keys);
     for (unsigned i = 0; i < results.size(); ++i) {
       lowering_.builder_.CreateStore(
-          lowering_.resultLowerer().resultHalf(results[i], types[i], /*error=*/false),
+          lowering_.resultLowerer().resultHalf(results[i], types[i], false),
           lowering_.builder_.CreateStructGEP(layout.type, tuple, layout.elements[i]));
     }
     lowering_.groupLowerer().adoptFields(tuple, tupleType);
@@ -211,8 +200,7 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
     lowering_.functionFrame().switchTo(failBlock);
     for (size_t i = 0; i < results.size(); ++i) {
       lowering_.refCounts().releaseValue(
-          lowering_.resultLowerer().resultHalf(results[i], types[i], /*error=*/false),
-          types[i]->okType());
+          lowering_.resultLowerer().resultHalf(results[i], types[i], false), types[i]->okType());
     }
     lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
                                        resultType, lowering_.builder_.getFalse(), nullptr, errors),
@@ -227,4 +215,4 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
   return lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
 }
 
-} // namespace tz
+}

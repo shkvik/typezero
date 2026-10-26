@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// spawnSync, execFileSync and execSync of node:child_process (docs/process.md).
 class ChildProcessFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "child_process"; }
@@ -14,4 +13,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

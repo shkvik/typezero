@@ -25,4 +25,4 @@ Errors InferPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

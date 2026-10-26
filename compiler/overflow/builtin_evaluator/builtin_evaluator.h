@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The ranges of calls of built-ins: Math, and the values a Json may give.
 class BuiltinEvaluator {
 public:
   explicit BuiltinEvaluator(OverflowCheck &check);
@@ -18,4 +17,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

@@ -54,8 +54,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     return checked;
   }
   if (checker_.eventMaps().isEmitterClass(cls)) {
-    if (Expr *checked =
-            checker_.emitterChecker().checkEmitterCall(call, member, cls, /*super=*/false)) {
+    if (Expr *checked = checker_.emitterChecker().checkEmitterCall(call, member, cls, false)) {
       return checked;
     }
   }
@@ -67,7 +66,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   const ClassField *field = ClassBases::findField(cls, name);
   if (field && !field->method) {
-    // A function in a field.
     call->callee = checker_.classMemberChecker().checkClassMember(member, nullptr);
     const Type *type = call->callee->type;
     if (type->isFunction()) {
@@ -84,9 +82,9 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     checkArgsLoosely();
     return call;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   if (methods.empty()) {
-    if (!ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/true).empty()) {
+    if (!ClassDeclarer::methodsNamed(cls, name, true).empty()) {
       checker_.diags_.error(member->loc(), "'" + name + "' is a static method of '" + cls->name +
                                                "': call it through the class, '" + cls->name + "." +
                                                name + "(...)'");
@@ -118,11 +116,8 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     checker_.diags_.error(member->loc(),
                           "'" + name + "' is not a generic method; remove the type arguments");
   }
-  // A generic method: a call of the copy made for its types, which no class
-  // overrides.
   if (sym->isGeneric() && checked) {
-    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
-                                                          /*method=*/true);
+    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
     checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
@@ -134,8 +129,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
     }
     return call;
   }
-  // A direct call, unless classes down the chain override the method: then
-  // the method table of the object's class says which one runs.
   if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
     call->method = impl->sym;
   } else {
@@ -143,7 +136,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   }
   member->type = checker_.returnInferrer().functionType(sym);
   call->type = checker_.returnInferrer().returnType(sym);
-  // The arguments chooseVariant checked are only converted.
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
   return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
@@ -155,7 +147,6 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   if (cls->isGeneric()) {
     return checker_.genericClassChecker().checkGenericNew(expr, cls, expected);
   }
-  // As node's `new AbortSignal()`, which throws "Illegal constructor".
   if (cls == checker_.libraryClass("AbortSignal") &&
       !checker_.libraryCalls().inLibrary(expr->loc())) {
     checker_.diags_.error(expr->loc(),
@@ -204,8 +195,6 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), nullptr, std::move(expr->args));
   expr->ctor = call;
   call->type = Type::voidTy();
-  // Without a constructor of its own, a class takes those of the nearest
-  // class up its chain that has any, as in JavaScript.
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
   if (ctors.empty()) {
     if (!call->args.empty()) {
@@ -233,7 +222,7 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   }
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {
-      checker_.flowChecker().calledFunction(); // the code of the class runs
+      checker_.flowChecker().calledFunction();
       break;
     }
   }
@@ -242,4 +231,4 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
   return expr;
 }
 
-} // namespace tz
+}

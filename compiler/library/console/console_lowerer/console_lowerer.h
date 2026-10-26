@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// console.log and its kin.
 class ConsoleLowerer {
 public:
   explicit ConsoleLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

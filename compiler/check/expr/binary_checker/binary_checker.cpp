@@ -55,7 +55,7 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::LogAnd:
   case BinaryOp::LogOr: {
     Checker::Flow whenTrue, whenFalse;
-    checker_.truthChecker().checkLogical(bin, expected, whenTrue, whenFalse, /*tested=*/false,
+    checker_.truthChecker().checkLogical(bin, expected, whenTrue, whenFalse, false,
                                          bin->op == BinaryOp::LogAnd ? Checker::TruthUse::And
                                                                      : Checker::TruthUse::Or);
     checker_.flow_ = FlowChecker::join(whenTrue, whenFalse);
@@ -76,8 +76,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     checker_.decimalChecker().checkComparisonOperands(bin);
     checker_.resultTypes().neverOperands(bin);
     bin->type = Type::boolTy();
-    // Two values of one type parameter compare as TypeScript allows; each
-    // instance checks its type (objects do not compare).
     if (bin->lhs->type->isParam() && bin->lhs->type == bin->rhs->type) {
       return bin;
     }
@@ -87,7 +85,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (l->isError() || r->isError()) {
       return bin;
     }
-    // Strings compare by UTF-16 code units, as in JavaScript.
     if (l->isString() && r->isString()) {
       return bin;
     }
@@ -111,14 +108,10 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    // Only the low bits of both sides matter: the count is masked. A literal
-    // takes no type from the context, as for `&` and `|`: `-1 >>> 0` is the
-    // 4294967295 of JavaScript where a long is expected too, not a 64-bit
-    // shift of a long -1.
     bin->lhs = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(bin->lhs, nullptr, /*wraps=*/true));
+        checker_.exprChecker().checkExpr(bin->lhs, nullptr, true));
     bin->rhs = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(bin->rhs, nullptr, /*wraps=*/true));
+        checker_.exprChecker().checkExpr(bin->rhs, nullptr, true));
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     bin->type = Type::error();
     if (l->isError() || r->isError()) {
@@ -129,22 +122,14 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return bin;
     }
     if (l->isFloat()) {
-      // A double becomes a 32-bit integer first, as in JavaScript: ToInt32,
-      // whose bits are those of ToUint32, which `>>>` reads them as below.
       bin->lhs = toInt32(bin->lhs);
       l = Type::intTy();
     }
     if (r->isFloat()) {
       bin->rhs = toInt32(bin->rhs);
     }
-    // The result has the type of the left side. The shift count is masked to
-    // the bit width, so converting it to that type loses nothing.
     bin->rhs = checker_.typeRelations().convert(bin->rhs, l);
     bin->type = l;
-    // JavaScript's `x >>> n` is unsigned. Shifted by 1 to 31 bits an int
-    // still fits in an int, but `-1 >>> 0` is 4294967295, so with a count
-    // that may be 0 the result is a long, unless only its low 32 bits matter
-    // (`(h >>> 0) | 0`) or it is a constant that fits.
     if (bin->op == BinaryOp::UShr && l->isInt() && !wraps) {
       std::optional<int64_t> count = checker_.constantFolder().intConstant(bin->rhs);
       if (!count || (*count & 31) == 0) {
@@ -159,26 +144,16 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     return bin;
   }
 
-  default: { // arithmetic and bitwise
+  default: {
     bool bitwise =
         bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr || bin->op == BinaryOp::BitXor;
-    // The operands of `&`, `|` and `^` take no type from the context: they
-    // become 32-bit integers the way JavaScript makes them, and `x | 0` stays
-    // ToInt32 wherever it is (`2166136261 | 0` cuts the literal to 32 bits,
-    // `Math.floor(x) | 0` wraps around).
     const Type *hint = nullptr;
     if (expected && !bitwise && (expected->isNumeric() || expected->isDecimal())) {
       hint = expected;
     }
-    // A decimal power takes an integer exponent, so the exponent takes no
-    // decimal from the context.
     bool pow = bin->op == BinaryOp::Pow;
     const Type *rhsHint = pow && hint && hint->isDecimal() ? nullptr : hint;
-    // The low bits of a sum, difference, product or power depend only on the
-    // low bits of the operands; not so for a quotient.
     bool operandsWrap = bitwise || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
-    // In the chain `a + b + c` the last `+` is checked first; it reports
-    // joining numbers with strings for the whole chain (see reportMixedConcat).
     BinaryExpr *chain = std::exchange(checker_.concatChain_, nullptr);
     bool chainEnd = bin->op == BinaryOp::Add && !chain;
     const BinaryExpr *outerMixed =
@@ -187,8 +162,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
         bin->op == BinaryOp::Add && left && left->op == BinaryOp::Add) {
       checker_.concatChain_ = chain ? chain : bin;
     }
-    // Literals next to a decimal are decimals (see sema_decimal.cpp): a
-    // literal left side waits for the right one.
     bool literals = !bitwise && !pow;
     if (literals && DecimalChecker::isLiteralTree(bin->lhs) &&
         !DecimalChecker::isLiteralTree(bin->rhs)) {
@@ -212,8 +185,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     checker_.resultTypes().neverOperands(bin);
     const Type *l = bin->lhs->type, *r = bin->rhs->type;
     if (bin->op == BinaryOp::Add) {
-      // JavaScript joins a number or a boolean with a string as text: `10 + "1"`
-      // is "101", which is rarely meant where it is not written as a template.
       auto joinsAsText = [](const Type *type) {
         const Type *base = type->nonOptional();
 
@@ -235,7 +206,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return bin;
     }
     if (bin->op == BinaryOp::Add && (l->isString() || r->isString())) {
-      // As in JavaScript, `+` concatenates when either side is a string.
       bin->lhs = checker_.concatChecker().toStringOperand(bin->lhs);
       bin->rhs = checker_.concatChecker().toStringOperand(bin->rhs);
       bin->type = Type::string();
@@ -248,10 +218,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
       return checker_.decimalChecker().checkDecimalArithmetic(bin);
     }
     if (bitwise && l->isNumeric() && r->isNumeric() && (l->isFloat() || r->isFloat() || l != r)) {
-      // As in JavaScript, both sides become 32-bit integers first, so `x | 0`
-      // drops the fraction of a double exactly the way JavaScript does. A
-      // long next to an int keeps its low 32 bits the same way: `x | 0` is
-      // JavaScript's ToInt32 for a long too. Only two longs work on 64 bits.
       bin->lhs = toInt32(bin->lhs);
       bin->rhs = toInt32(bin->rhs);
       bin->type = Type::intTy();
@@ -270,8 +236,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
     if (!common->isInteger()) {
       return bin;
     }
-    // An integer to a negative power is a fraction (as with `/`, integers
-    // stay integers); a negative constant exponent is surely a mistake.
     if (bin->op == BinaryOp::Pow) {
       if (std::optional<int64_t> exponent = checker_.constantFolder().intConstant(bin->rhs);
           exponent && *exponent < 0) {
@@ -289,8 +253,6 @@ Expr *BinaryChecker::checkBinary(BinaryExpr *bin, const Type *expected, bool wra
   }
 }
 
-// `==` and `!=` (the only equality operators; there is no null to convert). Any
-// value can be compared with undefined; `T | undefined` compares with `T`.
 Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   if (Expr *null = checker_.jsonChecker().checkNullEquality(bin)) {
     return null;
@@ -298,7 +260,6 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   checker_.decimalChecker().checkComparisonOperands(bin);
   const Type *l = bin->lhs->type, *r = bin->rhs->type;
   bin->type = Type::boolTy();
-  // typeof never gives "bigint": there is none.
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
@@ -319,8 +280,6 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   if (l->nonOptional()->isJson() || r->nonOptional()->isJson()) {
     return checker_.jsonChecker().checkJsonEquality(bin);
   }
-  // In JavaScript two Results are two objects, never equal; their values
-  // cannot be compared for them.
   if (l->nonOptional()->isResult() || r->nonOptional()->isResult()) {
     checker_.diags_.error(bin->loc(),
                           llvm::Twine("Results cannot be compared with '") + opSpelling(bin->op) +
@@ -329,8 +288,6 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
                               "'value'");
     return bin;
   }
-  // TypeScript compares a value of a type parameter with anything; each
-  // instance checks the types it has.
   if (l->nonOptional()->isParam() || r->nonOptional()->isParam()) {
     return bin;
   }
@@ -353,12 +310,8 @@ Expr *BinaryChecker::checkEquality(BinaryExpr *bin) {
   return bin;
 }
 
-// `a ?? b`: b when a is undefined. When a cannot be undefined (for example an
-// index Checker proved in range), b is checked but never evaluated.
 Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
   bin->lhs = checker_.exprChecker().checkExpr(bin->lhs, expected);
-  // `s.match(re) ?? []`: the match is the array of its captures there, as
-  // it is an array in JavaScript.
   if (bin->lhs->type->nonOptional()->isMatch() && isa<ArrayLitExpr>(bin->rhs)) {
     bin->lhs = checker_.matchChecker().matchItems(bin->lhs);
   }
@@ -366,11 +319,11 @@ Expr *BinaryChecker::checkNullish(BinaryExpr *bin, const Type *expected) {
   Checker::Flow afterLhs = checker_.flow_;
   const Type *hint = l->isUndefined() || l->isError() ? expected : l->nonOptional();
   bin->rhs = checker_.exprChecker().checkExpr(bin->rhs, hint);
-  checker_.flow_ = FlowChecker::join(afterLhs, checker_.flow_); // the right side may not run
+  checker_.flow_ = FlowChecker::join(afterLhs, checker_.flow_);
   const Type *r = bin->rhs->type;
   bin->type = Type::error();
   if (l->isError() || r->isError()) {
-    if (checker_.trial_ && l->isError() != r->isError()) { // as in checkConditional
+    if (checker_.trial_ && l->isError() != r->isError()) {
       bin->type = l->isError() ? r : l->nonOptional();
     }
     return bin;
@@ -405,4 +358,4 @@ Expr *BinaryChecker::toInt32(Expr *expr) {
              : checker_.typeRelations().convert(expr, Type::intTy());
 }
 
-} // namespace tz
+}

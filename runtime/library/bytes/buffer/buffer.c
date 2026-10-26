@@ -1,13 +1,3 @@
-// Buffer as in node, and the text encodings (docs/bytes.md, sections 2 and
-// 5): Buffer.from(string, encoding) and toString(encoding) with utf8,
-// utf16le, latin1, ascii, base64, base64url and hex, the methods of node
-// that work on bytes, and TextEncoder / TextDecoder of the WHATWG Encoding
-// standard. A Buffer is a TzBytes of the kind TZ_BYTES_BUFFER (bytes.c).
-//
-// Where node's results depend on its algorithms (what base64 makes of text
-// that is not base64, where hex stops), the algorithms are node's (those of
-// its deps/nbytes).
-
 #include "runtime/library/bytes/buffer/buffer.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -30,11 +20,8 @@ extern const TzLayout tz_bytes_layouts[];
 
 #define MAX_LENGTH ((int64_t)(1 << 30) - 1)
 
-// Buffer's encodings, as Checker numbers them
-// (compiler/library/bytes/sema/sema_bytes.cpp).
 enum { ENC_UTF8, ENC_UTF16LE, ENC_LATIN1, ENC_ASCII, ENC_BASE64, ENC_BASE64URL, ENC_HEX };
 
-// The code units of a string, which stays where it is while they are used.
 typedef struct {
   TzStr s;
   const void *units;
@@ -51,10 +38,6 @@ static void units_of(Units *u, void *obj, uint64_t meta) {
 static inline uint32_t unit_at(const Units *u, uint32_t i) {
   return u->two ? ((const uint16_t *)u->units)[i] : ((const uint8_t *)u->units)[i];
 }
-
-//===----------------------------------------------------------------------===//
-// Encodings by name
-//===----------------------------------------------------------------------===//
 
 static int lower_equal(const Units *u, const char *name) {
   size_t n = strlen(name);
@@ -74,7 +57,6 @@ static int lower_equal(const Units *u, const char *name) {
   return 1;
 }
 
-// The encoding a name stands for, as Buffer.isEncoding reads it; -1 for none.
 int32_t tz_buffer_encoding(void *obj, uint64_t meta) {
   static const struct {
     const char *name;
@@ -96,8 +78,6 @@ int32_t tz_buffer_encoding(void *obj, uint64_t meta) {
   return -1;
 }
 
-// The same for an encoding the program gives: an unknown one is a TypeError,
-// as in node.
 int32_t tz_buffer_encoding_checked(void *obj, uint64_t meta) {
   int32_t encoding = tz_buffer_encoding(obj, meta);
   if (encoding < 0) {
@@ -114,12 +94,6 @@ int32_t tz_buffer_encoding_checked(void *obj, uint64_t meta) {
   return encoding;
 }
 
-//===----------------------------------------------------------------------===//
-// From text
-//===----------------------------------------------------------------------===//
-
-// The code point at i of UTF-16, and how many units it takes; a lone
-// surrogate is U+FFFD, as encoding it in UTF-8 makes it.
 static uint32_t code_point(const Units *u, uint32_t i, uint32_t *taken) {
   uint32_t c = unit_at(u, i);
   *taken = 1;
@@ -177,8 +151,6 @@ static int64_t utf8_length(const Units *u) {
   return n;
 }
 
-// The values of the base64 digits of both alphabets, as node reads them,
-// and of the hex digits, each plus 1: 0 is what is no digit.
 #define D(c, v) [c] = (v) + 1
 #define DIGITS4(c, v) D(c, v), D(c + 1, v + 1), D(c + 2, v + 2), D(c + 3, v + 3)
 #define DIGITS8(c, v) DIGITS4(c, v), DIGITS4(c + 4, v + 4)
@@ -194,13 +166,10 @@ static const uint8_t kHexDigits[256] = {DIGITS8('0', 0),  D('8', 8),  D('9', 9),
 #undef DIGITS4
 #undef D
 
-// A digit's value; 255 (and -1) for what is no digit.
 static uint8_t unbase64(uint32_t c) { return c < 256 ? (uint8_t)(kBase64Digits[c] - 1) : 255; }
 
 static int unhex(uint32_t c) { return c < 256 ? kHexDigits[c] - 1 : -1; }
 
-// What Buffer.byteLength(string, encoding) gives: for base64, node's
-// estimate from the length, which decoding may not reach.
 static int64_t byte_length(const Units *u, int32_t encoding) {
   int64_t n = u->length;
   switch (encoding) {
@@ -231,8 +200,6 @@ int32_t tz_buffer_byte_length(void *obj, uint64_t meta, int32_t encoding) {
   return (int32_t)byte_length(&u, encoding);
 }
 
-// nbytes::Base64DecodeGroupSlow: one group of four digits, skipping what is
-// not a digit; false when the text ends or a '=' stops it.
 static int base64_group(uint8_t *dst, size_t dstlen, const Units *u, size_t *i, size_t *k) {
   size_t n = u->length;
   uint8_t hi = 0, lo = 0;
@@ -267,8 +234,6 @@ static int base64_group(uint8_t *dst, size_t dstlen, const Units *u, size_t *i, 
   return 1;
 }
 
-// nbytes::Base64Decode: what node decodes, both alphabets, into at most
-// dstlen bytes.
 static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
   size_t n = u->length;
   size_t size = n;
@@ -281,8 +246,6 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
   size_t decoded = n < 2 ? 0 : size > 1 ? (size / 4) * 3 + (size % 4 + 1) / 2 : 0;
   size_t available = dstlen < decoded ? dstlen : decoded;
   size_t max_k = available / 3 * 3, max_i = n / 4 * 4, i = 0, k = 0;
-  // Groups of four digits of one byte each, the common case, straight from
-  // the bytes of the string.
   if (!u->two) {
     const uint8_t *s = (const uint8_t *)u->units;
     while (i < max_i && k < max_k) {
@@ -326,15 +289,12 @@ static size_t base64_decode(uint8_t *dst, size_t dstlen, const Units *u) {
   return k;
 }
 
-// Writes the string in `encoding` into at most `capacity` bytes at `out`;
-// returns how many it wrote. UTF-8 writes no part of a character that does
-// not fit, as node's write() does.
 static int64_t encode_into(uint8_t *out, int64_t capacity, const Units *u, int32_t encoding) {
   uint32_t n = u->length;
   switch (encoding) {
   case ENC_UTF8: {
     int64_t written = 0;
-    if (!u->two) { // Latin-1: one byte, or two from 0x80 on
+    if (!u->two) {
       const uint8_t *s = (const uint8_t *)u->units;
       for (uint32_t i = 0; i < n; ++i) {
         uint8_t b = s[i];
@@ -400,7 +360,7 @@ static int64_t encode_into(uint8_t *out, int64_t capacity, const Units *u, int32
     }
     return count;
   }
-  default: { // latin1 and ascii: the low byte of each unit
+  default: {
     int64_t count = (int64_t)n < capacity ? (int64_t)n : capacity;
     if (!u->two) {
       memcpy(out, u->units, (size_t)count);
@@ -429,7 +389,6 @@ TzBytes *tz_buffer_from_string(void *obj, uint64_t meta, int32_t encoding) {
   int64_t size = byte_length(&u, encoding);
   TzBytes *b = buffer_of(size);
   int64_t written = encode_into(b->data, size, &u, encoding);
-  // byteLength may overestimate for base64 and hex, as in node.
   b->length = (int32_t)written;
 
   return b;
@@ -444,13 +403,6 @@ TzBytes *tz_buffer_copy_of(const uint8_t *data, int64_t length) {
   return b;
 }
 
-//===----------------------------------------------------------------------===//
-// To text
-//===----------------------------------------------------------------------===//
-
-// The WHATWG UTF-8 decoder, which V8 and TextDecoder follow: each byte that
-// does not belong to a character becomes U+FFFD, as does a sequence cut
-// short. Returns 0 at the first such byte when `fatal`.
 static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
   int64_t i = 0;
   while (i < n) {
@@ -504,7 +456,6 @@ static int decode_utf8(TzBuf *out, const uint8_t *s, int64_t n, int fatal) {
       ++seen;
     }
     if (seen < need) {
-      // The byte that broke the sequence starts over.
       if (fatal) {
         return 0;
       }
@@ -580,7 +531,7 @@ static TzStr encode_text(const uint8_t *s, int64_t n, int32_t encoding) {
     }
     return str;
   }
-  default: { // base64, base64url
+  default: {
     int url = encoding == ENC_BASE64URL;
     const char *digits = url ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
                              : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -632,8 +583,6 @@ TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding) {
   return encode_text(data, length, encoding);
 }
 
-// buf.toString(encoding, start?, end?): positions clamped to the bytes, as
-// node does (`has`: 1 start, 2 end).
 void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start, int64_t end,
                          int32_t has) {
   int64_t n = b->length;
@@ -646,10 +595,6 @@ void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t
   *out = encode_text(b->data + from, to - from, encoding);
 }
 
-//===----------------------------------------------------------------------===//
-// Methods of node
-//===----------------------------------------------------------------------===//
-
 TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
   if (size < 0 || size > MAX_LENGTH) {
     tz_throw(TZ_RANGE_ERROR,
@@ -661,8 +606,6 @@ TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
   return zero ? tz_bytes_new(TZ_BYTES_BUFFER, size) : buffer_of(size);
 }
 
-// Buffer.from(arrayBuffer, offset?, length?): the same memory (`has`: 1
-// offset, 2 length); the buffer is borrowed.
 TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, int32_t has) {
   if (!(has & 1)) {
     offset = 0;
@@ -697,8 +640,6 @@ TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, i
   return b;
 }
 
-// Buffer.concat(list, totalLength?): the bytes of the Uint8Arrays one after
-// another, cut or padded with zeros to the total length.
 TzBytes *tz_buffer_concat(const TzArray *list, int64_t total, int32_t has_total) {
   TzBytes *const *items = (TzBytes *const *)list->data;
   if (!has_total) {
@@ -757,8 +698,6 @@ TZ_COLD static void out_of_range(const char *name, int64_t value, int64_t max) {
   }
 }
 
-// buf.compare(target, targetStart?, targetEnd?, sourceStart?, sourceEnd?);
-// `has` holds a bit for each, from 1 on.
 int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, int64_t tstart,
                                 int64_t tend, int64_t sstart, int64_t send, int32_t has) {
   if (!(has & 1)) {
@@ -799,8 +738,6 @@ int32_t tz_buffer_compare_range(const TzBytes *source, const TzBytes *target, in
   return compare_memory(source->data + sstart, send - sstart, target->data + tstart, tend - tstart);
 }
 
-// buf.copy(target, targetStart?, sourceStart?, sourceEnd?): returns how many
-// bytes it copied (`has`: 1, 2 and 4).
 int32_t tz_buffer_copy(const TzBytes *source, TzBytes *target, int64_t tstart, int64_t sstart,
                        int64_t send, int32_t has) {
   if (!(has & 1)) {
@@ -839,7 +776,6 @@ int32_t tz_buffer_copy(const TzBytes *source, TzBytes *target, int64_t tstart, i
   return (int32_t)n;
 }
 
-// buf.write(string, offset?, length?, encoding): returns the bytes written.
 int32_t tz_buffer_write_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset, int64_t length,
                                int32_t has, int32_t encoding) {
   if (!(has & 1)) {
@@ -863,8 +799,6 @@ int32_t tz_buffer_write_string(TzBytes *b, void *obj, uint64_t meta, int64_t off
   return (int32_t)encode_into(b->data + offset, room, &u, encoding);
 }
 
-// The bytes a value to look for or to fill with stands for: a string in an
-// encoding (in a block to free), or the bytes of a Uint8Array.
 static uint8_t *bytes_of_string(void *obj, uint64_t meta, int32_t encoding, int64_t *n) {
   Units u;
   units_of(&u, obj, meta);
@@ -875,8 +809,6 @@ static uint8_t *bytes_of_string(void *obj, uint64_t meta, int32_t encoding, int6
   return bytes;
 }
 
-// node's indexOf: from byteOffset on (from the end if negative); with mode
-// 1, lastIndexOf backward from it; with 2, includes.
 static int32_t find_bytes(const TzBytes *b, const uint8_t *needle, int64_t n, int64_t from,
                           int32_t has_from, int32_t mode) {
   int64_t length = b->length;
@@ -927,9 +859,6 @@ int32_t tz_buffer_index_of_byte(const TzBytes *b, int32_t value, int64_t from, i
   return find_bytes(b, &byte, 1, from, has_from, mode);
 }
 
-// buf.fill(value, offset?, end?, encoding?) with a string or a Uint8Array:
-// its bytes over and over. An empty value fills with zeros; a string that
-// gives no bytes in its encoding is a TypeError, as in node.
 static void fill_with(TzBytes *b, const uint8_t *bytes, int64_t n, int64_t offset, int64_t end,
                       int32_t has) {
   int64_t from = (has & 1) ? offset : 0, to = (has & 2) ? end : b->length;
@@ -972,7 +901,6 @@ void tz_buffer_fill_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset,
 
 void tz_buffer_fill_bytes(TzBytes *b, const TzBytes *value, int64_t offset, int64_t end,
                           int32_t has) {
-  // A copy first: the value may lie in the bytes being filled.
   uint8_t *bytes = (uint8_t *)tz_alloc((size_t)value->length + 1);
   if (value->length) {
     memcpy(bytes, value->data, (size_t)value->length);
@@ -986,8 +914,6 @@ void tz_buffer_fill_byte(TzBytes *b, int32_t value, int64_t offset, int64_t end,
   fill_with(b, &byte, 1, offset, end, has);
 }
 
-// The error of read…() and write…() at `offset` for `size` bytes, as node
-// words it (its boundsError).
 TZ_COLD void tz_buffer_bounds_error(int64_t offset, int64_t size, int64_t length) {
   if (length - size < 0) {
     tz_throw(TZ_RANGE_ERROR, "Attempt to access memory outside buffer bounds");
@@ -1013,7 +939,6 @@ static int check_var(const TzBytes *b, int64_t offset, int64_t size) {
   return 1;
 }
 
-// readUIntLE(offset, byteLength) and the like: `flags` 1 signed, 2 big-endian.
 int64_t tz_buffer_read_var(const TzBytes *b, int64_t offset, int64_t size, int32_t flags) {
   if (!check_var(b, offset, size)) {
     return 0;
@@ -1045,7 +970,6 @@ int64_t tz_buffer_write_var(TzBytes *b, int64_t value, int64_t offset, int64_t s
   return offset + size;
 }
 
-// swap16(), swap32() and swap64(): the bytes of each element reversed.
 void tz_buffer_swap(TzBytes *b, int32_t size) {
   if (b->length % size != 0) {
     tz_throw(TZ_RANGE_ERROR, "Buffer size must be a multiple of %d-bits", size * 8);
@@ -1060,10 +984,6 @@ void tz_buffer_swap(TzBytes *b, int32_t size) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// TextEncoder and TextDecoder
-//===----------------------------------------------------------------------===//
-
 void *tz_text_encoder_new(void) {
   TzInstance *e = (TzInstance *)tz_obj_alloc(sizeof(TzInstance));
   e->rc = 1;
@@ -1072,7 +992,6 @@ void *tz_text_encoder_new(void) {
   return e;
 }
 
-// encode(s): the UTF-8 of the string, a lone surrogate as U+FFFD.
 TzBytes *tz_text_encode(void *obj, uint64_t meta) {
   Units u;
   units_of(&u, obj, meta);
@@ -1083,8 +1002,6 @@ TzBytes *tz_text_encode(void *obj, uint64_t meta) {
   return b;
 }
 
-// encodeInto(s, dst): as much of the string as fits, whole characters; the
-// code units read and the bytes written go to out[0] and out[1].
 void tz_text_encode_into(void *obj, uint64_t meta, TzBytes *dst, int32_t *out) {
   Units u;
   units_of(&u, obj, meta);
@@ -1105,9 +1022,6 @@ void tz_text_encode_into(void *obj, uint64_t meta, TzBytes *dst, int32_t *out) {
   out[1] = (int32_t)written;
 }
 
-// The encodings of a TextDecoder; a single-byte one has its table (see
-// encodings.h), a multi-byte one its TzCjkEncoding (cjk.c), which the
-// program holds.
 enum { TEXT_UTF8, TEXT_UTF16LE, TEXT_UTF16BE, TEXT_SINGLE_BYTE, TEXT_CJK };
 
 typedef struct {
@@ -1115,9 +1029,6 @@ typedef struct {
   const TzLayout *layout;
   int32_t encoding;
   int32_t fatal, ignore_bom;
-  // The last decode had `stream: true`: the stream goes on from `state`,
-  // and `bom_seen` says whether its first character, which may be a BOM, is
-  // behind.
   int32_t streaming;
   const void *table;
   uint32_t state[4];
@@ -1151,8 +1062,6 @@ void tz_text_decoder_encoding(TzStr *out, const void *decoder) {
   *out = tz_str_from_ascii(name, strlen(name));
 }
 
-// A decoder of an encoding Checker found by its label: TEXT_* and, for an old
-// encoding, its table.
 void *tz_text_decoder_make(int32_t encoding, const void *table, int32_t fatal, int32_t ignore_bom) {
   TzTextDecoder *d = (TzTextDecoder *)tz_obj_alloc(sizeof(TzTextDecoder));
   memset(d, 0, sizeof *d);
@@ -1170,16 +1079,11 @@ static int is_space(uint32_t c) {
   return c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ';
 }
 
-// `new TextDecoder(label)` of a label known only when the program runs:
-// found among the labels of the Encoding standard, with the tables of the
-// old encodings the program holds (all there are: `count` of one byte and
-// `cjk_count` of several). An unknown label is a RangeError, as in node.
 void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const *tables,
                           int32_t count, const TzCjkEncoding *const *cjk, int32_t cjk_count,
                           int32_t fatal, int32_t ignore_bom) {
   Units u;
   units_of(&u, obj, meta);
-  // ASCII whitespace around the label does not count.
   uint32_t start = 0, end = u.length;
   while (start < end && is_space(unit_at(&u, start))) {
     ++start;
@@ -1238,8 +1142,6 @@ TZ_COLD static void invalid_data(const char *encoding) {
   tz_throw(TZ_TYPE_ERROR, "The encoded data was not valid for encoding %s", encoding);
 }
 
-// A character of UTF-8 or UTF-16: the first of a stream is dropped if it is
-// a BOM, unless the decoder keeps it.
 static void put_text(TzTextDecoder *d, TzBuf *out, uint32_t cp) {
   if (!d->bom_seen) {
     d->bom_seen = 1;
@@ -1256,9 +1158,6 @@ static void put_text(TzTextDecoder *d, TzBuf *out, uint32_t cp) {
   }
 }
 
-// The WHATWG UTF-8 decoder (see decode_utf8), byte by byte from the state of
-// the stream: the code point so far, the bytes it needs and has, and the
-// bounds of the next one. Returns 0 at the first error when fatal.
 static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n, int stream) {
   uint32_t cp = d->state[0], needed = d->state[1], seen = d->state[2];
   uint32_t lower = needed ? d->state[3] & 0xFF : 0x80, upper = needed ? d->state[3] >> 8 : 0xBF;
@@ -1268,7 +1167,6 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
       if (stream) {
         break;
       }
-      // The end of the stream, inside a character.
       if (needed) {
         cp = needed = seen = 0;
         if (d->fatal) {
@@ -1313,7 +1211,6 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
       continue;
     }
     if (b < lower || b > upper) {
-      // The byte that broke the character starts over.
       cp = needed = seen = 0;
       lower = 0x80;
       upper = 0xBF;
@@ -1341,13 +1238,11 @@ static int utf8_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n
   return 1;
 }
 
-// The WHATWG UTF-16 decoder, from the state of the stream: a byte of the
-// next code unit (plus one, 0 for none) and a leading surrogate (0 for none).
 static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t n, int stream,
                         int big) {
   int lead_byte = (int)d->state[0] - 1;
   uint32_t lead_surrogate = d->state[1];
-  int back[2], restored = 0; // the bytes of a unit after a lone surrogate, the next one last
+  int back[2], restored = 0;
   int64_t i = 0;
   for (;;) {
     int b;
@@ -1361,7 +1256,6 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
       b = -1;
     }
     if (b < 0) {
-      // The end of the stream, inside a character.
       if (lead_byte >= 0 || lead_surrogate) {
         lead_byte = -1;
         lead_surrogate = 0;
@@ -1385,7 +1279,6 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
         put_text(d, out, 0x10000 + ((lead - 0xD800) << 10) + (unit - 0xDC00));
         continue;
       }
-      // The unit starts over.
       int high = (int)(unit >> 8), low = (int)(unit & 0xFF);
       back[restored++] = big ? low : high;
       back[restored++] = big ? high : low;
@@ -1414,17 +1307,13 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
   return 1;
 }
 
-// decode(bytes, { stream }): the text, from bytes the caller holds. A call
-// without `stream` ends the stream, and the next one starts a new one.
 void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, int32_t stream) {
   TzTextDecoder *d = (TzTextDecoder *)decoder;
-  // On an error, the empty string, which holds no memory.
   *out = tz_str_from_ascii("", 0);
   if (!d->streaming) {
     memset(d->state, 0, sizeof d->state);
     d->bom_seen = 0;
   }
-  // The whole text of a stream of UTF-8 at once.
   if (d->encoding == TEXT_UTF8 && !d->streaming && !stream && !d->fatal) {
     if (!d->ignore_bom && n >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
       data += 3;
@@ -1464,7 +1353,6 @@ void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, i
   }
   }
   if (!ok) {
-    // The next decode starts a new stream.
     d->streaming = 0;
     tz_buf_free(&text);
     invalid_data(tz_text_decoder_name(d));

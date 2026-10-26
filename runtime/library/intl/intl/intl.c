@@ -1,12 +1,3 @@
-// Intl beyond dates (docs/intl.md): what its objects share, made the way V8
-// makes them (src/objects/intl-objects.cc) so that they give what node
-// gives: the language a locale resolves to, the options, the parts of
-// formatToParts; and Intl.getCanonicalLocales and supportedLocalesOf. The
-// kinds are in intl_number.c (NumberFormat, PluralRules, toLocaleString of
-// numbers), intl_text.c (Collator, localeCompare, normalize, Segmenter) and
-// intl_names.c (RelativeTimeFormat, ListFormat, DisplayNames). Dates use
-// the languages of this file too (date_format.c).
-
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -27,12 +18,7 @@ static const char *const option_names[TZ_IO_COUNT] = {
 #undef TZ_INTL_OPTION_NAME
 };
 
-//===----------------------------------------------------------------------===//
-// The ICU of the system
-//===----------------------------------------------------------------------===//
-
 TZ_COLD TZ_NORETURN void tz_intl_no_icu(void) {
-  // TODO(linux): the data of the languages in the executable.
   tz_panicf("Intl needs the ICU of the system, which Windows has from Windows 10 1903 on");
 }
 
@@ -48,10 +34,6 @@ const TzIcu *tz_intl_icu(void) {
 
   return icu;
 }
-
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
 
 int tz_intl_ascii(TzStr s, char *out, size_t size) {
   uint32_t n;
@@ -102,10 +84,6 @@ const TzUChar *tz_intl_utf16(TzStr *s, TzUChar *buffer, int32_t capacity, TzUCha
   return out;
 }
 
-//===----------------------------------------------------------------------===//
-// Languages
-//===----------------------------------------------------------------------===//
-
 static int is_listed(const TzIcu *icu, const char *name) {
   int32_t count = icu->uloc_countAvailable();
   for (int32_t i = 0; i < count; ++i) {
@@ -117,8 +95,6 @@ static int is_listed(const TzIcu *icu, const char *name) {
   return 0;
 }
 
-// Whether ICU has the language, also under its full name: "zh_TW" is
-// listed as "zh_Hant_TW".
 static int is_available(const TzIcu *icu, const char *name) {
   if (is_listed(icu, name)) {
     return 1;
@@ -137,9 +113,6 @@ static int is_available(const TzIcu *icu, const char *name) {
   return strcmp(full, name) != 0 && is_listed(icu, full);
 }
 
-// The language ICU has data for that `requested` (an ICU locale ID without
-// keywords) falls back to: itself, or what is left without its last parts
-// (ECMA-402, BestAvailableLocale); "" if none.
 static void best_available(const TzIcu *icu, const char *requested, char *out, size_t size) {
   char candidate[64];
   tz_intl_copy(candidate, sizeof candidate, requested);
@@ -157,8 +130,6 @@ static void best_available(const TzIcu *icu, const char *requested, char *out, s
   out[0] = 0;
 }
 
-// A language tag as ICU names it ("de_DE@collation=phonebook"); 0 if it is
-// none (ECMA-402, IsStructurallyValidLanguageTag, as ICU reads tags).
 static int parse_tag(const TzIcu *icu, TzStr locale, char *id, int32_t size) {
   char tag[128];
   if (!tz_intl_ascii(locale, tag, sizeof tag) || !tag[0]) {
@@ -166,8 +137,6 @@ static int parse_tag(const TzIcu *icu, TzStr locale, char *id, int32_t size) {
   }
   TzUErrorCode status = 0;
   int32_t parsed = 0;
-  // "und", the undetermined language, is ICU's root: the language of the
-  // system then.
   int32_t n = icu->uloc_forLanguageTag(tag, id, size - 1, &parsed, &status);
   if (TZ_U_FAILURE(status) || n < 0 || parsed != (int32_t)strlen(tag) ||
       strncmp(tag, "x-", 2) == 0 || strcmp(tag, "root") == 0) {
@@ -204,7 +173,6 @@ int tz_intl_resolve_locale(const TzIcu *icu, int has_locale, TzStr locale, char 
   TzUErrorCode status = 0;
   int32_t n = icu->uloc_getBaseName(requested, base, (int32_t)sizeof base - 1, &status);
   base[TZ_U_FAILURE(status) || n < 0 ? 0 : n] = 0;
-  // What is not there falls back to the language of the system, as in V8.
   best_available(icu, base, found, 64);
   if (!found[0]) {
     best_available(icu, tz_icu_default_locale(), found, 64);
@@ -216,7 +184,6 @@ int tz_intl_resolve_locale(const TzIcu *icu, int has_locale, TzStr locale, char 
   return 1;
 }
 
-// The keywords of ICU that the BCP 47 keys of Intl name.
 static const char *legacy_key(const char *bcp_key) {
   static const char *const keys[][2] = {{"nu", "numbers"},    {"co", "collation"},
                                         {"kn", "colnumeric"}, {"kf", "colcasefirst"},
@@ -282,10 +249,6 @@ int tz_intl_has_numbering(const TzIcu *icu, const char *name) {
   return ok;
 }
 
-//===----------------------------------------------------------------------===//
-// Options
-//===----------------------------------------------------------------------===//
-
 const char *tz_intl_option(const TzIntlOptions *o, int index, const char *const *allowed, char *out,
                            const char *method, int *failed) {
   if (*failed || !(o->has_text & (UINT64_C(1) << index))) {
@@ -334,10 +297,6 @@ int tz_intl_bool_option(const TzIntlOptions *o, int index) {
   return o->number[index] != 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Objects
-//===----------------------------------------------------------------------===//
-
 TzIntl *tz_intl_alloc(size_t size, int32_t kind, const TzLayout *layout) {
   TzIntl *o = (TzIntl *)tz_obj_alloc((int64_t)size);
   memset(o, 0, size);
@@ -355,8 +314,6 @@ void tz_intl_set_text(TzIntl *o, int index, const char *text) {
   tz_intl_copy(o->text[index], TZ_INTL_TEXT, text);
 }
 
-// new Intl.NumberFormat(...) and the others; NULL for options JavaScript
-// rejects, with the error thrown.
 void *tz_intl_new(int32_t kind, const TzIntlOptions *o) {
   switch (kind) {
   case TZ_INTL_NUMBER_FORMAT:
@@ -376,8 +333,6 @@ void *tz_intl_new(int32_t kind, const TzIntlOptions *o) {
   }
 }
 
-// The release of the program's code for every kind: each closes what ICU
-// made for it in the drop function of its own layout.
 void tz_intl_drop(void *object) { ((TzInstance *)object)->layout->drop(object); }
 
 static void release(TzIntl *o) {
@@ -386,8 +341,6 @@ static void release(TzIntl *o) {
   }
 }
 
-// toLocaleString() and localeCompare() make the same objects again and
-// again; the last ones are kept, by what made them.
 #define CACHED 4
 typedef struct {
   uint16_t *key;
@@ -399,7 +352,6 @@ typedef struct {
   uint32_t next;
 } Cache;
 
-// The thread's own (TzThread::caches).
 static Cache *cache_of(TzThread *t) {
   Cache *c = (Cache *)t->caches[TZ_CACHE_INTL];
   if (!c) {
@@ -413,7 +365,6 @@ static Cache *cache_of(TzThread *t) {
   return c;
 }
 
-// The key of a lookup, with room on the stack for the usual few options.
 typedef struct {
   uint16_t local[128];
   uint16_t *units;
@@ -479,8 +430,6 @@ static void key_free(Key *k) {
   }
 }
 
-// The object of `kind` for the options, made the first time; NULL with the
-// error thrown for options JavaScript rejects. The cache keeps it.
 TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method) {
   Key key;
   key_of(&key, kind, o);
@@ -495,7 +444,7 @@ TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method)
   }
   TzIntl *object =
       kind == TZ_INTL_COLLATOR ? tz_collator_create(o, method) : tz_nf_create(o, method);
-  if (!object) { // thrown
+  if (!object) {
     key_free(&key);
     return NULL;
   }
@@ -515,7 +464,6 @@ TzIntl *tz_intl_cached(int32_t kind, const TzIntlOptions *o, const char *method)
 
 void tz_date_format_shutdown(void);
 
-// What the caches of every thread hold, before the leak check.
 void tz_intl_shutdown(void) {
   for (int32_t t = 0; t < tz_thread_total(); ++t) {
     TzThread *thread = tz_thread_at(t);
@@ -535,8 +483,6 @@ void tz_intl_shutdown(void) {
   tz_date_format_shutdown();
 }
 
-// resolvedOptions(): the option `which` (TZ_IO_*, -1 for the locale); 0
-// when it is not there.
 int32_t tz_intl_text(TzStr *out, const TzIntl *o, int32_t which) {
   const char *text = which < 0 ? o->locale : o->text[which];
   *out = tz_str_from_ascii(text, strlen(text));
@@ -544,10 +490,8 @@ int32_t tz_intl_text(TzStr *out, const TzIntl *o, int32_t which) {
   return text[0] != 0;
 }
 
-// A number or a boolean of resolvedOptions(): NaN when it is not there.
 double tz_intl_number(const TzIntl *o, int32_t which) { return o->number[which]; }
 
-// useGrouping of resolvedOptions(): 1 with its text, 0 for false.
 int32_t tz_intl_grouping(TzStr *out, const TzIntl *o) {
   const char *text = o->text[TZ_IO_USE_GROUPING];
   int on = strcmp(text, "false") != 0;
@@ -555,10 +499,6 @@ int32_t tz_intl_grouping(TzStr *out, const TzIntl *o) {
 
   return on;
 }
-
-//===----------------------------------------------------------------------===//
-// Parts
-//===----------------------------------------------------------------------===//
 
 static void *field_at(void *object, const TzIntlShape *shape, int field) {
   return (char *)object + shape->offsets[field];
@@ -580,7 +520,6 @@ void tz_intl_push_part(TzArray *parts, const TzIntlShape *shape, const char *typ
   tz_arr_push_value(parts, &part);
 }
 
-// A field ICU wrote: where it is, and what it is.
 typedef struct {
   int32_t field, start, limit;
 } Span;
@@ -615,9 +554,6 @@ void tz_intl_push_value_parts(TzArray *parts, const TzIntlShape *shape, const vo
     icu->ucfpos_getIndexes(position, &s->start, &s->limit, &status);
   }
   icu->ucfpos_close(position);
-  // Each unit belongs to the innermost field around it (the integer holds
-  // its group separators), or to none; a run of units of one field, or of
-  // none, is a part.
   int32_t from = 0, owner = -2;
   for (int32_t i = 0; i <= length; ++i) {
     int32_t best = -1;
@@ -649,12 +585,6 @@ void tz_intl_push_value_parts(TzArray *parts, const TzIntlShape *shape, const vo
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Intl.getCanonicalLocales and supportedLocalesOf
-//===----------------------------------------------------------------------===//
-
-// The canonical tag of each of `locales`, each once, into `out`; 0 with a
-// RangeError thrown for one that is no language tag.
 static int canonical_list(const TzIcu *icu, const TzArray *locales, TzArray *out) {
   for (uint32_t i = 0; i < locales->length; ++i) {
     TzStr s = ((const TzStr *)locales->data)[i];
@@ -686,8 +616,6 @@ static int canonical_list(const TzIcu *icu, const TzArray *locales, TzArray *out
   return 1;
 }
 
-// Intl.getCanonicalLocales(locales): a new array; NULL with the error
-// thrown.
 TzArray *tz_intl_canonical_locales(const TzArray *locales) {
   const TzIcu *icu = tz_intl_icu();
   TzArray *out = tz_arr_new(&tz_string_type, 0, locales->length);
@@ -699,9 +627,6 @@ TzArray *tz_intl_canonical_locales(const TzArray *locales) {
   return out;
 }
 
-// Intl.NumberFormat.supportedLocalesOf(locales, options) and the others:
-// those of the canonical tags whose language ICU has, or a language they
-// fall back to.
 TzArray *tz_intl_supported_locales(const TzArray *locales, const TzIntlOptions *o,
                                    const char *method) {
   const TzIcu *icu = tz_intl_icu();
@@ -737,7 +662,7 @@ TzArray *tz_intl_supported_locales(const TzArray *locales, const TzIntlOptions *
       tz_str_release_value(tag);
     }
   }
-  all->length = 0; // its tags moved to `out` or were released
+  all->length = 0;
   tz_arr_free(all);
   if (!ok || failed) {
     tz_arr_free(out);

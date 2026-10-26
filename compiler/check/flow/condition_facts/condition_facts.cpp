@@ -19,8 +19,6 @@ namespace tz {
 
 namespace {
 
-// The variable `expr` reads, looking through the conversion Checker inserts for
-// a narrowed `T | undefined` variable.
 const VarSymbol *variableOf(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr);
       conv && conv->isImplicit() && conv->operand->type->isOptional()) {
@@ -32,7 +30,6 @@ const VarSymbol *variableOf(const Expr *expr) {
 }
 
 const NameExpr *optionalVariable(const Expr *expr) {
-  // `(m = re.exec(s)) != undefined`: the value is the variable's new one.
   if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
     expr = assign->target;
   }
@@ -41,12 +38,11 @@ const NameExpr *optionalVariable(const Expr *expr) {
   return name && name->var && name->var->type->isOptional() ? name : nullptr;
 }
 
-// x < y, or x <= y.
 void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
 
-} // namespace
+}
 
 ConditionFacts::ConditionFacts(Checker &checker) : checker_(checker) {}
 
@@ -56,17 +52,14 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   checker_.jsonChecker().addJsonFacts(cond, whenTrue, whenFalse);
   checker_.unionNarrowing().addUnionFacts(cond, whenTrue, whenFalse);
   checker_.unknownChecker().addUnknownFacts(cond, whenTrue, whenFalse);
-  // `if (isCircle(s))`: what the function's body shows (sema_predicate.cpp).
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::None) {
     checker_.predicateChecker().applyPredicate(call, whenTrue, whenFalse);
     return;
   }
-  // `if (x)`: a `T | undefined` that is truthy holds a value.
   if (const NameExpr *name = optionalVariable(cond)) {
     whenTrue.defined.insert(name->var);
     return;
   }
-  // The same for a field, `if (q.limit)`.
   auto optionalField = [&](const Expr *expr) -> std::optional<Checker::FieldPath> {
     if (!expr->type || !expr->type->isOptional()) {
       return std::nullopt;
@@ -84,7 +77,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   }
   BinaryOp op = bin->op;
 
-  // `x instanceof C`: x holds a value, and a variable is a C.
   if (op == BinaryOp::InstanceOf) {
     if (const NameExpr *name = optionalVariable(bin->lhs)) {
       whenTrue.defined.insert(name->var);
@@ -92,7 +84,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       FieldFacts::defineField(whenTrue, *path);
     }
     const Type *cls = bin->rhs->type;
-    // A class known only when the program runs, whose objects are a T.
     if (cls && cls->isConstructor()) {
       cls = cls->constructed();
     }
@@ -101,7 +92,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         cls != var->type->nonOptional() && cls->isSubtypeOf(var->type->nonOptional())) {
       whenTrue.narrowed.push_back({var, cls});
     }
-    // A Uint8Array that is a Buffer.
     if (const VarSymbol *var = variableOf(bin->lhs);
         var && cls && cls->isBuffer() && var->type->nonOptional()->bytes() == Type::Bytes::Uint8) {
       whenTrue.narrowed.push_back({var, cls});
@@ -110,7 +100,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   }
 
   if (op == BinaryOp::Eq || op == BinaryOp::Ne) {
-    // `x !== undefined`, `x === undefined`
     if (isa<UndefinedExpr>(bin->lhs) || isa<UndefinedExpr>(bin->rhs)) {
       const Expr *side = isa<UndefinedExpr>(bin->rhs) ? bin->lhs : bin->rhs;
       if (const NameExpr *name = optionalVariable(side)) {
@@ -120,7 +109,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
       }
       return;
     }
-    // `x === v` where v cannot be undefined: x holds a value if they are equal.
     for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
       auto *conv = dyn_cast<CastExpr>(other);
       const NameExpr *name = optionalVariable(side);
@@ -129,16 +117,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
         (op == BinaryOp::Eq ? whenTrue : whenFalse).defined.insert(name->var);
       }
     }
-    // `typeof x === "undefined"`, `typeof x === "number"`
     for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
       auto *typeOf = dyn_cast<UnaryExpr>(side);
       auto *text = dyn_cast<StringLitExpr>(other);
       if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
         continue;
       }
-      // A variable of a type parameter T: a string, a boolean or a number
-      // where that is what typeof says (in generic code; an instance has
-      // its type).
       if (const VarSymbol *var = variableOf(typeOf->operand);
           var && var->type->nonOptional()->isParam()) {
         const Type *param = var->type->nonOptional();
@@ -165,7 +149,6 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
             holds.defined.insert(var);
           }
         }
-        // `T extends string | int` that is not a string is an int.
         llvm::SmallVector<const Type *, 4> others;
         for (const Type *t : param->alternatives()) {
           llvm::StringRef name = typeOfName(t);
@@ -218,14 +201,12 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   }
   Facts &t = whenTrue.facts, &f = whenFalse.facts;
 
-  // `x !== c` says something when x is already known to be on one side of c:
-  // `a.length !== 0` means a.length >= 1.
   if ((op == BinaryOp::Ne || op == BinaryOp::Eq) && (l->term.isZero() || r->term.isZero())) {
     const Linear &x = l->term.isZero() ? *r : *l, &c = l->term.isZero() ? *l : *r;
     Facts &differ = op == BinaryOp::Ne ? t : f;
-    if (checker_.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) { // c <= x
+    if (checker_.flow_.facts.proves(c.term, x.term, x.offset - c.offset + 1)) {
       addLess(differ, c, x, false);
-    } else if (checker_.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) { // x <= c
+    } else if (checker_.flow_.facts.proves(x.term, c.term, c.offset - x.offset + 1)) {
       addLess(differ, x, c, false);
     }
   }
@@ -259,4 +240,4 @@ void ConditionFacts::addConditionFacts(const Expr *cond, Checker::Flow &whenTrue
   }
 }
 
-} // namespace tz
+}

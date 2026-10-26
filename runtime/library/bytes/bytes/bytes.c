@@ -1,17 +1,3 @@
-// Binary data (docs/bytes.md): ArrayBuffer, the typed arrays and DataView.
-//
-// An ArrayBuffer is the memory; a typed array, a Buffer or a DataView is a
-// window into it (TzBytes in bytes.h) that holds a reference to its buffer.
-// The code reads and writes elements itself, straight from `data` (see
-// compiler/library/bytes/codegen/codegen_bytes.cpp); the runtime makes the
-// objects and does what takes a loop: copies with conversions, fill, set, sort,
-// join...
-//
-// Checker checks that what is stored fits in the element (docs/bytes.md,
-// section 3), so the conversions here only need to agree with JavaScript
-// where JavaScript converts too: between the kinds of typed arrays, and from
-// doubles.
-
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -25,8 +11,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// kMaxLength of compiler/check/facts/facts.h: the proofs of indices count on
-// it.
 #define MAX_LENGTH ((int64_t)(1 << 30) - 1)
 
 void tz_bytes_drop(void *object);
@@ -42,7 +26,6 @@ void tz_bytes_object_drop(void *object);
    sizeof(name) - 1,                                                                               \
    TZ_BYTES_CLASS + (kind)}
 
-// Not static: see the rules in tzrt.h. Indexed by TZ_BYTES_*.
 const TzLayout tz_bytes_layouts[] = {
     {0},
     LAYOUT(TZ_BYTES_U8, "Uint8Array", tz_bytes_drop),
@@ -83,13 +66,6 @@ static int is_float(int32_t kind) {
   return kind == TZ_BYTES_F16 || kind == TZ_BYTES_F32 || kind == TZ_BYTES_F64;
 }
 
-//===----------------------------------------------------------------------===//
-// Conversions, as JavaScript makes them
-//===----------------------------------------------------------------------===//
-
-// IEEE 754 binary16, rounding to the nearest, ties to even, as Float16Array
-// stores a number. Done by hand: the C library has no conversion of its own
-// that every target links.
 TZ_HOT double tz_f16_to_f64(uint32_t h) {
   int exponent = (int)((h >> 10) & 0x1f);
   double mantissa = (double)(h & 0x3ff);
@@ -111,17 +87,16 @@ TZ_HOT uint32_t tz_f16_from_f64(double d) {
     return 0x7e00u;
   }
   double a = fabs(d);
-  if (a >= 65520.0) { // rounds to infinity
+  if (a >= 65520.0) {
     return sign | 0x7c00u;
   }
   int exponent;
-  frexp(a, &exponent); // a = m * 2^exponent, 0.5 <= m < 1
+  frexp(a, &exponent);
   if (a == 0 || exponent - 1 < -14) {
-    // Subnormal: a multiple of 2^-24; 1024 of them make the smallest normal.
     double q = rint(ldexp(a, 24));
     return sign | (uint32_t)q;
   }
-  double q = rint(ldexp(a, 10 - (exponent - 1))); // 1024 to 2048
+  double q = rint(ldexp(a, 10 - (exponent - 1)));
   if (q == 2048) {
     q = 1024;
     ++exponent;
@@ -130,8 +105,6 @@ TZ_HOT uint32_t tz_f16_from_f64(double d) {
   return sign | ((uint32_t)(exponent - 1 + 15) << 10) | ((uint32_t)q - 1024);
 }
 
-// ToUint32 of a number, before the narrower ones take its low bits: NaN and
-// the infinities are 0, fractions are cut off, the rest wraps around.
 static uint32_t wrap32(double d) {
   if (!isfinite(d)) {
     return 0;
@@ -144,10 +117,9 @@ static uint32_t wrap32(double d) {
   return (uint32_t)t;
 }
 
-// ToUint8Clamp: rounds half to even, as Uint8ClampedArray stores a number.
 static uint8_t clamp8(double d) {
   if (!(d > 0)) {
-    return 0; // NaN too
+    return 0;
   }
   if (d >= 255) {
     return 255;
@@ -218,8 +190,6 @@ static double get(const uint8_t *data, int32_t kind, int64_t i) {
 
 double tz_bytes_get(const TzBytes *b, int64_t i) { return get(b->data, tz_bytes_kind(b), i); }
 
-// Whether storing the elements of `from` in `kind` keeps their bits: the same
-// kind, or integers of one size (an Int8Array clamped is the exception).
 static int same_bits(int32_t kind, int32_t from) {
   if (kind == from) {
     return 1;
@@ -231,10 +201,6 @@ static int same_bits(int32_t kind, int32_t from) {
 
   return !(kind == TZ_BYTES_U8C && from == TZ_BYTES_I8);
 }
-
-//===----------------------------------------------------------------------===//
-// Making them
-//===----------------------------------------------------------------------===//
 
 static TzArrayBuffer *abuf_alloc(int64_t length, int zero) {
   TzArrayBuffer *ab = (TzArrayBuffer *)tz_obj_alloc((int64_t)sizeof(TzArrayBuffer) + length);
@@ -250,8 +216,6 @@ static TzArrayBuffer *abuf_alloc(int64_t length, int zero) {
   return ab;
 }
 
-// A window of `length` elements of `kind` from byte `offset` of `buffer`,
-// whose reference it takes over.
 static TzBytes *view_of(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int64_t length) {
   TzBytes *b = (TzBytes *)tz_obj_alloc(sizeof(TzBytes));
   b->rc = 1;
@@ -264,7 +228,6 @@ static TzBytes *view_of(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int
   return b;
 }
 
-// A typed array of its own buffer; zeroed unless `zero` is 0.
 static TzBytes *bytes_alloc(int32_t kind, int64_t length, int zero) {
   return view_of(kind, abuf_alloc(length * tz_bytes_element_size(kind), zero), 0, length);
 }
@@ -275,11 +238,7 @@ void tz_bytes_drop(void *object) {
   tz_obj_free(b);
 }
 
-void tz_abuf_drop(void *object) {
-  // A buffer of embedBytes is a constant of the program, never released to
-  // zero; its bytes too lie in the executable.
-  tz_obj_free(object);
-}
+void tz_abuf_drop(void *object) { tz_obj_free(object); }
 
 void tz_bytes_object_drop(void *object) { tz_obj_free(object); }
 
@@ -292,7 +251,6 @@ TzBytes *tz_bytes_new(int32_t kind, int64_t length) {
   return bytes_alloc(kind, length, 1);
 }
 
-// A new typed array whose elements the caller sets, all of them.
 TzBytes *tz_bytes_new_unset(int32_t kind, int64_t length) { return bytes_alloc(kind, length, 0); }
 
 TzArrayBuffer *tz_abuf_new(int64_t length) {
@@ -306,8 +264,6 @@ TzArrayBuffer *tz_abuf_new(int64_t length) {
 
 static const char *kind_name(int32_t kind) { return tz_bytes_layouts[kind].name; }
 
-// `new Uint16Array(buffer, offset?, length?)`; `has` says which were given
-// (1: offset, 2: length). The buffer is borrowed.
 TzBytes *tz_bytes_view(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int64_t length,
                        int32_t has) {
   int64_t size = tz_bytes_element_size(kind);
@@ -347,7 +303,6 @@ TzBytes *tz_bytes_view(int32_t kind, TzArrayBuffer *buffer, int64_t offset, int6
   return view_of(kind, buffer, offset, length);
 }
 
-// `new DataView(buffer, offset?, length?)`, its length in bytes.
 TzBytes *tz_dataview_new(TzArrayBuffer *buffer, int64_t offset, int64_t length, int32_t has) {
   if (!(has & 1)) {
     offset = 0;
@@ -374,7 +329,6 @@ TZ_COLD void tz_dataview_range_error(void) {
   tz_throw(TZ_RANGE_ERROR, "Offset is outside the bounds of the DataView");
 }
 
-// The elements of an array of numbers, converted as JavaScript stores them.
 TzBytes *tz_bytes_from_array(int32_t kind, const TzArray *a) {
   TzBytes *b = bytes_alloc(kind, a->length, 0);
   uint32_t n = a->length;
@@ -399,7 +353,6 @@ TzBytes *tz_bytes_from_array(int32_t kind, const TzArray *a) {
   return b;
 }
 
-// A typed array of `kind` with the values of another, converted.
 TzBytes *tz_bytes_from_bytes(int32_t kind, const TzBytes *src) {
   int32_t from = tz_bytes_kind(src);
   TzBytes *b = bytes_alloc(kind, src->length, 0);
@@ -414,8 +367,6 @@ TzBytes *tz_bytes_from_bytes(int32_t kind, const TzBytes *src) {
   return b;
 }
 
-// The elements as an array of `element` (int, long or double): spreading,
-// Array.from.
 TzArray *tz_bytes_to_array(const TzBytes *b, const TzType *element) {
   int32_t kind = tz_bytes_kind(b);
   TzArray *a = tz_arr_new(element, b->length, b->length);
@@ -439,14 +390,8 @@ TzArrayBuffer *tz_bytes_buffer(TzBytes *b) {
   return b->buffer;
 }
 
-// Buffer.isBuffer of a Uint8Array, which may be a Buffer.
 int32_t tz_bytes_is_buffer(const TzBytes *b) { return tz_bytes_kind(b) == TZ_BYTES_BUFFER; }
 
-//===----------------------------------------------------------------------===//
-// Methods
-//===----------------------------------------------------------------------===//
-
-// A relative position: from the end if negative, clamped to [0, length].
 static int64_t relative(int64_t position, int64_t length) {
   if (position < 0) {
     return position + length < 0 ? 0 : position + length;
@@ -455,7 +400,6 @@ static int64_t relative(int64_t position, int64_t length) {
   return position > length ? length : position;
 }
 
-// `has` says which of start (1) and end (2) were given.
 static void range_of(int64_t length, int64_t start, int64_t end, int32_t has, int64_t *from,
                      int64_t *to) {
   *from = (has & 1) ? relative(start, length) : 0;
@@ -503,7 +447,6 @@ void tz_bytes_fill(TzBytes *b, double value, int64_t start, int64_t end, int32_t
   range_of(b->length, start, end, has, &from, &to);
   int32_t kind = tz_bytes_kind(b);
   if (tz_bytes_element_size(kind) == 1 && to > from) {
-    // One byte: the value stored is the same everywhere.
     uint8_t byte[1];
     put(byte, kind, 0, value);
     memset(b->data + from, byte[0], (size_t)(to - from));
@@ -520,7 +463,6 @@ TZ_COLD static int set_out_of_bounds(void) {
   return 0;
 }
 
-// `dst.set(src, offset)` of an array of numbers.
 void tz_bytes_set_array(TzBytes *dst, const TzArray *src, int64_t offset) {
   if (offset < 0 || offset + src->length > dst->length) {
     set_out_of_bounds();
@@ -535,8 +477,6 @@ void tz_bytes_set_array(TzBytes *dst, const TzArray *src, int64_t offset) {
   }
 }
 
-// `dst.set(src, offset)` of a typed array, which may share memory with dst:
-// then the values are read before any is written, as JavaScript does.
 void tz_bytes_set_bytes(TzBytes *dst, const TzBytes *src, int64_t offset) {
   if (offset < 0 || offset + src->length > dst->length) {
     set_out_of_bounds();
@@ -558,7 +498,6 @@ void tz_bytes_set_bytes(TzBytes *dst, const TzBytes *src, int64_t offset) {
   tz_free(values);
 }
 
-// indexOf (mode 0), lastIndexOf (1) and includes (2), which also finds NaN.
 int32_t tz_bytes_index_of(const TzBytes *b, double value, int64_t from, int32_t has_from,
                           int32_t mode) {
   int32_t kind = tz_bytes_kind(b);
@@ -584,7 +523,6 @@ int32_t tz_bytes_index_of(const TzBytes *b, double value, int64_t from, int32_t 
   return mode == 2 ? 0 : -1;
 }
 
-// The text of an element, as String(x) of the number.
 static void buf_element(TzBuf *out, const TzBytes *b, int32_t kind, int64_t i) {
   char text[32];
   size_t n;
@@ -635,8 +573,6 @@ void tz_bytes_reverse(TzBytes *b) {
   }
 }
 
-// The order of sort() without a function: numbers ascending, -0 before +0,
-// NaN last.
 static int less(double x, double y) {
   if (isnan(x)) {
     return 0;
@@ -678,7 +614,6 @@ void tz_bytes_sort(TzBytes *b) {
     return;
   }
   if (kind == TZ_BYTES_U8 || kind == TZ_BYTES_U8C || kind == TZ_BYTES_BUFFER) {
-    // Counting sort: bytes need no comparisons.
     size_t counts[256] = {0};
     for (size_t i = 0; i < n; ++i) {
       ++counts[b->data[i]];
@@ -703,9 +638,6 @@ void tz_bytes_sort(TzBytes *b) {
   tz_free(tmp);
 }
 
-// sort(compare): the values in the representation of the language (i32,
-// i64 or double, `size` bytes), which the comparison function the compiler
-// made reads (see Lowering::sortComparator).
 typedef int32_t (*TzCompare)(void *ctx, const void *x, const void *y);
 
 static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCompare compare,
@@ -718,7 +650,6 @@ static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCom
   merge_sort_with(items + half * size, tmp, n - half, size, compare, ctx);
   size_t i = 0, j = half, k = 0;
   while (i < half && j < n) {
-    // Stable: an element of the right half goes first only if it is less.
     if (compare(ctx, items + j * size, items + i * size) < 0) {
       memcpy(tmp + k++ * size, items + j++ * size, size);
     } else {
@@ -804,7 +735,6 @@ TzBytes *tz_bytes_to_sorted(TzBytes *b) {
   return copy;
 }
 
-// `with(index, value)`: a copy with one element replaced.
 TzBytes *tz_bytes_with(TzBytes *b, int64_t index, double value) {
   int64_t at = index < 0 ? index + b->length : index;
   if (at < 0 || at >= b->length) {
@@ -816,10 +746,6 @@ TzBytes *tz_bytes_with(TzBytes *b, int64_t index, double value) {
 
   return copy;
 }
-
-//===----------------------------------------------------------------------===//
-// Printing
-//===----------------------------------------------------------------------===//
 
 void tz_buf_bytes_hex(TzBuf *out, const uint8_t *data, int64_t length, int64_t max,
                       const char *more) {

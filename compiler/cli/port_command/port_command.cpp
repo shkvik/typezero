@@ -40,8 +40,7 @@ const char kSynopsis[] =
     "  files the package exports when it does not say.";
 
 bool readFile(llvm::StringRef file, std::string &text) {
-  auto buffer = llvm::MemoryBuffer::getFile(file, /*IsText=*/false,
-                                            /*RequiresNullTerminator=*/false);
+  auto buffer = llvm::MemoryBuffer::getFile(file, false, false);
   if (!buffer) {
     report("cannot read '" + file + "': " + buffer.getError().message());
     return false;
@@ -74,11 +73,8 @@ bool writeFile(llvm::StringRef file, llvm::StringRef text) {
   return true;
 }
 
-// The name of the default export of each file, before anything changes.
 void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef packageDir,
                       PortContext &ctx) {
-  // `export { default } from "./x"` takes x's name: files are read until no
-  // name changes.
   for (int round = 0; round < 4; ++round) {
     for (const std::string &file : files) {
       llvm::SmallString<256> real;
@@ -160,7 +156,6 @@ void findDefaultNames(const std::vector<std::string> &files, llvm::StringRef pac
   }
 }
 
-// What a package says it exports, as files relative to its directory.
 std::vector<std::pair<std::string, std::string>> packageEntries(const std::string &dir,
                                                                 const Manifest &manifest,
                                                                 std::string &name,
@@ -175,8 +170,6 @@ std::vector<std::pair<std::string, std::string>> packageEntries(const std::strin
   if (version.empty()) {
     version = manifest.version;
   }
-  // A package for npm: its name and version, and the .ts files its
-  // package.json names.
   llvm::SmallString<256> packageJson(dir);
   path::append(packageJson, "package.json");
   if (auto buffer = llvm::MemoryBuffer::getFile(packageJson)) {
@@ -213,7 +206,6 @@ std::vector<std::pair<std::string, std::string>> packageEntries(const std::strin
   return entries;
 }
 
-// The sources of what `tz port` is given, in the cache or on the disk.
 bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::string &version,
                  std::vector<std::pair<std::string, std::string>> &exports, bool &local) {
   std::string error;
@@ -269,7 +261,7 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   }
   if (source.kind == Source::Kind::Git) {
     std::string commit;
-    if (!gitResolve(source.url, source.ref, /*refresh=*/true, commit, error) ||
+    if (!gitResolve(source.url, source.ref, true, commit, error) ||
         !gitCheckout(source.url, commit, dir, error)) {
       report(error);
       return false;
@@ -283,7 +275,6 @@ bool fetchSource(llvm::StringRef arg, std::string &dir, std::string &name, std::
   return true;
 }
 
-// The name of the copy of a file: a.tz for a.ts.
 std::string copyName(llvm::StringRef file) {
   return file.ends_with(".ts") ? (file.drop_back(3) + ".tz").str() : file.str();
 }
@@ -295,7 +286,7 @@ std::string displayPath(llvm::StringRef base, llvm::StringRef relative) {
   return path::convert_to_slash(shown);
 }
 
-} // namespace
+}
 
 int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   std::string sourceArg, outArg;
@@ -329,7 +320,6 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   if (!fetchSource(sourceArg, dir, name, version, exports, local)) {
     return kExitError;
   }
-  // Paths are compared with the files' real paths.
   llvm::SmallString<256> realDir;
   if (!fs::real_path(dir, realDir)) {
     dir = std::string(realDir);
@@ -365,9 +355,7 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     return kExitError;
   }
 
-  // Where the copy goes.
   std::string shortName = llvm::StringRef(name).substr(llvm::StringRef(name).rfind('/') + 1).str();
-  // `out` as the report shows it.
   std::string out = inPlace ? sourceArg : outArg.empty() ? shortName : outArg;
   llvm::SmallString<256> outDir(inPlace ? dir : out);
   fs::make_absolute(outDir);
@@ -380,7 +368,6 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     }
   }
 
-  // The files the exports reach, and the names of their default exports.
   std::vector<std::string> entries, files, external;
   for (const auto &[key, file] : exports) {
     llvm::SmallString<256> full(dir);
@@ -402,13 +389,12 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     }
   }
 
-  // Port each file.
   Counts counts;
   struct Ported {
-    std::string relative; // of the copy
+    std::string relative;
     std::string text;
     std::vector<Note> notes;
-    std::string source; // relative, of the file ported
+    std::string source;
   };
   std::vector<Ported> ported;
   for (const std::string &file : files) {
@@ -439,14 +425,12 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     if (!writeFile(target, p.text)) {
       return kExitError;
     }
-    // In place, a.tz replaces a.ts.
     if (inPlace && p.source != p.relative) {
       llvm::SmallString<256> old(outDir);
       path::append(old, p.source);
       fs::remove(old);
     }
   }
-  // The license and the readme go with the code.
   std::error_code ec;
   for (fs::directory_iterator it(dir, ec), end; it != end && !ec; it.increment(ec)) {
     std::string file = path::filename(it->path()).lower();
@@ -464,7 +448,6 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
       }
     }
   }
-  // A tz.json that says what the package is.
   llvm::SmallString<256> tzJson(outDir);
   path::append(tzJson, "tz.json");
   if (!inPlace || !fs::exists(tzJson)) {
@@ -472,7 +455,6 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     if (!version.empty()) {
       json += ",\n  \"version\": " + jsonQuote(version);
     }
-    // The exports are files of the copy.
     if (exports.size() == 1 && exports[0].first == ".") {
       json += ",\n  \"main\": " + jsonQuote(copyName(exports[0].second));
     } else {
@@ -494,7 +476,6 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
     }
   }
 
-  // The report.
   llvm::outs() << "ported " << name << (version.empty() ? "" : " " + version) << " into "
                << path::convert_to_slash(out) << " (" << ported.size()
                << (ported.size() == 1 ? " file" : " files") << ")\n";
@@ -524,4 +505,4 @@ int PortCommand::run(llvm::ArrayRef<const char *> args) const {
   return 0;
 }
 
-} // namespace tz::pkg
+}

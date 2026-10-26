@@ -63,8 +63,6 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
       params.push_back(i32);
       args.push_back(lowering_.builder_.CreateZExt(value, i32));
     } else if (LibraryCallLowerer::isAbortSignal(type)) {
-      // A signal crosses as the runtime's side of it
-      // (runtime/library/events/signal/signal.c).
       params.push_back(ptr);
       args.push_back(lowering_.libraryCallLowerer().nativeSignal(value, type));
     } else {
@@ -78,8 +76,6 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
   name.consume_front("__");
   llvm::Value *result;
   if (name.starts_with("tz_tls_") && !lowering_.usesTls_) {
-    // A program that tz built without TLS (SourceFile::usesTls) has none to call: the call fails
-    // as the runtime words it, rejecting the promise or throwing.
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_net_no_tls", lowering_.builder_.getVoidTy(),
                                                    {ptr, ptr}),
@@ -89,7 +85,6 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     result = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction(name, cret, params), args);
   }
-  // The function owns its arguments; the runtime only borrowed them.
   for (size_t i = 0; i < sym->params.size(); ++i) {
     lowering_.refCounts().releaseValue(function->getArg(unsigned(i)), sym->params[i]);
   }
@@ -120,8 +115,6 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
     llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
     llvm::Function *outer = std::exchange(lowering_.function_, code);
     lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
-    // The environment is the box of the function it wraps, which the call
-    // borrows; the arguments go to that function, which owns them.
     llvm::Value *inner =
         lowering_.builder_.CreateLoad(lowering_.fnTy_,
                                       lowering_.builder_.CreateStructGEP(
@@ -132,7 +125,6 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
       args.push_back(code->getArg(i));
     }
     llvm::Value *result = lowering_.closureLowerer().callFunctionValue(inner, from, args);
-    // What it gives after it threw is nothing to convert.
     if (lowering_.typeThrows(from)) {
       llvm::BasicBlock *thrownBlock = lowering_.functionFrame().newBlock("adapt.thrown");
       llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("adapt.ok");
@@ -151,15 +143,11 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
     lowering_.function_ = outer;
     lowering_.builder_.restoreIP(point);
     info = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-        llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                   {code, lowering_.stringLowerer().stringLiteral(u"")}),
         "tz.fninfo.adapt");
   }
-  // The box is a member when the function may hold one, as the box of an
-  // unknown is (Lowering::boxValue): a box outside the groups would count
-  // from outside it a reference that a group holding the adapter owns.
   bool member = lowering_.memory().mayHoldMember(from);
   llvm::Value *box = lowering_.envLowerer().newBox(from, member);
   lowering_.builder_.CreateStore(
@@ -171,8 +159,6 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
   return lowering_.closureLowerer().makeFunctionValue(info, box);
 }
 
-// A key of TZ_FIELD_GETTER for each getter: a TzGetterType with the type of
-// the value and a function that calls the getter and writes what it gives.
 void TzModulesLowerer::appendGetterKeys(llvm::ArrayRef<const ClassDecl *> chain,
                                         std::vector<llvm::Constant *> &entries) {
   std::vector<const FunctionDecl *> getters;
@@ -211,16 +197,15 @@ void TzModulesLowerer::appendGetterKeys(llvm::ArrayRef<const ClassDecl *> chain,
         {lowering_.builder_.getInt32(17), lowering_.builder_.getInt32(0),
          llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr))});
     auto *type = new llvm::GlobalVariable(
-        *lowering_.module_, getterTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, getterTy, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(
             getterTy, {base, lowering_.typeDescriptors().typeDescriptor(fn->sym->ret), get}),
         "tz.getter." + name);
     entries.push_back(llvm::ConstantStruct::get(
-        lowering_.fieldDescTy_,
-        {lowering_.stringLowerer().utf8Constant(fn->name),
-         lowering_.builder_.getInt32(uint32_t(fn->name.size())),
-         lowering_.builder_.getInt32(0xFFFFFFFEu), type})); // TZ_FIELD_GETTER
+        lowering_.fieldDescTy_, {lowering_.stringLowerer().utf8Constant(fn->name),
+                                 lowering_.builder_.getInt32(uint32_t(fn->name.size())),
+                                 lowering_.builder_.getInt32(0xFFFFFFFEu), type}));
   }
 }
 
-} // namespace tz
+}

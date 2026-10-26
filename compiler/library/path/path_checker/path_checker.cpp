@@ -43,7 +43,7 @@ const Type *formatInputType() {
                       "FormatInputPathObject");
 }
 
-} // namespace
+}
 
 PathChecker::PathChecker(Checker &checker) : checker_(checker) {}
 
@@ -72,7 +72,6 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   const Type *string = Type::string();
 
   if (fn == "join" || fn == "resolve") {
-    // The paths become one array, spread ones too: `join(...parts)`.
     auto *paths = checker_.ctx_.make<ArrayLitExpr>(call->args.empty() ? loc : call->args[0]->loc());
     for (size_t i = 0; i < call->args.size(); ++i) {
       paths->elements.push_back({call->args[i], call->spreads(i)});
@@ -113,8 +112,6 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
     return call;
   }
   if (shape->builtin == Builtin::PathFormat) {
-    // An object with some of root, dir, base, ext and name: a literal takes
-    // the type of format's parameter; path.parse() gives all five.
     Expr *arg = checker_.exprChecker().checkExpr(call->args[0], formatInputType());
     const Type *type = arg->type;
     bool fits = type->isObject() && !type->isClass() && !type->isTuple() &&
@@ -142,4 +139,4 @@ Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::String
   return call;
 }
 
-} // namespace tz
+}

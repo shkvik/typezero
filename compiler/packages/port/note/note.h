@@ -10,4 +10,4 @@ struct Note {
   std::string message;
 };
 
-} // namespace tz::pkg
+}

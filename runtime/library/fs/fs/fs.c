@@ -1,10 +1,7 @@
-// node:fs (docs/io.md): what its functions share: byte buffers, paths as the
-// program gave them and as the system gets them, the flags of open, and files.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs/fs.h"
@@ -31,10 +28,6 @@
 #include <time.h>
 #include <unistd.h>
 #endif
-
-//===----------------------------------------------------------------------===//
-// Bytes
-//===----------------------------------------------------------------------===//
 
 void tz_fs_bytes_init(Bytes *b) {
   b->data = NULL;
@@ -125,7 +118,7 @@ void tz_fs_raw_reserve(Raw *r, size_t extra) {
   }
   uint8_t *data = (uint8_t *)realloc(r->data, capacity);
   if (!data) {
-    abort(); // on a thread of the pool, which cannot report it
+    abort();
   }
   r->data = data;
   r->capacity = capacity;
@@ -225,16 +218,11 @@ TzStr tz_fs_str_of_utf8(const uint8_t *s, size_t n) {
   return tz_buf_take(&b);
 }
 
-//===----------------------------------------------------------------------===//
-// Paths
-//===----------------------------------------------------------------------===//
-
 static void path_from_units(Path *p) {
   tz_buf_init(&p->shown);
 #ifdef _WIN32
   tz_buf_init(&p->wide);
   tz_path_namespaced_units(&p->wide, p->given.data, p->given.length);
-  // Node shows the path without the prefix (StringFromPath).
   const uint16_t *w = p->wide.data;
   size_t n = p->wide.length;
   static const uint16_t unc[] = {'\\', '\\', '?', '\\', 'U', 'N', 'C', '\\'};
@@ -325,8 +313,6 @@ void tz_fs_fail_errno(TzMaker make, int e, const char *syscall, const Path *path
 }
 #endif
 
-// The `flag` option, as Node reads it ("r", "w", "a+", "wx"...); 0 if it is
-// none of them.
 static int parse_flags(const TzBuf *flag, OpenFlags *f) {
   static const struct {
     const char *text;
@@ -401,7 +387,6 @@ File tz_fs_open_raw(const Path *p, OpenFlags f, int32_t mode, Failure *failure) 
                   NULL, disposition, attributes | FILE_FLAG_BACKUP_SEMANTICS, NULL);
   if (h == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
-    // To create a file where a directory is.
     if (error == ERROR_FILE_EXISTS && f.create && !f.exclusive) {
       *failure = (Failure){E_EISDIR, tz_fs_errors[E_EISDIR].windows};
     } else {

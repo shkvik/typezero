@@ -1,12 +1,6 @@
-// node:stream/consumers: the whole content of a stream, as text, JSON, a
-// Buffer or an ArrayBuffer (lib/stream/consumers.js of Node 24;
-// docs/streams.md).
-
 import { Stream, streamChunks } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
 
-// node decodes with a TextDecoder; a StringDecoder of UTF-8 gives the same
-// text, and replaces bad bytes as Buffer.toString() does.
 export async function text(stream: Stream): Promise<string> {
   const dec = new StringDecoder("utf8")
   let str = ""

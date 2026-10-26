@@ -13,4 +13,4 @@ std::string Locked::describe() const {
   return id;
 }
 
-} // namespace tz::pkg
+}

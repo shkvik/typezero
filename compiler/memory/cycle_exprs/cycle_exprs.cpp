@@ -35,8 +35,6 @@ void CycleExprs::expr(const Expr *expr) {
       if (!p.method) {
         this->expr(p.value);
       }
-      // A method of an interface, bound to the object a spread copies it
-      // from (see emitSpreadLiteral).
       if (p.spread && p.value->type && p.value->type->isObject()) {
         for (const Field &f : p.value->type->fields()) {
           if (f.type->isFunction()) {
@@ -55,9 +53,6 @@ void CycleExprs::expr(const Expr *expr) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(expr);
     this->expr(member->object);
-    // A method as a value is bound to its object; so is a member of an
-    // interface that holds a function, which a method of a class that
-    // implements it may be.
     const Type *object = member->object->type ? member->object->type->nonOptional() : nullptr;
     if (member->type && member->type->nonOptional()->isFunction() && object &&
         !scanner_.callee_.contains(member) &&
@@ -242,9 +237,6 @@ bool CycleExprs::constructionWrite(const AssignExpr *assign) {
     const ClassDecl *cls = fn->cls;
     bool initEscapes = cls->init && cls->init->thisVar &&
                        CycleScanner::thisEscapes(cls->init->body, cls->init->thisVar);
-    // Before a constructor's body: the initializers, which run first in a
-    // class that extends none; in one that does, `super()` runs the class
-    // extended and then them.
     bool escaped = fn == cls->init
                        ? cls->parent && scanner_.cycleEscapes().constructionEscapes(cls->parent)
                        : !cls->parent && initEscapes;
@@ -256,4 +248,4 @@ bool CycleExprs::constructionWrite(const AssignExpr *assign) {
   return it->second.contains(assign);
 }
 
-} // namespace tz
+}

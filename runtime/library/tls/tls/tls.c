@@ -1,31 +1,7 @@
-// TLS (docs/net.md, section 4): https for fetch and for serve with `tls`, on OpenSSL's TLS 1.2 and
-// 1.3 with the settings of node 24: its ciphers, TLS 1.2 at least, SNI, ALPN http/1.1, the
-// certificate of a server checked as node checks it, and the root certificates node embeds.
-//
-// TLS sits on a connection of net.c, between its socket and HTTP (http.c), in memory: what the
-// socket reads lands in NetConn::raw, from which OpenSSL takes it through a BIO of this file, and
-// what OpenSSL writes lands in NetConn::sealed, which net.c writes to the socket as it writes the
-// output of a plain connection. So the reads and writes stay those of the completion port, and
-// HTTP reads and writes plaintext as it does without TLS. net.c reaches this file through
-// NetTlsOps; a program, through `__tz_tls_connect` (fetch) and `__tz_tls_listen` (serve), which
-// tz links only into a program that may use https, together with libssl and all of libcrypto
-// (compiler/link/licenses/licenses.cpp).
-//
-// The client checks the server after the handshake, as node does: the chain of its certificate
-// against the roots (OpenSSL's verification), then the name of the host (node's
-// tls.checkServerIdentity), with node's errors and codes (CERT_HAS_EXPIRED,
-// ERR_TLS_CERT_ALTNAME_INVALID...), which fetch gives as the cause of "fetch failed". The roots
-// are Mozilla's, as node embeds them (tls_roots.h), with the certificates of the file that
-// NODE_EXTRA_CA_CERTS names and, with NODE_USE_SYSTEM_CA=1, those the system trusts, as in node.
-//
-// TODO(linux): the roots of the system with NODE_USE_SYSTEM_CA (/etc/ssl/certs); the rest works
-// as it is once net.c has sockets there.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/library/net/net/net.h"
 
 #ifdef _WIN32
-// Before OpenSSL, whose headers undefine what wincrypt.h defines in their way (X509_NAME).
 #include <wincrypt.h>
 #else
 #include <arpa/inet.h>
@@ -53,7 +29,6 @@
 #include "runtime/library/bytes/bytes/bytes.h"
 #include "runtime/library/events/signal/signal.h"
 
-// node 24's tls.DEFAULT_CIPHERS: the suites of TLS 1.3, and the ciphers of TLS 1.2.
 static const char kSuites[] =
     "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256";
 static const char kCiphers[] =
@@ -61,26 +36,20 @@ static const char kCiphers[] =
     "ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:"
     "DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA256:"
     "DHE-RSA-AES256-SHA256:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA";
-// What a client offers and a server takes: HTTP/1.1 only, until HTTP/2 (docs/net.md, section 7).
 static const unsigned char kAlpn[] = "\x08http/1.1";
 
-// None of the state is static: see the rules in tzrt.h.
-SSL_CTX *tz_tls_client;        // of every client, made with the first connection
-BIO_METHOD *tz_tls_bio_method; // of the BIO over a connection
-int32_t tz_tls_system_roots;   // NODE_USE_SYSTEM_CA=1: the roots of the system too
+SSL_CTX *tz_tls_client;
+BIO_METHOD *tz_tls_bio_method;
+int32_t tz_tls_system_roots;
 
-// The TLS of a connection (NetConn::tls).
 typedef struct Tls {
   NetConn *conn;
   SSL *ssl;
   uint8_t server;
   uint8_t handshaken;
   uint8_t failed;
-  uint8_t shut; // close_notify written: nothing more goes out
-  // The error of OpenSSL that failed it; 0 when the socket ended during the handshake.
+  uint8_t shut;
   unsigned long failure;
-  // Of a client: the handshake the program waits for (`__tz_tls_connect`), and the host it is
-  // for, whose name the certificate must have.
   TzPromise *promise;
   TzMaker make;
   TzSignal *signal;
@@ -88,18 +57,11 @@ typedef struct Tls {
   char host[256];
 } Tls;
 
-// What console.error prints between these goes to stderr (output.c).
 void tz_err_begin(void);
 void tz_err_end(void);
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
-//===----------------------------------------------------------------------===//
-// Errors
-//===----------------------------------------------------------------------===//
-
-// An error of TLS as node makes it: an Error with a code (and without the system call of the
-// other errors of SystemError).
 static void *tls_error(TzMaker make, const char *code, const char *message, int32_t number) {
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
@@ -112,8 +74,6 @@ static void *tls_error(TzMaker make, const char *code, const char *message, int3
   return make(&parts);
 }
 
-// An error of OpenSSL, with node's code of it: "ERR_SSL_" and the reason in capitals for one of
-// libssl ("ERR_SSL_WRONG_VERSION_NUMBER"), "ERR_OSSL_" and the library for the others.
 static void *ssl_error(TzMaker make, unsigned long error) {
   static const struct {
     int lib;
@@ -156,7 +116,6 @@ static void *ssl_error(TzMaker make, unsigned long error) {
   return tls_error(make, code, message, 0);
 }
 
-// The server went away during the handshake: node's ECONNRESET of it.
 static void *disconnected(TzMaker make) {
   return tls_error(make, "ECONNRESET",
                    "Client network socket disconnected before secure TLS connection was "
@@ -164,7 +123,6 @@ static void *disconnected(TzMaker make) {
                    -4077);
 }
 
-// The code node gives a result of the verification of a certificate (X509ErrorCode).
 static const char *verify_code(long result) {
   switch (result) {
 #define CODE(name)                                                                                 \
@@ -204,8 +162,6 @@ static const char *verify_code(long result) {
   }
 }
 
-// A certificate that does not verify: OpenSSL's words for it, with node's code. To the two that
-// a root of the system's own may fix, node 24 adds a hint, which here names tz's way to it.
 static void *verify_error(TzMaker make, long result) {
   char message[512];
   int hint = !tz_tls_system_roots && (result == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT ||
@@ -218,11 +174,6 @@ static void *verify_error(TzMaker make, long result) {
   return tls_error(make, verify_code(result), message, 0);
 }
 
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
-
-// A growing string of bytes, NUL-terminated.
 typedef struct Text {
   char *data;
   size_t length, cap;
@@ -248,16 +199,10 @@ static void text_put(Text *t, const char *s) { text_add(t, s, strlen(s)); }
 
 static const char *text_of(const Text *t) { return t->data ? t->data : ""; }
 
-// A string of the program as UTF-8 bytes, which the caller releases.
 static TzBytes *bytes_of(void *obj, uint64_t meta) {
   return tz_buffer_from_string(obj, meta, TZ_ENC_UTF8);
 }
 
-//===----------------------------------------------------------------------===//
-// The BIO over a connection
-//===----------------------------------------------------------------------===//
-
-// What OpenSSL writes is queued on the connection.
 static int bio_write(BIO *bio, const char *data, size_t length, size_t *written) {
   NetConn *c = (NetConn *)BIO_get_data(bio);
   memcpy(net_seal_reserve(c, length), data, length);
@@ -267,8 +212,6 @@ static int bio_write(BIO *bio, const char *data, size_t length, size_t *written)
   return 1;
 }
 
-// What it reads is what the socket read; when that is used up, it waits for more (a retry), or
-// the socket ended.
 static int bio_read(BIO *bio, char *out, size_t length, size_t *got) {
   NetConn *c = (NetConn *)BIO_get_data(bio);
   BIO_clear_retry_flags(bio);
@@ -325,14 +268,8 @@ static BIO_METHOD *bio_method(void) {
   return tz_tls_bio_method;
 }
 
-//===----------------------------------------------------------------------===//
-// What net.c asks
-//===----------------------------------------------------------------------===//
-
 static void tls_seal(NetConn *c);
 
-// The connection's TLS failed: what OpenSSL has to tell the other side (an alert) goes out, and
-// the connection breaks with NET_TLS_FAILED.
 static void fail(NetConn *c, unsigned long error) {
   Tls *t = (Tls *)c->tls;
   if (t->failed) {
@@ -346,7 +283,6 @@ static void fail(NetConn *c, unsigned long error) {
   c->error = NET_TLS_FAILED;
 }
 
-// The error of the handshake that failed: none when the socket ended first.
 static unsigned long handshake_error(NetConn *c) {
   unsigned long error = ERR_peek_error();
   if (c->raw_eof && c->raw_start == c->raw_end &&
@@ -374,7 +310,6 @@ static int tls_open(NetConn *c) {
       return 1;
     }
     t->handshaken = 1;
-    // A client checks the server before the program goes on (handshake_input).
     if (!t->server) {
       return 1;
     }
@@ -398,7 +333,6 @@ static int tls_open(NetConn *c) {
       c->eof = 1;
       return 1;
     }
-    // close_notify, or the end of the socket without it, which node takes as an end too.
     if (e == SSL_ERROR_ZERO_RETURN) {
       c->eof = 1;
       return 1;
@@ -428,7 +362,6 @@ static void tls_shutdown(NetConn *c) {
     return;
   }
   if (!t->handshaken || t->failed) {
-    // Nothing goes out to a peer that was not checked.
     c->out_len = 0;
     t->shut = 1;
     return;
@@ -465,13 +398,12 @@ static void tls_release(NetConn *c) {
     t->promise = NULL;
     tz_obj_release((TzObject *)p);
   }
-  SSL_free(t->ssl); // and the BIO
+  SSL_free(t->ssl);
   tz_free(t);
 }
 
 static const NetTlsOps tls_ops = {tls_open, tls_seal, tls_shutdown, tls_failure, tls_release};
 
-// TLS on a connection, with the settings of `ctx`.
 static Tls *tls_new(NetConn *c, SSL_CTX *ctx) {
   Tls *t = (Tls *)tz_alloc(sizeof(Tls));
   memset(t, 0, sizeof *t);
@@ -486,11 +418,6 @@ static Tls *tls_new(NetConn *c, SSL_CTX *ctx) {
   return t;
 }
 
-//===----------------------------------------------------------------------===//
-// The roots
-//===----------------------------------------------------------------------===//
-
-// Mozilla's, which tls_roots.h has compressed.
 static void add_mozilla_roots(X509_STORE *store) {
   uint8_t *der = (uint8_t *)tz_alloc(TLS_ROOTS_SIZE);
   z_stream z;
@@ -518,7 +445,6 @@ static void add_mozilla_roots(X509_STORE *store) {
   tz_free(der);
 }
 
-// "Warning: ...", as node's process warning (without its pid).
 static void warn(const char *message) {
   tz_err_begin();
   tz_out_write("Warning: ", 9);
@@ -527,8 +453,6 @@ static void warn(const char *message) {
   tz_err_end();
 }
 
-// The certificates of the file NODE_EXTRA_CA_CERTS names, as node reads them: PEM, one after the
-// other; a file it cannot read is a warning, and the others stay.
 static void add_extra_roots(X509_STORE *store) {
   char name[1024];
   FILE *f = NULL;
@@ -573,7 +497,6 @@ static void add_extra_roots(X509_STORE *store) {
   ERR_clear_error();
   BIO_free(bio);
   tz_free(data.data);
-  // The end of the file is a PEM without a start line; anything else is a warning.
   if (error &&
       !(ERR_GET_LIB(error) == ERR_LIB_PEM && ERR_GET_REASON(error) == PEM_R_NO_START_LINE)) {
     char text[256], message[1400];
@@ -585,8 +508,6 @@ static void add_extra_roots(X509_STORE *store) {
 }
 
 #ifdef _WIN32
-// Whether the system trusts a certificate for servers: no enhanced key usage at all, or one with
-// server authentication, as node takes the system's (IsCertTrustedForServerAuth).
 static int for_servers(PCCERT_CONTEXT cert) {
   DWORD size = 0;
   if (!CertGetEnhancedKeyUsage(cert, 0, NULL, &size)) {
@@ -608,8 +529,6 @@ static int for_servers(PCCERT_CONTEXT cert) {
 }
 #endif
 
-// NODE_USE_SYSTEM_CA=1: the roots of the system, as node's --use-system-ca takes them: on
-// Windows, those of its stores of roots, intermediate CAs and trusted people.
 static void add_system_roots(X509_STORE *store) {
 #ifdef _WIN32
   static const wchar_t *const kStores[] = {L"ROOT", L"CA", L"TrustedPeople"};
@@ -632,9 +551,9 @@ static void add_system_roots(X509_STORE *store) {
     }
     CertCloseStore(system, 0);
   }
-  ERR_clear_error(); // a root that is in two stores
+  ERR_clear_error();
 #else
-  (void)store; // TODO(linux): /etc/ssl/certs, as node reads it
+  (void)store;
 #endif
 }
 
@@ -652,12 +571,6 @@ static X509_STORE *trusted_roots(void) {
   return store;
 }
 
-//===----------------------------------------------------------------------===//
-// Contexts
-//===----------------------------------------------------------------------===//
-
-// What clients and servers share: node's versions and ciphers. Renegotiation (of TLS 1.2) is off:
-// what it would read or write in the middle of the program's data is not worth its attacks.
 static void configure(SSL_CTX *ctx) {
   SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
   SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
@@ -666,9 +579,6 @@ static void configure(SSL_CTX *ctx) {
   SSL_CTX_set_options(ctx, SSL_OP_NO_RENEGOTIATION | SSL_OP_IGNORE_UNEXPECTED_EOF);
 }
 
-// Every certificate of the chain is looked at whatever the one before gave, as node's callback
-// does (it returns 1): the error that stays is the last, which is node's error then (a lone
-// certificate of an unknown CA: UNABLE_TO_VERIFY_LEAF_SIGNATURE, not the first one found).
 static int verify_all(int ok, X509_STORE_CTX *store) {
   (void)ok;
   (void)store;
@@ -683,7 +593,6 @@ static SSL_CTX *client_context(void) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
   configure(ctx);
   SSL_CTX_set_cert_store(ctx, trusted_roots());
-  // The certificate is checked after the handshake, as node checks it (check_peer).
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_all);
   SSL_CTX_set_alpn_protos(ctx, kAlpn, sizeof kAlpn - 1);
   tz_tls_client = ctx;
@@ -691,7 +600,6 @@ static SSL_CTX *client_context(void) {
   return ctx;
 }
 
-// A server takes http/1.1, and refuses a client that offers only other protocols, as node does.
 static int select_alpn(SSL *ssl, const unsigned char **out, unsigned char *out_length,
                        const unsigned char *in, unsigned int in_length, void *arg) {
   (void)ssl;
@@ -703,7 +611,6 @@ static int select_alpn(SSL *ssl, const unsigned char **out, unsigned char *out_l
   return status == OPENSSL_NPN_NEGOTIATED ? SSL_TLSEXT_ERR_OK : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
-// Throws the last error of OpenSSL, as node's createSecureContext throws it.
 static void throw_openssl(const char *otherwise) {
   unsigned long error = ERR_peek_error();
   ERR_clear_error();
@@ -716,8 +623,6 @@ static void throw_openssl(const char *otherwise) {
   tz_throw(TZ_ERROR, "%s", text);
 }
 
-// A server's context with its certificate (and the chain after it) and its key, PEM; NULL after
-// it threw.
 static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj,
                                uint64_t key_meta) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
@@ -736,7 +641,7 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
         X509_free(ca);
       }
     }
-    ERR_clear_error(); // the end, a PEM without a start line
+    ERR_clear_error();
   }
   BIO_free(bio);
   tz_instance_release((TzInstance *)cert);
@@ -748,7 +653,6 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
   TzBytes *key = bytes_of(key_obj, key_meta);
   bio = BIO_new_mem_buf(key->data, key->length);
   EVP_PKEY *pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
-  // The key must be that of the certificate: "key values mismatch" otherwise.
   ok = pkey && SSL_CTX_use_PrivateKey(ctx, pkey) == 1;
   EVP_PKEY_free(pkey);
   BIO_free(bio);
@@ -762,11 +666,6 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
   return ctx;
 }
 
-//===----------------------------------------------------------------------===//
-// The name of the server (node's tls.checkServerIdentity)
-//===----------------------------------------------------------------------===//
-
-// An address written as one: its bytes (4 or 16); 0 for a name.
 static int address_of(const char *host, unsigned char *out) {
   if (inet_pton(AF_INET, host, out) == 1) {
     return 4;
@@ -778,7 +677,6 @@ static int address_of(const char *host, unsigned char *out) {
   return 0;
 }
 
-// Splits `s` (changed) at each dot; the count of parts, at most `max`, or -1 for more.
 static int split_dots(char *s, char **parts, int max) {
   int count = 0;
   for (char *p = s;;) {
@@ -795,9 +693,6 @@ static int split_dots(char *s, char **parts, int max) {
   }
 }
 
-// node's `check(hostParts, pattern, wildcards)`: whether `pattern`, a name of the certificate,
-// covers `host`, in lower case without the dot at its end. A wildcard is one `*` in the first
-// label only, not in an IDNA label, and not over a top-level domain.
 static int name_matches(const char *host, const unsigned char *given, size_t length) {
   char pattern[256], name[256];
   if (length == 0 || length >= sizeof pattern || strlen(host) >= sizeof name) {
@@ -805,7 +700,6 @@ static int name_matches(const char *host, const unsigned char *given, size_t len
   }
   for (size_t i = 0; i < length; ++i) {
     unsigned char ch = given[i];
-    // Control characters, blanks and anything outside ASCII (an IDNA U-label) never match.
     if (ch < 0x21 || ch > 0x7F) {
       return 0;
     }
@@ -845,8 +739,6 @@ static int name_matches(const char *host, const unsigned char *given, size_t len
          strcmp(sub + n - suffix, star + 1) == 0;
 }
 
-// A name as node shows it in `subjectaltname`: as it is, or quoted with escapes when it holds
-// what would make the list ambiguous.
 static void put_alt_name(Text *t, const char *prefix, const unsigned char *s, size_t n) {
   text_put(t, prefix);
   int safe = 1;
@@ -873,7 +765,6 @@ static void put_alt_name(Text *t, const char *prefix, const unsigned char *s, si
   text_put(t, "\"");
 }
 
-// One entry of node's `subjectaltname`: "DNS:example.com", "IP Address:127.0.0.1".
 static void put_general_name(Text *t, const GENERAL_NAME *g) {
   if (g->type == GEN_DNS || g->type == GEN_EMAIL || g->type == GEN_URI) {
     const ASN1_IA5STRING *s = g->type == GEN_DNS     ? g->d.dNSName
@@ -913,7 +804,6 @@ static void put_general_name(Text *t, const GENERAL_NAME *g) {
   BIO_free(bio);
 }
 
-// Whether the certificate is of `given`, the host fetch connected to; the error if not.
 static void *check_identity(TzMaker make, const char *given, X509 *cert) {
   char host[256];
   snprintf(host, sizeof host, "%s", given);
@@ -973,7 +863,6 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
       text_put(&reason, text_of(&altnames));
     }
   } else {
-    // The common name, only when the certificate has no DNS names.
     X509_NAME *subject = X509_get_subject_name(cert);
     Text cn = {NULL, 0, 0};
     int count = 0;
@@ -1018,8 +907,6 @@ static void *check_identity(TzMaker make, const char *given, X509 *cert) {
   return error;
 }
 
-// node's check of the server after its handshake (onConnectSecure): the chain of its
-// certificate, then the name, unless the session was resumed.
 static void *check_peer(Tls *t) {
   X509 *cert = SSL_get1_peer_certificate(t->ssl);
   long result = X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
@@ -1039,11 +926,6 @@ static void *check_peer(Tls *t) {
   return error;
 }
 
-//===----------------------------------------------------------------------===//
-// fetch
-//===----------------------------------------------------------------------===//
-
-// The handshake of a client came to its end, or broke.
 static void handshake_input(NetConn *c) {
   Tls *t = (Tls *)c->tls;
   if (!t || !t->promise) {
@@ -1082,13 +964,11 @@ static void abort_handshake(TzAbortListener *l) {
   net_abort(t->conn);
 }
 
-// `__tz_tls_connect(conn, host, signal)`: TLS on a connection fetch made to `host`, settled once
-// the server is checked, or rejected with node's error of what failed.
 void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta, void *signal,
                     TzMaker make) {
   NetConn *c = (NetConn *)conn;
   tz_net_make = make;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   Tls *t = tls_new(c, client_context());
   t->promise = p;
   t->make = make;
@@ -1098,7 +978,6 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
   t->host[n] = 0;
   tz_instance_release((TzInstance *)host);
   unsigned char address[16];
-  // SNI names a host, never an address, as node sends it.
   if (!address_of(t->host, address)) {
     SSL_set_tlsext_host_name(t->ssl, t->host);
   }
@@ -1110,18 +989,13 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
       net_abort(c);
       return;
     }
-    tz_ref_retain(signal); // a member of a group (signal.c)
+    tz_ref_retain(signal);
     t->signal = (TzSignal *)signal;
     t->abort.run = abort_handshake;
     tz_signal_listen(t->signal, &t->abort);
   }
-  // The ClientHello goes out with the first read.
   net_read(c);
 }
-
-//===----------------------------------------------------------------------===//
-// serve
-//===----------------------------------------------------------------------===//
 
 static void accept_tls(NetListener *l, NetConn *c) {
   Tls *t = tls_new(c, (SSL_CTX *)l->tls);
@@ -1131,9 +1005,6 @@ static void accept_tls(NetListener *l, NetConn *c) {
 
 static void release_context(void *tls) { SSL_CTX_free((SSL_CTX *)tls); }
 
-// `__tz_tls_listen(host, port, maxBody, cert, key)`: a listener of https, whose connections start
-// with the handshake of the certificate `cert` and its key `key` (PEM). An unreadable PEM, or a
-// key of another certificate, throws as node's createServer does.
 void *tz_tls_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
                     void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
                     TzMaker make) {

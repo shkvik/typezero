@@ -5,8 +5,6 @@
 namespace tz {
 
 static bool isIdentStart(char c) {
-  // Bytes >= 0x80 belong to UTF-8 sequences; accept them so identifiers may be
-  // written in any script.
   return llvm::isAlpha(c) || c == '_' || c == '$' || static_cast<unsigned char>(c) >= 0x80;
 }
 
@@ -17,7 +15,6 @@ Lexer::Lexer(llvm::StringRef source, Diagnostics &diags)
   if (source.starts_with("\xEF\xBB\xBF")) {
     cur_ += 3;
   }
-  // A `#!` line lets programs be run as scripts on Unix.
   if (source.substr(cur_ - source.begin()).starts_with("#!")) {
     while (cur_ < end_ && *cur_ != '\n') {
       ++cur_;
@@ -104,13 +101,13 @@ Token Lexer::next() {
     if (!templateBraces_.empty()) {
       if (templateBraces_.back() == 0) {
         templateBraces_.pop_back();
-        return lexTemplate(start, /*continuation=*/true, nl);
+        return lexTemplate(start, true, nl);
       }
       --templateBraces_.back();
     }
     return make(Tok::RBrace, start, nl);
   case '`':
-    return lexTemplate(start, /*continuation=*/false, nl);
+    return lexTemplate(start, false, nl);
   case '[':
     return make(Tok::LBracket, start, nl);
   case ']':
@@ -125,7 +122,6 @@ Token Lexer::next() {
     if (match('?')) {
       return make(match('=') ? Tok::QuestionQuestionAssign : Tok::QuestionQuestion, start, nl);
     }
-    // `a?.5:1` is a conditional with the number .5.
     if (peek() == '.' && !llvm::isDigit(peek(1))) {
       ++cur_;
       return make(Tok::QuestionDot, start, nl);
@@ -235,7 +231,6 @@ Token Lexer::next() {
   case '@':
     return make(Tok::At, start, nl);
   case '#':
-    // `#x`, a private name of a class: an identifier that keeps its `#`.
     if (isIdentStart(peek())) {
       return lexIdentifier(start, nl);
     }
@@ -266,7 +261,7 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     while (llvm::isAlnum(peek()) || peek() == '_') {
       ++cur_;
     }
-    if (cur_[-1] == 'n' && cur_ - start > 3) { // `0xffn`, a bigint (see below)
+    if (cur_[-1] == 'n' && cur_ - start > 3) {
       --cur_;
     }
   } else {
@@ -276,12 +271,7 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     while (llvm::isDigit(peek()) || peek() == '_') {
       ++cur_;
     }
-    // As in JavaScript, the point may end the number: `5.` is 5, and in
-    // `5..toString()` the second point reads the property.
     if (!isFloat && peek() == '.' && isIdentStart(peek(1)) && peek(1) != 'e' && peek(1) != 'E') {
-      // `5.toString()`: the point belongs to the number, and a name cannot
-      // follow it. The point is left to be read as `.`, so that the rest
-      // parses as meant and this is the only error.
       llvm::StringRef number(start, static_cast<size_t>(cur_ - start));
       const char *name = cur_ + 1, *nameEnd = name;
       while (nameEnd < end_ && isIdentChar(*nameEnd)) {
@@ -313,7 +303,6 @@ Token Lexer::lexNumber(const char *start, bool newlineBefore) {
     }
   }
 
-  // `10n` is a bigint, which the language replaces with long and decimal.
   if (peek() == 'n' && !isIdentChar(peek(1))) {
     Token tok = make(isFloat ? Tok::FloatLiteral : Tok::IntLiteral, start, newlineBefore);
     diags_.error(llvm::SMLoc::getFromPointer(start),
@@ -374,8 +363,6 @@ Token Lexer::lexTemplate(const char *start, bool continuation, bool newlineBefor
   }
 }
 
-// `/body/flags`: the body ends at the first `/` that is neither escaped nor
-// in a class `[...]`, and holds no line break.
 Token Lexer::regex(const char *start, bool newlineBefore) {
   cur_ = start + 1;
   bool inClass = false;
@@ -445,4 +432,4 @@ Token Lexer::lexIdentifier(const char *start, bool newlineBefore) {
   return make(kind, start, newlineBefore);
 }
 
-} // namespace tz
+}

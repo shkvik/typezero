@@ -51,4 +51,4 @@ std::pair<unsigned, unsigned> lineAndColumn(llvm::StringRef text, size_t offset)
   return {line, column};
 }
 
-} // namespace tz::pkg
+}

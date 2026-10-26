@@ -24,14 +24,10 @@ std::string toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-// The members of a type: those of a union, or the type itself (so `type`
-// must outlive the result).
 llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-// The variable `expr` reads, through the conversions Checker adds where it is
-// narrowed.
 const VarSymbol *readVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit) {
@@ -44,9 +40,8 @@ const VarSymbol *readVariable(const Expr *expr) {
   return name ? name->var : nullptr;
 }
 
-} // namespace
+}
 
-// `type` with only the members `keep` accepts; null if none is left.
 static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const Type *)> keep) {
   bool undefined = type->isOptional();
   const Type *value = type->nonOptional();
@@ -58,7 +53,7 @@ static const Type *keepMembers(const Type *type, llvm::function_ref<bool(const T
   }
   bool keepsUndefined = undefined && keep(Type::undefinedTy());
   if (kept.empty()) {
-    return keepsUndefined ? type : nullptr; // only undefined: nothing to learn
+    return keepsUndefined ? type : nullptr;
   }
   const Type *result = Type::unionOf(kept);
 
@@ -69,7 +64,7 @@ UnionNarrowing::UnionNarrowing(Checker &checker) : checker_(checker) {}
 
 void UnionNarrowing::narrowVariable(Checker::Flow &flow, const VarSymbol *var, const Type *type) {
   llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
-  if (!type) { // no member is left: nothing reaches here
+  if (!type) {
     flow.narrowed.push_back({var, Type::never()});
     return;
   }
@@ -93,7 +88,6 @@ std::optional<Checker::NarrowTarget> UnionNarrowing::narrowTarget(const Expr *ex
     target.var = var;
     declared = var->type;
   } else {
-    // A field read through fields from a variable: `o.shape`.
     const Expr *read = expr;
     while (auto *conv = dyn_cast<CastExpr>(read)) {
       if (!conv->isImplicit() || conv->shortCircuit) {
@@ -165,7 +159,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     narrowTargetTo(flow, target, keepMembers(now, keep));
   };
 
-  // `Array.isArray(x)`
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
     if (std::optional<Checker::NarrowTarget> target = narrowTarget(call->args[0])) {
       narrow(whenTrue, *target, [](const Type *m) { return m->isArray(); });
@@ -173,10 +166,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     }
     return;
   }
-  // The tag of a union of objects, `s.kind` (in `s.kind == "circle"` and in
-  // `if (r.ok)`): the members whose tag `keep` accepts.
-  // With `s?.kind`, undefined gives undefined, which `undefinedKept` says
-  // whether to keep.
   auto narrowByTag = [&](const MemberExpr *member, Checker::Flow &flow,
                          llvm::function_ref<bool(const Type *)> keep, bool undefinedKept = true) {
     const Expr *object = member->object;
@@ -191,7 +180,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (!target || !target->declared->nonOptional()->isUnion()) {
       return false;
     }
-    // A union, or one member of it left by checks before this one.
     const Type *now = targetType(flow, *target)->nonOptional();
     if (!now->isUnion() && !now->isObject()) {
       return false;
@@ -210,7 +198,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
 
     return true;
   };
-  // `if (r.ok)`, of `{ ok: true; value: int } | { ok: false; error: E }`.
   if (auto *member = dyn_cast<MemberExpr>(cond)) {
     auto mayBe = [](const Type *t, bool truthy) {
       if (!t->isLiteral()) {
@@ -229,22 +216,18 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     return;
   }
 
-  // `x instanceof C`: the members that are a C, and C itself if a member is
-  // what C extends.
   if (bin->op == BinaryOp::InstanceOf) {
     const Type *cls = bin->rhs->type;
     std::optional<Checker::NarrowTarget> target = narrowTarget(bin->lhs);
     if (!target || !cls) {
       return;
     }
-    // A class known only when the program runs: of a class T, as T.
     if (cls->isConstructor()) {
       cls = cls->constructed();
       if (!cls->isClass()) {
         return;
       }
     }
-    // `x instanceof Buffer`: a Buffer, or a Uint8Array that is one.
     if (cls->isBuffer()) {
       const Type *now = targetType(whenTrue, *target)->nonOptional();
       std::vector<const Type *> kept;
@@ -257,8 +240,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
       narrow(whenFalse, *target, [&](const Type *m) { return !m->isBuffer(); });
       return;
     }
-    // `x instanceof Date` (or Map, Set, Uint8Array...): the members Checker
-    // gave the right side.
     if (!cls->isClass()) {
       const Type *those = cls;
       llvm::ArrayRef<const Type *> matching = membersOf(those);
@@ -281,7 +262,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     return;
   }
 
-  // `"radius" in s`
   if (bin->op == BinaryOp::In) {
     std::optional<Checker::NarrowTarget> target = narrowTarget(bin->rhs);
     auto *key = dyn_cast<StringLitExpr>(bin->lhs);
@@ -301,7 +281,6 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
   Checker::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
   Checker::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
-    // `typeof x == "string"`
     if (auto *typeOf = dyn_cast<UnaryExpr>(side); typeOf && typeOf->op == UnaryOp::TypeOf) {
       auto *text = dyn_cast<StringLitExpr>(other);
       std::optional<Checker::NarrowTarget> target =
@@ -318,14 +297,12 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
     const Type *literal = writtenLiteral(other);
     if (!literal) {
       if (const Type *type = other->type; type && type->isLiteral()) {
-        literal = type; // `s.kind == c.kind`, with c a Circle
+        literal = type;
       }
     }
     if (!literal) {
       continue;
     }
-    // `s.kind == "circle"`: the members whose tag may be that; with
-    // `s?.kind`, s is not undefined then.
     const auto *member = dyn_cast<MemberExpr>(side);
     if (auto *chain = dyn_cast<OptionalChainExpr>(side)) {
       member = dyn_cast<MemberExpr>(chain->chain);
@@ -334,11 +311,10 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
         narrowByTag(
             member, equal,
             [&](const Type *t) { return TypeRelations::isImplicitlyConvertible(literal, t); },
-            /*undefinedKept=*/false)) {
+            false)) {
       narrowByTag(member, different, [&](const Type *t) { return t != literal; });
       continue;
     }
-    // `x == "up"`, of a union holding that literal.
     if (std::optional<Checker::NarrowTarget> target = narrowTarget(side)) {
       const Type *now = targetType(equal, *target)->nonOptional();
       if (llvm::is_contained(membersOf(now), literal)) {
@@ -352,4 +328,4 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
   }
 }
 
-} // namespace tz
+}

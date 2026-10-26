@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// `++x`, `x++`, `--x`, `x--`.
 class UpdateExpr : public Expr {
 public:
   UpdateExpr(llvm::SMLoc loc, bool increment, bool prefix, Expr *target)
@@ -16,4 +15,4 @@ public:
   Expr *target;
 };
 
-} // namespace tz
+}

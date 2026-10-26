@@ -39,9 +39,7 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
   for (size_t k = 0; k < decl->decls.size(); ++k) {
     VarDeclarator &d = decl->decls[k];
     const Type *declared =
-        d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, /*allowVoid=*/false) : nullptr;
-    // `const f = first` with a generic `first`: another name for it, as
-    // generic as it is.
+        d.typeAnn ? checker_.typeResolver().resolveType(*d.typeAnn, false) : nullptr;
     if (auto *name = llvm::dyn_cast_or_null<NameExpr>(d.init);
         name && decl->isConst && !declared && !d.destructured && name->typeArgs.empty()) {
       if (FuncSymbol *generic = checker_.genericChecker().genericNamed(name)) {
@@ -50,9 +48,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         continue;
       }
     }
-    // `const id = <T>(x: T) => x` at the top level: a generic function, as if
-    // declared with `function` (an arrow there captures nothing: what it uses
-    // are globals). Unlike a declaration, it exists from here on.
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init);
         fe && !fe->fn->typeParams.empty() && decl->isConst && !declared && !d.destructured &&
         checker_.scopes_.size() == 1) {
@@ -68,12 +63,10 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     }
     if (auto *fe = llvm::dyn_cast_or_null<FunctionExpr>(d.init)) {
       if (fe->fn->name.empty()) {
-        fe->fn->name = d.name; // as JavaScript names it
+        fe->fn->name = d.name;
       }
       if (decl->isConst && !d.destructured) {
-        // The constant exists while its function is checked, so that the
-        // function can call itself through it.
-        VarSymbol *var = checker_.scopes().declareVar(d.name, d.loc, nullptr, /*isConst=*/true);
+        VarSymbol *var = checker_.scopes().declareVar(d.name, d.loc, nullptr, true);
         var->lambda = fe->fn;
         d.sym = var;
         const Type *function =
@@ -84,7 +77,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         if (declared) {
           d.init = checker_.typeRelations().coerce(d.init, declared);
         }
-        // A function of another result is called through what adapts it.
         if (auto *cast = dyn_cast<CastExpr>(d.init); cast && cast->adaptsResult) {
           var->lambda = nullptr;
         }
@@ -93,9 +85,8 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       }
     }
     const Type *type = declared;
-    Expr *value = nullptr; // the initializer before its conversion
-    bool untyped = false;  // reported with the scope (see noteUntyped)
-    // A literal takes its type from where the variable goes.
+    Expr *value = nullptr;
+    bool untyped = false;
     const Type *hint = declared;
     std::vector<std::pair<const Type *, llvm::SMLoc>> places;
     if (!declared && d.init && !d.destructured && Destination::literalShaped(d.init)) {
@@ -106,9 +97,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       places = std::move(checker_.destinationConflict_);
       checker_.destinationConflict_.clear();
     }
-    // `const t = setInterval(() => { ... clearInterval(t) }, 10)`: the
-    // callback of a timer runs later, when t holds the timer, so it may use
-    // t; through a box, as a closure created before its variable does.
     VarSymbol *early = nullptr;
     if (const Type *timer =
             d.init && !d.destructured ? checker_.timerChecker().timerCallType(d.init) : nullptr) {
@@ -160,23 +148,17 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
     }
 
     if (d.destructured && d.objectPattern) {
-      // The fields are read by name: `%0.x` reports what has no field x.
     } else if (d.destructured && (type->isString() || type->isTypedArray()) && !declared) {
-      // A string destructures into its characters, as JavaScript's iterator
-      // gives them: `[...s]`; a typed array into its elements, and `...rest`
-      // is an array of them, as in JavaScript.
       auto *chars = checker_.ctx_.make<ArrayLitExpr>(d.init->loc());
-      chars->elements.push_back({d.init, /*spread=*/true});
+      chars->elements.push_back({d.init, true});
       chars->type = Type::array(type->isString() ? Type::string() : type->elementType());
       d.init = value = chars;
       type = chars->type;
     } else if (d.destructured && type->isIterator() && !declared) {
-      // `const [a, b] = it` takes the first two values of the iterator.
       d.init = value = checker_.generatorChecker().destructuredIterator(d.init, d);
       type = d.init->type;
     } else if (d.destructured && !type->isArray() && !type->isTuple() && !type->isMatch() &&
-               !type->isError() &&
-               !type->nonOptional()->isJson()) { // a Json reads its elements by index
+               !type->isError() && !type->nonOptional()->isJson()) {
       std::string message = "only arrays can be destructured, found '" + type->name().str() + "'";
       if (type->isOptional() && type->inner()->isArray()) {
         message += "; the array may be undefined: check it first";
@@ -192,7 +174,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
       d.sym = checker_.scopes().declareVar(d.name, d.loc, type, decl->isConst);
     }
     checker_.regexChecker().noteRegexVariable(d.sym, value, decl->isConst, block, index);
-    // `const m = Reflect.get(user, "save")`: the method it holds.
     if (decl->isConst && !d.destructured) {
       if (auto *got = llvm::dyn_cast_or_null<CallExpr>(value);
           got && got->builtin == Builtin::ReflectMethod &&
@@ -217,12 +198,10 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         checker_.constVars_[d.sym] = *constant;
       }
     }
-    // A string constant may name a field: `o[key]`.
     if (decl->isConst && d.init && type->isString()) {
       if (std::optional<std::string> key = checker_.keyedFieldChecker().constantKey(d.init)) {
         checker_.constKeys_[d.sym] = std::move(*key);
       }
-      // And how it starts, which tells whether a fetch of it is of http:// (noteHttpsCall).
       if (std::string prefix = checker_.tzModulesChecker().knownPrefix(d.init); !prefix.empty()) {
         checker_.constPrefixes_[d.sym] = std::move(prefix);
       }
@@ -230,9 +209,6 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
   }
 }
 
-// As in TypeScript, the type of a variable is where it is declared; unlike
-// tsc, Checker does not take it from the assignments that follow. It looks at
-// them only for the hint, so the error waits for the end of the scope.
 void VarChecker::noteUntyped(VarSymbol *var, bool initUndefined) {
   checker_.untyped_.push_back({var, initUndefined, {}});
 }
@@ -245,14 +221,12 @@ void VarChecker::assignedUntyped(const VarSymbol *var, const Type *type) {
   }
 }
 
-// Reports the variables declared in the innermost scope, which is ending.
 void VarChecker::reportUntyped() {
   llvm::erase_if(checker_.untyped_, [&](const Checker::Untyped &u) {
     auto found = checker_.scopes_.back().find(u.var->name);
     if (found == checker_.scopes_.back().end() || found->second.var != u.var) {
       return false;
     }
-    // The type that holds every value assigned, if there is one.
     const Type *type = u.initUndefined ? Type::undefinedTy() : nullptr;
     for (const Type *t : u.assigned) {
       const Type *common = type ? TypeRelations::unify(type, t) : t;
@@ -278,4 +252,4 @@ void VarChecker::reportUntyped() {
   });
 }
 
-} // namespace tz
+}

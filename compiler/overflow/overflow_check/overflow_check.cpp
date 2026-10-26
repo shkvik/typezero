@@ -1,24 +1,3 @@
-// Warnings where int arithmetic may overflow (docs/small.md, section 6).
-//
-// The pass runs after Checker, over the checked program, and runs every function
-// abstractly: a number is a range [lo, hi] together with where its bounds come
-// from, a string or an array has a range for its length, and an array a value
-// for its elements. Conditions narrow the ranges (`if (x < 100)`), loops are
-// run until their ranges settle, and values go from function to function
-// through summaries of the whole program: the parameters of a function take
-// what all its calls pass, a call gives what the function returns, and fields,
-// elements of arrays, values of dictionaries and variables that several
-// functions use take everything stored into them anywhere. The summaries are
-// computed in rounds until they settle; the last round reports.
-//
-// Where the bounds of a value come from decides whether it is worth a warning
-// (see Origin). A value from outside the program (parseInt, JSON) or one that
-// grows with every pass of a loop without a bound may well be large; so may a
-// value the pass computes exactly, such as `i * i` with i up to an array's
-// length. But the program's own data that the pass does not follow closely (a
-// field a loop increments, a result of recursion) is trusted: a warning about
-// every `node.count + 1` would be noise.
-
 #include "compiler/overflow/overflow_check/overflow_check.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/facts/facts.h"
@@ -65,8 +44,6 @@ using llvm::isa;
 
 void OverflowCheck::run() {
   programScan().scanProgram();
-  // The first round finds which summaries get values; their values start
-  // empty after it.
   callRanges().analyzeAll();
   for (auto &entry : next_.params) {
     std::vector<Slot> &slots = cur_.params[entry.first];
@@ -90,20 +67,18 @@ void OverflowCheck::run() {
   for (round_ = 1;; ++round_) {
     next_ = Summaries();
     callRanges().analyzeAll();
-    if (!callRanges().mergeSummaries(/*narrowing=*/false)) {
+    if (!callRanges().mergeSummaries(false)) {
       break;
     }
     if (round_ > kMaxRounds + 4) {
       break;
     }
   }
-  // Rounds from the settled summaries bring back the bounds that widening
-  // gave up.
   for (int i = 0; i < 2; ++i) {
     ++round_;
     next_ = Summaries();
     callRanges().analyzeAll();
-    if (!callRanges().mergeSummaries(/*narrowing=*/true)) {
+    if (!callRanges().mergeSummaries(true)) {
       break;
     }
   }
@@ -122,8 +97,6 @@ void OverflowCheck::run() {
 
     return a.loc.getPointer() < b.loc.getPointer();
   });
-  // A place is reported once, also when several copies of a generic
-  // function have it.
   std::set<const char *> shown;
   for (const Warning &w : warnings_) {
     if (shown.insert(w.loc.getPointer()).second) {
@@ -151,4 +124,4 @@ OverflowCheck::OverflowCheck(SourceFile &program, Diagnostics &diags)
 }
 
 OverflowCheck::~OverflowCheck() = default;
-} // namespace tz
+}

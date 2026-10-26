@@ -69,8 +69,6 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  // `new cls()` and `new route.cls()` of a variable that holds a class
-  // (docs/decorators.md, sections 5 and 6).
   if (!expr->callee && !expr->name.empty() &&
       checker_.topLevelChecker().lookupValue(expr->name).var) {
     expr->callee = checker_.ctx_.make<NameExpr>(expr->loc(), expr->name);
@@ -86,8 +84,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls) {
       return expr->member == "DateTimeFormat"
                  ? checker_.dateFormatChecker().checkDateFormatNew(expr->loc(), expr->args)
-                 : checker_.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args,
-                                                       /*withNew=*/true);
+                 : checker_.intlChecker().checkIntlNew(expr->loc(), expr->member, expr->args, true);
     }
     checker_.diags_.error(expr->loc(),
                           "'" + expr->name + "." + expr->member +
@@ -97,7 +94,6 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
     return expr;
   }
   if (ClassDecl *cls = checker_.topLevelChecker().lookupValue(expr->name).cls) {
-    // As node's constructors of them throw 'Illegal constructor'.
     if (cls->library && !checker_.libraryCalls().inLibrary(expr->loc()) &&
         (cls == checker_.libraryClass("CryptoKey") ||
          cls == checker_.libraryClass("SubtleCrypto"))) {
@@ -168,7 +164,7 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
 
   const Type *element = nullptr;
   if (expr->typeArgs.size() == 1) {
-    element = checker_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/false);
+    element = checker_.typeResolver().resolveType(expr->typeArgs[0], false);
   } else if (expr->typeArgs.size() > 1) {
     checker_.diags_.error(expr->loc(), "'Array' takes one type argument");
     element = Type::error();
@@ -204,4 +200,4 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   return expr;
 }
 
-} // namespace tz
+}

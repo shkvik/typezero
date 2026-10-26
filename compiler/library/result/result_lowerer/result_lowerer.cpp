@@ -21,16 +21,14 @@ namespace tz {
 
 namespace {
 
-// The descriptor kind; must match runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kResultKind = 12;
 
-// The half of a Result that the argument `i` of a method gets.
 bool argGetsError(Builtin method, size_t i) {
   switch (method) {
   case Builtin::ResultMapErr:
   case Builtin::ResultOrElse:
   case Builtin::ResultOrTee:
-  case Builtin::ResultUnwrapOr: // the argument is the result for an Err
+  case Builtin::ResultUnwrapOr:
     return true;
   case Builtin::ResultMatch:
     return i == 1;
@@ -39,7 +37,7 @@ bool argGetsError(Builtin method, size_t i) {
   }
 }
 
-} // namespace
+}
 
 ResultLowerer::ResultLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -67,8 +65,6 @@ llvm::Type *ResultLowerer::lowerHalf(const Type *half) {
                         : lowering_.moduleBuilder().lower(half);
 }
 
-// { i32 kind, i32 size, ptr value type, ptr error type, i32 value offset,
-// i32 error offset, i32 ok offset }: TzResultType in runtime/core/tzrt/tzrt.h.
 llvm::Constant *ResultLowerer::resultDescriptor(const Type *type) {
   Lowering::ResultLayout layout = resultLayout(type);
   const llvm::DataLayout &data = lowering_.module_->getDataLayout();
@@ -86,7 +82,7 @@ llvm::Constant *ResultLowerer::resultDescriptor(const Type *type) {
        lowering_.typeDescriptors().typeDescriptor(type->errType()), offset(layout.value),
        offset(layout.error), offset(layout.ok)});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, descriptorType, /*isConstant=*/true,
+      new llvm::GlobalVariable(*lowering_.module_, descriptorType, true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.type." + type->name());
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   lowering_.typeDescriptors_[type] = global;
@@ -114,7 +110,6 @@ llvm::Value *ResultLowerer::makeResult(const Type *type, llvm::Value *ok, llvm::
   elements[layout.error] =
       error ? error : llvm::Constant::getNullValue(layout.type->getElementType(layout.error));
   elements[layout.ok] = ok;
-  // `ok(1)` is a constant, which needs no counting.
   if (llvm::all_of(elements, [](llvm::Value *v) { return isa<llvm::Constant>(v); })) {
     return llvm::ConstantStruct::get(layout.type, {cast<llvm::Constant>(elements[0]),
                                                    cast<llvm::Constant>(elements[1]),
@@ -133,7 +128,7 @@ llvm::Value *ResultLowerer::convertHalf(llvm::Value *half, const Type *from, con
     return half;
   }
   if (from->isNever() || to->isNever() || to->isVoid()) {
-    return nullptr; // nothing to keep: zero
+    return nullptr;
   }
 
   return lowering_.exprLowerer().emitConversion(half, from, to);
@@ -143,9 +138,8 @@ llvm::Value *ResultLowerer::callWithHalf(llvm::Value *fn, const Type *fnType, ll
                                          const Type *halfType) {
   std::vector<llvm::Value *> args;
   if (fnType->params().empty()) {
-    lowering_.refCounts().releaseValue(half, halfType); // the function does not take it
+    lowering_.refCounts().releaseValue(half, halfType);
   } else {
-    // The function owns its argument; `ok()` holds undefined.
     const Type *param = fnType->params()[0];
     const Type *given = halfType->isVoid() ? Type::undefinedTy() : halfType;
     llvm::Value *arg = halfType->isVoid() ? lowering_.builder_.getFalse() : half;
@@ -166,7 +160,6 @@ llvm::Value *ResultLowerer::emitResultCall(CallExpr *call) {
     const Type *type = call->type;
     llvm::Value *half =
         call->args.empty() ? nullptr : lowering_.exprLowerer().emitExpr(call->args[0]);
-    // `ok(undefined)` holds nothing, as `ok()` does.
     if ((isOk ? type->okType() : type->errType())->isVoid()) {
       half = nullptr;
     }
@@ -174,8 +167,6 @@ llvm::Value *ResultLowerer::emitResultCall(CallExpr *call) {
                       isOk ? nullptr : half);
   }
   case Builtin::SafeTry: {
-    // The generator runs once, here, as an ordinary function whose `yield*`
-    // returns an Err (see emitSafeTryYield).
     const Type *fnType = call->args[0]->type;
     llvm::Value *fn = lowering_.exprLowerer().emitExpr(call->args[0]);
     llvm::Value *result = lowering_.closureLowerer().callFunctionValue(fn, fnType, {});
@@ -203,17 +194,12 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
   const Type *resultType = call->type;
   Builtin method = call->builtin;
   if (method == Builtin::ResultIsOk || method == Builtin::ResultIsErr) {
-    Lowering::Operand result =
-        lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *ok = resultIsOk(result.value, type);
     lowering_.refCounts().dropOperand(result);
     return method == Builtin::ResultIsOk ? ok : lowering_.builder_.CreateNot(ok);
   }
 
-  // The Result is taken over: the code for each half uses the half that is
-  // there, and the other one is zero. The arguments are evaluated before
-  // either runs, as in JavaScript, except a function for a half the Result
-  // cannot have, which is never called.
   llvm::Value *result = lowering_.exprLowerer().emitExpr(member->object);
   std::vector<llvm::Value *> args(call->args.size(), nullptr);
   for (size_t i = 0; i < call->args.size(); ++i) {
@@ -224,7 +210,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     }
   }
   auto fnType = [&](size_t i) { return call->args[i]->type; };
-  // The functions wait in slots while one of them may throw.
   bool throws = method != Builtin::ResultUnwrapOr && llvm::any_of(call->args, [&](Expr *arg) {
                   return lowering_.typeThrows(arg->type);
                 });
@@ -232,9 +217,8 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
   for (size_t i = 0; i < args.size(); ++i) {
     held.push_back(lowering_.throwLowerer().hold(args[i], fnType(i), throws));
   }
-  llvm::Value *value = resultHalf(result, type, /*error=*/false);
-  llvm::Value *error = resultHalf(result, type, /*error=*/true);
-  // A function whose result is dropped (andTee, orTee).
+  llvm::Value *value = resultHalf(result, type, false);
+  llvm::Value *error = resultHalf(result, type, true);
   auto drop = [&](llvm::Value *returned, size_t i) {
     if (returned && !fnType(i)->ret()->isVoid()) {
       lowering_.refCounts().releaseValue(returned, fnType(i)->ret());
@@ -317,7 +301,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     break;
   case Builtin::ResultAndTee:
   case Builtin::ResultOrTee: {
-    // The function gets the half too, and the Result stays as it is.
     bool onError = method == Builtin::ResultOrTee;
     auto tee = [&, onError] {
       llvm::Value *half = onError ? error : value;
@@ -333,8 +316,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     break;
   }
   case Builtin::ResultAndThrough:
-    // The function gets the value; its Err replaces the Result, its Ok is
-    // dropped.
     onOk = [&]() -> llvm::Value * {
       lowering_.refCounts().retainValue(value, valueType);
       const Type *passed = fnType(0)->ret();
@@ -382,7 +363,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     llvm_unreachable("not a method of Result");
   }
 
-  // The code for the half that can be there; both, after a test.
   llvm::Value *returned;
   if (valueType->isNever()) {
     returned = onErr();
@@ -425,13 +405,11 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
 }
 
 llvm::Value *ResultLowerer::emitResultMember(MemberExpr *member) {
-  // Checker allows only the half the type says is there, so the other one is
-  // zero.
   const Type *type = member->object->type;
   bool error = member->name == "error";
   const Type *half = error ? type->errType() : type->okType();
-  Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
-  if (half->isVoid()) { // `ok().value` is undefined
+  Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, true);
+  if (half->isVoid()) {
     lowering_.refCounts().dropOperand(result);
     return lowering_.builder_.getFalse();
   }
@@ -443,10 +421,6 @@ llvm::Value *ResultLowerer::emitResultMember(MemberExpr *member) {
   return value;
 }
 
-// `yield* r`: an Err returns from the generator of safeTry, as `return r`
-// would, with its error converted to what the generator returns; an Ok gives
-// its value. Checker allows it only where nothing computed before it in its
-// statement is still held, so the variables are all there is to release.
 llvm::Value *ResultLowerer::emitSafeTryYield(YieldExpr *yield) {
   const Type *type = yield->value->type;
   llvm::Value *result = lowering_.exprLowerer().emitExpr(yield->value);
@@ -458,23 +432,22 @@ llvm::Value *ResultLowerer::emitSafeTryYield(YieldExpr *yield) {
     lowering_.functionFrame().switchTo(errBlock);
     const Type *err = Type::result(Type::never(), type->errType());
     llvm::Value *returned = lowering_.exprLowerer().emitConversion(
-        makeResult(err, lowering_.builder_.getFalse(), nullptr,
-                   resultHalf(result, type, /*error=*/true)),
+        makeResult(err, lowering_.builder_.getFalse(), nullptr, resultHalf(result, type, true)),
         err, lowering_.returnType_);
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(returned);
     lowering_.functionFrame().switchTo(okBlock);
   }
-  if (type->okType()->isNever()) { // always an Err: the code after it never runs
+  if (type->okType()->isNever()) {
     lowering_.builder_.CreateUnreachable();
     lowering_.functionFrame().startDeadBlock();
     return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(yield->type));
   }
   if (type->okType()->isVoid()) {
-    return lowering_.builder_.getFalse(); // undefined
+    return lowering_.builder_.getFalse();
   }
 
-  return resultHalf(result, type, /*error=*/false);
+  return resultHalf(result, type, false);
 }
 
-} // namespace tz
+}

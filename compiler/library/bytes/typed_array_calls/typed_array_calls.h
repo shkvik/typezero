@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The properties and methods of typed arrays and ArrayBuffer.
 class TypedArrayCalls : public BytesCallSite {
 public:
   using BytesCallSite::BytesCallSite;
@@ -12,4 +11,4 @@ public:
   llvm::Value *emit();
 };
 
-} // namespace tz
+}

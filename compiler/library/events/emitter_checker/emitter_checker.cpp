@@ -29,8 +29,6 @@ namespace tz {
 
 namespace {
 
-// The methods of node's EventEmitter that name an event, by what the
-// program gives them.
 enum class EmitterMethod {
   None,
   Listen,
@@ -73,13 +71,10 @@ EmitterMethod emitterMethod(llvm::StringRef name) {
   return EmitterMethod::None;
 }
 
-// The events every emitter has, which its code emits itself.
 bool isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
 
-// The file of a place that placeOf gives: what comes before its line and
-// column.
 std::string fileOfPlace(const std::string &place) {
   size_t column = place.rfind(':');
   size_t line =
@@ -88,14 +83,13 @@ std::string fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-// "main.tz:3:13" of a place, for messages.
 std::string shortPlace(const std::string &place) {
   std::string file = fileOfPlace(place);
 
   return llvm::sys::path::filename(file).str() + place.substr(file.size());
 }
 
-} // namespace
+}
 
 EmitterChecker::EmitterChecker(Checker &checker) : checker_(checker) {}
 
@@ -110,13 +104,11 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
   const Type *events = nullptr;
   if (!expr->typeArgs.empty()) {
     if (expr->typeArgs.size() == 1) {
-      events = checker_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/false);
+      events = checker_.typeResolver().resolveType(expr->typeArgs[0], false);
     }
   } else if (const Type *want = expected ? expected->nonOptional() : nullptr;
              want && ClassDeclarer::classOf(want) &&
              ClassDeclarer::classOf(want)->generic == generic) {
-    // `const bus: EventEmitter<Events> = new EventEmitter()`: the map of the
-    // place it goes.
     events = ClassDeclarer::classOf(want)->typeArgs[0];
   } else {
     events = checker_.eventMapInference().inferredEventMap(
@@ -127,7 +119,7 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
       return checkArgsLoosely();
     }
   }
-  if (!events) { // reported by instantiateClass
+  if (!events) {
     return nullptr;
   }
   if (events->isError()) {
@@ -139,9 +131,6 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
     return checkArgsLoosely();
   }
   expr->typeArgs.clear();
-  // `{ captureRejections: true }`: the emitter emits 'error' with the Error
-  // of each rejected Promise of an async listener, so that is what the
-  // listeners of 'error' get.
   if (!expr->args.empty()) {
     if (auto *options = dyn_cast<ObjectLitExpr>(expr->args[0])) {
       for (const ObjectLitExpr::Property &prop : options->props) {
@@ -196,8 +185,6 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
     if (e.name != *key) {
       continue;
     }
-    // An event emitted with other types: those that hold both, if any, as
-    // int and double make double; the last round reports others.
     const Type *before = checker_.eventMapInference().fromPortable(e.args, loc);
     if (!before || before == found || before->fields().size() != elements.size()) {
       return call;
@@ -228,7 +215,7 @@ Expr *EmitterChecker::collectEmitterCall(CallExpr *call, MemberExpr *member,
 Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                         llvm::StringRef name, llvm::ArrayRef<const Type *> bound,
                                         const std::vector<bool> *given, bool super) {
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   assert(!methods.empty() && "a method of the emitter's code");
   FuncSymbol *sym = methods[0]->sym;
   checker_.returnInferrer().resolveParams(sym);
@@ -243,8 +230,6 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
     }
     ret = ret ? checker_.typeParams().substitute(ret, sym->typeParams, bound) : Type::error();
     checker_.instanceLoc_ = outerLoc;
-    // Generic code is checked with its types opaque, and not compiled: the
-    // copies of the methods are for the types of its instances.
     if (!checker_.trial_ && llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); })) {
       if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(sym, bound, loc)) {
         callee = instance;
@@ -262,8 +247,6 @@ Expr *EmitterChecker::callLibraryMethod(CallExpr *call, MemberExpr *member, Clas
   }
   member->type = checker_.returnInferrer().functionType(callee);
   call->type = ret ? ret : Type::error();
-  // A copy takes the elements of an argument list as parameters of their
-  // own (see expandArgumentList).
   if (callee != sym) {
     checker_.returnInferrer().resolveParams(callee);
     return checker_.argumentChecker().checkArguments(call, callee->params, callee->minArgs,
@@ -280,13 +263,11 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
   if (kind == EmitterMethod::None || checker_.libraryCalls().inLibrary(call->loc())) {
     return nullptr;
   }
-  // A class down the chain may declare a method of that name itself.
-  std::vector<FunctionDecl *> methods =
-      ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, false);
   if (!methods.empty() && !methods[0]->cls->library) {
     return nullptr;
   }
-  const Type *receiver = member->object->type; // `this` for super.m()
+  const Type *receiver = member->object->type;
   const Type *events = checker_.eventMaps().eventMapOf(receiver);
   if (!events) {
     return nullptr;
@@ -319,7 +300,6 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
                             "'emit' needs the name of the event, e.g. 'emit(\"data\", ...)'");
       return call;
     }
-    // A round looking for event maps records what the emits pass.
     if (auto open = checker_.openMaps_.find(events); open != checker_.openMaps_.end()) {
       return collectEmitterCall(call, member, open->second);
     }
@@ -331,8 +311,6 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     size_t count = call->args.size() - 1;
     size_t min = args->tupleMin();
     size_t max = args->tupleRest() ? ~size_t(0) : args->fields().size();
-    // Of a map found from emits: where the event is first emitted, which
-    // gave it its arguments.
     std::string first;
     if (auto inferred = checker_.inferredMaps_.find(events);
         inferred != checker_.inferredMaps_.end()) {
@@ -360,7 +338,6 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     std::vector<bool> given(call->args.size(), false);
     given[0] = true;
     if (!first.empty()) {
-      // Both places in the message (docs/events.md, section 2).
       for (size_t i = 1; i < call->args.size() && i - 1 < args->fields().size(); ++i) {
         const Type *wanted = args->fields()[i - 1].type;
         call->args[i] = checker_.exprChecker().checkExpr(call->args[i], wanted);
@@ -399,11 +376,11 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       call->args.push_back(checker_.exprChecker().checkExpr(
           checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(listener)), Type::intTy()));
     } else {
-      checker_.file_->comparesFunctions = true; // the listener is found by what it is
+      checker_.file_->comparesFunctions = true;
     }
     std::vector<bool> given(call->args.size(), true);
     callLibraryMethod(call, member, cls, name, {}, &given, super);
-    call->type = receiver; // `this`
+    call->type = receiver;
     return call;
   }
   case EmitterMethod::Listeners:
@@ -503,4 +480,4 @@ void EmitterChecker::reportEmitterMethodValue(MemberExpr *member) {
                             member->name + "(\"data\", listener)'");
 }
 
-} // namespace tz
+}

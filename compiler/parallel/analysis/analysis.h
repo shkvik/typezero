@@ -58,8 +58,6 @@ private:
       return buffer != o.buffer ? buffer < o.buffer : offset < o.offset;
     }
   };
-  // "at line 12", or "at lib.tz:12" in another file; "line 12" or
-  // "lib.tz:12".
   static bool inOtherFile(const std::string &where) {
     return where.find(".tz:") != std::string::npos;
   }
@@ -82,24 +80,13 @@ private:
   const char *listenersKey_ = nullptr;
   llvm::DenseMap<const VarSymbol *, const Expr *> declInit_;
   llvm::DenseMap<const Expr *, llvm::StringRef> siteName_;
-  // The functions the program has as values, by their type.
   std::map<const Type *, std::vector<unsigned>> values_;
   llvm::DenseSet<unsigned> valueFns_;
-  // The built-in modules written in tz (library/): the program's calls into
-  // them are described (libraryCall), and their code is not walked.
   std::vector<std::pair<const char *, const char *>> libRanges_;
-  // The listeners the program gives them, by what runs them (CallRec::
-  // channel): those of emitters (on, once...), and those of event targets
-  // and abort signals (addEventListener, onabort); the functions by name,
-  // and the types of the function values given.
   std::vector<unsigned> listeners_[ChannelCount];
   std::vector<const Type *> listenerTypes_[ChannelCount];
-  // The functions that settle a Promise, given to the executor of `new
-  // Promise`: no code of the program.
   llvm::DenseSet<const VarSymbol *> resolvers_;
-  // The index parameters of callbacks of map and forEach (see OwnCell).
   llvm::DenseSet<const VarSymbol *> ownIndex_;
-  // The callbacks of map whose results Promise.all of this await takes.
   llvm::DenseMap<const FunctionDecl *, const AwaitExpr *> joinReturns_;
   struct AwaitInfo {
     unsigned fn = 0;
@@ -113,7 +100,6 @@ private:
   };
   llvm::DenseMap<const AwaitExpr *, JoinInfo> joins_;
   std::vector<const ClassDecl *> classes_;
-  // The classes the program declares, whose objects reflection may make.
   std::vector<const ClassDecl *> programClasses_;
   llvm::DenseSet<const ClassDecl *> classSeen_;
   std::map<const FunctionDecl *, Escapes> escapes_;
@@ -122,14 +108,13 @@ private:
   std::map<const Type *, std::vector<const Type *>> reach_;
   std::map<std::pair<unsigned, unsigned>, bool> fnOnce_;
   std::map<unsigned, bool> rejectionEnds_;
-  // The state of the walk of one function.
   unsigned fi_ = 0;
   FnInfo *fn_ = nullptr;
   Active cur_;
   struct Target {
     llvm::StringRef label;
     bool loop = false;
-    bool block = false; // a labeled block, which only `break label` leaves
+    bool block = false;
     Active breaks, continues;
   };
   std::vector<Target> targets_;
@@ -147,16 +132,13 @@ private:
     Active active;
   };
   std::vector<OpenJoin> openJoins_;
-  // Tasks and pieces.
   std::vector<Activation> acts_;
   std::map<std::tuple<unsigned, int, std::optional<Ref>, bool>, unsigned> actIndex_;
-  // From a call of a function run inline: (caller, call, callee).
   std::vector<std::tuple<unsigned, unsigned, unsigned>> inlineEdges_;
   std::vector<Root> roots_;
   std::vector<PieceInst> pieces_;
   std::map<std::tuple<unsigned, unsigned, int, std::optional<Ref>>, unsigned> pieceIndex_;
   std::vector<std::vector<unsigned>> actPieces_;
-  // The activations of a function in a task.
   std::map<std::pair<unsigned, int>, std::vector<unsigned>> actsByTask_;
   const std::vector<unsigned> &actsOf(unsigned fn, int root) const {
     static const std::vector<unsigned> none;
@@ -165,12 +147,9 @@ private:
     return found == actsByTask_.end() ? none : found->second;
   }
   std::map<std::tuple<int, unsigned, std::optional<Ref>, unsigned, unsigned>, int> rootIndex_;
-  // The pieces of each segment, and how many there are of a segment in a task.
   std::map<std::pair<unsigned, unsigned>, std::vector<unsigned>> segPieces_;
   std::map<std::tuple<unsigned, unsigned, int>, unsigned> sameTask_;
-  // The pieces of each task that may follow each piece (and its start).
   std::vector<std::map<unsigned, std::vector<unsigned>>> flow_;
-  // Decisions, by piece.
   struct Partner {
     unsigned piece;
     std::vector<Loc> locs;
@@ -179,8 +158,6 @@ private:
     bool alone = true;
     std::vector<Partner> partners;
     llvm::SMLoc from, to;
-    // Every place of the piece's own code where it touches what keeps
-    // node's order (the access, or the call that makes it).
     std::vector<llvm::SMLoc> ats;
   };
   std::vector<std::vector<Touch>> pieceTouches_;
@@ -233,4 +210,4 @@ private:
   std::unique_ptr<ExplainTitles> explainTitlesPart_;
 };
 
-} // namespace tz::parallel
+}

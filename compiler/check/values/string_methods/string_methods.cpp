@@ -25,8 +25,6 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
     llvm::StringRef name;
     Builtin builtin;
     unsigned minArgs, maxArgs;
-    // The kinds of the arguments: 's' a string, 'p' a position or count,
-    // '*' any value, turned into a string. The last one repeats.
     const char *args;
     const Type *ret;
   };
@@ -96,14 +94,12 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   call->type = method->ret;
 
   if (method->builtin == Builtin::StrCharCodeAt) {
-    // Out of range, JavaScript returns NaN, which only a double can hold.
     call->mayBeOutOfRange =
-        !checker_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
+        !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::doubleTy() : Type::intTy();
   } else if (method->builtin == Builtin::StrCodePointAt) {
-    // Out of range, JavaScript returns undefined.
     call->mayBeOutOfRange =
-        !checker_.indexProofs().provesInBounds(member->object, call->args[0], /*allowEnd=*/false);
+        !checker_.indexProofs().provesInBounds(member->object, call->args[0], false);
     call->type = call->mayBeOutOfRange ? Type::optional(Type::intTy()) : Type::intTy();
   } else if (method->builtin == Builtin::StrAt) {
     call->mayBeOutOfRange = !checker_.indexProofs().provesAtInBounds(member->object, call->args[0]);
@@ -113,4 +109,4 @@ Expr *StringMethods::checkStringMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

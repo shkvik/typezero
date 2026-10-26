@@ -1,19 +1,3 @@
-// Arrays: JavaScript semantics (reference objects, live length, the methods
-// below behave as in JavaScript) with elements stored unboxed by their static
-// type, so an int[] is a plain buffer of 32-bit integers.
-//
-// The header and its fields are described in tzrt.h (TzArray); the compiler
-// reads and writes `data`, `length` and `capacity` directly for indexing,
-// push and pop, and calls these functions for everything else.
-//
-// Storage: a new array keeps its elements right after the header (one
-// allocation). When it outgrows them, they move to a separate buffer with
-// spare room. shift() advances `data` instead of moving the elements, and
-// unshift() leaves room in front, so queues and deques are O(1) per operation.
-//
-// An array owns its elements: the ones that are strings, arrays or optionals
-// of those are reference counted, and released when the array dies.
-
 #include "runtime/core/array/array.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/closure/closure.h"
@@ -33,8 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The same limit as for strings, which keeps every length far from the int
-// range (see kMaxLength in compiler/check/facts/facts.h).
 #define MAX_LENGTH ((1u << 30) - 1)
 
 int64_t tz_arr_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_arrays)); }
@@ -53,7 +35,7 @@ int tz_is_managed(const TzType *type) {
     }
     return 0;
   case TZ_T_STRING:
-  case TZ_T_DECIMAL: // its long form
+  case TZ_T_DECIMAL:
   case TZ_T_ARRAY:
   case TZ_T_FUNCTION:
   case TZ_T_OBJECT:
@@ -77,7 +59,6 @@ static inline char *inline_storage(TzArray *a) { return (char *)(a + 1); }
 
 static inline char *storage(TzArray *a) { return a->alloc ? a->alloc : inline_storage(a); }
 
-// What JavaScript reports as a RangeError.
 TZ_NORETURN static void invalid_length(int64_t length) {
   if (length < 0) {
     tz_panicf("RangeError: Invalid array length %lld", (long long)length);
@@ -85,12 +66,6 @@ TZ_NORETURN static void invalid_length(int64_t length) {
   tz_panicf("array length %lld exceeds the maximum of %u", (long long)length, MAX_LENGTH);
 }
 
-//===----------------------------------------------------------------------===//
-// Values and reference counts
-//===----------------------------------------------------------------------===//
-
-// Arrays whose count reached zero, freed one by one so that deeply nested
-// arrays do not recurse.
 typedef struct {
   TzArray **items;
   size_t count, capacity;
@@ -110,11 +85,8 @@ static void dead_push(DeadArrays *dead, TzArray *a) {
   dead->items[dead->count++] = a;
 }
 
-// `owner`, if not NULL, is the object that held the value: a reference it
-// held to a member of its own group (or of an eternal one) was not counted
-// (see group.c).
 static void release_value(const TzType *type, void *value, DeadArrays *dead, void *owner) {
-  if (type->kind == TZ_T_UNION) { // the member it holds
+  if (type->kind == TZ_T_UNION) {
     const void *held = value;
     type = tz_resolve(type, &held);
     value = (void *)held;
@@ -140,7 +112,6 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead, voi
     break;
   }
   case TZ_T_OPTIONAL:
-    // Undefined holds the zero value, which releases as nothing.
     release_value(type->inner, value, dead, owner);
     break;
   case TZ_T_FUNCTION: {
@@ -153,7 +124,7 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead, voi
     break;
   }
   case TZ_T_OBJECT:
-  case TZ_T_UNKNOWN: { // a box is an object too
+  case TZ_T_UNKNOWN: {
     TzInstance *o = *(TzInstance **)value;
     if (owner && o && tz_rc_is_member(o->rc)) {
       tz_group_unstore(owner, o);
@@ -169,7 +140,6 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead, voi
     tz_dec_release_value(*(TzDec *)value);
     break;
   case TZ_T_RESULT: {
-    // The half not in use holds zero, which releases as nothing.
     const TzResultType *result = (const TzResultType *)type;
     release_value(type->inner, (char *)value + result->value_offset, dead, owner);
     release_value(result->error, (char *)value + result->error_offset, dead, owner);
@@ -181,7 +151,7 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead, voi
 }
 
 void tz_value_retain(const TzType *type, void *value) {
-  if (type->kind == TZ_T_UNION) { // the member it holds
+  if (type->kind == TZ_T_UNION) {
     const void *held = value;
     type = tz_resolve(type, &held);
     value = (void *)held;
@@ -236,8 +206,6 @@ void tz_value_retain(const TzType *type, void *value) {
   }
 }
 
-// Frees an array whose count reached zero, and everything that dies with it.
-// Called by the inline release code that the compiler emits.
 void tz_arr_free(TzArray *array) {
   DeadArrays dead = {NULL, 0, 0};
   TzArray *a = array;
@@ -296,7 +264,6 @@ void tz_value_release_in(void *owner, const TzType *type, void *value) {
   tz_free(dead.items);
 }
 
-// Releases elements from..to of `a`, which it holds no more.
 static void release_range(TzArray *a, uint32_t from, uint32_t to) {
   if (!tz_is_managed(a->type)) {
     return;
@@ -312,8 +279,6 @@ static void release_range(TzArray *a, uint32_t from, uint32_t to) {
   tz_free(dead.items);
 }
 
-// The elements from..to of `a` were copied in: each gets counted, and in a
-// member of a group joins it.
 static void retain_range(TzArray *a, uint32_t from, uint32_t to) {
   if (!tz_is_managed(a->type)) {
     return;
@@ -335,7 +300,6 @@ static void retain_range(TzArray *a, uint32_t from, uint32_t to) {
 #endif
 }
 
-// The same for `n` values of `type` stored from `values` on.
 static void retain_range_of(const TzType *type, char *values, uint32_t n) {
   if (tz_is_managed(type)) {
     for (uint32_t i = 0; i < n; ++i) {
@@ -344,12 +308,6 @@ static void retain_range_of(const TzType *type, char *values, uint32_t n) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Creation and storage
-//===----------------------------------------------------------------------===//
-
-// A new array of `length` zero elements (0, false, "", undefined) with room
-// for `capacity`, in one allocation.
 TzArray *tz_arr_new(const TzType *type, int64_t length, int64_t capacity) {
   if (capacity < length) {
     capacity = length;
@@ -394,16 +352,11 @@ TzArray *tz_arr_new_group(const TzType *type, int64_t length, int64_t capacity) 
   return a;
 }
 
-// A new array of `a`'s elements: a member of a group if `a` is one, as a copy
-// of an array that may form cycles may too.
 static TzArray *new_like(const TzArray *a, int64_t length) {
   return tz_rc_is_member(a->rc) ? tz_arr_new_group(a->type, length, length)
                                 : tz_arr_new(a->type, length, length);
 }
 
-// `new Array<T>(n)`
-// `new Array(n)`. A negative length throws RangeError, as in JavaScript (the
-// program checks after the call, and takes nothing then).
 TzArray *tz_arr_new_length(const TzType *type, int64_t length) {
   if (length < 0) {
     tz_throw(TZ_RANGE_ERROR, "Invalid array length");
@@ -428,8 +381,6 @@ TzArray *tz_arr_new_length_group(const TzType *type, int64_t length) {
   return tz_arr_new_group(type, length, length);
 }
 
-// Moves the elements to a new buffer with `front` free slots before them and
-// room for `capacity` elements from the first one on.
 static void reallocate(TzArray *a, uint32_t front, uint32_t capacity) {
   size_t size = a->type->size;
   char *buffer = (char *)tz_alloc(((size_t)front + capacity) * size);
@@ -443,7 +394,6 @@ static void reallocate(TzArray *a, uint32_t front, uint32_t capacity) {
   a->capacity = capacity;
 }
 
-// Makes room for at least `min` elements, growing by half as V8 does.
 TZ_COLD void tz_arr_grow(TzArray *a, int64_t min) {
   if (min > MAX_LENGTH) {
     invalid_length(min);
@@ -458,8 +408,6 @@ TZ_COLD void tz_arr_grow(TzArray *a, int64_t min) {
   reallocate(a, 0, (uint32_t)capacity);
 }
 
-// Moves the first element to `out` (zeroes it if the array is empty) and
-// returns whether there was one.
 TZ_HOT int32_t tz_arr_shift(TzArray *a, void *out) {
   size_t size = a->type->size;
   if (a->length == 0) {
@@ -471,7 +419,6 @@ TZ_HOT int32_t tz_arr_shift(TzArray *a, void *out) {
   --a->length;
   --a->capacity;
   if (a->length == 0) {
-    // Empty again: start over at the beginning of the storage.
     char *base = storage(a);
     a->capacity += (uint32_t)((size_t)(a->data - base) / size);
     a->data = base;
@@ -492,8 +439,6 @@ void tz_arr_push_value(TzArray *a, const void *value) {
   ++a->length;
 }
 
-// Makes `n` slots at the front for unshift() and returns the first one. The
-// compiler stores the new elements there.
 void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
   if (n == 0) {
     return a->data;
@@ -510,8 +455,6 @@ void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
     a->length = (uint32_t)length;
     return a->data;
   }
-  // A new buffer with spare room at both ends, so that both unshift() and
-  // push() stay amortized O(1).
   uint64_t spare = length / 2 + 8;
   uint64_t newFront = spare / 2;
   uint64_t capacity = length + (spare - newFront);
@@ -532,10 +475,7 @@ void *tz_arr_unshift_slots(TzArray *a, int64_t n) {
   return data;
 }
 
-// `a.length = n`: drops elements, or adds zero ones. Arrays, functions and
-// objects have no zero value: an array of them can only get shorter.
 void tz_arr_set_length(TzArray *a, int64_t n) {
-  // RangeErrors, which the program checks for after the call.
   if (n < 0) {
     tz_throw(TZ_RANGE_ERROR, "Invalid array length");
     return;
@@ -569,12 +509,6 @@ void tz_arr_set_length(TzArray *a, int64_t n) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Methods
-//===----------------------------------------------------------------------===//
-
-// A relative position as slice() and fill() take it: negative counts from the
-// end; the result is clamped to [0, length].
 static int64_t relative(int64_t position, int64_t length) {
   if (position < 0) {
     position += length;
@@ -600,10 +534,6 @@ TzArray *tz_arr_slice(TzArray *a, int64_t start, int64_t end, int32_t has_end) {
 
 TzArray *tz_arr_copy(TzArray *a) { return tz_arr_slice(a, 0, 0, 0); }
 
-// A slice and a copy of an array of a type that may form cycles, as the
-// compiler wants them: members of groups, or not when it found that they
-// are never stored (see StoreScanner in
-// compiler/lower/codegen/codegen_cycles.cpp), whatever `a` is.
 static TzArray *slice_as(TzArray *a, int64_t start, int64_t end, int32_t has_end, int member) {
   int64_t length = a->length;
   int64_t from = relative(start, length);
@@ -631,9 +561,6 @@ TzArray *tz_arr_copy_plain(TzArray *a) { return slice_as(a, 0, 0, 0, 0); }
 
 TzArray *tz_arr_copy_group(TzArray *a) { return slice_as(a, 0, 0, 0, 1); }
 
-// splice(start, deleteCount, ...items): moves the removed elements into a new
-// array, which it returns, and opens a gap of `insert` slots where they were;
-// `*slots` gets its address, and the compiler stores the items there.
 TzArray *tz_arr_splice(TzArray *a, int64_t start, int64_t delete_count, int32_t has_delete,
                        int64_t insert, void **slots) {
   int64_t length = a->length;
@@ -646,7 +573,6 @@ TzArray *tz_arr_splice(TzArray *a, int64_t start, int64_t delete_count, int32_t 
   TzArray *removed = tz_arr_new(a->type, count, count);
   if (count) {
     memcpy(removed->data, element(a, (uint32_t)from), (size_t)count * size);
-    // They move out of a member to an array of their own, which is none.
     if (tz_rc_is_member(a->rc)) {
       for (int64_t i = 0; i < count; ++i) {
         tz_group_take_value(a, a->type, removed->data + (size_t)i * size);
@@ -670,7 +596,6 @@ TzArray *tz_arr_splice(TzArray *a, int64_t start, int64_t delete_count, int32_t 
   return removed;
 }
 
-// Appends the elements of `src` to `dst` (for spreads and concat()).
 void tz_arr_append(TzArray *dst, TzArray *src) {
   uint32_t n = src->length;
   if (n == 0) {
@@ -680,24 +605,22 @@ void tz_arr_append(TzArray *dst, TzArray *src) {
   if (total > dst->capacity) {
     tz_arr_grow(dst, (int64_t)total);
   }
-  // Read src->data only now: src may be dst, which just moved.
   memcpy(element(dst, dst->length), src->data, (size_t)n * dst->type->size);
   uint32_t from = dst->length;
   dst->length = (uint32_t)total;
   retain_range(dst, from, dst->length);
 }
 
-// ===, or SameValueZero (NaN equals NaN) for includes().
 static int values_equal(const TzType *type, const void *a, const void *b, int same_value_zero) {
   switch (type->kind) {
   case TZ_T_ATOM:
     return *(const int32_t *)a == *(const int32_t *)b;
-  case TZ_T_UNION: { // the same member, equal
+  case TZ_T_UNION: {
     uint32_t tag = *(const uint32_t *)a;
     if (tag != *(const uint32_t *)b) {
       return 0;
     }
-    if (tag == 0) { // both undefined
+    if (tag == 0) {
       return 1;
     }
     const void *x = a, *y = b;
@@ -720,13 +643,13 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
     return tz_str_equal(x->obj, x->meta, y->obj, y->meta);
   }
   case TZ_T_ARRAY:
-  case TZ_T_OBJECT: // the same one
+  case TZ_T_OBJECT:
     return *(void *const *)a == *(void *const *)b;
-  case TZ_T_JSON: // as `===` compares the values JSON.parse gives
+  case TZ_T_JSON:
     return tz_json_strict_equal(*(TzJson *const *)a, *(TzJson *const *)b);
-  case TZ_T_UNKNOWN: // as `===` compares what they hold
+  case TZ_T_UNKNOWN:
     return tz_unknown_equal(*(void *const *)a, *(void *const *)b);
-  case TZ_T_DECIMAL: { // the same value
+  case TZ_T_DECIMAL: {
     const TzDec *x = (const TzDec *)a, *y = (const TzDec *)b;
     return tz_dec_equal(x->coef, x->meta, y->coef, y->meta);
   }
@@ -746,7 +669,6 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
   }
 }
 
-// indexOf (mode 0), lastIndexOf (mode 1) and includes (mode 2, returns 0/1).
 int32_t tz_arr_index_of(TzArray *a, const void *value, int64_t from, int32_t has_from,
                         int32_t mode) {
   int64_t length = a->length;
@@ -802,12 +724,9 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
     tz_buf_decimal(out, *(const TzDec *)value);
     break;
   case TZ_T_ARRAY:
-    // Array.prototype.toString joins with commas, also when nested.
     tz_buf_join(out, *(TzArray *const *)value, NULL);
     break;
   case TZ_T_OBJECT: {
-    // Only an Error, a date and a regex have a text of their own (Checker
-    // rejects other objects): a date's is its toString(), in local time.
     const TzInstance *object = *(const TzInstance *const *)value;
     if (object && (object->layout->flags & TZ_LAYOUT_ERROR)) {
       tz_buf_error_text(out, object);
@@ -815,7 +734,7 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
       tz_buf_regex(out, (const TzRegex *)object);
     } else if (object && (object->layout->flags & TZ_LAYOUT_DATE)) {
       TzStr text;
-      tz_date_local_string(&text, ((const TzDate *)object)->time, 0); // TZ_DATE_TEXT_FULL
+      tz_date_local_string(&text, ((const TzDate *)object)->time, 0);
       tz_buf_str(out, text);
       tz_str_release_value(text);
     }
@@ -826,9 +745,7 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
       tz_buf_value(out, type->inner, value, in_join);
       break;
     }
-    // fall through: undefined
   case TZ_T_UNDEFINED:
-    // join() shows undefined elements as empty.
     if (!in_join) {
       tz_buf_ascii(out, "undefined");
     }
@@ -868,8 +785,6 @@ void tz_arr_join(TzStr *out, TzArray *a, void *sep_obj, uint64_t sep_meta, int32
   *out = tz_buf_take(&buf);
 }
 
-// String(value) for arrays and optionals (the compiler converts the other
-// types inline).
 void tz_value_to_string(TzStr *out, const TzType *type, const void *value) {
   type = tz_resolve(type, &value);
   if (type->kind == TZ_T_STRING) {
@@ -925,13 +840,11 @@ void tz_arr_fill(TzArray *a, const void *value, int64_t start, int64_t end, int3
   }
 }
 
-// Sorting: JavaScript's default order compares the string forms of the
-// elements by UTF-16 code units, keeps undefined last, and is stable.
 typedef struct {
   TzStr key;
   uint32_t index;
   uint8_t undefined;
-  uint8_t owned; // the key was made for sorting and must be released
+  uint8_t owned;
 } SortItem;
 
 static int sort_before(const SortItem *a, const SortItem *b) {
@@ -962,10 +875,6 @@ static void merge_sort(SortItem *items, SortItem *tmp, size_t n) {
   memcpy(items, tmp, n * sizeof(SortItem));
 }
 
-// sort(compare): `compare(ctx, x, y)` calls the program's comparison function
-// on the elements at x and y and returns the sign of its result (NaN counts
-// as 0). Stable, and undefined elements go last without being compared, as
-// in JavaScript.
 typedef int32_t (*TzCompare)(void *ctx, const void *x, const void *y);
 
 static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCompare compare,
@@ -978,7 +887,6 @@ static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCom
   merge_sort_with(items + half * size, tmp, n - half, size, compare, ctx);
   size_t i = 0, j = half, k = 0;
   while (i < half && j < n) {
-    // The right one goes first only if it compares strictly before.
     if (compare(ctx, items + i * size, items + j * size) > 0) {
       memcpy(tmp + k++ * size, items + j++ * size, size);
     } else {
@@ -1001,8 +909,6 @@ void tz_arr_sort_with(TzArray *a, TzCompare compare, void *ctx) {
   }
   const TzType *type = a->type;
   size_t size = type->size;
-  // The elements are sorted in a copy that holds references of its own: the
-  // comparison function may change the array meanwhile.
   char *items = (char *)tz_alloc((size_t)n * size);
   char *tmp = (char *)tz_alloc((size_t)n * size);
   size_t defined = 0, undefined = n;
@@ -1014,7 +920,6 @@ void tz_arr_sort_with(TzArray *a, TzCompare compare, void *ctx) {
       memcpy(items + defined++ * size, value, size);
     }
   }
-  // The undefined ones keep their order, after the others.
   for (size_t i = defined; i < n; ++i) {
     memcpy(items + i * size, tmp + (n - 1 - (i - defined)) * size, size);
   }
@@ -1029,8 +934,6 @@ void tz_arr_sort_with(TzArray *a, TzCompare compare, void *ctx) {
       }
     }
   } else if (tz_is_managed(type)) {
-    // The function changed the array's length: JavaScript leaves the result
-    // up to the engine; here the array stays as the function left it.
     for (uint32_t i = 0; i < n; ++i) {
       tz_value_release(type, items + (size_t)i * size);
     }
@@ -1065,7 +968,7 @@ void tz_arr_sort(TzArray *a) {
       t = t->inner;
     }
     if (t->kind == TZ_T_STRING) {
-      item->key = *(const TzStr *)value; // borrowed from the array
+      item->key = *(const TzStr *)value;
     } else {
       TzBuf buf;
       tz_buf_init(&buf);

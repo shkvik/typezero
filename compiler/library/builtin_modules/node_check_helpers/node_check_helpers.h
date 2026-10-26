@@ -8,10 +8,6 @@
 
 namespace tz {
 
-// Functions that several classes made from sema_node.cpp use.
-
-// The functions of node:fs that tz has, and every name node:fs exports in
-// Node 24.
 inline const llvm::StringLiteral kFsFunctions[] = {
     "readFileSync", "writeFileSync", "appendFileSync", "existsSync", "accessSync",
     "chmodSync",    "truncateSync",  "statSync",       "lstatSync",  "readdirSync",
@@ -138,7 +134,6 @@ inline const llvm::StringLiteral kOsFunctions[] = {
 inline const llvm::StringLiteral kOsExports[] = {"EOL",         "devNull",           "getPriority",
                                                  "setPriority", "networkInterfaces", "constants"};
 
-// What node:buffer exports in Node 24 besides Buffer, which is global too.
 inline const llvm::StringLiteral kBufferExports[] = {"Blob",
                                                      "File",
                                                      "SlowBuffer",
@@ -153,8 +148,6 @@ inline const llvm::StringLiteral kBufferExports[] = {"Blob",
                                                      "transcode",
                                                      "INSPECT_MAX_BYTES"};
 
-// The functions of node:fs/promises that tz has, and every name it exports
-// in Node 24.
 inline const llvm::StringLiteral kFspFunctions[] = {
     "readFile", "writeFile", "appendFile", "access",   "chmod",    "truncate",
     "stat",     "lstat",     "readdir",    "mkdir",    "mkdtemp",  "rmdir",
@@ -167,20 +160,15 @@ inline const llvm::StringLiteral kFspExports[] = {
     "lchown",    "chown",      "utimes",   "lutimes", "realpath", "mkdtemp",  "mkdtempDisposable",
     "writeFile", "appendFile", "readFile", "watch",   "constants"};
 
-// Every name node:child_process exports in Node 24.
 inline const llvm::StringLiteral kChildExports[] = {"ChildProcess", "_forkChild",   "exec",
                                                     "execFile",     "execFileSync", "execSync",
                                                     "fork",         "spawn",        "spawnSync"};
 
-// What node:process gives that tz has: the properties of process it has.
 inline const llvm::StringLiteral kProcessNames[] = {
     "argv", "env", "exit", "exitCode", "cwd", "platform", "execPath", "stdin", "stdout", "stderr"};
 
-// What is wrong with importing `name` from the module `path` names, or
-// nothing.
 std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringRef path);
 
-// The name of a module in messages.
 std::string moduleLabel(NodeModule module);
 
-} // namespace tz
+}

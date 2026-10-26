@@ -19,16 +19,12 @@ namespace tz {
 
 namespace {
 
-// What a function given to a method gets for a half: `ok()` holds undefined.
 const Type *halfParam(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
 
-// Whether a half can tell a value its type: a hint of never or void cannot.
 bool givesType(const Type *half) { return !half->isNever() && !half->isVoid(); }
 
-} // namespace
+}
 
-// Why the halves `a` and `b` of Results make no union, for the messages
-// that say so: ": <the problem>", or empty.
 static std::string noUnion(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return ": one of them is nothing, 'ok()'";
@@ -44,9 +40,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
                                              const Type *expected) {
   const Type *type = member->object->type;
   const Type *value = type->okType(), *error = type->errType();
-  // A variable narrowed by isOk() keeps the type of its error for the
-  // methods, as in TypeScript: a function given for it gets that type,
-  // though it is never called.
   if (auto *conv = dyn_cast<CastExpr>(member->object);
       conv && conv->isImplicit() && conv->operand->type->isResult()) {
     if (value->isNever()) {
@@ -66,8 +59,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   if (name == "_unsafeUnwrap" || name == "_unsafeUnwrapErr") {
-    // The half asked for, or an Error thrown (neverthrow's ErrorConfig only
-    // chooses whether its own error object has a stack; an Error always has).
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
@@ -77,8 +68,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
   if (name == "asyncMap" || name == "asyncAndThen") {
-    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member,
-                                                                name); // sema_async.cpp
+    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member, name);
   }
   if (name == "asyncAndThrough") {
     checker_.diags_.error(member->loc(),
@@ -136,7 +126,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   }
 
   if (builtin == Builtin::ResultUnwrapOr) {
-    // The value of an Ok, or the argument.
     Expr *&arg = call->args[0];
     arg = checker_.exprChecker().checkExpr(arg, givesType(value) ? value : nullptr);
     const Type *other = arg->type;
@@ -155,8 +144,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     return call;
   }
 
-  // The methods that take a function: what it gets, and for an arrow written
-  // here, what it should return where that tells its literals their types.
   bool onError = builtin == Builtin::ResultMapErr || builtin == Builtin::ResultOrElse ||
                  builtin == Builtin::ResultOrTee;
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
@@ -165,8 +152,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   }
   auto check = [&](Expr *&arg, const Type *half, const Type *ret) -> const Type * {
     if (half->isNever() && !isa<FunctionExpr>(arg)) {
-      // Never called, as the Result cannot have that half: any function
-      // will do (and Lowering leaves the call out).
       arg = checker_.exprChecker().checkExpr(arg);
       if (arg->type->isFunction()) {
         return arg->type->ret();
@@ -193,8 +178,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   switch (builtin) {
   case Builtin::ResultMap:
   case Builtin::ResultMapErr: {
-    // Objects, and Results, take their type from the place, as with map of
-    // arrays.
     const Type *half =
         wantedResult ? (onError ? wantedResult->errType() : wantedResult->okType()) : nullptr;
     ret = check(call->args[0], onError ? error : value,
@@ -227,11 +210,11 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     call->type = result;
     return call;
   }
-  default: // andTee, orTee, andThrough
+  default:
     ret = check(call->args[0], onError ? error : value, nullptr);
     break;
   }
-  checker_.flowChecker().calledFunction(); // the function may change anything
+  checker_.flowChecker().calledFunction();
   if (!ret) {
     return call;
   }
@@ -299,7 +282,7 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     call->type = Type::result(common, ret->errType());
     break;
   }
-  default: // andTee and orTee give the Result as it is
+  default:
     call->type = type;
     break;
   }
@@ -307,4 +290,4 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
   return call;
 }
 
-} // namespace tz
+}

@@ -27,4 +27,4 @@ bool ProjectPackages::prepare(llvm::StringRef input) {
   return true;
 }
 
-} // namespace tz
+}

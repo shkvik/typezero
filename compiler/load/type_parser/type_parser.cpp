@@ -30,7 +30,6 @@ using llvm::dyn_cast;
 
 TypeParser::TypeParser(Parser &parser) : parser_(parser) {}
 
-// type := unionType ('extends' unionType '?' type ':' type)?
 TypeRef TypeParser::parseType() {
   const char *start = parser_.tok_.text.data();
   bool noConditional = std::exchange(parser_.noConditional_, false);
@@ -40,12 +39,10 @@ TypeRef TypeParser::parseType() {
   if (noConditional || !parser_.tok_.is(Tok::Identifier) || parser_.tok_.text != "extends") {
     return check;
   }
-  // `T extends string ? A : B`: a conditional type (docs/generics.md,
-  // section 10).
   TypeRef ref;
   ref.kind = TypeRef::Kind::Conditional;
   ref.loc = check.loc;
-  parser_.cursor().advance(); // 'extends'
+  parser_.cursor().advance();
   ref.args.push_back(std::move(check));
   parser_.noConditional_ = true;
   ref.args.push_back(parseType());
@@ -65,10 +62,9 @@ TypeRef TypeParser::parseType() {
   return ref;
 }
 
-// unionType := '|'? intersectionType ('|' intersectionType)*
 TypeRef TypeParser::parseUnionType() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().accept(Tok::Pipe); // a leading `|` is allowed, as in TypeScript
+  parser_.cursor().accept(Tok::Pipe);
   TypeRef first = parseIntersectionType();
   if (!parser_.tok_.is(Tok::Pipe)) {
     return first;
@@ -84,7 +80,6 @@ TypeRef TypeParser::parseUnionType() {
   return ref;
 }
 
-// intersectionType := '&'? arrayType ('&' arrayType)*
 TypeRef TypeParser::parseIntersectionType() {
   llvm::SMLoc loc = parser_.tok_.loc();
   parser_.cursor().accept(Tok::Amp);
@@ -103,7 +98,6 @@ TypeRef TypeParser::parseIntersectionType() {
   return ref;
 }
 
-// returnType := ('asserts'? (name | 'this') 'is' type) | 'asserts' (name | 'this') | type
 TypeRef TypeParser::parseReturnType() {
   auto onLine = [&](const char *text) {
     return parser_.cursor().peek().is(Tok::Identifier) && !parser_.cursor().peek().newlineBefore &&
@@ -132,9 +126,7 @@ TypeRef TypeParser::parseReturnType() {
   return ref;
 }
 
-// arrayType := 'readonly'? 'keyof'? primaryType ('[' type? ']')*
 TypeRef TypeParser::parseArrayType() {
-  // `keyof T`: the names of the fields of T.
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "keyof" &&
       (parser_.cursor().peek().is(Tok::Identifier) || parser_.cursor().peek().is(Tok::LParen) ||
        parser_.cursor().peek().is(Tok::LBrace) || parser_.cursor().peek().is(Tok::KwTypeof))) {
@@ -145,7 +137,6 @@ TypeRef TypeParser::parseArrayType() {
     ref.args.push_back(parseArrayType());
     return ref;
   }
-  // `readonly T[]` is for tsc: the compiler does not stop changes to the array.
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "readonly" &&
       (parser_.cursor().peek().is(Tok::Identifier) || parser_.cursor().peek().is(Tok::LParen) ||
        parser_.cursor().peek().is(Tok::LBracket))) {
@@ -153,7 +144,7 @@ TypeRef TypeParser::parseArrayType() {
     parser_.cursor().advance();
     TypeRef ref = parseArrayType();
     if (ref.kind == TypeRef::Kind::Tuple) {
-      ref.readonly.assign(ref.args.size(), true); // its elements cannot be assigned to
+      ref.readonly.assign(ref.args.size(), true);
     } else if (ref.kind != TypeRef::Kind::Array) {
       parser_.cursor().report(loc, "'readonly' applies only to array and tuple types");
     }
@@ -165,7 +156,6 @@ TypeRef TypeParser::parseArrayType() {
     array.kind = TypeRef::Kind::Array;
     array.loc = ref.loc;
     parser_.cursor().advance();
-    // `T[K]`: the type of the member K of T.
     if (!parser_.tok_.is(Tok::RBracket)) {
       array.kind = TypeRef::Kind::Indexed;
       array.args.push_back(std::move(ref));
@@ -182,7 +172,6 @@ TypeRef TypeParser::parseArrayType() {
   return ref;
 }
 
-// primaryType := name ('<' type (',' type)* '>')? | '(' type ')' | objectType
 TypeRef TypeParser::parsePrimaryType() {
   TypeRef ref;
   ref.loc = parser_.tok_.loc();
@@ -193,9 +182,6 @@ TypeRef TypeParser::parsePrimaryType() {
     return parser_.objectTypes().parseTupleType();
   }
   if (parser_.tok_.is(Tok::Less)) {
-    // `<X>(x: X) => X`, a function that is generic itself. Which copy of a
-    // generic function runs is decided when compiling, so a value must have
-    // its types fixed; the function that takes one can be generic instead.
     std::vector<TypeParamDecl> params = parser_.functions().parseTypeParams();
     const char *start = parser_.tok_.text.data();
     if (parser_.tok_.is(Tok::LParen)) {
@@ -212,18 +198,15 @@ TypeRef TypeParser::parsePrimaryType() {
         "decided when compiling, so a function value has fixed types; make the function that "
         "takes it generic instead, e.g. 'function apply<" +
             names + ">(f: " + type + ")'");
-    return TypeRef(); // an empty name: an error already reported
+    return TypeRef();
   }
   if (parser_.tok_.is(Tok::LParen) && parser_.functionTypes().functionTypeAhead()) {
     return parser_.functionTypes().parseFunctionType();
   }
-  // `infer U` in the pattern of a conditional type, `infer N extends int`
-  // with a constraint. As in TypeScript, `extends` after it starts a
-  // conditional type if `?` follows, unless conditional types cannot be here.
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "infer" &&
       parser_.cursor().peek().is(Tok::Identifier)) {
     ref.kind = TypeRef::Kind::Infer;
-    parser_.cursor().advance(); // 'infer'
+    parser_.cursor().advance();
     ref.name = parser_.tok_.text;
     parser_.cursor().advance();
     if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "extends") {
@@ -239,8 +222,6 @@ TypeRef TypeParser::parsePrimaryType() {
     }
     return ref;
   }
-  // Template literal types: `` `on${K}` ``, and `` `text` ``, a string
-  // literal type.
   if (parser_.tok_.is(Tok::TemplateString) || parser_.tok_.is(Tok::TemplateHead)) {
     std::u16string text;
     decodeTemplatePart(parser_.tok_, text, parser_.diags_);
@@ -268,7 +249,6 @@ TypeRef TypeParser::parsePrimaryType() {
     }
     return ref;
   }
-  // Literal types: `"circle"`, `0`, `-1.5`, `true`.
   if (parser_.tok_.is(Tok::StringLiteral)) {
     ref.kind = TypeRef::Kind::Literal;
     ref.name = "string";
@@ -309,7 +289,6 @@ TypeRef TypeParser::parsePrimaryType() {
     parser_.cursor().expect(Tok::RParen, "to close the parenthesized type");
     return ref;
   }
-  // `typeof defaults`, `typeof config.server`: the type of a value.
   if (parser_.tok_.is(Tok::KwTypeof)) {
     ref.kind = TypeRef::Kind::TypeOf;
     parser_.cursor().advance();
@@ -335,14 +314,12 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   ref.name = parser_.tok_.text;
   parser_.cursor().advance();
-  // `NodeJS.Timeout`, as the types of Node name the objects of timers.
   if (ref.name == "NodeJS" && parser_.tok_.is(Tok::Dot) &&
       parser_.cursor().peek().is(Tok::Identifier)) {
     parser_.cursor().advance();
     ref.name = parser_.ctx_.keepName(("NodeJS." + parser_.tok_.text).str());
     parser_.cursor().advance();
   }
-  // `Intl.NumberFormat`: a type of the namespace Intl, by its dotted name.
   if (ref.name == "Intl" && parser_.tok_.is(Tok::Dot) &&
       parser_.cursor().peek().is(Tok::Identifier)) {
     parser_.cursor().advance();
@@ -357,10 +334,9 @@ TypeRef TypeParser::parsePrimaryType() {
   return ref;
 }
 
-// `<T, U>`. A closing `>>` (as in `Array<Array<int>>`) is split in two.
 std::vector<TypeRef> TypeParser::parseTypeArgs() {
   std::vector<TypeRef> args;
-  parser_.cursor().advance(); // '<'
+  parser_.cursor().advance();
   do {
     args.push_back(parseType());
   } while (parser_.cursor().accept(Tok::Comma));
@@ -374,7 +350,6 @@ std::vector<TypeRef> TypeParser::parseTypeArgs() {
   case Tok::GreaterEq:
   case Tok::ShrAssign:
   case Tok::UShrAssign:
-    // Keep the rest of the token: `>>` leaves `>`, `>=` leaves `=`.
     parser_.tok_.kind = parser_.tok_.is(Tok::Shr)         ? Tok::Greater
                         : parser_.tok_.is(Tok::UShr)      ? Tok::Shr
                         : parser_.tok_.is(Tok::GreaterEq) ? Tok::Assign
@@ -398,9 +373,6 @@ bool TypeParser::tryTypeArgs(std::vector<TypeRef> &args, bool callOnly) {
   bool muted = parser_.diags_.setMuted(true);
   parser_.recovering_ = false;
   std::vector<TypeRef> parsed = parseTypeArgs();
-  // As in TypeScript: a call, or a token that ends the expression (an
-  // instantiation `first<int>` used as a value). After anything else, as in
-  // `a < b > c`, the `<` compares.
   bool ok = !parser_.recovering_;
   switch (parser_.tok_.kind) {
   case Tok::LParen:
@@ -429,4 +401,4 @@ bool TypeParser::tryTypeArgs(std::vector<TypeRef> &args, bool callOnly) {
   return true;
 }
 
-} // namespace tz
+}

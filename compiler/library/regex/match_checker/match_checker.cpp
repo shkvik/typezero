@@ -22,14 +22,13 @@ const char kUnknownRegex[] =
     "the regex is known only when the program runs (it is not a literal, nor a variable that "
     "holds one all along)";
 
-} // namespace
+}
 
 MatchChecker::MatchChecker(Checker &checker) : checker_(checker) {}
 
 Expr *MatchChecker::matchItems(Expr *match) {
   const Type *array = Type::array(Type::optional(Type::string()));
   if (match->type->isOptional()) {
-    // `m?.%items`
     bool outer = std::exchange(checker_.chainShortCircuits_, false);
     Expr *items = matchItems(checker_.exprChecker().chainLink(match));
     auto *chain = checker_.ctx_.make<OptionalChainExpr>(match->loc(), items);
@@ -101,7 +100,6 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
   const Type *item = Type::optional(Type::string());
   std::optional<int64_t> k = checker_.constantFolder().intConstant(index->index);
   int groups = type->matchGroups();
-  // The match itself is m[0] of any regex.
   if (k && *k == 0) {
     index->mayBeOutOfRange = false;
     index->type = item;
@@ -119,17 +117,15 @@ Expr *MatchChecker::checkMatchIndex(IndexExpr *index) {
     }
     index->mayBeOutOfRange = false;
     index->type = item;
-    // A group that takes part in every match holds a value.
     if (type->captureMandatory(unsigned(*k))) {
       return checker_.typeRelations().convert(index, Type::string());
     }
     return index;
   }
-  // Otherwise as an element of an array: undefined past the end.
   index->mayBeOutOfRange = true;
   index->type = item;
 
   return index;
 }
 
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Calls: which class builds a call of a built-in, a method or a function.
 class CallLowerer {
 public:
   explicit CallLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

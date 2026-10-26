@@ -14,9 +14,6 @@ namespace tz {
 
 FunctionMethodChecker::FunctionMethodChecker(Checker &checker) : checker_(checker) {}
 
-// `f.call(obj, a, b)` and `f.apply(obj, args)` of a function with a `this`
-// parameter: a call of the function value with obj first. apply takes the
-// arguments as the list of parameters the function ends with.
 Expr *FunctionMethodChecker::checkThisCall(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   call->type = Type::error();
@@ -50,8 +47,6 @@ Expr *FunctionMethodChecker::checkThisCall(CallExpr *call, MemberExpr *member) {
       checkArgsLoosely();
       return call;
     }
-    // As `f(obj, ...args)` would pass the list: an argument list, or a
-    // tuple in a variable, element by element (see expandListSpreads).
     call->spread = {false, true};
     checker_.argListChecker().expandListSpreads(call->args, call->spread);
   }
@@ -73,7 +68,6 @@ Expr *FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member)
     }
     return call;
   }
-  // Each copy checks that its elements can be joined (checkTupleJoin).
   if (checker_.callChecker().rejectSpread(call) ||
       !checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
     return call;
@@ -86,4 +80,4 @@ Expr *FunctionMethodChecker::checkListMethod(CallExpr *call, MemberExpr *member)
   return call;
 }
 
-} // namespace tz
+}

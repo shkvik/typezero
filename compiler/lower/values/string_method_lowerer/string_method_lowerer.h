@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of strings.
 class StringMethodLowerer {
 public:
   explicit StringMethodLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

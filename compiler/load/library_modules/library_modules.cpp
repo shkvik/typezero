@@ -25,8 +25,6 @@ namespace tz {
 
 namespace {
 
-// The globals of the web platform that tz has written in tz, and the files
-// of library/ that declare them.
 struct LibraryGlobal {
   llvm::StringLiteral name, file, module;
 };
@@ -49,7 +47,6 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"ReadableStreamDefaultController", "fetch.tz", "tz:fetch"},
     {"FormData", "fetch.tz", "tz:fetch"},
     {"fetch", "fetch.tz", "tz:fetch"},
-    // The types that go with them, global in TypeScript too.
     {"RequestInit", "fetch.tz", "tz:fetch"},
     {"ResponseInit", "fetch.tz", "tz:fetch"},
     {"HeadersInit", "fetch.tz", "tz:fetch"},
@@ -57,8 +54,6 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"RequestRedirect", "fetch.tz", "tz:fetch"},
     {"ReadableStreamReadResult", "fetch.tz", "tz:fetch"},
     {"UnderlyingSource", "fetch.tz", "tz:fetch"},
-    // Those of Web Crypto: the types of TypeScript's lib.dom that its
-    // functions take and give.
     {"CryptoKey", "webcrypto.tz", "tz:webcrypto"},
     {"CryptoKeyPair", "webcrypto.tz", "tz:webcrypto"},
     {"SubtleCrypto", "webcrypto.tz", "tz:webcrypto"},
@@ -99,8 +94,6 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"HkdfParams", "webcrypto.tz", "tz:webcrypto"},
 };
 
-// The modules whose code is in several files: the files after the first, read in this order as
-// one module with it, in one scope.
 struct ModuleParts {
   llvm::StringLiteral file;
   std::vector<llvm::StringLiteral> parts;
@@ -110,7 +103,6 @@ const ModuleParts kModuleParts[] = {
      {"stream_readable.tz", "stream_writable.tz", "stream_duplex.tz", "stream_pipeline.tz"}},
 };
 
-// The statements and names of a part, after those of the module.
 void appendPart(SourceFile &file, SourceFile &part) {
   llvm::append_range(file.items, part.items);
   llvm::append_range(file.imports, part.imports);
@@ -123,7 +115,7 @@ void appendPart(SourceFile &file, SourceFile &part) {
   }
 }
 
-} // namespace
+}
 
 LibraryModules::LibraryModules(Loader &loader) : loader_(loader) {}
 
@@ -142,15 +134,13 @@ std::optional<SourceFile> LibraryModules::parseLibraryFile(llvm::StringRef file,
                                   "; reinstall tz");
     return std::nullopt;
   }
-  // Errors and the places of stack traces name the module as node names
-  // its own, `node:events:12:5`, `tz:http:12:5`.
   unsigned id = loader_.sourceMgr_.AddNewSourceBuffer(
       llvm::MemoryBuffer::getMemBufferCopy((*buffer)->getBuffer(), name), llvm::SMLoc());
   buffers.push_back(id);
   llvm::StringRef text = loader_.sourceMgr_.getMemoryBuffer(id)->getBuffer();
   Lexer lexer(text, loader_.diags_);
 
-  return Parser(lexer, loader_.ctx_, loader_.diags_, /*library=*/true).parseSourceFile();
+  return Parser(lexer, loader_.ctx_, loader_.diags_, true).parseSourceFile();
 }
 
 Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name, llvm::SMLoc loc) {
@@ -191,10 +181,6 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
 }
 
 void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) {
-  // Where the file first names each, as an identifier of its code (not in
-  // a comment or a string, nor a property after `.`): the tokens tell, and
-  // the parser reported the syntax. `crypto.subtle` names the object of
-  // tz:webcrypto too, which Checker reads under a name of its own.
   llvm::StringMap<const char *> mentions;
   const char *subtle = nullptr;
   bool muted = loader_.diags_.setMuted(true);
@@ -244,7 +230,6 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
       own.insert(decl.whole);
     }
   }
-  // One import for each module of the globals the file names.
   std::vector<ImportDecl> imports;
   auto importOf = [&](llvm::StringRef file, llvm::StringRef path, llvm::SMLoc loc) -> ImportDecl * {
     auto it = llvm::find_if(imports, [&](const ImportDecl &d) { return d.path == path; });
@@ -273,8 +258,6 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
       decl->names.push_back({global.name, loc, global.name, loc});
     }
   }
-  // `crypto.subtle`: the object of tz:webcrypto, which Checker reads under a
-  // name of its own.
   if (subtle) {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);
     if (ImportDecl *decl = importOf("webcrypto.tz", "tz:webcrypto", loc)) {
@@ -307,12 +290,7 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
       decl.names.erase(decl.names.begin() + long(i));
     }
   }
-  // `process.stdin`, and `process.stdout` or `process.stderr` but in
-  // `.write(chunk)` and `.isTTY`, and but the input and the output of
-  // readline: the tokens tell, as for the web globals. A write with an
-  // encoding or a callback needs the stream. The same of the names that
-  // node:process gives them (`import { stdin } from "node:process"`).
-  llvm::StringMap<llvm::StringRef> imported; // the name in the file: stdin, stdout or stderr
+  llvm::StringMap<llvm::StringRef> imported;
   llvm::SmallPtrSet<const char *, 4> importedAt;
   for (const ImportDecl &decl : module->file.imports) {
     if (decl.path != "node:process" && decl.path != "process") {
@@ -337,7 +315,6 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
     auto is = [&](size_t i, Tok kind, llvm::StringRef text) {
       return i < tokens.size() && tokens[i].is(kind) && (text.empty() || tokens[i].text == text);
     };
-    // Whether the call whose `(` is at `i` has more than one argument.
     auto severalArgs = [&](size_t i) {
       if (!is(i, Tok::LParen, "")) {
         return false;
@@ -366,7 +343,6 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
       if (!is(at, Tok::Identifier, "") || (at > 0 && is(at - 1, Tok::Dot, ""))) {
         continue;
       }
-      // The token of the stream: `process.stdout`, or `stdout` imported.
       size_t last = at;
       llvm::StringRef stream;
       if (tokens[at].text == "process" && is(at + 1, Tok::Dot, "") &&
@@ -385,7 +361,6 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
       if (stream != "stdin" && (name == "isTTY" || (name == "write" && !severalArgs(last + 3)))) {
         continue;
       }
-      // `{ input: process.stdin, output: process.stdout }` of readline.
       if (at >= 2 && is(at - 1, Tok::Colon, "") &&
           (is(at - 2, Tok::Identifier, "input") || is(at - 2, Tok::Identifier, "output"))) {
         continue;
@@ -403,4 +378,4 @@ void LibraryModules::importFsStreams(Module *module, llvm::StringRef text) {
   }
 }
 
-} // namespace tz
+}

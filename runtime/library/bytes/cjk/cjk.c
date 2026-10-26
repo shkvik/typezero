@@ -1,33 +1,15 @@
-// The multi-byte encodings of TextDecoder (docs/bytes.md, section 5): gbk and
-// gb18030, Big5, EUC-JP, ISO-2022-JP, Shift_JIS and EUC-KR, as the WHATWG
-// Encoding Standard decodes them, with its indexes (cjk_tables.h).
-//
-// Each encoding is a TzCjkEncoding (cjk.h) that names its indexes. A program
-// that names an encoding in its code refers to that one, so the linker puts
-// into the exe only the indexes it needs (cjk_tables.h holds 173 KB of them),
-// and the decoders, which TextDecoder calls through the encoding, only with
-// some; a label known only when the program runs refers to all of them. The
-// decoders are the handlers of the standard, byte by byte, with their state in
-// four words of the TextDecoder, so that a stream (`decode(bytes, { stream:
-// true })`) goes on where the last chunk ended. "Restore to the queue" puts
-// bytes back in front of the rest.
-
 #include "runtime/library/bytes/cjk/cjk.h"
 #include "runtime/core/string/string.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "runtime/library/bytes/cjk/cjk_tables.h"
 
-// What a handler of the standard gives back for a byte: go on to the next
-// one, an error (U+FFFD, or a TypeError when fatal), or the end.
 enum { GO, ERROR, FINISHED };
 
-// The end of the queue, where a byte would be.
 #define END (-1)
 
-// The bytes still to decode: those restored to the queue, then the input.
 typedef struct {
-  int back[8]; // restored, the next one last
+  int back[8];
   int count;
   const uint8_t *data;
   int64_t length, at;
@@ -41,10 +23,9 @@ static int next_byte(Queue *q, int stream) {
     return q->data[q->at++];
   }
 
-  return stream ? -2 : END; // a stream stops here, and goes on with the next chunk
+  return stream ? -2 : END;
 }
 
-// Restores the bytes `bytes[0..n)` to the queue: bytes[0] comes next.
 static void restore(Queue *q, const int *bytes, int n) {
   for (int k = n; k-- > 0;) {
     if (bytes[k] != END) {
@@ -65,7 +46,6 @@ static void emit(TzBuf *out, uint32_t cp) {
 
 static int is_ascii(int b) { return b >= 0 && b <= 0x7F; }
 
-// The index code point for `pointer`, 0 for none.
 static uint32_t index_cp(const uint16_t *table, uint32_t first, uint32_t count, int64_t pointer) {
   if (pointer < first || pointer - first >= count) {
     return 0;
@@ -74,8 +54,6 @@ static uint32_t index_cp(const uint16_t *table, uint32_t first, uint32_t count, 
   return table[pointer - first];
 }
 
-// The index gb18030 ranges code point for `pointer`, or 0 for null (none is
-// U+0000: the first range starts at U+0080).
 static uint32_t gb18030_ranges(const TzCjkEncoding *e, int64_t pointer) {
   if ((pointer > 39419 && pointer < 189000) || pointer > 1237575) {
     return 0;
@@ -83,7 +61,6 @@ static uint32_t gb18030_ranges(const TzCjkEncoding *e, int64_t pointer) {
   if (pointer == 7457) {
     return 0xE7C7;
   }
-  // The last range that starts at or before it.
   uint32_t lo = 0, hi = e->range_count;
   while (hi - lo > 1) {
     uint32_t mid = (lo + hi) / 2;
@@ -188,7 +165,6 @@ static int big5_byte(const TzCjkEncoding *e, uint32_t *s, Queue *q, TzBuf *out, 
     if ((b >= 0x40 && b <= 0x7E) || (b >= 0xA1 && b <= 0xFE)) {
       pointer = ((int64_t)lead - 0x81) * 157 + (b - offset);
     }
-    // The pointers of two code points each.
     static const struct {
       int32_t pointer;
       uint16_t first, second;
@@ -279,7 +255,6 @@ static int euc_jp_byte(const TzCjkEncoding *e, uint32_t *s, Queue *q, TzBuf *out
   return ERROR;
 }
 
-// The states of the ISO-2022-JP decoder.
 enum {
   ISO_ASCII,
   ISO_ROMAN,
@@ -354,7 +329,7 @@ static int iso_2022_jp_byte(const TzCjkEncoding *e, uint32_t *s, Queue *q, TzBuf
     *output = 0;
     *state = *output_state;
     return ERROR;
-  default: { // ISO_ESCAPE
+  default: {
     uint32_t lead = *leading;
     *leading = 0;
     int to = -1;
@@ -403,7 +378,6 @@ static int shift_jis_byte(const TzCjkEncoding *e, uint32_t *s, Queue *q, TzBuf *
     if ((b >= 0x40 && b <= 0x7E) || (b >= 0x80 && b <= 0xFC)) {
       pointer = ((int64_t)lead - lead_offset) * 188 + b - offset;
     }
-    // EUDC of Windows: the private use area.
     if (pointer >= 8836 && pointer <= 10715) {
       emit(out, (uint32_t)(0xE000 - 8836 + pointer));
       return GO;
@@ -481,7 +455,7 @@ int32_t tz_cjk_decode(const TzCjkEncoding *e, uint32_t *state, TzBuf *out, const
   for (;;) {
     int b = next_byte(&q, stream);
     if (b == -2) {
-      return 1; // the rest of a stream comes later
+      return 1;
     }
     int result = handle(e, state, &q, out, b);
     if (result == FINISHED) {
@@ -496,11 +470,6 @@ int32_t tz_cjk_decode(const TzCjkEncoding *e, uint32_t *state, TzBuf *out, const
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The encodings, which name their indexes
-//===----------------------------------------------------------------------===//
-
-// Not static: see the rules in tzrt.h. Lowering refers to each by its name.
 #define INDEX(name) TZ_CJK_##name##_FIRST, TZ_CJK_##name##_COUNT
 #define RANGES tz_cjk_gb18030_ranges, TZ_CJK_GB18030_RANGES
 const TzCjkEncoding tz_cjk_encoding_gbk = {

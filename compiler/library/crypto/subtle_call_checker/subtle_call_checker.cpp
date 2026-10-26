@@ -32,7 +32,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// A number written as a literal.
 std::optional<double> numberLiteral(const Expr *e) {
   if (auto *lit = dyn_cast_or_null<IntLitExpr>(e)) {
     return double(lit->value);
@@ -44,7 +43,6 @@ std::optional<double> numberLiteral(const Expr *e) {
   return std::nullopt;
 }
 
-// The property `name` of an object literal, or null.
 const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread && !prop.key && prop.name == name) {
@@ -55,7 +53,7 @@ const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRe
   return nullptr;
 }
 
-} // namespace
+}
 
 SubtleCallChecker::SubtleCallChecker(Checker &checker) : checker_(checker) {}
 
@@ -66,8 +64,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     return nullptr;
   }
   auto arg = [&](size_t i) -> Expr * { return i < args.size() ? args[i] : nullptr; };
-  // An algorithm: as written, or the literal a constant holds (`const algorithm = { name:
-  // "HMAC", hash: "SHA-256" }`, as hono writes it).
   auto algorithm = [&](size_t i) -> const Expr * {
     Expr *e = arg(i);
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
@@ -82,7 +78,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   };
   bool bad = false;
 
-  // The format, written as a literal.
   auto format = [&](size_t i) -> std::string {
     std::optional<std::string> f = stringLiteral(arg(i));
     if (!f) {
@@ -99,8 +94,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     return *f;
   };
 
-  // The usages, written as an array literal of literals, against those the key takes: of a
-  // public key or a private one, or of either (`isPublic` 0, 1, or -1 for both).
   auto usages = [&](size_t i, llvm::StringRef name, int isPublic, bool creates) {
     auto *lit = dyn_cast_or_null<ArrayLitExpr>(arg(i));
     if (!lit) {
@@ -132,7 +125,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       }
       if (!name.empty() && !llvm::is_contained(allowed, *u)) {
         bad = true;
-        // "an HMAC key", "a PBKDF2 key"
         std::string an = llvm::StringRef("EHRAX").contains(name.front()) ? "an " : "a ";
         std::string what =
             isPublic == 1 ? "a public " + name.str() + " key"
@@ -146,7 +138,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
         return;
       }
     }
-    // A secret or private key that can do nothing: node rejects it.
     if (!creates || name.empty() || isPublic == 1) {
       return;
     }
@@ -171,8 +162,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
   };
 
-  // The key data, once checked, against the format: of what the program gave, before it became
-  // the `BufferSource | JsonWebKey` of the parameter.
   std::string keyFormat;
   auto keyDataFits = [&]() {
     Expr *data = arg(1);
@@ -209,10 +198,8 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     return true;
   };
 
-  std::string target; // the function of tz:webcrypto the call goes to, if not the method
+  std::string target;
   std::vector<bool> checkedArgs(args.size(), false);
-  // What the program writes as a JSON value: a name or a member of one of type Json, or
-  // JSON.parse(text).
   std::function<bool(const Expr *)> isJsonValue = [&](const Expr *e) -> bool {
     if (auto *name = dyn_cast_or_null<NameExpr>(e)) {
       VarSymbol *var = checker_.scopes().lookup(name->name).var;
@@ -237,7 +224,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     literalAlgorithm(checker_.diags_, algorithm(0), "digest", "", bad);
   } else if (method == "generateKey") {
     std::string name = literalAlgorithm(checker_.diags_, algorithm(0), "generateKey", "", bad);
-    // A pair: the usages of both keys, of which the private one needs some.
     llvm::StringRef family = familyOf(name);
     usages(2, name, family == "Hmac" || family == "Aes" ? 0 : -1, true);
     if (!name.empty()) {
@@ -265,7 +251,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     if (!name.empty()) {
       target = "subtleImport" + familyOf(name).str();
     }
-    // A JWK as JSON, as JSON.parse gives it, is read as a JsonWebKey, which in node it is.
     if ((f.empty() || f == "jwk") && isJsonValue(arg(1)) && isa<NameExpr>(member->object) &&
         checker_.libFunctions_.lookup("subtleJwkOf")) {
       Expr *json = checker_.exprChecker().checkExpr(arg(1));
@@ -329,15 +314,13 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
       target = "subtleUnwrap" + familyOf(name).str();
     }
   } else {
-    return nullptr; // checkMethodCall reports it
+    return nullptr;
   }
 
   if (bad) {
-    // The arguments are still checked, as the method takes them (an empty array of usages
-    // is one of KeyUsage).
     call->type = Type::error();
-    std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(
-        checker_.libraryClass("SubtleCrypto"), method, /*isStatic=*/false);
+    std::vector<FunctionDecl *> methods =
+        ClassDeclarer::methodsNamed(checker_.libraryClass("SubtleCrypto"), method, false);
     FuncSymbol *sym = methods.size() == 1 ? methods[0]->sym : nullptr;
     if (sym) {
       checker_.returnInferrer().resolveParams(sym);
@@ -351,8 +334,6 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
     }
     return call;
   }
-  // The function of the family takes the arguments of the method; the receiver, crypto.subtle
-  // or a variable, has nothing to evaluate.
   Expr *checked;
   if (!target.empty() && checker_.libFunctions_.lookup(target) && isa<NameExpr>(member->object)) {
     checked = checker_.eventTargetChecker().callLibraryFunction(call, target, {}, checkedArgs,
@@ -367,4 +348,4 @@ Expr *SubtleCallChecker::checkSubtleCall(CallExpr *call, MemberExpr *member, con
   return checked;
 }
 
-} // namespace tz
+}

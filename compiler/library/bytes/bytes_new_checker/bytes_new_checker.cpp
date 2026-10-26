@@ -33,7 +33,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -52,7 +51,7 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-} // namespace
+}
 
 BytesNewChecker::BytesNewChecker(Checker &checker) : checker_(checker) {}
 
@@ -65,7 +64,6 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     }
   };
   auto *callee = checker_.ctx_.make<NameExpr>(loc, type->name());
-  // A fake call, for the helpers that check arguments.
   auto *call = checker_.ctx_.make<CallExpr>(loc, callee, args);
   if (!expr->typeArgs.empty()) {
     checker_.diags_.error(loc, "'new " + type->name() + "' takes no type arguments");
@@ -131,8 +129,6 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     if (!checker_.argumentChecker().checkArity(call, loc, 0, 2)) {
       return call;
     }
-    // The label: one written in the code is looked up now, as its table is
-    // built into the program only then (docs/bytes.md, section 5).
     auto *resolved = checker_.ctx_.make<IntLitExpr>(loc, 1);
     resolved->type = Type::intTy();
     std::u16string name = u"utf-8";
@@ -152,8 +148,6 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
         }
         name = std::u16string(found, found + strlen(found));
       } else {
-        // Known only when the program runs: the program then holds the
-        // tables of all the encodings.
         call->args[0] = checker_.argumentChecker().checkArg(label, Type::string());
         resolved->value = 0;
         checked[1] = call->args[0];
@@ -180,8 +174,6 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
     break;
   }
 
-  // A typed array: of a length, of values, of another typed array, or a view
-  // of an ArrayBuffer.
   if (args.empty()) {
     auto *zero = checker_.ctx_.make<IntLitExpr>(loc, 0);
     zero->type = Type::longTy();
@@ -262,7 +254,6 @@ Expr *BytesNewChecker::checkBytesValues(CallExpr *call, ArrayLitExpr *lit, const
     call->type = type;
     return call;
   }
-  // With spreads, an array of the values first.
   Expr *array = checker_.exprChecker().checkExpr(lit, Type::array(element));
   if (array->type->isError()) {
     return call;
@@ -318,7 +309,7 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
   }
   int64_t lo, hi;
   if (!target->elementRange(lo, hi)) {
-    return true; // a floating element takes any number
+    return true;
   }
   Bytes kind = target->bytes();
   std::string text = valueText(source);
@@ -334,7 +325,6 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
                               target->name() + ".from(" + text + ", x => Math.round(x) & 0xff)'");
     return false;
   }
-  // An Int32Array takes any int, and a clamped element any integer.
   if (kind == Bytes::Uint8Clamped || (kind == Bytes::Int32 && element->isInt())) {
     return true;
   }
@@ -362,4 +352,4 @@ bool BytesNewChecker::checkBytesSource(Expr *source, const Type *target) {
   return false;
 }
 
-} // namespace tz
+}

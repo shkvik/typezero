@@ -31,4 +31,4 @@ std::string dictText(const Expr *expr, const Type *type) {
   return type->isRecord() ? "r" : type->isMap() ? "m" : "s";
 }
 
-} // namespace tz
+}

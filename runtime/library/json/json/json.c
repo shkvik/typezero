@@ -1,6 +1,3 @@
-// Json values (docs/modules.md, section 5): their nodes and counts, the errors of
-// JSON, and the keys and entries of objects.
-
 #include "runtime/library/json/json/json.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -17,15 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// TzJson::flags of an object: some key is an array index, so the keys do not
-// come in the order they were added.
 #define F_INDEX_KEYS 1u
 
-// An object with more keys than this finds them through a hash index.
 #define INDEX_FROM 8
 
-// null, true and false are one node each, never freed: their counts start so
-// high that they never get back to zero.
 #define IMMORTAL (INT64_C(1) << 62)
 
 TzJson tz_json_null_node = {IMMORTAL, TZ_JSON_NULL, 0, {0}};
@@ -54,8 +46,6 @@ TzJson *tz_json_retained(TzJson *j) {
   return j;
 }
 
-// Nodes whose count reached zero, freed one by one: a deep value is freed
-// without recursion.
 typedef struct {
   TzJson **items;
   size_t count, capacity;
@@ -91,7 +81,7 @@ void tz_json_publish(TzJson *root) {
   while (pending.count) {
     TzJson *j = pending.items[--pending.count];
     if (j->rc <= 0 || j->rc >= TZ_RC_FOREVER) {
-      continue; // shared already, or one of the constants
+      continue;
     }
     j->rc = TZ_RC_SHARED + j->rc;
     switch (j->kind) {
@@ -145,8 +135,6 @@ void tz_json_free(TzJson *j) {
       tz_str_release_value(j->u.string);
       break;
     case TZ_JSON_ARRAY: {
-      // The elements are Json too, so they join the others here instead of
-      // going through tz_arr_free.
       TzArray *a = j->u.array;
       if (tz_rc_dec(&a->rc)) {
         TzJson **items = (TzJson **)a->data;
@@ -167,7 +155,7 @@ void tz_json_free(TzJson *j) {
       tz_free(j->u.object.entries);
       tz_free(j->u.object.index);
       break;
-    default: // null and booleans are never freed
+    default:
       break;
     }
     tz_free(j);
@@ -180,7 +168,6 @@ void tz_json_free(TzJson *j) {
   tz_free(dead.items);
 }
 
-// The release the compiler calls (Lowering::releaseValue).
 TZ_HOT void tz_json_release_value(TzJson *j) {
   if (j && tz_rc_dec(&j->rc)) {
     tz_json_free(j);
@@ -205,7 +192,7 @@ uint16_t tz_json_view_at(const View *v, uint32_t i) {
 static uint32_t key_hash(TzStr key) {
   View v;
   tz_json_view_init(&v, key);
-  uint32_t h = 2166136261u; // FNV-1a over the code units
+  uint32_t h = 2166136261u;
   for (uint32_t i = 0; i < v.length; ++i) {
     h ^= tz_json_view_at(&v, i);
     h *= 16777619u;
@@ -235,7 +222,7 @@ int64_t tz_json_index_key(TzStr key) {
 }
 
 int tz_json_is_length_key(TzStr key) {
-  TzStr length = tz_str_from_ascii("length", 6); // inline: nothing to release
+  TzStr length = tz_str_from_ascii("length", 6);
 
   return tz_json_key_equal(key, length);
 }
@@ -310,7 +297,6 @@ void tz_json_put(TzJson *o, TzStr key, TzJson *value) {
     o->u.object.entries = entries;
     o->u.object.capacity = capacity;
   }
-  // Keys are kept flat, so that comparing and hashing them reads them in place.
   uint32_t length;
   int two;
   tz_str_units(&key, &length, &two);

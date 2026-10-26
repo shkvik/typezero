@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// The built-in modules written in tz: where they are, and their calls of the compiler
-// (the intrinsics __tz_*).
 class TzModulesFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "tz_modules"; }
@@ -17,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

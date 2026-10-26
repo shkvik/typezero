@@ -23,8 +23,6 @@ GeneratorChecker::GeneratorChecker(Checker &checker) : checker_(checker) {}
 
 const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
   llvm::StringRef name = ref.name;
-  // `IteratorResult<T, R>`, what next() of an iterator written by hand
-  // gives.
   if (name == "IteratorResult" && !checker_.typeDeclarer().lookupType(name)) {
     if (ref.args.empty() || ref.args.size() > 2) {
       checker_.diags_.error(
@@ -32,13 +30,13 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
                    "iterator gives when it is done, e.g. 'IteratorResult<int, undefined>'");
       return Type::error();
     }
-    const Type *value = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+    const Type *value = checker_.typeResolver().resolveType(ref.args[0], false);
     const Type *returned = Type::undefinedTy();
     if (ref.args.size() == 2) {
       const TypeRef &arg = ref.args[1];
       if (!(arg.kind == TypeRef::Kind::Name &&
             (arg.name == "void" || arg.name == "undefined" || arg.name == "unknown"))) {
-        returned = checker_.typeResolver().resolveType(arg, /*allowVoid=*/false);
+        returned = checker_.typeResolver().resolveType(arg, false);
       }
     }
     if (value->isError() || returned->isError()) {
@@ -46,8 +44,6 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
     }
     return IterableChecker::iteratorResultType(value, returned);
   }
-  // `Iterable<T>` makes a function generic, as the type of a parameter (see
-  // iterableParam); anywhere else it is no one type.
   if (name == "Iterable" && !checker_.typeDeclarer().lookupType(name)) {
     checker_.diags_.error(
         ref.loc, "'Iterable<T>' can only be the type of a parameter of a function declared "
@@ -56,10 +52,6 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
                  "'Iterator<int>' for any iterator");
     return Type::error();
   }
-  // `Iterator<T>` is any iterator, as `IterableIterator<T>` is; an iterator
-  // written by hand becomes one where it is expected (see coerce). What an
-  // async generator gives (docs/iterators.md, step 4) goes by the names
-  // TypeScript has for it.
   bool async = name == "AsyncGenerator" || name == "AsyncIterableIterator" ||
                name == "AsyncIterator" || name == "AsyncIterable";
   if (name != "Generator" && name != "IterableIterator" &&
@@ -73,9 +65,7 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
                                        name + "<int>'");
     return Type::error();
   }
-  const Type *yielded = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
-  // What it returns and what next() sends: void for nothing, which
-  // undefined and TypeScript's unknown also say.
+  const Type *yielded = checker_.typeResolver().resolveType(ref.args[0], false);
   auto other = [&](size_t i) -> const Type * {
     if (i >= ref.args.size()) {
       return Type::voidTy();
@@ -86,7 +76,7 @@ const Type *GeneratorChecker::resolveIteratorType(const TypeRef &ref) {
       return Type::voidTy();
     }
 
-    return checker_.typeResolver().resolveType(arg, /*allowVoid=*/false);
+    return checker_.typeResolver().resolveType(arg, false);
   };
   const Type *returned = other(1), *sent = other(2);
   for (const Type *t : {yielded, returned, sent}) {
@@ -133,8 +123,7 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
                                                  llvm::ArrayRef<ReturnStmt *> returns,
                                                  bool fallsOff, bool report) {
   const Type *yielded = nullptr;
-  bool broken = false; // a yield whose error is reported already
-  // An async generator awaits what it yields and returns.
+  bool broken = false;
   bool async = fn->decl && fn->decl->isAsync;
   for (YieldExpr *yield : yields) {
     const Type *t = yield->delegate ? yield->element
@@ -174,7 +163,6 @@ const Type *GeneratorChecker::inferGeneratorType(const FuncSymbol *fn,
     return Type::error();
   }
 
-  // What it returns when it is done: void without a value.
   const Type *returned = nullptr;
   bool undefined = fallsOff;
   for (ReturnStmt *ret : returns) {
@@ -230,7 +218,6 @@ const Type *GeneratorChecker::iteratedType(const Type *type) {
   if (type->isTypedArray()) {
     return type->elementType();
   }
-  // `xs: Iterable<int>` in generic code: what any copy iterates gives.
   if (type->isParam() && type->iterated()) {
     return type->iterated();
   }
@@ -244,13 +231,12 @@ const Type *GeneratorChecker::asyncIteratedType(const Type *type) {
   }
   if (type->runtimeKind() == Type::Runtime::Readline ||
       type->runtimeKind() == Type::Runtime::ReadlinePromises) {
-    return Type::string(); // its lines
+    return Type::string();
   }
   const Type *element = iteratedType(type);
   if (!element) {
     return nullptr;
   }
-  // A Promise<void> gives undefined.
   const Type *awaited = AsyncChecker::awaitedType(element);
 
   return awaited && awaited->isVoid() ? Type::undefinedTy() : awaited;
@@ -274,25 +260,21 @@ bool GeneratorChecker::checkSendsNothing(const Type *iterator, llvm::SMLoc loc,
 Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   yield->type = Type::error();
   FuncSymbol *fn = checker_.currentFunction_;
-  // The generator of safeTry gives no values: its `yield* r` takes the
-  // value of a Result (see sema_result.cpp).
   if (fn && fn->decl && fn->decl->safeTry) {
     return checker_.safeTryChecker().checkSafeTryYield(yield);
   }
   if (!fn || !fn->decl || !fn->decl->isGenerator) {
-    // The parser reports `yield` outside a generator.
     if (yield->value) {
       yield->value = checker_.exprChecker().checkExpr(yield->value);
     }
     return yield;
   }
-  // The generator's type, if it is known: declared, or not being inferred.
   bool async = fn->decl->isAsync;
   const Type *generator =
       fn->ret && (async ? fn->ret->isAsyncIterator() : fn->ret->isIterator()) ? fn->ret : nullptr;
   const Type *yielded = generator ? generator->yielded() : nullptr;
   const Type *sent = generator ? generator->sent() : Type::voidTy();
-  bool loose = fn->ret && !generator; // its type is wrong: no checks
+  bool loose = fn->ret && !generator;
   if (async && !sent->isVoid() && !loose) {
     checker_.diags_.error(yield->loc(), "values sent with next(x) to an async generator are not "
                                         "supported yet; declare it as 'AsyncGenerator<" +
@@ -302,7 +284,6 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   }
 
   if (!yield->delegate && async) {
-    // `yield p` of an async generator awaits p, and gives what it gives.
     if (yield->value) {
       yield->value = checker_.exprChecker().checkExpr(yield->value, yielded);
       const Type *t = yield->value->type;
@@ -327,8 +308,6 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
                                               "'");
     }
   } else if (yield->delegate && async) {
-    // `yield* xs`: each value of an async iterator, or each element of xs
-    // awaited.
     yield->value =
         checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(yield->value));
     const Type *type = yield->value->type;
@@ -357,7 +336,6 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
                                               "'");
     }
   } else {
-    // `yield* xs`: each value of xs in turn. A chain of helpers runs there.
     checker_.iteratorMethods().markFused(yield->value);
     yield->value =
         checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(yield->value));
@@ -376,7 +354,6 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
                                   type->name() + "'");
       }
     } else if (type->isIterator() && !type->sent()->isVoid() && type->sent() != sent && !loose) {
-      // What next() sends to this generator goes on to the other one.
       checker_.diags_.error(yield->value->loc(),
                             "'yield*' passes on what next(x) sends, and '" + type->name() +
                                 "' expects '" + type->sent()->name() + "' from it, but " +
@@ -392,12 +369,9 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   if (!fn->ret && checker_.yields_) {
     checker_.yields_->push_back(yield);
   }
-  // Whoever iterates the generator may change anything before it goes on.
   checker_.flowChecker().calledFunction();
 
   if (yield->delegate) {
-    // What the other generator returns, if anything; not kept of an async
-    // one yet.
     const Type *type = yield->value->type;
     yield->type = !async && type->isIterator() && !type->returned()->isVoid() ? type->returned()
                                                                               : Type::undefinedTy();
@@ -423,7 +397,6 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d)
   checkSendsNothing(iterator, init->loc(), "destructuring");
   Expr *source = init;
   if (!d.patternRest) {
-    // As many values as the pattern names; the iterator is left after them.
     auto *member = checker_.ctx_.make<MemberExpr>(init->loc(), init, "take");
     auto *n = checker_.ctx_.make<IntLitExpr>(init->loc(), d.patternLength);
     n->type = Type::longTy();
@@ -434,11 +407,11 @@ Expr *GeneratorChecker::destructuredIterator(Expr *init, const VarDeclarator &d)
     source = take;
   }
   auto *array = checker_.ctx_.make<ArrayLitExpr>(init->loc());
-  array->elements.push_back({source, /*spread=*/true});
+  array->elements.push_back({source, true});
   array->type = Type::array(iterator->yielded());
-  checker_.flowChecker().calledFunction(); // a generator runs
+  checker_.flowChecker().calledFunction();
 
   return array;
 }
 
-} // namespace tz
+}

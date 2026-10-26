@@ -24,8 +24,6 @@ namespace tz {
 
 namespace {
 
-// The source text of the two sides of `bin`, an operator `length` characters
-// long; empty if the source is not known.
 std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source, llvm::SMLoc op,
                                                          size_t length) {
   const char *at = op.getPointer();
@@ -37,16 +35,12 @@ std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
           llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
 }
 
-// An operand as it was before toStringOperand converted it.
 const Expr *unconverted(const Expr *expr) {
   auto *cast = dyn_cast<CastExpr>(expr);
 
   return cast && cast->isImplicit() && cast->type->isString() ? cast->operand : expr;
 }
 
-// The parts `+` joins in the chain ending at `bin`, with their source text:
-// for `a + b + "x" + c` they are `a + b` (a sum: the numbers before the first
-// string add up, as in JavaScript), "x" and c.
 void concatParts(const BinaryExpr *bin,
                  std::vector<std::pair<const Expr *, llvm::StringRef>> &parts) {
   auto [lhs, rhs] = operandTexts(bin->source, bin->loc(), 1);
@@ -59,8 +53,6 @@ void concatParts(const BinaryExpr *bin,
   parts.push_back({unconverted(bin->rhs), rhs});
 }
 
-// The parts as one template literal, or "" if some text is not known. If
-// the template would hold just one value, `only` gets its text.
 std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRef>> parts,
                            llvm::StringRef &only) {
   std::string result = "`";
@@ -71,8 +63,6 @@ std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRe
     }
     bool quoted = text.size() >= 2 && text.back() == text.front();
     if (isa<StringLitExpr>(expr) && quoted && (text.front() == '"' || text.front() == '\'')) {
-      // The escapes of the literal mean the same in a template; a backquote
-      // and `${` would not.
       llvm::StringRef body = text.drop_front().drop_back();
       for (size_t i = 0; i < body.size(); ++i) {
         if (body[i] == '\\' && i + 1 < body.size()) {
@@ -93,14 +83,14 @@ std::string concatTemplate(llvm::ArrayRef<std::pair<const Expr *, llvm::StringRe
       result += ("${" + only + "}").str();
     }
   }
-  if (values != 1 || result.size() != only.size() + 4) { // "`${" and "}"
+  if (values != 1 || result.size() != only.size() + 4) {
     only = "";
   }
 
   return result + "`";
 }
 
-} // namespace
+}
 
 ConcatChecker::ConcatChecker(Checker &checker) : checker_(checker) {}
 
@@ -117,21 +107,17 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
   if (type->isRegExp()) {
     return checker_.regexChecker().regexToString(expr);
   }
-  // As in JavaScript: the text of toString(), in local time.
   if (type->isDate()) {
     return checker_.dateChecker().dateToString(expr);
   }
   if (type->isBytes()) {
     return checker_.bytesChecker().bytesToString(expr);
   }
-  // As TypeScript allows; an instance for objects or functions reports it at
-  // the call.
   if (type->nonOptional()->isParam()) {
     checker_.genericChecker().noteForced(expr, Type::string());
     return checker_.typeRelations().convert(expr, Type::string());
   }
   if (Checker::holdsFunctions(type)) {
-    // JavaScript would give the source code of the function.
     checker_.diags_.error(expr->loc(), "a function cannot be converted to a string; print it with "
                                        "console.log, or use its name");
     return expr;
@@ -150,8 +136,7 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return expr;
   }
   if (ClassDecl *cls = ClassDeclarer::classOf(type->nonOptional());
-      cls && !ClassDeclarer::methodsNamed(cls, "toString", /*isStatic=*/false).empty()) {
-    // JavaScript would call it: tz calls no code by itself.
+      cls && !ClassDeclarer::methodsNamed(cls, "toString", false).empty()) {
     auto *name = dyn_cast<NameExpr>(expr);
     std::string text = name ? name->name.str() : "o";
     checker_.diags_.error(expr->loc(),
@@ -186,30 +171,24 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return expr;
   }
   if (JsonChecker::holdsJson(type)) {
-    // An object would be "[object Object]" in JavaScript.
     checker_.diags_.error(
         expr->loc(), "a Json cannot be converted to a string: it may hold an object; check what it "
                      "holds first (e.g. 'typeof x == \"string\"'), or write it as JSON with "
                      "'JSON.stringify(x)'");
     return expr;
   }
-  // An Error gives "TypeError: message", as JavaScript's Error.prototype.toString.
   if (checker_.throwChecker().isErrorType(type)) {
     return checker_.typeRelations().convert(expr, Type::string());
   }
   if (Checker::holdsObjects(type)) {
-    // JavaScript would give "[object Object]", or call a toString method.
     checker_.diags_.error(expr->loc(),
                           "an object cannot be converted to a string: JavaScript would give "
                           "'[object Object]'; print it with console.log, or build the text from "
                           "its fields");
     return expr;
   }
-  // A union: as the member it holds, each of which must convert (a union of
-  // string literals is a string already).
   if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
     for (const Type *m : u->members()) {
-      // A date, a regex and an Error have texts of their own, as alone.
       if ((m->isObject() && !m->isDate() && !m->isRegExp() &&
            !checker_.throwChecker().isErrorType(m)) ||
           m->isDict() || m->isFunction() || m->isIterator()) {
@@ -226,8 +205,6 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
     return cast ? cast : expr;
   }
 
-  // Numbers, booleans, undefined, arrays (joined with commas) and optionals of
-  // those convert as in JavaScript.
   return checker_.typeRelations().convert(expr, Type::string());
 }
 
@@ -244,11 +221,10 @@ void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *
     checker_.diags_.error(mixed->loc(), message + "; use a template literal instead");
     return;
   }
-  if (!only.empty()) { // `"" + n`
+  if (!only.empty()) {
     checker_.diags_.error(mixed->loc(), message + "; convert it with 'String(" + only + ")'");
     return;
   }
-  // `count + input` may be meant as a sum: then the string needs Number().
   if (parts.size() == 2) {
     auto [first, firstText] = parts[0];
     auto [second, secondText] = parts[1];
@@ -270,4 +246,4 @@ void ConcatChecker::reportMixedConcat(const BinaryExpr *root, const BinaryExpr *
   checker_.diags_.error(mixed->loc(), message + "; use a template: '" + joined + "'");
 }
 
-} // namespace tz
+}

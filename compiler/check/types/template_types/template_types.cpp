@@ -16,8 +16,6 @@ namespace tz {
 
 namespace {
 
-// More strings than this from one template literal type is an error, as in
-// TypeScript.
 constexpr size_t kMaxTemplateStrings = 100000;
 
 std::string utf8(const std::u16string &text) {
@@ -43,16 +41,11 @@ std::vector<const Type *> distributed(const Type *type) {
   return out;
 }
 
-// What a template literal type may hold: strings, numbers, booleans,
-// undefined, and in generic code a type parameter.
 bool templateHole(const Type *type) {
   return type->isString() || type->isNumeric() || type->isBool() || type->isLiteral() ||
          type->isUndefined() || type->isParam();
 }
 
-// Upper and lower case of a character as JavaScript's toUpperCase and
-// toLowerCase give them, for the Latin, Greek and Cyrillic letters; other
-// characters stay.
 std::u16string upperCase(char16_t c) {
   if (c >= u'a' && c <= u'z') {
     return std::u16string(1, char16_t(c - 32));
@@ -72,7 +65,6 @@ std::u16string upperCase(char16_t c) {
   if (c == 0x131 || c == 0x17f) {
     return c == 0x131 ? u"I" : u"S";
   }
-  // Latin Extended-A: pairs of an upper and a lower case letter.
   if ((c >= 0x100 && c <= 0x137) || (c >= 0x14a && c <= 0x177)) {
     return std::u16string(1, char16_t(c & ~1u));
   }
@@ -117,7 +109,7 @@ std::u16string lowerCase(char16_t c) {
   if (c == 0x178) {
     return std::u16string(1, char16_t(0xff));
   }
-  if (c == 0x130) { // i with a combining dot above
+  if (c == 0x130) {
     return std::u16string{u'i', char16_t(0x307)};
   }
   if ((c >= 0x100 && c <= 0x137) || (c >= 0x14a && c <= 0x177)) {
@@ -167,7 +159,7 @@ std::u16string changeCase(TypeOp op, const std::u16string &text) {
   return out;
 }
 
-} // namespace
+}
 
 TemplateTypes::TemplateTypes(Checker &checker) : checker_(checker) {}
 
@@ -195,8 +187,6 @@ bool TemplateTypes::matchTemplate(const std::u16string &text, llvm::ArrayRef<con
       continue;
     }
     const Type *piece = Type::stringLiteral(pieces[k]);
-    // `infer N extends int`: the number the text is, if it reads back as
-    // that text; the constraint itself if not.
     if (inference && llvm::is_contained(inference->params, hole)) {
       if (const Type *constraint = hole->constraint();
           constraint && constraint->nonOptional()->isNumeric()) {
@@ -248,8 +238,6 @@ const Type *TemplateTypes::resolveTemplate(const TypeRef &ref) {
 }
 
 const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
-  // Each choice of the members of the holes makes a string literal, or a
-  // pattern if some hole is `string` or a number.
   struct Part {
     std::vector<std::u16string> texts;
     std::vector<const Type *> holes;
@@ -265,7 +253,7 @@ const Type *TemplateTypes::evalTemplate(llvm::ArrayRef<const Type *> operands) {
         if (m->isStringLiteral()) {
           made.texts.back() += m->literalText();
         } else if (m->isLiteral()) {
-          made.texts.back() += utf16(m->name()); // a number or a boolean, as written
+          made.texts.back() += utf16(m->name());
         } else if (m->isUndefined()) {
           made.texts.back() += u"undefined";
         } else if (m->isPattern()) {
@@ -310,7 +298,6 @@ const Type *TemplateTypes::evalStringCase(TypeOp op, const Type *type) {
     if (m->isStringLiteral()) {
       results.push_back(Type::stringLiteral(changeCase(op, m->literalText())));
     } else if (m->isPattern()) {
-      // The texts of a pattern; what its holes hold stays as it is.
       std::vector<std::u16string> texts(m->patternTexts().begin(), m->patternTexts().end());
       if (op == TypeOp::Uppercase || op == TypeOp::Lowercase) {
         for (std::u16string &text : texts) {
@@ -331,4 +318,4 @@ const Type *TemplateTypes::evalStringCase(TypeOp op, const Type *type) {
   return results.empty() ? Type::never() : Type::unionOf(results);
 }
 
-} // namespace tz
+}

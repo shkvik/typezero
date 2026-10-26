@@ -1,6 +1,3 @@
-// Unicode case mapping for toUpperCase and toLowerCase, from the tables in
-// unicode_tables.h (see gen_unicode_tables.mjs).
-
 #include "runtime/core/unicode/unicode.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +23,6 @@ typedef struct {
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 static const CaseRun *find_run(const CaseRun *runs, size_t n, uint32_t cp) {
-  // The last run that starts at or before cp.
   size_t lo = 0, hi = n;
   while (lo < hi) {
     size_t mid = (lo + hi) / 2;
@@ -63,10 +59,7 @@ static int in_ranges(const CodeRange *ranges, size_t n, uint32_t cp) {
   return 0;
 }
 
-// Maps `cp` to upper or lower case: one code point, or up to three (such as
-// ß to SS). Returns how many it wrote to `out`.
 int tz_case_map(uint32_t cp, int upper, uint32_t out[3]) {
-  // A code point is either in the special list (sorted) or in the runs.
   const CaseSpecial *special = upper ? upper_special : lower_special;
   size_t lo = 0, hi = upper ? COUNT(upper_special) : COUNT(lower_special);
   while (lo < hi) {
@@ -95,7 +88,6 @@ int tz_is_case_ignorable(uint32_t cp) {
   return in_ranges(case_ignorable_ranges, COUNT(case_ignorable_ranges), cp);
 }
 
-// WhiteSpace and LineTerminator of JavaScript, which trim() removes.
 int tz_is_js_space(uint32_t unit) {
   switch (unit) {
   case 0x09:

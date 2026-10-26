@@ -1,10 +1,7 @@
-// stdin: what readLine of tz:io, readFileSync(0), node:readline and
-// process.stdin read, from one buffer.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/stdin/stdin.h"
@@ -37,19 +34,14 @@
 #include <unistd.h>
 #endif
 
-//===----------------------------------------------------------------------===//
-// stdin
-//===----------------------------------------------------------------------===//
-
 Bytes tz_in;
 
 int tz_in_eof;
 
 #ifdef _WIN32
-uint16_t tz_in_surrogate; // the first half of a pair the console split
+uint16_t tz_in_surrogate;
 #endif
 
-// Reads more of stdin; false at its end.
 static int in_fill(void) {
   if (tz_in_eof) {
     return 0;
@@ -62,8 +54,6 @@ static int in_fill(void) {
     return 0;
   }
   if (GetConsoleMode(h, &mode)) {
-    // The console gives UTF-16: letters of any language, whatever its code
-    // page. A line that starts with Ctrl+Z ends the input.
     wchar_t text[4096];
     DWORD got = 0;
     if (!ReadConsoleW(h, text, 4096, &got, NULL) || got == 0 || text[0] == 0x1A) {
@@ -111,8 +101,6 @@ static int in_fill(void) {
 #endif
 }
 
-// readLine(question?) of tz:io: the question as it is, then a line of stdin
-// without its "\n" or "\r\n". At the end of the input, false.
 int32_t tz_io_read_line(TzStr *out, void *question_obj, uint64_t question_meta,
                         int32_t has_question) {
   if (has_question) {
@@ -153,17 +141,9 @@ void tz_fs_read_stdin(Bytes *data) {
   tz_in.length = 0;
 }
 
-//===----------------------------------------------------------------------===//
-// process.stdin as a stream
-//===----------------------------------------------------------------------===//
-
-// The reads of process.stdin as a Readable (library/stream/fs_stream.tz): each
-// waits for the next chunk, at most `max` bytes, of the buffer that readLine
-// and readline read too, or undefined at its end. Not static: see the rules
-// in tzrt.h.
 typedef struct ChunkWaiter {
   struct ChunkWaiter *next;
-  TzPromise *promise; // held
+  TzPromise *promise;
   int32_t max;
 } ChunkWaiter;
 
@@ -176,7 +156,7 @@ void tz_fs_stdin_serve_chunks(void) {
     if (!tz_chunk_head) {
       tz_chunk_tail = NULL;
     }
-    TzBytes *chunk = NULL; // undefined: the end
+    TzBytes *chunk = NULL;
     if (tz_in.length > 0) {
       size_t n = tz_in.length < (size_t)w->max ? tz_in.length : (size_t)w->max;
       chunk = tz_buffer_copy_of(tz_in.data, (int64_t)n);
@@ -192,7 +172,6 @@ void tz_fs_stdin_serve_chunks(void) {
   }
 }
 
-// A Promise of the next chunk of stdin, a Buffer, or undefined at its end.
 void tz_stdin_chunk(TzPromise *p, int32_t max) {
   ChunkWaiter *w = (ChunkWaiter *)calloc(1, sizeof(ChunkWaiter));
   if (!w) {

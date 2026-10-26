@@ -23,11 +23,9 @@ namespace tz {
 
 namespace {
 
-// What `await` of a value of `type` gives: the value of a Promise, or the
-// value itself.
 const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
 
-} // namespace
+}
 
 PromiseChecker::PromiseChecker(Checker &checker) : checker_(checker) {}
 
@@ -54,9 +52,6 @@ const Type *PromiseChecker::rejecterType() {
   return Type::function({checker_.errorClass_->type}, 1, false, Type::voidTy());
 }
 
-// The type of the value of `new Promise(executor)` without one written or
-// expected, from what the executor gives `resolve`: nothing (void), or
-// values of one type, which a check of a copy of the executor finds.
 const Type *PromiseChecker::executorValueType(const Expr *executor) {
   auto *fe = dyn_cast<FunctionExpr>(executor);
   if (!fe) {
@@ -78,8 +73,6 @@ const Type *PromiseChecker::executorValueType(const Expr *executor) {
   if (fe->fn->source.empty()) {
     return nullptr;
   }
-  // On a copy, with `resolve` of no type, so that anything goes to it, and
-  // without messages: the executor itself is checked after.
   FunctionDecl *copy = checker_.returnInferrer().freshCopy(fe->fn);
   copy->sym = nullptr;
   auto *trial = checker_.ctx_.make<FunctionExpr>(fe->loc(), copy);
@@ -127,7 +120,7 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
     checker_.diags_.error(expr->loc(), "'Promise' takes one type argument, the type of its value");
     value = Type::error();
   } else if (expr->typeArgs.size() == 1) {
-    value = awaited(checker_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/true));
+    value = awaited(checker_.typeResolver().resolveType(expr->typeArgs[0], true));
   } else if (expected && expected->nonOptional()->isPromise() &&
              !expected->nonOptional()->promised()->isNever()) {
     value = expected->nonOptional()->promised();
@@ -153,7 +146,6 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
             : checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
-  // The executor runs now, with the functions that settle the Promise.
   Checker::Signature sig;
   sig.params = {resolverType(value), rejecterType()};
   sig.minArgs = 2;
@@ -167,12 +159,10 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
   return call;
 }
 
-// then, catch and finally.
 Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, const Type *expected) {
   const Type *type = member->object->type;
   const Type *value = type->promised();
   llvm::StringRef name = member->name;
-  // A Promise of a Result is a ResultAsync of neverthrow.
   static const llvm::StringLiteral resultMethods[] = {
       "map", "mapErr", "andThen", "orElse", "match", "unwrapOr", "andTee", "orTee", "andThrough"};
   if (value->isResult() && llvm::is_contained(resultMethods, name)) {
@@ -190,8 +180,6 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   const Type *wanted = expected && expected->nonOptional()->isPromise()
                            ? expected->nonOptional()->promised()
                            : nullptr;
-  // A callback: what it gets (nothing for void), and what it returns, as the
-  // Promise it gives would. Null for `undefined` in its place.
   bool failed = false;
   auto callback = [&](Expr *&arg, const Type *param) -> const Type * {
     if (isa<UndefinedExpr>(arg)) {
@@ -212,14 +200,12 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
       failed = true;
       return nullptr;
     }
-    // The callback runs later, so its function may outlive the call.
     if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
       fe->fn->nonEscaping = false;
     }
 
     return awaited(arg->type->ret());
   };
-  // The values that two ways give, in one type: void only with void.
   auto both = [&](const Type *a, const Type *b, llvm::SMLoc loc) -> const Type * {
     if (a->isVoid() && b->isVoid()) {
       return a;
@@ -294,4 +280,4 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   return call;
 }
 
-} // namespace tz
+}

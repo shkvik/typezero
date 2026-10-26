@@ -17,8 +17,6 @@ namespace tz {
 
 namespace {
 
-// The variable an argument reads, through the conversions of narrowing and
-// of passing it.
 const VarSymbol *argumentVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit) {
@@ -31,8 +29,6 @@ const VarSymbol *argumentVariable(const Expr *expr) {
   return name ? name->var : nullptr;
 }
 
-// An argument as a term of the facts: a variable, or a constant (an integer
-// literal); none for anything else.
 std::optional<Linear> argumentTerm(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -55,14 +51,14 @@ std::optional<Linear> argumentTerm(const Expr *expr) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 PredicateChecker::PredicateChecker(Checker &checker) : checker_(checker) {}
 
 const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sym) {
   const TypeRef &ref = *fn->returnType;
   if (ref.kind != TypeRef::Kind::Predicate) {
-    return checker_.typeResolver().resolveType(ref, /*allowVoid=*/true);
+    return checker_.typeResolver().resolveType(ref, true);
   }
   int param = -2;
   if (ref.name == "this") {
@@ -82,9 +78,8 @@ const Type *PredicateChecker::resolveReturnType(FunctionDecl *fn, FuncSymbol *sy
                                          ref.name + "' is none");
     }
   }
-  const Type *type = ref.args.empty()
-                         ? nullptr
-                         : checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *type =
+      ref.args.empty() ? nullptr : checker_.typeResolver().resolveType(ref.args[0], false);
   if (sym && param != -2 && (!type || !type->isError())) {
     sym->predicateParam = param;
     sym->predicateType = type;
@@ -145,11 +140,10 @@ void PredicateChecker::notePredicateExit(const Checker::Flow &whenTrue,
   const FuncSymbol *sym = build.fn;
   build.whenTrue = FlowChecker::join(build.whenTrue, whenTrue);
   build.whenFalse = FlowChecker::join(build.whenFalse, whenFalse);
-  // A written predicate: here the parameter must be shown to be T.
   if (sym->predicateParam == -2 || !sym->predicateType || whenTrue.unreachable) {
     return;
   }
-  const FunctionDecl *decl = build.decl; // the body being checked: maybe a copy
+  const FunctionDecl *decl = build.decl;
   const VarSymbol *var = sym->predicateParam == -1 ? decl->thisVar
                          : size_t(sym->predicateParam) < decl->params.size()
                              ? decl->params[size_t(sym->predicateParam)].sym
@@ -179,8 +173,6 @@ void PredicateChecker::endPredicate(FunctionDecl *fn) {
   if (!build.fn) {
     return;
   }
-  // Facts about what the function's parameters are, as they were passed: a
-  // parameter assigned to in the body is something else by its returns.
   Checker::Predicate summary;
   auto position = [&](const VarSymbol *var) -> int {
     if (!var || var->reassigned) {
@@ -237,8 +229,6 @@ const Checker::Predicate *PredicateChecker::predicateOf(const FuncSymbol *fn) co
   if (auto found = predicates_.find(fn); found != predicates_.end()) {
     return &found->second;
   }
-  // Not checked yet (a function called before its body is checked): its
-  // summary from a copy of its body, once.
   FunctionDecl *decl = fn->decl;
   if (!decl || decl->checked || !decl->body || decl->isGenerator || decl->isInstance ||
       (fn->ret && !fn->ret->isBool() && !fn->asserts) || !summarizing_.insert(fn).second) {
@@ -261,7 +251,6 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
   if (!fn || call->virtualCall || !call->unionMethods.empty()) {
     return;
   }
-  // What each parameter stands for at the call.
   auto *member = dyn_cast<MemberExpr>(call->callee);
   auto argument = [&](int i) -> const Expr * {
     if (i == -1) {
@@ -274,20 +263,17 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
     const Expr *arg = argument(i);
     const VarSymbol *var = arg ? argumentVariable(arg) : nullptr;
 
-    // What it holds now is what was passed, unless the call changed it.
     return var && !checker_.flowChecker().changedByCalls(var) ? var : nullptr;
   };
   auto narrowTo = [&](Checker::Flow &flow, const VarSymbol *var, const Type *type) {
     const Type *now = checker_.literalTypes().typeIn(flow, var);
     if (TypeRelations::isImplicitlyConvertible(now, type)) {
-      return; // nothing new
+      return;
     }
     if (TypeRelations::isImplicitlyConvertible(type, now)) {
       UnionNarrowing::narrowVariable(flow, var, type);
       return;
     }
-    // The members of what it is now that are also what the parameter was
-    // shown to be.
     if (const Type *value = now->nonOptional(); value->isUnion()) {
       std::vector<const Type *> kept;
       for (const Type *m : value->members()) {
@@ -320,7 +306,6 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
         FieldFacts::defineField(flow, Checker::FieldPath{var, names});
       }
     }
-    // The facts, with each parameter replaced by its argument.
     auto term = [&](const Term &t) -> std::optional<Linear> {
       if (t.isZero()) {
         return Linear{Term::zero(), 0};
@@ -363,8 +348,6 @@ void PredicateChecker::applyPredicate(const CallExpr *call, Checker::Flow &whenT
     apply(summary->whenTrue, whenTrue);
     apply(summary->whenFalse, whenFalse);
   }
-  // A written predicate says so whatever the body proves; the body is
-  // checked to prove it (see notePredicateExit).
   if (fn->predicateParam != -2 && fn->predicateType) {
     if (const VarSymbol *var = variable(fn->predicateParam)) {
       narrowTo(whenTrue, var, fn->predicateType);
@@ -409,4 +392,4 @@ const Type *PredicateChecker::filteredType(const Expr *callback, const Type *ele
   return kept;
 }
 
-} // namespace tz
+}

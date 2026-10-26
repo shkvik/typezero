@@ -27,28 +27,25 @@ namespace tz {
 
 namespace {
 
-// What an iterator prints as; must match TzLayout in runtime/core/tzrt/tzrt.h.
 enum : unsigned {
-  kLayoutGenerator = 2,       // Object [Generator] {}
-  kLayoutArrayIterator = 4,   // Object [Array Iterator] {}
-  kLayoutStringIterator = 8,  // Object [String Iterator] {}
-  kLayoutHelper = 16,         // Object [Iterator Helper] {}
-  kLayoutRegexIterator = 256, // Object [RegExp String Iterator] {}
-  kLayoutDictIterator = 8192, // [Map Iterator] { 'a' }, with what follows
+  kLayoutGenerator = 2,
+  kLayoutArrayIterator = 4,
+  kLayoutStringIterator = 8,
+  kLayoutHelper = 16,
+  kLayoutRegexIterator = 256,
+  kLayoutDictIterator = 8192,
   kLayoutDictValues = 16384,
   kLayoutDictEntries = 32768,
   kLayoutDictOfSet = 65536,
 };
 
-// The header before the frame of the coroutine: { i64 rc, ptr layout }.
 constexpr uint64_t kHeaderSize = 16;
 
-// The alignment of the frame, which follows the header of an allocation.
 constexpr uint32_t kFrameAlign = 8;
 
 enum PromiseField : unsigned { kOut, kIn, kRet, kRunning, kClose };
 
-} // namespace
+}
 
 GeneratorLowerer::GeneratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -64,7 +61,6 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
                                          "tz.iter.destroy", lowering_.module_.get());
     iterDropFn_->addFnAttr(llvm::Attribute::NoUnwind);
     llvm::IRBuilder<> b(llvm::BasicBlock::Create(lowering_.ctx_, "entry", iterDropFn_));
-    // Closed first, if it waits at a `yield` with a `finally` around it.
     b.CreateCall(iterCloseFunction(), {iterDropFn_->getArg(0)});
     llvm::Value *frame =
         b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), iterDropFn_->getArg(0), kHeaderSize, "frame");
@@ -73,13 +69,11 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
     b.CreateRetVoid();
   }
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.layoutDescTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.layoutDescTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.layoutDescTy_,
                                 {iterDropFn_,
                                  llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                  lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(flags),
-                                 // not an instance of a class
                                  llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                  lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0)}),
       "tz.layout.iterator");
@@ -89,12 +83,6 @@ llvm::Constant *GeneratorLowerer::iteratorLayout(unsigned flags) {
   return layout;
 }
 
-// return() of JavaScript, as `for...of` and the iterator helpers call it when
-// they stop before the end, and as dropping an iterator does: a generator
-// that waits at a `yield` with a `finally` around it is resumed to return
-// from there, which runs them; any other iterator is left as it is. The
-// error in flight waits meanwhile; one the `finally` blocks throw is dropped,
-// as nothing could catch it where an iterator is closed.
 llvm::Function *GeneratorLowerer::iterCloseFunction() {
   if (iterCloseFn_) {
     return iterCloseFn_;
@@ -137,8 +125,6 @@ llvm::Function *GeneratorLowerer::iterCloseFunction() {
   b.CreateStore(b.getInt32(1), running);
   b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
   b.CreateStore(b.getInt32(0), running);
-  // A `yield` in a `finally` stopped it: it stays where it is, as in
-  // JavaScript, until it is dropped.
   b.CreateStore(b.getInt32(0), close);
   llvm::Value *error = b.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(b), "error");
   b.CreateCondBr(b.CreateIsNotNull(error), failedBlock, closedBlock);
@@ -154,9 +140,6 @@ llvm::Function *GeneratorLowerer::iterCloseFunction() {
   return iterCloseFn_;
 }
 
-// A generator function as a coroutine: a call binds the parameters and
-// returns the generator, which runs the body up to the first `yield` when
-// next() is first called.
 void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function) {
   if (fn->isAsync) {
     lowering_.asyncGeneratorLowerer().emitAsyncGenerator(fn, function);
@@ -170,7 +153,7 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
       kLayoutGenerator, type->isIterator() && !type->sent()->isVoid() ? type->sent() : nullptr);
   coroutine.closes = hasTry(fn->body);
   coroutine.yielded = type->isIterator() ? type->yielded() : nullptr;
-  lowering_.functionFrame().pushScope(); // the parameters, and the environment of a closure
+  lowering_.functionFrame().pushScope();
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
@@ -180,8 +163,6 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
     } else {
       lowering_.envParam_->setName("this");
     }
-    // The function value that made the generator may go before it does, and
-    // so may the object of a method, which a call only lends.
     llvm::Value *slot = lowering_.functionFrame().createObjectSlot("env");
     lowering_.builder_.CreateCall(lowering_.objRetainFn_, {lowering_.envParam_});
     lowering_.builder_.CreateStore(lowering_.envParam_, slot);
@@ -197,7 +178,7 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
     lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
   lowering_.unwindLowerer().finishScopeUnwind(0);
-  lowering_.scopes_.pop_back(); // every way out released it
+  lowering_.scopes_.pop_back();
   lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.coroutineLowerer().finishCoroutine();
   lowering_.coro_ = nullptr;
@@ -215,7 +196,7 @@ llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *
     params.push_back(lowering_.moduleBuilder().lower(operand));
   }
   if (builtin == Builtin::StrMatchAll) {
-    params.push_back(lowering_.builder_.getPtrTy()); // the shape of the matches
+    params.push_back(lowering_.builder_.getPtrTy());
   }
   const char *name = "tz.iter";
   switch (builtin) {
@@ -275,8 +256,6 @@ llvm::Function *GeneratorLowerer::iteratorFunction(Builtin builtin, const Type *
   return fn;
 }
 
-// The iterator of an array or a string, or of a helper over another
-// iterator, as an object: a coroutine that holds its operands.
 void GeneratorLowerer::emitPendingIterators() {
   while (!lowering_.pendingIterators_.empty()) {
     Lowering::IteratorJob job = lowering_.pendingIterators_.back();
@@ -287,8 +266,6 @@ void GeneratorLowerer::emitPendingIterators() {
     bool stage = isIteratorStage(job.builtin);
     bool matches = job.builtin == Builtin::StrMatchAll;
     bool dict = isDictIterator(job.builtin);
-    // The iterator of a dictionary keeps the map and its position in the
-    // promise too, where printing finds them: { ..., ptr map, i32 position }.
     llvm::StructType *dictPromise = nullptr;
     unsigned flags = 0;
     if (dict) {
@@ -319,8 +296,6 @@ void GeneratorLowerer::emitPendingIterators() {
     llvm::Value *source = hold(lowering_.function_->getArg(0), job.source, "source");
     llvm::Value *operand =
         job.operand ? hold(lowering_.function_->getArg(1), job.operand, "operand") : nullptr;
-    // `s.matchAll(re)`: the string and the regex, whose g flag was checked;
-    // the lastIndex of the copy is taken when the iterator is made.
     llvm::Value *lastSlot = nullptr;
     if (matches) {
       lastSlot =
@@ -335,8 +310,6 @@ void GeneratorLowerer::emitPendingIterators() {
               {regex}),
           lastSlot);
     }
-    // The map of a dictionary's iterator is there to be printed before the
-    // iterator first runs.
     llvm::Value *mapField = nullptr;
     if (dict) {
       mapField = lowering_.builder_.CreateStructGEP(dictPromise, coroutine.promise, 5);
@@ -357,12 +330,10 @@ void GeneratorLowerer::emitPendingIterators() {
           .matchAllProducer(source, operand, lastSlot, lowering_.function_->getArg(2))
           .run(yield);
     } else if (dict) {
-      // The entries stay where they are while the iterator lives, so that
-      // its position stays good, and the map is read from the promise.
       lowering_.dictLowerer().beginDictIteration(source);
       llvm::Value *position = lowering_.builder_.CreateStructGEP(dictPromise, coroutine.promise, 6);
       lowering_.dictLowerer().dictProducer(mapField, job.source, job.builtin, position).run(yield);
-      if (lowering_.functionFrame().blockIsOpen()) { // done: nothing is left to show
+      if (lowering_.functionFrame().blockIsOpen()) {
         lowering_.builder_.CreateStore(
             llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), mapField);
       }
@@ -373,7 +344,6 @@ void GeneratorLowerer::emitPendingIterators() {
               : lowering_.lazyChainLowerer().valueProducer(source, job.source);
       producer.run(yield);
     } else {
-      // The stage before it is the iterator it holds.
       const Type *callback = job.operand->isFunction() ? job.operand : nullptr;
       lowering_.lazyChainLowerer()
           .valueProducer(source, job.source)
@@ -392,4 +362,4 @@ void GeneratorLowerer::emitPendingIterators() {
   }
 }
 
-} // namespace tz
+}

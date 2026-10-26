@@ -1,7 +1,3 @@
-// Numbers in text: Number(s), parseInt and parseFloat, which read the ASCII
-// text string.c hands them, x.toFixed(digits), and the shortest digits of a
-// double, which String(x) writes.
-
 #include "runtime/core/number/number.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
@@ -15,12 +11,11 @@
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
-// The value of `c` as a digit of any radix up to 36, or 36 for a non-digit.
 static int digit_value(char c) {
   if (c >= '0' && c <= '9') {
     return c - '0';
   }
-  c |= 0x20; // lower case
+  c |= 0x20;
   if (c >= 'a' && c <= 'z') {
     return c - 'a' + 10;
   }
@@ -28,8 +23,6 @@ static int digit_value(char c) {
   return 36;
 }
 
-// The length of the decimal number at text[i] (StrUnsignedDecimalLiteral
-// without Infinity): digits, a point and digits, an exponent. 0 if none.
 static size_t decimal_length(const char *text, size_t i, size_t n) {
   size_t j = i, digits = 0;
   while (j < n && is_digit(text[j])) {
@@ -62,15 +55,10 @@ static size_t decimal_length(const char *text, size_t i, size_t n) {
   return j - i;
 }
 
-// The powers of ten that a double holds exactly.
 static const double exact_pow10[23] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,
                                        1e8,  1e9,  1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
                                        1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
 
-// decimal_value without strtod, for the usual numbers: when the significant
-// digits make an integer below 2^53 and the power of ten is exact, one
-// multiplication or division of exact doubles rounds correctly (Clinger's
-// fast path). Returns 0 when it does not apply.
 static int decimal_value_fast(const char *text, size_t n, double *out) {
   size_t i = 0;
   int negative = 0;
@@ -78,8 +66,8 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
     negative = text[i++] == '-';
   }
   uint64_t m = 0;
-  int digits = 0;  // significant ones, in m
-  int32_t e10 = 0; // the value is m * 10^e10
+  int digits = 0;
+  int32_t e10 = 0;
   int point = 0;
   for (; i < n; ++i) {
     char c = text[i];
@@ -90,7 +78,7 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
     if (!is_digit(c)) {
       break;
     }
-    if (m == 0 && c == '0') { // a leading zero
+    if (m == 0 && c == '0') {
       e10 -= point;
       continue;
     }
@@ -100,7 +88,7 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
     m = m * 10 + (uint64_t)(c - '0');
     e10 -= point;
   }
-  if (i < n) { // the exponent, which decimal_length made sure has digits
+  if (i < n) {
     ++i;
     int exponent_negative = 0;
     if (text[i] == '+' || text[i] == '-') {
@@ -128,8 +116,6 @@ static int decimal_value_fast(const char *text, size_t n, double *out) {
   return 1;
 }
 
-// strtod of text[0..n), which holds a valid decimal number, correctly
-// rounded as JavaScript requires.
 static double decimal_value(const char *text, size_t n) {
   double fast;
   if (decimal_value_fast(text, n, &fast)) {
@@ -147,8 +133,6 @@ static double decimal_value(const char *text, size_t n) {
   return value;
 }
 
-// Number(s) once the whitespace around s is gone: a decimal number,
-// Infinity, or 0x, 0o and 0b followed by digits; anything else is NaN.
 double tz_number_from_ascii(const char *text, size_t n, int complete) {
   if (!complete) {
     return NAN;
@@ -176,15 +160,13 @@ double tz_number_from_ascii(const char *text, size_t n, int complete) {
     return text[0] == '-' ? -INFINITY : INFINITY;
   }
   size_t length = decimal_length(text, i, n);
-  if (length == 0 || length != n - i) { // a sign alone is not a number either
+  if (length == 0 || length != n - i) {
     return NAN;
   }
 
   return decimal_value(text, n);
 }
 
-// parseInt: a sign, then the longest run of digits of the radix (10 unless
-// given, or 16 after "0x"); NaN without digits.
 double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
   size_t i = 0;
   int negative = 0;
@@ -213,7 +195,7 @@ double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
   }
   double value;
   if (radix == 10) {
-    value = decimal_value(text + start, i - start); // correctly rounded, also when long
+    value = decimal_value(text + start, i - start);
   } else {
     value = 0;
     for (size_t k = start; k < i; ++k) {
@@ -221,10 +203,9 @@ double tz_parse_int_ascii(const char *text, size_t n, int32_t radix) {
     }
   }
 
-  return negative ? -value : value; // "-0" gives -0, as in JavaScript
+  return negative ? -value : value;
 }
 
-// parseFloat: the longest decimal number (or Infinity) at the start.
 double tz_parse_float_ascii(const char *text, size_t n) {
   size_t i = n > 0 && (text[0] == '+' || text[0] == '-') ? 1 : 0;
   if (n - i >= 8 && memcmp(text + i, "Infinity", 8) == 0) {
@@ -238,17 +219,11 @@ double tz_parse_float_ascii(const char *text, size_t n) {
   return decimal_value(text, i + length);
 }
 
-//===----------------------------------------------------------------------===//
-// toFixed
-//===----------------------------------------------------------------------===//
-
-// Unsigned integers of up to 512 bits, in 32-bit limbs, least significant
-// first. toFixed needs at most m * 10^100 * 2^17 < 2^403.
 #define BIG_LIMBS 16
 
 typedef struct {
   uint32_t limb[BIG_LIMBS];
-  int n; // limbs in use; the top one is not 0
+  int n;
 } Big;
 
 static void big_set(Big *b, uint64_t value) {
@@ -270,7 +245,6 @@ static void big_mul_small(Big *b, uint32_t factor) {
   }
 }
 
-// Divides by `divisor` in place and returns the remainder.
 static uint32_t big_div_small(Big *b, uint32_t divisor) {
   uint64_t rest = 0;
   for (int i = b->n - 1; i >= 0; --i) {
@@ -336,7 +310,6 @@ static void big_shift_right(Big *b, int k) {
   }
 }
 
-// b += 2^k
 static void big_add_power_of_two(Big *b, int k) {
   int word = k / 32;
   while (b->n <= word) {
@@ -353,10 +326,6 @@ static void big_add_power_of_two(Big *b, int k) {
   }
 }
 
-// x.toFixed(digits) as JavaScript defines it: the integer n for which
-// n / 10^digits - x is closest to 0 (the larger one on a tie), written out
-// with `digits` decimals. Exact, because x = m * 2^e is scaled by 10^digits
-// with big integers.
 void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   if (digits < 0 || digits > 100) {
     tz_throw(TZ_RANGE_ERROR, "toFixed() digits argument must be between 0 and 100");
@@ -371,7 +340,7 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
     tz_str_from_f64(out, x);
     return;
   }
-  int negative = x < 0; // not -0
+  int negative = x < 0;
   if (negative) {
     x = -x;
   }
@@ -379,7 +348,7 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   int e = 0;
   big_set(&n, 0);
   if (x != 0) {
-    double fraction = frexp(x, &e); // x = fraction * 2^e, 0.5 <= fraction < 1
+    double fraction = frexp(x, &e);
     big_set(&n, (uint64_t)ldexp(fraction, 53));
     e -= 53;
   }
@@ -388,14 +357,13 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   }
   if (e >= 0) {
     big_shift_left(&n, e);
-  } else if (big_bit_length(&n) < -e) { // below one half
+  } else if (big_bit_length(&n) < -e) {
     big_set(&n, 0);
-  } else { // round half up: (n + 2^(k-1)) / 2^k
+  } else {
     big_add_power_of_two(&n, -e - 1);
     big_shift_right(&n, -e);
   }
 
-  // The decimal digits of n, at least digits + 1 of them.
   char reversed[160];
   int count = 0;
   while (n.n > 0) {
@@ -418,8 +386,6 @@ void tz_num_to_fixed(TzStr *out, double x, int64_t digits) {
   *out = tz_str_from_ascii(text, len);
 }
 
-// The exponent of a double as V8's Double::Exponent() gives it: value = significand * 2^e with
-// the 53 bits of the significand an integer.
 static int radix_exponent(double value) {
   uint64_t bits;
   memcpy(&bits, &value, sizeof bits);
@@ -428,7 +394,6 @@ static int radix_exponent(double value) {
   return biased == 0 ? 1 - 1075 : biased - 1075;
 }
 
-// The next double up from a finite non-negative one.
 static double next_up(double value) {
   uint64_t bits;
   memcpy(&bits, &value, sizeof bits);
@@ -438,8 +403,6 @@ static double next_up(double value) {
   return value;
 }
 
-// x.toString(radix) as V8 writes it (DoubleToRadixCString of src/numbers/conversions.cc): the
-// integer part exactly, the fraction to the precision of the double, rounded to even.
 void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
   if (radix < 2 || radix > 36) {
     tz_throw(TZ_RANGE_ERROR, "toString() radix argument must be between 2 and 36");
@@ -451,7 +414,6 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
     return;
   }
   static const char chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-  // 1100 digits of an integer part at most (2^1024 in base 2), as many of a fraction.
   enum { SIZE = 2200 };
   char buffer[SIZE];
   int integer_cursor = SIZE / 2, fraction_cursor = SIZE / 2;
@@ -460,7 +422,6 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
     x = -x;
   }
   double integer = floor(x), fraction = x - integer;
-  // The fraction has digits only to the precision of the double.
   double delta = 0.5 * (next_up(x) - x);
   if (delta < next_up(0.0)) {
     delta = next_up(0.0);
@@ -473,12 +434,11 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
       int digit = (int)fraction;
       buffer[fraction_cursor++] = chars[digit];
       fraction -= digit;
-      // Round to even, carrying into the digits before.
       if ((fraction > 0.5 || (fraction == 0.5 && (digit & 1))) && fraction + delta > 1) {
         for (;;) {
           --fraction_cursor;
           if (fraction_cursor == SIZE / 2) {
-            integer += 1; // into the integer part
+            integer += 1;
             break;
           }
           char c = buffer[fraction_cursor];
@@ -492,7 +452,6 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
       }
     } while (fraction >= delta);
   }
-  // The integer digits; those below the precision of the double are zero.
   while (radix_exponent(integer / (double)radix) > 0) {
     integer /= (double)radix;
     buffer[--integer_cursor] = '0';
@@ -508,26 +467,11 @@ void tz_num_to_radix(TzStr *out, double x, int64_t radix) {
   *out = tz_str_from_ascii(buffer + integer_cursor, (size_t)(fraction_cursor - integer_cursor));
 }
 
-//===----------------------------------------------------------------------===//
-// The shortest digits of a double
-//===----------------------------------------------------------------------===//
-
-// Ryū (Ulf Adams, "Ryū: fast float-to-string conversion", PLDI 2018) finds
-// the shortest decimal that reads back as the same double, and of those the
-// closest to it, a tie going to the even one: the digits Number#toString
-// writes in JavaScript. It scales the bounds of the interval that rounds to
-// the double by a power of ten with 128-bit arithmetic, then removes digits
-// while the bounds stay apart.
-
-// ceil(log2(5^e)) for 0 < e <= 3528, and 1 for e = 0: the bits of 5^e.
 static inline int32_t pow5_bits(int32_t e) { return (int32_t)(((uint32_t)e * 1217359) >> 19) + 1; }
 
-// floor(log10(2^e)) for 0 <= e <= 1650, and floor(log10(5^e)) for 0 <= e <=
-// 2620.
 static inline uint32_t log10_pow2(int32_t e) { return ((uint32_t)e * 78913) >> 18; }
 static inline uint32_t log10_pow5(int32_t e) { return ((uint32_t)e * 732923) >> 20; }
 
-// Whether 5^p divides `value` (not 0), and 2^p (p < 64).
 static int pow5_divides(uint64_t value, uint32_t p) {
   uint32_t count = 0;
   while (value % 5 == 0) {
@@ -542,7 +486,6 @@ static inline int pow2_divides(uint64_t value, uint32_t p) {
   return (value & ((1ull << p) - 1)) == 0;
 }
 
-// (m * mul) >> j of a 128-bit `mul`, low word first; 64 < j < 128.
 static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
 #ifdef __SIZEOF_INT128__
   unsigned __int128 low = (unsigned __int128)m * mul[0];
@@ -550,7 +493,6 @@ static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
 
   return (uint64_t)(((low >> 64) + high) >> (j - 64));
 #else
-  // The four products of the 32-bit halves.
   uint64_t a = m >> 32, b = (uint32_t)m;
   uint64_t parts[2][2];
   for (int w = 0; w < 2; ++w) {
@@ -568,9 +510,6 @@ static inline uint64_t mul_shift(uint64_t m, const uint64_t *mul, int32_t j) {
 #endif
 }
 
-// The shortest digits of a finite positive double, written to `digits` (17
-// at most, no terminator); returns how many, and sets `*exponent` so that the
-// double is those digits times 10^exponent.
 int tz_f64_digits(double value, char *digits, int32_t *exponent) {
   uint64_t bits;
   memcpy(&bits, &value, sizeof bits);
@@ -581,7 +520,6 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
   int32_t e10;
   int32_t e2 = (int32_t)biased - 1075;
   if (biased != 0 && e2 <= 0 && e2 >= -52 && (mantissa & ((1ull << -e2) - 1)) == 0) {
-    // An integer below 2^53: its own digits, without the zeros at the end.
     output = ((1ull << 52) | mantissa) >> -e2;
     e10 = 0;
     while (output % 10 == 0) {
@@ -589,9 +527,6 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
       ++e10;
     }
   } else {
-    // m2 * 2^e2 with two more bits for the bounds, which are mv - mm_shift - 1
-    // and mv + 2 (in quarters): the interval of the reals that round to the
-    // double, closed when its mantissa is even.
     uint64_t m2;
     if (biased == 0) {
       e2 = 1 - 1023 - 52 - 2;
@@ -604,8 +539,6 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
     uint64_t mv = 4 * m2;
     uint32_t mm_shift = mantissa != 0 || biased <= 1;
 
-    // The bounds and the value scaled by 10^-e10, and whether the digits
-    // dropped from vm and vr in that are all zeros.
     uint64_t vr, vp, vm;
     int vm_zeros = 0, vr_zeros = 0;
     if (e2 >= 0) {
@@ -617,7 +550,6 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
       vp = mul_shift(4 * m2 + 2, pow5_inv[q], i);
       vm = mul_shift(4 * m2 - 1 - mm_shift, pow5_inv[q], i);
       if (q <= 21) {
-        // Only one of mp, mv and mm can be a multiple of 5.
         if (mv % 5 == 0) {
           vr_zeros = pow5_divides(mv, q);
         } else if (even) {
@@ -636,8 +568,6 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
       vp = mul_shift(4 * m2 + 2, pow5[i], j);
       vm = mul_shift(4 * m2 - 1 - mm_shift, pow5[i], j);
       if (q <= 1) {
-        // mv has at least two trailing zero bits, mp one, mm one only when
-        // mm_shift is 1.
         vr_zeros = 1;
         if (even) {
           vm_zeros = mm_shift == 1;
@@ -649,12 +579,9 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
       }
     }
 
-    // Remove digits while the bounds stay apart; the last one removed from
-    // vr says how to round.
     int32_t removed = 0;
     uint32_t last = 0;
     if (vm_zeros || vr_zeros) {
-      // The general case, which needs to know about exact ties (rare).
       while (vp / 10 > vm / 10) {
         vm_zeros &= vm % 10 == 0;
         vr_zeros &= last == 0;
@@ -675,12 +602,12 @@ int tz_f64_digits(double value, char *digits, int32_t *exponent) {
         }
       }
       if (vr_zeros && last == 5 && vr % 2 == 0) {
-        last = 4; // exactly halfway: round to even
+        last = 4;
       }
       output = vr + ((vr == vm && (!even || !vm_zeros)) || last >= 5);
     } else {
       int round_up = 0;
-      if (vp / 100 > vm / 100) { // two digits at once, the usual start
+      if (vp / 100 > vm / 100) {
         round_up = vr % 100 >= 50;
         vr /= 100;
         vp /= 100;

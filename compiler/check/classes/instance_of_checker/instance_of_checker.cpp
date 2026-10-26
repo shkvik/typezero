@@ -17,18 +17,11 @@ namespace tz {
 
 InstanceOfChecker::InstanceOfChecker(Checker &checker) : checker_(checker) {}
 
-// `x instanceof C` compares the number of x's class with the range of
-// numbers of C and the classes down its chain. An object whose type is not
-// up C's chain (or down it) is never a C.
 Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
   bin->lhs = checker_.exprChecker().checkExpr(bin->lhs);
   bin->type = Type::boolTy();
   auto *name = dyn_cast<NameExpr>(bin->rhs);
   ClassDecl *cls = name ? checker_.topLevelChecker().lookupValue(name->name).cls : nullptr;
-  // `x instanceof Date`, `Map` or `Set`: of a union, the members that are
-  // one; anywhere else the type says it already. The right side gets the
-  // type of those members, whose numbers the check compares (see
-  // Lowering::emitInstanceOf).
   for (llvm::StringRef builtin : {"Date", "Map", "Set"}) {
     if (cls || !checker_.callChecker().isGlobalName(bin->rhs, builtin)) {
       continue;
@@ -39,8 +32,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     const Type *type = bin->lhs->type;
     const Type *base = type->nonOptional();
     std::string what = "'" + builtin.str() + "'";
-    // An unknown or an object may hold a Date, which the check shows; the
-    // types in a Map or a Set no check can tell.
     if (base->isUnknown() || base->isAnyObject()) {
       if (builtin == "Date") {
         bin->rhs->type = Type::date();
@@ -87,8 +78,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     }
     return bin;
   }
-  // `x instanceof Uint8Array` and the other types of binary data, as for
-  // Date; but a Uint8Array may hold a Buffer, which only the check tells.
   if (const Type *bytes = !cls && name && !checker_.scopes().lookup(name->name).var &&
                                   !checker_.scopes().lookup(name->name).func
                               ? BytesChecker::bytesTypeNamed(name->name)
@@ -96,9 +85,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     return checkBytesInstanceOf(bin, bytes);
   }
   if (!cls) {
-    // A class as a value: one known when compiling is that class; of one
-    // known only when the program runs, its number is compared then
-    // (docs/decorators.md, section 6), and the value is a T.
     bin->rhs = checker_.exprChecker().checkExpr(bin->rhs);
     const Type *rhs = bin->rhs->type;
     if (ClassDecl *known = const_cast<ClassDecl *>(rhs->classRef()); known && known->type) {
@@ -118,8 +104,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
       return bin;
     }
   }
-  // A generic class: the instance the type of the value says, which is a
-  // class of its own (of a union, the members that are one).
   if (cls->isGeneric()) {
     const Type *type = bin->lhs->type;
     bin->rhs->type = Type::error();
@@ -136,7 +120,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
       }
     }
     if (matching.empty()) {
-      // An unknown or an object may be any of them.
       bool related = base->isUnknown() || base->isAnyObject() ||
                      (base->isObject() && cls->type->isSubtypeOf(base));
       for (const Type *m : members) {
@@ -145,7 +128,7 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
       if (related) {
         std::string generic = cls->name.str();
         std::string hint;
-        if (cls->library) { // an emitter of the library: a class that extends it
+        if (cls->library) {
           hint = "test for a class that extends it, e.g. 'x instanceof Bus' with 'class Bus "
                  "extends " +
                  generic + " {}'";
@@ -180,12 +163,9 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
     return bin;
   }
   const Type *base = type->nonOptional();
-  // An unknown or an object may be of any class (see addUnknownFacts).
   if (base->isUnknown() || base->isAnyObject()) {
     return bin;
   }
-  // Of a union: some member must be able to be one (docs/objects.md,
-  // section 7); then the check is one of the class numbers.
   if (base->isUnion()) {
     bool may = llvm::any_of(base->members(), [&](const Type *m) {
       return m->isObject() && (cls->type->isSubtypeOf(m) || m->isSubtypeOf(cls->type));
@@ -225,7 +205,6 @@ Expr *InstanceOfChecker::checkInstanceOf(BinaryExpr *bin) {
 
 Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes) {
   using Bytes = Type::Bytes;
-  // What a value of type t is for sure, and what it may be.
   auto is = [&](const Type *t) {
     return t->isBytes() &&
            (t->bytes() == bytes->bytes() || (bytes->bytes() == Bytes::Uint8 && t->isBuffer()));
@@ -237,11 +216,7 @@ Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes
   }
   const Type *base = type->nonOptional();
   std::string what = "'" + bytes->name().str() + "'";
-  // The right side gets the types the check compares the number of the
-  // object with (see Lowering::emitInstanceOf): the members that are one,
-  // or Buffer.
   bin->rhs->type = bytes;
-  // An unknown or an object may be one (see addUnknownFacts).
   if (base->isUnknown() || base->isAnyObject()) {
     return bin;
   }
@@ -282,4 +257,4 @@ Expr *InstanceOfChecker::checkBytesInstanceOf(BinaryExpr *bin, const Type *bytes
   return bin;
 }
 
-} // namespace tz
+}

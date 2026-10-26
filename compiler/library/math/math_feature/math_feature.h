@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The functions of Math.
 class MathFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "math"; }
@@ -16,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

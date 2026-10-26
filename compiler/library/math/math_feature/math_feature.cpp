@@ -28,4 +28,4 @@ llvm::Value *MathFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.mathLowerer().emitMathCall(call);
 }
 
-} // namespace tz
+}

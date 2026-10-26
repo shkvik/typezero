@@ -7,8 +7,6 @@
 
 namespace tz {
 
-// Functions that several classes made from sema_crypto.cpp use.
-
 using Crypto = Type::Crypto;
 
-} // namespace tz
+}

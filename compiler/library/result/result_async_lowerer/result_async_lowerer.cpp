@@ -47,7 +47,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsync(CallExpr *call) {
   llvm::Value *callbacks[2] = {nullptr, nullptr};
   const Type *types[2] = {nullptr, nullptr};
   if (call->builtin == Builtin::ResultAsyncUnwrapOr) {
-    // The default waits in the value of the promise until it is needed.
     if (lowering_.promiseLowerer().promiseValueSize(result)) {
       lowering_.builder_.CreateStore(values[1],
                                      lowering_.promiseLowerer().promiseValueAddress(derived));
@@ -60,7 +59,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsync(CallExpr *call) {
   }
   llvm::Value *source = values[0];
   if (call->builtin == Builtin::ResultAsyncFromPromise) {
-    // `promise.then((v) => ok(v)).catch((e) => err(toError(e)))`.
     llvm::Value *step = lowering_.promiseLowerer().newPromise(result);
     lowering_.reactionLowerer().attachReaction(
         source, step,
@@ -85,9 +83,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsync(CallExpr *call) {
   return derived;
 }
 
-// asyncMap and asyncAndThen of a Result, whose function runs now, as in
-// neverthrow: an Ok gives `fromSafePromise(f(value))` and `f(value)`, an Err
-// `errAsync(error)`.
 llvm::Value *ResultAsyncLowerer::emitResultAsyncOf(CallExpr *call,
                                                    llvm::ArrayRef<llvm::Value *> values) {
   const Type *result = call->type->promised();
@@ -135,7 +130,7 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncOf(CallExpr *call,
   }
   llvm::Value *gave = lowering_.closureLowerer().callFunctionValue(fn, fnType, args);
   lowering_.refCounts().releaseValue(fn, fnType);
-  lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType)); // it runs here, in the caller
+  lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
   llvm::Value *made = gave;
   if (call->builtin == Builtin::ResultAsyncMap || ret->promised() != result) {
     made = lowering_.promiseLowerer().newPromise(result);
@@ -160,11 +155,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncOf(CallExpr *call,
   return promise;
 }
 
-// ResultAsync.fromThrowable(f, toError?): a function value whose
-// environment holds f and toError. Its code is neverthrow's async function:
-// it calls f and gives a ResultAsync of an Ok of what f's promise gives, or
-// an Err of what f throws or the promise is rejected with, as toError makes
-// it; once the promise settles, or now when f throws.
 llvm::Value *ResultAsyncLowerer::emitResultAsyncThrowable(CallExpr *call) {
   const Type *fnType = call->args[0]->type;
   const Type *toErrorType = call->args.size() > 1 ? call->args[1]->type : nullptr;
@@ -207,7 +197,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncThrowable(CallExpr *call) {
   llvm::Value *promise = lowering_.closureLowerer().callFunctionValue(f, fnType, args);
   llvm::Value *derived = lowering_.promiseLowerer().newPromise(result);
   if (lowering_.typeThrows(fnType)) {
-    // f threw rather than give a promise: an Err of that now.
     llvm::Value *thrown =
         lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "thrown");
     llvm::BasicBlock *threwBlock = lowering_.functionFrame().newBlock("threw");
@@ -230,7 +219,6 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncThrowable(CallExpr *call) {
       errorHalf = lowering_.closureLowerer().callFunctionValue(toError, toErrorType, errorArgs);
       errorType = toErrorType->ret();
       if (lowering_.typeThrows(toErrorType)) {
-        // toError threw in turn: that rejects the ResultAsync.
         llvm::Value *again =
             lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "thrown");
         llvm::BasicBlock *failedBlock = lowering_.functionFrame().newBlock("failed");
@@ -271,8 +259,7 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncThrowable(CallExpr *call) {
   lowering_.builder_.restoreIP(point);
 
   auto *info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.fromAsyncThrowable");
@@ -296,4 +283,4 @@ llvm::Value *ResultAsyncLowerer::emitResultAsyncThrowable(CallExpr *call) {
   return lowering_.closureLowerer().makeFunctionValue(info, object);
 }
 
-} // namespace tz
+}

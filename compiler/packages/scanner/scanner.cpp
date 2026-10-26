@@ -17,7 +17,6 @@ namespace path = llvm::sys::path;
 
 namespace {
 
-// Whether a '/' after `prev` starts a regex literal rather than dividing.
 bool regexMayFollow(const Token *prev) {
   if (!prev) {
     return true;
@@ -44,7 +43,7 @@ bool regexMayFollow(const Token *prev) {
   }
 }
 
-} // namespace
+}
 
 std::vector<Token> tokenize(llvm::StringRef text) {
   llvm::SourceMgr sourceMgr;
@@ -102,10 +101,9 @@ std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::
     }
     bool isImport = tok.text == "import";
     if (i + 1 < tokens.size() && isImport && tokens[i + 1].is(Tok::StringLiteral)) {
-      add(tokens[i + 1]); // import "x"
+      add(tokens[i + 1]);
       continue;
     }
-    // The clause up to `from "x"`; braces must close before it.
     int depth = 0;
     for (size_t j = i + 1; j < tokens.size() && j < i + 2000; ++j) {
       const Token &t = tokens[j];
@@ -115,7 +113,6 @@ std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::
         if (--depth < 0) {
           break;
         }
-        // `export { a }` without `from` ends here.
         if (depth == 0 && !isImport &&
             !(j + 1 < tokens.size() && tokens[j + 1].is(Tok::Identifier) &&
               tokens[j + 1].text == "from")) {
@@ -130,7 +127,7 @@ std::vector<ImportRef> importSpecifiers(const std::vector<Token> &tokens, llvm::
         break;
       } else if (depth == 0 && !isImport && j == i + 1 && !t.is(Tok::Star) &&
                  !(t.is(Tok::Identifier) && t.text == "type")) {
-        break; // `export const ...`: a declaration
+        break;
       }
     }
   }
@@ -158,7 +155,7 @@ std::string resolveRelative(llvm::StringRef fromFile, llvm::StringRef spec, Sour
   for (const std::string &candidate : candidates) {
     llvm::SmallString<256> full(path::parent_path(fromFile));
     path::append(full, candidate);
-    path::remove_dots(full, /*remove_dot_dot=*/true);
+    path::remove_dots(full, true);
     if (fs::is_regular_file(full)) {
       return std::string(full);
     }
@@ -202,4 +199,4 @@ void reachableFiles(const std::vector<std::string> &entries, std::vector<std::st
   }
 }
 
-} // namespace tz::pkg
+}

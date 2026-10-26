@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Greedy and lazy repeats.
 class MatcherRepeats {
 public:
   explicit MatcherRepeats(MatcherBuilder &builder);
@@ -21,4 +20,4 @@ private:
   MatcherBuilder &builder_;
 };
 
-} // namespace tz
+}

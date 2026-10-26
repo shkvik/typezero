@@ -31,8 +31,6 @@ namespace path = llvm::sys::path;
 
 namespace {
 
-// The dependencies of a JSR package: the jsr: imports of the files its
-// exports reach. JSR writes them so when it publishes ("jsr:@std/path@^1/join").
 std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersion &meta) {
   std::vector<std::string> entries, files, external, deps;
   for (const auto &[name, file] : meta.exports) {
@@ -42,7 +40,6 @@ std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersio
   }
   reachableFiles(entries, files, external, Sources::Tz);
   for (llvm::StringRef spec : external) {
-    // Without the path inside the package: "jsr:@std/path@^1".
     std::string package, dep, subpath;
     if (splitJsrImport(spec, package, dep, subpath) &&
         std::find(deps.begin(), deps.end(), dep) == deps.end()) {
@@ -54,7 +51,7 @@ std::vector<std::string> jsrDependencies(const std::string &dir, const JsrVersio
   return deps;
 }
 
-} // namespace
+}
 
 void Resolver::reportSpec(const std::string &by, const Dependency *dep,
                           const std::string &message) {
@@ -80,8 +77,8 @@ bool Resolver::collect(std::map<std::string, std::vector<Requirement>> &reqs) {
     std::string by;
     std::string baseDir;
     bool allowLocal;
-    const std::vector<Dependency> *deps;   // from a tz.json
-    const std::vector<std::string> *specs; // from tz.lock
+    const std::vector<Dependency> *deps;
+    const std::vector<std::string> *specs;
   };
   std::deque<Node> queue{{"tz.json", root_.dir, true, &root_.dependencies, nullptr}};
   std::set<std::string> visited;
@@ -184,8 +181,6 @@ bool Resolver::chooseJsr(const std::string &id, const std::vector<Requirement> &
     Range::parse(req.source.range, range, ignored);
     ranges.push_back(std::move(range));
   }
-  // The newest version every range takes; with no range at all, the newest
-  // one that is not a prerelease, if there is one.
   auto best = [&](const std::vector<const Range *> &rs) -> const Version * {
     const Version *found = nullptr;
     bool anyStable = llvm::any_of(
@@ -335,4 +330,4 @@ bool Resolver::run(Lock &out) {
   return false;
 }
 
-} // namespace tz::pkg
+}

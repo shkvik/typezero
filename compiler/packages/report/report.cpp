@@ -19,4 +19,4 @@ void reportAt(llvm::StringRef file, llvm::StringRef text, size_t offset,
 
 void progress(const llvm::Twine &message) { llvm::errs() << "tz: " << message << "\n"; }
 
-} // namespace tz::pkg
+}

@@ -55,14 +55,12 @@ bool isFlag(llvm::StringRef name, uint32_t &flag) {
   return false;
 }
 
-} // namespace
+}
 
 RegexChecker::RegexChecker(Checker &checker) : checker_(checker) {}
 
 Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
   lit->type = Type::regExp();
-  // The literal as the source has it, to show where an error is; empty for
-  // one that `new RegExp("...")` stands for.
   llvm::StringRef source(lit->loc().getPointer(), lit->written);
   std::vector<uint16_t> flagUnits(lit->flags.begin(), lit->flags.end());
   uint32_t flags = 0;
@@ -82,8 +80,6 @@ Expr *RegexChecker::checkRegexLit(RegexLitExpr *lit) {
   uint32_t *program =
       tz_re_compile(pattern.data(), pattern.size(), flags | TZ_RE_STRICT, &error, &errorAt);
   if (!program) {
-    // Where in the pattern: its code units counted through the UTF-8 of the
-    // source.
     llvm::SMLoc at = lit->loc();
     if (lit->written) {
       const char *p = source.begin() + 1;
@@ -135,7 +131,6 @@ void RegexChecker::noteRegexVariable(VarSymbol *var, const Expr *init, bool isCo
     return;
   }
   if (!isConst) {
-    // A `let` that nothing assigns to after its declaration.
     if (block.empty()) {
       return;
     }
@@ -167,7 +162,6 @@ const Type *RegexChecker::matchType(const RegexLitExpr *regex) {
   for (uint32_t k = 0; k < captures; ++k) {
     mandatory[k] = tz_re_mandatory(program, k);
   }
-  // The named groups, a field each, in the order the names first come.
   std::vector<Field> fields;
   for (uint32_t k = 1; k < captures; ++k) {
     uint32_t start, length = tz_re_name(program, k, &start);
@@ -243,8 +237,6 @@ Expr *RegexChecker::checkRegexMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// The properties of a regex: lastIndex is a field; the others say what the
-// regex is.
 Expr *RegexChecker::checkRegexMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (name == "lastIndex") {
@@ -288,7 +280,6 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
                                    std::to_string(args.size()));
     return loosely();
   }
-  // Text known when compiling: a literal, or a template without values.
   auto literal = [](const Expr *e) -> std::optional<std::u16string> {
     if (auto *lit = dyn_cast<StringLitExpr>(e)) {
       return lit->value;
@@ -302,7 +293,6 @@ Expr *RegexChecker::checkRegExpConstructor(llvm::SMLoc loc, std::vector<Expr *> 
   std::optional<std::u16string> pattern = literal(args[0]);
   std::optional<std::u16string> flags = args.size() > 1 ? literal(args[1]) : std::u16string();
   if (pattern && flags) {
-    // The same as a literal, compiled now.
     auto *lit = checker_.ctx_.make<RegexLitExpr>(loc, *pattern, *flags);
     return checkRegexLit(lit);
   }
@@ -363,4 +353,4 @@ Expr *RegexChecker::checkRegExpStaticMember(MemberExpr *member) {
   return member;
 }
 
-} // namespace tz
+}

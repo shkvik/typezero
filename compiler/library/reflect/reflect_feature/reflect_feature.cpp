@@ -45,4 +45,4 @@ llvm::Value *ReflectFeature::lowerCall(Lowering &lowering, CallExpr *call) const
   return lowering.reflectLowerer().emitReflectCall(call);
 }
 
-} // namespace tz
+}

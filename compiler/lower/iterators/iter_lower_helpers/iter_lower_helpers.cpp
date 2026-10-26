@@ -62,4 +62,4 @@ bool hasTry(const Stmt *stmt) {
   return found;
 }
 
-} // namespace tz
+}

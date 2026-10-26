@@ -29,9 +29,6 @@ enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlag
 
 constexpr uint32_t kFulfilled = 1;
 
-// A reaction to a promise (then, catch, finally): { i64 rc, ptr descriptor,
-// reactor { ptr next, ptr run, ptr owner, ptr source, i64 ahead }, ptr
-// derived, fn onFulfilled, fn onRejected }.
 enum ReactionField : unsigned {
   kReactionRc,
   kReactionDesc,
@@ -47,18 +44,10 @@ enum ReactionField : unsigned {
 
 constexpr uint64_t kReactorOffset = 16;
 
-} // namespace
+}
 
 ResultAsyncHandler::ResultAsyncHandler(Lowering &lowering) : lowering_(lowering) {}
 
-// The code of a reaction of a ResultAsync, once the promise it waits for
-// (`source`, of a value of `value`) settled: it settles its own promise, of
-// a value of `result`, as the method `kind` does with the callbacks of types
-// `first` and `second`. It takes the turns of the queue that neverthrow's
-// code takes, so that what else runs meanwhile runs in the same order: map,
-// mapErr, orElse and the tees run an async function, whose promise the
-// ResultAsync then follows; andThen, match and unwrapOr are a callback of
-// then(); fromPromise is a then() and a catch().
 llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type *value,
                                                        const Type *result, const Type *first,
                                                        const Type *second) {
@@ -86,8 +75,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
   bool holds = lowering_.promiseLowerer().promiseValueSize(result) != 0;
   llvm::FunctionCallee fulfillLater = lowering_.asyncLowerer().asyncFunction(
       "tz_promise_fulfill_later", lowering_.builder_.getVoidTy(), {ptr});
-  // The promise the code settles: that of the async function, which this
-  // one follows once the code is done, or this one.
   llvm::Value *settled = derived;
   auto done = [&] {
     if (settled != derived) {
@@ -100,8 +87,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
     return lowering_.builder_.CreateLoad(
         lowering_.fnTy_, lowering_.builder_.CreateStructGEP(type, object, field), "callback");
   };
-  // Calls `fn` of `fnType` with the owned `arg` of `argType`, as a half of a
-  // Result is given (undefined for void).
   auto callWith = [&](llvm::Value *fn, const Type *fnType, llvm::Value *arg, const Type *argType) {
     std::vector<llvm::Value *> args;
     if (fnType->params().empty()) {
@@ -117,8 +102,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
 
     return lowering_.closureLowerer().callFunctionValue(fn, fnType, args);
   };
-  // After a callback of `fnType` that may throw: `onThrow` takes its error,
-  // and the code is done.
   auto threw = [&](const Type *fnType, llvm::function_ref<void(llvm::Value *)> onThrow) {
     if (!lowering_.typeThrows(fnType)) {
       return;
@@ -140,8 +123,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
   auto reject = [&](llvm::Value *error) {
     lowering_.promiseLowerer().rejectPromise(settled, error);
   };
-  // A Result of `result`: an Ok (or an Err) of the owned half `v` of type
-  // `from`.
   auto made = [&](bool ok, llvm::Value *v, const Type *from) {
     const Type *to = ok ? result->okType() : result->errType();
     llvm::Value *half =
@@ -150,19 +131,15 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
     return lowering_.resultLowerer().makeResult(result, lowering_.builder_.getInt1(ok),
                                                 ok ? half : nullptr, ok ? nullptr : half);
   };
-  // What a callback of andThen, orElse or match gave, of type `given`: a
-  // promise to follow, or the value.
   auto settleWith = [&](llvm::Value *v, const Type *given) {
     if (given->isPromise() && given->promised() == result) {
       lowering_.promiseLowerer().followPromise(settled, v);
     } else if (given->isPromise()) {
-      // Its value converts on the way, which takes the turn of the queue
-      // that following it would.
       lowering_.reactionLowerer().attachReaction(
           v, settled,
           lowering_.reactionLowerer().reactionHandler(Builtin::PromiseThen, given->promised(),
                                                       result, nullptr, nullptr),
-          nullptr, nullptr, /*later=*/true);
+          nullptr, nullptr, true);
       lowering_.refCounts().releaseValue(v, given);
     } else {
       lowering_.promiseLowerer().fulfillPromise(
@@ -183,7 +160,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
       lowering_.builder_.CreateICmpEQ(state, lowering_.builder_.getInt32(kFulfilled)),
       fulfilledBlock, rejectedBlock);
 
-  // Rejected: the error goes on, unless the code catches it.
   lowering_.functionFrame().switchTo(rejectedBlock);
   llvm::Value *error = lowering_.builder_.CreateLoad(
       ptr, lowering_.promiseLowerer().promiseField(source, kError), "error");
@@ -191,7 +167,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
   switch (kind) {
   case Builtin::ResultAsyncFromPromise:
   case Builtin::ResultAsyncFromThrowable:
-    // An Err of what toError makes of the error, or of the error.
     if (first) {
       llvm::Value *x = callWith(callback(kReactionFulfilled), first, error, errorType);
       threw(first, reject);
@@ -201,13 +176,11 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
     }
     break;
   case Builtin::ResultAsyncTeeDone:
-    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {error}); // a tee does not care
-    lowering_.promiseLowerer().fulfillPromise(derived, nullptr,
-                                              result); // the Result is in the value already
+    lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {error});
+    lowering_.promiseLowerer().fulfillPromise(derived, nullptr, result);
     break;
   case Builtin::ResultAsyncUnwrapOr:
     if (holds) {
-      // The default waits in the value: it goes.
       llvm::Value *slot = lowering_.promiseLowerer().promiseValueAddress(derived);
       lowering_.refCounts().releaseValue(
           lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(result), slot), result);
@@ -222,7 +195,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
   }
   lowering_.builder_.CreateRetVoid();
 
-  // Fulfilled.
   lowering_.functionFrame().switchTo(fulfilledBlock);
   llvm::Value *given = nullptr;
   if (lowering_.promiseLowerer().promiseValueSize(value)) {
@@ -232,7 +204,7 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
     lowering_.refCounts().retainValue(given, value);
   }
   switch (kind) {
-  case Builtin::ResultAsyncFromPromise: // its catch(): the Result goes on
+  case Builtin::ResultAsyncFromPromise:
     lowering_.promiseLowerer().fulfillPromise(derived, given, result);
     lowering_.builder_.CreateRetVoid();
     break;
@@ -248,12 +220,10 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
     if (given) {
       lowering_.refCounts().releaseValue(given, value);
     }
-    lowering_.promiseLowerer().fulfillPromise(derived, nullptr,
-                                              result); // the Result is in the value already
+    lowering_.promiseLowerer().fulfillPromise(derived, nullptr, result);
     lowering_.builder_.CreateRetVoid();
     break;
   default: {
-    // A Result came: the method goes by its half.
     if (kind == Builtin::ResultAsyncMap || kind == Builtin::ResultAsyncMapErr ||
         kind == Builtin::ResultAsyncOrElse || kind == Builtin::ResultAsyncAndTee ||
         kind == Builtin::ResultAsyncOrTee) {
@@ -275,13 +245,12 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
       lowering_.functionFrame().switchTo(isOk ? okBlock : errBlock);
       llvm::Value *half = isOk ? okHalf : errHalf;
       const Type *halfType = isOk ? okType : errType;
-      if (halfType->isNever()) { // a Result without this half
+      if (halfType->isNever()) {
         lowering_.builder_.CreateUnreachable();
         continue;
       }
       if (kind == Builtin::ResultAsyncUnwrapOr) {
         if (isOk && holds) {
-          // The value instead of the default.
           llvm::Value *slot = lowering_.promiseLowerer().promiseValueAddress(derived);
           lowering_.refCounts().releaseValue(
               lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(result), slot), result);
@@ -293,13 +262,12 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
               derived, lowering_.exprLowerer().emitConversion(half, halfType, result), result);
         } else {
           lowering_.refCounts().releaseValue(res, value);
-          lowering_.promiseLowerer().fulfillPromise(derived, nullptr, result); // the default
+          lowering_.promiseLowerer().fulfillPromise(derived, nullptr, result);
         }
         lowering_.builder_.CreateRetVoid();
         continue;
       }
       if (kind != Builtin::ResultAsyncMatch && isOk == onError) {
-        // The half nothing is called for goes on as it is.
         if (tee) {
           lowering_.promiseLowerer().fulfillPromise(settled, res, result);
         } else {
@@ -312,7 +280,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
       bool onSecond = kind == Builtin::ResultAsyncMatch && !isOk;
       const Type *fnType = onSecond ? second : first;
       if (tee) {
-        // The Result waits in the value until the callback is done.
         lowering_.refCounts().retainValue(half, halfType);
         if (holds) {
           lowering_.builder_.CreateStore(res,
@@ -327,8 +294,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
       switch (kind) {
       case Builtin::ResultAsyncMap:
       case Builtin::ResultAsyncMapErr:
-        // `return ok(await f(value))`: once f's promise settles, or a turn
-        // later.
         threw(fnType, reject);
         if (ret->isPromise()) {
           lowering_.reactionLowerer().attachReaction(
@@ -348,8 +313,6 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
         break;
       case Builtin::ResultAsyncAndTee:
       case Builtin::ResultAsyncOrTee:
-        // `try { await f(value) } catch {}`, then the Result: when f
-        // throws, the error goes and the Result goes on now.
         threw(fnType, [&](llvm::Value *thrown) {
           lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {thrown});
           lowering_.promiseLowerer().fulfillPromise(settled, nullptr, result);
@@ -369,7 +332,7 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
         }
         done();
         break;
-      default: // andThen, orElse and match
+      default:
         threw(fnType, reject);
         settleWith(x, ret);
         break;
@@ -384,4 +347,4 @@ llvm::Function *ResultAsyncHandler::resultAsyncHandler(Builtin kind, const Type 
   return handler;
 }
 
-} // namespace tz
+}

@@ -13,8 +13,6 @@ namespace tz {
 
 namespace {
 
-// The variable a check tests, through the conversions that narrowing adds;
-// null unless it is an unknown or an object.
 const VarSymbol *checkedVariable(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -31,7 +29,6 @@ const VarSymbol *checkedVariable(const Expr *expr) {
   return type->isUnknown() || type->nonOptional()->isAnyObject() ? name->var : nullptr;
 }
 
-// The name of a variable for a hint, or "x".
 std::string hintName(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -46,14 +43,13 @@ std::string hintName(const Expr *expr) {
   return "x";
 }
 
-} // namespace
+}
 
 UnknownChecker::UnknownChecker(Checker &checker) : checker_(checker) {}
 
 bool UnknownChecker::isObjectReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
          type->isPromise() ||
-         // A union of objects only: a reference to one.
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
@@ -117,8 +113,6 @@ Expr *UnknownChecker::checkUnknownMember(MemberExpr *member) {
   if (member->object->type->isClassRef()) {
     return checker_.classValueChecker().checkClassRefMember(member);
   }
-  // In TypeScript a decorator of a member gets the prototype, whose
-  // constructor is the class; here it gets the class.
   if (member->name == "constructor") {
     checker_.diags_.error(member->loc(),
                           "'constructor' is not supported: an object has no prototype in tz; "
@@ -136,8 +130,6 @@ Expr *UnknownChecker::checkUnknownMethod(CallExpr *call, MemberExpr *member) {
     return nullptr;
   }
   call->type = Type::error();
-  // A static method of the class a class as a value is, known when
-  // compiling; its value is evaluated first.
   if (ClassDecl *cls = const_cast<ClassDecl *>(receiver->classRef()); cls && cls->type) {
     Expr *object = member->object;
     Expr *result = checker_.staticChecker().checkClassStaticCall(call, member, cls);
@@ -170,8 +162,6 @@ Expr *UnknownChecker::checkUnknownMethod(CallExpr *call, MemberExpr *member) {
 
 void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
                                      Checker::Flow &whenFalse) const {
-  // A variable gets the type a check showed, in place of what an earlier one
-  // showed (`typeof x == "object"`, then `x instanceof C`).
   auto narrow = [](Checker::Flow &flow, const VarSymbol *var, const Type *type) {
     llvm::erase_if(flow.narrowed, [&](const auto &narrowed) { return narrowed.first == var; });
     flow.narrowed.push_back({var, type});
@@ -188,12 +178,9 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
   }
   if (bin->op == BinaryOp::InstanceOf) {
     const Type *cls = bin->rhs->type;
-    // A class known only when the program runs, whose objects are a T.
     if (cls && cls->isConstructor()) {
       cls = cls->constructed();
     }
-    // A class, a Date, or a type of binary data (Buffer for a Uint8Array
-    // too: an unknown holds what it holds).
     if (const VarSymbol *var = checkedVariable(bin->lhs);
         var && cls && (cls->isObject() || cls->isParam() || cls->isDate() || cls->isBytes())) {
       narrow(whenTrue, var, cls);
@@ -214,8 +201,6 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
     if (!var || !var->type->isUnknown()) {
       continue;
     }
-    // A class, a box of a function and a function are "function"; a Json
-    // holds no function.
     const Type *narrowed = text->value == u"string"    ? Type::string()
                            : text->value == u"number"  ? Type::doubleTy()
                            : text->value == u"boolean" ? Type::boolTy()
@@ -227,4 +212,4 @@ void UnknownChecker::addUnknownFacts(const Expr *cond, Checker::Flow &whenTrue,
   }
 }
 
-} // namespace tz
+}

@@ -30,9 +30,6 @@ std::string variantList(llvm::ArrayRef<FunctionDecl *> variants) {
 
 namespace {
 
-// How well a value of type `from` fits a parameter of type `to`: 0 for the
-// same type, more for a conversion (int to long is better than int to
-// double), -1 if it does not fit.
 int conversionRank(const Type *from, const Type *to) {
   if (from == to || from->isError() || to->isError()) {
     return 0;
@@ -48,36 +45,27 @@ int conversionRank(const Type *from, const Type *to) {
     int inner = conversionRank(from, to->inner());
     return inner < 0 ? -1 : inner + 1;
   }
-  // A value that cannot exist: the half of a Result that is never there.
   if (from->isNever()) {
     return 1;
   }
   if (from->isInt() && to == Type::longTy()) {
     return 1;
   }
-  // A double and a decimal fit an integer equally well, as in C#: neither
-  // converts to the other, so with `f(k: double)` and `f(k: decimal)` a call
-  // with an int or a long is ambiguous.
   if (from->isInt() && (to->isFloat() || to->isDecimal())) {
     return 2;
   }
   if (from == Type::longTy() && (to->isFloat() || to->isDecimal())) {
     return 1;
   }
-  // A string, a number, a boolean and a Json[] are Json values: a fit worse
-  // than any between typed values, so `f(s: string)` wins over `f(j: Json)`.
   if (to->isJson()) {
     return from->isString() || from->isNumeric() || from->isBool() ||
                    (from->isArray() && from->inner()->isJson())
                ? 3
                : -1;
   }
-  // A value of `T extends C` is a C.
   if (from->isParam() && from->constraint()) {
     return conversionRank(from->constraint(), to);
   }
-  // An iterator seen through a type that drops what it returns or what it
-  // is sent.
   if (from->isIterator() && to->isIterator()) {
     return from->yielded() == to->yielded() &&
                    (from->returned() == to->returned() || to->returned()->isVoid()) &&
@@ -85,11 +73,9 @@ int conversionRank(const Type *from, const Type *to) {
                ? 1
                : -1;
   }
-  // A Buffer is a Uint8Array.
   if (from->isBytes() || to->isBytes()) {
     return from->isBuffer() && to->bytes() == Type::Bytes::Uint8 ? 1 : -1;
   }
-  // A match of a known regex is a match of some regex.
   if (from->isMatch() || to->isMatch() || from->isRegExp() || to->isRegExp() || from->isDate() ||
       to->isDate() || from->isIntl() || to->isIntl() || from->isCrypto() || to->isCrypto() ||
       from->isWeakRef() || to->isWeakRef()) {
@@ -97,14 +83,12 @@ int conversionRank(const Type *from, const Type *to) {
                ? 1
                : -1;
   }
-  // A type up the declared chain: the nearer, the better, as in C#.
   if (from->isObject() && to->isObject()) {
     int distance = subtypeDistance(from, to);
     if (distance > 0) {
       return distance;
     }
   }
-  // An object seen through a type with read-only fields.
   if (from->isObject() && to->isObject() && !from->isClass() && !to->isClass() &&
       !from->isAnyObject() && !to->isAnyObject() && from->isTuple() == to->isTuple() &&
       from->fields().size() == to->fields().size() && from->overloads().empty() &&
@@ -114,9 +98,6 @@ int conversionRank(const Type *from, const Type *to) {
       })) {
     return 1;
   }
-  // A Result converts half by half, as good as its worse half:
-  // `Result<int, never>` fits `Result<int, string>` better than
-  // `Result<double, string>`.
   if (from->isResult() && to->isResult()) {
     auto half = [](const Type *a, const Type *b) {
       if (a == b) {
@@ -135,7 +116,6 @@ int conversionRank(const Type *from, const Type *to) {
   return -1;
 }
 
-// The type of the parameter that takes argument `i`.
 const Type *parameterAt(const FuncSymbol *sym, size_t i) {
   if (sym->hasRest && i + 1 >= sym->params.size()) {
     const Type *rest = sym->params.back();
@@ -145,8 +125,6 @@ const Type *parameterAt(const FuncSymbol *sym, size_t i) {
   return i < sym->params.size() ? sym->params[i] : nullptr;
 }
 
-// Whether a tree of number literals has one written as a double: `1.5`,
-// `2.0`, `1e-3`.
 bool hasFloatLiteral(const Expr *expr) {
   if (isa<FloatLitExpr>(expr)) {
     return true;
@@ -161,7 +139,7 @@ bool hasFloatLiteral(const Expr *expr) {
   return false;
 }
 
-} // namespace
+}
 
 OverloadResolver::OverloadResolver(Checker &checker) : checker_(checker) {}
 
@@ -211,8 +189,6 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
     return fit[0]->sym;
   }
 
-  // The arguments, each with the type of its parameter if the variants agree
-  // on it (and it is no type parameter of a generic variant).
   for (size_t i = 0; i < count; ++i) {
     const Type *expected = parameterAt(fit[0]->sym, i);
     for (FunctionDecl *v : fit) {
@@ -221,9 +197,6 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
         expected = nullptr;
       }
     }
-    // A literal with a fraction is a double, or a decimal where a variant
-    // takes one there and none takes a double: `m.times(1.5)` with
-    // `times(k: int)` and `times(k: decimal)`.
     if (!expected && DecimalChecker::isLiteralTree(args[i]) && hasFloatLiteral(args[i])) {
       bool decimal = false, dbl = false;
       for (FunctionDecl *v : fit) {
@@ -246,15 +219,13 @@ FuncSymbol *OverloadResolver::chooseVariant(llvm::ArrayRef<FunctionDecl *> varia
   struct Candidate {
     FunctionDecl *fn;
     std::vector<int> ranks;
-    bool leavesOut;                     // takes defaults, optional parameters or a rest parameter
-    std::vector<const Type *> typeArgs; // of a generic variant
+    bool leavesOut;
+    std::vector<const Type *> typeArgs;
   };
   std::vector<Candidate> applicable;
   std::string why;
   for (FunctionDecl *v : fit) {
     Candidate c{v, {}, v->sym->hasRest || count < v->sym->params.size(), {}};
-    // A generic variant takes the types its arguments give its type
-    // parameters.
     if (v->sym->isGeneric() &&
         !checker_.typeArgInferrer().inferFromArguments(v->sym, args, c.typeArgs)) {
       why += "; " + variantText(v) + " cannot take these arguments for its type parameters";
@@ -343,7 +314,6 @@ Expr *OverloadResolver::callGenericVariant(CallExpr *call, FuncSymbol *sym,
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && method) {
     member->type = checker_.returnInferrer().functionType(callee);
   }
-  // The arguments chooseVariant checked are only converted.
   std::vector<bool> given(call->args.size(), true);
 
   return checker_.argumentChecker().checkArguments(call, params, sym->minArgs, sym->hasRest, loc,
@@ -364,8 +334,6 @@ FuncSymbol *OverloadResolver::variantForType(llvm::ArrayRef<FunctionDecl *> vari
       }
     }
   } else if (checker_.callback_) {
-    // A callback, `[1, 2].map(v.add)`: the variant that takes what the
-    // method passes.
     for (FunctionDecl *v : variants) {
       const FuncSymbol *sym = v->sym;
       bool fits = !sym->hasRest && sym->minArgs <= checker_.callback_->params.size() &&
@@ -447,7 +415,7 @@ Expr *OverloadResolver::checkOverloadCall(CallExpr *call, MemberExpr *member) {
   call->signature = int(found - variants.begin());
   member->type = overload.signatures[size_t(call->signature)];
   call->type = sym->ret;
-  checker_.flowChecker().calledFunction(); // a method runs
+  checker_.flowChecker().calledFunction();
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
   return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
@@ -469,4 +437,4 @@ Expr *OverloadResolver::checkOverloadMember(MemberExpr *member, const Type *expe
   return member;
 }
 
-} // namespace tz
+}

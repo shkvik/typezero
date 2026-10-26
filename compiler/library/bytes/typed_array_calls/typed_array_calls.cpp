@@ -33,13 +33,11 @@ namespace tz {
 llvm::Value *TypedArrayCalls::emit() {
   switch (call->builtin) {
   case Builtin::BytesByteLength: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
     auto sizeOf = [](const Type *t) { return t->isTypedArray() ? t->elementSize() : 1u; };
     llvm::Value *size = lowering_.builder_.getInt64(sizeOf(self.type));
     if (self.type->isUnion()) {
-      // Of the member the value is, by its class number, where elements of
-      // more than a byte are among them.
       llvm::Value *id = nullptr;
       for (const Type *m : self.type->members()) {
         if (sizeOf(m) == 1) {
@@ -58,7 +56,7 @@ llvm::Value *TypedArrayCalls::emit() {
     return lowering_.builder_.CreateTrunc(lowering_.builder_.CreateMul(length, size), i32);
   }
   case Builtin::BytesByteOffset: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
     if (!lowering_.bytesTy_) {
       lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
     }
@@ -68,7 +66,7 @@ llvm::Value *TypedArrayCalls::emit() {
     return offset;
   }
   case Builtin::BytesBuffer: {
-    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *buffer =
         lowering_.builder_.CreateCall(fn("tz_bytes_buffer", ptr, {ptr}), {self.value});
     lowering_.refCounts().dropOperand(self);
@@ -119,8 +117,7 @@ llvm::Value *TypedArrayCalls::emit() {
           fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
           {self.value, none, lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)});
     } else {
-      Lowering::Operand separator =
-          lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      Lowering::Operand separator = lowering_.refCounts().emitOperand(call->args[0], true);
       lowering_.throwLowerer().takeOperand(self);
       text = lowering_.stringLowerer().callReturningString(
           fn("tz_bytes_join", voidTy, {ptr, ptr, ptr, i64, i32}),
@@ -168,7 +165,7 @@ llvm::Value *TypedArrayCalls::emit() {
         {self.value, from.value, offset});
     lowering_.refCounts().dropOperand(from);
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck(); // RangeError: offset is out of bounds
+    lowering_.throwLowerer().emitThrowCheck();
     return nullptr;
   }
   case Builtin::BytesSubarray:
@@ -219,7 +216,7 @@ llvm::Value *TypedArrayCalls::emit() {
     llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_bytes_with", ptr, {ptr, i64, f64}),
                                                       {self.value, index, value});
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck(); // RangeError: Invalid typed array index
+    lowering_.throwLowerer().emitThrowCheck();
     return made;
   }
   case Builtin::ArrayBufferIsView: {
@@ -231,4 +228,4 @@ llvm::Value *TypedArrayCalls::emit() {
   }
 }
 
-} // namespace tz
+}

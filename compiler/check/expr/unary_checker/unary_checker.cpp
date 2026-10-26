@@ -26,8 +26,6 @@ using llvm::isa;
 
 namespace tz {
 
-// A name or an integer literal as written, for messages that show how to
-// rewrite the code around it.
 static std::optional<std::string> simpleText(const Expr *expr) {
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     return name->name.str();
@@ -46,14 +44,11 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
   switch (unary->op) {
   case UnaryOp::Neg:
   case UnaryOp::Plus: {
-    // `-1` where a literal type is expected, `-1 | 1`: the literal is
-    // checked as an int and negated, and the result is of the literal type.
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
       if (const Type *literal =
               checker_.literalTypes().numberLiteralFor(expected, -double(lit->value), false);
           literal && lit->value != 0) {
-        unary->operand =
-            checker_.literalChecker().checkIntLit(lit, literal->literalBase(), /*negated=*/true);
+        unary->operand = checker_.literalChecker().checkIntLit(lit, literal->literalBase(), true);
         unary->type = literal;
         return unary;
       }
@@ -73,30 +68,25 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
     }
     const Type *hint = wanted && (wanted->isNumeric() || wanted->isDecimal()) ? wanted : nullptr;
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand)) {
-      unary->operand =
-          checker_.literalChecker().checkIntLit(lit, hint, /*negated=*/unary->op == UnaryOp::Neg);
+      unary->operand = checker_.literalChecker().checkIntLit(lit, hint, unary->op == UnaryOp::Neg);
     } else {
       unary->operand = checker_.genericChecker().apparent(
           checker_.exprChecker().checkExpr(unary->operand, hint, wraps));
     }
     const Type *type = unary->operand->type;
-    if (type->isNever()) { // see neverOperands
+    if (type->isNever()) {
       unary->operand = checker_.typeRelations().convert(unary->operand, Type::doubleTy());
       type = Type::doubleTy();
     }
     if (type->isString() || type->isBool()) {
-      // `+s` is Number(s), and `-s` is -Number(s), as in JavaScript.
       unary->type = Type::doubleTy();
       break;
     }
-    // `+d` is the time of a date.
     if (type->isDate() && unary->op == UnaryOp::Plus) {
       return checker_.dateChecker().dateTime(unary->operand);
     }
     bool literal = isa<IntLitExpr>(unary->operand) || isa<FloatLitExpr>(unary->operand);
     if (type->isDecimal() && unary->op == UnaryOp::Plus && !literal) {
-      // `+x` makes a number of x in JavaScript, which a decimal does only
-      // explicitly; `+2` is just 2.
       checker_.diags_.error(unary->loc(),
                             "unary '+' cannot be applied to a decimal; for a double, write "
                             "'Number(x)', or drop the '+'");
@@ -119,7 +109,7 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
     const Type *hint =
         expected && expected->nonOptional()->isInteger() ? expected->nonOptional() : nullptr;
     unary->operand = checker_.genericChecker().apparent(
-        checker_.exprChecker().checkExpr(unary->operand, hint, /*wraps=*/true));
+        checker_.exprChecker().checkExpr(unary->operand, hint, true));
     const Type *type = unary->operand->type;
     if (type->isFloat()) {
       unary->operand = checker_.binaryChecker().toInt32(unary->operand);
@@ -133,21 +123,16 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
     break;
   }
   case UnaryOp::TypeOf:
-    // Known from the type, except whether a `T | undefined` holds a value.
     unary->operand = checker_.exprChecker().checkExpr(unary->operand);
     unary->type = Type::string();
     break;
   case UnaryOp::Void:
-    // `void f()` runs f and drops what it returns; the value is undefined,
-    // usable wherever the literal `undefined` is.
     unary->operand = checker_.exprChecker().checkExpr(unary->operand);
     unary->type = Type::undefinedTy();
     break;
   case UnaryOp::Delete:
     return checkDelete(unary);
   case UnaryOp::NonNull: {
-    // `x!`: the program stops if x is undefined, so from here on a variable
-    // holds a value.
     unary->operand = checker_.exprChecker().checkExpr(unary->operand, expected);
     const Type *type = unary->operand->type;
     if (type->isUndefined()) {
@@ -172,12 +157,8 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
   return unary;
 }
 
-// `delete` removes a property of an object, and an object always has the
-// fields of its type. An array element would leave a hole, and arrays have
-// none.
 Expr *UnaryChecker::checkDelete(UnaryExpr *unary) {
   unary->type = Type::boolTy();
-  // A field that is not there and one that holds undefined are the same.
   auto reportField = [&](const Expr *object, const Field *field) {
     if (field->type->isOptional()) {
       checker_.diags_.error(unary->loc(), "'delete' cannot remove field '" + field->name +
@@ -190,7 +171,6 @@ Expr *UnaryChecker::checkDelete(UnaryExpr *unary) {
   };
   auto *index = dyn_cast<IndexExpr>(unary->operand);
   if (auto *member = dyn_cast<MemberExpr>(unary->operand); member && !member->optional) {
-    // The object first: `delete r.key` removes a key of a Record.
     member->object = checker_.exprChecker().checkExpr(member->object);
     const Type *object = member->object->type;
     if (object->isDict()) {
@@ -261,9 +241,6 @@ Expr *UnaryChecker::checkDelete(UnaryExpr *unary) {
   return unary;
 }
 
-// `key in object` asks whether the object has the property; an object always
-// has the fields of its type. Arrays have no holes, so for them it is a
-// comparison of the index with the length.
 Expr *UnaryChecker::checkIn(BinaryExpr *bin) {
   std::optional<std::string> key = simpleText(bin->lhs);
   bool literalKey = isa<IntLitExpr>(bin->lhs);
@@ -278,8 +255,6 @@ Expr *UnaryChecker::checkIn(BinaryExpr *bin) {
   if (r->nonOptional()->isDict()) {
     return checker_.dictChecker().checkDictIn(bin);
   }
-  // `"radius" in s` tells the members of a union of objects apart by their
-  // fields (docs/objects.md, section 7).
   if (const Type *u = r->nonOptional(); u->isUnion()) {
     if (r->isOptional()) {
       checker_.diags_.error(bin->rhs->loc(),
@@ -322,7 +297,6 @@ Expr *UnaryChecker::checkIn(BinaryExpr *bin) {
     return bin;
   }
   if (const Type *object = r->nonOptional(); object->isObject()) {
-    // A field that is not there and one that holds undefined are the same.
     std::optional<std::string> name =
         object->isTuple() ? std::nullopt : checker_.keyedFieldChecker().constantKey(bin->lhs);
     const Field *field = name ? object->field(*name) : nullptr;
@@ -365,4 +339,4 @@ Expr *UnaryChecker::checkIn(BinaryExpr *bin) {
   return bin;
 }
 
-} // namespace tz
+}

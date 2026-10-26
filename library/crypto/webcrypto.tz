@@ -1,25 +1,3 @@
-// Web Crypto (docs/crypto.md, step 4): crypto.subtle, CryptoKey and the dictionaries of the
-// algorithms, ported from lib/internal/crypto/webcrypto.js and the files of each algorithm of
-// Node 24 (util.js, webidl.js, mac.js, aes.js, ec.js, rsa.js, cfrg.js, hkdf.js, pbkdf2.js), with
-// node's errors: DOMExceptions of its names and messages, and the TypeErrors of Web IDL. A file
-// that says `crypto.subtle` or names one of these types gets them, as if it imported them (see
-// the loader, compiler/load/loader/loader.cpp).
-//
-// What takes time runs on the threads of the pool, as node runs it on those of libuv: digests,
-// signatures, ciphers, derivations and the making of key pairs. The intrinsics __tz_subtle_*
-// give the promises that runtime/library/crypto/crypto_subtle* settles
-// (compiler/library/crypto/sema/sema_webcrypto.cpp); a job that fails gives undefined, which
-// becomes node's OperationError here. The rest, which node does at once too (normalizing an
-// algorithm, checking usages, reading and writing keys), is done here over node:crypto.
-//
-// A key's algorithm decides what it does: a CryptoKey holds the KeyHandle of its family, which
-// the import or the generation of the key made, and the operations go through it. So a program
-// that only makes HMAC keys reaches no code of AES or of asymmetric keys, and needs only the
-// direct layer of OpenSSL (docs/crypto.md, section 3). For the same reason the compiler sends
-// importKey, generateKey, unwrapKey and deriveKey whose algorithm is written in the call to the
-// function of its family (subtleImport*, subtleGenerate*...); the methods of SubtleCrypto take
-// an algorithm of any family.
-
 import { createPrivateKey, createPublicKey, createSecretKey, KeyObject, randomBytes } from "node:crypto"
 import { DOMException } from "tz:web"
 
@@ -49,8 +27,6 @@ export type BufferSource =
 export type NamedCurve = string
 export type BigInteger = Uint8Array
 
-// Every dictionary of an algorithm in one: TypeScript has a type for each, which a literal the
-// program writes could not be told apart by, so here their names are this type.
 export interface Algorithm {
   name: string
   hash?: string | Algorithm
@@ -132,7 +108,6 @@ export interface CryptoKeyPair {
 export class CryptoKey {
   readonly type: KeyType
   readonly extractable: boolean
-  // Copies for the program, as node's getters give: what the key is lies in its handle.
   readonly algorithm: Algorithm
   readonly usages: KeyUsage[]
   @__tz_hidden readonly handle: KeyHandle
@@ -145,10 +120,6 @@ export class CryptoKey {
     this.usages = [...handle.usages]
   }
 }
-
-//===----------------------------------------------------------------------===//
-// Errors
-//===----------------------------------------------------------------------===//
 
 const kFailed = "The operation failed for an operation-specific reason"
 
@@ -174,11 +145,6 @@ function invalidAccess(message: string): DOMException {
 
 const kUnrecognized = "Unrecognized algorithm name"
 
-//===----------------------------------------------------------------------===//
-// Bytes
-//===----------------------------------------------------------------------===//
-
-// The bytes of a BufferSource, as a view of its memory.
 function bytesOf(data: BufferSource): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data)
   if (data instanceof Uint8Array) return data
@@ -197,7 +163,6 @@ function bytesOf(data: BufferSource): Uint8Array {
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
 }
 
-// A copy of bytes in an ArrayBuffer of their own.
 function arrayBufferOf(bytes: Uint8Array): ArrayBuffer {
   const out = new ArrayBuffer(bytes.length)
   new Uint8Array(out).set(bytes)
@@ -222,12 +187,6 @@ function base64url(text: string): Uint8Array {
 
 const kNoBytes = new Uint8Array(0)
 
-//===----------------------------------------------------------------------===//
-// Normalizing an algorithm (util.js and webidl.js of node)
-//===----------------------------------------------------------------------===//
-
-// The algorithms an operation knows, as node 24 registers them (the experimental ones it has
-// besides, SHA-3, Ed448, X448, AES-OCB, ChaCha20-Poly1305 and the others, tz has not).
 function algorithmsOf(op: string): string[] {
   switch (op) {
     case "digest":
@@ -264,7 +223,6 @@ function algorithmsOf(op: string): string[] {
   return []
 }
 
-// The dictionary of Web IDL the parameters of `name` for `op` are, or "" for none.
 function dictionaryOf(op: string, name: string): string {
   const aes = name.startsWith("AES-")
   switch (op) {
@@ -310,7 +268,6 @@ function required(dictionary: string, member: string): TypeError {
   )
 }
 
-// A number of Web IDL with [EnforceRange] up to `max`, as node converts it.
 function integer(value: double, member: string, dictionary: string, max: double): double {
   if (!Number.isFinite(value))
     throw new TypeError(
@@ -326,8 +283,6 @@ function integer(value: double, member: string, dictionary: string, max: double)
 
 const kUnsignedLong = 4294967295
 
-// A number of Web IDL without [EnforceRange]: whole, modulo 2^32, as node converts the length of
-// deriveBits.
 function unsignedLong(value: double): double {
   if (!Number.isFinite(value) || value == 0) return 0
   const x = Math.trunc(value)
@@ -337,7 +292,6 @@ function unsignedLong(value: double): double {
 
 const kTagLengths: double[] = [32, 64, 96, 104, 112, 120, 128]
 
-// The bytes of a member, copied, as node copies them.
 function bytesMember(value: BufferSource | undefined, member: string, dictionary: string): Uint8Array {
   if (value == undefined) throw required(dictionary, member)
   return bytesOf(value).slice()
@@ -357,9 +311,6 @@ function byteLength(bytes: Uint8Array, member: string, length: int) {
     throw new DOMException(`${member} must contain exactly ${length} bytes`, "OperationError")
 }
 
-// normalizeAlgorithm of node: the canonical name, and the members of the dictionary of the
-// operation, checked in the order of their names, with the buffers copied and the hash
-// normalized.
 function normalize(algorithm: AlgorithmIdentifier, op: string): Algorithm {
   const given: Algorithm = typeof algorithm == "string" ? { name: algorithm } : algorithm
   let name = ""
@@ -479,14 +430,12 @@ function normalizeHash(hash: string | Algorithm): Algorithm {
   return normalize(hash, "digest")
 }
 
-// The name of the hash a normalized algorithm has ("SHA-256").
 function hashOf(algorithm: Algorithm): string {
   const hash = algorithm.hash
   if (hash == undefined) return ""
   return typeof hash == "string" ? hash : hash.name
 }
 
-// OpenSSL's name of a hash of Web Crypto, for the full layer.
 function opensslHash(name: string): string {
   switch (name) {
     case "SHA-1":
@@ -511,7 +460,6 @@ function digestBytes(name: string): int {
   return 32
 }
 
-// The digest of data by a hash of Web Crypto, on the pool.
 function digestOf(name: string, data: BufferSource): Promise<ArrayBuffer> {
   switch (name) {
     case "SHA-1":
@@ -524,23 +472,17 @@ function digestOf(name: string, data: BufferSource): Promise<ArrayBuffer> {
   return __tz_subtle_digest("sha256", data)
 }
 
-//===----------------------------------------------------------------------===//
-// Usages
-//===----------------------------------------------------------------------===//
-
 function anyNotIn(usages: KeyUsage[], allowed: KeyUsage[]): boolean {
   for (const u of usages) if (!allowed.includes(u)) return true
   return false
 }
 
-// The usages, each once, in the order given (node's SafeSet).
 function distinct(usages: KeyUsage[]): KeyUsage[] {
   const out: KeyUsage[] = []
   for (const u of usages) if (!out.includes(u)) out.push(u)
   return out
 }
 
-// Those of `usages` in `wanted`, in the order of `wanted` (getUsagesUnion of node).
 function union(usages: KeyUsage[], wanted: KeyUsage[]): KeyUsage[] {
   const out: KeyUsage[] = []
   for (const u of wanted) if (usages.includes(u)) out.push(u)
@@ -549,7 +491,6 @@ function union(usages: KeyUsage[], wanted: KeyUsage[]): KeyUsage[] {
 
 const kKeyOps = ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"]
 
-// validateKeyOps of node: the key_ops of a JWK, each once, with every usage among them.
 function checkKeyOps(ops: string[] | undefined, usages: KeyUsage[]) {
   if (ops == undefined) return
   const seen: string[] = []
@@ -565,7 +506,6 @@ function checkKeyOps(ops: string[] | undefined, usages: KeyUsage[]) {
   }
 }
 
-// The members of a JWK every family checks: its use and key_ops against the usages, and ext.
 function checkJwk(jwk: JsonWebKey, use: string, usages: KeyUsage[], extractable: boolean) {
   if (usages.length > 0 && jwk.use != undefined && jwk.use != use)
     throw dataError('Invalid JWK "use" Parameter')
@@ -580,13 +520,6 @@ function opsOf(usages: KeyUsage[]): string[] {
   return out
 }
 
-//===----------------------------------------------------------------------===//
-// Keys
-//===----------------------------------------------------------------------===//
-
-// What a key is and does: the KeyObject of node:crypto with the key's algorithm and usages,
-// and the operations of its family, which the subclasses do; the others are no operations of
-// the algorithm, which the checks before them rule out.
 abstract class KeyHandle {
   constructor(
     readonly key: KeyObject,
@@ -615,7 +548,6 @@ abstract class KeyHandle {
     throw notSupported(kUnrecognized)
   }
 
-  // AES-KW of wrapKey and unwrapKey.
   async wrap(data: BufferSource, unwrap: boolean): Promise<ArrayBuffer> {
     void data
     void unwrap
@@ -628,7 +560,6 @@ abstract class KeyHandle {
     throw notSupported(kUnrecognized)
   }
 
-  // exportKey in the formats of the family: undefined for one it has not.
   exportRaw(): ArrayBuffer | undefined {
     return undefined
   }
@@ -649,12 +580,10 @@ abstract class KeyHandle {
   }
 }
 
-// The members of the JWK node:crypto exports of an asymmetric key, as strings.
 function jwkOfKey(key: KeyObject): JsonWebKey {
   return fromJson<JsonWebKey>(key.export({ format: "jwk" }))
 }
 
-// A JWK as node:crypto reads it.
 function jsonOf(jwk: JsonWebKey): Json {
   const j: Json = {
     kty: jwk.kty,
@@ -674,7 +603,6 @@ function jsonOf(jwk: JsonWebKey): Json {
   return j
 }
 
-// The JWK, or an error for bytes given as one; the bytes, or an error for a JWK given as them.
 function jwkData(keyData: BufferSource | JsonWebKey): JsonWebKey {
   if (
     keyData instanceof ArrayBuffer ||
@@ -709,10 +637,6 @@ function rawData(keyData: BufferSource | JsonWebKey, op: string): Uint8Array {
     `Failed to execute '${op}' on 'SubtleCrypto': 2nd argument is not instance of ArrayBuffer, Buffer, TypedArray, or DataView.`,
   )
 }
-
-//===----------------------------------------------------------------------===//
-// HMAC (mac.js)
-//===----------------------------------------------------------------------===//
 
 class HmacHandle extends KeyHandle {
   constructor(key: KeyObject, usages: KeyUsage[], readonly hash: string) {
@@ -814,10 +738,6 @@ function importHmac(
   const handle = new HmacHandle(createSecretKey(bytes), usages, hash)
   return new CryptoKey(handle, { name: "HMAC", length, hash: { name: hash } }, extractable)
 }
-
-//===----------------------------------------------------------------------===//
-// AES (aes.js)
-//===----------------------------------------------------------------------===//
 
 class AesHandle extends KeyHandle {
   constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly bits: double) {
@@ -934,10 +854,6 @@ function importAes(
   return new CryptoKey(handle, { name, length }, extractable)
 }
 
-//===----------------------------------------------------------------------===//
-// PBKDF2 and HKDF (pbkdf2.js, hkdf.js and importGenericSecretKey of keys.js)
-//===----------------------------------------------------------------------===//
-
 class KdfHandle extends KeyHandle {
   async deriveBits(algorithm: Algorithm, length: double | undefined): Promise<ArrayBuffer> {
     if (length == undefined) throw new DOMException("length cannot be null", "OperationError")
@@ -948,7 +864,6 @@ class KdfHandle extends KeyHandle {
     let result: ArrayBuffer | undefined = undefined
     if (this.name == "PBKDF2") {
       const iterations = algorithm.iterations ?? 1
-      // The KDFs of OpenSSL count in an int, as node checks it.
       if (iterations > 2147483647 || length / 8 > 2147483647) throw failed()
       switch (hash) {
         case "SHA-1":
@@ -961,7 +876,6 @@ class KdfHandle extends KeyHandle {
       return await __tz_subtle_pbkdf2("sha256", this.key, salt, iterations, length / 8)
     }
     const info = algorithm.info ?? kNoBytes
-    // node's hkdf takes at most 1024 bytes of info.
     if (bytesOf(info).length > 1024) throw failed()
     switch (hash) {
       case "SHA-1":
@@ -997,11 +911,6 @@ function importKdf(
   return new CryptoKey(new KdfHandle(key, "secret", name, usages), { name }, false)
 }
 
-//===----------------------------------------------------------------------===//
-// Asymmetric keys: what ECDSA, ECDH, RSA and Ed25519 / X25519 share
-//===----------------------------------------------------------------------===//
-
-// The KeyObject of DER data, or a DataError, as node's import takes it.
 function derKey(bytes: Uint8Array, format: KeyFormat): KeyObject {
   try {
     if (format == "spki") return createPublicKey({ key: bytes, format: "der", type: "spki" })
@@ -1026,7 +935,6 @@ function keyType(key: KeyObject): KeyType {
   return key.type == "private" ? "private" : key.type == "public" ? "public" : "secret"
 }
 
-// DER: a length, and a TLV.
 function derLength(n: int): Uint8Array {
   if (n < 128) return new Uint8Array([n & 0x7f])
   if (n < 256) return new Uint8Array([0x81, n & 0xff])
@@ -1036,10 +944,6 @@ function derLength(n: int): Uint8Array {
 function der(tag: int, content: Uint8Array): Uint8Array {
   return concat([new Uint8Array([tag & 0xff]), derLength(content.length), content])
 }
-
-//===----------------------------------------------------------------------===//
-// ECDSA and ECDH (ec.js)
-//===----------------------------------------------------------------------===//
 
 class EcHandle extends KeyHandle {
   constructor(key: KeyObject, name: string, usages: KeyUsage[], readonly curve: string) {
@@ -1095,7 +999,6 @@ function checkEcUsages(name: string, isPublic: boolean, usages: KeyUsage[]) {
     throw syntaxError(`Unsupported key usage for a ${name} key`)
 }
 
-// The DER of the algorithm of an EC public key on the curve: ecPublicKey and its OID.
 function ecAlgorithm(curve: string): Uint8Array {
   const ecPublicKey = new Uint8Array([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])
   const oid =
@@ -1188,7 +1091,6 @@ function importEc(
   return new CryptoKey(new EcHandle(key, name, usages, curve), { name, namedCurve: curve }, extractable)
 }
 
-// ECDH and X25519 (ecdhDeriveBits of diffiehellman.js): the shared secret, cut to `length` bits.
 async function ecdhDeriveBits(
   handle: KeyHandle,
   algorithm: Algorithm,
@@ -1216,10 +1118,6 @@ async function ecdhDeriveBits(
   }
   return arrayBufferOf(cut)
 }
-
-//===----------------------------------------------------------------------===//
-// RSASSA-PKCS1-v1_5, RSA-PSS and RSA-OAEP (rsa.js)
-//===----------------------------------------------------------------------===//
 
 class RsaHandle extends KeyHandle {
   constructor(
@@ -1251,7 +1149,6 @@ class RsaHandle extends KeyHandle {
     return verdict == 1
   }
 
-  // The salt of RSA-PSS, which the key must have room for, as node checks it.
   #saltLength(algorithm: Algorithm): int {
     const salt = algorithm.saltLength ?? 0
     const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash) - 2
@@ -1301,7 +1198,6 @@ function rsaUsages(name: string, isPublic: boolean): KeyUsage[] {
   return isPublic ? ["verify"] : ["sign"]
 }
 
-// The modulus length and the public exponent of an RSA key, from its JWK.
 function rsaDetails(key: KeyObject): Algorithm {
   const jwk = jwkOfKey(key)
   const n = base64url(jwk.n ?? "")
@@ -1318,7 +1214,6 @@ async function generateRsa(
 ): Promise<CryptoKeyPair> {
   const name = algorithm.name
   const exponent = algorithm.publicExponent ?? kNoBytes
-  // bigIntArrayToUnsignedInt of node: at most 32 bits, leading zeros allowed.
   let value = 0
   for (let i = 0; i < exponent.length; i++) {
     const shift = exponent.length - i - 1
@@ -1400,11 +1295,6 @@ function importRsa(
   return new CryptoKey(handle, { name, modulusLength, publicExponent, hash: { name: hash } }, extractable)
 }
 
-//===----------------------------------------------------------------------===//
-// Ed25519 and X25519 (cfrg.js)
-//===----------------------------------------------------------------------===//
-
-// The DER of the algorithm of Ed25519 or X25519: its OID alone.
 function okpAlgorithm(name: string): Uint8Array {
   return new Uint8Array([0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, name == "Ed25519" ? 0x70 : 0x6e])
 }
@@ -1463,7 +1353,6 @@ function checkOkpUsages(name: string, isPublic: boolean, usages: KeyUsage[]) {
     throw syntaxError(`Unsupported key usage for a ${name} key`)
 }
 
-// createCFRGRawKey of node: a key of 32 raw bytes.
 function okpRawKey(name: string, bytes: Uint8Array, isPublic: boolean): KeyObject {
   if (bytes.length != 32) throw dataError(`${name} raw keys must be exactly 32-bytes`)
   try {
@@ -1500,7 +1389,6 @@ async function generateOkp(
   const set = distinct(usages)
   const publicUsages: KeyUsage[] = ed ? union(set, ["verify"]) : []
   const privateUsages = ed ? union(set, ["sign"]) : union(set, ["deriveKey", "deriveBits"])
-  // node gives these two the other way round.
   return {
     privateKey: new CryptoKey(new OkpHandle(privateKey, name, privateUsages), { name }, extractable),
     publicKey: new CryptoKey(new OkpHandle(publicKey, name, publicUsages), { name }, true),
@@ -1549,11 +1437,6 @@ function importOkp(
   return new CryptoKey(new OkpHandle(key, name, usages), { name }, extractable)
 }
 
-//===----------------------------------------------------------------------===//
-// The operations
-//===----------------------------------------------------------------------===//
-
-// What the import of each family makes, checked as importKeySync of node checks it.
 function imported(
   key: CryptoKey | undefined,
   algorithm: Algorithm,
@@ -1606,7 +1489,6 @@ function normalizeOr(algorithm: AlgorithmIdentifier, op: string, fallback: strin
   }
 }
 
-// cipherOrWrap of node.
 async function cipherOrWrap(
   decrypt: boolean,
   algorithm: Algorithm,
@@ -1637,7 +1519,6 @@ async function exportAny(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer
     void err
     throw notSupported(`${handle.name} key export is not supported`)
   }
-  // The name of the error is node's.
   if (!key.extractable) throw new DOMException("key is not extractable", "InvalidAccessException")
   let result: ArrayBuffer | JsonWebKey | undefined = undefined
   if (format == "spki") result = handle.exportSpki()
@@ -1652,12 +1533,9 @@ async function exportAny(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer
 async function exportBytes(format: KeyFormat, key: CryptoKey): Promise<ArrayBuffer> {
   const result = await exportAny(format, key)
   if (result instanceof ArrayBuffer) return result
-  // Not for a format other than "jwk"; the JSON text keeps the type exact.
   return arrayBufferOf(new TextEncoder().encode(JSON.stringify(result)))
 }
 
-// The bytes wrapKey encrypts: the key exported, a JWK as JSON text, which AES-KW pads with
-// spaces to whole blocks.
 async function wrappedBytes(format: KeyFormat, key: CryptoKey, kw: boolean): Promise<Uint8Array> {
   const data = await exportAny(format, key)
   if (data instanceof ArrayBuffer) return new Uint8Array(data)
@@ -1666,7 +1544,6 @@ async function wrappedBytes(format: KeyFormat, key: CryptoKey, kw: boolean): Pro
   return new TextEncoder().encode(text)
 }
 
-// The key data unwrapKey decrypted: the bytes, or the JWK of the JSON text.
 function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): BufferSource | JsonWebKey {
   if (format != "jwk") return bytes
   try {
@@ -1677,7 +1554,6 @@ function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): BufferSource | Js
   }
 }
 
-// getKeyLength of node: the length of the key deriveKey makes, or undefined for a KDF.
 function keyLength(algorithm: AlgorithmIdentifier): double | undefined {
   const a = normalize(algorithm, "get key length")
   if (a.name.startsWith("AES-")) {
@@ -1863,7 +1739,6 @@ export class SubtleCrypto {
   }
 }
 
-// The importers of the families for deriveKey and unwrapKey.
 function importSecret(
   format: KeyFormat,
   keyData: BufferSource | JsonWebKey,
@@ -1891,12 +1766,6 @@ function importAnyFamily(
 
 export const subtle = new SubtleCrypto()
 
-//===----------------------------------------------------------------------===//
-// What the compiler calls for an algorithm written in the call (sema_webcrypto.cpp): the work
-// of its family only.
-//===----------------------------------------------------------------------===//
-
-// A JWK the program has as JSON, as JSON.parse gives it in node.
 function subtleJwkOf(json: Json | undefined): JsonWebKey {
   if (json == undefined) throw dataError("Invalid keyData")
   return fromJson<JsonWebKey>(json)
@@ -2018,8 +1887,6 @@ async function subtleGenerateOkp(
   return createdPair(await generateOkp(normalize(algorithm, "generateKey"), extractable, keyUsages))
 }
 
-// exportKey with the format written in the call: "jwk" gives a JsonWebKey (never bytes), the
-// others an ArrayBuffer (never a JWK).
 async function subtleExportJwk(format: KeyFormat, key: CryptoKey): Promise<JsonWebKey> {
   const result = await exportAny(format, key)
   if (result instanceof ArrayBuffer) return {}

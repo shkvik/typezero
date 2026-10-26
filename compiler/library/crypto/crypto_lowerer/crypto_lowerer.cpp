@@ -36,8 +36,6 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   llvm::StringRef kinds = fn.params;
   assert(kinds.size() == exprs.size() && "the arguments are those of the function");
 
-  // The values, owned: undefined data is not evaluated, and a hash or a cipher of the direct
-  // layer is a constant of the runtime.
   std::vector<Expr *> evaluated;
   for (size_t i = 0; i < exprs.size(); ++i) {
     bool direct = (kinds[i] == 'm' || kinds[i] == 'n' || kinds[i] == 'h' || kinds[i] == 'c') &&
@@ -62,7 +60,6 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     params.push_back(ptr);
     args.push_back(out);
   }
-  // A job of Web Crypto settles the promise it gets later (runtime/library/crypto/crypto_subtle*).
   llvm::Value *promise = nullptr;
   if (fn.result == 'P') {
     promise = lowering_.promiseLowerer().newPromise(call->type->promised());
@@ -142,7 +139,6 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   llvm::Value *result = lowering_.builder_.CreateCall(
       lowering_.processLowerer().processFunction(fn.name, ret, params), args);
   if (promise) {
-    // It rejects the promise rather than throwing.
     for (size_t i = 0; i < exprs.size(); ++i) {
       if (values[i]) {
         lowering_.refCounts().releaseValue(values[i], exprs[i]->type);
@@ -150,7 +146,6 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     }
     return promise;
   }
-  // What the call gives back of its receiver (or first argument) keeps its reference.
   llvm::Value *self = nullptr;
   if (fn.result == 'S') {
     self = values[0];
@@ -201,9 +196,6 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
   }
 }
 
-// generateKeyPairSync: the private key, the public key of it, each exported as its encoding
-// asks, in a new `{ publicKey, privateKey }`. The passphrases come first, as JavaScript reads
-// the options before the call.
 llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
@@ -211,8 +203,8 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
   Lowering::Held passphrases[2] = {{nullptr, nullptr, nullptr}, {nullptr, nullptr, nullptr}};
   for (int k = 0; k < 2; ++k) {
     if (Expr *p = call->args[1 + 5 * k + 4]; !p->type->isUndefined()) {
-      passphrases[k] = lowering_.throwLowerer().hold(lowering_.exprLowerer().emitExpr(p), p->type,
-                                                     /*needed=*/true);
+      passphrases[k] =
+          lowering_.throwLowerer().hold(lowering_.exprLowerer().emitExpr(p), p->type, true);
     }
   }
   llvm::Value *priv = lowering_.exprLowerer().emitExpr(call->args[0]);
@@ -222,7 +214,6 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
       "public");
   lowering_.throwLowerer().emitThrowCheckWith(
       [&] { lowering_.refCounts().releaseValue(priv, keyType); });
-  // The keys, then what each becomes; on the way up, what is not released yet.
   llvm::Value *values[2] = {pub, priv};
   const Type *types[2] = {keyType, keyType};
   for (int k = 0; k < 2; ++k) {
@@ -293,11 +284,11 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
   const Type *type = call->type;
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1});
   lowering_.builder_.CreateStore(
-      values[0], lowering_.objectLayouts().fieldAddress(object, type, "publicKey", /*exact=*/true));
-  lowering_.builder_.CreateStore(values[1], lowering_.objectLayouts().fieldAddress(
-                                                object, type, "privateKey", /*exact=*/true));
+      values[0], lowering_.objectLayouts().fieldAddress(object, type, "publicKey", true));
+  lowering_.builder_.CreateStore(
+      values[1], lowering_.objectLayouts().fieldAddress(object, type, "privateKey", true));
 
   return object;
 }
 
-} // namespace tz
+}

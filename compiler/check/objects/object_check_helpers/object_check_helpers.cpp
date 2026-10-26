@@ -27,4 +27,4 @@ const Expr *unnarrowed(const Expr *expr) {
   return expr;
 }
 
-} // namespace tz
+}

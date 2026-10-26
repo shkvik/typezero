@@ -14,9 +14,7 @@ public:
   BinaryOp op;
   Expr *lhs;
   Expr *rhs;
-  // The source text of the whole expression (loc() is the operator), for
-  // hints that rewrite it. Empty for one Checker made.
   llvm::StringRef source;
 };
 
-} // namespace tz
+}

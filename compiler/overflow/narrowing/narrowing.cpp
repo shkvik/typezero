@@ -38,7 +38,6 @@ namespace tz {
 
 namespace {
 
-// A number written as a literal: `3`, `-1`, `2.5`.
 std::optional<double> literalValue(const Expr *expr) {
   expr = stripCasts(expr);
   if (auto *lit = dyn_cast_or_null<IntLitExpr>(expr)) {
@@ -56,7 +55,7 @@ std::optional<double> literalValue(const Expr *expr) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 Narrowing::Narrowing(OverflowCheck &check) : check_(check) {}
 
@@ -88,7 +87,6 @@ void Narrowing::notePredicate(const FunctionDecl *fn, const State &whenTrue,
 
 std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
                                                                const State &st) const {
-  // An int compared as a long or a double is the same value.
   while (auto *conv = dyn_cast_or_null<CastExpr>(expr)) {
     if (!conv->isImplicit() || !conv->operand->type ||
         !conv->operand->type->nonOptional()->isNumeric()) {
@@ -99,7 +97,6 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
   if (!expr) {
     return std::nullopt;
   }
-  // `x + 1 < n`, `2 * x <= n`, `x * x <= n`: the variable inside.
   if (auto *bin = dyn_cast<BinaryExpr>(expr);
       bin && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub || bin->op == BinaryOp::Mul)) {
     if (bin->op == BinaryOp::Mul) {
@@ -133,7 +130,7 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
     if (bin->op == BinaryOp::Add) {
       n->offset += *c;
     } else if (bin->op == BinaryOp::Sub) {
-      if (constantFirst) { // c - x
+      if (constantFirst) {
         n->scale = -n->scale;
         n->offset = *c - n->offset;
       } else {
@@ -152,7 +149,6 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
   OverflowCheck::Narrowable n;
   const NameExpr *name = nullptr;
   if (auto *update = dyn_cast<UpdateExpr>(expr)) {
-    // After `++k` the value is k; after `k++` it was one less.
     name = dyn_cast<NameExpr>(update->target);
     if (!update->prefix) {
       n.offset = update->increment ? -1 : 1;
@@ -187,8 +183,6 @@ std::optional<OverflowCheck::Narrowable> Narrowing::narrowable(const Expr *expr,
   return n;
 }
 
-// Narrows what `target` reads in `s`, knowing that its value lies within
-// [lower, upper].
 void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, const Bound &lower,
                           const Bound &upper) {
   if (s.dead) {
@@ -215,7 +209,6 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
     double r = down(std::sqrt(upper.v));
     n = narrowTo(n, Bound{-r, upper.origin, upper.why}, Bound{r, upper.origin, upper.why});
   } else {
-    // value = var * scale + offset
     Bound lo = lower, hi = upper;
     lo.v = (lower.v - target.offset) / target.scale;
     hi.v = (upper.v - target.offset) / target.scale;
@@ -240,12 +233,10 @@ void Narrowing::constrain(State &s, const OverflowCheck::Narrowable &target, con
 void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val &r, State &whenTrue,
                                  State &whenFalse) {
   auto apply = [&](const Expr *side, const Num &other, BinaryOp op) {
-    // side `op` other
     std::optional<OverflowCheck::Narrowable> target = narrowable(side, whenTrue);
     if (!target || other.empty()) {
       return;
     }
-    // Integers that differ differ by at least 1.
     bool integer =
         target->integer && target->scale == 1 && target->offset == std::trunc(target->offset);
     auto below = [&](const Bound &b) {
@@ -255,7 +246,6 @@ void Narrowing::narrowComparison(const BinaryExpr *bin, const Val &l, const Val 
       return Bound{integer ? std::floor(b.v) + 1 : b.v, b.origin, b.why};
     };
     Bound none{-kInf}, top{kInf};
-    // `x != c` at one end of what x holds.
     auto exclude = [&](State &s) {
       if (s.dead || other.lo != other.hi || !integer || target->square) {
         return;
@@ -374,7 +364,6 @@ void Narrowing::refine(const Expr *cond, State &st, State &whenTrue, State &when
     (lit->value ? whenFalse : whenTrue).dead = true;
     return;
   }
-  // `(k++, k < 3)`: the last one decides.
   if (auto *seq = dyn_cast<SequenceExpr>(cond); seq && !seq->exprs.empty()) {
     for (size_t i = 0; i + 1 < seq->exprs.size(); ++i) {
       check_.evaluator().eval(seq->exprs[i], st);
@@ -430,4 +419,4 @@ void Narrowing::refine(const Expr *cond, State &st, State &whenTrue, State &when
   whenTrue = whenFalse = st;
 }
 
-} // namespace tz
+}

@@ -36,9 +36,6 @@ llvm::Value *NumberAccessCalls::emit() {
   case Builtin::DataViewSet:
   case Builtin::BufferRead:
   case Builtin::BufferWriteNumber: {
-    // args: the kind, then for a DataView the offset, the value to set and
-    // littleEndian?; for a Buffer whether it is big-endian, the value to
-    // write and the offset? (0 when left out).
     bool dataView = call->builtin == Builtin::DataViewGet || call->builtin == Builtin::DataViewSet;
     bool write =
         call->builtin == Builtin::DataViewSet || call->builtin == Builtin::BufferWriteNumber;
@@ -67,7 +64,6 @@ llvm::Value *NumberAccessCalls::emit() {
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *length = lowering_.bytesLowerer().bytesLength(self.value);
     if (call->mayBeOutOfRange) {
-      // 0 <= offset and offset + size <= length, as unsigned numbers.
       llvm::Value *ok = lowering_.builder_.CreateAnd(
           lowering_.builder_.CreateICmpULT(offset, length),
           lowering_.builder_.CreateICmpULE(lowering_.builder_.getInt64(size),
@@ -96,7 +92,6 @@ llvm::Value *NumberAccessCalls::emit() {
         return raw;
       }
       llvm::Value *swap = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::bswap, raw);
-      // The bytes lie little-endian in memory.
       if (auto *constant = dyn_cast<llvm::ConstantInt>(little)) {
         return constant->isOne() ? raw : swap;
       }
@@ -106,8 +101,7 @@ llvm::Value *NumberAccessCalls::emit() {
     llvm::Value *result;
     if (!write) {
       llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(bits, address, llvm::Align(1));
-      raw->setMetadata(llvm::LLVMContext::MD_tbaa,
-                       lowering_.bytesLowerer().bytesTbaa(/*header=*/false));
+      raw->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
       llvm::Value *v = swapped(raw);
       switch (kind) {
       case Bytes::Float32:
@@ -152,9 +146,7 @@ llvm::Value *NumberAccessCalls::emit() {
       }
       llvm::StoreInst *store =
           lowering_.builder_.CreateAlignedStore(swapped(v), address, llvm::Align(1));
-      store->setMetadata(llvm::LLVMContext::MD_tbaa,
-                         lowering_.bytesLowerer().bytesTbaa(/*header=*/false));
-      // A Buffer's write gives the offset after what it wrote.
+      store->setMetadata(llvm::LLVMContext::MD_tbaa, lowering_.bytesLowerer().bytesTbaa(false));
       result =
           dataView
               ? nullptr
@@ -195,4 +187,4 @@ llvm::Value *NumberAccessCalls::emit() {
   }
 }
 
-} // namespace tz
+}

@@ -46,7 +46,6 @@ llvm::Value *UnionMemberLowerer::unionFieldAddress(llvm::Value *object, const Ty
     return lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), object,
                                                          uint64_t(offset), name + ".addr");
   }
-  // Each member puts it elsewhere: chosen by the class number of the object.
   llvm::Value *id = lowering_.unionLowerer().objectClassId(object);
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.field.end");
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
@@ -78,10 +77,8 @@ llvm::Value *UnionMemberLowerer::unionFieldAddress(llvm::Value *object, const Ty
 
 llvm::Value *UnionMemberLowerer::emitUnionFieldRead(MemberExpr *member) {
   const Type *type = member->object->type;
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
   llvm::ArrayRef<const Type *> members = type->members();
-  // A field of one type in every member: one load, from one offset if they
-  // agree on it.
   const Type *fieldType = members.front()->field(member->name)->type;
   bool same = llvm::all_of(
       members, [&](const Type *m) { return m->field(member->name)->type == fieldType; });
@@ -93,7 +90,6 @@ llvm::Value *UnionMemberLowerer::emitUnionFieldRead(MemberExpr *member) {
     lowering_.refCounts().retainValue(result, fieldType);
     result = lowering_.exprLowerer().emitConversion(result, fieldType, member->type);
   } else {
-    // Each member reads its own, chosen by the class number of the object.
     llvm::Value *id = lowering_.unionLowerer().objectClassId(object.value);
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.field.end");
     std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
@@ -132,10 +128,9 @@ llvm::Value *UnionMemberLowerer::emitUnionFieldRead(MemberExpr *member) {
 }
 
 llvm::Value *UnionMemberLowerer::emitObjectIn(BinaryExpr *bin) {
-  // `"radius" in s`: whether the object is of a member with that field.
   lowering_.stmtLowerer().emitDiscarded(bin->lhs);
   const Type *type = bin->rhs->type;
-  Lowering::Operand value = lowering_.refCounts().emitOperand(bin->rhs, /*canBorrow=*/true);
+  Lowering::Operand value = lowering_.refCounts().emitOperand(bin->rhs, true);
   std::string name;
   const Expr *key = bin->lhs;
   while (auto *conv = dyn_cast<CastExpr>(key)) {
@@ -157,7 +152,6 @@ llvm::Value *UnionMemberLowerer::emitObjectIn(BinaryExpr *bin) {
   }
   std::vector<const Type *> with;
   if (objects->isTagged()) {
-    // An object only in its slot.
     llvm::Value *isObject =
         lowering_.builder_.CreateICmpEQ(lowering_.unionLayout().unionTag(object),
                                         lowering_.builder_.getInt32(unsigned(UnionSlot::Object)));
@@ -207,7 +201,6 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   for (size_t i = call->args.size(); i < fnType->params().size(); ++i) {
     values.push_back(lowering_.optionalLowerer().undefinedValue(fnType->params()[i]));
   }
-  // The member the object is of tells which runs; each gets the arguments.
   llvm::Value *id = lowering_.unionLowerer().objectClassId(self.value);
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.call.end");
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
@@ -236,7 +229,6 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
                          lowering_.classDescriptors().methodCode(m.method->decl), args);
       throws |= lowering_.mayThrow().callMayThrow(m.method->decl, m.virtualCall);
     } else {
-      // The function in the field, borrowed from the object.
       llvm::Value *fn = lowering_.builder_.CreateLoad(
           lowering_.fnTy_,
           lowering_.objectLayouts().fieldAddress(self.value, m.member, member->name));
@@ -267,4 +259,4 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

@@ -38,7 +38,6 @@ std::u16string units(const uint32_t *program, uint32_t start, uint32_t length) {
   return text;
 }
 
-// The text of a literal as a regex that matches it: `/\./` for ".".
 std::string escapedLiteral(const std::u16string &text) {
   std::u16string escaped;
   for (char16_t c : text) {
@@ -51,7 +50,6 @@ std::string escapedLiteral(const std::u16string &text) {
   return "/" + utf8(escaped) + "/";
 }
 
-// How a string argument is written, for hints: a literal as itself.
 std::string argumentText(const Expr *arg) {
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
     std::string text = utf8(lit->value);
@@ -70,7 +68,7 @@ const char kUnknownRegex[] =
     "the regex is known only when the program runs (it is not a literal, nor a variable that "
     "holds one all along)";
 
-} // namespace
+}
 
 StringRegexChecker::StringRegexChecker(Checker &checker) : checker_(checker) {}
 
@@ -136,8 +134,6 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
         return restLoosely();
       }
       if (name == "matchAll") {
-        // A lazy iterator, as in JavaScript: each match is found when it is
-        // asked for.
         call->builtin = Builtin::StrMatchAll;
         call->type = Type::iterator(checker_.regexChecker().matchType(regex));
         return call;
@@ -152,7 +148,6 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
       if (call->args.size() == 2) {
         call->args[1] = checker_.memberChecker().checkPosition(call->args[1]);
       }
-      // A group that may not take part in a match gives undefined.
       bool undefinedGroups = !regex;
       for (uint32_t k = 1; regex && k < tz_re_captures(regex->program.data()); ++k) {
         undefinedGroups |= !tz_re_mandatory(regex->program.data(), k);
@@ -226,8 +221,6 @@ Expr *StringRegexChecker::checkStringRegexMethod(CallExpr *call, MemberExpr *mem
   return restLoosely();
 }
 
-// replace(re, x) and replaceAll(re, x): x is the text that replaces each
-// match, with its patterns ($1, $<name>, $&...), or a function that gives it.
 Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
                                            const RegexLitExpr *regex) {
   Expr *&replacement = call->args[1];
@@ -245,7 +238,6 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
     if (!regex || !text) {
       return call;
     }
-    // `$4` with three groups, which JavaScript would insert as it is.
     const uint32_t *program = regex->program.data();
     uint32_t groups = tz_re_captures(program) - 1;
     bool named = false;
@@ -297,8 +289,6 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
     return call;
   }
 
-  // The function gets the match, each group, the offset of the match, the
-  // whole string and, with named groups, the object of them.
   Checker::Signature sig;
   sig.pad = false;
   sig.ret = Type::string();
@@ -329,7 +319,6 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
                                 ", the offset and the string" +
                                 (sig.params.back()->isObject() ? ", and the named groups" : ""));
     }
-    // Checked all the same, as if it got strings there.
     while (sig.params.size() < fe->fn->params.size()) {
       sig.params.push_back(Type::string());
     }
@@ -344,9 +333,9 @@ Expr *StringRegexChecker::checkReplacement(CallExpr *call, MemberExpr *member,
   }
   call->builtin = Builtin::StrReplaceRegexFn;
   call->type = Type::string();
-  checker_.flowChecker().calledFunction(); // the function may change anything
+  checker_.flowChecker().calledFunction();
 
   return call;
 }
 
-} // namespace tz
+}

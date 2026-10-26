@@ -31,7 +31,6 @@ llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
   if (member->object->type->nonOptional()->isJson()) {
     return lowering_.jsonLowerer().emitJsonMember(member);
   }
-  // A union of binary data too, whose members keep the length alike.
   const Type *objectType = member->object->type;
   if (objectType->isBytes() ||
       (objectType->isUnion() &&
@@ -44,8 +43,7 @@ llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
   if (member->object->type->isResult()) {
     return lowering_.resultLowerer().emitResultMember(member);
   }
-  // Otherwise Checker allows only `.length` of a string or an array.
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Value *length = object.type->isArray()
                             ? lowering_.arrayLowerer().arrayLength(object.value)
                             : lowering_.stringLowerer().stringLength(object.value);
@@ -54,4 +52,4 @@ llvm::Value *MemberLowerer::emitMember(MemberExpr *member) {
   return lowering_.builder_.CreateTrunc(length, lowering_.builder_.getInt32Ty(), "length");
 }
 
-} // namespace tz
+}

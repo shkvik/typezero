@@ -23,4 +23,4 @@ private:
   const pkg::Graph *packages_;
 };
 
-} // namespace tz
+}

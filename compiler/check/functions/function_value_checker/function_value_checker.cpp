@@ -15,7 +15,6 @@ namespace tz {
 
 namespace {
 
-// How a callback of a built-in method is called, for messages.
 const char *callbackArgs(llvm::StringRef method) {
   if (method == "reduce" || method == "reduceRight") {
     return "(accumulator, value, index, array)";
@@ -33,7 +32,6 @@ const char *ordinal(size_t i) {
   return i < 5 ? names[i] : "next";
 }
 
-// What the arguments of a callback are, by position.
 const char *callbackArgName(llvm::StringRef method, size_t i) {
   bool reduce = method == "reduce" || method == "reduceRight";
   if (reduce) {
@@ -43,7 +41,7 @@ const char *callbackArgName(llvm::StringRef method, size_t i) {
   return i == 0 ? "value" : i == 1 ? "index" : "array";
 }
 
-} // namespace
+}
 
 FunctionValueChecker::FunctionValueChecker(Checker &checker) : checker_(checker) {}
 
@@ -58,7 +56,6 @@ Expr *FunctionValueChecker::adaptFunction(Expr *expr, const Type *to) {
       return nullptr;
     }
   }
-  // The parameters callers do not pass must be ones it can go without.
   if (wanted.size() < from->minArgs()) {
     return nullptr;
   }
@@ -92,7 +89,6 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
         maxArgs = count;
       }
     }
-    // `xs.map(ok)` makes a Result of each element.
     if (llvm::StringRef result = checker_.resultTypes().neverthrowName(n->name);
         result == "ok" || result == "err") {
       name = n->name;
@@ -146,7 +142,6 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
 
   size_t count = std::min<size_t>(maxArgs, expected.params.size());
   if (count > primary) {
-    // `map(parseInt)`: parseInt would take the index as its radix.
     std::string qualified = name.str();
     if (auto *m = dyn_cast<MemberExpr>(arg)) {
       qualified = cast<NameExpr>(m->object)->name.str() + "." + qualified;
@@ -204,4 +199,4 @@ bool FunctionValueChecker::asyncCallbackProblem(const Expr *arg, const Checker::
   return true;
 }
 
-} // namespace tz
+}

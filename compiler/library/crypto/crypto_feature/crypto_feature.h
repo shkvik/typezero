@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// node:crypto and Web Crypto (docs/crypto.md).
 class CryptoFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "crypto"; }
@@ -19,4 +18,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

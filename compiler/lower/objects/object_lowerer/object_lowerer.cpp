@@ -37,8 +37,6 @@ namespace tz {
 
 ObjectLowerer::ObjectLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// `{ x: 1, y }`: the values in the order written, then undefined in the
-// optional fields the literal leaves out.
 llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   if (lit->type->isJson()) {
     return lowering_.jsonLowerer().emitJsonObjectLiteral(lit);
@@ -63,9 +61,6 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
       keys.push_back(i);
     }
   }
-  // If a value may throw, the values come first (held, see emitHeldValues),
-  // then the object: one that a throw left half filled could not be
-  // released.
   std::vector<Expr *> exprs;
   for (const ObjectLitExpr::Property &prop : lit->props) {
     exprs.push_back(prop.value);
@@ -77,7 +72,6 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
   lowering_.groupLowerer().noteUnstored(object, lit);
-  // Nothing can reach the new object while its values are evaluated.
   for (size_t k = 0; k < keys.size(); ++k) {
     unsigned i = keys[k];
     llvm::Value *value = k < values.size() ? values[k]
@@ -94,12 +88,6 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
   return object;
 }
 
-// `{ ...a, x: 1, ...b }`. The object is made first with every field empty
-// (zero, which releases as nothing), and each part stores its values in
-// order, replacing what an earlier part stored. A spread reads the fields of
-// its object when it comes, as in JavaScript, but does not copy an optional
-// field that holds undefined. The keys are in the order the parts first give
-// them, the fields of a spread object in the order of its type.
 llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
   const Type *type = lit->type;
   llvm::ArrayRef<Field> fields = type->fields();
@@ -133,11 +121,8 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
   for (const Field &f : fields) {
     lowering_.builder_.CreateStore(
         llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(f.type)),
-        lowering_.objectLayouts().fieldAddress(object, type, f.name, /*exact=*/true));
+        lowering_.objectLayouts().fieldAddress(object, type, f.name, true));
   }
-  // Nothing can reach the new object while the parts are evaluated; a part
-  // that throws leaves it with what is stored so far, which the way up
-  // releases (every field is a value or empty).
   Lowering::Held held = lowering_.throwLowerer().hold(
       object, type, llvm::any_of(lit->props, [&](const ObjectLitExpr::Property &p) {
         return lowering_.mayThrow().exprThrows(p.value);
@@ -150,24 +135,19 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
       }
       const Type *to = type->field(prop.name)->type;
       lowering_.storeLowerer().storeIn(
-          object, type,
-          lowering_.objectLayouts().fieldAddress(object, type, prop.name, /*exact=*/true),
+          object, type, lowering_.objectLayouts().fieldAddress(object, type, prop.name, true),
           lowering_.exprLowerer().emitExpr(prop.value), to);
       continue;
     }
     const Type *source = prop.value->type;
-    // Its fields are copied right away, so a variable can be borrowed.
-    Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, /*canBorrow=*/true);
+    Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, true);
     for (const Field &f : source->fields()) {
       if (llvm::is_contained(prop.omit, f.name) ||
           llvm::is_contained(prop.replacedFields, f.name)) {
         continue;
       }
       const Type *to = type->field(f.name)->type;
-      llvm::Value *address =
-          lowering_.objectLayouts().fieldAddress(object, type, f.name, /*exact=*/true);
-      // A method of an interface that some class implements: bound to the
-      // object.
+      llvm::Value *address = lowering_.objectLayouts().fieldAddress(object, type, f.name, true);
       if (const Lowering::InterfaceMember *method =
               lowering_.inheritLowerer().dispatchedMember(source, f.name);
           method && method->callable) {
@@ -212,8 +192,6 @@ llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
   const Type *type = lit->type;
   std::vector<unsigned> keys(type->fields().size());
   std::iota(keys.begin(), keys.end(), 0u);
-  // As for an object literal: if an element may throw, the elements come
-  // first (held), then the tuple, which a throw would leave half filled.
   std::vector<Expr *> exprs;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     exprs.push_back(e.expr);
@@ -249,9 +227,6 @@ void ObjectLowerer::emitTupleSpread(llvm::Value *array, llvm::Value *tuple, cons
   }
 }
 
-// Object.keys, Object.values and Object.entries: the runtime walks the
-// fields in the order of the object's keys, leaving out the optional ones
-// that hold undefined.
 llvm::Value *ObjectLowerer::emitObjectCall(CallExpr *call) {
   if (call->args[0]->type->nonOptional()->isJson()) {
     return lowering_.jsonLowerer().emitJsonObjectCall(call);
@@ -259,7 +234,7 @@ llvm::Value *ObjectLowerer::emitObjectCall(CallExpr *call) {
   if (call->args[0]->type->isDict()) {
     return lowering_.dictMethodLowerer().emitDictObjectCall(call);
   }
-  Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
   llvm::Value *result;
   if (call->builtin == Builtin::ObjectKeys) {
@@ -271,7 +246,6 @@ llvm::Value *ObjectLowerer::emitObjectCall(CallExpr *call) {
         lowering_.rt_.objValues,
         {object.value, lowering_.typeDescriptors().typeDescriptor(element)}, "values");
   } else {
-    // Each entry is a new tuple [key, value].
     uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(
         lowering_.objectLayouts().objectLayout(element).type);
     result = lowering_.builder_.CreateCall(
@@ -287,14 +261,11 @@ llvm::Value *ObjectLowerer::emitObjectCall(CallExpr *call) {
 }
 
 llvm::Value *ObjectLowerer::emitFieldRead(MemberExpr *member) {
-  if (member->object->type->isUnion()) { // a field each member has
+  if (member->object->type->isUnion()) {
     return lowering_.unionMemberLowerer().emitUnionFieldRead(member);
   }
-  // A method of an interface, as a value: bound to the object, with the info
-  // of the code the object's table gives.
   if (member->signature >= 0 && !lowering_.inheritLowerer().dispatchedMember(
                                     member->object->type, member->name, member->signature)) {
-    // Of an interface that no class implements (see emitInterfaceCall).
     lowering_.stmtLowerer().emitDiscarded(member->object);
     lowering_.builder_.CreateCall(
         llvm::Intrinsic::getOrInsertDeclaration(lowering_.module_.get(), llvm::Intrinsic::trap));
@@ -311,7 +282,7 @@ llvm::Value *ObjectLowerer::emitFieldRead(MemberExpr *member) {
         member->name + ".info");
     return lowering_.closureLowerer().makeFunctionValue(info, object);
   }
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Value *value = lowering_.builder_.CreateLoad(
       lowering_.moduleBuilder().lower(member->type),
       lowering_.objectLayouts().fieldAddress(object.value, object.type, member->name),
@@ -322,8 +293,6 @@ llvm::Value *ObjectLowerer::emitFieldRead(MemberExpr *member) {
   return value;
 }
 
-// `o.x = v` and `o.x op= v`. As in JavaScript, the object is evaluated
-// first, and the old value of a compound assignment is read before v.
 llvm::Value *ObjectLowerer::keyedFieldAddress(llvm::Value *object, const Type *type,
                                               llvm::Value *key, const Type *keyType) {
   llvm::ArrayRef<const Type *> names =
@@ -348,7 +317,6 @@ llvm::Value *ObjectLowerer::keyedFieldAddress(llvm::Value *object, const Type *t
 }
 
 llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult) {
-  // `o[k] = v` with a key of literals, or `o.name = v`.
   auto *index = dyn_cast<IndexExpr>(assign->target);
   auto *member = dyn_cast<MemberExpr>(assign->target);
   const Type *type = index ? index->type : member->type;
@@ -365,14 +333,13 @@ llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult)
     value = lowering_.exprLowerer().emitExpr(assign->value);
   } else if (type->isString()) {
     llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.strTy_, address);
-    lowering_.refCounts().retainString(old); // the right side may replace the field
-    Lowering::Operand rhs =
-        lowering_.stringLowerer().emitConcatPart(assign->value, /*canBorrow=*/false);
+    lowering_.refCounts().retainString(old);
+    Lowering::Operand rhs = lowering_.stringLowerer().emitConcatPart(assign->value, false);
     value = lowering_.stringLowerer().concatOperands({{old, true, type}, rhs});
   } else if (type->isDecimal()) {
     llvm::Value *old =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
-    lowering_.refCounts().retainValue(old, type); // the right side may replace the field
+    lowering_.refCounts().retainValue(old, type);
     value = lowering_.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
     lowering_.refCounts().releaseValue(old, type);
   } else {
@@ -381,7 +348,6 @@ llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult)
     value = lowering_.binaryLowerer().emitArithmetic(
         *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), type);
   }
-  // Debug mode notes the field a store into a member writes.
   lowering_.storeField_ = index ? index->field.str() : member->name.str();
   lowering_.storeLoc_ = assign->loc();
   lowering_.storeLowerer().storeIn(object.value, object.type, address, value, type);
@@ -396,4 +362,4 @@ llvm::Value *ObjectLowerer::emitFieldAssign(AssignExpr *assign, bool needResult)
   return value;
 }
 
-} // namespace tz
+}

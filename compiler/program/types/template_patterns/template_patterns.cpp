@@ -35,7 +35,6 @@ bool splitByTemplate(const std::u16string &text, llvm::ArrayRef<std::u16string> 
       text.compare(text.size() - end.size(), end.size(), end) != 0) {
     return false;
   }
-  // As TypeScript's inferFromLiteralPartsToTemplateLiteral does.
   std::u16string rest = text.substr(0, text.size() - end.size());
   size_t pos = start.size();
   parts.clear();
@@ -61,7 +60,6 @@ bool splitByTemplate(const std::u16string &text, llvm::ArrayRef<std::u16string> 
 }
 
 bool numberString(const std::u16string &text, double &value) {
-  // What JavaScript's StringToNumber skips around the number.
   auto space = [](char16_t c) {
     return c == ' ' || (c >= '\t' && c <= '\r') || c == 0xa0 || c == 0x1680 ||
            (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 || c == 0x202f ||
@@ -81,7 +79,6 @@ bool numberString(const std::u16string &text, double &value) {
     }
     ascii += char(text[i]);
   }
-  // TypeScript takes only the empty string as no number.
   if (text.empty()) {
     return false;
   }
@@ -106,8 +103,6 @@ bool numberString(const std::u16string &text, double &value) {
     }
     return std::isfinite(value);
   }
-  // [+-] digits [. digits] [e [+-] digits], with a digit before or after
-  // the point.
   size_t i = 0, digits = 0;
   if (ascii[i] == '+' || ascii[i] == '-') {
     ++i;
@@ -122,7 +117,7 @@ bool numberString(const std::u16string &text, double &value) {
     }
   }
   if (digits == 0) {
-    return false; // Infinity too: not a finite number
+    return false;
   }
   if (i < ascii.size() && (ascii[i] == 'e' || ascii[i] == 'E')) {
     ++i;
@@ -152,7 +147,6 @@ bool holeAccepts(const Type *hole, const std::u16string &part) {
     return !hole->isPattern() || matchesPattern(part, hole);
   case Type::Kind::Double:
     return numberString(part, value);
-  // `${int}`: a whole number that fits.
   case Type::Kind::Int:
     return numberString(part, value) && value == std::trunc(value) && value >= -2147483648.0 &&
            value <= 2147483647.0;
@@ -182,4 +176,4 @@ bool matchesPattern(const std::u16string &text, const Type *pattern) {
   return true;
 }
 
-} // namespace tz
+}

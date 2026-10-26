@@ -52,13 +52,11 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
   switch (ref.kind) {
   case TypeRef::Kind::Name: {
     if (ref.name.empty()) {
-      return Type::error(); // the parser already reported it
+      return Type::error();
     }
     if (const Type *type = Type::fromName(ref.name)) {
       return type;
     }
-    // What cannot happen: the value after every member of a union is ruled
-    // out, the type of a function that never returns.
     if (ref.name == "never" && !checker_.typeDeclarer().lookupType(ref.name)) {
       return Type::never();
     }
@@ -69,8 +67,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
                    : checker_.aliasInstantiator().instantiateAlias(alias, {}, ref.loc);
       }
       if (auto *cls = dyn_cast<ClassDecl>(decl)) {
-        // A generic class names a type with its type arguments, unless
-        // they all have defaults.
         if (cls->isGeneric()) {
           ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(cls, {}, ref.loc);
           return inst ? inst->type : Type::error();
@@ -88,8 +84,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       checker_.diags_.error(ref.loc, "cannot find type '" + ref.name + "'");
       return Type::error();
     }
-    // What TypeScript calls the texts a tag gets from its template: here a
-    // plain array of strings, without `raw` (see checkMember).
     if (ref.name == "TemplateStringsArray") {
       return Type::array(Type::string());
     }
@@ -99,7 +93,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (ref.name == "Date") {
       return Type::date();
     }
-    // What setTimeout and setImmediate give, also as @types/node names them.
     if (ref.name == "Timeout" || ref.name == "NodeJS.Timeout") {
       return Type::timeout();
     }
@@ -109,7 +102,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (const Type *bytes = BytesChecker::bytesTypeNamed(ref.name)) {
       return bytes;
     }
-    // The Interface of node:readline, by the name imported.
     if (const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(ref.name);
         n && (n->module == NodeModule::Readline || n->module == NodeModule::ReadlinePromises) &&
         n->name == "Interface") {
@@ -120,15 +112,12 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (const Type *crypto = checker_.cryptoChecker().cryptoTypeNamed(ref.name)) {
       return crypto;
     }
-    // A match of some regex; one of a known regex converts to it.
     if (ref.name == "RegExpMatchArray" || ref.name == "RegExpExecArray") {
       return Type::match(-1, {}, nullptr, false);
     }
     if (const Type *dict = checker_.dictChecker().resolveDictType(ref)) {
-      return dict; // an error: it needs type arguments
+      return dict;
     }
-    // Any class, and the parameters of the constructor of the class extended
-    // (docs/decorators.md, section 5).
     if (ref.name == "Constructor") {
       return Type::constructorOf(Type::anyObject());
     }
@@ -168,8 +157,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     return Type::error();
   }
   case TypeRef::Kind::Generic:
-    // `Uint8Array<ArrayBuffer>` of TypeScript 5.7: the buffer is always an
-    // ArrayBuffer here.
     if (const Type *bytes = BytesChecker::bytesTypeNamed(ref.name);
         bytes && bytes->isTypedArray() && !checker_.typeDeclarer().lookupType(ref.name)) {
       if (ref.args.size() != 1 || ref.args[0].kind != TypeRef::Kind::Name ||
@@ -184,7 +171,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         !result.empty()) {
       return checker_.resultTypes().resolveResultType(ref, result);
     }
-    // ReadonlyArray<T> is for tsc; changes to it are not stopped here.
     if (ref.name == "Array" || ref.name == "ReadonlyArray") {
       if (ref.args.size() != 1) {
         checker_.diags_.error(ref.loc, "'" + ref.name + "' takes one type argument");
@@ -196,12 +182,11 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       array.args = ref.args;
       return resolveTypeInner(array);
     }
-    // `Box<int>`: an instance of a generic class.
     if (auto *cls =
             llvm::dyn_cast_or_null<ClassDecl>(checker_.typeDeclarer().lookupType(ref.name))) {
       std::vector<const Type *> args;
       for (const TypeRef &arg : ref.args) {
-        args.push_back(resolveType(arg, /*allowVoid=*/false));
+        args.push_back(resolveType(arg, false));
         if (args.back()->isError()) {
           return args.back();
         }
@@ -215,7 +200,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
           checker_.genericClassInstantiator().instantiateClass(cls, std::move(args), ref.loc);
       return inst ? inst->type : Type::error();
     }
-    // `Pair<int>`
     if (auto *alias =
             llvm::dyn_cast_or_null<TypeAliasDecl>(checker_.typeDeclarer().lookupType(ref.name))) {
       std::vector<const Type *> args;
@@ -242,7 +226,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       return promise;
     }
     if (ref.name == "MethodDescriptor") {
-      // What a decorator of a method gets (docs/decorators.md, section 2).
       if (ref.args.size() != 2) {
         checker_.diags_.error(ref.loc,
                               "'MethodDescriptor' takes two type arguments: the types of the "
@@ -250,8 +233,8 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
                               "'MethodDescriptor<[int, int], int>'");
         return Type::error();
       }
-      const Type *args = resolveType(ref.args[0], /*allowVoid=*/false);
-      const Type *ret = resolveType(ref.args[1], /*allowVoid=*/true);
+      const Type *args = resolveType(ref.args[0], false);
+      const Type *ret = resolveType(ref.args[1], true);
       if (args->isError() || ret->isError()) {
         return Type::error();
       }
@@ -270,9 +253,8 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (ref.name == "Constructor") {
       return checker_.classValueChecker().resolveConstructorType(ref);
     }
-    // The type of the objects a class makes: `InstanceType<typeof Point>`.
     if (ref.name == "InstanceType" && ref.args.size() == 1) {
-      const Type *cls = resolveType(ref.args[0], /*allowVoid=*/false);
+      const Type *cls = resolveType(ref.args[0], false);
       if (cls->isError()) {
         return cls;
       }
@@ -299,7 +281,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     bool withNull = false;
     std::vector<const Type *> members;
     for (const TypeRef &member : ref.args) {
-      // `Json | null` is a Json, which holds null already.
       if (member.kind == TypeRef::Kind::Name && member.name == "null") {
         withNull = true;
         continue;
@@ -334,7 +315,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     if (ref.name == "boolean") {
       return Type::boolLiteral(ref.number != 0);
     }
-    // A whole number that fits is an int, as the literal `1` is.
     bool whole = ref.number == std::trunc(ref.number) && ref.number >= -2147483648.0 &&
                  ref.number <= 2147483647.0 && !(ref.number == 0 && std::signbit(ref.number));
     return Type::numberLiteral(ref.number, whole ? Type::intTy() : Type::doubleTy());
@@ -355,7 +335,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
   case TypeRef::Kind::Intersection:
     return checker_.conditionalTypes().resolveIntersection(ref);
   case TypeRef::Kind::Infer: {
-    // The type parameter resolveConditional declared for it.
     auto *binding =
         llvm::dyn_cast_or_null<TypeAliasDecl>(checker_.typeDeclarer().lookupType(ref.name));
     if (!checker_.extendsClause_ || !binding || !binding->resolved) {
@@ -367,22 +346,19 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     return binding->resolved;
   }
   case TypeRef::Kind::Function: {
-    // `(a: int, b?: int, ...rest: int[]) => T`
     std::vector<const Type *> params;
     size_t minArgs = 0;
     bool optional = false, ok = true;
     size_t count = ref.args.size() - 1;
-    // `(this: unknown, ...args: A) => R` (see Type::hasThis).
     bool hasThis = count > 0 && !ref.names.empty() && ref.names[0] == "this" && !ref.optional[0] &&
                    !(ref.rest && count == 1);
     for (size_t i = 0; i < count; ++i) {
       bool rest = ref.rest && i + 1 == count;
       bool outerList = std::exchange(checker_.listContext_, rest);
-      const Type *type = resolveType(ref.args[i], /*allowVoid=*/false);
+      const Type *type = resolveType(ref.args[i], false);
       checker_.listContext_ = outerList;
       ok &= !type->isError();
       if (rest) {
-        // Or a list of the types of parameters: `(...args: A) => R`.
         if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
           checker_.diags_.error(ref.args[i].loc,
                                 "a rest parameter must be an array, e.g. '...xs: int[]'");
@@ -401,12 +377,10 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       }
       params.push_back(type);
     }
-    // A predicate in a function type is what the function returns.
     const TypeRef &returned = ref.args.back();
-    const Type *ret = returned.kind != TypeRef::Kind::Predicate
-                          ? resolveType(returned, /*allowVoid=*/true)
-                      : returned.asserts ? Type::voidTy()
-                                         : Type::boolTy();
+    const Type *ret = returned.kind != TypeRef::Kind::Predicate ? resolveType(returned, true)
+                      : returned.asserts                        ? Type::voidTy()
+                                                                : Type::boolTy();
     if (!ok || ret->isError()) {
       return Type::error();
     }
@@ -417,13 +391,9 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
   case TypeRef::Kind::Tuple: {
     std::vector<const Type *> elements;
     for (const TypeRef &element : ref.args) {
-      elements.push_back(resolveType(element, /*allowVoid=*/false));
+      elements.push_back(resolveType(element, false));
     }
-    // `[int, ...A]`: lists of the types of parameters spread into it
-    // (docs/generics.md, section 9).
     if (llvm::is_contained(ref.spread, true)) {
-      // `[...Tuple<A>, ...Tuple<B>]`: what a computation that waits gives is
-      // spread once it is known.
       bool waiting = false;
       for (size_t i = 0; i < elements.size(); ++i) {
         waiting |=
@@ -444,8 +414,6 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
         checker_.diags_.error(ref.loc, why);
         return Type::error();
       }
-      // A rest element makes a list of parameters, which only the type of a
-      // rest parameter is, and a pattern of a conditional type may match.
       if (list->isTuple() && list->tupleRest() && !checker_.listContext_ &&
           !checker_.extendsClause_) {
         checker_.diags_.error(
@@ -477,7 +445,6 @@ std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,
   auto isMethod = [&](size_t i) { return i < ref.methods.size() && ref.methods[i]; };
   for (size_t i = 0; i < ref.args.size(); ++i) {
     llvm::StringRef name = ref.names[i];
-    // A method with several signatures: all of them are methods.
     bool several = false, others = false;
     for (size_t j = 0; j < ref.args.size(); ++j) {
       if (j != i && ref.names[j] == name) {
@@ -492,7 +459,7 @@ std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,
                                                "'interface Name { ... }'");
         continue;
       }
-      const Type *type = resolveType(ref.args[i], /*allowVoid=*/false);
+      const Type *type = resolveType(ref.args[i], false);
       auto it = llvm::find_if(*overloads, [&](const Overload &o) { return o.name == name; });
       if (it == overloads->end()) {
         it = overloads->insert(overloads->end(), Overload{name.str(), {}});
@@ -510,7 +477,7 @@ std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,
       checker_.diags_.error(ref.locs[i], "duplicate field '" + name + "'");
       continue;
     }
-    const Type *type = resolveType(ref.args[i], /*allowVoid=*/false);
+    const Type *type = resolveType(ref.args[i], false);
     if (ref.optional[i]) {
       type = Type::optional(type);
     }
@@ -520,4 +487,4 @@ std::vector<Field> TypeResolver::resolveFields(const TypeRef &ref,
   return fields;
 }
 
-} // namespace tz
+}

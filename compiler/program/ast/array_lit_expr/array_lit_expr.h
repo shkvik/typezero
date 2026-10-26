@@ -4,13 +4,12 @@
 
 namespace tz {
 
-// `[a, b, ...c]`
 class ArrayLitExpr : public Expr {
 public:
   struct Element {
     Expr *expr;
-    bool spread;       // `...expr`
-    bool hole = false; // `[a, , b]`: allowed only in destructuring; expr is undefined
+    bool spread;
+    bool hole = false;
   };
 
   explicit ArrayLitExpr(llvm::SMLoc loc) : Expr(Kind::ArrayLit, loc) {}
@@ -19,4 +18,4 @@ public:
   std::vector<Element> elements;
 };
 
-} // namespace tz
+}

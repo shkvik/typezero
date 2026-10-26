@@ -29,31 +29,24 @@ namespace tz {
 
 namespace {
 
-// Must match TzAsyncGen in runtime/core/async/async.h: the reactor, then the
-// frame.
 constexpr uint64_t kAgenReactor = 40;
 
 constexpr uint64_t kAgenHeader = 80;
 
 constexpr uint32_t kAgenFrameAlign = 8;
 
-// TZ_LAYOUT_ASYNC_ITERATOR | TZ_LAYOUT_ASYNC_GENERATOR
 constexpr uint32_t kLayoutAsyncGenerator = 268435456 | 536870912;
 
-// TzPromise: { rc, layout, head, tail, error, i32 state, i32 flags }
 constexpr unsigned kPromiseState = 5, kPromiseFlags = 6, kPromiseError = 4;
 
 constexpr uint32_t kPromiseFulfilled = 1;
 
-constexpr uint32_t kPromiseDone = 8; // TZ_PROMISE_DONE
+constexpr uint32_t kPromiseDone = 8;
 
-} // namespace
+}
 
 AsyncGeneratorLowerer::AsyncGeneratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// The layout of async generators: the drop function, which destroys the
-// coroutine where it waits (without awaiting anything, as JavaScript drops
-// one), and what `for await` calls.
 llvm::Constant *AsyncGeneratorLowerer::asyncGeneratorLayout() {
   if (agenLayout_) {
     return agenLayout_;
@@ -85,7 +78,7 @@ llvm::Constant *AsyncGeneratorLowerer::asyncGeneratorLayout() {
                                 lowering_.builder_.getInt32(kLayoutAsyncGenerator), null,
                                 lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0)});
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, type, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(type, {base, callee("tz_agen_next"), callee("tz_agen_close")}),
       "tz.layout.agen");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -94,8 +87,6 @@ llvm::Constant *AsyncGeneratorLowerer::asyncGeneratorLayout() {
   return agenLayout_;
 }
 
-// An async generator function: a call binds the parameters and returns the
-// generator, whose body starts with the first step asked of it.
 void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function *function) {
   lowering_.functionBuilder().beginFunction(function, fn);
   Lowering::Coroutine coroutine{};
@@ -130,8 +121,6 @@ void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function 
   coroutine.handle = lowering_.builder_.CreateCall(
       lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_begin),
       {coroutine.id, frame}, "handle");
-  // As for a generator, the object comes from the handle: LLVM takes the
-  // frame to be reached only through it.
   coroutine.object = lowering_.builder_.CreateGEP(
       i8, coroutine.handle, llvm::ConstantInt::getSigned(i64, -int64_t(kAgenHeader)), "generator");
   state.object = coroutine.object;
@@ -141,7 +130,7 @@ void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function 
   coroutine.freeBlock = lowering_.functionFrame().newBlock("coro.free");
   coroutine.returnBlock = lowering_.functionFrame().newBlock("coro.return");
 
-  lowering_.functionFrame().pushScope(); // the parameters, and the environment of a closure
+  lowering_.functionFrame().pushScope();
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
@@ -160,13 +149,13 @@ void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function 
     args.push_back(lowering_.function_->getArg(i));
   }
   lowering_.functionBuilder().emitParams(fn, args);
-  lowering_.coroutineLowerer().emitSuspend(); // until the first step
+  lowering_.coroutineLowerer().emitSuspend();
   lowering_.stmtLowerer().emitStmt(fn->body);
   if (lowering_.functionFrame().blockIsOpen()) {
     lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
   lowering_.unwindLowerer().finishScopeUnwind(0);
-  lowering_.scopes_.pop_back(); // every way out released it
+  lowering_.scopes_.pop_back();
   lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.coroutineLowerer().finishCoroutine();
   lowering_.coro_ = nullptr;
@@ -174,7 +163,6 @@ void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function 
   lowering_.function_ = nullptr;
 }
 
-// The body is done: the step it ran for gets done, then those waiting.
 void AsyncGeneratorLowerer::finishAsyncGenerator(llvm::Value *error) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   lowering_.builder_.CreateCall(
@@ -209,9 +197,6 @@ llvm::Value *AsyncGeneratorLowerer::awaitValueOf(llvm::Value *value, const Type 
   return value;
 }
 
-// AsyncGeneratorYield: `value` (owned, of `type`, null for none) settles
-// the step that runs, and the body goes on with what comes next: the next
-// step at once, or later; or return() returns from here, after a turn.
 void AsyncGeneratorLowerer::agenYield(llvm::Value *value, const Type *type, llvm::SMLoc loc) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Value *slot = value && lowering_.promiseLowerer().promiseValueSize(type)
@@ -249,8 +234,6 @@ void AsyncGeneratorLowerer::agenYield(llvm::Value *value, const Type *type, llvm
   lowering_.builder_.CreateCondBr(
       lowering_.builder_.CreateICmpEQ(how, lowering_.builder_.getInt32(1)), closeBlock, goBlock,
       llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-  // return(): AsyncGeneratorUnwrapYieldResumption awaits the value it
-  // returns, then returns from here.
   lowering_.functionFrame().switchTo(closeBlock);
   lowering_.asyncLowerer().suspendAsync(nullptr, loc);
   lowering_.tryLowerer().emitReturnOf(nullptr);
@@ -264,9 +247,8 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncYield(YieldExpr *yield) {
   const Type *yielded = lowering_.currentFn_->sym->ret->yielded();
   if (yield->delegate) {
     emitAsyncYieldAll(yield, yielded);
-    return lowering_.builder_.getFalse(); // undefined
+    return lowering_.builder_.getFalse();
   }
-  // `yield value` awaits the value first.
   llvm::Value *value = nullptr;
   const Type *given = Type::undefinedTy();
   if (yield->value) {
@@ -284,12 +266,9 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncYield(YieldExpr *yield) {
   }
   agenYield(converted, yielded, yield->loc());
 
-  return lowering_.builder_.getFalse(); // what next() sent: undefined
+  return lowering_.builder_.getFalse();
 }
 
-// One step of the async iterator held in `slot`, of type `type`: the value
-// it gives (owned, of `element`), or on to `endBlock` once it is done. The
-// iterator that is done, or whose step was rejected, is not closed.
 llvm::Value *AsyncGeneratorLowerer::emitAsyncStep(llvm::Value *slot, const Type *element,
                                                   llvm::SMLoc loc, llvm::BasicBlock *endBlock) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
@@ -300,7 +279,6 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncStep(llvm::Value *slot, const Type 
                                              {ptr, ptr}),
       {it, step});
   lowering_.asyncLowerer().suspendAsync(step, loc);
-  // Let go of the iterator without closing it.
   auto forget = [&] {
     llvm::Value *held = lowering_.builder_.CreateLoad(ptr, slot, "iterator");
     lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), slot);
@@ -362,13 +340,10 @@ void AsyncGeneratorLowerer::closeAsyncIterator(llvm::Value *slot) {
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(it), closeBlock, nextBlock);
   lowering_.functionFrame().switchTo(closeBlock);
   if (lowering_.cleanupNoAwait_ || !lowering_.async_) {
-    // A coroutine dropped where it waits only lets go of what it holds.
     lowering_.builder_.CreateBr(nextBlock);
     lowering_.functionFrame().switchTo(nextBlock);
     return;
   }
-  // The error in flight, if any, waits meanwhile; one that closing gives is
-  // dropped, as a sync iterator's is (see iterCloseFunction).
   llvm::Value *saved =
       lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "saved");
   lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(ptr),
@@ -385,10 +360,6 @@ void AsyncGeneratorLowerer::closeAsyncIterator(llvm::Value *slot) {
   lowering_.functionFrame().switchTo(nextBlock);
 }
 
-// `yield* xs` of an async generator: each value of the async iterator xs
-// as the generator's own, without awaiting it again; or each element of an
-// array or an iterator awaited, as the wrapping iterator of the spec does,
-// and then the turn of `yield*`'s own await of the step.
 void AsyncGeneratorLowerer::emitAsyncYieldAll(YieldExpr *yield, const Type *yielded) {
   const Type *type = yield->value->type;
   const Type *element = yield->element;
@@ -435,7 +406,7 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
   lowering_.pendingLabels_.clear();
   const Type *type = stmt->iterable->type;
   const Type *element = stmt->binding.sym->type;
-  lowering_.functionFrame().pushScope(); // the iterable
+  lowering_.functionFrame().pushScope();
   if (type->isAsyncIterator() || type->isRuntimeObject()) {
     llvm::Value *slot = lowering_.functionFrame().createManagedSlot(type, "for.await.iterator");
     lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(stmt->iterable), slot);
@@ -445,12 +416,11 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("for.await.end");
     lowering_.functionFrame().emitBlock(headBlock);
     llvm::Value *value = emitAsyncStep(slot, element, stmt->loc(), endBlock);
-    lowering_.functionFrame().pushScope(); // the loop variable, fresh in every iteration
+    lowering_.functionFrame().pushScope();
     lowering_.stmtLowerer().storeReplacing(
         lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value,
         element);
-    lowering_.targets_.push_back(
-        {labels, /*isLoop=*/true, /*isSwitch=*/false, endBlock, headBlock, depth});
+    lowering_.targets_.push_back({labels, true, false, endBlock, headBlock, depth});
     lowering_.stmtLowerer().emitStmt(stmt->body);
     lowering_.targets_.pop_back();
     lowering_.functionFrame().popScope();
@@ -471,8 +441,7 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
   consumer.each = [this, stmt, labels, depth, endBlock, from,
                    element](llvm::Value *value) -> llvm::Value * {
     llvm::Value *awaited = awaitValueOf(value, from, stmt->loc());
-    lowering_.asyncLowerer().suspendAsync(nullptr,
-                                          stmt->loc()); // the turn of the wrapping iterator
+    lowering_.asyncLowerer().suspendAsync(nullptr, stmt->loc());
     const Type *given = Checker::awaitedTypeOf(from);
     llvm::Value *converted = element->isUndefined() ? lowering_.builder_.getFalse()
                              : given->isVoid()
@@ -483,12 +452,11 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
     }
     llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("for.await.next");
     size_t here = lowering_.scopes_.size();
-    lowering_.functionFrame().pushScope(); // the loop variable, fresh in every iteration
+    lowering_.functionFrame().pushScope();
     lowering_.stmtLowerer().storeReplacing(
         lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), converted,
         element);
-    lowering_.targets_.push_back(
-        {labels, /*isLoop=*/true, /*isSwitch=*/false, endBlock, nextBlock, depth, here});
+    lowering_.targets_.push_back({labels, true, false, endBlock, nextBlock, depth, here});
     lowering_.stmtLowerer().emitStmt(stmt->body);
     lowering_.targets_.pop_back();
     lowering_.functionFrame().popScope();
@@ -501,4 +469,4 @@ void AsyncGeneratorLowerer::emitForAwait(ForOfStmt *stmt) {
   lowering_.functionFrame().popScope();
 }
 
-} // namespace tz
+}

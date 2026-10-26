@@ -1,7 +1,3 @@
-// argon2Sync of the direct layer (docs/crypto.md, section 3): Argon2d, Argon2i and Argon2id of
-// RFC 9106 (version 0x13) over the BLAKE2b of OpenSSL, as its reference code computes them. The
-// lanes are filled one after another; the result does not depend on that.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
@@ -9,7 +5,6 @@
 #include "runtime/library/bytes/bytes/bytes.h"
 #include <string.h>
 
-// The BLAKE2b of OpenSSL (see crypto_md.c).
 typedef struct {
   uint8_t digest_length, key_length, fanout, depth, leaf_length[4];
   uint8_t node_offset[8], node_depth, inner_length, reserved[14], salt[16], personal[16];
@@ -43,7 +38,6 @@ static void put32(Blake2bCtx *c, uint32_t x) {
   ossl_blake2b_update(c, b, 4);
 }
 
-// H' of the RFC: a hash of any length, from 64-byte steps.
 static void hash_long(uint8_t *out, size_t length, const uint8_t *in, size_t in_length) {
   Blake2bCtx c;
   blake2b_start(&c, length <= 64 ? length : 64);
@@ -89,7 +83,6 @@ static uint64_t blamka(uint64_t x, uint64_t y) {
     b = rotr(b ^ c, 63);                                                                           \
   } while (0)
 
-// The permutation P over 16 words of `v`, at the positions in `at`.
 static void permute(uint64_t *v, const int at[16]) {
   uint64_t *x[16];
   for (int i = 0; i < 16; ++i) {
@@ -105,8 +98,6 @@ static void permute(uint64_t *v, const int at[16]) {
   G(*x[3], *x[4], *x[9], *x[14]);
 }
 
-// The compression G of the RFC: next = P(prev ^ ref) ^ prev ^ ref, XORed into next after the
-// first pass.
 static void fill_block(const Block *prev, const Block *ref, Block *next, int with_xor) {
   Block r, t;
   for (int i = 0; i < BLOCK_WORDS; ++i) {
@@ -190,7 +181,7 @@ static void fill_segment(const Instance *in, uint32_t pass, uint32_t lane, uint3
   }
   uint32_t start = 0;
   if (pass == 0 && slice == 0) {
-    start = 2; // the first two blocks of each lane are made from H0
+    start = 2;
     if (independent) {
       next_addresses(&address, &input, &zero);
     }
@@ -245,9 +236,6 @@ static void put_data(Blake2bCtx *c, const TzCryptoData *d) {
   }
 }
 
-// argon2Sync(algorithm, { message, nonce, parallelism, tagLength, memory, passes, secret,
-// associatedData }); the algorithm as 0 (argon2d), 1 (argon2i) or 2 (argon2id), or -1 for a name
-// known only now, in `name`.
 TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, const TzType *mt,
                           const void *mv, const TzType *nt, const void *nv, double parallelism,
                           double tag_length, double memory, double passes, const TzType *st,
@@ -301,7 +289,6 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
   {
     uint32_t p = (uint32_t)parallelism, m = (uint32_t)memory, t = (uint32_t)passes;
     uint32_t tag = (uint32_t)tag_length;
-    // H0.
     Blake2bCtx c;
     uint8_t h0[72];
     blake2b_start(&c, 64);

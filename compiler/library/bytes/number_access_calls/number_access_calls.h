@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// Numbers read from and written to bytes: the methods of DataView, and readInt32LE and the
-// like of Buffer.
 class NumberAccessCalls : public BytesCallSite {
 public:
   using BytesCallSite::BytesCallSite;
@@ -13,4 +11,4 @@ public:
   llvm::Value *emit();
 };
 
-} // namespace tz
+}

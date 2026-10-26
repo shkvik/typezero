@@ -23,7 +23,6 @@ WeakRefLowerer::WeakRefLowerer(Lowering &lowering) : lowering_(lowering) {}
 llvm::Value *WeakRefLowerer::emitWeakRefCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   if (call->builtin == Builtin::WeakRefNew) {
-    // The WeakRef borrows the object, which it does not hold.
     Expr *arg = call->args[0];
     llvm::Value *target = lowering_.exprLowerer().emitExpr(arg);
     llvm::Value *weak = lowering_.builder_.CreateCall(
@@ -33,7 +32,7 @@ llvm::Value *WeakRefLowerer::emitWeakRefCall(CallExpr *call) {
     return weak;
   }
   Lowering::Operand weak =
-      lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, /*canBorrow=*/true);
+      lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
   llvm::Value *target = lowering_.builder_.CreateCall(
       lowering_.groupLowerer().groupFunction("tz_weak_deref", ptr, {ptr}), {weak.value}, "target");
   lowering_.refCounts().dropOperand(weak);
@@ -41,4 +40,4 @@ llvm::Value *WeakRefLowerer::emitWeakRefCall(CallExpr *call) {
   return target;
 }
 
-} // namespace tz
+}

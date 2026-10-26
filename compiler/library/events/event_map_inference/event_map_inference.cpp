@@ -16,8 +16,6 @@ namespace tz {
 
 namespace {
 
-// The file of a place that placeOf gives: what comes before its line and
-// column.
 std::string fileOfPlace(const std::string &place) {
   size_t column = place.rfind(':');
   size_t line =
@@ -26,9 +24,6 @@ std::string fileOfPlace(const std::string &place) {
   return line == std::string::npos ? place : place.substr(0, line);
 }
 
-// Whether the next round may take `type` as it is: it has no class in it,
-// nor a type that its declaration alone makes (a recursive one), which
-// each round declares anew.
 bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (!seen.insert(type).second) {
     return true;
@@ -74,7 +69,7 @@ bool sameInEveryRound(const Type *type, llvm::SmallPtrSetImpl<const Type *> &see
   }
 }
 
-} // namespace
+}
 
 EventMapInference::EventMapInference(Checker &checker) : checker_(checker) {}
 
@@ -100,7 +95,7 @@ EventInference::Portable EventMapInference::portable(const Type *type,
     return p;
   }
   if (!seen.insert(type).second) {
-    p.kind = Kind::Bad; // a recursive type
+    p.kind = Kind::Bad;
     return p;
   }
   auto part = [&](const Type *t) { p.parts.push_back(portable(t, seen)); };
@@ -301,7 +296,6 @@ const Type *EventMapInference::inferredEventMap(const std::string &site) {
   checker_.inference_->open = true;
   const Type *map;
   if (!checker_.inference_->final) {
-    // Opaque, so that the calls on its emitters can tell it is this one.
     Type *opaque = Type::declareObject("the events of " + site);
     opaque->defineFields({});
     checker_.openMaps_[opaque] = site;
@@ -321,4 +315,4 @@ const Type *EventMapInference::inferredEventMap(const std::string &site) {
   return map;
 }
 
-} // namespace tz
+}

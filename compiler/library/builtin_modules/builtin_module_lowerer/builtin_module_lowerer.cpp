@@ -28,10 +28,8 @@ namespace tz {
 
 namespace {
 
-// The fields of the objects that makers make, in the order of the parts:
-// by the name of a class, or for an object type the one with these fields.
 struct MakerFields {
-  const char *cls; // null for an object type
+  const char *cls;
   std::vector<llvm::StringRef> fields;
 };
 
@@ -42,10 +40,10 @@ const std::vector<MakerFields> &makerFields() {
        {"dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks", "atimeMs",
         "mtimeMs", "ctimeMs", "birthtimeMs"}},
       {"Dirent", {"name", "parentPath", "#type"}},
-      {nullptr, {"root", "dir", "base", "ext", "name"}},         // ParsedPath
-      {nullptr, {"model", "speed", "times"}},                    // CpuInfo
-      {nullptr, {"user", "nice", "sys", "idle", "irq"}},         // its times
-      {nullptr, {"uid", "gid", "username", "homedir", "shell"}}, // UserInfo
+      {nullptr, {"root", "dir", "base", "ext", "name"}},
+      {nullptr, {"model", "speed", "times"}},
+      {nullptr, {"user", "nice", "sys", "idle", "irq"}},
+      {nullptr, {"uid", "gid", "username", "homedir", "shell"}},
   };
 
   return table;
@@ -69,10 +67,9 @@ const std::vector<llvm::StringRef> &makerOrder(const Type *type) {
   llvm_unreachable("no maker for this type");
 }
 
-// A field whose object is made inline, from the parts that follow.
 bool isNestedPart(const Type *type) { return type->isObject() && !type->isClass(); }
 
-} // namespace
+}
 
 BuiltinModuleLowerer::BuiltinModuleLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -110,7 +107,6 @@ llvm::Function *BuiltinModuleLowerer::objectMaker(const Type *type) {
   if (cls) {
     object = lowering_.classLowerer().allocInstance(cls);
   } else {
-    // The keys in the order Node prints them, which is that of the parts.
     std::vector<unsigned> keys;
     for (llvm::StringRef field : order) {
       keys.push_back(ObjectLayouts::fieldIndex(type, field));
@@ -127,7 +123,7 @@ llvm::Function *BuiltinModuleLowerer::objectMaker(const Type *type) {
                              : lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(field),
                                                              address, order[i]);
     lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, order[i], /*exact=*/true));
+        value, lowering_.objectLayouts().fieldAddress(object, type, order[i], true));
   }
   lowering_.groupLowerer().adoptFields(object, type);
   lowering_.builder_.CreateRet(object);
@@ -158,9 +154,8 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
              *ptr = lowering_.builder_.getPtrTy();
 
   if (call->builtin == Builtin::FsStatsDate) {
-    // dateFromMs of Node: the milliseconds rounded, as Math.round does.
     auto *member = cast<MemberExpr>(call->callee);
-    Lowering::Operand stats = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand stats = lowering_.refCounts().emitOperand(member->object, true);
     llvm::Value *ms =
         lowering_.builder_.CreateLoad(f64,
                                       lowering_.objectLayouts().fieldAddress(
@@ -174,11 +169,8 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
   }
 
   if (call->builtin == Builtin::FsIsKind) {
-    // The kind of file is in the bits of the mode of a Stats, and in the
-    // hidden field of a Dirent.
     auto *member = cast<MemberExpr>(call->callee);
-    Lowering::Operand object =
-        lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
     const Type *type = object.type;
     bool stats = type->field("mode") != nullptr;
     llvm::StringRef field = stats ? "mode" : "#type";
@@ -193,7 +185,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
         lowering_.builder_.CreateAnd(bits, lowering_.builder_.getInt32(0170000)), kind);
   }
 
-  // The arguments, owned, released after the call: the runtime borrows them.
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
   auto release = [&] {
     for (size_t i = 0; i < values.size(); ++i) {
@@ -206,7 +197,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
   auto fn = [&](llvm::StringRef name, llvm::Type *ret, llvm::ArrayRef<llvm::Type *> params) {
     return lowering_.processLowerer().processFunction(name, ret, params);
   };
-  // A runtime function that may throw a SystemError, with its maker last.
   auto fsCall = [&](llvm::StringRef name, llvm::Type *ret, std::vector<llvm::Type *> params,
                     std::vector<llvm::Value *> args) -> llvm::Value * {
     params.push_back(ptr);
@@ -226,8 +216,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
 
     return lowering_.builder_.CreateLoad(lowering_.strTy_, out);
   };
-  // A string or undefined, from a runtime function that says whether there
-  // is one.
   auto optionalString = [&](llvm::Value *out, llvm::Value *found) {
     return lowering_.optionalLowerer().makeOptional(
         lowering_.builder_.CreateLoad(lowering_.strTy_, out),
@@ -280,7 +268,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
                                            {obj(1), meta(1), values[0], objectMaker(call->type)});
     break;
   case Builtin::PathFormat: {
-    // The five parts as `string | undefined`, from the fields the object has.
     const Type *object = call->args[1]->type;
     const Type *optional = Type::optional(Type::string());
     llvm::Type *part = lowering_.moduleBuilder().lower(optional);
@@ -346,7 +333,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
     return optionalString(out, found);
   }
   case Builtin::FsReadFile:
-    // Without an encoding, a Buffer; with one, its number last.
     if (call->type->isBytes()) {
       if (call->args[0]->type->isInt()) {
         return fsCall("tz_fs_read_fd_bytes", ptr, {i32}, {values[0]});
@@ -360,7 +346,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
     return fsString("tz_fs_read_file", {ptr, i64, ptr, i64, i32},
                     {obj(0), meta(0), obj(1), meta(1), values[2]});
   case Builtin::FsWriteFile:
-    // The bytes of a view, or text in the encoding last.
     if (!call->args[1]->type->isString()) {
       if (call->args[0]->type->isInt()) {
         fsCall("tz_fs_write_fd_bytes", voidTy, {i32, ptr}, {values[0], values[1]});
@@ -435,4 +420,4 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

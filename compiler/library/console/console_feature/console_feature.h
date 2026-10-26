@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// console.log, info, debug, error and warn.
 class ConsoleFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "console"; }
@@ -16,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

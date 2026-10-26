@@ -40,7 +40,6 @@ bool bytesMayThrow(const CallExpr *call) {
   switch (call->builtin) {
   case Builtin::BytesNew:
   case Builtin::ArrayBufferNew: {
-    // A length that is a constant and not negative cannot fail.
     const Expr *length = call->args[0];
     if (auto *conv = dyn_cast<CastExpr>(length); conv && conv->isImplicit()) {
       length = conv->operand;
@@ -68,8 +67,7 @@ bool bytesMayThrow(const CallExpr *call) {
   case Builtin::BufferWriteNumber:
     return call->mayBeOutOfRange;
   case Builtin::TextDecoderNew:
-    return constantOf(call->args[0]) == 0; // a label known only when it runs
-  // An encoding known only when the program runs.
+    return constantOf(call->args[0]) == 0;
   case Builtin::BufferFromString:
     return !isConstant(call->args[1]);
   case Builtin::BufferByteLength:
@@ -155,10 +153,6 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
 llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
              *ptr = lowering_.builder_.getPtrTy();
-  // One constant Uint8Array for each file, over a constant ArrayBuffer and
-  // bytes the executable holds; counted, but never down to zero. The bytes
-  // are writable, so a program may change them, as it may change what any
-  // embedBytes of the file gives.
   const std::u16string &path = cast<StringLitExpr>(call->args[1])->value;
   llvm::Constant *&global = embeddedBytes_[path];
   if (!global) {
@@ -170,7 +164,7 @@ llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
     }
     llvm::Constant *init = llvm::ConstantDataArray::get(lowering_.ctx_, bytes);
     auto *data =
-        new llvm::GlobalVariable(*lowering_.module_, init->getType(), /*isConstant=*/false,
+        new llvm::GlobalVariable(*lowering_.module_, init->getType(), false,
                                  llvm::GlobalValue::PrivateLinkage, init, "tz.embedded.data");
     data->setAlignment(llvm::Align(16));
     auto *layoutsTy = llvm::ArrayType::get(lowering_.layoutDescTy_, 16);
@@ -182,21 +176,19 @@ llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
           llvm::ArrayRef<llvm::Constant *>{lowering_.builder_.getInt32(0),
                                            lowering_.builder_.getInt32(uint32_t(kind))});
     };
-    // The count of a constant never reaches zero (as for regexes).
     llvm::Constant *count = lowering_.builder_.getInt64(uint64_t(1) << 62);
     llvm::Constant *length = lowering_.builder_.getInt32(uint32_t(bytes.size()));
     auto *abufTy = llvm::StructType::get(lowering_.ctx_, {i64, ptr, ptr, i32, i32});
     auto *abuf = new llvm::GlobalVariable(
-        *lowering_.module_, abufTy, /*isConstant=*/false, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, abufTy, false, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(abufTy, {count, layout(Bytes::ArrayBuffer), data, length,
-                                           lowering_.builder_.getInt32(1)}), // TZ_ABUF_STATIC
+                                           lowering_.builder_.getInt32(1)}),
         "tz.embedded.buffer");
     if (!lowering_.bytesTy_) {
       lowering_.bytesTy_ = bytesStruct(lowering_.ctx_);
     }
     global = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.bytesTy_, /*isConstant=*/false,
-        llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, lowering_.bytesTy_, false, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(lowering_.bytesTy_, {count, layout(Bytes::Uint8), data, length,
                                                        lowering_.builder_.getInt32(0), abuf}),
         "tz.embedded");
@@ -205,4 +197,4 @@ llvm::Value *BytesCallLowerer::emitEmbedBytes(CallExpr *call) {
   return global;
 }
 
-} // namespace tz
+}

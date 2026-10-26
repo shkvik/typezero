@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The calls of crypto.subtle: their algorithms checked where they are written.
 class SubtleCallChecker {
 public:
   explicit SubtleCallChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

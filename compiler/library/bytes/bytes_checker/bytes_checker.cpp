@@ -53,7 +53,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -76,7 +75,6 @@ Range exact(int64_t v) { return {v, v}; }
 
 bool known(const Range &r) { return r.lo && r.hi; }
 
-// The smallest 2^n - 1 at or above v >= 0.
 int64_t allOnes(int64_t v) {
   int64_t m = 0;
   while (m < v) {
@@ -97,7 +95,7 @@ const llvm::StringLiteral kTypedMethods[] = {
     "reduceRight", "reverse",    "set",      "slice",         "some",    "sort",
     "subarray",    "toReversed", "toSorted", "toString",      "values",  "with"};
 
-} // namespace
+}
 
 BytesChecker::BytesChecker(Checker &checker) : checker_(checker) {}
 
@@ -127,9 +125,7 @@ Expr *BytesChecker::checkBytesIndex(IndexExpr *index) {
   if (index->index->type->isError()) {
     return index;
   }
-  // Proved in range: a plain read. Otherwise JavaScript yields undefined.
-  bool inRange =
-      checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false);
+  bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
   index->mayBeOutOfRange = !inRange;
   index->type = inRange ? type->elementType() : Type::optional(type->elementType());
 
@@ -143,7 +139,7 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::opt
     return;
   }
   std::string object = valueText(index->object), position = valueText(index->index);
-  if (!checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false)) {
+  if (!checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
     std::optional<int64_t> at = checker_.constantFolder().intConstant(index->index);
     std::string check = at ? object + ".length > " + std::to_string(*at)
                            : position + " >= 0 && " + position + " < " + object + ".length";
@@ -159,7 +155,6 @@ void BytesChecker::checkBytesStore(IndexExpr *index, const Expr *value, std::opt
     checker_.byteProofs().checkFits(value, target, what);
     return;
   }
-  // `u[i] op= v` stores `u[i] op v`, and `u[i]++` stores u[i] + 1.
   int64_t lo, hi;
   if (!target->elementRange(lo, hi) || target->bytes() == Bytes::Uint8Clamped ||
       target->bytes() == Bytes::Int32) {
@@ -187,7 +182,6 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
     return checker_.processChecker().builtinCall(member->loc(), member, builtin, std::move(args),
                                                  result);
   };
-  // A constant, after the object for what evaluating it does.
   auto constant = [&](Expr *value) -> Expr * {
     if (isa<NameExpr>(member->object)) {
       return value;
@@ -213,7 +207,7 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   switch (type->bytes()) {
   case Bytes::ArrayBuffer:
     if (name == "byteLength") {
-      member->type = Type::intTy(); // read by Lowering, and a length for the proofs
+      member->type = Type::intTy();
       return member;
     }
     if (name == "maxByteLength") {
@@ -287,10 +281,6 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
   return member;
 }
 
-// The properties lie at the same place in every view (TzBytes), and the
-// length of an ArrayBuffer where a view keeps its length: Lowering reads them
-// the same way whatever the member is, and finds the size of an element by
-// the member's class number where the members' differ.
 Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
@@ -324,7 +314,7 @@ Expr *BytesChecker::checkBytesUnionMember(MemberExpr *member) {
     return member;
   }
   if (name == "length") {
-    member->type = Type::intTy(); // read by Lowering, as of each member
+    member->type = Type::intTy();
     return member;
   }
   if (name == "buffer") {
@@ -353,7 +343,6 @@ Expr *BytesChecker::checkBytesStaticMember(MemberExpr *member) {
     lit->type = Type::intTy();
     return lit;
   }
-  // The size of the pool of Buffer.allocUnsafe in node, which tz has none of.
   if (type->isBuffer() && member->name == "poolSize") {
     auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), 8192);
     lit->type = Type::intTy();
@@ -406,7 +395,6 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
     return lit;
   }
 
-  // Checked when the program runs: an unknown one is a TypeError.
   return checker_.argumentChecker().checkArg(arg, Type::string());
 }
 
@@ -460,4 +448,4 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
   return checker_.typedArrayChecker().checkTypedArrayMethod(call, member, expected);
 }
 
-} // namespace tz
+}

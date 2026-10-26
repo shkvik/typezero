@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Calls, members, indexing and `new`: what follows a primary expression.
 class CallParser {
 public:
   explicit CallParser(Parser &parser);
@@ -16,4 +15,4 @@ private:
   Parser &parser_;
 };
 
-} // namespace tz
+}

@@ -30,9 +30,6 @@ enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlag
 
 constexpr uint32_t kFulfilled = 1;
 
-// A reaction to a promise (then, catch, finally): { i64 rc, ptr descriptor,
-// reactor { ptr next, ptr run, ptr owner, ptr source, i64 ahead }, ptr
-// derived, fn onFulfilled, fn onRejected }.
 enum ReactionField : unsigned {
   kReactionRc,
   kReactionDesc,
@@ -48,7 +45,7 @@ enum ReactionField : unsigned {
 
 constexpr uint64_t kReactorOffset = 16;
 
-} // namespace
+}
 
 ReactionLowerer::ReactionLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -65,7 +62,6 @@ llvm::StructType *ReactionLowerer::reactionType() {
   return reactionTy_;
 }
 
-// Releases the promise a reaction gives and its callbacks, then frees it.
 llvm::Function *ReactionLowerer::reactionDrop() {
   if (reactionDropFn_) {
     return reactionDropFn_;
@@ -83,7 +79,6 @@ llvm::Function *ReactionLowerer::reactionDrop() {
   llvm::Value *derived = lowering_.builder_.CreateLoad(
       ptr, lowering_.builder_.CreateStructGEP(type, object, kReactionDerived));
   if (lowering_.memory().hasCycles) {
-    // A member of a group (attachReaction): what it holds goes as from one.
     const Type *anyFunction = Type::function({}, 0, false, Type::voidTy());
     lowering_.storeLowerer().releaseIn(object, derived, Type::promise(Type::voidTy()));
     for (unsigned field : {kReactionFulfilled, kReactionRejected}) {
@@ -113,10 +108,6 @@ llvm::Function *ReactionLowerer::reactionDrop() {
   return reactionDropFn_;
 }
 
-// void (ptr reactor, ptr source): the code of a reaction, once the promise
-// it waits for (`source`, of a value of `value`) settled. It calls the
-// callback for how it settled, if there is one, and settles its own promise,
-// of a value of `result`, with what that gives, or as `source` did.
 llvm::Function *ReactionLowerer::reactionHandler(Builtin kind, const Type *value,
                                                  const Type *result, const Type *onFulfilled,
                                                  const Type *onRejected) {
@@ -145,8 +136,6 @@ llvm::Function *ReactionLowerer::reactionHandler(Builtin kind, const Type *value
       ptr, lowering_.builder_.CreateStructGEP(type, object, kReactionDerived), "derived");
   bool holds = lowering_.promiseLowerer().promiseValueSize(result) != 0;
 
-  // What a callback of type `fnType` gave: its error, a promise to follow, or
-  // the value.
   auto settleWith = [&](llvm::Value *given, const Type *fnType) {
     if (lowering_.typeThrows(fnType)) {
       llvm::Value *error =
@@ -175,8 +164,6 @@ llvm::Function *ReactionLowerer::reactionHandler(Builtin kind, const Type *value
     }
     lowering_.builder_.CreateRetVoid();
   };
-  // Calls the callback in `field` of type `fnType` with `arg` (owned; null
-  // for none), as many as it takes.
   auto callWith = [&](unsigned field, const Type *fnType, llvm::Value *arg, const Type *argType) {
     llvm::Value *fn = lowering_.builder_.CreateLoad(
         lowering_.fnTy_, lowering_.builder_.CreateStructGEP(type, object, field), "callback");
@@ -266,7 +253,6 @@ llvm::Value *ReactionLowerer::emitPromiseReaction(CallExpr *call) {
   exprs.insert(exprs.end(), call->args.begin(), call->args.end());
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(exprs);
   llvm::Value *source = values[0];
-  // The callbacks, by what they are for; `undefined` is none.
   const Type *types[2] = {nullptr, nullptr};
   llvm::Value *callbacks[2] = {nullptr, nullptr};
   size_t first = call->builtin == Builtin::PromiseCatch ? 1 : 0;
@@ -290,9 +276,6 @@ void ReactionLowerer::attachReaction(llvm::Value *source, llvm::Value *derived,
                                      llvm::Value *onRejected, bool later) {
   llvm::StructType *type = reactionType();
   uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(type);
-  // In a program with cycles, a member of a group, as what holds it (its
-  // promise, see tz_promise_react) and what it holds may be: else a cycle
-  // through it could never be freed.
   llvm::Value *object =
       lowering_.memory().hasCycles
           ? lowering_.groupLowerer().allocMember(size, "reaction")
@@ -303,7 +286,6 @@ void ReactionLowerer::attachReaction(llvm::Value *source, llvm::Value *derived,
     lowering_.builder_.CreateStore(lowering_.builder_.getInt64(1),
                                    lowering_.builder_.CreateStructGEP(type, object, kReactionRc));
   }
-  // A member's descriptor is a layout, which the report of debug mode reads.
   lowering_.builder_.CreateStore(
       lowering_.memory().hasCycles
           ? lowering_.groupLowerer().memberDescriptor(reactionDrop(), "reaction")
@@ -345,4 +327,4 @@ void ReactionLowerer::attachReaction(llvm::Value *source, llvm::Value *derived,
       {source, lowering_.builder_.CreateStructGEP(type, object, kReactorNext)});
 }
 
-} // namespace tz
+}

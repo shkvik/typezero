@@ -8,7 +8,6 @@
 
 namespace tz {
 
-// The machine tz builds for: the one it runs on.
 class Target {
 public:
   static Result<Target, Errors> host(bool optimize);
@@ -23,4 +22,4 @@ private:
   std::unique_ptr<llvm::TargetMachine> machine_;
 };
 
-} // namespace tz
+}

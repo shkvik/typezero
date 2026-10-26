@@ -18,4 +18,4 @@ struct BuildOptions {
   RuntimeFiles runtime;
 };
 
-} // namespace tz
+}

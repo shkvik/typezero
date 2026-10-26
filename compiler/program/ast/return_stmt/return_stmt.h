@@ -9,7 +9,7 @@ struct ReturnStmt : Stmt {
   ReturnStmt(llvm::SMLoc loc, Expr *value) : Stmt(Kind::Return, loc), value(value) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Return; }
 
-  Expr *value; // may be null
+  Expr *value;
 };
 
-} // namespace tz
+}

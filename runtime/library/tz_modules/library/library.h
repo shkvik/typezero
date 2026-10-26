@@ -1,5 +1,3 @@
-// The built-in modules written in tz (library/): what their intrinsics `__tz_*` do.
-
 #ifndef TZ_LIBRARY_H
 #define TZ_LIBRARY_H
 

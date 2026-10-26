@@ -26,12 +26,9 @@ namespace tz {
 
 namespace {
 
-// How Lowering walks the references in a value for the group functions: the
-// reference itself, or the environment of a function; anything else goes to
-// the runtime by its descriptor.
 enum class RefShape { None, Pointer, Function, Optional, Other };
 
-} // namespace
+}
 
 MemoryDebug::MemoryDebug(Lowering &lowering) : lowering_(lowering) {}
 
@@ -50,7 +47,6 @@ void MemoryDebug::checkOwned(const Type *type, llvm::StringRef name, llvm::Value
     return nullptr;
   };
   const Type *owner = held(lowering_.memory().ownedFields);
-  // The function in an owned object's field: only that object holds it.
   bool callback = !owner && (owner = held(lowering_.memory().backRefFields)) != nullptr;
   if (!owner) {
     return;
@@ -72,8 +68,6 @@ void MemoryDebug::checkOwned(const Type *type, llvm::StringRef name, llvm::Value
        lowering_.builder_.getInt32(uint32_t(text.size()))});
 }
 
-// void trace(ptr object, ptr walk): each field that may hold a member, and
-// the variables captured after them, to the walk.
 llvm::Function *
 MemoryDebug::traceFunction(const Type *type, llvm::StructType *layout,
                            llvm::ArrayRef<std::pair<const VarSymbol *, unsigned>> captures,
@@ -181,7 +175,7 @@ void MemoryDebug::finishGroupDebug(llvm::Instruction *init) {
   }
   auto *arrayType = llvm::ArrayType::get(entryType, entries.size());
   auto *table = new llvm::GlobalVariable(
-      *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, entries), "tz.group.traces");
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(lowering_.groupLowerer().groupFunction("tz_group_debug_init",
@@ -190,4 +184,4 @@ void MemoryDebug::finishGroupDebug(llvm::Instruction *init) {
                {table, b.getInt32(uint32_t(entries.size()))});
 }
 
-} // namespace tz
+}

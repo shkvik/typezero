@@ -67,14 +67,13 @@ void FunctionFrame::emitCleanups(size_t depth) {
 }
 
 void FunctionFrame::emitScopeCleanup(const Lowering::Scope &scope) {
-  // The iterations of dictionaries end, before the slots let them go.
   for (llvm::Value *slot : llvm::reverse(scope.dicts)) {
     llvm::Value *map = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, "map");
     llvm::BasicBlock *endBlock = newBlock("dict.iterated");
     llvm::BasicBlock *nextBlock = newBlock("dict.iteration.end");
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(map), endBlock, nextBlock);
     switchTo(endBlock);
-    llvm::Value *count = lowering_.dictLowerer().dictField(map, 8); // TzMap::iterating
+    llvm::Value *count = lowering_.dictLowerer().dictField(map, 8);
     lowering_.builder_.CreateStore(
         lowering_.builder_.CreateSub(
             lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(), count),
@@ -98,7 +97,7 @@ void FunctionFrame::emitScopeCleanup(const Lowering::Scope &scope) {
     switchTo(nextBlock);
   }
   for (const auto &[slot, type] : llvm::reverse(scope.slots)) {
-    if (!type) { // a box or an environment
+    if (!type) {
       llvm::Value *object = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot);
       lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                      slot);
@@ -107,10 +106,8 @@ void FunctionFrame::emitScopeCleanup(const Lowering::Scope &scope) {
     }
     llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
     llvm::Value *value = lowering_.builder_.CreateLoad(lowered, slot);
-    // Emptied, so that a second cleanup of the same slot (a loop that leaves
-    // early on the next iteration) does nothing.
     lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), slot);
-    if (lowering_.eternalSlots_.contains(slot)) { // a global of main's, at the end
+    if (lowering_.eternalSlots_.contains(slot)) {
       lowering_.publishLowerer().endValue(value, type);
     } else {
       lowering_.refCounts().releaseValue(value, type);
@@ -128,7 +125,6 @@ llvm::AllocaInst *FunctionFrame::createStackSlot(llvm::Type *type, const llvm::T
 llvm::Value *FunctionFrame::createManagedSlot(const Type *type, const llvm::Twine &name) {
   llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
   llvm::AllocaInst *slot = createStackSlot(lowered, name);
-  // Starts empty, so that releasing it before it was assigned is harmless.
   llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
   init.CreateStore(llvm::Constant::getNullValue(lowered), slot);
   lowering_.scopes_.back().slots.push_back({slot, type});
@@ -147,8 +143,6 @@ llvm::Value *FunctionFrame::createObjectSlot(const llvm::Twine &name) {
 
 llvm::Value *FunctionFrame::createLocal(const VarSymbol *var, llvm::StringRef name) {
   if (var->boxed()) {
-    // Closures share the variable: it lives in a box, a new one each time
-    // the declaration runs.
     llvm::Value *slot = createObjectSlot(name + ".box");
     lowering_.boxSlots_[var] = slot;
     llvm::Value *box = lowering_.envLowerer().newBox(ClosureLowerer::typeOf(var));
@@ -177,9 +171,6 @@ llvm::Value *FunctionFrame::addressOf(const VarSymbol *var) {
   }
   llvm::Value *global = lowering_.globals_.lookup(var);
   assert(global && "variable used before its declaration was emitted");
-  // The state of a built-in module (fetch's pool of connections, the stdio
-  // streams...): code that runs ahead of its turn waits for it first, as the
-  // analysis does not walk that code (runtime/core/parallel/parallel.c).
   if (lowering_.parallel_ && lowering_.function_ && lowering_.libraryState_.contains(var)) {
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
         "tz_order_enter", lowering_.builder_.getVoidTy(), {}));
@@ -195,4 +186,4 @@ llvm::Value *FunctionFrame::spill(llvm::Value *value, const llvm::Twine &name) {
   return slot;
 }
 
-} // namespace tz
+}

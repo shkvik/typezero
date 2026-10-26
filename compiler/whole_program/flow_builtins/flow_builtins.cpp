@@ -30,7 +30,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   }
   auto insert = [&](size_t from) {
     for (size_t i = from; i < args.size(); ++i) {
-      // `a.push(...b)`: the elements of b.
       Refs value = c->spreads(i) ? shifted(args[i], 1) : args[i];
       flows_.flowStmts().recordWrite(receiver, true, "", c->spreads(i) ? nullptr : c->args[i],
                                      receiverType ? receiverType->nonOptional() : nullptr,
@@ -40,8 +39,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       }
     }
   };
-  // The callbacks get the elements, the container, and what else the call
-  // passes; what they return goes to the result of map and reduce.
   Refs given = parts;
   append(given, receiver);
   for (const Refs &a : args) {
@@ -54,14 +51,7 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
       results.push_back({flows_.returned(f->fn), 0, 0});
     }
   }
-  // Where rejections come back: the callback of `catch`, the second one of
-  // `then`, `reason` of what `allSettled` gives, the `errors` of the
-  // AggregateError of `any`.
   switch (c->builtin) {
-  // The intrinsics of the built-in modules written in tz: `__tz_as<C>(x)`
-  // and `__tz_chunk<T>(u)` give x itself seen as another type,
-  // `__tz_listener<F>(f)` a function that calls f; the others give
-  // numbers, strings and the runtime's objects, and keep nothing.
   case Builtin::LibAs:
   case Builtin::LibChunk:
   case Builtin::LibListener:
@@ -110,9 +100,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   default:
     break;
   }
-  // `new Map(entries)`, `new Set(values)`: into the dictionary, its keys
-  // and values by its type, two levels inside the entries (one of a Set's
-  // values).
   if (c->builtin == Builtin::DictNew && args.size() == 1) {
     if (int into = flows_.contents(c->type); into >= 0) {
       flows_.flow(shifted(args[0], c->type->nonOptional()->isSet() ? 1 : 2), into);
@@ -200,7 +187,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::SetAdd:
   case Builtin::RecordSet:
   case Builtin::RecordNullishSet:
-    // Into the dictionary: its values (and a Set's keys) by their type.
     if (held >= 0) {
       for (const Refs &a : args) {
         flows_.flow(a, held);
@@ -212,8 +198,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     }
     return receiver;
   default: {
-    // Any other: what it gives may be its receiver, a part of it, or an
-    // argument; what it keeps is not followed.
     Refs out = receiver;
     append(out, parts);
     for (const Refs &a : args) {
@@ -231,4 +215,4 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   }
 }
 
-} // namespace tz
+}

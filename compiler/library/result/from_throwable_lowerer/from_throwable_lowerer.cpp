@@ -28,9 +28,6 @@ namespace tz {
 
 FromThrowableLowerer::FromThrowableLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// A function value whose environment holds f and toError: its code calls f
-// with its arguments and makes a Result of what f returns, or of the error
-// f throws, taken from tz_thrown (and given to toError).
 llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
   const Type *fnType = call->args[0]->type;
   const Type *toErrorType = call->args.size() > 1 ? call->args[1]->type : nullptr;
@@ -40,8 +37,6 @@ llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
   auto *envType =
       llvm::StructType::get(lowering_.ctx_, {i64, ptr, lowering_.fnTy_, lowering_.fnTy_});
 
-  // The environment, which holds both functions (a null one without
-  // toError) and releases them when it is dropped.
   auto *dropType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(), {ptr}, false);
   auto *drop = llvm::Function::Create(dropType, llvm::GlobalValue::InternalLinkage,
                                       "tz.fromThrowable.env.drop", lowering_.module_.get());
@@ -57,7 +52,6 @@ llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
   lowering_.builder_.CreateCall(lowering_.rt_.objFree, {drop->getArg(0)});
   lowering_.builder_.CreateRetVoid();
 
-  // The code.
   llvm::FunctionType *codeType = lowering_.closureLowerer().closureFnType(madeType);
   auto *code = llvm::Function::Create(codeType, llvm::GlobalValue::InternalLinkage,
                                       "tz.fromThrowable", lowering_.module_.get());
@@ -98,7 +92,6 @@ llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
       lowering_.refCounts().releaseValue(thrown, lowering_.errorClass_->type);
     }
     error = lowering_.closureLowerer().callFunctionValue(toError, toErrorType, errorArgs);
-    // toError threw in turn: that goes to the caller.
     if (lowering_.typeThrows(toErrorType)) {
       llvm::BasicBlock *madeBlock = lowering_.functionFrame().newBlock("made");
       llvm::BasicBlock *failedBlock = lowering_.functionFrame().newBlock("failed");
@@ -117,8 +110,7 @@ llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
   lowering_.builder_.restoreIP(point);
 
   auto *info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.fromThrowable");
@@ -142,13 +134,11 @@ llvm::Value *FromThrowableLowerer::emitFromThrowable(CallExpr *call) {
   return lowering_.closureLowerer().makeFunctionValue(info, object);
 }
 
-// The half asked for, or an Error thrown for the other one, as neverthrow's
-// messages say.
 llvm::Value *FromThrowableLowerer::emitUnsafeUnwrap(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *type = member->object->type;
   bool wantErr = call->builtin == Builtin::ResultUnsafeUnwrapErr;
-  Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand result = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Value *ok = lowering_.resultLowerer().resultIsOk(result.value, type);
   llvm::BasicBlock *goodBlock = lowering_.functionFrame().newBlock("unwrap");
   llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("unwrap.other");
@@ -175,4 +165,4 @@ llvm::Value *FromThrowableLowerer::emitUnsafeUnwrap(CallExpr *call) {
   return lowering_.exprLowerer().emitConversion(value, half, call->type);
 }
 
-} // namespace tz
+}

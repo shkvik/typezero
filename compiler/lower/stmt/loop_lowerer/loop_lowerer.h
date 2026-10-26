@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Loops, break, continue and labels.
 class LoopLowerer {
 public:
   explicit LoopLowerer(Lowering &lowering);
@@ -21,4 +20,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

@@ -16,4 +16,4 @@ llvm::Value *ChildProcessFeature::lowerCall(Lowering &lowering, CallExpr *call) 
   return lowering.childLowerer().emitChildBuiltin(call);
 }
 
-} // namespace tz
+}

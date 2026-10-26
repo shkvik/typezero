@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// process, Date.now() and performance.now() (docs/process.md).
 class ProcessFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "process"; }
@@ -16,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

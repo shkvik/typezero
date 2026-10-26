@@ -136,7 +136,7 @@ SourceFile Parser::parseSourceFile() {
       recovering_ = false;
       continue;
     }
-    file.items.push_back(stmts().parseStatement(/*topLevel=*/true));
+    file.items.push_back(stmts().parseStatement(true));
     if (recovering_) {
       cursor().synchronize();
     }
@@ -168,7 +168,7 @@ FunctionDecl *Parser::parseMethodCopy() {
 
 FunctionDecl *Parser::parseFunctionExprCopy() {
   if (tok_.is(Tok::KwFunction)) {
-    return functions().parseFunction(/*expression=*/true);
+    return functions().parseFunction(true);
   }
   if (tok_.is(Tok::Less)) {
     const char *start = tok_.text.data();
@@ -189,9 +189,7 @@ bool Parser::Pattern::declares(llvm::StringRef name) const {
   return false;
 }
 
-FunctionDecl *Parser::parseFunctionCopy() {
-  return functions().parseFunction(/*expression=*/false);
-}
+FunctionDecl *Parser::parseFunctionCopy() { return functions().parseFunction(false); }
 
 Parser::~Parser() = default;
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// WeakRef (docs/objects.md, section 11).
 class WeakRefFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "weakref"; }
@@ -15,4 +14,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

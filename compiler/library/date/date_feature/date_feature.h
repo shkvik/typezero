@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Date and Intl.DateTimeFormat (docs/date.md).
 class DateFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "date"; }
@@ -16,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

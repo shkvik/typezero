@@ -8,10 +8,6 @@
 
 namespace tz {
 
-// Functions that several classes made from sema_intl.cpp use.
-
-// An option: its type ('s' a string, 'n' a number, 'b' a boolean, 'g' a
-// string or a boolean), and the values a string may have (none: any).
 struct IntlOption {
   llvm::StringLiteral name;
   char kind;
@@ -22,7 +18,6 @@ inline const IntlOption kMatcher = {"localeMatcher", 's', {"lookup", "best fit"}
 
 inline const IntlOption kNumbering = {"numberingSystem", 's', {}};
 
-// The digit options of NumberFormat and PluralRules.
 inline const IntlOption kDigits[] = {
     {"minimumIntegerDigits", 'n', {}},
     {"minimumFractionDigits", 'n', {}},
@@ -40,16 +35,14 @@ inline const IntlOption kDigits[] = {
 
 std::vector<IntlOption> numberOptions();
 
-// A kind of object of Intl: what JavaScript calls it, what its options are,
-// and whether it can be made without `new`.
 struct IntlService {
   IntlKind kind;
   llvm::StringLiteral name;
-  int runtimeKind; // TZ_INTL_*
+  int runtimeKind;
   std::vector<IntlOption> options;
   bool callable;
 };
 
 const std::vector<IntlService> &services();
 
-} // namespace tz
+}

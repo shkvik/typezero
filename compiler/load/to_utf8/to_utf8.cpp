@@ -22,4 +22,4 @@ std::string toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-} // namespace tz
+}

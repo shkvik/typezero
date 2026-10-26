@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The module: declarations, globals, functions and main, in that order.
 class ModuleBuilder {
 public:
   explicit ModuleBuilder(Lowering &lowering);
@@ -20,4 +19,4 @@ private:
   std::vector<const VarSymbol *> managedGlobals_;
 };
 
-} // namespace tz
+}

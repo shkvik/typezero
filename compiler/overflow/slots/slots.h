@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Where values are kept while a function runs: variables, fields and elements.
 class Slots {
 public:
   explicit Slots(OverflowCheck &check);
@@ -24,4 +23,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

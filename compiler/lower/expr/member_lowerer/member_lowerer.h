@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Members of objects.
 class MemberLowerer {
 public:
   explicit MemberLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

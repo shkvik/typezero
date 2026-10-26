@@ -5,8 +5,6 @@
 
 namespace tz {
 
-// `throw value`: only an Error (or an instance of a class derived from it)
-// can be thrown (docs/errors.md).
 struct ThrowStmt : Stmt {
   ThrowStmt(llvm::SMLoc loc, Expr *value) : Stmt(Kind::Throw, loc), value(value) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Throw; }
@@ -14,4 +12,4 @@ struct ThrowStmt : Stmt {
   Expr *value;
 };
 
-} // namespace tz
+}

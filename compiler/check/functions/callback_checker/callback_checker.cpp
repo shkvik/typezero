@@ -24,7 +24,6 @@ namespace tz {
 
 namespace {
 
-// How a callback of a built-in method is called, for messages.
 const char *callbackArgs(llvm::StringRef method) {
   if (method == "reduce" || method == "reduceRight") {
     return "(accumulator, value, index, array)";
@@ -42,7 +41,6 @@ const char *ordinal(size_t i) {
   return i < 5 ? names[i] : "next";
 }
 
-// What the arguments of a callback are, by position.
 const char *callbackArgName(llvm::StringRef method, size_t i) {
   bool reduce = method == "reduce" || method == "reduceRight";
   if (reduce) {
@@ -52,14 +50,13 @@ const char *callbackArgName(llvm::StringRef method, size_t i) {
   return i == 0 ? "value" : i == 1 ? "index" : "array";
 }
 
-} // namespace
+}
 
 CallbackChecker::CallbackChecker(Checker &checker) : checker_(checker) {}
 
 Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &expected,
                                         unsigned primary, llvm::StringRef method) {
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
-    // The method only calls it, during the call.
     fe->fn->nonEscaping = true;
     Expr *checked = checker_.closureChecker().checkFunctionExpr(fe, &expected);
     if (checker_.functionValueChecker().asyncCallbackProblem(checked, expected, method)) {
@@ -72,7 +69,6 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &exp
     wrapper->fn->nonEscaping = true;
     return checker_.closureChecker().checkFunctionExpr(wrapper, &expected);
   }
-  // `lists.map(first)`: the instance for what the method passes.
   const Checker::Signature *outerCallback =
       std::exchange(checker_.callback_, isa<MemberExpr>(arg) ? &expected : nullptr);
   auto *named = dyn_cast<NameExpr>(arg);
@@ -108,8 +104,6 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &exp
                                             "' passes '" + given->name() + "'");
       return arg;
     }
-    // `map(parseInt)`: the index would land in an optional parameter, which
-    // the function surely meant for something else.
     if (i >= primary && i >= type->minArgs()) {
       std::string paramName =
           known && i < known->params.size() ? " '" + known->params[i].name.str() + "'" : "";
@@ -138,14 +132,12 @@ Expr *CallbackChecker::checkFunctionArg(Expr *arg, const Checker::Signature &exp
                                           type->ret()->name() + "'");
     return arg;
   }
-  // `names.forEach(store.save)`: what it returns is dropped, a Result too.
   if (expected.voidResult && type->ret()->isResult()) {
     checker_.diags_.error(arg->loc(),
                           name + " returns a Result that '" + method +
                               "' drops, so an error in it would go unchecked; pass an arrow "
                               "that handles it, e.g. with '.match(...)'");
   }
-  // And a Promise, which nothing would wait for.
   if (expected.voidResult && !expected.asyncVoid && type->ret()->isPromise()) {
     checker_.diags_.error(arg->loc(),
                           name + " returns a Promise that '" + method +
@@ -166,7 +158,6 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
   if (!ret || !ret->value) {
     return false;
   }
-  // The variables a condition shows to hold a value when it is `value`.
   std::function<llvm::SmallPtrSet<const VarSymbol *, 4>(const Expr *, bool)> defined =
       [&](const Expr *cond, bool value) -> llvm::SmallPtrSet<const VarSymbol *, 4> {
     if (auto *unary = dyn_cast<UnaryExpr>(cond); unary && unary->op == UnaryOp::Not) {
@@ -176,7 +167,6 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
         bin && (bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr)) {
       llvm::SmallPtrSet<const VarSymbol *, 4> l = defined(bin->lhs, value),
                                               r = defined(bin->rhs, value);
-      // Both sides hold when `&&` is true (`||` false); one of them otherwise.
       if ((bin->op == BinaryOp::LogAnd) == value) {
         l.insert(r.begin(), r.end());
         return l;
@@ -189,7 +179,6 @@ bool CallbackChecker::keepsDefined(const Expr *callback) const {
       }
       return both;
     }
-    // The truth of a value: `x` is truthy only if it holds one.
     if (auto *conv = dyn_cast<CastExpr>(cond); conv && conv->isImplicit() && conv->type->isBool()) {
       cond = conv->operand;
     }
@@ -225,7 +214,6 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
       {"every", Builtin::ArrEvery, Test},
   };
   const Type *arrayType = member->object->type;
-  // A typed array gives its elements as numbers (sema_bytes.cpp).
   bool typed = arrayType->isTypedArray();
   const Type *element = typed ? arrayType->elementType() : arrayType->inner();
   llvm::StringRef name = member->name;
@@ -273,9 +261,6 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
     break;
   case Map:
   case FlatMap:
-    // Where an array of objects is wanted, the objects the callback makes
-    // take their type from it; so do Results, `xs.map(ok)`. A typed array
-    // stores the results in a new one of its kind.
     if (const Type *wanted = expected ? expected->nonOptional() : nullptr;
         wanted && wanted->isArray() &&
         (Checker::holdsObjects(wanted->inner()) || Checker::holdsResults(wanted->inner()))) {
@@ -294,8 +279,6 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   case Reduce:
     primary = 2;
     if (count == 2) {
-      // `reduce(f, 0)` over doubles starts from the double 0, over decimals
-      // from the decimal 0 (and `reduce(f, 0.5)` from the decimal 0.5).
       Expr *&init = call->args[1];
       auto *unary = dyn_cast<UnaryExpr>(init);
       bool literal = isa<IntLitExpr>(init) ||
@@ -332,8 +315,6 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   }
 
   bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
-  // The callback of a typed array knows the range of its element; that of
-  // map must give what fits in the new one.
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && typed) {
     Checker::ByteCallback info;
     info.param = kind == Reduce ? 1 : 0;
@@ -346,7 +327,7 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   call->args[0] = checkFunctionArg(call->args[0], sig, primary, name);
   const Type *callback = call->args[0]->type;
   call->builtin = method ? method->builtin : Builtin::ArrSortWith;
-  checker_.flowChecker().calledFunction(); // the callback may change anything
+  checker_.flowChecker().calledFunction();
   if (!callback->isFunction()) {
     return call;
   }
@@ -362,17 +343,15 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
                             "the callback of '" + name + "' must return a value");
       return call;
     }
-    if (typed) { // see checkBytesMethod
+    if (typed) {
       call->type = arrayType;
       break;
     }
     call->type = kind == FlatMap && result->isArray() ? result : Type::array(result);
     break;
   case Filter:
-    // `filter(Boolean)` and `filter(x => x != undefined)` keep only the
-    // elements that hold a value: `(T | undefined)[]` becomes `T[]`.
     if (const Type *kept = checker_.predicateChecker().filteredType(call->args[0], element)) {
-      call->type = Type::array(kept); // what a function that tests keeps
+      call->type = Type::array(kept);
     } else {
       call->type = element->isOptional() && (isBoolean || keepsDefined(call->args[0]))
                        ? Type::array(element->inner())
@@ -409,4 +388,4 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   return call;
 }
 
-} // namespace tz
+}

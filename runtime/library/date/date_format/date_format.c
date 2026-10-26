@@ -1,15 +1,3 @@
-// Dates in the formats of languages (docs/date.md, section 3):
-// toLocaleString, toLocaleDateString, toLocaleTimeString and
-// Intl.DateTimeFormat, made the way V8 makes them (JSDateTimeFormat in
-// src/objects/js-date-time-format.cc), so that they write what node writes:
-// the options become a skeleton of ICU ("yMMMMd"), ICU finds the pattern of
-// the language that fits it best ("d MMMM y 'г'."), and the pattern writes
-// the date. dateStyle and timeStyle take the language's own patterns.
-//
-// The data of the languages is the ICU of the system (icu.h). Its version
-// may be older than node's, and then details may differ: the kind of space
-// before "PM", a newer name of a zone.
-
 #include "runtime/library/date/date/date.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/core/alloc/alloc.h"
@@ -24,14 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The locale and the options as the compiled code passes them
-// (Lowering::emitDateOptions); the strings are borrowed.
 typedef struct {
   TzStr locale;
   TzStr values[TZ_DTO_COUNT];
-  uint32_t present;  // bit TZ_DTO_* for a value given, bit 31 for the locale
-  int32_t hour12;    // -1 when not given
-  double fractional; // NaN when not given
+  uint32_t present;
+  int32_t hour12;
+  double fractional;
 } TzDateOptions;
 
 enum { HC_NONE, HC_H11, HC_H12, HC_H23, HC_H24 };
@@ -39,17 +25,14 @@ enum { HC_NONE, HC_H11, HC_H12, HC_H23, HC_H24 };
 #define TEXT 64
 #define LOCALE_BIT (1u << 31)
 
-// A formatter: the one of ICU, and the options as resolvedOptions() gives
-// them.
 typedef struct {
-  void *format; // UDateFormat
+  void *format;
   char locale[TEXT];
-  char values[TZ_DTO_COUNT][TEXT]; // "" when not there
-  int32_t hour12;                  // -1 when not there
-  int32_t fractional;              // 0 when not there
+  char values[TZ_DTO_COUNT][TEXT];
+  int32_t hour12;
+  int32_t fractional;
 } Resolved;
 
-// An Intl.DateTimeFormat: an object of the language that the runtime makes.
 typedef struct {
   int64_t rc;
   const TzLayout *layout;
@@ -59,7 +42,6 @@ typedef struct {
 void tz_dtf_drop(void *object);
 static const TzLayout dtf_layout = {tz_dtf_drop, NULL, 0, TZ_LAYOUT_DATE_FORMAT, NULL, 0, 0};
 
-// The values of the options that have a list of them, as in sema_date.cpp.
 static const char *const allowed[TZ_DTO_COUNT][7] = {
     [TZ_DTO_LOCALE_MATCHER] = {"lookup", "best fit"},
     [TZ_DTO_HOUR_CYCLE] = {"h11", "h12", "h23", "h24"},
@@ -85,15 +67,7 @@ static const char *const option_names[TZ_DTO_COUNT] = {
     "minute",        "second",   "timeZoneName",    "formatMatcher", "dateStyle", "timeStyle",
 };
 
-//===----------------------------------------------------------------------===//
-// Errors
-//===----------------------------------------------------------------------===//
-
-// The RangeError and TypeError of JavaScript are thrown (see tz_throw): the
-// function gives nothing, and the program checks tz_thrown after the call.
-// A system without ICU is a failure of the runtime, which stops the program.
 TZ_COLD TZ_NORETURN static void no_icu(void) {
-  // TODO(linux): the data of the languages in the executable.
   tz_panicf("Intl needs the ICU of the system, which Windows has from Windows 10 1903 on");
 }
 
@@ -109,10 +83,6 @@ static const char *method_name(int kind) {
     return "Date.prototype.toLocaleString";
   }
 }
-
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
 
 static void copy_text(char *out, const char *text) {
   size_t n = strlen(text);
@@ -135,7 +105,6 @@ static int equal_ignoring_case(const char *a, const char *b) {
   return *a == *b;
 }
 
-// UTF-16 to and from ASCII, for patterns and zone names.
 static int32_t widen(const char *text, TzUChar *out, int32_t capacity) {
   int32_t n = 0;
   for (; text[n] && n < capacity - 1; ++n) {
@@ -154,13 +123,6 @@ static void narrow_text(const TzUChar *units, int32_t length, char *out, size_t 
   out[n] = 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Options
-//===----------------------------------------------------------------------===//
-
-// The value of an option that is a string, checked; NULL when not given,
-// and when it is no value of the option, with a RangeError thrown (see
-// tz_throw) and `*failed` set.
 static const char *option(const TzDateOptions *o, int index, char *out, int kind, int *failed) {
   if (!(o->present & (1u << index))) {
     return NULL;
@@ -185,8 +147,6 @@ static const char *option(const TzDateOptions *o, int index, char *out, int kind
   return out;
 }
 
-// The zone of the timeZone option: its name as resolvedOptions() gives it,
-// and the ID that ICU formats with. 0 for a zone ICU does not know.
 static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUChar *id,
                         int32_t *id_length) {
   static const char *const utc[] = {"UTC", "GMT", "Etc/UTC", "Etc/GMT"};
@@ -197,7 +157,6 @@ static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUC
       return 1;
     }
   }
-  // An offset: ±HH, ±HHMM or ±HH:MM.
   if (name[0] == '+' || name[0] == '-') {
     const char *p = name + 1;
     int digits[4], n = 0;
@@ -231,8 +190,6 @@ static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUC
     *id_length = widen(gmt, id, TEXT);
     return 1;
   }
-  // A name of the database, in any case: the name ICU has, then its
-  // canonical form.
   TzUErrorCode status = 0;
   void *zones = icu->ucal_openTimeZones(&status);
   if (TZ_U_FAILURE(status)) {
@@ -270,11 +227,6 @@ static int resolve_zone(const TzIcu *icu, const char *name, char *resolved, TzUC
   return found;
 }
 
-//===----------------------------------------------------------------------===//
-// Languages
-//===----------------------------------------------------------------------===//
-
-// The hour cycle of the first hour in a pattern, outside quotes.
 static int hour_cycle_of(const TzUChar *pattern, int32_t length) {
   int quoted = 0;
   for (int32_t i = 0; i < length; ++i) {
@@ -310,7 +262,6 @@ static TzUChar hour_char(int hc) {
   }
 }
 
-// V8's ReplaceHourCycleInPattern: every hour outside quotes in the cycle hc.
 static void replace_hour_cycle(TzUChar *pattern, int32_t length, int hc) {
   if (hc == HC_NONE) {
     return;
@@ -326,7 +277,6 @@ static void replace_hour_cycle(TzUChar *pattern, int32_t length, int hc) {
   }
 }
 
-// The best pattern of the language for a skeleton, in the hour cycle hc.
 static int32_t best_pattern(const TzIcu *icu, void *generator, const TzUChar *skeleton,
                             int32_t length, int hc, TzUChar *pattern, int32_t capacity) {
   TzUErrorCode status = 0;
@@ -341,10 +291,6 @@ static int32_t best_pattern(const TzIcu *icu, void *generator, const TzUChar *sk
   return n;
 }
 
-//===----------------------------------------------------------------------===//
-// Making a formatter
-//===----------------------------------------------------------------------===//
-
 static const char *const style_names[] = {"full", "long", "medium", "short"};
 
 static int style_of(const char *value) {
@@ -353,15 +299,13 @@ static int style_of(const char *value) {
   }
   for (int i = 0; i < 4; ++i) {
     if (strcmp(style_names[i], value) == 0) {
-      return i; // UDAT_FULL to UDAT_SHORT
+      return i;
     }
   }
 
   return TZ_UDAT_NONE;
 }
 
-// What resolvedOptions() says the parts of a pattern are, as V8 reads them
-// back from the pattern: the first of the letters of each that it contains.
 static void resolve_parts(Resolved *r, const TzUChar *pattern, int32_t length) {
   char text[256];
   narrow_text(pattern, length, text, sizeof text);
@@ -407,8 +351,6 @@ static void resolve_parts(Resolved *r, const TzUChar *pattern, int32_t length) {
   r->fractional = digits;
 }
 
-// What JavaScript throws for the options: what create made so far goes, and
-// it gives NULL.
 static Resolved *refuse(Resolved *r, void *generator, int32_t kind, const char *format,
                         const char *value) {
   if (generator) {
@@ -420,8 +362,6 @@ static Resolved *refuse(Resolved *r, void *generator, int32_t kind, const char *
   return NULL;
 }
 
-// The formatter of the options; NULL, with an error thrown (see tz_throw),
-// for options JavaScript rejects.
 static Resolved *create(const TzDateOptions *o, int kind) {
   const TzIcu *icu = tz_icu();
   if (!icu) {
@@ -429,13 +369,10 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   }
   TzUErrorCode status = 0;
 
-  // The language asked for, with its keywords, as ICU names it, and the one
-  // ICU has data for (intl.c).
   char requested[160], found[TEXT];
   if (!tz_intl_resolve_locale(icu, (o->present & LOCALE_BIT) != 0, o->locale, requested, found)) {
     return NULL;
   }
-  // The keywords of the language: -u-ca-, -u-nu- and -u-hc-.
   char keyword_calendar[TEXT] = "", keyword_numbers[TEXT] = "", keyword_hours[TEXT] = "";
   struct {
     const char *name;
@@ -478,8 +415,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     fractional = (int)floor(o->fractional);
   }
 
-  // The language the formatter uses: the one found, with the calendar and
-  // the numbers of the options, or else of the language asked for.
   char tag[TEXT * 2];
   status = 0;
   int32_t n = icu->uloc_toLanguageTag(found, tag, TEXT, 0, &status);
@@ -488,8 +423,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   char extension[TEXT * 2] = "", resolved_extension[TEXT * 2] = "";
   const char *calendar = values[TZ_DTO_CALENDAR];
   const char *numbers = values[TZ_DTO_NUMBERING_SYSTEM];
-  // A keyword of the language counts in the locale resolvedOptions() gives
-  // only if no option replaced it.
   if (!calendar && keyword_calendar[0]) {
     calendar = icu->uloc_toUnicodeLocaleType("ca", keyword_calendar);
     if (calendar) {
@@ -520,9 +453,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     strcat(extension, "-ca-");
     strcat(extension, calendar);
   }
-  // -u-hc- stays with the language the patterns come from, also when an
-  // option sets the hour cycle: the language's cycles of 12 and 24 hours
-  // are its.
   if (keyword_hours[0] && strlen(keyword_hours) < 8) {
     strcat(extension, "-hc-");
     strcat(extension, keyword_hours);
@@ -552,7 +482,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     }
   }
 
-  // The zone.
   TzUChar zone[TEXT];
   int32_t zone_length = 0;
   if (values[TZ_DTO_TIME_ZONE]) {
@@ -566,7 +495,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     narrow_text(zone, zone_length, r->values[TZ_DTO_TIME_ZONE], TEXT);
   }
 
-  // The hour cycle (ECMA-402, CreateDateTimeFormat, steps 24 to 28).
   status = 0;
   void *generator = icu->udatpg_open(locale, &status);
   if (TZ_U_FAILURE(status)) {
@@ -588,9 +516,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
       hc_default = HC_H23;
     }
   }
-  // The hour cycle of hours asked for and of the styles: hourCycle, or with
-  // hour12 the language's cycle of 12 or of 24 hours, or -u-hc-, or the
-  // language's own.
   const char *cycle = values[TZ_DTO_HOUR_CYCLE];
   int hc_option = !cycle || o->hour12 >= 0    ? HC_NONE
                   : strcmp(cycle, "h11") == 0 ? HC_H11
@@ -604,10 +529,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
            : o->hour12 == 0        ? hc24
            : hc_keyword != HC_NONE ? hc_keyword
                                    : hc_default;
-  // The hours shown by default follow only whether the clock has 12 hours
-  // or 24, as node shows them: hourCycle "h11" is the 12 hours of the
-  // language (h12, but h11 in Japanese), and without an option the language
-  // decides ('j').
   int twelve = o->hour12 >= 0 ? o->hour12 > 0 : hc_option != HC_NONE ? hc_option <= HC_H12 : -1;
   int hc_defaults = hc_keyword;
   if (twelve > 0) {
@@ -647,8 +568,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
     pattern_length = icu->udat_toPattern(format, 0, pattern, 255, &status);
     if (time_style && !TZ_U_FAILURE(status) && pattern_length < 255 &&
         hc != hour_cycle_of(pattern, pattern_length)) {
-      // In another hour cycle: the pattern made again from its skeleton
-      // with the hours of that cycle (without the AM/PM that 'h' brings).
       TzUChar skeleton[256], replaced[256];
       status = 0;
       int32_t length =
@@ -680,7 +599,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
       copy_text(r->values[TZ_DTO_TIME_STYLE], time_style);
     }
   } else {
-    // What is shown when no part is asked for (ToDateTimeOptions).
     int need_defaults = 1;
     if (kind != TZ_DATE_LOCALE_TIME) {
       for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_DAY; ++i) {
@@ -708,7 +626,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
       values[TZ_DTO_HOUR] = values[TZ_DTO_MINUTE] = values[TZ_DTO_SECOND] = "numeric";
     }
     int hc_skeleton = hour_defaulted ? hc_defaults : hc;
-    // The skeleton, part by part in the order of ECMA-402's Table 7.
     static const struct {
       int option;
       const char *values[6];
@@ -775,7 +692,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   }
   icu->udatpg_close(generator);
 
-  // Dates before 1582 in the Gregorian calendar too, as in JavaScript.
   status = 0;
   const void *cal = icu->udat_getCalendar(format);
   const char *type = icu->ucal_getType(cal, &status);
@@ -789,7 +705,6 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   }
   r->format = format;
 
-  // The rest of what resolvedOptions() gives.
   status = 0;
   type = icu->ucal_getType(icu->udat_getCalendar(format), &status);
   const char *bcp =
@@ -817,11 +732,6 @@ static void release(Resolved *r) {
   tz_free(r);
 }
 
-//===----------------------------------------------------------------------===//
-// Formatting
-//===----------------------------------------------------------------------===//
-
-// The text of t, a valid time value.
 static int32_t format_units(Resolved *r, double t, TzUChar *buffer, int32_t capacity,
                             TzUChar **heap, void *fields) {
   const TzIcu *icu = tz_icu();
@@ -845,9 +755,6 @@ static int32_t format_units(Resolved *r, double t, TzUChar *buffer, int32_t capa
 static TzStr format_string(Resolved *r, double t) {
   TzUChar buffer[256], *heap;
   int32_t n = format_units(r, t, buffer, 256, &heap, NULL);
-  // As V8 does in format() (not in formatToParts()): ICU 72 put a narrow
-  // no-break space before "AM" and in other places where a space was, which
-  // broke pages that read the text (https://crbug.com/1414292).
   TzUChar *text = heap ? heap : buffer;
   for (int32_t i = 0; i < n; ++i) {
     if (text[i] == 0x202F) {
@@ -860,8 +767,6 @@ static TzStr format_string(Resolved *r, double t) {
   return s;
 }
 
-// toLocaleString() and the like make the same formatters again and again;
-// the last ones are kept, by what made them.
 #define CACHED 4
 typedef struct {
   TzBuf key;
@@ -872,7 +777,6 @@ typedef struct {
   uint32_t next;
 } Cache;
 
-// The thread's own (TzThread::caches).
 static Cache *cache_of(TzThread *t) {
   Cache *c = (Cache *)t->caches[TZ_CACHE_DATE_FORMAT];
   if (!c) {
@@ -925,7 +829,7 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
     }
   }
   Resolved *r = create(o, kind);
-  if (!r) { // thrown
+  if (!r) {
     tz_buf_free(&key);
     return NULL;
   }
@@ -940,7 +844,6 @@ static Resolved *cached(int kind, const TzDateOptions *o) {
   return r;
 }
 
-// What the caches of every thread hold, before the leak check.
 void tz_date_format_shutdown(void) {
   for (int32_t t = 0; t < tz_thread_total(); ++t) {
     TzThread *thread = tz_thread_at(t);
@@ -968,11 +871,6 @@ void tz_date_locale(TzStr *out, double t, int32_t kind, const TzDateOptions *o) 
   *out = r ? format_string(r, t) : tz_str_from_ascii("", 0);
 }
 
-//===----------------------------------------------------------------------===//
-// Intl.DateTimeFormat
-//===----------------------------------------------------------------------===//
-
-// NULL for options JavaScript rejects, with the error thrown.
 void *tz_dtf_new(const TzDateOptions *o) {
   Resolved *r = create(o, TZ_DATE_LOCALE_FORMAT);
   if (!r) {
@@ -992,7 +890,6 @@ void tz_dtf_drop(void *object) {
   tz_obj_free(f);
 }
 
-// format() and formatToParts() of an invalid date.
 TZ_COLD static void invalid_time(void) { tz_throw(TZ_RANGE_ERROR, "Invalid time value"); }
 
 void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) {
@@ -1004,7 +901,6 @@ void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) {
   *out = format_string(f->resolved, t);
 }
 
-// The type of a part, from the field of ICU (UDateFormatField) that made it.
 static const char *part_type(int32_t field) {
   switch (field) {
   case 0:
@@ -1053,8 +949,6 @@ static const char *part_type(int32_t field) {
   }
 }
 
-// formatToParts(d): an array of new objects { type, value }, of `size`
-// bytes laid out by `layout`, with the strings at the offsets given.
 TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_type_desc,
                                 const TzLayout *layout, int64_t size, uint32_t type_offset,
                                 uint32_t value_offset) {
@@ -1077,7 +971,6 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
       begin = end = n;
     }
     for (int k = 0; k < 2; ++k) {
-      // The literal text before the field, then the field.
       int32_t from = k == 0 ? previous : begin, to = k == 0 ? begin : end;
       if (from >= to) {
         continue;
@@ -1102,8 +995,6 @@ TzArray *tz_dtf_format_to_parts(TzDateFormat *f, double t, const TzType *part_ty
   return parts;
 }
 
-// resolvedOptions(): the option `which` (TZ_DTO_*, -1 for the locale);
-// 0 when it is not there.
 int32_t tz_dtf_option(TzStr *out, TzDateFormat *f, int32_t which) {
   const char *text = which < 0 ? f->resolved->locale : f->resolved->values[which];
   *out = tz_str_from_ascii(text, strlen(text));

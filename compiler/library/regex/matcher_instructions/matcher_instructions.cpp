@@ -17,9 +17,6 @@ namespace tz {
 
 MatcherInstructions::MatcherInstructions(MatcherBuilder &builder) : builder_(builder) {}
 
-// A unit that the instruction at `pc` matches, and the bits that may differ
-// (0x20 for a letter of either case, under i), when it is a character of one
-// code unit read forward: one of a run that a few wide compares can check.
 bool MatcherInstructions::literalUnit(uint32_t pc, uint32_t &unit, uint32_t &fold) const {
   const uint32_t *op = builder_.code_ + pc;
   uint32_t limit = builder_.wide_ ? 0xFFFF : 0xFF;
@@ -35,7 +32,6 @@ bool MatcherInstructions::literalUnit(uint32_t pc, uint32_t &unit, uint32_t &fol
   if (op[0] != RE_SET || (builder_.wide_ && op[1] != 0)) {
     return false;
   }
-  // Exactly a letter in both cases.
   uint32_t count = 0, first = 0;
   for (uint32_t c = 0; c < 256; ++c) {
     if ((op[2 + c / 32] >> (c % 32)) & 1) {
@@ -55,8 +51,6 @@ bool MatcherInstructions::literalUnit(uint32_t pc, uint32_t &unit, uint32_t &fol
   return true;
 }
 
-// How many instructions from `pc` on are characters of one unit each, with
-// no block starting among them.
 uint32_t MatcherInstructions::literalRun(uint32_t pc) const {
   uint32_t run = 0, unit, fold;
   for (uint32_t at = pc; at < builder_.codeSize_ && literalUnit(at, unit, fold);
@@ -70,10 +64,8 @@ uint32_t MatcherInstructions::literalRun(uint32_t pc) const {
   return run;
 }
 
-// The `run` characters from `pc` on: one check that they fit, then the
-// units compared 8 bytes at a time. Returns the pc after them.
 uint32_t MatcherInstructions::emitLiteralRun(uint32_t pc, uint32_t run) {
-  std::vector<std::pair<uint32_t, uint32_t>> units; // unit, fold
+  std::vector<std::pair<uint32_t, uint32_t>> units;
   for (uint32_t i = 0; i < run; ++i) {
     uint32_t unit, fold;
     literalUnit(pc, unit, fold);
@@ -188,15 +180,12 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
   case RE_GOTO:
     if (op[1] <= pc && builder_.memo_) {
       builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), builder_.i32(1)),
-                     builder_.steps_); // an iteration: work
+                     builder_.steps_);
     }
     builder_.b_.CreateBr(builder_.blockAt(op[1]));
     return;
   case RE_SPLIT_NEXT:
   case RE_SPLIT_GOTO: {
-    // The way tried first and the one left for later, each with the
-    // character it needs first if it is known: a way without its character
-    // would fail at once, so it is not taken, nor is a choice point made.
     uint32_t first = op[0] == RE_SPLIT_NEXT ? pc + 2 : op[1];
     uint32_t later = op[0] == RE_SPLIT_NEXT ? op[1] : pc + 2;
     Value *pos = builder_.load(builder_.pos_);
@@ -244,7 +233,6 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
       builder_.setSlot(builder_.i32(2 * op[1] + 1), builder_.i32(0xFFFFFFFFu));
       return;
     }
-    // Slot by slot, in a loop.
     llvm::AllocaInst *k = builder_.entryVar("reset");
     builder_.store(builder_.i32(2 * op[1]), k);
     BasicBlock *loop = builder_.newBlock("reset.loop"), *body = builder_.newBlock("reset.slot"),
@@ -264,7 +252,6 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     builder_.setSlot(slotBase + op[1], builder_.i32(op[2]));
     return;
   case RE_LOOP: {
-    // counter, min, max, greedy, body, exit
     Value *n = builder_.loadSlot(slotBase + op[1]);
     BasicBlock *body = builder_.blockAt(op[5]), *exit = builder_.blockAt(op[6]);
     BasicBlock *more = builder_.newBlock("loop.more");
@@ -285,8 +272,6 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     return;
   }
   case RE_LOOP_END: {
-    // counter, min, position, loop: an optional iteration that matched
-    // nothing fails.
     Value *n = builder_.loadSlot(slotBase + op[1]);
     if (op[2] != RE_INFINITY) {
       Value *empty = builder_.b_.CreateICmpEQ(builder_.load(builder_.pos_),
@@ -312,7 +297,7 @@ void MatcherInstructions::emitInstruction(uint32_t pc) {
     std::vector<uint32_t> words(op, op + 3 + op[2]);
     auto *data = llvm::ConstantDataArray::get(builder_.ctx_, words);
     auto *global =
-        new llvm::GlobalVariable(builder_.module_, data->getType(), /*isConstant=*/true,
+        new llvm::GlobalVariable(builder_.module_, data->getType(), true,
                                  llvm::GlobalValue::PrivateLinkage, data, "tz.regex.backref");
     llvm::Type *ptr = builder_.b_.getPtrTy(), *i32Ty = builder_.b_.getInt32Ty();
     llvm::FunctionCallee fn = builder_.module_.getOrInsertFunction(
@@ -344,7 +329,6 @@ void MatcherInstructions::emitRepeat(uint32_t pc) {
     builder_.matcherRepeats().emitRepeatGreedy(pc, false);
     return;
   }
-  // Without the memo as fast as it gets; with it, a note per position.
   BasicBlock *plain = builder_.newBlock("repeat.plain"), *noted = builder_.newBlock("repeat.memo");
   builder_.b_.CreateCondBr(builder_.b_.CreateIsNull(builder_.load(builder_.memoAt_)), plain, noted);
   builder_.b_.SetInsertPoint(plain);
@@ -353,8 +337,6 @@ void MatcherInstructions::emitRepeat(uint32_t pc) {
   builder_.matcherRepeats().emitRepeatGreedy(pc, true);
 }
 
-// A lookaround (kind, next) runs its body right here, above a barrier on
-// the stack whose label means "the body failed".
 void MatcherInstructions::emitLook(uint32_t pc) {
   const uint32_t *op = builder_.code_ + pc;
   auto [mark, at, logMark] = builder_.lookVars_[pc];
@@ -386,7 +368,6 @@ void MatcherInstructions::emitLook(uint32_t pc) {
   }
 }
 
-// The end of a lookaround's body: it matched.
 void MatcherInstructions::emitLookSuccess(uint32_t look) {
   const uint32_t *op = builder_.code_ + look;
   auto [mark, at, logMark] = builder_.lookVars_[look];
@@ -395,7 +376,6 @@ void MatcherInstructions::emitLookSuccess(uint32_t look) {
   if (builder_.memo_ && builder_.hasLook_) {
     builder_.store(builder_.b_.CreateSub(builder_.load(builder_.depth_), builder_.i32(1)),
                    builder_.depth_);
-    // What the memo noted on the way may have led here: forgotten.
     builder_.matcherMemo().withMemo("tz_re_memo_forget", {builder_.load(logMark)});
   }
   if (!negative) {
@@ -418,4 +398,4 @@ void MatcherInstructions::emitLookSuccess(uint32_t look) {
   }
 }
 
-} // namespace tz
+}

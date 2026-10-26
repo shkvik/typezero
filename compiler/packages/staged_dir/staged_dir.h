@@ -12,10 +12,6 @@ namespace tz::pkg {
 namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
-// A directory filled under a temporary name next to where it belongs, then
-// renamed: another tz that looks into the cache meanwhile sees it whole or
-// not at all. If another tz finished the same directory first, its copy is
-// kept.
 class StagedDir {
 public:
   bool create(llvm::StringRef final, std::string &error) {
@@ -39,7 +35,7 @@ public:
       return true;
     }
     if (fs::is_directory(final_)) {
-      return true; // another tz was faster; the destructor drops this copy
+      return true;
     }
     error = "cannot move '" + std::string(temp_) + "' to '" + final_ + "': " + ec.message();
 
@@ -47,7 +43,7 @@ public:
   }
   ~StagedDir() {
     if (!temp_.empty()) {
-      fs::remove_directories(temp_, /*IgnoreErrors=*/true);
+      fs::remove_directories(temp_, true);
     }
   }
 
@@ -56,4 +52,4 @@ private:
   llvm::SmallString<256> temp_;
 };
 
-} // namespace tz::pkg
+}

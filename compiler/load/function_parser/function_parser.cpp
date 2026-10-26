@@ -26,19 +26,11 @@ namespace tz {
 
 FunctionParser::FunctionParser(Parser &parser) : parser_(parser) {}
 
-// A function declaration. TypeScript's overload signatures (`function f(x:
-// int): int` without a body, before the implementation, which then works out
-// what it was given) are an error: a plain function has one body, and a
-// variant with other parameters is a function of its own, with its own name.
-// The signatures are skipped and the implementation is kept, so that the rest
-// of the program is still checked.
 Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
-  FunctionDecl *fn = parseFunction(/*expression=*/false, isAsync);
+  FunctionDecl *fn = parseFunction(false, isAsync);
   if (fn->body) {
     return fn;
   }
-  // An intrinsic of a built-in module written in tz: the runtime has its
-  // code (see FunctionDecl::external).
   if (parser_.library_ && fn->name.starts_with("__tz_")) {
     fn->external = true;
     fn->body = parser_.ctx_.make<BlockStmt>(fn->loc());
@@ -56,7 +48,7 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
                                        "' has no body; add it after the parameters: '{ ... }'");
       return parser_.ctx_.make<EmptyStmt>(loc);
     }
-    fn = parseFunction(/*expression=*/false, isAsync);
+    fn = parseFunction(false, isAsync);
   }
   parser_.cursor().report(
       loc, "overload signatures are not supported: plain functions are not overloaded; give each "
@@ -68,7 +60,7 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
 FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
   const char *start = parser_.tok_.text.data();
   llvm::SMLoc keywordLoc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'function'
+  parser_.cursor().advance();
   bool generator = parser_.cursor().accept(Tok::Star);
 
   llvm::StringRef name;
@@ -91,7 +83,6 @@ FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
   if (parser_.tok_.is(Tok::Less)) {
     fn->typeParams = parseTypeParams();
   }
-  // `yield` is an operator only in the body of a generator.
   bool outerGenerator = parser_.inGenerator_;
   parser_.inGenerator_ = generator;
   Parser::ParamPatterns patterns;
@@ -102,13 +93,11 @@ FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
   }
 
   if (parser_.tok_.is(Tok::LBrace)) {
-    // `yield` belongs to the generator whose body it is in.
     llvm::SaveAndRestore<bool> inGenerator(parser_.inGenerator_, generator);
     fn->body = parser_.stmts().parseBlock();
     addPrologue(fn, patterns);
   } else if (!expression && (parser_.cursor().accept(Tok::Semi) || parser_.tok_.newlineBefore ||
                              parser_.tok_.is(Tok::RBrace) || parser_.tok_.is(Tok::Eof))) {
-    // No body, as in an overload signature (see parseFunctionDecl).
   } else {
     parser_.cursor().error(parser_.tok_.loc(), "expected '{' to start the function body");
     fn->body = parser_.ctx_.make<BlockStmt>(parser_.tok_.loc());
@@ -124,12 +113,10 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
                           fn->isArrow ? "to start the parameters" : "after the function name");
   while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
     Param param;
-    // `constructor(@Inject("name") name: string)` (docs/decorators.md).
     param.decorators = parser_.classes().parseDecorators();
     if (parser_.recovering_) {
       break;
     }
-    // `constructor(public x: int)`: a parameter property.
     while (parser_.tok_.is(Tok::Identifier) &&
            (parser_.tok_.text == "public" || parser_.tok_.text == "private" ||
             parser_.tok_.text == "protected" || parser_.tok_.text == "readonly" ||
@@ -157,7 +144,6 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
       param.name = parser_.tok_.text;
       parser_.cursor().advance();
     } else if ((parser_.tok_.is(Tok::LBrace) || parser_.tok_.is(Tok::LBracket)) && !param.rest) {
-      // `({ x, y }: Point)`: the body destructures a hidden parameter.
       const char *start = parser_.tok_.text.data();
       std::unique_ptr<Parser::Pattern> pattern = parser_.patterns().parseBindingPattern();
       param.name = parser_.ctx_.hiddenName();
@@ -201,14 +187,11 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
   parser_.cursor().expect(Tok::RParen, "to close the parameter list");
 }
 
-// `function f({ x, y }: Point) { body }` is
-// `function f(%0: Point) { let x = %0.x, y = %0.y; body }`: as in
-// JavaScript, the variables can be assigned to.
 void FunctionParser::addPrologue(FunctionDecl *fn, Parser::ParamPatterns &patterns) {
   if (patterns.empty() || !fn->body) {
     return;
   }
-  auto *decl = parser_.ctx_.make<VarDeclStmt>(fn->body->loc(), /*isConst=*/false);
+  auto *decl = parser_.ctx_.make<VarDeclStmt>(fn->body->loc(), false);
   for (auto &[name, pattern] : patterns) {
     parser_.patterns().declareElements(decl, *pattern, name);
   }
@@ -220,22 +203,18 @@ bool FunctionParser::asyncFunctionAhead() {
          parser_.cursor().peek().is(Tok::KwFunction) && !parser_.cursor().peek().newlineBefore;
 }
 
-// At `async`: an async arrow `async x => ...` or `async (x) => ...`, or an
-// async function expression, follows; otherwise `async` is a name, and
-// nothing is consumed.
 Expr *FunctionParser::tryAsyncFunction() {
   llvm::SMLoc loc = parser_.tok_.loc();
   if (asyncFunctionAhead()) {
     parser_.cursor().advance();
-    return parser_.ctx_.make<FunctionExpr>(loc,
-                                           parseFunction(/*expression=*/true, /*isAsync=*/true));
+    return parser_.ctx_.make<FunctionExpr>(loc, parseFunction(true, true));
   }
   const Token &next = parser_.cursor().peek();
   if (next.newlineBefore || !(next.is(Tok::Identifier) || next.is(Tok::LParen))) {
     return nullptr;
   }
   Parser::Snapshot start = parser_.cursor().snapshot();
-  parser_.cursor().advance(); // 'async'
+  parser_.cursor().advance();
   bool arrow = parser_.tok_.is(Tok::Identifier) ? parser_.cursor().peek().is(Tok::Arrow) &&
                                                       !parser_.cursor().peek().newlineBefore
                                                 : arrowAhead();
@@ -249,8 +228,6 @@ Expr *FunctionParser::tryAsyncFunction() {
   return fe;
 }
 
-// At `(`: the parameters of an arrow function follow if they parse as such
-// and `=>` (or a return type and `=>`) comes after them.
 bool FunctionParser::arrowAhead() {
   Parser::Snapshot start = parser_.cursor().snapshot();
   bool muted = parser_.diags_.setMuted(true);
@@ -278,7 +255,6 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
   auto *fn = parser_.ctx_.make<FunctionDecl>(loc, "");
   fn->isExpression = fn->isArrow = true;
   fn->typeParams = std::move(typeParams);
-  // An arrow cannot yield for the generator around it.
   llvm::SaveAndRestore<bool> inGenerator(parser_.inGenerator_, false);
   Parser::ParamPatterns patterns;
   if (parser_.tok_.is(Tok::Identifier)) {
@@ -299,7 +275,6 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
   parser_.cursor().expect(Tok::Arrow, "after the parameters of the arrow function");
   if (parser_.tok_.is(Tok::LBrace)) {
     fn->body = parser_.stmts().parseBlock();
-    // `() => { a: 1 }` is a block with the label `a`, not an object.
     if (fn->body->body.size() == 1) {
       if (auto *labeled = dyn_cast<LabeledStmt>(fn->body->body[0]);
           labeled && isa<ExprStmt>(labeled->body)) {
@@ -309,7 +284,6 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
       }
     }
   } else {
-    // `x => value` returns the value.
     llvm::SMLoc valueLoc = parser_.tok_.loc();
     Expr *value = parser_.exprs().parseExpr();
     fn->body = parser_.ctx_.make<BlockStmt>(valueLoc);
@@ -322,11 +296,9 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
   return parser_.ctx_.make<FunctionExpr>(loc, fn);
 }
 
-// `<T, U extends number = int>`. TypeScript's modifiers of type parameters
-// (`const T`, `in T`, `out T`) say nothing a copy for each type needs.
 std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
   std::vector<TypeParamDecl> params;
-  parser_.cursor().advance(); // '<'
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::Greater) && !parser_.tok_.is(Tok::Eof)) {
     if ((parser_.tok_.is(Tok::KwConst) || parser_.tok_.is(Tok::KwIn) ||
          (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "out")) &&
@@ -363,4 +335,4 @@ std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
   return params;
 }
 
-} // namespace tz
+}

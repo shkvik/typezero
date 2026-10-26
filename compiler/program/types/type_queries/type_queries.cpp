@@ -52,22 +52,18 @@ static bool mentionsParam(const Type *type, llvm::SmallPtrSetImpl<const Type *> 
            mentionsParam(type->sent(), seen);
   case Type::Kind::Dict:
     return mentionsParam(type->keyType(), seen) || mentionsParam(type->valueType(), seen);
-  case Type::Kind::ClassRef: // `Constructor<T>`
+  case Type::Kind::ClassRef:
     return type->isConstructor() && mentionsParam(type->constructed(), seen);
   case Type::Kind::Union:
     return llvm::any_of(type->members(), [&](const Type *m) { return mentionsParam(m, seen); });
   case Type::Kind::Object:
-    // An async iterator, as an iterator: by what it gives, returns and takes.
     if (type->isAsyncIterator()) {
       return mentionsParam(type->yielded(), seen) || mentionsParam(type->returned(), seen) ||
              mentionsParam(type->sent(), seen);
     }
-    // A class made from a generic one is generic code by its type
-    // arguments, whatever its fields.
     if (!type->typeArgs().empty()) {
       return llvm::any_of(type->typeArgs(), [&](const Type *t) { return mentionsParam(t, seen); });
     }
-    // A recursive type mentions itself.
     if (!seen.insert(type).second) {
       return false;
     }
@@ -87,4 +83,4 @@ bool mentionsParam(const Type *type) {
   return mentionsParam(type, seen);
 }
 
-} // namespace tz
+}

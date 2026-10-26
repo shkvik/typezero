@@ -38,7 +38,6 @@ namespace tz {
 
 namespace {
 
-// The text of an expression as written, as far as it can be rebuilt.
 std::string exprText(const Expr *expr) {
   expr = stripCasts(expr);
   if (!expr) {
@@ -87,7 +86,6 @@ std::string exprText(const Expr *expr) {
   }
 }
 
-// A value named in a message: 'x', 'p.count', or a description.
 std::string subject(const Expr *expr) {
   expr = stripCasts(expr);
   if (!expr) {
@@ -120,7 +118,7 @@ std::string numberText(double v) {
   return text;
 }
 
-} // namespace
+}
 
 OverflowWarnings::OverflowWarnings(OverflowCheck &check) : check_(check) {}
 
@@ -148,8 +146,6 @@ Num OverflowWarnings::input(const Type *type, llvm::SMLoc loc, const char *what)
   return range(l.lo, l.hi, Origin::Input, reason(Origin::Input, loc, what));
 }
 
-// A value of `type` about which nothing is known, but which is the
-// program's own.
 Val OverflowWarnings::trusted(const Type *type) const {
   Val v;
   if (!type) {
@@ -170,7 +166,6 @@ Num OverflowWarnings::fit(Num n, const Type *type) const {
   if (n.empty() || !isNumberType(type)) {
     return n;
   }
-  // Before the last pass of a loop: as it is, so that a sum stays a sum.
   if (check_.quiet_ && isIntegerType(type)) {
     return n;
   }
@@ -178,8 +173,6 @@ Num OverflowWarnings::fit(Num n, const Type *type) const {
   if (n.lo >= l.lo && n.hi <= l.hi) {
     return n;
   }
-  // An integer that does not fit has wrapped around: it may be any value, as
-  // worrying as the end that went beyond.
   if (isIntegerType(type)) {
     Bound w = n.hi > l.hi && n.lo < l.lo ? joint(0, n.low(), n.high())
               : n.hi > l.hi              ? n.high()
@@ -258,7 +251,6 @@ std::string OverflowWarnings::fixText(const Expr *site, const VarSymbol *accum) 
       return "declare '" + accum->name.str() + "' as 'long' or 'double'";
     }
   }
-  // A field that adds up: `this.total += x`.
   const Expr *target = nullptr;
   if (auto *assign = dyn_cast<AssignExpr>(site); assign && assign->op) {
     target = assign->target;
@@ -286,14 +278,11 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
   if (!check_.reporting_ || check_.quiet_) {
     return;
   }
-  // The end that goes beyond int, and where it comes from.
   bool top = exceeding.hi > kIntMax, bottom = exceeding.lo < kIntMin;
   Bound culprit = top && bottom ? joint(0, exceeding.low(), exceeding.high())
                   : top         ? exceeding.high()
                                 : exceeding.low();
-  // The operand it comes from.
   const Expr *subjectExpr = nullptr;
-  // What a sum adds is to blame rather than the sum.
   auto operands = accum ? std::array{std::pair{&r, rhs}, std::pair{&l, lhs}}
                         : std::array{std::pair{&l, lhs}, std::pair{&r, rhs}};
   for (int exact = 1; exact >= 0 && !subjectExpr; --exact) {
@@ -330,4 +319,4 @@ void OverflowWarnings::warn(const Expr *site, const Num &l, const Num &r, const 
       {loc, "'" + exprText(site) + "' may overflow int: " + why + "; " + fixText(site, accum)});
 }
 
-} // namespace tz
+}

@@ -33,16 +33,10 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 ThrowLowerer::ThrowLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// tz_thrown and the stack limit (TzThread in runtime/core/parallel/parallel.h): in a
-// parallel program the thread's own, since code on the threads of the runtime
-// throws at the same time. Its address then goes through
-// llvm.threadlocal.address, which a coroutine does not keep across a
-// suspension: it may resume on another thread. Both are in one variable, so
-// that a function finds them from one address.
 llvm::GlobalVariable *ThrowLowerer::thrownGlobal() {
   if (!thrown_) {
     auto *type = llvm::StructType::get(
@@ -113,14 +107,12 @@ void ThrowLowerer::emitThrowNew(int kind, llvm::StringRef message) {
 
 void ThrowLowerer::emitThrowStmt(ThrowStmt *stmt) {
   llvm::Value *error = lowering_.exprLowerer().emitExpr(stmt->value);
-  if (stmt->value->type->isUnknown()) { // an Error, or else a TypeError
+  if (stmt->value->type->isUnknown()) {
     error = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction(
             "tz_unknown_error", lowering_.builder_.getPtrTy(), {lowering_.builder_.getPtrTy()}),
         {error}, "error");
   }
-  // `throw new Error(...)` throws from `new`, as V8 says (a NewExpr is at
-  // the name of its class).
   llvm::SMLoc loc = stmt->value->loc();
   if (isa<NewExpr>(stmt->value)) {
     const char *start = stmt->loc().getPointer(), *at = loc.getPointer();
@@ -137,7 +129,6 @@ void ThrowLowerer::emitThrowStmt(ThrowStmt *stmt) {
 void ThrowLowerer::emitStackCheck(llvm::SMLoc loc) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *top = lowering_.builder_.CreateIntrinsic(llvm::Intrinsic::stackaddress, {ptr}, {});
-  // Each thread has a stack of its own: TzThread::stack_limit.
   llvm::Value *slot = lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(),
                                                                     thrownSlot(), 8);
   llvm::Value *limit = lowering_.builder_.CreateLoad(ptr, slot, "stack.limit");
@@ -214,4 +205,4 @@ std::vector<llvm::Value *> ThrowLowerer::emitHeldValues(llvm::ArrayRef<Expr *> e
   return values;
 }
 
-} // namespace tz
+}

@@ -8,7 +8,7 @@
 namespace tz {
 
 Expr *BytesFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                    const Type * /*expected*/) const {
+                                    const Type *) const {
   return checker.bufferStaticChecker().checkBytesStatic(call, member);
 }
 
@@ -28,4 +28,4 @@ llvm::Value *BytesFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.bytesCallLowerer().emitBytesCall(call);
 }
 
-} // namespace tz
+}

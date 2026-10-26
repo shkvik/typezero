@@ -10,4 +10,4 @@ template <class E> struct Err {
 
 template <class E> Err<E> err(E error) { return {std::move(error)}; }
 
-} // namespace tz
+}

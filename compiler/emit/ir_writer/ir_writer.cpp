@@ -9,4 +9,4 @@ Errors IrWriter::run(const llvm::Module &module, llvm::StringRef path) const {
   return writer.write(path, [&](llvm::raw_pwrite_stream &out) { module.print(out, nullptr); });
 }
 
-} // namespace tz
+}

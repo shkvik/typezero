@@ -48,8 +48,6 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     if (type->isDict()) {
       return checker_.dictChecker().checkDictTarget(index, compound);
     }
-    // An element of a typed array; the index and the value are checked once
-    // the value is known (see checkBytesStore).
     if (type->isTypedArray()) {
       index->index = checker_.memberChecker().checkPosition(index->index);
       index->type = type->elementType();
@@ -65,10 +63,9 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
                                        "Uint8Array(buffer)[i] = value'"));
       return Type::error();
     }
-    // `o[key] = v` with a constant key assigns the field it names.
     if (type->isObject()) {
-      Expr *checked = checker_.keyedFieldChecker().checkKeyedField(index, /*write=*/true);
-      if (index->keyed) { // a field chosen by a key of literals
+      Expr *checked = checker_.keyedFieldChecker().checkKeyedField(index, true);
+      if (index->keyed) {
         return index->type;
       }
       auto *member = dyn_cast<MemberExpr>(checked);
@@ -121,7 +118,6 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
     if (type->nonOptional()->isJson()) {
       return checker_.jsonChecker().checkJsonTarget(member);
     }
-    // A static field through a class as a value known when compiling.
     if (ClassDecl *cls = const_cast<ClassDecl *>(type->classRef());
         cls && cls->type && isa<NameExpr>(member->object)) {
       return checker_.staticChecker().checkStaticTarget(target, cls);
@@ -136,8 +132,6 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
                                 member->name + "'");
       return Type::error();
     }
-    // A field of every member of a union: through a type they all are, or
-    // in each, where it has one type (sema_union.cpp).
     if (type->isUnion()) {
       if (const Type *common = checker_.unionChecker().commonBaseWith(type, member->name)) {
         member->object = checker_.typeRelations().convert(member->object, common);
@@ -166,7 +160,7 @@ const Type *TargetChecker::checkAssignTarget(Expr *&target, bool compound) {
         return Type::error();
       }
       member->type = Type::intTy();
-      return Type::longTy(); // a new length is computed as long, like positions
+      return Type::longTy();
     }
     if (type->isString() && member->name == "length") {
       checker_.diags_.error(member->loc(), "the length of a string cannot be changed");
@@ -198,7 +192,7 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
   }
   Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
   if (!entry.var) {
-    checker_.nameChecker().checkName(name); // reports the error
+    checker_.nameChecker().checkName(name);
     return nullptr;
   }
   name->var = entry.var;
@@ -216,4 +210,4 @@ VarSymbol *TargetChecker::checkVarTarget(NameExpr *name) {
   return entry.var;
 }
 
-} // namespace tz
+}

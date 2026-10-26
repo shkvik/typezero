@@ -10,4 +10,4 @@ Expr *StreamFeature::checkLibraryCall(Checker &checker, CallExpr *call, NameExpr
   return checker.streamPipeline().checkLibraryCall(call, name, func);
 }
 
-} // namespace tz
+}

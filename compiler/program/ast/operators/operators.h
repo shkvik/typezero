@@ -23,9 +23,9 @@ enum class UnaryOp {
   Not,
   BitNot,
   TypeOf,
-  Void,    // `void x`: evaluates x; the value is undefined
-  Delete,  // `delete x`: Checker rejects it, since objects and arrays always have their fields
-  NonNull, // postfix `x!`
+  Void,
+  Delete,
+  NonNull,
 };
 
 enum class BinaryOp {
@@ -49,13 +49,13 @@ enum class BinaryOp {
   Ne,
   LogAnd,
   LogOr,
-  Nullish,    // `a ?? b`
-  In,         // `key in object`: Checker rejects it until unions come
-  InstanceOf, // `x instanceof C`: compares the class number in x's descriptor
+  Nullish,
+  In,
+  InstanceOf,
 };
 
 const char *opSpelling(UnaryOp op);
 
 const char *opSpelling(BinaryOp op);
 
-} // namespace tz
+}

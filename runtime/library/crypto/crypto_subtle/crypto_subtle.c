@@ -1,16 +1,3 @@
-// Web Crypto (docs/crypto.md, step 4): the work of crypto.subtle that takes time, which runs on
-// the threads of the pool (runtime/core/io/io.c), as node runs it on those of libuv. This file is
-// the direct layer: digests, HMAC, PBKDF2, HKDF and AES-GCM / CBC / CTR over the hashes and ciphers
-// the caller names (crypto_md.c, crypto_aes.c); crypto_subtle_kw.c has AES-KW and
-// crypto_subtle_keys.c the full layer. The code of crypto.subtle (library/crypto/webcrypto.tz)
-// calls them through the intrinsics __tz_subtle_* (sema_crypto.cpp), each with the promise it
-// settles first.
-//
-// The main thread copies what the thread reads, as the data may change meanwhile (the spec has
-// the bytes copied too), and makes the ArrayBuffer the thread writes the result into; the thread
-// touches nothing else of the runtime. A job that fails fulfills its promise with undefined (a
-// verification with -1), which the library turns into node's OperationError.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/async/async.h"
@@ -24,29 +11,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-//===----------------------------------------------------------------------===//
-// Jobs
-//===----------------------------------------------------------------------===//
-
 enum { DATA, KEY, EXTRA, MORE, PARTS };
 
 typedef struct SubtleJob {
-  TzWork work; // first: the pool knows the job by it
+  TzWork work;
   TzPromise *promise;
   void (*run)(struct SubtleJob *j);
   const TzMd *md;
   const TzCipherAlg *alg;
   TzCipher *cipher;
-  // Copies of the data, the key, and of the salt, IV or signature and the info or AAD.
   uint8_t *bytes[PARTS];
   size_t lengths[PARTS];
-  TzArrayBuffer *out; // the result, which `written` bytes of are made
+  TzArrayBuffer *out;
   size_t written;
-  double count;   // iterations, or the length of the output
-  int32_t flag;   // decrypt
-  int32_t tag;    // bytes of the tag of AES-GCM
-  int32_t bits;   // of the counter of AES-CTR
-  int32_t result; // of a verification: 1, 0, or -1 for a failure
+  double count;
+  int32_t flag;
+  int32_t tag;
+  int32_t bits;
+  int32_t result;
   int failed;
 } SubtleJob;
 
@@ -59,8 +41,6 @@ static SubtleJob *job_new(TzPromise *p) {
   return j;
 }
 
-// A copy of the bytes of `value` as part `part` of the job: false with the promise rejected
-// (the value was no bytes, which the library's types rule out) and the job freed.
 static void job_free(SubtleJob *j);
 static int job_copy(SubtleJob *j, int part, const TzType *type, const void *value) {
   TzCryptoData d;
@@ -103,14 +83,11 @@ static void job_free(SubtleJob *j) {
 
 static void job_work(TzWork *w) {
   SubtleJob *j = (SubtleJob *)w;
-  // One that failed already (its result could not be made) only comes back.
   if (!j->failed) {
     j->run(j);
   }
 }
 
-// Back on the main thread: the ArrayBuffer of the result, cut to what was written, or
-// undefined; a verification gives its number.
 static void job_done(TzWork *w) {
   SubtleJob *j = (SubtleJob *)w;
   if (j->out) {
@@ -128,13 +105,10 @@ static void job_done(TzWork *w) {
   job_free(j);
 }
 
-// Queues the job, whose result is an ArrayBuffer of `size` bytes at most (or, with -1, a
-// verification).
 static void job_queue(SubtleJob *j, void (*run)(SubtleJob *), int64_t size) {
   if (size >= 0) {
     j->out = tz_abuf_new(size);
     if (!j->out) {
-      // Longer than an ArrayBuffer can be: the job fails, as node's does.
       tz_instance_release((TzInstance *)tz_error_take());
       j->failed = 1;
       j->out = tz_abuf_new(0);
@@ -147,16 +121,11 @@ static void job_queue(SubtleJob *j, void (*run)(SubtleJob *), int64_t size) {
   tz_work_queue(&j->work);
 }
 
-//===----------------------------------------------------------------------===//
-// Digests, HMAC, PBKDF2 and HKDF
-//===----------------------------------------------------------------------===//
-
 static void digest_run(SubtleJob *j) {
   tz_crypto_digest_raw(j->md, j->bytes[DATA], j->lengths[DATA], j->out->data);
   j->written = j->md->size;
 }
 
-// digest(algorithm, data).
 void tz_crypto_subtle_digest(TzPromise *p, const TzMd *md, const TzType *dt, const void *dv) {
   SubtleJob *j = job_new(p);
   j->md = md;
@@ -174,7 +143,6 @@ static void hmac_run(SubtleJob *j) {
 static void hmac_verify_run(SubtleJob *j) {
   uint8_t mac[64];
   tz_crypto_hmac_raw(j->md, j->bytes[KEY], j->lengths[KEY], j->bytes[DATA], j->lengths[DATA], mac);
-  // In constant time, as CRYPTO_memcmp does it for node.
   int equal = j->lengths[EXTRA] == j->md->size;
   volatile uint8_t diff = 0;
   for (size_t i = 0; equal && i < j->md->size; ++i) {
@@ -184,8 +152,6 @@ static void hmac_verify_run(SubtleJob *j) {
   memset(mac, 0, sizeof mac);
 }
 
-// sign('HMAC', key, data) and verify('HMAC', key, signature, data); the key is a secret
-// KeyObject (data, as tz_crypto_data reads it).
 void tz_crypto_subtle_hmac(TzPromise *p, const TzMd *md, const TzType *kt, const void *kv,
                            const TzType *dt, const void *dv) {
   SubtleJob *j = job_new(p);
@@ -211,8 +177,6 @@ static void pbkdf2_run(SubtleJob *j) {
   j->written = (size_t)j->out->length;
 }
 
-// deriveBits({ name: 'PBKDF2', hash, salt, iterations }, key, length): `length` bytes, which the
-// library checked.
 void tz_crypto_subtle_pbkdf2(TzPromise *p, const TzMd *md, const TzType *kt, const void *kv,
                              const TzType *st, const void *sv, double iterations, double length) {
   SubtleJob *j = job_new(p);
@@ -225,7 +189,6 @@ void tz_crypto_subtle_pbkdf2(TzPromise *p, const TzMd *md, const TzType *kt, con
 
 static void hkdf_run(SubtleJob *j) {
   size_t length = (size_t)j->out->length;
-  // RFC 5869 makes at most 255 blocks.
   if (length > 255 * (size_t)j->md->size) {
     j->failed = 1;
     return;
@@ -235,7 +198,6 @@ static void hkdf_run(SubtleJob *j) {
   j->written = length;
 }
 
-// deriveBits({ name: 'HKDF', hash, salt, info }, key, length).
 void tz_crypto_subtle_hkdf(TzPromise *p, const TzMd *md, const TzType *kt, const void *kv,
                            const TzType *st, const void *sv, const TzType *it, const void *iv,
                            double length) {
@@ -246,11 +208,6 @@ void tz_crypto_subtle_hkdf(TzPromise *p, const TzMd *md, const TzType *kt, const
   }
 }
 
-//===----------------------------------------------------------------------===//
-// AES-GCM, AES-CBC and AES-CTR
-//===----------------------------------------------------------------------===//
-
-// The cipher, made ready by the thread: false (the job failed) for a key of another length.
 static int cipher_start(SubtleJob *j, const uint8_t *iv, size_t iv_length) {
   TzCipher *c = j->cipher;
   if (j->lengths[KEY] != j->alg->key_length) {
@@ -271,7 +228,6 @@ static void gcm_run(SubtleJob *j) {
   const uint8_t *in = j->bytes[DATA];
   size_t length = j->lengths[DATA], tag = (size_t)j->tag;
   if (j->flag) {
-    // The tag ends the data; the library checked there is one.
     length -= tag;
   }
   if (!j->lengths[EXTRA] || !cipher_start(j, j->bytes[EXTRA], j->lengths[EXTRA])) {
@@ -329,15 +285,11 @@ static u128 block_number(const uint8_t *b) {
   return v;
 }
 
-// AES-CTR whose counter is the rightmost `bits` bits of the counter block, which wraps around
-// to zero without touching the rest, as the spec has it; node and Chromium fail when the data
-// needs more blocks than the counter has values.
 static void ctr_run(SubtleJob *j) {
   size_t length = j->lengths[DATA];
   u128 blocks = (length + 15) / 16;
   u128 mask = j->bits == 128 ? ~(u128)0 : (((u128)1 << j->bits) - 1);
   u128 counter = block_number(j->bytes[EXTRA]) & mask;
-  // The values left before the counter wraps: 2^bits - counter.
   u128 left = (mask - counter) + 1;
   if (j->bits < 128 && blocks > mask + 1) {
     j->failed = 1;
@@ -356,7 +308,6 @@ static void ctr_run(SubtleJob *j) {
     j->alg->ops->update(j->cipher, j->bytes[DATA], first, out);
   }
   if (first < length) {
-    // The counter, wrapped to zero.
     uint8_t zeroed[16];
     memcpy(zeroed, j->bytes[EXTRA], 16);
     for (int k = 0; k < j->bits; ++k) {
@@ -368,9 +319,6 @@ static void ctr_run(SubtleJob *j) {
   j->written = length;
 }
 
-// encrypt and decrypt of AES-GCM ({ iv, additionalData, tagLength } with the tag in bytes),
-// AES-CBC ({ iv }) and AES-CTR ({ counter, length }) with a cipher of the direct layer; the key
-// is a secret KeyObject.
 void tz_crypto_subtle_aes(TzPromise *p, const TzCipherAlg *alg, const TzType *kt, const void *kv,
                           int32_t decrypt, const TzType *it, const void *iv, const TzType *at,
                           const void *av, int32_t tag, int32_t bits, const TzType *dt,
@@ -391,7 +339,6 @@ void tz_crypto_subtle_aes(TzPromise *p, const TzCipherAlg *alg, const TzType *kt
   size_t length = j->lengths[DATA];
   switch (alg->kind) {
   case TZ_CIPHER_AEAD:
-    // Data shorter than its tag, which the library rejects first, fails.
     if (decrypt && length < (size_t)tag) {
       j->failed = 1;
     }

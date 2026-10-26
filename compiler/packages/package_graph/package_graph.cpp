@@ -46,10 +46,6 @@ bool writeText(llvm::StringRef file, llvm::StringRef text) {
   return false;
 }
 
-// Whether tz.lock already fits tz.json, and names every package it needs
-// and no other: then a build needs no registry. Fills `locals` with the
-// local packages reached. A tz.json of a local package that cannot be read
-// is reported, and `failed` set.
 bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Manifest> &locals,
               bool &failed) {
   failed = false;
@@ -115,7 +111,6 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
       }
     }
   }
-  // Packages nobody needs any more are dropped from tz.lock.
   for (const auto &entry : lock.packages) {
     if (!reached.count(entry.first)) {
       return false;
@@ -125,7 +120,6 @@ bool lockFits(const Manifest &root, const Lock &lock, std::map<std::string, Mani
   return true;
 }
 
-// The sources of a locked package in the cache, checked against tz.lock.
 bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) {
   Source source;
   std::string error;
@@ -141,8 +135,6 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
       return false;
     }
     if (meta.hash != locked.hash) {
-      // A published version never changes: the registry, its mirror or the
-      // cache does not hold what it held when tz.lock was written.
       report("the files of " + locked.describe() + " are not those tz.lock names: their hash is " +
              meta.hash + ", tz.lock has " + locked.hash);
       return false;
@@ -175,7 +167,7 @@ bool ensureSources(const Locked &locked, std::string &dir, JsrVersion *jsrMeta) 
   return true;
 }
 
-} // namespace
+}
 
 bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Graph &graph,
                      Lock *before, Lock *after) {
@@ -207,7 +199,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
   bool exists = fs::exists(lockPath);
   if (exists || !lock.packages.empty()) {
     std::string current;
-    if (auto buffer = llvm::MemoryBuffer::getFile(lockPath, /*IsText=*/true)) {
+    if (auto buffer = llvm::MemoryBuffer::getFile(lockPath, true)) {
       current = (*buffer)->getBuffer().str();
     }
     if (current != text && !writeText(lockPath, text)) {
@@ -218,10 +210,9 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
     *after = lock;
   }
 
-  // The packages of the program, the project first.
   graph = Graph();
   std::map<std::string, unsigned> index;
-  std::vector<const Manifest *> manifests; // of each package, null for JSR
+  std::vector<const Manifest *> manifests;
   std::vector<Manifest> fetched;
   fetched.reserve(lock.packages.size());
   llvm::StringSet<> names;
@@ -276,7 +267,7 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
         Source target;
         if (parseSource(dep, "", target, error)) {
           if (lock.packages.count(target.id())) {
-            p.jsrDeps["@" + target.scope + "/" + target.name] = 0; // the index is set below
+            p.jsrDeps["@" + target.scope + "/" + target.name] = 0;
           }
         }
       }
@@ -296,7 +287,6 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
     index[id] = static_cast<unsigned>(graph.packages.size());
     graph.packages.push_back(std::move(p));
   }
-  // Which package each import name means.
   for (size_t i = 0; i < graph.packages.size(); ++i) {
     Package &p = graph.packages[i];
     if (const Manifest *m = manifests[i]) {
@@ -320,4 +310,4 @@ bool preparePackages(const Manifest &manifest, const PrepareOptions &options, Gr
   return true;
 }
 
-} // namespace tz::pkg
+}

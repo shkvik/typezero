@@ -14,7 +14,7 @@ llvm::ArrayRef<llvm::StringLiteral> DateFeature::typeArgFreeGlobals() const {
 }
 
 Expr *DateFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type * /*expected*/) const {
+                                   const Type *) const {
   const Type *receiver = member->object->type;
   if (receiver->isDate()) {
     return checker.dateChecker().checkDateMethod(call, member);
@@ -32,4 +32,4 @@ llvm::Value *DateFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.dateLowerer().emitDateCall(call);
 }
 
-} // namespace tz
+}

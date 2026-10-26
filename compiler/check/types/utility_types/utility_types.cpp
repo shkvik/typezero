@@ -27,17 +27,15 @@ llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-} // namespace
+}
 
 UtilityTypes::UtilityTypes(Checker &checker) : checker_(checker) {}
 
-// What `o.name` of a getter of the class gives (`status` of a Response):
-// null for a name without one, or a getter only code inside may use.
 const Type *UtilityTypes::getterType(ClassDecl *cls, llvm::StringRef name) {
   if (!cls || name.starts_with("#")) {
     return nullptr;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   for (FunctionDecl *fn : methods) {
     if (fn->accessor == FunctionDecl::Accessor::Getter && fn->sym && fn->access == Access::Public) {
       return checker_.returnInferrer().functionType(fn->sym)->ret();
@@ -47,8 +45,6 @@ const Type *UtilityTypes::getterType(ClassDecl *cls, llvm::StringRef name) {
   return nullptr;
 }
 
-// The type of the value `name` that the file `from` declares: a function, a
-// class as a value, or a variable that its check gave a type.
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
   for (Stmt *item : from->file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item); fn && fn->name == name) {
@@ -96,7 +92,6 @@ const Type *UtilityTypes::resolveUtilityType(const TypeRef &ref) {
                 u.op == TypeOp::Capitalize || u.op == TypeOp::Uncapitalize;
     std::vector<const Type *> operands;
     for (const TypeRef &arg : ref.args) {
-      // `ReturnType<typeof f>` of a generic function or an overloaded method.
       const Type *signature =
           function ? checker_.conditionalTypes().signatureForUtility(arg) : nullptr;
       operands.push_back(signature ? signature
@@ -138,7 +133,6 @@ Expr *UtilityTypes::checkGenericIndex(IndexExpr *index) {
   if (!open && !(object->isObject() && isa<NameExpr>(index->index))) {
     return nullptr;
   }
-  // The key first, without changing it.
   if (!open) {
     auto *name = cast<NameExpr>(index->index);
     VarSymbol *var = checker_.scopes().lookup(name->name).var;
@@ -178,4 +172,4 @@ bool UtilityTypes::wantsLiteral(const Type *param) const {
   return llvm::all_of(membersOf(c), [](const Type *m) { return m->isStringLiteral(); });
 }
 
-} // namespace tz
+}

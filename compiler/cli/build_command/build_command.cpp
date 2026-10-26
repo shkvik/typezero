@@ -36,4 +36,4 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
   return 0;
 }
 
-} // namespace tz
+}

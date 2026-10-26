@@ -1,29 +1,3 @@
-// The memory allocator of the runtime: every string, array and buffer comes
-// from here. It follows the design of mimalloc, simplified for one thread:
-//
-//   segment  4 MiB of address space from the OS, aligned to 4 MiB. Unit 0
-//            holds the segment's metadata, units 1..63 (64 KiB each) hold
-//            pages.
-//   page     a run of units holding blocks of one size class. A page hands
-//            out never-used blocks by bumping a pointer, then reuses freed
-//            blocks from its free list.
-//   huge     an object above 32 KiB gets its own OS allocation, also aligned
-//            to 4 MiB, with a small header.
-//
-// Because segments are aligned, tz_free finds the page of any block by
-// masking its address, without being told its size. Allocating or freeing a
-// small block is a handful of instructions in the common case, which matters
-// for strings: a program creates millions of them, and the C library's
-// malloc costs several times more per call.
-//
-// Each thread has a heap of its own (TzHeap in alloc.h): the segments it took
-// and their pages are its. In the parallel runtime (TZ_PARALLEL) a thread
-// may free a block of another's heap: the block goes onto that heap's list
-// of remote frees, a stack that others push onto with an atomic exchange,
-// and the owner takes the whole list back the next time it runs out of room
-// in a page (or when its thread goes idle, parallel.c), freeing each block
-// as its own.
-
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/output/output.h"
 #include "runtime/core/parallel/parallel.h"
@@ -39,28 +13,27 @@
 #endif
 
 #define SEGMENT_SHIFT 22
-#define SEGMENT_SIZE ((size_t)1 << SEGMENT_SHIFT) // 4 MiB
+#define SEGMENT_SIZE ((size_t)1 << SEGMENT_SHIFT)
 #define UNIT_SHIFT 16
-#define UNIT_SIZE ((size_t)1 << UNIT_SHIFT) // 64 KiB
-#define UNITS (SEGMENT_SIZE / UNIT_SIZE)    // 64
-#define MAX_SMALL ((size_t)32 << 10)        // larger objects are huge
-#define HUGE_HEADER 64                      // keeps huge blocks 64-byte aligned
-#define HUGE_SPARES TZ_HEAP_HUGE_SPARES     // freed huge blocks kept for reuse
-#define HUGE_SPARE_UNITS 16                 // of up to 1 MiB each
-// Size classes: multiples of 8 up to 64, then four per power of two.
+#define UNIT_SIZE ((size_t)1 << UNIT_SHIFT)
+#define UNITS (SEGMENT_SIZE / UNIT_SIZE)
+#define MAX_SMALL ((size_t)32 << 10)
+#define HUGE_HEADER 64
+#define HUGE_SPARES TZ_HEAP_HUGE_SPARES
+#define HUGE_SPARE_UNITS 16
 #define BINS TZ_HEAP_BINS
 
 enum { KIND_SMALL = 1, KIND_HUGE = 2 };
 
 typedef struct Page {
-  void *free;    // freed blocks, linked through their first word
-  char *bump;    // the next block never handed out
-  char *end;     // the end of the page's blocks
-  uint32_t used; // blocks handed out and not freed
+  void *free;
+  char *bump;
+  char *end;
+  uint32_t used;
   uint32_t block_size;
   uint8_t bin;
-  uint8_t units;  // the length of the run of units
-  uint8_t listed; // in its bin's list, which holds pages with room
+  uint8_t units;
+  uint8_t listed;
   struct Page *next, *prev;
 } Page;
 
@@ -68,44 +41,35 @@ struct Heap;
 
 typedef struct Segment {
   uint32_t kind;
-  uint32_t huge_units; // huge: the units of the block (committed)
-  struct Heap *owner;  // small: the heap of the thread whose pages these are
-  void *os_base;       // what to give back to the OS
+  uint32_t huge_units;
+  struct Heap *owner;
+  void *os_base;
   size_t os_size;
-  uint64_t free_units; // bit u set: unit u holds no page
+  uint64_t free_units;
   struct Segment *next, *prev;
-  uint8_t first_unit[UNITS]; // for each unit of a page, the page's first unit
-  Page pages[UNITS];         // indexed by the first unit of a page
+  uint8_t first_unit[UNITS];
+  Page pages[UNITS];
 } Segment;
 
 _Static_assert(sizeof(Segment) <= UNIT_SIZE, "segment metadata must fit in unit 0");
 
-// Units 1..63 free, unit 0 taken by the metadata.
 #define ALL_UNITS_FREE (~(uint64_t)1)
 
-// TzHeap of the thread, with its types.
 typedef struct Heap {
-  Page *bins[BINS];                  // pages with room, per size class
-  Segment *segments;                 // small segments, those with free units first
-  Segment *spare;                    // one empty segment kept for reuse
-  Segment *huge_spares[HUGE_SPARES]; // freed huge blocks of up to 1 MiB
-  void *remote;                      // blocks freed by other threads (atomic)
+  Page *bins[BINS];
+  Segment *segments;
+  Segment *spare;
+  Segment *huge_spares[HUGE_SPARES];
+  void *remote;
 } Heap;
 
 _Static_assert(sizeof(Heap) == sizeof(TzHeap), "Heap must match TzHeap");
 
 #define tz_heap (*(Heap *)&tz_thread.heap)
 
-//===----------------------------------------------------------------------===//
-// The operating system
-//===----------------------------------------------------------------------===//
-
-// `size` bytes of zeroed memory aligned to SEGMENT_SIZE.
 static void *os_alloc_aligned(size_t size, void **base, size_t *reserved) {
   size_t total = size + SEGMENT_SIZE;
 #ifdef _WIN32
-  // Reserve enough address space to find an aligned start in it, and commit
-  // only the aligned part. The rest stays reserved, which costs no memory.
   char *p = (char *)VirtualAlloc(NULL, total, MEM_RESERVE, PAGE_READWRITE);
   if (!p) {
     return NULL;
@@ -125,7 +89,6 @@ static void *os_alloc_aligned(size_t size, void **base, size_t *reserved) {
     return NULL;
   }
   char *aligned = (char *)(((uintptr_t)p + SEGMENT_SIZE - 1) & ~(uintptr_t)(SEGMENT_SIZE - 1));
-  // Give back the unaligned head and the tail.
   if (aligned > p) {
     munmap(p, (size_t)(aligned - p));
   }
@@ -153,10 +116,6 @@ TZ_NORETURN static void out_of_memory(size_t size) {
   tz_panicf("out of memory allocating %zu bytes", size);
 }
 
-//===----------------------------------------------------------------------===//
-// Size classes
-//===----------------------------------------------------------------------===//
-
 static inline unsigned highest_bit(size_t x) {
 #ifdef _MSC_VER
   unsigned long index;
@@ -173,7 +132,7 @@ static inline unsigned bin_of(size_t size) {
   if (size <= 64) {
     return size == 0 ? 0 : (unsigned)((size - 1) >> 3);
   }
-  unsigned b = highest_bit(size - 1); // size - 1 is in [2^b, 2^(b+1))
+  unsigned b = highest_bit(size - 1);
 
   return 8 + (b - 6) * 4 + (unsigned)(((size - 1) >> (b - 2)) & 3);
 }
@@ -187,7 +146,6 @@ static inline size_t bin_size(unsigned bin) {
   return ((size_t)1 << b) + ((size_t)sub + 1) * ((size_t)1 << (b - 2));
 }
 
-// Units per page: enough for at least eight blocks.
 static inline unsigned bin_units(unsigned bin) {
   size_t bytes = bin_size(bin) * 8;
 
@@ -197,10 +155,6 @@ static inline unsigned bin_units(unsigned bin) {
 static inline Segment *segment_of(const void *p) {
   return (Segment *)((uintptr_t)p & ~(uintptr_t)(SEGMENT_SIZE - 1));
 }
-
-//===----------------------------------------------------------------------===//
-// Segments and pages
-//===----------------------------------------------------------------------===//
 
 static void segment_link(Segment *s) {
   s->prev = NULL;
@@ -244,7 +198,6 @@ static Segment *segment_new(void) {
   return s;
 }
 
-// The first run of `n` free units in `s`, or 0.
 static unsigned find_units(const Segment *s, unsigned n) {
   uint64_t mask = n >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1);
   for (unsigned u = 1; u + n <= UNITS; ++u) {
@@ -313,8 +266,6 @@ static Page *page_new(unsigned bin) {
   return page;
 }
 
-// Gives the units of an empty page back to its segment, and an empty segment
-// back to the OS (keeping one for reuse).
 static void page_release(Page *page) {
   bin_remove(page);
   Segment *s = segment_of(page);
@@ -332,19 +283,11 @@ static void page_release(Page *page) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Allocation
-//===----------------------------------------------------------------------===//
-
 static void *huge_alloc(size_t size) {
   size_t total = (HUGE_HEADER + size + UNIT_SIZE - 1) & ~(UNIT_SIZE - 1);
   if (total < size) {
     out_of_memory(size);
   }
-  // A block freed before, of about the size: a stream of 64 KiB chunks (as
-  // node:fs reads them) frees one and allocates the next for each chunk,
-  // which the OS makes slow (the mapping, a fault on the first write to each
-  // page, the unmapping).
   size_t units = total / UNIT_SIZE;
   for (unsigned i = 0; i < HUGE_SPARES; ++i) {
     Segment *s = tz_heap.huge_spares[i];
@@ -370,14 +313,11 @@ static void *huge_alloc(size_t size) {
 
 void tz_heap_collect(void);
 
-// tz_alloc when the first page of the size class has no room, or the block
-// is huge.
 TZ_NOINLINE void *tz_alloc_slow(size_t size) {
   if (size > MAX_SMALL) {
     return huge_alloc(size);
   }
 #if TZ_PARALLEL
-  // What other threads freed may make room.
   if (__atomic_load_n(&tz_heap.remote, __ATOMIC_RELAXED)) {
     tz_heap_collect();
     if (tz_heap.bins[bin_of(size)]) {
@@ -385,8 +325,6 @@ TZ_NOINLINE void *tz_alloc_slow(size_t size) {
     }
   }
 #endif
-  // Pages at the head of the list without room are full: drop them from it
-  // until one has room, or start a new page.
   unsigned bin = bin_of(size);
   Page *page = tz_heap.bins[bin];
   while (page && !page->free && page->bump >= page->end) {
@@ -436,8 +374,6 @@ static inline Page *page_of(Segment *s, const void *p) {
   return &s->pages[s->first_unit[unit]];
 }
 
-// tz_free of a huge block, or of a small one already back in its page when
-// the page has to move: it was full, or it is now empty.
 TZ_NOINLINE void tz_free_slow(void *p) {
   Segment *s = segment_of(p);
   if (s->kind == KIND_HUGE) {
@@ -454,17 +390,13 @@ TZ_NOINLINE void tz_free_slow(void *p) {
   }
   Page *page = page_of(s, p);
   if (!page->listed) {
-    bin_push(page); // it has room again
+    bin_push(page);
   } else if (page->used == 0 && (page->next || page->prev)) {
-    // Empty, and not the only page of its size: give it back. The last one
-    // stays, so that allocating and freeing one object does not churn.
     page_release(page);
   }
 }
 
 #if TZ_PARALLEL
-// tz_free of a small block of another thread's heap: onto that heap's list
-// of remote frees.
 TZ_NOINLINE void tz_free_remote(void *p) {
   Heap *owner = segment_of(p)->owner;
   void *head = __atomic_load_n(&owner->remote, __ATOMIC_RELAXED);
@@ -497,7 +429,6 @@ TZ_HOT void tz_free(void *p) {
   tz_free_slow(p);
 }
 
-// Takes back what other threads freed of this thread's heap.
 void tz_heap_collect(void) {
 #if TZ_PARALLEL
   void *block = __atomic_exchange_n(&tz_heap.remote, NULL, __ATOMIC_ACQUIRE);

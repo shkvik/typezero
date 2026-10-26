@@ -28,4 +28,4 @@ llvm::Value *BuiltinModulesFeature::lowerCall(Lowering &lowering, CallExpr *call
   return lowering.builtinModuleLowerer().emitNodeBuiltin(call);
 }
 
-} // namespace tz
+}

@@ -10,4 +10,4 @@ int LicensesCommand::run(const Args &args) const {
   return printLicenses(args.input, runtime_.path("licenses"));
 }
 
-} // namespace tz
+}

@@ -25,10 +25,8 @@ namespace tz {
 
 namespace {
 
-// Where a descriptor holds its tables of interfaces: after its TzLayout.
 constexpr uint64_t kItablesOffset = 40;
 
-// A load from a descriptor, which never changes.
 llvm::LoadInst *invariant(llvm::LoadInst *load) {
   load->setMetadata(llvm::LLVMContext::MD_invariant_load,
                     llvm::MDNode::get(load->getContext(), {}));
@@ -42,7 +40,7 @@ std::string typeName(const Type *type) {
   return name.starts_with("{") ? "object" : name.str();
 }
 
-} // namespace
+}
 
 InheritLowerer::InheritLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -57,7 +55,6 @@ const Type *InheritLowerer::layoutPrefix(const Type *type) const {
 }
 
 void InheritLowerer::prepareDispatch(SourceFile &file) {
-  // The types up each declared chain; the interfaces in the order found.
   std::vector<const Type *> order;
   auto implement = [&](const Type *type, const Type *iface) {
     lowering_.withSubtypes_.insert(iface);
@@ -78,7 +75,7 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
   };
   for (const Type *type : file.subtypes) {
     if (mentionsParam(type)) {
-      continue; // of generic code, which is emitted only as its instances
+      continue;
     }
     std::vector<const Type *> queue(type->bases().begin(), type->bases().end());
     llvm::SmallPtrSet<const Type *, 8> seen;
@@ -91,8 +88,6 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
       implement(type, base);
     }
   }
-  // A type with read-only fields that objects of another are seen as is
-  // one too, of what the other's objects may be.
   for (bool changed = true; changed;) {
     changed = false;
     for (auto [from, to] : file.views) {
@@ -123,15 +118,14 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
     for (unsigned k = 0; k < fields.size(); ++k) {
       const Field &f = fields[k];
       Lowering::InterfaceMember &member = info.members[k];
-      // A method of some class that implements it.
       bool callable = f.type->isFunction() && llvm::any_of(info.implementers, [&](const Type *t) {
                         return t->isClass() && !t->field(f.name);
                       });
       if (callable) {
         member.entry = int(entries.size());
         member.callable = true;
-        entries.push_back(lowering_.builder_.getPtrTy()); // the code
-        entries.push_back(lowering_.builder_.getPtrTy()); // its info
+        entries.push_back(lowering_.builder_.getPtrTy());
+        entries.push_back(lowering_.builder_.getPtrTy());
         continue;
       }
       uint64_t offset = offsetOf(iface, k);
@@ -141,9 +135,8 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
         continue;
       }
       member.entry = int(entries.size());
-      entries.push_back(lowering_.builder_.getInt64Ty()); // the offset
+      entries.push_back(lowering_.builder_.getInt64Ty());
     }
-    // A method with several signatures is a method of classes only.
     for (const Overload &overload : iface->overloads()) {
       std::vector<Lowering::InterfaceMember> &signatures = info.overloads.emplace_back();
       for (size_t i = 0; i < overload.signatures.size(); ++i) {
@@ -156,7 +149,6 @@ void InheritLowerer::prepareDispatch(SourceFile &file) {
     info.table = llvm::StructType::get(lowering_.ctx_, entries);
   }
 
-  // The numbers: interfaces that some type implements together differ.
   std::vector<const Type *> numbered;
   for (const Type *iface : order) {
     Lowering::InterfaceInfo &info = lowering_.interfaces_[iface];
@@ -256,7 +248,7 @@ llvm::Constant *InheritLowerer::itablesOf(const Type *type) {
   }
   auto *arrayType = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), colors_);
   auto *array = new llvm::GlobalVariable(
-      *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(arrayType, tables), "tz.itables." + typeName(type));
   array->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   global = array;
@@ -289,7 +281,6 @@ llvm::Constant *InheritLowerer::itable(const Type *type, const Type *iface) {
       continue;
     }
     if (const ClassDecl *cls = type->classDecl(); cls && !type->field(f.name)) {
-      // A class with the method: an abstract class has no objects.
       FunctionDecl *fn = implementingMethod(cls, f.name, f.type);
       entries.push_back(fn ? lowering_.classDescriptors().methodCode(fn) : null);
       entries.push_back(fn ? lowering_.closureLowerer().functionInfo(fn) : null);
@@ -299,8 +290,6 @@ llvm::Constant *InheritLowerer::itable(const Type *type, const Type *iface) {
     entries.push_back(code);
     entries.push_back(codeInfo);
   }
-  // The variant of a class for each signature; a type that is not a class
-  // has no objects with such methods.
   for (const Overload &overload : iface->overloads()) {
     for (const Type *signature : overload.signatures) {
       const ClassDecl *cls = type->classDecl();
@@ -309,7 +298,7 @@ llvm::Constant *InheritLowerer::itable(const Type *type, const Type *iface) {
       entries.push_back(fn ? lowering_.closureLowerer().functionInfo(fn) : null);
     }
   }
-  auto *table = new llvm::GlobalVariable(*lowering_.module_, info.table, /*isConstant=*/true,
+  auto *table = new llvm::GlobalVariable(*lowering_.module_, info.table, true,
                                          llvm::GlobalValue::PrivateLinkage,
                                          llvm::ConstantStruct::get(info.table, entries),
                                          "tz.itable." + typeName(type) + "." + typeName(iface));
@@ -348,8 +337,6 @@ FunctionDecl *InheritLowerer::implementingMethod(const ClassDecl *cls, llvm::Str
   return nullptr;
 }
 
-// The function in the field is kept alive while it runs: the call may replace
-// what the field holds.
 std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Type *type,
                                                                         const Field &member) {
   auto &stub = fieldStubs_[{type, member.name}];
@@ -365,7 +352,7 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", code));
   llvm::Value *fn = lowering_.builder_.CreateLoad(
       lowering_.fnTy_,
-      lowering_.objectLayouts().fieldAddress(code->getArg(0), type, member.name, /*exact=*/true),
+      lowering_.objectLayouts().fieldAddress(code->getArg(0), type, member.name, true),
       member.name);
   lowering_.refCounts().retainValue(fn, fnType);
   std::vector<llvm::Value *> args;
@@ -383,8 +370,7 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
   llvm::SmallVector<llvm::UTF16, 16> units;
   llvm::convertUTF8ToUTF16String(member.name, units);
   auto *info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(
                                            std::u16string(units.begin(), units.end()))}),
@@ -394,16 +380,12 @@ std::pair<llvm::Function *, llvm::Constant *> InheritLowerer::fieldStub(const Ty
   return stub;
 }
 
-// `shape.area()` through an interface: the code the object's table gives,
-// called with the object, as a method is.
 llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *iface = member->object->type;
   const Lowering::InterfaceMember *method = dispatchedMember(iface, member->name, call->signature);
   const Type *fnType = member->type;
   if (!method) {
-    // A method with several signatures of an interface that no class
-    // implements: no object can get here.
     for (Expr *arg : call->args) {
       lowering_.stmtLowerer().emitDiscarded(arg);
     }
@@ -416,7 +398,6 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
   bool borrow =
       staysDuringCall(member->object) && llvm::all_of(call->args, AssignLowerer::cannotAssign);
   Lowering::Operand self = lowering_.refCounts().emitOperand(member->object, borrow);
-  // The object waits while an argument that may throw is computed.
   lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
                                          return lowering_.mayThrow().exprThrows(arg);
                                        }));
@@ -432,11 +413,10 @@ llvm::Value *InheritLowerer::emitInterfaceCall(CallExpr *call) {
       "code"));
   llvm::CallInst *result =
       lowering_.builder_.CreateCall(lowering_.closureLowerer().closureFnType(fnType), code, args);
-  // The object goes before what the method threw does.
   lowering_.refCounts().dropOperand(self);
   lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
 
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
-} // namespace tz
+}

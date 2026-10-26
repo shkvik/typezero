@@ -18,7 +18,6 @@ namespace tz {
 
 namespace {
 
-// JavaScript's ToInt32.
 int32_t jsToInt32(double x) {
   if (!std::isfinite(x)) {
     return 0;
@@ -31,7 +30,6 @@ int32_t jsToInt32(double x) {
   return static_cast<int32_t>(static_cast<uint32_t>(m));
 }
 
-// JavaScript's `**`: unlike C's pow, 1 ** NaN and (-1) ** Infinity are NaN.
 double power(double x, double y) {
   if (std::isnan(y) || (std::fabs(x) == 1 && std::isinf(y))) {
     return std::numeric_limits<double>::quiet_NaN();
@@ -47,17 +45,14 @@ std::string formatNumber(double value) {
   return text;
 }
 
-// Doubles hold every integer up to 2^53 exactly.
 constexpr int64_t kMaxExact = int64_t(1) << 53;
 
-// `value` wrapped around to `bits` bits, as the machine computes it.
 int64_t wrapTo(unsigned bits, int64_t value) {
   return bits == 32 ? static_cast<int32_t>(static_cast<uint32_t>(value)) : value;
 }
 
 bool fitsIn(unsigned bits, int64_t value) { return wrapTo(bits, value) == value; }
 
-// base ** exponent wrapped around to 64 bits, and the true value if it fits.
 std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t exponent) {
   uint64_t wrapped = 1, factor = static_cast<uint64_t>(base);
   std::optional<int64_t> exact = 1, exactFactor = base;
@@ -75,7 +70,6 @@ std::pair<int64_t, std::optional<int64_t>> intPower(int64_t base, int64_t expone
   return {static_cast<int64_t>(wrapped), exact};
 }
 
-// The true value of an integer constant as JavaScript prints it (up to 1e21).
 std::string constantText(std::optional<int64_t> exact, double value) {
   if (exact) {
     return std::to_string(*exact);
@@ -89,7 +83,7 @@ std::string constantText(std::optional<int64_t> exact, double value) {
   return text;
 }
 
-} // namespace
+}
 
 ConstantFolder::ConstantFolder(Checker &checker) : checker_(checker) {}
 
@@ -186,7 +180,6 @@ std::optional<Checker::Constant> ConstantFolder::evalConstant(const Expr *expr, 
     }
   }
   case Expr::Kind::Name: {
-    // An earlier member of the same enum.
     llvm::StringRef name = cast<NameExpr>(expr)->name;
     for (size_t i = 0; i < defined; ++i) {
       if (self->members[i].name == name) {
@@ -196,7 +189,6 @@ std::optional<Checker::Constant> ConstantFolder::evalConstant(const Expr *expr, 
     return std::nullopt;
   }
   case Expr::Kind::Member: {
-    // `E.X`, of this enum or another one.
     auto *access = cast<MemberExpr>(expr);
     auto *object = dyn_cast<NameExpr>(access->object);
     EnumDecl *decl = object ? checker_.scopes().lookup(object->name).enumDecl : nullptr;
@@ -228,7 +220,6 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
   }
   switch (expr->kind()) {
   case Expr::Kind::IntLit: {
-    // One that does not fit was reported; `-2147483648` is a UnaryExpr.
     uint64_t value = cast<IntLitExpr>(expr)->value;
     if (value > uint64_t(std::numeric_limits<int64_t>::max()) ||
         !fitsIn(expr->type->bitWidth(), static_cast<int64_t>(value))) {
@@ -244,8 +235,6 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
     return found->second;
   }
   case Expr::Kind::Cast: {
-    // An int widened to long: the value the int holds. A long cut to an int
-    // for a bitwise operator: its low 32 bits.
     auto *conv = cast<CastExpr>(expr);
     if (!conv->isImplicit()) {
       return std::nullopt;
@@ -269,7 +258,6 @@ std::optional<int64_t> ConstantFolder::intConstant(const Expr *expr) const {
 void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
   unsigned bits = unary->type->bitWidth();
   if (auto *lit = dyn_cast<IntLitExpr>(unary->operand); lit && unary->op == UnaryOp::Neg) {
-    // `-2147483648` fits in an int, though 2147483648 alone does not.
     uint64_t magnitude = lit->value;
     if (magnitude <= uint64_t(1) << (bits - 1)) {
       constants_[unary] = static_cast<int64_t>(0 - magnitude);
@@ -302,10 +290,6 @@ void ConstantFolder::foldUnary(UnaryExpr *unary, bool wraps) {
   }
 }
 
-// In a `wraps` context only the low bits of the value matter, as in
-// `(h * 31 + c) | 0`: JavaScript computes the true value and `| 0` takes its
-// low 32 bits, which is what wrapping around gives. So there the value may
-// exceed its type, but not 2^53, beyond which JavaScript rounds it.
 void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   std::optional<int64_t> l = intConstant(bin->lhs), r = intConstant(bin->rhs);
   if (!l || !r) {
@@ -314,9 +298,9 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   unsigned bits = bin->type->bitWidth();
   int64_t a = *l, b = *r;
   auto ua = static_cast<uint64_t>(a), ub = static_cast<uint64_t>(b);
-  std::optional<int64_t> exact; // the true value, if it fits in 64 bits
-  int64_t wrapped = 0;          // what the program computes, before wrapTo
-  double value = 0;             // what JavaScript computes
+  std::optional<int64_t> exact;
+  int64_t wrapped = 0;
+  double value = 0;
   switch (bin->op) {
   case BinaryOp::Add:
     exact = llvm::checkedAdd(a, b);
@@ -335,22 +319,22 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
     break;
   case BinaryOp::Div:
   case BinaryOp::Rem: {
-    if (b == 0) { // reported by checkDivisor
+    if (b == 0) {
       return;
     }
     int64_t min =
         bits == 32 ? std::numeric_limits<int32_t>::min() : std::numeric_limits<int64_t>::min();
-    if (b == -1) { // MIN / -1 wraps around to MIN (see Lowering::emitIntDivRem)
+    if (b == -1) {
       exact = bin->op == BinaryOp::Rem ? 0 : llvm::checkedSub(int64_t(0), a);
       wrapped = bin->op == BinaryOp::Rem ? 0 : (a == min ? min : -a);
       value = -static_cast<double>(a);
     } else {
-      exact = wrapped = bin->op == BinaryOp::Div ? a / b : a % b; // truncated, as integers divide
+      exact = wrapped = bin->op == BinaryOp::Div ? a / b : a % b;
     }
     break;
   }
   case BinaryOp::Pow: {
-    if (b < 0) { // reported by checkBinary
+    if (b < 0) {
       return;
     }
     auto [low, product] = intPower(a, b);
@@ -371,9 +355,6 @@ void ConstantFolder::foldBinary(BinaryExpr *bin, bool wraps) {
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    // As Lowering does it: the count masked to the width, `>>>` on the bits.
-    // An int's `>>>` may give a long (see checkBinary), which holds the
-    // unsigned 32-bit result.
     unsigned width = bin->lhs->type->bitWidth();
     unsigned count = static_cast<unsigned>(b) & (width - 1);
     int64_t x = wrapTo(width, a);
@@ -459,4 +440,4 @@ Expr *ConstantFolder::globalConstant(llvm::StringRef object, llvm::StringRef nam
   return nullptr;
 }
 
-} // namespace tz
+}

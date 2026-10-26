@@ -19,8 +19,6 @@ namespace tz {
 
 LiteralChecker::LiteralChecker(Checker &checker) : checker_(checker) {}
 
-// An integer literal takes the numeric type the context expects; otherwise
-// int, or long if it does not fit.
 Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool negated) {
   auto fits = [&](unsigned bits) {
     uint64_t limit = uint64_t(1) << (bits - 1);
@@ -29,15 +27,13 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
   };
 
   if (expected) {
-    // `0 | 1`, or a union with a number type: that type.
     double value = negated ? -double(lit->value) : double(lit->value);
-    if (const Type *literal =
-            checker_.literalTypes().numberLiteralFor(expected, value, /*fraction=*/false);
+    if (const Type *literal = checker_.literalTypes().numberLiteralFor(expected, value, false);
         literal && (!negated || value != 0)) {
       lit->type = literal;
       return lit;
     }
-    if (const Type *member = LiteralTypes::numberMemberOf(expected, /*fraction=*/false)) {
+    if (const Type *member = LiteralTypes::numberMemberOf(expected, false)) {
       expected = member;
     }
     expected = expected->nonOptional();
@@ -52,12 +48,9 @@ Expr *LiteralChecker::checkIntLit(IntLitExpr *lit, const Type *expected, bool ne
     lit->type = Type::intTy();
   } else if (fits(64)) {
     lit->type = Type::longTy();
-  } else { // only a double holds it, as any number in JavaScript
+  } else {
     lit->type = Type::doubleTy();
   }
-  // The type a literal takes in generic code may come from a type parameter
-  // (`reduce(f, 0)` over `T extends number` starts from a double); an
-  // instance gives it the same.
   std::pair<const char *, unsigned> key{lit->loc().getPointer(), unsigned(Expr::Kind::IntLit)};
   if (!checker_.functions_.empty() && checker_.functions_.front()->sym &&
       checker_.functions_.front()->sym->isGeneric()) {
@@ -77,8 +70,6 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   bool constant = true;
   for (Expr *&e : tmpl->exprs) {
     e = checker_.exprChecker().checkExpr(e);
-    // A copy of generic code converts a value of a type parameter to a string
-    // here, as the generic check did (noteForced): the type it had.
     const Expr *part = e;
     if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit() && conv->type->isString()) {
       part = conv->operand;
@@ -89,9 +80,6 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
     e = checker_.concatChecker().toStringOperand(e);
   }
   tmpl->type = Type::string();
-  // Where a template literal type is expected, the type the parts make, as
-  // in TypeScript: `on${x}` of a string x is an `on${string}`. One literal
-  // of a template of variables and literals is that string literal itself.
   const Type *want = expected ? expected->nonOptional() : nullptr;
   auto templated = [](const Type *t) {
     return t->isPattern() || t->typeOp() == TypeOp::Template || t->isStringLiteral();
@@ -126,4 +114,4 @@ Expr *LiteralChecker::checkTemplate(TemplateExpr *tmpl, const Type *expected) {
   return tmpl;
 }
 
-} // namespace tz
+}

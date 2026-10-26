@@ -19,8 +19,6 @@ namespace tz {
 
 TupleChecker::TupleChecker(Checker &checker) : checker_(checker) {}
 
-// `t.join(sep)`: the elements of the tuple as String() makes them (an
-// undefined one empty, as join does), with sep between them.
 Expr *TupleChecker::checkTupleJoin(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call) ||
@@ -62,7 +60,6 @@ const Type *TupleChecker::tupleElement(const Type *tuple) {
   return element;
 }
 
-// `t.length` is known when compiling; the tuple is still evaluated.
 Expr *TupleChecker::checkTupleMember(MemberExpr *member) {
   const Type *type = member->object->type;
   if (member->name != "length") {
@@ -118,7 +115,6 @@ Expr *TupleChecker::checkTupleMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// `["Ann", 30]` where `[string, int]` is expected: a value for each place.
 Expr *TupleChecker::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
   llvm::ArrayRef<Field> fields = tuple->fields();
   lit->type = Type::error();
@@ -150,4 +146,4 @@ Expr *TupleChecker::checkTupleLit(ArrayLitExpr *lit, const Type *tuple) {
   return lit;
 }
 
-} // namespace tz
+}

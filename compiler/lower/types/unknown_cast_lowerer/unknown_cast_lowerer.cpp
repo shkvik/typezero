@@ -21,17 +21,15 @@ namespace tz {
 
 namespace {
 
-// TZ_LAYOUT_CLASS and TZ_LAYOUT_DATE of runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kLayoutClass = 2097152;
 
 constexpr uint32_t kLayoutDate = 1024;
 
-// TZ_T_* of runtime/core/tzrt/tzrt.h, and the kinds tz_unknown_kind gives.
 enum : uint32_t { kBoxInt = 1, kBoxLong = 2, kBoxDouble = 3 };
 
 enum : uint32_t { kKindString = 2, kKindBoolean = 3 };
 
-} // namespace
+}
 
 UnknownCastLowerer::UnknownCastLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -66,13 +64,11 @@ std::vector<const ClassDecl *> UnknownCastLowerer::classesOfType(const Type *typ
 llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
                                                llvm::BasicBlock *fail) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  // Goes on where `ok` holds.
   auto test = [&](llvm::Value *ok) {
     llvm::BasicBlock *next = lowering_.functionFrame().newBlock("reflect.fits");
     lowering_.builder_.CreateCondBr(ok, next, fail);
     lowering_.functionFrame().switchTo(next);
   };
-  // tz_unknown_to_X(u, &out): whether it holds one, and the value.
   auto through = [&](const char *name, llvm::Type *out) {
     llvm::Value *slot = lowering_.functionFrame().createStackSlot(out, "reflect.value");
     llvm::Value *ok = lowering_.builder_.CreateCall(
@@ -86,7 +82,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
     return u;
   }
   if (to->isOptional()) {
-    // Undefined is undefined; anything else must be a T.
     llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
     llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("reflect.optional");
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("reflect.optional.end");
@@ -103,7 +98,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
     return phi;
   }
   if (to->isUnion()) {
-    // The first member that it holds.
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("reflect.union.end");
     std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> found;
     for (const Type *member : to->members()) {
@@ -163,19 +157,17 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
         lowering_.builder_.CreateAnd(flags, lowering_.builder_.getInt32(kLayoutClass)),
         lowering_.builder_.getInt32(0));
     if (to->isClassRef()) {
-      // A class itself: that one, or one whose objects are T.
       test(isClass);
       if (const ClassDecl *cls = to->classRef()) {
         test(lowering_.builder_.CreateICmpEQ(u, lowering_.unknownLowerer().classObject(cls)));
       } else if (!to->constructed()->isAnyObject()) {
-        // TzClass: { rc, layout, parent, i32 id, ... }.
         llvm::Value *id = lowering_.builder_.CreateLoad(
             i32,
             lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), u, 24),
             "class");
         test(classIdIn(id, classesOfType(to->constructed())));
       }
-      return u; // never counted
+      return u;
     }
     if (to->isDict()) {
       test(lowering_.builder_.CreateICmpEQ(layout,
@@ -188,7 +180,7 @@ llvm::Value *UnknownCastLowerer::emitUnknownAs(llvm::Value *u, const Type *to,
       std::vector<const ClassDecl *> classes = to->isClass() || to->isBase() || !to->bases().empty()
                                                    ? classesOfType(to)
                                                    : std::vector<const ClassDecl *>();
-      if (classes.empty()) { // no check tells a literal type apart
+      if (classes.empty()) {
         lowering_.builder_.CreateBr(fail);
         lowering_.functionFrame().startDeadBlock();
         return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to));
@@ -220,7 +212,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
                                            emitUnknownFit(u, to->inner()));
   }
   if (to->isUnion()) {
-    // As well as the member it fits best.
     llvm::Value *best = level(0);
     for (const Type *member : to->members()) {
       llvm::Value *fit = emitUnknownFit(u, member);
@@ -230,7 +221,7 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
     return best;
   }
   if (to->isLiteral()) {
-    return level(0); // no check tells one value of a type apart
+    return level(0);
   }
   auto boxKind = [&] {
     return lowering_.builder_.CreateCall(
@@ -240,7 +231,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
     return lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_unknown_kind", i32, {ptr}), {u});
   };
-  // Whether tz_unknown_to_X takes it, for a number.
   auto takes = [&](const char *name, llvm::Type *out) {
     llvm::Value *slot = lowering_.functionFrame().createStackSlot(out, "fit.value");
     llvm::Value *ok = lowering_.builder_.CreateCall(
@@ -292,7 +282,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
   default:
     return level(0);
   }
-  // An object of the language: its layout tells, as for emitUnknownAs.
   llvm::Value *layout = lowering_.builder_.CreateCall(
       lowering_.unknownLowerer().unknownFunction("tz_unknown_layout", ptr, {ptr}), {u}, "layout");
   llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
@@ -317,7 +306,6 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
     } else if (to->constructed()->isAnyObject()) {
       fit = pick(isClass, 2, level(0));
     } else {
-      // TzClass: { rc, layout, parent, i32 id, ... }; read only of a class.
       llvm::Value *at = lowering_.builder_.CreateSelect(
           isClass, lowering_.builder_.CreateConstGEP1_64(lowering_.builder_.getInt8Ty(), u, 24),
           layout);
@@ -360,4 +348,4 @@ llvm::Value *UnknownCastLowerer::emitUnknownFit(llvm::Value *u, const Type *to) 
   return phi;
 }
 
-} // namespace tz
+}

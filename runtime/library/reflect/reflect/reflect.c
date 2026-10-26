@@ -1,16 +1,3 @@
-// Reflection (docs/decorators.md, section 6): Reflect.get, Reflect.apply,
-// Reflect.construct and `new` of a class known only when the program runs.
-//
-// The fields and methods of an object of tz lie at places fixed when
-// compiling, without names. For the classes that reflection reaches, the
-// compiler puts a description in the exe (TzClassInfo, which the object of
-// the class points to): a function that makes an object from arguments as
-// unknowns, checking each against the constructor, and the methods as
-// functions that take their `this`. The fields need nothing more: the layout
-// of every object names them, for printing. A function value in an unknown
-// is called through the invoker of its type, which checks the arguments
-// against its parameters.
-
 #include "runtime/library/reflect/reflect/reflect.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -25,16 +12,16 @@
 #include <stdio.h>
 #include <string.h>
 
-int32_t tz_json_kind(const TzJson *j); // json.c
+int32_t tz_json_kind(const TzJson *j);
 
 typedef struct {
-  TzClass *const *classes; // by number
+  TzClass *const *classes;
   uint32_t class_count;
   const TzInvokerEntry *invokers;
   uint32_t invoker_count;
 } TzReflectStore;
 
-TzReflectStore tz_reflect_store; // not static: see the rules in tzrt.h
+TzReflectStore tz_reflect_store;
 
 void tz_reflect_init(TzClass *const *classes, uint32_t count, const TzInvokerEntry *invokers,
                      uint32_t invoker_count) {
@@ -50,7 +37,6 @@ static const TzBox *as_box(const void *u) {
   return o && o->layout == &tz_box_layout ? (const TzBox *)u : NULL;
 }
 
-// Whether the UTF-8 name is the string `key`.
 static int same_name(const char *name, uint32_t length, TzStr key) {
   uint32_t units;
   int two;
@@ -93,8 +79,6 @@ static int same_name(const char *name, uint32_t length, TzStr key) {
   return k == units;
 }
 
-// What an argument is, for messages: "undefined", "2.5", "a string", "an
-// object of class User"...
 static void describe(const void *u, char *out, size_t size) {
   int32_t kind = tz_unknown_kind(u);
   const TzBox *box = as_box(u);
@@ -178,11 +162,6 @@ void tz_class_name(TzStr *out, const TzClass *cls) {
   *out = tz_buf_take(&buf);
 }
 
-//===----------------------------------------------------------------------===//
-// new and Reflect.construct
-//===----------------------------------------------------------------------===//
-
-// Whether `u` is a class, which `new` takes; throws a TypeError if not.
 static const TzClass *as_class(const void *u) {
   if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_CLASS)) {
     return (const TzClass *)u;
@@ -196,7 +175,7 @@ static const TzClass *as_class(const void *u) {
 
 void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
   const TzLayout *layout = cls->layout;
-  if (!cls->info) { // String, Number... as `design:*` records give them
+  if (!cls->info) {
     tz_throw(TZ_TYPE_ERROR, "%.*s of JavaScript cannot be made through reflection",
              (int)layout->name_length, layout->name);
     return NULL;
@@ -210,8 +189,6 @@ void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
   return cls->info->construct(args, count);
 }
 
-// The elements of an array of any type as unknowns, which `out` (of the
-// array's length) owns.
 static void as_unknowns(const TzArray *array, void **out) {
   for (uint32_t i = 0; i < array->length; ++i) {
     char *element = array->data + (size_t)i * array->type->size;
@@ -255,14 +232,9 @@ void *tz_reflect_make(void *(*construct)(void *const *args, uint32_t count), con
   return result;
 }
 
-//===----------------------------------------------------------------------===//
-// Reflect.get
-//===----------------------------------------------------------------------===//
-
-// The description of the class of an object, if reflection reaches it.
 static const TzClassInfo *info_of(const TzInstance *object) {
   if (object->layout->flags & TZ_LAYOUT_CLASS) {
-    return NULL; // the static methods are not described
+    return NULL;
   }
   uint32_t id = object->layout->class_id;
   if (!id || id >= tz_reflect_store.class_count || !tz_reflect_store.classes[id]) {
@@ -279,8 +251,6 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
     return NULL;
   }
   const TzInstance *object = (const TzInstance *)target;
-  // A field, by the names the layout gives for printing; of a class, its
-  // static fields, and its name.
   const TzLayout *layout = object->layout;
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
@@ -297,7 +267,6 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
     tz_class_name(&name, (const TzClass *)object);
     return tz_unknown_box(&tz_string_type, &name);
   }
-  // A method, as a function that takes its `this`.
   const TzClassInfo *info = info_of(object);
   if (info) {
     for (uint32_t i = 0; i < info->method_count; ++i) {
@@ -314,10 +283,6 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
   return NULL;
 }
 
-//===----------------------------------------------------------------------===//
-// Reflect.apply
-//===----------------------------------------------------------------------===//
-
 void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   const TzBox *box = as_box(f);
   if (!box || box->type->kind != TZ_T_FUNCTION) {
@@ -333,7 +298,7 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
       invoke = tz_reflect_store.invokers[i].invoke;
     }
   }
-  if (!invoke) { // Checker gives one to each type of function that can be here
+  if (!invoke) {
     tz_throw(TZ_TYPE_ERROR, "Reflect.apply cannot call this function");
     return NULL;
   }
@@ -349,10 +314,6 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   return result;
 }
 
-//===----------------------------------------------------------------------===//
-// fromJson(cls, j)
-//===----------------------------------------------------------------------===//
-
 void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
   const TzLayout *layout = cls->layout;
   if (!cls->info || !cls->info->from_json) {
@@ -363,14 +324,6 @@ void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
 
   return cls->info->from_json(json, NULL);
 }
-
-//===----------------------------------------------------------------------===//
-// Checked conversions of unknowns
-//===----------------------------------------------------------------------===//
-
-// What the code that reflection runs needs to take an argument as unknown
-// (borrowed) for a parameter: whether it holds a value of the kind, and
-// that value (owned) in `out`.
 
 static int box_number(const void *u, double *out) {
   const TzBox *box = as_box(u);
@@ -413,7 +366,7 @@ int32_t tz_unknown_to_int(const void *u, int32_t *out) {
 
 int32_t tz_unknown_to_long(const void *u, int64_t *out) {
   const TzBox *box = as_box(u);
-  if (box && box->type->kind == TZ_T_LONG) { // exactly, beyond 2^53 too
+  if (box && box->type->kind == TZ_T_LONG) {
     *out = *(const int64_t *)TZ_BOX_VALUE(box);
     return 1;
   }
@@ -445,8 +398,6 @@ int32_t tz_unknown_to_string(const void *u, TzStr *out) {
   return 1;
 }
 
-// A box of exactly `type`: an array, a function, a decimal, a Result; of a
-// Json, any Json.
 int32_t tz_unknown_to_box(const void *u, const TzType *type, void *out) {
   const TzBox *box = as_box(u);
   if (!box || (box->type != type && !(type->kind == TZ_T_JSON && box->type->kind == TZ_T_JSON))) {
@@ -458,8 +409,6 @@ int32_t tz_unknown_to_box(const void *u, const TzType *type, void *out) {
   return 1;
 }
 
-// The layout of an object of the language in an unknown; NULL for undefined
-// and a value in a box.
 const TzLayout *tz_unknown_layout(const void *u) {
   return u && !as_box(u) ? ((const TzInstance *)u)->layout : NULL;
 }

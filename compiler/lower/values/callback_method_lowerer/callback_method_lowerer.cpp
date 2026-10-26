@@ -26,19 +26,12 @@ namespace tz {
 
 namespace {
 
-// Header fields; must match runtime/core/array/array.c.
 enum ArrayField : unsigned { kRefCount, kElementType, kData, kLength, kCapacity, kAlloc };
 
-} // namespace
+}
 
 CallbackMethodLowerer::CallbackMethodLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// forEach, map, filter, flatMap, reduce, reduceRight, find, findIndex,
-// findLast, findLastIndex, some and every. The array is evaluated once and
-// stays alive during the call, and the callback gets that array, whatever it
-// does meanwhile. As in JavaScript, the elements visited are those below the
-// length the array had at the start that are still there when their turn
-// comes; elements the callback adds are not visited.
 llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   if (member->object->type->isTypedArray()) {
@@ -50,10 +43,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
   Builtin method = call->builtin;
 
-  // The array and the callback wait in slots while the callback may throw,
-  // as does what the method builds, so that the way out releases them.
   bool throws = lowering_.typeThrows(callbackType);
-  // reduce of an empty array without an initial value throws too.
   bool emptyThrows =
       (method == Builtin::ArrReduce || method == Builtin::ArrReduceRight) && call->args.size() < 2;
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
@@ -70,21 +60,18 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
       call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
   if (method == Builtin::ArrSortWith) {
-    // The runtime sorts; the comparison goes through a function that calls
-    // the callback, and does nothing more once it threw.
     llvm::Value *context = lowering_.functionFrame().spill(callback, "compare");
     lowering_.builder_.CreateCall(lowering_.rt_.arrSortWith,
                                   {array, sortComparator(call), context});
     lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldCallback), callbackType);
     lowering_.emitThrowCheckIf(throws);
-    return lowering_.throwLowerer().take(heldArray); // the same array, with this reference
+    return lowering_.throwLowerer().take(heldArray);
   }
 
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
   bool backward = method == Builtin::ArrReduceRight || method == Builtin::ArrFindLast ||
                   method == Builtin::ArrFindLastIndex;
   size_t passes = std::min(callbackType->params().size(), size_t(reduce ? 4 : 3));
-  // The arguments of the callback that are the element (and the accumulator).
   size_t valueArgs = reduce ? 2 : 1;
 
   llvm::Value *length = lowering_.arrayLowerer().arrayLength(array);
@@ -100,7 +87,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
         "element");
   };
 
-  // reduce: the accumulator, from the initial value or the first element.
   llvm::Value *accSlot = nullptr;
   if (reduce) {
     accSlot = lowering_.functionFrame().createStackSlot(lowering_.moduleBuilder().lower(call->type),
@@ -122,7 +108,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
       start = lowering_.builder_.CreateAdd(start, step);
     }
   }
-  // map, filter, flatMap: the new array.
   llvm::Value *out = nullptr;
   if (method == Builtin::ArrMap || method == Builtin::ArrFilter || method == Builtin::ArrFlatMap) {
     out = lowering_.groupLowerer().newArray(
@@ -134,7 +119,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     lowering_.groupLowerer().noteUnstored(out, call);
   }
   Lowering::Held heldOut = lowering_.throwLowerer().hold(out, call->type, throws);
-  // find, findIndex, some, every: the result if no element decides it.
   llvm::Value *resultSlot = nullptr;
   if (!reduce && !out && method != Builtin::ArrForEach) {
     resultSlot = lowering_.functionFrame().createStackSlot(
@@ -155,8 +139,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("each.end");
   lowering_.functionFrame().emitBlock(headBlock);
   llvm::Value *i = lowering_.builder_.CreateLoad(i64, indexSlot, "i");
-  // Below the length at the start (or not below 0 going back), and still in
-  // the array. Going back, the unsigned comparison covers both.
   llvm::Value *inRange =
       lowering_.builder_.CreateICmpULT(i, lowering_.arrayLowerer().arrayLength(array));
   if (!backward) {
@@ -166,8 +148,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
 
   lowering_.functionFrame().switchTo(bodyBlock);
   llvm::Value *value = readElement(i);
-  // The callback owns its arguments; filter and find keep one more
-  // reference to the element, to put it in the result.
   bool keeps =
       method == Builtin::ArrFilter || method == Builtin::ArrFind || method == Builtin::ArrFindLast;
   if (passes >= valueArgs) {
@@ -178,13 +158,12 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   }
   std::vector<llvm::Value *> args;
   if (reduce) {
-    args.push_back(lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type),
-                                                 accSlot)); // moves into the call
+    args.push_back(
+        lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type), accSlot));
   }
   args.push_back(value);
   args.push_back(lowering_.builder_.CreateTrunc(i, lowering_.builder_.getInt32Ty()));
   args.push_back(array);
-  // The accumulator moves into the call, unless the callback takes none.
   if (reduce && passes == 0) {
     lowering_.refCounts().releaseValue(args[0], call->type);
   }
@@ -198,7 +177,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   lowering_.throwLowerer().take(heldElement);
   const Type *resultType = callbackType->ret();
 
-  // What the result means. `found` is where an element decides the result.
   llvm::BasicBlock *foundBlock = nullptr;
   auto test = [&](llvm::Value *decides) {
     foundBlock = lowering_.functionFrame().newBlock("each.found");
@@ -213,8 +191,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     }
     break;
   case Builtin::ArrMap:
-    // One result per element visited, in order: the new array has room for
-    // them all.
     lowering_.builder_.CreateStore(
         result, lowering_.arrayLowerer().elementAddress(lowering_.arrayLowerer().arrayData(out),
                                                         resultType, i));
@@ -237,8 +213,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     llvm::BasicBlock *dropBlock = lowering_.functionFrame().newBlock("filter.drop");
     lowering_.builder_.CreateCondBr(result, keepBlock, dropBlock);
     lowering_.functionFrame().switchTo(keepBlock);
-    // `filter(Boolean)` of `T | undefined` elements keeps those that hold a
-    // value, as plain T.
     const Type *kept = call->type->inner();
     lowering_.arrayLowerer().emitPush(
         out, {lowering_.exprLowerer().emitConversion(value, element, kept)}, kept);
@@ -309,12 +283,8 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   return nullptr;
 }
 
-// The function the runtime calls to compare two elements for sort(compare):
-// (ptr context, ptr x, ptr y) -> i32, the sign of compare(*x, *y), where
-// the context holds the function value. NaN counts as 0.
 llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
   const Type *receiver = cast<MemberExpr>(call->callee)->object->type;
-  // The runtime gives the elements of a typed array as numbers of their type.
   const Type *element = receiver->isTypedArray() ? receiver->elementType() : receiver->inner();
   Expr *callbackExpr = call->args[0];
   const Type *callbackType = callbackExpr->type;
@@ -328,7 +298,6 @@ llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
   lowering_.function_ = fn;
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", fn));
   if (lowering_.typeThrows(callbackType)) {
-    // Once the callback threw, the sort only has to end.
     llvm::BasicBlock *thrownBlock = llvm::BasicBlock::Create(lowering_.ctx_, "thrown", fn);
     llvm::BasicBlock *compareBlock = llvm::BasicBlock::Create(lowering_.ctx_, "compare", fn);
     lowering_.builder_.CreateCondBr(
@@ -345,12 +314,11 @@ llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
   for (size_t k = 0; k < passes; ++k) {
     llvm::Value *value = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element),
                                                        fn->getArg(unsigned(k + 1)));
-    lowering_.refCounts().retainValue(value, element); // the callback owns its arguments
+    lowering_.refCounts().retainValue(value, element);
     args.push_back(value);
   }
   llvm::Value *result;
   if (auto *fe = dyn_cast<FunctionExpr>(callbackExpr)) {
-    // An arrow written here: its code is known, and may be inlined.
     std::vector<llvm::Value *> all{lowering_.builder_.CreateExtractValue(callback, 1)};
     all.insert(all.end(), args.begin(), args.end());
     for (size_t k = passes; k < callbackType->params().size(); ++k) {
@@ -388,4 +356,4 @@ llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
   return fn;
 }
 
-} // namespace tz
+}

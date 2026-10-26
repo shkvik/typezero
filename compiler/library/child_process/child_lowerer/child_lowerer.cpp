@@ -24,8 +24,6 @@ namespace tz {
 
 namespace {
 
-// The fields of TzSpawnRequest and TzSpawnParts
-// (runtime/library/child_process/child/child.c).
 enum RequestField : unsigned {
   RqFile,
   RqArgs,
@@ -74,7 +72,6 @@ enum PartsField : unsigned {
   PtPiped,
 };
 
-// HAS_CWD and the others of runtime/library/child_process/child/child.c.
 enum : uint32_t {
   HasCwd = 1,
   HasTimeout = 2,
@@ -89,14 +86,13 @@ enum : uint32_t {
 
 const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
 
-// Whether a value of `type` may be text, or a Buffer.
 bool holds(const Type *type, const Type *member) {
   type = type->nonOptional();
 
   return type == member || llvm::is_contained(type->members(), member);
 }
 
-} // namespace
+}
 
 ChildLowerer::ChildLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -121,8 +117,6 @@ llvm::Value *ChildLowerer::spawnStream(llvm::Value *parts, unsigned stream, cons
   };
   llvm::Value *piped = lowering_.builder_.CreateICmpNE(
       lowering_.builder_.CreateLoad(i32, field(PtPiped, stream)), lowering_.builder_.getInt32(0));
-  // The parts not in use are zero, which needs no counting: a value made of
-  // them is only dropped.
   auto part = [&](const Type *member) {
     llvm::Value *raw =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(member),
@@ -134,7 +128,7 @@ llvm::Value *ChildLowerer::spawnStream(llvm::Value *parts, unsigned stream, cons
     return raw;
   };
   bool text = holds(to, Type::string()), bytes = holds(to, bufferType());
-  if (!to->isOptional() && !to->isUnion()) { // the stream is a pipe
+  if (!to->isOptional() && !to->isUnion()) {
     return part(to);
   }
   if (to->isOptional() && !to->inner()->isUnion()) {
@@ -204,7 +198,7 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
     } else if (name == "name") {
       value = load(PtName);
     } else if (name == "error") {
-      value = load(PtError); // a SystemError, or null for undefined
+      value = load(PtError);
     } else if (name == "errno") {
       value = lowering_.optionalLowerer().makeOptional(load(PtErrno), flag(PtHasCode), t);
     } else if (name == "code") {
@@ -222,10 +216,8 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
     } else if (name == "pid") {
       value = load(PtPid);
     } else if (name == "stdout" || name == "stderr") {
-      value = spawnStream(parts, name == "stdout" ? 1 : 2, t, /*retain=*/false);
+      value = spawnStream(parts, name == "stdout" ? 1 : 2, t, false);
     } else if (name == "output") {
-      // [undefined, stdout, stderr]: stdin is never output. The fields
-      // stdout and stderr hold them too.
       const Type *element = t->inner();
       llvm::Value *count = lowering_.builder_.getInt64(3);
       value = lowering_.builder_.CreateCall(
@@ -234,14 +226,14 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
       llvm::Value *data = lowering_.arrayLowerer().arrayData(value);
       for (unsigned i = 0; i < 3; ++i) {
         lowering_.builder_.CreateStore(
-            spawnStream(parts, i, element, /*retain=*/true),
+            spawnStream(parts, i, element, true),
             lowering_.arrayLowerer().elementAddress(data, element, lowering_.builder_.getInt64(i)));
       }
     } else {
-      continue; // cause and the places of an error, which start empty
+      continue;
     }
     lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, name, /*exact=*/true));
+        value, lowering_.objectLayouts().fieldAddress(object, type, name, true));
   }
   lowering_.builder_.CreateRet(object);
   lowering_.function_ = outer;
@@ -252,8 +244,6 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
 
 llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  // The strings of TzSpawnRequest, args among them, its pointers and
-  // doubles, then its ints from mode to gid, stdio and the encoding.
   llvm::Type *f64 = lowering_.builder_.getDoubleTy();
   std::vector<llvm::Type *> fields(RqEnv, lowering_.strTy_);
   fields[RqArgs] = ptr;
@@ -263,7 +253,6 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   fields.push_back(i32);
   llvm::StructType *requestType = llvm::StructType::get(lowering_.ctx_, fields);
 
-  // The arguments, owned, released after the call: the runtime borrows them.
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
   llvm::AllocaInst *request =
       lowering_.functionFrame().createStackSlot(requestType, "spawn.request");
@@ -273,7 +262,6 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
                                    lowering_.builder_.CreateStructGEP(requestType, request, f));
   };
   auto literal = [&](unsigned arg) { return unsigned(cast<IntLitExpr>(call->args[arg])->value); };
-  // Which options the call gave, as bits, and the value of each.
   llvm::Value *has = lowering_.builder_.getInt32(literal(ChildStdioGiven) ? HasStdio : 0);
   auto given = [&](unsigned arg) -> std::pair<llvm::Value *, llvm::Value *> {
     const Type *type = call->args[arg]->type;
@@ -295,7 +283,6 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
 
     return present;
   };
-  // A boolean option, false when not given.
   auto boolean = [&](unsigned arg, unsigned f) {
     auto [present, value] = given(arg);
     set(f, lowering_.builder_.CreateZExt(lowering_.builder_.CreateAnd(present, value), i32));
@@ -304,7 +291,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   set(RqFile, values[ChildFile]);
   set(RqArgs, values[ChildArgs]);
   option(ChildCwd, RqCwd, HasCwd);
-  option(ChildEnv, RqEnv, 0); // null for undefined
+  option(ChildEnv, RqEnv, 0);
   {
     const Type *input = call->args[ChildInput]->type->nonOptional();
     bool text = input->isString();
@@ -324,7 +311,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
     set(RqShellKind, lowering_.builder_.CreateSelect(present, lowering_.builder_.getInt32(2),
                                                      lowering_.builder_.getInt32(0)));
   } else {
-    boolean(ChildShell, RqShellKind); // 1 for the system's
+    boolean(ChildShell, RqShellKind);
   }
   boolean(ChildWindowsHide, RqWindowsHide);
   boolean(ChildVerbatim, RqVerbatim);
@@ -346,8 +333,6 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   }
   set(RqEncoding, lowering_.builder_.getInt32(literal(ChildEncoding)));
 
-  // What the program gives: the result of spawnSync, or an ExecSyncError
-  // when execSync and execFileSync fail.
   const Type *made = call->type;
   if (call->builtin != Builtin::ChildSpawnSync) {
     made = nullptr;
@@ -373,7 +358,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
     return result;
   }
 
-  return spawnStream(parts, 1, call->type, /*retain=*/false);
+  return spawnStream(parts, 1, call->type, false);
 }
 
-} // namespace tz
+}

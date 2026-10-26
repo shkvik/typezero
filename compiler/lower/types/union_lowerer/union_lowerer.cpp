@@ -23,14 +23,10 @@ namespace tz {
 
 namespace {
 
-// The descriptor of an object, whose class number tells its type.
 constexpr unsigned kDescriptorClass = 6;
 
-} // namespace
+}
 
-// The slot of `to`, a tagged union, that a part of a union in `slot` goes to
-// when `to` has no such slot: a string literal is a string, an int widens.
-// None for a part that a check ruled out (`to` is a narrowed type).
 static UnionSlot targetSlot(UnionSlot slot, const Type *to) {
   auto has = [&](UnionSlot s) { return llvm::is_contained(to->slots(), s); };
   if (has(slot)) {
@@ -74,17 +70,15 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
         lowering_.exprLowerer().emitConversion(value, from, to->inner()),
         lowering_.builder_.getTrue(), to);
   }
-  if (from->isOptional()) { // narrowed: known to hold a value
+  if (from->isOptional()) {
     return lowering_.exprLowerer().emitConversion(
         lowering_.optionalLowerer().optionalValue(value, from), from->inner(), to);
   }
 
-  // The text of a string literal: a constant, which is not counted.
   if (UnionLayout::isAtomType(from) && (to->isString() || to->isJson())) {
     return lowering_.exprLowerer().emitConversion(lowering_.unionLayout().atomString(value),
                                                   Type::string(), to);
   }
-  // A Json that checks showed to hold one of the members.
   if (from->isJson() && to->isTagged()) {
     llvm::Value *kind = lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
@@ -92,7 +86,6 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
         {value});
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("json.union.end");
     std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
-    // See tz_json_typeof: 2 a boolean, 3 a number, 4 a string, else an array.
     for (UnionSlot slot : to->slots()) {
       llvm::BasicBlock *block = lowering_.functionFrame().newBlock("json.union.slot");
       llvm::BasicBlock *next = lowering_.functionFrame().newBlock("json.union.next");
@@ -126,8 +119,6 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
 
   if (to->isTagged()) {
     if (from->isTagged()) {
-      // The same tags, where the parts lie alike; a part in a slot that `to`
-      // lacks converts, unless a check ruled it out.
       std::vector<UnionSlot> possible;
       bool same = true;
       for (UnionSlot slot : from->slots()) {
@@ -163,20 +154,17 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
           lowering_.moduleBuilder().lower(to),
           llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to)));
     }
-    // A member, or a union whose members take one slot.
     UnionSlot slot = targetSlot(unionSlot(from), to);
     assert(slot != UnionSlot::None && "Checker converts a member into its union");
     return lowering_.unionLayout().makeTagged(
         to, slot, lowering_.exprLowerer().emitConversion(value, from, to->slotPart(slot)));
   }
-  // Narrowed: a member of the tagged union, or a part of it.
   if (from->isTagged()) {
     UnionSlot slot = unionSlot(to);
     return lowering_.exprLowerer().emitConversion(
         lowering_.unionLayout().taggedPart(value, from, slot), from->slotPart(slot), to);
   }
 
-  // Atoms are atoms, objects references, whatever the union.
   return value;
 }
 
@@ -195,8 +183,6 @@ bool UnionLowerer::narrowsUnion(const Type *from, const Type *to) {
 }
 
 llvm::Value *UnionLowerer::emitUnionEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
-  // Two values of a tagged union are equal when they hold the same member
-  // and those are equal; both undefined are equal too.
   llvm::Value *sameTag = lowering_.builder_.CreateICmpEQ(lowering_.unionLayout().unionTag(a),
                                                          lowering_.unionLayout().unionTag(b));
   llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
@@ -223,7 +209,6 @@ llvm::Value *UnionLowerer::emitUnionEqual(llvm::Value *a, llvm::Value *b, const 
 }
 
 llvm::Value *UnionLowerer::emitUnionTypeOf(llvm::Value *value, const Type *type) {
-  // A select over the tags: each slot has one name.
   llvm::Value *tag = lowering_.unionLayout().unionTag(value);
   llvm::Value *result = lowering_.stringLowerer().stringLiteral(u"undefined");
   for (UnionSlot slot : type->slots()) {
@@ -248,7 +233,6 @@ llvm::Value *UnionLowerer::emitUnionTruth(llvm::Value *value, const Type *type) 
     return lowering_.builder_.getTrue();
   }
 
-  // Tagged: a string or a boolean as itself, an object always, undefined never.
   return lowering_.unionLayout().forEachSlot(
       value, type->slots(),
       [&](UnionSlot slot) -> llvm::Value * {
@@ -264,16 +248,12 @@ llvm::Value *UnionLowerer::emitUnionTruth(llvm::Value *value, const Type *type) 
 }
 
 uint32_t UnionLowerer::plainTypeId(const Type *type) {
-  // Every Promise has one number: a union holds one Promise type, and a
-  // Promise<never> stands for any.
   if (type->isPromise()) {
     return kPlainIdBase;
   }
-  // The runtime makes the objects of binary data, numbered by their kind.
   if (type->isBytes()) {
     return kBytesIdBase + uint32_t(type->bytes());
   }
-  // A type and its twin with read-only fields lie alike: one number.
   std::vector<Field> fields(type->fields().begin(), type->fields().end());
   for (Field &f : fields) {
     f.readonly = false;
@@ -324,13 +304,10 @@ llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Typ
       result = lowering_.builder_.CreateOr(result, in);
       return;
     }
-    // A regex, a match or an object of Intl is an object of the
-    // runtime, which has no number.
     uint32_t number =
         t->isRegExp() || t->isMatch() || t->isIntl() || t->isCrypto() ? 0 : plainTypeId(t);
     result = lowering_.builder_.CreateOr(
         result, lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(number)));
-    // A Buffer is a Uint8Array.
     if (t->bytes() == Type::Bytes::Uint8) {
       result = lowering_.builder_.CreateOr(
           result, lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(plainTypeId(
@@ -339,8 +316,6 @@ llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Typ
   };
   for (const Type *t : types) {
     test(t);
-    // The objects of the types declared to be it: classes that implement an
-    // interface, interfaces that extend it.
     for (const Type *sub : lowering_.subtypes_) {
       if (sub != t && sub->isSubtypeOf(t) && !(sub->classDecl() && t->classDecl())) {
         test(sub);
@@ -351,4 +326,4 @@ llvm::Value *UnionLowerer::emitIsOneOf(llvm::Value *id, llvm::ArrayRef<const Typ
   return result;
 }
 
-} // namespace tz
+}

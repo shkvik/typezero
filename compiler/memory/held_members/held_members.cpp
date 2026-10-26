@@ -45,8 +45,6 @@ void HeldMembers::findHeld() {
       work.push_back(v);
     }
   }
-  // A reaction to a promise is a member that holds its callbacks (attachReaction), and a promise
-  // one that holds its value.
   for (unsigned n : callbacks_) {
     reach(n);
   }
@@ -157,4 +155,4 @@ void HeldMembers::run() {
   }
 }
 
-} // namespace tz
+}

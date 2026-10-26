@@ -30,8 +30,6 @@ using llvm::Value;
 
 namespace tz {
 
-// A variable a method can neither change nor release while it runs, so the
-// object in it can be lent to the method.
 bool staysDuringCall(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || conv->shortCircuit || !conv->operand->type->isOptional()) {
@@ -59,7 +57,7 @@ llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls, bool member) {
   uint64_t size = lowering_.module_->getDataLayout().getTypeAllocSize(layout.type);
   llvm::Value *object;
   if (member) {
-    object = lowering_.groupLowerer().allocMember(size, "object"); // counted by its group
+    object = lowering_.groupLowerer().allocMember(size, "object");
   } else {
     object = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
                                            {lowering_.builder_.getInt64(size)}, "object");
@@ -68,7 +66,6 @@ llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls, bool member) {
   }
   lowering_.builder_.CreateStore(lowering_.classDescriptors().classDescriptor(cls),
                                  lowering_.builder_.CreateStructGEP(layout.type, object, 1));
-  // The fields start empty, so that setting one releases nothing.
   if (size > 16) {
     lowering_.builder_.CreateMemSet(
         lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), object, 16),
@@ -78,12 +75,8 @@ llvm::Value *ClassLowerer::allocInstance(const ClassDecl *cls, bool member) {
   return object;
 }
 
-// The arguments are evaluated first, as in JavaScript; then the object is
-// made and its code runs. If that throws, the object goes: its fields that
-// are set are released with it.
 llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
   const ClassDecl *cls = expr->cls;
-  // A class as a value, known when compiling: what makes it runs first.
   if (expr->callee && !isa<NameExpr>(expr->callee)) {
     lowering_.stmtLowerer().emitDiscarded(expr->callee);
   }
@@ -100,7 +93,6 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
   }
   llvm::Value *object = allocInstance(cls, lowering_.makesMember(expr, cls->type));
   lowering_.groupLowerer().noteUnstored(object, expr);
-  // The object goes with what its code throws, released as the error leaves.
   Lowering::Held held =
       lowering_.throwLowerer().hold(object, cls->type, constructionThrows(cls, sym));
   emitConstruct(object, cls, sym, args);
@@ -118,18 +110,11 @@ bool ClassLowerer::constructionThrows(const ClassDecl *cls, const FuncSymbol *ct
          (cls->init && lowering_.mayThrow(cls->init));
 }
 
-// A class with a constructor of its own runs it: in a class that extends
-// another, its `super(...)` runs the classes up the chain and then the
-// initializers. A class without one runs the class it extends with the
-// arguments, and then its initializers, as JavaScript's implicit
-// `constructor(...args) { super(...args) }` does. After each part that may
-// throw, an error goes up.
 void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, const FuncSymbol *ctor,
                                  llvm::ArrayRef<llvm::Value *> args) {
   if (ctor && ctor->decl->cls == cls) {
     std::vector<llvm::Value *> all{object};
     if (!cls->parent && cls->init) {
-      // The arguments wait meanwhile, if the initializers may throw.
       bool initThrows = lowering_.mayThrow(cls->init);
       std::vector<Lowering::Held> waiting;
       for (size_t i = 0; i < args.size(); ++i) {
@@ -150,8 +135,6 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
   if (cls->parent) {
     emitConstruct(object, cls->parent, ctor, args);
   }
-  // A kind of Error (TypeError...) names the objects of the classes that
-  // extend it, as its prototype does in JavaScript. The names are ASCII.
   if (cls->builtin && cls->parent) {
     lowering_.builder_.CreateStore(
         lowering_.stringLowerer().stringLiteral(std::u16string(cls->name.begin(), cls->name.end())),
@@ -197,18 +180,13 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   for (size_t i = call->args.size(); i < method->params.size(); ++i) {
     args.push_back(lowering_.optionalLowerer().undefinedValue(method->params[i]));
   }
-  // A method that classes down the chain override: the one of the object's
-  // class, from its method table.
   llvm::CallInst *result =
       call->virtualCall
           ? lowering_.builder_.CreateCall(
                 lowering_.closureLowerer().closureFnType(ClosureLowerer::functionTypeOf(method)),
-                lowering_.inheritLowerer().vtableEntry(self.value, method->decl->slot,
-                                                       /*info=*/false),
-                args)
+                lowering_.inheritLowerer().vtableEntry(self.value, method->decl->slot, false), args)
           : lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(method->decl),
                                           args);
-  // The object goes before what the method threw does.
   lowering_.refCounts().dropOperand(self);
   lowering_.emitThrowCheckIf(lowering_.mayThrow().callMayThrow(method->decl, call->virtualCall) &&
                              call != lowering_.returnCall_);
@@ -216,27 +194,23 @@ llvm::Value *ClassLowerer::emitMethodCall(CallExpr *call) {
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
-// The value holds a reference to the object, its environment.
 llvm::Value *ClassLowerer::emitBoundMethod(MemberExpr *member) {
   llvm::Value *object = lowering_.exprLowerer().emitExpr(member->object);
-  llvm::Value *info = member->virtualCall
-                          ? lowering_.inheritLowerer().vtableEntry(
-                                object, member->method->decl->slot, /*info=*/true)
-                          : lowering_.closureLowerer().functionInfo(member->method->decl);
+  llvm::Value *info =
+      member->virtualCall
+          ? lowering_.inheritLowerer().vtableEntry(object, member->method->decl->slot, true)
+          : lowering_.closureLowerer().functionInfo(member->method->decl);
 
   return lowering_.closureLowerer().makeFunctionValue(info, object);
 }
 
-// One comparison of class numbers, after the check for undefined.
 llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
   const ClassDecl *cls = bin->rhs->type->classDecl();
   const Type *type = bin->lhs->type;
-  Lowering::Operand value = lowering_.refCounts().emitOperand(bin->lhs, /*canBorrow=*/true);
-  // A class known only when the program runs: the numbers its object holds
-  // (TzClass: { rc, layout, parent, i32 id, i32 last_id, ... }).
+  Lowering::Operand value = lowering_.refCounts().emitOperand(bin->lhs, true);
   llvm::Value *first = nullptr, *last = nullptr;
   if (bin->rhs->type->isConstructor()) {
-    llvm::Value *rhs = lowering_.exprLowerer().emitExpr(bin->rhs); // a class is never counted
+    llvm::Value *rhs = lowering_.exprLowerer().emitExpr(bin->rhs);
     first = lowering_.builder_.CreateLoad(
         lowering_.builder_.getInt32Ty(),
         lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), rhs, 24),
@@ -255,15 +229,11 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
       llvm::Value *id = lowering_.builder_.CreateLoad(
           lowering_.builder_.getInt32Ty(),
           lowering_.builder_.CreateStructGEP(lowering_.layoutDescTy_, descriptor, 6), "class");
-      // A class of JavaScript (`String` of a `design:*` record) has no number:
-      // nothing is one of its objects.
       return lowering_.builder_.CreateAnd(
           lowering_.builder_.CreateICmpNE(first, lowering_.builder_.getInt32(0)),
           lowering_.builder_.CreateICmpULE(lowering_.builder_.CreateSub(id, first),
                                            lowering_.builder_.CreateSub(last, first)));
     }
-    // `instanceof Date` (or Map, Set) of a union: the numbers of its members
-    // that Checker gave the right side.
     if (!cls) {
       const Type *those = bin->rhs->type;
       return lowering_.unionLowerer().emitIsOneOf(
@@ -281,14 +251,12 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
       return lowering_.builder_.CreateICmpEQ(id, lowering_.builder_.getInt32(cls->id));
     }
 
-    // The classes down its chain have the numbers that follow its own.
     return lowering_.builder_.CreateICmpULE(
         lowering_.builder_.CreateSub(id, lowering_.builder_.getInt32(cls->id)),
         lowering_.builder_.getInt32(cls->lastId - cls->id));
   };
   llvm::Value *result;
   if (type->nonOptional()->isTagged()) {
-    // Only in the slot of objects: a check of the tag first.
     llvm::Value *tagged = value.value;
     const Type *u = type->nonOptional();
     llvm::BasicBlock *testBlock = lowering_.functionFrame().newBlock("instanceof.test");
@@ -332,8 +300,6 @@ llvm::Value *ClassLowerer::emitInstanceOf(BinaryExpr *bin) {
   return result;
 }
 
-// The fields in the order written, then what the methods capture, as a
-// closure's environment holds it.
 llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   const ClassDecl *cls = lit->cls;
   const Type *type = cls->type;
@@ -342,7 +308,7 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object;
   if (member) {
-    object = lowering_.groupLowerer().allocMember(size, "object"); // counted by its group
+    object = lowering_.groupLowerer().allocMember(size, "object");
   } else {
     object = lowering_.builder_.CreateCall(lowering_.rt_.objAlloc,
                                            {lowering_.builder_.getInt64(size)}, "object");
@@ -352,7 +318,6 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
   lowering_.builder_.CreateStore(lowering_.classDescriptors().classDescriptor(cls),
                                  lowering_.builder_.CreateStructGEP(layout.type, object, 1));
   lowering_.groupLowerer().noteUnstored(object, lit);
-  // Nothing can reach the new object while its values are evaluated.
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (prop.method) {
       continue;
@@ -379,7 +344,7 @@ llvm::Value *ClassLowerer::emitMethodLiteral(ObjectLitExpr *lit) {
             {object, value});
       }
     } else {
-      value = lowering_.envLowerer().emitVarValue(var, /*borrow=*/false);
+      value = lowering_.envLowerer().emitVarValue(var, false);
       if (member) {
         lowering_.storeLowerer().groupStore(object, value, ClosureLowerer::typeOf(var));
       }
@@ -408,4 +373,4 @@ void ClassLowerer::emitStaticFields(ClassDecl *cls) {
   }
 }
 
-} // namespace tz
+}

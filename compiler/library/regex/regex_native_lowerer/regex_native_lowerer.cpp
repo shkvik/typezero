@@ -32,7 +32,7 @@ uint64_t counterRange(const CountedLoop &loop) {
   return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
 }
 
-} // namespace
+}
 
 RegexNativeLowerer::RegexNativeLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -57,4 +57,4 @@ llvm::Constant *RegexNativeLowerer::regexMatcher(const RegexLitExpr *lit) {
   return matcher;
 }
 
-} // namespace tz
+}

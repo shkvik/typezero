@@ -30,7 +30,7 @@ uint64_t counterRange(const CountedLoop &loop) {
   return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
 }
 
-} // namespace
+}
 
 MatcherAnalysis::MatcherAnalysis(MatcherBuilder &builder) : builder_(builder) {}
 
@@ -57,7 +57,7 @@ void MatcherAnalysis::analyze() {
       builder_.leader_[op[5]] = builder_.leader_[op[6]] = 1;
       builder_.targets_.insert(op[5]);
       builder_.targets_.insert(op[6]);
-      const uint32_t *end = builder_.code_ + op[6] - 5; // its RE_LOOP_END
+      const uint32_t *end = builder_.code_ + op[6] - 5;
       builder_.loops_.push_back(
           {pc, op[1], op[2], op[3], op[5], op[6], end[3], end[2] != RE_INFINITY});
       builder_.hasLoops_ = true;
@@ -90,7 +90,6 @@ void MatcherAnalysis::analyze() {
       builder_.hasLoops_ = true;
     }
   }
-  // Inner lookarounds come later and overwrite the outer ones.
   for (uint32_t look : looks) {
     for (uint32_t pc = look + 3; pc < builder_.code_[look + 2]; ++pc) {
       builder_.scope_[pc] = int32_t(look);
@@ -100,8 +99,6 @@ void MatcherAnalysis::analyze() {
   const uint32_t *first = builder_.program_ + builder_.program_[TZ_RE_H_FIRST];
   builder_.anchored_ = (first[8] & TZ_RE_FIRST_ANCHORED) != 0;
 
-  // The skip past a run: a greedy unbounded repeat of a class first, with
-  // nothing before it but the start of a group.
   uint32_t pc = 0;
   while (pc < builder_.codeSize_ && builder_.code_[pc] == RE_SET_POSITION) {
     pc += 2;
@@ -117,13 +114,10 @@ bool MatcherAnalysis::inLoop(const CountedLoop &loop, uint32_t pc) const {
   return pc >= loop.pc && pc < loop.exit && builder_.scope_[loop.pc] == builder_.scope_[pc];
 }
 
-// Whether at `pc` it matters for `loop` if the iteration has matched
-// anything yet: past the start of the body of a loop with the empty check.
 bool MatcherAnalysis::flagged(const CountedLoop &loop, uint32_t pc) const {
   return loop.emptyCheck && pc > loop.body;
 }
 
-// How many states the counted loops around `pc` can be in.
 uint64_t MatcherAnalysis::contextSize(uint32_t pc) const {
   uint64_t size = 1;
   for (const CountedLoop &loop : builder_.loops_) {
@@ -162,9 +156,6 @@ void MatcherAnalysis::planMemo() {
   builder_.rows_ = uint32_t(rows);
 }
 
-// Adds to `states` what the program gets to from them without reading a
-// character: the states that read one, and whether the match may end
-// (`match`) or what comes is not known (`unknown`, a backreference).
 void MatcherAnalysis::closure(std::set<uint32_t> &states, bool &match, bool &unknown) const {
   std::vector<uint32_t> work(states.begin(), states.end());
   std::set<uint32_t> seen(states.begin(), states.end());
@@ -201,7 +192,7 @@ void MatcherAnalysis::closure(std::set<uint32_t> &states, bool &match, bool &unk
       add(op[4]);
       break;
     case RE_LOOK:
-      add(op[2]); // what the lookaround allows is a part of all this
+      add(op[2]);
       break;
     case RE_REPEAT:
       states.insert(pc);
@@ -216,15 +207,13 @@ void MatcherAnalysis::closure(std::set<uint32_t> &states, bool &match, bool &unk
       if (isCharInstruction(op[0])) {
         states.insert(pc);
       } else {
-        add(next); // registers, captures, assertions
+        add(next);
       }
       break;
     }
   }
 }
 
-// The units a match can have at offsets 0, 1, ... of it, as long as every
-// match is longer: for the scan for where one starts.
 std::vector<OffsetSet> MatcherAnalysis::offsetSets(unsigned limit) const {
   std::vector<OffsetSet> sets;
   std::set<uint32_t> states = {0};
@@ -271,7 +260,7 @@ std::vector<OffsetSet> MatcherAnalysis::offsetSets(unsigned limit) const {
           units.wide = true;
         }
         break;
-      default: // RE_ALL; the back forms come only in lookbehinds
+      default:
         bytes.fill(0xFFFFFFFFu);
         units.wide = true;
         break;
@@ -292,7 +281,7 @@ void MatcherAnalysis::planScan() {
   std::vector<OffsetSet> sets = offsetSets(16);
   struct Choice {
     uint32_t offset;
-    double share; // of the bytes of text in the set
+    double share;
   };
   std::vector<Choice> usable;
   for (uint32_t k = 0; k < sets.size(); ++k) {
@@ -305,7 +294,7 @@ void MatcherAnalysis::planScan() {
       }
     }
     if (!any) {
-      builder_.scanEmpty_ = true; // in a byte string nothing can come there
+      builder_.scanEmpty_ = true;
     }
     if (any && !byteTests(sets[k].bytes).empty()) {
       usable.push_back({k, share / 1000});
@@ -313,7 +302,6 @@ void MatcherAnalysis::planScan() {
   }
   std::stable_sort(usable.begin(), usable.end(),
                    [](const Choice &a, const Choice &b) { return a.share < b.share; });
-  // The rarest offsets, up to three, until about one start in 256 is left.
   double share = 1;
   for (const Choice &choice : usable) {
     if (builder_.scan_.size() == 3 || (builder_.scan_.size() >= 2 && share < 1.0 / 256)) {
@@ -322,7 +310,6 @@ void MatcherAnalysis::planScan() {
     share *= choice.share;
     builder_.scan_.push_back({choice.offset, sets[choice.offset]});
   }
-  // Where nearly every byte may start a match, the scan by units is faster.
   if (share > 0.1) {
     builder_.scan_.clear();
   }
@@ -336,4 +323,4 @@ void MatcherAnalysis::planScan() {
   }
 }
 
-} // namespace tz
+}

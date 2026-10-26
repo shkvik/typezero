@@ -39,7 +39,7 @@ StoreScanner::StoreScanner(std::function<bool(const Expr *)> site) : isSite_(std
   storeStmtsPart_ = std::make_unique<StoreStmts>(*this);
   storeExprsPart_ = std::make_unique<StoreExprs>(*this);
   storeCallsPart_ = std::make_unique<StoreCalls>(*this);
-  node(Key{Kind::Stored, nullptr}); // node 0
+  node(Key{Kind::Stored, nullptr});
 }
 
 void StoreScanner::function(const FunctionDecl *fn) {
@@ -53,7 +53,6 @@ void StoreScanner::function(const FunctionDecl *fn) {
       flowInto(var(param.sym), storeExprs().expr(param.defaultValue));
     }
   }
-  // A rest parameter is an array the arguments go into.
   if (fn->sym && fn->sym->hasRest && !fn->params.empty()) {
     flowInto(var(fn->params.back().sym), {});
   }
@@ -109,7 +108,6 @@ unsigned StoreScanner::stored() { return 0; }
 
 unsigned StoreScanner::var(const VarSymbol *v) {
   unsigned n = node({Kind::Var, v});
-  // A variable that lives in a box holds its value on the heap.
   if (v && v->boxed()) {
     edge(stored(), n);
   }
@@ -134,4 +132,4 @@ void StoreScanner::flowInto(unsigned place, const Sources &values) {
 void StoreScanner::store(const Sources &values) { flowInto(stored(), values); }
 
 StoreScanner::~StoreScanner() = default;
-} // namespace tz
+}

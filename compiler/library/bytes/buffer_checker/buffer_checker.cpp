@@ -24,7 +24,6 @@ namespace tz {
 
 namespace {
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -43,7 +42,7 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-} // namespace
+}
 
 BufferChecker::BufferChecker(Checker &checker) : checker_(checker) {}
 
@@ -75,7 +74,6 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return lit;
   };
   auto bytesArg = [&](Expr *arg) { return checker_.argumentChecker().checkArg(arg, uint8); };
-  // A Uint8Array, a string or a number, which indexOf and fill take.
   auto valueArg = [&](Expr *arg) -> Expr * {
     arg = checker_.exprChecker().checkExpr(arg, nullptr);
     const Type *t = arg->type;
@@ -154,8 +152,6 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferCopy, Type::intTy());
   }
   if (name == "write") {
-    // write(string, offset?, length?, encoding?), where the encoding may come
-    // in place of the offset or the length, as node reads it.
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 4)) {
       return call;
     }
@@ -184,8 +180,6 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferWrite, Type::intTy());
   }
   if (name == "fill" || name == "indexOf" || name == "lastIndexOf" || name == "includes") {
-    // fill(value, offset?, end?, encoding?) and indexOf(value, byteOffset?,
-    // encoding?), where an encoding may come in place of a position.
     bool fill = name == "fill";
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, fill ? 4 : 3)) {
       return call;
@@ -235,8 +229,8 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
     return made(Builtin::BufferSwap, type);
   }
   NumberMethod m;
-  if (!numberMethod(name, /*dataView=*/false, m)) {
-    return nullptr; // the methods of Uint8Array
+  if (!numberMethod(name, false, m)) {
+    return nullptr;
   }
   if (m.bigint) {
     checker_.decimalChecker().reportBigInt(member->loc(), "'" + name.str() + "'");
@@ -245,8 +239,6 @@ Expr *BufferChecker::checkBufferMethod(CallExpr *call, MemberExpr *member) {
   }
   Bytes kind = m.kind;
   if (m.variable) {
-    // readUIntLE(offset, byteLength) and writeUIntLE(value, offset,
-    // byteLength): up to 6 bytes, a long.
     if (!checker_.argumentChecker().checkArity(call, member->loc(), m.write ? 3 : 2,
                                                m.write ? 3 : 2)) {
       return call;
@@ -342,7 +334,6 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     if (!call->args.empty()) {
-      // `decode(undefined, { stream: false })` ends a stream with no bytes.
       Expr *input = call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
       const Type *t = input->type;
       if (!t->isError() && !t->isUndefined() && !t->isByteView() &&
@@ -354,8 +345,6 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
         return call;
       }
     }
-    // `{ stream: true }`: the bytes go on in the next call, which may end a
-    // character they begin (docs/bytes.md, section 5).
     if (call->args.size() == 2) {
       const Type *options = Type::object({{"stream", Type::optional(Type::boolTy()), false}});
       Expr *given = checker_.exprChecker().checkExpr(call->args[1], options);
@@ -374,4 +363,4 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

@@ -32,7 +32,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -44,9 +43,6 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-// The options of Intl.DateTimeFormat (ECMA-402, 11.1.2): the strings, by
-// their place among TZ_DTO_*, and the values each may have (none: any
-// string); then hour12 and fractionalSecondDigits.
 struct DateOption {
   llvm::StringLiteral name;
   std::vector<llvm::StringLiteral> values;
@@ -86,7 +82,7 @@ const char *methodName(int kind) {
   }
 }
 
-} // namespace
+}
 
 bool isLanguageTag(const std::string &tag) {
   auto alnum = [](char c) { return llvm::isAlnum(c); };
@@ -107,12 +103,6 @@ bool isLanguageTag(const std::string &tag) {
 
 DateFormatChecker::DateFormatChecker(Checker &checker) : checker_(checker) {}
 
-// The locale and the options, both optional, of toLocaleString and the like
-// and of Intl.DateTimeFormat. The locale is a string or undefined; the
-// options an object whose fields are options, each as its type is (a string,
-// hour12 a boolean, fractionalSecondDigits a number), or that type or
-// undefined. What JavaScript rejects with an exception when the program runs
-// and is written in the code is an error here.
 bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   bool ok = true;
   if (!args.empty()) {
@@ -190,7 +180,6 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
       ok = false;
       continue;
     }
-    // What must be there, for the conflicts below.
     bool present = !field.type->isOptional();
     if (field.name == "dateStyle" || field.name == "timeStyle") {
       hasStyle |= present;
@@ -215,7 +204,6 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
                           "TypeError for; use either the styles or the parts");
     ok = false;
   }
-  // The values written in a literal.
   if (literal) {
     for (const ObjectLitExpr::Property &prop : literal->props) {
       if (prop.spread) {
@@ -271,8 +259,6 @@ const Type *DateFormatChecker::dateFormatPartType() {
                       "Intl.DateTimeFormatPart");
 }
 
-// What resolvedOptions() gives, with the fields in the order node prints
-// them.
 const Type *DateFormatChecker::resolvedDateOptionsType() {
   const Type *text = Type::string(), *maybe = Type::optional(Type::string());
 
@@ -298,7 +284,6 @@ const Type *DateFormatChecker::resolvedDateOptionsType() {
                       "Intl.ResolvedDateTimeFormatOptions");
 }
 
-// new Intl.DateTimeFormat(locale?, options?), also without `new`.
 Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto *callee = checker_.ctx_.make<NameExpr>(loc, "Intl");
   if (args.size() > 2) {
@@ -321,8 +306,6 @@ Expr *DateFormatChecker::checkDateFormatNew(llvm::SMLoc loc, std::vector<Expr *>
                                                Type::dateFormat());
 }
 
-// `Intl.DateTimeFormat(...)` without `new`; the rest of Intl is in
-// sema_intl.cpp.
 Expr *DateFormatChecker::checkIntlCall(CallExpr *call, MemberExpr *member) {
   if (member->name == "DateTimeFormat") {
     if (checker_.callChecker().rejectSpread(call)) {
@@ -344,7 +327,6 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
-    // The date, or its time in milliseconds; now without one.
     if (!call->args.empty()) {
       Expr *&arg = call->args[0];
       arg = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(arg));
@@ -383,4 +365,4 @@ Expr *DateFormatChecker::checkDateFormatMethod(CallExpr *call, MemberExpr *membe
   return call;
 }
 
-} // namespace tz
+}

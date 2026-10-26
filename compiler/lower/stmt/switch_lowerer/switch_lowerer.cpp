@@ -24,19 +24,15 @@ namespace tz {
 
 SwitchLowerer::SwitchLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// The discriminant is evaluated once and compared with each test in order;
-// the first one equal to it jumps to its case, and no match to `default`.
-// The case bodies follow each other, so control falls through.
 void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
   const Type *type = stmt->discriminant->type;
   llvm::SmallVector<llvm::StringRef, 1> labels = std::move(lowering_.pendingLabels_);
   lowering_.pendingLabels_.clear();
   size_t depth = lowering_.scopes_.size();
-  lowering_.functionFrame().pushScope(); // the variables of the cases
+  lowering_.functionFrame().pushScope();
   llvm::Value *value = lowering_.exprLowerer().emitExpr(stmt->discriminant);
   llvm::Value *slot = nullptr;
   if (type->isManaged()) {
-    // Released whichever way control leaves the switch.
     slot = lowering_.functionFrame().createManagedSlot(type, "switch.value");
     lowering_.builder_.CreateStore(value, slot);
   }
@@ -61,7 +57,7 @@ void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
     llvm::Value *current =
         slot ? lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), slot) : value;
     llvm::Value *equal;
-    if (!c.compareType) { // `case undefined:`
+    if (!c.compareType) {
       equal =
           type->isOptional()
               ? lowering_.builder_.CreateNot(lowering_.optionalLowerer().optionalHas(current, type))
@@ -79,8 +75,7 @@ void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
   }
   lowering_.builder_.CreateBr(defaultBody);
 
-  lowering_.targets_.push_back(
-      {labels, /*isLoop=*/false, /*isSwitch=*/true, endBlock, nullptr, depth});
+  lowering_.targets_.push_back({labels, false, true, endBlock, nullptr, depth});
   for (size_t i = 0; i < stmt->cases.size(); ++i) {
     lowering_.functionFrame().switchTo(bodies[i]);
     for (Stmt *s : stmt->cases[i].body) {
@@ -94,4 +89,4 @@ void SwitchLowerer::emitSwitch(SwitchStmt *stmt) {
   lowering_.functionFrame().emitBlock(endBlock);
 }
 
-} // namespace tz
+}

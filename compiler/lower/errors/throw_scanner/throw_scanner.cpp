@@ -162,9 +162,6 @@ void ThrowScanner::stmt(const Stmt *stmt, bool caught) {
     break;
   }
   case Stmt::Kind::Class: {
-    // Its static fields get their values where it is declared (those of
-    // an instance of a generic class are the generic class's), and its
-    // decorators run there.
     auto *cls = llvm::cast<ClassDecl>(stmt);
     expr(cls->baseExpr, caught);
     for (const ClassField &f : cls->fields) {
@@ -186,8 +183,6 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
   if (!expr) {
     return;
   }
-  // An iterator object runs code when it is resumed; whatever consumes one
-  // may resume it. That of a dictionary only walks its entries.
   auto *dictIterator = llvm::dyn_cast<CallExpr>(expr);
   if (expr->type && expr->type->isIterator() &&
       !(dictIterator && isDictIterator(dictIterator->builtin))) {
@@ -222,9 +217,8 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     auto *member = llvm::cast<MemberExpr>(expr);
     this->expr(member->object, caught);
     if (jsonReadMayThrow(member->object)) {
-      throwCalls().intrinsic(caught); // a key of null or undefined
+      throwCalls().intrinsic(caught);
     }
-    // A method as a value: through the method table, any that overrides it.
     if (member->method && member->type) {
       if (member->virtualCall) {
         forEachImplementation(member->method->decl, [&](const FunctionDecl *fn) {
@@ -270,13 +264,10 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     if (assign->op && ThrowCalls::operatorThrows(*assign->op, assign->type, assign->value)) {
       throwCalls().intrinsic(caught);
     }
-    // `a.length = n`: a negative length, or one that grows an array whose
-    // elements have no default.
     if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target);
         member && member->object->type && member->object->type->isArray()) {
       throwCalls().intrinsic(caught);
     }
-    // A key of a Json that is no object, or an element past the end.
     if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target);
         member && member->object->type && member->object->type->nonOptional()->isJson()) {
       throwCalls().intrinsic(caught);
@@ -304,14 +295,11 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     for (const Expr *arg : create->ctor ? create->ctor->args : create->args) {
       this->expr(arg, caught);
     }
-    // Through the description of the class: its arguments are checked
-    // then, and its code may throw.
     if (create->reflect) {
       throwCalls().intrinsic(caught);
       break;
     }
     if (const ClassDecl *cls = create->cls) {
-      // The initializers of the classes up the chain run too.
       for (const ClassDecl *c = cls; c; c = c->parent) {
         if (c->init) {
           throwCalls().callee(c->init, caught, nullptr);
@@ -338,7 +326,6 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
   case Expr::Kind::Cast: {
     auto *conv = llvm::cast<CastExpr>(expr);
     this->expr(conv->operand, caught);
-    // An adapter calls the function it wraps.
     if (conv->adaptsResult) {
       out_.adapters.push_back({conv->type, conv->operand->type});
     } else if (conv->type && conv->type->isFunction() && conv->operand->type &&
@@ -368,7 +355,6 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
   case Expr::Kind::Yield: {
     auto *yield = llvm::cast<YieldExpr>(expr);
     this->expr(yield->value, caught);
-    // next() without a value may resume a `yield` that needs one.
     if (!yield->discarded && yield->type && !yield->type->isOptional() &&
         !yield->type->isUndefined() && !yield->type->isVoid()) {
       throwCalls().intrinsic(caught);
@@ -376,7 +362,6 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     break;
   }
   case Expr::Kind::Await: {
-    // A Promise that is rejected throws its error here.
     const Expr *value = llvm::cast<AwaitExpr>(expr)->value;
     this->expr(value, caught);
     if (value->type && value->type->isPromise()) {
@@ -384,7 +369,7 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
     }
     break;
   }
-  case Expr::Kind::Class: // as the declaration of its class, where it is
+  case Expr::Kind::Class:
     stmt(llvm::cast<ClassExpr>(expr)->decl, caught);
     break;
   default:
@@ -393,4 +378,4 @@ void ThrowScanner::expr(const Expr *expr, bool caught) {
 }
 
 ThrowScanner::~ThrowScanner() = default;
-} // namespace tz
+}

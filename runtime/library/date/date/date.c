@@ -1,14 +1,3 @@
-// Dates (docs/date.md). A Date is an object of the language whose one field
-// is its time value: milliseconds since 1970 in UTC, NaN for an invalid date
-// (see TzDate in date.h). The compiler makes and changes the objects; here is
-// the arithmetic of time values, as V8 computes it (src/date, and
-// builtins-date.cc): taking them apart into fields, the setters, the strings
-// of toISOString, toUTCString and toString, and reading strings.
-//
-// What is local needs the rules of the time zone, which come from
-// date_zone.c: only the functions of local time call there, so a program
-// that uses only UTC (and Date.now()) never loads them.
-
 #include "runtime/library/date/date/date.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
@@ -25,12 +14,10 @@ static const char *const week_days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri"
 static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-// A time value taken apart. `t` is a whole number of milliseconds within the
-// limits, local or UTC.
 typedef struct {
   int year, month, day, week_day, hour, minute, second, ms;
-  int64_t days;        // since 1970
-  int64_t time_in_day; // milliseconds since midnight
+  int64_t days;
+  int64_t time_in_day;
 } Fields;
 
 static void break_down(double t, Fields *f) {
@@ -38,8 +25,6 @@ static void break_down(double t, Fields *f) {
   int64_t days = ms >= 0 ? ms / MS_PER_DAY : (ms - (MS_PER_DAY - 1)) / MS_PER_DAY;
   f->days = days;
   f->time_in_day = ms - days * MS_PER_DAY;
-  // The proleptic Gregorian calendar from days (H. Hinnant, "chrono-Compatible
-  // Low-Level Date Algorithms").
   int64_t z = days + 719468;
   int64_t era = (z >= 0 ? z : z - 146096) / 146097;
   int64_t doe = z - era * 146097;
@@ -50,7 +35,7 @@ static void break_down(double t, Fields *f) {
   f->year = (int)(yoe + era * 400 + (month <= 1));
   f->month = month;
   f->day = (int)(doy - (153 * mp + 2) / 5 + 1);
-  int64_t wd = (days + 4) % 7; // 1970-01-01 was a Thursday
+  int64_t wd = (days + 4) % 7;
   f->week_day = (int)(wd < 0 ? wd + 7 : wd);
   f->hour = (int)(f->time_in_day / 3600000);
   f->minute = (int)(f->time_in_day / 60000 % 60);
@@ -58,10 +43,6 @@ static void break_down(double t, Fields *f) {
   f->ms = (int)(f->time_in_day % 1000);
 }
 
-// The same day and time in a year from 2008 to 2035 that is a leap year if
-// t's is and starts on the same day of the week (V8's EquivalentTime). V8
-// takes the name of the zone of a time before 1970 or after 2038 as for that
-// year: in standard or summer time as the zone is then today.
 double tz_date_equivalent_time(double t) {
   Fields f;
   break_down(t, &f);
@@ -76,11 +57,8 @@ double tz_date_equivalent_time(double t) {
   return days * MS_PER_DAY + (double)f.time_in_day;
 }
 
-// The local time of a valid time value.
 static double to_local(double t) { return t + tz_date_offset(t); }
 
-// A local time made from fields as UTC: the time value, NaN if out of range
-// (V8's SetLocalDateValue).
 static double from_local(double local) {
   if (!(local >= -TZ_DATE_MAX_LOCAL_TIME && local <= TZ_DATE_MAX_LOCAL_TIME)) {
     return NAN;
@@ -89,13 +67,6 @@ static double from_local(double local) {
   return tz_date_time_clip(tz_date_local_to_utc(local));
 }
 
-//===----------------------------------------------------------------------===//
-// Making dates
-//===----------------------------------------------------------------------===//
-
-// new Date(y, m, d, h, min, s, ms) with `local`, and Date.UTC: the
-// arguments left out are given as their defaults. A year from 0 to 99 is
-// 1900 and more.
 double tz_date_from_fields(double year, double month, double date, double hours, double minutes,
                            double seconds, double ms, int32_t local) {
   if (!isnan(year)) {
@@ -113,7 +84,6 @@ double tz_date_from_fields(double year, double month, double date, double hours,
 
 double tz_date_clip(double t) { return tz_date_time_clip(t); }
 
-// Date.parse(s) and new Date(s).
 double tz_date_parse(void *obj, uint64_t meta) {
   TzStr s = {obj, meta};
   uint32_t length;
@@ -151,10 +121,6 @@ double tz_date_parse(void *obj, uint64_t meta) {
   return tz_date_time_clip(value);
 }
 
-//===----------------------------------------------------------------------===//
-// Fields
-//===----------------------------------------------------------------------===//
-
 static double field_of(const Fields *f, int32_t field) {
   switch (field) {
   case TZ_DATE_YEAR:
@@ -176,7 +142,6 @@ static double field_of(const Fields *f, int32_t field) {
   }
 }
 
-// getUTCFullYear() and the others.
 double tz_date_utc_field(double t, int32_t field) {
   if (isnan(t)) {
     return NAN;
@@ -187,9 +152,6 @@ double tz_date_utc_field(double t, int32_t field) {
   return field_of(&f, field);
 }
 
-// getFullYear() and the others, and getTimezoneOffset(): whole minutes, as
-// V8 gives them, also of the offsets with seconds that times before
-// standard time had.
 double tz_date_local_field(double t, int32_t field) {
   if (isnan(t)) {
     return NAN;
@@ -204,14 +166,10 @@ double tz_date_local_field(double t, int32_t field) {
   return field_of(&f, field);
 }
 
-// The setters: setHours(h, m?, s?, ms?) and the others, with `count` of the
-// arguments `a`..`d` given. As in V8 (builtins-date.cc), each changes the
-// fields it names in the local time (or UTC), and the result is clipped.
 double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double a, double b,
                    double c, double d) {
   double args[4] = {a, b, c, d};
   if (isnan(t)) {
-    // setFullYear starts from +0 then, the others give NaN.
     if (field != TZ_DATE_YEAR) {
       return NAN;
     }
@@ -269,7 +227,7 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
     }
     day = tz_date_make_day(year, month, date);
     break;
-  default: // TZ_DATE_YEAR
+  default:
     year = args[0];
     if (count > 1) {
       month = args[1];
@@ -285,16 +243,10 @@ double tz_date_set(double t, int32_t field, int32_t local, int32_t count, double
   return local ? from_local(value) : tz_date_time_clip(value);
 }
 
-//===----------------------------------------------------------------------===//
-// Strings
-//===----------------------------------------------------------------------===//
-
 static TzStr ascii(const char *text, int length) {
   return tz_str_from_ascii(text, length > 0 ? (size_t)length : 0);
 }
 
-// `2026-10-22T18:00:00.000Z`; years past 9999 and before 0 with six digits
-// and a sign.
 static int iso_text(char *out, size_t size, double t) {
   Fields f;
   break_down(t, &f);
@@ -308,8 +260,6 @@ static int iso_text(char *out, size_t size, double t) {
                   f.ms);
 }
 
-// toISOString(): of an invalid date, a RangeError (see tz_throw) and the
-// empty string.
 void tz_date_iso(TzStr *out, double t) {
   if (isnan(t)) {
     tz_throw(TZ_RANGE_ERROR, "Invalid time value");
@@ -320,8 +270,6 @@ void tz_date_iso(TzStr *out, double t) {
   *out = ascii(text, iso_text(text, sizeof text, t));
 }
 
-// toJSON(): the ISO text, or nothing (null in JavaScript) for an invalid
-// date.
 int32_t tz_date_json(TzStr *out, double t) {
   if (isnan(t)) {
     out->obj = NULL;
@@ -334,7 +282,6 @@ int32_t tz_date_json(TzStr *out, double t) {
   return 1;
 }
 
-// How console.log shows a date: its ISO text, or `Invalid Date`.
 void tz_buf_date(TzBuf *out, double t) {
   if (isnan(t)) {
     tz_buf_ascii(out, "Invalid Date");
@@ -345,7 +292,6 @@ void tz_buf_date(TzBuf *out, double t) {
   tz_buf_ascii_n(out, text, n > 0 ? (size_t)n : 0);
 }
 
-// `Fri, 23 Oct 2026 10:00:00 GMT`.
 void tz_date_utc_string(TzStr *out, double t) {
   if (isnan(t)) {
     *out = ascii("Invalid Date", 12);
@@ -361,9 +307,6 @@ void tz_date_utc_string(TzStr *out, double t) {
   *out = ascii(text, n);
 }
 
-// toString(), toDateString() and toTimeString() (TZ_DATE_TEXT_*): `Fri Oct 23
-// 2026 10:00:00 GMT+0600 (Kyrgyzstan Time)`, its date, its time; with the
-// name of the zone in the language of the system, as V8 writes it.
 void tz_date_local_string(TzStr *out, double t, int32_t mode) {
   if (isnan(t)) {
     *out = ascii("Invalid Date", 12);

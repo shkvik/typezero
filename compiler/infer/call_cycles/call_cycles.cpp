@@ -18,9 +18,6 @@ CallCycles::CallCycles(Checker &checker) : checker_(checker) {}
 void CallCycles::findCycles(
     llvm::ArrayRef<FunctionDecl *> functions,
     llvm::function_ref<FunctionDecl *(FunctionDecl *, llvm::StringRef)> resolve) {
-  // Tarjan's algorithm over the calls between functions without a return
-  // type. A name that only looks like such a call (a variable with the same
-  // name) costs a few more checks, nothing else.
   std::vector<FunctionDecl *> nodes;
   llvm::StringMap<size_t> byName;
   llvm::DenseMap<const FunctionDecl *, size_t> byDecl;
@@ -41,7 +38,6 @@ void CallCycles::findCycles(
       }
     }
     collectNames(nodes[i]->body, names);
-    // `o.m(...)` may call any method named m.
     llvm::StringSet<> members;
     collectMemberCalls(nodes[i]->body, members);
     for (const auto &member : members) {
@@ -92,7 +88,7 @@ void CallCycles::findCycles(
       cycle.push_back(nodes[w]->sym);
     } while (w != v);
     if (cycle.size() == 1 && !llvm::is_contained(calls[v], v)) {
-      return; // not recursive
+      return;
     }
     for (FuncSymbol *fn : cycle) {
       checker_.cycleOf_[fn] = static_cast<unsigned>(checker_.cycles_.size());
@@ -106,4 +102,4 @@ void CallCycles::findCycles(
   }
 }
 
-} // namespace tz
+}

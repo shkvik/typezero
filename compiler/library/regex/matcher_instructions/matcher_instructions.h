@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The instructions of the program, literal runs and lookarounds.
 class MatcherInstructions {
 public:
   explicit MatcherInstructions(MatcherBuilder &builder);
@@ -21,4 +20,4 @@ private:
   MatcherBuilder &builder_;
 };
 
-} // namespace tz
+}

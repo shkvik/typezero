@@ -8,8 +8,6 @@ namespace tz {
 class Target;
 struct BuildOptions;
 
-// The hot functions of the runtime copied into the program, then LLVM's optimizations; with -O0
-// neither.
 class OptimizePass {
 public:
   OptimizePass(const Target &target, const BuildOptions &options);
@@ -23,4 +21,4 @@ private:
   const BuildOptions &options_;
 };
 
-} // namespace tz
+}

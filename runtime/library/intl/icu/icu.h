@@ -1,31 +1,18 @@
-// The ICU of the system, for time zones and languages (docs/date.md,
-// sections 2 and 3; docs/intl.md). In Windows 10 1903 and later it is
-// icu.dll; Windows 10 before that has the same functions in icuuc.dll and
-// icuin.dll. The library is loaded when the program first needs it, so a
-// program that uses only UTC and Date.now() never loads it.
-//
-// TODO(linux): Linux and macOS have no ICU to count on. There the zone
-// database goes into the executable (about 150 KB, only for programs that use
-// local time or zones), and the data of the languages by the rule of
-// docs/date.md, section 3. Until then they have UTC and no languages.
-
 #ifndef TZ_ICU_H
 #define TZ_ICU_H
 
 #include <stdint.h>
 
-// The few types of ICU's C API that the runtime uses; the handles are opaque.
 typedef uint16_t TzUChar;
-typedef int TzUErrorCode; // a failure is > 0
+typedef int TzUErrorCode;
 #define TZ_U_FAILURE(status) ((status) > 0)
 #define TZ_U_BUFFER_OVERFLOW_ERROR 15
 
-// UCalendarDateFields and other constants of the C API.
 enum {
   TZ_UCAL_GREGORIAN = 1,
   TZ_UCAL_ZONE_OFFSET = 15,
   TZ_UCAL_DST_OFFSET = 16,
-  TZ_UCAL_STANDARD = 0, // display names
+  TZ_UCAL_STANDARD = 0,
   TZ_UCAL_DST = 2,
   TZ_UCAL_TZ_TRANSITION_NEXT = 0,
   TZ_UCAL_TZ_TRANSITION_PREVIOUS_INCLUSIVE = 3,
@@ -36,7 +23,6 @@ enum {
 };
 
 typedef struct TzIcu {
-  // ucal
   void *(*ucal_open)(const TzUChar *zone, int32_t length, const char *locale, int type,
                      TzUErrorCode *status);
   void (*ucal_close)(void *cal);
@@ -45,7 +31,6 @@ typedef struct TzIcu {
   int32_t (*ucal_get)(const void *cal, int field, TzUErrorCode *status);
   int8_t (*ucal_getTimeZoneTransitionDate)(const void *cal, int type, double *transition,
                                            TzUErrorCode *status);
-  // ICU 69 and later; NULL before.
   void (*ucal_getTimeZoneOffsetFromLocal)(const void *cal, int nonexistent, int duplicated,
                                           int32_t *raw, int32_t *dst, TzUErrorCode *status);
   int32_t (*ucal_getTimeZoneDisplayName)(const void *cal, int type, const char *locale,
@@ -62,7 +47,6 @@ typedef struct TzIcu {
   void *(*ucal_openTimeZones)(TzUErrorCode *status);
   const TzUChar *(*uenum_unext)(void *enumeration, int32_t *length, TzUErrorCode *status);
   void (*uenum_close)(void *enumeration);
-  // uloc
   const char *(*uloc_getDefault)(void);
   int32_t (*uloc_getBaseName)(const char *locale, char *name, int32_t capacity,
                               TzUErrorCode *status);
@@ -86,7 +70,6 @@ typedef struct TzIcu {
   void *(*unumsys_open)(const char *locale, TzUErrorCode *status);
   const char *(*unumsys_getName)(const void *system);
   void (*unumsys_close)(void *system);
-  // udat
   void *(*udat_open)(int time_style, int date_style, const char *locale, const TzUChar *zone,
                      int32_t zone_length, const TzUChar *pattern, int32_t pattern_length,
                      TzUErrorCode *status);
@@ -102,7 +85,6 @@ typedef struct TzIcu {
   void *(*ufieldpositer_open)(TzUErrorCode *status);
   void (*ufieldpositer_close)(void *iterator);
   int32_t (*ufieldpositer_next)(void *iterator, int32_t *begin, int32_t *end);
-  // udatpg
   void *(*udatpg_open)(const char *locale, TzUErrorCode *status);
   void (*udatpg_close)(void *generator);
   int32_t (*udatpg_getBestPatternWithOptions)(void *generator, const TzUChar *skeleton,
@@ -110,12 +92,8 @@ typedef struct TzIcu {
                                               int32_t capacity, TzUErrorCode *status);
   int32_t (*udatpg_getSkeleton)(void *generator, const TzUChar *pattern, int32_t length,
                                 TzUChar *skeleton, int32_t capacity, TzUErrorCode *status);
-  // ICU 67 and later; NULL before.
   int (*udatpg_getDefaultHourCycle)(const void *generator, TzUErrorCode *status);
 
-  // The rest of Intl (intl.c and the files after it): NULL where the system
-  // lacks them, which tz_intl_icu checks.
-  // unumf, the number formatter of skeletons (ICU 67 and later)
   void *(*unumf_openForSkeletonAndLocaleWithError)(const TzUChar *skeleton, int32_t length,
                                                    const char *locale, void *parse_error,
                                                    TzUErrorCode *status);
@@ -128,7 +106,6 @@ typedef struct TzIcu {
   void (*unumf_formatDecimal)(const void *formatter, const char *value, int32_t length,
                               void *result, TzUErrorCode *status);
   const void *(*unumf_resultAsValue)(const void *result, TzUErrorCode *status);
-  // ufmtval and ucfpos: the text of a formatted value and its fields
   const TzUChar *(*ufmtval_getString)(const void *value, int32_t *length, TzUErrorCode *status);
   int8_t (*ufmtval_nextPosition)(const void *value, void *position, TzUErrorCode *status);
   void *(*ucfpos_open)(TzUErrorCode *status);
@@ -137,20 +114,17 @@ typedef struct TzIcu {
   int32_t (*ucfpos_getField)(const void *position, TzUErrorCode *status);
   void (*ucfpos_getIndexes)(const void *position, int32_t *start, int32_t *limit,
                             TzUErrorCode *status);
-  // ucurr, unumsys
   int32_t (*ucurr_getDefaultFractionDigits)(const TzUChar *currency, TzUErrorCode *status);
   const TzUChar *(*ucurr_getName)(const TzUChar *currency, const char *locale, int style,
                                   int8_t *is_choice, int32_t *length, TzUErrorCode *status);
   void *(*unumsys_openByName)(const char *name, TzUErrorCode *status);
   int8_t (*unumsys_isAlgorithmic)(const void *system);
-  // uplrules
   void *(*uplrules_openForType)(const char *locale, int type, TzUErrorCode *status);
   void (*uplrules_close)(void *rules);
   int32_t (*uplrules_selectFormatted)(const void *rules, const void *number, TzUChar *keyword,
                                       int32_t capacity, TzUErrorCode *status);
   void *(*uplrules_getKeywords)(const void *rules, TzUErrorCode *status);
   const char *(*uenum_next)(void *enumeration, int32_t *length, TzUErrorCode *status);
-  // ucol
   void *(*ucol_open)(const char *locale, TzUErrorCode *status);
   void (*ucol_close)(void *collator);
   int32_t (*ucol_strcoll)(const void *collator, const TzUChar *a, int32_t a_length,
@@ -159,7 +133,6 @@ typedef struct TzIcu {
   int (*ucol_getAttribute)(const void *collator, int attribute, TzUErrorCode *status);
   void *(*ucol_getKeywordValuesForLocale)(const char *key, const char *locale, int8_t common,
                                           TzUErrorCode *status);
-  // unorm2
   const void *(*unorm2_getNFCInstance)(TzUErrorCode *status);
   const void *(*unorm2_getNFDInstance)(TzUErrorCode *status);
   const void *(*unorm2_getNFKCInstance)(TzUErrorCode *status);
@@ -168,7 +141,6 @@ typedef struct TzIcu {
                               TzUChar *out, int32_t capacity, TzUErrorCode *status);
   int32_t (*unorm2_spanQuickCheckYes)(const void *normalizer, const TzUChar *text, int32_t length,
                                       TzUErrorCode *status);
-  // ubrk
   void *(*ubrk_open)(int type, const char *locale, const TzUChar *text, int32_t length,
                      TzUErrorCode *status);
   void (*ubrk_close)(void *iterator);
@@ -178,7 +150,6 @@ typedef struct TzIcu {
   int32_t (*ubrk_preceding)(void *iterator, int32_t offset);
   int8_t (*ubrk_isBoundary)(void *iterator, int32_t offset);
   int32_t (*ubrk_getRuleStatus)(void *iterator);
-  // ureldatefmt
   void *(*ureldatefmt_open)(const char *locale, void *number_format, int width, int context,
                             TzUErrorCode *status);
   void (*ureldatefmt_close)(void *formatter);
@@ -189,7 +160,6 @@ typedef struct TzIcu {
                                             void *result, TzUErrorCode *status);
   void (*ureldatefmt_formatToResult)(const void *formatter, double offset, int unit, void *result,
                                      TzUErrorCode *status);
-  // ulistfmt
   void *(*ulistfmt_openForType)(const char *locale, int type, int width, TzUErrorCode *status);
   void (*ulistfmt_close)(void *formatter);
   void *(*ulistfmt_openResult)(TzUErrorCode *status);
@@ -198,7 +168,6 @@ typedef struct TzIcu {
   void (*ulistfmt_formatStringsToResult)(const void *formatter, const TzUChar *const *strings,
                                          const int32_t *lengths, int32_t count, void *result,
                                          TzUErrorCode *status);
-  // uldn, the names of languages, regions, scripts and keywords
   void *(*uldn_openForContext)(const char *locale, int *contexts, int32_t count,
                                TzUErrorCode *status);
   void (*uldn_close)(void *names);
@@ -215,19 +184,11 @@ typedef struct TzIcu {
   const char *(*uloc_toLegacyType)(const char *keyword, const char *value);
 } TzIcu;
 
-// The functions of the ICU of the system, loaded on the first call; NULL if
-// there is none.
 const TzIcu *tz_icu(void);
-// How many of the functions of Intl beyond dates the system lacks (an ICU
-// older than 67).
 extern int32_t tz_icu_missing;
 
-// The language of the system as ICU names it, without its keywords
-// ("ru_RU"), as node has it.
 const char *tz_icu_default_locale(void);
 
-// The IANA name of the local zone (date_zone.c), as
-// Intl.DateTimeFormat().resolvedOptions() gives it; its length.
 int32_t tz_date_zone_id(TzUChar *out, int32_t capacity);
 
 #endif

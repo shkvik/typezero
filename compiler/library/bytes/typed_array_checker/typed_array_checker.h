@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of typed arrays and DataView.
 class TypedArrayChecker {
 public:
   explicit TypedArrayChecker(Checker &checker);
@@ -16,4 +15,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

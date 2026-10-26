@@ -6,29 +6,18 @@ namespace tz {
 
 struct Module;
 
-// `import { a, b as c } from "./x"`. The parser keeps imports and exports
-// apart from the statements: they only bind names.
 struct ImportDecl {
   llvm::SMLoc loc;
   std::vector<ModuleName> names;
-  std::string path; // as written
+  std::string path;
   llvm::SMLoc pathLoc;
-  Module *from = nullptr; // set by the loader
-  // `import fs from "node:fs"` or `import * as fs from "node:fs"` of a
-  // built-in module: errors, which Checker reports with the names the file uses
-  // of it (the parser reports those of the program's files).
+  Module *from = nullptr;
   llvm::StringRef whole;
   llvm::SMLoc wholeLoc;
   bool wholeIsDefault = false;
-  // Added by the loader: the globals of the web platform the file names
-  // (tz:web), which JavaScript has without an import.
   bool implicit = false;
 };
 
-// Whether an import names a module built into tz (docs/io.md): "node:fs" and
-// the same name without "node:", "tz:io"... (not "neverthrow", which only
-// gives names of the language). The names are those of Node 24's
-// require("module").builtinModules.
 inline bool isBuiltinModule(llvm::StringRef path) {
   static constexpr llvm::StringLiteral bare[] = {"assert",
                                                  "assert/strict",
@@ -96,4 +85,4 @@ inline bool isBuiltinModule(llvm::StringRef path) {
   return false;
 }
 
-} // namespace tz
+}

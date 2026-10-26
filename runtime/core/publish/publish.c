@@ -1,28 +1,3 @@
-// Shared objects of the parallel runtime (docs/async.md, section 8;
-// TZ_RC_SHARED in group.h).
-//
-// Reference counts are plain, as fast as they can be, while one thread at a
-// time can reach an object: a piece of async code runs on one thread, and
-// what it makes is its own. An object becomes shared once something that
-// other threads reach holds it: a global, an object that is shared already,
-// the arguments of an async function (the caller keeps them while its pieces
-// run elsewhere), the value of a promise (its awaiters get it). Then it and
-// everything it holds are counted with atomic operations from then on: the
-// count goes to TZ_RC_SHARED plus the references, which the fast paths of
-// counting send to the slow ones. tz_publish_* makes it so, before the
-// object becomes reachable: the thread that publishes it is the only one
-// that can reach it yet, so changing its count is safe. Publishing what is
-// shared already costs a test, so a store of one into a shared object stops
-// at once (tz_store_barrier).
-//
-// A member of a group is counted under the lock of the groups already
-// (group.c); publishing it publishes its whole group, which TZ_LINK_PUBLISHED
-// in the link of each member then says, and what the members hold.
-//
-// The fields of an object are found by the function the compiler makes for
-// its descriptor (Lowering::publishTable), which calls tz_publish_value for
-// each; the objects of the runtime by their kinds here.
-
 #include "runtime/core/publish/publish.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/async/async.h"
@@ -69,17 +44,11 @@ void tz_json_publish(TzJson *j);
 void tz_dec_publish(TzDec d);
 void tz_map_publish(TzMap *m);
 
-//===----------------------------------------------------------------------===//
-// The functions of the compiler, by descriptor
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   const void *descriptor;
   void (*publish)(void *object);
 } TzPublishEntry;
 
-// Open addressing by the descriptor's address. Not static: see the rules in
-// tzrt.h. Set once, by main, before any thread starts.
 const TzPublishEntry **tz_publish_slots;
 uint32_t tz_publish_mask;
 
@@ -124,19 +93,12 @@ static void (*publisher_of(const void *descriptor))(void *) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The walk
-//===----------------------------------------------------------------------===//
-
-// The objects marked whose contents are still to be published: the walk
-// takes no stack, however long a list of objects is. The thread's own.
 typedef struct {
   void **items;
   size_t count, capacity;
   int active;
 } Pending;
 
-// Not static: see the rules in tzrt.h.
 TZ_THREAD_LOCAL Pending tz_publish_pending;
 #define pending tz_publish_pending
 
@@ -153,14 +115,10 @@ static void pending_push(void *object) {
   pending.items[pending.count++] = object;
 }
 
-// A member of a group being published, tagged when it is an array, which
-// has no layout.
 static void push_member(void *member, int32_t array) {
   pending_push((void *)((uintptr_t)member | (array ? 1 : 0)));
 }
 
-// Marks a counted object shared; 1 if it was not, and what it holds is to be
-// published too.
 static int mark(void *object) {
   int64_t *rc = (int64_t *)object;
   int64_t count = *rc;
@@ -169,7 +127,7 @@ static int mark(void *object) {
     return 1;
   }
 
-  return 0; // shared already, or never freed
+  return 0;
 }
 
 static void publish_ref(void *object) {
@@ -178,8 +136,6 @@ static void publish_ref(void *object) {
   }
   int64_t rc = ((TzObject *)object)->rc;
   if (tz_rc_is_member(rc)) {
-    // Its group, the whole of it (group.c), each member to have its
-    // contents published.
     tz_group_publish(object, push_member);
     return;
   }
@@ -188,11 +144,10 @@ static void publish_ref(void *object) {
   }
 }
 
-// What an object holds, now that it is marked (or its group published).
 static void publish_array_contents(TzArray *a);
 
 static void publish_contents(void *item) {
-  if ((uintptr_t)item & 1) { // a member array
+  if ((uintptr_t)item & 1) {
     publish_array_contents((TzArray *)((uintptr_t)item & ~(uintptr_t)1));
     return;
   }
@@ -203,7 +158,6 @@ static void publish_contents(void *item) {
     publish(object);
     return;
   }
-  // An object of the runtime's own, by its kind.
   uint32_t flags = layout->flags;
   if (flags & TZ_LAYOUT_DICT) {
     tz_map_publish((TzMap *)object);
@@ -223,9 +177,7 @@ static void publish_contents(void *item) {
     TzBox *box = (TzBox *)object;
     tz_publish_value(box->type, box + 1);
   } else if (flags & TZ_LAYOUT_TIMER) {
-    // A timer's callback runs on the main thread only.
   } else {
-    // Fields by the layout: those of the runtime's objects that have any.
     if (getenv("TZ_PUBLISH_DEBUG")) {
       fprintf(stderr, "publish fallback: object %p layout %p drop %p count %u flags %x\n", object,
               (const void *)layout, (void *)layout->drop, layout->count, layout->flags);
@@ -250,8 +202,6 @@ static void publish_array_contents(TzArray *a) {
   }
 }
 
-// Publishes everything pending: the outermost call does, so that one walk
-// takes no stack for the objects it finds.
 static void drain(void) {
   if (pending.active) {
     return;
@@ -263,18 +213,11 @@ static void drain(void) {
   pending.active = 0;
 }
 
-// What a member holds, when its group joins a published one (group.c).
 void tz_publish_contents(void *member, int32_t array) {
   push_member(member, array);
   drain();
 }
 
-//===----------------------------------------------------------------------===//
-// Values
-//===----------------------------------------------------------------------===//
-
-// An array goes by its type, not by a layout: its elements are published
-// here, through the same list for the objects among them.
 static void publish_array(TzArray *a) {
   if (!a) {
     return;
@@ -286,8 +229,6 @@ static void publish_array(TzArray *a) {
   if (!mark(a)) {
     return;
   }
-  // Elements now: an array is no object with a layout, which the list
-  // expects. Arrays of arrays nest only as deep as the types do.
   publish_array_contents(a);
 }
 

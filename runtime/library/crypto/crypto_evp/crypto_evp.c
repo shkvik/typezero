@@ -1,8 +1,3 @@
-// The full layer (docs/crypto.md, section 3): hashes and ciphers by names known only when the
-// program runs, which OpenSSL looks up in its tables, and getHashes(), getCiphers() and
-// getCurves(). A name becomes a TzMd or a TzCipherAlg over the EVP API, kept for the rest of the
-// program, so that the functions of crypto.c work on them as on those of the direct layer.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/error/error.h"
@@ -17,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The last error of OpenSSL in node's words: "error:1C800064:Provider routines::bad decrypt".
 void tz_openssl_throw(int32_t kind, const char *otherwise) {
   unsigned long code = ERR_get_error();
   ERR_clear_error();
@@ -30,8 +24,6 @@ void tz_openssl_throw(int32_t kind, const char *otherwise) {
   tz_throw(kind, "%s", text);
 }
 
-// Whether OpenSSL knows a name it cannot fetch: what node 24 turns off (md4, des-cbc), which it
-// reports as unsupported.
 static int unsupported(const char *name) {
   if (OBJ_sn2nid(name) == NID_undef && OBJ_ln2nid(name) == NID_undef) {
     return 0;
@@ -40,10 +32,6 @@ static int unsupported(const char *name) {
 
   return 1;
 }
-
-//===----------------------------------------------------------------------===//
-// Hashes
-//===----------------------------------------------------------------------===//
 
 typedef struct {
   EVP_MD_CTX *ctx;
@@ -106,10 +94,6 @@ static void add_known(Known **list, const char *name, void *alg) {
   *list = k;
 }
 
-// The TzMd of a hash named in the program, as node looks it up (EVP_get_digestbyname, then
-// EVP_MD_fetch of the name it gives, so that aliases such as "RSA-SHA256" work), or NULL after
-// throwing what the caller throws for an unknown one: 0 for createHash, 1 for hash(), 2 for
-// createHmac and the KDFs.
 const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   char name[64];
   tz_crypto_cstr(obj, meta, name, sizeof name);
@@ -142,7 +126,7 @@ const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   made->ctx_size = sizeof(EvpMd);
   made->xof = (EVP_MD_get_flags(md) & EVP_MD_FLAG_XOF) != 0;
   made->size = (uint32_t)EVP_MD_get_size(md);
-  if (made->xof) { // node's default lengths of SHAKE: its strength
+  if (made->xof) {
     made->size = strstr(name, "128") ? 16 : 32;
   }
   made->block = (uint32_t)EVP_MD_get_block_size(md);
@@ -153,7 +137,6 @@ const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller) {
   return made;
 }
 
-// The EVP_MD of a hash a key operation names (sign, verify, RSA-PSS), or NULL after throwing.
 EVP_MD *tz_openssl_md_of(const TzMd *md) {
   if (md->ops == &evp_md_ops) {
     return ((const EvpMd *)md->seed)->md;
@@ -162,16 +145,12 @@ EVP_MD *tz_openssl_md_of(const TzMd *md) {
   return NULL;
 }
 
-//===----------------------------------------------------------------------===//
-// Ciphers
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   EVP_CIPHER_CTX *ctx;
-  int ccm; // CCM: the length of the data goes to OpenSSL first, once
+  int ccm;
   int ccm_length_set;
-  int ccm_failed; // the tag did not match, which final() reports, as in node
-  int tag_given;  // the tag of a decipher went to OpenSSL
+  int ccm_failed;
+  int tag_given;
 } EvpCipher;
 
 static int evp_init(TzCipher *c, const uint8_t *key, size_t key_length, const uint8_t *iv,
@@ -183,7 +162,6 @@ static int evp_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
   int mode = EVP_CIPHER_get_mode(cipher);
   e->ccm = mode == EVP_CIPH_CCM_MODE;
   int ok = EVP_CipherInit_ex(e->ctx, cipher, NULL, NULL, NULL, !c->decrypt);
-  // As node does: the length of the nonce of an AEAD, whatever OpenSSL takes by default.
   if (ok && c->alg->kind == TZ_CIPHER_AEAD) {
     ok = EVP_CIPHER_CTX_ctrl(e->ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)iv_length, NULL) > 0;
   }
@@ -202,7 +180,6 @@ static int evp_init(TzCipher *c, const uint8_t *key, size_t key_length, const ui
   return ok;
 }
 
-// The tag of a decipher goes to OpenSSL before the data (MaybePassAuthTagToOpenSSL of node).
 static int give_tag(TzCipher *c, EvpCipher *e) {
   if (!c->decrypt || !c->tag_set || e->tag_given) {
     return 1;
@@ -243,7 +220,7 @@ static int64_t evp_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
     return -1;
   }
   if (!EVP_CipherUpdate(e->ctx, out, &written, in, (int)length)) {
-    if (e->ccm && c->decrypt) { // the tag does not match: final() says so
+    if (e->ccm && c->decrypt) {
       ERR_clear_error();
       e->ccm_failed = 1;
       return 0;
@@ -291,7 +268,6 @@ static void evp_cleanup(TzCipher *c) {
 
 static const TzCipherOps evp_cipher_ops = {evp_init, evp_aad, evp_update, evp_final, evp_cleanup};
 
-// The TzCipherAlg of a cipher named in the program, or NULL after throwing node's error.
 const TzCipherAlg *tz_openssl_cipher(void *obj, uint64_t meta) {
   char name[64];
   tz_crypto_cstr(obj, meta, name, sizeof name);
@@ -328,10 +304,6 @@ const TzCipherAlg *tz_openssl_cipher(void *obj, uint64_t meta) {
 
   return made;
 }
-
-//===----------------------------------------------------------------------===//
-// getHashes(), getCiphers() and getCurves()
-//===----------------------------------------------------------------------===//
 
 typedef struct {
   char **names;
@@ -398,8 +370,6 @@ static int same_lower(const char *a, const char *b) {
   return *a == *b;
 }
 
-// filterDuplicateStrings of node: one name of those that differ only in case (the last one),
-// sorted.
 static TzArray *name_array(Names *n) {
   size_t kept = 0;
   for (size_t i = 0; i < n->count; ++i) {

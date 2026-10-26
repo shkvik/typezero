@@ -21,15 +21,11 @@ namespace tz {
 
 namespace {
 
-// The type a record `design:*` holds, for a key written as that literal;
-// null for any other key.
 const Type *designType(const Expr *key) {
   auto *lit = dyn_cast<StringLitExpr>(key);
   if (!lit) {
     return nullptr;
   }
-  // Classes, which `new` and Reflect.construct can make objects of (a DI
-  // container makes those of the parameters of a constructor).
   const Type *any = Type::constructorOf(Type::anyObject());
   if (lit->value == u"design:type" || lit->value == u"design:returntype") {
     return Type::optional(any);
@@ -58,11 +54,6 @@ Expr *stripImplicit(Expr *expr) {
   return expr;
 }
 
-// Whether every value of type `arg` passes the check that Reflect.apply makes
-// of an argument for a parameter of type `param` (Lowering::emitUnknownAs),
-// so that a call known when compiling may skip it. Where the check is
-// stricter than the types (an object literal, a union, whose member the
-// check picks in its own order), it is kept.
 bool reflectAccepts(const Type *arg, const Type *param) {
   if (param->isUnknown()) {
     return true;
@@ -92,7 +83,7 @@ bool reflectAccepts(const Type *arg, const Type *param) {
   case Type::Kind::Decimal:
   case Type::Kind::Result:
   case Type::Kind::Json:
-    return arg == param; // a box of exactly the type
+    return arg == param;
   case Type::Kind::ClassRef: {
     const ClassDecl *cls = arg->classRef();
     if (!cls || !cls->type) {
@@ -105,7 +96,6 @@ bool reflectAccepts(const Type *arg, const Type *param) {
     return made->isAnyObject() || (made->classDecl() && cls->type->isSubtypeOf(made));
   }
   case Type::Kind::Object: {
-    // An object of a class, which its number tells.
     const ClassDecl *cls = arg->classDecl();
     if (!cls || cls->literal || cls->builtin || !arg->isClass()) {
       return param->isDate() && arg->isDate();
@@ -121,7 +111,7 @@ bool reflectAccepts(const Type *arg, const Type *param) {
   }
 }
 
-} // namespace
+}
 
 ReflectCallChecker::ReflectCallChecker(Checker &checker) : checker_(checker) {}
 
@@ -143,7 +133,6 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
       {"getOwnMetadata", Builtin::MetaGetOwn, 2, 3}, {"hasMetadata", Builtin::MetaHas, 2, 3},
       {"hasOwnMetadata", Builtin::MetaHasOwn, 2, 3}, {"deleteMetadata", Builtin::MetaDelete, 2, 3}};
   llvm::StringRef fn = member->name;
-  // Reflection (sema_reflect.cpp).
   if (fn == "get" || fn == "apply" || fn == "construct") {
     return checker_.reflectChecker().checkReflection(call, member, expected);
   }
@@ -176,7 +165,6 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
   }
   bool define = function->builtin == Builtin::MetaDefine;
 
-  // The key: an object the compiler knows, or a string.
   Expr *&keyArg = call->args[0];
   llvm::SMLoc keyLoc = keyArg->loc();
   std::string label;
@@ -204,7 +192,6 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     }
   }
 
-  // The value.
   if (define) {
     Expr *&value = call->args[1];
     const Checker::MetaKeyType *known = nullptr;
@@ -238,7 +225,6 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
     }
   }
 
-  // The target, an object, and the property, a string or nothing.
   size_t at = define ? 2 : 1;
   Expr *&target = call->args[at];
   target = checker_.exprChecker().checkExpr(target);
@@ -279,9 +265,7 @@ Expr *ReflectCallChecker::checkReflectCall(CallExpr *call, MemberExpr *member,
 
 FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::StringRef name,
                                                      bool &several) {
-  // The variants up the chain, as the description has them: a generic one
-  // is a function for each copy, and Reflect.get gives none of them.
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   llvm::erase_if(methods, [](const FunctionDecl *fn) { return !fn->typeParams.empty(); });
   if (methods.empty()) {
     return nullptr;
@@ -296,8 +280,6 @@ FunctionDecl *ReflectCallChecker::knownReflectMethod(ClassDecl *cls, llvm::Strin
       return nullptr;
     }
   }
-  // A class down the chain that declares a method of the name again, another
-  // variant, would give its own.
   std::function<bool(const ClassDecl *)> declaresAgain = [&](const ClassDecl *c) {
     return llvm::any_of(c->children, [&](const ClassDecl *child) {
       return llvm::any_of(ClassLinks::ownMethods(child),
@@ -318,8 +300,6 @@ const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
   if (auto *name = dyn_cast<NameExpr>(f)) {
     return name->var ? name->var->reflectMethod : nullptr;
   }
-  // `Reflect.apply(Reflect.get(o, "m"), ...)`, whose object has no effects
-  // to keep; of several variants, the arguments choose when it runs.
   if (auto *got = dyn_cast<CallExpr>(f); got && got->builtin == Builtin::ReflectMethod &&
                                          !checker_.severalVariants_.contains(got) &&
                                          isa<NameExpr>(stripImplicit(got->args[0]))) {
@@ -330,7 +310,6 @@ const FunctionDecl *ReflectCallChecker::heldReflectMethod(const Expr *f) {
 }
 
 Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl *fn) {
-  // `this`: an object of the method's class, which the function checks.
   Expr *self = stripImplicit(call->args[1]);
   const ClassDecl *cls = self->type->isOptional() ? nullptr : self->type->classDecl();
   if (!cls || cls->literal || !cls->derivesFrom(fn->cls)) {
@@ -349,7 +328,6 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
     }
     args.push_back(stripImplicit(e.expr));
   }
-  // As many as it takes, each of a type the check lets through.
   size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
   if (args.size() < sym->minArgs || (!sym->hasRest && args.size() > fixed)) {
     return nullptr;
@@ -360,8 +338,6 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
       return nullptr;
     }
   }
-  // `self.m(args)`, of this very method, which no class down the chain
-  // declares again.
   auto *member = checker_.ctx_.make<MemberExpr>(call->loc(), self, fn->name);
   member->type = checker_.returnInferrer().functionType(sym);
   auto *direct = checker_.ctx_.make<CallExpr>(call->loc(), member, std::move(args));
@@ -373,7 +349,6 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
   if (!result->type->isVoid()) {
     return checker_.typeRelations().convert(result, Type::unknown());
   }
-  // Undefined, after the call.
   Expr *nothing = checker_.typeRelations().convert(
       checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(call->loc())),
       Type::unknown());
@@ -383,9 +358,6 @@ Expr *ReflectCallChecker::directReflectApply(CallExpr *call, const FunctionDecl 
   return seq;
 }
 
-// An array of the arguments of Reflect.apply or Reflect.construct: of any
-// values, each an unknown when the program runs; a literal is one of
-// unknowns.
 Expr *ReflectCallChecker::checkReflectArgs(Expr *args) {
   if (isa<ArrayLitExpr>(args)) {
     return checker_.exprChecker().checkExpr(args, Type::array(Type::unknown()));
@@ -408,4 +380,4 @@ Expr *ReflectCallChecker::checkReflectArgs(Expr *args) {
   return args;
 }
 
-} // namespace tz
+}

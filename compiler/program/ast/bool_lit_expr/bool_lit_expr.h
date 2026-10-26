@@ -12,4 +12,4 @@ public:
   bool value;
 };
 
-} // namespace tz
+}

@@ -82,7 +82,7 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   }
   case Builtin::ClearTimeout:
   case Builtin::ClearImmediate: {
-    Lowering::Operand timer = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand timer = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *value = timer.value;
     if (call->args[0]->type->isUndefined()) {
       value = llvm::ConstantPointerNull::get(ptr);
@@ -100,7 +100,6 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   case Builtin::TimerRef:
   case Builtin::TimerUnref:
   case Builtin::TimerRefresh: {
-    // The timer itself.
     llvm::Value *timer = lowering_.exprLowerer().emitExpr(cast<MemberExpr>(call->callee)->object);
     if (call->builtin == Builtin::TimerRefresh) {
       lowering_.builder_.CreateCall(
@@ -113,8 +112,8 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
     return timer;
   }
   case Builtin::TimerHasRef: {
-    Lowering::Operand timer = lowering_.refCounts().emitOperand(
-        cast<MemberExpr>(call->callee)->object, /*canBorrow=*/true);
+    Lowering::Operand timer =
+        lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
     llvm::Value *has = lowering_.builder_.CreateCall(
         lowering_.asyncLowerer().asyncFunction("tz_timer_has_ref", i32, {ptr}), {timer.value});
     lowering_.refCounts().dropOperand(timer);
@@ -125,4 +124,4 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

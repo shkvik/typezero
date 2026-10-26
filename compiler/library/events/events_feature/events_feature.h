@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// node:events and EventTarget (docs/events.md): once() and the other functions of the
-// module.
 class EventsFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "events"; }
@@ -14,4 +12,4 @@ public:
                          FuncSymbol *func) const override;
 };
 
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// Calls walked: their callees, the functions passed, new.
 class CallWalk {
 public:
   explicit CallWalk(Analysis &analysis);
@@ -26,4 +25,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

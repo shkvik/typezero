@@ -42,7 +42,6 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
   cls->resolved = cls->declared = true;
   checker_.classes_.push_back(cls);
 
-  // The fields have the types of their values, in the order written.
   bool ok = true;
   std::vector<Field> fields;
   for (ObjectLitExpr::Property &prop : lit->props) {
@@ -63,7 +62,6 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
       fe->fn->name = prop.name;
     }
     std::string what = ("field '" + prop.name + "'").str();
-    // The interface expected gives the type, as for a literal without methods.
     const Field *wanted = target ? target->field(prop.name) : nullptr;
     prop.value = checker_.exprChecker().checkExpr(prop.value, wanted ? wanted->type : nullptr);
     if (wanted) {
@@ -101,8 +99,6 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
                         : name.substr(0, name.size() - 2) + "; " + methods + " }";
   type->rename(name);
 
-  // The methods share one environment, the object: created with it, they
-  // see what is visible where it is written.
   NestedGroup *group = checker_.ctx_.newGroup();
   group->owner = checker_.currentDecl();
   group->scopeDepth = checker_.scopes_.size();
@@ -115,8 +111,6 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
     fn->group = group;
     fn->parent = checker_.currentDecl();
     fn->creationSeq = group->creationSeq;
-    // A method of the interface expected gives the types of the parameters
-    // and the result, as it gives them to an arrow.
     const Field *wanted = target ? target->field(fn->name) : nullptr;
     if (wanted && wanted->type->isFunction()) {
       checker_.classDeclarer().declareTyped(fn, wanted->type);
@@ -124,7 +118,7 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
         fn->sym->ret = checker_.predicateChecker().resolveReturnType(fn, fn->sym);
       }
     } else {
-      checker_.functionChecker().declareFunction(fn, nullptr, /*scoped=*/false);
+      checker_.functionChecker().declareFunction(fn, nullptr, false);
     }
   }
   checker_.callCycles().findCycles(
@@ -148,9 +142,6 @@ Expr *MethodLiteralChecker::checkMethodLiteral(ObjectLitExpr *lit, const Type *t
   return lit;
 }
 
-// Whether the literal has exactly the members of interface `target`: fields
-// of the same types, and methods where it has functions it cannot replace.
-// Reports the first difference.
 bool MethodLiteralChecker::implementsLiteral(ObjectLitExpr *lit, const Type *target) {
   const ClassDecl *cls = lit->cls;
   auto fail = [&](llvm::SMLoc loc, const std::string &why) {
@@ -201,4 +192,4 @@ bool MethodLiteralChecker::implementsLiteral(ObjectLitExpr *lit, const Type *tar
   return true;
 }
 
-} // namespace tz
+}

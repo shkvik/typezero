@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// Which references may be the same object, and which objects escape.
 class AliasAnalysis {
 public:
   explicit AliasAnalysis(Analysis &analysis);
@@ -25,4 +24,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

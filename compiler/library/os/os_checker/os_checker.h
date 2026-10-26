@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The functions of node:os.
 class OsChecker {
 public:
   explicit OsChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

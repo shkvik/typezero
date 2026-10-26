@@ -28,9 +28,6 @@ namespace tz {
 
 namespace {
 
-// The code of a group function may land in a drop function that is emitted
-// while another one is (objectLayout makes them when first needed): its
-// blocks and stack slots go to the function the builder is in.
 llvm::BasicBlock *blockHere(llvm::IRBuilder<> &b, const char *name) {
   return llvm::BasicBlock::Create(b.getContext(), name, b.GetInsertBlock()->getParent());
 }
@@ -44,12 +41,9 @@ llvm::Value *spillHere(llvm::IRBuilder<> &b, llvm::Value *value, const char *nam
   return slot;
 }
 
-// How Lowering walks the references in a value for the group functions: the
-// reference itself, or the environment of a function; anything else goes to
-// the runtime by its descriptor.
 enum class RefShape { None, Pointer, Function, Optional, Other };
 
-} // namespace
+}
 
 static RefShape refShape(const Type *type) {
   switch (type->kind()) {
@@ -57,12 +51,12 @@ static RefShape refShape(const Type *type) {
   case Type::Kind::Array:
   case Type::Kind::Dict:
   case Type::Kind::Unknown:
-  case Type::Kind::Promise: // which may be a member (promiseIsMember)
+  case Type::Kind::Promise:
     return RefShape::Pointer;
   case Type::Kind::Function:
     return RefShape::Function;
   case Type::Kind::Union:
-    return type->isTagged() ? RefShape::Other : RefShape::Pointer; // one of objects
+    return type->isTagged() ? RefShape::Other : RefShape::Pointer;
   case Type::Kind::Optional:
     return RefShape::Optional;
   case Type::Kind::Result:
@@ -79,9 +73,7 @@ void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type
     return;
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  // Debug mode notes where the store is, for what a walk reports.
   if (lowering_.debugMemory_) {
-    // Each thread's own in a parallel program (runtime/core/group/group.c).
     auto *site =
         cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_group_site", ptr));
     site->setThreadLocal(lowering_.parallel_);
@@ -103,7 +95,6 @@ void StoreLowerer::groupStore(llvm::Value *owner, llvm::Value *value, const Type
                                   {owner, lowering_.builder_.CreateExtractValue(value, 1)});
     return;
   case RefShape::Optional:
-    // Undefined holds zero, which refers to nothing.
     groupStore(owner, lowering_.optionalLowerer().optionalValue(value, type), type->inner());
     return;
   case RefShape::Other:
@@ -229,7 +220,6 @@ void StoreLowerer::storeBarrier(llvm::Value *owner, llvm::Value *value, const Ty
       lowering_.builder_.CreateICmpSLT(count, lowering_.builder_.getInt64(0)), barrierBlock,
       doneBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(barrierBlock);
-  // An array goes by its type: it has no descriptor of its own.
   RefShape shape = type->isString() || type->isArray() ? RefShape::Other : refShape(type);
   if (shape == RefShape::Pointer || shape == RefShape::Function) {
     llvm::Value *object =
@@ -278,7 +268,6 @@ void StoreLowerer::storeIn(llvm::Value *owner, const Type *ownerType, llvm::Valu
 void StoreLowerer::storeVar(const VarSymbol *var, llvm::Value *address, llvm::Value *value,
                             bool replacing) {
   const Type *type = ClosureLowerer::typeOf(var);
-  // What a global holds, functions may read in any task; a box, closures.
   if (var->isGlobal && var->usedInFunction) {
     publishValue(value, type);
   } else if (var->boxed() &&
@@ -344,9 +333,6 @@ void StoreLowerer::forgetWeakRefs(llvm::Value *object) {
   lowering_.builder_.SetInsertPoint(doneBlock);
 }
 
-// Releases what each field holds as a member lets go of it, then frees the
-// object unless it is one: a group frees its members' memory itself, after
-// all of them released what they hold (runtime/core/group/group.c).
 void StoreLowerer::emitMemberDrop(const Type *type, Lowering::ObjectLayout &layout) {
   llvm::Function *drop = layout.drop;
   llvm::Function *saved = lowering_.function_;
@@ -369,7 +355,6 @@ void StoreLowerer::emitMemberDrop(const Type *type, Lowering::ObjectLayout &layo
     lowering_.memoryDebug().checkOwned(type, fields[i].name, value, fieldType);
     releaseIn(object, value, fieldType);
   }
-  // The variables a literal's methods captured.
   if (const ClassDecl *cls = type->classDecl(); cls && cls->group) {
     const std::vector<VarSymbol *> &captures = cls->group->captures;
     for (size_t i = 0; i < captures.size(); ++i) {
@@ -396,4 +381,4 @@ void StoreLowerer::emitMemberDrop(const Type *type, Lowering::ObjectLayout &layo
   lowering_.function_ = saved;
 }
 
-} // namespace tz
+}

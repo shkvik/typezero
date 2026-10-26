@@ -1,13 +1,3 @@
-// Numbers in the formats of languages (docs/intl.md): Intl.NumberFormat, the
-// toLocaleString of numbers and decimals, and Intl.PluralRules, made the way
-// V8 makes them (src/objects/js-number-format.cc, js-plural-rules.cc) so that
-// they write what node writes: the options, read in the order of ECMA-402,
-// become a skeleton of ICU's number formatter ("currency/RUB precision-integer
-// rounding-mode-half-up"), and the formatter writes the number in the
-// language. A decimal is formatted from its text, so exactly.
-//
-// The data of the languages is the ICU of the system (icu.h, intl.h).
-
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -21,8 +11,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// The fields of ICU's formatted numbers (UNumberFormatFields) and their
-// category (UFieldCategory).
 enum {
   UNUM_INTEGER_FIELD = 0,
   UNUM_FRACTION_FIELD = 1,
@@ -43,13 +31,13 @@ enum {
 
 typedef struct {
   TzIntl base;
-  void *formatter; // UNumberFormatter
+  void *formatter;
 } TzNumberFormat;
 
 typedef struct {
   TzIntl base;
-  void *rules;     // UPluralRules
-  void *formatter; // of the digit options: the rules read what it writes
+  void *rules;
+  void *formatter;
 } TzPluralRules;
 
 static void nf_drop(void *object);
@@ -59,11 +47,6 @@ static const TzLayout pr_layout = {pr_drop, NULL, 0, TZ_LAYOUT_INTL, "PluralRule
 
 static const char *const matchers[] = {"lookup", "best fit", NULL};
 
-//===----------------------------------------------------------------------===//
-// Skeletons
-//===----------------------------------------------------------------------===//
-
-// Appends a stem to a skeleton, after a space.
 static void put(char *skeleton, size_t size, const char *stem) {
   size_t n = strlen(skeleton), m = strlen(stem);
   if (n + m + 2 > size) {
@@ -90,8 +73,6 @@ static int has_text(const TzIntlOptions *o, int index) {
   return (o->has_text & (UINT64_C(1) << index)) != 0;
 }
 
-// ECMA-402, DefaultNumberOption: `fallback` when not given; the floor of a
-// value from min to max, else a RangeError.
 static int default_number(const TzIntlOptions *o, int index, int min, int max, int fallback,
                           int *failed) {
   return tz_intl_number_option(o, index, min, max, fallback, failed);
@@ -154,8 +135,6 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   priority = priority ? priority : "auto";
   trailing = trailing ? trailing : "auto";
 
-  // As V8 does it: unlike ECMA-402 of 2024, roundingIncrement leaves the
-  // default fraction digits as they are, so it needs them given.
   int has_mnfd = has_number(o, TZ_IO_MINIMUM_FRACTION_DIGITS);
   int has_mxfd = has_number(o, TZ_IO_MAXIMUM_FRACTION_DIGITS);
   int has_sd = has_number(o, TZ_IO_MINIMUM_SIGNIFICANT_DIGITS) ||
@@ -208,7 +187,6 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   }
   enum { FRACTION, SIGNIFICANT, MORE, LESS } type;
   if (!need_sd && !need_fd) {
-    // Compact without digits: 1.2K, but 12K.
     mnfd = mxfd = 0;
     mnsd = 1;
     mxsd = 2;
@@ -252,7 +230,6 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
     repeat(stem, &n, '0', mnid);
     put(skeleton, size, stem);
   }
-  // The fraction digits (".00##", or none) and the significant ones ("@@#").
   char fraction[128], significant[32];
   size_t f = 0, s = 0;
   if (mxfd == 0) {
@@ -265,7 +242,6 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   repeat(significant, &s, '@', mnsd);
   repeat(significant, &s, '#', mxsd - mnsd);
   if (increment != 1) {
-    // The increment at the last fraction digit: 5 with two digits is 0.05.
     char digits[16];
     int k = snprintf(digits, sizeof digits, "%d", increment);
     strcpy(stem, "precision-increment/");
@@ -302,11 +278,6 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// Units and currencies
-//===----------------------------------------------------------------------===//
-
-// The units of ECMA-402 (IsSanctionedSingleUnitIdentifier).
 static int is_sanctioned(const char *unit, size_t length) {
   static const char *const units[] = {
       "acre",        "bit",         "byte",        "celsius",
@@ -330,7 +301,6 @@ static int is_sanctioned(const char *unit, size_t length) {
   return 0;
 }
 
-// A unit, or two joined by "-per-" (IsWellFormedUnitIdentifier).
 static int is_well_formed_unit(const char *unit) {
   size_t length = strlen(unit);
   if (is_sanctioned(unit, length)) {
@@ -364,10 +334,6 @@ static int currency_digits(const TzIcu *icu, const char *code) {
   return TZ_U_FAILURE(status) || digits < 0 ? 2 : digits;
 }
 
-//===----------------------------------------------------------------------===//
-// Intl.NumberFormat
-//===----------------------------------------------------------------------===//
-
 static void *open_formatter(const TzIcu *icu, const char *skeleton, const char *locale) {
   TzUChar units[512];
   int32_t n = 0;
@@ -375,7 +341,7 @@ static void *open_formatter(const TzIcu *icu, const char *skeleton, const char *
     units[n] = (unsigned char)skeleton[n];
   }
   units[n] = 0;
-  char parse_error[128]; // UParseError
+  char parse_error[128];
   TzUErrorCode status = 0;
   void *formatter =
       icu->unumf_openForSkeletonAndLocaleWithError(units, n, locale, parse_error, &status);
@@ -386,8 +352,6 @@ static void *open_formatter(const TzIcu *icu, const char *skeleton, const char *
   return formatter;
 }
 
-// The ICU locale `found` with the numbering system `system` (NULL for the
-// language's own).
 static void with_numbering(const TzIcu *icu, const char *found, const char *system, char *id,
                            size_t size) {
   tz_intl_copy(id, size, found);
@@ -411,8 +375,6 @@ static void numbering_of(const TzIcu *icu, const char *id, TzIntl *r) {
   }
 }
 
-// The numbering system of the option, else of -u-nu-, among those the
-// system has; whether -u-nu- stays in the locale resolvedOptions() gives.
 static const char *choose_numbering(const TzIcu *icu, const char *requested, const char *option,
                                     char *keyword, size_t size, int *in_tag) {
   tz_intl_keyword(icu, requested, "nu", keyword, size);
@@ -471,7 +433,6 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
   with_numbering(icu, found, system, id, sizeof id);
   numbering_of(icu, id, r);
 
-  // The style and its unit (SetNumberFormatUnitOptions).
   const char *style = tz_intl_option(o, TZ_IO_STYLE, styles, b[2], method, &failed);
   const char *currency = tz_intl_option(o, TZ_IO_CURRENCY, NULL, b[3], method, &failed);
   style = style ? style : "decimal";
@@ -538,7 +499,6 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
     mxfd_default = 0;
   }
 
-  // The notation and the digits.
   const char *notation = tz_intl_option(o, TZ_IO_NOTATION, notations, b[8], method, &failed);
   notation = notation ? notation : "standard";
   int compact = strcmp(notation, "compact") == 0;
@@ -561,8 +521,6 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
     put(skeleton, sizeof skeleton, "engineering");
   }
 
-  // useGrouping: true is "always", false and "" are false, "true" and
-  // "false" the default (GetBooleanOrStringNumberFormatOption).
   const char *grouping = compact ? "min2" : "auto";
   int flag = tz_intl_bool_option(o, TZ_IO_USE_GROUPING);
   if (flag >= 0) {
@@ -665,8 +623,6 @@ void tz_nf_format(TzStr *out, TzNumberFormat *nf, int32_t kind, double d, int64_
   *out = format_string(nf->formatter, &n);
 }
 
-// What the parts of a number are: its sign decides minusSign or plusSign,
-// and the integer of NaN and of the infinities has a type of its own.
 typedef struct {
   int nan, infinite, negative;
 } NumberKind;
@@ -745,7 +701,6 @@ TzArray *tz_nf_format_to_parts(TzNumberFormat *nf, int32_t kind, double d, int64
   return parts;
 }
 
-// toLocaleString(locale?, options?) of a number or a decimal.
 void tz_num_locale(TzStr *out, int32_t kind, double d, int64_t integer, uint64_t meta,
                    const TzIntlOptions *o) {
   TzIntl *nf = tz_intl_cached(TZ_INTL_NUMBER_FORMAT, o, "Number.prototype.toLocaleString");
@@ -756,10 +711,6 @@ void tz_num_locale(TzStr *out, int32_t kind, double d, int64_t integer, uint64_t
   TzIntlNumber n = {kind, d, integer, meta};
   *out = format_string(((TzNumberFormat *)nf)->formatter, &n);
 }
-
-//===----------------------------------------------------------------------===//
-// Intl.PluralRules
-//===----------------------------------------------------------------------===//
 
 TzIntl *tz_pr_create(const TzIntlOptions *o) {
   const char *method = "Intl.PluralRules";
@@ -809,8 +760,6 @@ static void pr_drop(void *object) {
   tz_obj_free(pr);
 }
 
-// select(n): the category of the number as the options write it, so that
-// 1.0 with a fraction digit is "other" in English.
 void tz_pr_select(TzStr *out, TzPluralRules *pr, int32_t kind, double d, int64_t integer,
                   uint64_t meta) {
   const TzIcu *icu = tz_icu();
@@ -830,8 +779,6 @@ void tz_pr_select(TzStr *out, TzPluralRules *pr, int32_t kind, double d, int64_t
   }
 }
 
-// resolvedOptions().pluralCategories: those of the language, in the order
-// of ECMA-402.
 TzArray *tz_pr_categories(TzPluralRules *pr) {
   static const char *const order[] = {"zero", "one", "two", "few", "many", "other"};
   const TzIcu *icu = tz_icu();

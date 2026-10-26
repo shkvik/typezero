@@ -1,7 +1,3 @@
-// node:crypto (docs/crypto.md): what the two layers share, without OpenSSL (see crypto.h). The
-// objects of node:crypto and their methods, HMAC, PBKDF2 and HKDF over any hash, the random
-// numbers of the system, timingSafeEqual and secret keys.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/closure/closure.h"
@@ -21,16 +17,10 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-// After windows.h, whose types it uses.
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt")
 #endif
 
-//===----------------------------------------------------------------------===//
-// Errors, as node words them
-//===----------------------------------------------------------------------===//
-
-// A number as node shows it in a message: an integer above 2^32 with `_` between thousands.
 static void number_text(char *out, size_t size, double value) {
   if (value == floor(value) && fabs(value) < 1e21) {
     char digits[32];
@@ -65,7 +55,6 @@ static void number_text(char *out, size_t size, double value) {
   tz_str_release_value(s);
 }
 
-// validateInt32 and validateInteger of node: whether `value` is a whole number from min to max.
 static int check_integer(double value, const char *name, double min, double max) {
   char text[64];
   number_text(text, sizeof text, value);
@@ -94,10 +83,6 @@ int tz_crypto_check_integer(double value, const char *name, double min, double m
 }
 
 static void hash_finalized(void) { tz_throw(TZ_ERROR, "Digest already called"); }
-
-//===----------------------------------------------------------------------===//
-// Data
-//===----------------------------------------------------------------------===//
 
 int tz_crypto_data(TzCryptoData *out, const TzType *type, const void *value, int32_t encoding,
                    const char *what) {
@@ -177,19 +162,12 @@ size_t tz_crypto_cstr(void *obj, uint64_t meta, char *out, size_t capacity) {
   return n;
 }
 
-//===----------------------------------------------------------------------===//
-// Hash and Hmac
-//===----------------------------------------------------------------------===//
-
 static void hash_drop(void *object);
 static const TzLayout hash_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Hash");
 static const TzLayout hmac_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Hmac");
-// createSign and createVerify of the full layer: a hash of the data, signed at the end.
 const TzLayout tz_crypto_sign_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Sign");
 const TzLayout tz_crypto_verify_layout = TZ_CRYPTO_LAYOUT(hash_drop, "Verify");
 
-// The objects of node:crypto, which the program frees as any object (Lowering names this drop
-// for all their types): each by its own layout.
 void tz_crypto_drop(void *object) { ((TzInstance *)object)->layout->drop(object); }
 
 void tz_crypto_md_start(const TzMd *md, void *ctx) {
@@ -237,7 +215,6 @@ static void hash_drop(void *object) {
   tz_obj_free(h);
 }
 
-// createHash(algorithm, { outputLength }): -1 for no length.
 TzHash *tz_crypto_hash_new(const TzMd *md, double length) {
   if (!md) {
     return NULL;
@@ -258,7 +235,6 @@ TzHash *tz_crypto_hash_new(const TzMd *md, double length) {
   return h;
 }
 
-// update(data, inputEncoding) of a Hash and of an Hmac: the receiver is handed back.
 void tz_crypto_hash_update(TzHash *h, const TzType *type, const void *value, int32_t encoding) {
   if (h->done) {
     hash_finalized();
@@ -274,8 +250,6 @@ void tz_crypto_hash_update(TzHash *h, const TzType *type, const void *value, int
   tz_crypto_data_done(&d);
 }
 
-// The digest into `out`, at least 64 bytes or h->length: 0 when there is none to give (an Hmac
-// digested before gives an empty one, as in node).
 static int64_t hash_finish(TzHash *h, uint8_t *out) {
   const TzMd *md = h->md;
   if (h->layout == &hmac_layout) {
@@ -329,7 +303,6 @@ void tz_crypto_hash_digest_text(TzStr *out, TzHash *h, int32_t encoding) {
   }
 }
 
-// copy({ outputLength }): -1 for the length of the original.
 TzHash *tz_crypto_hash_copy(TzHash *h, double length) {
   if (h->done) {
     hash_finalized();
@@ -346,8 +319,6 @@ TzHash *tz_crypto_hash_copy(TzHash *h, double length) {
   return copy;
 }
 
-// Memory for the contexts of a computation, which the threads of the pool make too (Web Crypto,
-// crypto_subtle.c): from the system, as the allocator of the runtime is the main thread's.
 static void *scratch(size_t size) {
   void *p = malloc(size ? size : 1);
   if (!p) {
@@ -357,7 +328,6 @@ static void *scratch(size_t size) {
   return p;
 }
 
-// The digest of data at once, into `out` (h->size bytes).
 static void digest_once(const TzMd *md, const uint8_t *data, size_t length, uint8_t *out) {
   _Alignas(16) uint8_t stack[512];
   void *ctx = md->ctx_size <= sizeof stack ? stack : scratch(md->ctx_size);
@@ -376,7 +346,6 @@ void tz_crypto_digest_raw(const TzMd *md, const uint8_t *data, size_t length, ui
   digest_once(md, data, length, out);
 }
 
-// crypto.hash(algorithm, data, outputEncoding): the digest as a Buffer for 'buffer'.
 TzBytes *tz_crypto_hash_once(const TzMd *md, const TzType *type, const void *value) {
   if (!md) {
     return NULL;
@@ -408,7 +377,6 @@ void tz_crypto_hash_once_text(TzStr *out, const TzMd *md, const TzType *type, co
   tz_crypto_text(out, bytes, md->size, encoding);
 }
 
-// The inner and outer contexts of HMAC (RFC 2104) keyed in `ctx` (two contexts of md).
 static void hmac_key(const TzMd *md, uint8_t *ctx, const uint8_t *key, size_t length) {
   uint8_t block[256], pad[256];
   memset(block, 0, md->block);
@@ -429,7 +397,6 @@ static void hmac_key(const TzMd *md, uint8_t *ctx, const uint8_t *key, size_t le
   memset(pad, 0, sizeof pad);
 }
 
-// Whether HMAC can use `md`: a hash with a fixed output and a block.
 static int hmac_takes(const TzMd *md) {
   if (md->xof || md->block == 0 || md->block > 256) {
     tz_throw(TZ_TYPE_ERROR, "Invalid digest: %s", md->name);
@@ -439,7 +406,6 @@ static int hmac_takes(const TzMd *md) {
   return 1;
 }
 
-// createHmac(algorithm, key): the key is a string (utf8), bytes or a secret KeyObject.
 TzHash *tz_crypto_hmac_new(const TzMd *md, const TzType *type, const void *value,
                            int32_t encoding) {
   if (!md || !hmac_takes(md)) {
@@ -456,8 +422,6 @@ TzHash *tz_crypto_hmac_new(const TzMd *md, const TzType *type, const void *value
   return h;
 }
 
-// HMAC of `data` with the keyed contexts of `keyed`, into out (md->size bytes); `work` holds
-// two contexts.
 static void hmac_with(const TzMd *md, const uint8_t *keyed, uint8_t *work, const uint8_t *data,
                       size_t length, uint8_t *out) {
   uint8_t *inner = work, *outer = work + md->ctx_size;
@@ -496,11 +460,6 @@ void tz_crypto_hmac_raw(const TzMd *md, const uint8_t *key, size_t key_length, c
   free_contexts(md, keyed, 2, 1);
 }
 
-//===----------------------------------------------------------------------===//
-// PBKDF2 and HKDF
-//===----------------------------------------------------------------------===//
-
-// PBKDF2 (RFC 8018) of `md` into out.
 void tz_crypto_pbkdf2_raw(const TzMd *md, const uint8_t *password, size_t password_length,
                           const uint8_t *salt, size_t salt_length, double iterations, uint8_t *out,
                           size_t length) {
@@ -535,7 +494,6 @@ void tz_crypto_pbkdf2_raw(const TzMd *md, const uint8_t *password, size_t passwo
   free_contexts(md, keyed, 2, 1);
 }
 
-// pbkdf2Sync(password, salt, iterations, keylen, digest).
 TzBytes *tz_crypto_pbkdf2(const TzType *pt, const void *pv, const TzType *st, const void *sv,
                           double iterations, double keylen, const TzMd *md) {
   if (!md) {
@@ -559,7 +517,7 @@ TzBytes *tz_crypto_pbkdf2(const TzType *pt, const void *pv, const TzType *st, co
   }
   TzBytes *result = NULL;
   if (keylen == 0) {
-    tz_throw(TZ_ERROR, "Deriving bits failed"); // as node 24 does
+    tz_throw(TZ_ERROR, "Deriving bits failed");
   } else if ((result = tz_buffer_alloc((int64_t)keylen, 0))) {
     tz_crypto_pbkdf2_raw(md, password.data, password.length, salt.data, salt.length, iterations,
                          result->data, (size_t)keylen);
@@ -570,7 +528,6 @@ TzBytes *tz_crypto_pbkdf2(const TzType *pt, const void *pv, const TzType *st, co
   return result;
 }
 
-// hkdfSync(digest, ikm, salt, info, keylen) (RFC 5869): an ArrayBuffer.
 TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, const TzType *st,
                               const void *sv, const TzType *it, const void *iv, double keylen) {
   if (!md) {
@@ -580,7 +537,7 @@ TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, 
     return NULL;
   }
   if (md->xof || keylen == 0) {
-    tz_throw(TZ_ERROR, "Deriving bits failed"); // as node 24 does
+    tz_throw(TZ_ERROR, "Deriving bits failed");
     return NULL;
   }
   if (keylen > 255.0 * md->size) {
@@ -602,7 +559,6 @@ TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, 
   }
   TzArrayBuffer *result = NULL;
   if (info.length > 1024) {
-    // The words are node's.
     tz_throw(TZ_RANGE_ERROR,
              "The value of \"info\" is out of range. It must be must not contain "
              "more than 1024 bytes. Received %zu",
@@ -625,12 +581,10 @@ void tz_crypto_hkdf_raw(const TzMd *md, const uint8_t *key, size_t key_length, c
   size_t size = md->size;
   uint8_t *keyed = contexts(md, 4), *work = keyed + 2 * md->ctx_size;
   uint8_t prk[64], t[64];
-  // Extract: PRK = HMAC(salt, ikm); no salt is a string of zeros.
   uint8_t zeros[64] = {0};
   hmac_key(md, keyed, salt_length ? salt : zeros, salt_length ? salt_length : size);
   hmac_with(md, keyed, work, key ? key : zeros, key_length, prk);
   free_contexts(md, keyed, 2, 1);
-  // Expand: T(i) = HMAC(PRK, T(i-1) | info | i).
   keyed = contexts(md, 4);
   work = keyed + 2 * md->ctx_size;
   hmac_key(md, keyed, prk, size);
@@ -656,10 +610,6 @@ void tz_crypto_hkdf_raw(const TzMd *md, const uint8_t *key, size_t key_length, c
   memset(t, 0, sizeof t);
 }
 
-//===----------------------------------------------------------------------===//
-// Random numbers
-//===----------------------------------------------------------------------===//
-
 void tz_crypto_random(uint8_t *out, size_t length) {
 #ifdef _WIN32
   while (length) {
@@ -675,7 +625,6 @@ void tz_crypto_random(uint8_t *out, size_t length) {
 #endif
 }
 
-// randomBytes(size).
 TzBytes *tz_crypto_random_bytes(double size) {
   if (isnan(size) || size < 0 || size > 2147483647) {
     char text[64];
@@ -694,7 +643,6 @@ TzBytes *tz_crypto_random_bytes(double size) {
   return b;
 }
 
-// randomFillSync(buffer, offset?, size?) (`has`: 1 offset, 2 size): fills it in place.
 void tz_crypto_random_fill(TzInstance *view, double offset, double size, int32_t has) {
   uint8_t *data;
   int64_t length;
@@ -726,7 +674,6 @@ void tz_crypto_random_fill(TzInstance *view, double offset, double size, int32_t
   tz_crypto_random(data + (int64_t)from, (size_t)count);
 }
 
-// getRandomValues(typedArray): an array of integers of up to 65536 bytes, filled in place.
 void tz_crypto_get_random_values(TzBytes *view) {
   int64_t length = tz_bytes_byte_length(view);
   if (length > 65536) {
@@ -736,10 +683,8 @@ void tz_crypto_get_random_values(TzBytes *view) {
   tz_crypto_random(view->data, (size_t)length);
 }
 
-// A random number below `range` (at most 2^48), without the bias of a plain modulo, as node
-// draws it: 6 random bytes, rejected above the largest multiple of the range.
 static double random_below(double range) {
-  const double limit = 281474976710656.0; // 2^48
+  const double limit = 281474976710656.0;
   double top = limit - fmod(limit, range);
   for (;;) {
     uint8_t b[6];
@@ -754,7 +699,6 @@ static double random_below(double range) {
   }
 }
 
-// randomInt(min, max): an integer from min (inclusive) to max (exclusive).
 double tz_crypto_random_int(double min, double max) {
   const double safe = 9007199254740991.0;
   char text[64];
@@ -801,7 +745,6 @@ int32_t tz_crypto_random_int32(int32_t min, int32_t max) {
   return (int32_t)tz_crypto_random_int(min, max);
 }
 
-// randomUUID(): a version 4 UUID.
 void tz_crypto_random_uuid(TzStr *out) {
   uint8_t b[16];
   tz_crypto_random(b, sizeof b);
@@ -818,10 +761,6 @@ void tz_crypto_random_uuid(TzStr *out) {
   }
   *out = tz_str_from_ascii(text, sizeof text);
 }
-
-//===----------------------------------------------------------------------===//
-// timingSafeEqual
-//===----------------------------------------------------------------------===//
 
 int32_t tz_crypto_timing_safe_equal(const TzType *at, const void *av, const TzType *bt,
                                     const void *bv) {
@@ -849,10 +788,6 @@ int32_t tz_crypto_timing_safe_equal(const TzType *at, const void *av, const TzTy
   return equal;
 }
 
-//===----------------------------------------------------------------------===//
-// Cipheriv and Decipheriv
-//===----------------------------------------------------------------------===//
-
 static void cipher_drop(void *object);
 static const TzLayout cipher_layout = TZ_CRYPTO_LAYOUT(cipher_drop, "Cipheriv");
 static const TzLayout decipher_layout = TZ_CRYPTO_LAYOUT(cipher_drop, "Decipheriv");
@@ -872,15 +807,13 @@ static int valid_tag_length(const TzCipherAlg *alg, double length) {
   if (length != n) {
     return 0;
   }
-  if (alg->iv_any == 1) { // GCM
+  if (alg->iv_any == 1) {
     return n == 4 || n == 8 || (n >= 12 && n <= 16);
   }
 
   return n >= 1 && n <= 16;
 }
 
-// createCipheriv(algorithm, key, iv, { authTagLength }) and createDecipheriv: -1 for no tag
-// length.
 TzCipher *tz_crypto_cipher_new(const TzCipherAlg *alg, const TzType *kt, const void *kv,
                                const TzType *it, const void *iv, double tag_length,
                                int32_t decrypt) {
@@ -927,7 +860,6 @@ TzCipher *tz_crypto_cipher_new(const TzCipherAlg *alg, const TzType *kt, const v
   return c;
 }
 
-// The output of update() into `out` (room for length + 2 blocks).
 static int64_t cipher_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
   if (c->state == 2) {
     tz_throw(TZ_ERROR, "Trying to add data in unsupported state");
@@ -977,7 +909,6 @@ TzBytes *tz_crypto_cipher_final(TzCipher *c) {
   return n < 0 ? NULL : tz_crypto_buffer(out, (size_t)n);
 }
 
-// setAAD(buffer, { plaintextLength }): the receiver is handed back.
 void tz_crypto_cipher_set_aad(TzCipher *c, const TzType *type, const void *value,
                               double plaintext_length) {
   if (c->alg->kind != TZ_CIPHER_AEAD || c->state != 0 || !c->alg->ops->aad) {
@@ -1003,7 +934,6 @@ TzBytes *tz_crypto_cipher_get_auth_tag(TzCipher *c) {
   return tz_crypto_buffer(c->tag, (size_t)c->tag_length);
 }
 
-// setAuthTag(tag, encoding) of a Decipheriv: the receiver is handed back.
 void tz_crypto_cipher_set_auth_tag(TzCipher *c, const TzType *type, const void *value,
                                    int32_t encoding) {
   if (c->alg->kind != TZ_CIPHER_AEAD || c->state == 2 || c->tag_set) {
@@ -1026,7 +956,6 @@ void tz_crypto_cipher_set_auth_tag(TzCipher *c, const TzType *type, const void *
   tz_crypto_data_done(&d);
 }
 
-// setAutoPadding(autoPadding): the receiver is handed back.
 void tz_crypto_cipher_set_auto_padding(TzCipher *c, int32_t padding) {
   if (c->state == 2) {
     tz_throw(TZ_ERROR, "Invalid state for operation setAutoPadding");
@@ -1035,9 +964,6 @@ void tz_crypto_cipher_set_auto_padding(TzCipher *c, int32_t padding) {
   c->padding = padding;
 }
 
-// The update of a cipher of whole blocks with padding, as OpenSSL's providers do it
-// (ossl_cipher_generic_block_update): a decipher holds back the last block, which may be padding,
-// until final. `blocks` ciphers whole blocks.
 int64_t tz_crypto_block_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out,
                                TzBlocks blocks) {
   const size_t size = c->alg->block;
@@ -1079,14 +1005,12 @@ int64_t tz_crypto_block_update(TzCipher *c, const uint8_t *in, size_t length, ui
   return written;
 }
 
-// OpenSSL's error of a final block, unless the cipher is a job's (see TzCipher::quiet).
 static void block_fail(const TzCipher *c, const char *message) {
   if (!c->quiet) {
     tz_throw(TZ_ERROR, "%s", message);
   }
 }
 
-// The final block of such a cipher: the padding added, or checked and taken off.
 int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   const size_t size = c->alg->block;
   if (!c->decrypt) {
@@ -1129,10 +1053,6 @@ int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   return (int64_t)(size - pad);
 }
 
-//===----------------------------------------------------------------------===//
-// Secret keys
-//===----------------------------------------------------------------------===//
-
 static void key_drop(void *object);
 const TzLayout tz_crypto_secret_key_layout = TZ_CRYPTO_LAYOUT(key_drop, "SecretKeyObject");
 const TzLayout tz_crypto_public_key_layout = TZ_CRYPTO_LAYOUT(key_drop, "PublicKeyObject");
@@ -1150,7 +1070,6 @@ static void key_drop(void *object) {
   tz_obj_free(key);
 }
 
-// createSecretKey(key, encoding).
 TzKey *tz_crypto_secret_key(const TzType *type, const void *value, int32_t encoding) {
   TzCryptoData d;
   if (!tz_crypto_data(&d, type, value, encoding, "key")) {
@@ -1171,7 +1090,6 @@ TzKey *tz_crypto_secret_key(const TzType *type, const void *value, int32_t encod
   return key;
 }
 
-// generateKeySync('hmac' | 'aes', { length }): random bytes of `length` bits.
 TzKey *tz_crypto_generate_secret_key(int32_t aes, double bits) {
   if (aes) {
     if (bits != 128 && bits != 192 && bits != 256) {
@@ -1199,7 +1117,6 @@ TzKey *tz_crypto_generate_secret_key(int32_t aes, double bits) {
   return key;
 }
 
-// key.type.
 void tz_crypto_key_type(TzStr *out, const TzKey *key) {
   const char *name = key->type == TZ_KEY_SECRET   ? "secret"
                      : key->type == TZ_KEY_PUBLIC ? "public"
@@ -1207,14 +1124,12 @@ void tz_crypto_key_type(TzStr *out, const TzKey *key) {
   *out = tz_str_from_ascii(name, strlen(name));
 }
 
-// key.symmetricKeySize: undefined (-1) for an asymmetric key.
 int32_t tz_crypto_key_symmetric_size(const TzKey *key) {
   return key->type == TZ_KEY_SECRET ? key->length : -1;
 }
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
-// key.asymmetricKeyType: whether there is one (none for a secret key).
 int32_t tz_crypto_key_asymmetric_type(TzStr *out, const TzKey *key) {
   if (key->type == TZ_KEY_SECRET) {
     *out = tz_str_from_ascii("", 0);
@@ -1225,7 +1140,6 @@ int32_t tz_crypto_key_asymmetric_type(TzStr *out, const TzKey *key) {
   return 1;
 }
 
-// key.export() and key.export({ format: 'buffer' }) of a secret key: its bytes.
 TzBytes *tz_crypto_key_export_secret(const TzKey *key) {
   if (key->type != TZ_KEY_SECRET) {
     tz_throw(TZ_TYPE_ERROR, "The \"options.format\" property must be one of: 'pem', 'der', "
@@ -1236,8 +1150,6 @@ TzBytes *tz_crypto_key_export_secret(const TzKey *key) {
   return tz_crypto_buffer(key->secret, (size_t)key->length);
 }
 
-// The options of export: a type ('spki', 'pkcs8'...), a cipher and its passphrase, as strings of
-// the program, with `has` saying which (1 type, 2 cipher, 4 passphrase).
 typedef struct {
   char type[16], cipher[64];
   TzCryptoData passphrase;
@@ -1269,7 +1181,6 @@ static int asymmetric_only(const TzKey *key, const char *format) {
   return 0;
 }
 
-// key.export({ format: 'pem', type, cipher, passphrase }).
 void tz_crypto_key_export_pem(TzStr *out, const TzKey *key, int32_t has, void *type_obj,
                               uint64_t type_meta, void *cipher_obj, uint64_t cipher_meta,
                               const TzType *pt, const void *pv) {
@@ -1283,7 +1194,6 @@ void tz_crypto_key_export_pem(TzStr *out, const TzKey *key, int32_t has, void *t
   tz_crypto_data_done(&o.passphrase);
 }
 
-// key.export({ format: 'der', type, cipher, passphrase }).
 TzBytes *tz_crypto_key_export_der(const TzKey *key, int32_t has, void *type_obj, uint64_t type_meta,
                                   void *cipher_obj, uint64_t cipher_meta, const TzType *pt,
                                   const void *pv) {
@@ -1298,7 +1208,6 @@ TzBytes *tz_crypto_key_export_der(const TzKey *key, int32_t has, void *type_obj,
   return b;
 }
 
-// key.export({ format: 'jwk' }): { kty: 'oct', k } of a secret key.
 TzJson *tz_crypto_key_export_jwk(const TzKey *key) {
   if (key->type != TZ_KEY_SECRET) {
     return key->ops->export_jwk(key);
@@ -1313,7 +1222,6 @@ TzJson *tz_crypto_key_export_jwk(const TzKey *key) {
   return jwk;
 }
 
-// a.equals(b).
 int32_t tz_crypto_key_equals(const TzKey *a, const TzKey *b) {
   if (a->type != b->type) {
     return 0;

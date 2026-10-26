@@ -1,6 +1,3 @@
-// Json values as the program makes, reads and writes them, and Object.keys,
-// Object.values and Object.entries of them.
-
 #include "runtime/library/json/json_values/json_values.h"
 #include "runtime/library/json/json/json.h"
 #include "runtime/core/alloc/alloc.h"
@@ -18,10 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-//===----------------------------------------------------------------------===//
-// Making values (Lowering: literals and conversions)
-//===----------------------------------------------------------------------===//
-
 TzJson *tz_json_null(void) { return tz_json_retained(&tz_json_null_node); }
 
 TzJson *tz_json_bool(int32_t value) {
@@ -35,14 +28,13 @@ TzJson *tz_json_number(double value) {
   return j;
 }
 
-TzJson *tz_json_string_node(TzStr s) { // takes over s
+TzJson *tz_json_string_node(TzStr s) {
   TzJson *j = tz_json_node_new(TZ_JSON_STRING, sizeof(TzStr));
   j->u.string = s;
 
   return j;
 }
 
-// The string is borrowed.
 TzJson *tz_json_string(void *obj, uint64_t meta) {
   TzStr s = {obj, meta};
   tz_str_retain_value(s);
@@ -50,7 +42,6 @@ TzJson *tz_json_string(void *obj, uint64_t meta) {
   return tz_json_string_node(s);
 }
 
-// Takes over the reference to `array`, an array of Json.
 TzJson *tz_json_from_array(TzArray *array) {
   TzJson *j = tz_json_node_new(TZ_JSON_ARRAY, sizeof(TzArray *));
   j->u.array = array;
@@ -72,7 +63,6 @@ TzJson *tz_json_object_new(void) {
   return j;
 }
 
-// `{ key: value }` of a literal: the key is borrowed, the value taken over.
 void tz_json_object_put(TzJson *o, void *key_obj, uint64_t key_meta, TzJson *value) {
   TzStr key = {key_obj, key_meta};
   tz_json_put(o, key, value);
@@ -80,8 +70,6 @@ void tz_json_object_put(TzJson *o, void *key_obj, uint64_t key_meta, TzJson *val
 
 int32_t tz_json_kind(const TzJson *j) { return j ? (int32_t)j->kind : -1; }
 
-// `typeof j`: 0 "undefined", 1 "object" (null too, as in JavaScript), 2
-// "boolean", 3 "number", 4 "string".
 int32_t tz_json_typeof(const TzJson *j) {
   if (!j) {
     return 0;
@@ -98,12 +86,8 @@ int32_t tz_json_typeof(const TzJson *j) {
   }
 }
 
-// `j == null` and `j == undefined`, which are true for both.
 TZ_HOT int32_t tz_json_is_nullish(const TzJson *j) { return !j || j->kind == TZ_JSON_NULL; }
 
-// The value of a Json known to be a number, a boolean, a string or an array
-// (Checker narrowed it with typeof or Array.isArray). The string and the array
-// are owned.
 double tz_json_as_number(const TzJson *j) {
   return j && j->kind == TZ_JSON_NUMBER ? j->u.number.value : 0;
 }
@@ -141,18 +125,16 @@ int32_t tz_json_strict_equal(const TzJson *a, const TzJson *b) {
   case TZ_JSON_BOOL:
     return a->u.boolean == b->u.boolean;
   case TZ_JSON_NUMBER:
-    return a->u.number.value == b->u.number.value; // NaN is not NaN
+    return a->u.number.value == b->u.number.value;
   case TZ_JSON_STRING:
     return tz_json_key_equal(a->u.string, b->u.string);
   case TZ_JSON_ARRAY:
-    return a->u.array == b->u.array; // the same array
+    return a->u.array == b->u.array;
   default:
     return a == b;
   }
 }
 
-// `j == x` with a number, a string or a boolean x: as `===`, true only for a
-// Json of that kind and value.
 int32_t tz_json_equals_number(const TzJson *j, double value) {
   return j && j->kind == TZ_JSON_NUMBER && j->u.number.value == value;
 }
@@ -186,7 +168,6 @@ const char *tz_json_kind_name(const TzJson *j) {
   }
 }
 
-// `j.key` of undefined or null: the TypeError of JavaScript.
 static void read_error(const TzJson *j, TzStr key, const char *verb) {
   TzBuf b;
   tz_buf_init(&b);
@@ -201,8 +182,6 @@ static void read_error(const TzJson *j, TzStr key, const char *verb) {
   tz_json_throw(TZ_TYPE_ERROR, &b);
 }
 
-// The element `i` of an array, or the code unit `i` of a string, as a Json;
-// NULL past the end.
 static TzJson *element_of(const TzJson *j, uint32_t i) {
   if (j->kind == TZ_JSON_ARRAY) {
     const TzArray *a = j->u.array;
@@ -219,10 +198,6 @@ static TzJson *element_of(const TzJson *j, uint32_t i) {
   return tz_json_string_node(tz_str_from_utf16(&unit, 1));
 }
 
-// `j.key` and `j["key"]` as JavaScript reads them: the value of the key of an
-// object, an element or the length of an array or a string, undefined (NULL)
-// for anything else. Reading from undefined or null is a TypeError (and
-// gives NULL). The object is borrowed, the result owned.
 TzJson *tz_json_get(const TzJson *j, void *key_obj, uint64_t key_meta) {
   TzStr key = {key_obj, key_meta};
   if (!j || j->kind == TZ_JSON_NULL) {
@@ -250,12 +225,11 @@ TzJson *tz_json_get(const TzJson *j, void *key_obj, uint64_t key_meta) {
     tz_json_view_init(&v, j->u.string);
     return tz_json_number(v.length);
   }
-  default: // numbers and booleans have no keys of their own
+  default:
     return NULL;
   }
 }
 
-// The key a number names, as JavaScript writes it: `j[1.5]` reads "1.5".
 static TzStr number_key(double index) {
   TzStr key;
   tz_str_from_f64(&key, index);
@@ -263,7 +237,6 @@ static TzStr number_key(double index) {
   return key;
 }
 
-// `j[i]` with a number i.
 TzJson *tz_json_get_index(const TzJson *j, double index) {
   int whole = index >= 0 && index <= 4294967294.0 && index == floor(index);
   if (whole && j && (j->kind == TZ_JSON_ARRAY || j->kind == TZ_JSON_STRING)) {
@@ -276,8 +249,6 @@ TzJson *tz_json_get_index(const TzJson *j, double index) {
   return result;
 }
 
-// `j[i] = value` of an array: in place, or at the end. Further on JavaScript
-// would leave holes, which arrays do not have.
 static void set_element(const TzJson *j, int64_t i, TzJson *value) {
   TzArray *a = j->u.array;
   if (!value || i > a->length) {
@@ -305,10 +276,6 @@ static void set_element(const TzJson *j, int64_t i, TzJson *value) {
   tz_json_release(old);
 }
 
-// `j.key = value` and `j["key"] = value`; the value is taken over, and
-// undefined (NULL) removes the key: a key that holds undefined and one that
-// is not there are the same. Only objects and arrays (at an index up to their
-// length) can be written to; the rest is the TypeError of JavaScript.
 void tz_json_set(const TzJson *j, void *key_obj, uint64_t key_meta, TzJson *value) {
   TzStr key = {key_obj, key_meta};
   if (j && j->kind == TZ_JSON_OBJECT) {
@@ -363,14 +330,6 @@ void tz_json_set_index(const TzJson *j, double index, TzJson *value) {
   tz_str_release_value(key);
 }
 
-//===----------------------------------------------------------------------===//
-// Object.keys, Object.values and Object.entries
-//===----------------------------------------------------------------------===//
-
-// The keys of a Json and their values, as JavaScript gives them for any
-// value: an object's in the order of its keys, the indices of an array or a
-// string, nothing for a number or a boolean. Undefined and null are the
-// TypeError of JavaScript, and -1.
 static int64_t key_count(const TzJson *j) {
   if (!j || j->kind == TZ_JSON_NULL) {
     TzBuf b;
@@ -394,7 +353,6 @@ static int64_t key_count(const TzJson *j) {
   }
 }
 
-// The key and the value at `k` in the order of the keys (owned).
 static void entry_at(const TzJson *j, const uint32_t *order, uint32_t k, TzStr *key,
                      TzJson **value) {
   if (j->kind == TZ_JSON_OBJECT) {
@@ -433,7 +391,6 @@ TzArray *tz_json_keys(const TzJson *j, const TzType *string_type) {
   return keys;
 }
 
-// for...in, which walks no keys of undefined or null.
 TzArray *tz_json_for_in_keys(const TzJson *j, const TzType *string_type) {
   if (!j || j->kind == TZ_JSON_NULL) {
     return tz_arr_new(string_type, 0, 0);
@@ -459,8 +416,6 @@ TzArray *tz_json_values(const TzJson *j) {
   return values;
 }
 
-// Each entry is a new tuple [key, value], an object of `tuple_size` bytes
-// described by `tuple_layout`, as in tz_obj_entries.
 TzArray *tz_json_entries(const TzJson *j, const TzType *tuple_type, const TzLayout *tuple_layout,
                          int64_t tuple_size) {
   int64_t count = key_count(j);

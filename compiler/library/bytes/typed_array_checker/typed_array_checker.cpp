@@ -31,7 +31,7 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-} // namespace
+}
 
 TypedArrayChecker::TypedArrayChecker(Checker &checker) : checker_(checker) {}
 
@@ -41,8 +41,6 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
   const Type *element = type->elementType();
   llvm::StringRef name = member->name;
   std::string what = "an element of '" + type->name().str() + "'";
-  // What toReversed, toSorted and with make: a Uint8Array of a Buffer, as
-  // TypedArrayCreateSameType makes.
   const Type *copy = type->isBuffer() ? Type::bytesType(Bytes::Uint8) : type;
   auto made = [&](Builtin builtin, const Type *result) {
     call->builtin = builtin;
@@ -209,8 +207,6 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
     return made(Builtin::BytesWith, copy);
   }
   if (name == "keys" || name == "values" || name == "entries") {
-    // Over a copy of the elements, as an array: the same values, unless the
-    // loop changes the typed array meanwhile.
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
@@ -242,7 +238,7 @@ Expr *TypedArrayChecker::checkTypedArrayMethod(CallExpr *call, MemberExpr *membe
 Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   NumberMethod m;
-  if (!numberMethod(name, /*dataView=*/true, m)) {
+  if (!numberMethod(name, true, m)) {
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
@@ -284,4 +280,4 @@ Expr *TypedArrayChecker::checkDataViewMethod(CallExpr *call, MemberExpr *member)
   return call;
 }
 
-} // namespace tz
+}

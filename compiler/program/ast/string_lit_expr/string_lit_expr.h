@@ -10,8 +10,7 @@ public:
       : Expr(Kind::StringLit, loc), value(std::move(value)) {}
   static bool classof(const Expr *e) { return e->kind() == Kind::StringLit; }
 
-  // UTF-16 code units, as JavaScript sees the string.
   std::u16string value;
 };
 
-} // namespace tz
+}

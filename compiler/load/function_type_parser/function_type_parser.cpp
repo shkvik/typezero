@@ -24,13 +24,11 @@ namespace tz {
 
 FunctionTypeParser::FunctionTypeParser(Parser &parser) : parser_(parser) {}
 
-// At `(`: a function type if a parameter list (names, optionally with `?`,
-// `...` and types) and `=>` follow; otherwise a parenthesized type.
 bool FunctionTypeParser::functionTypeAhead() {
   Parser::Snapshot start = parser_.cursor().snapshot();
   bool muted = parser_.diags_.setMuted(true);
   parser_.recovering_ = false;
-  parser_.cursor().advance(); // '('
+  parser_.cursor().advance();
   bool ok = true;
   while (ok && !parser_.tok_.is(Tok::RParen)) {
     parser_.cursor().accept(Tok::Ellipsis);
@@ -65,7 +63,7 @@ TypeRef FunctionTypeParser::parseFunctionType() {
 bool FunctionTypeParser::parseSignatureParams(TypeRef &ref) {
   ref.kind = TypeRef::Kind::Function;
   ref.loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // '('
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RParen) && !parser_.tok_.is(Tok::Eof)) {
     bool rest = parser_.cursor().accept(Tok::Ellipsis);
     llvm::SMLoc loc = parser_.tok_.loc();
@@ -99,4 +97,4 @@ bool FunctionTypeParser::parseSignatureParams(TypeRef &ref) {
   return true;
 }
 
-} // namespace tz
+}

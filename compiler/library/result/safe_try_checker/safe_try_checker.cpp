@@ -15,11 +15,8 @@ namespace tz {
 
 namespace {
 
-// What a function given to a method gets for a half: `ok()` holds undefined.
 const Type *halfParam(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
 
-// The value of an expression strips the conversion Checker adds to a narrowed
-// variable or to a value given where another type is expected.
 const Expr *unconverted(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -31,10 +28,8 @@ const Expr *unconverted(const Expr *expr) {
   return expr;
 }
 
-} // namespace
+}
 
-// Why the halves `a` and `b` of Results make no union, for the messages
-// that say so: ": <the problem>", or empty.
 static std::string noUnion(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return ": one of them is nothing, 'ok()'";
@@ -65,13 +60,11 @@ Expr *SafeTryChecker::checkSafeTry(CallExpr *call, const Type *expected) {
   if (!fn->params.empty()) {
     checker_.diags_.error(fn->params[0].loc, "the generator of safeTry takes no parameters");
   }
-  // What it returns is the Result of safeTry.
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   Checker::Signature sig;
   sig.pad = false;
   sig.ret = wanted && wanted->isResult() ? wanted : nullptr;
-  fn->nonEscaping = true; // called during the call, once
-  // Not a generator: it runs to its end at once (see FunctionDecl::safeTry).
+  fn->nonEscaping = true;
   fn->safeTry = true;
   fn->isGenerator = false;
   call->args[0] = checker_.closureChecker().checkFunctionExpr(fe, sig.ret ? &sig : nullptr);
@@ -99,7 +92,7 @@ Expr *SafeTryChecker::checkSafeTry(CallExpr *call, const Type *expected) {
 
 const Type *SafeTryChecker::generatorResult(const FunctionDecl *fn, const Type *returned) {
   if (!returned->isResult()) {
-    return returned; // reported by checkSafeTry
+    return returned;
   }
   const Type *result = returned;
   visitExprs(
@@ -122,7 +115,7 @@ const Type *SafeTryChecker::generatorResult(const FunctionDecl *fn, const Type *
         }
         result = Type::result(result->okType(), common);
       },
-      /*intoFunctions=*/false);
+      false);
 
   return result ? result : Type::error();
 }
@@ -139,7 +132,6 @@ Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
                           "take x; 'yield* r' takes the value of the Result r");
     return yield;
   }
-  // `yield* r.safeUnwrap()`, as neverthrow wrote it before, is `yield* r`.
   if (auto *call = dyn_cast<CallExpr>(yield->value);
       call && call->args.empty() && !call->optional) {
     if (auto *member = dyn_cast<MemberExpr>(call->callee); member && member->name == "safeUnwrap") {
@@ -158,7 +150,6 @@ Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
             "'; a generator that gives values is called directly, not by safeTry");
     return yield;
   }
-  // An Err returns from the generator: its error must fit what it returns.
   if (const Type *ret = fn->ret;
       ret && ret->isResult() &&
       !TypeRelations::isImplicitlyConvertible(Type::result(Type::never(), type->errType()), ret)) {
@@ -167,7 +158,6 @@ Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
                               "' when the Result is an Err, but the generator returns '" +
                               ret->name() + "'; convert the error with 'mapErr'");
   }
-  // `yield* err(e)` always returns, as `return err(e)` does.
   if (type->okType()->isNever()) {
     checker_.flow_.unreachable = true;
   }
@@ -176,20 +166,13 @@ Expr *SafeTryChecker::checkSafeTryYield(YieldExpr *yield) {
   return yield;
 }
 
-// A `yield*` that returns from the generator releases the variables, as a
-// `return` does, but not what the statement around it has computed before
-// it: in `f(s.trim(), yield* r)` the trimmed string is held for the call. So
-// `yield*` may come only where nothing computed before it in its statement
-// holds a reference: at the start of a statement or an initializer, in
-// arithmetic on numbers, in the arguments of a call after numbers and the
-// like, in the value of ok(), in a branch of `?:`.
 void SafeTryChecker::checkYieldPlacement(const Stmt *stmt) {
   if (!stmt) {
     return;
   }
   auto expr = [&](const Expr *e) {
     if (e) {
-      checkYieldPlacement(e, /*safe=*/true);
+      checkYieldPlacement(e, true);
     }
   };
   switch (stmt->kind()) {
@@ -234,8 +217,6 @@ void SafeTryChecker::checkYieldPlacement(const Stmt *stmt) {
     checkYieldPlacement(cast<ForOfStmt>(stmt)->body);
     break;
   case Stmt::Kind::Switch:
-    // The discriminant waits in a variable of the switch, which a return
-    // releases.
     expr(cast<SwitchStmt>(stmt)->discriminant);
     for (const SwitchCase &c : cast<SwitchStmt>(stmt)->cases) {
       expr(c.test);
@@ -265,7 +246,7 @@ void SafeTryChecker::checkYieldPlacement(const Stmt *stmt) {
     break;
   }
   default:
-    break; // a function declared inside is a function of its own
+    break;
   }
 }
 
@@ -275,8 +256,6 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
       checkYieldPlacement(e, s);
     }
   };
-  // Whether the value of `e` holds no reference while what follows it runs:
-  // a string literal is a constant, which is not counted.
   auto plain = [](const Expr *e) {
     const Expr *value = unconverted(e);
     auto *tmpl = dyn_cast<TemplateExpr>(value);
@@ -305,8 +284,6 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
     break;
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
-    // `&&`, `||` and `??` have released their left side, or it holds
-    // nothing, when the right one runs.
     bool passes =
         bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr || bin->op == BinaryOp::Nullish;
     sub(bin->lhs, safe);
@@ -338,7 +315,6 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
     break;
   }
   case Expr::Kind::Template: {
-    // A number goes into the text as it is; a string is held.
     bool held = false;
     for (const Expr *e : cast<TemplateExpr>(expr)->exprs) {
       sub(e, safe && !held);
@@ -357,8 +333,6 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
   }
   case Expr::Kind::Call: {
     auto *call = cast<CallExpr>(expr);
-    // The receiver of a method and a function value are held while the
-    // arguments are computed, but not a namespace such as Math or console.
     auto *member = dyn_cast<MemberExpr>(call->callee);
     auto *space = member ? dyn_cast<NameExpr>(member->object) : nullptr;
     bool namespaced = space && !space->var;
@@ -376,7 +350,6 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
     break;
   }
   case Expr::Kind::ArrayLit:
-    // The new array exists before its elements are computed.
     for (const ArrayLitExpr::Element &e : cast<ArrayLitExpr>(expr)->elements) {
       sub(e.expr, false);
     }
@@ -399,8 +372,8 @@ void SafeTryChecker::checkYieldPlacement(const Expr *expr, bool safe) {
     sub(cast<UpdateExpr>(expr)->target, false);
     break;
   default:
-    break; // literals, names, and functions, which are functions of their own
+    break;
   }
 }
 
-} // namespace tz
+}

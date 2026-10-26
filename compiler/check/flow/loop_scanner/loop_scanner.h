@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// What the body of a loop changes.
 class LoopScanner {
 public:
   explicit LoopScanner(Checker &checker);
@@ -19,4 +18,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

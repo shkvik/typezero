@@ -27,12 +27,10 @@ namespace {
 
 enum CombineKind : int32_t { kAll, kAllSettled, kRace, kAny };
 
-} // namespace
+}
 
 PromiseCombineLowerer::PromiseCombineLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// Promise.all, allSettled, race and any: the runtime gets an array of the
-// promises, a value that is none becoming a resolved one, as in JavaScript.
 llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
@@ -54,7 +52,6 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
 
     return promise;
   };
-  // The values, each made a promise, in a new array.
   auto arrayOf = [&](std::vector<llvm::Value *> values, llvm::ArrayRef<const Type *> types) {
     llvm::Value *array = lowering_.builder_.CreateCall(
         lowering_.rt_.arrNew,
@@ -70,9 +67,7 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     return array;
   };
   llvm::Value *promises;
-  // What each promise of a tuple gives, which may differ.
   std::vector<const Type *> given;
-  // A literal of the values themselves; `[...xs]` makes an array first.
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
   if (lit && llvm::any_of(lit->elements,
                           [](const ArrayLitExpr::Element &e) { return e.spread || e.hole; })) {
@@ -119,8 +114,6 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     lowering_.refCounts().releaseValue(values, argType);
   }
 
-  // How the runtime collects what it gives (TzCombine in
-  // runtime/core/async/async.h).
   const Type *result = call->type->promised();
   int32_t kind = call->builtin == Builtin::PromiseAll          ? kAll
                  : call->builtin == Builtin::PromiseAllSettled ? kAllSettled
@@ -132,8 +125,6 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
   const llvm::DataLayout &dl = lowering_.module_->getDataLayout();
   auto *shapeType = llvm::StructType::get(
       lowering_.ctx_, {ptr, ptr, ptr, i32, i32, ptr, ptr, i32, i32, i32, ptr, ptr});
-  // The layout, size, value type and field offsets of allSettled's result
-  // object.
   struct Settled {
     llvm::Constant *layout, *valueType;
     uint32_t size = 0, status = 0, value = 0, reason = 0;
@@ -180,14 +171,13 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     items = lowering_.typeDescriptors().typeDescriptor(result->inner());
   }
   if (kind == kAllSettled && result->isTuple()) {
-    // A tuple of results, each of its own type.
     std::vector<llvm::Constant *> shapes;
     for (const Field &f : result->fields()) {
       shapes.push_back(shapeOf(null, settledOf(f.type)));
     }
     auto *eachType = llvm::ArrayType::get(shapeType, shapes.size());
     auto *global = new llvm::GlobalVariable(
-        *lowering_.module_, eachType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, eachType, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(eachType, shapes), "tz.promise.settled");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     each = global;
@@ -195,7 +185,6 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     settled = settledOf(result->inner());
   }
   if ((kind == kRace || kind == kAny) && lowering_.promiseLowerer().promiseValueSize(result)) {
-    // Promises of different values give one of a union.
     std::vector<llvm::Constant *> fns;
     bool converts = false;
     for (const Type *t : given) {
@@ -211,21 +200,20 @@ llvm::Value *PromiseCombineLowerer::emitPromiseCombine(CallExpr *call) {
     if (converts) {
       auto *fnsType = llvm::ArrayType::get(ptr, fns.size());
       auto *global = new llvm::GlobalVariable(
-          *lowering_.module_, fnsType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+          *lowering_.module_, fnsType, true, llvm::GlobalValue::PrivateLinkage,
           llvm::ConstantArray::get(fnsType, fns), "tz.promise.convert");
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       convert = global;
     }
   }
   auto *shape = new llvm::GlobalVariable(
-      *lowering_.module_, shapeType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, shapeType, true, llvm::GlobalValue::PrivateLinkage,
       shapeOf(lowering_.promiseLowerer().promiseLayout(result), settled), "tz.promise.combine");
   shape->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   (void)i64;
   llvm::Value *promise = lowering_.builder_.CreateCall(
       lowering_.asyncLowerer().asyncFunction("tz_promise_combine", ptr, {i32, ptr, ptr}),
       {lowering_.builder_.getInt32(uint32_t(kind)), promises, shape}, "promise");
-  // The array may be a member of a group, as its promises may be.
   lowering_.builder_.CreateCall(
       lowering_.memory().hasCycles
           ? lowering_.groupLowerer().groupAwareRelease(lowering_.arrReleaseFn_)
@@ -260,4 +248,4 @@ llvm::Function *PromiseCombineLowerer::combineConverter(const Type *from, const 
   return fn;
 }
 
-} // namespace tz
+}

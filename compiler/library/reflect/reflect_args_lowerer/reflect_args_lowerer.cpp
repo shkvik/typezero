@@ -19,9 +19,6 @@ namespace tz {
 
 namespace {
 
-// Whether a value of type `a` goes where one of `b` is without an explicit
-// conversion, as a parameter of `a` is narrower than one of `b`: the rule a
-// call that compiles prefers a variant by (docs/overloads.md, section 2).
 bool narrower(const Type *a, const Type *b) {
   if (a == b || b->isUnknown()) {
     return true;
@@ -51,7 +48,7 @@ bool narrower(const Type *a, const Type *b) {
   return false;
 }
 
-} // namespace
+}
 
 ReflectArgsLowerer::ReflectArgsLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -59,7 +56,6 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
                                                    llvm::Value *selfId, llvm::Value *args,
                                                    llvm::Value *count) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
-  // args[i], or undefined past the end, read from a slot that holds it then.
   llvm::Value *missing = lowering_.functionFrame().createStackSlot(ptr, "variant.missing");
   lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                  missing);
@@ -76,8 +72,6 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
     const FuncSymbol *sym;
     size_t fixed;
     llvm::Value *ok;
-    // How the arguments fit, up to the most parameters a variant has before
-    // a rest: of a rest parameter, its element.
     std::vector<llvm::Value *> fits;
     const Type *param(size_t i) const {
       if (i < fixed) {
@@ -112,7 +106,6 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
         v.fits.push_back(nullptr);
         continue;
       }
-      // Left out, a parameter that may be: no worse than given.
       llvm::Value *fit = lowering_.builder_.CreateSelect(
           given(i), lowering_.unknownCastLowerer().emitUnknownFit(argAt(i), param),
           lowering_.builder_.getInt32(3));
@@ -123,7 +116,6 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
       v.fits.push_back(fit);
     }
     if (sym->hasRest) {
-      // Each of the rest fits the element.
       const Type *element = sym->params.back()->inner();
       llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
       llvm::BasicBlock *loopBlock = lowering_.functionFrame().newBlock("variant.rest");
@@ -155,15 +147,13 @@ llvm::Value *ReflectArgsLowerer::emitChooseVariant(llvm::ArrayRef<const Function
     v.ok = ok;
     all.push_back(std::move(v));
   }
-  // Whether `a` fits better than `b`: each argument no worse, one better;
-  // or the same, and `a` takes no rest where `b` does.
   auto better = [&](const Variant &a, const Variant &b) {
     llvm::Value *noWorse = lowering_.builder_.getTrue(), *anyBetter = lowering_.builder_.getFalse(),
                 *anyWorse = lowering_.builder_.getFalse();
     for (size_t i = 0; i < compared; ++i) {
       const Type *pa = a.param(i), *pb = b.param(i);
       if (!pa || !pb) {
-        continue; // one of them takes no argument there: it fits no such call
+        continue;
       }
       bool toB = narrower(pa, pb), toA = narrower(pb, pa);
       llvm::Value *fa = a.fits[i], *fb = b.fits[i];
@@ -221,11 +211,6 @@ void ReflectArgsLowerer::emitReflectMismatch(llvm::StringRef what, llvm::Value *
        lowering_.builder_.getInt32(uint32_t(name.size())), got});
 }
 
-// The arguments `args[from..count)` as the parameters `params` take them,
-// the rest parameter last (of `rest`, an array type, or null), in `values`;
-// on a mismatch what was converted is released and control goes to the
-// block `onFail` gives for the argument, with what it holds. `min` arguments
-// are surely there.
 void ReflectArgsLowerer::emitReflectArgs(
     llvm::Value *args, llvm::Value *count, size_t min, llvm::ArrayRef<const Type *> params,
     const Type *rest, std::vector<llvm::Value *> &values,
@@ -246,7 +231,6 @@ void ReflectArgsLowerer::emitReflectArgs(
     if (i < min) {
       u = argAt(lowering_.builder_.getInt64(i));
     } else {
-      // Left out: undefined.
       llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
       llvm::BasicBlock *givenBlock = lowering_.functionFrame().newBlock("reflect.given");
       llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("reflect.arg");
@@ -274,7 +258,6 @@ void ReflectArgsLowerer::emitReflectArgs(
   if (!rest) {
     return;
   }
-  // The rest, as an array of its elements.
   const Type *element = rest->inner();
   llvm::Value *from = lowering_.builder_.getInt32(uint32_t(params.size()));
   llvm::Value *more = lowering_.builder_.CreateSelect(lowering_.builder_.CreateICmpUGT(count, from),
@@ -312,4 +295,4 @@ void ReflectArgsLowerer::emitReflectArgs(
   values.push_back(array);
 }
 
-} // namespace tz
+}

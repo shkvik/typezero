@@ -27,19 +27,12 @@ Errors CheckPass::run(Program &program) const {
   SourceFile &file = program.file;
   checker.metadataChecker().findMetadataWriters(file);
 
-  // A global no function mentions cannot change during a call, and can live in
-  // main's stack frame. That includes the arrows of top-level code.
   for (Stmt *item : file.items) {
-    collectNames(item, checker.namesInFunctions_, /*inFunction=*/isa<FunctionDecl>(item));
+    collectNames(item, checker.namesInFunctions_, isa<FunctionDecl>(item));
   }
-  // `crypto.subtle` reads the SubtleCrypto of tz:webcrypto by a name no code writes, in
-  // functions too (sema_webcrypto.cpp).
   checker.namesInFunctions_.insert(kSubtleName);
   checker.importBinder().noteImportsInFunctions(file);
 
-  // Top-level code runs in order, file by file in the order they load; its
-  // `let` and `const` become globals. A file sees the variables of the files
-  // that load before it.
   checker.flow_ = Checker::Flow();
   for (Module *module : file.modules) {
     checker.topLevelChecker().checkTopLevel(module);
@@ -50,13 +43,9 @@ Errors CheckPass::run(Program &program) const {
     checker.importBinder().bindImports();
   }
 
-  // Bodies come last so that functions can use globals declared after them,
-  // except those whose return type top-level code needed first. Nothing is
-  // known about the globals when a function starts.
   for (Module *module : file.modules) {
     checker.moduleDeclarer().useModule(module);
     for (Stmt *item : module->file.items) {
-      // A class whose base is a value is checked with those made late.
       if (auto *cls = dyn_cast<ClassDecl>(item); cls && cls->type) {
         if (!cls->baseExpr) {
           checker.classChecker().checkClassBodies(cls);
@@ -64,7 +53,6 @@ Errors CheckPass::run(Program &program) const {
         continue;
       }
       if (auto *fn = dyn_cast<FunctionDecl>(item)) {
-        // The body of a template is checked in its copies only.
         if (checker.lateClasses().isTemplate(fn->sym)) {
           continue;
         }
@@ -95,4 +83,4 @@ Errors CheckPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

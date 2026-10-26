@@ -21,7 +21,6 @@ namespace tz {
 
 namespace {
 
-// The array variable a method is called on, if it is one.
 const VarSymbol *arrayVariable(const Expr *object) {
   if (auto *conv = dyn_cast<CastExpr>(object);
       conv && conv->isImplicit() && conv->operand->type->isOptional()) {
@@ -35,7 +34,7 @@ const VarSymbol *arrayVariable(const Expr *object) {
   return name->var;
 }
 
-} // namespace
+}
 
 std::string argumentCount(unsigned min, unsigned max) {
   std::string text = std::to_string(min);
@@ -93,7 +92,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   if (name == "push" || name == "unshift") {
     bool spreads = call->hasSpread();
     for (size_t i = 0; i < count; ++i) {
-      if (call->spreads(i)) { // `a.push(...b)`: b has the same type as a
+      if (call->spreads(i)) {
         call->args[i] = checker_.typeRelations().coerce(
             checker_.exprChecker().checkExpr(call->args[i], arrayType), arrayType);
       } else {
@@ -102,12 +101,10 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     call->builtin = name == "push" ? Builtin::ArrPush : Builtin::ArrUnshift;
     call->type = Type::intTy();
-    // The length grows by exactly `count`, unless arrays are spread.
     if (self && !spreads) {
       checker_.flow_.facts.shift(Term::lengthOf(self), static_cast<int64_t>(count));
     }
-    checker_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/false,
-                                        spreads ? nullptr : self);
+    checker_.flowChecker().arrayResized(arrayType, true, false, spreads ? nullptr : self);
     return call;
   }
 
@@ -127,7 +124,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
             [&](const Facts::Fact &f) { return f.rhs == Term::lengthOf(self); });
       }
     }
-    checker_.flowChecker().arrayResized(arrayType, /*grew=*/false, /*shrank=*/true, self);
+    checker_.flowChecker().arrayResized(arrayType, false, true, self);
     return call;
   }
 
@@ -153,7 +150,6 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   }
 
   if (name == "concat") {
-    // Each argument is an array of the same type or a single element.
     for (size_t i = 0; i < count; ++i) {
       call->args[i] = checker_.exprChecker().checkExpr(call->args[i], arrayType);
       if (call->args[i]->type != arrayType) {
@@ -300,8 +296,6 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                             "=> a.x - b.x)'");
       return call;
     }
-    // A union compares its values as strings too, numbers and objects among
-    // them: the same traps.
     auto textual = [](const Type *m) {
       const Type *b = m->isLiteral() ? m->literalBase() : m;
 
@@ -317,9 +311,6 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
                                 "them; pass one, e.g. 'sort((a, b) => ...)'");
       return call;
     }
-    // JavaScript would sort numbers as strings; sorting them differently
-    // would give another order than node for the same code. (Undefined
-    // elements go to the end without being compared.)
     if (element->nonOptional()->isNumeric() || element->nonOptional()->isDecimal() ||
         GenericChecker::apparentType(element->nonOptional())->isNumeric()) {
       checker_.diags_.error(member->loc(),
@@ -335,8 +326,6 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   }
 
   if (name == "splice") {
-    // splice(start, deleteCount, ...items): removes and returns elements,
-    // and inserts items in their place.
     if (!arity(1, ~0u)) {
       return call;
     }
@@ -349,7 +338,7 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
     }
     call->builtin = Builtin::ArrSplice;
     call->type = arrayType;
-    checker_.flowChecker().arrayResized(arrayType, /*grew=*/true, /*shrank=*/true);
+    checker_.flowChecker().arrayResized(arrayType, true, true);
     return call;
   }
   checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
@@ -359,4 +348,4 @@ Expr *ArrayMethods::checkArrayMethod(CallExpr *call, MemberExpr *member, const T
   return call;
 }
 
-} // namespace tz
+}

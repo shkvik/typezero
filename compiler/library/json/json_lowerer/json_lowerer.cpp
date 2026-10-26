@@ -29,7 +29,6 @@ namespace tz {
 
 namespace {
 
-// The kind of an array node; must match runtime/core/tzrt/tzrt.h.
 constexpr int32_t kJsonArray = 4;
 
 std::u16string utf16(llvm::StringRef text) {
@@ -39,7 +38,6 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-// The literal `null`, which Checker gave the type Json.
 bool isNullLiteral(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
 
@@ -50,8 +48,6 @@ bool isJsonish(const Type *type) { return type->nonOptional()->isJson(); }
 
 bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
   type = type->nonOptional();
-  // A Json can be put in itself (`j.self = j`), and an object of a class, or
-  // one of an interface that a class implements, may refer back to itself.
   if (type->isJson() || type->isClass() || type->isBase() || type->isUnknown() ||
       type->isAnyObject() || llvm::is_contained(open, type)) {
     return true;
@@ -62,7 +58,7 @@ bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
     may = mayHoldItself(type->inner(), open);
   } else if (type->isResult()) {
     may = mayHoldItself(type->okType(), open) || mayHoldItself(type->errType(), open);
-  } else if (type->isRecord()) { // a Map or a Set writes `{}`
+  } else if (type->isRecord()) {
     may = mayHoldItself(type->valueType(), open);
   } else if (type->isObject()) {
     may = llvm::any_of(type->fields(), [&](const Field &f) { return mayHoldItself(f.type, open); });
@@ -74,7 +70,7 @@ bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
   return may;
 }
 
-} // namespace
+}
 
 bool jsonReadMayThrow(const Expr *object) {
   if (!object->type || !object->type->nonOptional()->isJson()) {
@@ -116,10 +112,9 @@ llvm::Value *JsonLowerer::emitJsonNull() {
       jsonFunction("tz_json_null", lowering_.builder_.getPtrTy(), {}), {});
 }
 
-// `j.name`: the runtime reads the key as JavaScript does.
 llvm::Value *JsonLowerer::emitJsonMember(MemberExpr *member) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Value *key = lowering_.stringLowerer().stringLiteral(utf16(member->name));
   llvm::Value *result = lowering_.builder_.CreateCall(
       jsonFunction("tz_json_get", ptr, {ptr, ptr, lowering_.builder_.getInt64Ty()}),
@@ -132,7 +127,6 @@ llvm::Value *JsonLowerer::emitJsonMember(MemberExpr *member) {
   return result;
 }
 
-// `j[key]` with a string key, or `j[i]` with a number.
 llvm::Value *JsonLowerer::emitJsonIndex(IndexExpr *index) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   Lowering::Operand object =
@@ -140,7 +134,7 @@ llvm::Value *JsonLowerer::emitJsonIndex(IndexExpr *index) {
   lowering_.throwLowerer().holdOperand(object, lowering_.mayThrow().exprThrows(index->index));
   llvm::Value *result;
   if (index->index->type->isString()) {
-    Lowering::Operand key = lowering_.refCounts().emitOperand(index->index, /*canBorrow=*/true);
+    Lowering::Operand key = lowering_.refCounts().emitOperand(index->index, true);
     lowering_.throwLowerer().takeOperand(object);
     result = lowering_.builder_.CreateCall(
         jsonFunction("tz_json_get", ptr, {ptr, ptr, lowering_.builder_.getInt64Ty()}),
@@ -160,8 +154,6 @@ llvm::Value *JsonLowerer::emitJsonIndex(IndexExpr *index) {
   return result;
 }
 
-// `j.name = v`, `j[key] = v`, `j[i] = v`: as in JavaScript, the object, the
-// key and the value are evaluated in that order; the runtime takes the value.
 llvm::Value *JsonLowerer::emitJsonAssign(AssignExpr *assign, bool needResult) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
   auto *index = dyn_cast<IndexExpr>(assign->target);
@@ -202,8 +194,6 @@ llvm::Value *JsonLowerer::emitJsonAssign(AssignExpr *assign, bool needResult) {
   }
   lowering_.refCounts().dropOperand(key);
   lowering_.refCounts().dropOperand(object);
-  // What is no object, or an element past the end: the value was released,
-  // and so goes the reference of the result.
   lowering_.throwLowerer().emitThrowCheckWith([&] {
     if (needResult) {
       lowering_.refCounts().releaseValue(value, assign->type);
@@ -221,8 +211,6 @@ llvm::Value *JsonLowerer::emitJsonConversion(llvm::Value *value, const Type *fro
       return llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     }
     if (from->isOptional()) {
-      // `string | undefined` to `Json | undefined`: only a value that is
-      // there becomes a node.
       llvm::BasicBlock *before = lowering_.builder_.GetInsertBlock();
       llvm::BasicBlock *convertBlock = lowering_.functionFrame().newBlock("json.convert");
       llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("json.converted");
@@ -260,12 +248,9 @@ llvm::Value *JsonLowerer::emitJsonConversion(llvm::Value *value, const Type *fro
       lowering_.refCounts().releaseString(value);
       return node;
     }
-    // A Json[]: the node takes the array over, and it stays the same array.
     return lowering_.builder_.CreateCall(jsonFunction("tz_json_from_array", ptr, {ptr}), {value});
   }
 
-  // A Json that a check (typeof, Array.isArray) showed to hold a value of
-  // `to`; it is there, whatever its type says.
   if (to->isOptional()) {
     return lowering_.optionalLowerer().makeOptional(emitJsonConversion(value, from, to->inner()),
                                                     lowering_.builder_.getTrue(), to);
@@ -288,8 +273,6 @@ llvm::Value *JsonLowerer::emitJsonConversion(llvm::Value *value, const Type *fro
   return result;
 }
 
-// `==` with a Json side. Comparing with null or undefined is true for both,
-// as in JavaScript; otherwise as `===`.
 llvm::Value *JsonLowerer::emitJsonEquality(BinaryExpr *bin) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
              *i64 = lowering_.builder_.getInt64Ty();
@@ -298,18 +281,16 @@ llvm::Value *JsonLowerer::emitJsonEquality(BinaryExpr *bin) {
   bool lhsNothing = lhs->type->isUndefined() || isNullLiteral(lhs);
   bool rhsNothing = rhs->type->isUndefined() || isNullLiteral(rhs);
   if (lhsNothing || rhsNothing) {
-    if (lhsNothing && rhsNothing) { // `null == undefined`
+    if (lhsNothing && rhsNothing) {
       lowering_.stmtLowerer().emitDiscarded(lhs);
       lowering_.stmtLowerer().emitDiscarded(rhs);
       return lowering_.builder_.getInt1(isEq);
     }
-    // A side that is always undefined, such as `void f()`, still runs, in
-    // its turn.
     if (lhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(lhs);
     }
     Expr *other = lhsNothing ? rhs : lhs;
-    Lowering::Operand value = lowering_.refCounts().emitOperand(other, /*canBorrow=*/true);
+    Lowering::Operand value = lowering_.refCounts().emitOperand(other, true);
     if (rhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(rhs);
     }
@@ -318,7 +299,7 @@ llvm::Value *JsonLowerer::emitJsonEquality(BinaryExpr *bin) {
     return isEq ? lowering_.builder_.CreateNot(present) : present;
   }
   Lowering::Operand a = lowering_.refCounts().emitOperand(lhs, AssignLowerer::cannotAssign(rhs));
-  Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, /*canBorrow=*/true);
+  Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, true);
   llvm::Value *equal;
   if (isJsonish(lhs->type) && isJsonish(rhs->type)) {
     equal = lowering_.builder_.CreateCall(jsonFunction("tz_json_strict_equal", i32, {ptr, ptr}),
@@ -348,7 +329,6 @@ llvm::Value *JsonLowerer::emitJsonEquality(BinaryExpr *bin) {
   return isEq ? same : lowering_.builder_.CreateNot(same);
 }
 
-// `j ?? fallback`: the fallback replaces null too, as in JavaScript.
 llvm::Value *JsonLowerer::emitJsonNullish(BinaryExpr *bin) {
   llvm::Value *lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
   llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("nullish.value");
@@ -373,8 +353,6 @@ llvm::Value *JsonLowerer::emitJsonNullish(BinaryExpr *bin) {
   return phi;
 }
 
-// `j?.name`: a Json that is null or undefined ends the chain. null is never
-// freed, and undefined holds nothing, so nothing is released there.
 llvm::Value *JsonLowerer::emitJsonChainLink(CastExpr *link) {
   llvm::Value *value = lowering_.exprLowerer().emitExpr(link->operand);
   llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("chain.link");
@@ -385,13 +363,12 @@ llvm::Value *JsonLowerer::emitJsonChainLink(CastExpr *link) {
 }
 
 llvm::Value *JsonLowerer::emitJsonTypeOf(Expr *operand) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, /*canBorrow=*/true);
+  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
   llvm::Value *code =
       lowering_.builder_.CreateCall(jsonFunction("tz_json_typeof", lowering_.builder_.getInt32Ty(),
                                                  {lowering_.builder_.getPtrTy()}),
                                     {value.value});
   lowering_.refCounts().dropOperand(value);
-  // See tz_json_typeof.
   static const std::pair<int32_t, const char16_t *> names[] = {
       {0, u"undefined"}, {2, u"boolean"}, {3, u"number"}, {4, u"string"}};
   llvm::Value *result = lowering_.stringLowerer().stringLiteral(u"object");
@@ -404,15 +381,12 @@ llvm::Value *JsonLowerer::emitJsonTypeOf(Expr *operand) {
   return result;
 }
 
-// `{ phone: null }` where a Json is expected. A value that is undefined
-// leaves its key out.
 llvm::Value *JsonLowerer::emitJsonObjectLiteral(ObjectLitExpr *lit) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::FunctionCallee put = jsonFunction("tz_json_object_put", lowering_.builder_.getVoidTy(),
                                           {ptr, ptr, lowering_.builder_.getInt64Ty(), ptr});
   llvm::Value *object =
       lowering_.builder_.CreateCall(jsonFunction("tz_json_object_new", ptr, {}), {}, "json");
-  // Nothing can reach the new object while its values are evaluated.
   for (const ObjectLitExpr::Property &prop : lit->props) {
     Lowering::Operand key{lowering_.stringLowerer().stringLiteral(utf16(prop.name)), false,
                           Type::string()};
@@ -440,10 +414,9 @@ llvm::Value *JsonLowerer::emitJsonObjectLiteral(ObjectLitExpr *lit) {
   return object;
 }
 
-// Object.keys, Object.values and Object.entries of a Json, and `for...in`.
 llvm::Value *JsonLowerer::emitJsonObjectCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
   llvm::Value *result;
   if (call->builtin == Builtin::ObjectKeys) {
@@ -464,7 +437,7 @@ llvm::Value *JsonLowerer::emitJsonObjectCall(CallExpr *call) {
         "entries");
   }
   lowering_.refCounts().dropOperand(object);
-  lowering_.emitThrowCheckIf(!call->forIn); // of null or undefined
+  lowering_.emitThrowCheckIf(!call->forIn);
 
   return result;
 }
@@ -476,37 +449,35 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::JsonParse:
   case Builtin::JsonParseAs: {
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *json =
         lowering_.builder_.CreateCall(jsonFunction("tz_json_parse", ptr, {ptr, i64}),
                                       {lowering_.stringLowerer().stringObj(text.value),
                                        lowering_.stringLowerer().stringMeta(text.value)},
                                       "json");
     lowering_.refCounts().dropOperand(text);
-    lowering_.throwLowerer().emitThrowCheck(); // SyntaxError
+    lowering_.throwLowerer().emitThrowCheck();
     if (call->builtin == Builtin::JsonParse) {
       return json;
     }
     llvm::Value *result = lowering_.fromJsonLowerer().emitFromJson(call->type, json, noPath);
     lowering_.refCounts().releaseValue(json, Type::json());
-    lowering_.throwLowerer().emitThrowCheck(); // a value that does not fit
+    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::FromJson: {
-    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *result = lowering_.fromJsonLowerer().emitFromJson(call->type, json.value, noPath);
     lowering_.refCounts().dropOperand(json);
     lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::EmbedJson: {
-    // The text is in the program; the first evaluation parses it, and every
-    // one gives that value (see tz_json_embed), for each file embedded.
     const std::u16string &text = cast<StringLitExpr>(call->args[0])->value;
     llvm::GlobalVariable *&cache = embedCaches_[cast<StringLitExpr>(call->args[1])->value];
     if (!cache) {
       cache = new llvm::GlobalVariable(
-          *lowering_.module_, ptr, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+          *lowering_.module_, ptr, false, llvm::GlobalValue::InternalLinkage,
           llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), "tz.embed");
     }
     llvm::Value *literal = lowering_.stringLowerer().stringLiteral(text);
@@ -516,7 +487,6 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
                                          "embedded");
   }
   case Builtin::JsonStringify: {
-    // The runtime writes any value, by its type descriptor.
     Expr *value = call->args[0];
     bool hasSpace = call->args.size() == 2;
     Lowering::Operand operand = lowering_.refCounts().emitOperand(
@@ -528,7 +498,7 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
     llvm::Value *spaceNumber = llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(), 0.0);
     llvm::Value *spaceObj = noPath, *spaceMeta = lowering_.builder_.getInt64(0);
     if (hasSpace && call->args[1]->type->isString()) {
-      space = lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+      space = lowering_.refCounts().emitOperand(call->args[1], true);
       spaceKind = lowering_.builder_.getInt32(2);
       spaceObj = lowering_.stringLowerer().stringObj(space.value);
       spaceMeta = lowering_.stringLowerer().stringMeta(space.value);
@@ -546,7 +516,7 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
          spaceObj, spaceMeta});
     lowering_.refCounts().dropOperand(space);
     lowering_.refCounts().dropOperand(operand);
-    lowering_.emitThrowCheckIf(stringifyMayThrow(value->type)); // a value inside itself
+    lowering_.emitThrowCheckIf(stringifyMayThrow(value->type));
     llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
     if (!call->type->isOptional()) {
       return text;
@@ -561,24 +531,22 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
       return lowering_.unknownLowerer().emitUnknownIsArray(arg);
     }
     if (isJsonish(type)) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
       llvm::Value *kind =
           lowering_.builder_.CreateCall(jsonFunction("tz_json_kind", i32, {ptr}), {value.value});
       lowering_.refCounts().dropOperand(value);
       return lowering_.builder_.CreateICmpEQ(kind, lowering_.builder_.getInt32(kJsonArray));
     }
-    // A tagged union holds an array in its slot of arrays (codegen_union.cpp).
     if (const Type *u = type->nonOptional(); u->isTagged()) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
       llvm::Value *tag = lowering_.unionLayout().unionTag(value.value);
       lowering_.refCounts().dropOperand(value);
       return lowering_.builder_.CreateICmpEQ(
           tag, lowering_.builder_.getInt32(unsigned(UnionSlot::Array)));
     }
-    // Known from the type; a tuple is an array in JavaScript.
     bool array = type->nonOptional()->isArray() || type->nonOptional()->isTuple();
     if (array && type->isOptional()) {
-      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+      Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
       llvm::Value *has = lowering_.optionalLowerer().optionalHas(value.value, type);
       lowering_.refCounts().dropOperand(value);
       return has;
@@ -591,4 +559,4 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

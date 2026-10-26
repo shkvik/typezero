@@ -1,9 +1,7 @@
-// node:fs/promises for directories: readdir, mkdir, rm, rename and the like.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs/fs.h"
@@ -36,9 +34,6 @@
 #include <unistd.h>
 #endif
 
-// The entries of the directory at `path` (its system form, without a zero),
-// each named in the directory numbered `dir`, as list_dir gives them; false
-// with the failure of "scandir".
 #ifdef _WIN32
 static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *out,
                     Failure *failure) {
@@ -66,7 +61,7 @@ static int list_raw(const uint16_t *path, size_t n, uint32_t dir, ListedList *ou
   if (find == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
     if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) {
-      return 1; // empty, as the root of an empty drive is
+      return 1;
     }
     *failure = tz_fs_win32_failure(error);
     return 0;
@@ -146,7 +141,6 @@ static int list_raw(const uint8_t *path, size_t n, uint32_t dir, ListedList *out
     }
   }
   closedir(d);
-  // Sorted by their bytes, as libuv's scandir sorts them.
   qsort(out->items + first, out->count - first, sizeof(Listed), compare_listed);
 
   return 1;
@@ -154,23 +148,17 @@ static int list_raw(const uint8_t *path, size_t n, uint32_t dir, ListedList *out
 #endif
 
 #ifdef _WIN32
-#define SYSTEM_UNIT 2 // the bytes of a unit of a path of the system
+#define SYSTEM_UNIT 2
 #else
 #define SYSTEM_UNIT 1
 #endif
 
-// A directory waiting to be visited: its number, its system form and its
-// entries.
 typedef struct {
   uint32_t dir;
   Raw path;
   ListedList entries;
 } Pending;
 
-// readdir of node:fs/promises: with `recursive`, as Node's readdirRecursive
-// goes, which differs from readdirSync's: the entries of a directory, each
-// directory among them listed when it is met, and then the directory listed
-// last is visited (a stack, where readdirSync takes them level by level).
 static void readdir_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
   Raw root = {NULL, 0, 0};
@@ -203,7 +191,6 @@ static void readdir_work(TzWork *w) {
   while (depth > 0) {
     Pending at = stack[--depth];
     for (size_t i = 0; i < at.entries.count && !failed; ++i) {
-      // The entry moves to the result.
       Listed *result = tz_fs_listed_add(&r->entries);
       *result = at.entries.items[i];
       memset(&at.entries.items[i], 0, sizeof(Listed));
@@ -227,7 +214,6 @@ static void readdir_work(TzWork *w) {
       if (r->make_item) {
         descend = result->kind == S_DIR;
       } else {
-        // A link to a directory too, as Node's internalModuleStat follows it.
         TzStatsParts st;
 #ifdef _WIN32
         tz_fs_raw_unit(&child, 0);
@@ -255,7 +241,7 @@ static void readdir_work(TzWork *w) {
       }
       uint32_t number = (uint32_t)r->dir_count;
       r->dirs[r->dir_count++] = (uint32_t)(r->entries.count - 1);
-      ++r->work.turns; // Node awaits a readdir for each
+      ++r->work.turns;
       Pending next = {number, child, {NULL, 0, 0}};
       if (!list_raw((const void *)child.data, child.length / SYSTEM_UNIT, number, &next.entries,
                     &failure)) {
@@ -314,8 +300,6 @@ static void readdir_done(TzWork *w) {
   }
   size_t count = r->entries.count;
   TzArray *result = tz_arr_new(r->element, 0, (int64_t)count);
-  // Each directory as the program sees it (joined to the path given) for
-  // Dirents, and relative to the one given for names.
   TzBuf *seen = (TzBuf *)tz_alloc(sizeof(TzBuf) * r->dir_count);
   TzBuf *relative = (TzBuf *)tz_alloc(sizeof(TzBuf) * r->dir_count);
   for (size_t d = 0; d < r->dir_count; ++d) {
@@ -325,7 +309,6 @@ static void readdir_done(TzWork *w) {
       tz_buf_units(&seen[0], r->path.given.data, r->path.given.length);
       continue;
     }
-    // Its parent was numbered before it.
     const Listed *entry = &r->entries.items[r->dirs[d]];
     TzBuf name;
     tz_buf_init(&name);
@@ -397,9 +380,6 @@ static void mkdir_work(TzWork *w) {
   if (!r->recursive) {
     return;
   }
-  // Node makes the directories a call at a time: one that fails for each
-  // parent missing, then one for each made; or one and a stat when the
-  // directory is there.
   size_t levels = 0;
   if (r->made > 0) {
 #ifdef _WIN32
@@ -425,7 +405,6 @@ static void mkdir_done(TzWork *w) {
   if (!tz_fs_fsp_succeeded(r)) {
     return;
   }
-  // `string | undefined`: the first directory made, with `recursive`.
   TzOptStr first;
   memset(&first, 0, sizeof first);
   if (r->made) {
@@ -446,9 +425,6 @@ void tz_fsp_mkdir(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t recu
   tz_fs_fsp_queue(r, mkdir_work, mkdir_done);
 }
 
-// mkdtemp: the prefix and six random letters and digits, as given (not
-// resolved). The name is made on the main thread, where paths are, and the
-// thread tries it; one that is taken comes back for another.
 static void mkdtemp_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
@@ -471,7 +447,6 @@ static void mkdtemp_try(FsRequest *r);
 static void mkdtemp_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
   if (r->failed && r->made && r->attempts < 100) {
-    // Taken: another name.
     r->failed = 0;
     tz_fs_path_free(&r->dest);
     --r->paths;
@@ -479,7 +454,6 @@ static void mkdtemp_done(TzWork *w) {
     return;
   }
   if (r->failed) {
-    // The template, as Node shows it.
     TzBuf shown;
     tz_buf_init(&shown);
     tz_buf_units(&shown, r->path.given.data, r->path.given.length);
@@ -551,7 +525,6 @@ static void unlink_work(TzWork *w) {
 #endif
 }
 
-// rmdir and unlink: `which` is 0 for rmdir.
 void tz_fsp_remove(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t which, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
   if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
@@ -570,9 +543,6 @@ static void rm_work(TzWork *w) {
     tz_fs_fsp_fail(r, failure, syscall, 1);
   }
   r->directory = found == RM_DIRECTORY;
-  // Node checks with lstat, then its rimraf goes down the tree: lstat and
-  // unlink for a file, lstat, rmdir, readdir and rmdir again for a
-  // directory, each level after the one above it.
   r->work.turns = 3 + 4 * (uint32_t)depth;
 }
 
@@ -626,7 +596,6 @@ static void copy_file_work(TzWork *w) {
     tz_fs_fsp_fail(r, (Failure){E_ENOSYS, tz_fs_errors[E_ENOSYS].windows}, "copyfile", 2);
   } else if (!CopyFileW(tz_fs_wide(&r->path), tz_fs_wide(&r->dest), (r->mode & 1) != 0)) {
     DWORD error = GetLastError();
-    // The same file: there is nothing to copy (libuv checks for EBUSY).
     TzStatsParts a, b;
     int same = tz_fs_win32_failure(error).index == E_EBUSY &&
                tz_fs_stat_of(tz_fs_wide(&r->path), 1, &a) == 0 &&
@@ -675,9 +644,6 @@ void tz_fsp_copy_file(TzPromise *p, void *from_obj, uint64_t from_meta, void *to
   tz_fs_fsp_queue(r, copy_file_work, tz_fs_fsp_done_void);
 }
 
-// realpath of node:fs/promises is libuv's, unlike realpathSync: the path
-// the system has for the file, with its letters as they are on the disk on
-// Windows.
 static void realpath_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32

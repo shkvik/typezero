@@ -26,4 +26,4 @@ void distribute(const Type *type, std::vector<const Type *> &out) {
   }
 }
 
-} // namespace tz
+}

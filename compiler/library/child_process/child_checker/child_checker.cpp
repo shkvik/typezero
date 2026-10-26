@@ -29,14 +29,11 @@ std::string utf8(const std::u16string &text) {
 
 const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
 
-// What stdout and stderr of an ExecSyncError hold: a string with an
-// encoding, a Buffer without one, undefined for a stream the child did not
-// write to a pipe.
 const Type *outputUnion() {
   return Type::unionOf({Type::string(), bufferType(), Type::undefinedTy()});
 }
 
-} // namespace
+}
 
 ChildChecker::ChildChecker(Checker &checker) : checker_(checker) {}
 
@@ -48,9 +45,6 @@ void ChildChecker::declareExecSyncError() {
   checker_.errorClass_->children.push_back(cls);
   Type *type = Type::classType("ExecSyncError", cls);
   cls->type = type;
-  // The fields Node's error has, in the order it prints them. The first five
-  // are those of an error of the system the program ran into (ETIMEDOUT,
-  // ENOBUFS), undefined when it only failed; then the result of spawnSync.
   const Type *s = Type::optional(Type::string());
   const std::pair<llvm::StringRef, const Type *> own[] = {
       {"errno", Type::optional(Type::intTy())},
@@ -82,7 +76,6 @@ void ChildChecker::declareExecSyncError() {
 Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
   if (fn != "spawnSync" && fn != "execFileSync" && fn != "execSync") {
-    // Reported at the import.
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
@@ -100,7 +93,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
     return lit;
   };
-  // An option the call does not give: undefined of its type.
   auto absent = [&](const Type *type) {
     auto *none = checker_.ctx_.make<UndefinedExpr>(loc);
     none->type = Type::undefinedTy();
@@ -110,8 +102,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
 
   std::vector<Expr *> args(ChildArgCount, nullptr);
   args[ChildFile] = call->args[0] = checker_.argumentChecker().checkArg(call->args[0], string);
-  // The arguments, which may be left out before the options, as in Node:
-  // `execFileSync("git", { cwd })`.
   size_t optionsAt = 1;
   if (!exec && call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1])) {
     if (!isa<UndefinedExpr>(call->args[1])) {
@@ -151,7 +141,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     return call;
   }
 
-  // The options that decide the types, which are literals.
   bool failed = false;
   unsigned encoding = ChildBytes;
   if (Expr *value = options.lookup("encoding"); value && !isa<UndefinedExpr>(value)) {
@@ -177,8 +166,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   bool stdioGiven = false;
   if (Expr *value = options.lookup("stdio"); value && !isa<UndefinedExpr>(value)) {
     stdioGiven = true;
-    // One of them: "pipe", "inherit", "ignore", an fd, or undefined for a
-    // pipe.
     auto kind = [&](Expr *e, unsigned i) -> std::optional<unsigned> {
       if (isa<UndefinedExpr>(e)) {
         return ChildPipe;
@@ -263,7 +250,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
     }
   }
 
-  // The others, of any expression.
   auto option = [&](llvm::StringRef name, const Type *type) {
     Expr *value = options.lookup(name);
 
@@ -280,8 +266,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   args[ChildUid] = option("uid", Type::intTy());
   args[ChildGid] = option("gid", Type::intTy());
 
-  // input: text, written in the encoding of the call as Node writes it, or
-  // the bytes of a view.
   if (Expr *value = options.lookup("input")) {
     Expr *input = checker_.exprChecker().checkExpr(value, string);
     const Type *t = input->type->nonOptional();
@@ -293,7 +277,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
       args[ChildInput] = checker_.typeRelations().coerce(input, Type::optional(t));
       if (t->isString() && encoding == ChildBytes && options.lookup("encoding") &&
           !isa<UndefinedExpr>(options.lookup("encoding"))) {
-        // Node encodes the text with the encoding, and 'buffer' is none.
         checker_.diags_.error(input->loc(),
                               "text input with the encoding 'buffer' is a TypeError in Node "
                               "(Unknown encoding: buffer); pass its bytes, "
@@ -313,8 +296,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   } else {
     args[ChildInput] = absent(string);
   }
-  // killSignal: a name ("SIGKILL") or a number, checked when the program
-  // runs, as in Node.
   if (Expr *value = options.lookup("killSignal")) {
     Expr *signal = checker_.exprChecker().checkExpr(value, string);
     const Type *t = signal->type->nonOptional();
@@ -335,8 +316,6 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   } else {
     args[ChildKillSignal] = absent(string);
   }
-  // shell: true for the system's (cmd.exe, /bin/sh), or the path of one.
-  // execSync always goes through one: there it may only name it.
   if (Expr *value = options.lookup("shell")) {
     Expr *shell = checker_.exprChecker().checkExpr(value, string);
     const Type *t = shell->type->nonOptional();
@@ -378,14 +357,10 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   call->args = std::move(args);
   call->spread.clear();
 
-  // What the program printed: a string with an encoding, a Buffer without
-  // one; undefined for a stream that was no pipe.
   const Type *text = encoding == ChildBytes ? bufferType() : string;
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
     call->builtin = Builtin::ChildSpawnSync;
-    // In the order Node prints them; `error` is there only when the program
-    // could not start or did not end by itself.
     const Type *t = Type::object(
         {{"error", Type::optional(checker_.systemErrorClass_->type), false},
          {"status", Type::optional(Type::intTy()), false},
@@ -404,4 +379,4 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   return call;
 }
 
-} // namespace tz
+}

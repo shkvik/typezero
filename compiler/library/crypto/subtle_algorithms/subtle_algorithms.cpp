@@ -23,7 +23,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// A number written as a literal.
 std::optional<double> numberLiteral(const Expr *e) {
   if (auto *lit = dyn_cast_or_null<IntLitExpr>(e)) {
     return double(lit->value);
@@ -35,7 +34,6 @@ std::optional<double> numberLiteral(const Expr *e) {
   return std::nullopt;
 }
 
-// The property `name` of an object literal, or null.
 const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRef name) {
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread && !prop.key && prop.name == name) {
@@ -46,7 +44,7 @@ const ObjectLitExpr::Property *property(const ObjectLitExpr *lit, llvm::StringRe
   return nullptr;
 }
 
-} // namespace
+}
 
 std::optional<std::string> stringLiteral(const Expr *e) {
   while (auto *conv = dyn_cast_or_null<CastExpr>(e)) {
@@ -324,7 +322,7 @@ std::string exampleOf(llvm::StringRef member) {
     return "theirPublicKey";
   }
 
-  return "new Uint8Array(16)"; // salt, info
+  return "new Uint8Array(16)";
 }
 
 std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRef op,
@@ -337,7 +335,7 @@ std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRe
     }
     const ObjectLitExpr::Property *name = property(lit, "name");
     if (!name) {
-      return ""; // the type check reports it
+      return "";
     }
     nameExpr = name->value;
   }
@@ -386,7 +384,6 @@ std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRe
     }
     return "";
   }
-  // The members its dictionary needs, and the values written that node would reject.
   Dictionary dict = dictionaryOf(op, name);
   if (!lit) {
     if (!dict.required.empty()) {
@@ -467,4 +464,4 @@ std::string literalAlgorithm(Diagnostics &diags, const Expr *arg, llvm::StringRe
   return name;
 }
 
-} // namespace tz
+}

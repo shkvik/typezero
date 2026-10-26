@@ -7,8 +7,6 @@
 
 namespace tz {
 
-// Functions that several classes made from codegen_bytes.cpp use.
-
 using Bytes = Type::Bytes;
 
-} // namespace tz
+}

@@ -18,21 +18,17 @@ namespace tz {
 
 namespace {
 
-// What `await` of a value of `type` gives: the value of a Promise, or the
-// value itself.
 const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
 
-// The Result a Promise of one that is expected holds.
 const Type *wantedResult(const Type *expected) {
   const Type *type = expected ? expected->nonOptional() : nullptr;
 
   return type && type->isPromise() && type->promised()->isResult() ? type->promised() : nullptr;
 }
 
-// What a callback gets for a half of a Result: `ok()` holds undefined.
 const Type *halfOf(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
 
-} // namespace
+}
 
 ResultAsyncChecker::ResultAsyncChecker(Checker &checker) : checker_(checker) {}
 
@@ -45,7 +41,6 @@ Expr *ResultAsyncChecker::checkResultAsyncCall(CallExpr *call, NameExpr *name,
   if (which == "fromAsyncThrowable") {
     return checkResultAsyncThrowable(call, name->loc());
   }
-  // okAsync(v) and errAsync(e): ok(v) and err(e) in a Promise settled now.
   Expr *made =
       checker_.resultChecker().checkOkErr(call, name, which == "okAsync", wantedResult(expected));
   if (!made->type->isResult()) {
@@ -89,9 +84,6 @@ Expr *ResultAsyncChecker::checkResultAsyncStatic(CallExpr *call, MemberExpr *mem
   return call;
 }
 
-// fromPromise(p, toError) and fromSafePromise(p): an Ok of what p gives, or
-// an Err of what toError makes of its error (fromSafePromise lets the error
-// reject the ResultAsync).
 Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc, bool safe,
                                                  const Type *expected) {
   call->type = Type::error();
@@ -125,7 +117,7 @@ Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc
       return call;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[1])) {
-      fe->fn->nonEscaping = false; // it runs later
+      fe->fn->nonEscaping = false;
     }
     error = call->args[1]->type->ret();
     if (error->isVoid()) {
@@ -135,7 +127,6 @@ Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc
       return call;
     }
   }
-  // The halves of the type expected, where they go.
   if (wanted && TypeRelations::isImplicitlyConvertible(value, wanted->okType()) &&
       TypeRelations::isImplicitlyConvertible(error, wanted->errType())) {
     value = wanted->okType();
@@ -147,9 +138,6 @@ Expr *ResultAsyncChecker::checkResultFromPromise(CallExpr *call, llvm::SMLoc loc
   return call;
 }
 
-// ResultAsync.fromThrowable(f, toError?): a function with the parameters of
-// f, which gives a ResultAsync of what f's Promise gives, or of what f throws
-// or its Promise is rejected with, as toError makes it.
 Expr *ResultAsyncChecker::checkResultAsyncThrowable(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call) ||
@@ -217,8 +205,6 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
   if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
-  // asyncMap and asyncAndThen of a Result: map and andThen of a ResultAsync
-  // as to types, but the function runs now and must give a promise.
   llvm::StringRef given = name;
   bool ofResult = member->object->type->isResult();
   if (ofResult) {
@@ -226,7 +212,6 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
   }
   const Type *result = ofResult ? member->object->type : member->object->type->promised();
   const Type *value = result->okType(), *error = result->errType();
-  // A callback: what it gets, and what it gives, as `await` would.
   auto callback = [&](Expr *&arg, const Type *half) -> const Type * {
     Checker::Signature sig;
     sig.pad = false;
@@ -236,7 +221,7 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
       return nullptr;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
-      fe->fn->nonEscaping = false; // it runs later
+      fe->fn->nonEscaping = false;
     }
     if (ofResult && !arg->type->ret()->isPromise()) {
       checker_.diags_.error(arg->loc(), "the function of '" + given + "' must give a " +
@@ -253,7 +238,7 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
     checker_.diags_.error(member->loc(), "'andThrough' of a ResultAsync is not supported yet; use "
                                          "'andThen', which gives the Result its function gives");
     if (call->args.size() == 1) {
-      callback(call->args[0], value); // for the errors in it
+      callback(call->args[0], value);
     } else {
       checkArgsLoosely();
     }
@@ -311,7 +296,6 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
                                 "'");
       return call;
     }
-    // The halves the other way meet those of the Result the function gives.
     const Type *kept = onError ? made->errType() : made->okType();
     const Type *mine = onError ? value : error;
     const Type *theirs = onError ? made->okType() : made->errType();
@@ -361,7 +345,7 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
     call->type = Type::promise(both);
     return call;
   }
-  default: // andTee and orTee: what the function gives is dropped
+  default:
     if (!callback(call->args[0], method->builtin == Builtin::ResultAsyncOrTee ? error : value)) {
       return call;
     }
@@ -373,4 +357,4 @@ Expr *ResultAsyncChecker::checkResultAsyncMethod(CallExpr *call, MemberExpr *mem
   return call;
 }
 
-} // namespace tz
+}

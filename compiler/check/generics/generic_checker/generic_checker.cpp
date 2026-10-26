@@ -29,7 +29,6 @@ const Type *GenericChecker::apparentType(const Type *type) {
   if (type->isParam() && type->constraint() && !type->isListParam()) {
     return type->constraint();
   }
-  // A literal type has the operations of its base: `dir.length`, `bit + 1`.
   if (type->isLiteral()) {
     return type->literalBase();
   }
@@ -57,8 +56,6 @@ FuncSymbol *GenericChecker::genericNamed(const NameExpr *name) const {
 const Type *GenericChecker::numberParam(const Type *param) const {
   const Type *&number = numberParams_[param];
   if (!number) {
-    // The numbers it may be: double without a constraint, else the widest
-    // of its numeric alternatives.
     const Type *constraint = nullptr;
     for (const Type *t : param->alternatives()) {
       if (t->isNumeric()) {
@@ -99,7 +96,7 @@ Expr *GenericChecker::forceConversion(Expr *expr, const Type *to) {
     return expr;
   }
   if (to->isString()) {
-    return checker_.concatChecker().toStringOperand(expr); // reports an object or a function
+    return checker_.concatChecker().toStringOperand(expr);
   }
   if (TypeRelations::isImplicitlyConvertible(type, to)) {
     return checker_.typeRelations().convert(expr, to);
@@ -132,7 +129,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     bool isAnd = bin->op == BinaryOp::LogAnd;
     std::optional<bool> l = constantCondition(bin->lhs);
     if (l && *l != isAnd) {
-      return l; // `false && x`, `true || x`
+      return l;
     }
     if (l) {
       return constantCondition(bin->rhs);
@@ -142,8 +139,6 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
   if (bin->op != BinaryOp::Eq && bin->op != BinaryOp::Ne) {
     return std::nullopt;
   }
-  // `typeof x == "string"`, with x a variable: its type tells, unless it may
-  // be undefined.
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
@@ -159,7 +154,7 @@ std::optional<bool> GenericChecker::constantCondition(const Expr *cond) const {
     }
     const Type *type = typeOf->operand->type;
     llvm::StringRef name = typeOfName(type->nonOptional());
-    if (name.empty()) { // a union of several kinds: known when it runs
+    if (name.empty()) {
       return std::nullopt;
     }
     std::u16string wanted(name.begin(), name.end());
@@ -212,4 +207,4 @@ const Type *GenericChecker::literalShape(const Expr *expr) {
   return nullptr;
 }
 
-} // namespace tz
+}

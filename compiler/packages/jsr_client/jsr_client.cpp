@@ -46,7 +46,6 @@ bool writeFile(llvm::StringRef file, llvm::StringRef data, std::string &error) {
   return true;
 }
 
-// A path from a registry's list of files must stay inside the package.
 bool safeRelativePath(llvm::StringRef file) {
   if (file.empty() || file.contains('\\') || file.contains(':') || file.starts_with("/")) {
     return false;
@@ -62,8 +61,6 @@ bool safeRelativePath(llvm::StringRef file) {
   return true;
 }
 
-// Reads a JSON document of the registry; false with an empty error when the
-// registry says there is none.
 bool fetchJson(const std::string &url, std::string &text, JsonValue &out, std::string &error) {
   switch (fetchUrl(url, text, error)) {
   case FetchResult::NotFound:
@@ -113,7 +110,6 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
     }
     out.files.push_back({file.str(), checksum.lower()});
   }
-  // "./mod.tz" is the file mod.tz of the package.
   auto packageFile = [](llvm::StringRef target) {
     target.consume_front("./");
 
@@ -134,7 +130,7 @@ bool readJsrVersion(llvm::StringRef text, const std::string &where, JsrVersion &
   return true;
 }
 
-} // namespace
+}
 
 std::string jsrBaseUrl() {
   std::string base = "https://jsr.io";
@@ -165,7 +161,7 @@ bool jsrVersions(llvm::StringRef scope, llvm::StringRef name, JsrVersions &out,
   for (size_t i = 0; i < versions->keys.size(); ++i) {
     JsrVersions::Entry entry;
     if (!Version::parse(versions->keys[i], entry.version)) {
-      continue; // not semver: no range can name it
+      continue;
     }
     const JsonValue *yanked = versions->items[i].get("yanked");
     entry.yanked = yanked && yanked->kind == JsonValue::Kind::Bool && yanked->boolean;
@@ -198,7 +194,6 @@ bool jsrVersion(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef ver
     return false;
   }
 
-  // Kept only once it reads well: the version's list of files never changes.
   return writeFileAtomically(cached, text, error);
 }
 
@@ -235,4 +230,4 @@ bool jsrDownload(llvm::StringRef scope, llvm::StringRef name, llvm::StringRef ve
   return staged.commit(error);
 }
 
-} // namespace tz::pkg
+}

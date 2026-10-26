@@ -26,13 +26,10 @@ using llvm::Value;
 
 namespace tz {
 
-// What a function returns: the value of its `return`, or for a generator what
-// its iterator gives when it is done.
 static const Type *returnedType(const FunctionDecl *fn, const Type *returnType) {
   if (fn && fn->isGenerator && fn->sym && fn->sym->ret && fn->sym->ret->isIterator()) {
     return fn->sym->ret->returned();
   }
-  // An async function: what its promise holds.
   if (fn && fn->isAsync && returnType && returnType->isPromise()) {
     return returnType->promised();
   }
@@ -45,7 +42,7 @@ TryLowerer::TryLowerer(Lowering &lowering) : lowering_(lowering) {}
 Lowering::TryContext *TryLowerer::finallyBetween(size_t target) {
   for (Lowering::TryContext &t : llvm::reverse(lowering_.tries_)) {
     if (target != ~size_t(0) && t.targetsDepth <= target) {
-      return nullptr; // the target is inside this `try`, and so inside the rest
+      return nullptr;
     }
     if (t.finally && t.phase != Lowering::TryContext::Phase::Finally) {
       return &t;
@@ -83,7 +80,6 @@ void TryLowerer::emitReturnOf(llvm::Value *value) {
   if (Lowering::TryContext *t = finallyBetween(~size_t(0))) {
     if (value) {
       if (!t->pendingValue) {
-        // Empty until a `return` fills it (see emitTry).
         llvm::Type *lowered = lowering_.moduleBuilder().lower(type);
         llvm::AllocaInst *slot =
             lowering_.functionFrame().createStackSlot(lowered, "pending.value");
@@ -112,20 +108,13 @@ void TryLowerer::emitReturnOf(llvm::Value *value) {
   if (value) {
     lowering_.builder_.CreateRet(value);
   } else if (lowering_.returnType_ && lowering_.returnType_->isOptional()) {
-    lowering_.builder_.CreateRet(
-        lowering_.optionalLowerer().undefinedValue(lowering_.returnType_)); // `return;`
+    lowering_.builder_.CreateRet(lowering_.optionalLowerer().undefinedValue(lowering_.returnType_));
   } else {
     lowering_.builder_.CreateRetVoid();
   }
   lowering_.functionFrame().startDeadBlock();
 }
 
-// The block runs; an error from it goes to the `catch`, which takes it from
-// tz_thrown, or with only a `finally`, to that. The `finally` runs after the
-// block and the `catch`, however they end: `completion` says how to go on.
-// While it runs, what is pending (the error to throw again, the value to
-// return) waits in slots of its scope, which a way out of the `finally` of
-// its own (a return, a jump, an error) releases.
 void TryLowerer::emitTry(TryStmt *stmt) {
   size_t depth = lowering_.scopes_.size();
   {
@@ -151,7 +140,6 @@ void TryLowerer::emitTry(TryStmt *stmt) {
   }
   size_t index = lowering_.tries_.size() - 1;
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("try.end");
-  // The block or the `catch` ended normally.
   auto leave = [&] {
     if (!lowering_.functionFrame().blockIsOpen()) {
       return;
@@ -164,7 +152,6 @@ void TryLowerer::emitTry(TryStmt *stmt) {
       lowering_.builder_.CreateBr(endBlock);
     }
   };
-  // Takes the error in flight.
   auto takeError = [&] {
     llvm::Value *error = lowering_.builder_.CreateLoad(
         lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "error");
@@ -184,8 +171,7 @@ void TryLowerer::emitTry(TryStmt *stmt) {
     lowering_.functionFrame().pushScope();
     if (const VarSymbol *var = stmt->param.sym) {
       lowering_.storeLowerer().storeVar(
-          var, lowering_.functionFrame().createLocal(var, stmt->param.name), error,
-          /*replacing=*/false);
+          var, lowering_.functionFrame().createLocal(var, stmt->param.name), error, false);
     } else {
       lowering_.refCounts().releaseValue(error, lowering_.errorClass_->type);
     }
@@ -214,7 +200,6 @@ void TryLowerer::emitTry(TryStmt *stmt) {
     if (!lowering_.functionFrame().blockIsOpen()) {
       lowering_.functionFrame().popScope();
     } else {
-      // Ended normally: go on as the block or the `catch` did.
       llvm::Value *completion = lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(),
                                                               t->completion, "completion");
       llvm::Value *error =
@@ -244,14 +229,13 @@ void TryLowerer::emitTry(TryStmt *stmt) {
         exitBlocks.push_back(lowering_.functionFrame().newBlock("finally.exit"));
         dispatch->addCase(lowering_.builder_.getInt32(uint32_t(3 + k)), exitBlocks.back());
       }
-      // The error goes on up, its places kept.
       lowering_.functionFrame().switchTo(rethrowBlock);
       lowering_.builder_.CreateStore(error, lowering_.throwLowerer().thrownSlot());
       lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
       if (returns) {
         lowering_.functionFrame().switchTo(returnBlock);
         emitReturnOf(value);
-        lowering_.builder_.CreateUnreachable(); // ends the dead block after it
+        lowering_.builder_.CreateUnreachable();
       }
       for (size_t k = 0; k < exits.size(); ++k) {
         lowering_.functionFrame().switchTo(exitBlocks[k]);
@@ -264,4 +248,4 @@ void TryLowerer::emitTry(TryStmt *stmt) {
   lowering_.functionFrame().switchTo(endBlock);
 }
 
-} // namespace tz
+}

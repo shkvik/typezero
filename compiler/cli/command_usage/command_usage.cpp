@@ -10,4 +10,4 @@ int usage(const llvm::Twine &message, llvm::StringRef synopsis) {
   return kExitUsage;
 }
 
-} // namespace tz::pkg
+}

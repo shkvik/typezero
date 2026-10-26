@@ -14,14 +14,11 @@ namespace tz {
 
 namespace {
 
-// A value C gets as a pointer: what lies in memory as a reference.
 bool isExternalReference(const Type *type) {
   return type->isObject() || type->isArray() || type->isIterator() || type->isJson() ||
          type->isDict() || type->isPromise() || type->isUnknown();
 }
 
-// Whether a value of `type` can cross to the runtime: a number, a boolean,
-// a string, or a reference, which may be undefined.
 bool isExternalValue(const Type *type) {
   if (type->isInteger() || type->isFloat() || type->isBool() || type->isString()) {
     return true;
@@ -33,7 +30,7 @@ bool isExternalValue(const Type *type) {
   return isExternalReference(type);
 }
 
-} // namespace
+}
 
 TzModulesChecker::TzModulesChecker(Checker &checker) : checker_(checker) {}
 
@@ -71,8 +68,6 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
 
 Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
   const Type *from = expr->type;
-  // The parameters the callers of `to` pass, then any number of optional
-  // ones, which get undefined (hono's `app.fetch(request, env?, ctx?)`).
   llvm::ArrayRef<const Type *> mine = from->params(), given = to->params();
   if (mine.size() < given.size() || from->minArgs() > given.size() || from->hasRest() ||
       to->hasRest() || from->hasThis() != to->hasThis() || mine.take_front(given.size()) != given ||
@@ -188,7 +183,6 @@ std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
     auto it = checker_.constPrefixes_.find(name->var);
     return it == checker_.constPrefixes_.end() ? std::string() : it->second;
   }
-  // `new URL(url)` and `new Request(url, init)`: the address they are made of.
   if (auto *made = dyn_cast<NewExpr>(expr);
       made && made->cls && made->cls->library &&
       (made->cls->name == "URL" || made->cls->name == "Request")) {
@@ -213,8 +207,6 @@ void TzModulesChecker::noteHttpsCall(CallExpr *call, const FunctionDecl *fn) {
       checker_.file_->usesTls = true;
     }
   } else if (fn == checker_.libFunctions_.lookup("serve")) {
-    // Options written out have `tls` or not (a spread may bring it); others, whatever their type
-    // allows.
     const Expr *options = call->args[0];
     while (auto *cast = dyn_cast<CastExpr>(options)) {
       options = cast->operand;
@@ -250,4 +242,4 @@ bool TzModulesChecker::rejectAccessorCall(CallExpr *call, MemberExpr *member, Fu
   return true;
 }
 
-} // namespace tz
+}

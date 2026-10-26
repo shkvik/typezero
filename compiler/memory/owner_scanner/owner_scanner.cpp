@@ -60,7 +60,6 @@ OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) cons
         bad_.contains(b.field)) {
       continue;
     }
-    // Every write of f makes a new D in the construction of a C.
     auto writes = writes_.find(b.field);
     if (writes == writes_.end()) {
       continue;
@@ -76,8 +75,6 @@ OwnerScanner::proven(const std::function<bool(const ClassDecl *)> &escapes) cons
     if (!fresh || !made || made->builtin || !made->type->field(b.callback)) {
       continue;
     }
-    // D's construction and methods, up its chain, keep `this` to
-    // themselves.
     bool keeps = true;
     for (const ClassDecl *c = made; c && keeps; c = c->parent) {
       keeps = !escapes(c);
@@ -210,7 +207,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     if (use == Use::Value) {
       valueReads_.insert(member->name);
     }
-    // A method as a value holds its object.
     bool binds = member->method ||
                  (member->type && member->type->nonOptional()->isFunction() && use == Use::Value);
     expr(member->object, binds ? Use::Value : Use::Receiver);
@@ -218,7 +214,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   }
   case Expr::Kind::Index: {
     auto *index = llvm::cast<IndexExpr>(e);
-    // `o[k]` of a key of literals reads a field by its name.
     if (!index->field.empty()) {
       readAll(index->field);
     }
@@ -239,7 +234,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     auto *member = llvm::dyn_cast<MemberExpr>(bare(call->callee));
     if (member && (call->method || call->builtin != Builtin::None || call->superCall ||
                    !call->unionMethods.empty())) {
-      // A method's name: its object is the receiver.
       expr(member->object, Use::Receiver);
     } else {
       expr(call->callee, Use::Callee);
@@ -247,7 +241,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     for (const Expr *arg : call->args) {
       expr(arg, Use::Value);
     }
-    // What gives the values of every field.
     if ((call->builtin == Builtin::ObjectValues || call->builtin == Builtin::ObjectEntries) &&
         !call->args.empty()) {
       readFields(call->args[0]->type);
@@ -260,7 +253,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
     if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target)) {
       wrote(member, assign);
       expr(member->object, Use::Receiver);
-      // A compound assignment reads the field too.
       if (assign->op) {
         nonCallReads_.insert(member->name), valueReads_.insert(member->name);
       }
@@ -294,7 +286,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
       if (!p.method) {
         expr(p.value, Use::Value);
       }
-      // A spread copies the fields.
       if (p.spread && p.value) {
         readFields(p.value->type);
       }
@@ -316,7 +307,6 @@ void OwnerScanner::expr(const Expr *e, Use use) {
   default:
     break;
   }
-  // The rest: what is in them is used as a value.
   visitChildren(e, [&](const Expr *child) { expr(child, Use::Value); });
 }
 
@@ -363,11 +353,8 @@ void OwnerScanner::wrote(const MemberExpr *target, const AssignExpr *assign) {
     made = nullptr;
   }
   writes_[target->name].push_back({construction ? fn->cls : nullptr, made});
-  // `this.f.g = function` of a C, the function capturing its `this`.
   auto *owned = llvm::dyn_cast<MemberExpr>(bare(target->object));
   auto *fe = llvm::dyn_cast<FunctionExpr>(bare(assign->value));
-  // A generator or an async function goes on after its call returns, which
-  // its owner may not see.
   if (!owned || !fe || fe->fn->nonEscaping || fe->fn->isAsync || fe->fn->isGenerator || !fn ||
       !fn->thisVar || !fn->cls) {
     return;
@@ -478,4 +465,4 @@ void OwnerScanner::visitChildren(const Expr *e, const std::function<void(const E
   }
 }
 
-} // namespace tz
+}

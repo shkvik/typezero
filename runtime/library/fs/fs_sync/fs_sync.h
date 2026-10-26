@@ -1,5 +1,3 @@
-// The synchronous functions of node:fs for files: read, write, stat, rename, copy.
-
 #ifndef TZ_FS_SYNC_H
 #define TZ_FS_SYNC_H
 
@@ -27,7 +25,6 @@ enum {
 };
 
 #ifdef _WIN32
-// The fields of Stats as libuv fills them on Windows; 0 or the error.
 DWORD tz_fs_stat_of(const wchar_t *path, int follow, TzStatsParts *st);
 #else
 int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st);

@@ -14,13 +14,12 @@ namespace tz {
 
 namespace {
 
-// Built-in functions called by name; they change no variables and arrays.
 const llvm::StringRef kGlobalFunctions[] = {
     "String",   "Number",  "parseInt",           "parseFloat", "isNaN",
     "isFinite", "Boolean", "encodeURIComponent", "encodeURI",  "decodeURIComponent",
     "decodeURI"};
 
-} // namespace
+}
 
 LoopScanner::LoopScanner(Checker &checker) : checker_(checker) {}
 
@@ -41,8 +40,6 @@ Checker::LoopScan LoopScanner::scanLoop(llvm::ArrayRef<const Stmt *> stmts,
   return scan;
 }
 
-// Whether `expr` names a variable that holds an iterator: iterating it runs
-// the code of a generator or the callbacks of helpers.
 bool LoopScanner::namesIterator(const Expr *expr) const {
   auto *name = dyn_cast<NameExpr>(expr);
   const VarSymbol *var = name ? checker_.scopes().lookup(name->name).var : nullptr;
@@ -50,7 +47,6 @@ bool LoopScanner::namesIterator(const Expr *expr) const {
   return var && var->type && var->type->nonOptional()->isIterator();
 }
 
-// `depth` counts the loops nested inside the scanned one.
 void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned depth) const {
   switch (stmt->kind()) {
   case Stmt::Kind::Block:
@@ -69,8 +65,6 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
     }
     break;
   case Stmt::Kind::Function:
-    // What a function declared in the loop assigns to may change in the
-    // loop, when it is called.
     scanStmt(cast<FunctionDecl>(stmt)->body, scan, depth + 1);
     break;
   case Stmt::Kind::Continue:
@@ -132,7 +126,7 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
         scanExpr(c.test, scan, depth);
       }
     }
-    ++scan.switches; // an unlabeled `break` in it leaves the switch
+    ++scan.switches;
     for (const SwitchCase &c : s->cases) {
       for (const Stmt *body : c.body) {
         scanStmt(body, scan, depth);
@@ -168,7 +162,6 @@ void LoopScanner::scanStmt(const Stmt *stmt, Checker::LoopScan &scan, unsigned d
     break;
   }
   case Stmt::Kind::Break: {
-    // `break label` leaves the loop unless the label is inside it.
     llvm::StringRef label = cast<BreakStmt>(stmt)->label;
     if (label.empty() ? depth == 0 && scan.switches == 0
                       : !llvm::is_contained(scan.innerLabels, label)) {
@@ -193,7 +186,6 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     c.delta = ++c.count == 1 ? delta : 0;
     c.nested |= depth > 0;
   };
-  // A constant step: an int literal from 1 to kMaxLength, or 0.
   auto step = [](const Expr *e) -> int64_t {
     auto *lit = dyn_cast<IntLitExpr>(e);
 
@@ -208,15 +200,13 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     if (auto *index = dyn_cast<IndexExpr>(target)) {
       scanExpr(index->object, scan, depth);
       scanExpr(index->index, scan, depth);
-      scan.growsArrays = true; // `a[a.length] = x` appends
+      scan.growsArrays = true;
       scan.releasesElements = true;
-      // `o[key] = x` assigns the field the key names.
       checker_.keyedFieldChecker().keyNames(
           index->index, [&](llvm::StringRef name) { scan.fieldWrites.insert(name); });
     } else if (auto *member = dyn_cast<MemberExpr>(target)) {
       scanExpr(member->object, scan, depth);
       scan.fieldWrites.insert(member->name);
-      // `a.length = n`; the field of an object changes no array.
       if (member->name == "length") {
         scan.growsArrays = scan.shrinksArrays = true;
         scan.releasesElements = true;
@@ -277,17 +267,17 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     scanExpr(assign->value, scan, depth);
     int64_t delta = 0;
     if (assign->op && (*assign->op == BinaryOp::Add || *assign->op == BinaryOp::Sub)) {
-      delta = step(assign->value); // i += k
+      delta = step(assign->value);
       if (*assign->op == BinaryOp::Sub) {
         delta = -delta;
       }
     } else if (auto *bin = dyn_cast<BinaryExpr>(assign->value); !assign->op && bin) {
       if (bin->op == BinaryOp::Add && isName(bin->lhs, assign->target)) {
-        delta = step(bin->rhs); // i = i + k
+        delta = step(bin->rhs);
       } else if (bin->op == BinaryOp::Add && isName(bin->rhs, assign->target)) {
-        delta = step(bin->lhs); // i = k + i
+        delta = step(bin->lhs);
       } else if (bin->op == BinaryOp::Sub && isName(bin->lhs, assign->target)) {
-        delta = -step(bin->rhs); // i = i - k
+        delta = -step(bin->rhs);
       }
     }
     change(assign->target, delta);
@@ -311,7 +301,6 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
       }
       scanExpr(member->object, scan, depth);
       llvm::StringRef method = member->name;
-      // `o.run()` calls the function in a field: any code.
       if (checker_.file_->fieldNames.contains(method)) {
         scan.callsFunctions = true;
       }
@@ -324,7 +313,6 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
       } else if (method == "fill") {
         scan.releasesElements = true;
       }
-      // The methods that call back, of arrays and of Results.
       static const char *const callbacks[] = {
           "map",     "filter", "forEach", "reduce",   "reduceRight",   "find",      "findIndex",
           "some",    "every",  "flatMap", "findLast", "findLastIndex", "sort",      "mapErr",
@@ -332,7 +320,6 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
       if (llvm::is_contained(callbacks, method) && !call->args.empty()) {
         scan.callsFunctions = true;
       }
-      // An iterator runs a generator's code or the callbacks of helpers.
       if (method == "next" || method == "toArray" ||
           (method == "from" && (checker_.callChecker().isGlobalName(member->object, "Array") ||
                                 checker_.callChecker().isGlobalName(member->object, "Iterator")))) {
@@ -352,7 +339,6 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     for (const Expr *arg : cast<NewExpr>(expr)->args) {
       scanExpr(arg, scan, depth);
     }
-    // A constructor runs code.
     if (cast<NewExpr>(expr)->name != "Array") {
       scan.callsFunctions = true;
     }
@@ -376,26 +362,22 @@ void LoopScanner::scanExpr(const Expr *expr, Checker::LoopScan &scan, unsigned d
     scanExpr(cast<OptionalChainExpr>(expr)->chain, scan, depth);
     break;
   case Expr::Kind::Function:
-    // The same for an arrow created in the loop.
     scanStmt(cast<FunctionExpr>(expr)->fn->body, scan, depth + 1);
     break;
   case Expr::Kind::Yield:
-    // Whoever iterates the generator runs any code before it goes on.
     if (const Expr *value = cast<YieldExpr>(expr)->value) {
       scanExpr(value, scan, depth);
     }
     scan.callsFunctions = true;
     break;
   case Expr::Kind::Await:
-    // So does any other task while this one waits.
     scanExpr(cast<AwaitExpr>(expr)->value, scan, depth);
     scan.callsFunctions = true;
     break;
   case Expr::Kind::Class:
-    // Its static initializers run, and its base may be a call.
     scan.callsFunctions = true;
     break;
   }
 }
 
-} // namespace tz
+}

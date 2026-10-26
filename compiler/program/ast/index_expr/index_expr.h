@@ -6,7 +6,6 @@ namespace tz {
 
 struct EnumDecl;
 
-// `object[index]`
 class IndexExpr : public Expr {
 public:
   IndexExpr(llvm::SMLoc loc, Expr *object, Expr *index)
@@ -15,21 +14,12 @@ public:
 
   Expr *object;
   Expr *index;
-  bool optional = false; // `object?.[index]`
-  // Set by Checker. A read that Checker could not prove in range checks the index
-  // and yields `T | undefined`. A write may append: Checker proved only
-  // `index <= length`.
+  bool optional = false;
   bool mayBeOutOfRange = false;
   bool mayAppend = false;
-  // Set by Checker for `Color[value]`: the name of an enum member.
   EnumDecl *enumDecl = nullptr;
-  // Set by Checker for `o[key]` of an object or a tuple with a constant key: the
-  // field it reads, which Checker reads by name instead.
   llvm::StringRef field;
-  // Set by Checker for `o[k]` of an object whose key is of a union of string
-  // literals (`Record<"up" | "down", int>`), each naming a field of one
-  // type: the field is chosen when the program runs.
   bool keyed = false;
 };
 
-} // namespace tz
+}

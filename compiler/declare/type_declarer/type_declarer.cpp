@@ -42,7 +42,7 @@ std::string formatNumber(double value) {
   return text;
 }
 
-} // namespace
+}
 
 TypeDeclarer::TypeDeclarer(Checker &checker) : checker_(checker) {}
 
@@ -53,11 +53,9 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
     if (auto *alias = dyn_cast<TypeAliasDecl>(stmt)) {
       name = alias->name;
       if (Type::fromName(name) || name == "Array") {
-        // `type int = number` tells tsc what an int is; here it is built in.
         bool integer = name == "int" || name == "long" || name == "double";
         bool forTsc =
             integer && alias->type.kind == TypeRef::Kind::Name && alias->type.name == "number";
-        // So is the union tsc needs for Json (docs/modules.md, section 5).
         forTsc |= name == "Json" && alias->type.kind == TypeRef::Kind::Union;
         if (!forTsc) {
           checker_.diags_.error(
@@ -72,7 +70,6 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
       name = decl->name;
       checker_.scopes().declare(name, decl->loc(), {nullptr, nullptr, decl});
     } else if (auto *cls = dyn_cast<ClassDecl>(stmt); cls && checker_.scopes_.size() == 1) {
-      // Only at the top level of a file; elsewhere checkClassStmt reports it.
       name = cls->name;
       checker_.classDeclarer().declareClass(cls);
     } else {
@@ -93,11 +90,7 @@ std::vector<Stmt *> TypeDeclarer::declareTypes(llvm::ArrayRef<Stmt *> stmts, boo
   return declared;
 }
 
-// Resolved in the scope that declares them, so that the names they use mean
-// what they mean there. A generic alias names a type for each list of type
-// arguments; here it is checked once with its type parameters.
 void TypeDeclarer::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
-  // An alias of `typeof x` waits for x, until a type uses it.
   std::function<bool(const TypeRef &)> typeOf = [&](const TypeRef &ref) {
     return ref.kind == TypeRef::Kind::TypeOf || llvm::any_of(ref.args, typeOf);
   };
@@ -111,7 +104,6 @@ void TypeDeclarer::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
     } else if (alias) {
       resolveAlias(alias);
     } else if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
-      // A class whose base is a value is resolved where it is declared.
       if (!cls->baseExpr) {
         checker_.classDeclarer().resolveClass(cls);
       }
@@ -128,24 +120,17 @@ Stmt *TypeDeclarer::lookupType(llvm::StringRef name) const {
       return found->second;
     }
   }
-  // The utilities of TypeScript that are mapped types (see declarePrelude).
   if (TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name)) {
     return alias;
   }
 
-  // Error and its kinds (see Checker::lookup).
   return checker_.throwChecker().errorKindClass(name);
 }
 
-// An object type may refer to itself through its fields (`next?: Node`,
-// `children: Tree[]`): those get a placeholder for it, which becomes the type
-// once its fields are known. Such a type stays tied to its declaration; any
-// other object type is the same as every other one with the same fields.
 const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   if (alias->resolved) {
     return alias->resolved;
   }
-  // A type of another file, imported before it is resolved: in its own file.
   if (Module *home = checker_.declModules_.lookup(alias);
       home && home != checker_.module_ && checker_.scopes_.size() == 1) {
     Module *here = checker_.module_;
@@ -167,7 +152,6 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   const Type *type;
   if (alias->type.kind == TypeRef::Kind::Object) {
     alias->self = Type::declareObject(alias->name);
-    // `interface User extends Named`: the fields of Named come first.
     std::vector<const Type *> bases;
     std::vector<Overload> overloads;
     std::vector<Field> fields =
@@ -185,8 +169,6 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
       }
     }
   } else if (alias->type.kind == TypeRef::Kind::Union) {
-    // A union whose members refer back to it in their fields, as the nodes
-    // of a tree do: the fields get it as declared, with its members after.
     alias->self = Type::declareUnion(alias->name);
     type = checker_.typeResolver().resolveTypeInner(alias->type);
     if (alias->recursive && !type->isError()) {
@@ -232,7 +214,7 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   }
   decl->resolving = true;
   double next = 0;
-  bool counting = true; // the next member without a value gets `next`
+  bool counting = true;
   bool numbers = false, strings = false;
   for (size_t i = 0; i < decl->members.size(); ++i) {
     EnumMember &m = decl->members[i];
@@ -287,7 +269,6 @@ void TypeDeclarer::resolveEnum(EnumDecl *decl) {
   decl->resolved = true;
 }
 
-// `E.X` is the member's value, as a literal.
 Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Type *expected) {
   resolveEnum(decl);
   const EnumMember *m = decl->find(member->name);
@@ -312,8 +293,6 @@ Expr *TypeDeclarer::checkEnumMember(EnumDecl *decl, MemberExpr *member, const Ty
   return checker_.exprChecker().checkExpr(lit, expected);
 }
 
-// `E[value]`, the name of the member with that value, as in TypeScript. For
-// a value no member has, JavaScript gives undefined.
 Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
   resolveEnum(decl);
   index->type = Type::error();
@@ -335,8 +314,6 @@ Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
     return index;
   }
   index->index = checker_.typeRelations().convert(index->index, Type::longTy());
-  // A constant: the name is known now. When several members have the value,
-  // the last one names it.
   if (std::optional<Linear> value = checker_.indexProofs().linear(index->index);
       value && value->term.isZero()) {
     const EnumMember *found = nullptr;
@@ -360,4 +337,4 @@ Expr *TypeDeclarer::checkEnumIndex(EnumDecl *decl, IndexExpr *index) {
   return index;
 }
 
-} // namespace tz
+}

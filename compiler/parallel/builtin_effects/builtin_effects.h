@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// What the calls of built-ins read and write, and the callbacks they run.
 class BuiltinEffects {
 public:
   explicit BuiltinEffects(Analysis &analysis);
@@ -15,4 +14,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

@@ -1,33 +1,3 @@
-// TCP sockets (docs/net.md, step 1): listening, accepting, connecting,
-// reading and writing on the completion port of the loop (io.c), and the
-// names of hosts. What the program calls is in library/ (`__tz_net_*`); HTTP
-// is in http.c.
-//
-// On Windows every socket is overlapped and tied to the completion port of
-// the loop, with this file's net_completed as the key: AcceptEx, ConnectEx,
-// WSARecv and WSASend are asked of the system, which posts each when it is
-// done, and the poll phase hands it back (tz_io_due) as the callbacks of
-// node are. An operation that is done at once is not posted
-// (FILE_SKIP_COMPLETION_PORT_ON_SUCCESS), as libuv asks: its result is used
-// right away. Names of hosts are looked up by GetAddrInfoExW, which calls
-// back on a thread of the system; that only posts to the port.
-//
-// In the parallel runtime the connections a server of http accepts are tied
-// to the port of the pool instead (parallel.c): its threads take what comes
-// for them (net_completed_pooled) and run the piece that waits for it. The
-// state of a connection changes under its lock, as its task, those threads
-// and the main thread may each touch it; a thread that holds the lock never
-// waits for its turn.
-//
-// The objects the program holds are a connection (NetConn) and a listener
-// (NetListener), objects of the language without fields: the program frees
-// them by its counts as any object, which closes the socket. An operation in
-// flight keeps the memory until the system is done with it.
-//
-// TODO(linux): epoll for the sockets, and a resolver of our own
-// (/etc/resolv.conf, /etc/hosts, docs/net.md, section 5): a static program
-// has no libc resolver to rely on.
-
 #include "runtime/library/net/net/net.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/async/async.h"
@@ -51,7 +21,6 @@
 
 extern TzErrorInfo tz_error_info;
 
-// None of the state is static: see the rules in tzrt.h.
 TzMaker tz_net_make;
 int32_t tz_net_started;
 #ifdef _WIN32
@@ -63,11 +32,6 @@ LPFN_GETACCEPTEXSOCKADDRS tz_net_accept_addresses;
 #define NET_INPUT 16384
 #define NET_RAW_MAX (256 * 1024)
 
-//===----------------------------------------------------------------------===//
-// Errors
-//===----------------------------------------------------------------------===//
-
-// libuv's codes, texts and numbers on Windows.
 static const NetError kNetErrors[] = {
     {"UNKNOWN", "unknown error", -4094},
     {"ECONNREFUSED", "connection refused", -4078},
@@ -114,7 +78,6 @@ enum {
   NE_EAI_AGAIN,
 };
 
-// The errors of names, which are no errors of sockets.
 #define NET_NOT_FOUND (-3008)
 #define NET_TRY_AGAIN (-3001)
 
@@ -225,7 +188,6 @@ void *net_system_error(TzMaker make, int32_t error, const char *syscall, const c
 }
 
 void *net_error(int32_t kind, const char *message, void *cause) {
-  // The error takes the message over.
   TzStr text = net_utf8(message);
   void *error = tz_error_info.make(kind, text.obj, text.meta);
   if (cause) {
@@ -238,7 +200,6 @@ void *net_error(int32_t kind, const char *message, void *cause) {
 TzStr net_utf8(const char *message) {
   TzBuf b;
   tz_buf_init(&b);
-  // UTF-8 to UTF-16: the messages are ASCII but for names of hosts.
   const unsigned char *s = (const unsigned char *)message;
   for (size_t i = 0; s[i];) {
     uint32_t c = s[i];
@@ -261,10 +222,6 @@ TzStr net_utf8(const char *message) {
 
   return tz_buf_take(&b);
 }
-
-//===----------------------------------------------------------------------===//
-// Promises and bytes
-//===----------------------------------------------------------------------===//
 
 void net_fulfill(TzPromise **p, const void *value, size_t size) {
   TzPromise *promise = *p;
@@ -303,9 +260,6 @@ double net_now(void) {
 #endif
 }
 
-// What a call of TLS (`__tz_tls_*`) is in a program that tz built without
-// it (Lowering::emitExternal): its fetch calls name only http:// URLs, which
-// redirected it to https://. Rejects `p`, or throws without one.
 void tz_net_no_tls(TzPromise *p, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -323,10 +277,6 @@ void tz_net_no_tls(TzPromise *p, TzMaker make) {
 
 #ifdef _WIN32
 
-//===----------------------------------------------------------------------===//
-// Sockets on Windows
-//===----------------------------------------------------------------------===//
-
 static void conn_drop(void *object);
 static void listener_drop(void *object);
 static const TzLayout conn_layout = {conn_drop, NULL, 0, 0, "Socket", 6, 0};
@@ -343,7 +293,6 @@ static void start(void) {
   tz_net_started = 1;
 }
 
-// The functions of Winsock that are reached through a socket.
 static void load_extensions(SOCKET s) {
   if (tz_net_accept_ex) {
     return;
@@ -359,17 +308,13 @@ static void load_extensions(SOCKET s) {
            &tz_net_accept_addresses, sizeof tz_net_accept_addresses, &bytes, NULL, NULL);
 }
 
-// What the port gives back for a socket: the operation, which the poll
-// phase then hands back.
 static void net_completed(OVERLAPPED_ENTRY *entry) {
   NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
   op->bytes = entry->dwNumberOfBytesTransferred;
-  op->error = entry->Internal != 0 ? -1 : 0; // the error itself comes later
+  op->error = entry->Internal != 0 ? -1 : 0;
   tz_io_due(&op->work);
 }
 
-// Ties a new socket to a port, so that what it asks for comes back there,
-// to `taken`.
 static int attach_to(SOCKET s, HANDLE port, void (*taken)(OVERLAPPED_ENTRY *)) {
   if (!CreateIoCompletionPort((HANDLE)s, port, (ULONG_PTR)taken, 0)) {
     return 0;
@@ -380,11 +325,8 @@ static int attach_to(SOCKET s, HANDLE port, void (*taken)(OVERLAPPED_ENTRY *)) {
   return 1;
 }
 
-// To the port of the loop.
 static int attach(SOCKET s) { return attach_to(s, (HANDLE)tz_io_port_handle(), net_completed); }
 
-// Prepares an operation; once the system says it is pending, op_wait makes
-// the loop wait for it (unless `unref`).
 static void op_begin(NetOp *op, void (*done)(TzWork *), int unref) {
   memset(&op->ov, 0, sizeof op->ov);
   op->work.done = done;
@@ -398,7 +340,6 @@ static void op_begin(NetOp *op, void (*done)(TzWork *), int unref) {
 
 static void op_wait(NetOp *op) { tz_io_begin(&op->work); }
 
-// The error of an operation the port gave back as failed.
 static int32_t op_error(NetOp *op, SOCKET s, int closed) {
   if (!op->error) {
     return 0;
@@ -414,10 +355,6 @@ static int32_t op_error(NetOp *op, SOCKET s, int closed) {
 
   return error ? error : WSAECONNRESET;
 }
-
-//===----------------------------------------------------------------------===//
-// Connections
-//===----------------------------------------------------------------------===//
 
 static NetConn *conn_new(SOCKET s) {
   NetConn *c = (NetConn *)tz_obj_alloc(sizeof(NetConn));
@@ -454,11 +391,9 @@ static void conn_free(NetConn *c) {
   tz_obj_free(c);
 }
 
-// Whether output waits to be written: the program's, or, with TLS, what is
-// encrypted already.
 static int has_output(const NetConn *c) { return c->out_len || c->sealed_len; }
 
-void tz_http_release(NetConn *c); // http.c: what HTTP holds
+void tz_http_release(NetConn *c);
 
 static void close_socket(NetConn *c) {
   if (c->closed) {
@@ -468,14 +403,12 @@ static void close_socket(NetConn *c) {
   closesocket(c->s);
 }
 
-// Frees an orphan once no operation waits.
 static void conn_settle(NetConn *c) {
   if (c->orphan && c->ops == 0) {
     conn_free(c);
   }
 }
 
-// The same, for one locked: unlocked first.
 static void conn_unlock_settle(NetConn *c) {
   int gone = c->orphan && c->ops == 0;
   conn_unlock(c);
@@ -485,7 +418,6 @@ static void conn_unlock_settle(NetConn *c) {
 }
 
 static void conn_drop(void *object) {
-  // It leaves lists of the runtime: in node's order (parallel.c).
   TZ_ORDERED();
   NetConn *c = (NetConn *)object;
   conn_lock(c);
@@ -496,7 +428,6 @@ static void conn_drop(void *object) {
     tz_obj_release((TzObject *)p);
   }
   c->orphan = 1;
-  // What is queued is still written, as a socket of node is ended.
   if (c->closing && (c->writing || has_output(c))) {
     if (!c->writing) {
       net_flush(c);
@@ -510,7 +441,6 @@ static void conn_drop(void *object) {
 static void read_done(TzWork *w);
 
 void net_input_room(NetConn *c, uint32_t room) {
-  // What is unused moves to the start; then the buffer grows.
   if (c->in_start == c->in_end) {
     c->in_start = c->in_end = 0;
   }
@@ -537,9 +467,6 @@ void net_input_room(NetConn *c, uint32_t room) {
   }
 }
 
-// Room to read ciphertext into: a record of 16 KB at first, and twice as
-// much after each read that filled it, up to NET_RAW_MAX, as a large body
-// streams in.
 static void raw_room(NetConn *c) {
   if (c->raw_start == c->raw_end) {
     c->raw_start = c->raw_end = 0;
@@ -568,8 +495,6 @@ static void raw_room(NetConn *c) {
   c->raw_end = kept;
 }
 
-// Ciphertext came: `got` bytes at the end of `raw`, none at the end of the
-// socket.
 static void raw_got(NetConn *c, uint32_t got) {
   if (got == 0) {
     c->raw_eof = 1;
@@ -589,8 +514,6 @@ void net_read(NetConn *c) {
       return;
     }
     if (c->tls) {
-      // What was read already may be what the reader waits for, once it is
-      // decrypted; what TLS answers (its handshake) goes out first.
       int ready = c->tls_ops->open(c);
       net_flush(c);
       if (ready || c->error) {
@@ -621,7 +544,6 @@ void net_read(NetConn *c) {
       op_wait(&c->rop);
       return;
     }
-    // Done at once: the port gets nothing.
     --c->ops;
     c->reading = 0;
     if (rc == SOCKET_ERROR) {
@@ -652,8 +574,6 @@ static void read_done(TzWork *w) {
     return;
   }
   int32_t error = op_error(&c->rop, c->s, c->closed);
-  // Closed by this side meanwhile (server.stop() ends the connections that
-  // wait): what came no longer counts, and the reader learns it ended.
   if (!error && c->closed) {
     error = ERROR_OPERATION_ABORTED;
   }
@@ -669,9 +589,7 @@ static void read_done(TzWork *w) {
     }
     c->in_end += c->rop.bytes;
   }
-  tz_rc_inc(&c->rc); // what runs may let go of it
-  // Ciphertext is decrypted first, and more read until the reader has
-  // something.
+  tz_rc_inc(&c->rc);
   if (c->tls && !c->error) {
     net_read(c);
   } else {
@@ -733,7 +651,6 @@ size_t net_pending_output(const NetConn *c) {
 
 static void write_done(TzWork *w);
 
-// The output below the high-water mark: what waits for that goes on.
 static void drained(NetConn *c) {
   if (c->drain && (net_pending_output(c) < NET_HIGH_WATER_MARK || c->closed || c->error)) {
     net_fulfill(&c->drain, NULL, 0);
@@ -749,7 +666,6 @@ static void finish_close(NetConn *c) {
 
 void net_flush(NetConn *c) {
   while (!c->writing && !c->closed && !c->error) {
-    // With TLS what goes out is the ciphertext of what the program wrote.
     if (c->tls) {
       c->tls_ops->seal(c);
       if (c->error) {
@@ -762,7 +678,6 @@ void net_flush(NetConn *c) {
     if (!*queued) {
       break;
     }
-    // The queue goes out as it is; the next fills the other buffer.
     uint8_t *data = *queue;
     uint32_t cap = *capacity;
     *queue = c->flight;
@@ -826,7 +741,6 @@ static void write_done(TzWork *w) {
 }
 
 #if TZ_PARALLEL
-// parallel.c, async.c, io.c: see net_completed_pooled.
 void *tz_pool_port_handle(void);
 void tz_trigger_hold(void);
 int32_t tz_trigger_take(TzPromise **out);
@@ -835,12 +749,6 @@ void tz_ahead_forward(TzPromise *p);
 void tz_io_due_remote(TzWork *w);
 void tz_io_done_remote(TzWork *w);
 
-// What the port of the pool gives back for a connection of a server, on a
-// thread of the pool (parallel.c). What touches only the connection is done
-// here: the head of the next request read, or more of the output written;
-// and the piece that waits for the request runs here too, ahead of its
-// event, when it may. The rest (an error, the end, a body, a connection the
-// program let go of) goes to the main thread, as if it came there.
 static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
   NetOp *op = CONTAINING_RECORD(entry->lpOverlapped, NetOp, ov);
   op->bytes = entry->dwNumberOfBytesTransferred;
@@ -855,7 +763,6 @@ static void net_completed_pooled(OVERLAPPED_ENTRY *entry) {
     tz_io_due_remote(&op->work);
     return;
   }
-  // The promise it settles keeps its reactions, for the piece to run here.
   tz_trigger_hold();
   if (reading) {
     --c->ops;
@@ -887,7 +794,6 @@ void net_close(NetConn *c) {
     return;
   }
   c->closing = 1;
-  // TLS says it ends, after what was written.
   if (c->tls) {
     c->tls_ops->shutdown(c);
   }
@@ -904,7 +810,6 @@ void net_abort(NetConn *c) {
   close_socket(c);
 }
 
-// `__tz_net_close(c)`: ends the connection once what is queued is written.
 void tz_net_close(void *conn, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -914,11 +819,6 @@ void tz_net_close(void *conn, TzMaker make) {
   conn_unlock(c);
 }
 
-//===----------------------------------------------------------------------===//
-// Addresses
-//===----------------------------------------------------------------------===//
-
-// The text of an address, as node shows it: "127.0.0.1", "::1".
 static void address_text(const SOCKADDR *sa, char *out, size_t size) {
   out[0] = 0;
   if (sa->sa_family == AF_INET) {
@@ -933,9 +833,6 @@ static int address_port(const SOCKADDR *sa) {
                                         : ((const SOCKADDR_IN6 *)sa)->sin6_port);
 }
 
-// The ASCII of a string the program gave (a name of a host, an address);
-// false if it holds other characters, which no such name has after the URL
-// parser made it ASCII.
 static int ascii_of(void *obj, uint64_t meta, char *out, size_t size) {
   TzStr s = {obj, meta};
   uint32_t length;
@@ -956,7 +853,6 @@ static int ascii_of(void *obj, uint64_t meta, char *out, size_t size) {
   return 1;
 }
 
-// An address written as one: "127.0.0.1", "::1", "[::1]".
 static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int *length) {
   memset(out, 0, sizeof *out);
   char text[256];
@@ -988,10 +884,6 @@ static int parse_literal(const char *host, int port, SOCKADDR_STORAGE *out, int 
   return 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Listening
-//===----------------------------------------------------------------------===//
-
 static void listener_free(NetListener *l) {
   for (NetConn *c = l->conns; c; c = c->next) {
     c->listener = NULL;
@@ -1015,7 +907,6 @@ static void listener_close(NetListener *l) {
 }
 
 static void listener_drop(void *object) {
-  // It leaves lists of the runtime: in node's order (parallel.c).
   TZ_ORDERED();
   NetListener *l = (NetListener *)object;
   listener_close(l);
@@ -1030,9 +921,6 @@ static void listener_drop(void *object) {
   }
 }
 
-// `__tz_net_listen(host, port, maxBody)`: a listener on the address, or a
-// SystemError as node's: "listen EADDRINUSE: address already in use
-// 0.0.0.0:3000".
 void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
                     TzMaker make) {
   start();
@@ -1045,7 +933,6 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   SOCKADDR_STORAGE address;
   int length = 0;
   if (!parse_literal(host, port, &address, &length)) {
-    // A name: its first address, found now, as node does before it listens.
     ADDRINFOW hints, *found = NULL;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -1057,7 +944,6 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
       tz_thrown = net_system_error(make, NET_NOT_FOUND, "getaddrinfo", host, 0);
       return NULL;
     }
-    // IPv4 first, as for connections (see sort_addresses).
     ADDRINFOW *pick = found;
     for (ADDRINFOW *a = found; a; a = a->ai_next) {
       if (a->ai_family == AF_INET) {
@@ -1067,7 +953,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
     }
     memcpy(&address, pick->ai_addr, pick->ai_addrlen);
     length = (int)pick->ai_addrlen;
-    ((SOCKADDR_IN *)&address)->sin_port = htons((u_short)port); // same place in v6
+    ((SOCKADDR_IN *)&address)->sin_port = htons((u_short)port);
     FreeAddrInfoW(found);
   }
   char where[300];
@@ -1082,11 +968,9 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
     return NULL;
   }
   if (family == AF_INET6) {
-    // "::" takes IPv4 too, as in node.
     DWORD no = 0;
     setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&no, sizeof no);
   }
-  // Another program may not take the port while this one has it.
   BOOL yes = TRUE;
   setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&yes, sizeof yes);
   if (bind(s, (SOCKADDR *)&address, length) == SOCKET_ERROR || listen(s, 511) == SOCKET_ERROR ||
@@ -1123,7 +1007,6 @@ int32_t tz_net_listener_port(void *listener, TzMaker make) {
 static void accept_done(TzWork *w);
 static void accepted(NetListener *l, int32_t error);
 
-// Accepts with AcceptEx into a new socket.
 static void accept_next(NetListener *l) {
   for (;;) {
     if (l->closed) {
@@ -1151,7 +1034,6 @@ static void accept_next(NetListener *l) {
     }
     --l->ops;
     if (!ok) {
-      // The other side gave up meanwhile (WSAECONNRESET): the next one.
       closesocket(l->accepting);
       l->accepting = INVALID_SOCKET;
       continue;
@@ -1167,7 +1049,6 @@ static void accept_done(TzWork *w) {
   accepted(l, op_error(&l->aop, l->s, l->closed));
 }
 
-// AcceptEx gave a connection, or failed.
 static void accepted(NetListener *l, int32_t error) {
   SOCKET s = l->accepting;
   l->accepting = INVALID_SOCKET;
@@ -1187,12 +1068,10 @@ static void accepted(NetListener *l, int32_t error) {
       }
       return;
     }
-    accept_next(l); // the other side gave up meanwhile
+    accept_next(l);
     return;
   }
   setsockopt(s, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (const char *)&l->s, sizeof l->s);
-  // With the parallel runtime, what comes for a connection of http goes to
-  // the threads of the pool (net_completed_pooled).
   void *pool = NULL;
 #if TZ_PARALLEL
   if (!l->tls) {
@@ -1221,32 +1100,26 @@ static void accepted(NetListener *l, int32_t error) {
   }
   l->conns = c;
   c->http.max_body = l->max_body;
-  // A server of https: the handshake comes with the first read.
   if (l->tls) {
     l->tls_accept(l, c);
   }
   net_fulfill(&l->pending, &c, sizeof c);
 }
 
-// `__tz_net_accept(listener)`: the next connection, or undefined once the
-// listener is closed.
 void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   TZ_ORDERED();
   NetListener *l = (NetListener *)listener;
   tz_net_make = make;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   l->pending = p;
   accept_next(l);
 }
 
-// `__tz_net_closeListener(listener)`: stops accepting; what waits for the
-// next connection gets undefined.
 void tz_net_close_listener(void *listener, TzMaker make) {
   TZ_ORDERED();
   (void)make;
   NetListener *l = (NetListener *)listener;
   listener_close(l);
-  // The server stops: its connections end after the requests being handled.
   for (NetConn *c = l->conns; c; c = c->next) {
     conn_lock(c);
     c->http.ending = 1;
@@ -1255,9 +1128,6 @@ void tz_net_close_listener(void *listener, TzMaker make) {
   }
 }
 
-// `__tz_net_sweep(listener, idle)`: closes the connections that wait for a
-// request longer than `idle` ms, as node's keepAliveTimeout; with `idle`
-// zero, all of them that wait (server.stop()). Gives how many are left.
 int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -1282,14 +1152,8 @@ int32_t tz_net_sweep(void *listener, double idle, TzMaker make) {
   return left;
 }
 
-//===----------------------------------------------------------------------===//
-// Connecting
-//===----------------------------------------------------------------------===//
-
-// A connection being made: the names of the host looked up, then each
-// address tried in turn.
 typedef struct Connect {
-  NetOp op; // first: the name looked up (posted by hand), then ConnectEx
+  NetOp op;
   TzPromise *promise;
   TzMaker make;
   char host[256];
@@ -1298,17 +1162,14 @@ typedef struct Connect {
   int lengths[16];
   int count, next;
   NetConn *conn;
-  // The first failure, which the error shows (of the first address, as
-  // node shows it), and the address it was of.
   int32_t error;
   int failed_at;
   TzSignal *signal;
   TzAbortListener abort;
-  // GetAddrInfoExW
   ADDRINFOEXW *found;
   HANDLE cancel;
   int looking;
-  int done; // the promise settled; free once nothing waits
+  int done;
 } Connect;
 
 static void connect_free(Connect *r) {
@@ -1345,8 +1206,6 @@ static void connect_fail(Connect *r, int32_t error) {
 static void connect_done(TzWork *w);
 static void connected(Connect *r, int32_t error);
 
-// IPv4 first, then IPv6, each in the order given: a server on "0.0.0.0" is
-// reached through "localhost", which names "::1" first on Windows.
 static void sort_addresses(Connect *r) {
   SOCKADDR_STORAGE sorted[16];
   int lengths[16], n = 0;
@@ -1362,7 +1221,6 @@ static void sort_addresses(Connect *r) {
   memcpy(r->lengths, lengths, sizeof(int) * (size_t)n);
 }
 
-// The attempt at the address just tried failed.
 static void attempt_failed(Connect *r, int32_t error) {
   if (r->error) {
     return;
@@ -1371,8 +1229,6 @@ static void attempt_failed(Connect *r, int32_t error) {
   r->failed_at = r->next - 1;
 }
 
-// Whether an address is of this machine, where a refused connection need
-// not be tried again: Windows tries a SYN three times, two seconds in all.
 static int is_loopback(const SOCKADDR_STORAGE *a) {
   if (a->ss_family == AF_INET) {
     return ((const uint8_t *)&((const SOCKADDR_IN *)a)->sin_addr)[0] == 127;
@@ -1381,7 +1237,6 @@ static int is_loopback(const SOCKADDR_STORAGE *a) {
   return IN6_IS_ADDR_LOOPBACK(&((const SOCKADDR_IN6 *)a)->sin6_addr);
 }
 
-// Tries the next address.
 static void connect_next(Connect *r) {
   while (r->next < r->count) {
     SOCKADDR_STORAGE *address = &r->addresses[r->next];
@@ -1399,7 +1254,6 @@ static void connect_next(Connect *r) {
       continue;
     }
     if (is_loopback(address)) {
-      // As libuv does, so that a port nothing listens on fails at once.
       TCP_INITIAL_RTO_PARAMETERS rto;
       memset(&rto, 0, sizeof rto);
       rto.Rtt = TCP_INITIAL_RTO_UNSPECIFIED_RTT;
@@ -1407,7 +1261,6 @@ static void connect_next(Connect *r) {
       DWORD bytes;
       WSAIoctl(s, SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &bytes, NULL, NULL);
     }
-    // ConnectEx wants a bound socket.
     SOCKADDR_STORAGE any;
     memset(&any, 0, sizeof any);
     any.ss_family = address->ss_family;
@@ -1443,10 +1296,9 @@ static void connect_done(TzWork *w) {
   connected(r, op_error(&r->op, r->conn->s, r->conn->closed));
 }
 
-// ConnectEx made the connection, or failed.
 static void connected(Connect *r, int32_t error) {
   NetConn *c = r->conn;
-  if (r->done) { // aborted meanwhile
+  if (r->done) {
     connect_free(r);
     return;
   }
@@ -1461,7 +1313,6 @@ static void connected(Connect *r, int32_t error) {
   connect_free(r);
 }
 
-// The names of the host came (posted to the port by found_names).
 static void names_done(TzWork *w) {
   Connect *r = (Connect *)CONTAINING_RECORD(w, NetOp, work);
   r->looking = 0;
@@ -1501,7 +1352,6 @@ static void names_posted(OVERLAPPED_ENTRY *entry) {
   tz_io_due(&op->work);
 }
 
-// On a thread of the system: only posts the result to the port.
 static void CALLBACK found_names(DWORD error, DWORD bytes, LPWSAOVERLAPPED overlapped) {
   (void)bytes;
   NetOp *op = CONTAINING_RECORD(overlapped, NetOp, ov);
@@ -1511,8 +1361,6 @@ static void CALLBACK found_names(DWORD error, DWORD bytes, LPWSAOVERLAPPED overl
 
 static void abort_connect(TzAbortListener *l) {
   Connect *r = CONTAINING_RECORD(l, Connect, abort);
-  // The promise is rejected with the reason, as fetch is; what waits for the
-  // system ends when it is done.
   net_reject(&r->promise, tz_signal_reason(r->signal));
   r->done = 1;
   if (r->looking && r->cancel) {
@@ -1523,9 +1371,6 @@ static void abort_connect(TzAbortListener *l) {
   }
 }
 
-// `__tz_net_connect(host, port, signal)`: a connection to the host, or a
-// SystemError as node's: "connect ECONNREFUSED 127.0.0.1:1",
-// "getaddrinfo ENOTFOUND example.invalid".
 void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t port, void *signal,
                     TzMaker make) {
   TZ_ORDERED();
@@ -1533,7 +1378,7 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
   tz_net_make = make;
   Connect *r = (Connect *)tz_alloc(sizeof(Connect));
   memset(r, 0, sizeof *r);
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   r->promise = p;
   r->make = make;
   r->port = port;
@@ -1548,7 +1393,7 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
       connect_free(r);
       return;
     }
-    tz_ref_retain(signal); // a member of a group (signal.c)
+    tz_ref_retain(signal);
     r->signal = (TzSignal *)signal;
     r->abort.run = abort_connect;
     tz_signal_listen(r->signal, &r->abort);
@@ -1560,7 +1405,6 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
     connect_next(r);
     return;
   }
-  // "localhost" is the machine itself, without asking (RFC 6761).
   if (_stricmp(r->host, "localhost") == 0) {
     parse_literal("127.0.0.1", port, &r->addresses[0], &r->lengths[0]);
     parse_literal("::1", port, &r->addresses[1], &r->lengths[1]);
@@ -1583,18 +1427,12 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
     op_wait(&r->op);
     return;
   }
-  // Done at once: as if it came back.
   r->op.error = rc;
   names_done(&r->op.work);
 }
 
-#else // !_WIN32
+#else
 
-//===----------------------------------------------------------------------===//
-// Other systems: not yet
-//===----------------------------------------------------------------------===//
-
-// TODO(linux): sockets on epoll and a resolver of our own (docs/net.md).
 static void unsupported(void) {
   tz_throw(TZ_ERROR, "networking is not supported on this system yet (docs/net.md, step 1)");
 }

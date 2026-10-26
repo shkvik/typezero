@@ -17,16 +17,10 @@ namespace tz {
 
 namespace {
 
-// How deep instances of generic aliases may nest, each needed by the one
-// that resolves it, as in TypeScript: an alias that refers to itself with
-// other arguments, or a conditional type whose branch does. A conditional
-// type that ends in another instance, a tail call, goes on in a loop
-// instead, up to kMaxTailCalls times (TypeScript's limits too).
 constexpr unsigned kMaxAliasDepth = 50;
 
 constexpr unsigned kMaxTailCalls = 1000;
 
-// "int, string"
 std::string typeList(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
@@ -36,7 +30,7 @@ std::string typeList(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-} // namespace
+}
 
 AliasInstantiator::AliasInstantiator(Checker &checker) : checker_(checker) {}
 
@@ -56,16 +50,13 @@ std::vector<const Type *> AliasInstantiator::aliasTypeParams(TypeAliasDecl *alia
 
 const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
                                                 std::vector<const Type *> args, llvm::SMLoc loc) {
-  // The instances that tail calls went through: the type is theirs too.
   std::vector<Checker::AliasInstance *> chain;
-  // Where the program needs the outermost instance, for an endless one.
   if (aliasDepth_ == 0) {
     aliasUse_ = loc;
   }
   const Type *type = nullptr;
   for (unsigned calls = 0; !type; ++calls) {
     aliasTypeParams(alias);
-    // Copied: instantiating others below may move the map's entries.
     std::vector<const Type *> params = aliasParams_[alias].first,
                               defaults = aliasParams_[alias].second;
     if (args.size() > params.size()) {
@@ -102,14 +93,12 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       break;
     }
 
-    // A std::map: the entry stays where it is while others are added.
     Checker::AliasInstance &entry = aliasInstances_[{alias, args}];
     if (entry.type) {
       type = entry.type;
       break;
     }
     if (entry.resolving) {
-      // An object type may refer to itself through its fields.
       if (entry.self) {
         entry.recursive = true;
         type = entry.self;
@@ -146,14 +135,10 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       type = Type::error();
       break;
     }
-    // `Pair<int>` in messages.
     std::string display = alias->name.str() + "<" + typeList(args) + ">";
     entry.resolving = true;
     chain.push_back(&entry);
     ++aliasDepth_;
-    // The names it uses mean what they mean in its own file, which may be
-    // another one: `interface Source<R> { pull?: (c: Controller<R>) => void }`
-    // of a file that imports only Source.
     std::vector<llvm::StringMap<Stmt *>> outerTypes;
     Module *home = checker_.declModules_.lookup(alias);
     bool moved = home && home != checker_.module_;
@@ -165,8 +150,6 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
     checker_.typeParams().bindTypeParams(alias->typeParams, args);
     if (alias->type.kind == TypeRef::Kind::Object) {
       entry.self = Type::declareObject(display);
-      // A generic interface, `interface Repo<T> extends Named { ... }`, as
-      // resolveAlias makes one.
       std::vector<const Type *> bases;
       std::vector<Overload> overloads;
       std::vector<Field> fields =
@@ -193,7 +176,6 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
       checker_.typeScopes_ = std::move(outerTypes);
     }
     --aliasDepth_;
-    // The conditional type ended in another instance: that one next.
     if (!type && checker_.tailCall_) {
       alias = checker_.tailCall_->alias;
       args = std::move(checker_.tailCall_->args);
@@ -216,4 +198,4 @@ const Type *AliasInstantiator::instantiateAlias(TypeAliasDecl *alias,
   return type;
 }
 
-} // namespace tz
+}

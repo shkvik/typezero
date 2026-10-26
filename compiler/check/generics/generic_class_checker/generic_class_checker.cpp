@@ -28,7 +28,6 @@ namespace tz {
 
 namespace {
 
-// "int, string"
 std::string typeNames(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
@@ -38,7 +37,6 @@ std::string typeNames(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-// "T = int, U = string"
 std::string bindings(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<const Type *> args) {
   std::string text;
   for (size_t i = 0; i < params.size() && i < args.size(); ++i) {
@@ -48,7 +46,7 @@ std::string bindings(llvm::ArrayRef<const Type *> params, llvm::ArrayRef<const T
   return text;
 }
 
-} // namespace
+}
 
 const ClassDecl *genericInstanceOf(const Type *type, const ClassDecl *generic) {
   for (const ClassDecl *c = type ? type->classDecl() : nullptr; c; c = c->parent) {
@@ -66,8 +64,6 @@ void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
   if (!cls->isGeneric() || !cls->typeArgs.empty()) {
     return;
   }
-  // In the file of the class, where the names its constraints use mean what
-  // they mean there, and without the type parameters of any code around.
   std::vector<llvm::StringMap<Stmt *>> outer = checker_.typeScopes_;
   checker_.typeScopes_.resize(1);
   Module *here = checker_.module_;
@@ -85,7 +81,6 @@ void GenericClassChecker::declareClassTypeParams(ClassDecl *cls) {
   }
   checker_.typeScopes_ = std::move(outer);
   checker_.classDefaults_[cls] = std::move(defaults);
-  // `Box<T>` in messages, and the type of `this` in its methods.
   auto *type = const_cast<Type *>(cls->type);
   type->setTypeArgs(cls->typeArgs);
   type->rename(cls->name.str() + "<" + typeNames(cls->typeArgs) + ">");
@@ -120,7 +115,6 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
       bodies.push_back(inst->init);
     }
     bodies.insert(bodies.end(), inst->constructors.begin(), inst->constructors.end());
-    // A generic method is checked in the copies of it that calls need.
     for (FunctionDecl *fn : ClassLinks::ownMethods(inst)) {
       if (!fn->isAbstract && fn->typeParams.empty()) {
         bodies.push_back(fn);
@@ -131,7 +125,7 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
         continue;
       }
       if (!fn->sym->ret) {
-        checker_.returnInferrer().inferReturnType(fn->sym); // that of the generic method
+        checker_.returnInferrer().inferReturnType(fn->sym);
       }
       Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
       checker_.checkingInstance_ = instance;
@@ -143,8 +137,6 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
   }
   instance->checking = false;
   instance->checked = true;
-  // The variants that the types make the same are reported first (see
-  // fillInstance).
   if (errors.empty() || instance->failed) {
     return;
   }
@@ -156,7 +148,6 @@ void GenericClassChecker::checkClassInstance(Checker::Instance *instance) {
 void GenericClassChecker::reportClassInstance(Checker::Instance *instance, llvm::SMLoc use) {
   llvm::SMLoc loc = use.isValid() ? use : instance->cls->generic->loc();
   if (checker_.diags_.capture()) {
-    // In the body of another instance: this use is where that one fails.
     checker_.failedCalls_[loc.getPointer()] = instance;
     checker_.diags_.error(loc, instance->message);
     return;
@@ -190,23 +181,20 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
       }
     }
   };
-  // `new EventEmitter()`, with its event map or without (sema_events.cpp).
   if (generic->library && generic->name == "EventEmitter") {
     if (Expr *emitter = checker_.emitterChecker().checkEmitterNew(expr, generic, expected)) {
       return emitter;
     }
   }
-  // `new Readable({...})` (sema_stream.cpp).
   if (generic->library && checker_.chunkTypes().isStreamClass(generic)) {
     if (Expr *stream = checker_.streamNewChecker().checkStreamNew(expr, generic, expected)) {
       return stream;
     }
   }
-  // `new Box<int>(1)`: the instance, as any class.
   if (!expr->typeArgs.empty()) {
     std::vector<const Type *> args;
     for (const TypeRef &ref : expr->typeArgs) {
-      args.push_back(checker_.typeResolver().resolveType(ref, /*allowVoid=*/false));
+      args.push_back(checker_.typeResolver().resolveType(ref, false));
       if (args.back()->isError()) {
         checkArgsLoosely(expr->args);
 
@@ -234,8 +222,6 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
                                            "' is abstract and cannot be created: create "
                                            "an object of a class that extends it");
   }
-  // The type arguments come from the constructor that the arguments choose,
-  // as from a generic function whose result is `Box<T>`.
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(generic);
   FunctionDecl *ctor = ctors.size() == 1 ? ctors[0] : nullptr;
   if (ctors.size() > 1) {
@@ -293,8 +279,6 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   checker_.classDeclarer().completeClass(inst);
   expr->cls = inst;
   call->type = Type::voidTy();
-  // The constructor of the instance that is a copy of the one chosen: the
-  // same parameters, with the types of the instance.
   if (ctor) {
     std::vector<FunctionDecl *> mine = ClassLinks::constructorsOf(inst);
     auto at = llvm::find(ctors, ctor) - ctors.begin();
@@ -305,7 +289,7 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   }
   for (const ClassDecl *c = inst; c; c = c->parent) {
     if (c->init || !c->constructors.empty()) {
-      checker_.flowChecker().calledFunction(); // the code of the class runs
+      checker_.flowChecker().calledFunction();
       break;
     }
   }
@@ -314,4 +298,4 @@ Expr *GenericClassChecker::checkGenericNew(NewExpr *expr, ClassDecl *generic,
   return expr;
 }
 
-} // namespace tz
+}

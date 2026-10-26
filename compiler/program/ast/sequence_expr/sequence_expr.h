@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// `a, b, c`: evaluates each in order; the value is the last one's.
 class SequenceExpr : public Expr {
 public:
   SequenceExpr(llvm::SMLoc loc, std::vector<Expr *> exprs)
@@ -14,4 +13,4 @@ public:
   std::vector<Expr *> exprs;
 };
 
-} // namespace tz
+}

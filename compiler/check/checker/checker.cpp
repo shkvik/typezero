@@ -186,8 +186,6 @@ std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size
   return following;
 }
 
-// The type of a parameter without an annotation, from a default value that
-// is a literal, as `let x = 5` would give it; null for other values.
 const Type *literalType(const Expr *value) {
   if (auto *unary = dyn_cast<UnaryExpr>(value); unary && unary->op == UnaryOp::Neg) {
     value = unary->operand;
@@ -386,4 +384,4 @@ void Checker::popScope() {
 }
 
 Checker::~Checker() = default;
-} // namespace tz
+}

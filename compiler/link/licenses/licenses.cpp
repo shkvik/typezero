@@ -14,15 +14,14 @@ namespace tz {
 
 namespace {
 
-// The section of the manifest: a line `tz-licenses`, then a line for each project embedded.
 constexpr llvm::StringLiteral kSection = ".tzlic";
 constexpr llvm::StringLiteral kHeader = "tz-licenses\n";
 
 struct Project {
   llvm::StringLiteral id;
-  llvm::StringLiteral title; // and what of it the program has
+  llvm::StringLiteral title;
   llvm::StringLiteral license;
-  llvm::StringLiteral file; // in the directory `licenses` next to tz
+  llvm::StringLiteral file;
 };
 
 const Project kProjects[] = {
@@ -35,7 +34,7 @@ const Project kProjects[] = {
      "BSD-3-Clause", "WHATWG.txt"},
 };
 
-} // namespace
+}
 
 CryptoUse cryptoUse(const llvm::Module &module) {
   CryptoUse use;
@@ -84,7 +83,7 @@ void addLicenseManifest(llvm::Module &module, const Embedded &embedded) {
     text += "whatwg\n";
   }
   llvm::Constant *data = llvm::ConstantDataArray::getString(module.getContext(), text);
-  auto *manifest = new llvm::GlobalVariable(module, data->getType(), /*isConstant=*/true,
+  auto *manifest = new llvm::GlobalVariable(module, data->getType(), true,
                                             llvm::GlobalValue::PrivateLinkage, data, "tz.licenses");
   manifest->setSection(kSection);
   manifest->setAlignment(llvm::Align(1));
@@ -151,4 +150,4 @@ int printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir) {
   return 0;
 }
 
-} // namespace tz
+}

@@ -32,7 +32,6 @@ using llvm::dyn_cast;
 
 namespace {
 
-// The emitters of node:events, the event targets and the abort signals.
 bool isEmitterClass(llvm::StringRef cls) {
   return cls == "EventEmitter" || cls == "EventEmitterBase";
 }
@@ -41,7 +40,7 @@ bool isTargetClass(llvm::StringRef cls) { return cls == "EventTarget" || cls == 
 
 bool isSignalClass(llvm::StringRef cls) { return cls == "AbortSignal" || cls == "AbortController"; }
 
-} // namespace
+}
 
 LibraryEffects::LibraryEffects(Analysis &analysis) : analysis_(analysis) {}
 
@@ -89,7 +88,6 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
   CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, at);
   rec.call = c;
   if (superCtor) {
-    // The initializers of the fields of the program's classes that extend it.
     for (const ClassDecl *k = analysis_.fn_->decl ? analysis_.fn_->decl->cls : nullptr; k;
          k = k->parent) {
       if (k->init) {
@@ -97,7 +95,6 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
       }
     }
   } else if (c->method && c->virtualCall) {
-    // The methods of the program's classes that override it.
     for (const FunctionDecl *fn : analysis_.callWalk().methodTargets(decl, true)) {
       analysis_.callWalk().addCallee(rec, fn, self);
     }
@@ -121,14 +118,11 @@ void LibraryEffects::libraryNew(const NewExpr *n) {
     libraryArg(n->ctor, libraryClassName(n->cls), "constructor", arg, at);
   }
   analysis_.codeWalk().throwPoint();
-  // A new object, which only this expression has.
 }
 
-// What a function of a built-in module does with one of its arguments.
 void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::StringRef name,
                                 const Expr *arg, llvm::SMLoc at) {
   const Expr *f = strip(arg);
-  // A listener is given as a value of any type: `__tz_listener(f)`.
   if (auto *wrap = dyn_cast<CallExpr>(f);
       wrap && wrap->builtin == Builtin::LibListener && !wrap->args.empty()) {
     f = strip(wrap->args[0]);
@@ -142,15 +136,13 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
                                       name == "setOnabort")) {
       listen(f, TargetListeners);
     } else if (cls.empty() && name == "serve") {
-      libraryCallback(c, f, CallKind::Later, /*interval=*/true, /*handled=*/true);
+      libraryCallback(c, f, CallKind::Later, true, true);
     } else {
       libraryCallback(c, f, CallKind::Inline);
       libraryCallback(c, f, CallKind::Later);
     }
     return;
   }
-  // The functions of an object literal given: the source of a stream, the
-  // options of a server.
   if (auto *lit = dyn_cast<ObjectLitExpr>(f)) {
     for (const ObjectLitExpr::Property &p : lit->props) {
       const Expr *v = strip(p.value);
@@ -162,7 +154,7 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
       if (cls == "ReadableStream" && p.name == "start") {
         libraryCallback(c, v, CallKind::Inline);
       } else if (cls == "ReadableStream" && p.name == "pull") {
-        libraryCallback(c, v, CallKind::Later, /*interval=*/true);
+        libraryCallback(c, v, CallKind::Later, true);
       } else if (cls == "ReadableStream" && p.name == "cancel") {
         libraryCallback(c, v, CallKind::Later);
       } else if (cls.empty() && name == "serve" && p.name == "onListen") {
@@ -182,8 +174,6 @@ void LibraryEffects::libraryArg(const CallExpr *c, llvm::StringRef cls, llvm::St
   libraryReads(f, at);
 }
 
-// What a function of a built-in module reads of a value it is given: the
-// state of an object of one of their classes, or else all it holds.
 void LibraryEffects::libraryReads(const Expr *e, llvm::SMLoc at) {
   const Type *type = e && e->type ? e->type->nonOptional() : nullptr;
   if (const ClassDecl *cls = type ? type->classDecl() : nullptr; cls && cls->library) {
@@ -205,10 +195,9 @@ void LibraryEffects::libraryCallback(const CallExpr *c, const Expr *f, CallKind 
   analysis_.callWalk().addFunctionCallees(f, f, kind);
 }
 
-// A listener kept, which a call of `channel` runs.
 void LibraryEffects::listen(const Expr *f, Channel channel) {
   f = strip(f);
-  analysis_.exprWalk().expr(f); // a function of the program as a value
+  analysis_.exprWalk().expr(f);
   const FunctionDecl *decl = nullptr;
   if (auto *fe = dyn_cast<FunctionExpr>(f)) {
     decl = fe->fn;
@@ -237,8 +226,6 @@ void LibraryEffects::dispatch(const CallExpr *c, CallKind kind, Channel channel,
   rec.channel = channel;
 }
 
-// What a call of the method `name` of a class of a built-in module touches
-// of the object it is called on.
 void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
                                   std::optional<Ref> self, bool write, llvm::SMLoc at) {
   if (isSignalClass(cls)) {
@@ -258,8 +245,6 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
   analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.state_, write, at);
 }
 
-// `o.x = v` of a setter of a class of a built-in module: its call. A
-// function assigned to `onabort` (or another `on...`) is a listener.
 bool LibraryEffects::librarySetter(const MemberExpr *m, const Expr *value) {
   const Type *type = m->object->type ? m->object->type->nonOptional() : nullptr;
   const ClassDecl *cls = type ? type->classDecl() : nullptr;
@@ -285,4 +270,4 @@ bool LibraryEffects::librarySetter(const MemberExpr *m, const Expr *value) {
   return true;
 }
 
-} // namespace tz::parallel
+}

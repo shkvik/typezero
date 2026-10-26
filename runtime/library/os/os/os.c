@@ -1,14 +1,5 @@
-// node:os (docs/io.md): what Node's os module says about the system, from
-// the same sources as libuv, which Node uses. os.EOL, os.devNull and
-// os.endianness() are constants of the program, os.platform() is
-// process.platform.
-//
-// On Windows, the functions of advapi32 (the registry, the user's name) are
-// looked up when they are first needed, so that a program that does not use
-// them does not load that library.
-
 #ifndef _WIN32
-#define _DEFAULT_SOURCE // gethostname, getloadavg and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/os/os/os.h"
@@ -35,8 +26,6 @@
 #endif
 
 #ifdef _WIN32
-// An environment variable; an empty one counts as not set, as `||` treats
-// it in Node.
 static TzStr env_str(const char *name, int *found) {
   TzStr key = tz_str_from_ascii(name, strlen(name)), value;
   *found = tz_process_env(&value, key.obj, key.meta);
@@ -57,7 +46,6 @@ static TzStr env_str(const char *name, int *found) {
 
 typedef LSTATUS(WINAPI *RegGetValueFn)(HKEY, LPCWSTR, LPCWSTR, DWORD, LPDWORD, PVOID, LPDWORD);
 
-// A value of the registry, read with RegGetValueW of advapi32.
 static int registry_value(const wchar_t *key, const wchar_t *name, DWORD flags, void *out,
                           DWORD *size) {
   HMODULE advapi = LoadLibraryW(L"advapi32.dll");
@@ -66,7 +54,6 @@ static int registry_value(const wchar_t *key, const wchar_t *name, DWORD flags, 
   return get && get(HKEY_LOCAL_MACHINE, key, name, flags, NULL, out, size) == ERROR_SUCCESS;
 }
 #else
-// An environment variable, or NULL if it is unset or empty.
 static const char *env_text(const char *name) {
   const char *value = getenv(name);
 
@@ -76,7 +63,6 @@ static const char *env_text(const char *name) {
 static TzStr str_of_text(const char *text) {
   TzBuf b;
   tz_buf_init(&b);
-  // The system's text is UTF-8; what is not becomes U+FFFD.
   for (const unsigned char *s = (const unsigned char *)text; *s;) {
     uint32_t c = *s;
     size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 0;
@@ -114,7 +100,6 @@ static void homedir(TzStr *out) {
   int found;
   *out = env_str("USERPROFILE", &found);
   if (!found) {
-    // The drive and the path of the profile, as Windows sets them.
     TzStr drive = env_str("HOMEDRIVE", &found), path;
     int has_path;
     path = env_str("HOMEPATH", &has_path);
@@ -141,8 +126,6 @@ static void homedir(TzStr *out) {
 #endif
 }
 
-// os.tmpdir(), as Node's: TEMP or TMP (TMPDIR, TMP or TEMP elsewhere),
-// without a separator at the end.
 static void tmpdir(TzStr *out) {
   TzBuf b;
   tz_buf_init(&b);
@@ -164,7 +147,7 @@ static void tmpdir(TzStr *out) {
       tz_buf_str(&b, value);
       tz_str_release_value(value);
     } else {
-      tz_buf_ascii(&b, "undefined"); // what `undefined + "\\temp"` gives in Node
+      tz_buf_ascii(&b, "undefined");
     }
     tz_buf_ascii(&b, "\\temp");
   }
@@ -192,8 +175,6 @@ static void tmpdir(TzStr *out) {
 #ifdef _WIN32
 typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
 
-// The version of Windows as it is (GetVersionEx tells programs without a
-// manifest that it is 8).
 static void windows_version(OSVERSIONINFOW *info) {
   memset(info, 0, sizeof *info);
   info->dwOSVersionInfoSize = sizeof *info;
@@ -215,7 +196,7 @@ void tz_os_string(TzStr *out, int32_t which) {
   case 1:
     tmpdir(out);
     return;
-  case 2: { // hostname
+  case 2: {
 #ifdef _WIN32
     wchar_t name[256];
     DWORD size = 256;
@@ -232,7 +213,7 @@ void tz_os_string(TzStr *out, int32_t which) {
 #endif
     return;
   }
-  case 3: // arch
+  case 3:
 #if defined(__x86_64__) || defined(_M_X64)
     strcpy(text, "x64");
 #elif defined(__aarch64__) || defined(_M_ARM64)
@@ -243,7 +224,7 @@ void tz_os_string(TzStr *out, int32_t which) {
     strcpy(text, "unknown");
 #endif
     break;
-  case 4: // type
+  case 4:
 #if defined(_WIN32)
     strcpy(text, "Windows_NT");
 #elif defined(__APPLE__)
@@ -252,7 +233,7 @@ void tz_os_string(TzStr *out, int32_t which) {
     strcpy(text, "Linux");
 #endif
     break;
-  case 5: { // release
+  case 5: {
 #ifdef _WIN32
     OSVERSIONINFOW info;
     windows_version(&info);
@@ -266,9 +247,8 @@ void tz_os_string(TzStr *out, int32_t which) {
 #endif
     break;
   }
-  case 6: { // version
+  case 6: {
 #ifdef _WIN32
-    // As libuv: the product name, which still says "Windows 10" on 11.
     wchar_t product[256];
     DWORD size = sizeof product;
     TzBuf b;
@@ -299,7 +279,7 @@ void tz_os_string(TzStr *out, int32_t which) {
     break;
 #endif
   }
-  case 7: { // machine
+  case 7: {
 #ifdef _WIN32
     SYSTEM_INFO info;
     GetNativeSystemInfo(&info);
@@ -331,7 +311,6 @@ void tz_os_string(TzStr *out, int32_t which) {
   *out = tz_str_from_ascii(text, strlen(text));
 }
 
-// os.totalmem(), os.freemem() and os.uptime().
 double tz_os_number(int32_t which) {
 #ifdef _WIN32
   if (which == 2) {
@@ -381,7 +360,6 @@ static int32_t processor_count(void) {
 int32_t tz_os_available_parallelism(void) { return processor_count(); }
 
 #ifdef _WIN32
-// SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION of ntdll.
 typedef struct {
   LARGE_INTEGER idle, kernel, user, dpc, interrupt;
   ULONG interrupts;
@@ -390,8 +368,6 @@ typedef struct {
 typedef LONG(WINAPI *NtQuerySystemInformationFn)(int, void *, ULONG, ULONG *);
 #endif
 
-// os.cpus(): for each processor its model, speed in MHz and the times it
-// spent, in milliseconds, which `make` builds a CpuInfo of.
 TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
   int32_t count = processor_count();
   TzArray *cpus = tz_arr_new(element, 0, count);
@@ -402,8 +378,7 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
       GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation");
   ULONG got = 0;
   if (query) {
-    query(8 /* SystemProcessorPerformanceInformation */, times,
-          (ULONG)(sizeof(ProcessorTimes) * (size_t)count), &got);
+    query(8, times, (ULONG)(sizeof(ProcessorTimes) * (size_t)count), &got);
   }
   for (int32_t i = 0; i < count; ++i) {
     wchar_t key[128];
@@ -428,7 +403,6 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
   }
   tz_free(times);
 #else
-  // The model from /proc/cpuinfo where there is one; times are not read.
   char model[256] = "";
   FILE *info = fopen("/proc/cpuinfo", "r");
   if (info) {
@@ -457,7 +431,6 @@ TzArray *tz_os_cpus(const TzType *element, TzMaker make) {
   return cpus;
 }
 
-// os.loadavg(): [0, 0, 0] on Windows, as in Node.
 TzArray *tz_os_loadavg(const TzType *element) {
   double load[3] = {0, 0, 0};
 #ifndef _WIN32
@@ -475,8 +448,6 @@ TzArray *tz_os_loadavg(const TzType *element) {
 typedef BOOL(WINAPI *GetUserNameFn)(LPWSTR, LPDWORD);
 #endif
 
-// os.userInfo(): Windows has no uid, gid or shell (-1, -1 and, as null is
-// only in Json, undefined).
 void *tz_os_user_info(TzMaker make) {
   TzUserInfoParts parts;
   memset(&parts, 0, sizeof parts);

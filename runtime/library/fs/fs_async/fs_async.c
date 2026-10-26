@@ -1,10 +1,7 @@
-// node:fs/promises (docs/io.md, step 4): the requests to the thread pool (io.c),
-// and the functions for files.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs_async/fs_async.h"
@@ -40,16 +37,6 @@
 #include <unistd.h>
 #endif
 
-// The functions of node:fs/promises (docs/io.md, step 4) are those above
-// with the waiting moved to a thread of the pool (io.c). The main thread
-// checks the arguments and prepares the paths; an error there (a zero in a
-// path, a bad flag) rejects the promise at once, as an async function of
-// Node does. The thread makes the calls of the system and keeps what they
-// give in memory of its own (Raw), and the main thread makes the result of
-// it, or the SystemError, which rejects the promise. Each request says how
-// many turns of the loop Node takes for the same (TzWork::turns): its round
-// trips to its pool.
-
 Listed *tz_fs_listed_add(ListedList *list) {
   if (list->count == list->capacity) {
     size_t capacity = list->capacity * 2 + 16;
@@ -79,7 +66,7 @@ FsRequest *tz_fs_fsp_new(TzPromise *p, TzMaker make) {
   FsRequest *r = (FsRequest *)tz_alloc(sizeof(FsRequest));
   memset(r, 0, sizeof *r);
   r->promise = p;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   r->make = make;
 
   return r;
@@ -122,13 +109,11 @@ int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta) {
   return 1;
 }
 
-// A request with a signal that was aborted already is rejected with an
-// AbortError, as Node checks it first.
 static int fsp_signal(FsRequest *r, void *signal) {
   if (!signal) {
     return 1;
   }
-  tz_ref_retain(signal); // a member of a group (signal.c)
+  tz_ref_retain(signal);
   r->signal = signal;
   if (!tz_signal_aborted(signal)) {
     return 1;
@@ -143,7 +128,6 @@ void tz_fs_fsp_queue(FsRequest *r, void (*work)(TzWork *), void (*done)(TzWork *
   r->work.work = work;
   r->work.done = done;
   r->work.turns = 1;
-  // Done settles the promise and frees the request, nothing else.
   tz_work_queue_settles(&r->work, r->promise);
 }
 
@@ -174,8 +158,6 @@ int tz_fs_fsp_succeeded(FsRequest *r) {
     return 1;
   }
   if (r->at.length) {
-    // A path inside the one given failed: the error shows it, as the
-    // program would name it, without the prefix of the system's form.
     TzBuf units;
     tz_buf_init(&units);
 #ifdef _WIN32
@@ -219,19 +201,14 @@ void tz_fs_fsp_done_void(TzWork *w) {
   }
 }
 
-// The number of pieces of `length` bytes Node reads or writes a file in.
 static uint32_t chunks_of(size_t length) {
-  const size_t chunk = 512 * 1024; // kReadFileBufferLength, kWriteFileMaxChunkSize
+  const size_t chunk = 512 * 1024;
 
   return (uint32_t)((length + chunk - 1) / chunk);
 }
 
 #ifdef _WIN32
-// Reads to the end into `out`; 0 or the error.
 static DWORD read_raw(File f, Raw *out) {
-  // As much as the file has, and one byte more to find its end: a block of
-  // its size, which the heap of the system gives the threads at once, where
-  // big blocks would make them wait for each other.
   LARGE_INTEGER size;
   if (GetFileSizeEx(f, &size) && size.QuadPart >= 0 && size.QuadPart < ((int64_t)1 << 31)) {
     tz_fs_raw_reserve(out, (size_t)size.QuadPart + 1);
@@ -315,7 +292,6 @@ static void read_file_work(TzWork *w) {
     tz_fs_fsp_fail(r, failure, "open", 1);
     return;
   }
-  // open, fstat, the reads and close.
 #ifdef _WIN32
   DWORD error = read_raw(f, &r->data);
 #else
@@ -333,7 +309,6 @@ static void read_file_done(TzWork *w) {
   if (!tz_fs_fsp_succeeded(r)) {
     return;
   }
-  // The main thread makes the value: a Buffer, or the text.
   if (r->encoding < 0) {
     TzBytes *b = tz_buffer_copy_of(r->data.data, (int64_t)r->data.length);
     tz_fs_fsp_fulfill(r, &b, sizeof b);
@@ -379,12 +354,9 @@ static void write_file_work(TzWork *w) {
     tz_fs_fsp_fail_system(r, error, "write", 0);
   }
   tz_fs_close_file(f);
-  // open, the writes and close.
   r->work.turns = 2 + chunks_of(r->data.length);
 }
 
-// What writeFile and appendFile write: a request for the path, the flag and
-// the mode, or NULL once it is settled with an error.
 static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
                                 uint64_t flag_meta, int32_t mode, void *signal, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
@@ -403,8 +375,6 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
   return r;
 }
 
-// writeFile and appendFile of text, whose flag is "a", in an encoding of
-// Buffer (0 is utf8).
 void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *data_obj,
                        uint64_t data_meta, void *flag_obj, uint64_t flag_meta, int32_t mode,
                        void *signal, int32_t encoding, TzMaker make) {
@@ -413,7 +383,6 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
     return;
   }
   if (encoding != 0) {
-    // The bytes of the text in that encoding, a copy the thread writes.
     TzBytes *b = tz_buffer_from_string(data_obj, data_meta, encoding);
     tz_fs_raw_reserve(&r->data, (size_t)b->length + 1);
     memcpy(r->data.data, b->data, (size_t)b->length);
@@ -422,7 +391,6 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
     tz_fs_fsp_queue(r, write_file_work, tz_fs_fsp_done_void);
     return;
   }
-  // The text as UTF-8, which the thread writes.
   TzBuf units;
   tz_buf_init(&units);
   tz_buf_str(&units, (TzStr){data_obj, data_meta});
@@ -433,8 +401,6 @@ void tz_fsp_write_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *d
   tz_fs_fsp_queue(r, write_file_work, tz_fs_fsp_done_void);
 }
 
-// writeFile and appendFile of a typed array, a Buffer or a DataView: a copy
-// of its bytes, which the thread writes while the program goes on.
 void tz_fsp_write_file_bytes(TzPromise *p, void *path_obj, uint64_t path_meta, const TzBytes *b,
                              void *flag_obj, uint64_t flag_meta, int32_t mode, void *signal,
                              TzMaker make) {
@@ -452,7 +418,6 @@ void tz_fsp_write_file_bytes(TzPromise *p, void *path_obj, uint64_t path_meta, c
 static void access_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
-  // As libuv: only writing can be denied, to a read-only file.
   DWORD attributes = GetFileAttributesW(tz_fs_wide(&r->path));
   if (attributes == INVALID_FILE_ATTRIBUTES) {
     tz_fs_fsp_fail_system(r, GetLastError(), "access", 1);
@@ -479,7 +444,6 @@ void tz_fsp_access(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mod
 static void chmod_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
 #ifdef _WIN32
-  // Windows keeps only whether a file is read-only: the owner's write bit.
   DWORD attributes = GetFileAttributesW(tz_fs_wide(&r->path));
   if (attributes == INVALID_FILE_ATTRIBUTES) {
     tz_fs_fsp_fail_system(r, GetLastError(), "chmod", 1);
@@ -508,10 +472,10 @@ void tz_fsp_chmod(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode
 
 static void truncate_work(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
-  OpenFlags flags = {1, 1, 0, 0, 0, 0}; // "r+"
+  OpenFlags flags = {1, 1, 0, 0, 0, 0};
   Failure failure;
   File f = tz_fs_open_raw(&r->path, flags, 0666, &failure);
-  r->work.turns = 3; // open, ftruncate and close
+  r->work.turns = 3;
   if (f == NO_FILE) {
     tz_fs_fsp_fail(r, failure, "open", 1);
     return;

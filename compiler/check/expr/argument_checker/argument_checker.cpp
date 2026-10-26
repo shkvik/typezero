@@ -22,14 +22,10 @@ ArgumentChecker::ArgumentChecker(Checker &checker) : checker_(checker) {}
 Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type *> params,
                                       size_t minArgs, bool hasRest, llvm::SMLoc loc,
                                       const std::vector<bool> *checked) {
-  // `...t` of a tuple in a variable, and of an argument list, as checkCall
-  // does for the other calls.
   if (!checked) {
     checker_.argListChecker().expandListSpreads(call->args, call->spread);
   }
   size_t fixed = params.size() - (hasRest ? 1 : 0);
-  // In generic code, a rest parameter of a list of types (`...args: A`):
-  // spreads of lists (docs/generics.md, section 9).
   if (hasRest && (params.back()->isListParam() || spreadsLists(params.back()))) {
     for (size_t i = 0; i < call->args.size() && i < fixed; ++i) {
       if (call->spreads(i) && checker_.callChecker().rejectSpread(call)) {
@@ -63,8 +59,6 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
                              ? params.back()
                              : nullptr;
   if (listRest && call->args.size() == fixed + 1 && call->spreads(fixed)) {
-    // A list of parameters, `...args: A` (docs/generics.md, section 9): a
-    // list of its type spread there goes as it is.
     Expr *&arg = call->args[fixed];
     if (!isChecked(fixed)) {
       arg = checker_.exprChecker().checkExpr(arg, listRest);
@@ -76,18 +70,14 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
     checkedRest = arg;
     call->spread.clear();
   } else if (hasRest) {
-    // The arguments for the rest parameter become one array, as `f(1, ...a)`
-    // passes `[1, ...a]`.
     llvm::SMLoc restLoc = call->args.size() > fixed ? call->args[fixed]->loc() : call->loc();
     auto *rest = checker_.ctx_.make<ArrayLitExpr>(restLoc);
     const Type *restType = params.back();
     for (size_t i = fixed; i < call->args.size(); ++i) {
       Expr *arg = call->args[i];
-      // Checked already: the array has the elements as they are.
       if (isChecked(i)) {
         checkedRest = rest;
         const Type *element = restType->isArray() ? restType->inner() : restType;
-        // A tuple of the arguments for a list of parameters.
         if (listRest && listRest->isTuple() && i - fixed < listRest->fields().size()) {
           element = listRest->fields()[i - fixed].type;
         }
@@ -110,13 +100,12 @@ Expr *ArgumentChecker::checkArguments(CallExpr *call, llvm::ArrayRef<const Type 
       rest->type = restType;
     }
     call->args.resize(std::min(call->args.size(), fixed));
-    while (call->args.size() < fixed) { // optional parameters left out
+    while (call->args.size() < fixed) {
       call->args.push_back(checker_.ctx_.make<UndefinedExpr>(call->loc()));
     }
     call->args.push_back(rest);
     call->spread.clear();
   }
-  // Parameters left out get undefined, and with it their default values.
   for (size_t i = 0; i < call->args.size(); ++i) {
     if (call->args[i] == checkedRest) {
       continue;
@@ -134,7 +123,7 @@ bool ArgumentChecker::checkArity(CallExpr *call, llvm::SMLoc loc, unsigned min, 
   if (count >= min && count <= max) {
     return true;
   }
-  if (call->tagged) { // the arguments are not written out
+  if (call->tagged) {
     checker_.diags_.error(
         loc, "expected " + argumentCount(min, max) + ", but the tagged template passes " +
                  llvm::Twine(count) + ": the array of its texts" +
@@ -157,4 +146,4 @@ Expr *ArgumentChecker::checkArg(Expr *arg, const Type *to) {
       checker_.exprChecker().checkExpr(arg, to->isError() ? nullptr : to), to);
 }
 
-} // namespace tz
+}

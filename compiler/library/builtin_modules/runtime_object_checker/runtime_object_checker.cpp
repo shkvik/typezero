@@ -17,11 +17,9 @@ namespace tz {
 
 namespace {
 
-// The runtime's side of an AbortSignal
-// (runtime/library/events/signal/signal.c).
 const Type *signalType() { return Type::runtimeObject(Type::Runtime::AbortSignal); }
 
-} // namespace
+}
 
 RuntimeObjectChecker::RuntimeObjectChecker(Checker &checker) : checker_(checker) {}
 
@@ -31,8 +29,6 @@ Expr *RuntimeObjectChecker::signalOption(Expr *value, llvm::SMLoc loc) {
     auto *none = checker_.ctx_.make<UndefinedExpr>(loc);
     return checker_.argumentChecker().checkArg(none, optional);
   }
-  // Without the library's AbortSignal, which a file that names AbortSignal
-  // or AbortController brings, only undefined can be given.
   ClassDecl *cls = checker_.libraryClass("AbortSignal");
   if (!cls) {
     return checker_.argumentChecker().checkArg(value, optional);
@@ -57,7 +53,6 @@ Expr *RuntimeObjectChecker::checkRuntimeMember(MemberExpr *member) {
   return member;
 }
 
-// What the objects of each kind have, for the messages.
 std::string RuntimeObjectChecker::runtimeMembers(const Type *type) {
   switch (type->runtimeKind()) {
   case Type::Runtime::Readline:
@@ -128,7 +123,6 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
         call->type = Type::promise(Type::string());
         return call;
       }
-      // question(query, callback), or with options between them.
       if (call->args.size() < 2) {
         checker_.diags_.error(member->loc(),
                               "'question' of node:readline takes a callback for the answer, "
@@ -153,7 +147,7 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
         return call;
       }
       if (auto *fe = dyn_cast<FunctionExpr>(callback)) {
-        fe->fn->nonEscaping = false; // it runs later
+        fe->fn->nonEscaping = false;
       }
       call->args = {query, callback};
       call->builtin = Builtin::RlQuestionCallback;
@@ -196,4 +190,4 @@ const Type *RuntimeObjectChecker::checkRuntimeTarget(MemberExpr *member, bool co
   return Type::error();
 }
 
-} // namespace tz
+}

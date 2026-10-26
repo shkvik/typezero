@@ -1,5 +1,3 @@
-// JSON.parse.
-
 #include "runtime/library/json/json/json.h"
 #include "runtime/library/json/json_values/json_values.h"
 #include "runtime/core/alloc/alloc.h"
@@ -14,10 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// An iterative parser with the grammar, the errors and the messages of V8's
-// JsonParser, so that a bad text fails as it does in node. Positions count
-// UTF-16 code units.
 
 enum {
   T_STRING,
@@ -36,8 +30,6 @@ enum {
   T_EOS,
 };
 
-// An object or an array that is being read, and for an object the key whose
-// value comes next.
 typedef struct {
   TzJson *container;
   TzStr key;
@@ -45,16 +37,13 @@ typedef struct {
 } Frame;
 
 typedef struct {
-  TzBuf text; // the code units of the whole text
+  TzBuf text;
   const uint16_t *s;
   uint32_t n, pos;
   Frame *frames;
   size_t depth, capacity;
-  // What an error must release besides the frames: a value that waits to be
-  // stored, the text of a string being read.
   TzJson *pending;
   TzBuf scratch;
-  // Where an error goes back to (__builtin_setjmp): tz_json_parse.
   void *fail[5];
 } Parser;
 
@@ -121,8 +110,6 @@ static void parser_release(Parser *p) {
   tz_buf_free(&p->scratch);
 }
 
-// " in JSON at position 5 (line 1 column 6)": V8 counts lines at \n, \r and
-// \r\n, the line terminators of JSON.
 static void at_position(TzBuf *b, const Parser *p) {
   uint32_t line = 1, line_start = 0;
   for (uint32_t i = 0; i < p->pos; ++i) {
@@ -159,10 +146,6 @@ static int is_special(const Parser *p) {
   return 0;
 }
 
-// V8's ReportUnexpectedToken: the token at the current position does not
-// fit. `message` replaces the general one about the token, with the
-// position; without it, a token that is not a number or a string is shown
-// with the text around it.
 TZ_NORETURN static void unexpected(Parser *p, int token, const char *message) {
   parser_release(p);
   TzBuf b;
@@ -183,7 +166,6 @@ TZ_NORETURN static void unexpected(Parser *p, int token, const char *message) {
     tz_buf_ascii(&b, "Unexpected token '");
     tz_buf_push(&b, p->s[p->pos]);
     tz_buf_ascii(&b, "', ");
-    // Ten code units on each side of a long text.
     uint32_t from = 0, to = p->n;
     const char *before = "", *after = "";
     if (p->n >= 21) {
@@ -214,7 +196,7 @@ TZ_NORETURN static void unexpected(Parser *p, int token, const char *message) {
 TZ_NORETURN static void unexpected_here(Parser *p) { unexpected(p, token_of(current(p)), NULL); }
 
 static void scan_literal(Parser *p, const char *word) {
-  ++p->pos; // the first letter chose the literal
+  ++p->pos;
   for (size_t i = 1; word[i]; ++i, ++p->pos) {
     if (p->pos >= p->n) {
       unexpected(p, T_EOS, NULL);
@@ -239,10 +221,9 @@ static int hex_value(int32_t c) {
   return -1;
 }
 
-// A string, after its opening quote; returns an owned string.
 static TzStr scan_string(Parser *p) {
   uint32_t start = p->pos;
-  for (;;) { // the usual string, without escapes, is taken as it is
+  for (;;) {
     if (p->pos >= p->n) {
       unexpected(p, T_ILLEGAL, "Unterminated string in JSON");
     }
@@ -331,7 +312,6 @@ static TzJson *parse_number(Parser *p) {
     ++p->pos;
   }
   if (current(p) == '0') {
-    // A zero is the whole integer part: "01" is not a number.
     ++p->pos;
     if (is_digit(current(p))) {
       unexpected(p, T_NUMBER, NULL);
@@ -380,10 +360,7 @@ static TzJson *parse_number(Parser *p) {
     }
   }
   text[length] = 0;
-  double value = strtod(text, NULL); // correctly rounded, as JavaScript requires
-  // The text stays where the double cannot give its digits back: more than
-  // 15 of them, or beyond the range of a double. JSON.parse<T> reads a
-  // decimal or a long from it exactly.
+  double value = strtod(text, NULL);
   int keep = digits > 15 || isinf(value) || (value == 0 && nonzero);
   TzJson *j;
   if (keep) {
@@ -417,7 +394,6 @@ static void push_frame(Parser *p, TzJson *container) {
   f->has_key = 0;
 }
 
-// A key and its colon, in the object of the innermost frame.
 static void read_key(Parser *p, const char *message) {
   skip_whitespace(p);
   if (current(p) != '"') {
@@ -437,7 +413,6 @@ static void read_key(Parser *p, const char *message) {
 static TzJson *parse(Parser *p) {
   for (;;) {
     TzJson *value;
-    // A value, or the start of an array or an object.
     skip_whitespace(p);
     switch (token_of(current(p))) {
     case T_STRING:
@@ -484,7 +459,6 @@ static TzJson *parse(Parser *p) {
       unexpected_here(p);
     }
 
-    // The value goes into the containers it completes.
     for (;;) {
       if (p->depth == 0) {
         skip_whitespace(p);
@@ -530,8 +504,6 @@ static TzJson *parse(Parser *p) {
   }
 }
 
-// JSON.parse(text). A text that is not JSON is a SyntaxError, and NULL:
-// unexpected released what the parser had and came back here.
 TzJson *tz_json_parse(void *obj, uint64_t meta) {
   TzStr str = {obj, meta};
   Parser p;
@@ -552,22 +524,14 @@ TzJson *tz_json_parse(void *obj, uint64_t meta) {
   return result;
 }
 
-// The values of embedJson, kept for the leak check: the address of each
-// cache the program filled.
 typedef struct {
   TzJson **slots[64];
   TzJson ***more;
   size_t count, capacity;
 } Caches;
 
-Caches tz_json_caches; // not static: see the rules in tzrt.h
+Caches tz_json_caches;
 
-// embedJson(path): the text of the file, checked when the program was
-// compiled, is read the first time the program gets there; `cache` keeps
-// the value for the next times, so the same file gives the same value, as
-// require() of a JSON file in node does.
-// Threads fill a cache once, under the lock, with a value they share
-// (publish.c).
 TzLock tz_json_embed_lock;
 
 TzJson *tz_json_embed(TzJson **cache, void *obj, uint64_t meta) {

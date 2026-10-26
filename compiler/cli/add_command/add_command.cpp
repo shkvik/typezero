@@ -26,7 +26,6 @@ namespace path = llvm::sys::path;
 
 namespace {
 
-// `to` relative to the directory `from`, with '/': "../lib".
 std::string relativePath(llvm::StringRef from, llvm::StringRef to) {
   std::vector<llvm::StringRef> base(path::begin(from), path::end(from));
   std::vector<llvm::StringRef> target(path::begin(to), path::end(to));
@@ -53,15 +52,12 @@ std::string relativePath(llvm::StringRef from, llvm::StringRef to) {
   return result.starts_with("../") ? result : "./" + result;
 }
 
-// "/x", "C:/x", "C:\x": a path, not a source with a scheme like "git:".
 bool isAbsolutePath(llvm::StringRef text) {
   return text.starts_with("/") || text.starts_with("\\") ||
          (text.size() > 2 && llvm::isAlpha(text[0]) && text[1] == ':' &&
           (text[2] == '/' || text[2] == '\\'));
 }
 
-// What `tz add <arg>` adds: the name imports will use and the source for
-// tz.json.
 bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out) {
   std::string error;
   Source source;
@@ -69,8 +65,6 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
   bool bare = !text.starts_with("jsr:") && !text.starts_with("@") && !text.contains(':') &&
               !text.starts_with(".") && !isAbsolutePath(text);
   if (bare || text.starts_with("@") || text.starts_with("jsr:")) {
-    // A name alone is a package adapted for tz: "zod" is jsr:@tz/zod
-    // (docs/packages.md, section 2), imported as "zod".
     std::string spec;
     if (bare) {
       auto [name, range] = text.split('@');
@@ -84,8 +78,6 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
     }
     out.alias = source.scope == "tz" ? source.name : "@" + source.scope + "/" + source.name;
     if (source.range.empty()) {
-      // The newest version, written as the range of what is compatible with
-      // it.
       JsrVersions versions;
       if (!jsrVersions(source.scope, source.name, versions, error)) {
         if (!error.empty()) {
@@ -135,9 +127,8 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
     }
     out.spec = "file:" + relativePath(project.dir, source.dir);
   } else {
-    // The package's own name is the import name, if it has one.
     std::string commit, dir;
-    if (!gitResolve(source.url, source.ref, /*refresh=*/true, commit, error) ||
+    if (!gitResolve(source.url, source.ref, true, commit, error) ||
         !gitCheckout(source.url, commit, dir, error)) {
       report(error);
       return false;
@@ -156,7 +147,7 @@ bool interpretAdd(const Manifest &project, llvm::StringRef arg, Dependency &out)
   return true;
 }
 
-} // namespace
+}
 
 int AddCommand::run(llvm::ArrayRef<const char *> args) const {
   const char *synopsis = "tz add <package>...\n\n"
@@ -222,4 +213,4 @@ int AddCommand::run(llvm::ArrayRef<const char *> args) const {
   return 0;
 }
 
-} // namespace tz::pkg
+}

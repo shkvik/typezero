@@ -21,12 +21,6 @@
 
 namespace tz {
 
-// The order is the order of the checks the compiler had before the topics were apart: a topic
-// whose hook answers first wins, as its branch did. Most hooks look at names or types no other
-// topic has, so the order matters only within a hook that several topics share on one value:
-// date before intl for the methods of Intl.DateTimeFormat, which is an object of Intl too; intl
-// before decimal for `d.toLocaleString()`; events before stream for the functions of their
-// modules.
 FeatureRegistry::FeatureRegistry() {
   features_.push_back(std::make_unique<TzModulesFeature>());
   features_.push_back(std::make_unique<BuiltinModulesFeature>());
@@ -68,4 +62,4 @@ const Feature *FeatureRegistry::lowering(Builtin builtin) const {
   return nullptr;
 }
 
-} // namespace tz
+}

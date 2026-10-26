@@ -62,4 +62,4 @@ Expr *FsPromisesChecker::checkFsPromisesCall(CallExpr *call, llvm::StringRef fn,
   return call;
 }
 
-} // namespace tz
+}

@@ -38,20 +38,15 @@ namespace tz {
 
 namespace {
 
-// A loop that runs at most this many passes is run pass by pass.
 constexpr double kUnrollPasses = 24;
 
-// Whether `stmt` yields, which makes whoever iterates the generator decide
-// how many passes its loop makes.
 bool yields(const Stmt *stmt) {
   bool found = false;
-  visitExprs(stmt, [&](const Expr *e) { found |= isa<YieldExpr>(e); }, /*intoFunctions=*/false);
+  visitExprs(stmt, [&](const Expr *e) { found |= isa<YieldExpr>(e); }, false);
 
   return found;
 }
 
-// Whether a loop with the condition `cond` (null: none) is open-ended: no
-// condition, a constant one, or one that reads the input.
 bool openEnded(const Expr *cond, const Stmt *body) {
   if (yields(body)) {
     return false;
@@ -73,7 +68,6 @@ bool openEnded(const Expr *cond, const Stmt *body) {
   return input;
 }
 
-// Whether `body` makes the array in `var` longer.
 bool grows(const Stmt *body, const VarSymbol *var) {
   auto isVar = [&](const Expr *e) {
     auto *name = dyn_cast_or_null<NameExpr>(stripCasts(e));
@@ -104,8 +98,6 @@ bool grows(const Stmt *body, const VarSymbol *var) {
   return found;
 }
 
-// How far a pass moved a value from what it was at the head: [offLo, offHi]
-// if it only added to it.
 std::optional<std::pair<double, double>> stepOf(const Num &end, uint64_t base) {
   if (end.empty() || end.base != base || !base) {
     return std::nullopt;
@@ -114,7 +106,7 @@ std::optional<std::pair<double, double>> stepOf(const Num &end, uint64_t base) {
   return std::make_pair(end.offLo, end.offHi);
 }
 
-} // namespace
+}
 
 LoopRanges::LoopRanges(OverflowCheck &check) : check_(check) {}
 
@@ -157,7 +149,6 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   Val element = check_.overflowWarnings().trusted(bound);
   if (type && type->isArray()) {
     element = check_.slots().elementsOf(s->iterable, iterable, type);
-    // An array that the loop makes longer goes on with the new elements.
     if (!iterated || !grows(s->body, iterated)) {
       spec.passes = add(iterable.len, exactly(1));
     }
@@ -170,7 +161,6 @@ void LoopRanges::execLoop(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labe
   spec.exitAtHead = true;
   spec.simple = !containsLoop(s->body);
   spec.body = [this, s, type, element, iterated](State &in) {
-    // An array the loop changes: its elements as they are on this pass.
     Val e = element;
     if (iterated && type && type->isArray()) {
       e = check_.slots().elementsOf(s->iterable, check_.slots().readVar(iterated, in), type);
@@ -259,8 +249,6 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
       continue;
     }
     const Num &start = entryVar.second.num;
-    // A counter that moves by the same step on every pass, which the loop's
-    // checks keep within bounds.
     if (std::optional<std::pair<double, double>> step = stepOf(e->second.num, f->second.num.base);
         step && step->first == step->second && step->first != 0 && isIntegerType(var->type) &&
         !start.empty()) {
@@ -274,7 +262,6 @@ Num LoopRanges::passCount(const OverflowCheck::LoopSpec &spec, const State &entr
         consider((start.hi - bounded.lo) / -s + 1, bounded.low());
       }
     }
-    // A length that shrinks on every pass: it cannot go below 0.
     if (std::optional<std::pair<double, double>> step = stepOf(e->second.len, f->second.len.base);
         step && step->second < 0 && !entryVar.second.len.empty()) {
       consider(entryVar.second.len.hi / -step->second + 1, entryVar.second.len.high());
@@ -289,16 +276,9 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     return;
   }
   const State entry = st;
-  // The passes before the last only find the head of the loop: what holds at
-  // the start of every pass. Nothing is recorded in them, and values are not
-  // wrapped around in them, so that a sum keeps its relation to the head:
-  // each pass starts with every value relative to itself, and what a pass
-  // adds to a value is its step.
   ++check_.quiet_;
   llvm::DenseMap<const VarSymbol *, uint64_t> bases;
 
-  // 1. Until the head holds what the passes give, every end that moves goes
-  //    to the end of its type's range.
   State head = entry;
   State lastHead, lastEnd = deadState();
   bool comesBack = false;
@@ -321,7 +301,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       Val &h = headVar.second;
       const Val &n = found->second;
       if (isBottom(h)) {
-        // Set in the loop for the first time: what the passes before set.
         if (!isBottom(n)) {
           h = n;
           h.num.base = h.len.base = 0;
@@ -360,7 +339,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     }
   }
   if (!comesBack) {
-    // The body never comes back for another pass.
     --check_.quiet_;
     State exits = deadState();
     onePass(spec, entry, exits);
@@ -368,8 +346,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     return;
   }
 
-  // 2. Passes from that head bring back the bounds that the checks and the
-  //    body keep: `i < n` bounds i.
   for (int k = 0; k < (check_.overBudget() ? 1 : 2); ++k) {
     State from = rebased(head, bases);
     State exits = deadState();
@@ -402,11 +378,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     }
   }
 
-  // An end at the limit of its type that every pass moves on: as worrying as
-  // what moves it, or growing with the loop. A sum or a count in a loop
-  // without a bound on its passes is trusted, unless the loop is open-ended
-  // (see LoopSpec::openEnded): such a loop ends when the program's own data
-  // says so, and that data is in memory.
   auto limit = [&](const Bound &moving, double at, bool unbounded, bool additive = false) {
     if (moving.origin == Origin::Trusted || moving.origin == Origin::Input) {
       return Bound{at, moving.origin, moving.why};
@@ -428,11 +399,7 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
                   : stepOf(end->second.num, from->second.num.base);
   };
 
-  // 3. How many passes the loop makes, and so how far what it adds to on
-  //    every pass gets.
   Num passes = passCount(spec, entry, head, lastHead, lastEnd);
-  // A loop that its checks end after a few passes, as
-  // `while (true) { i++; if (i == 3) break }`: run from the entry, it stops.
   if ((passes.empty() || passes.hi > kUnrollPasses) && spec.simple && !check_.overBudget()) {
     State at = entry;
     for (double k = 0; k < kUnrollPasses; ++k) {
@@ -445,7 +412,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     }
   }
   if (!passes.empty() && passes.hi <= kUnrollPasses && spec.simple && !check_.overBudget()) {
-    // Few passes: run them one by one.
     State at = entry;
     State all = entry;
     for (double k = 0; k <= passes.hi && !at.dead; ++k) {
@@ -460,8 +426,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       }
       Val v = found->second;
       v.num.base = v.len.base = 0;
-      // Beyond the type: it wraps around. That is this loop's doing unless
-      // the value was at the end of its range when the loop started.
       Limits l = limitsOf(headVar.first->type);
       const Num &start = entry.vars.lookup(headVar.first).num;
       if (!v.num.empty() && v.num.hi > l.hi) {
@@ -490,9 +454,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
         }
         if (n.hi >= l.hi && startNum.hi < l.hi) {
           if (step && !passes.empty() && step->second > 0) {
-            // A sum of a bounded number of steps.
-            // After k passes the head holds the start plus k steps, and the
-            // passes bound the states at the head, the start among them.
             double hi = plus(startNum.hi, times(std::max(passes.hi - 1, 0.0), step->second), kInf);
             if (hi <= l.hi) {
               n.setHigh(joint(hi, joint(hi, startNum.high(), endNum.high()), passes.high()));
@@ -518,7 +479,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
       };
       grow(h.num, start.num, end->second.num, stepIn(var, false), limitsOf(var->type));
       grow(h.len, start.len, end->second.len, stepIn(var, true), {0, kLengthMax});
-      // Elements made from elements, as `a.push(a[i] + 1)`.
       if (h.elem && start.elem && end->second.elem) {
         const Type *element =
             var->type->nonOptional()->isArray() ? var->type->nonOptional()->inner() : nullptr;
@@ -538,8 +498,6 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
     }
   }
 
-  // What only grew keeps its relation to an outer loop's head; what did not
-  // change is exactly what it was.
   for (auto &headVar : head.vars) {
     const Val &e = entry.vars.lookup(headVar.first);
     auto relate = [](Num &n, const Num &start, std::optional<std::pair<double, double>> step) {
@@ -562,10 +520,9 @@ void LoopRanges::runLoop(const OverflowCheck::LoopSpec &spec, State &st) {
   }
   --check_.quiet_;
 
-  // 4. The pass that counts, from the head that holds on every pass.
   State exits = deadState();
   onePass(spec, head, exits);
   st = exits;
 }
 
-} // namespace tz
+}

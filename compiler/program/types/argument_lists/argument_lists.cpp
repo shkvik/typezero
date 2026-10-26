@@ -36,10 +36,9 @@ const Type *spreadTuple(llvm::ArrayRef<const Type *> parts, const std::vector<bo
     }
     if (i >= spread.size() || !spread[i]) {
       elements.push_back(part);
-      min = elements.size(); // the elements before it are needed then
+      min = elements.size();
       continue;
     }
-    // A list of types in generic code stays as it is, spread there.
     if (part->isListParam()) {
       elements.push_back(part);
       min = elements.size();
@@ -69,7 +68,6 @@ const Type *spreadTuple(llvm::ArrayRef<const Type *> parts, const std::vector<bo
       why = "a list of types and an array cannot be spread into one tuple type";
       return nullptr;
     }
-    // `[...A]` is A.
     if (elements.size() == 1 && elements[0]->isListParam()) {
       return elements[0];
     }
@@ -94,8 +92,6 @@ bool flattenArguments(llvm::ArrayRef<const Type *> params, size_t &minArgs, bool
   for (const Field &f : list->fields()) {
     flat.push_back(f.type);
   }
-  // The elements a call must give are needed if every parameter before them
-  // is; and after them, the rest parameter of the list, if it has one.
   if (minArgs >= fixed) {
     minArgs = fixed + list->tupleMin();
   }
@@ -107,4 +103,4 @@ bool flattenArguments(llvm::ArrayRef<const Type *> params, size_t &minArgs, bool
   return true;
 }
 
-} // namespace tz
+}

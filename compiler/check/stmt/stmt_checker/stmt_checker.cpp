@@ -40,13 +40,11 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
-    break; // declared with the block (declareTypes)
+    break;
   case Stmt::Kind::Class:
     checker_.classChecker().checkClassStmt(cast<ClassDecl>(stmt));
     break;
   case Stmt::Kind::Function:
-    // check() handles top-level functions, and checkStatements those of a
-    // block.
     if (!cast<FunctionDecl>(stmt)->group) {
       checker_.diags_.error(stmt->loc(),
                             "a function can be declared only directly in a block; in a "
@@ -55,14 +53,11 @@ void StmtChecker::checkStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::Expr: {
     auto *s = cast<ExprStmt>(stmt);
-    // `yield x;` drops what next() sends.
     if (auto *yield = dyn_cast<YieldExpr>(s->expr)) {
       yield->discarded = true;
     }
     s->expr = checker_.exprChecker().checkExpr(s->expr);
-    checker_.resultChecker().checkDiscarded(s->expr, /*callback=*/false, s->loc());
-    // `assertIsCircle(s);` narrows from here on, as `asserts s is Circle`
-    // says, and as its body shows.
+    checker_.resultChecker().checkDiscarded(s->expr, false, s->loc());
     if (auto *call = dyn_cast<CallExpr>(s->expr)) {
       const FuncSymbol *callee = call->func ? call->func : call->method;
       if (callee && callee->asserts) {
@@ -70,8 +65,6 @@ void StmtChecker::checkStmt(Stmt *stmt) {
         checker_.predicateChecker().applyPredicate(call, checker_.flow_, ignored);
       }
     }
-    // Code after `process.exit()` never runs, as after `return`: in
-    // `if (!file) process.exit(1)` the rest knows that file is there.
     if (ReturnChecker::isExit(s)) {
       checker_.flow_.unreachable = true;
     }
@@ -137,8 +130,6 @@ void StmtChecker::checkStmt(Stmt *stmt) {
 void StmtChecker::checkIf(IfStmt *stmt) {
   Checker::Flow whenTrue, whenFalse;
   stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
-  // In an instance, `if (typeof x == "string")` may be decided by the type
-  // of x: the branch that cannot run is dropped, unchecked.
   if (std::optional<bool> constant = checker_.checkingInstance_
                                          ? checker_.genericChecker().constantCondition(stmt->cond)
                                          : std::nullopt) {
@@ -168,8 +159,6 @@ void StmtChecker::checkIf(IfStmt *stmt) {
   checker_.flow_ = FlowChecker::join(afterThen, checker_.flow_);
 }
 
-// The body of `if`, `while` or `for`. As in TypeScript, a declaration there
-// needs braces: it would be visible nowhere else.
 void StmtChecker::checkBody(Stmt *body) {
   if (isa<VarDeclStmt>(body) || isa<TypeAliasDecl>(body) || isa<EnumDecl>(body) ||
       isa<FunctionDecl>(body)) {
@@ -180,4 +169,4 @@ void StmtChecker::checkBody(Stmt *body) {
   checkStmt(body);
 }
 
-} // namespace tz
+}

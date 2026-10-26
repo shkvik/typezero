@@ -40,7 +40,6 @@ const Type *CryptoChecker::cryptoTypeNamed(llvm::StringRef name) const {
   return nullptr;
 }
 
-// constants.RSA_PKCS1_PSS_PADDING and the others of node:crypto, as node has them.
 Expr *CryptoChecker::cryptoConstant(MemberExpr *member) {
   static const std::pair<llvm::StringLiteral, int> constants[] = {
       {"RSA_PKCS1_PADDING", 1},           {"RSA_NO_PADDING", 3},
@@ -153,7 +152,6 @@ Expr *CryptoChecker::checkCryptoMember(MemberExpr *member) {
   return member;
 }
 
-// new X509Certificate(buffer), the one class of node:crypto made with new.
 Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
   expr->type = Type::error();
   if (cls != "X509Certificate") {
@@ -228,4 +226,4 @@ Expr *CryptoChecker::checkWebCryptoMember(MemberExpr *member) {
   return member;
 }
 
-} // namespace tz
+}

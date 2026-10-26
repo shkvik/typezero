@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// What a call reaches, with the references of its arguments put in.
 class CallResolver {
 public:
   explicit CallResolver(Analysis &analysis);
@@ -19,4 +18,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

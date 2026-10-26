@@ -36,7 +36,6 @@ Expr *EventTargetChecker::onabortAssign(AssignExpr *assign, MemberExpr *member, 
   if (!cls || !cls->derivesFrom(signal) || member->object->type->isOptional()) {
     return nullptr;
   }
-  // What node has as getters only.
   if (member->name == "aborted" || member->name == "reason") {
     checker_.diags_.error(member->loc(), "'" + member->name +
                                              "' of an AbortSignal is read-only; abort it with its "
@@ -82,7 +81,6 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
   const Type *event = eventClass->type;
   const Type *object = checker_.typeDeclarer().resolveAlias(objectListener);
-  // The kind of event a function takes: Event, or a class down its chain.
   auto eventKind = [&](const Type *type, llvm::SMLoc loc) -> const Type * {
     if (type->isError()) {
       return nullptr;
@@ -103,9 +101,8 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   if (auto *fe = dyn_cast<FunctionExpr>(listener)) {
     kind = event;
     if (!fe->fn->params.empty() && fe->fn->params[0].type && !fe->fn->params[0].rest) {
-      kind = eventKind(
-          checker_.typeResolver().resolveType(*fe->fn->params[0].type, /*allowVoid=*/false),
-          fe->fn->params[0].loc);
+      kind = eventKind(checker_.typeResolver().resolveType(*fe->fn->params[0].type, false),
+                       fe->fn->params[0].loc);
     }
     if (!kind) {
       listener = checker_.exprChecker().checkExpr(listener);
@@ -143,7 +140,7 @@ Expr *EventTargetChecker::checkEventTargetCall(CallExpr *call, MemberExpr *membe
   given[0] = given[1] = true;
   if (!add) {
     listener = checker_.typeRelations().convert(listener, Type::unknown());
-    checker_.file_->comparesFunctions = true; // the listener is found by what it is
+    checker_.file_->comparesFunctions = true;
     return checker_.emitterChecker().callLibraryMethod(call, member, cls, "removeListenerWith", {},
                                                        &given, false);
   }
@@ -163,8 +160,6 @@ Expr *EventTargetChecker::callLibraryFunction(CallExpr *call, llvm::StringRef na
   assert(fn && fn->sym && "a function of the emitter's code");
   FuncSymbol *sym = fn->sym;
   checker_.returnInferrer().resolveParams(sym);
-  // Of a function that does not write it, inferred before its copies are
-  // made (on() gives what its async generator does).
   const Type *ret = checker_.returnInferrer().returnType(sym);
   FuncSymbol *callee = sym;
   if (sym->isGeneric() && !checker_.trial_ &&
@@ -197,7 +192,6 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       call->args[i] = checker_.exprChecker().checkExpr(call->args[i]);
     }
   };
-  // The functions that are methods of the emitter they get first.
   if (fn == "getEventListeners" || fn == "listenerCount") {
     if (checker_.callChecker().rejectSpread(call) ||
         !checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
@@ -207,7 +201,6 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     if (ClassDecl *target = checker_.libraryClass("EventTarget");
         fn == "getEventListeners" && target && ClassDeclarer::classOf(object->type) &&
         ClassDeclarer::classOf(object->type)->derivesFrom(target)) {
-      // The listeners of an EventTarget, of the kinds of events they take.
       auto *member = checker_.ctx_.make<MemberExpr>(call->loc(), object, "listenersOf");
       auto *method =
           checker_.ctx_.make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
@@ -235,16 +228,12 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     auto *method =
         checker_.ctx_.make<CallExpr>(call->loc(), member, std::vector<Expr *>{call->args[1]});
     Expr *checked = checker_.emitterChecker().checkEmitterCall(
-        method, member, ClassDeclarer::classOf(object->type), /*super=*/false);
+        method, member, ClassDeclarer::classOf(object->type), false);
     return checked ? checked : method;
   }
   if (fn != "once" && fn != "on") {
     return nullptr;
   }
-  // once(emitter, name, { signal }): a Promise of the arguments of the next
-  // event, and of its 'error' events, if it has them. on(emitter, name, {
-  // signal, close }): an async iterator of the arguments of each event, which
-  // its 'error' events end.
   if (checker_.callChecker().rejectSpread(call) ||
       !checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
     return call;
@@ -286,7 +275,6 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     checkArgsLoosely(2);
     return call;
   }
-  // Its 'error' events reject the Promise.
   const Type *errors = events->isRecord()       ? events->valueType()
                        : events->field("error") ? events->field("error")->type
                                                 : nullptr;
@@ -309,4 +297,4 @@ Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncS
   return checkEventsFunction(call, func->decl->name, name->loc());
 }
 
-} // namespace tz
+}

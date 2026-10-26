@@ -29,10 +29,8 @@ namespace tz {
 
 namespace {
 
-// The header before the frame of the coroutine: { i64 rc, ptr layout }.
 constexpr uint64_t kHeaderSize = 16;
 
-// What iterating a value of `type` gives (see Checker::iteratedType).
 const Type *iteratedType(const Type *type) {
   if (type->isTypedArray()) {
     return type->elementType();
@@ -41,14 +39,14 @@ const Type *iteratedType(const Type *type) {
   return type->isArray() ? type->inner() : type->isString() ? type : type->yielded();
 }
 
-} // namespace
+}
 
 IteratorLowerer::IteratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels = std::move(lowering_.pendingLabels_);
   lowering_.pendingLabels_.clear();
-  lowering_.functionFrame().pushScope(); // the operands of the iteration
+  lowering_.functionFrame().pushScope();
   Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(stmt->iterable);
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("for.of.end");
@@ -58,17 +56,13 @@ void IteratorLowerer::emitIteratorForOf(ForOfStmt *stmt) {
     lowering_.builder_.CreateBr(endBlock);
   };
   consumer.each = [this, stmt, labels, depth, endBlock](llvm::Value *value) -> llvm::Value * {
-    // `continue` goes on after the value, in a generator emitted inline
-    // inside its scopes; `break` leaves them all.
     llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("for.of.next");
     size_t here = lowering_.scopes_.size();
-    lowering_.functionFrame().pushScope(); // the loop variable, fresh in every iteration
+    lowering_.functionFrame().pushScope();
     lowering_.storeLowerer().storeVar(
         stmt->binding.sym,
-        lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value,
-        /*replacing=*/true);
-    lowering_.targets_.push_back(
-        {labels, /*isLoop=*/true, /*isSwitch=*/false, endBlock, nextBlock, depth, here});
+        lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value, true);
+    lowering_.targets_.push_back({labels, true, false, endBlock, nextBlock, depth, here});
     lowering_.stmtLowerer().emitStmt(stmt->body);
     lowering_.targets_.pop_back();
     lowering_.functionFrame().popScope();
@@ -120,16 +114,13 @@ llvm::Value *IteratorLowerer::emitIteratorBuiltin(CallExpr *call) {
   }
 }
 
-// toArray, forEach, reduce, some, every, find and Array.from: the chain
-// before them runs here as one loop.
 llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   Builtin method = call->builtin;
   bool from = method == Builtin::ArrayFrom;
   Expr *source = from ? call->args[0] : cast<MemberExpr>(call->callee)->object;
   const Type *element = iteratedType(source->type);
-  lowering_.functionFrame().pushScope(); // the operands
+  lowering_.functionFrame().pushScope();
   Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
-  // The callback is evaluated after the chain, as JavaScript does.
   Expr *callbackExpr = from ? (call->args.size() > 1 ? call->args[1] : nullptr)
                        : method == Builtin::IterToArray ? nullptr
                                                         : call->args[0];
@@ -159,7 +150,6 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
 
   llvm::Value *array = nullptr, *resultSlot = nullptr, *hasAcc = nullptr;
   const Type *resultType = call->type;
-  // The array being filled waits in a slot, which an error releases.
   Lowering::Held heldArray{nullptr, nullptr, nullptr};
   switch (method) {
   case Builtin::ArrayFrom:
@@ -197,7 +187,6 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     if (call->args.size() > 1) {
       lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), resultSlot);
     } else {
-      // Without an initial value the first value is the accumulator.
       hasAcc = lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt1Ty(), "has.acc");
       lowering_.builder_.CreateStore(lowering_.builder_.getFalse(), hasAcc);
     }
@@ -217,8 +206,8 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
         lowering_.builder_.CreateBr(nextBlock);
         lowering_.functionFrame().switchTo(combineBlock);
       }
-      llvm::Value *acc = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType),
-                                                       resultSlot); // moves into the call
+      llvm::Value *acc =
+          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(resultType), resultSlot);
       lowering_.builder_.CreateStore(lowering_.lazyChainLowerer().callCallback(
                                          callback, callbackType, {acc, value, nextCount()},
                                          {resultType, element, Type::intTy()}),
@@ -244,7 +233,7 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       bool find = method == Builtin::IterFind;
       if (find) {
-        lowering_.refCounts().retainValue(value, element); // kept if it is the one
+        lowering_.refCounts().retainValue(value, element);
       }
       llvm::Value *decides = lowering_.lazyChainLowerer().callCallback(
           callback, callbackType, {value, nextCount()}, {element, Type::intTy()});
@@ -279,7 +268,6 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
     result = lowering_.throwLowerer().take(heldArray);
   } else if (resultSlot) {
     if (hasAcc) {
-      // As JavaScript, which reports a TypeError.
       llvm::BasicBlock *emptyBlock = lowering_.functionFrame().newBlock("reduce.empty");
       llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("reduce.ok");
       lowering_.builder_.CreateCondBr(
@@ -296,27 +284,22 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   return result;
 }
 
-// `it.next(x)`: a new { value, done }.
 llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *type = member->object->type;
   const Type *element = type->yielded(), *returned = type->returned(), *sent = type->sent();
-  // Owned: the generator may drop every other reference to itself while it
-  // runs. It waits in a slot, which an error from it releases.
   llvm::Value *it = lowering_.exprLowerer().emitExpr(member->object);
   Lowering::Held heldIt = lowering_.throwLowerer().hold(it, type, true);
   llvm::Value *sentValue = nullptr, *in = nullptr;
   if (!call->args.empty()) {
     sentValue = lowering_.exprLowerer().emitExpr(call->args[0]);
     if (sent->isVoid()) {
-      lowering_.refCounts().releaseValue(sentValue,
-                                         call->args[0]->type); // the generator ignores it
+      lowering_.refCounts().releaseValue(sentValue, call->args[0]->type);
       sentValue = nullptr;
     } else {
       in = lowering_.functionFrame().spill(sentValue, "sent");
     }
   }
-  // Zero unless it gives a value: an undefined value holds zero.
   llvm::Value *out = lowering_.functionFrame().createStackSlot(
       lowering_.moduleBuilder().lower(element), "next.value");
   lowering_.builder_.CreateStore(
@@ -334,9 +317,8 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
       lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_done), {frame}, "was.done");
   llvm::Value *has = lowering_.coroutineLowerer().emitResume(it, out, in, ret);
   if (sentValue) {
-    lowering_.refCounts().releaseValue(sentValue, sent); // the generator took a copy of it
+    lowering_.refCounts().releaseValue(sentValue, sent);
   }
-  // `T | R | undefined`: what it gave, or what it returned.
   const Type *valueType = call->type->field("value")->type;
   llvm::Value *given = lowering_.exprLowerer().emitConversion(
       lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element), out), element,
@@ -344,7 +326,6 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   llvm::Value *value = lowering_.builder_.CreateSelect(
       has, given, lowering_.optionalLowerer().undefinedValue(valueType));
   if (ret) {
-    // What a generator returns comes with the call that finished it.
     llvm::Value *returnedValue = lowering_.exprLowerer().emitConversion(
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(returned), ret), returned,
         valueType);
@@ -365,14 +346,13 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   return result;
 }
 
-// The iterator of an array or a string, or a helper, as a value.
 llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
   const Type *result = call->type;
   switch (call->builtin) {
   case Builtin::IterFrom: {
     Expr *arg = call->args[0];
     if (arg->type->isIterator()) {
-      return lowering_.exprLowerer().emitExpr(arg); // its own iterator
+      return lowering_.exprLowerer().emitExpr(arg);
     }
     Builtin kind = arg->type->isString() ? Builtin::IterFrom : Builtin::ArrValues;
     return lowering_.builder_.CreateCall(
@@ -393,7 +373,6 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
         {lowering_.exprLowerer().emitExpr(array)});
   }
   default: {
-    // A stage: the iterator before it, and its callback or count.
     Expr *receiver = cast<MemberExpr>(call->callee)->object;
     Expr *arg = call->args[0];
     llvm::Function *fn = lowering_.generatorLowerer().iteratorFunction(
@@ -404,4 +383,4 @@ llvm::Value *IteratorLowerer::emitIteratorObject(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

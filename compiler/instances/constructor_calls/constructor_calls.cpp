@@ -12,14 +12,8 @@ namespace tz {
 
 ConstructorCalls::ConstructorCalls(Checker &checker) : checker_(checker) {}
 
-// A call `this.m()` in a constructor (or in the initializers of the fields)
-// runs before the classes down the chain have set their fields: if one of
-// them overrides m, its m would read fields that are not set yet (node gives
-// undefined, or throws a TypeError). The same through the methods the
-// constructor calls on `this`.
 void ConstructorCalls::checkConstructorCalls() {
   for (ClassDecl *cls : checker_.classes_) {
-    // An instance of a generic class: its generic class reports.
     if (cls->literal || cls->children.empty() || cls->generic) {
       continue;
     }
@@ -45,7 +39,6 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
       fn->body,
       [&](const Expr *e) {
         auto *call = dyn_cast<CallExpr>(e);
-        // A call of the constructor is reported once, whatever it leads to.
         if (!call || !call->method || (origin && reportedCalls_.contains(origin))) {
           return;
         }
@@ -61,7 +54,6 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
         FunctionDecl *target = call->method->decl;
         const CallExpr *site = origin ? origin : call;
         if (call->virtualCall || !cls->derivesFrom(target->cls)) {
-          // The class down the chain whose method would run.
           const ClassDecl *by = target->cls;
           if (call->virtualCall) {
             std::function<const ClassDecl *(const ClassDecl *)> find =
@@ -96,14 +88,13 @@ void ConstructorCalls::scanConstructorCalls(const FunctionDecl *fn, const ClassD
           reportedCalls_.insert(site);
           return;
         }
-        // The methods each call of the constructor leads to.
         if (!origin) {
           seen.clear();
         }
         seen.insert(fn);
         scanConstructorCalls(target, cls, site, ctor, seen);
       },
-      /*intoFunctions=*/false);
+      false);
 }
 
-} // namespace tz
+}

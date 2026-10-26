@@ -1,50 +1,3 @@
-// Strings: JavaScript semantics (length and indices in UTF-16 code units)
-// with V8-style representations underneath.
-//
-// A string value is two machine words, `obj` and `meta`. The C functions below
-// take them as two separate arguments and return strings through an `out`
-// pointer, which keeps the calling convention trivial on every platform.
-//
-//   obj   the object holding the characters: a buffer, a rope node, a static
-//         literal emitted by the compiler, NULL for an empty string, or the
-//         characters themselves for an inline string
-//   meta  bits  0-29  length in code units
-//         bits 30-59  offset of the first code unit in the buffer (slices)
-//         bit  60     ASCII: one-byte and all code units < 0x80
-//         bit  61     TWO_BYTE: code units are 16-bit, otherwise 8-bit (Latin-1)
-//         bit  62     ROPE: obj is a rope node (with HEAP) or holds the
-//                     characters (without HEAP, see below)
-//         bit  63     HEAP: obj is reference counted (literals are not)
-//
-// The layout must match Lowering (kStr* constants in
-// compiler/lower/lowering/lowering.cpp).
-//
-// Representations:
-//   inline        a one-byte string of up to 8 code units lives in `obj`, the
-//                 first unit in the lowest byte and zeros after the last:
-//                 no allocation and no reference count. Every one-byte string
-//                 that short is inline, so two inline strings are equal
-//                 exactly when their words are.
-//   flat buffer   code units in one array, 1 or 2 bytes each. A buffer can
-//                 have spare capacity: `a + b` appends `b` in place when `a`
-//                 ends exactly where the buffer's used part ends, so building
-//                 a string with `+=` is linear even when it is read in between.
-//   slice         a value pointing into another buffer: substrings of 13 code
-//                 units or more share the characters instead of copying them.
-//   rope          `a + b` of 13 code units or more is a node pointing at both
-//                 halves; the characters are copied once, when something
-//                 reads them. The flat result is kept in the node and gets
-//                 spare capacity for further appends.
-//
-// Every function takes its string arguments borrowed and returns an owned
-// (+1) result.
-//
-// In the parallel runtime a string that threads share (TZ_RC_SHARED, see
-// publish.c) is counted atomically, and the two things that change a string
-// that is read stay safe: an append in place claims its room in the buffer
-// with a compare-and-swap of `used`, and a shared rope is flattened under a
-// lock, its flat result published before anyone reads it.
-
 #include "runtime/core/string/string.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -58,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Searching uses SSE2, which every x86-64 has, where the compiler offers it.
 #if defined(__SSE2__) && (defined(__clang__) || defined(__GNUC__))
 #define TZ_SSE2 1
 #include <emmintrin.h>
@@ -72,11 +24,8 @@
 #define F_HEAP (1ull << 63)
 #define MAX_LENGTH LEN_MASK
 
-// Below this length concatenation copies and slices copy: a node or a shared
-// buffer costs more than the characters themselves. V8 uses the same limit.
 #define SHORT_LENGTH 13
 
-// The longest inline string: as many one-byte code units as fit in `obj`.
 #define INLINE_MAX 8
 
 enum { KIND_BUF1 = 1, KIND_BUF2 = 2, KIND_ROPE = 3 };
@@ -89,14 +38,14 @@ typedef struct {
 
 typedef struct {
   Header h;
-  uint32_t capacity; // in code units
-  uint32_t used;     // code units written so far; appends continue here
-} Buffer;            // the code units follow the header
+  uint32_t capacity;
+  uint32_t used;
+} Buffer;
 
 typedef struct {
   Header h;
-  TzStr left, right; // released once the rope is flattened
-  TzStr flat;        // the flattened characters, or {NULL, 0}
+  TzStr left, right;
+  TzStr flat;
 } Rope;
 
 static const TzStr kEmpty = {NULL, F_ASCII};
@@ -121,17 +70,12 @@ static inline TzStr make_str(void *obj, uint64_t meta) {
   return s;
 }
 
-// Inline strings keep code unit i in bits 8*i..8*i+7 of `obj`, which puts
-// them in memory order on a little-endian machine: units() hands out &obj.
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #error "inline strings assume a little-endian target"
 #endif
 
 static inline uint64_t inline_bits(const TzStr *s) { return (uint64_t)(uintptr_t)s->obj; }
 
-// An inline string of `len` (1 to INLINE_MAX) code units held in `bits`, with
-// zeros above them. The ASCII flag is computed here, not taken from the
-// source, so that equal inline strings have equal words.
 static inline TzStr inline_from_bits(uint64_t bits, uint32_t len) {
   TzStr s;
   s.obj = (void *)(uintptr_t)bits;
@@ -149,9 +93,6 @@ static inline TzStr inline_str(const uint8_t *data, uint32_t len) {
   return inline_from_bits(bits, len);
 }
 
-// The inline string data[from..from+n) of one-byte units, 0 < n <= INLINE_MAX,
-// where `end` units are readable from `data` on: eight bytes are loaded at
-// once when there is room for them.
 static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t from, uint32_t n) {
   uint64_t bits;
   if (from + 8 <= end) {
@@ -166,10 +107,6 @@ static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t fro
 
   return inline_from_bits(bits, n);
 }
-
-//===----------------------------------------------------------------------===//
-// Objects and reference counts
-//===----------------------------------------------------------------------===//
 
 int64_t tz_str_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_strings)); }
 
@@ -197,8 +134,6 @@ static inline void release(TzStr s) {
   }
 }
 
-// A growable stack of pointers for the iterative walks below: ropes built by a
-// loop can be a million levels deep, too deep for recursion.
 typedef struct {
   void **items;
   size_t count, capacity;
@@ -231,9 +166,6 @@ static void stack_free(PtrStack *s) {
   }
 }
 
-// Frees an object whose count reached zero, and everything that dies with it.
-// Called by the inline release code that the compiler emits.
-// tz_str_free of a rope: its halves may die with it.
 TZ_NOINLINE void tz_str_free_rope(void *obj) {
   PtrStack pending;
   stack_init(&pending);
@@ -260,13 +192,9 @@ TZ_HOT void tz_str_free(void *obj) {
     tz_str_free_rope(obj);
     return;
   }
-  --tz_live_strings; // a buffer: nothing else dies with it
+  --tz_live_strings;
   tz_free(obj);
 }
-
-//===----------------------------------------------------------------------===//
-// Buffers and code units
-//===----------------------------------------------------------------------===//
 
 static Buffer *buffer_new(uint32_t capacity, int two) {
   Buffer *b = (Buffer *)object_new(sizeof(Buffer) + (size_t)capacity * (two ? 2 : 1),
@@ -281,8 +209,6 @@ static inline char *buffer_units(Buffer *b) { return (char *)b + sizeof(Buffer);
 
 TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta);
 
-// The flat result of a rope, once there: in the parallel runtime the meta is
-// written before the object, which another thread may be reading.
 static inline void *rope_flat_obj(const Rope *r) {
 #if TZ_PARALLEL
   return __atomic_load_n(&r->flat.obj, __ATOMIC_ACQUIRE);
@@ -291,9 +217,6 @@ static inline void *rope_flat_obj(const Rope *r) {
 #endif
 }
 
-// The flat string behind `s`, borrowed from `s`. Ropes are flattened once.
-// The words are read one by one, which keeps the result in registers: a copy
-// of the whole struct would pick it from memory, `s` or the rope's.
 static inline TzStr flat(TzStr s) {
   if (is_rope(s.meta)) {
     Rope *r = (Rope *)s.obj;
@@ -309,8 +232,6 @@ static inline TzStr flat(TzStr s) {
   return s;
 }
 
-// Code units of a flat string. They are inside `*f` itself when it is inline,
-// so `f` must outlive the result.
 static inline const void *units(const TzStr *f) {
   if (is_inline(f->meta)) {
     return &f->obj;
@@ -329,10 +250,6 @@ static inline uint16_t unit_at(const TzStr *f, uint32_t i) {
   return is_two(f->meta) ? ((const uint16_t *)u)[i] : ((const uint8_t *)u)[i];
 }
 
-// The code unit at `i` of a one-byte string that is no rope node: a buffer or
-// a literal, tested first (the usual long text), or an inline string; -1 for
-// any other string. It is read from the two words alone, so that a loop over
-// the string keeps everything in registers.
 static inline int32_t direct_byte(void *obj, uint64_t meta, uint32_t i) {
   if ((meta & (F_ROPE | F_TWO_BYTE)) == 0) {
     return ((const uint8_t *)obj)[sizeof(Buffer) + str_off(meta) + i];
@@ -344,11 +261,8 @@ static inline int32_t direct_byte(void *obj, uint64_t meta, uint32_t i) {
   return -1;
 }
 
-// Whether a string is one-byte and no rope node: what direct_byte reads.
 static inline int direct_bytes(uint64_t meta) { return !is_rope(meta) && !is_two(meta); }
 
-// Copies the code units of flat `src` to `dst`, widening one-byte units when
-// `dst_two` is set. Narrowing is the caller's job.
 static void copy_units(void *dst, int dst_two, const TzStr *src) {
   uint32_t len = str_len(src->meta);
   if (len == 0) {
@@ -366,8 +280,6 @@ static void copy_units(void *dst, int dst_two, const TzStr *src) {
   }
 }
 
-// Adds the code units of one-byte `s` at position `pos` of an inline string
-// being built in `bits`; pos + length of s must not exceed INLINE_MAX.
 static inline uint64_t add_inline_units(uint64_t bits, uint32_t pos, TzStr s) {
   uint32_t len = str_len(s.meta);
   if (len == 0) {
@@ -386,8 +298,6 @@ static inline uint64_t add_inline_units(uint64_t bits, uint32_t pos, TzStr s) {
 }
 
 #if TZ_PARALLEL
-// The lock of the shared ropes being flattened, which their children are
-// read and released under. Not static: see the rules in tzrt.h.
 int32_t tz_str_flatten_lock;
 
 static void flatten_lock(void) {
@@ -409,13 +319,8 @@ static void flatten_unlock(void) { __atomic_store_n(&tz_str_flatten_lock, 0, __A
 
 static void flatten_rope(Rope *r, uint64_t meta);
 
-// A shared rope (or one with a shared one below) is flattened under the
-// lock, its shared children first, so that no thread reads children another
-// is releasing.
 TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
   if (!tz_rc_is_shared(r->h.rc)) {
-    // This thread's own: only its shared children need the lock, which
-    // flat() of each takes.
     PtrStack pending;
     stack_init(&pending);
     stack_push(&pending, &r->right);
@@ -453,13 +358,11 @@ TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
 #endif
   uint32_t len = str_len(meta);
   int two = is_two(meta);
-  // Spare room: a flattened string is often appended to next.
   Buffer *b = buffer_new(len + len / 2, two);
   char *dst = buffer_units(b);
   size_t width = two ? 2 : 1;
   uint32_t pos = 0;
 
-  // Copy the leaves left to right without recursion.
   PtrStack pending;
   stack_init(&pending);
   stack_push(&pending, &r->right);
@@ -483,8 +386,6 @@ TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
 
   b->used = len;
 #if TZ_PARALLEL
-  // A shared rope's result is shared, and readers find it once its object
-  // is there.
   if (tz_rc_is_shared(r->h.rc)) {
     b->h.rc = TZ_RC_SHARED + 1;
   }
@@ -501,8 +402,6 @@ TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
 
 static TzStr single_char(uint8_t unit) { return inline_str(&unit, 1); }
 
-// A new flat string holding `units` (1 or 2 bytes each), narrowed to one byte
-// per unit when possible.
 static TzStr string_from_units(const void *data, uint32_t len, int two) {
   if (len == 0) {
     return kEmpty;
@@ -548,10 +447,6 @@ static TzStr string_from_ascii(const char *text, size_t len) {
 
 TzStr tz_str_from_ascii(const char *text, size_t length) { return string_from_ascii(text, length); }
 
-// A new string of `length` ASCII characters, which the caller writes at the
-// pointer returned before using the string: the text of base64 and hex
-// (buffer.c), made without a copy. NULL for a length that fits in the value
-// itself; then the caller makes the string with tz_str_from_ascii.
 char *tz_str_ascii_units(size_t length, TzStr *out) {
   if (length <= INLINE_MAX) {
     return NULL;
@@ -581,7 +476,6 @@ void tz_str_retain_value(TzStr s) { retain(s); }
 void tz_str_release_value(TzStr s) { release(s); }
 
 #if TZ_PARALLEL
-// publish.c: a string other threads may reach, and what it is made of.
 void tz_str_publish(TzStr s) {
   if (!(s.meta & F_HEAP)) {
     return;
@@ -592,7 +486,7 @@ void tz_str_publish(TzStr s) {
   while (pending.count > 0) {
     Header *h = (Header *)pending.items[--pending.count];
     if (h->rc <= 0 || h->rc >= TZ_RC_FOREVER) {
-      continue; // shared already
+      continue;
     }
     h->rc = TZ_RC_SHARED + h->rc;
     if (h->kind == KIND_ROPE) {
@@ -609,10 +503,6 @@ void tz_str_publish(TzStr s) {
 }
 #endif
 
-//===----------------------------------------------------------------------===//
-// Concatenation
-//===----------------------------------------------------------------------===//
-
 static TzStr rope_new(TzStr left, TzStr right) {
   uint32_t len = str_len(left.meta) + str_len(right.meta);
   int two = is_two(left.meta) || is_two(right.meta);
@@ -628,7 +518,6 @@ static TzStr rope_new(TzStr left, TzStr right) {
   return make_str(r, make_meta(len, 0, two, ascii, F_HEAP | F_ROPE));
 }
 
-// Copies n bytes; a short copy is two overlapping words, not a call.
 static inline void copy_bytes(uint8_t *dst, const uint8_t *src, uint32_t n) {
   if (n >= 8 && n <= 16) {
     uint64_t head, tail;
@@ -641,8 +530,6 @@ static inline void copy_bytes(uint8_t *dst, const uint8_t *src, uint32_t n) {
   }
 }
 
-// The one-byte case of join_sep below: the one-byte `items` joined by flat
-// `sep` into `out`, which has room for exactly the `total` units they make.
 static void join_bytes(uint8_t *out, uint32_t total, const TzStr *items, int64_t n,
                        const TzStr *sep) {
   uint32_t sep_len = str_len(sep->meta), pos = 0;
@@ -659,8 +546,6 @@ static void join_bytes(uint8_t *out, uint32_t total, const TzStr *items, int64_t
     TzStr s = items[i];
     uint32_t len = str_len(s.meta);
     if (is_inline(s.meta) && pos + 8 <= total) {
-      // All eight bytes at once: the zeros after the string are written over
-      // by what comes next.
       memcpy(out + pos, &s.obj, 8);
     } else if (len) {
       TzStr f = flat(s);
@@ -670,8 +555,6 @@ static void join_bytes(uint8_t *out, uint32_t total, const TzStr *items, int64_t
   }
 }
 
-// `items` joined by `sep` (NULL for none) into a new flat string of exactly
-// the needed size, inline when it is short enough.
 static TzStr join_sep(const TzStr *items, int64_t n, const TzStr *sep) {
   uint64_t total = 0;
   int two = 0, ascii = 1;
@@ -733,8 +616,6 @@ static TzStr join_sep(const TzStr *items, int64_t n, const TzStr *sep) {
 
 static TzStr join(const TzStr *parts, int64_t n) { return join_sep(parts, n, NULL); }
 
-// Appends parts[1..n) to parts[0] without copying it, if parts[0] ends where
-// its buffer's used part ends and the buffer has room.
 static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t total, int two,
                            int ascii) {
   TzStr base = parts[0];
@@ -762,8 +643,6 @@ static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t t
   }
   int claimed = 0;
 #if TZ_PARALLEL
-  // Another thread may append to a shared buffer at the same time: the room
-  // is this one's once the swap took it.
   if (tz_rc_is_shared(b->h.rc)) {
     uint32_t expected = off + len;
     if (!__atomic_compare_exchange_n(&b->used, &expected, off + len + extra, 0, __ATOMIC_ACQ_REL,
@@ -797,10 +676,6 @@ static int append_in_place(TzStr *out, const TzStr *parts, int64_t n, uint32_t t
   return 1;
 }
 
-// A number the compiler passes to tz_str_concat_n as it is, so that `"x" + i`
-// needs no temporary string: `meta` has the ROPE and TWO_BYTE flags without
-// HEAP, which no real string has, and NUMBER_INT or NUMBER_DOUBLE in its low
-// bits; `obj` holds the bits of the value. Must match kNumberPart in Lowering.
 #define NUMBER_INT 1
 #define NUMBER_DOUBLE 2
 
@@ -808,16 +683,11 @@ static inline int is_number_part(uint64_t meta) {
   return (meta & (F_ROPE | F_HEAP | F_TWO_BYTE)) == (F_ROPE | F_TWO_BYTE);
 }
 
-// The text of a number part too long to be inline: a flat one-byte string on
-// the stack. It is never counted (no HEAP flag), so it must not outlive the
-// concatenation.
 typedef struct {
   Buffer b;
   char units[32];
 } NumberText;
 
-// Writes the decimal digits of `value` so that they end at `end` (at most 20
-// characters); returns where they start.
 static char *format_i64(char *end, int64_t value) {
   char *p = end;
   uint64_t magnitude = value < 0 ? 0 - (uint64_t)value : (uint64_t)value;
@@ -832,8 +702,6 @@ static char *format_i64(char *end, int64_t value) {
   return p;
 }
 
-// The text of a number part: an inline string when it is short enough,
-// otherwise a flat string in `t`.
 static TzStr number_text(NumberText *t, TzStr part) {
   uint64_t bits = (uint64_t)(uintptr_t)part.obj;
   const char *text = t->units;
@@ -859,8 +727,6 @@ static TzStr number_text(NumberText *t, TzStr part) {
   return make_str(&t->b, make_meta((uint32_t)len, 0, 0, 1, 0));
 }
 
-// The usual `"x" + i`: when every part is inline or a short number and the
-// result fits, it is built in a register. Returns 0 if it does not fit.
 static int concat_inline(TzStr *out, const TzStr *parts, int64_t n) {
   uint64_t bits = 0;
   uint32_t pos = 0;
@@ -894,7 +760,6 @@ static int concat_inline(TzStr *out, const TzStr *parts, int64_t n) {
   return 1;
 }
 
-// tz_str_concat_n when the result is not a short string.
 TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
   TzStr local[16];
   NumberText local_numbers[4];
@@ -930,9 +795,6 @@ TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
               (unsigned long long)MAX_LENGTH);
   }
 
-  // A number's text on the stack must become a real string before a result
-  // keeps a reference to it. Such text is flat and not counted; inline
-  // strings and literals never point into `numbers`.
 #define IS_TEMP(s)                                                                                 \
   (numbers_used && !((s).meta & (F_ROPE | F_HEAP)) && (s).obj >= (void *)numbers &&                \
    (s).obj < (void *)(numbers + numbers_used))
@@ -943,7 +805,6 @@ TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
   if (count == 0) {
     *out = kEmpty;
   } else if (!two && total <= INLINE_MAX) {
-    // The usual `"x" + i`: built in a register, nothing to allocate.
     uint64_t bits = 0;
     uint32_t pos = 0;
     for (int64_t i = 0; i < count; ++i) {
@@ -959,7 +820,6 @@ TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
       *out = kept[0];
     }
   } else if (append_in_place(out, kept, count, (uint32_t)total, two, ascii)) {
-    // done
   } else if (total >= SHORT_LENGTH && count == 2) {
     TzStr left = temp0 ? string_from_units(units(&kept[0]), str_len(kept[0].meta), 0) : kept[0];
     TzStr right = temp1 ? string_from_units(units(&kept[1]), str_len(kept[1].meta), 0) : kept[1];
@@ -971,8 +831,6 @@ TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
       release(right);
     }
   } else if (total >= SHORT_LENGTH && str_len(kept[0].meta) >= total - str_len(kept[0].meta)) {
-    // A long string plus a few short ones, as in `s = s + x + "\n"`: keep the
-    // long one and join only the rest.
     TzStr rest = join(kept + 1, count - 1);
     TzStr first = temp0 ? string_from_units(units(&kept[0]), str_len(kept[0].meta), 0) : kept[0];
     *out = rope_new(first, rest);
@@ -992,26 +850,17 @@ TZ_NOINLINE void tz_str_concat_slow(TzStr *out, const TzStr *parts, int64_t n) {
   }
 }
 
-// `parts[0] + parts[1] + ... + parts[n-1]`: the compiler turns chains of `+`
-// and template literals into one call. Parts may be number parts.
 void tz_str_concat_n(TzStr *out, const TzStr *parts, int64_t n) {
   if (!concat_inline(out, parts, n)) {
     tz_str_concat_slow(out, parts, n);
   }
 }
 
-// `items` joined by `sep` (NULL for ","), in one buffer of the exact size:
-// join() of a string[].
 void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep) {
   TzStr comma = single_char(',');
   *out = join_sep(items, n, sep ? sep : &comma);
 }
 
-//===----------------------------------------------------------------------===//
-// Comparison and search
-//===----------------------------------------------------------------------===//
-
-// Whether a[ia..ia+n) and b[ib..ib+n) hold the same code units.
 TZ_NOINLINE int tz_str_units_equal(const TzStr *a, uint32_t ia, const TzStr *b, uint32_t ib,
                                    uint32_t n) {
   if (n == 0) {
@@ -1060,7 +909,6 @@ TZ_NOINLINE int32_t tz_str_compare_slow(void *a_obj, uint64_t a_meta, void *b_ob
     return compare_lengths(la, lb);
   }
   if (!is_two(a.meta) && !is_two(b.meta)) {
-    // Bytes compare as the code units they are.
     int c = memcmp(units(&a), units(&b), n);
     return c != 0 ? (c < 0 ? -1 : 1) : compare_lengths(la, lb);
   }
@@ -1086,9 +934,6 @@ static inline uint64_t byte_swap(uint64_t x) {
 #endif
 }
 
-// The first eight code units of a one-byte string that is no rope, as a word
-// with the first unit as the highest byte: an inline string has zeros after
-// its last unit, and a buffer has at least nine units.
 static inline uint64_t first_word(void *obj, uint64_t meta) {
   uint64_t word = (uint64_t)(uintptr_t)obj;
   if (!is_inline(meta)) {
@@ -1098,10 +943,6 @@ static inline uint64_t first_word(void *obj, uint64_t meta) {
   return byte_swap(word);
 }
 
-// Orders strings by UTF-16 code units, as JavaScript's `<` does. One-byte
-// strings mostly differ in their first eight units, which compare as words:
-// the zeros after the end of a shorter inline string order it first, as its
-// length does.
 TZ_HOT int32_t tz_str_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
   if (direct_bytes(a_meta) && direct_bytes(b_meta) && (is_inline(a_meta) || str_len(a_meta) >= 8) &&
       (is_inline(b_meta) || str_len(b_meta) >= 8)) {
@@ -1121,8 +962,6 @@ static uint32_t clamp(int64_t value, uint32_t len) {
   return value<0 ? 0 : value>(int64_t) len ? len : (uint32_t)value;
 }
 
-// The position of the first byte `c` in data[from..end), or `end`. Sixteen
-// bytes at a time, without reading past `end`.
 static inline uint32_t find_byte(const uint8_t *data, uint32_t from, uint32_t end, uint8_t c) {
 #ifdef TZ_SSE2
   __m128i needle = _mm_set1_epi8((char)c);
@@ -1143,7 +982,6 @@ static inline uint32_t find_byte(const uint8_t *data, uint32_t from, uint32_t en
   return end;
 }
 
-// The same for a 16-bit code unit, eight at a time.
 static inline uint32_t find_unit16(const uint16_t *data, uint32_t from, uint32_t end, uint16_t c) {
 #ifdef TZ_SSE2
   __m128i needle = _mm_set1_epi16((short)c);
@@ -1164,7 +1002,6 @@ static inline uint32_t find_unit16(const uint16_t *data, uint32_t from, uint32_t
   return end;
 }
 
-// The first code unit `c` in units[from..end) of a flat string, or `end`.
 static inline uint32_t find_unit(const void *units, int two, uint32_t from, uint32_t end,
                                  uint16_t c) {
   if (two) {
@@ -1174,12 +1011,9 @@ static inline uint32_t find_unit(const void *units, int two, uint32_t from, uint
   return c > 0xFF ? end : find_byte((const uint8_t *)units, from, end, (uint8_t)c);
 }
 
-// How many bytes `c` data[0..end) holds, counting no further than `max`.
 static uint32_t count_byte(const uint8_t *data, uint32_t end, uint8_t c, uint32_t max) {
   uint32_t count = 0, i = 0;
 #ifdef TZ_SSE2
-  // Sixteen counters of a byte each, summed every 255 blocks before they
-  // could overflow.
   __m128i needle = _mm_set1_epi8((char)c), zero = _mm_setzero_si128();
   while (i + 16 <= end && count < max) {
     uint32_t stop = end - i >= 255 * 16 ? i + 255 * 16 : end - 15;
@@ -1212,9 +1046,6 @@ static inline int bytes_equal(const uint8_t *a, const uint8_t *b, uint32_t n) {
   return 1;
 }
 
-// The first start of needle[0..n) (n >= 2) in data from `from` on, before
-// `end`, the last start + 1; or `end`. The candidates are the places where
-// both the first and the last byte match, sixteen at a time.
 static uint32_t find_bytes(const uint8_t *data, uint32_t from, uint32_t end, const uint8_t *needle,
                            uint32_t n) {
 #ifdef TZ_SSE2
@@ -1242,8 +1073,6 @@ static uint32_t find_bytes(const uint8_t *data, uint32_t from, uint32_t end, con
   return end;
 }
 
-// Like JavaScript's indexOf: the first match at or after `from`, or -1. Both
-// strings are flat; `from` is at most the length of `s`.
 static int64_t index_of(const TzStr *s, const TzStr *t, uint32_t from) {
   uint32_t len = str_len(s->meta), tlen = str_len(t->meta);
   if (tlen == 0) {
@@ -1254,7 +1083,6 @@ static int64_t index_of(const TzStr *s, const TzStr *t, uint32_t from) {
   }
   const void *su = units(s);
   int two = is_two(s->meta);
-  // The last start + 1.
   uint32_t end = len - tlen + 1;
   if (!two && !is_two(t->meta)) {
     const uint8_t *tu = (const uint8_t *)units(t);
@@ -1263,7 +1091,6 @@ static int64_t index_of(const TzStr *s, const TzStr *t, uint32_t from) {
     return i == end ? -1 : (int64_t)i;
   }
   uint16_t first = unit_at(t, 0);
-  // Candidates start where the first unit matches; the rest is compared.
   for (uint32_t i = from; i < end; ++i) {
     i = find_unit(su, two, i, end, first);
     if (i == end) {
@@ -1289,8 +1116,6 @@ int32_t tz_str_includes(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_me
   return tz_str_index_of(s_obj, s_meta, t_obj, t_meta, from, has_from) >= 0;
 }
 
-// Whether inline `s` holds inline `t` at `start`; start + length of t must
-// not exceed the length of s.
 static inline int inline_has_at(void *s_obj, uint32_t start, void *t_obj, uint32_t tlen) {
   if (tlen == 0) {
     return 1;
@@ -1330,12 +1155,6 @@ TZ_HOT int32_t tz_str_ends_with(void *s_obj, uint64_t s_meta, void *t_obj, uint6
   return tz_str_units_equal(&s, end - tlen, &t, 0, tlen);
 }
 
-//===----------------------------------------------------------------------===//
-// Characters and substrings
-//===----------------------------------------------------------------------===//
-
-// The compiler checks or proves every index before calling these, so this
-// fires only on a bug in the compiler.
 static void check_index(int64_t index, uint32_t len) {
   if (index < 0 || index >= (int64_t)len) {
     tz_panicf("internal error: string index %lld out of range for length %u", (long long)index,
@@ -1356,8 +1175,6 @@ TZ_HOT int32_t tz_str_char_code_at(void *obj, uint64_t meta, int64_t index) {
   return unit >= 0 ? unit : tz_str_char_code_at_slow(obj, meta, (uint32_t)index);
 }
 
-// A copy of data[from..from+n) of flat one-byte `f`, whose units are `data`,
-// for INLINE_MAX < n < SHORT_LENGTH, as substring_of makes it.
 TZ_NOINLINE void tz_str_short_piece(TzStr *out, const TzStr *f, const uint8_t *data, uint32_t from,
                                     uint32_t n) {
   if (n == str_len(f->meta)) {
@@ -1377,9 +1194,6 @@ TZ_NOINLINE void tz_str_short_piece(TzStr *out, const TzStr *f, const uint8_t *d
   *out = make_str(b, make_meta(n, 0, 0, ascii, F_HEAP));
 }
 
-// s[from..to): short pieces are copied, longer ones share the buffer. The
-// string comes as its two words and the result goes out through `out`: a
-// TzStr passed by value would go through memory.
 TZ_NOINLINE void tz_str_substring_into(TzStr *out, void *obj, uint64_t meta, uint32_t from,
                                        uint32_t to) {
   TzStr s = make_str(obj, meta);
@@ -1415,10 +1229,6 @@ static inline TzStr substring_of(TzStr s, uint32_t from, uint32_t to) {
   return piece;
 }
 
-// substring_of without a call when the string is one-byte and no rope and the
-// piece is inline or shares the buffer: what the hot methods below inline. A
-// short piece is cut from a word of eight units, the last eight when it ends
-// there (a buffer has at least nine).
 static inline void substring_fast(TzStr *out, void *obj, uint64_t meta, uint32_t from,
                                   uint32_t to) {
   uint32_t n = to - from, len = str_len(meta);
@@ -1461,7 +1271,6 @@ TZ_NOINLINE void tz_str_char_at_slow(TzStr *out, void *obj, uint64_t meta, uint3
   tz_str_substring_into(out, obj, meta, index, index + 1);
 }
 
-// s[i]: the code unit at i as a string. One byte is an inline string.
 TZ_HOT void tz_str_char_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
   int32_t unit = direct_byte(obj, meta, (uint32_t)index);
@@ -1490,9 +1299,6 @@ TZ_NOINLINE int32_t tz_str_code_point_at_slow(TzStr *out, void *obj, uint64_t me
   return 1;
 }
 
-// The code point at `index` for `for...of`: one code unit, or two for a
-// surrogate pair. Returns the number of code units taken. A one-byte string
-// has no surrogates.
 TZ_HOT int32_t tz_str_code_point_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
   int32_t unit = direct_byte(obj, meta, (uint32_t)index);
@@ -1504,7 +1310,6 @@ TZ_HOT int32_t tz_str_code_point_at(TzStr *out, void *obj, uint64_t meta, int64_
   return 1;
 }
 
-// JavaScript's slice: negative positions count from the end.
 TZ_HOT void tz_str_slice(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
                          int32_t has_end) {
   uint32_t len = str_len(meta);
@@ -1517,8 +1322,6 @@ TZ_HOT void tz_str_slice(TzStr *out, void *obj, uint64_t meta, int64_t start, in
   }
 }
 
-// JavaScript's substring: negative positions become 0, and the ends swap if
-// needed.
 TZ_HOT void tz_str_substring(TzStr *out, void *obj, uint64_t meta, int64_t start, int64_t end,
                              int32_t has_end) {
   uint32_t len = str_len(meta);
@@ -1528,8 +1331,6 @@ TZ_HOT void tz_str_substring(TzStr *out, void *obj, uint64_t meta, int64_t start
 }
 
 void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
-  // RangeErrors, as in JavaScript; the program checks for them after the
-  // call.
   if (count < 0) {
     tz_throw(TZ_RANGE_ERROR, "Invalid count value: %lld", (long long)count);
     *out = kEmpty;
@@ -1566,7 +1367,6 @@ void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
   Buffer *b = buffer_new((uint32_t)total, two);
   char *dst = buffer_units(b);
   copy_units(dst, two, &f);
-  // Double the filled part until it is long enough.
   size_t filled = (size_t)len * width, need = (size_t)total * width;
   while (filled < need) {
     size_t chunk = filled < need - filled ? filled : need - filled;
@@ -1576,10 +1376,6 @@ void tz_str_repeat(TzStr *out, void *obj, uint64_t meta, int64_t count) {
   b->used = (uint32_t)total;
   *out = make_str(b, make_meta((uint32_t)total, 0, two, is_ascii(f.meta), F_HEAP));
 }
-
-//===----------------------------------------------------------------------===//
-// Conversions and printing
-//===----------------------------------------------------------------------===//
 
 void tz_str_from_i64(TzStr *out, int64_t value) {
   char buf[24];
@@ -1597,8 +1393,6 @@ void tz_str_from_f64(TzStr *out, double value) {
   *out = string_from_ascii(buf, tz_format_f64(value, buf));
 }
 
-// Writes code units to stdout as UTF-8. A lone surrogate, which UTF-8 cannot
-// express, becomes U+FFFD, as in Node.js.
 TZ_NOINLINE void tz_out_write_units(const void *data, uint32_t len, int two) {
   char buf[256];
   size_t n = 0;
@@ -1653,10 +1447,6 @@ void tz_print_string(void *obj, uint64_t meta) {
     tz_out_write_units(units(&f), len, is_two(f.meta));
   }
 }
-
-//===----------------------------------------------------------------------===//
-// Building strings in C
-//===----------------------------------------------------------------------===//
 
 void tz_buf_init(TzBuf *b) {
   b->data = NULL;
@@ -1731,14 +1521,8 @@ TzStr tz_buf_take(TzBuf *b) {
   return s;
 }
 
-//===----------------------------------------------------------------------===//
-// Building a string of a known length
-//===----------------------------------------------------------------------===//
-
-// A flat string built from pieces whose total length is known up front:
-// inline when it is one-byte and short enough, otherwise one buffer.
 typedef struct {
-  Buffer *b; // NULL while inline
+  Buffer *b;
   uint64_t bits;
   uint32_t pos;
   int two;
@@ -1751,8 +1535,6 @@ static void builder_init(Builder *w, uint32_t total, int two) {
   w->two = two;
 }
 
-// Appends `n` code units of flat `s` from `from` on. A two-byte `s` needs a
-// two-byte builder.
 static void builder_put(Builder *w, const TzStr *s, uint32_t from, uint32_t n) {
   if (n == 0) {
     return;
@@ -1785,7 +1567,6 @@ static TzStr builder_finish(Builder *w, int ascii) {
   return make_str(w->b, make_meta(w->pos, 0, w->two, ascii, F_HEAP));
 }
 
-// Appends code units of flat `s` to a growing buffer.
 static void buf_put(TzBuf *b, const TzStr *s, uint32_t from, uint32_t n) {
   if (n == 0) {
     return;
@@ -1809,8 +1590,6 @@ static void buf_code_point(TzBuf *b, uint32_t cp) {
   }
 }
 
-// The code point at `*i` of flat `s` (a surrogate pair, or one code unit),
-// advancing `*i` past it.
 static uint32_t next_code_point(const TzStr *s, uint32_t *i, uint32_t len) {
   uint32_t unit = unit_at(s, *i);
   ++*i;
@@ -1825,7 +1604,6 @@ static uint32_t next_code_point(const TzStr *s, uint32_t *i, uint32_t len) {
   return unit;
 }
 
-// The code point that ends before `*i`, moving `*i` back to its start.
 static uint32_t previous_code_point(const TzStr *s, uint32_t *i) {
   uint32_t unit = unit_at(s, --*i);
   if (unit >= 0xDC00 && unit <= 0xDFFF && *i > 0) {
@@ -1839,11 +1617,6 @@ static uint32_t previous_code_point(const TzStr *s, uint32_t *i) {
   return unit;
 }
 
-//===----------------------------------------------------------------------===//
-// More methods
-//===----------------------------------------------------------------------===//
-
-// charAt(): "" out of range.
 void tz_str_char_at_or_empty(TzStr *out, void *obj, uint64_t meta, int64_t index) {
   if (index < 0 || index >= (int64_t)str_len(meta)) {
     *out = kEmpty;
@@ -1858,7 +1631,6 @@ TZ_NOINLINE int32_t tz_str_code_point_slow(void *obj, uint64_t meta, uint32_t in
   return (int32_t)next_code_point(&f, &index, str_len(meta));
 }
 
-// codePointAt(), for a position the compiler checked.
 TZ_HOT int32_t tz_str_code_point(void *obj, uint64_t meta, int64_t index) {
   check_index(index, str_len(meta));
   int32_t unit = direct_byte(obj, meta, (uint32_t)index);
@@ -1866,7 +1638,6 @@ TZ_HOT int32_t tz_str_code_point(void *obj, uint64_t meta, int64_t index) {
   return unit >= 0 ? unit : tz_str_code_point_slow(obj, meta, (uint32_t)index);
 }
 
-// lastIndexOf(): the last match that starts at or before `position`.
 int32_t tz_str_last_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta,
                              int64_t position, int32_t has_position) {
   TzStr s = flat(make_str(s_obj, s_meta)), t = flat(make_str(t_obj, t_meta));
@@ -1898,13 +1669,10 @@ int32_t tz_str_last_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t
   return -1;
 }
 
-// The pieces of split_bytes: data[p..q) of flat one-byte `f`. A slice is
-// not retained here; `*slices` counts them, for the caller to retain `f`
-// once for all of them.
 static inline void split_piece(TzStr *out, const TzStr *f, const uint8_t *data, uint32_t len,
                                uint32_t p, uint32_t q, uint32_t *slices) {
   uint32_t n = q - p;
-  if (n - 1 < INLINE_MAX) { // 1 to INLINE_MAX
+  if (n - 1 < INLINE_MAX) {
     *out = inline_piece(data, len, p, n);
   } else if (n >= SHORT_LENGTH) {
     ++*slices;
@@ -1917,20 +1685,14 @@ static inline void split_piece(TzStr *out, const TzStr *f, const uint8_t *data, 
   }
 }
 
-// split() of a one-byte string by a one-byte code unit: the usual case. The
-// separators are counted first, so the array is made once at its final size
-// and the pieces are written straight into it; then the bits of sixteen
-// bytes at a time give the separators.
 static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c, uint32_t max) {
   const uint8_t *data = (const uint8_t *)units(f);
   uint32_t len = str_len(f->meta);
-  // n - 1 separators end pieces; the last piece ends at the end, or at the
-  // separator after it when the limit cuts the rest off.
   uint32_t n = count_byte(data, len, c, max - 1) + 1;
   TzArray *a = tz_arr_new(string_type, 0, n);
   TzStr *out = (TzStr *)a->data;
   uint32_t k = 0, p = 0, slices = 0;
-  if (n == max) { // perhaps fewer pieces than separators
+  if (n == max) {
     for (; k + 1 < n; ++k) {
       uint32_t q = find_byte(data, p, len, c);
       split_piece(&out[k], f, data, len, p, q, &slices);
@@ -1939,11 +1701,6 @@ static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c
   } else {
     uint32_t b = 0;
 #ifdef TZ_SSE2
-    // Every separator ends a piece. Each piece is first written as if it
-    // were short, its first eight bytes loaded at once (they are there while
-    // eight bytes follow the block); those that are not short are noted and
-    // redone in batches. That keeps the branches that the processor could
-    // not predict out of the loop.
     struct {
       uint32_t k, p, n;
     } redo[64];
@@ -1963,7 +1720,7 @@ static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c
         redo[redos].k = k;
         redo[redos].p = p;
         redo[redos].n = piece;
-        redos += piece - 1 >= INLINE_MAX; // empty, or too long to be inline
+        redos += piece - 1 >= INLINE_MAX;
         if (redos == 64) {
           for (uint32_t i = 0; i < redos; ++i) {
             split_piece(&out[redo[i].k], f, data, len, redo[i].p, redo[i].p + redo[i].n, &slices);
@@ -1994,11 +1751,9 @@ static TzArray *split_bytes(const TzType *string_type, const TzStr *f, uint8_t c
   return a;
 }
 
-// split(separator, limit): the pieces between the separators, at most
-// `limit` of them; an empty separator splits into code units.
 TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void *sep_obj,
                       uint64_t sep_meta, int32_t has_sep, int64_t limit, int32_t has_limit) {
-  uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX; // ToUint32, as in JavaScript
+  uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX;
   if (max == 0) {
     return tz_arr_new(string_type, 0, 0);
   }
@@ -2012,7 +1767,6 @@ TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void 
   TzStr f = flat(s), sep = flat(make_str(sep_obj, sep_meta));
   uint32_t len = str_len(f.meta), sep_len = str_len(sep.meta);
   if (sep_len == 0) {
-    // Each code unit, a short string unless it is above 0xFF.
     uint32_t n = len < max ? len : max;
     TzArray *a = tz_arr_new(string_type, 0, n);
     TzStr *out = (TzStr *)a->data;
@@ -2033,7 +1787,6 @@ TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void 
     return split_bytes(string_type, &f, (uint8_t)unit_at(&sep, 0), max);
   }
 
-  // Any other separator: the matches are found twice, once to count them.
   uint32_t n = 1;
   for (int64_t q = 0; n < max && (q = index_of(&f, &sep, (uint32_t)q)) >= 0; q += sep_len) {
     ++n;
@@ -2052,8 +1805,6 @@ TzArray *tz_str_split(const TzType *string_type, void *obj, uint64_t meta, void 
   return a;
 }
 
-// `[...s]`: appends the code points of s to `a`, each as a string, as the
-// string's iterator gives them.
 void tz_arr_append_code_points(TzArray *a, void *obj, uint64_t meta) {
   TzStr s = make_str(obj, meta), f = flat(s);
   uint32_t len = str_len(meta);
@@ -2065,7 +1816,6 @@ void tz_arr_append_code_points(TzArray *a, void *obj, uint64_t meta) {
   }
 }
 
-// Whitespace as JavaScript's trim() and Number() see it, ASCII first.
 static inline int is_space(uint32_t unit) {
   return unit == ' ' || (unit >= 9 && unit <= 13) || (unit >= 0x80 && tz_is_js_space(unit));
 }
@@ -2086,7 +1836,6 @@ TZ_NOINLINE void tz_str_trim_slow(TzStr *out, void *obj, uint64_t meta, int32_t 
   tz_str_substring_into(out, obj, meta, start, end);
 }
 
-// trim() (ends 3), trimStart() (1) and trimEnd() (2).
 TZ_HOT void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
   if (!direct_bytes(meta)) {
     tz_str_trim_slow(out, obj, meta, ends);
@@ -2106,8 +1855,6 @@ TZ_HOT void tz_str_trim(TzStr *out, void *obj, uint64_t meta, int32_t ends) {
   substring_fast(out, obj, meta, start, end);
 }
 
-// padStart() and padEnd(): `fill` (by default a space) repeated, and cut, up
-// to `length` code units in all.
 void tz_str_pad(TzStr *out, void *obj, uint64_t meta, int64_t length, void *fill_obj,
                 uint64_t fill_meta, int32_t has_fill, int32_t at_start) {
   TzStr s = make_str(obj, meta);
@@ -2139,8 +1886,6 @@ void tz_str_pad(TzStr *out, void *obj, uint64_t meta, int64_t length, void *fill
   *out = builder_finish(&w, is_ascii(f.meta) && is_ascii(fill.meta));
 }
 
-// Unicode's Final_Sigma: the sigma at `i` ends a word if a cased letter comes
-// before it and none after it, not counting case-ignorable ones.
 static int final_sigma(const TzStr *f, uint32_t i, uint32_t len) {
   int preceded = 0;
   for (uint32_t j = i; j > 0;) {
@@ -2163,8 +1908,6 @@ static int final_sigma(const TzStr *f, uint32_t i, uint32_t len) {
   return 1;
 }
 
-// Whether toUpperCase() (`upper`) or toLowerCase() maps a Latin-1 unit to
-// the one 0x20 away: the ASCII letters, and the Latin-1 ones but × and ÷.
 static inline int flips_case(uint8_t c, int upper) {
   if (upper) {
     return (c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7);
@@ -2173,13 +1916,10 @@ static inline int flips_case(uint8_t c, int upper) {
   return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7);
 }
 
-// toUpperCase() and toLowerCase() of a one-byte string whose result is
-// one-byte too, which is every toLowerCase(); toUpperCase() leaves Latin-1
-// only for µ, ß and ÿ, and then this returns 0.
 static int latin1_case(TzStr *out, const TzStr *s, const TzStr *f, int upper) {
   uint32_t len = str_len(f->meta);
   const uint8_t *u = (const uint8_t *)units(f);
-  uint32_t first = len; // the first unit that changes
+  uint32_t first = len;
   for (uint32_t i = 0; i < len; ++i) {
     if (upper && (u[i] == 0xB5 || u[i] == 0xDF || u[i] == 0xFF)) {
       return 0;
@@ -2207,16 +1947,11 @@ static int latin1_case(TzStr *out, const TzStr *s, const TzStr *f, int upper) {
   return 1;
 }
 
-// toUpperCase() and toLowerCase(), with the full mappings of Unicode, as V8
-// has them: "ß" becomes "SS", and a final capital sigma a final small one.
 static void convert_case(TzStr *out, void *obj, uint64_t meta, int upper) {
   TzStr s = make_str(obj, meta);
   TzStr f = flat(s);
   uint32_t len = str_len(f.meta);
   if (is_ascii(f.meta) && is_inline(f.meta)) {
-    // The letters of all eight bytes at once: adding a constant to a byte
-    // sets its top bit from the first letter on, another constant from just
-    // past the last one, and a letter flips 0x20.
     uint64_t bits = inline_bits(&f);
     uint64_t from = upper ? 0x1F1F1F1F1F1F1F1Full : 0x3F3F3F3F3F3F3F3Full;
     uint64_t past = upper ? 0x0505050505050505ull : 0x2525252525252525ull;
@@ -2283,12 +2018,10 @@ void tz_str_to_upper(TzStr *out, void *obj, uint64_t meta) { convert_case(out, o
 
 void tz_str_to_lower(TzStr *out, void *obj, uint64_t meta) { convert_case(out, obj, meta, 0); }
 
-// The text that replaces a match, with the patterns of JavaScript: "$$" is
-// "$", "$&" the match, "$`" what comes before it and "$'" what follows it.
 static void put_replacement(TzBuf *b, const TzStr *replacement, const TzStr *s, uint32_t at,
                             uint32_t match_len) {
   uint32_t len = str_len(replacement->meta), s_len = str_len(s->meta);
-  uint32_t plain = 0; // where the text not copied yet starts
+  uint32_t plain = 0;
   for (uint32_t i = 0; i + 1 < len; ++i) {
     if (unit_at(replacement, i) != '$') {
       continue;
@@ -2313,10 +2046,6 @@ static void put_replacement(TzBuf *b, const TzStr *replacement, const TzStr *s, 
   buf_put(b, replacement, plain, len - plain);
 }
 
-// tz_str_replace of one-byte `f` and `replacement` when the replacement has
-// no patterns ($): the matches are counted first, and the result is made at
-// its final size, one byte per unit. `at` is the first match. Returns 0 if
-// it does not apply.
 static int replace_plain(TzStr *out, const TzStr *f, const TzStr *pattern, const TzStr *replacement,
                          int64_t at, int all) {
   uint32_t len = str_len(f->meta), p_len = str_len(pattern->meta);
@@ -2325,7 +2054,6 @@ static int replace_plain(TzStr *out, const TzStr *f, const TzStr *pattern, const
   if (r_len && find_byte(r, 0, r_len, '$') != r_len) {
     return 0;
   }
-  // An empty pattern matches between every two code units, and at both ends.
   uint64_t count = 1;
   if (all) {
     if (p_len == 0) {
@@ -2358,7 +2086,6 @@ static int replace_plain(TzStr *out, const TzStr *f, const TzStr *pattern, const
   return 1;
 }
 
-// replace() (the first match) and replaceAll() of a string pattern.
 void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint64_t p_meta,
                     void *r_obj, uint64_t r_meta, int32_t all) {
   TzStr s = make_str(s_obj, s_meta);
@@ -2385,7 +2112,6 @@ void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint6
     if (!all) {
       break;
     }
-    // An empty pattern matches between every two code units.
     uint32_t from = (uint32_t)at + (p_len ? p_len : 1);
     at = from <= len ? index_of(&f, &pattern, from) : -1;
   }
@@ -2393,7 +2119,6 @@ void tz_str_replace(TzStr *out, void *s_obj, uint64_t s_meta, void *p_obj, uint6
   *out = tz_buf_take(&b);
 }
 
-// String.fromCharCode(): each code is taken modulo 2^16.
 void tz_str_from_char_codes(TzStr *out, const int32_t *codes, int64_t n) {
   TzBuf b;
   tz_buf_init(&b);
@@ -2403,8 +2128,6 @@ void tz_str_from_char_codes(TzStr *out, const int32_t *codes, int64_t n) {
   *out = tz_buf_take(&b);
 }
 
-// String.fromCodePoint(): a code point that is not an integer from 0 to
-// 0x10FFFF is a RangeError.
 void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
   TzBuf b;
   tz_buf_init(&b);
@@ -2423,14 +2146,6 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
   *out = tz_buf_take(&b);
 }
 
-//===----------------------------------------------------------------------===//
-// URIs: encodeURIComponent, encodeURI, decodeURIComponent, decodeURI
-//===----------------------------------------------------------------------===//
-
-// Sets of ASCII characters, as the bits of two words: those below 64 and the
-// others. The functions of the component keep its unreserved characters
-// (letters, digits and -_.!~*'()) as they are; those of the whole URI also
-// keep the reserved ones (;/?:@&=+$,#), and decodeURI keeps their escapes.
 #define URI_BIT(c) (1ull << ((c) & 63))
 #define URI_RANGE(a, b) ((~0ull >> (63 - ((b) & 63))) & (~0ull << ((a) & 63)))
 #define URI_UNRESERVED_LOW                                                                         \
@@ -2443,7 +2158,6 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
    URI_BIT('+') | URI_BIT('$') | URI_BIT(',') | URI_BIT('#'))
 #define URI_RESERVED_HIGH URI_BIT('@')
 
-// The 256 values F(c) of a table indexed by a byte.
 #define URI_EACH8(F, c)                                                                            \
   F(c), F((c) + 1), F((c) + 2), F((c) + 3), F((c) + 4), F((c) + 5), F((c) + 6), F((c) + 7)
 #define URI_EACH64(F, c)                                                                           \
@@ -2452,14 +2166,11 @@ void tz_str_from_code_points(TzStr *out, const double *code_points, int64_t n) {
       URI_EACH8(F, (c) + 56)
 #define URI_EACH256(F) {URI_EACH64(F, 0), URI_EACH64(F, 64), URI_EACH64(F, 128), URI_EACH64(F, 192)}
 
-// What a code unit below 256 becomes: itself (1), %XX (3) or the two escapes
-// of its UTF-8 (6), as tables for one-byte strings, built from the sets.
 #define URI_LENGTH(c, low, high)                                                                   \
   ((c) >= 128 ? 6 : (((c) < 64 ? (low) : (high)) >> ((c) & 63)) & 1 ? 1 : 3)
 #define URI_COMPONENT_LENGTH(c) URI_LENGTH(c, URI_UNRESERVED_LOW, URI_UNRESERVED_HIGH)
 #define URI_FULL_LENGTH(c)                                                                         \
   URI_LENGTH(c, URI_UNRESERVED_LOW | URI_RESERVED_LOW, URI_UNRESERVED_HIGH | URI_RESERVED_HIGH)
-// The value of a hex digit, -1 for any other character.
 #define URI_HEX(c)                                                                                 \
   ((c) >= '0' && (c) <= '9'                     ? (c) - '0'                                        \
    : ((c) | 0x20) >= 'a' && ((c) | 0x20) <= 'f' ? ((c) | 0x20) - 'a' + 10                          \
@@ -2474,10 +2185,6 @@ static void uri_malformed(TzStr *out) {
   *out = kEmpty;
 }
 
-// The UTF-8 of every character outside the set as %XX escapes, upper case, as
-// V8 writes them. The result is ASCII, so its length is counted first; a
-// string without anything to escape is its own result. A lone surrogate has
-// no UTF-8: a URIError.
 static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *lengths) {
   static const char hex[] = "0123456789ABCDEF";
   TzStr s = make_str(obj, meta);
@@ -2530,7 +2237,7 @@ static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *leng
         *p++ = (char)c;
         continue;
       }
-      if (length == 6) { // the first byte of two, C2 or C3
+      if (length == 6) {
         p[0] = '%';
         p[1] = 'C';
         p[2] = hex[c >> 6];
@@ -2548,7 +2255,6 @@ static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *leng
     return;
   }
   for (uint32_t i = 0; i < len;) {
-    // The characters kept, as they are, then one escaped.
     while (i < len && wide[i] < 0x80 && lengths[wide[i]] == 1) {
       *p++ = (char)wide[i++];
     }
@@ -2556,7 +2262,7 @@ static void uri_encode(TzStr *out, void *obj, uint64_t meta, const uint8_t *leng
       break;
     }
     uint32_t c = wide[i++];
-    if (c >= 0xD800 && c <= 0xDBFF) { // a pair, as the count found
+    if (c >= 0xD800 && c <= 0xDBFF) {
       c = 0x10000 + ((c - 0xD800) << 10) + (uint32_t)(wide[i++] - 0xDC00);
     }
     uint8_t utf8[4];
@@ -2595,7 +2301,6 @@ void tz_uri_encode(TzStr *out, void *obj, uint64_t meta) {
 
 static inline int hex_digit(uint32_t c) { return c < 256 ? kHexDigits[c] : -1; }
 
-// The byte of the escape %XX at `at` of the units, or -1 if there is none.
 static inline int uri_escape_at(const void *u, int two, uint32_t len, uint32_t at) {
   if (at + 2 >= len) {
     return -1;
@@ -2609,10 +2314,6 @@ static inline int uri_escape_at(const void *u, int two, uint32_t len, uint32_t a
   return c == '%' && (hi | lo) >= 0 ? hi << 4 | lo : -1;
 }
 
-// The character that the escapes from `at` on stand for, in `*c`: one ASCII
-// character, or the UTF-8 of one in as many escapes as its first byte says.
-// Returns how many units they take, or 0 when they are no escapes, are cut
-// short or are not UTF-8 (overlong, a surrogate, past U+10FFFF).
 static inline uint32_t uri_unescape(const void *u, int two, uint32_t len, uint32_t at,
                                     uint32_t *c) {
   static const uint32_t smallest[5] = {0, 0, 0x80, 0x800, 0x10000};
@@ -2644,15 +2345,10 @@ static inline uint32_t uri_unescape(const void *u, int two, uint32_t len, uint32
   return 3 * (uint32_t)count;
 }
 
-// Whether decodeURI keeps the escape of `c` as it was written: c is reserved.
 static inline int uri_keeps_escape(uint32_t c, int keep_reserved) {
   return keep_reserved && c < 0x80 && kUriLengths[c] == 1 && kUriComponentLengths[c] != 1;
 }
 
-// uri_decode, two bytes a unit, from unit `i` of the string on, after the `n`
-// one-byte units of the result before it in `prefix`; called with `two` a
-// constant, so that each kind of string gets a loop of its own. `room` units
-// hold the result.
 static inline void uri_decode_wide(TzStr *out, const void *u, int two, uint32_t len, uint32_t i,
                                    int keep_reserved, const uint8_t *prefix, uint32_t n,
                                    uint32_t room) {
@@ -2693,9 +2389,6 @@ static inline void uri_decode_wide(TzStr *out, const void *u, int two, uint32_t 
     i += taken;
     next = find_unit(u, two, i, len, '%');
   }
-  // A string that the units of the prefix and the rest let be one-byte is
-  // made so; so is a short one, and one much shorter than its room gets a
-  // buffer of its own length.
   if (all <= 0xFF || n <= INLINE_MAX || n < room / 2) {
     *out = string_from_units(result, n, 1);
     tz_str_free(b);
@@ -2705,14 +2398,9 @@ static inline void uri_decode_wide(TzStr *out, const void *u, int two, uint32_t 
   *out = make_str(b, make_meta(n, 0, 1, 0, F_HEAP));
 }
 
-// uri_decode of a one-byte string, one byte a unit for as long as the
-// result's characters fit in one, straight into the buffer of the result;
-// from the first that does not on, uri_decode_wide goes on.
 static void uri_decode_bytes(TzStr *out, const uint8_t *u, uint32_t len, uint32_t next,
                              int keep_reserved, int ascii, uint32_t room) {
   uint32_t c;
-  // A string whose first escape is already of two bytes, as with Cyrillic or
-  // Chinese, needs no buffer of one byte a unit.
   if (uri_unescape(u, 0, len, next, &c) && c > 0xFF) {
     uri_decode_wide(out, u, 0, len, next, keep_reserved, u, next, room);
     return;
@@ -2746,8 +2434,6 @@ static void uri_decode_bytes(TzStr *out, const uint8_t *u, uint32_t len, uint32_
     }
     i += taken;
   }
-  // A short result is inline, and one much shorter than its room gets a
-  // buffer of its own length.
   if (n <= INLINE_MAX || n < room / 2) {
     *out = string_from_units(dst, n, 0);
     tz_str_free(b);
@@ -2757,10 +2443,6 @@ static void uri_decode_bytes(TzStr *out, const uint8_t *u, uint32_t len, uint32_
   *out = make_str(b, make_meta(n, 0, 0, ascii, F_HEAP));
 }
 
-// Every escape replaced by what it stands for (see uri_unescape); a `%`
-// without two hex digits and escapes that are not UTF-8 are URIErrors. With
-// `keep_reserved` (decodeURI) the escapes of reserved characters stay as
-// they were written. A string without escapes is its own result.
 static void uri_decode(TzStr *out, void *obj, uint64_t meta, int keep_reserved) {
   TzStr s = make_str(obj, meta);
   TzStr f = flat(s);
@@ -2773,8 +2455,6 @@ static void uri_decode(TzStr *out, void *obj, uint64_t meta, int keep_reserved) 
     *out = s;
     return;
   }
-  // The result is no longer than the string. Counting its length first would
-  // cost about as much as decoding it.
   if (two) {
     uri_decode_wide(out, u, 1, len, 0, keep_reserved, NULL, 0, len);
   } else {
@@ -2788,15 +2468,6 @@ void tz_uri_decode_component(TzStr *out, void *obj, uint64_t meta) {
 
 void tz_uri_decode(TzStr *out, void *obj, uint64_t meta) { uri_decode(out, obj, meta, 1); }
 
-//===----------------------------------------------------------------------===//
-// Numbers from strings (number.c does the parsing)
-//===----------------------------------------------------------------------===//
-
-// The ASCII characters of flat `*f` from `from` to `to`, up to the first
-// other one; `*n` gets their count. A one-byte string lends its own units,
-// read from `*f`, which must stay where it is meanwhile. A two-byte one is
-// copied to `local`, or to a new block that `*owned` gets for the caller to
-// free.
 static const char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *local, size_t size,
                               size_t *n, char **owned) {
   *owned = NULL;
@@ -2827,8 +2498,6 @@ static const char *ascii_text(const TzStr *f, uint32_t from, uint32_t to, char *
   return text;
 }
 
-// Number(s) and `+s`: the whole string, without the whitespace around it,
-// must be a number; the empty string is 0.
 double tz_str_to_number(void *obj, uint64_t meta) {
   TzStr f = flat(make_str(obj, meta));
   uint32_t start = 0, end = str_len(f.meta);
@@ -2847,8 +2516,6 @@ double tz_str_to_number(void *obj, uint64_t meta) {
   return value;
 }
 
-// The ASCII text after the leading whitespace of flat `*f`, which parseInt
-// and parseFloat read a number from the start of.
 static const char *leading_text(const TzStr *f, char *local, size_t size, size_t *n, char **owned) {
   uint32_t start = 0, end = str_len(f->meta);
   while (start < end && is_space(unit_at(f, start))) {
@@ -2858,7 +2525,6 @@ static const char *leading_text(const TzStr *f, char *local, size_t size, size_t
   return ascii_text(f, start, end, local, size, n, owned);
 }
 
-// parseInt(s, radix); a radix of 0 means none, as in JavaScript.
 double tz_parse_int(void *obj, uint64_t meta, int32_t radix) {
   TzStr f = flat(make_str(obj, meta));
   char local[64], *owned;

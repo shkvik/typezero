@@ -27,7 +27,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
     auto *name = llvm::cast<NameExpr>(e);
     if (name->var) {
       out.push_back(scanner_.var(name->var));
-      // The variable of a function, as a value.
       if (name->var->function && !scanner_.callee_.contains(e)) {
         scanner_.escapes(name->var->function);
       }
@@ -48,7 +47,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::ArrayLit:
     for (const ArrayLitExpr::Element &x : llvm::cast<ArrayLitExpr>(e)->elements) {
       StoreScanner::Sources element = expr(x.expr);
-      // A spread copies the elements, not the array.
       if (!x.spread || (x.expr->type && x.expr->type->isIterator())) {
         scanner_.store(element);
       }
@@ -65,8 +63,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
         continue;
       }
       StoreScanner::Sources value = expr(p.value);
-      // A spread copies the fields; a method of an interface it copies is
-      // bound to the object (see emitSpreadLiteral).
       bool binds = p.spread && p.value->type && p.value->type->isObject() &&
                    llvm::any_of(p.value->type->fields(),
                                 [](const Field &f) { return f.type->isFunction(); });
@@ -74,8 +70,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
         scanner_.store(value);
       }
     }
-    // A literal's methods get the object as `this`, and it holds what
-    // they capture.
     if (lit->cls) {
       for (const FunctionDecl *fn : lit->cls->methods) {
         scanner_.function(fn);
@@ -94,7 +88,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     StoreScanner::Sources object = expr(member->object);
-    // A method as a value holds its object.
     if (member->method && !scanner_.callee_.contains(e)) {
       scanner_.store(object);
       scanner_.escapes(member->method->decl);
@@ -103,7 +96,7 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
         !scanner_.callee_.contains(e)) {
       scanner_.store(object);
     }
-    out.clear(); // a field read: anything
+    out.clear();
     if (scanner_.isSite_(e)) {
       out.push_back(scanner_.node({StoreScanner::Kind::Site, e}));
     }
@@ -139,7 +132,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
       scanner_.flowInto(scanner_.var(name->var), value);
       out.push_back(scanner_.var(name->var));
     } else {
-      // A field, an element or an entry: stored.
       if (auto *member = llvm::dyn_cast<MemberExpr>(assign->target)) {
         expr(member->object);
       } else if (auto *index = llvm::dyn_cast<IndexExpr>(assign->target)) {
@@ -166,8 +158,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
       args.push_back(expr(arg));
     }
     if (const ClassDecl *cls = create->cls) {
-      // The constructor that runs gets the arguments, and it, the
-      // initializers and those up the chain get the object as `this`.
       const FunctionDecl *ctor =
           create->ctor && create->ctor->func ? create->ctor->func->decl : nullptr;
       scanner_.storeStmts().bindArgs(ctor, args);
@@ -199,8 +189,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   case Expr::Kind::Cast: {
     auto *conv = llvm::cast<CastExpr>(e);
     StoreScanner::Sources operand = expr(conv->operand);
-    // An object as an unknown, or as the object of generic code: kept as
-    // it may be.
     if (conv->type &&
         (conv->type->nonOptional()->isUnknown() || conv->type->nonOptional()->isAnyObject())) {
       scanner_.store(operand);
@@ -224,7 +212,6 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   }
   case Expr::Kind::Function: {
     const FunctionDecl *fn = llvm::cast<FunctionExpr>(e)->fn;
-    // An environment on the heap holds what it captures.
     if (!fn->nonEscaping) {
       const std::vector<VarSymbol *> &captures = fn->group ? fn->group->captures : fn->captures;
       for (const VarSymbol *v : captures) {
@@ -252,4 +239,4 @@ StoreScanner::Sources StoreExprs::expr(const Expr *e) {
   return out;
 }
 
-} // namespace tz
+}

@@ -39,8 +39,6 @@ ModuleBuilder::ModuleBuilder(Lowering &lowering) : lowering_(lowering) {}
 
 std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   lowering_.comparesFunctions_ = file.comparesFunctions;
-  // The variables of the built-in modules that hold what may change: all
-  // but constants of values that do not.
   if (lowering_.parallel_) {
     for (const Module *module : file.modules) {
       if (!module->builtin) {
@@ -70,10 +68,6 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
   lowering_.usesTls_ = file.usesTls;
   lowering_.subtypes_ = file.subtypes;
   lowering_.usesAsync_ = file.usesAsync;
-  // Node runs a file with `import`, `export` or top-level `await` as an ES
-  // module, inside a microtask, and any other as CommonJS, before the
-  // microtasks; the order of what follows depends on it
-  // (runtime/core/async/async.c).
   lowering_.esModule_ = file.topLevelAwait;
   for (const Module *module : file.modules) {
     if (module->isEntry &&
@@ -83,13 +77,9 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     }
   }
   lowering_.runtimeFunctions().declareRuntime();
-  // Debug mode: a program compiled to check itself for leaks, as the tests
-  // are, also checks what the compiler proved of its memory.
   lowering_.debugMemory_ = getenv("TZ_CHECK_LEAKS") != nullptr;
   lowering_.runtimeFunctions().defineRefCountHelpers();
   lowering_.inheritLowerer().prepareDispatch(file);
-  // The functions and globals of imported files are named after the file
-  // too: "tz.geometry.circle.area".
   for (const Module *module : file.modules) {
     if (module->isEntry) {
       continue;
@@ -106,8 +96,6 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       lowering_.symbolPrefixes_[item] = prefix;
     }
   }
-  // A generic function is emitted as its instances, which are top-level
-  // functions like the others.
   std::vector<FunctionDecl *> functions;
   std::vector<ClassDecl *> classes;
   for (Stmt *item : file.items) {
@@ -116,13 +104,9 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
       functions.push_back(fn);
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
-      // A generic class is emitted as its instances, which share its static
-      // methods.
       if (cls->isEmitted()) {
         classes.push_back(cls);
       }
-      // Static methods are plain functions; the others take `this`. A
-      // generic method is emitted as its copies.
       if (!cls->generic) {
         for (FunctionDecl *fn : cls->methods) {
           if (fn->isStatic && fn->typeParams.empty()) {
@@ -150,8 +134,6 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     lowering_.classDescriptors().emitMethods(cls);
   }
   emitMain(file);
-  // The closures each function creates come after it, and the iterators of
-  // arrays and helpers it makes; each may need more of the other.
   while (!lowering_.pendingClosures_.empty() || !lowering_.pendingIterators_.empty()) {
     lowering_.closureLowerer().emitPendingClosures();
     lowering_.generatorLowerer().emitPendingIterators();
@@ -169,7 +151,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::Void:
     return lowering_.builder_.getVoidTy();
   case Type::Kind::Undefined:
-    return lowering_.builder_.getInt1Ty(); // never read
+    return lowering_.builder_.getInt1Ty();
   case Type::Kind::Bool:
     return lowering_.builder_.getInt1Ty();
   case Type::Kind::Int:
@@ -185,7 +167,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::Array:
     return lowering_.builder_.getPtrTy();
   case Type::Kind::Optional:
-    if (UnionLayout::zeroIsUndefined(type->inner())) { // null (or zero) is undefined
+    if (UnionLayout::zeroIsUndefined(type->inner())) {
       return lower(type->inner());
     }
     return llvm::StructType::get(lowering_.ctx_,
@@ -200,7 +182,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::Result:
     return lowering_.resultLowerer().resultLayout(type).type;
   case Type::Kind::Never:
-    return llvm::StructType::get(lowering_.ctx_); // never holds anything
+    return llvm::StructType::get(lowering_.ctx_);
   case Type::Kind::Iterator:
     return lowering_.builder_.getPtrTy();
   case Type::Kind::Json:
@@ -210,7 +192,7 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
   case Type::Kind::Promise:
     return lowering_.builder_.getPtrTy();
   case Type::Kind::Unknown:
-    return lowering_.builder_.getPtrTy(); // null for undefined
+    return lowering_.builder_.getPtrTy();
   case Type::Kind::ClassRef:
     return lowering_.builder_.getPtrTy();
   case Type::Kind::Error:
@@ -226,21 +208,18 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
         if (!f.isStatic || !f.var) {
           continue;
         }
-        // In the object of a class used as a value, which shows them.
         llvm::Type *type = lower(f.var->type);
         lowering_.globals_[f.var] =
             cls->usedAsValue
                 ? lowering_.unknownLowerer().staticFieldAddress(cls, f.var)
                 : new llvm::GlobalVariable(
-                      *lowering_.module_, type, /*isConstant=*/false,
-                      llvm::GlobalValue::InternalLinkage, llvm::Constant::getNullValue(type),
+                      *lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
+                      llvm::Constant::getNullValue(type),
                       "tz." + lowering_.symbolPrefixes_.lookup(cls) + f.var->name);
         if (f.var->type->isManaged()) {
           managedGlobals_.push_back(f.var);
         }
       }
-      // What the methods that decorators may replace run: their own code
-      // until the decorators run, and also before, as in JavaScript.
       for (FunctionDecl *fn : cls->methods) {
         if (const VarSymbol *impl = fn->impl) {
           llvm::Constant *adapter =
@@ -248,7 +227,7 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
                   lowering_.decoratorLowerer().implAdapterInfo(fn),
                   llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())));
           lowering_.globals_[impl] =
-              new llvm::GlobalVariable(*lowering_.module_, lower(impl->type), /*isConstant=*/false,
+              new llvm::GlobalVariable(*lowering_.module_, lower(impl->type), false,
                                        llvm::GlobalValue::InternalLinkage, adapter,
                                        "tz." + lowering_.symbolPrefixes_.lookup(cls) +
                                            cls->name.str() + "." + fn->name.str() + ".impl");
@@ -263,13 +242,11 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
     }
     for (VarDeclarator &d : decl->decls) {
       if (d.alias || !d.sym->usedInFunction) {
-        continue; // another name for a generic function, or a local of main
+        continue;
       }
       llvm::Type *type = lower(d.sym->type);
-      // Holds zero (or the empty string) until the top-level code that
-      // declares it runs.
       lowering_.globals_[d.sym] = new llvm::GlobalVariable(
-          *lowering_.module_, type, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+          *lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
           llvm::Constant::getNullValue(type),
           "tz." + lowering_.symbolPrefixes_.lookup(decl) + d.name);
       if (d.sym->type->isManaged()) {
@@ -280,7 +257,6 @@ void ModuleBuilder::declareGlobals(SourceFile &file) {
 }
 
 void ModuleBuilder::emitMain(SourceFile &file) {
-  // Top-level code that awaits is a coroutine of its own (codegen_async.cpp).
   llvm::Function *asyncMain =
       file.topLevelAwait ? lowering_.asyncLowerer().emitAsyncMain(file) : nullptr;
   auto *type = llvm::FunctionType::get(lowering_.builder_.getInt32Ty(), false);
@@ -293,7 +269,6 @@ void ModuleBuilder::emitMain(SourceFile &file) {
   lowering_.functionFrame().pushScope();
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *ptr = lowering_.builder_.getPtrTy();
   if (asyncMain) {
-    // The runtime runs the loop until nothing is left to do.
     llvm::Value *promise = lowering_.builder_.CreateCall(asyncMain, {}, "main");
     lowering_.builder_.CreateCall(
         lowering_.asyncLowerer().asyncFunction("tz_async_main", voidTy, {ptr}), {promise});
@@ -304,28 +279,24 @@ void ModuleBuilder::emitMain(SourceFile &file) {
         lowering_.stmtLowerer().emitStmt(item);
       }
     }
-    // Then the timers, the promises and the queues the code started.
     if (lowering_.usesAsync_ && lowering_.functionFrame().blockIsOpen()) {
       lowering_.builder_.CreateCall(lowering_.asyncLowerer().asyncFunction(
                                         "tz_async_run", voidTy, {lowering_.builder_.getInt32Ty()}),
                                     {lowering_.builder_.getInt32(lowering_.esModule_)});
     }
   }
-  // Exits right away unless a leak check wants everything released.
   if (lowering_.functionFrame().blockIsOpen()) {
     lowering_.builder_.CreateCall(lowering_.rt_.mainDone);
   }
   lowering_.functionFrame().popScope();
   if (lowering_.functionFrame().blockIsOpen()) {
-    // Release the globals too, so that a leak check finds every count at zero.
     for (const VarSymbol *var : llvm::reverse(managedGlobals_)) {
       llvm::Type *lowered = lower(var->type);
       llvm::Value *address = lowering_.functionFrame().addressOf(var);
       llvm::Value *value = lowering_.builder_.CreateLoad(lowered, address);
       lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), address);
       if (lowering_.isEternal(var)) {
-        lowering_.publishLowerer().endValue(
-            value, var->type); // its eternal groups go whatever their counts
+        lowering_.publishLowerer().endValue(value, var->type);
       } else {
         lowering_.refCounts().releaseValue(value, var->type);
       }
@@ -339,4 +310,4 @@ void ModuleBuilder::emitMain(SourceFile &file) {
   lowering_.functionBuilder().finishFunction();
 }
 
-} // namespace tz
+}

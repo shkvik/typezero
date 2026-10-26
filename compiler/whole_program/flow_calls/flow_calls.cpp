@@ -96,8 +96,6 @@ void FlowCalls::passArguments(const CallExpr *call, const FunctionDecl *target,
     if (!param) {
       continue;
     }
-    // Into the array of a rest parameter, an element; spread there, the
-    // elements of the array spread.
     if (rest && k == count - 1) {
       flows_.flow(spread ? copied(args[i]) : holding(args[i]), flows_.var(param));
     } else if (spread) {
@@ -154,8 +152,6 @@ std::vector<const FunctionDecl *> FlowCalls::overridersOf(const FunctionDecl *fn
 }
 
 Refs FlowCalls::call(CallExpr *c) {
-  // The functions the executor of a Promise gets are the runtime's: what
-  // the first gets is not followed, what the second gets is a rejection.
   if (c->builtin == Builtin::PromiseNew) {
     for (const Expr *arg : c->args) {
       if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
@@ -181,7 +177,7 @@ Refs FlowCalls::call(CallExpr *c) {
         flows_.flowStmts().currentThis() ? flows_.flowStmts().currentThis()->type : nullptr;
     superCtor = true;
   } else if (!callee || !(callee->func || (callee->var && callee->var->lambda))) {
-    flows_.flowExprs().expr(c->callee); // a function value
+    flows_.flowExprs().expr(c->callee);
   }
   std::vector<Refs> args;
   for (Expr *arg : c->args) {
@@ -201,8 +197,6 @@ Refs FlowCalls::call(CallExpr *c) {
     }
   }
   if (!target) {
-    // A function value: see walkProgram. The resolvers of a Promise are
-    // the runtime's.
     int result = flows_.node(NodeKind::CallResult, c, "");
     flows_.valueCalls_.push_back({c, args, result});
     if ((callee && callee->var && flows_.runtimeRejects_.count(callee->var)) ||
@@ -254,4 +248,4 @@ void FlowCalls::callback(const Expr *arg, const Refs &values) {
   }
 }
 
-} // namespace tz
+}

@@ -1,38 +1,10 @@
-// node:events: EventEmitter, once() and the rest, ported from lib/events.js
-// of Node 24 to tz (docs/events.md).
-//
-// An emitter keeps its listeners as node's does: `_events` maps the name of
-// an event to its one listener, or to an array of them in the order they
-// run, `_eventsCount` counts the names, and each method takes the steps of
-// node's, so that the order listeners run in, newListener and
-// removeListener, the warning and the errors are node's. This code sees a
-// listener as an `unknown`, as JavaScript sees a function: the compiler
-// checks each call of the program against the event map of its emitter
-// before it comes here (compiler/library/events/sema/sema_events.cpp), and
-// `__tz_listener<F>(l)` gives back the function `l` holds as a function of its
-// event's type F.
-//
-// What node keeps in properties of functions and arrays (the listener that
-// the wrapper of once() wraps, `warned` of an array of listeners), this code
-// keeps in objects and a set of its own. `__tz_*` are intrinsics of the
-// compiler, which only its built-in modules can call.
-
 import { AbortSignal, Event, EventTarget } from "tz:web"
 
-// What this code asks of the runtime
-// (runtime/library/tz_modules/library/library.c, inspect.c): the Record marked
-// as an object without a prototype, as it prints; the name of the class of an
-// object; an unknown as console.log shows it; process.pid.
 function __tz_lib_bare(map: Record<string, unknown>): Record<string, unknown>
 function __tz_lib_class_name(object: object): string
 function __tz_lib_inspect(value: unknown): string
 function __tz_lib_pid(): int
 
-// The listener once() adds: node's onceWrapper, bound to its state. It
-// prints as node prints that, `[Function: bound onceWrapper] { listener:
-// ... }` (TZ_LAYOUT_LIBRARY in runtime/core/tzrt/tzrt.h), and holds the
-// listener, but not the emitter, which calls it with itself: so an emitter and
-// its listeners make no cycle of references, which counting could not free.
 class OnceWrapper {
   #fired = false
   constructor(readonly listener: unknown) {}
@@ -44,48 +16,26 @@ class OnceWrapper {
   }
 }
 
-// An async listener: the emitter gets the Promise of each call, which it
-// lets go, or watches when it captures rejections (captureRejections). It
-// prints as the async function it holds (TZ_LAYOUT_LIBRARY).
 class AsyncListener {
   constructor(readonly listener: unknown) {}
 }
 
-// A function that takes `this`, `function (this: Server, port: int)`: node
-// calls each listener with the emitter as `this`. It prints as the function
-// it holds.
 class ThisListener {
   constructor(readonly listener: unknown) {}
 }
 
-// A listener of the code of node:stream (library/stream/stream.tz) that takes
-// the first argument of its event as an unknown, whatever the type its emitter
-// emits it with: the chunk of a 'data' event, which is a Buffer, a string or a
-// T of an object-mode stream. It prints as the function it holds.
 class UnknownArgListener {
   constructor(readonly listener: unknown) {}
 }
 
-// What the compiler says a listener is
-// (compiler/library/events/sema/sema_events.cpp); a listener of the built-in
-// modules may be kUnknownArg too.
 const kPlain = 0
 const kAsync = 1
 const kThis = 2
 const kUnknownArg = 3
 
-// The listeners of an event that has more than one, in the order they run:
-// node's array, which it prints as (TZ_LAYOUT_LIBRARY). An object of a class
-// of its own, so that emit() tells it from one listener by its class.
-//
-// node's emit() runs over a copy of the array, so that what its listeners
-// add and remove changes the next emit only; here the copy is made when
-// such a change comes, if emits run over the array (`emitting`), so that an
-// emit makes none.
 class ListenerList {
   #emitting = 0
   constructor(public items: unknown[]) {}
-  // The array, which an emit runs over until it calls done().
   begin() {
     this.#emitting++
     return this.items
@@ -93,7 +43,6 @@ class ListenerList {
   done(items: unknown[]) {
     if (items == this.items) this.#emitting--
   }
-  // The array to change, a copy if emits run over this one.
   changing() {
     if (this.#emitting > 0) {
       this.items = [...this.items]
@@ -103,8 +52,6 @@ class ListenerList {
   }
 }
 
-// What emit('error') throws when the error is not an Error: node's
-// ERR_UNHANDLED_ERROR.
 class UnhandledError extends Error {
   code = "ERR_UNHANDLED_ERROR"
   context: unknown
@@ -114,7 +61,6 @@ class UnhandledError extends Error {
   }
 }
 
-// What once() rejects with when its signal aborts: node's AbortError.
 class AbortError extends Error {
   code = "ABORT_ERR"
   constructor(cause: Error | undefined) {
@@ -123,26 +69,16 @@ class AbortError extends Error {
   }
 }
 
-// node's ERR_OUT_OF_RANGE.
 class OutOfRangeError extends RangeError {
   code = "ERR_OUT_OF_RANGE"
 }
 
-// What the emitters have in common, whatever their events: EventEmitter
-// below adds the event map, a type only. node:stream builds on it too.
 export class EventEmitterBase {
-  // node's _events, _eventsCount and _maxListeners, which print with those
-  // names, first, and Symbol(shapeMode) and Symbol(kCapture), which print
-  // after the fields of the classes down the chain, as node prints symbols
-  // (see classDescriptor in compiler/lower/codegen/codegen_class.cpp). The
-  // program does not see them: only this code knows what `#events` holds.
   #events: Record<string, unknown> = __tz_lib_bare({})
   #eventsCount = 0
   #maxListeners: double | undefined = undefined
   #shapeMode = false
   #capture: boolean
-  // The events whose arrays of listeners grew past the limit and were
-  // warned about: node marks such an array `warned`.
   #warned = new Set<string>()
 
   constructor(options?: { captureRejections?: boolean }) {
@@ -163,17 +99,14 @@ export class EventEmitterBase {
     let doError = type == "error"
     const events = this.#events
     doError &&= events["error"] == undefined
-    // If there is no 'error' event listener then throw.
     if (doError) {
       const er = firstArg(...args)
-      if (er instanceof Error) throw er // Unhandled 'error' event
-      throw new UnhandledError(er) // Unhandled 'error' event
+      if (er instanceof Error) throw er
+      throw new UnhandledError(er)
     }
     const handler = events[type]
     if (handler == undefined) return false
     if (handler instanceof ListenerList) {
-      // The listeners as they are now: those that a listener adds or
-      // removes change the next emit, not this one.
       const listeners = handler.begin()
       try {
         for (const listener of listeners) this.#run(type, listener, ...args)
@@ -186,10 +119,6 @@ export class EventEmitterBase {
     return true
   }
 
-  // emit() of an event that is not 'error', whose first argument the
-  // listeners of kUnknownArg get as `boxed`, the unknown that holds it, and
-  // the others as it is: the 'data' events of node:stream, whose own
-  // listeners take the chunk as the stream keeps it.
   emitWithUnknown<A extends unknown[]>(type: string, boxed: unknown, ...args: A): boolean {
     const handler = this.#events[type]
     if (handler == undefined) return false
@@ -215,8 +144,6 @@ export class EventEmitterBase {
     this.#run(type, listener, ...args)
   }
 
-  // One listener of `type` with the arguments, as node's emit applies it;
-  // a listener of once() takes the steps of onceWrapper.
   #run<A extends unknown[]>(type: string, listener: unknown, ...args: A) {
     let fn = listener
     if (fn instanceof OnceWrapper) {
@@ -241,10 +168,6 @@ export class EventEmitterBase {
     __tz_listener<(...args: A) => void>(fn)(...args)
   }
 
-  // node's addCatch: with captureRejections a rejection of an async
-  // listener becomes an 'error' event, on the next tick. Without, the
-  // Promise is let go, and its error ends the program as an unhandled
-  // rejection does in node.
   #addCatch(promise: Promise<void>) {
     if (!this.#capture) {
       void promise
@@ -253,8 +176,6 @@ export class EventEmitterBase {
     void promise.catch((err) => process.nextTick(() => this.#rejection(err)))
   }
 
-  // node's emitUnhandledRejectionOrErr. Capturing stops while 'error' is
-  // emitted, or an async listener of it could loop.
   #rejection(err: Error) {
     const prev = this.#capture
     try {
@@ -265,19 +186,14 @@ export class EventEmitterBase {
     }
   }
 
-  // node's _addListener.
   #addListener(type: string, listener: unknown, prepend: boolean) {
     let events = this.#events
-    // To avoid recursion in the case that type == "newListener": before
-    // adding it to the listeners, first emit "newListener".
     if (events["newListener"] != undefined) {
       this.emit("newListener", type, original(listener))
-      // A newListener listener may have replaced `_events`.
       events = this.#events
     }
     const existing = events[type]
     if (existing == undefined) {
-      // Optimize the case of one listener: it needs no array.
       events[type] = listener
       ++this.#eventsCount
       return this
@@ -288,11 +204,9 @@ export class EventEmitterBase {
       if (prepend) list.unshift(listener)
       else list.push(listener)
     } else {
-      // Adding the second element, need to change to array.
       list = prepend ? [listener, existing] : [existing, listener]
       events[type] = new ListenerList(list)
     }
-    // Check for listener leak.
     const m = this.getMaxListeners()
     if (m > 0 && list.length > m && !this.#warned.has(type)) {
       this.#warned.add(type)
@@ -306,8 +220,6 @@ export class EventEmitterBase {
     return this
   }
 
-  // `kind` says what the listener is (kPlain, kAsync, kThis); the compiler
-  // gives it.
   addListener(type: string, listener: unknown, kind: int = kPlain) {
     return this.#addListener(type, wrap(listener, kind), false)
   }
@@ -330,7 +242,6 @@ export class EventEmitterBase {
     return this
   }
 
-  // Emits a 'removeListener' event if and only if the listener was removed.
   removeListener(type: string, listener: unknown) {
     const events = this.#events
     const kept = events[type]
@@ -371,7 +282,6 @@ export class EventEmitterBase {
 
   removeAllListeners(type?: string) {
     const events = this.#events
-    // Not listening for removeListener, no need to emit.
     if (events["removeListener"] == undefined) {
       if (type == undefined) {
         this.#events = __tz_lib_bare({})
@@ -385,7 +295,6 @@ export class EventEmitterBase {
       this.#shapeMode = false
       return this
     }
-    // Emit removeListener for all listeners on all events.
     if (type == undefined) {
       for (const key of ownKeys(events)) {
         if (key == "removeListener") continue
@@ -400,7 +309,6 @@ export class EventEmitterBase {
     }
     const listeners = events[type]
     if (listeners instanceof ListenerList) {
-      // LIFO order.
       const items = listeners.items
       for (let i = items.length - 1; i >= 0; i--) this.removeListener(type, items[i])
     } else if (listeners != undefined) {
@@ -409,8 +317,6 @@ export class EventEmitterBase {
     return this
   }
 
-  // node's _listeners: the listeners as the program gave them, or as they
-  // are kept (`raw`, the wrappers of once()).
   #listeners(type: string, raw: boolean): unknown[] {
     const evlistener = this.#events[type]
     if (evlistener == undefined) return []
@@ -418,10 +324,6 @@ export class EventEmitterBase {
     return raw ? [...evlistener.items] : evlistener.items.map((l) => original(l))
   }
 
-  // listeners() and rawListeners() of the program: the listeners as
-  // functions of their event. An async one lets its Promise go, as a call
-  // from emit does without captureRejections; the wrapper of once() removes
-  // itself before it calls its listener, as node's does.
   #listenersOf<A extends unknown[]>(type: string, raw: boolean): ((...args: A) => void)[] {
     const out: ((...args: A) => void)[] = []
     for (const listener of this.#listeners(type, raw)) out.push(this.#callable<A>(type, listener))
@@ -455,19 +357,10 @@ export class EventEmitterBase {
   }
 }
 
-// `new EventEmitter<{ data: [chunk: string]; end: [] }>()`: an emitter of
-// these events, each with the arguments of its listeners. The compiler
-// finds the map from the emit() calls of the program when none is given.
 export class EventEmitter<Events> extends EventEmitterBase {
-  // How many listeners an event may have before a warning, for the
-  // emitters without setMaxListeners().
   static defaultMaxListeners: double = 10
 }
 
-// once(emitter, name): a Promise of the arguments of the next `name`
-// event, rejected by an 'error' event (when the emitter has them, `errors`,
-// which the compiler gives with the types of both) and when the signal
-// aborts.
 export async function once<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
   name: string,
@@ -494,22 +387,12 @@ export async function once<A extends unknown[], R extends unknown[]>(
       reject(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined))
     }
     emitter.once(name, resolver)
-    // EventTarget does not have `error` event semantics like Node
-    // EventEmitters, we listen to `error` events only on EventEmitters.
     if (errors && name != "error") emitter.once("error", errorListener)
     if (signal != undefined)
       signal.addFunctionListener<Event>("abort", abortListener, { once: true })
   })
 }
 
-// on(emitter, name, { signal, close }): the `name` events, each the
-// arguments of its listeners, for `for await`, as node's on() gives them.
-// It listens from the call: the events that come while nothing waits for
-// them wait in a queue. An 'error' event (when the emitter has them,
-// `errors`) ends the iteration with its error, after the events before it;
-// so does an abort of the signal, with an AbortError; an event named in
-// `close` ends it after the events before it. When the iteration ends, by
-// those or by `break`, the listeners go.
 export function on<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
   name: string,
@@ -546,12 +429,10 @@ export function on<A extends unknown[], R extends unknown[]>(
   })
 }
 
-// The events of on() that wait for the iteration, and how it ends.
 class EventQueue<A extends unknown[]> {
   #events: A[] = []
   #error: Error | undefined = undefined
   #finished = false
-  // What the iteration waits on while the queue is empty.
   #wake: (() => void) | undefined = undefined
 
   push(args: A) {
@@ -601,7 +482,6 @@ class EventQueue<A extends unknown[]> {
   }
 }
 
-// The functions node:events has for any emitter.
 export function listenerCount(emitter: EventEmitterBase, name: string) {
   return emitter.listenerCount(name)
 }
@@ -626,7 +506,6 @@ function wrap(listener: unknown, kind: int): unknown {
   return listener
 }
 
-// The listener the program gave: node's `listener.listener || listener`.
 function original(listener: unknown): unknown {
   if (listener instanceof OnceWrapper) return original(listener.listener)
   if (listener instanceof AsyncListener) return listener.listener
@@ -635,7 +514,6 @@ function original(listener: unknown): unknown {
   return listener
 }
 
-// node's `list === listener || list.listener === listener`.
 function same(kept: unknown, listener: unknown) {
   return kept == listener || original(kept) == listener
 }
@@ -648,8 +526,6 @@ function errorOf(reason: unknown): Error | undefined {
   return reason instanceof Error ? reason : undefined
 }
 
-// Reflect.ownKeys of an object: the keys that are array indices first, in
-// ascending order, then the others in the order they were added.
 function ownKeys(events: Record<string, unknown>): string[] {
   const keys = Object.keys(events)
   const indices = keys.filter((k) => isArrayIndex(k))
@@ -662,7 +538,6 @@ function isArrayIndex(key: string) {
   return /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 4294967295
 }
 
-// node's validateNumber with a minimum.
 function validateNumber(value: double, name: string, min: double) {
   if (Number.isNaN(value) || value < min)
     throw new OutOfRangeError(
@@ -670,14 +545,10 @@ function validateNumber(value: double, name: string, min: double) {
     )
 }
 
-// process.emitWarning, as node prints a warning: to stderr, on the next
-// tick.
 function emitWarning(name: string, message: string) {
   process.nextTick(() => console.error(`(node:${__tz_lib_pid()}) ${name}: ${message}`))
 }
 
-// once(target, name) of an EventTarget: a Promise of the event, in an array
-// as the arguments of an emitter's event are.
 async function onceTarget(
   target: EventTarget,
   name: string,
@@ -700,8 +571,6 @@ async function onceTarget(
   })
 }
 
-// getEventListeners(emitterOrTarget, name): the compiler calls listeners()
-// of the emitter, or the method of the EventTarget.
 export function getEventListeners(emitter: EventEmitterBase, name: string) {
   void emitter
   void name

@@ -33,7 +33,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -48,7 +47,7 @@ std::optional<std::u16string> literalText(const Expr *e) {
 struct DateMethod {
   llvm::StringLiteral name;
   Builtin builtin;
-  int field; // TZ_DATE_* of a getter or a setter, the TZ_DATE_TEXT_* or TZ_DATE_LOCALE_* kind
+  int field;
   unsigned min, max;
 };
 
@@ -110,9 +109,6 @@ int daysInMonth(int64_t year, int64_t month) {
   return month == 1 && isLeap(year) ? 29 : days[month];
 }
 
-// "February 2026 has no day 31, and JavaScript would make it March 3"; of a
-// year not known, "February has no day 30, and JavaScript would move on to
-// March".
 std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day) {
   std::string text = kMonthNames[month];
   if (year) {
@@ -134,7 +130,7 @@ std::string missingDay(std::optional<int64_t> year, int64_t month, int64_t day) 
   return text + "make it " + kMonthNames[m] + " " + std::to_string(d);
 }
 
-} // namespace
+}
 
 DateChecker::DateChecker(Checker &checker) : checker_(checker) {}
 
@@ -171,14 +167,12 @@ void DateChecker::checkDateLiteral(const Expr *arg) {
     return;
   }
   if (fields.date_only) {
-    // "2026-10-23" is midnight UTC: in UTC+6 its getHours() is 6.
     checker_.diags_.error(
         arg->loc(), "a date without a time is read as midnight UTC, while the same date "
                     "with a time is local; write '" +
                         shown + "T00:00' for local midnight or '" + shown + "T00:00Z' for UTC");
     return;
   }
-  // "2026-02-30T10:00" is March 2.
   int64_t month = int64_t(fields.month), dayOfMonth = int64_t(fields.day);
   if (dayOfMonth > daysInMonth(int64_t(fields.year), month)) {
     checker_.diags_.error(
@@ -245,7 +239,6 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
                  : *month == 1 ? 29
                                : daysInMonth(2001, *month);
       if (*day > last) {
-        // What JavaScript makes of it, and how the last day is written.
         std::string next = std::to_string(*month == 11 ? 0 : *month + 1);
         std::string nextYear = year ? std::to_string(*month == 11 ? fullYear + 1 : fullYear) : "y";
         report(2, missingDay(year ? std::optional<int64_t>(fullYear) : std::nullopt, *month, *day) +
@@ -271,8 +264,6 @@ void DateChecker::checkDateFields(std::vector<Expr *> &args) {
   }
 }
 
-// new Date(), new Date(ms), new Date(s), new Date(date) and new Date(y, m,
-// d?, h?, min?, s?, ms?), the last in local time.
 Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
   auto *callee = checker_.ctx_.make<NameExpr>(loc, "Date");
   auto failed = [&] {
@@ -328,14 +319,12 @@ Expr *DateChecker::checkDateNew(llvm::SMLoc loc, std::vector<Expr *> &args) {
                                                Type::date());
 }
 
-// `Date()` without `new`: the text of now, as toString() writes it.
 Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }
   if (!call->args.empty()) {
-    // JavaScript ignores them, which hides what was meant.
     checker_.diags_.error(name->loc(),
                           "'Date()' without 'new' gives the text of the current time and "
                           "ignores its arguments; write 'new Date(...)'");
@@ -350,7 +339,6 @@ Expr *DateChecker::checkDateFunction(CallExpr *call, NameExpr *name) {
   return call;
 }
 
-// Date.UTC and Date.parse; Date.now is with the clocks (checkProcessCall).
 Expr *DateChecker::checkDateStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
@@ -469,11 +457,9 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::doubleTy();
     break;
   case Builtin::DateToJSON:
-    // The key JSON.stringify passes, which a date ignores.
     if (!call->args.empty()) {
       call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
     }
-    // null in JavaScript for an invalid date: there is no null.
     call->type = Type::optional(Type::string());
     break;
   case Builtin::DateToLocalString:
@@ -487,7 +473,7 @@ Expr *DateChecker::checkDateMethod(CallExpr *call, MemberExpr *member) {
     call->args.insert(call->args.begin(), field(method->field));
     call->type = Type::string();
     break;
-  default: // toISOString, toUTCString
+  default:
     call->type = Type::string();
     break;
   }
@@ -511,8 +497,6 @@ Expr *DateChecker::checkDateMember(MemberExpr *member) {
   return member;
 }
 
-// `a - b` (the milliseconds between two dates) and `a < b`: the time values.
-// Null if neither side is a date.
 Expr *DateChecker::checkDateOperands(BinaryExpr *bin) {
   const Type *l = bin->lhs->type, *r = bin->rhs->type;
   if (!l->isDate() && !r->isDate()) {
@@ -550,4 +534,4 @@ Expr *DateChecker::checkDateOperands(BinaryExpr *bin) {
   return bin;
 }
 
-} // namespace tz
+}

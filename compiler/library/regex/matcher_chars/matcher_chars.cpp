@@ -20,7 +20,7 @@ bool isBack(uint32_t op) {
 
 bool hasByte(const ByteSet &s, uint32_t c) { return (s[c / 32] >> (c % 32)) & 1; }
 
-} // namespace
+}
 
 MatcherChars::MatcherChars(MatcherBuilder &builder) : builder_(builder) {}
 
@@ -90,7 +90,7 @@ llvm::Constant *MatcherChars::byteTable(const ByteSet &bits) {
   }
   auto *data = llvm::ConstantDataArray::get(builder_.ctx_, bytes);
   auto *global =
-      new llvm::GlobalVariable(builder_.module_, data->getType(), /*isConstant=*/true,
+      new llvm::GlobalVariable(builder_.module_, data->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, data, "tz.regex.class");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   table = global;
@@ -98,7 +98,6 @@ llvm::Constant *MatcherChars::byteTable(const ByteSet &bits) {
   return table;
 }
 
-// Whether `c` (below 256) is in `bits`: a few compares, or a table.
 Value *MatcherChars::inByteSet(Value *c, const ByteSet &bits) {
   std::vector<std::pair<uint32_t, uint32_t>> runs;
   for (uint32_t x = 0; x < 256;) {
@@ -137,7 +136,6 @@ Value *MatcherChars::inByteSet(Value *c, const ByteSet &bits) {
   return builder_.b_.CreateAnd(in, builder_.b_.CreateICmpULT(c, builder_.i32(256)));
 }
 
-// RE_SET's operands at `set`: n, 8 words of bits, n ranges from 256 on.
 Value *MatcherChars::inSet(Value *c, const uint32_t *set, bool bytesOnly) {
   ByteSet bits;
   for (int i = 0; i < 8; ++i) {
@@ -160,7 +158,7 @@ Value *MatcherChars::inSet(Value *c, const uint32_t *set, bool bytesOnly) {
   std::vector<uint32_t> words(ranges, ranges + 2 * n);
   auto *data = llvm::ConstantDataArray::get(builder_.ctx_, words);
   auto *global =
-      new llvm::GlobalVariable(builder_.module_, data->getType(), /*isConstant=*/true,
+      new llvm::GlobalVariable(builder_.module_, data->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, data, "tz.regex.ranges");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::FunctionCallee fn = builder_.module_.getOrInsertFunction(
@@ -168,7 +166,6 @@ Value *MatcherChars::inSet(Value *c, const uint32_t *set, bool bytesOnly) {
       llvm::FunctionType::get(
           builder_.b_.getInt32Ty(),
           {builder_.b_.getInt32Ty(), builder_.b_.getPtrTy(), builder_.b_.getInt32Ty()}, false));
-  // Below 256 the bits answer; the call is for the rest only.
   Value *high = test(builder_.b_.CreateICmpUGE(c, builder_.i32(256)), [&] {
     return builder_.b_.CreateICmpNE(builder_.b_.CreateCall(fn, {c, global, builder_.i32(n)}),
                                     builder_.i32(0));
@@ -187,10 +184,6 @@ std::pair<Value *, Value *> MatcherChars::readChar(Value *pos, bool back, BasicB
     Value *before = builder_.b_.CreateSub(pos, builder_.i32(1));
     return {builder_.unitAt(before), before};
   }
-  // With u, a surrogate pair is one character, and in the middle of one there
-  // is none (see read_forward in runtime/library/regex/regex/regex.c): the
-  // runtime reads it, as a unit that is not a surrogate is the character
-  // itself.
   Value *at = pos;
   if (!back) {
     builder_.failUnless(builder_.b_.CreateICmpSLT(pos, builder_.length_), fail);
@@ -232,8 +225,6 @@ std::pair<Value *, Value *> MatcherChars::readChar(Value *pos, bool back, BasicB
   return {cp, np};
 }
 
-// The one-character instruction at `atom` at `pos`: the position past (or
-// before) the character, or a jump to `fail`.
 Value *MatcherChars::charStep(uint32_t atom, Value *pos, BasicBlock *fail) {
   const uint32_t *op = builder_.code_ + atom;
   bool back = isBack(op[0]);
@@ -245,7 +236,6 @@ Value *MatcherChars::charStep(uint32_t atom, Value *pos, BasicBlock *fail) {
       return pos;
     }
     if (!builder_.wide_ || !builder_.unicode_ || c < 0xD800 || (c > 0xDFFF && c < 0x10000)) {
-      // A code unit: no pairs to think of.
       Value *at = pos;
       if (back) {
         builder_.failUnless(builder_.b_.CreateICmpSGT(pos, builder_.i32(0)), fail);
@@ -270,11 +260,11 @@ Value *MatcherChars::charStep(uint32_t atom, Value *pos, BasicBlock *fail) {
   case RE_SET_BACK:
     builder_.failUnless(inSet(cp, op + 1, !builder_.wide_), fail);
     break;
-  default: // RE_ALL
+  default:
     break;
   }
 
   return next;
 }
 
-} // namespace tz
+}

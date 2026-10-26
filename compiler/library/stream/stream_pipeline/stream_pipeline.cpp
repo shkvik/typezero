@@ -27,16 +27,13 @@ namespace tz {
 
 namespace {
 
-// Whether `place` (as Checker::placeOf gives it) is in the module named
-// `module`: "node:stream:12:3" is in "node:stream", not in
-// "node:stream/promises".
 bool inModule(const std::string &place, llvm::StringRef module) {
   llvm::StringRef at(place);
 
   return at.consume_front(module) && at.consume_front(":");
 }
 
-} // namespace
+}
 
 StreamPipeline::StreamPipeline(Checker &checker) : checker_(checker) {}
 
@@ -53,8 +50,6 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
   const Type *stageType = stageClass ? stageClass->type : Type::error();
   const Type *options = streamSignalOptionsType();
   stream = false;
-  // A function: the source (the first), a transform of the chunks before it
-  // (an async generator), or the sink, whose Promise ends the pipeline.
   auto stageCall = [&](llvm::StringRef fn, std::vector<const Type *> bound, Expr *value) -> Expr * {
     auto *callee = checker_.ctx_.make<NameExpr>(loc, fn);
     auto *call = checker_.ctx_.make<CallExpr>(loc, callee, std::vector<Expr *>{value});
@@ -94,7 +89,6 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
         return arg;
       }
       if (chunk && checker_.chunkTypes().recordStreamChunk(chunks.writable, chunk, loc)) {
-        // A round that looks for its type.
       } else if (chunk && !checker_.openMaps_.count(chunk) &&
                  !streamTakes(chunks.writable, chunk)) {
         checker_.diags_.error(loc, "pipeline() writes chunks of " + chunk->name().str() + " to '" +
@@ -168,7 +162,6 @@ Expr *StreamPipeline::streamStage(Expr *&arg, const Type *&chunk, bool first, bo
     return arg;
   }
   if (first) {
-    // An iterable, or an async one.
     if (type->isAsyncIterator()) {
       chunk = type->yielded();
       Expr *stage = stageCall("streamAsyncIterableStage", {chunk}, arg);
@@ -207,7 +200,6 @@ Expr *StreamPipeline::valuesIteratorOf(Expr *collection) {
     member->type = Type::function({}, 0, false, iterator);
     return checker_.processChecker().builtinCall(loc, member, Builtin::ArrValues, {}, iterator);
   }
-  // A Map, a Set, an object with `[Symbol.iterator]()`.
   Expr *iterator = checker_.dictChecker().iterableOf(collection);
 
   return iterator != collection && iterator->type->isIterator() ? iterator : nullptr;
@@ -217,7 +209,6 @@ bool StreamPipeline::streamTakes(const Type *writable, const Type *chunk) {
   if (writable == chunk) {
     return true;
   }
-  // A stream of Buffers takes strings too.
   if (writable->isBuffer() && chunk->isString()) {
     return true;
   }
@@ -239,7 +230,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     return nullptr;
   }
   if (fn == "finished" && promises) {
-    return nullptr; // a plain function
+    return nullptr;
   }
   if (checker_.libraryCalls().inLibrary(call->loc())) {
     return nullptr;
@@ -264,7 +255,6 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
         checker_.exprChecker().checkExpr(checker_.ctx_.make<UndefinedExpr>(loc)), type);
   };
   if (fn == "finished") {
-    // finished(stream, callback) and finished(stream, options, callback).
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
       return call;
     }
@@ -331,8 +321,6 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     return checker_.eventTargetChecker().callLibraryFunction(call, "streamCompose", {w, r}, given,
                                                              loc);
   }
-  // pipeline(...stages, callback) of node:stream; pipeline(...stages,
-  // options?) of node:stream/promises.
   size_t count = call->args.size();
   Expr *callbackArg = nullptr;
   Expr *optionsArg = nullptr;
@@ -377,7 +365,6 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
   Expr *lastStream = nullptr;
   for (size_t i = 0; i < stages.size(); ++i) {
     if (i + 1 == stages.size() && lastIsStream && !promises) {
-      // The last stream goes on its own, as the result has its type.
       auto *conv = dyn_cast<CastExpr>(stages[i]);
       lastStream = conv ? conv->operand : stages[i];
       continue;
@@ -429,4 +416,4 @@ Expr *StreamPipeline::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbo
   return checkStreamFunction(call, func->decl, name->loc());
 }
 
-} // namespace tz
+}

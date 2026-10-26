@@ -21,4 +21,4 @@ void ErrorPrinter::print(const Errors &errors) const {
   }
 }
 
-} // namespace tz
+}

@@ -29,19 +29,12 @@ bool MemoryPlan::refMayBeMember(const Type *type) const {
     result = isCyclic(type);
     break;
   case Type::Kind::Function:
-    // The environment of a closure, or a promise: `resolve` of `new Promise`
-    // has its promise as its environment, and a promise may be a member
-    // (promiseIsMember, runtime/core/async/async.c).
     result = fnMayBeMember || hasCycles;
     break;
   case Type::Kind::Promise:
-    // By the type of its value, or of its error (promiseIsMember); a
-    // promise of one type may be seen as one of another.
     result = hasCycles;
     break;
   case Type::Kind::Unknown:
-    // An object, a promise, or the box of a value that may hold a member,
-    // which is a member itself (Lowering::boxValue).
     result = hasCycles;
     break;
   case Type::Kind::Union:
@@ -73,4 +66,4 @@ bool MemoryPlan::promiseIsMember(const Type *value) const {
   return hasCycles && (anyCyclicObject || (value && mayHoldMember(value)));
 }
 
-} // namespace tz
+}

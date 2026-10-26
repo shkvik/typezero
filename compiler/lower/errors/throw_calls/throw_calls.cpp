@@ -110,7 +110,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     for (const Expr *arg : c->args) {
       scanner_.expr(arg, caught);
     }
-    // A method of a union: that of any member may run.
     for (const CallExpr::UnionMethod &m : c->unionMethods) {
       if (m.method && m.virtualCall) {
         forEachImplementation(m.method->decl,
@@ -140,7 +139,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   if (member) {
     scanner_.expr(member->object, caught);
   }
-  // asyncMap and asyncAndThen of a Result call their function now.
   bool ofResult = (builtin == Builtin::ResultAsyncMap || builtin == Builtin::ResultAsyncAndThen) &&
                   member && member->object->type && member->object->type->isResult();
   bool callbacks = (builtin >= Builtin::ArrForEach && builtin <= Builtin::ArrSortWith) ||
@@ -162,7 +160,7 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::ArrReduceRight:
   case Builtin::IterReduce:
     if (c->args.size() < 2) {
-      intrinsic(caught); // of nothing, without an initial value
+      intrinsic(caught);
     }
     break;
   case Builtin::IterTake:
@@ -177,7 +175,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     resumes(caught);
     break;
   case Builtin::SafeTry:
-    // Its generator runs once, now.
     if (!c->args.empty()) {
       if (auto *fe = llvm::dyn_cast<FunctionExpr>(c->args[0])) {
         callee(fe->fn, caught, nullptr);
@@ -190,16 +187,16 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::ParseInt:
   case Builtin::ParseFloat:
     if (c->type && c->type->isInteger()) {
-      intrinsic(caught); // NaN or a number that does not fit
+      intrinsic(caught);
     }
     break;
   case Builtin::StrRepeat:
   case Builtin::StrPadStart:
   case Builtin::StrPadEnd:
   case Builtin::FromCodePoint:
-  case Builtin::UriEncodeComponent: // a lone surrogate
+  case Builtin::UriEncodeComponent:
   case Builtin::UriEncode:
-  case Builtin::UriDecodeComponent: // an escape that is not UTF-8
+  case Builtin::UriDecodeComponent:
   case Builtin::UriDecode:
   case Builtin::ResultUnsafeUnwrap:
   case Builtin::ResultUnsafeUnwrapErr:
@@ -213,12 +210,10 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::NumToRadix:
     intrinsic(caught);
     break;
-  case Builtin::RegExpNew: // a SyntaxError
+  case Builtin::RegExpNew:
   case Builtin::JsonParse:
   case Builtin::JsonParseAs:
   case Builtin::FromJson:
-  // Reflection checks its values when the program runs, and runs the code
-  // of the class.
   case Builtin::ReflectGet:
   case Builtin::ReflectApply:
   case Builtin::ReflectConstruct:
@@ -226,8 +221,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     intrinsic(caught);
     break;
   case Builtin::StrMatchAll:
-    // Without the g flag, a TypeError, where the regex is known only when
-    // the program runs.
     if (!c->regex) {
       intrinsic(caught);
     }
@@ -240,15 +233,15 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     break;
   case Builtin::JsonStringify:
     if (!c->args.empty() && c->args[0]->type && stringifyMayThrow(c->args[0]->type)) {
-      intrinsic(caught); // a value inside itself
+      intrinsic(caught);
     }
     break;
-  case Builtin::DateToISOString: // of an invalid date
+  case Builtin::DateToISOString:
     intrinsic(caught);
     break;
   case Builtin::DtfFormat:
   case Builtin::DtfFormatToParts:
-    if (!c->args.empty()) { // a date that may be invalid
+    if (!c->args.empty()) {
       intrinsic(caught);
     }
     break;
@@ -263,8 +256,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
     }
     break;
   case Builtin::MetaDefine:
-    // A key `design:*` that the program wrote, which only the compiler
-    // writes (runtime/library/reflect/meta/meta.c).
     if (!c->metaKey && !c->designRecord && !c->args.empty() &&
         !llvm::isa<StringLitExpr>(c->args[0])) {
       intrinsic(caught);
@@ -273,7 +264,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::ObjectKeys:
   case Builtin::ObjectValues:
   case Builtin::ObjectEntries:
-    // Of a Json that is null or undefined, but for `for...in`.
     if (!c->forIn && !c->args.empty() && c->args[0]->type &&
         c->args[0]->type->nonOptional()->isJson()) {
       intrinsic(caught);
@@ -282,15 +272,15 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   default:
     if (isRoundingBuiltin(builtin) && c->type && c->type->isInteger() && !c->args.empty() &&
         c->args[0]->type != c->type) {
-      intrinsic(caught); // a number that does not fit in the integer
+      intrinsic(caught);
     }
     if (isDecimalBuiltin(builtin)) {
       intrinsic(caught);
     }
-    if (isFsBuiltin(builtin) || isChildBuiltin(builtin)) { // an error of the system
+    if (isFsBuiltin(builtin) || isChildBuiltin(builtin)) {
       intrinsic(caught);
     }
-    if (isCryptoBuiltin(builtin)) { // the errors of node:crypto
+    if (isCryptoBuiltin(builtin)) {
       intrinsic(caught);
     }
     if (isBytesBuiltin(builtin) && bytesMayThrow(c)) {
@@ -303,4 +293,4 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   }
 }
 
-} // namespace tz
+}

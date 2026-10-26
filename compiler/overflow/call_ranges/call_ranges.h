@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Ranges through calls: the arguments, the results, the summaries of functions.
 class CallRanges {
 public:
   explicit CallRanges(OverflowCheck &check);
@@ -25,4 +24,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

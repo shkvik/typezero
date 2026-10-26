@@ -30,8 +30,6 @@ using llvm::isa;
 
 namespace tz {
 
-// Whether `stmt`, the body of a loop with `labels`, has a `continue` that
-// goes to that loop; `loops` counts the loops around `stmt` inside it.
 static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels,
                         unsigned loops = 0) {
   if (!stmt) {
@@ -71,12 +69,9 @@ static bool continuesTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels
 
 LoopChecker::LoopChecker(Checker &checker) : checker_(checker) {}
 
-// Loops are checked once. Their head state comes from scanning the loop for
-// what it changes (loopHead), so what Checker assumes at the start of the body
-// holds on every iteration, and everywhere in the loop.
 void LoopChecker::checkWhile(WhileStmt *stmt) {
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {stmt->cond});
-  Checker::Flow head = checker_.loopBounds().loopHead(scan, stmt->cond, /*induction=*/true);
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, stmt->cond, true);
   checker_.flow_ = head;
   Checker::Flow whenTrue, whenFalse;
   stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
@@ -86,12 +81,11 @@ void LoopChecker::checkWhile(WhileStmt *stmt) {
 }
 
 void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
-  // No induction: the body runs once before the condition is first checked.
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {stmt->cond});
-  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, /*induction=*/false);
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, false);
   checker_.flow_ = head;
   checkLoopBody(stmt->body);
-  checker_.flow_ = FlowChecker::join(checker_.flow_, head); // `continue` jumps to the condition
+  checker_.flow_ = FlowChecker::join(checker_.flow_, head);
   Checker::Flow whenTrue, whenFalse;
   stmt->cond = checker_.truthChecker().checkCondition(stmt->cond, whenTrue, whenFalse);
   checker_.flow_ = scan.breaks ? FlowChecker::join(whenFalse, head) : whenFalse;
@@ -99,13 +93,13 @@ void LoopChecker::checkDoWhile(DoWhileStmt *stmt) {
 
 void LoopChecker::checkFor(ForStmt *stmt) {
   llvm::SmallVector<llvm::StringRef, 1> labels = checker_.pendingLabels_;
-  checker_.pushScope(); // variables declared in the loop header
+  checker_.pushScope();
   checker_.block_ = {};
   if (stmt->init) {
     checker_.stmtChecker().checkStmt(stmt->init);
   }
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {stmt->cond, stmt->step});
-  Checker::Flow head = checker_.loopBounds().loopHead(scan, stmt->cond, /*induction=*/true);
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, stmt->cond, true);
   checker_.flow_ = head;
   Checker::Flow whenTrue = head, whenFalse = head;
   whenFalse.unreachable = true;
@@ -115,17 +109,13 @@ void LoopChecker::checkFor(ForStmt *stmt) {
   checker_.flow_ = whenTrue;
   checkLoopBody(stmt->body);
   if (stmt->step) {
-    // The step runs where the body ends (`node = node.next` after
-    // `node != undefined`), unless a `continue` may jump there from
-    // elsewhere; what holds at the head holds there too. If the body never
-    // ends, the step never runs, and is checked as the body starts.
     if (continuesTo(stmt->body, labels)) {
       checker_.flow_ = head;
     } else if (checker_.flow_.unreachable) {
       checker_.flow_ = whenTrue;
     }
     if (auto *yield = dyn_cast<YieldExpr>(stmt->step)) {
-      yield->discarded = true; // as in a statement
+      yield->discarded = true;
     }
     stmt->step = checker_.exprChecker().checkExpr(stmt->step);
     checker_.resultChecker().checkDiscarded(stmt->step);
@@ -145,9 +135,6 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
     checker_.iteratorMethods().markFused(stmt->iterable);
     stmt->iterable = checker_.dictChecker().iterableOf(
         checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(stmt->iterable)));
-    // `for (const x of args)` of an argument list (see expandArgumentList):
-    // its elements, of the type that holds them all. (Any other tuple is not
-    // iterated: its elements have types of their own.)
     auto *name = dyn_cast<NameExpr>(stmt->iterable);
     bool list = name && name->var && name->type->isTuple() && !name->type->tupleRest() &&
                 llvm::any_of(checker_.functions_, [&](const FunctionDecl *fn) {
@@ -155,7 +142,6 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
                 });
     if (list) {
       auto *elements = checker_.ctx_.make<ArrayLitExpr>(name->loc());
-      // The numbers as the widest of them, then a union of the kinds.
       const Type *number = nullptr;
       std::vector<const Type *> kinds;
       for (const Field &f : name->type->fields()) {
@@ -171,7 +157,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
             {checker_.ctx_.make<IndexExpr>(name->loc(),
                                            checker_.ctx_.make<NameExpr>(name->loc(), name->name),
                                            checker_.ctx_.make<IntLitExpr>(name->loc(), k)),
-             /*spread=*/false});
+             false});
       }
       const Type *element = kinds.empty() ? nullptr : Type::unionOf(kinds);
       if (!elements->elements.empty()) {
@@ -180,7 +166,7 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
       }
     }
   }
-  if (stmt->iterable->type->isMatch()) { // the captures
+  if (stmt->iterable->type->isMatch()) {
     stmt->iterable = checker_.matchChecker().matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
@@ -228,17 +214,12 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   }
 
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {});
-  // An iterator runs code between the iterations: a generator's body, the
-  // callbacks of its helpers.
   if (type->isIterator()) {
     scan.callsFunctions = true;
   }
-  // The array keeps each element alive during its iteration unless the body
-  // could remove or replace elements, directly or through a function. Then a
-  // const loop variable can borrow the element instead of counting it.
   stmt->borrowElements = stmt->isConst && type->isArray() && element->isManaged() &&
                          !scan.callsFunctions && !scan.releasesElements;
-  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, /*induction=*/false);
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, false);
   checker_.flow_ = head;
   checker_.pushScope();
   stmt->binding.sym =
@@ -254,4 +235,4 @@ void LoopChecker::checkLoopBody(Stmt *body) {
   checker_.targets_.pop_back();
 }
 
-} // namespace tz
+}

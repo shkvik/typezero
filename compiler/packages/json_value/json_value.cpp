@@ -18,4 +18,4 @@ std::string JsonValue::getString(llvm::StringRef key) const {
   return value && value->isString() ? value->string : std::string();
 }
 
-} // namespace tz::pkg
+}

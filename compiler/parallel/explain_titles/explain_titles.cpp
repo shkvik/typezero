@@ -64,7 +64,6 @@ std::string ExplainTitles::fnName(const FnInfo &f) const {
     }
     name = (fn->isArrow ? "the arrow " : "the function ") +
            Analysis::atText(analysis_.explainNames().where(fn->loc()));
-    // Each copy of a generic function has a copy of it.
     for (const FunctionDecl *up = fn->parent; up; up = up->parent) {
       if (up->isInstance) {
         FnInfo info;
@@ -119,7 +118,6 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
   if (s.kind == SegKind::Start) {
     return "start";
   }
-  // Two awaits on one line are told apart by their column.
   std::string at = analysis_.explainNames().where(s.loc);
   unsigned line = analysis_.explainNames().lineOf(s.loc), same = 0;
   for (const Segment &o : f.segs) {
@@ -146,16 +144,11 @@ std::string ExplainTitles::segTitle(const FnInfo &f, unsigned seg) const {
   return "start";
 }
 
-// How the explanation names a task; two tasks started on one line by calls
-// of the same text are told apart by the column.
 std::string ExplainTitles::rootTitle(int r) const {
   if (analysis_.rootTitles_.empty()) {
-    // Only tasks of one function need names apart: the explanation shows
-    // tasks under the pieces of their function.
     auto key = [&](size_t i, const std::string &title) {
       return title + "|" + std::to_string(analysis_.roots_[i].fn);
     };
-    // First by the column, where that tells them apart.
     std::map<std::string, std::set<std::string>> columns;
     for (size_t i = 0; i < analysis_.roots_.size(); ++i) {
       columns[key(i, rootTitleAt(int(i), false))].insert(rootTitleAt(int(i), true));
@@ -166,8 +159,6 @@ std::string ExplainTitles::rootTitle(int r) const {
       titles.push_back(columns[key(i, title)].size() > 1 ? rootTitleAt(int(i), true) : title);
     }
     std::map<std::string, unsigned> count;
-    // Then by the task that starts them (parents come first), and last by
-    // their order.
     std::map<std::string, unsigned> same, seen;
     for (size_t i = 0; i < analysis_.roots_.size(); ++i) {
       ++same[key(i, titles[i])];
@@ -209,7 +200,6 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
     return (root.multi ? "the callbacks" : "the callback") + at;
   }
   if (rec.kind == CallKind::Inline) {
-    // A callback that map (or the like) runs for each element.
     const FunctionDecl *fn = analysis_.fns_[root.fn].decl;
     std::string text =
         (root.multi ? "the tasks of " : "the task of ") + fnName(analysis_.fns_[root.fn]);
@@ -227,7 +217,6 @@ std::string ExplainTitles::rootTitleAt(int r, bool column) const {
 std::string ExplainTitles::contextOf(unsigned piece) const {
   const PieceInst &p = analysis_.pieces_[piece];
   std::string text = rootTitle(p.root);
-  // Pieces of one function in one task with different objects as `this`.
   if (analysis_.sameTask_.at(std::make_tuple(p.fn, p.seg, p.root)) > 1 && p.self) {
     text += ", this = " + analysis_.explainNames().refName(*p.self);
   }
@@ -248,4 +237,4 @@ std::string ExplainTitles::pieceTitle(unsigned piece, bool withContext) const {
   return text;
 }
 
-} // namespace tz::parallel
+}

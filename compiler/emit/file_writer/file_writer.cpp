@@ -22,4 +22,4 @@ Errors FileWriter::write(llvm::StringRef path,
   return errors;
 }
 
-} // namespace tz
+}

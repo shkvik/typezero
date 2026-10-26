@@ -80,4 +80,4 @@ int CommandLine::run(int argc, char **argv) const {
   return build.run(args, args.outputPath());
 }
 
-} // namespace tz
+}

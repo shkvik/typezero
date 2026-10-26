@@ -25,8 +25,6 @@ using llvm::isa;
 
 namespace tz {
 
-// The type of a parameter without an annotation, from a default value that
-// is a literal, as `let x = 5` would give it.
 const Type *literalType(const Expr *value);
 
 ClosureChecker::ClosureChecker(Checker &checker) : checker_(checker) {}
@@ -36,7 +34,6 @@ Checker::Signature ClosureChecker::signatureOf(const Type *fnType) {
   sig.params.assign(fnType->params().begin(), fnType->params().end());
   sig.minArgs = fnType->minArgs();
   sig.ret = fnType->ret();
-  // As in TypeScript, a function whose result is dropped may return anything.
   sig.voidResult = fnType->ret()->isVoid();
   sig.hasThis = fnType->hasThis();
 
@@ -52,7 +49,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
   fn->sym = sym;
   fn->parent = checker_.currentDecl();
   fn->creationSeq = ++checker_.seq_;
-  // Its type parameters stand for nothing that could be checked.
   bool generic = !fn->typeParams.empty();
   if (generic) {
     checker_.diags_.error(
@@ -65,8 +61,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     checker_.typeParams().bindTypeParams(fn->typeParams, fn->typeArgs);
   }
 
-  // A function of a type that takes `this`, written without a `this`
-  // parameter: it gets one (see Signature::hasThis).
   bool thisFromContext = false;
   if (sig && sig->hasThis && !sig->params.empty() &&
       (fn->params.empty() || fn->params[0].name != "this" || fn->isArrow)) {
@@ -77,18 +71,17 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     thisFromContext = true;
   }
 
-  // Parameters: an annotation, or the type the context passes.
   size_t named = fn->params.size();
   bool afterOptional = false;
   for (size_t i = 0; i < named; ++i) {
     Param &param = fn->params[i];
     const Type *given = sig && i < sig->params.size() ? sig->params[i] : nullptr;
     bool mayOmit = param.optional || param.defaultValue;
-    const Type *type;   // inside the body
-    const Type *passed; // by callers
+    const Type *type;
+    const Type *passed;
     if (param.type) {
       bool outerList = std::exchange(checker_.listContext_, param.rest);
-      type = checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+      type = checker_.typeResolver().resolveType(*param.type, false);
       checker_.listContext_ = outerList;
       if (param.optional) {
         type = Type::optional(type);
@@ -98,7 +91,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
         checker_.diags_.error(param.loc, "parameter '" + param.label() + "' is declared as '" +
                                              passed->name() + "', but the function gets '" +
                                              given->name() + "' here");
-        passed = given; // reported once
+        passed = given;
         type = param.defaultValue ? given->nonOptional() : given;
       }
     } else if (given) {
@@ -117,7 +110,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
                          "' needs a type: nothing here says what the function is called with");
       type = passed = Type::error();
     }
-    // `function (this: unknown, ...)`: the `this` it gets (Type::hasThis).
     if (i == 0 && thisFromContext) {
       sym->hasThis = true;
     } else if (i == 0 && param.name == "this" && param.type && !param.rest) {
@@ -130,7 +122,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
       }
     }
     if (param.rest) {
-      // Or a list of the types of parameters, `...args: A`.
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
         checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
                                              param.name + ": int[]'");
@@ -148,8 +139,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     sym->params.push_back(passed);
   }
   named = fn->params.size();
-  // It takes the arguments it does not name too, so that its type is the one
-  // expected; a rest parameter takes them already.
   if (sig && sig->pad && !sym->hasRest) {
     for (size_t i = named; i < sig->params.size(); ++i) {
       Param hidden;
@@ -161,23 +150,17 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     }
     sym->minArgs = sig->minArgs;
   }
-  // `...args: [int, int]`: those parameters (see expandArgumentList).
   checker_.argListChecker().expandArgumentList(fn, sym);
 
   if (fn->isGenerator) {
-    // A generator returns an iterator, whose types its body gives unless
-    // they are declared or expected.
     if (fn->returnType) {
       sym->ret = checker_.generatorChecker().generatorReturnType(
-          fn, checker_.typeResolver().resolveType(*fn->returnType, /*allowVoid=*/true));
+          fn, checker_.typeResolver().resolveType(*fn->returnType, true));
     } else if (sig && sig->ret &&
                (fn->isAsync ? sig->ret->isAsyncIterator() : sig->ret->isIterator())) {
       sym->ret = sig->ret;
     }
   } else if (fn->isAsync) {
-    // An async function returns a Promise of what its body returns. Where
-    // the result is dropped, so is that Promise, which only a callback that
-    // runs on its own may do.
     if (sig && sig->voidResult) {
       if (!sig->asyncVoid) {
         checker_.diags_.error(fe->loc(),
@@ -190,7 +173,7 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
       sym->discardsResult = true;
     } else if (fn->returnType) {
       sym->ret = checker_.asyncChecker().asyncReturnType(
-          fn, checker_.typeResolver().resolveType(*fn->returnType, /*allowVoid=*/true));
+          fn, checker_.typeResolver().resolveType(*fn->returnType, true));
     } else if (sig && sig->ret && sig->ret->isPromise()) {
       sym->ret = sig->ret;
     } else if (!ReturnInferrer::returnsValue(fn->body)) {
@@ -210,9 +193,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
     checker_.typeScopes_.pop_back();
   }
 
-  // A function that calls itself, through its constant or its own name,
-  // needs its return type before its body is checked: found on copies, as
-  // for recursive declarations (see inferCycle).
   if (!sym->ret) {
     llvm::StringSet<> names;
     collectNames(fn->body, names);
@@ -236,8 +216,6 @@ Expr *ClosureChecker::checkFunctionExpr(FunctionExpr *fe, const Checker::Signatu
       checker_.returnInferrer().leaveBody(saved);
     }
   }
-  // Created in a constructor before every field is set, it must not use
-  // `this` (see checkThis).
   bool outerReady = checker_.closureThisReady_;
   if (checker_.initFn_ && checker_.currentDecl() == checker_.initFn_) {
     checker_.closureThisReady_ = checker_.classChecker().thisReady(checker_.flow_);
@@ -263,7 +241,6 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
   Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
-  // `function f() { ... f() ... }`: the name is visible inside.
   bool ownScope = fn->isExpression && !fn->ownName.empty();
   if (ownScope) {
     declareOwnName(fn);
@@ -296,7 +273,6 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
   checker_.blockNames_.push_back(std::move(names));
   for (size_t i = 0; i < block->body.size(); ++i) {
     if (group && i == group->firstUse) {
-      // The functions are created here.
       group->creationSeq = ++checker_.seq_;
       for (FunctionDecl *fn : group->members) {
         fn->var->declSeq = group->creationSeq;
@@ -305,10 +281,6 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
     checker_.block_ = block->body;
     checker_.blockIndex_ = i;
     checker_.stmtChecker().checkStmt(block->body[i]);
-    // An `if` an instance's types decided ended in a return, so the code after
-    // it cannot run in this instance: dropped unchecked, as the branch that
-    // cannot run is (see checkIf). `if (typeof x == "string") return f(x)`
-    // then `return g(x)`, the code for the other types.
     auto *decided = dyn_cast<IfStmt>(block->body[i]);
     if (checker_.checkingInstance_ && decided && isa<BoolLitExpr>(decided->cond) &&
         checker_.flow_.unreachable && (!group || group->firstUse <= i) &&
@@ -325,4 +297,4 @@ void ClosureChecker::checkStatements(BlockStmt *block) {
   }
 }
 
-} // namespace tz
+}

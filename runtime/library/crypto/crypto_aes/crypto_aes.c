@@ -1,9 +1,3 @@
-// AES of the direct layer (docs/crypto.md, section 3): GCM, CBC and CTR over the assembly of
-// OpenSSL, chosen as its providers choose it for the CPU: AVX-512 with VAES for GCM, AES-NI, and
-// its constant-time code without them. The file is compiled once for each mode (TZ_AES_GCM,
-// TZ_AES_CBC, TZ_AES_CTR; see runtime/CMakeLists.txt), so a program brings only the modes it
-// names.
-
 #include "internal/deprecated.h"
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/error/error.h"
@@ -26,7 +20,6 @@ void aesni_ctr32_encrypt_blocks(const unsigned char *in, unsigned char *out, siz
                                 const void *ks, const unsigned char *ivec);
 
 #if defined(TZ_AES_GCM) || defined(TZ_AES_CTR)
-// The key schedule for encryption, by the CPU.
 static void encrypt_key(const uint8_t *key, size_t length, AES_KEY *ks) {
   if (AESNI_CAPABLE) {
     aesni_set_encrypt_key(key, (int)length * 8, ks);
@@ -38,10 +31,6 @@ static void encrypt_key(const uint8_t *key, size_t length, AES_KEY *ks) {
 
 #define NAMED(bits, mode) "aes-" #bits "-" mode
 
-//===----------------------------------------------------------------------===//
-// GCM
-//===----------------------------------------------------------------------===//
-
 #ifdef TZ_AES_GCM
 
 size_t aesni_gcm_encrypt(const unsigned char *in, unsigned char *out, size_t len, const void *key,
@@ -50,7 +39,6 @@ size_t aesni_gcm_decrypt(const unsigned char *in, unsigned char *out, size_t len
                          unsigned char ivec[16], u64 *Xi);
 void gcm_ghash_avx(u64 Xi[2], const u128 Htable[16], const u8 *in, size_t len);
 
-// AVX-512 with VAES and VPCLMULQDQ (cipher_aes_gcm_hw_vaes_avx512.inc of OpenSSL).
 int ossl_vaes_vpclmulqdq_capable(void);
 void ossl_aes_gcm_encrypt_avx512(const void *ks, void *gcm, unsigned int *pblocklen,
                                  const unsigned char *in, size_t len, unsigned char *out);
@@ -67,7 +55,7 @@ static block128_f block_function(void) {
 }
 
 typedef struct {
-  GCM128_CONTEXT gcm; // first: the assembly finds its fields at fixed offsets
+  GCM128_CONTEXT gcm;
   AES_KEY ks;
   ctr128_f ctr;
   int vaes;
@@ -99,7 +87,6 @@ static int gcm_aad(TzCipher *c, const uint8_t *aad, size_t length, double plaint
   if (!g->vaes) {
     return CRYPTO_gcm128_aad(&g->gcm, aad, length) == 0;
   }
-  // vaes_gcm_aadupdate: whole blocks through the assembly, the rest into the hash.
   GCM128_CONTEXT *gcm = &g->gcm;
   gcm->len.u[0] += length;
   unsigned int ares = gcm->ares;
@@ -145,7 +132,6 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
     }
     return (int64_t)length;
   }
-  // generic_aes_gcm_cipher_update: AES-NI and GHASH stitched in one pass when both are there.
   size_t bulk = 0;
   int stitched =
       g->ctr == (ctr128_f)aesni_ctr32_encrypt_blocks && gcm->funcs.ghash == gcm_ghash_avx;
@@ -217,10 +203,6 @@ GCM(256)
 
 #endif
 
-//===----------------------------------------------------------------------===//
-// CBC
-//===----------------------------------------------------------------------===//
-
 #ifdef TZ_AES_CBC
 
 typedef struct {
@@ -270,17 +252,13 @@ CBC(256)
 
 #endif
 
-//===----------------------------------------------------------------------===//
-// CTR
-//===----------------------------------------------------------------------===//
-
 #ifdef TZ_AES_CTR
 
 typedef struct {
   AES_KEY ks;
   uint8_t counter[16];
-  uint8_t stream[16]; // the key stream of the partial block
-  unsigned int used;  // of it
+  uint8_t stream[16];
+  unsigned int used;
 } Ctr;
 
 static int ctr_init(TzCipher *c, const uint8_t *key, size_t key_length, const uint8_t *iv,

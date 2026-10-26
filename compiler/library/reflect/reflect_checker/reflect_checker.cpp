@@ -28,7 +28,6 @@ namespace tz {
 
 namespace {
 
-// The classes whose objects a value of `type` may be.
 void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
   type = type->nonOptional();
   if (type->isArray()) {
@@ -57,7 +56,7 @@ Expr *stripImplicit(Expr *expr) {
   return expr;
 }
 
-} // namespace
+}
 
 ReflectChecker::ReflectChecker(Checker &checker) : checker_(checker) {}
 
@@ -70,20 +69,15 @@ bool ReflectChecker::onlyChecked() const {
 
 void ReflectChecker::noteReflectedConversion(const Type *from, const Type *to,
                                              const CastExpr *cast) {
-  // Code that is never emitted reaches no class.
   if (onlyChecked()) {
     return;
   }
-  // A class that becomes some class known only when the program runs, which
-  // `new` and Reflect.construct make objects of; unless a copy for the class
-  // known when compiling drops the conversion (see exactClassArgs).
   if (to->nonOptional()->isConstructor()) {
     if (ClassDecl *cls = const_cast<ClassDecl *>(from->nonOptional()->classRef())) {
       checker_.constructorCasts_[cast] = cls;
     }
     return;
   }
-  // Objects that code looks into only through reflection.
   if (to->nonOptional()->isAnyObject() || to->isUnknown() ||
       (to->nonOptional()->isArray() && to->nonOptional()->inner()->isUnknown())) {
     classesIn(from, escaped_);
@@ -95,14 +89,11 @@ void ReflectChecker::finishReflection() {
     entry.second->reflectNew = true;
   }
   if (!checker_.reflectionUsed_) {
-    // Nothing looks into a class by name: none is described.
     for (ClassDecl *cls : checker_.classes_) {
       cls->reflectNew = cls->reflectMethods = cls->reflectJson = false;
     }
     return;
   }
-  // The objects reflection may look into: of the classes they escape as, of
-  // those it makes, and of the classes down their chains.
   std::function<void(ClassDecl *)> methods = [&](ClassDecl *cls) {
     if (cls->reflectMethods) {
       return;
@@ -125,8 +116,6 @@ void ReflectChecker::finishReflection() {
   for (ClassDecl *cls : reflectedObjects_) {
     methods(cls);
   }
-  // fromJson(cls, j) of a class known only when the program runs: any class
-  // that may be one, if a Json can make it.
   if (jsonReflect_) {
     for (ClassDecl *cls : checker_.classes_) {
       if (cls->reflectNew && !cls->isAbstract && classJsonProblem(cls).empty()) {
@@ -141,7 +130,7 @@ std::string ReflectChecker::classJsonProblem(const ClassDecl *cls) {
   if (auto found = jsonProblems_.find(cls); found != jsonProblems_.end()) {
     return found->second;
   }
-  jsonProblems_[cls] = ""; // a class that holds itself, as it is being found
+  jsonProblems_[cls] = "";
   std::string name = cls->type ? cls->type->name().str() : cls->name.str();
   std::string problem;
   std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
@@ -156,9 +145,6 @@ std::string ReflectChecker::classJsonProblem(const ClassDecl *cls) {
   c->jsonParams.clear();
   if (problem.empty() && ctor && ctor->sym) {
     checker_.returnInferrer().resolveParams(ctor->sym);
-    // The key of each parameter is its name; those of `...args:
-    // ConstructorArgs` have the names of the parameters they are up the
-    // chain.
     std::function<std::string(const FunctionDecl *, size_t)> keyOf = [&](const FunctionDecl *fn,
                                                                          size_t k) {
       if (!fn->listName.empty() && k >= fn->listStart && fn->cls && fn->cls->parent) {
@@ -187,8 +173,6 @@ std::string ReflectChecker::classJsonProblem(const ClassDecl *cls) {
     }
   }
   if (problem.empty()) {
-    // The fields code may write that a Json can give, which the keys of the
-    // Json set after the constructor ran.
     checker_.classDeclarer().completeClass(c);
     c->jsonFields.clear();
     for (const Field &f : c->type->fields()) {
@@ -228,7 +212,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
       return call;
     }
-    // A field known when compiling: read as it is.
     auto *object = dyn_cast<NameExpr>(call->args[0]);
     auto *key = dyn_cast<StringLitExpr>(call->args[1]);
     Expr *&target = call->args[0];
@@ -238,7 +221,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
       return call;
     }
-    // `T extends object` in a generic function: its copies take the classes.
     const Type *base = GenericChecker::apparentType(type->nonOptional());
     if (base->isJson()) {
       checker_.diags_.error(target->loc(),
@@ -253,9 +235,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
       return call;
     }
-    // An object of a class known when compiling, also where a copy of a
-    // generic function passes its T on as an unknown, as the generic code
-    // does (see noteForced).
     Expr *seen = stripImplicit(target);
     const Type *seenType = seen->type;
     ClassDecl *cls = seenType->isObject() && !seenType->isAnyObject()
@@ -272,7 +251,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       }
       const ClassField *declared = cls ? ClassBases::findField(cls, name) : nullptr;
       bool open = !cls || (declared && declared->access == Access::Public);
-      // A field: read as it is.
       if (object && !type->isOptional() && base->isObject() && !base->isAnyObject() &&
           base->field(name) && open) {
         auto *read = checker_.ctx_.make<MemberExpr>(
@@ -286,7 +264,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
         return checker_.typeRelations().convert(
             checker_.classMemberChecker().checkClassMember(read, nullptr), Type::unknown());
       }
-      // A method: its function, as the description would give it.
       bool several = false;
       if (FunctionDecl *method =
               cls && !cls->literal && !seenType->field(name)
@@ -304,9 +281,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       }
     }
     call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::string());
-    // Objects of these classes are looked into by name.
     if (onlyChecked()) {
-      // Never emitted.
     } else if (type->isUnknown() || base->isAnyObject() || !base->classDecl()) {
       reflectGetAny_ = true;
     } else {
@@ -348,13 +323,12 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     }
     if (!onlyChecked()) {
       checker_.reflectionUsed_ = true;
-      reflectGetAny_ = true; // the method of an object it got by name
+      reflectGetAny_ = true;
     }
     call->builtin = Builtin::ReflectApply;
     call->type = Type::unknown();
     return call;
   }
-  // Reflect.construct(cls, args)
   if (call->args.size() == 3) {
     checker_.diags_.error(call->args[2]->loc(),
                           "the third argument of Reflect.construct, the class whose "
@@ -366,7 +340,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   if (!checker_.argumentChecker().checkArity(call, member->loc(), 2, 2)) {
     return call;
   }
-  // A class known when compiling, and the arguments written out: `new`.
   auto *name = dyn_cast<NameExpr>(call->args[0]);
   auto *list = dyn_cast<ArrayLitExpr>(call->args[1]);
   Expr *&cls = call->args[0];
@@ -394,10 +367,6 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     create->callee = checker_.ctx_.make<NameExpr>(name->loc(), name->name);
     return checker_.classValueChecker().checkValueNew(create, expected);
   }
-  // A class known when compiling, with arguments known only when the
-  // program runs: the function of the class that checks them makes the
-  // object, without its description. An abstract one fails when the program
-  // runs, through the description, as JavaScript fails then.
   bool known = false;
   if (const ClassDecl *made = type->classRef()) {
     if (!made->type) {
@@ -448,7 +417,6 @@ Expr *ReflectChecker::checkFromJsonClass(CallExpr *call, NameExpr *name) {
     }
     call->type = known->type;
   } else {
-    // Any class it may be, through its description.
     if (!onlyChecked()) {
       checker_.reflectionUsed_ = true;
       jsonReflect_ = true;
@@ -460,4 +428,4 @@ Expr *ReflectChecker::checkFromJsonClass(CallExpr *call, NameExpr *name) {
   return call;
 }
 
-} // namespace tz
+}

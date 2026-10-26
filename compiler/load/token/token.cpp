@@ -193,4 +193,4 @@ const char *tokSpelling(Tok kind) {
   return "token";
 }
 
-} // namespace tz
+}

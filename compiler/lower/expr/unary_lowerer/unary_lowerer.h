@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Unary operators, !, typeof and the names of enums.
 class UnaryLowerer {
 public:
   explicit UnaryLowerer(Lowering &lowering);
@@ -18,4 +17,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

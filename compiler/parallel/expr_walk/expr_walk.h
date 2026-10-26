@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// Expressions walked: what they read and write.
 class ExprWalk {
 public:
   explicit ExprWalk(Analysis &analysis);
@@ -26,4 +25,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

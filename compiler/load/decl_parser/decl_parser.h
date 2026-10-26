@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// type, interface and enum.
 class DeclParser {
 public:
   explicit DeclParser(Parser &parser);
@@ -17,4 +16,4 @@ private:
   Parser &parser_;
 };
 
-} // namespace tz
+}

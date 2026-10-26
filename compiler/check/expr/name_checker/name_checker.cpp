@@ -33,8 +33,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
   if (name->name == "this") {
     return checker_.classChecker().checkThis(name);
   }
-  // A class as a value that Checker made (see classValueAt), which may have no
-  // name.
   if (name->cls && name->type) {
     return name;
   }
@@ -47,8 +45,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
         name->loc(), "'" + name->name + "' is not a generic function; remove the type arguments");
   }
   if (entry.var) {
-    // A static field of a class expression gets its value once, when the
-    // class is made, not at each call of the function around it.
     if (checker_.staticInit_ && checker_.currentClass_ && checker_.currentClass_->expression &&
         !entry.var->isGlobal && llvm::is_contained(checker_.currentClass_->locals, name->name)) {
       checker_.diags_.error(name->loc(),
@@ -62,7 +58,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
     checker_.nestedFunctions().noteUse(entry.var, name->loc());
     name->type = checker_.scopes().varType(entry.var);
     checker_.scopes().checkVisible(name, entry.var);
-    // A stream after its setEncoding() (sema_stream.cpp).
     if (!checker_.streamViews_.empty()) {
       Checker::FieldPath path;
       path.var = entry.var;
@@ -70,16 +65,12 @@ Expr *NameChecker::checkName(NameExpr *name) {
         return checker_.typeRelations().convert(name, view);
       }
     }
-    // Of a type parameter, with its type known here from `typeof`.
     if (const Type *narrowed = checker_.genericChecker().narrowedType(entry.var)) {
       return checker_.typeRelations().convert(name, narrowed);
     }
-    // Narrowed: known to hold a value here.
     if (name->type->isOptional() && checker_.isDefined(entry.var)) {
       return checker_.typeRelations().convert(name, name->type->inner());
     }
-    // A Result known to be an Ok is a `Result<T, never>`, whose value can be
-    // read; one known to be an Err, a `Result<never, E>`.
     if (const Type *type = name->type; type->isResult()) {
       if (checker_.flow_.okResults.contains(entry.var) && !type->errType()->isNever()) {
         return checker_.typeRelations().convert(name, Type::result(type->okType(), Type::never()));
@@ -96,14 +87,11 @@ Expr *NameChecker::checkName(NameExpr *name) {
     }
   }
   if (entry.func) {
-    // A top-level function as a value.
     name->func = entry.func;
     name->type = checker_.returnInferrer().functionType(entry.func);
     checker_.tzModulesChecker().noteHttpsValue(entry.func->decl, name->loc());
     return name;
   }
-  // `String`, `Date`... as values: the classes that records `design:*` hold
-  // (docs/decorators.md, section 3).
   if (!entry.var && !entry.func && !entry.enumDecl && !entry.cls) {
     if (ClassDecl *cls = checker_.metadataChecker().builtinConstructor(name->name)) {
       return checker_.classValueChecker().checkClassValue(name, cls);
@@ -113,7 +101,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
                                                  "isNaN",  "isFinite", "Boolean"};
   static const llvm::StringLiteral uris[] = {"encodeURIComponent", "encodeURI",
                                              "decodeURIComponent", "decodeURI"};
-  // The global objects, by what is used of them first.
   static const std::pair<llvm::StringLiteral, llvm::StringLiteral> objects[] = {
       {"process", "process.argv"},
       {"console", "console.log(x)"},
@@ -187,10 +174,8 @@ Expr *NameChecker::checkName(NameExpr *name) {
                                            name->name + ".Member' or '" + name->name + "[value]'");
   } else if (entry.cls) {
     return checker_.classValueChecker().checkClassValue(name, entry.cls);
-  }
-  // A class expression sees its own name in its body, as in JavaScript.
-  else if (checker_.currentClass_ && checker_.currentClass_->expression &&
-           !checker_.currentClass_->name.empty() && checker_.currentClass_->name == name->name) {
+  } else if (checker_.currentClass_ && checker_.currentClass_->expression &&
+             !checker_.currentClass_->name.empty() && checker_.currentClass_->name == name->name) {
     return checker_.classValueChecker().checkClassValue(name, checker_.currentClass_);
   } else if (checker_.currentClass_ && checker_.currentClass_->expression &&
              llvm::is_contained(checker_.currentClass_->locals, name->name)) {
@@ -200,7 +185,6 @@ Expr *NameChecker::checkName(NameExpr *name) {
                               "once, not at each call, and its code runs later; pass the "
                               "value to its constructor, or keep it in a global");
   } else if (checker_.topLevelChecker().reportNotLoaded(name)) {
-    // A name of a file that is checked later: reported.
   } else if (checker_.early_ &&
              (checker_.state(checker_.module_).topLevelNames.contains(name->name) ||
               checker_.declaredLater(name->name))) {
@@ -232,4 +216,4 @@ Expr *NameChecker::checkName(NameExpr *name) {
   return name;
 }
 
-} // namespace tz
+}

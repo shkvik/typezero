@@ -26,7 +26,7 @@ namespace {
 
 bool hasByte(const ByteSet &s, uint32_t c) { return (s[c / 32] >> (c % 32)) & 1; }
 
-} // namespace
+}
 
 uint32_t instructionSize(const uint32_t *code, uint32_t pc) {
   const uint32_t *op = code + pc;
@@ -55,7 +55,7 @@ uint32_t instructionSize(const uint32_t *code, uint32_t pc) {
     return 5 + op[4];
   case RE_BACKREF:
     return 3 + op[2];
-  default: // RE_MATCH, RE_FAIL, RE_ANY, RE_ALL and the assertions
+  default:
     return 1;
   }
 }
@@ -88,7 +88,6 @@ double byteFrequency(uint32_t c) {
 
 std::vector<ByteTest> byteTests(ByteSet s) {
   std::vector<ByteTest> tests;
-  // Letters in both cases: a range after `| 0x20`.
   for (uint32_t c = 'a'; c <= 'z';) {
     if (!hasByte(s, c) || !hasByte(s, c - 0x20)) {
       ++c;
@@ -161,8 +160,6 @@ Value *MatcherBuilder::slotAddress(Value *index) {
   return b_.CreateInBoundsGEP(b_.getInt32Ty(), slots_, b_.CreateZExt(index, b_.getInt64Ty()));
 }
 
-// Sets a capture or register slot, with an undo record if a choice point
-// may come back to the old value (with none on the stack, nothing can).
 void MatcherBuilder::setSlot(Value *index, Value *value) {
   Value *address = slotAddress(index);
   Value *old = b_.CreateLoad(b_.getInt32Ty(), address);
@@ -180,8 +177,6 @@ void MatcherBuilder::setSlot(Value *index, Value *value) {
   b_.SetInsertPoint(done);
 }
 
-// Room for `n` more entries on the stack: each instruction makes it for all
-// it may push, so that a push needs no check of its own.
 void MatcherBuilder::reserve(uint32_t n) {
   if (n == 0) {
     return;
@@ -221,8 +216,6 @@ Value *MatcherBuilder::dataValue() {
   return b_.CreateTrunc(b_.CreateLShr(entry, b_.getInt64(32)), b_.getInt32Ty());
 }
 
-// A label for the stack whose block takes the popped value as the position
-// and goes on at `target`.
 uint32_t MatcherBuilder::resumeTo(BasicBlock *target) {
   auto it = resumeIds_.find(target);
   if (it != resumeIds_.end()) {
@@ -312,8 +305,6 @@ llvm::Function *MatcherBuilder::build() {
     }
   }
 
-  // Every slot holds a value from the start, so that undo records never read
-  // undefined memory.
   b_.CreateMemSet(slots_, b_.getInt8(0xFF), slots * 4, llvm::MaybeAlign(4));
   store(b_.CreateLoad(ptr, here(stackVar_)), base_);
   store(b_.CreateLoad(i32Ty, here(capacityVar_)), capacity_);
@@ -423,4 +414,4 @@ llvm::Value *MatcherBuilder::here(llvm::GlobalVariable *var) {
 }
 
 MatcherBuilder::~MatcherBuilder() = default;
-} // namespace tz
+}

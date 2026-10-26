@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Timers, queueMicrotask, nextTick and the other built-ins of async code.
 class AsyncBuiltinLowerer {
 public:
   explicit AsyncBuiltinLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

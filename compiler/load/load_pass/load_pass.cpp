@@ -16,4 +16,4 @@ Errors LoadPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

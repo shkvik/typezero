@@ -4,12 +4,10 @@
 
 namespace tz {
 
-// What the program of a regex is: its loops, its memo and the scan for a start.
 class MatcherAnalysis {
 public:
   explicit MatcherAnalysis(MatcherBuilder &builder);
 
-  // What the program is
   void analyze();
   bool inLoop(const CountedLoop &loop, uint32_t pc) const;
   bool flagged(const CountedLoop &loop, uint32_t pc) const;
@@ -23,4 +21,4 @@ private:
   MatcherBuilder &builder_;
 };
 
-} // namespace tz
+}

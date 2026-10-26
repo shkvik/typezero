@@ -1,9 +1,3 @@
-// node:path (docs/io.md): the functions of path.posix and path.win32, which
-// compute what Node.js does, step by step as its path.js does, on the UTF-16
-// code units of the strings. `win32` picks the style; the default style of
-// node:path is the system's (Lowering passes it). fs.c resolves paths with
-// these functions too, as Node does on Windows before it calls the system.
-
 #include "runtime/library/path/path/path.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -62,7 +56,6 @@ static int contains(Span s, uint16_t unit) {
   return 0;
 }
 
-// The text in lower case, as toLowerCase() makes it.
 static void lower(TzBuf *out, Span s) {
   TzStr str = tz_str_from_utf16(s.s, s.n);
   TzStr low;
@@ -85,8 +78,6 @@ static int equal_ignoring_case(Span a, Span b) {
   return equal;
 }
 
-// Resolves `.` and `..` in a path that has no root, as normalizeString in
-// Node's path.js.
 static void normalize_string(TzBuf *res, Span path, int allow_above_root, uint16_t separator,
                              int (*is_separator)(uint16_t)) {
   ptrdiff_t last_segment_length = 0, last_slash = -1;
@@ -102,7 +93,6 @@ static void normalize_string(TzBuf *res, Span path, int allow_above_root, uint16
     }
     if (is_separator(code)) {
       if (last_slash == (ptrdiff_t)i - 1 || dots == 1) {
-        // Nothing: an empty segment or `.`.
       } else if (dots == 2) {
         size_t n = res->length;
         if (n < 2 || last_segment_length != 2 || res->data[n - 1] != '.' ||
@@ -152,7 +142,6 @@ static void normalize_string(TzBuf *res, Span path, int allow_above_root, uint16
   }
 }
 
-// process.cwd(), for resolve().
 static void cwd(TzBuf *out, int win32) {
   TzStr dir;
   tz_process_cwd(&dir);
@@ -163,11 +152,10 @@ static void cwd(TzBuf *out, int win32) {
     return;
   }
 #ifdef _WIN32
-  // path.posix on Windows: the separators become '/', and the drive goes.
   if (out->length == start) {
     return;
   }
-  size_t first = out->length - 1; // slice(-1), as Node does without a '/'
+  size_t first = out->length - 1;
   for (size_t i = out->length; i > start; --i) {
     if (out->data[i - 1] == '\\') {
       out->data[i - 1] = '/';
@@ -183,20 +171,11 @@ static void cwd(TzBuf *out, int win32) {
 #endif
 }
 
-//===----------------------------------------------------------------------===//
-// Roots of win32 paths
-//===----------------------------------------------------------------------===//
-
-// `\\server\share` at the start: where its parts are. 0 if there is none.
 typedef struct {
-  size_t server, server_end; // the first part
-  size_t share, share_end;   // the second
+  size_t server, server_end;
+  size_t share, share_end;
 } UncRoot;
 
-// Matches a UNC root after the two separators that start `path`, as Node
-// does: one or more non-separators, separators, one or more non-separators.
-// Returns 0 without a second part; `*complete` says whether the path ends
-// right after the root.
 static int match_unc(Span path, UncRoot *root) {
   size_t len = path.n, j = 2, last = j;
   while (j < len && !is_any_sep(path.s[j])) {
@@ -224,10 +203,6 @@ static int match_unc(Span path, UncRoot *root) {
   return j == len || j != last;
 }
 
-//===----------------------------------------------------------------------===//
-// resolve
-//===----------------------------------------------------------------------===//
-
 static void resolve_posix(TzBuf *out, const Span *paths, size_t count) {
   TzBuf resolved, piece, normal;
   tz_buf_init(&resolved);
@@ -244,7 +219,6 @@ static void resolve_posix(TzBuf *out, const Span *paths, size_t count) {
     if (piece.length == 0) {
       continue;
     }
-    // `${path}/${resolvedPath}`
     tz_buf_push(&piece, '/');
     put(&piece, span_of(&resolved));
     TzBuf swap = resolved;
@@ -266,8 +240,6 @@ static void resolve_posix(TzBuf *out, const Span *paths, size_t count) {
   tz_buf_free(&normal);
 }
 
-// The cwd Windows keeps for a drive, `=C:` in the environment, or the cwd
-// of the process, or the root of the drive.
 static void drive_cwd(TzBuf *out, Span device) {
   TzBuf name;
   tz_buf_init(&name);
@@ -284,7 +256,6 @@ static void drive_cwd(TzBuf *out, Span device) {
   if (!found || out->length == 0) {
     cwd(out, 1);
   }
-  // Not on this drive: its root.
   Span path = span_of(out);
   if (!equal_ignoring_case(span_sub(path, 0, 2), device) && at(path, 2) == '\\') {
     out->length = 0;
@@ -332,7 +303,7 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
           tz_buf_ascii(&device, "\\\\");
           put(&device, first);
           if (first.n == 1 && (first.s[0] == '.' || first.s[0] == '?')) {
-            root_end = 4; // a device root, `\\.\PHYSICALDRIVE0`
+            root_end = 4;
           } else {
             tz_buf_push(&device, '\\');
             put(&device, span_sub(path, unc.share, unc.share_end));
@@ -354,7 +325,6 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
     int skip = 0;
     if (device.length > 0) {
       if (device_buf.length > 0) {
-        // Another device: this path does not apply.
         skip = !equal_ignoring_case(span_of(&device), span_of(&device_buf));
       } else {
         put(&device_buf, span_of(&device));
@@ -370,7 +340,6 @@ static void resolve_win32(TzBuf *out, const Span *paths, size_t count) {
         break;
       }
     } else {
-      // `${path.slice(rootEnd)}\\${resolvedTail}`
       TzBuf joined;
       tz_buf_init(&joined);
       put(&joined, span_sub(path, root_end, len));
@@ -409,10 +378,6 @@ static void resolve(TzBuf *out, const Span *paths, size_t count, int win32) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// normalize and join
-//===----------------------------------------------------------------------===//
-
 static void normalize_posix(TzBuf *out, Span path) {
   if (path.n == 0) {
     tz_buf_push(out, '.');
@@ -437,13 +402,10 @@ static void normalize_posix(TzBuf *out, Span path) {
   tz_buf_free(&normal);
 }
 
-// The device names Windows keeps in every directory: `CON:` names the
-// console, wherever it is written.
 static int is_reserved_name(Span path, ptrdiff_t colon) {
   static const char *const names[] = {
       "CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
       "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
-  // slice(0, colonIndex) of JavaScript: -1 drops the last unit.
   size_t end = colon >= 0 ? (size_t)colon : path.n > 0 ? path.n - 1 : 0;
   Span device = span_sub(path, 0, end);
   if (device.n < 3 || device.n > 4) {
@@ -468,7 +430,6 @@ static int is_reserved_name(Span path, ptrdiff_t colon) {
       return 1;
     }
   }
-  // COM¹ and the like, superscript digits that Windows reads as digits too.
   if (device.n == 4) {
     uint16_t d = device.s[3];
     if (d == 0xB9 || d == 0xB2 || d == 0xB3) {
@@ -498,7 +459,6 @@ static void normalize_win32(TzBuf *out, Span path) {
   }
   uint16_t code = path.s[0];
   if (len == 1) {
-    // A single '/' becomes '\\'; anything else stays.
     if (is_posix_sep(code)) {
       tz_buf_push(out, '\\');
     } else {
@@ -517,8 +477,6 @@ static void normalize_win32(TzBuf *out, Span path) {
       if (match_unc(path, &unc)) {
         Span first = span_sub(path, unc.server, unc.server_end);
         if (first.n == 1 && (first.s[0] == '.' || first.s[0] == '?')) {
-          // A device root, `\\.\PHYSICALDRIVE0`; `\\?\COM1:` names a device
-          // name.
           tz_buf_ascii(&device, "\\\\");
           put(&device, first);
           root_end = 4;
@@ -531,7 +489,6 @@ static void normalize_win32(TzBuf *out, Span path) {
             root_end = 4 + possible.n;
           }
         } else if (unc.share_end == len) {
-          // Only a UNC root: `\\server\share\`.
           tz_buf_ascii(out, "\\\\");
           put(out, first);
           tz_buf_push(out, '\\');
@@ -563,7 +520,6 @@ static void normalize_win32(TzBuf *out, Span path) {
           root_end = 3;
         }
       } else if (is_reserved_name(path, colon)) {
-        // `CON:x`: the device name is its root.
         put(&device, span_sub(path, 0, (size_t)colon + 1));
         has_device = 1;
         root_end = (size_t)colon + 1;
@@ -585,8 +541,6 @@ static void normalize_win32(TzBuf *out, Span path) {
 
   int dot_prefix = 0;
   if (!is_absolute && !has_device && contains(path, ':')) {
-    // The tail must not become something Windows reads as an absolute path
-    // (CVE-2024-36139).
     Span t = span_of(&tail);
     if (t.n >= 2 && is_drive_letter(t.s[0]) && t.s[1] == ':') {
       dot_prefix = 1;
@@ -678,8 +632,6 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
     tz_buf_free(&joined);
     return;
   }
-  // Two separators at the start would make a UNC path, unless the first part
-  // clearly is one: exactly two, then something else.
   int needs_replace = 1;
   size_t slashes = 0;
   if (is_any_sep(first.s[0])) {
@@ -705,8 +657,6 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
       joined.length -= slashes - 1;
     }
   }
-  // A part with a device name (`CON:x`) is left as it is, but for the
-  // separators: normalizing it could make it another path.
   Span whole = span_of(&joined);
   int reserved = 0;
   for (size_t i = 0; i < whole.n && !reserved;) {
@@ -732,10 +682,6 @@ static void join_win32(TzBuf *out, const Span *paths, size_t count) {
   }
   tz_buf_free(&joined);
 }
-
-//===----------------------------------------------------------------------===//
-// relative
-//===----------------------------------------------------------------------===//
 
 static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
   if (span_equal(from_in, to_in)) {
@@ -795,7 +741,6 @@ static void relative_posix(TzBuf *out, Span from_in, Span to_in) {
   tz_buf_free(&tb);
 }
 
-// Splits at '\\' as split('\\') does, without an empty last part.
 static size_t split_backslash(Span s, Span *parts, size_t max) {
   size_t count = 0, start = 0;
   for (size_t i = 0; i <= s.n; ++i) {
@@ -837,7 +782,6 @@ static void relative_win32(TzBuf *out, Span from_in, Span to_in) {
   }
 
   if (from_orig.n != from.n || to_orig.n != to.n) {
-    // Lower case changed the lengths: compare part by part.
     size_t from_count = split_backslash(from_orig, NULL, 0);
     size_t to_count = split_backslash(to_orig, NULL, 0);
     Span *fp = (Span *)tz_alloc((from_count + 1) * sizeof(Span));
@@ -964,10 +908,6 @@ done:
   tz_buf_free(&tl);
 }
 
-//===----------------------------------------------------------------------===//
-// dirname, basename, extname
-//===----------------------------------------------------------------------===//
-
 static Span dirname_posix(Span path, const char **literal) {
   *literal = NULL;
   if (path.n == 0) {
@@ -1023,7 +963,7 @@ static Span dirname_win32(Span path, const char **literal) {
       UncRoot unc;
       if (match_unc(path, &unc)) {
         if (unc.share_end == len) {
-          return path; // only a UNC root
+          return path;
         }
         root_end = (ptrdiff_t)unc.share_end + 1;
         offset = unc.share_end + 1;
@@ -1118,10 +1058,6 @@ static Span basename_of(Span path, const Span *suffix, int win32) {
   return span_sub(path, start, (size_t)end);
 }
 
-// The last part of a path, looked for down to `from`, split at its last dot
-// as extname() and parse() split it: [start_part, start_dot) and
-// [start_dot, end), with start_dot -1 for no extension and end -1 for no
-// part. start_part is `start_part` if no separator comes before it.
 typedef struct {
   ptrdiff_t start_part, start_dot, end;
 } LastPart;
@@ -1153,7 +1089,6 @@ static LastPart last_part(Span path, size_t from, size_t start_part, int win32) 
       pre_dot_state = -1;
     }
   }
-  // No dot, a dot right at the start of the part, or the part `..`.
   if (r.start_dot == -1 || r.end == -1 || pre_dot_state == 0 ||
       (pre_dot_state == 1 && r.start_dot == r.end - 1 && r.start_dot == r.start_part + 1)) {
     r.start_dot = -1;
@@ -1175,11 +1110,6 @@ static Span extname_of(Span path, int win32) {
   return span_sub(path, (size_t)part.start_dot, (size_t)part.end);
 }
 
-//===----------------------------------------------------------------------===//
-// The functions of node:path
-//===----------------------------------------------------------------------===//
-
-// The elements of an array of strings, flat, as spans; `bufs` holds them.
 static Span *spans_of(TzArray *parts, TzBuf **bufs) {
   size_t n = parts->length;
   Span *spans = (Span *)tz_alloc((n + 1) * sizeof(Span));
@@ -1320,15 +1250,13 @@ void tz_path_relative(TzStr *out, void *from_obj, uint64_t from_meta, void *to_o
   finish(out, &b);
 }
 
-// path.parse(): { root, dir, base, ext, name }, which `make` builds from a
-// TzParsedPath.
 void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
   Text t;
   text_init(&t, obj, meta);
   Span path = t.span;
   size_t len = path.n;
   Span root = {path.s, 0}, dir = root, base = root, ext = root, name = root;
-  int whole = 0; // the path is all root, or all base
+  int whole = 0;
   size_t root_end = 0;
   if (len > 0 && win32) {
     uint16_t code = path.s[0];
@@ -1367,8 +1295,6 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
           ext = span_sub(path, (size_t)part.start_dot, (size_t)part.end);
         }
       }
-      // A directory that is the root keeps its separator: `C:\abc` is in
-      // `C:\`.
       if (part.start_part > 0 && (size_t)part.start_part != root_end) {
         dir = span_sub(path, 0, (size_t)part.start_part - 1);
       } else {
@@ -1408,9 +1334,7 @@ void *tz_path_parse(void *obj, uint64_t meta, int32_t win32, TzMaker make) {
   return make(&parts);
 }
 
-// path.format(): `dir` (or `root`), then `base` (or `name` and `ext`).
 void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
-  // The fields in the order of TzParsedPath: root, dir, base, ext, name.
   TzBuf f[5];
   for (int i = 0; i < 5; ++i) {
     tz_buf_init(&f[i]);
@@ -1425,7 +1349,6 @@ void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
   Span d = dir.n > 0 ? dir : root;
   if (d.n > 0) {
     put(&b, d);
-    // A root ends with its separator.
     if (!span_equal(d, root)) {
       tz_buf_push(&b, win32 ? '\\' : '/');
     }
@@ -1447,8 +1370,6 @@ void tz_path_format(TzStr *out, const TzOptStr *parts, int32_t win32) {
   finish(out, &b);
 }
 
-// path.toNamespacedPath(): on win32, the `\\?\` form of an absolute path,
-// which takes long paths; posix paths stay as they are.
 static void namespaced(TzBuf *out, Span path) {
   if (path.n == 0) {
     return;

@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Arithmetic and comparisons.
 class BinaryLowerer {
 public:
   explicit BinaryLowerer(Lowering &lowering);
@@ -18,4 +17,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

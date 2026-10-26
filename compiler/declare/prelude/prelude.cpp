@@ -14,8 +14,6 @@ namespace tz {
 
 namespace {
 
-// The utilities that are mapped types, as TypeScript declares them (Omit
-// takes keys of T only: a key that is not one is a mistake).
 constexpr llvm::StringLiteral kPrelude = R"(type Partial<T> = { [K in keyof T]?: T[K] }
 type Required<T> = { [K in keyof T]-?: T[K] }
 type Readonly<T> = { readonly [K in keyof T]: T[K] }
@@ -24,7 +22,7 @@ type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
 )";
 
-} // namespace
+}
 
 Prelude::Prelude(Checker &checker) : checker_(checker) {}
 
@@ -42,4 +40,4 @@ void Prelude::declarePrelude() {
   }
 }
 
-} // namespace tz
+}

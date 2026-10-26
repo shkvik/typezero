@@ -23,13 +23,10 @@ bool isBack(uint32_t op) {
 
 void addByte(ByteSet &s, uint32_t c) { s[c / 32] |= 1u << (c % 32); }
 
-} // namespace
+}
 
 MatcherRepeats::MatcherRepeats(MatcherBuilder &builder) : builder_(builder) {}
 
-// The units that what the code at `pc` matches can start with, when every
-// way from there reads a character forward before it can match: a split
-// takes a way only if the unit at the position is one of them.
 FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
   FirstUnits units;
   std::set<uint32_t> states = {pc};
@@ -67,7 +64,7 @@ FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
       }
       units.wide = true;
       break;
-    default: // read backward: the unit at the position tells nothing
+    default:
       return units;
     }
   }
@@ -76,8 +73,6 @@ FirstUnits MatcherRepeats::unitsFirst(uint32_t pc) const {
   return units;
 }
 
-// Whether the unit at `pos` is one of `units` (or half of a surrogate pair
-// with u, which may start a character of any code point).
 Value *MatcherRepeats::startsWith(const FirstUnits &units, Value *pos) {
   return builder_.matcherChars().test(builder_.b_.CreateICmpSLT(pos, builder_.length_), [&] {
     Value *u = builder_.unitAt(pos);
@@ -94,8 +89,6 @@ Value *MatcherRepeats::startsWith(const FirstUnits &units, Value *pos) {
   });
 }
 
-// Whether the character at `atom` matches the unit `u`, for the repeats that
-// read by code units.
 Value *MatcherRepeats::unitMatches(uint32_t atom, Value *u) {
   const uint32_t *op = builder_.code_ + atom;
   switch (op[0]) {
@@ -105,17 +98,11 @@ Value *MatcherRepeats::unitMatches(uint32_t atom, Value *u) {
     return builder_.matcherChars().inSet(u, op + 1, !builder_.wide_);
   case RE_ANY:
     return builder_.b_.CreateNot(builder_.matcherChars().isLineTerminator(u));
-  default: // RE_ALL
+  default:
     return builder_.b_.getTrue();
   }
 }
 
-// A greedy repeat (min, max, greedy, length, the character): as many as
-// match, then one less at a time, each on a choice point of its own made
-// from one entry for all (the position where the repeat ends now) above one
-// that keeps where `min` ended. With `memo` (and no upper bound) the read
-// also stops at a position the repeat got to before: everything from there
-// on failed then.
 void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   const uint32_t *op = builder_.code_ + pc;
   uint32_t min = op[1], max = op[2], atom = pc + 5, after = pc + 5 + op[4];
@@ -130,7 +117,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   builder_.store(start, minAt);
   BasicBlock *done = builder_.newBlock("repeat.done");
   if (!memo && !back && (!builder_.wide_ || !builder_.unicode_)) {
-    // By code units, up to the limit.
     Value *limit = builder_.length_;
     if (max != RE_INFINITY) {
       Value *bound =
@@ -160,7 +146,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
         builder_.b_.CreateICmpUGE(builder_.b_.CreateSub(end, start), builder_.i32(min)));
     builder_.store(builder_.b_.CreateAdd(start, builder_.i32(min)), minAt);
   } else if (!memo) {
-    // Character by character.
     BasicBlock *loop = builder_.newBlock("repeat.loop"), *read = builder_.newBlock("repeat.read");
     builder_.b_.CreateBr(loop);
     builder_.b_.SetInsertPoint(loop);
@@ -188,7 +173,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
     }
     builder_.failUnless(builder_.b_.CreateICmpUGE(builder_.load(count), builder_.i32(min)));
   } else {
-    // With the memo: `min` characters, then a note at each position.
     if (min > 0) {
       BasicBlock *loop = builder_.newBlock("repeat.first"),
                  *read = builder_.newBlock("repeat.first.read");
@@ -214,7 +198,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
     builder_.store(p, last);
     builder_.store(builder_.matcherChars().charStep(atom, p, exhausted), at);
     builder_.b_.CreateBr(loop);
-    // The read ends at the last position noted now; none: nothing to try.
     builder_.b_.SetInsertPoint(seen);
     builder_.b_.CreateBr(exhausted);
     builder_.b_.SetInsertPoint(exhausted);
@@ -230,9 +213,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
 
   builder_.matcherMemo().countWork(start, builder_.load(at));
 
-  // Where what follows must start with a character, the repeat ends at the
-  // last position before one at once: what follows would fail at the others
-  // before it did anything (as the interpreter does on backtracking).
   int64_t hint = back ? -1 : followingChar(builder_.code_, after, builder_.unicode_);
   if (hint >= 0) {
     if (!builder_.wide_ && hint > 255) {
@@ -259,7 +239,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
     }
   }
 
-  // The choice point for fewer characters.
   Value *end = builder_.load(at), *minPos = builder_.load(minAt);
   BasicBlock *choice = builder_.newBlock("repeat.choice"), *go = builder_.newBlock("repeat.go");
   builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(end, minPos), choice, go);
@@ -272,9 +251,6 @@ void MatcherRepeats::emitRepeatGreedy(uint32_t pc, bool memo) {
   builder_.b_.CreateBr(builder_.blockAt(after));
 }
 
-// The label of a greedy repeat's choice point, whose block takes one
-// character less (the same with the memo and without: what follows notes
-// its positions).
 uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
   auto it = builder_.repeatLabels_.find(pc);
   if (it != builder_.repeatLabels_.end()) {
@@ -294,7 +270,6 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
   if (!back) {
     q = builder_.b_.CreateSub(p, builder_.i32(1));
     if (builder_.wide_ && builder_.unicode_) {
-      // Back over a whole pair.
       Value *pair = builder_.matcherChars().test(
           builder_.b_.CreateICmpSGE(builder_.b_.CreateSub(p, builder_.i32(2)), minPos), [&] {
             return builder_.b_.CreateAnd(builder_.matcherChars().isTrail(builder_.unitAt(
@@ -306,8 +281,6 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
     }
     int64_t hint = followingChar(builder_.code_, after, builder_.unicode_);
     if (hint >= 0) {
-      // Where the character that must follow is not, what follows would
-      // fail: those positions are skipped.
       if (!builder_.wide_ && hint > 255) {
         builder_.b_.CreateBr(drop);
       } else {
@@ -344,7 +317,6 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
     }
   }
   if (builder_.open()) {
-    // Fewer still next time, unless this is `min`.
     BasicBlock *keep = builder_.newBlock("repeat.keep"), *last = builder_.newBlock("repeat.last"),
                *go = builder_.newBlock("repeat.resume");
     builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(q, minPos), keep, last);
@@ -369,9 +341,6 @@ uint32_t MatcherRepeats::greedyLabel(uint32_t pc) {
   return label;
 }
 
-// A lazy repeat: `min` characters, then one more at a time, each on the
-// choice point, which keeps the count in the entry below it. With the memo
-// on (and no upper bound) a position the repeat got to before ends it.
 void MatcherRepeats::emitRepeatLazy(uint32_t pc) {
   const uint32_t *op = builder_.code_ + pc;
   uint32_t min = op[1], max = op[2], atom = pc + 5, after = pc + 5 + op[4];
@@ -447,4 +416,4 @@ uint32_t MatcherRepeats::lazyLabel(uint32_t pc) {
   return label;
 }
 
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// What the calls of the library and of the built-ins read and write.
 class LibraryEffects {
 public:
   explicit LibraryEffects(Analysis &analysis);
@@ -28,4 +27,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

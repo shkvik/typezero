@@ -28,27 +28,20 @@ namespace tz {
 
 namespace {
 
-// A generator with more `yield`s than this is not emitted inline: the
-// consumer is copied to each of them.
 constexpr unsigned kMaxInlineYields = 8;
 
-// Nor one emitted inline in so many others, or where the code would be
-// copied more times than this: generators emitted inline in the consumers of
-// others multiply their copies.
 constexpr unsigned kMaxInlineDepth = 4;
 
 constexpr unsigned kMaxInlineCopies = 16;
 
 unsigned countYields(const FunctionDecl *fn) {
   unsigned count = 0;
-  visitExprs(
-      fn->body, [&](const Expr *e) { count += isa<YieldExpr>(e) ? 1 : 0; },
-      /*intoFunctions=*/false);
+  visitExprs(fn->body, [&](const Expr *e) { count += isa<YieldExpr>(e) ? 1 : 0; }, false);
 
   return count;
 }
 
-} // namespace
+}
 
 InlineGeneratorLowerer::InlineGeneratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -57,13 +50,9 @@ bool InlineGeneratorLowerer::isInlinable(const FunctionDecl *decl) const {
       !decl->sym->ret->isIterator()) {
     return false;
   }
-  // A `catch` or `finally` around a `yield` would take what the consumer's
-  // code throws there, or run when it jumps out.
   if (hasTry(decl->body)) {
     return false;
   }
-  // Not inside itself: a recursive generator would be emitted inside itself
-  // without end.
   unsigned depth = 0;
   for (const Lowering::InlineGenerator *frame = lowering_.inline_; frame;
        frame = frame->consumerContext.inlined) {
@@ -91,11 +80,9 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
   };
   if (auto *call = dyn_cast<CallExpr>(source)) {
     switch (call->builtin) {
-    case Builtin::IterFrom: // of an iterator, the iterator itself
+    case Builtin::IterFrom:
       return prepare(call->args[0], returnSlot);
     case Builtin::StrMatchAll: {
-      // The string, then the regex, then the check of its g flag, as when the
-      // iterator is made.
       llvm::Value *text = hold(cast<MemberExpr>(call->callee)->object);
       llvm::Value *regex = hold(call->args[0]);
       if (!call->regex) {
@@ -104,7 +91,7 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
                                                    lowering_.builder_.getVoidTy(),
                                                    {lowering_.builder_.getPtrTy()}),
             {lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), regex, "regex")});
-        lowering_.throwLowerer().emitThrowCheck(); // a TypeError without the g flag
+        lowering_.throwLowerer().emitThrowCheck();
       }
       llvm::Value *lastSlot =
           lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "lastIndex");
@@ -129,7 +116,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
     case Builtin::MapEntries:
     case Builtin::SetValues:
     case Builtin::SetEntries: {
-      // Its entries stay where they are while the loop runs.
       Expr *dict = cast<MemberExpr>(call->callee)->object;
       llvm::Value *slot = hold(dict);
       lowering_.dictLowerer().beginDictIteration(slot);
@@ -140,8 +126,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
     case Builtin::IterTake:
     case Builtin::IterDrop:
     case Builtin::IterFlatMap: {
-      // The chain before it first, then its own argument, as JavaScript
-      // evaluates them.
       Expr *receiver = cast<MemberExpr>(call->callee)->object;
       Lowering::Producer from = prepare(receiver);
       llvm::Value *operand = hold(call->args[0]);
@@ -158,8 +142,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
     }
     case Builtin::None:
       if (call->func && isInlinable(call->func->decl)) {
-        // The generator's code goes where it is consumed. Its arguments are
-        // evaluated and its parameters bound now, as when it is called.
         FunctionDecl *decl = call->func->decl;
         auto snapshot = std::make_shared<
             std::tuple<decltype(lowering_.addresses_), decltype(lowering_.boxSlots_),
@@ -176,8 +158,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
         Lowering::Producer producer;
         producer.run = [this, decl, returnSlot, snapshot](const Lowering::Consumer &consumer) {
           emitInlineGenerator(decl, consumer, returnSlot);
-          // The same generator may be emitted inline again inside the
-          // consumer: its variables are where they were for the rest.
           std::tie(lowering_.addresses_, lowering_.boxSlots_, lowering_.envBoxes_,
                    lowering_.groupEnvs_) = *snapshot;
         };
@@ -191,9 +171,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
   assert((type->isArray() || type->isString() || type->isIterator() || type->isTypedArray()) &&
          "Checker checks what is iterated");
   llvm::Value *slot = hold(source);
-  // An iterator stopped before its end is closed (iterCloseFunction) when
-  // the iteration's scope ends, however it ends, even if it lives on in a
-  // variable.
   if (type->isIterator()) {
     lowering_.scopes_.back().iterators.push_back(slot);
   }
@@ -201,8 +178,6 @@ Lowering::Producer InlineGeneratorLowerer::prepare(Expr *source, llvm::Value *re
   return lowering_.lazyChainLowerer().valueProducer(slot, type, returnSlot);
 }
 
-// The body of a generator in place, in a context of its own; at each `yield`
-// the consumer runs in the context the iteration started in.
 void InlineGeneratorLowerer::emitInlineGenerator(FunctionDecl *decl,
                                                  const Lowering::Consumer &consumer,
                                                  llvm::Value *returnSlot) {
@@ -237,7 +212,6 @@ llvm::Value *InlineGeneratorLowerer::emitYieldValue(llvm::Value *value, const Ty
   llvm::Value *sent = frame->consumer.each(value);
   const Type *sentType = frame->consumer.sent;
   lowering_.coroutineLowerer().restoreContext(generator);
-  // What the consumer gave back, as the `yield` wants it.
   if (!resultType || resultType->isUndefined()) {
     if (sent) {
       lowering_.refCounts().releaseValue(sent, sentType);
@@ -262,7 +236,6 @@ llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
                                       : lowering_.optionalLowerer().undefinedValue(yielded);
     return emitYieldValue(value, yield->type);
   }
-  // `yield* xs`: each value of xs, and then what xs returns.
   const Type *iterable = yield->value->type;
   const Type *innerSent =
       iterable->isIterator() && !iterable->sent()->isVoid() ? iterable->sent() : nullptr;
@@ -279,7 +252,6 @@ llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
     return emitYieldValue(lowering_.exprLowerer().emitConversion(value, element, yielded),
                           innerSent);
   };
-  // `yield* xs.take(2)` ends when take does.
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("yield.all.end");
   consumer.stop = [this, depth, endBlock] {
@@ -288,9 +260,8 @@ llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
   };
   producer.run(consumer);
   lowering_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = lowering_.builder_.getFalse(); // undefined
+  llvm::Value *result = lowering_.builder_.getFalse();
   if (returnSlot) {
-    // Moved out of the slot, which the scope would release.
     result =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(yield->type), returnSlot);
     lowering_.builder_.CreateStore(
@@ -301,4 +272,4 @@ llvm::Value *InlineGeneratorLowerer::emitYield(YieldExpr *yield) {
   return result;
 }
 
-} // namespace tz
+}

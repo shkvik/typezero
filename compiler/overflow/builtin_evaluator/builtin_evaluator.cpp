@@ -38,10 +38,9 @@ using llvm::dyn_cast_or_null;
 
 namespace {
 
-// The times of Date: 100 million days either side of 1970, in milliseconds.
 constexpr double kMaxTime = 8.64e15;
 
-} // namespace
+}
 
 BuiltinEvaluator::BuiltinEvaluator(OverflowCheck &check) : check_(check) {}
 
@@ -64,7 +63,6 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   const Type *type = call->type;
   auto arg = [&](size_t i) { return i < args.size() ? args[i] : Val(); };
   auto length = [&]() { return receiver.len.empty() ? someLength() : receiver.len; };
-  // The length of the receiver, after the call changed it.
   auto setLength = [&](Num len) {
     auto *name = dyn_cast_or_null<NameExpr>(stripCasts(receiverExpr));
     if (!name || !name->var) {
@@ -110,7 +108,6 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   case Builtin::StrSearch:
   case Builtin::ArrIndexOf:
   case Builtin::ArrLastIndexOf: {
-    // A position, or -1.
     Num len = length();
     return numVal(make({-1}, {std::max(len.hi - 1, -1.0), len.hiOrigin, len.hiWhy}));
   }
@@ -263,9 +260,8 @@ Val BuiltinEvaluator::evalBuiltin(const CallExpr *call, State &st) {
   default:
     break;
   }
-  // Methods of strings that give strings, and the rest.
   if (call->builtin >= Builtin::RegExpNew && call->builtin <= Builtin::StrSplitRegex) {
-    check_.callRanges().calledUserCode(st); // a replacer function runs
+    check_.callRanges().calledUserCode(st);
   }
   if (isFsBuiltin(call->builtin) || isChildBuiltin(call->builtin)) {
     check_.mayThrow(st);
@@ -278,7 +274,6 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
   std::vector<Num> args;
   for (const Expr *arg : call->args) {
     Val v = check_.evaluator().eval(arg, st);
-    // Math.max(...a): the elements of a.
     const Type *type = arg->type ? arg->type->nonOptional() : nullptr;
     if (type && type->isArray()) {
       v = check_.slots().elementsOf(arg, v, type);
@@ -309,7 +304,6 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
       return Val();
     }
     r = make({std::floor(x.lo), x.loOrigin, x.loWhy}, {std::ceil(x.hi), x.hiOrigin, x.hiWhy});
-    // An integer result must fit, or the program stops (see emitMathCall).
     Limits l = limitsOf(type);
     if (isIntegerType(type)) {
       r = narrowTo(r, l.lo, l.hi);
@@ -324,7 +318,6 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
               : x.hi <= 0 ? -x.hi
                           : 0},
              std::fabs(x.lo) > std::fabs(x.hi) ? Bound{-x.lo, x.loOrigin, x.loWhy} : x.high());
-    // Math.abs of the smallest int is itself.
     if (isIntegerType(type) && r.hi > limitsOf(type).hi) {
       r = range(limitsOf(type).lo, limitsOf(type).hi, x.loOrigin, x.loWhy);
     }
@@ -344,7 +337,6 @@ Val BuiltinEvaluator::evalMath(const CallExpr *call, State &st) {
         best = Num();
         break;
       }
-      // Each end comes from the side that gives it.
       best = isMin ? make(lower(best.low(), a.low()), lower(best.high(), a.high()))
                    : make(higher(best.low(), a.low()), higher(best.high(), a.high()));
     }
@@ -402,8 +394,6 @@ Val BuiltinEvaluator::jsonVal(const Type *type, const Reason *why) {
   return v;
 }
 
-// What JSON.parse<T> builds puts values from outside into the fields of T and
-// of the types inside it.
 void BuiltinEvaluator::jsonValues(const Type *type, const Reason *why,
                                   llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (!type) {
@@ -436,4 +426,4 @@ void BuiltinEvaluator::jsonValues(const Type *type, const Reason *why,
   }
 }
 
-} // namespace tz
+}

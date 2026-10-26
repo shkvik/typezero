@@ -10,4 +10,4 @@ Errors OverflowPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

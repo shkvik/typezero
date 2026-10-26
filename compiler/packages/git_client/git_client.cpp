@@ -19,15 +19,12 @@ namespace path = llvm::sys::path;
 
 namespace {
 
-// Runs git; false with git's own message in `error` if it fails.
 bool git(llvm::ArrayRef<std::string> args, std::string *output, std::string &error) {
   static llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName("git");
   if (!program) {
     error = "git packages need the git program, and it is not installed (or not on PATH)";
     return false;
   }
-  // The user's settings must not change the files: no line-ending
-  // conversion, no prompts for passwords.
   std::vector<std::string> all{
       "-c", "core.autocrlf=false",     "-c", "core.eol=lf",
       "-c", "core.longpaths=true",     "-c", "credential.interactive=never",
@@ -51,9 +48,6 @@ bool git(llvm::ArrayRef<std::string> args, std::string *output, std::string &err
   return false;
 }
 
-// The cache's name for a repository: its name, and a hash of the address
-// that makes it unique. Short, because git for Windows refuses paths longer
-// than 260 characters, and a checkout puts .git/logs/refs/... under it.
 std::string repositoryKey(llvm::StringRef url) {
   llvm::StringRef name = url.rtrim("/\\");
   size_t slash = name.find_last_of("/:\\");
@@ -70,14 +64,12 @@ std::string repositoryKey(llvm::StringRef url) {
   return key + "-" + sha256Hex(url).substr(0, 8);
 }
 
-} // namespace
+}
 
 bool gitResolve(const std::string &url, const std::string &ref, bool refresh, std::string &commit,
                 std::string &error) {
   std::string key = repositoryKey(url);
   std::string mirror = cachePath({"git", key + ".git"});
-  // A repository is fetched once per run of tz at most: `tz add` reads the
-  // package, then resolves the versions of all.
   static llvm::StringSet<> current;
   bool fresh = current.contains(url);
   if (!fs::is_directory(mirror)) {
@@ -125,7 +117,6 @@ bool gitResolve(const std::string &url, const std::string &ref, bool refresh, st
 bool gitCheckout(const std::string &url, const std::string &commit, std::string &dir,
                  std::string &error) {
   std::string key = repositoryKey(url);
-  // 16 digits of the commit tell it apart from the others of the repository.
   dir = cachePath({"git", key, llvm::StringRef(commit).take_front(16)});
   if (fs::is_directory(dir)) {
     return true;
@@ -135,7 +126,7 @@ bool gitCheckout(const std::string &url, const std::string &commit, std::string 
   if (!fs::is_directory(mirror) ||
       !git({"--git-dir", mirror, "cat-file", "-e", commit + "^{commit}"}, nullptr, ignored)) {
     std::string found;
-    if (!gitResolve(url, commit, /*refresh=*/false, found, error)) {
+    if (!gitResolve(url, commit, false, found, error)) {
       return false;
     }
   }
@@ -144,8 +135,6 @@ bool gitCheckout(const std::string &url, const std::string &commit, std::string 
     return false;
   }
   std::string work(staged.path());
-  // A clone that borrows the mirror's objects, checked out at the commit;
-  // then only the files are kept.
   llvm::SmallString<256> dotGit(work);
   path::append(dotGit, ".git");
   if (!git({"clone", "--quiet", "--shared", "--no-checkout", "--", mirror, work}, nullptr, error) ||
@@ -155,7 +144,7 @@ bool gitCheckout(const std::string &url, const std::string &commit, std::string 
     error = "cannot check out " + commit + " of " + url + ": " + error;
     return false;
   }
-  fs::remove_directories(dotGit, /*IgnoreErrors=*/true);
+  fs::remove_directories(dotGit, true);
   if (fs::exists(dotGit)) {
     error = "cannot remove '" + std::string(dotGit) + "'";
     return false;
@@ -164,4 +153,4 @@ bool gitCheckout(const std::string &url, const std::string &commit, std::string 
   return staged.commit(error);
 }
 
-} // namespace tz::pkg
+}

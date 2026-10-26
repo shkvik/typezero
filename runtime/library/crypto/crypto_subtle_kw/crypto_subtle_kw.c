@@ -1,8 +1,3 @@
-// Web Crypto (docs/crypto.md, step 4): AES-KW of wrapKey and unwrapKey (RFC 3394), on a thread
-// of the pool, over the AES of the direct layer. An object of its own: a program that does not
-// wrap keys brings none of it, nor the AES it calls.
-
-// The low-level AES functions are deprecated for programs; OpenSSL keeps them for itself.
 #include "internal/deprecated.h"
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/alloc/alloc.h"
@@ -19,7 +14,7 @@
 #include <string.h>
 
 typedef struct KwJob {
-  TzWork work; // first: the pool knows the job by it
+  TzWork work;
   TzPromise *promise;
   uint8_t *key, *data;
   size_t key_length, length;
@@ -38,7 +33,6 @@ static void kw_work(TzWork *w) {
   size_t n = j->length / 8;
   int bits = (int)j->key_length * 8;
   AES_KEY ks;
-  // A whole number of 64-bit blocks: at least two to wrap, and three (the IV and two) to unwrap.
   if ((j->key_length != 16 && j->key_length != 24 && j->key_length != 32) || j->length % 8 ||
       n < (j->unwrap ? 3u : 2u)) {
     j->failed = 1;
@@ -80,7 +74,6 @@ static void kw_work(TzWork *w) {
         memcpy(r + 8 * i, b + 8, 8);
       }
     }
-    // The integrity check, in constant time.
     volatile uint8_t diff = 0;
     for (int k = 0; k < 8; ++k) {
       diff |= a[k] ^ kDefaultIv[k];
@@ -123,8 +116,6 @@ static uint8_t *copy(const uint8_t *data, size_t length) {
   return p;
 }
 
-// wrapKey and unwrapKey with AES-KW: the key is a secret KeyObject, the data the key to wrap or
-// the wrapped one; undefined for a failure.
 void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int32_t unwrap,
                              const TzType *dt, const void *dv) {
   TzCryptoData key, data;
@@ -147,7 +138,6 @@ void tz_crypto_subtle_aes_kw(TzPromise *p, const TzType *kt, const void *kv, int
   tz_crypto_data_done(&key);
   j->out = tz_abuf_new((int64_t)j->length + 8);
   if (!j->out) {
-    // Longer than an ArrayBuffer can be: the job fails, as node's does.
     tz_instance_release((TzInstance *)tz_error_take());
     j->failed = 1;
     j->out = tz_abuf_new(0);

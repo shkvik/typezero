@@ -41,10 +41,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   sym->name = fn->name;
   sym->loc = fn->loc();
   sym->decl = fn;
-  // A generic function: its type parameters are visible in its signature;
-  // so are those of the generic class of a method (not of a static one,
-  // which every instance of the class shares).
-  // A parameter `xs: Iterable<int>` makes it generic too (see iterableParam).
   bool generic = !fn->typeParams.empty() || llvm::any_of(fn->params, [&](const Param &p) {
     return p.type && checker_.iterableChecker().isIterableRef(*p.type);
   });
@@ -57,7 +53,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   }
   if (generic) {
     if (var) {
-      // A parameter `Iterable<T>` alone is reported with it (see iterableParam).
       if (!fn->typeParams.empty()) {
         checker_.diags_.error(fn->loc(),
                               "a generic function can be declared only at the top level for now");
@@ -69,9 +64,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
           checker_.typeParams().declareTypeParams(fn->typeParams, &sym->typeDefaults);
     }
   }
-  // A hook of node:stream in the program's own stream class (`_read()`,
-  // `_transform(chunk, encoding, callback)`): the parameters the stream
-  // passes, those left out too, as node allows (sema_stream.cpp).
   std::optional<std::vector<const Type *>> hook =
       fn->cls ? checker_.chunkTypes().streamHookParams(fn) : std::nullopt;
   if (hook && llvm::none_of(fn->params, [](const Param &p) { return p.rest; })) {
@@ -85,8 +77,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   bool afterOptional = false;
   for (size_t i = 0; i < fn->params.size(); ++i) {
     Param &param = fn->params[i];
-    // Only the parameters of the methods and constructors of classes have
-    // decorators (docs/decorators.md, section 1).
     if (!param.decorators.empty() && (!fn->cls || fn->cls->literal) && !fn->isInstance) {
       checker_.diags_.error(param.decorators[0].loc,
                             "a decorator of a parameter can decorate only a "
@@ -97,20 +87,16 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       type = checker_.iterableChecker().iterableParam(fn, sym, *param.type);
       bool outerList = std::exchange(checker_.listContext_, param.rest);
       if (!type) {
-        type = checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+        type = checker_.typeResolver().resolveType(*param.type, false);
       }
       checker_.listContext_ = outerList;
-      // `_read(size: number)` of node: the size is an int.
       if (hook && i < hook->size() && type && type->isFloat() && (*hook)[i]->isInt()) {
         type = (*hook)[i];
       }
     } else if (hook && i < hook->size() && !param.rest) {
       type = (*hook)[i];
     } else if (param.defaultValue && (type = literalType(param.defaultValue))) {
-      // `function f(n = 10)`: n is an int.
     } else if (param.defaultValue && !param.rest && !fn->source.empty()) {
-      // `function f(n = limit * 2)`: the type of the value, found when
-      // needed (see resolveParams).
       param.declaredType = nullptr;
       sym->params.push_back(nullptr);
       sym->pendingParams = true;
@@ -123,8 +109,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       type = Type::optional(type);
     }
     param.declaredType = type;
-    // `function (this: unknown, ...args: A)`: the `this` the function gets,
-    // which `f.call(obj, ...)` passes first (docs/decorators.md, section 2).
     if (i == 0 && param.name == "this" && !param.rest && param.type) {
       if (fn->isArrow) {
         checker_.diags_.error(param.loc,
@@ -138,8 +122,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       }
     }
     if (param.rest) {
-      // The arguments from here on, as an array (empty without any); or a
-      // list of the types of parameters, `...args: A`.
       if (!type->isArray() && !type->isListParam() && !type->isTuple() && !type->isError()) {
         checker_.diags_.error(param.loc, "a rest parameter must be an array, e.g. '..." +
                                              param.name + ": int[]'");
@@ -149,8 +131,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
       sym->params.push_back(param.declaredType);
       continue;
     }
-    // A caller may leave out an optional parameter or one with a default
-    // value, or pass undefined: then the default applies.
     bool mayOmit = param.optional || param.defaultValue;
     sym->params.push_back(mayOmit ? Type::optional(type) : type);
     if (!mayOmit) {
@@ -161,9 +141,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
     }
     afterOptional |= param.optional;
   }
-  // Without an annotation: void if no `return` gives a value, else what the
-  // body returns, found when needed (see returnType). A generator returns an
-  // iterator, whose types its body gives.
   if (fn->returnType) {
     sym->ret = checker_.asyncChecker().asyncReturnType(
         fn, checker_.generatorChecker().generatorReturnType(
@@ -176,7 +153,6 @@ void FunctionChecker::declareFunction(FunctionDecl *fn, VarSymbol *var, bool sco
   if (generic || classParams) {
     checker_.typeScopes_.pop_back();
   }
-  // `...args: [int, int]`: those parameters (see expandArgumentList).
   checker_.argListChecker().expandArgumentList(fn, sym);
   fn->sym = sym;
   if (!fn->name.empty() && scoped) {
@@ -196,8 +172,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.currentFunction_ = sym;
   checker_.functions_.push_back(fn);
   unsigned errors = checker_.diags_.errorCount();
-  // A method may use the private members of its class; a closure those of
-  // the class around it.
   ClassDecl *outerClass = checker_.currentClass_;
   if (!fn->isClosure()) {
     checker_.currentClass_ = fn->cls;
@@ -206,13 +180,9 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   const VarSymbol *outerThis = checker_.initThis_;
   bool outerReady = checker_.closureThisReady_;
   checker_.pushScope();
-  // The type parameters of a generic function, or the types an instance has
-  // for them; and those of the class of a method.
   if (fn->cls && !fn->isStatic) {
     checker_.genericClassChecker().bindClassTypeParams(fn->cls);
   }
-  // A class that a class expression in a copy of a generic function made
-  // sees the types of the copy.
   if (fn->cls) {
     checker_.lateClasses().bindOuterTypeParams(fn->cls);
   }
@@ -222,10 +192,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   if (fn->takesThis()) {
     VarSymbol *self = checker_.classChecker().declareThis(fn);
     if (fn->isConstructor || fn == fn->cls->init) {
-      // The fields set when it starts: the optional ones, which hold
-      // undefined, and in a constructor those with initializers. In a class
-      // that extends another, the initializers run after `super(...)`, and
-      // the fields declared up the chain are set by then.
       checker_.initFn_ = fn;
       checker_.initThis_ = self;
       checker_.closureThisReady_ = true;
@@ -239,7 +205,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
       }
       checker_.flow_.beforeSuper = derived && fn->isConstructor;
       if (checker_.flow_.beforeSuper) {
-        // `super(...)` must be a statement of the body itself.
         unsigned supers = 0;
         for (Stmt *stmt : fn->body->body) {
           auto *expr = dyn_cast<ExprStmt>(stmt);
@@ -260,14 +225,11 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
     }
   }
   for (size_t i = 0; i < fn->params.size(); ++i) {
-    // A default value is computed at each call that leaves the parameter
-    // out, where it sees the parameters before it.
     Param &param = fn->params[i];
     const Type *type = param.declaredType;
     if (param.defaultValue && type->isError() && !param.type) {
-      // Its type comes from it, and checking it failed (see resolveParams).
       param.defaultValue->type = type;
-      param.sym = checker_.scopes().declareVar(param.name, param.loc, type, /*isConst=*/false);
+      param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
       continue;
     }
     if (param.defaultValue) {
@@ -286,28 +248,24 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
       }
       if (forward) {
         param.defaultValue->type = Type::error();
-        param.sym = checker_.scopes().declareVar(param.name, param.loc, type, /*isConst=*/false);
+        param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
         continue;
       }
       if (auto *fe = dyn_cast<FunctionExpr>(param.defaultValue); fe && fe->fn->name.empty()) {
-        fe->fn->name = param.name; // as JavaScript names it
+        fe->fn->name = param.name;
       }
       param.defaultValue =
           checker_.exprChecker().checkExpr(param.defaultValue, type->isError() ? nullptr : type);
       param.defaultValue = checker_.typeRelations().coerce(param.defaultValue, type);
     }
-    param.sym = checker_.scopes().declareVar(param.name, param.loc, type, /*isConst=*/false);
+    param.sym = checker_.scopes().declareVar(param.name, param.loc, type, false);
     if (param.defaultValue && type->isOptional() && !param.defaultValue->type->isOptional() &&
         !param.defaultValue->type->isUndefined()) {
       checker_.flowChecker().setDefined(param.sym, true);
     }
   }
-  // The callback of a method of a typed array knows what its element holds.
   checker_.byteProofs().addByteCallbackFacts(fn);
-  // `args` of `...args: [int, int]`, whose parameters are those.
   checker_.argListChecker().declareArgumentList(fn);
-  // The parameters and the outermost block of the body share one scope. A
-  // function that returns a boolean summarizes what its returns show.
   checker_.predicateChecker().beginPredicate(fn);
   checker_.closureChecker().checkStatements(fn->body);
   if (!checker_.flow_.unreachable && sym->asserts) {
@@ -325,8 +283,6 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.initThis_ = outerThis;
   checker_.closureThisReady_ = outerReady;
 
-  // As in TypeScript, a function that may return undefined may also just end.
-  // A generator that may finish without `return` returns undefined.
   const Type *ret = fn->isAsync && sym->ret && sym->ret->isPromise() ? sym->ret->promised()
                     : !fn->isGenerator                               ? sym->ret
                     : sym->ret && (sym->ret->isIterator() || sym->ret->isAsyncIterator())
@@ -345,4 +301,4 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   }
 }
 
-} // namespace tz
+}

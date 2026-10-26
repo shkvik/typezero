@@ -6,7 +6,6 @@ namespace tz {
 
 class Args;
 
-// `tz licenses app.exe`: the licenses of the code of others the executable embeds.
 class LicensesCommand {
 public:
   explicit LicensesCommand(const RuntimeFiles &runtime);
@@ -17,4 +16,4 @@ private:
   const RuntimeFiles &runtime_;
 };
 
-} // namespace tz
+}

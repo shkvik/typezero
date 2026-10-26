@@ -18,9 +18,6 @@ namespace tz {
 
 Errors InstancesPass::run(Program &program) const {
   Checker &checker = *program.checker;
-  // The copies of generic functions that calls need, now that every generic
-  // body is checked, and the classes that class expressions made, which may
-  // need more of each other.
   do {
     checker.lateClasses().checkLateClasses();
     checker.genericInstantiator().checkInstances();
@@ -30,4 +27,4 @@ Errors InstancesPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

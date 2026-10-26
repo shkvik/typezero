@@ -32,7 +32,6 @@ Errors DeclarePass::run(Program &program) const {
   SourceFile &file = program.file;
   checker.file_ = &file;
   if (file.modules.empty()) {
-    // A program of one file that did not come from the loader.
     Module *module = checker.ctx_.newModule();
     module->isEntry = true;
     module->file.items = file.items;
@@ -41,7 +40,7 @@ Errors DeclarePass::run(Program &program) const {
     module->loadPath = {module};
     file.modules.push_back(module);
   }
-  checker.pushScope(); // the functions and globals of a file (see useModule)
+  checker.pushScope();
   for (const Feature *feature : features_.all()) {
     feature->prepare(checker, file);
   }
@@ -51,10 +50,6 @@ Errors DeclarePass::run(Program &program) const {
   }
   checker.prelude().declarePrelude();
 
-  // Only the fields assigned somewhere can change. `o[key] = v` assigns the
-  // field the key names (see keyNames), and an element of a tuple by its
-  // number. An arrow in a field of a class that nothing assigns is a method
-  // (see resolveClass).
   for (Stmt *item : file.items) {
     visitExprs(item, [&](const Expr *e) {
       const Expr *target = nullptr;
@@ -72,11 +67,9 @@ Errors DeclarePass::run(Program &program) const {
     });
   }
 
-  // Types and functions are visible in the whole file, as in JavaScript, and
-  // those of every file exist before any code runs.
   checker.declaredFunctions_ = checker.moduleDeclarer().declareModules(file);
 
   return program.diags->take();
 }
 
-} // namespace tz
+}

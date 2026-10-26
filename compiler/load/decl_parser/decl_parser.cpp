@@ -27,9 +27,8 @@ namespace tz {
 
 DeclParser::DeclParser(Parser &parser) : parser_(parser) {}
 
-// `type Name = T`, `type Name<T> = ...`
 Stmt *DeclParser::parseTypeAlias() {
-  parser_.cursor().advance(); // 'type'
+  parser_.cursor().advance();
   llvm::SMLoc loc = parser_.tok_.loc();
   llvm::StringRef name = parser_.tok_.text;
   parser_.cursor().advance();
@@ -46,9 +45,8 @@ Stmt *DeclParser::parseTypeAlias() {
   return alias;
 }
 
-// `interface Name { fields }`: the name of an object type, as with `type`.
 Stmt *DeclParser::parseInterface() {
-  parser_.cursor().advance(); // 'interface'
+  parser_.cursor().advance();
   llvm::SMLoc loc = parser_.tok_.loc();
   llvm::StringRef name = parser_.tok_.text;
   parser_.cursor().advance();
@@ -78,9 +76,8 @@ Stmt *DeclParser::parseInterface() {
   return decl;
 }
 
-// `enum Name { A, B = value, ... }`
 Stmt *DeclParser::parseEnum() {
-  parser_.cursor().advance(); // 'enum'
+  parser_.cursor().advance();
   llvm::SMLoc loc = parser_.tok_.loc();
   if (!parser_.tok_.is(Tok::Identifier)) {
     parser_.cursor().error(parser_.tok_.loc(), "expected the name of the enum");
@@ -114,4 +111,4 @@ Stmt *DeclParser::parseEnum() {
   return decl;
 }
 
-} // namespace tz
+}

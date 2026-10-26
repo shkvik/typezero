@@ -17,7 +17,6 @@ namespace tz {
 
 namespace {
 
-// The source text of the two sides of `bin`; empty if it is not known.
 std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin) {
   llvm::StringRef source = bin->source;
   const char *at = bin->loc().getPointer();
@@ -30,8 +29,6 @@ std::pair<llvm::StringRef, llvm::StringRef> sidesOf(const BinaryExpr *bin) {
           llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
 }
 
-// Methods of BigNumber.js that a decimal does without: operators and other
-// methods do what they do.
 struct Replacement {
   llvm::StringLiteral name, use;
 };
@@ -74,8 +71,6 @@ const Replacement kReplacements[] = {
     {"toJSON", "'String(a)'"},
 };
 
-// A decimal power is exact with an integer exponent; a fraction of one would
-// be a root.
 std::string exponentMessage(const Type *found) {
   std::string message = "the exponent of a decimal power must be an integer ('int' or 'long'), "
                         "found '" +
@@ -96,7 +91,7 @@ std::string utf8(const std::u16string &text) {
   return result;
 }
 
-} // namespace
+}
 
 DecimalChecker::DecimalChecker(Checker &checker) : checker_(checker) {}
 
@@ -134,8 +129,6 @@ const Type *DecimalChecker::literalHint(const Expr *other, const Type *hint) {
 }
 
 void DecimalChecker::checkComparisonOperands(BinaryExpr *bin) {
-  // A string or boolean literal next to a value of a literal type or a union
-  // takes its literal type: `s.kind == "circle"` (see sema_union.cpp).
   auto literal = [&](const Expr *e) {
     if (auto *unary = dyn_cast<UnaryExpr>(e); unary && unary->op == UnaryOp::Neg) {
       e = unary->operand;
@@ -288,7 +281,6 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
   if (op != BinaryOp::Div && op != BinaryOp::Rem) {
     return;
   }
-  // A literal, or an integer constant made a decimal.
   const Expr *value = divisor;
   for (auto *conv = dyn_cast<CastExpr>(value); conv && conv->isImplicit();
        conv = dyn_cast<CastExpr>(value)) {
@@ -302,9 +294,6 @@ void DecimalChecker::checkDecimalDivisor(BinaryOp op, const Expr *divisor) {
   }
 }
 
-// decimal(x) of a string, a number or a decimal. A literal is read exactly;
-// any other double is taken as the shortest digits that read back as it,
-// which keeps the error of `0.1 + 0.2` (BigNumber.js does the same).
 Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
   if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
@@ -334,8 +323,6 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   return call;
 }
 
-// decimal.max, decimal.min and decimal.sum: of values and of arrays spread
-// into the call, `decimal.sum(...prices)`.
 Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
   llvm::StringRef name = member->name;
   call->type = Type::error();
@@ -425,17 +412,11 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what) {
   return checker_.typeRelations().convert(arg, Type::longTy());
 }
 
-// The methods of a decimal: those of BigNumber.js that operators do not
-// replace, with rounding modes as strings (BigNumber.ROUND_HALF_UP is
-// "half-up"). `round` is decimalPlaces(dp, mode) and integerValue(mode).
 Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
   struct Method {
     llvm::StringLiteral name;
     Builtin builtin;
     unsigned minArgs, maxArgs;
-    // The kinds of the arguments: 'd' a decimal, 'p' decimal places, 's'
-    // significant digits, 'b' a base, 'k' a power of ten, 'm' a rounding
-    // mode.
     const char *args;
     const Type *ret;
   };
@@ -529,4 +510,4 @@ void DecimalChecker::reportBigInt(llvm::SMLoc loc, llvm::StringRef what) {
                   "'long', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')");
 }
 
-} // namespace tz
+}

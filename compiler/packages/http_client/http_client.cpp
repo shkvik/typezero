@@ -20,7 +20,6 @@ std::string fileUrlPath(llvm::StringRef url) {
   if (!url.consume_front("file://")) {
     return "";
   }
-  // "file:///C:/x" has an empty host; "file://C:/x" is written too.
   if (url.size() > 2 && url[0] == '/' && llvm::isAlpha(url[1]) && url[2] == ':') {
     url = url.drop_front();
   }
@@ -42,8 +41,7 @@ std::string fileUrlPath(llvm::StringRef url) {
 namespace {
 
 FetchResult readFile(const std::string &path, std::string &body, std::string &error) {
-  auto buffer = llvm::MemoryBuffer::getFile(path, /*IsText=*/false,
-                                            /*RequiresNullTerminator=*/false);
+  auto buffer = llvm::MemoryBuffer::getFile(path, false, false);
   if (!buffer) {
     if (buffer.getError() == std::errc::no_such_file_or_directory) {
       return FetchResult::NotFound;
@@ -74,13 +72,11 @@ std::string winhttpError(DWORD code) {
   return message.empty() ? "error " + std::to_string(code) : message;
 }
 
-// One session for the whole run: WinHTTP keeps its connections open between
-// requests, and a package of a hundred files is a hundred requests.
 HINTERNET session() {
   static HINTERNET handle = [] {
     HINTERNET h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                               WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!h) { // before Windows 8.1
+    if (!h) {
       h = WinHttpOpen(L"tz", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
                       WINHTTP_NO_PROXY_BYPASS, 0);
     }
@@ -176,7 +172,6 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
 
 #else
 
-// Without WinHTTP, the curl program does the request.
 FetchResult httpGet(const std::string &url, std::string &body, std::string &error) {
   llvm::ErrorOr<std::string> curl = llvm::sys::findProgramByName("curl");
   if (!curl) {
@@ -212,7 +207,7 @@ FetchResult httpGet(const std::string &url, std::string &body, std::string &erro
 
 #endif
 
-} // namespace
+}
 
 FetchResult fetchUrl(const std::string &url, std::string &body, std::string &error) {
   llvm::StringRef ref(url);
@@ -227,4 +222,4 @@ FetchResult fetchUrl(const std::string &url, std::string &body, std::string &err
   return FetchResult::Failed;
 }
 
-} // namespace tz::pkg
+}

@@ -29,12 +29,10 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   if (expected && expected->nonOptional()->isJson()) {
     return checker_.jsonChecker().checkJsonArrayLit(lit);
   }
-  // Where an unknown is expected, the elements may be of any types too.
   if (expected && expected->isUnknown()) {
     expected = Type::array(Type::unknown());
   }
   const Type *expectedElement = nullptr;
-  // Where a union is expected, its array, if it has one: `string | double[]`.
   if (expected && expected->nonOptional()->isUnion()) {
     if (const Type *array = expected->nonOptional()->slotPart(UnionSlot::Array);
         array && array->isArray()) {
@@ -60,21 +58,15 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     return checker_.tupleChecker().checkTupleLit(lit, expected->nonOptional());
   }
 
-  // The element types: of the values, or of the arrays spread into this one.
-  // A string spreads into its characters, a tuple into its elements. Literal
-  // numbers next to a decimal element are decimals: they are checked after
-  // the other elements, which changes nothing else.
   std::vector<const Type *> types(lit->elements.size());
   bool someDecimal = false;
-  const Type *seen = nullptr; // the type of the elements so far
+  const Type *seen = nullptr;
   for (size_t i = 0; i < lit->elements.size(); ++i) {
     ArrayLitExpr::Element &e = lit->elements[i];
     if (!e.spread && !expectedElement && DecimalChecker::isLiteralTree(e.expr)) {
       continue;
     }
     if (!e.spread) {
-      // `[p, { x: 1, y: 2 }]`: a literal takes the type of the objects
-      // before it.
       const Type *hint = expectedElement;
       if (!hint && seen && Checker::holdsObjects(seen) && Destination::literalShaped(e.expr)) {
         hint = seen;
@@ -93,7 +85,7 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
     checker_.iteratorMethods().markFused(e.expr);
     e.expr = checker_.dictChecker().iterableOf(checker_.exprChecker().checkExpr(
         e.expr, expectedElement ? Type::array(expectedElement) : nullptr));
-    if (e.expr->type->isMatch()) { // `[...m]`: the captures
+    if (e.expr->type->isMatch()) {
       e.expr = checker_.matchChecker().matchItems(e.expr);
     }
     const Type *type = e.expr->type;
@@ -101,10 +93,9 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       types[i] = type;
       continue;
     }
-    // `[...gen()]`: the values of the iterator, one after another.
     if (type->isIterator()) {
       checker_.generatorChecker().checkSendsNothing(type, e.expr->loc(), "a spread");
-      checker_.flowChecker().calledFunction(); // a generator runs
+      checker_.flowChecker().calledFunction();
       types[i] = type->yielded();
       someDecimal |= types[i]->nonOptional()->isDecimal();
       continue;
@@ -119,7 +110,6 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       types[i] = element ? element : Type::error();
       continue;
     }
-    // `[...bytes]`: the elements as numbers.
     if (type->isTypedArray()) {
       types[i] = type->elementType();
       continue;
@@ -163,8 +153,6 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       if (!next) {
         std::string message = "array elements must have one type; found '" + element->name().str() +
                               "' and '" + types[i]->name().str() + "'";
-        // A value of each type in its own place is a tuple, which must be
-        // expected there: JavaScript makes an array.
         bool spreads =
             llvm::any_of(lit->elements, [](const ArrayLitExpr::Element &e) { return e.spread; });
         auto literalClass = [](const Type *t) {
@@ -207,8 +195,6 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
       e.expr = checker_.typeRelations().coerce(e.expr, element);
     } else if (e.expr->type != arrayType && !e.expr->type->isError() &&
                !(e.expr->type->isString() && element->isString()) &&
-               // `[...dogs]` as Animal[]: the same references, copied; also of
-               // a union of objects, which is one reference too.
                !(e.expr->type->isArray() &&
                  UnknownChecker::isObjectReference(e.expr->type->inner()->nonOptional()) &&
                  element->nonOptional()->isObject() &&
@@ -223,7 +209,6 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
                  llvm::all_of(e.expr->type->fields(), [&](const Field &f) {
                    return TypeRelations::isImplicitlyConvertible(f.type, element);
                  }))) {
-      // Arrays of different types have different layouts, so no conversion.
       checker_.diags_.error(e.expr->loc(), "cannot spread '" + e.expr->type->name() + "' into '" +
                                                arrayType->name() + "'");
     }
@@ -233,4 +218,4 @@ Expr *ArrayLiteralChecker::checkArrayLit(ArrayLitExpr *lit, const Type *expected
   return lit;
 }
 
-} // namespace tz
+}

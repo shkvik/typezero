@@ -44,4 +44,4 @@ llvm::Value *ResultFeature::lowerCall(Lowering &lowering, CallExpr *call) const 
   return lowering.resultLowerer().emitResultCall(call);
 }
 
-} // namespace tz
+}

@@ -12,4 +12,4 @@ ParallelPlan ParallelPass::run(const Program &program) const {
   return planParallel(program.file, program.sourceMgr);
 }
 
-} // namespace tz
+}

@@ -31,4 +31,4 @@ std::string variantText(const FunctionDecl *fn) {
   return text + ")";
 }
 
-} // namespace tz
+}

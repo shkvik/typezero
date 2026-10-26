@@ -108,7 +108,6 @@ void Executor::exec(const Stmt *stmt, State &st) {
     execTry(cast<TryStmt>(stmt), st);
     break;
   case Stmt::Kind::Class: {
-    // Declaring a class sets its static fields.
     auto *cls = cast<ClassDecl>(stmt);
     if (cls->builtin) {
       break;
@@ -210,7 +209,6 @@ void Executor::execTry(const TryStmt *stmt, State &st) {
   check_.tries_.pop_back();
   State out = st;
   if (stmt->handler) {
-    // Something in the block may throw at any point.
     State handler = join(join(entry, st), thrown);
     exec(stmt->handler, handler);
     out = join(st, handler);
@@ -227,14 +225,12 @@ void Executor::execTry(const TryStmt *stmt, State &st) {
 }
 
 void Executor::execReturn(const ReturnStmt *ret, State &st) {
-  // The value may run callbacks, which push frames.
   size_t at = check_.frames_.size() - 1;
   Val v;
   if (ret->value) {
     const FunctionDecl *fn = check_.frames_[at].fn;
     const Type *retType = fn && fn->sym ? fn->sym->ret : nullptr;
     if (!check_.frames_[at].callback && retType && retType->isBool()) {
-      // A function that tests: what holds when it returns true, and false.
       State t, f;
       check_.narrowing().refine(ret->value, st, t, f);
       check_.narrowing().notePredicate(fn, t, f);
@@ -257,4 +253,4 @@ void Executor::execReturn(const ReturnStmt *ret, State &st) {
   st.dead = true;
 }
 
-} // namespace tz
+}

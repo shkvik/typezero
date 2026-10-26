@@ -11,7 +11,7 @@ void TzModulesFeature::prepare(Checker &checker, SourceFile &file) const {
 }
 
 Expr *TzModulesFeature::checkFunctionCall(Checker &checker, CallExpr *call, NameExpr *name,
-                                          const Type * /*expected*/) const {
+                                          const Type *) const {
   return checker.libraryCalls().checkLibCall(call, name);
 }
 
@@ -21,4 +21,4 @@ llvm::Value *TzModulesFeature::lowerCall(Lowering &lowering, CallExpr *call) con
   return lowering.libraryCallLowerer().emitLibBuiltin(call);
 }
 
-} // namespace tz
+}

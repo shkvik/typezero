@@ -176,7 +176,6 @@ void CallRanges::analyzeFunction(const FunctionDecl *fn) {
   check_.executor().exec(fn->body, st);
 }
 
-// Adds what a call passes to the summaries of the parameters.
 void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::ArrayRef<Val> args) {
   if (check_.quiet_ || !fn) {
     return;
@@ -193,7 +192,6 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
     }
     Val v;
     if (p.rest) {
-      // The arguments from here on, as one array.
       Val element;
       for (size_t k = i; k < args.size(); ++k) {
         element = join(element, call && call->spreads(k) && args[k].elem ? *args[k].elem : args[k]);
@@ -205,7 +203,7 @@ void CallRanges::passArgs(const FunctionDecl *fn, const CallExpr *call, llvm::Ar
     } else if (spread) {
       v = check_.overflowWarnings().trusted(p.sym->type);
     } else {
-      continue; // left out: the default value, which the function itself gives
+      continue;
     }
     slots[i].val = join(slots[i].val, v);
     if (dangerous(v.num.worst()) && call) {
@@ -223,7 +221,6 @@ Val CallRanges::returned(const FunctionDecl *fn, const Type *type) {
   return check_.overflowWarnings().trusted(type);
 }
 
-// User code may change the length of any array that has other names.
 void CallRanges::calledUserCode(State &st) {
   for (auto &entry : st.vars) {
     auto info = check_.vars_.find(entry.first);
@@ -371,7 +368,6 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   const Expr *arg = at < call->args.size() ? stripCasts(call->args[at]) : nullptr;
   auto *fe = dyn_cast_or_null<FunctionExpr>(arg);
   if (!fe || !check_.inlined_.contains(fe->fn)) {
-    // A function by name, called for each element.
     const FunctionDecl *named = nullptr;
     if (auto *name = dyn_cast_or_null<NameExpr>(arg)) {
       if (name->func) {
@@ -480,4 +476,4 @@ Val CallRanges::evalCallback(const CallExpr *call, State &st) {
   }
 }
 
-} // namespace tz
+}

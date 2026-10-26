@@ -29,17 +29,15 @@ const char *accessWord(Access access) {
   return access == Access::Private ? "private" : "protected";
 }
 
-} // namespace
+}
 
 ClassMemberChecker::ClassMemberChecker(Checker &checker) : checker_(checker) {}
 
 bool ClassMemberChecker::checkAccess(const ClassDecl *cls, Access access, llvm::StringRef name,
                                      llvm::SMLoc loc) {
-  // The instances of a generic class are that class.
   if (access == Access::Public || Checker::sameClass(checker_.currentClass_, cls)) {
     return true;
   }
-  // A protected member is for the class and those down its chain.
   if (access == Access::Protected) {
     for (const ClassDecl *c = checker_.currentClass_; c; c = c->parent) {
       if (Checker::sameClass(c, cls)) {
@@ -73,7 +71,6 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   const ClassField *field = ClassBases::findField(cls, name, &owner);
   if (field && !field->method) {
     checkAccess(owner, field->access, name, member->loc());
-    // The fields up the chain are set by `super(...)`, before `this` exists.
     if (viaThis && owner == checker_.initFn_->cls &&
         !llvm::is_contained(checker_.flow_.setFields, name)) {
       checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
@@ -99,8 +96,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
     return member;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
-  // A property of a built-in class written in tz (sema_library.cpp).
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
   if (llvm::any_of(methods, [](const FunctionDecl *fn) {
         return fn->accessor != FunctionDecl::Accessor::None;
       })) {
@@ -109,7 +105,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
   }
   if (methods.empty()) {
-    if (!ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/true).empty() ||
+    if (!ClassDeclarer::methodsNamed(cls, name, true).empty() ||
         llvm::any_of(cls->fields,
                      [&](const ClassField &f) { return f.isStatic && f.name == name; })) {
       checker_.diags_.error(member->loc(), "'" + name + "' is a static member of '" + cls->name +
@@ -121,9 +117,7 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     }
     return member;
   }
-  // A method as a value: bound to the object, so `const f = o.m; f()` works.
   checkAccess(methods[0]->cls, methods[0]->access, name, member->loc());
-  // But not one of an emitter that the event map checks (sema_events.cpp).
   if (methods[0]->cls->library && checker_.eventMaps().isEmitterClass(cls) &&
       !checker_.libraryCalls().inLibrary(member->loc()) && name != "getMaxListeners" &&
       name != "eventNames") {
@@ -150,7 +144,6 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
                            name + "(x)'");
     return member;
   }
-  // The method of the object's class, if classes down the chain override it.
   if (FunctionDecl *impl = ClassLinks::soleImplementation(cls, sym->decl)) {
     member->method = impl->sym;
   } else {
@@ -190,7 +183,7 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     }
   }
   if (!field || field->method) {
-    if (field || !ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false).empty()) {
+    if (field || !ClassDeclarer::methodsNamed(cls, name, false).empty()) {
       checker_.diags_.error(member->loc(),
                             "'" + name + "' is a method of '" + type->name() +
                                 "' and cannot be replaced: a method belongs to the class, "
@@ -210,15 +203,12 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
     return Type::error();
   }
-  // A read-only field is set by the constructor of the class that declares
-  // it (or declares it again).
   if (field->readonly && !(viaThis && owner == checker_.initFn_->cls)) {
     checker_.diags_.error(member->loc(), "cannot assign to '" + name +
                                              "' because it is a read-only field of '" +
                                              type->name() + "'; only its constructor can set it");
   }
   if (!field->resolved) {
-    // Its type comes from this initializer (see checkAssign).
     if (viaThis && checker_.initFn_ == cls->init && owner == cls && !compound) {
       member->type = nullptr;
       return nullptr;
@@ -235,4 +225,4 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   return field->resolved;
 }
 
-} // namespace tz
+}

@@ -24,7 +24,7 @@ std::u16string toUtf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 ProcessChecker::ProcessChecker(Checker &checker) : checker_(checker) {}
 
@@ -55,8 +55,6 @@ Expr *ProcessChecker::checkExitCode(Expr *code) {
                                           optionalInt);
 }
 
-// process.exit(), process.cwd(), process.stdout.write(), Date.now() and
-// performance.now().
 Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
@@ -67,8 +65,7 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
 
   bool isDate = checker_.callChecker().isGlobalName(member->object, "Date");
   if (isDate && name != "now") {
-    return checker_.dateChecker().checkDateStatic(call,
-                                                  member); // Date.UTC, Date.parse (sema_date.cpp)
+    return checker_.dateChecker().checkDateStatic(call, member);
   }
   if (isDate || checker_.callChecker().isGlobalName(member->object, "performance")) {
     llvm::StringRef object = isDate ? "Date" : "performance";
@@ -83,7 +80,6 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
         !checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    // Date.now() gives whole milliseconds, performance.now() fractions too.
     call->builtin = isDate ? Builtin::DateNow : Builtin::PerformanceNow;
     call->type = Type::doubleTy();
     return call;
@@ -92,8 +88,6 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   bool isStdout = isProcessMember(member->object, "stdout");
   if (isStdout || isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
-    // The stream of node:stream, where the program uses it as one
-    // (sema_stream.cpp): it writes at once too.
     if (name != "isTTY" && checker_.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
@@ -112,10 +106,6 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
         !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
-    // Text, or the bytes of a Buffer or a Uint8Array as they are; the result
-    // is always true, as nothing waits to be written. A write with the
-    // encoding or the callback of node is one of the stream of node:stream,
-    // which the loader brings then.
     Expr *chunk = checker_.exprChecker().checkExpr(call->args[0], Type::string());
     const Type *type = chunk->type;
     if (!type->isBuffer() && type->bytes() != Type::Bytes::Uint8) {
@@ -134,12 +124,9 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   if (name == "nextTick") {
-    return checker_.timerChecker().checkNextTick(call, member); // sema_async.cpp
+    return checker_.timerChecker().checkNextTick(call, member);
   }
   if (name == "exit") {
-    // The program ends here, as in Node: `finally` blocks do not run, and
-    // what is printed so far is written out. Without a code it ends with
-    // process.exitCode.
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
@@ -170,13 +157,9 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// process.argv, process.env.NAME, process.exitCode, process.execPath,
-// process.platform and process.stdout.isTTY, and errors for the other
-// properties of process, Date and performance that are read.
 Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   llvm::StringRef name = member->name;
   if (isProcessMember(member->object, "env")) {
-    // `string | undefined`, as in Node.
     auto *key = checker_.ctx_.make<StringLitExpr>(member->loc(), toUtf16(name));
     key->type = Type::string();
     return builtinCall(member->loc(), member, Builtin::ProcessEnv, {key},
@@ -186,15 +169,11 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   bool isStdout = isProcessMember(member->object, "stdout");
   if (isStdout || isProcessMember(member->object, "stderr")) {
     std::string stream = isStdout ? "process.stdout" : "process.stderr";
-    // A field of the stream of node:stream (sema_stream.cpp); a terminal
-    // has none of its own yet.
     if (name != "isTTY" && name != "columns" && name != "rows" &&
         checker_.libFunctions_.lookup("processStdout")) {
       return nullptr;
     }
     if (name == "isTTY") {
-      // Whether the stream is a terminal. A boolean, as the types of Node
-      // say; Node itself has undefined instead of false.
       auto *fd = checker_.ctx_.make<IntLitExpr>(member->loc(), isStdout ? 1 : 2);
       fd->type = Type::intTy();
       return builtinCall(member->loc(), member, Builtin::ProcessIsTTY, {fd}, Type::boolTy());
@@ -213,7 +192,7 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   }
 
   if (checker_.callChecker().isGlobalName(member->object, "Date")) {
-    return checker_.dateChecker().checkDateStaticMember(member); // sema_date.cpp
+    return checker_.dateChecker().checkDateStaticMember(member);
   }
   if (checker_.callChecker().isGlobalName(member->object, "performance")) {
     if (name == "now") {
@@ -240,7 +219,7 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
     return builtinCall(member->loc(), member, Builtin::ProcessArgv, {},
                        Type::array(Type::string()));
   }
-  if (name == "exitCode") { // undefined until the program sets it
+  if (name == "exitCode") {
     return builtinCall(member->loc(), member, Builtin::ProcessExitCode, {},
                        Type::optional(Type::intTy()));
   }
@@ -250,8 +229,6 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   if (name == "platform") {
     return builtinCall(member->loc(), member, Builtin::ProcessPlatform, {}, Type::string());
   }
-  // The whole of it, a dictionary (docs/io.md): a key read by name above is
-  // the variable itself.
   if (name == "env") {
     return builtinCall(member->loc(), member, Builtin::EnvMap, {},
                        Type::dict(Type::DictKind::Record, Type::string(), Type::string()));
@@ -271,7 +248,6 @@ Expr *ProcessChecker::checkProcessMember(MemberExpr *member) {
   return member;
 }
 
-// process.env[name]
 Expr *ProcessChecker::checkProcessEnvIndex(IndexExpr *index) {
   if (!isProcessMember(index->object, "env")) {
     return nullptr;
@@ -302,13 +278,10 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
   }
 
   if (isProcess && name == "exitCode" && !assign->op) {
-    // The code the program ends with when its code runs to the end.
     Expr *code = checkExitCode(assign->value);
     return builtinCall(assign->loc(), assign->target, Builtin::ProcessSetExitCode, {code},
                        Type::voidTy());
   }
-  // A key of process.env is set as one of any Record, through the dictionary,
-  // which changes the variable too.
   if (isEnv) {
     return nullptr;
   }
@@ -326,4 +299,4 @@ Expr *ProcessChecker::checkProcessAssign(AssignExpr *assign) {
   return assign;
 }
 
-} // namespace tz
+}

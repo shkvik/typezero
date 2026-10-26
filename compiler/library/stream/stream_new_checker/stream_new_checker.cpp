@@ -19,11 +19,8 @@ namespace tz {
 
 namespace {
 
-// What the options literal of `new Readable({...})` says of the chunk
-// types: an option written as a literal, `true`, `false` or a string.
 struct StreamOptionFlags {
   const ObjectLitExpr *lit = nullptr;
-  // -1 when the option is not written, 0 or 1 for false or true.
   int flag(llvm::StringRef name) const {
     if (!lit) {
       return -1;
@@ -35,12 +32,11 @@ struct StreamOptionFlags {
       if (auto *b = dyn_cast<BoolLitExpr>(prop.value)) {
         return b->value ? 1 : 0;
       }
-      return 1; // a value known only when the program runs
+      return 1;
     }
 
     return -1;
   }
-  // Whether a string option is written (not undefined).
   bool has(llvm::StringRef name) const {
     if (!lit) {
       return false;
@@ -55,7 +51,7 @@ struct StreamOptionFlags {
   }
 };
 
-} // namespace
+}
 
 StreamNewChecker::StreamNewChecker(Checker &checker) : checker_(checker) {}
 
@@ -70,8 +66,6 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   if (!expr->typeArgs.empty() || checker_.libraryCalls().inLibrary(expr->loc())) {
     return nullptr;
   }
-  // `const r: Readable<string> = new Readable({...})`: the types of the place
-  // it goes.
   if (const Type *want = expected ? expected->nonOptional() : nullptr;
       want && ClassDeclarer::classOf(want) && ClassDeclarer::classOf(want)->generic == generic) {
     return nullptr;
@@ -81,8 +75,6 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     options.lit = dyn_cast<ObjectLitExpr>(expr->args[0]);
   }
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
-  // The type the chunk parameter of a function of the literal is declared
-  // with: `write(chunk: User, ...)`, `transform(chunk: Row, ...)`.
   auto annotated = [&](llvm::StringRef fn) -> const Type * {
     if (!options.lit) {
       return nullptr;
@@ -96,15 +88,12 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
                                ? fe->fn->params[1]
                                : fe->fn->params[0];
       if (param.type) {
-        return checker_.typeResolver().resolveType(*param.type, /*allowVoid=*/false);
+        return checker_.typeResolver().resolveType(*param.type, false);
       }
     }
 
     return nullptr;
   };
-  // The chunk type of a side: of an object-mode side what the program puts
-  // into it (see inferredChunkType); a string where it decodes text, a
-  // Buffer otherwise.
   std::string site = "stream " + checker_.eventMapInference().placeOf(expr->loc());
   auto side = [&](bool objectMode, bool text, llvm::StringRef key, const Type *fallback,
                   llvm::StringRef what) -> const Type * {
@@ -161,8 +150,6 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
     if (!w) {
       return failed();
     }
-    // What a Transform gives is what it takes, unless it pushes others or
-    // gives others to the callbacks of transform() and flush().
     const Type *r = side(readableObjects, options.has("encoding"), "R",
                          name == "Duplex" || !writableObjects ? nullptr : w, "chunks it gives");
     if (!r) {
@@ -188,4 +175,4 @@ Expr *StreamNewChecker::checkStreamNew(NewExpr *expr, ClassDecl *generic, const 
   return checker_.methodCallChecker().checkClassNew(expr, inst, expected);
 }
 
-} // namespace tz
+}

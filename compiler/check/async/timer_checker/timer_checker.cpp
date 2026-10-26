@@ -19,8 +19,6 @@ namespace tz {
 
 TimerChecker::TimerChecker(Checker &checker) : checker_(checker) {}
 
-// A callback that runs later with nothing: `() => void`; an async one is let
-// run on its own, as a listener is (docs/events.md).
 Expr *TimerChecker::checkTaskCallback(Expr *arg, llvm::StringRef fn) {
   Checker::Signature sig;
   sig.ret = Type::voidTy();
@@ -109,13 +107,12 @@ Expr *TimerChecker::checkAsyncGlobal(CallExpr *call, NameExpr *name) {
     call->type = fn == "setImmediate" ? Type::immediate() : Type::voidTy();
     return call;
   }
-  // clearTimeout, clearInterval and clearImmediate.
   if (!checker_.argumentChecker().checkArity(call, name->loc(), 0, 1)) {
     return call;
   }
   bool immediate = fn == "clearImmediate";
   call->builtin = immediate ? Builtin::ClearImmediate : Builtin::ClearTimeout;
-  if (call->args.empty()) { // does nothing, as in Node
+  if (call->args.empty()) {
     auto *none = checker_.ctx_.make<UndefinedExpr>(call->loc());
     none->type = Type::undefinedTy();
     call->args.push_back(none);
@@ -166,7 +163,6 @@ Expr *TimerChecker::checkNextTick(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// ref(), unref(), hasRef() and refresh() of a Timeout or an Immediate.
 Expr *TimerChecker::checkTimerMethod(CallExpr *call, MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
@@ -204,10 +200,6 @@ Expr *TimerChecker::checkTimerMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// setTimeout(delay?, value?, options?) and setImmediate(value?, options?): a
-// Promise of the value (void without one) once the time is up;
-// setInterval(delay?, value?, options?): an async iterator that gives the
-// value each time. The options are `signal` and `ref`.
 Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc,
                                             const Type *expected) {
   checker_.file_->usesAsync = true;
@@ -243,7 +235,6 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
       args.push_back(checker_.argumentChecker().checkArg(call->args[0], Type::doubleTy()));
     }
   }
-  // The value, whose type the Promise takes.
   const Type *value = Type::voidTy();
   Expr *given = valueAt < call->args.size() ? call->args[valueAt] : nullptr;
   if (given && !isa<UndefinedExpr>(given)) {
@@ -300,8 +291,6 @@ Expr *TimerChecker::checkTimersPromisesCall(CallExpr *call, llvm::StringRef fn, 
   return call;
 }
 
-// scheduler.wait(delay, options?) is setTimeout(delay, undefined, options),
-// scheduler.yield() is setImmediate().
 Expr *TimerChecker::checkSchedulerCall(CallExpr *call, MemberExpr *member) {
   checker_.file_->usesAsync = true;
   call->type = Type::error();
@@ -334,4 +323,4 @@ Expr *TimerChecker::checkSchedulerCall(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

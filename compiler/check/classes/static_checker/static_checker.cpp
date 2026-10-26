@@ -23,10 +23,7 @@ namespace tz {
 
 namespace {
 
-// A static field of a class or of one up its chain, and the class that
-// declares it.
 ClassField *staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner) {
-  // Those of an instance of a generic class are the generic class's.
   for (ClassDecl *c = cls; c; c = c->parent) {
     for (ClassField &f : c->staticOwner()->fields) {
       if (f.isStatic && f.name == name && f.var) {
@@ -39,14 +36,13 @@ ClassField *staticField(ClassDecl *cls, llvm::StringRef name, ClassDecl **owner)
   return nullptr;
 }
 
-} // namespace
+}
 
 StaticChecker::StaticChecker(Checker &checker) : checker_(checker) {}
 
 Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const Type *expected) {
   llvm::StringRef name = member->name;
   member->type = Type::error();
-  // Up the chain too: a class has the static members of the one it extends.
   ClassDecl *owner = nullptr;
   if (ClassField *found = staticField(cls, name, &owner)) {
     ClassField &f = *found;
@@ -83,16 +79,15 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
     }
     return read;
   }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/true);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, true);
   if (methods.empty() && (name == "name" || name == "prototype")) {
-    // As of a class as a value: `C.name` is "C"; there is no prototype.
     auto *object = cast<NameExpr>(member->object);
     member->object = checker_.classValueChecker().checkClassValue(object, cls);
     return checker_.classValueChecker().checkClassRefMember(member);
   }
   if (methods.empty()) {
     if (ClassBases::findField(cls, name) ||
-        !ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false).empty()) {
+        !ClassDeclarer::methodsNamed(cls, name, false).empty()) {
       checker_.diags_.error(
           member->loc(), "'" + name + "' is a member of the instances of '" + cls->name +
                              "', not of the class: create one with 'new " + cls->name + "(...)'");
@@ -108,7 +103,6 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
   if (!sym) {
     return member;
   }
-  // A static method as a value, as a top-level function is one.
   auto *value = checker_.ctx_.make<NameExpr>(member->loc(), name);
   value->func = sym;
   value->type = checker_.returnInferrer().functionType(sym);
@@ -118,7 +112,6 @@ Expr *StaticChecker::checkStaticMember(MemberExpr *member, ClassDecl *cls, const
 
 const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
   auto *member = cast<MemberExpr>(target);
-  // The class's name is no value: the target is a static field, or wrong.
   member->object->type = member->type = Type::error();
   ClassDecl *owner = nullptr;
   if (ClassField *found = staticField(cls, member->name, &owner)) {
@@ -143,7 +136,7 @@ const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
     }
     return f.var->type;
   }
-  if (!ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/true).empty()) {
+  if (!ClassDeclarer::methodsNamed(cls, member->name, true).empty()) {
     checker_.diags_.error(member->loc(), "'" + member->name + "' is a static method of '" +
                                              cls->name + "' and cannot be replaced");
   } else {
@@ -157,8 +150,6 @@ const Type *StaticChecker::checkStaticTarget(Expr *&target, ClassDecl *cls) {
 Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, ClassDecl *cls,
                                           const Type *expected) {
   call->type = Type::error();
-  // `EventEmitter.once(emitter, name)`: the functions of node:events are
-  // properties of EventEmitter too (sema_events.cpp).
   static const llvm::StringLiteral eventsFunctions[] = {
       "once", "on", "listenerCount", "getEventListeners", "getMaxListeners", "setMaxListeners"};
   if (cls->library && cls->name == "EventEmitter" &&
@@ -170,14 +161,11 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     return checker_.callChecker().checkDirectCall(
         call, checker_.libFunctions_.lookup(member->name)->sym, member->loc(), expected);
   }
-  // `Readable.from(iterable)` (sema_stream.cpp).
   if (cls->library && cls->name == "Readable" && member->name == "from") {
     return checker_.streamSources().checkStreamFrom(call, member);
   }
-  std::vector<FunctionDecl *> methods =
-      ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/true);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
   if (methods.empty()) {
-    // A static field that holds a function, or an error.
     call->callee = checkStaticMember(member, cls, nullptr);
     const Type *type = call->callee->type;
     if (type->isFunction()) {
@@ -207,10 +195,8 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
     checker_.diags_.error(
         member->loc(), "'" + member->name + "' is not a generic method; remove the type arguments");
   }
-  // A generic static method, as a generic function.
   if (sym->isGeneric() && checked) {
-    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
-                                                          /*method=*/false);
+    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), false);
   }
   if (sym->isGeneric()) {
     return checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), expected,
@@ -218,11 +204,10 @@ Expr *StaticChecker::checkClassStaticCall(CallExpr *call, MemberExpr *member, Cl
   }
   call->func = sym;
   call->type = checker_.returnInferrer().returnType(sym);
-  // The arguments chooseVariant checked are only converted.
   std::vector<bool> given(checked ? call->args.size() : 0, true);
 
   return checker_.argumentChecker().checkArguments(call, sym->params, sym->minArgs, sym->hasRest,
                                                    member->loc(), &given);
 }
 
-} // namespace tz
+}

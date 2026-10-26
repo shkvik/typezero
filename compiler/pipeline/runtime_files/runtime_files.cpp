@@ -10,7 +10,7 @@ namespace {
 
 void anchor() {}
 
-} // namespace
+}
 
 RuntimeFiles::RuntimeFiles(const char *argv0) {
   std::string self = llvm::sys::fs::getMainExecutable(argv0, (void *)(intptr_t)&anchor);
@@ -24,4 +24,4 @@ std::string RuntimeFiles::path(llvm::StringRef name) const {
   return std::string(path);
 }
 
-} // namespace tz
+}

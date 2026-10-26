@@ -62,13 +62,10 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
     }
   }
 
-  // The names of the types first, then what files import, and only then
-  // what the types are: a type may use the types of other files.
   std::vector<std::vector<Stmt *>> types(program.modules.size());
   for (Module *module : program.modules) {
     useModule(module);
-    types[module->order] =
-        checker_.typeDeclarer().declareTypes(module->file.items, /*resolve=*/false);
+    types[module->order] = checker_.typeDeclarer().declareTypes(module->file.items, false);
     for (Stmt *type : types[module->order]) {
       checker_.declModules_[type] = module;
     }
@@ -94,8 +91,6 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
         checker_.declModules_[fn] = module;
         functions.push_back(fn);
       }
-      // The methods of a class are functions of its file. A class whose
-      // base is a value gets them where it is declared (see makeLateClass).
       auto *cls = dyn_cast<ClassDecl>(item);
       if (!cls || !cls->type || cls->baseExpr) {
         continue;
@@ -121,8 +116,6 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
     useModule(module);
     checker_.importBinder().bindImports();
   }
-  // The instances of generic classes that types named so far, now that the
-  // generic classes have their methods.
   checker_.methodsDeclared_ = true;
   for (size_t i = 0; i < checker_.unfilled_.size(); ++i) {
     checker_.filling_.push_back(checker_.unfilled_[i]);
@@ -130,11 +123,8 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
     checker_.filling_.pop_back();
   }
   checker_.unfilled_.clear();
-  // Which methods override which, now that every class has its methods; a
-  // class that a class expression makes later may override some too.
   checker_.lateClasses().markLateOverrides(program);
   checker_.classLinks().linkClasses();
-  // The exports nothing imports are checked too.
   for (Module *module : program.modules) {
     exportsOf(module);
   }
@@ -144,8 +134,6 @@ std::vector<FunctionDecl *> ModuleDeclarer::declareModules(SourceFile &program) 
 
 const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module) {
   Checker::ModuleState &here = checker_.state(module);
-  // Busy: the exports of files that re-export each other with `export *`,
-  // which adds nothing more, as in JavaScript.
   if (here.exportsDone || here.exportsBusy) {
     return here.exports;
   }
@@ -171,9 +159,8 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
     for (const ModuleName &name : decl.names) {
       std::optional<Checker::Binding> target;
       if (!decl.path.empty()) {
-        // `export { a } from "./x"`
         if (!decl.from) {
-          continue; // not loaded: reported
+          continue;
         }
         target = findExport(decl.from, decl.path, name);
         if (!target) {
@@ -196,7 +183,7 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
         bool imported = llvm::any_of(module->file.imports, [&](const ImportDecl &i) {
           return llvm::any_of(i.names, [&](const ModuleName &n) { return n.as == name.name; });
         });
-        if (!target && !imported) { // a failed import is reported at the import
+        if (!target && !imported) {
           checker_.diags_.error(name.loc,
                                 "cannot find '" + name.name +
                                     "' to export: this file neither declares nor imports it");
@@ -214,9 +201,6 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
     }
   }
 
-  // `export *` passes on what the other file exports, except the names this
-  // file exports itself. Two files that export one name to different things
-  // make it ambiguous, as in tsc.
   for (const ExportDecl &decl : module->file.exports) {
     if (!decl.all || !decl.from || decl.from == module) {
       continue;
@@ -285,4 +269,4 @@ std::optional<Checker::Binding> ModuleDeclarer::resolveLocal(Module *module, llv
   return std::nullopt;
 }
 
-} // namespace tz
+}

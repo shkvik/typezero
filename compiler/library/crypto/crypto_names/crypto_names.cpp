@@ -134,4 +134,4 @@ std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path) {
   return "'" + path.str() + "' has no export named '" + name.str() + "'";
 }
 
-} // namespace tz
+}

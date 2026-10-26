@@ -19,11 +19,10 @@ uint64_t counterRange(const CountedLoop &loop) {
   return loop.max == RE_INFINITY ? uint64_t(loop.min) + 1 : uint64_t(loop.max) + 1;
 }
 
-} // namespace
+}
 
 MatcherMemo::MatcherMemo(MatcherBuilder &builder) : builder_(builder) {}
 
-// Which state of the counted loops around `pc` the match is in.
 Value *MatcherMemo::memoContext(uint32_t pc, Value *pos) {
   Value *context = builder_.i32(0);
   for (const CountedLoop &loop : builder_.loops_) {
@@ -52,10 +51,6 @@ llvm::StructType *MatcherMemo::memoType() {
   return llvm::StructType::get(builder_.ctx_, {ptr, i32Ty, i32Ty, ptr, i32Ty, i32Ty});
 }
 
-// Past the budget of work, the memo goes on. The work is the choices taken,
-// the iterations of loops and the characters repeats read; the budget grows
-// with the starts the search went past, so that a search that backtracks
-// within bounds never needs the memo.
 void MatcherMemo::budgetCheck() {
   if (!builder_.memo_) {
     return;
@@ -72,7 +67,7 @@ void MatcherMemo::budgetCheck() {
                                builder_.b_.CreateSExt(builder_.load(builder_.steps_), i64), budget),
                            over, go);
   builder_.b_.SetInsertPoint(over);
-  builder_.store(builder_.i32(0x80000000u), builder_.steps_); // not again
+  builder_.store(builder_.i32(0x80000000u), builder_.steps_);
   builder_.b_.CreateCondBr(builder_.b_.CreateIsNull(builder_.load(builder_.memoAt_)), start, go);
   builder_.b_.SetInsertPoint(start);
   llvm::FunctionCallee startFn = builder_.module_.getOrInsertFunction(
@@ -85,7 +80,6 @@ void MatcherMemo::budgetCheck() {
   builder_.b_.SetInsertPoint(go);
 }
 
-// Adds what a repeat read, from `from` to `to`, to the work.
 void MatcherMemo::countWork(Value *from, Value *to) {
   if (!builder_.memo_) {
     return;
@@ -96,15 +90,11 @@ void MatcherMemo::countWork(Value *from, Value *to) {
   builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.steps_), read), builder_.steps_);
 }
 
-// Notes that the match got to row `row` (and the loop state of `pc`) at
-// `pos`, or goes to `visited` if it got there before. Only with the memo on.
 void MatcherMemo::memoCheck(uint32_t row, uint32_t pc, Value *pos, BasicBlock *visited) {
   Value *memo = builder_.load(builder_.memoAt_);
   BasicBlock *on = builder_.newBlock("memo"), *done = builder_.newBlock("memo.done");
   builder_.b_.CreateCondBr(builder_.b_.CreateIsNotNull(memo), on, done);
   builder_.b_.SetInsertPoint(on);
-  // Inside a lookaround what is noted may lie on the way to its match,
-  // which is no failure: noted down too, to be forgotten if it matches.
   Value *log = builder_.hasLook_
                    ? builder_.b_.CreateZExt(
                          builder_.b_.CreateICmpNE(builder_.load(builder_.depth_), builder_.i32(0)),
@@ -120,7 +110,6 @@ void MatcherMemo::memoCheck(uint32_t row, uint32_t pc, Value *pos, BasicBlock *v
   builder_.b_.SetInsertPoint(done);
 }
 
-// How long the memo's log is (0 without the memo).
 Value *MatcherMemo::memoLogLength() {
   Value *memo = builder_.load(builder_.memoAt_);
   BasicBlock *from = builder_.b_.GetInsertBlock(), *on = builder_.newBlock("log"),
@@ -138,7 +127,6 @@ Value *MatcherMemo::memoLogLength() {
   return phi;
 }
 
-// Calls `name` with the memo first, if there is one.
 void MatcherMemo::withMemo(llvm::StringRef name, llvm::ArrayRef<Value *> args) {
   Value *memo = builder_.load(builder_.memoAt_);
   BasicBlock *on = builder_.newBlock("memo.call"), *done = builder_.newBlock("memo.called");
@@ -157,4 +145,4 @@ void MatcherMemo::withMemo(llvm::StringRef name, llvm::ArrayRef<Value *> args) {
   builder_.b_.SetInsertPoint(done);
 }
 
-} // namespace tz
+}

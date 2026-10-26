@@ -12,7 +12,7 @@ struct IfStmt : Stmt {
 
   Expr *cond;
   Stmt *thenStmt;
-  Stmt *elseStmt; // may be null
+  Stmt *elseStmt;
 };
 
-} // namespace tz
+}

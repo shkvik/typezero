@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// tz build --explain-parallel: the decisions in words.
 class Explainer {
 public:
   explicit Explainer(Analysis &analysis);
@@ -16,4 +15,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

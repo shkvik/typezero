@@ -1,7 +1,5 @@
 #pragma once
 
-// The tree of a program: a header per node. This one gives them all.
-
 #include "compiler/program/ast/access/access.h"
 #include "compiler/program/ast/array_lit_expr/array_lit_expr.h"
 #include "compiler/program/ast/assign_expr/assign_expr.h"

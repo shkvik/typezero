@@ -4,8 +4,6 @@
 
 namespace tz::parallel {
 
-// The titles of what --explain-parallel shows: functions, their segments, the roots and
-// the pieces.
 class ExplainTitles {
 public:
   explicit ExplainTitles(Analysis &analysis);
@@ -22,4 +20,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

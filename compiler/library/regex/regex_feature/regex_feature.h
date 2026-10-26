@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Regular expressions, their matches, and RegExp (docs/regex.md).
 class RegexFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "regex"; }
@@ -19,4 +18,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

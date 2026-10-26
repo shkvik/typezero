@@ -25,11 +25,8 @@ namespace tz {
 
 namespace {
 
-// TzBytes; an ArrayBuffer has data and length at the same places.
 enum BytesField : unsigned { kRefCount, kLayout, kData, kLength, kOffset, kBuffer };
 
-// The tables of the single-byte encodings, of which a program holds those
-// it names (docs/bytes.md, section 5).
 struct EncodingTable {
   const char *name;
   uint16_t high[128];
@@ -48,8 +45,6 @@ llvm::StructType *bytesStruct(llvm::LLVMContext &ctx) {
   return llvm::StructType::get(ctx, {i64, ptr, ptr, i32, i32, ptr});
 }
 
-// How an element lies in memory: an integer of its size (a Float16 as its
-// bits), or a float.
 llvm::Type *storageType(llvm::IRBuilder<> &b, Bytes kind) {
   switch (kind) {
   case Bytes::Int16:
@@ -72,8 +67,6 @@ bool isSignedKind(Bytes kind) {
   return kind == Bytes::Int8 || kind == Bytes::Int16 || kind == Bytes::Int32;
 }
 
-// A value of the element type of `kind` as the bits it is stored as: cut to
-// the size (Checker proved it fits), clamped, or rounded to the float.
 llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value *value,
                        llvm::FunctionCallee f16) {
   llvm::Type *storage = storageType(b, kind);
@@ -94,7 +87,7 @@ llvm::Value *toStorage(Lowering &, llvm::IRBuilder<> &b, Bytes kind, llvm::Value
   }
 }
 
-} // namespace
+}
 
 BytesLowerer::BytesLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -118,7 +111,7 @@ llvm::Value *BytesLowerer::bytesData(llvm::Value *bytes) {
   llvm::LoadInst *data = lowering_.builder_.CreateLoad(
       lowering_.builder_.getPtrTy(),
       lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, bytes, kData), "bytes.data");
-  data->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(/*header=*/true));
+  data->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(true));
 
   return data;
 }
@@ -130,7 +123,7 @@ llvm::Value *BytesLowerer::bytesLength(llvm::Value *bytes) {
   llvm::LoadInst *length = lowering_.builder_.CreateLoad(
       lowering_.builder_.getInt32Ty(),
       lowering_.builder_.CreateStructGEP(lowering_.bytesTy_, bytes, kLength), "bytes.length");
-  length->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(/*header=*/true));
+  length->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(true));
 
   return lowering_.builder_.CreateZExt(length, lowering_.builder_.getInt64Ty());
 }
@@ -141,7 +134,7 @@ llvm::Value *BytesLowerer::loadElement(llvm::Value *data, const Type *type, llvm
   llvm::LoadInst *raw = lowering_.builder_.CreateAlignedLoad(
       storage, lowering_.builder_.CreateInBoundsGEP(storage, data, index),
       llvm::Align(type->elementSize()), "element");
-  raw->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(/*header=*/false));
+  raw->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(false));
   switch (kind) {
   case Bytes::Uint32:
     return lowering_.builder_.CreateZExt(raw, lowering_.builder_.getInt64Ty());
@@ -173,7 +166,7 @@ void BytesLowerer::storeElement(llvm::Value *data, const Type *type, llvm::Value
   llvm::StoreInst *store = lowering_.builder_.CreateAlignedStore(
       toStorage(lowering_, lowering_.builder_, kind, value, f16),
       lowering_.builder_.CreateInBoundsGEP(storage, data, index), llvm::Align(type->elementSize()));
-  store->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(/*header=*/false));
+  store->setMetadata(llvm::LLVMContext::MD_tbaa, bytesTbaa(false));
 }
 
 llvm::Value *BytesLowerer::emitBytesIndex(IndexExpr *index) {
@@ -196,8 +189,6 @@ llvm::Value *BytesLowerer::emitBytesIndex(IndexExpr *index) {
   return result;
 }
 
-// `u[i] = v` and `u[i] op= v`: Checker proved the index in range and the value
-// to fit.
 llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needResult) {
   auto *index = cast<IndexExpr>(assign->target);
   const Type *type = index->object->type;
@@ -212,7 +203,6 @@ llvm::Value *BytesLowerer::emitBytesElementAssign(AssignExpr *assign, bool needR
   if (!assign->op) {
     value = lowering_.exprLowerer().emitExpr(assign->value);
   } else {
-    // As in JavaScript, the old value is read before the right side runs.
     llvm::Value *old = loadElement(bytesData(bytes.value), type, position);
     value = lowering_.binaryLowerer().emitArithmetic(
         *assign->op, old, lowering_.exprLowerer().emitExpr(assign->value), element);
@@ -251,9 +241,7 @@ llvm::Value *BytesLowerer::emitBytesUpdate(UpdateExpr *update) {
 }
 
 llvm::Value *BytesLowerer::emitBytesMember(MemberExpr *member) {
-  // `.length` of a typed array, `.byteLength` of a DataView or an
-  // ArrayBuffer: the length, where both keep it.
-  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Value *length = bytesLength(object.value);
   lowering_.refCounts().dropOperand(object);
 
@@ -310,11 +298,11 @@ llvm::Constant *BytesLowerer::encodingTable(llvm::StringRef name) {
       llvm::ConstantStruct::getAnon({lowering_.stringLowerer().utf8Constant(found->name),
                                      llvm::ConstantArray::get(highTy, high)});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, init->getType(), /*isConstant=*/true,
+      new llvm::GlobalVariable(*lowering_.module_, init->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.encoding." + name);
   table = global;
 
   return table;
 }
 
-} // namespace tz
+}

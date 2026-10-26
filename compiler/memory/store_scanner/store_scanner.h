@@ -16,40 +16,18 @@
 
 namespace tz {
 
-// Which stores of references put values into groups.
-
-// What a call through the method table of `fn` may run: fn and the methods
-// that override it down the chain (see codegen_throw.cpp).
 void forEachOverride(const FunctionDecl *fn, llvm::function_ref<void(const FunctionDecl *)> visit);
 
-// Layer 1 of docs/objects.md, section 11: the objects that are never stored
-// anywhere a reference can be kept from (a field, an element, an entry, an
-// environment, a box), only in variables and arguments, cannot be on a
-// cycle. They are counted as any other object, and a reference to a member
-// stored in them does not join groups: the arrays a search keeps its work
-// in do not stay in the group of the graph it searches.
-//
-// The analysis follows values through variables, arguments, `this` and
-// results, over the whole program: a node of its graph is a place a value
-// may be (a variable, the result of a function, an allocation), and an edge
-// says that if what is at its start is stored, so is what is at its end.
-// Whatever reaches a place that stores is stored; an allocation nothing
-// stored reaches is not.
 class StoreStmts;
 class StoreExprs;
 class StoreCalls;
 
 class StoreScanner {
 public:
-  // `site` tells the allocations that matter: those of types that may form
-  // cycles.
   explicit StoreScanner(std::function<bool(const Expr *)> site);
   void function(const FunctionDecl *fn);
-  // Top-level code: no function, no result.
   void topLevel(const Stmt *s);
-  // A function used as a value: whoever calls it may keep what it returns.
   void escapes(const FunctionDecl *fn);
-  // The allocations nothing stored reaches.
   llvm::DenseSet<const Expr *> unstored();
 
 private:
@@ -90,4 +68,4 @@ private:
   std::unique_ptr<StoreCalls> storeCallsPart_;
 };
 
-} // namespace tz
+}

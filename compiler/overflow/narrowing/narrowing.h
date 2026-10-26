@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// What conditions say of the ranges: comparisons and predicates.
 class Narrowing {
 public:
   explicit Narrowing(OverflowCheck &check);
@@ -22,4 +21,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

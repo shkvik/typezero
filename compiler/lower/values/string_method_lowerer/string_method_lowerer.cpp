@@ -31,7 +31,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     return lowering_.exprLowerer().emitExpr(member->object);
   }
   if (call->builtin == Builtin::StrConcat) {
-    // `s.concat(a, b)` is `s + a + b`.
     std::vector<Expr *> parts{member->object};
     parts.insert(parts.end(), call->args.begin(), call->args.end());
     std::vector<Lowering::Operand> operands;
@@ -48,7 +47,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
                                          return lowering_.mayThrow().exprThrows(arg);
                                        }));
   std::vector<Lowering::Operand> strings;
-  std::vector<llvm::Value *> numbers; // positions and counts, as i64
+  std::vector<llvm::Value *> numbers;
   for (size_t i = 0; i < call->args.size(); ++i) {
     Expr *arg = call->args[i];
     if (arg->type->isString()) {
@@ -68,7 +67,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   for (Lowering::Operand &str : strings) {
     lowering_.throwLowerer().takeOperand(str);
   }
-  // An optional position: its value and whether it was given.
   auto optional = [&](size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < numbers.size()) {
       return {numbers[i], lowering_.builder_.getInt32(1)};
@@ -76,7 +74,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
 
     return {lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)};
   };
-  // An optional string argument: its parts and whether it was given.
   auto optionalString = [&](size_t i) -> std::array<llvm::Value *, 3> {
     if (i < strings.size()) {
       return {lowering_.stringLowerer().stringObj(strings[i].value),
@@ -91,7 +88,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   llvm::Value *obj = lowering_.stringLowerer().stringObj(receiver.value);
   llvm::Value *meta = lowering_.stringLowerer().stringMeta(receiver.value);
   llvm::Value *result = nullptr;
-  bool failable = false; // the runtime may throw
+  bool failable = false;
   switch (call->builtin) {
   case Builtin::StrCharCodeAt: {
     llvm::Value *position = numbers[0];
@@ -99,7 +96,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
       result = lowering_.builder_.CreateCall(lowering_.rt_.strCharCodeAt, {obj, meta, position});
       break;
     }
-    // Out of range, JavaScript returns NaN.
     llvm::Value *inRange = lowering_.builder_.CreateICmpULT(
         position, lowering_.stringLowerer().stringLength(receiver.value));
     llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("code.read");
@@ -120,7 +116,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     break;
   }
   case Builtin::StrAt: {
-    // A negative position counts from the end.
     llvm::Value *length = lowering_.stringLowerer().stringLength(receiver.value);
     llvm::Value *position = numbers[0];
     position = lowering_.builder_.CreateSelect(
@@ -167,9 +162,9 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   case Builtin::StrRepeat:
     result = lowering_.stringLowerer().callReturningString(lowering_.rt_.strRepeat,
                                                            {obj, meta, numbers[0]});
-    failable = true; // a negative count
+    failable = true;
     break;
-  case Builtin::StrCharAt: // "" out of range
+  case Builtin::StrCharAt:
     result = lowering_.stringLowerer().callReturningString(
         lowering_.rt_.strCharAtOrEmpty,
         {obj, meta, numbers.empty() ? lowering_.builder_.getInt64(0) : numbers[0]});
@@ -222,7 +217,7 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
     result = lowering_.stringLowerer().callReturningString(
         lowering_.rt_.strPad, {obj, meta, numbers[0], fillObj, fillMeta, hasFill,
                                lowering_.builder_.getInt32(call->builtin == Builtin::StrPadStart)});
-    failable = true; // a string too long
+    failable = true;
     break;
   }
   case Builtin::StrToUpperCase:
@@ -257,4 +252,4 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

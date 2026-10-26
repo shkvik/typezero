@@ -21,7 +21,7 @@ void initializeTargets() {
   LLVMInitializeAArch64AsmPrinter();
 }
 
-} // namespace
+}
 
 Target::Target(llvm::Triple triple, std::unique_ptr<llvm::TargetMachine> machine)
     : triple_(std::move(triple)), machine_(std::move(machine)) {}
@@ -45,4 +45,4 @@ Result<Target, Errors> Target::host(bool optimize) {
   return ok(Target(triple, std::move(machine)));
 }
 
-} // namespace tz
+}

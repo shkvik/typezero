@@ -26,9 +26,6 @@ using llvm::dyn_cast;
 
 CallParser::CallParser(Parser &parser) : parser_(parser) {}
 
-// Calls, `.name`, `[index]`, `x!`, and their optional forms `?.(`, `?.name`
-// and `?.[`. After a `?.` the rest of them form an optional chain. Also
-// tagged templates. A property name may be a keyword, as in `set.delete(x)`.
 Expr *CallParser::parseCallOrMember() {
   Expr *expr = parser_.primaries().parsePrimary();
   bool chain = false;
@@ -36,17 +33,14 @@ Expr *CallParser::parseCallOrMember() {
     return chain ? parser_.ctx_.make<OptionalChainExpr>(expr->loc(), expr) : expr;
   };
   for (;;) {
-    // `f<int>(x)` and `f<int>`: the type arguments of a generic function.
     if (auto *name = dyn_cast<NameExpr>(expr); name && !chain && parser_.tok_.is(Tok::Less) &&
                                                name->typeArgs.empty() &&
                                                parser_.types().tryTypeArgs(name->typeArgs)) {
       continue;
     }
-    // `JSON.parse<User>(text)`: type arguments of a method, right before its
-    // call.
     if (auto *member = dyn_cast<MemberExpr>(expr);
         member && parser_.tok_.is(Tok::Less) && member->typeArgs.empty() &&
-        parser_.types().tryTypeArgs(member->typeArgs, /*callOnly=*/true)) {
+        parser_.types().tryTypeArgs(member->typeArgs, true)) {
       continue;
     }
     bool optional = false;
@@ -67,7 +61,6 @@ Expr *CallParser::parseCallOrMember() {
       }
     }
     if (parser_.tok_.is(Tok::LParen)) {
-      // Diagnostics about a call point at its start, e.g. `f` in `f(x)`.
       llvm::SMLoc loc = expr->loc();
       parser_.cursor().advance();
       llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
@@ -108,9 +101,6 @@ Expr *CallParser::parseCallOrMember() {
       access->optional = optional;
       expr = access;
     } else if (parser_.tok_.is(Tok::TemplateString) || parser_.tok_.is(Tok::TemplateHead)) {
-      // tag`a${x}b${y}c` calls the tag with the texts around the values, as
-      // one array, and then the values: tag(["a", "b", "c"], x, y). String.raw
-      // gets the texts as written, escapes and all.
       if (chain) {
         parser_.cursor().report(
             parser_.tok_.loc(),
@@ -133,7 +123,6 @@ Expr *CallParser::parseCallOrMember() {
       call->tagged = true;
       expr = call;
     } else if (parser_.tok_.is(Tok::Bang) && !parser_.tok_.newlineBefore) {
-      // `x!`: x is not undefined (checked when the program runs).
       expr = parser_.ctx_.make<UnaryExpr>(parser_.tok_.loc(), UnaryOp::NonNull, expr);
       parser_.cursor().advance();
     } else {
@@ -142,11 +131,9 @@ Expr *CallParser::parseCallOrMember() {
   }
 }
 
-// `new Name<T>(args)`
 Expr *CallParser::parseNew() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'new'
-  // `new (Mixin(User))()`: a class as a value (see NewExpr::callee).
+  parser_.cursor().advance();
   Expr *callee = nullptr;
   if (parser_.tok_.is(Tok::LParen)) {
     llvm::SMLoc at = parser_.tok_.loc();
@@ -175,7 +162,6 @@ Expr *CallParser::parseNew() {
   llvm::StringRef name = parser_.tok_.text;
   llvm::SMLoc nameLoc = parser_.tok_.loc();
   parser_.cursor().advance();
-  // `new Intl.DateTimeFormat()`: a constructor of a namespace.
   llvm::StringRef member;
   llvm::SMLoc memberLoc;
   if (parser_.cursor().accept(Tok::Dot)) {
@@ -187,7 +173,6 @@ Expr *CallParser::parseNew() {
       parser_.cursor().error(parser_.tok_.loc(), "expected a name after '.'");
     }
   }
-  // `new this.types[i]()`, `new a.b.c()`: a class as a value.
   if (parser_.tok_.is(Tok::Dot) || parser_.tok_.is(Tok::LBracket)) {
     callee = parser_.ctx_.make<NameExpr>(nameLoc, name);
     if (!member.empty()) {
@@ -204,7 +189,7 @@ Expr *CallParser::parseNew() {
         continue;
       }
       llvm::SMLoc at = parser_.tok_.loc();
-      parser_.cursor().advance(); // '['
+      parser_.cursor().advance();
       llvm::SaveAndRestore<bool> allowIn(parser_.noIn_, false);
       Expr *index = parser_.exprs().parseSequence();
       parser_.cursor().expect(Tok::RBracket, "to close the index");
@@ -233,4 +218,4 @@ Expr *CallParser::parseNew() {
   return create;
 }
 
-} // namespace tz
+}

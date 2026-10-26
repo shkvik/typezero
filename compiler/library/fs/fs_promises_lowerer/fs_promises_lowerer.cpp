@@ -30,8 +30,6 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
   auto obj = [&](size_t i) { return lowering_.stringLowerer().stringObj(values[i]); };
   auto meta = [&](size_t i) { return lowering_.stringLowerer().stringMeta(values[i]); };
   auto flag = [&](size_t i) { return lowering_.builder_.CreateZExt(values[i], i32); };
-  // The runtime function, with the promise first and the maker of
-  // SystemError last.
   auto run = [&](llvm::StringRef name, std::vector<llvm::Type *> params,
                  std::vector<llvm::Value *> args) {
     params.insert(params.begin(), ptr);
@@ -43,15 +41,11 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
   };
   switch (call->builtin) {
   case Builtin::FspReadFile:
-    // The path, the flag, the signal, then the encoding of text; without
-    // one, a Buffer (-1).
     run("tz_fsp_read_file", {ptr, i64, ptr, i64, ptr, i32},
         {obj(0), meta(0), obj(1), meta(1), values[2],
          value->isBytes() ? llvm::ConstantInt::getSigned(i32, -1) : values[3]});
     break;
   case Builtin::FspWriteFile:
-    // The path, the data, the flag, the mode, the encoding of text, the
-    // signal; bytes have no encoding.
     if (!call->args[1]->type->isString()) {
       run("tz_fsp_write_file_bytes", {ptr, i64, ptr, ptr, i64, i32, ptr},
           {obj(0), meta(0), values[1], obj(2), meta(2), values[3], values[4]});
@@ -128,7 +122,7 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
     return rl;
   }
   Lowering::Operand rl =
-      lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, /*canBorrow=*/true);
+      lowering_.refCounts().emitOperand(cast<MemberExpr>(call->callee)->object, true);
   llvm::Value *result = nullptr;
   switch (call->builtin) {
   case Builtin::RlQuestion: {
@@ -144,9 +138,6 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
     break;
   }
   case Builtin::RlQuestionCallback: {
-    // The question of node:readline/promises, whose answer goes to the
-    // callback as then() would give it; an error in it, or a question of an
-    // interface closed already, ends the program.
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
     llvm::Value *answer = lowering_.promiseLowerer().newPromise(Type::string());
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
@@ -178,7 +169,6 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   return result;
 }
 
-// node:timers/promises.
 llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i32 = lowering_.builder_.getInt32Ty();
   llvm::Type *f64 = lowering_.builder_.getDoubleTy(), *ptr = lowering_.builder_.getPtrTy();
@@ -186,7 +176,6 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
   case Builtin::TimersSetTimeout:
   case Builtin::TimersSetImmediate:
   case Builtin::TimersSetInterval: {
-    // [delay], [value], signal, ref.
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
     bool immediate = call->builtin == Builtin::TimersSetImmediate;
     llvm::Value *delay = immediate ? llvm::ConstantFP::get(f64, 0.0) : values[0];
@@ -199,7 +188,6 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
     llvm::Value *ref = lowering_.builder_.CreateZExt(values.back(), i32);
     llvm::Value *result;
     if (call->builtin == Builtin::TimersSetInterval) {
-      // The iterator keeps the value, which it copies into each step.
       llvm::Value *slot = given ? lowering_.functionFrame().spill(given, "interval.value")
                                 : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
       llvm::Value *type =
@@ -211,7 +199,6 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
                                             "tz_timers_interval", ptr, {f64, ptr, ptr, ptr, i32}),
                                         {delay, slot, type, signal, ref}, "interval");
     } else {
-      // The promise holds the value until the time is up.
       result = lowering_.promiseLowerer().newPromise(value);
       if (given && lowering_.promiseLowerer().promiseValueSize(value)) {
         lowering_.builder_.CreateStore(given,
@@ -222,7 +209,6 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
                                                      {ptr, f64, i32, ptr, i32}),
           {result, delay, lowering_.builder_.getInt32(immediate), signal, ref});
     }
-    // The signal is borrowed.
     lowering_.refCounts().releaseValue(signal, call->args[call->args.size() - 2]->type);
     return result;
   }
@@ -231,4 +217,4 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

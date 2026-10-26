@@ -33,8 +33,6 @@ namespace tz {
 FunctionBuilder::FunctionBuilder(Lowering &lowering) : lowering_(lowering) {}
 
 void FunctionBuilder::setFunctionAttributes(llvm::Function *fn) {
-  // Nothing unwinds yet, but unwind tables still let debuggers and crash
-  // handlers walk the stack.
   fn->addFnAttr(llvm::Attribute::NoUnwind);
   fn->setUWTableKind(llvm::UWTableKind::Default);
 }
@@ -46,12 +44,8 @@ void FunctionBuilder::declareFunction(FunctionDecl *fn) {
     params.push_back(lowering_.moduleBuilder().lower(param));
   }
   auto *type = llvm::FunctionType::get(lowering_.moduleBuilder().lower(sym->ret), params, false);
-  // The whole program is one module, so everything but `main` is internal and
-  // LLVM is free to inline or drop it. An instance of a generic function is
-  // named with its type arguments, as Checker made them (see
-  // Checker::representation): `tz.first<int>`, `tz.first<object>`.
   std::string name = "tz." + lowering_.symbolPrefixes_.lookup(fn) + fn->name.str();
-  if (fn->cls) { // a static method
+  if (fn->cls) {
     name = "tz." + lowering_.symbolPrefixes_.lookup(fn->cls) + fn->cls->name.str() + "." +
            fn->name.str() + (fn->variant ? "." + std::to_string(fn->variant) : "");
   }
@@ -89,7 +83,7 @@ void FunctionBuilder::emitFunction(FunctionDecl *fn) {
     lowering_.tzModulesLowerer().emitExternal(fn);
     return;
   }
-  if (fn->impl) { // a static method a decorator may replace
+  if (fn->impl) {
     lowering_.decoratorLowerer().emitDecoratedMethod(fn);
     return;
   }
@@ -114,13 +108,9 @@ void FunctionBuilder::emitFunction(FunctionDecl *fn) {
   finishFunction();
 }
 
-// The parameters, from the arguments given, and the body.
 void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
-  lowering_.functionFrame().pushScope(); // parameters: the callee owns its arguments
+  lowering_.functionFrame().pushScope();
   emitParams(fn, args);
-  // An owner its environment refers to without counting (layer 2 of
-  // docs/objects.md, section 11) stays while the closure runs, even if what
-  // it runs lets the owner go.
   if (fn && fn->isClosure() && !fn->group) {
     for (const VarSymbol *var : fn->captures) {
       if (lowering_.memory().uncounted.count({fn, var})) {
@@ -134,7 +124,6 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
       }
     }
   }
-  // A function that may recurse checks the stack first (docs/errors.md).
   if (lowering_.recursive_.contains(fn)) {
     lowering_.throwLowerer().emitStackCheck(fn->loc());
   }
@@ -144,8 +133,6 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
 
 void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *> args) {
   if (fn->thisVar) {
-    // A method's object, the environment it gets: borrowed, as the caller
-    // keeps it alive during the call.
     llvm::Value *slot =
         lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(), "this");
     lowering_.builder_.CreateStore(lowering_.envParam_, slot);
@@ -157,13 +144,11 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
     if (isa<llvm::Argument>(arg)) {
       arg->setName(param.name);
     }
-    // Parameters can be assigned to, so they live in stack slots like locals.
     llvm::Value *slot = lowering_.functionFrame().createLocal(param.sym, param.name);
     if (!param.defaultValue) {
-      lowering_.storeLowerer().storeVar(param.sym, slot, arg, /*replacing=*/false);
+      lowering_.storeLowerer().storeVar(param.sym, slot, arg, false);
       continue;
     }
-    // The argument is `T | undefined`; undefined takes the default value.
     const Type *passed = Type::optional(param.sym->type);
     llvm::BasicBlock *givenBlock = lowering_.functionFrame().newBlock("param.given");
     llvm::BasicBlock *defaultBlock = lowering_.functionFrame().newBlock("param.default");
@@ -184,7 +169,7 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
         lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(param.sym->type), 2);
     value->addIncoming(given, givenBlock);
     value->addIncoming(fallback, defaultEnd);
-    lowering_.storeLowerer().storeVar(param.sym, slot, value, /*replacing=*/false);
+    lowering_.storeLowerer().storeVar(param.sym, slot, value, false);
   }
 }
 
@@ -194,22 +179,21 @@ void FunctionBuilder::finishFunction() {
   lowering_.function_ = nullptr;
 }
 
-// Control that reaches the end of a body returns.
 void FunctionBuilder::closeBody() {
   if (lowering_.functionFrame().blockIsOpen()) {
     llvm::Type *ret = lowering_.function_->getReturnType();
     if (ret->isVoidTy()) {
       lowering_.builder_.CreateRetVoid();
-    } else if (lowering_.function_->hasExternalLinkage()) { // main
+    } else if (lowering_.function_->hasExternalLinkage()) {
       lowering_.builder_.CreateRet(lowering_.builder_.getInt32(0));
-    } else if (lowering_.returnType_ && (lowering_.returnType_->isOptional() ||
-                                         lowering_.returnType_->isUnknown())) { // undefined
+    } else if (lowering_.returnType_ &&
+               (lowering_.returnType_->isOptional() || lowering_.returnType_->isUnknown())) {
       lowering_.builder_.CreateRet(
           lowering_.optionalLowerer().undefinedValue(lowering_.returnType_));
-    } else { // Checker proved that every path returns
+    } else {
       lowering_.builder_.CreateUnreachable();
     }
   }
 }
 
-} // namespace tz
+}

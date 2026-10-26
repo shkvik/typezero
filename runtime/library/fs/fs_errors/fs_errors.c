@@ -1,10 +1,7 @@
-// The errors of the system that node:fs throws as Node does: a SystemError (an
-// Error with code, errno, syscall, path and dest), with libuv's codes, numbers and texts.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs_errors/fs_errors.h"

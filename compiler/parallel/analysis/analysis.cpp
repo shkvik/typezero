@@ -60,7 +60,7 @@ void Analysis::run() {
   inner_ = intern("%inner");
   state_ = intern("%state");
   listenersKey_ = intern("%listeners");
-  codeWalk().discover(nullptr); // the top-level code
+  codeWalk().discover(nullptr);
   callResolver().resolve();
   callResolver().fold();
   pieces().explore();
@@ -149,4 +149,4 @@ std::optional<Ref> Analysis::classRefOrNone(const FnInfo &f) const {
 }
 
 Analysis::~Analysis() = default;
-} // namespace tz::parallel
+}

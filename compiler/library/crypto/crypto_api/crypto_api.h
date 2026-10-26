@@ -1,33 +1,5 @@
 #pragma once
 
-// The functions of runtime/library/crypto/ that calls of node:crypto become (docs/crypto.md).
-// Checker checks a call and gives it Builtin::Crypto with the number of the function first, as an
-// int literal, and the arguments in the order the function takes them; Lowering passes each as its
-// kind says and makes the result of what the function gives (codegen_crypto.cpp). The receiver
-// of a method is the object of the callee MemberExpr, the first argument of the function.
-//
-// Kinds of arguments:
-//   d  data: a string, bytes or a KeyObject, as a value of any type (TzType *, void *); NULL
-//      for undefined
-//   s  a string (obj, meta)
-//   i  an int; b a boolean (an int32); f a double
-//   o  a reference: an object of node:crypto, a Buffer, a Json
-//   m  a hash: an int literal names one of kDirectMds, the direct layer; a string is a name the
-//      full layer looks up (tz_openssl_md), whose error is that of createHash (m), of hash() (n)
-//      or of createHmac and the KDFs (h)
-//   c  a cipher: likewise of kDirectCiphers, or a name (tz_openssl_cipher)
-//
-// Kinds of results:
-//   v  nothing; S the receiver (or the first argument), which the call gives back
-//   o  a reference; p one that may be NULL for undefined
-//   s  a string, through a TzStr * the function takes first; q the same, which may be undefined:
-//      the function returns whether there is one
-//   b  a boolean; i an int; j an int, undefined when negative; f a double; t a Date from a
-//      time in milliseconds
-//   P  a Promise of the type Checker gave, which Lowering makes and passes first; the function
-//      settles it later, from a job of the pool (Web Crypto, crypto_subtle*.c of the runtime),
-//      and never throws
-
 #include "llvm/ADT/StringRef.h"
 #include <cstddef>
 
@@ -76,7 +48,6 @@ enum class CryptoFn : unsigned {
   KeyExportDer,
   KeyExportJwk,
   KeyEquals,
-  // The full layer.
   GetHashes,
   GetCiphers,
   GetCurves,
@@ -117,7 +88,6 @@ enum class CryptoFn : unsigned {
   X509CheckIssued,
   X509CheckPrivateKey,
   X509Verify,
-  // Web Crypto: the intrinsics __tz_subtle_* of library/crypto/webcrypto.tz (sema_webcrypto.cpp).
   SubtleDigest,
   SubtleHmac,
   SubtleHmacVerify,
@@ -223,8 +193,6 @@ inline constexpr CryptoFunction kCryptoFunctions[] = {
     {"tz_openssl_subtle_generate", 'P', "iffs"},
 };
 
-// The hashes and the ciphers of the direct layer: the name node gives each, and the constant of
-// runtime/library/crypto/crypto_md/crypto_md.c, crypto_aes.c or crypto_chacha.c that is it.
 struct DirectAlgorithm {
   llvm::StringLiteral name;
   llvm::StringLiteral symbol;
@@ -265,8 +233,6 @@ inline constexpr DirectAlgorithm kDirectCiphers[] = {
     {"chacha20-poly1305", "tz_crypto_cipher_chacha20_poly1305"},
 };
 
-// Whether a call of the runtime named `name` is one of the full layer, which needs all of
-// libcrypto (see Driver).
 inline bool isFullCryptoFunction(llvm::StringRef name) { return name.starts_with("tz_openssl_"); }
 
-} // namespace tz
+}

@@ -35,12 +35,8 @@ options:
                     print what runs in parallel and why, instead of building
                     (build only)
 )";
-// Not in the usage: -O0 turns optimization off, runtime inlining included.
-// The tests run every program both ways, and with --emit-llvm it shows the IR
-// as Lowering emits it, except that generators are split into the functions
-// of their coroutines (LLVM has to do that at any level).
 
-} // namespace
+}
 
 int Args::usageError(const llvm::Twine &message) {
   llvm::errs() << "tz: " << message << "\n\n" << kUsage;
@@ -79,10 +75,8 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
   for (size_t i = 1; i < args.size(); ++i) {
     llvm::StringRef arg = args[i];
     if (!input.empty() || rest) {
-      // Everything after the source file belongs to the program.
       programArgs.push_back(arg.str());
     } else if (arg == "--" && command == Command::Run) {
-      // `tz run -- a b`: the program is the project's, and the rest is its.
       rest = true;
     } else if (arg == "-o") {
       if (++i == args.size()) {
@@ -99,9 +93,6 @@ int Args::parse(llvm::ArrayRef<const char *> args) {
       return usageError("unknown option '" + arg + "'");
     } else if (command == Command::Run && !arg.ends_with_insensitive(".tz") &&
                !arg.ends_with_insensitive(".ts")) {
-      // Not a source file: the project's program runs, and this is its
-      // first argument. A file of TypeScript is taken as the source, for
-      // the error that says it needs another name.
       programArgs.push_back(arg.str());
       rest = true;
     } else {
@@ -148,4 +139,4 @@ std::string Args::outputPath() const {
   return std::string(name);
 }
 
-} // namespace tz
+}

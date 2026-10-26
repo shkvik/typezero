@@ -31,10 +31,9 @@ namespace tz {
 
 namespace {
 
-// Header fields; must match runtime/core/array/array.c.
 enum ArrayField : unsigned { kRefCount, kElementType, kData, kLength, kCapacity, kAlloc };
 
-} // namespace
+}
 
 ArrayLowerer::ArrayLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -68,7 +67,6 @@ llvm::Value *ArrayLowerer::emitCheckedRead(llvm::Value *inRange, const Type *res
   lowering_.builder_.CreateCondBr(inRange, readBlock, endBlock);
 
   lowering_.functionFrame().switchTo(readBlock);
-  // An element that is itself `T | undefined` is the result as it is.
   llvm::Value *value = read();
   if (value->getType() != lowering_.moduleBuilder().lower(resultType)) {
     value =
@@ -85,7 +83,6 @@ llvm::Value *ArrayLowerer::emitCheckedRead(llvm::Value *inRange, const Type *res
   return phi;
 }
 
-// Appends owned values; the array takes them over.
 void ArrayLowerer::emitPush(llvm::Value *array, llvm::ArrayRef<llvm::Value *> values,
                             const Type *element) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty();
@@ -115,7 +112,6 @@ void ArrayLowerer::emitPush(llvm::Value *array, llvm::ArrayRef<llvm::Value *> va
                        lowering_.builder_.CreateAdd(at, lowering_.builder_.getInt64(i))));
   }
   lowering_.builder_.CreateStore(newLength, arrayField(array, kLength));
-  // An array that may be a member of a group: its elements join it.
   if (lowering_.memory().refMayBeMember(Type::array(element))) {
     for (llvm::Value *value : values) {
       lowering_.storeLowerer().groupStore(array, value, element);
@@ -141,9 +137,6 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
     if (lit->elements.empty()) {
       return array;
     }
-    // Nothing can reach the new array while its elements are evaluated, so
-    // its data pointer stays put. If one of them throws, the array goes
-    // with those stored (the runtime made the rest zero).
     std::vector<Expr *> exprs;
     for (const ArrayLitExpr::Element &e : lit->elements) {
       exprs.push_back(e.expr);
@@ -180,9 +173,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
       continue;
     }
     if (e.spread) {
-      // Appended right away, so a variable can be borrowed. A string adds
-      // its characters.
-      Lowering::Operand source = lowering_.refCounts().emitOperand(e.expr, /*canBorrow=*/true);
+      Lowering::Operand source = lowering_.refCounts().emitOperand(e.expr, true);
       if (e.expr->type->isString()) {
         lowering_.builder_.CreateCall(lowering_.rt_.arrAppendCodePoints,
                                       {array, lowering_.stringLowerer().stringObj(source.value),
@@ -235,7 +226,6 @@ llvm::Value *ArrayLowerer::emitNewArray(NewExpr *expr) {
     return lowering_.groupLowerer().newArray(expr->type, lowering_.builder_.getInt64(0),
                                              lowering_.builder_.getInt64(0));
   }
-  // The runtime throws RangeError for a negative length, as JavaScript does.
   llvm::FunctionCallee create = lowering_.rt_.arrNewLength;
   if (lowering_.isCyclic(expr->type)) {
     create = lowering_.groupLowerer().groupFunction(
@@ -276,8 +266,6 @@ llvm::Value *ArrayLowerer::emitArrayIndex(IndexExpr *index) {
   return result;
 }
 
-// `a[i] = v` and `a[i] op= v`. The store happens after v is evaluated, which
-// may have changed the array, so the data pointer is loaded only then.
 llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult) {
   auto *index = cast<IndexExpr>(assign->target);
   const Type *element = index->type;
@@ -292,17 +280,15 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
   if (!assign->op) {
     value = lowering_.exprLowerer().emitExpr(assign->value);
   } else {
-    // As in JavaScript, the old value is read before the right side runs.
     llvm::Value *old =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element),
                                       elementAddress(arrayData(array.value), element, position));
     if (element->isString()) {
-      lowering_.refCounts().retainString(old); // the right side may replace the element
-      Lowering::Operand rhs =
-          lowering_.stringLowerer().emitConcatPart(assign->value, /*canBorrow=*/false);
+      lowering_.refCounts().retainString(old);
+      Lowering::Operand rhs = lowering_.stringLowerer().emitConcatPart(assign->value, false);
       value = lowering_.stringLowerer().concatOperands({{old, true, element}, rhs});
     } else if (element->isDecimal()) {
-      lowering_.refCounts().retainValue(old, element); // the right side may replace the element
+      lowering_.refCounts().retainValue(old, element);
       value = lowering_.decimalLowerer().emitDecimalCompound(*assign->op, old, assign->value);
       lowering_.refCounts().releaseValue(old, element);
     } else {
@@ -324,7 +310,6 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
   if (!index->mayAppend) {
     replace();
   } else {
-    // Checker proved index <= length: either a replacement or an append.
     llvm::BasicBlock *replaceBlock = lowering_.functionFrame().newBlock("store.replace");
     llvm::BasicBlock *appendBlock = lowering_.functionFrame().newBlock("store.append");
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("store.end");
@@ -348,7 +333,6 @@ llvm::Value *ArrayLowerer::emitElementAssign(AssignExpr *assign, bool needResult
   return value;
 }
 
-// `a.length = n`
 llvm::Value *ArrayLowerer::emitLengthAssign(AssignExpr *assign, bool needResult) {
   auto *member = cast<MemberExpr>(assign->target);
   Lowering::Operand array =
@@ -358,20 +342,16 @@ llvm::Value *ArrayLowerer::emitLengthAssign(AssignExpr *assign, bool needResult)
   lowering_.throwLowerer().takeOperand(array);
   lowering_.builder_.CreateCall(lowering_.rt_.arrSetLength, {array.value, length});
   lowering_.refCounts().dropOperand(array);
-  // A negative length, or one that would grow an array whose elements have
-  // no default.
   lowering_.throwLowerer().emitThrowCheck();
 
   return needResult ? length : nullptr;
 }
 
-// The loop of `for...of` over an array or a string (see emitForOf).
 void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
                                   llvm::BasicBlock *condBlock, llvm::BasicBlock *bodyBlock,
                                   llvm::BasicBlock *endBlock) {
   const Type *iterableType = stmt->iterable->type;
   bool isString = iterableType->isString();
-  // A loop variable a closure keeps in a box holds its own reference.
   bool borrow = stmt->borrowElements && !stmt->binding.sym->boxed();
   const Type *element = isString ? iterableType : iterableType->inner();
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
@@ -379,7 +359,6 @@ void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
   lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), indexSlot);
 
   lowering_.functionFrame().emitBlock(condBlock);
-  // Each element is read here, in whatever piece the iteration is.
   lowering_.orderAt(stmt->loc());
   lowering_.orderAt(stmt->iterable->loc());
   llvm::Value *iterable =
@@ -391,10 +370,9 @@ void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
                                   endBlock);
 
   lowering_.functionFrame().switchTo(bodyBlock);
-  lowering_.functionFrame().pushScope(); // the loop variable, fresh in every iteration
+  lowering_.functionFrame().pushScope();
   llvm::Value *value;
   if (isString) {
-    // One code point: one code unit, or two for a surrogate pair.
     llvm::Value *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "code.point");
     llvm::Value *units = lowering_.builder_.CreateCall(
         lowering_.rt_.strCodePointAt, {out, lowering_.stringLowerer().stringObj(iterable),
@@ -412,7 +390,6 @@ void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
         lowering_.builder_.CreateAdd(index, lowering_.builder_.getInt64(1)), indexSlot);
   }
   if (borrow) {
-    // A plain slot: nothing to release when the iteration ends.
     llvm::Value *slot = lowering_.functionFrame().createStackSlot(
         lowering_.moduleBuilder().lower(element), stmt->binding.name);
     lowering_.addresses_[stmt->binding.sym] = slot;
@@ -420,8 +397,7 @@ void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
   } else {
     lowering_.storeLowerer().storeVar(
         stmt->binding.sym,
-        lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value,
-        /*replacing=*/true);
+        lowering_.functionFrame().createLocal(stmt->binding.sym, stmt->binding.name), value, true);
   }
 
   lowering_.loopLowerer().pushLoop(endBlock, condBlock, lowering_.scopes_.size() - 1);
@@ -431,4 +407,4 @@ void ArrayLowerer::emitArrayForOf(ForOfStmt *stmt, llvm::Value *iterableSlot,
   lowering_.functionFrame().branchTo(condBlock);
 }
 
-} // namespace tz
+}

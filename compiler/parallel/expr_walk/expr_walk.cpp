@@ -59,7 +59,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
       }
       Use inner;
       if (!el.spread) {
-        inner.join = use.join; // an element of the array Promise.all takes
+        inner.join = use.join;
       }
       expr(el.expr, inner);
       if (el.spread) {
@@ -77,7 +77,7 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
         expr(p.key);
       }
       if (p.method) {
-        continue; // a method of the object, which runs when called
+        continue;
       }
       expr(p.value);
       if (p.spread) {
@@ -117,7 +117,6 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   case Expr::Kind::Binary: {
     auto *b = cast<BinaryExpr>(e);
     if (b->op == BinaryOp::LogAnd || b->op == BinaryOp::LogOr || b->op == BinaryOp::Nullish) {
-      // The right side may not run; the value is either side's.
       expr(b->lhs, use);
       Active before = analysis_.cur_;
       expr(b->rhs, use);
@@ -126,7 +125,6 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     }
     expr(b->lhs);
     expr(b->rhs);
-    // A division by zero, or an operation on decimals, may throw.
     if (b->op == BinaryOp::Div || b->op == BinaryOp::Rem ||
         (b->lhs->type && b->lhs->type->nonOptional()->isDecimal())) {
       analysis_.codeWalk().throwPoint();
@@ -158,14 +156,12 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
   }
   case Expr::Kind::Cast: {
     auto *c = cast<CastExpr>(e);
-    // A function known by name, adapted to another type of function.
     if (c->type && c->type->isFunction() &&
         analysis_.callWalk().functionRef(c->operand, use, c->type)) {
       expr(c->operand, use);
       return;
     }
     expr(c->operand, c->isImplicit() ? use : Use());
-    // The text of an array shows its elements.
     if (c->type && c->type->isString() && holdsReferences(c->operand->type)) {
       contents(c->operand, false, c->loc());
     }
@@ -179,7 +175,6 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
     return;
   }
   case Expr::Kind::OptionalChain: {
-    // Any link may end the chain.
     Active before = analysis_.cur_;
     expr(cast<OptionalChainExpr>(e)->chain, use);
     merge(analysis_.cur_, before);
@@ -201,7 +196,6 @@ void ExprWalk::expr(const Expr *e, const Use &use) {
 }
 
 void ExprWalk::name(const NameExpr *n, const Use &use) {
-  // A function as a value: code may call it later through the value.
   if (n->func || (n->var && (n->var->function || n->var->lambda))) {
     analysis_.callWalk().functionRef(n, use, n->type);
     return;
@@ -212,7 +206,7 @@ void ExprWalk::name(const NameExpr *n, const Use &use) {
 void ExprWalk::member(const MemberExpr *m) {
   expr(m->object);
   if (m->method) {
-    analysis_.callWalk().functionRef(m, {}, m->type); // a method bound to its object, as a value
+    analysis_.callWalk().functionRef(m, {}, m->type);
     return;
   }
   fieldAccess(m->object, m->name, false, m->loc());
@@ -224,8 +218,6 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return;
   }
   if (type->isArray()) {
-    // The length is apart from the elements: a task that writes an element
-    // of its own does not change it.
     if (name == "length") {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(object),
                                  analysis_.length_, write, at);
@@ -237,7 +229,7 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
     return;
   }
   if (type->isTypedArray()) {
-    return; // its length never changes
+    return;
   }
   if (type->isJson()) {
     analysis_.codeWalk().touch(LocKind::Elements, analysis_.aliasAnalysis().refOf(object), nullptr,
@@ -254,8 +246,6 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
       }
     }
   }
-  // Built-in properties are calls; a field that never changes is not data
-  // that could be shared wrongly.
   if (!field) {
     return;
   }
@@ -284,7 +274,6 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
     return;
   }
   if (type->isArray()) {
-    // The index a callback of map gets: each call its own element.
     auto *index = dyn_cast<NameExpr>(strip(ix->index));
     if (index && index->var && analysis_.ownIndex_.contains(index->var) &&
         !index->var->reassigned && !ix->mayAppend) {
@@ -292,7 +281,6 @@ void ExprWalk::indexAccess(const IndexExpr *ix, bool write) {
                                  index->var->owner, write, ix->loc());
       return;
     }
-    // A write past the end makes the array longer.
     if (write && ix->mayAppend) {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(ix->object),
                                  analysis_.length_, true, ix->loc());
@@ -313,8 +301,6 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
   if (!e || !holdsReferences(e->type)) {
     return;
   }
-  // What a literal made here holds is what its parts hold; an array that a
-  // built-in makes holds the objects of another.
   const Expr *made = strip(e);
   if (auto *lit = dyn_cast<ArrayLitExpr>(made)) {
     for (const ArrayLitExpr::Element &el : lit->elements) {
@@ -332,7 +318,6 @@ void ExprWalk::contents(const Expr *e, bool write, llvm::SMLoc at) {
     }
     return;
   }
-  // The objects inside one that is the code's own may be anyone's.
   Ref ref = analysis_.aliasAnalysis().refOf(e);
   if (ref.kind != RefKind::Local) {
     analysis_.codeWalk().touch(LocKind::Contents, ref, nullptr, write, at);
@@ -457,13 +442,10 @@ void ExprWalk::yieldExpr(const YieldExpr *y) {
   if (!analysis_.fn_->asyncGen) {
     return;
   }
-  // An async generator gives its value and waits: the loop that iterates
-  // it resumes it, inside its own piece. Each step of a `yield*` awaits the
-  // other iterator first.
   unsigned seg =
       analysis_.codeWalk().segment(y, y->delegate ? SegKind::Await : SegKind::Yield, y->loc());
   analysis_.fn_->segs[seg].delegate = y->delegate;
   analysis_.codeWalk().moveTo(seg);
 }
 
-} // namespace tz::parallel
+}

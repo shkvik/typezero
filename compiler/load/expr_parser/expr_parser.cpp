@@ -23,12 +23,9 @@ namespace tz {
 
 namespace {
 
-// Binding strength of binary operators, following JavaScript. `as` and
-// `satisfies` bind like the relational operators; they are parsed only to
-// report that the language has neither.
 constexpr int kRelationalPrec = 7;
 
-constexpr int kPowPrec = 11; // `**`, the only right-associative one
+constexpr int kPowPrec = 11;
 
 int binaryPrec(Tok kind) {
   switch (kind) {
@@ -123,7 +120,6 @@ BinaryOp binaryOpFor(Tok kind) {
   }
 }
 
-// Returns true for assignment operators; `op` is set for compound ones.
 bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   switch (kind) {
   case Tok::Assign:
@@ -179,22 +175,18 @@ bool assignmentOp(Tok kind, std::optional<BinaryOp> &op) {
   }
 }
 
-} // namespace
+}
 
 ExprParser::ExprParser(Parser &parser) : parser_(parser) {}
 
-// `yield value`, a bare `yield`, or `yield* iterable`, at the level of an
-// assignment. The value is on the same line, or there is none.
 Expr *ExprParser::parseYield() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'yield'
+  parser_.cursor().advance();
   bool delegate = !parser_.tok_.newlineBefore && parser_.cursor().accept(Tok::Star);
   Expr *value = nullptr;
   if (delegate) {
     value = parseExpr();
   } else if (!parser_.tok_.newlineBefore) {
-    // Only a token that can start an expression starts the value: `yield)`
-    // and `yield;` have none.
     switch (parser_.tok_.kind) {
     case Tok::RParen:
     case Tok::RBracket:
@@ -223,7 +215,6 @@ Expr *ExprParser::parseYield() {
   return parser_.ctx_.make<YieldExpr>(loc, value, delegate);
 }
 
-// `a, b, c`
 Expr *ExprParser::parseSequence() {
   Expr *first = parseExpr();
   if (!parser_.tok_.is(Tok::Comma)) {
@@ -237,8 +228,6 @@ Expr *ExprParser::parseSequence() {
   return parser_.ctx_.make<SequenceExpr>(first->loc(), std::move(exprs));
 }
 
-// Assignment is right-associative and has the lowest precedence after the
-// comma.
 Expr *ExprParser::parseExpr() {
   const char *start = parser_.tok_.text.begin();
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "yield") {
@@ -274,8 +263,6 @@ Expr *ExprParser::parseConditional() {
 
 Expr *ExprParser::parseBinary(int minPrec) {
   const char *start = parser_.tok_.text.begin();
-  // `-x ** 2` is an error in JavaScript: it could mean either `(-x) ** 2` or
-  // `-(x ** 2)`.
   llvm::StringRef unary;
   if (parser_.tok_.is(Tok::Minus) || parser_.tok_.is(Tok::Plus) || parser_.tok_.is(Tok::Bang) ||
       parser_.tok_.is(Tok::Tilde) || parser_.tok_.is(Tok::KwTypeof) ||
@@ -296,8 +283,6 @@ Expr *ExprParser::parseBinary(int minPrec) {
       lhs = parser_.ctx_.make<CastExpr>(loc, lhs, parser_.types().parseType());
       continue;
     }
-    // `x satisfies T` checks x against T and leaves its type as it is. tz
-    // has no operators on types, as with `as`: the type goes on the variable.
     if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "satisfies" &&
         !parser_.tok_.newlineBefore && kRelationalPrec >= minPrec) {
       llvm::SMLoc loc = parser_.tok_.loc();
@@ -315,7 +300,6 @@ Expr *ExprParser::parseBinary(int minPrec) {
     if (parser_.tok_.is(Tok::KwIn) && parser_.noIn_) {
       return lhs;
     }
-    // `x instanceof C`, a relational operator that lexes as a name.
     if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "instanceof" &&
         kRelationalPrec >= minPrec) {
       llvm::SMLoc loc = parser_.tok_.loc();
@@ -332,8 +316,6 @@ Expr *ExprParser::parseBinary(int minPrec) {
     }
     BinaryOp op = binaryOpFor(parser_.tok_.kind);
     llvm::SMLoc loc = parser_.tok_.loc();
-    // `==` never converts its operands (both sides must have the same type),
-    // so the strict form of JavaScript has nothing left to do.
     if (parser_.tok_.is(Tok::EqEqEq)) {
       parser_.cursor().report(loc,
                               "'===' is not supported; use '==', which does not convert types");
@@ -351,7 +333,6 @@ Expr *ExprParser::parseBinary(int minPrec) {
 
 Expr *ExprParser::parseUnary() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  // `await x`: a file is a module, where `await` is always the operator.
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "await") {
     parser_.cursor().advance();
     return parser_.ctx_.make<AwaitExpr>(loc, parseUnary());
@@ -383,7 +364,7 @@ Expr *ExprParser::parseUnary() {
   case Tok::MinusMinus: {
     bool increment = parser_.tok_.is(Tok::PlusPlus);
     parser_.cursor().advance();
-    return parser_.ctx_.make<UpdateExpr>(loc, increment, /*prefix=*/true, parseUnary());
+    return parser_.ctx_.make<UpdateExpr>(loc, increment, true, parseUnary());
   }
   default:
     return parsePostfix();
@@ -395,16 +376,15 @@ Expr *ExprParser::parseUnary() {
 
 Expr *ExprParser::parsePostfix() {
   Expr *expr = parser_.calls().parseCallOrMember();
-  // A line break before `++`/`--` makes it a prefix operator of the next line.
   if ((parser_.tok_.is(Tok::PlusPlus) || parser_.tok_.is(Tok::MinusMinus)) &&
       !parser_.tok_.newlineBefore) {
     bool increment = parser_.tok_.is(Tok::PlusPlus);
     llvm::SMLoc loc = parser_.tok_.loc();
     parser_.cursor().advance();
-    return parser_.ctx_.make<UpdateExpr>(loc, increment, /*prefix=*/false, expr);
+    return parser_.ctx_.make<UpdateExpr>(loc, increment, false, expr);
   }
 
   return expr;
 }
 
-} // namespace tz
+}

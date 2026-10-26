@@ -21,12 +21,8 @@ namespace tz {
 
 namespace {
 
-// A literal environment on the stack: never freed, so its count only needs
-// to stay far from zero.
 constexpr uint64_t kStackObjectCount = uint64_t(1) << 62;
 
-// The name of a closure's code in the IR: the functions it is nested in, then
-// its own.
 std::string qualifiedName(const FunctionDecl *fn) {
   std::string name = fn->name.empty() ? "lambda" : fn->name.str();
   for (const FunctionDecl *p = fn->parent; p; p = p->parent) {
@@ -36,7 +32,7 @@ std::string qualifiedName(const FunctionDecl *fn) {
   return "tz." + name;
 }
 
-} // namespace
+}
 
 EnvLowerer::EnvLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -58,7 +54,6 @@ const Lowering::EnvLayout &EnvLowerer::envLayout(const FunctionDecl *fn) {
   }
   layout.type = llvm::StructType::get(lowering_.ctx_, types);
 
-  // Releases what the environment holds, then frees it.
   auto *dropType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
                                            {lowering_.builder_.getPtrTy()}, false);
   layout.drop = llvm::Function::Create(dropType, llvm::GlobalValue::InternalLinkage,
@@ -67,10 +62,9 @@ const Lowering::EnvLayout &EnvLowerer::envLayout(const FunctionDecl *fn) {
   llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", layout.drop));
   llvm::Value *env = layout.drop->getArg(0);
-  // A member releases what it holds as one (see runtime/core/group/group.c).
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
-    if (lowering_.memory().uncounted.count({key, var})) { // an owner it lives in (layer 2)
+    if (lowering_.memory().uncounted.count({key, var})) {
       continue;
     }
     llvm::Value *field = lowering_.builder_.CreateStructGEP(layout.type, env, unsigned(i + 2));
@@ -118,17 +112,11 @@ llvm::StructType *EnvLowerer::boxType(const Type *type) {
 llvm::Value *EnvLowerer::newBox(const Type *type, bool member) {
   llvm::StructType *box = boxType(type);
   llvm::Function *&drop = lowering_.boxDrops_[type];
-  // A box of a variable whose values may form cycles with it is a member of
-  // a group (see runtime/core/group/group.c). Its drop lets go of the value as
-  // from a member, which is right for a box outside the groups too (a box of
-  // the same type may be either).
   bool memberDrop =
       (member || lowering_.isCyclicBox(type) || lowering_.memory().mayHoldMember(type)) &&
       type->isManaged();
   member = (member || lowering_.isCyclicBox(type)) && type->isManaged();
   if (!drop) {
-    // Releases the value, then frees the box; without a value to release,
-    // just frees it.
     auto *dropType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
                                              {lowering_.builder_.getPtrTy()}, false);
     if (!type->isManaged()) {
@@ -214,8 +202,6 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
     lowering_.builder_.CreateStore(layout.descriptor,
                                    lowering_.builder_.CreateStructGEP(type, env, 1));
   }
-  // An environment on the stack lives only while the variables do, so it
-  // borrows their values.
   member = member && layout.member && !onStack;
   for (size_t i = 0; i < layout.fields.size(); ++i) {
     const VarSymbol *var = layout.fields[i];
@@ -233,11 +219,9 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
             {env, value});
       }
     } else if (lowering_.memory().uncounted.count({layout.key, var})) {
-      // The closure lives in an object that the object it refers to made
-      // and holds alone (docs/objects.md, section 11, layer 2).
-      value = emitVarValue(var, /*borrow=*/true);
+      value = emitVarValue(var, true);
     } else {
-      value = emitVarValue(var, /*borrow=*/onStack);
+      value = emitVarValue(var, onStack);
       if (member) {
         lowering_.storeLowerer().groupStore(env, value, ClosureLowerer::typeOf(var));
       }
@@ -250,8 +234,6 @@ llvm::Value *EnvLowerer::createEnv(const Lowering::EnvLayout &layout, bool onSta
 }
 
 llvm::Value *EnvLowerer::emitVarValue(const VarSymbol *var, bool borrow) {
-  // A function's own value: it is the one being emitted (a constant arrow
-  // calling itself), or one of the group being emitted or created here.
   const FunctionDecl *fn = nullptr;
   llvm::Value *env = nullptr;
   if (var->lambda && var->lambda == lowering_.currentFn_) {
@@ -293,7 +275,7 @@ void EnvLowerer::emitGroupCreation(NestedGroup *group) {
   llvm::Value *slot = lowering_.functionFrame().createObjectSlot("group.env");
   lowering_.groupEnvs_[group] = slot;
   if (!layout.fields.empty() || lowering_.comparesFunctions_) {
-    lowering_.builder_.CreateStore(createEnv(layout, /*onStack=*/false), slot);
+    lowering_.builder_.CreateStore(createEnv(layout, false), slot);
   }
   for (FunctionDecl *member : group->members) {
     lowering_.closureLowerer().closureCode(member);
@@ -301,7 +283,6 @@ void EnvLowerer::emitGroupCreation(NestedGroup *group) {
 }
 
 void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
-  // A method of an object literal: the object holds what it captured.
   if (fn->cls && fn->cls->literal) {
     lowering_.envParam_->setName("this");
     const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(fn->cls->type);
@@ -319,8 +300,6 @@ void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
     }
     return;
   }
-  // The captured variables: the values copied into the environment, and the
-  // boxes it holds.
   lowering_.envParam_->setName("env");
   const Lowering::EnvLayout &layout = envLayout(fn);
   for (size_t i = 0; i < layout.fields.size(); ++i) {
@@ -336,4 +315,4 @@ void EnvLowerer::bindCaptures(const FunctionDecl *fn) {
   }
 }
 
-} // namespace tz
+}

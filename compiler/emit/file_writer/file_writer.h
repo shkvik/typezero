@@ -13,4 +13,4 @@ public:
                llvm::function_ref<void(llvm::raw_pwrite_stream &)> contents) const;
 };
 
-} // namespace tz
+}

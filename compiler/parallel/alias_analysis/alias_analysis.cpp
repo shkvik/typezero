@@ -42,10 +42,6 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
   if (!e) {
     return false;
   }
-  // A function of a built-in module makes what it gives (fetch() a
-  // Response, serve() a Server), and so does an async method (text() of a
-  // body, read() of a reader); a getter or another method may give an
-  // object it has.
   const Expr *made = e;
   if (auto *a = dyn_cast<AwaitExpr>(e)) {
     made = strip(a->value);
@@ -65,8 +61,6 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
     if (makesNewObject(c->builtin)) {
       return true;
     }
-    // A function of node:crypto that gives a reference makes the object it
-    // gives: a hash, a cipher, the bytes of a digest.
     if (c->builtin == Builtin::Crypto && !c->args.empty()) {
       if (auto *number = dyn_cast<IntLitExpr>(strip(c->args[0]));
           number && number->value < std::size(kCryptoFunctions)) {
@@ -74,7 +68,6 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
         return result == 'o' || result == 'p';
       }
     }
-    // A generator called makes a new iterator.
     const FunctionDecl *fn = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
     return fn && fn->isGenerator && !fn->safeTry;
   }
@@ -100,7 +93,6 @@ Ref AliasAnalysis::refOf(const Expr *e) {
       return Ref{RefKind::Site, it->second};
     }
   }
-  // An object made right here, which only this expression has.
   if (isAllocation(e)) {
     return Ref{RefKind::Local, nullptr};
   }
@@ -108,8 +100,6 @@ Ref AliasAnalysis::refOf(const Expr *e) {
   return Ref{RefKind::Type, e->type->nonOptional()};
 }
 
-// The object a method is called on: one made right here may still be kept
-// by the method.
 Ref AliasAnalysis::receiverRef(const Expr *e) {
   const Expr *object = strip(e);
   if (object && isAllocation(object)) {
@@ -119,8 +109,6 @@ Ref AliasAnalysis::receiverRef(const Expr *e) {
   return refOf(e);
 }
 
-// A variable that holds an object its function made, which never leaves the
-// function: no other code can touch the object.
 bool AliasAnalysis::isLocal(const VarSymbol *v) {
   if (v->isGlobal || v->captured || v->reassigned || !holdsReferences(v->type)) {
     return false;
@@ -193,7 +181,6 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
       }
     }
   } else if (a->isArray() && b->isArray()) {
-    // A Dog[] may be seen as an Animal[] that nothing writes through.
     const Type *x = a->inner()->nonOptional(), *y = b->inner()->nonOptional();
     result = x == y || (x->isObject() && y->isObject() && objectTypesMayAlias(x, y));
   } else if (a->isDict() && b->isDict()) {
@@ -201,7 +188,7 @@ bool AliasAnalysis::typesMayAlias(const Type *a, const Type *b) {
              b->valueType() && a->valueType()->isObject() && b->valueType()->isObject() &&
              objectTypesMayAlias(a->valueType(), b->valueType());
   } else if (a->isBytes() && b->isBytes()) {
-    result = true; // views of one buffer
+    result = true;
   } else if (a->isObject() && b->isObject()) {
     result = objectTypesMayAlias(a, b);
   }
@@ -227,8 +214,6 @@ bool AliasAnalysis::objectTypesMayAlias(const Type *a, const Type *b) {
   return false;
 }
 
-// The types of the values inside a value of `type`, at any depth: what its
-// fields, elements and entries hold, and what those hold in turn.
 const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
   auto found = analysis_.reach_.find(type);
   if (found != analysis_.reach_.end()) {
@@ -277,8 +262,6 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
       break;
     case Type::Kind::Object: {
       fieldsOf(t);
-      // An object of a class may be one of a class down its chain, and one
-      // of an interface any type declared to be it.
       std::vector<const ClassDecl *> down;
       if (const ClassDecl *cls = t->classDecl()) {
         down.assign(cls->children.begin(), cls->children.end());
@@ -313,8 +296,6 @@ const std::vector<const Type *> &AliasAnalysis::inside(const Type *type) {
   return analysis_.reach_[type] = std::move(out);
 }
 
-// Whether the object of `to` may be the object of `from`, or one inside it;
-// with `innerOnly`, only one inside it.
 bool AliasAnalysis::mayReach(Ref from, Ref to, bool innerOnly) {
   if (!innerOnly && sameObject(from, to)) {
     return true;
@@ -360,4 +341,4 @@ bool AliasAnalysis::locsMayMeet(const Loc &a, const Loc &b) {
   return sameObject(a.ref, b.ref);
 }
 
-} // namespace tz::parallel
+}

@@ -36,7 +36,6 @@ std::u16string utf16Of(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::string> literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -51,7 +50,7 @@ std::optional<std::string> literalOf(const Expr *e) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 CryptoArgs::CryptoArgs(Checker &checker) : checker_(checker) {}
 
@@ -103,8 +102,6 @@ Expr *CryptoArgs::cryptoUndefined(llvm::SMLoc loc) {
   return undef;
 }
 
-// Data: a string, bytes (a typed array, a Buffer, a DataView; an ArrayBuffer with `buffers`),
-// or a secret KeyObject (with `keys`), or a union of those.
 Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool keys,
                              bool buffers) {
   arg = checker_.exprChecker().checkExpr(arg, Type::string());
@@ -135,8 +132,6 @@ Expr *CryptoArgs::cryptoData(Expr *arg, llvm::StringRef what, bool strings, bool
   return arg;
 }
 
-// An encoding written as a literal ('hex', 'utf8'...): its number; `fallback` (as a number)
-// without one. Null after an error.
 Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef fn, int fallback) {
   if (index >= call->args.size() || isa<UndefinedExpr>(call->args[index])) {
     return cryptoInt(call->loc(), fallback);
@@ -161,8 +156,6 @@ Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef f
   return number;
 }
 
-// The bytes `made` gives as text in `encoding` (a number, -1 for the bytes themselves): what
-// digest('hex') and the like give.
 Expr *CryptoArgs::cryptoText(Expr *made, Expr *encoding) {
   if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
     return made;
@@ -173,7 +166,6 @@ Expr *CryptoArgs::cryptoText(Expr *made, Expr *encoding) {
                                                {encoding}, Type::string());
 }
 
-// The options of `fn` written as an object literal in the call, by name; false after an error.
 bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
                                llvm::ArrayRef<llvm::StringRef> allowed,
                                llvm::StringMap<Expr *> &options) {
@@ -207,8 +199,6 @@ bool CryptoArgs::cryptoOptions(Expr *arg, llvm::StringRef fn,
   return true;
 }
 
-// A string option that must be a literal of `values`: the index of the one written, or -1 after
-// an error.
 int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
                              llvm::ArrayRef<llvm::StringRef> values) {
   std::optional<std::string> text = literalOf(arg);
@@ -232,8 +222,6 @@ int CryptoArgs::cryptoChoice(Expr *arg, llvm::StringRef what,
   return -1;
 }
 
-// A hash named by `arg`: an int literal of kDirectMds for a literal the direct layer has, the
-// literal itself for one only the full layer has, or the string for a name known only now.
 Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
   std::optional<std::string> text = literalOf(arg);
   if (!text) {
@@ -269,7 +257,6 @@ Expr *CryptoArgs::cryptoMd(Expr *arg, bool hmac) {
   return nullptr;
 }
 
-// A cipher named by `arg`, as cryptoMd does for hashes.
 Expr *CryptoArgs::cryptoCipher(Expr *arg) {
   std::optional<std::string> text = literalOf(arg);
   if (!text) {
@@ -306,14 +293,12 @@ Expr *CryptoArgs::cryptoCipher(Expr *arg) {
   return nullptr;
 }
 
-// A number argument, as a double.
 Expr *CryptoArgs::cryptoNumber(Expr *arg) {
   return checker_.argumentChecker().checkArg(arg, Type::doubleTy());
 }
 
-// The key of a signature or an ECDH: a KeyObject, or a PEM or DER key (a string or bytes).
 Expr *CryptoArgs::cryptoKey(Expr *arg, llvm::StringRef what) {
-  return cryptoData(arg, what, /*strings=*/true, /*keys=*/true, /*buffers=*/true);
+  return cryptoData(arg, what, true, true, true);
 }
 
 Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
@@ -327,7 +312,6 @@ Expr *CryptoArgs::cryptoKeyObject(Expr *arg, llvm::StringRef what) {
   return arg;
 }
 
-// A callback where node:crypto takes one: an error with the form without it as the hint.
 bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::StringRef fn,
                                       llvm::StringRef hint) {
   if (index >= call->args.size()) {
@@ -353,9 +337,6 @@ bool CryptoArgs::rejectCryptoCallback(CallExpr *call, size_t index, llvm::String
   return true;
 }
 
-// The key of a signature at `arg`: a key, or the options with it ({ key, padding, saltLength,
-// dsaEncoding }), appended to `args` as the runtime takes them: the key, padding, saltLength,
-// the encoding of DSA (1 for 'ieee-p1363') and which were given.
 bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
                                std::vector<Expr *> &args) {
   llvm::SMLoc loc = arg->loc();
@@ -398,4 +379,4 @@ bool CryptoArgs::cryptoSignKey(Expr *arg, llvm::StringRef fn, bool priv,
   return true;
 }
 
-} // namespace tz
+}

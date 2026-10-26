@@ -31,7 +31,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -60,7 +59,6 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-// The fields of the parts and of the data the runtime makes.
 const Type *relativePartType() {
   return Type::object({{"type", Type::string(), false},
                        {"value", Type::string(), false},
@@ -68,9 +66,8 @@ const Type *relativePartType() {
                       "Intl.RelativeTimeFormatPart");
 }
 
-} // namespace
+}
 
-// The kind of the runtime (TZ_INTL_*) as the first argument of a built-in.
 static Expr *kindArg(AstContext &ctx, llvm::SMLoc loc, int kind) {
   auto *lit = ctx.make<IntLitExpr>(loc, uint64_t(kind));
   lit->type = Type::intTy();
@@ -88,8 +85,6 @@ const Type *IntlChecker::segmentDataType() {
                       "Intl.SegmentData");
 }
 
-// What resolvedOptions() gives, with the fields in the order node prints
-// them; a field that is not always there is `T | undefined`.
 const Type *IntlChecker::resolvedIntlOptionsType(IntlKind kind) {
   const Type *text = Type::string(), *maybe = Type::optional(Type::string());
   const Type *integer = Type::intTy(), *maybeInt = Type::optional(Type::intTy());
@@ -190,7 +185,6 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {
   if (name == "DateTimeFormatOptions") {
     return DateFormatChecker::dateOptionsType();
   }
-  // Names of kinds of strings.
   if (name == "LDMLPluralRule" || name == "RelativeTimeFormatUnit" ||
       name == "UnicodeBCP47LocaleIdentifier" || name == "BCP47LanguageTag") {
     return Type::string();
@@ -202,7 +196,6 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {
     if (name != service.name.str() + "Options") {
       continue;
     }
-    // The options as a type: every one `T | undefined`.
     std::vector<Field> fields;
     for (const IntlOption &option : service.options) {
       const Type *type = option.kind == 's'   ? Type::string()
@@ -266,9 +259,6 @@ Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vect
                                                Type::intl(service->kind));
 }
 
-// The locales of getCanonicalLocales and supportedLocalesOf: a string, an
-// array of them, or undefined for none. Written in the code, each must be a
-// language tag.
 Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
   std::vector<std::optional<std::u16string>> tags;
   if (auto *array = dyn_cast<ArrayLitExpr>(arg)) {
@@ -301,7 +291,6 @@ Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
   return arg;
 }
 
-// `Intl.X(...)` without `new`, and Intl.getCanonicalLocales.
 Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
@@ -326,10 +315,9 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
     return call;
   }
 
-  return checkIntlNew(member->loc(), member->name, call->args, /*withNew=*/false);
+  return checkIntlNew(member->loc(), member->name, call->args, false);
 }
 
-// `Intl.NumberFormat.supportedLocalesOf(locales, options?)` and the others.
 Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   auto *service = cast<MemberExpr>(member->object);
@@ -354,7 +342,6 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   if (call->args[0]->type->isError()) {
     return call;
   }
-  // The options alone (checkIntlArgs takes a locale first, here none).
   if (call->args.size() == 2) {
     std::vector<Expr *> pair{checker_.ctx_.make<UndefinedExpr>(member->loc()), call->args[1]};
     if (!checker_.intlOptionsChecker().checkIntlArgs(pair, 0, IntlKind::None, what)) {
@@ -362,7 +349,6 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
     }
     call->args[1] = pair[1];
   }
-  // The name of the method, for the message of a bad localeMatcher.
   call->args.insert(call->args.begin(),
                     checker_.ctx_.make<StringLitExpr>(member->loc(), utf16(what)));
   call->args[0]->type = Type::string();
@@ -372,15 +358,10 @@ Expr *IntlChecker::checkIntlStatic(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// `nf.format`, `collator.compare` and `dtf.format` as values: functions bound
-// to their objects, as the getters of JavaScript give them; the type of what
-// they take follows where they go (`nums.map(nf.format)` passes the elements).
 Expr *IntlChecker::checkIntlMember(MemberExpr *member, const Type *expected) {
   member->type = Type::error();
   IntlKind kind = member->object->type->intlKind();
   llvm::StringRef name = member->name;
-  // The function type the place wants: what a method passes its callback,
-  // or a declared one.
   const Type *wantedParam = nullptr, *wantedRet = nullptr;
   if (checker_.callback_ && !checker_.callback_->params.empty()) {
     wantedParam = checker_.callback_->params[0];
@@ -438,4 +419,4 @@ Expr *IntlChecker::segmentsArray(Expr *segments) {
                                                type);
 }
 
-} // namespace tz
+}

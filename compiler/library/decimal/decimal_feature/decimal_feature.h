@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// decimal: its functions and methods (docs/decimal.md).
 class DecimalFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "decimal"; }
@@ -18,4 +17,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

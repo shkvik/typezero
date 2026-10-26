@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// node:crypto: its types, constants and members, and the global crypto.
 class CryptoChecker {
 public:
   explicit CryptoChecker(Checker &checker);
@@ -14,11 +13,10 @@ public:
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
   Expr *cryptoConstant(MemberExpr *member);
-  // The class of node:crypto that `name` names in a type, or null.
   const Type *cryptoTypeNamed(llvm::StringRef name) const;
 
 private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

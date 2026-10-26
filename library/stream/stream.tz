@@ -1,46 +1,7 @@
-// node:stream: Readable, Writable, Duplex, Transform, PassThrough, pipe,
-// pipeline, finished, compose and Readable.from, ported from
-// lib/internal/streams of Node 24 to tz (docs/streams.md). The code is in this file and
-// in stream_readable.tz, stream_writable.tz, stream_duplex.tz and stream_pipeline.tz,
-// which the loader reads as one module, in that order.
-//
-// The state of each side is node's: a ReadableState and a WritableState with
-// the same bits and counters, and the functions over (stream, state) take
-// node's steps in node's order, so that the events, the calls of _read() and
-// _write() and the ticks they wait for are node's. Node's getters
-// (readableLength, writableEnded, destroyed...) are fields here, which tz has
-// instead of getters: the lengths and high-water marks are kept in them, and
-// those that the bits of the states decide are updated where the bits change
-// (see sync()).
-//
-// The chunk type. The code of Stream sees a chunk as an `unknown`, as
-// JavaScript does; the classes the program uses, Readable<T>, Writable<T>,
-// Duplex<W, R>, Transform<W, R> and PassThrough<T>, are thin: their methods
-// give the chunks their types, and they declare no fields Stream does not
-// have, so that a Duplex works where a Writable is expected (the compiler
-// lets it, compiler/library/stream/sema/sema_stream.cpp). A chunk that the
-// stream emits goes to the listeners of 'data' as what it is: a Buffer, a
-// string once the stream has an encoding, or a T in object mode; the compiler
-// makes sure the listeners take that (setEncoding narrows the type of the
-// stream from that point on, and is an error on a stream that has listeners
-// already).
-//
-// Cycles. tz frees memory by counting references, which a cycle keeps alive
-// (README, "Строки и память"). The listeners this code adds to a stream
-// (finished(), pipe(), pipeline()) take the stream as `this` rather than
-// capture it, or are removed when the stream ends, so that a stream that
-// ends leaves no cycle behind; where node leaves such a listener in place,
-// that is said where it is done.
-
 import { EventEmitterBase } from "node:events"
 import { AbortController, AbortSignal, Event } from "tz:web"
 import { StringDecoder, normalizeEncoding } from "node:string_decoder"
 
-//===----------------------------------------------------------------------===//
-// Errors (lib/internal/errors.js)
-//===----------------------------------------------------------------------===//
-
-// An error of node with its code, e.g. ERR_STREAM_PUSH_AFTER_EOF.
 class StreamError extends Error {
   code: string
   constructor(code: string, message: string) {
@@ -65,13 +26,9 @@ class StreamRangeError extends RangeError {
   }
 }
 
-// What this code asks of the runtime
-// (runtime/library/tz_modules/library/library.c, inspect.c): the name of the
-// class of an object; an unknown as console.log shows it.
 function __tz_lib_class_name(object: object): string
 function __tz_lib_inspect(value: unknown): string
 
-// node's AbortError.
 export class AbortError extends Error {
   code = "ABORT_ERR"
   constructor(message = "The operation was aborted", cause?: Error) {
@@ -84,7 +41,6 @@ function errorOf(reason: unknown): Error | undefined {
   return reason instanceof Error ? reason : undefined
 }
 
-// How node's ERR_INVALID_ARG_TYPE describes the value it got.
 function received(value: unknown): string {
   if (value == undefined) return "Received undefined"
   if (typeof value == "function") return "Received function"
@@ -129,7 +85,6 @@ function nullValues() {
   return new StreamTypeError("ERR_STREAM_NULL_VALUES", "May not write null values to stream")
 }
 
-// node's aggregateTwoErrors.
 function aggregateTwoErrors(inner: Error | undefined, outer: Error | undefined) {
   if (inner != undefined && outer != undefined && inner != outer) {
     const errors = inner instanceof AggregateStreamError ? [...inner.errors, outer] : [inner, outer]
@@ -161,11 +116,6 @@ function codeOf(err: Error | undefined): string {
   return ""
 }
 
-//===----------------------------------------------------------------------===//
-// The state of the sides (lib/internal/streams/utils.js, readable.js and
-// writable.js): the bits of node
-//===----------------------------------------------------------------------===//
-
 const kObjectMode = 1 << 0
 const kErrorEmitted = 1 << 1
 const kAutoDestroy = 1 << 2
@@ -176,7 +126,6 @@ const kCloseEmitted = 1 << 6
 const kErrored = 1 << 7
 const kConstructed = 1 << 8
 
-// Readable.
 const kEnded = 1 << 9
 const kEndEmitted = 1 << 10
 const kReading = 1 << 11
@@ -195,7 +144,6 @@ const kHasPaused = 1 << 25
 const kPaused = 1 << 26
 const kDataListening = 1 << 27
 
-// Writable.
 const kWSync = 1 << 9
 const kFinalCalled = 1 << 10
 const kNeedDrain = 1 << 11
@@ -215,17 +163,11 @@ const kAfterWritePending = 1 << 28
 const kBuffered = 1 << 29
 const kWEnded = 1 << 30
 
-// The kinds of listeners of library/events/events.tz: one that takes the
-// emitter as `this`, and one that takes the first argument of its event as an
-// unknown.
 const kThisListener = 2
 const kUnknownArgListener = 3
 
-// The callback of a write, of end() and of the hooks.
 export type StreamCallback = (error?: Error) => void
 
-// The callback of _transform() and _flush(): an error, or the chunk to push,
-// if any.
 export type TransformCallback = (error?: Error, data?: unknown) => void
 
 function nop(_error?: Error) {}
@@ -235,17 +177,13 @@ class ReadableState {
   buffer: unknown[] = []
   bufferIndex: int = 0
   pipes: Stream[] = []
-  // node's awaitDrainWriters: one writer, or a set of them with
-  // kMultiAwaitDrain.
   awaitDrainWriter: Stream | undefined = undefined
   awaitDrainWriters = new Set<Stream>()
   decoder: StringDecoder | undefined = undefined
   encoding: string | undefined = undefined
   defaultEncoding = "utf8"
   errored: Error | undefined = undefined
-  // false: the readable side of a Duplex that has none.
   readable: boolean | undefined = undefined
-  // The public bits the fields of the stream show (see sync()); -1 for none.
   synced: int = -1
   constructor(bits: int) {
     this.bits = bits
@@ -258,7 +196,6 @@ interface BufferedWrite {
   callback: StreamCallback
 }
 
-// What a write that finished at once leaves for the next tick.
 class AfterWriteTick {
   count: int = 1
   constructor(readonly cb: StreamCallback) {}
@@ -275,20 +212,13 @@ class WritableState {
   onFinished: StreamCallback[] = []
   errored: Error | undefined = undefined
   defaultEncoding = "utf8"
-  // false: the writable side of a Duplex that has none.
   writable: boolean | undefined = undefined
-  // The public bits the fields of the stream show (see sync()); -1 for none.
   synced: int = -1
   constructor(bits: int) {
     this.bits = bits
   }
 }
 
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/state.js
-//===----------------------------------------------------------------------===//
-
-// 16 KiB on Windows, as node has it there, 64 KiB elsewhere.
 let defaultHighWaterMarkBytes: int = process.platform == "win32" ? 16 * 1024 : 64 * 1024
 let defaultHighWaterMarkObjectMode: int = 16
 
@@ -318,8 +248,6 @@ function getHighWaterMark(hwm: double | undefined, name: string, objectMode: boo
   return getDefaultHighWaterMark(objectMode)
 }
 
-// What the classes give Stream to make each side: node's options, those
-// the state of a side takes.
 interface SideOptions {
   highWaterMark?: double
   sideHighWaterMark?: double
@@ -332,17 +260,10 @@ interface SideOptions {
   autoDestroy?: boolean
 }
 
-//===----------------------------------------------------------------------===//
-// Stream: the code of every kind of stream
-//===----------------------------------------------------------------------===//
-
-// node's legacy Stream, and the base of all streams: the states of the sides
-// it has and node's methods over them.
 export class Stream extends EventEmitterBase {
   @__tz_hidden _readableState: ReadableState | undefined = undefined
   @__tz_hidden _writableState: WritableState | undefined = undefined
   @__tz_hidden allowHalfOpen = true
-  // What node's getters give.
   @__tz_hidden destroyed = false
   @__tz_hidden closed = false
   @__tz_hidden errored: Error | undefined = undefined
@@ -364,25 +285,19 @@ export class Stream extends EventEmitterBase {
   @__tz_hidden writableLength: int = 0
   @__tz_hidden writableNeedDrain = false
   @__tz_hidden writableObjectMode = false
-  // The waits of the stream that node keeps as listeners of symbols:
-  // kConstruct and kDestroy.
   @__tz_hidden _onConstruct: (() => void)[] = []
   @__tz_hidden _onDestroy: ((err: Error | undefined) => void)[] = []
-  // Whether the hooks node finds by their presence are there: _construct,
-  // _writev, _final and _flush.
   @__tz_hidden _hasConstruct = false
   @__tz_hidden _hasWritev = false
   @__tz_hidden _hasFinal = false
   @__tz_hidden _hasFlush = false
   @__tz_hidden _isTransform = false
-  // A Transform's callback that waits for the reader (node's kCallback).
   @__tz_hidden _transformCallback: StreamCallback | undefined = undefined
 
   constructor(options?: { captureRejections?: boolean }) {
     super(options)
   }
 
-  // ReadableState of node, made by the classes that read.
   _initReadable(options: SideOptions, isDuplex: boolean) {
     let bits = kEmitClose | kAutoDestroy | kConstructed | kSync
     const objectMode =
@@ -412,7 +327,6 @@ export class Stream extends EventEmitterBase {
     sync(this)
   }
 
-  // WritableState of node.
   _initWritable(options: SideOptions, isDuplex: boolean) {
     let bits = kWSync | kConstructed | kEmitClose | kAutoDestroy
     const objectMode =
@@ -438,7 +352,6 @@ export class Stream extends EventEmitterBase {
     sync(this)
   }
 
-  // The end of node's constructors: the signal, and _construct().
   _initEnd(signal: AbortSignal | undefined) {
     if (signal != undefined) addAbortSignalNoValidate(signal, this)
     if (this._hasConstruct) {
@@ -455,17 +368,11 @@ export class Stream extends EventEmitterBase {
     }
   }
 
-  //===--------------------------------------------------------------------===//
-  // The hooks, which the classes and the program's classes replace
-  //===--------------------------------------------------------------------===//
-
   _read(size: int): void {
     void size
     throw methodNotImplemented("_read()")
   }
 
-  // _write() and _writev() of the chunk as it is, which the classes pass on
-  // to those of their chunk type.
   _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
     void chunk
     void encoding
@@ -491,26 +398,17 @@ export class Stream extends EventEmitterBase {
     callback()
   }
 
-  // _flush() of a Transform.
   _flush(callback: TransformCallback): void {
     callback()
   }
 
-  // Whether _final is Transform's own (node's `this._final === final`),
-  // which Writable calls; or the stream is no Transform.
   _ownTransformFinal(): boolean {
     return true
   }
 
-  // A 'data' event of a chunk: the class gives it the type its listeners
-  // take (see the top of this file).
   _emitData(chunk: unknown): void {
     this.emit("data", chunk)
   }
-
-  //===--------------------------------------------------------------------===//
-  // Events: node's Readable.prototype.on and the others
-  //===--------------------------------------------------------------------===//
 
   on(type: string, listener: unknown, kind: int = 0) {
     const res = super.on(type, listener, kind)
@@ -518,10 +416,7 @@ export class Stream extends EventEmitterBase {
     if (state == undefined) return res
     if (type == "data") {
       state.bits |= kDataListening
-      // Update readableListening so that resume() may be a no-op a few
-      // lines down. This is needed to support once('readable').
       state.bits |= this.listenerCount("readable") > 0 ? kReadableListening : 0
-      // Try start flowing on next tick if stream isn't explicitly paused.
       if ((state.bits & (kHasFlowing | kFlowing)) != kHasFlowing) this.resume()
     } else if (type == "readable") {
       if ((state.bits & (kEndEmitted | kReadableListening)) == 0) {
@@ -544,11 +439,6 @@ export class Stream extends EventEmitterBase {
     const state = this._readableState
     if (state == undefined) return res
     if (type == "readable") {
-      // We need to check if there is someone still listening to readable and
-      // reset the state. However this needs to happen after readable has been
-      // emitted but before I/O (nextTick) to support once('readable', fn)
-      // cycles. This means that calling resume within the same tick will have
-      // no effect.
       process.nextTick(() => updateReadableListening(this))
     } else if (type == "data" && this.listenerCount("data") == 0) {
       state.bits &= ~kDataListening
@@ -563,12 +453,6 @@ export class Stream extends EventEmitterBase {
     return res
   }
 
-  //===--------------------------------------------------------------------===//
-  // Reading
-  //===--------------------------------------------------------------------===//
-
-  // push() and unshift() of a chunk as it is; undefined ends the stream,
-  // as null does in node.
   _pushChunk(chunk: unknown, encoding?: string): boolean {
     const state = readableStateOf(this)
     const ret =
@@ -600,9 +484,7 @@ export class Stream extends EventEmitterBase {
     const decoder = new StringDecoder(encoding)
     state.decoder = decoder
     state.bits |= kDecoder
-    // If setEncoding(null), decoder.encoding equals utf8.
     state.encoding = decoder.encoding
-    // Iterate over current buffer to convert already stored Buffers:
     let content = ""
     for (let i = state.bufferIndex; i < state.buffer.length; i++) {
       const data = state.buffer[i]
@@ -612,12 +494,11 @@ export class Stream extends EventEmitterBase {
     state.bufferIndex = 0
     if (content != "") state.buffer.push(content)
     this.readableLength = content.length
-    state.synced = -1 // the encoding shows
+    state.synced = -1
     sync(this)
     return this
   }
 
-  // read(n) of node, which gives undefined where node gives null.
   _readChunk(size?: int): unknown {
     const ret = read(this, readableStateOf(this), size)
     sync(this)
@@ -626,7 +507,6 @@ export class Stream extends EventEmitterBase {
 
   pipe<D extends Stream>(dest: D, options?: { end?: boolean }): D {
     if (this._readableState == undefined) {
-      // A Writable has no pipe(), which node says thus.
       errorOrDestroy(this, new StreamError("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable"))
       return dest
     }
@@ -636,17 +516,14 @@ export class Stream extends EventEmitterBase {
 
   unpipe(dest?: Stream) {
     const state = readableStateOf(this)
-    // If we're not piping anywhere, then do nothing.
     if (state.pipes.length == 0) return this
     if (dest == undefined) {
-      // remove all.
       const dests = state.pipes
       state.pipes = []
       this.pause()
       for (const d of dests) d.emit("unpipe", this, { hasUnpiped: false })
       return this
     }
-    // Try to find the right one.
     const index = state.pipes.indexOf(dest)
     if (index == -1) return this
     state.pipes.splice(index, 1)
@@ -655,13 +532,9 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  // pause() and resume() are remnants of the legacy readable stream API. If
-  // the user uses them, then switch into old mode.
   resume() {
     const state = readableStateOf(this)
     if ((state.bits & kFlowing) == 0) {
-      // We flow only if there is no one listening for readable, but we still
-      // have to call resume().
       state.bits |= kHasFlowing
       if ((state.bits & kReadableListening) == 0) state.bits |= kFlowing
       else state.bits &= ~kFlowing
@@ -685,26 +558,16 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  //===--------------------------------------------------------------------===//
-  // Writing
-  //===--------------------------------------------------------------------===//
-
-  // write() of a chunk as it is: node's _write(), which gives an Error
-  // where the write failed at once.
   _writeAny(chunk: unknown, encoding: string | undefined, cb: StreamCallback): boolean | Error {
     const ret = writeImpl(this, chunk, encoding, cb)
     sync(this)
     return ret
   }
 
-  // node's state.onwrite, the callback of each _write(): a method of the
-  // stream, which needs no closure of its own.
   _onwrite(er?: Error): void {
     onwrite(this, er)
   }
 
-  // write(chunk, encoding, cb) of the program
-  // (compiler/library/stream/sema/sema_stream.cpp).
   _writeBool(chunk: unknown, encoding: string | undefined, cb: StreamCallback | undefined): boolean {
     return this._writeAny(chunk, encoding, cb ?? nop) == true
   }
@@ -732,7 +595,6 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  // end(chunk, encoding, cb) of node.
   _endWith(hasChunk: boolean, chunk: unknown, encoding: string | undefined,
            cb: StreamCallback | undefined) {
     const state = writableStateOf(this)
@@ -741,19 +603,12 @@ export class Stream extends EventEmitterBase {
       const ret = writeImpl(this, chunk, encoding, nop)
       if (ret instanceof Error) err = ret
     }
-    // .end() fully uncorks.
     if ((state.bits & kCorked) != 0) {
       this.writableCorked = 1
       this.uncork()
     }
     if (err != undefined) {
-      // Do nothing...
     } else if ((state.bits & (kEnding | kErrored)) == 0) {
-      // This is forgiving in terms of unnecessary calls to end() and can hide
-      // logic errors. However, usually such errors are harmless and causing a
-      // hard error can be disproportionately destructive. It is not always
-      // trivial for the user to determine whether end() needs to be called
-      // or not.
       state.bits |= kEnding
       sync(this)
       finishMaybe(this, state, true)
@@ -785,13 +640,8 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  //===--------------------------------------------------------------------===//
-  // Destroying (lib/internal/streams/destroy.js)
-  //===--------------------------------------------------------------------===//
-
   destroy(error?: Error, callback?: StreamCallback) {
     const w = this._writableState
-    // Invoke pending callbacks (Writable.prototype.destroy).
     if (w != undefined && (w.bits & (kBuffered | kOnFinished)) != 0 &&
         (w.bits & kDestroyed) == 0) {
       const state = w
@@ -801,7 +651,6 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  // process.stdout and process.stderr, which pipe() does not end.
   _markStdio() {
     stdioStreams.push(this)
   }
@@ -828,7 +677,6 @@ export class Stream extends EventEmitterBase {
   }
 }
 
-// The state of the readable side, which the caller knows is there.
 function readableStateOf(stream: Stream): ReadableState {
   const state = stream._readableState
   if (state == undefined) throw new StreamTypeError("ERR_INVALID_THIS", "the stream is not readable")
@@ -841,9 +689,6 @@ function writableStateOf(stream: Stream): WritableState {
   return state
 }
 
-// Node's getters, from the states: the fields of the stream that hold them.
-// The bits of each side that node's getters read: sync() does nothing while
-// they stay as they were, which they do on most calls.
 const kReadablePublic = kEndEmitted | kHasFlowing | kFlowing | kDataEmitted | kDestroyed |
   kErrorEmitted | kErrored | kClosed | kDecoder
 const kWritablePublic = kEnding | kFinished | kDestroyed | kNeedDrain | kWEnded | kErrored | kClosed
@@ -879,8 +724,6 @@ function syncNow(stream: Stream, r: ReadableState | undefined, w: WritableState 
     stream.writableAborted =
       w.writable != false && (b & (kDestroyed | kErrored)) != 0 && (b & kFinished) == 0
   }
-  // A Duplex is destroyed when both sides are; its errored is that of the
-  // readable side.
   if (r != undefined && w != undefined) {
     stream.destroyed = (r.bits & kDestroyed) != 0 && (w.bits & kDestroyed) != 0
     stream.closed = (r.bits & kClosed) != 0
@@ -896,7 +739,6 @@ function syncNow(stream: Stream, r: ReadableState | undefined, w: WritableState 
   }
 }
 
-// A chunk of a stream of bytes, which is a Buffer.
 function bufferOf(chunk: unknown): Buffer {
   return __tz_chunk<Buffer>(chunk)
 }

@@ -5,9 +5,6 @@
 
 namespace tz {
 
-// `enum Name { A, B = 5, C }`. The members are constants: numbers counting up
-// from 0 or from the last initializer, or strings. As a type, the enum is
-// `int`, or `string` when its members are strings.
 struct EnumDecl : Stmt {
   EnumDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Enum, loc), name(name) {}
   static bool classof(const Stmt *s) { return s->kind() == Kind::Enum; }
@@ -24,10 +21,9 @@ struct EnumDecl : Stmt {
 
   llvm::StringRef name;
   std::vector<EnumMember> members;
-  // Set by Checker.
   bool isString = false;
   bool resolved = false;
   bool resolving = false;
 };
 
-} // namespace tz
+}

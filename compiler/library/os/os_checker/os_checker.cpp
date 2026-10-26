@@ -37,7 +37,7 @@ const Type *userInfoType() {
                       "UserInfo");
 }
 
-} // namespace
+}
 
 OsChecker::OsChecker(Checker &checker) : checker_(checker) {}
 
@@ -80,7 +80,6 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return call;
   }
   if (fn == "endianness") {
-    // Every system tz builds for is little-endian.
     auto *lit = checker_.ctx_.make<StringLitExpr>(loc, u"LE");
     lit->type = Type::string();
     return lit;
@@ -110,4 +109,4 @@ Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   return call;
 }
 
-} // namespace tz
+}

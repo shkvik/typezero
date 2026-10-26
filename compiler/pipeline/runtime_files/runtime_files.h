@@ -5,8 +5,6 @@
 
 namespace tz {
 
-// The files tz brings next to its executable: the runtime, the libraries of node:crypto, the
-// texts of the licenses.
 class RuntimeFiles {
 public:
   explicit RuntimeFiles(const char *argv0);
@@ -17,4 +15,4 @@ private:
   std::string dir_;
 };
 
-} // namespace tz
+}

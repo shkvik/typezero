@@ -20,21 +20,15 @@ namespace tz {
 
 namespace {
 
-// What `await` of a value of `type` gives: the value of a Promise, or the
-// value itself.
 const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
 
-} // namespace
+}
 
 PromiseStaticChecker::PromiseStaticChecker(Checker &checker) : checker_(checker) {}
 
-// The promises (or values) Promise.all and the like take: an array, or an
-// array literal whose elements differ, which then is a tuple. `element`
-// gets the type of what each gives, `tuple` the types for a tuple.
 bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElement,
                                             const Type *&element, std::vector<const Type *> &tuple,
                                             llvm::StringRef fn) {
-  // A union that may hold a Promise, which JavaScript would wait for.
   auto mayBePromise = [&](const Type *t, llvm::SMLoc loc) {
     if (t->isPromise() || AsyncChecker::awaitedType(t) == t) {
       return false;
@@ -81,8 +75,6 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
       }
       types.push_back(e.expr->type);
     }
-    // One type that holds them all makes an array: Promise.reject() gives a
-    // Promise of anything.
     const Type *common = types.front();
     for (const Type *t : types) {
       if (common) {
@@ -128,7 +120,6 @@ bool PromiseStaticChecker::checkPromiseList(Expr *&arg, const Type *wantedElemen
     }
     return true;
   }
-  // An iterator or a Set, which JavaScript would take too: an array of it.
   auto *name = dyn_cast<NameExpr>(arg);
   std::string spread = type->isIterator() || type->isDict()
                            ? "; make an array of them: '" + fn.str() + "([..." +
@@ -184,7 +175,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (type->isError()) {
       return call;
     }
-    if (type->isPromise()) { // that Promise itself
+    if (type->isPromise()) {
       call->type = type;
       return call;
     }
@@ -222,7 +213,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (member->typeArgs.size() == 1) {
-      value = awaited(checker_.typeResolver().resolveType(member->typeArgs[0], /*allowVoid=*/true));
+      value = awaited(checker_.typeResolver().resolveType(member->typeArgs[0], true));
     } else if (expected && expected->isObject()) {
       if (const Field *promise = expected->field("promise");
           promise && promise->type->isPromise()) {
@@ -269,8 +260,6 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       return call;
     }
     if (!tuple.empty() && (builtin == Builtin::PromiseRace || builtin == Builtin::PromiseAny)) {
-      // One value comes out of race and any: of one type, or of their union,
-      // as in TypeScript.
       element = tuple.front();
       for (const Type *t : tuple) {
         const Type *common = LiteralTypes::unionUnify(element, t);
@@ -301,8 +290,6 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
         }
         call->type = Type::promise(Type::tuple(tuple));
       } else if (element->isVoid()) {
-        // Nothing to collect (JavaScript gives an array of undefined, which
-        // tz has no type for): it only waits.
         call->type = Type::promise(Type::voidTy());
       } else {
         call->type = Type::promise(Type::array(element));
@@ -310,7 +297,6 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
       break;
     case Builtin::PromiseAllSettled:
       if (!tuple.empty()) {
-        // A tuple of results, each of its own type, as in TypeScript.
         std::vector<const Type *> results;
         for (const Type *t : tuple) {
           results.push_back(
@@ -338,4 +324,4 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
   return call;
 }
 
-} // namespace tz
+}

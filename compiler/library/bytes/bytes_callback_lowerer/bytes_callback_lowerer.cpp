@@ -28,9 +28,6 @@ namespace tz {
 
 BytesCallbackLowerer::BytesCallbackLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// forEach, map, filter, reduce, reduceRight, find, findLast, findIndex,
-// findLastIndex, some, every and sort(compare) of a typed array. Its length
-// never changes, and its elements are numbers: nothing to count.
 llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *arrayType = member->object->type;
@@ -55,7 +52,6 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
       call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
   if (method == Builtin::ArrSortWith) {
-    // toSorted(compare) sorts a copy.
     bool copy = member->name == "toSorted";
     llvm::Value *target = array;
     Lowering::Held heldCopy{nullptr, nullptr, nullptr};
@@ -76,7 +72,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
     lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldCallback), callbackType);
     lowering_.emitThrowCheckIf(throws);
     if (!copy) {
-      return lowering_.throwLowerer().take(heldArray); // the same array, with this reference
+      return lowering_.throwLowerer().take(heldArray);
     }
     lowering_.refCounts().releaseValue(lowering_.throwLowerer().take(heldArray), arrayType);
     return lowering_.throwLowerer().take(heldCopy);
@@ -114,8 +110,6 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
       start = lowering_.builder_.CreateAdd(start, step);
     }
   }
-  // map: a new typed array of the same kind, of the same length; filter: an
-  // array of the elements kept, which becomes one at the end.
   llvm::Value *out = nullptr;
   int32_t kind = int32_t(arrayType->bytes());
   if (method == Builtin::ArrMap) {
@@ -152,7 +146,6 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("each.end");
   lowering_.functionFrame().emitBlock(headBlock);
   llvm::Value *i = lowering_.builder_.CreateLoad(i64, indexSlot, "i");
-  // Going back, the unsigned comparison stops below 0 too.
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateICmpULT(i, length), bodyBlock, endBlock);
 
   lowering_.functionFrame().switchTo(bodyBlock);
@@ -171,7 +164,7 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   }
   args.resize(passes);
   if (passes == valueArgs + 2) {
-    lowering_.refCounts().retainValue(array, arrayType); // the callback owns its arguments
+    lowering_.refCounts().retainValue(array, arrayType);
   }
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(callback, callbackType, args);
   lowering_.emitThrowCheckIf(throws);
@@ -271,4 +264,4 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   return nullptr;
 }
 
-} // namespace tz
+}

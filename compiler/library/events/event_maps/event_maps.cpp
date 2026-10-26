@@ -34,16 +34,12 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// The events every emitter has, which its code emits itself.
 bool isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
 
-// What the listeners of newListener and removeListener get: the name of the
-// event and the listener.
 const Type *serviceEventArgs() { return Type::tuple({Type::string(), Type::unknown()}); }
 
-// "'data', 'end' and 'error'"
 std::string eventList(const Type *events) {
   std::string out;
   llvm::ArrayRef<Field> fields = events->fields();
@@ -54,8 +50,6 @@ std::string eventList(const Type *events) {
   return out;
 }
 
-// The name nearest to `name` among the events, for a typo; empty if none
-// is near.
 std::string nearestEvent(const Type *events, llvm::StringRef name) {
   std::string best;
   unsigned bestDistance = ~0u;
@@ -70,7 +64,7 @@ std::string nearestEvent(const Type *events, llvm::StringRef name) {
   return bestDistance <= std::max<size_t>(2, name.size() / 3) ? best : std::string();
 }
 
-} // namespace
+}
 
 EventMaps::EventMaps(Checker &checker) : checker_(checker) {}
 
@@ -85,8 +79,6 @@ const Type *EventMaps::eventMapOf(const Type *type) const {
   if (!emitter) {
     return nullptr;
   }
-  // The streams of node:stream have theirs from StreamEmitter (see
-  // library/stream/stream.tz).
   const ClassDecl *streams = checker_.libraryClass("StreamEmitter");
   for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
     if (c->generic && (c->generic == emitter || c->generic == streams) && !c->typeArgs.empty()) {
@@ -150,8 +142,6 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
     name = checker_.argumentChecker().checkArg(name, Type::string());
     return name->type->isError() ? nullptr : events->valueType();
   }
-  // A constant, after the check: a literal, a constant holding one, a
-  // member of a string enum.
   name = checker_.argumentChecker().checkArg(name, Type::string());
   std::optional<std::string> key = checker_.keyedFieldChecker().constantKey(name);
   if (!key) {
@@ -174,22 +164,19 @@ const Type *EventMaps::eventArgs(const Type *events, Expr *&name, llvm::StringRe
   if (isServiceEvent(*key)) {
     return serviceEventArgs();
   }
-  // A map that a round looking for maps knows only by what it found so far.
   if (auto open = checker_.openMaps_.find(events); open != checker_.openMaps_.end()) {
     for (const EventInference::Event &e : checker_.inference_->maps[open->second]) {
       if (e.name == *key) {
         return checker_.eventMapInference().fromPortable(e.args, loc);
       }
     }
-    return nullptr; // not yet
+    return nullptr;
   }
   if (const Field *f = events->field(*key)) {
     return f->type;
   }
   std::string message;
   if (checker_.inferredMaps_.count(events)) {
-    // A map found from emit() calls: an event no code emits is a typo, as a
-    // rule (docs/events.md, section 2).
     message = "no code of the program emits '" + *key + "' on this emitter";
     if (events->fields().empty()) {
       message += ", nor any other event: an emitter without an event map has the events that "
@@ -232,8 +219,6 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
   const Type *sync = listenerType(args, Type::voidTy());
   const Type *async = listenerType(args, Type::promise(Type::voidTy()));
   kind = Checker::ListenerKind::Plain;
-  // `function (this: Server, port: int)`: it gets the emitter as `this`,
-  // which must be what it says.
   auto takesThis = [&](const Type *self, llvm::SMLoc loc) {
     if (self->isError()) {
       return false;
@@ -251,14 +236,12 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
     std::vector<const Type *> params{self};
     params.insert(params.end(), sync->params().begin(), sync->params().end());
 
-    return Type::function(params, sync->minArgs() + 1, sync->hasRest(), Type::voidTy(),
-                          /*hasThis=*/true);
+    return Type::function(params, sync->minArgs() + 1, sync->hasRest(), Type::voidTy(), true);
   };
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     FunctionDecl *fn = fe->fn;
     if (!fn->params.empty() && fn->params[0].name == "this" && fn->params[0].type) {
-      const Type *self =
-          checker_.typeResolver().resolveType(*fn->params[0].type, /*allowVoid=*/false);
+      const Type *self = checker_.typeResolver().resolveType(*fn->params[0].type, false);
       if (!takesThis(self, fn->params[0].loc)) {
         arg = checker_.exprChecker().checkExpr(arg);
         return arg;
@@ -280,8 +263,6 @@ Expr *EventMaps::checkListener(Expr *arg, const Type *args, llvm::StringRef even
       return checker_.typeRelations().convert(checker_.typeRelations().coerce(arg, wanted),
                                               Type::unknown());
     }
-    // An arrow written here gets the arguments of the event; an async one
-    // gives a Promise, which the emitter lets go (docs/events.md, section 3).
     if (fn->isAsync) {
       kind = Checker::ListenerKind::Async;
     }
@@ -357,7 +338,7 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   }
   std::vector<const Type *> args;
   for (const TypeRef &ref : create->typeArgs) {
-    args.push_back(checker_.typeResolver().resolveType(ref, /*allowVoid=*/false));
+    args.push_back(checker_.typeResolver().resolveType(ref, false));
     if (args.back()->isError()) {
       return nullptr;
     }
@@ -377,4 +358,4 @@ const Type *EventMaps::createdType(const NewExpr *create) {
   return inst ? inst->type : nullptr;
 }
 
-} // namespace tz
+}

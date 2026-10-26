@@ -58,18 +58,15 @@ void Inference::from(const Type *pattern, const Type *actual) {
   if (auto at = llvm::find(params, pattern); at != params.end()) {
     size_t k = size_t(at - params.begin());
     if (actual->isUndefined()) {
-      undefinedSeen[k] = true; // `T | undefined`, if anything else gives T
+      undefinedSeen[k] = true;
       return;
     }
-    // `xs: Iterable<double>` given a literal `[1, 2]`: an array of the
-    // values it wants, as a literal takes the type of its parameter.
     const Type *element = pattern->iterated();
     const Type *candidate = actual;
     if (element && weak && actual->isArray() && !mentionsParam(element)) {
       candidate = Type::array(element);
     }
     (weak ? weakCandidates : candidates)[k].push_back(candidate);
-    // `xs: Iterable<T>`: T is what iterating the argument gives.
     if (element && elementOf) {
       if (const Type *given = elementOf(candidate)) {
         from(element, given);
@@ -92,8 +89,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
     }
     return;
   case Type::Kind::Result:
-    // `ok(1)` is a `Result<int, never>`: E is never there, as in
-    // TypeScript, unless another argument gives it.
     if (actual->isResult()) {
       from(pattern->okType(), actual->okType());
       from(pattern->errType(), actual->errType());
@@ -103,8 +98,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
     if (!actual->isFunction()) {
       return;
     }
-    // `(...args: A) => R`: the parameters of the function from there on
-    // are the list, with those it may leave out and its rest parameter.
     llvm::ArrayRef<const Type *> ps = pattern->params();
     bool list = pattern->hasRest() && (ps.back()->isListParam() || spreadsLists(ps.back()));
     size_t fixed = list ? ps.size() - 1 : ps.size();
@@ -114,7 +107,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
     if (list && actual->params().size() - (actual->hasRest() ? 1 : 0) >= fixed) {
       from(ps.back(), paramsAsList(actual, fixed));
     }
-    // A method that returns nothing gives `R = void`.
     if (auto at = llvm::find(params, pattern->ret());
         at != params.end() && actual->ret()->isVoid()) {
       candidates[size_t(at - params.begin())].push_back(actual->ret());
@@ -132,8 +124,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
     from(pattern->sent(), actual->sent());
     return;
   case Type::Kind::Dict:
-    // An object literal goes where a Record is expected: its values say
-    // the type of the Record's.
     if (pattern->isRecord() && actual->isObject() && !actual->isClass() && !actual->isTuple()) {
       for (const Field &f : actual->fields()) {
         from(pattern->valueType(), f.type);
@@ -152,16 +142,12 @@ void Inference::from(const Type *pattern, const Type *actual) {
     }
     return;
   case Type::Kind::ClassRef:
-    // `Constructor<T>` against a class, `typeof User`, or a Constructor:
-    // T is what its objects are.
     if (pattern->isConstructor() && actual->isClassRef()) {
       from(pattern->constructed(),
            actual->isConstructor() ? actual->constructed() : actual->classRef()->type);
     }
     return;
   case Type::Kind::Object: {
-    // An async iterator, as an iterator (`AsyncIterable<T>`); an object
-    // with `[Symbol.asyncIterator]()`, as what that gives.
     if (pattern->isAsyncIterator()) {
       if (!actual->isAsyncIterator() && asyncOf) {
         if (const Type *given = asyncOf(actual)) {
@@ -175,17 +161,13 @@ void Inference::from(const Type *pattern, const Type *actual) {
       }
       return;
     }
-    // Recursive types meet themselves again.
     if (!actual->isObject() || !visited.insert({pattern, actual}).second) {
       return;
     }
-    // `[X, ...A]` against an argument list: the parts of the list.
     if (spreadsLists(pattern) && actual->isTuple()) {
       matchList(pattern, actual, nullptr);
       return;
     }
-    // `Box<T>` against `Box<int>`, or a class that extends one: the type
-    // arguments of the instance.
     if (const ClassDecl *cls = pattern->classDecl(); cls && !pattern->typeArgs().empty()) {
       const ClassDecl *generic = cls->generic ? cls->generic : cls;
       if (const ClassDecl *found = genericInstanceOf(actual, generic)) {
@@ -195,8 +177,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
       }
       return;
     }
-    // `Repo<T>` against a type that is `Repo<User>`, or is declared to be
-    // (a class that implements it).
     if (auto origin = origins.find(pattern); origin != origins.end()) {
       std::vector<const Type *> queue{actual};
       for (size_t i = 0; i < queue.size(); ++i) {
@@ -221,8 +201,6 @@ void Inference::from(const Type *pattern, const Type *actual) {
     return;
   }
   case Type::Kind::Union: {
-    // `T | string` against `int | string`: T is what the other members do
-    // not hold.
     std::vector<const Type *> open, fixed;
     for (const Type *m : pattern->members()) {
       (mentionsAnyOf(m, params) ? open : fixed).push_back(m);
@@ -252,8 +230,6 @@ void Inference::matchList(const Type *pattern, const Type *actual,
                           const std::vector<const Type *> *bound) {
   llvm::ArrayRef<Field> parts = pattern->fields();
   size_t count = actual->fields().size();
-  // How many elements each part takes: one for a type, the length of a
-  // known list, the rest for the one unknown list.
   std::vector<int> lengths(parts.size(), 1);
   int unknown = -1;
   size_t known = 0;
@@ -278,7 +254,6 @@ void Inference::matchList(const Type *pattern, const Type *actual,
       unknown = int(i);
     }
   }
-  // A rest part of the list goes only to the last part.
   if (known > count || (actual->tupleRest() && unknown != int(parts.size()) - 1)) {
     return;
   }
@@ -307,4 +282,4 @@ void Inference::retry(const std::vector<const Type *> &bound) {
   }
 }
 
-} // namespace tz
+}

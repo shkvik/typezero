@@ -43,9 +43,6 @@ Checker::StreamChunks ChunkTypes::streamChunksOf(const ClassDecl *cls) const {
 }
 
 void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
-  // A Duplex<W, R> is a Writable<W> too, as node's Duplex is (Symbol.hasInstance
-  // of Writable): their objects lie in memory as Stream's do (see
-  // library/stream/stream.tz).
   ClassDecl *generic = inst->generic;
   ClassDecl *writable = checker_.libraryClass("Writable");
   if (!generic || !generic->library || generic->name != "Duplex" || !writable ||
@@ -61,16 +58,10 @@ void ChunkTypes::addStreamBases(ClassDecl *inst, llvm::SMLoc loc) {
   }
 }
 
-// `class Upper extends Transform { _transform(chunk, encoding, callback) {
-// ... } }`: the method replaces the one the stream calls, as in node, so it
-// takes its parameters. They are known before the methods of the library's
-// classes are (an instance of a generic class gets its methods once all
-// classes have theirs), from the chunk types of the class it extends.
 std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const FunctionDecl *fn) {
-  if (!isStreamHook(fn, /*linked=*/false)) {
+  if (!isStreamHook(fn, false)) {
     return std::nullopt;
   }
-  // The class of node:stream the class extends, and its chunk types.
   const ClassDecl *lib = fn->cls->parent;
   while (lib && !lib->library) {
     lib = lib->parent;
@@ -179,7 +170,7 @@ const Type *ChunkTypes::inferredChunkType(const std::string &site, llvm::SMLoc l
     return nullptr;
   }
   if (checker_.openMaps_.count(map)) {
-    return map; // the placeholder of this round
+    return map;
   }
   const Field *chunk = map->field("chunk");
   if (!chunk || chunk->type->fields().empty()) {
@@ -219,7 +210,6 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   if (value->isLiteral()) {
     value = value->literalBase();
   }
-  // `push(more ? x : undefined)`: undefined ends the stream.
   value = value->nonOptional();
   const Type *found = Type::tuple({value});
   std::vector<EventInference::Event> &events = checker_.inference_->maps[open->second];
@@ -227,8 +217,6 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
     if (e.name != "chunk") {
       continue;
     }
-    // Chunks of other types: one that holds both, as int and double make
-    // double; the last round reports others.
     const Type *before = checker_.eventMapInference().fromPortable(e.args, loc);
     if (!before || before == found || before->fields().size() != 1) {
       return true;
@@ -252,4 +240,4 @@ bool ChunkTypes::recordStreamChunk(const Type *chunk, const Type *value, llvm::S
   return true;
 }
 
-} // namespace tz
+}

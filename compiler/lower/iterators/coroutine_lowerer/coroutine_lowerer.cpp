@@ -23,15 +23,13 @@ namespace tz {
 
 namespace {
 
-// The header before the frame of the coroutine: { i64 rc, ptr layout }.
 constexpr uint64_t kHeaderSize = 16;
 
-// The alignment of the frame, which follows the header of an allocation.
 constexpr uint32_t kFrameAlign = 8;
 
 enum PromiseField : unsigned { kOut, kIn, kRet, kRunning, kClose };
 
-} // namespace
+}
 
 CoroutineLowerer::CoroutineLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -54,8 +52,6 @@ void CoroutineLowerer::restoreContext(const Lowering::EmitContext &context) {
   lowering_.inline_ = context.inlined;
 }
 
-// The start of a coroutine: its frame is allocated after a header that makes
-// it an object of the runtime, which the ramp returns.
 void CoroutineLowerer::beginCoroutine(unsigned layoutFlags, const Type *sent,
                                       llvm::StructType *promise) {
   lowering_.function_->addFnAttr(llvm::Attribute::PresplitCoroutine);
@@ -80,8 +76,6 @@ void CoroutineLowerer::beginCoroutine(unsigned layoutFlags, const Type *sent,
       lowering_.builder_.CreateConstInBoundsGEP1_64(i8, memory, kHeaderSize, "frame");
   c.handle = lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_begin),
                                            {c.id, frame}, "handle");
-  // The object the ramp returns comes from the handle: LLVM takes the frame
-  // to be reached only through it.
   c.object = lowering_.builder_.CreateGEP(
       i8, c.handle,
       llvm::ConstantInt::getSigned(lowering_.builder_.getInt64Ty(), -int64_t(kHeaderSize)),
@@ -103,7 +97,6 @@ void CoroutineLowerer::emitSuspend() {
   llvm::SwitchInst *next = lowering_.builder_.CreateSwitch(state, c.returnBlock, 2);
   next->addCase(lowering_.builder_.getInt8(0), resumeBlock);
   next->addCase(lowering_.builder_.getInt8(1), destroyBlock);
-  // Destroyed while it waits here: what its scopes hold is released.
   lowering_.functionFrame().switchTo(destroyBlock);
   bool noAwait = std::exchange(lowering_.cleanupNoAwait_, true);
   lowering_.functionFrame().emitCleanups(0);
@@ -121,9 +114,6 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
     lowering_.builder_.CreateStore(value, out);
     emitSuspend();
   } else {
-    // Whether a `finally` waits here, which closing the generator runs; and
-    // while it closes, a `yield` in a `finally` gives nothing: the generator
-    // stops there, as no one asks for more.
     bool closable = lowering_.tryLowerer().finallyBetween(~size_t(0)) != nullptr;
     llvm::Value *close =
         lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kClose);
@@ -148,7 +138,6 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
     lowering_.functionFrame().switchTo(suspendBlock);
     emitSuspend();
     if (closable) {
-      // Resumed to close: a `return` from here.
       llvm::BasicBlock *closeBlock = lowering_.functionFrame().newBlock("yield.close");
       llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("yield.resumed");
       lowering_.builder_.CreateCondBr(
@@ -173,7 +162,6 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
   if (!c.sent) {
     return lowering_.optionalLowerer().undefinedValue(resultType);
   }
-  // What next(x) sent, which the caller keeps: a copy for the generator.
   llvm::Value *in = lowering_.builder_.CreateLoad(
       lowering_.builder_.getPtrTy(),
       lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, c.promise, kIn), "in");
@@ -186,7 +174,6 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
   }
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(in), givenBlock, noneBlock);
   if (!resultType->isOptional()) {
-    // next() without a value resumed a `yield` whose value is needed.
     lowering_.functionFrame().switchTo(noneBlock);
     lowering_.throwLowerer().emitThrowNew(1,
                                           "next() resumed a 'yield' that needs a value of type '" +
@@ -210,8 +197,6 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
   return result;
 }
 
-// The coroutine is done: what it returns goes where the caller wants it, if
-// anywhere, and it waits at its final suspension to be destroyed.
 void CoroutineLowerer::emitCoroutineReturn(llvm::Value *value, const Type *type) {
   Lowering::Coroutine &c = *lowering_.coro_;
   if (value && type && !type->isVoid() && !type->isUndefined()) {
@@ -244,7 +229,6 @@ void CoroutineLowerer::finishCoroutine() {
     lowering_.builder_.CreateUnreachable();
   }
   llvm::Value *none = llvm::ConstantTokenNone::get(lowering_.ctx_);
-  // The final suspension; next() never resumes it from there.
   lowering_.functionFrame().switchTo(c.finalBlock);
   llvm::Value *state = lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_suspend),
                                                      {none, lowering_.builder_.getTrue()}, "final");
@@ -255,7 +239,6 @@ void CoroutineLowerer::finishCoroutine() {
   lowering_.functionFrame().switchTo(resumedBlock);
   lowering_.builder_.CreateUnreachable();
 
-  // Freeing: the frame starts after the header of the object.
   lowering_.functionFrame().switchTo(c.freeBlock);
   llvm::Value *frame = lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_free),
                                                      {c.id, c.handle}, "mem");
@@ -292,7 +275,6 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
   llvm::Value *promise = lowering_.builder_.CreateCall(
       coroIntrinsic(llvm::Intrinsic::coro_promise),
       {frame, lowering_.builder_.getInt32(kFrameAlign), lowering_.builder_.getFalse()}, "promise");
-  // A generator that calls next() on itself, as JavaScript reports.
   llvm::Value *running =
       lowering_.builder_.CreateStructGEP(lowering_.promiseTy_, promise, kRunning);
   llvm::BasicBlock *runningBlock = lowering_.functionFrame().newBlock("next.running");
@@ -315,7 +297,6 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
   lowering_.builder_.CreateStore(lowering_.builder_.getInt32(1), running);
   lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
   lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), running);
-  // Its code threw: the generator is done, and the error goes on here.
   lowering_.throwLowerer().emitThrowCheck();
   llvm::Value *gave = lowering_.builder_.CreateNot(
       lowering_.builder_.CreateCall(coroIntrinsic(llvm::Intrinsic::coro_done), {frame}));
@@ -330,4 +311,4 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
   return has;
 }
 
-} // namespace tz
+}

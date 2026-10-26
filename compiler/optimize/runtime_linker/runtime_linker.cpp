@@ -10,14 +10,8 @@ namespace tz {
 
 namespace {
 
-// A hot runtime function with more instructions than this, counting the
-// static helpers it brings along, is not copied into programs after all: the
-// inliner would rarely take it, and optimizing it again for every program
-// only costs compile time.
 constexpr unsigned kRuntimeCopyLimit = 100;
 
-// The instructions of `fn` and of the static functions it refers to, which
-// would be copied with it.
 unsigned copySize(llvm::Function &fn, llvm::SmallPtrSetImpl<llvm::Function *> &seen) {
   unsigned size = fn.getInstructionCount();
   for (llvm::Instruction &inst : llvm::instructions(fn)) {
@@ -33,7 +27,7 @@ unsigned copySize(llvm::Function &fn, llvm::SmallPtrSetImpl<llvm::Function *> &s
   return size;
 }
 
-} // namespace
+}
 
 Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
   Errors errors;
@@ -42,7 +36,6 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     errors.tool("the runtime is missing: " + path);
     return errors;
   }
-  // Lazily: only the functions that end up linked are read in full.
   llvm::Expected<std::unique_ptr<llvm::Module>> runtime =
       llvm::getOwningLazyBitcodeModule(std::move(*buffer), module.getContext());
   if (!runtime) {
@@ -52,8 +45,6 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
   (*runtime)->setTargetTriple(module.getTargetTriple());
   (*runtime)->setDataLayout(module.getDataLayout());
 
-  // A call through a declaration that disagrees with the definition would
-  // not be inlined, or would pass its arguments wrongly.
   for (llvm::Function &decl : module) {
     llvm::Function *def = decl.isDeclaration() ? (*runtime)->getFunction(decl.getName()) : nullptr;
     if (def && def->getFunctionType() != decl.getFunctionType()) {
@@ -62,10 +53,6 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
       return errors;
     }
   }
-  // What the copies refer to by name is the one copy in tzrt.lib. State that
-  // is static would be duplicated instead: every copied function would get a
-  // variable of its own. (Names starting with __ belong to the C library's
-  // inline functions.)
   llvm::StringSet<> shared;
   for (llvm::GlobalValue &value : (*runtime)->global_values()) {
     if (value.isDeclaration()) {
@@ -81,8 +68,6 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
     }
   }
 
-  // Lowering declares every runtime function; only those the program calls
-  // are to be linked.
   for (llvm::Function &fn : llvm::make_early_inc_range(module)) {
     if (fn.isDeclaration() && fn.use_empty()) {
       fn.eraseFromParent();
@@ -94,8 +79,6 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
   }
 
   for (llvm::Function &fn : module) {
-    // clang named a CPU for the runtime; the inliner does not mix functions
-    // built for different CPUs, so everything uses the target's default.
     fn.removeFnAttr("target-cpu");
     fn.removeFnAttr("target-features");
     fn.removeFnAttr("tune-cpu");
@@ -122,10 +105,8 @@ Errors RuntimeLinker::run(llvm::Module &module, const std::string &path) const {
       var.setLinkage(llvm::GlobalValue::ExternalLinkage);
     }
   }
-  // Static helpers that only the dropped bodies called are left over;
-  // OptimizePass removes them before optimizing.
 
   return errors;
 }
 
-} // namespace tz
+}

@@ -26,8 +26,6 @@ void Scopes::declare(llvm::StringRef name, llvm::SMLoc loc, Checker::ScopeEntry 
     return;
   }
   const Checker::ScopeEntry &previous = it->second;
-  // Two functions with one name are not overloads: plain functions have none
-  // (docs/overloads.md).
   checker_.diags_.error(
       loc, "duplicate declaration of '" + name + "'" +
                (entry.func && previous.func
@@ -47,7 +45,6 @@ Checker::ScopeEntry Scopes::lookup(llvm::StringRef name) const {
       return found->second;
     }
   }
-  // Error and its kinds, which the program's own names hide.
   if (ClassDecl *kind = checker_.throwChecker().errorKindClass(name)) {
     return {nullptr, nullptr, nullptr, kind};
   }
@@ -75,7 +72,6 @@ const Type *Scopes::varType(VarSymbol *var) {
   if (var->type) {
     return var->type;
   }
-  // A function's variable, while its type is being worked out.
   FunctionDecl *fn = var->function ? var->function : var->lambda;
   if (!fn || !fn->sym) {
     return Type::error();
@@ -97,4 +93,4 @@ void Scopes::checkVisible(NameExpr *name, const VarSymbol *var) {
   }
 }
 
-} // namespace tz
+}

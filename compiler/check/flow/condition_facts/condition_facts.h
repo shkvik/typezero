@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The facts a condition gives its branches.
 class ConditionFacts {
 public:
   explicit ConditionFacts(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

@@ -19,4 +19,4 @@ private:
   const Target &target_;
 };
 
-} // namespace tz
+}

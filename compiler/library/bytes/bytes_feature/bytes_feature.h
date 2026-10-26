@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// ArrayBuffer, typed arrays, DataView, Buffer, TextEncoder and TextDecoder (docs/bytes.md).
 class BytesFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "bytes"; }
@@ -17,4 +16,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

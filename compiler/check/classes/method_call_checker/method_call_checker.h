@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Calls of methods and new of a class.
 class MethodCallChecker {
 public:
   explicit MethodCallChecker(Checker &checker);
@@ -16,4 +15,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

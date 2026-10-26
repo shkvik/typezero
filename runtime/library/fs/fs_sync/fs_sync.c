@@ -1,9 +1,7 @@
-// The synchronous functions of node:fs for files: read, write, stat, rename, copy.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs_sync/fs_sync.h"
@@ -36,12 +34,6 @@
 #include <unistd.h>
 #endif
 
-//===----------------------------------------------------------------------===//
-// readFileSync, writeFileSync, appendFileSync
-//===----------------------------------------------------------------------===//
-
-// The bytes of a file (or of stdin, fd 0, whatever it was read with before),
-// into `data`; 0 after the error is thrown.
 static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag_obj,
                      uint64_t flag_meta, TzMaker make) {
   OpenFlags flags;
@@ -77,8 +69,6 @@ static int read_fd(Bytes *data, int32_t fd, TzMaker make) {
   return tz_fs_read_all(f, data, make);
 }
 
-// The text of what was read: utf8 as it is, any other encoding of Buffer
-// (numbered as in buffer.c) decoded.
 static TzStr text_of(const Bytes *data, int32_t encoding) {
   if (encoding == 0) {
     return tz_fs_str_of_utf8(data->data, data->length);
@@ -110,8 +100,6 @@ void tz_fs_read_fd(TzStr *out, int32_t fd, int32_t encoding, TzMaker make) {
   tz_fs_bytes_free(&data);
 }
 
-// readFileSync without an encoding: a Buffer of the bytes, or NULL after the
-// error is thrown.
 TzBytes *tz_fs_read_file_bytes(void *path_obj, uint64_t path_meta, void *flag_obj,
                                uint64_t flag_meta, TzMaker make) {
   Bytes data;
@@ -137,7 +125,6 @@ TzBytes *tz_fs_read_fd_bytes(int32_t fd, TzMaker make) {
   return b;
 }
 
-// Writes `data` to the file at the path, opened with the flag and the mode.
 static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, size_t length,
                        void *flag_obj, uint64_t flag_meta, int32_t mode, TzMaker make) {
   OpenFlags flags;
@@ -156,8 +143,6 @@ static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, 
   tz_fs_path_free(&p);
 }
 
-// writeFileSync(fd, data): stdout and stderr through the output buffer, in
-// order with console.log.
 static void write_fd(int32_t fd, const uint8_t *data, size_t length, TzMaker make) {
   if (fd == 1 || fd == 2) {
     tz_std_write_bytes(fd, data, length);
@@ -210,8 +195,6 @@ void tz_fs_write_fd(int32_t fd, void *data_obj, uint64_t data_meta, int32_t enco
   tz_fs_bytes_free(&data);
 }
 
-// writeFileSync and appendFileSync of a typed array, a Buffer or a DataView:
-// its bytes.
 void tz_fs_write_file_bytes(void *path_obj, uint64_t path_meta, const TzBytes *b, void *flag_obj,
                             uint64_t flag_meta, int32_t mode, TzMaker make) {
   write_path(path_obj, path_meta, b->data, (size_t)tz_bytes_byte_length(b), flag_obj, flag_meta,
@@ -251,7 +234,6 @@ void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make
     return;
   }
 #ifdef _WIN32
-  // As libuv: only writing can be denied, to a read-only file.
   DWORD attributes = GetFileAttributesW(tz_fs_wide(&p));
   if (attributes == INVALID_FILE_ATTRIBUTES) {
     tz_fs_fail_win32(make, GetLastError(), "access", &p, NULL);
@@ -273,7 +255,6 @@ void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make)
     return;
   }
 #ifdef _WIN32
-  // Windows keeps only whether a file is read-only: the owner's write bit.
   DWORD attributes = GetFileAttributesW(tz_fs_wide(&p));
   if (attributes == INVALID_FILE_ATTRIBUTES) {
     tz_fs_fail_win32(make, GetLastError(), "chmod", &p, NULL);
@@ -297,7 +278,7 @@ void tz_fs_truncate(void *path_obj, uint64_t path_meta, int64_t length, TzMaker 
   if (!tz_fs_path_init(&p, path_obj, path_meta)) {
     return;
   }
-  OpenFlags flags = {1, 1, 0, 0, 0, 0}; // "r+"
+  OpenFlags flags = {1, 1, 0, 0, 0, 0};
   File f = tz_fs_open_file(&p, flags, 0666, make);
   if (f != NO_FILE) {
 #ifdef _WIN32
@@ -317,8 +298,6 @@ void tz_fs_truncate(void *path_obj, uint64_t path_meta, int64_t length, TzMaker 
 }
 
 #ifdef _WIN32
-// Milliseconds since 1970 from 100-nanosecond intervals since 1601, as Node
-// computes them from libuv's seconds and nanoseconds.
 static double ms_of(LARGE_INTEGER time) {
   int64_t ticks = time.QuadPart - 116444736000000000LL;
   int64_t seconds = ticks / 10000000, rest = ticks % 10000000;
@@ -410,9 +389,6 @@ int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st) {
 }
 #endif
 
-// statSync and lstatSync: a Stats from `make_stats`; NULL with the error
-// thrown, or without one when the file is not there and `throw_if_missing`
-// is unset ({ throwIfNoEntry: false }).
 void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t throw_if_missing,
                  TzMaker make_stats, TzMaker make) {
   Path p;
@@ -447,10 +423,6 @@ void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t thr
   return result;
 }
 
-//===----------------------------------------------------------------------===//
-// renameSync, copyFileSync, realpathSync
-//===----------------------------------------------------------------------===//
-
 void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                   TzMaker make) {
   Path from, to;
@@ -474,8 +446,6 @@ void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_
   tz_fs_path_free(&to);
 }
 
-// copyFileSync with the mode of fs.constants: COPYFILE_EXCL (1) fails if the
-// destination is there; COPYFILE_FICLONE_FORCE (4) is not possible here.
 void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                      int32_t mode, TzMaker make) {
   Path from, to;
@@ -492,7 +462,6 @@ void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t 
                         &from.shown, &to.shown);
   } else if (!CopyFileW(tz_fs_wide(&from), tz_fs_wide(&to), (mode & 1) != 0)) {
     DWORD error = GetLastError();
-    // The same file: there is nothing to copy (libuv checks for EBUSY).
     TzStatsParts a, b;
     int same = tz_fs_win32_failure(error).index == E_EBUSY &&
                tz_fs_stat_of(tz_fs_wide(&from), 1, &a) == 0 &&
@@ -534,7 +503,6 @@ void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t 
 }
 
 #ifdef _WIN32
-// Where a link leads, its whole real path; false if it cannot be found.
 static int final_path(const Path *p, TzBuf *out) {
   HANDLE h = CreateFileW(tz_fs_wide(p), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                          NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
@@ -570,7 +538,6 @@ static int final_path(const Path *p, TzBuf *out) {
   return ok;
 }
 
-// The root of a resolved path: `C:\` or `\\server\share\`.
 static size_t root_length(const TzBuf *p) {
   const uint16_t *s = p->data;
   size_t n = p->length, i = 0;
@@ -599,10 +566,6 @@ static size_t root_length(const TzBuf *p) {
 }
 #endif
 
-// realpathSync, as Node's (written in JavaScript): the path resolved, with
-// each part that is a link replaced by where it leads; the letters stay as
-// written. A part that is not there is ENOENT of "lstat" for the path up to
-// it.
 void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make) {
   out->obj = NULL;
   out->meta = 0;
@@ -626,7 +589,6 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
     }
     size_t pos = root_length(&p);
     int restarted = 0;
-    // The root first, then each part.
     for (size_t end = pos;; ++end) {
       if (end < p.length && p.data[end] != '\\' && p.data[end] != '/') {
         continue;
@@ -644,7 +606,6 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
         TzBuf target;
         tz_buf_init(&target);
         if (final_path(&at, &target)) {
-          // resolve(target, rest)
           TzBuf next;
           tz_buf_init(&next);
           tz_buf_units(&next, target.data, target.length);

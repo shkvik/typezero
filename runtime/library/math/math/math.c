@@ -1,7 +1,3 @@
-// The functions of Math that are not single LLVM instructions (see
-// Lowering::emitMathCall). The small ones are TZ_HOT, so that tz inlines
-// them, and with them the call to the C library.
-
 #include "runtime/core/error/error.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
@@ -14,8 +10,6 @@
 #include <unistd.h>
 #endif
 
-// JavaScript's `**` and Math.pow: unlike C's pow, 1 ** NaN and
-// (-1) ** Infinity are NaN.
 TZ_HOT double tz_math_pow(double x, double y) {
   if (isnan(y) || (fabs(x) == 1 && isinf(y))) {
     return NAN;
@@ -24,12 +18,8 @@ TZ_HOT double tz_math_pow(double x, double y) {
   return pow(x, y);
 }
 
-// 0 ** -1 of integers, as JavaScript's 0n ** -1n: RangeError, which the
-// program checks for after the call.
 TZ_COLD void tz_throw_zero_power(void) { tz_throw(TZ_RANGE_ERROR, "Division by zero"); }
 
-// `**` of integers, which wraps around like repeated `*`. A negative power
-// is a fraction, which loses its fraction like `/` does.
 TZ_HOT int64_t tz_math_pow_long(int64_t base, int64_t exponent) {
   if (exponent < 0) {
     if (base == 0) {
@@ -77,8 +67,6 @@ MATH1(atanh)
 
 TZ_HOT double tz_math_atan2(double y, double x) { return atan2(y, x); }
 
-// Math.hypot as V8 computes it: Infinity wins over NaN, and the squares of
-// the values scaled by the largest are summed with Kahan's compensation.
 double tz_math_hypot(const double *values, int64_t n) {
   double max = 0;
   int nan = 0;
@@ -111,13 +99,7 @@ double tz_math_hypot(const double *values, int64_t n) {
   return sqrt(sum) * max;
 }
 
-//===----------------------------------------------------------------------===//
-// Math.random
-//===----------------------------------------------------------------------===//
-
-// xorshift128+, as in V8. All zero means not seeded yet. Each thread has
-// its own, seeded apart (the address of `seed` differs too).
-TZ_THREAD_LOCAL uint64_t tz_random_state[2]; // not static: see the rules in tzrt.h
+TZ_THREAD_LOCAL uint64_t tz_random_state[2];
 
 static uint64_t splitmix64(uint64_t *x) {
   uint64_t z = (*x += 0x9E3779B97F4A7C15ull);
@@ -128,7 +110,7 @@ static uint64_t splitmix64(uint64_t *x) {
 }
 
 TZ_NOINLINE void tz_random_seed(void) {
-  uint64_t seed = (uint64_t)(uintptr_t)&seed; // differs between runs with ASLR
+  uint64_t seed = (uint64_t)(uintptr_t)&seed;
 #ifdef _WIN32
   LARGE_INTEGER counter;
   QueryPerformanceCounter(&counter);
@@ -156,6 +138,5 @@ TZ_HOT double tz_math_random(void) {
   s1 ^= s1 << 23;
   tz_random_state[1] = s1 ^ s0 ^ (s1 >> 17) ^ (s0 >> 26);
 
-  // The top 53 bits make a double in [0, 1).
   return (double)((tz_random_state[1] + s0) >> 11) * (1.0 / 9007199254740992.0);
 }

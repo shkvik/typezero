@@ -10,7 +10,7 @@
 namespace tz::pkg {
 
 bool readText(llvm::StringRef file, std::string &text) {
-  auto buffer = llvm::MemoryBuffer::getFile(file, /*IsText=*/true);
+  auto buffer = llvm::MemoryBuffer::getFile(file, true);
   if (!buffer) {
     report("cannot read '" + file + "': " + buffer.getError().message());
     return false;
@@ -20,4 +20,4 @@ bool readText(llvm::StringRef file, std::string &text) {
   return true;
 }
 
-} // namespace tz::pkg
+}

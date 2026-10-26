@@ -36,15 +36,12 @@ using llvm::isa;
 
 namespace tz {
 
-// Why an int's `x >>> n` may not go back into an int (see checkBinary).
 static const char kUnsignedShift[] =
     "'>>>' is unsigned in JavaScript, and with a count of 0 a negative int becomes a number above "
     "int: keep the result in a long";
 
 namespace {
 
-// The source text of the two sides of `bin`, an operator `length` characters
-// long; empty if the source is not known.
 std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source, llvm::SMLoc op,
                                                          size_t length) {
   const char *at = op.getPointer();
@@ -56,16 +53,12 @@ std::pair<llvm::StringRef, llvm::StringRef> operandTexts(llvm::StringRef source,
           llvm::StringRef(at + length, static_cast<size_t>(source.end() - at - length)).trim()};
 }
 
-} // namespace
+}
 
-// After the value of `a[i] = v` is known: the store happens then, so the
-// index must be in range at that point.
 static const char kWriteOutOfRange[] =
     "cannot prove that the index is within the array (0 <= index <= length); writing further "
     "would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()";
 
-// A copy of a name, a literal index or a chain of fields of a name (`o.a.b`),
-// which reads the same value again; null for anything else.
 static Expr *copyChain(AstContext &ctx, const Expr *e) {
   if (auto *name = dyn_cast<NameExpr>(e)) {
     return ctx.make<NameExpr>(name->loc(), name->name);
@@ -88,10 +81,7 @@ static Expr *copyChain(AstContext &ctx, const Expr *e) {
 AssignChecker::AssignChecker(Checker &checker) : checker_(checker) {}
 
 Expr *AssignChecker::checkAssign(AssignExpr *assign) {
-  // The `o.x = v` of `o.x ??= v` (and of `||=`, `&&=`), not one inside v.
   bool logical = std::exchange(logicalAssign_, false);
-  // `env.NAME = v` of node:process is `process.env.NAME = v`; a name
-  // imported from a built-in module cannot be assigned to.
   if (auto *member = dyn_cast<MemberExpr>(assign->target)) {
     member->object = checker_.builtinModuleChecker().processAlias(member->object);
   } else if (auto *index = dyn_cast<IndexExpr>(assign->target)) {
@@ -115,8 +105,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
 
   if (compound && op == BinaryOp::Nullish) {
-    // `r.key ??= v` of a Record (known by its variable, or process.env): a
-    // key that may be missing.
     if (auto *member = dyn_cast<MemberExpr>(assign->target); member && !member->optional) {
       auto *name = dyn_cast<NameExpr>(member->object);
       VarSymbol *var = name ? checker_.topLevelChecker().lookupValue(name->name).var : nullptr;
@@ -138,7 +126,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
         return set;
       }
     }
-    // `x ??= v`: assigns only if x is undefined.
     auto *name = dyn_cast<NameExpr>(assign->target);
     VarSymbol *var = name ? checker_.targetChecker().checkVarTarget(name) : nullptr;
     if (!name) {
@@ -170,8 +157,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     return assign;
   }
 
-  // `x += n` of a variable of a union that a check narrowed to a member:
-  // `x = x + n`, the sum of the member, which goes back into the union.
   if (auto *target = dyn_cast<NameExpr>(assign->target); target && compound) {
     const VarSymbol *var = checker_.scopes().lookup(target->name).var;
     if (var && var->type && var->type->nonOptional()->isUnion() &&
@@ -184,7 +169,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
 
   const Type *type = checker_.targetChecker().checkAssignTarget(assign->target, compound);
-  // `o.x = v` of an accessor, a call of its setter (sema_library.cpp).
   if (checker_.pendingSetter_) {
     return checker_.tzModulesChecker().checkSetterCall(assign);
   }
@@ -193,20 +177,17 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   auto *member = dyn_cast<MemberExpr>(assign->target);
   auto *name = dyn_cast<NameExpr>(assign->target);
   const VarSymbol *var = name ? name->var : nullptr;
-  // `a[i] op= v` reads the element before v is evaluated.
   bool reportedRange = false;
   if (index && compound && index->object->type->isArray() &&
-      !checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false)) {
+      !checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
     checker_.diags_.error(index->loc(),
                           "cannot prove that the index is within the array; check it first, "
                           "e.g. 'if (i < a.length)'");
     reportedRange = true;
   }
 
-  bool definite = false; // the value assigned is not undefined
+  bool definite = false;
   if (!type) {
-    // `this.x = value` in the initializers, where x has the type of the
-    // value, as a variable without a type does.
     Expr *value = checker_.exprChecker().checkExpr(assign->value);
     type = value->type;
     if (type->isVoid() || type->isUndefined()) {
@@ -226,7 +207,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     definite = !type->isOptional() && !type->isUndefined();
   } else if (!compound) {
     if (auto *fe = dyn_cast<FunctionExpr>(assign->value); fe && name && fe->fn->name.empty()) {
-      fe->fn->name = name->name; // as JavaScript names it
+      fe->fn->name = name->name;
     }
     Expr *value = checker_.exprChecker().checkExpr(assign->value, type->isError() ? nullptr : type);
     assign->value = checker_.typeRelations().coerce(value, type);
@@ -248,7 +229,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
                                                       valueType);
         }
       } else if (valueType->nonOptional()->isNumeric() || valueType->nonOptional()->isBool()) {
-        // As with `s + 5` (see reportMixedConcat).
         std::string message = "operator '+=' cannot be applied to types 'string' and '" +
                               valueType->name().str() + "' (JavaScript would join them as text)";
         auto [target, value] = operandTexts(assign->source, assign->loc(), 2);
@@ -268,40 +248,29 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
       bool shift = op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
       bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor;
       bool integerOnly = shift || bitwise;
-      // As with `x | v`, v takes no type from x (see checkBinary), and the
-      // exponent of a decimal power is an integer.
       bool decimalPow = type->isDecimal() && op == BinaryOp::Pow;
-      assign->value = checker_.exprChecker().checkExpr(assign->value,
-                                                       integerOnly || decimalPow ? nullptr : type,
-                                                       /*wraps=*/integerOnly);
+      assign->value = checker_.exprChecker().checkExpr(
+          assign->value, integerOnly || decimalPow ? nullptr : type, integerOnly);
       const Type *valueType = assign->value->type;
       if (type->isDecimal() && !integerOnly && !valueType->isError()) {
         checker_.decimalChecker().checkDecimalAssign(assign, op);
       } else if (!type->isError() && !valueType->isError()) {
         if (integerOnly && valueType->isFloat()) {
-          assign->value = checker_.binaryChecker().toInt32(assign->value); // as with `x | v`
+          assign->value = checker_.binaryChecker().toInt32(assign->value);
         }
         if (integerOnly && type->isFloat() && valueType->isNumeric()) {
-          // `x |= v` on a double works on 32-bit integers, as in JavaScript;
-          // the result goes back into x as a double (of `>>>=`, unsigned).
           assign->value = checker_.binaryChecker().toInt32(assign->value);
         } else if (integerOnly ? !type->isInteger() : !type->isNumeric()) {
           checker_.binaryChecker().reportOperandTypes(assign->loc(), spelling.c_str(), type,
                                                       valueType);
         } else if (bitwise && assign->value->type->isInteger() && assign->value->type != type) {
-          // As with `x | v`: a long next to an int keeps its low 32 bits, and
-          // the operator works on 32-bit integers; a long x gets the result
-          // back as a long.
           assign->value = checker_.binaryChecker().toInt32(assign->value);
         } else {
-          // `x op= v` must produce a value of x's type, so v converts to it.
           assign->value = shift ? checker_.typeRelations().convert(assign->value, type)
                                 : checker_.typeRelations().coerce(assign->value, type);
           if (type->isInteger()) {
             checker_.constantFolder().checkDivisor(op, assign->value);
           }
-          // `x >>>= n` is `x = x >>> n`, a long unless the count is 1 to 31
-          // (see checkBinary), which an int x cannot hold.
           if (op == BinaryOp::UShr && type->isInt()) {
             std::optional<int64_t> count = checker_.constantFolder().intConstant(assign->value);
             if (!count || (*count & 31) == 0) {
@@ -340,17 +309,14 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     }
   }
   if (index && index->object->type->isArray()) {
-    // The store happens after the value is evaluated, so prove it here.
-    bool inRange =
-        checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false);
+    bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
     if (!inRange && !reportedRange &&
-        (compound ||
-         !checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/true))) {
+        (compound || !checker_.indexProofs().provesInBounds(index->object, index->index, true))) {
       checker_.diags_.error(index->loc(), kWriteOutOfRange);
     }
     index->mayAppend = !inRange;
     if (!inRange) {
-      checker_.flowChecker().arrayResized(index->object->type, /*grew=*/true, /*shrank=*/false);
+      checker_.flowChecker().arrayResized(index->object->type, true, false);
     }
   }
   if (member && member->object->type->isArray()) {
@@ -358,7 +324,7 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
         length && length->term.isZero() && length->offset < 0) {
       checker_.diags_.error(assign->value->loc(), "an array length cannot be negative");
     }
-    checker_.flowChecker().arrayResized(member->object->type, /*grew=*/true, /*shrank=*/true);
+    checker_.flowChecker().arrayResized(member->object->type, true, true);
     if (std::optional<Linear> self = checker_.indexProofs().lengthOf(member->object);
         self && !self->term.isZero()) {
       if (std::optional<Linear> length = checker_.indexProofs().linear(assign->value)) {
@@ -367,7 +333,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
     }
   }
   if (member && member->object->type->isObject()) {
-    // The store happens now; until here the field kept its old value.
     checker_.fieldFacts().fieldsAssigned(member->name);
     if (std::optional<Checker::FieldPath> path = checker_.fieldFacts().fieldPath(member);
         path && definite) {
@@ -382,10 +347,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   return assign;
 }
 
-// `x ||= v` is `x || (x = v)` and `x &&= v` is `x && (x = v)`: v is evaluated
-// and assigned only when x does not decide the result. x is read twice, so it
-// must be a variable, a field of one or an element at a simple index. Its
-// truth is tested as in a condition.
 Expr *AssignChecker::checkLogicalAssign(AssignExpr *assign) {
   const char *op = assign->op == BinaryOp::LogOr ? "||=" : "&&=";
   Expr *read = nullptr;
@@ -412,7 +373,7 @@ Expr *AssignChecker::checkLogicalAssign(AssignExpr *assign) {
   auto *bin = checker_.ctx_.make<BinaryExpr>(assign->loc(), *assign->op, read, set);
   Checker::Flow whenTrue, whenFalse;
   bool outer = std::exchange(logicalAssign_, true);
-  checker_.truthChecker().checkLogical(bin, nullptr, whenTrue, whenFalse, /*tested=*/false,
+  checker_.truthChecker().checkLogical(bin, nullptr, whenTrue, whenFalse, false,
                                        bin->op == BinaryOp::LogAnd ? Checker::TruthUse::AndAssign
                                                                    : Checker::TruthUse::OrAssign);
   logicalAssign_ = outer;
@@ -421,8 +382,6 @@ Expr *AssignChecker::checkLogicalAssign(AssignExpr *assign) {
   return bin;
 }
 
-// `o.f ??= v` is `o.f ?? (o.f = v)`: o is read twice, so it must be a
-// variable or a field of one.
 Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
   Expr *read = copyChain(checker_.ctx_, assign->target);
   if (!read) {
@@ -445,7 +404,6 @@ Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
                                              member->name + "' has type '" + type->name() + "'");
     return result;
   }
-  // The field holds a value now, unless the one assigned may be undefined.
   const Type *valueType = set->value->type;
   if (auto *conv = dyn_cast<CastExpr>(set->value); conv && conv->isImplicit()) {
     valueType = conv->operand->type;
@@ -461,7 +419,7 @@ Expr *AssignChecker::checkFieldLogicalAssign(AssignExpr *assign) {
 
 Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   update->type = Type::error();
-  const Type *type = checker_.targetChecker().checkAssignTarget(update->target, /*compound=*/true);
+  const Type *type = checker_.targetChecker().checkAssignTarget(update->target, true);
   if (type->isError()) {
     return update;
   }
@@ -480,8 +438,7 @@ Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
     if (index->object->type->isTypedArray()) {
       checker_.bytesChecker().checkBytesStore(
           index, nullptr, update->increment ? BinaryOp::Add : BinaryOp::Sub, update->loc());
-    } else if (!checker_.indexProofs().provesInBounds(index->object, index->index,
-                                                      /*allowEnd=*/false)) {
+    } else if (!checker_.indexProofs().provesInBounds(index->object, index->index, false)) {
       checker_.diags_.error(index->loc(),
                             "cannot prove that the index is within the array; check it "
                             "first, e.g. 'if (i < a.length)'");
@@ -493,4 +450,4 @@ Expr *AssignChecker::checkUpdate(UpdateExpr *update) {
   return update;
 }
 
-} // namespace tz
+}

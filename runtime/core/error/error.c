@@ -1,17 +1,3 @@
-// Errors (docs/errors.md): the error in flight, the places an error passes on
-// its way up, the text of its stack, and an error nobody catches.
-//
-// An exception is a value that travels back up the calls: `throw` puts the
-// Error in tz_thrown and returns from the function, and every caller of a
-// function that may throw checks tz_thrown after the call, releasing what it
-// holds and returning in turn, until a `catch` takes the error. The class
-// Error is the program's (Lowering declares it); the runtime makes Errors for
-// its own failures through the function the program gives it.
-//
-// The stack of an error is collected on the way: the function that throws
-// and each one the error passes add their place, up to Node's default of ten
-// (Error.stackTraceLimit). Places cost nothing until something throws.
-
 #include "runtime/core/error/error.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/group/group.h"
@@ -23,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Not static: see the rules in tzrt.h.
 TzErrorInfo tz_error_info;
 
 enum { kStackTraceLimit = 10 };
@@ -49,7 +34,6 @@ const void *tz_error_cause(const void *error) {
   return *(void *const *)((const char *)error + tz_error_info.cause_offset);
 }
 
-// Appends UTF-8 text as UTF-16; a malformed sequence becomes U+FFFD.
 static void buf_utf8(TzBuf *out, const char *text, size_t n) {
   const unsigned char *s = (const unsigned char *)text;
   for (size_t i = 0; i < n;) {
@@ -83,10 +67,6 @@ static void buf_u32(TzBuf *out, uint32_t value) {
   tz_buf_ascii_n(out, text, (size_t)n);
 }
 
-//===----------------------------------------------------------------------===//
-// Throwing
-//===----------------------------------------------------------------------===//
-
 void tz_error_frame(const TzFrame *frame) {
   if (!tz_thrown) {
     return;
@@ -102,8 +82,6 @@ void tz_error_frame(const TzFrame *frame) {
   tz_arr_push_value(*frames, &address);
 }
 
-// `throw error`. An error thrown again (`catch (e) { throw e }`) keeps the
-// places it has: the stack says where it came from.
 void tz_error_throw(void *error, const TzFrame *frame) {
   tz_thrown = error;
   TzArray *frames = *frames_of(error);
@@ -112,8 +90,6 @@ void tz_error_throw(void *error, const TzFrame *frame) {
   }
 }
 
-// reject(error) and Promise.reject(error): an error that was never thrown
-// gets the place where it was rejected, as `throw` gives it its place.
 void tz_error_rejected(void *error, const TzFrame *frame) {
   TzArray *frames = *frames_of(error);
   if (frames && frames->length) {
@@ -125,11 +101,10 @@ void tz_error_rejected(void *error, const TzFrame *frame) {
   tz_thrown = thrown;
 }
 
-// An Error of `kind` with the message, thrown.
 void tz_throw_str(int32_t kind, void *obj, uint64_t meta) {
   tz_str_retain_value((TzStr){obj, meta});
   void *error = tz_error_info.make(kind, obj, meta);
-  if (tz_thrown) { // never, as the program runs only without one
+  if (tz_thrown) {
     tz_instance_release((TzInstance *)tz_thrown);
   }
   tz_thrown = error;
@@ -155,17 +130,10 @@ void tz_throw(int32_t kind, const char *format, ...) {
   tz_str_release_value(message);
 }
 
-// A function that may recurse found the stack too low at its start.
 TZ_COLD void tz_throw_stack_overflow(void) {
   tz_throw(TZ_RANGE_ERROR, "Maximum call stack size exceeded");
 }
 
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
-
-// Error.prototype.toString: the name and the message, or the one that is not
-// empty.
 void tz_buf_error_text(TzBuf *out, const void *error) {
   TzStr name = *field_str(error, tz_error_info.name_offset);
   TzStr message = *field_str(error, tz_error_info.message_offset);
@@ -182,9 +150,6 @@ void tz_buf_error_text(TzBuf *out, const void *error) {
   tz_buf_free(&text);
 }
 
-// The text, then "    at f (file:line:column)" for each place, as V8 makes
-// them; top-level code has no function name. An `await` that an error comes
-// out of is "async f", or in top-level code "async" before the place.
 int tz_buf_error_stack(TzBuf *out, const void *error) {
   tz_buf_error_text(out, error);
   const TzArray *frames = *frames_of(error);
@@ -213,17 +178,11 @@ int tz_buf_error_stack(TzBuf *out, const void *error) {
   return count != 0;
 }
 
-// Whether a field of the layout of an Error is one of the class Error's
-// (message, name, cause): JavaScript keeps them apart from the keys of the
-// object, which a class derived from Error adds.
 int tz_error_base_field(const TzField *field) {
   return field->offset == tz_error_info.message_offset ||
          field->offset == tz_error_info.name_offset || field->offset == tz_error_info.cause_offset;
 }
 
-// Whether the program gave the error a name of its own (`this.name =
-// "HttpError"`), which is a key of the object in JavaScript: a name that is
-// not the one of a built-in class.
 int tz_error_named(const void *error) {
   static const char *const builtins[] = {"Error",       "TypeError", "RangeError",
                                          "SyntaxError", "URIError",  "SystemError"};
@@ -247,7 +206,6 @@ int tz_error_named(const void *error) {
   return named;
 }
 
-// `e.stack`
 void tz_error_stack(TzStr *out, void *error) {
   TzBuf buf;
   tz_buf_init(&buf);
@@ -255,7 +213,6 @@ void tz_error_stack(TzStr *out, void *error) {
   *out = tz_buf_take(&buf);
 }
 
-// `e.toString()`
 void tz_error_to_string(TzStr *out, void *error) {
   TzBuf buf;
   tz_buf_init(&buf);
@@ -263,16 +220,10 @@ void tz_error_to_string(TzStr *out, void *error) {
   *out = tz_buf_take(&buf);
 }
 
-//===----------------------------------------------------------------------===//
-// An error nobody catches
-//===----------------------------------------------------------------------===//
-
 void tz_buf_inspect_error(TzBuf *out, const void *error);
 void tz_err_begin(void);
 void tz_err_end(void);
 
-// As in Node: what is printed so far is written out, the error goes to
-// stderr as console.error would show it, and the program ends with 1.
 TZ_NORETURN void tz_uncaught(void) {
   TzBuf buf;
   tz_buf_init(&buf);

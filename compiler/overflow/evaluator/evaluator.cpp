@@ -135,8 +135,6 @@ Val Evaluator::eval(const Expr *expr, State &st, bool wraps) {
     check_.callRanges().calledUserCode(st);
     return check_.overflowWarnings().trusted(expr->type);
   case Expr::Kind::Await:
-    // Other tasks run while this one waits, as code a call runs: what the
-    // Promise gives is a value of its type.
     eval(cast<AwaitExpr>(expr)->value, st);
     check_.callRanges().calledUserCode(st);
     return check_.overflowWarnings().trusted(expr->type);
@@ -197,7 +195,6 @@ Val Evaluator::evalUnary(const UnaryExpr *unary, State &st, bool wraps) {
   const Type *type = unary->type;
   switch (unary->op) {
   case UnaryOp::Neg: {
-    // `-2147483648` is a literal.
     if (auto *lit = dyn_cast<IntLitExpr>(unary->operand)) {
       return numVal(exactly(-double(lit->value)));
     }
@@ -237,13 +234,11 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
     return Num();
   }
   Limits lim = limitsOf(type);
-  // Bits mix: any value of the type, as worrying as the worse side.
   Num full = mixed(lim.lo, lim.hi, l, r);
   bool lPos = l.lo >= 0, rPos = r.lo >= 0;
   auto zero = Bound{0};
   switch (op) {
   case BinaryOp::BitAnd:
-    // A mask that is not negative keeps the value within it.
     if (lPos && rPos) {
       return make(zero, l.hi < r.hi ? l.high() : r.high());
     }
@@ -295,7 +290,6 @@ Num Evaluator::bitwise(BinaryOp op, const Num &l, const Num &r, const Type *type
       return make({std::floor(l.lo / k), l.loOrigin, l.loWhy},
                   {std::floor(l.hi / k), l.hiOrigin, l.hiWhy});
     }
-    // Shifted right by some count: between the value and 0.
     return make(l.lo < 0 ? l.low() : zero, l.hi > 0 ? l.high() : zero);
   }
   default:
@@ -335,8 +329,6 @@ Val Evaluator::evalBinary(const BinaryExpr *bin, State &st, bool wraps) {
   bool bits = bin->op == BinaryOp::BitAnd || bin->op == BinaryOp::BitOr ||
               bin->op == BinaryOp::BitXor || bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr ||
               bin->op == BinaryOp::UShr;
-  // The low bits of a sum, difference, product or power depend only on the
-  // low bits of the operands; not so for a quotient.
   bool operandsWrap = bits || (wraps && bin->op != BinaryOp::Div && bin->op != BinaryOp::Rem);
   Val l = eval(bin->lhs, st, operandsWrap);
   Val r = eval(bin->rhs, st, operandsWrap);
@@ -395,7 +387,6 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &l, const Num
     return exact;
   }
   if (!wraps && !check_.quiet_) {
-    // Trusted ends count as small: the warning is about the others.
     auto blamed = [](Num n) {
       if (n.loOrigin == Origin::Trusted) {
         n.setLow({std::clamp(n.lo, -1.0, 1.0)});
@@ -414,16 +405,13 @@ Num Evaluator::arithmetic(const Expr *site, BinaryOp op, const Num &l, const Num
                     (!rhs || check_.programScan().isConstantTree(rhs)) && (lhs || rhs);
     if ((exceeding.lo < kIntMin || exceeding.hi > kIntMax) && !constant) {
       check_.overflowWarnings().warn(site, l, r, lhs, rhs, exceeding, accum);
-      // Reported once: what comes of it is not reported again.
       return range(kIntMin, kIntMax, Origin::Trusted);
     }
   }
-  // Before the last pass of a loop: as it is, so that a sum stays a sum.
   if (check_.quiet_) {
     return exact;
   }
 
-  // It wraps around, as `| 0` asks for, or the trusted values stay small.
   return range(kIntMin, kIntMax, wraps ? Origin::Proven : Origin::Trusted);
 }
 
@@ -450,8 +438,6 @@ Val Evaluator::evalCast(const CastExpr *conv, State &st, bool wraps) {
     return Val();
   }
   if (isIntegerType(to) && !isIntegerType(from)) {
-    // A double becomes an int as `x | 0` makes one: the fraction goes, and
-    // a value beyond the int range wraps around.
     Limits l = limitsOf(to);
     if (n.lo >= l.lo && n.hi <= l.hi) {
       return numVal(
@@ -464,4 +450,4 @@ Val Evaluator::evalCast(const CastExpr *conv, State &st, bool wraps) {
   return numVal(check_.overflowWarnings().fit(n, to));
 }
 
-} // namespace tz
+}

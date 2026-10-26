@@ -1,36 +1,9 @@
-// node:child_process (docs/process.md): spawnSync, execFileSync and
-// execSync, as Node runs them.
-//
-// Node prepares the call in JavaScript (lib/child_process.js: the shell, the
-// environment, the checks of the options), and libuv starts the program
-// (deps/uv/src/win/process.c) while src/spawn_sync.cc collects what it
-// prints. The same steps are here, in the same order, so that the program
-// gets the same command line, the same environment and the same handles as
-// from Node, and the errors are Node's: the same codes and numbers, and the
-// same texts for wrong options.
-//
-// On Windows the parent's ends of the pipes are named pipes opened for
-// overlapped I/O, as libuv makes them, and one loop waits for the process,
-// each read of stdout and stderr, the write of the input and the timeout at
-// once: both outputs are read while the program runs, so neither fills up
-// and blocks it. Only the handles the child is meant to get are inherited
-// (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), so that another thread starting a
-// program at the same time cannot pass its pipes to this one. On other
-// systems posix_spawn starts the program and poll() does the same.
-//
-// What the call gives is made by functions of the program (TzMaker, see
-// Lowering::spawnMaker): the result of spawnSync, an ExecSyncError, or a
-// SystemError when the program could not start.
-
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <io.h>
 #include <windows.h>
 #else
-// TODO(linux): tz builds programs for Windows only so far, so this half has
-// run only under a harness of requests made by hand (gcc, glibc). It follows
-// libuv's src/unix/process.c, with posix_spawn.
-#define _GNU_SOURCE // posix_spawn_file_actions_addchdir_np, pipe2
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -57,30 +30,23 @@
 #include <stdio.h>
 #include <string.h>
 
-//===----------------------------------------------------------------------===//
-// What the program gives and gets (must match
-// compiler/library/child_process/codegen/codegen_child.cpp)
-//===----------------------------------------------------------------------===//
-
-// The call, as Checker checked it (see ChildArg in compiler/program/ast/ast.h).
-// Strings, the array, the map and the bytes are borrowed.
 typedef struct {
-  TzStr file; // the program; the command of execSync
+  TzStr file;
   TzArray *args;
   TzStr cwd, input_text, kill_name, shell, argv0;
-  TzMap *env;           // NULL: the environment of this process
-  TzBytes *input_bytes; // a view, when the input is bytes
+  TzMap *env;
+  TzBytes *input_bytes;
   const TzType *string_type;
   double timeout, max_buffer;
-  int32_t mode;  // TZ_CHILD_SPAWN...
-  int32_t has;   // which options the call gave: HAS_CWD...
-  int32_t input; // INPUT_NONE, INPUT_TEXT or INPUT_BYTES
+  int32_t mode;
+  int32_t has;
+  int32_t input;
   int32_t kill_number;
-  int32_t shell_kind; // SHELL_NONE, SHELL_SYSTEM or SHELL_PATH
+  int32_t shell_kind;
   int32_t windows_hide, verbatim, detached;
   int32_t uid, gid;
-  int32_t stdio[3]; // as ChildArg: 0 a pipe, 1 ignored, 2 + the fd inherited
-  int32_t encoding; // 0 for Buffers, 1 + the number of a Buffer encoding
+  int32_t stdio[3];
+  int32_t encoding;
 } TzSpawnRequest;
 
 enum { TZ_CHILD_SPAWN = 0, TZ_CHILD_EXEC_FILE = 1, TZ_CHILD_EXEC = 2 };
@@ -99,30 +65,21 @@ enum { INPUT_NONE, INPUT_TEXT, INPUT_BYTES };
 enum { SHELL_NONE, SHELL_SYSTEM, SHELL_PATH };
 enum { STDIO_PIPE = 0, STDIO_IGNORE = 1, STDIO_INHERIT = 2 };
 
-// The parts of what the call gives, which its maker takes over: the result
-// of spawnSync, or an ExecSyncError, by the fields each has.
 typedef struct {
-  TzStr message, name; // of an ExecSyncError
-  void *error;         // of the result of spawnSync: a SystemError, or NULL
-  // An ExecSyncError of an error of the system (ETIMEDOUT...), with has_code.
+  TzStr message, name;
+  void *error;
   TzStr code, syscall, path;
   TzArray *spawnargs;
-  TzStr signal;      // with has_signal
-  TzStr text[3];     // what each stream printed, with an encoding
-  TzBytes *bytes[3]; // or without one
+  TzStr signal;
+  TzStr text[3];
+  TzBytes *bytes[3];
   int32_t errno_value, has_code;
   int32_t status, has_status, has_signal;
   int32_t pid;
-  int32_t text_mode; // whether the output is in `text`
-  int32_t piped[3];  // whether the stream was a pipe the child wrote to
+  int32_t text_mode;
+  int32_t piped[3];
 } TzSpawnParts;
 
-//===----------------------------------------------------------------------===//
-// Errors
-//===----------------------------------------------------------------------===//
-
-// The errors of libuv that starting a program can give, with the numbers
-// Node gives for them: libuv's on Windows, -errno elsewhere.
 typedef struct {
   const char *code;
   int32_t number;
@@ -208,7 +165,6 @@ static const UvError kErrors[] = {
 };
 
 #ifdef _WIN32
-// An error of Windows as libuv translates it (uv_translate_sys_error).
 static int win32_error(DWORD error) {
   switch (error) {
   case ERROR_ELEVATION_REQUIRED:
@@ -359,12 +315,6 @@ static int errno_error(int e) {
 }
 #endif
 
-//===----------------------------------------------------------------------===//
-// Signals
-//===----------------------------------------------------------------------===//
-
-// os.constants.signals of Node on this system, in its order: the first name
-// of a number is the one Node reports.
 typedef struct {
   const char *name;
   int number;
@@ -400,7 +350,6 @@ static const Signal kSignals[] = {
 #define SIGNAL_TERM 15
 #define SIGNAL_KILL 9
 
-// The name of a signal, as Node's signo_string gives it; NULL for none.
 static const char *signal_name(int number) {
   for (size_t i = 0; i < sizeof kSignals / sizeof kSignals[0]; ++i) {
     if (kSignals[i].number == number) {
@@ -410,10 +359,6 @@ static const char *signal_name(int number) {
 
   return NULL;
 }
-
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
@@ -431,8 +376,6 @@ static int has_zero(const TzBuf *b) {
   return 0;
 }
 
-// " Received 'a\x00b'": a string as Node's inspect shows it in the messages
-// of its errors.
 static void buf_received(TzBuf *m, const TzBuf *value) {
   int single = 0, dbl = 0;
   for (size_t i = 0; i < value->length; ++i) {
@@ -469,9 +412,6 @@ static void buf_received(TzBuf *m, const TzBuf *value) {
   tz_buf_push(m, quote);
 }
 
-// ERR_INVALID_ARG_VALUE of a string with a zero in it: "The argument
-// 'args[0]' must be a string without null bytes. Received 'a\x00b'"; a name
-// with a dot is a property.
 static void throw_null_bytes(const char *name, const TzBuf *key, const char *reason,
                              const TzBuf *value) {
   TzBuf m;
@@ -491,7 +431,6 @@ static void throw_null_bytes(const char *name, const TzBuf *key, const char *rea
   tz_str_release_value(message);
 }
 
-// A number as Node's messages show it.
 static void throw_out_of_range(const char *name, const char *must, double value) {
   char number[32];
   number[tz_format_f64(value, number)] = 0;
@@ -499,11 +438,6 @@ static void throw_out_of_range(const char *name, const char *must, double value)
            must, number);
 }
 
-//===----------------------------------------------------------------------===//
-// Growing lists
-//===----------------------------------------------------------------------===//
-
-// The bytes a stream gave.
 typedef struct {
   uint8_t *data;
   size_t length, capacity;
@@ -527,7 +461,6 @@ static void out_append(Out *o, const uint8_t *data, size_t n) {
   o->length += n;
 }
 
-// Strings of UTF-16, for the arguments and the environment.
 typedef struct {
   TzBuf *items;
   size_t count, capacity;
@@ -573,22 +506,18 @@ static int units_equal(const TzBuf *b, const char *text) {
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// The call, prepared as Node prepares it (normalizeSpawnArguments)
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   const TzSpawnRequest *req;
-  TzBuf file;   // the program started: the shell, with one
-  List args;    // its arguments, argv[0] first
-  int verbatim; // windowsVerbatimArguments: as they are, unquoted
-  TzBuf cwd;    // empty: this process's
+  TzBuf file;
+  List args;
+  int verbatim;
+  TzBuf cwd;
   int has_cwd;
-  List env; // "NAME=value"
+  List env;
   int kill_signal;
-  int64_t timeout; // in milliseconds, 0 for none
+  int64_t timeout;
   double max_buffer;
-  TzBytes *input; // the bytes stdin gets, or NULL
+  TzBytes *input;
 } Call;
 
 static void call_free(Call *c) {
@@ -602,7 +531,6 @@ static void call_free(Call *c) {
 }
 
 #ifdef _WIN32
-// The value of a variable of this process, or 0 without it.
 static int get_env(TzBuf *out, const wchar_t *name) {
   DWORD n = GetEnvironmentVariableW(name, NULL, 0);
   if (n == 0) {
@@ -618,7 +546,6 @@ static int get_env(TzBuf *out, const wchar_t *name) {
   return got < n;
 }
 
-// Whether a file names cmd.exe: /^(?:.*\\)?cmd(?:\.exe)?$/i.
 static int is_cmd(const TzBuf *file) {
   size_t n = file->length;
   const uint16_t *s = file->data;
@@ -645,10 +572,6 @@ static int is_cmd(const TzBuf *file) {
 }
 #endif
 
-// The environment the program gets: the option `env`, or a copy of this
-// process's (without the hidden variables of drives, as process.env has
-// them). On Windows, as Node does, sorted, keeping the first of names that
-// differ only in case.
 static int collect_env(Call *c) {
   const TzSpawnRequest *req = c->req;
   List pairs = {0};
@@ -697,8 +620,6 @@ static int collect_env(Call *c) {
       if (!equals) {
         continue;
       }
-      // Kept as bytes, one unit each: they go back to the system as they
-      // came (see utf8_of).
       TzBuf *name = list_add(&names);
       for (const char *q = *p; q < equals; ++q) {
         tz_buf_push(name, (uint8_t)*q);
@@ -711,7 +632,6 @@ static int collect_env(Call *c) {
 #endif
   }
 #ifdef _WIN32
-  // Sorted by name as JavaScript sorts strings, then the duplicates dropped.
   size_t n = pairs.count;
   size_t *order = (size_t *)tz_alloc((n + 1) * sizeof(size_t));
   for (size_t i = 0; i < n; ++i) {
@@ -759,8 +679,6 @@ static int collect_env(Call *c) {
   return 1;
 }
 
-// The checks and the steps of normalizeSpawnArguments and spawnSync, in
-// their order; false after throwing a TypeError or a RangeError.
 static int prepare(Call *c, const TzSpawnRequest *req) {
   memset(c, 0, sizeof *c);
   c->req = req;
@@ -794,7 +712,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     tz_buf_free(&argv0);
     return 0;
   }
-  // The arguments: those of the call, after the program.
   List given = {0};
   uint32_t count = req->args ? req->args->length : 0;
   for (uint32_t i = 0; i < count; ++i) {
@@ -826,7 +743,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   tz_buf_init(&path);
   if (shell == SHELL_PATH) {
     tz_buf_str(&path, req->shell);
-    // An empty one is none, as `if (options.shell)` reads it in Node.
     if (path.length == 0) {
       shell = SHELL_NONE;
     }
@@ -839,7 +755,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
       tz_buf_free(&argv0);
       return 0;
     }
-    // The command: the program and its arguments joined, as they are.
     TzBuf command;
     tz_buf_init(&command);
     buf_take_units(&command, &c->file);
@@ -856,7 +771,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
       tz_buf_ascii(&c->file, "cmd.exe");
     }
     if (is_cmd(&c->file)) {
-      // '/d /s /c' with the command in quotes, unquoted inside.
       tz_buf_ascii(list_add(&given), "/d");
       tz_buf_ascii(list_add(&given), "/s");
       tz_buf_ascii(list_add(&given), "/c");
@@ -892,7 +806,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     return 0;
   }
 
-  // spawnSync: the timeout, maxBuffer and the signal.
   if (req->has & HAS_TIMEOUT) {
     double t = req->timeout;
     if (!(t >= 0 && isfinite(t) && t == floor(t))) {
@@ -940,8 +853,6 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     }
     c->kill_signal = req->kill_number;
   }
-  // The input, as bytes: text in the encoding of the call (utf8 without
-  // one), as Buffer.from(input, encoding) makes it.
   if (req->input == INPUT_TEXT && req->stdio[0] == STDIO_PIPE) {
     int32_t encoding = req->encoding > 0 ? req->encoding - 1 : 0;
     c->input = tz_buffer_from_string(req->input_text.obj, req->input_text.meta, encoding);
@@ -953,19 +864,13 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// Running the program
-//===----------------------------------------------------------------------===//
-
-// What happened: the error (X_NONE for none), whether the program started,
-// how it ended, and what it printed.
 typedef struct {
-  int error;      // the first error, as spawn_sync.cc keeps it
-  int pipe_error; // an error of a pipe, reported only without the other
+  int error;
+  int pipe_error;
   int started;
   int32_t pid;
-  int64_t status; // the exit code
-  int signal;     // the signal that ended it, 0 for none
+  int64_t status;
+  int signal;
   Out out[3];
 } Outcome;
 
@@ -983,9 +888,6 @@ static void set_pipe_error(Outcome *o, int error) {
 
 #ifdef _WIN32
 
-// Whether the program is a batch file, which Node refuses to start without
-// a shell (CVE-2024-27980): its last extension, after trailing dots and
-// spaces, is .bat or .cmd.
 static int is_batch_file(const TzBuf *file) {
   size_t end = file->length;
   while (end > 0 && (file->data[end - 1] == '.' || file->data[end - 1] == ' ' ||
@@ -1013,19 +915,15 @@ static int is_batch_file(const TzBuf *file) {
   return strcmp(ext, "bat") == 0 || strcmp(ext, "cmd") == 0;
 }
 
-// libuv's search_join_test: dir and name joined (with the cwd for a
-// relative dir) and the extension added; the result if that is a file,
-// else NULL. To free with tz_free.
 static wchar_t *search_path_join_test(const wchar_t *dir, size_t dir_len, const wchar_t *name,
                                       size_t name_len, const wchar_t *ext, size_t ext_len,
                                       const wchar_t *cwd, size_t cwd_len) {
   if (dir_len > 2 && ((dir[0] == L'\\' || dir[0] == L'/') && (dir[1] == L'\\' || dir[1] == L'/'))) {
-    cwd_len = 0; // a UNC path
+    cwd_len = 0;
   } else if (dir_len >= 1 && (dir[0] == L'/' || dir[0] == L'\\')) {
-    cwd_len = 2; // a full path without a drive: the drive of the cwd
+    cwd_len = 2;
   } else if (dir_len >= 2 && dir[1] == L':' &&
              (dir_len < 3 || (dir[2] != L'/' && dir[2] != L'\\'))) {
-    // A relative path with a drive (D:../file): the cwd, if on that drive.
     if (cwd_len < 2 || _wcsnicmp(cwd, dir, 2) != 0) {
       cwd_len = 0;
     } else {
@@ -1033,7 +931,7 @@ static wchar_t *search_path_join_test(const wchar_t *dir, size_t dir_len, const 
       dir_len -= 2;
     }
   } else if (dir_len > 2 && dir[1] == L':') {
-    cwd_len = 0; // absolute, with a drive
+    cwd_len = 0;
   }
   wchar_t *result = (wchar_t *)tz_alloc(sizeof(wchar_t) *
                                         (cwd_len + 1 + dir_len + 1 + name_len + 1 + ext_len + 1));
@@ -1067,8 +965,6 @@ static wchar_t *search_path_join_test(const wchar_t *dir, size_t dir_len, const 
   return NULL;
 }
 
-// libuv's path_search_walk_ext: the name as it is if it has an extension,
-// then with .com, then with .exe.
 static wchar_t *path_search_walk_ext(const wchar_t *dir, size_t dir_len, const wchar_t *name,
                                      size_t name_len, const wchar_t *cwd, size_t cwd_len,
                                      int name_has_ext) {
@@ -1084,10 +980,6 @@ static wchar_t *path_search_walk_ext(const wchar_t *dir, size_t dir_len, const w
   return search_path_join_test(dir, dir_len, name, name_len, L"exe", 3, cwd, cwd_len);
 }
 
-// libuv's search_path: the program as CreateProcess gets it, found as
-// cmd.exe finds it, but trying only .com and .exe, not PATHEXT. A name
-// without a directory is looked for in the cwd (of the child), then in each
-// directory of PATH, which may be quoted. NULL if there is none.
 static wchar_t *search_path(const wchar_t *file, const wchar_t *cwd, const wchar_t *path) {
   size_t file_len = wcslen(file), cwd_len = wcslen(cwd);
   if (file_len == 0 || (file_len == 1 && file[0] == L'.')) {
@@ -1145,8 +1037,6 @@ static wchar_t *search_path(const wchar_t *file, const wchar_t *cwd, const wchar
   return result;
 }
 
-// libuv's quote_cmd_arg: an argument as the C library of the child splits
-// the command line back into it (CommandLineToArgvW's rules).
 static void quote_cmd_arg(TzBuf *out, const TzBuf *arg) {
   size_t len = arg->length;
   const uint16_t *s = arg->data;
@@ -1169,8 +1059,6 @@ static void quote_cmd_arg(TzBuf *out, const TzBuf *arg) {
     tz_buf_push(out, '"');
     return;
   }
-  // Backward: the backslashes before a quote (or the closing quote) are
-  // doubled, and each quote escaped.
   TzBuf rev;
   tz_buf_init(&rev);
   int quote_hit = 1;
@@ -1193,9 +1081,6 @@ static void quote_cmd_arg(TzBuf *out, const TzBuf *arg) {
   tz_buf_free(&rev);
 }
 
-// The environment block of CreateProcessW, as libuv's make_program_env makes
-// it: sorted by name without case, with the variables Windows programs need
-// (SYSTEMROOT...) added from this process when the environment lacks them.
 static wchar_t *make_env_block(Call *c) {
   static const wchar_t *const required[] = {
       L"HOMEDRIVE", L"HOMEPATH",   L"LOGONSERVER", L"PATH",        L"SYSTEMDRIVE", L"SYSTEMROOT",
@@ -1222,7 +1107,6 @@ static wchar_t *make_env_block(Call *c) {
     }
     tz_buf_free(&value);
   }
-  // Sorted by name, case ignored (insertion: the lists are short).
   size_t n = c->env.count;
   for (size_t i = 1; i < n; ++i) {
     TzBuf moving = c->env.items[i];
@@ -1265,7 +1149,6 @@ static wchar_t *make_env_block(Call *c) {
   return block;
 }
 
-// PATH of the block (find_path), NULL without one.
 static const wchar_t *find_path(const wchar_t *env) {
   for (; env && *env; env += wcslen(env) + 1) {
     if ((env[0] == L'P' || env[0] == L'p') && (env[1] == L'A' || env[1] == L'a') &&
@@ -1278,9 +1161,7 @@ static const wchar_t *find_path(const wchar_t *env) {
   return NULL;
 }
 
-// The job that the programs started are in, as libuv's: they end when this
-// process does.
-HANDLE tz_child_job; // not static: see the rules in tzrt.h
+HANDLE tz_child_job;
 INIT_ONCE tz_child_job_once = INIT_ONCE_STATIC_INIT;
 
 static BOOL CALLBACK init_job(PINIT_ONCE once, PVOID param, PVOID *context) {
@@ -1299,7 +1180,6 @@ static BOOL CALLBACK init_job(PINIT_ONCE once, PVOID param, PVOID *context) {
     CloseHandle(job);
     job = NULL;
   }
-  // As libuv does: this process too, which ties the job to its session.
   if (job) {
     AssignProcessToJobObject(job, GetCurrentProcess());
   }
@@ -1308,19 +1188,15 @@ static BOOL CALLBACK init_job(PINIT_ONCE once, PVOID param, PVOID *context) {
   return TRUE;
 }
 
-// The parent's end of a pipe and what is in flight on it.
 typedef struct {
-  HANDLE handle; // NULL when closed
+  HANDLE handle;
   OVERLAPPED ov;
   int pending;
-  uint8_t *chunk; // the read in flight
+  uint8_t *chunk;
 } Pipe;
 
-volatile LONG tz_child_pipes; // a number for the names of pipes
+volatile LONG tz_child_pipes;
 
-// A connected pair of pipe ends, as libuv's uv__create_stdio_pipe_pair
-// makes them: the parent's, a named pipe for overlapped I/O; the child's,
-// inheritable and synchronous. `readable` is the child's stdin.
 static DWORD make_pipe(HANDLE *parent, HANDLE *child, int readable) {
   DWORD server = FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE | WRITE_DAC;
   DWORD client = 0;
@@ -1354,7 +1230,6 @@ static DWORD make_pipe(HANDLE *parent, HANDLE *child, int readable) {
     CloseHandle(h);
     return error;
   }
-  // The child connected when it opened its end.
   OVERLAPPED ov;
   memset(&ov, 0, sizeof ov);
   ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -1383,7 +1258,6 @@ static void pipe_close(Pipe *p) {
   p->handle = NULL;
 }
 
-// Starts the next read of an output pipe; false at its end.
 static int pipe_read(Pipe *p, Outcome *o) {
   if (!p->chunk) {
     p->chunk = (uint8_t *)tz_alloc(65536);
@@ -1412,7 +1286,6 @@ static void run(Call *c, Outcome *o) {
     o->error = X_ENOTSUP;
     return;
   }
-  // The command line, the environment, the cwd and PATH.
   TzBuf line;
   tz_buf_init(&line);
   for (size_t i = 0; i < c->args.count; ++i) {
@@ -1457,7 +1330,6 @@ static void run(Call *c, Outcome *o) {
   buf_take_units(&file, &c->file);
   tz_buf_push(&file, 0);
 
-  // The handles of the child, as libuv's uv__stdio_create makes them.
   HANDLE child[3] = {INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE};
   unsigned char crt_flags[3] = {0, 0, 0};
   Pipe pipes[3];
@@ -1474,13 +1346,13 @@ static void run(Call *c, Outcome *o) {
       if (child[i] == INVALID_HANDLE_VALUE) {
         failure = GetLastError();
       }
-      crt_flags[i] = 0x01 | 0x40; // FOPEN | FDEV
+      crt_flags[i] = 0x01 | 0x40;
     } else if (kind == STDIO_PIPE) {
       failure = make_pipe(&pipes[i].handle, &child[i], i == 0);
       if (!failure) {
         pipes[i].ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
       }
-      crt_flags[i] = 0x01 | 0x08; // FOPEN | FPIPE
+      crt_flags[i] = 0x01 | 0x08;
     } else {
       inherits = 1;
       int fd = kind - STDIO_INHERIT;
@@ -1489,8 +1361,6 @@ static void run(Call *c, Outcome *o) {
           !DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &child[i], 0, TRUE,
                            DUPLICATE_SAME_ACCESS)) {
         child[i] = INVALID_HANDLE_VALUE;
-        // A missing stdin, stdout or stderr is no error: the child goes
-        // without it.
         if (fd > 2) {
           failure = ERROR_INVALID_HANDLE;
         }
@@ -1509,8 +1379,6 @@ static void run(Call *c, Outcome *o) {
       }
     }
   }
-  // The C library of the child reads its fds from lpReserved2: a count, the
-  // flags of each, then the handles, unaligned.
   unsigned char reserved[sizeof(int) + 3 + 3 * sizeof(HANDLE)];
   int three = 3;
   memcpy(reserved, &three, sizeof three);
@@ -1525,7 +1393,6 @@ static void run(Call *c, Outcome *o) {
     }
   }
 
-  // Only these handles go to the child.
   HANDLE inherited[3];
   DWORD inherited_count = 0;
   for (int i = 0; i < 3; ++i) {
@@ -1569,7 +1436,6 @@ static void run(Call *c, Outcome *o) {
     if (attributes) {
       flags |= EXTENDED_STARTUPINFO_PRESENT;
     }
-    // windowsHide: no console window unless a stream is inherited.
     if (req->windows_hide && !inherits) {
       flags |= CREATE_NO_WINDOW;
     }
@@ -1577,8 +1443,6 @@ static void run(Call *c, Outcome *o) {
     if (req->detached) {
       flags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED;
     }
-    // The output of this program first, so that it comes before the
-    // child's where they share a stream.
     if (inherits) {
       tz_out_flush(1);
     }
@@ -1628,8 +1492,6 @@ static void run(Call *c, Outcome *o) {
   o->started = 1;
   o->pid = (int32_t)info.dwProcessId;
 
-  // The loop of spawn_sync.cc: until the program ended and its outputs
-  // closed, or the time ran out.
   ULONGLONG deadline = c->timeout > 0 ? GetTickCount64() + (ULONGLONG)c->timeout : 0;
   int exited = 0, killed = 0;
   double buffered = 0;
@@ -1652,10 +1514,9 @@ static void run(Call *c, Outcome *o) {
         pipe_close(&pipes[0]);
       }
     } else {
-      pipe_close(&pipes[0]); // the end of the input
+      pipe_close(&pipes[0]);
     }
   }
-  // Kills the program (SyncProcessRunner::Kill) and closes the pipes.
   int kill_signal = c->kill_signal;
   for (;;) {
     HANDLE waits[4];
@@ -1697,7 +1558,6 @@ static void run(Call *c, Outcome *o) {
       DWORD error = ok ? 0 : GetLastError();
       p->pending = 0;
       if (i == 0) {
-        // The input is written: its end tells the child so.
         if (!ok) {
           set_pipe_error(o, error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA
                                 ? X_EPIPE
@@ -1728,8 +1588,6 @@ static void run(Call *c, Outcome *o) {
     if (stop && !killed) {
       killed = 1;
       if (!exited) {
-        // Windows has no signals: TERM, KILL, INT and QUIT end the program
-        // with 1, as libuv does; others are ENOSYS, and then SIGKILL.
         int supported = kill_signal == SIGNAL_TERM || kill_signal == SIGNAL_KILL ||
                         kill_signal == 2 || kill_signal == 3;
         if (!supported) {
@@ -1765,11 +1623,8 @@ static void run(Call *c, Outcome *o) {
   }
 }
 
-#else // POSIX
+#else
 
-// The string as UTF-8 with a terminating zero, to free with tz_free. Units
-// above 0xFF that are not pairs become U+FFFD; a string from the
-// environment, kept as bytes (see collect_env), goes back as it came.
 static char *utf8_of(const TzBuf *b) {
   char *out = (char *)tz_alloc(b->length * 3 + 1);
   size_t n = 0;
@@ -1807,9 +1662,6 @@ static int64_t now_ms(void) {
   return (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
-// The program found as execvp finds it, in the PATH of the child's
-// environment (libuv's uv__spawn_find_path_in_env); NULL for a path, which
-// is used as it is, or a name that is in none of its directories.
 static char *find_program(const char *file, char **envp) {
   if (strchr(file, '/')) {
     return NULL;
@@ -1863,7 +1715,6 @@ static void run(Call *c, Outcome *o) {
   char *cwd = c->has_cwd ? utf8_of(&c->cwd) : NULL;
   char *program = find_program(file, envp);
   int failure = 0, inherits = 0;
-  // A name not found in PATH is not looked for elsewhere, as execvp does.
   if (!program && !strchr(file, '/')) {
     failure = ENOENT;
   }
@@ -1908,7 +1759,7 @@ static void run(Call *c, Outcome *o) {
   }
   posix_spawnattr_setflags(&attr, flags);
   if (req->has & (HAS_UID | HAS_GID)) {
-    failure = ENOTSUP; // TODO(linux): setuid and setgid in the child, as libuv does
+    failure = ENOTSUP;
   }
   pid_t pid = 0;
   if (!failure) {
@@ -1957,8 +1808,6 @@ static void run(Call *c, Outcome *o) {
     close(parent[0]);
     parent[0] = -1;
   }
-  // A child that stops reading its input must not end this process, as
-  // Node, which ignores SIGPIPE, is not ended.
   signal(SIGPIPE, SIG_IGN);
   int64_t deadline = c->timeout > 0 ? now_ms() + c->timeout : 0;
   int exited = 0, killed = 0, wstatus = 0;
@@ -1984,7 +1833,6 @@ static void run(Call *c, Outcome *o) {
       int64_t left = deadline - now_ms();
       wait = left > 0 ? (int)left : 0;
     }
-    // Without pipes, the wait for the end is a poll of nothing in steps.
     if (n == 0 && (wait < 0 || wait > 10)) {
       wait = 10;
     }
@@ -2064,13 +1912,8 @@ static void run(Call *c, Outcome *o) {
 
 #endif
 
-//===----------------------------------------------------------------------===//
-// What the call gives
-//===----------------------------------------------------------------------===//
-
 static TzStr str_of_buf(const TzBuf *b) { return tz_str_from_utf16(b->data, b->length); }
 
-// "spawnSync <file>", the call of the system in Node's errors.
 static TzStr syscall_of(const Call *c) {
   TzBuf b;
   tz_buf_init(&b);
@@ -2080,7 +1923,6 @@ static TzStr syscall_of(const Call *c) {
   return tz_buf_take(&b);
 }
 
-// "spawnSync <file> ENOENT": the message of ErrnoException.
 static TzStr errno_message(const Call *c, int error) {
   TzBuf b;
   tz_buf_init(&b);
@@ -2106,8 +1948,6 @@ static void *system_error(const Call *c, int error, TzMaker make) {
   return make(&parts);
 }
 
-// The output of each stream that was a pipe the child wrote to: decoded
-// with the encoding, or a Buffer. A program that did not start gave nothing.
 static void fill_output(const Call *c, const Outcome *o, TzSpawnParts *parts) {
   int32_t encoding = c->req->encoding;
   parts->text_mode = encoding > 0;
@@ -2137,7 +1977,6 @@ static void release_output(TzSpawnParts *parts, int from) {
   }
 }
 
-// What the call does when the program has run (or could not start).
 static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_error,
                     TzMaker make) {
   const TzSpawnRequest *req = c->req;
@@ -2163,8 +2002,6 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
     return make(&parts);
   }
 
-  // execSync and execFileSync: stderr goes on to this program's, unless the
-  // call said where it goes.
   if (!(req->has & HAS_STDIO) && o->started && parts.piped[2]) {
     if (parts.text_mode) {
       tz_stderr_write(parts.text[2].obj, parts.text[2].meta);
@@ -2179,7 +2016,6 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
     return NULL;
   }
   if (error == X_NONE && parts.has_status && parts.status == 0) {
-    // What it printed: the maker of the call reads stdout.
     out->text_mode = parts.text_mode;
     out->piped[1] = parts.piped[1];
     out->text[1] = parts.text[1];
@@ -2193,8 +2029,6 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
   TzBuf m;
   tz_buf_init(&m);
   if (error != X_NONE) {
-    // An error of the system while it ran: Node's error is that one, with
-    // the result of spawnSync in it.
     TzStr message = errno_message(c, error);
     tz_buf_str(&m, message);
     tz_str_release_value(message);
@@ -2209,7 +2043,6 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
       tz_arr_push_value(parts.spawnargs, &arg);
     }
   } else {
-    // "Command failed: git status", then what it wrote to stderr.
     tz_buf_ascii(&m, "Command failed: ");
     if (req->mode == TZ_CHILD_EXEC) {
       tz_buf_str(&m, req->file);
@@ -2239,9 +2072,6 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
   return NULL;
 }
 
-// spawnSync, execFileSync and execSync. spawnSync gives the object `make`
-// makes; the others leave stdout in `out` for the program, or throw an
-// ExecSyncError that `make` makes, or a SystemError.
 void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_system_error,
                    TzMaker make) {
   memset(out, 0, sizeof *out);

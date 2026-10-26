@@ -8,7 +8,7 @@
 namespace tz {
 
 Expr *DecimalFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                      const Type * /*expected*/) const {
+                                      const Type *) const {
   if (!checker.callChecker().isGlobalName(member->object, "decimal")) {
     return nullptr;
   }
@@ -23,7 +23,7 @@ llvm::ArrayRef<llvm::StringLiteral> DecimalFeature::typeArgFreeGlobals() const {
 }
 
 Expr *DecimalFeature::checkValueMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                           const Type * /*expected*/) const {
+                                           const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isDecimal()) {
     return nullptr;
@@ -38,4 +38,4 @@ llvm::Value *DecimalFeature::lowerCall(Lowering &lowering, CallExpr *call) const
   return lowering.decimalLowerer().emitDecimalCall(call);
 }
 
-} // namespace tz
+}

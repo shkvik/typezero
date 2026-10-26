@@ -1,12 +1,3 @@
-// Strings by the rules of languages (docs/intl.md): Intl.Collator and
-// localeCompare, normalize, and Intl.Segmenter, made the way V8 makes them
-// (src/objects/js-collator.cc, js-segmenter.cc, js-segments.cc). ICU
-// compares and breaks UTF-16; a string of one byte per unit is widened for
-// it first.
-//
-// The data of the languages and the tables of Unicode are the ICU of the
-// system (icu.h, intl.h).
-
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -17,7 +8,6 @@
 #include <math.h>
 #include <string.h>
 
-// UColAttribute and UColAttributeValue.
 enum {
   UCOL_ALTERNATE_HANDLING = 1,
   UCOL_CASE_FIRST = 2,
@@ -36,32 +26,28 @@ enum {
   UCOL_UPPER_FIRST = 25,
 };
 
-// UBreakIteratorType, and where the statuses of words that are no words
-// end (UBRK_WORD_NONE_LIMIT).
 enum { UBRK_CHARACTER = 0, UBRK_WORD = 1, UBRK_SENTENCE = 3, UBRK_DONE = -1 };
 #define WORD_NONE_LIMIT 100
 
 typedef struct {
   TzIntl base;
-  void *collator; // UCollator
+  void *collator;
 } TzCollator;
 
 typedef struct {
   TzIntl base;
-  int32_t type; // UBRK_*
+  int32_t type;
   char icu_locale[64];
 } TzSegmenter;
 
-// What segment(text) gives: the text, in UTF-16 for ICU, and a break
-// iterator over it.
 typedef struct {
   int64_t rc;
   const TzLayout *layout;
-  TzStr input; // its own reference
+  TzStr input;
   TzUChar *units;
   int32_t length;
   int32_t type;
-  void *iterator; // UBreakIterator
+  void *iterator;
 } TzSegments;
 
 static void collator_drop(void *object);
@@ -70,17 +56,10 @@ static void segments_drop(void *object);
 static const TzLayout collator_layout = {collator_drop, NULL, 0, TZ_LAYOUT_INTL, "Collator", 8, 0};
 static const TzLayout segmenter_layout = {segmenter_drop, NULL, 0, TZ_LAYOUT_INTL,
                                           "Segmenter",    9,    0};
-// Segments print as `{}`, as in node.
 static const TzLayout segments_layout = {segments_drop, NULL, 0, TZ_LAYOUT_INTL, NULL, 0, 0};
 
 static const char *const matchers[] = {"lookup", "best fit", NULL};
 
-//===----------------------------------------------------------------------===//
-// Intl.Collator
-//===----------------------------------------------------------------------===//
-
-// Whether the language has the collation (a BCP 47 type, "phonebk"), which
-// is not the standard one or that of search.
 static int has_collation(const TzIcu *icu, const char *locale, const char *collation) {
   if (strcmp(collation, "standard") == 0 || strcmp(collation, "search") == 0) {
     return 0;
@@ -148,15 +127,10 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   usage = usage ? usage : "sort";
   int search = strcmp(usage, "search") == 0;
 
-  // The keywords of the language that count: -u-co- of a collation it has,
-  // -u-kf- and -u-kn- of the values they take. The collation of the option
-  // goes before the one of the keyword, and the locale resolvedOptions()
-  // gives names it, as in V8.
   char keyword_co[TZ_INTL_TEXT], keyword_kf[TZ_INTL_TEXT], keyword_kn[TZ_INTL_TEXT];
   tz_intl_keyword(icu, requested, "co", keyword_co, sizeof keyword_co);
   tz_intl_keyword(icu, requested, "kf", keyword_kf, sizeof keyword_kf);
   tz_intl_keyword(icu, requested, "kn", keyword_kn, sizeof keyword_kn);
-  // uloc reads "-u-kn" as "yes", which BCP 47 writes "true".
   int has_kn = 0;
   {
     char raw[16];
@@ -198,7 +172,6 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
   tz_intl_set_text(r, TZ_IO_USAGE, usage);
   tz_intl_set_text(r, TZ_IO_COLLATION, chosen ? chosen : "default");
 
-  // The collator of the language with its collation; then the options.
   char id[160];
   tz_intl_copy(id, sizeof id, found);
   TzUErrorCode status = 0;
@@ -251,7 +224,6 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
                            ignore_punctuation ? UCOL_SHIFTED : UCOL_NON_IGNORABLE, &status);
   }
   tz_intl_set_text(r, TZ_IO_SENSITIVITY, sensitivity);
-  // What the collator does, as ICU says (Thai ignores punctuation).
   status = 0;
   r->number[TZ_IO_IGNORE_PUNCTUATION] =
       icu->ucol_getAttribute(coll, UCOL_ALTERNATE_HANDLING, &status) == UCOL_SHIFTED;
@@ -286,7 +258,6 @@ static int32_t compare(const void *collator, TzStr a, TzStr b) {
   return result;
 }
 
-// compare(a, b) of a collator; a and b are borrowed.
 int32_t tz_collator_compare(TzCollator *c, void *a_obj, uint64_t a_meta, void *b_obj,
                             uint64_t b_meta) {
   TzStr a = {a_obj, a_meta}, b = {b_obj, b_meta};
@@ -294,7 +265,6 @@ int32_t tz_collator_compare(TzCollator *c, void *a_obj, uint64_t a_meta, void *b
   return compare(c->collator, a, b);
 }
 
-// a.localeCompare(b, locale?, options?).
 int32_t tz_str_locale_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta,
                               const TzIntlOptions *o) {
   TzIntl *c = tz_intl_cached(TZ_INTL_COLLATOR, o, "String.prototype.localeCompare");
@@ -306,15 +276,6 @@ int32_t tz_str_locale_compare(void *a_obj, uint64_t a_meta, void *b_obj, uint64_
   return compare(((TzCollator *)c)->collator, a, b);
 }
 
-//===----------------------------------------------------------------------===//
-// normalize
-//===----------------------------------------------------------------------===//
-
-// s.normalize(form?): `form` is one of "NFC", "NFD", "NFKC", "NFKD", or not
-// given (NFC); anything else is a RangeError. The string is borrowed. The
-// tables of Unicode are ICU's (unorm2).
-// TODO(linux): the tables in the executable, only when the program calls
-// normalize (docs/intl.md, section 1).
 void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, void *form_obj,
                       uint64_t form_meta) {
   TzStr s = {obj, meta};
@@ -337,7 +298,6 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
       return;
     }
   }
-  // ASCII is the same in every form, and needs no ICU.
   uint32_t n;
   int two;
   const void *units = tz_str_units(&s, &n, &two);
@@ -362,7 +322,6 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
   TzUChar buffer[256], *heap;
   int32_t length;
   const TzUChar *text = tz_intl_utf16(&s, buffer, 256, &heap, &length);
-  // Already in the form: the string itself.
   if (icu->unorm2_spanQuickCheckYes(normalizer, text, length, &status) == length &&
       !TZ_U_FAILURE(status)) {
     tz_free(heap);
@@ -387,10 +346,6 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
   }
   tz_free(heap);
 }
-
-//===----------------------------------------------------------------------===//
-// Intl.Segmenter
-//===----------------------------------------------------------------------===//
 
 TzIntl *tz_seg_create(const TzIntlOptions *o) {
   const char *method = "Intl.Segmenter";
@@ -423,7 +378,6 @@ TzIntl *tz_seg_create(const TzIntlOptions *o) {
 
 static void segmenter_drop(void *object) { tz_obj_free(object); }
 
-// segment(text): the text is borrowed.
 void *tz_seg_segment(TzSegmenter *s, void *obj, uint64_t meta) {
   const TzIcu *icu = tz_icu();
   TzSegments *segments = (TzSegments *)tz_obj_alloc(sizeof(TzSegments));
@@ -434,7 +388,6 @@ void *tz_seg_segment(TzSegmenter *s, void *obj, uint64_t meta) {
   tz_str_retain_value(input);
   segments->input = input;
   segments->type = s->type;
-  // A copy of its own, for the break iterator, which reads it later.
   uint32_t n;
   int two;
   const void *units = tz_str_units(&input, &n, &two);
@@ -463,8 +416,6 @@ static void segments_drop(void *object) {
   tz_obj_free(s);
 }
 
-// The data of the segment from `start` to `end`: `{ segment, index, input }`
-// and, of words, isWordLike from the status of the boundary at its end.
 static void *segment_data(TzSegments *s, int32_t start, int32_t end, const TzIntlShape *shape) {
   TzInstance *data = (TzInstance *)tz_obj_alloc(shape->size);
   memset(data, 0, (size_t)shape->size);
@@ -477,7 +428,6 @@ static void *segment_data(TzSegments *s, int32_t start, int32_t end, const TzInt
   tz_str_retain_value(s->input);
   *(TzStr *)(base + shape->offsets[TZ_IF_INPUT]) = s->input;
   if (s->type == UBRK_WORD && shape->offsets[TZ_IF_WORD_LIKE] >= 0) {
-    // boolean | undefined: the value, then whether it is there.
     uint8_t *word_like = (uint8_t *)(base + shape->offsets[TZ_IF_WORD_LIKE]);
     word_like[0] = tz_icu()->ubrk_getRuleStatus(s->iterator) >= WORD_NONE_LIMIT;
     word_like[1] = 1;
@@ -486,7 +436,6 @@ static void *segment_data(TzSegments *s, int32_t start, int32_t end, const TzInt
   return data;
 }
 
-// The segments, as `for...of` and spreading them give them.
 TzArray *tz_segments_array(TzSegments *s, const TzIntlShape *shape) {
   const TzIcu *icu = tz_icu();
   TzArray *out = tz_arr_new(shape->type, 0, 8);
@@ -500,8 +449,6 @@ TzArray *tz_segments_array(TzSegments *s, const TzIntlShape *shape) {
   return out;
 }
 
-// containing(index): the segment around the index, or NULL (undefined)
-// outside the text. The index is a number of JavaScript: NaN is 0.
 void *tz_segments_containing(TzSegments *s, double index, const TzIntlShape *shape) {
   double n = isnan(index) ? 0 : trunc(index);
   if (n < 0 || n >= s->length) {

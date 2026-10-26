@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Result and ResultAsync of neverthrow, built in (docs/errors.md).
 class ResultFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "result"; }
@@ -20,4 +19,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

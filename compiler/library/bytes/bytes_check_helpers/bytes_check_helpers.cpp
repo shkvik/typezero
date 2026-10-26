@@ -17,7 +17,6 @@ namespace {
 
 bool known(const Range &r) { return r.lo && r.hi; }
 
-// The smallest 2^n - 1 at or above v >= 0.
 int64_t allOnes(int64_t v) {
   int64_t m = 0;
   while (m < v) {
@@ -31,7 +30,7 @@ int64_t floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-} // namespace
+}
 
 std::optional<int> encodingNamed(llvm::StringRef name) {
   static const std::pair<llvm::StringLiteral, Encoding> names[] = {
@@ -102,13 +101,12 @@ Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
 
     return r;
   };
-  std::optional<int64_t> count; // a constant right side
+  std::optional<int64_t> count;
   if (b.lo && b.hi && *b.lo == *b.hi) {
     count = *b.lo;
   }
   switch (op) {
   case BinaryOp::BitAnd: {
-    // With a side that is not negative, the result lies from 0 to it.
     Range r;
     for (const Range *side : {&a, &b}) {
       if (side->lo && *side->lo >= 0) {
@@ -200,8 +198,6 @@ Range operate(BinaryOp op, const Range &a, const Range &b, bool isInt) {
         hi = std::max(hi, v);
       }
     }
-    // The extremes are among the corners: for `a - b`, lo(a) - hi(b) and
-    // hi(a) - lo(b).
     return within({lo, hi});
   }
   default:
@@ -237,7 +233,6 @@ bool numberMethod(llvm::StringRef name, bool dataView, NumberMethod &m) {
     if (rest != n) {
       continue;
     }
-    // DataView says Float32 and Float64, Buffer Float and Double.
     bool floatName = n == "Float" || n == "Double";
     bool dataViewName = n.starts_with("Float") && !floatName;
     if ((dataView && (floatName || n.starts_with("UInt"))) || (!dataView && dataViewName)) {
@@ -277,4 +272,4 @@ std::string numberWhat(Bytes kind) {
   }
 }
 
-} // namespace tz
+}

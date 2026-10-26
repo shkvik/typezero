@@ -29,7 +29,6 @@ namespace tz {
 DecoratorLowerer::DecoratorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void DecoratorLowerer::emitClassDeclaration(ClassDecl *cls) {
-  // A base that is a value (`extends Mixin(Base)`) is evaluated first.
   if (cls->baseExpr) {
     lowering_.stmtLowerer().emitDiscarded(cls->baseExpr);
   }
@@ -39,9 +38,6 @@ void DecoratorLowerer::emitClassDeclaration(ClassDecl *cls) {
   }
 }
 
-// The class of a class expression is one class, made once, however many
-// times the expression runs (docs/decorators.md, section 5): its base is
-// evaluated each time, and its static fields get their values the first.
 llvm::Value *DecoratorLowerer::emitClassExpr(ClassExpr *expr) {
   ClassDecl *cls = expr->decl;
   if (cls->baseExpr) {
@@ -49,8 +45,8 @@ llvm::Value *DecoratorLowerer::emitClassExpr(ClassExpr *expr) {
   }
   auto initialized = [](const ClassField &f) { return f.isStatic && f.var && f.init; };
   if (!cls->decorations.empty() || llvm::any_of(cls->fields, initialized)) {
-    auto *done = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt1Ty(),
-                                          /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
+    auto *done = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt1Ty(), false,
+                                          llvm::GlobalValue::InternalLinkage,
                                           lowering_.builder_.getFalse(), "tz.classinit");
     llvm::BasicBlock *initBlock = lowering_.functionFrame().newBlock("class.init");
     llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("class.ready");
@@ -83,13 +79,10 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
   llvm::Constant *info = llvm::ConstantStruct::get(
       lowering_.fnInfoTy_, {adapter, lowering_.stringLowerer().stringLiteral(
                                          std::u16string(fn->name.begin(), fn->name.end()))});
-  auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-                               llvm::GlobalValue::PrivateLinkage, info, name + ".info");
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, lowering_.fnInfoTy_, true,
+                                          llvm::GlobalValue::PrivateLinkage, info, name + ".info");
   adapterInfos_[fn] = global;
 
-  // (env, this: unknown, the parameters) -> R: the `this` must be an instance
-  // of the class (a static method takes any), then the body gets the rest.
   llvm::IRBuilderBase::InsertPointGuard guard(lowering_.builder_);
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", adapter));
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
@@ -110,7 +103,6 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
     auto *callBlock = llvm::BasicBlock::Create(lowering_.ctx_, "this.ok", adapter);
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(self), testBlock, failBlock);
     lowering_.builder_.SetInsertPoint(testBlock);
-    // The number of its class, which a box and a class do not have.
     llvm::Value *layout = lowering_.builder_.CreateLoad(
         ptr, lowering_.builder_.CreateConstInBoundsGEP1_64(lowering_.builder_.getInt8Ty(), self, 8),
         "layout");
@@ -133,7 +125,6 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
             {lowering_.builder_.getInt32Ty(), ptr, lowering_.builder_.getInt64Ty()}),
         {lowering_.builder_.getInt32(1), lowering_.stringLowerer().stringObj(text),
          lowering_.stringLowerer().stringMeta(text)});
-    // The arguments go with the call that does not happen.
     for (size_t i = 1; i < implType->params().size(); ++i) {
       lowering_.refCounts().releaseValue(adapter->getArg(unsigned(i + 1)), implType->params()[i]);
     }
@@ -143,7 +134,7 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
   }
   std::vector<llvm::Value *> args;
   if (!fn->isStatic) {
-    args.push_back(self); // borrowed, as a method takes its object
+    args.push_back(self);
   }
   for (unsigned i = 2; i < adapter->arg_size(); ++i) {
     args.push_back(adapter->getArg(i));
@@ -167,11 +158,10 @@ llvm::Function *DecoratorLowerer::originalCode(FunctionDecl *fn) {
 }
 
 void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
-  // The body, as any method's or static method's.
   llvm::Function *original = originalCode(fn);
   if (fn->isGenerator) {
     lowering_.generatorLowerer().emitGenerator(fn, original);
-  } else if (fn->isAsync) { // a coroutine, whose promise the stub gives
+  } else if (fn->isAsync) {
     lowering_.asyncLowerer().emitAsyncFunction(fn, original);
   } else {
     lowering_.functionBuilder().beginFunction(original, fn);
@@ -189,8 +179,6 @@ void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
     lowering_.functionBuilder().finishFunction();
   }
 
-  // The stub: a call of what the global holds, with the object (or the
-  // class) as its `this`, and the arguments as they are.
   llvm::Function *stub = lowering_.classDescriptors().methodCode(fn);
   const Type *implType = fn->impl->type;
   llvm::IRBuilderBase::InsertPointGuard guard(lowering_.builder_);
@@ -198,12 +186,11 @@ void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
   unsigned first = fn->takesThis() ? 1 : 0;
   llvm::Value *self = fn->takesThis() ? static_cast<llvm::Value *>(stub->getArg(0))
                                       : lowering_.unknownLowerer().classObject(fn->cls);
-  lowering_.groupLowerer().retainObject(self); // the callee owns its `this`
+  lowering_.groupLowerer().retainObject(self);
   std::vector<llvm::Value *> args{self};
   for (unsigned i = first; i < stub->arg_size(); ++i) {
     args.push_back(stub->getArg(i));
   }
-  // Kept alive during the call, which may replace it.
   llvm::Value *impl = lowering_.builder_.CreateLoad(
       lowering_.fnTy_, lowering_.functionFrame().addressOf(fn->impl), "impl");
   llvm::Value *env = lowering_.builder_.CreateExtractValue(impl, 1);
@@ -217,9 +204,6 @@ void DecoratorLowerer::emitDecoratedMethod(FunctionDecl *fn) {
   }
 }
 
-// Metadata (runtime/library/reflect/meta/meta.c): the key as an address of a
-// constant of its own for an object key, or a string; values go in as unknowns,
-// and records of an object key come out as the type Checker found for them.
 llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   usesMetadata_ = true;
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty(),
@@ -280,7 +264,6 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
       result = found;
       break;
     }
-    // A record of the type Checker knows it has, or undefined.
     const Type *type = call->type->nonOptional();
     llvm::BasicBlock *readBlock = lowering_.functionFrame().newBlock("record.read");
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("record.end");
@@ -312,7 +295,7 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   lowering_.refCounts().releaseValue(target, Type::anyObject());
   lowering_.refCounts().releaseValue(property, propertyType);
   if (define && !call->metaKey && !call->designRecord && !isa<StringLitExpr>(call->args[0])) {
-    lowering_.throwLowerer().emitThrowCheck(); // a key `design:*` the program wrote
+    lowering_.throwLowerer().emitThrowCheck();
   }
 
   return result;
@@ -321,16 +304,14 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
 llvm::Constant *DecoratorLowerer::metaKeyConstant(const void *key) {
   llvm::Constant *&global = metaKeys_[key];
   if (!global) {
-    global = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt8Ty(),
-                                      /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+    global = new llvm::GlobalVariable(*lowering_.module_, lowering_.builder_.getInt8Ty(), true,
+                                      llvm::GlobalValue::PrivateLinkage,
                                       lowering_.builder_.getInt8(0), "tz.meta.key");
   }
 
   return global;
 }
 
-// With metadata, the runtime finds the class of an instance target by its
-// number, and goes up from there: every class gets its object.
 void DecoratorLowerer::finishMetadata(SourceFile &file, llvm::Instruction *init) {
   if (!usesMetadata_) {
     return;
@@ -351,9 +332,9 @@ void DecoratorLowerer::finishMetadata(SourceFile &file, llvm::Instruction *init)
     }
   }
   auto *type = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), count);
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
-                                          llvm::GlobalValue::PrivateLinkage,
-                                          llvm::ConstantArray::get(type, table), "tz.classes");
+  auto *global =
+      new llvm::GlobalVariable(*lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
+                               llvm::ConstantArray::get(type, table), "tz.classes");
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(lowering_.unknownLowerer().unknownFunction(
                    "tz_meta_init", lowering_.builder_.getVoidTy(),
@@ -361,4 +342,4 @@ void DecoratorLowerer::finishMetadata(SourceFile &file, llvm::Instruction *init)
                {global, b.getInt32(count)});
 }
 
-} // namespace tz
+}

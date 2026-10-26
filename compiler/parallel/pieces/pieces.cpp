@@ -63,8 +63,6 @@ unsigned Pieces::activate(unsigned fn, int root, std::optional<Ref> self, bool c
 
 int Pieces::newRoot(int parent, unsigned fn, std::optional<Ref> self, unsigned callerFn,
                     unsigned rec, Mode mode) {
-  // A task that starts itself again down its chain is that task again:
-  // several of it may run at once.
   for (int p = parent; p >= 0; p = analysis_.roots_[p].parent) {
     Root &up = analysis_.roots_[p];
     if (up.fn == fn && up.self == self && up.callerFn == callerFn && up.rec == int(rec)) {
@@ -76,7 +74,6 @@ int Pieces::newRoot(int parent, unsigned fn, std::optional<Ref> self, unsigned c
   if (auto found = analysis_.rootIndex_.find(key); found != analysis_.rootIndex_.end()) {
     return found->second;
   }
-  // A program that makes too many kinds of tasks gets them told apart less.
   constexpr size_t kMaxRoots = 4096;
   if (analysis_.roots_.size() >= kMaxRoots) {
     for (size_t i = 0; i < analysis_.roots_.size(); ++i) {
@@ -164,7 +161,6 @@ void Pieces::findPieces() {
   }
 }
 
-// The pieces of its task that a function's inline segments run inside.
 void Pieces::findHosts() {
   bool changed = true;
   while (changed) {
@@ -190,8 +186,6 @@ std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<uns
         out.push_back(it->second);
       }
     } else if (f.isInline(s)) {
-      // Its start runs inside the piece that calls it; the start of a task
-      // runs inside the piece of another task.
       if (act.rootStart) {
         out.push_back(analysis_.startNode(act.root));
       } else {
@@ -205,8 +199,6 @@ std::vector<unsigned> Pieces::piecesAt(const Activation &act, llvm::ArrayRef<uns
   return out;
 }
 
-// Whether the call runs at most once in one run of the task that runs
-// `rootFn`.
 bool Pieces::once(unsigned fi, unsigned rec, unsigned rootFn, unsigned depth) {
   if (analysis_.fns_[fi].calls[rec].repeated) {
     return false;
@@ -227,7 +219,7 @@ bool Pieces::fnOnce(unsigned fi, unsigned rootFn, unsigned depth) {
   if (found != analysis_.fnOnce_.end()) {
     return found->second;
   }
-  analysis_.fnOnce_[key] = false; // a recursive function runs more than once
+  analysis_.fnOnce_[key] = false;
   const FnInfo &f = analysis_.fns_[fi];
   bool result = false;
   if (f.named.size() == 1) {
@@ -243,9 +235,6 @@ bool Pieces::fnOnce(unsigned fi, unsigned rootFn, unsigned depth) {
   return analysis_.fnOnce_[key] = result;
 }
 
-// Whether an error that the await throws ends the program before any other
-// code runs: then no code after it may run while the tasks it waited for
-// still do.
 bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
   auto found = analysis_.awaits_.find(a);
   if (found == analysis_.awaits_.end() || found->second.caught) {
@@ -257,7 +246,7 @@ bool Pieces::rejectionEnds(const AwaitExpr *a, unsigned depth) {
 
 bool Pieces::fnRejectionEnds(unsigned fi, unsigned depth) {
   if (fi == 0) {
-    return true; // the top-level code: an error there ends the program
+    return true;
   }
   if (depth > 32 || analysis_.valueFns_.contains(fi) || !analysis_.fns_[fi].async) {
     return false;
@@ -281,7 +270,6 @@ bool Pieces::fnRejectionEnds(unsigned fi, unsigned depth) {
                          : rec.returned && fnRejectionEnds(cf, depth + 1);
         break;
       case Mode::Spawn:
-        // `void f()`: an error nobody handles ends the program.
         ends = rec.voided || (rec.join && !analysis_.joins_.lookup(rec.join).settled &&
                               rejectionEnds(rec.join, depth + 1));
         break;
@@ -308,8 +296,6 @@ void Pieces::findJoins() {
     const CallRec &rec = caller.calls[root.rec];
     int parentFn = root.parent >= 0 ? int(analysis_.roots_[root.parent].fn) : -1;
     root.multi |= rec.interval || parentFn < 0 || !once(root.callerFn, root.rec, parentFn, 0);
-    // Each copy of a task that map starts for an element writes the element
-    // of its own index: if the map runs once, no two copies share one.
     const FunctionDecl *callee = analysis_.fns_[root.fn].decl;
     if (rec.kind == CallKind::Inline && rec.call && rec.call->builtin == Builtin::ArrMap &&
         callee && callee->params.size() > 1 && callee->params[1].sym &&
@@ -326,7 +312,6 @@ void Pieces::findJoins() {
     if (root.parent < 0) {
       continue;
     }
-    // Where it starts: the pieces of the parent that make the call.
     std::set<unsigned> spawnAt, interval;
     for (unsigned ai : analysis_.actsOf(root.callerFn, root.parent)) {
       for (unsigned p : piecesAt(analysis_.acts_[ai], rec.segs)) {
@@ -338,13 +323,9 @@ void Pieces::findJoins() {
       continue;
     }
     auto join = analysis_.joins_.find(rec.join);
-    // An error there, of a task or of the code that starts them, must end
-    // the program; otherwise code could go on while some still run.
     if (join == analysis_.joins_.end() || !rejectionEnds(rec.join, 0)) {
       continue;
     }
-    // The pieces of the parent while it runs: those where the Promise.all
-    // waits.
     bool found = false;
     for (unsigned ai : analysis_.actsOf(join->second.fn, root.parent)) {
       found = true;
@@ -358,7 +339,6 @@ void Pieces::findJoins() {
     root.join = rec.join;
     root.interval.assign(interval.begin(), interval.end());
   }
-  // The chains, parents first: a task is made after its parent.
   for (size_t i = 1; i < analysis_.roots_.size(); ++i) {
     Root &root = analysis_.roots_[i];
     if (root.parent < 0 || size_t(root.parent) >= i) {
@@ -370,8 +350,6 @@ void Pieces::findJoins() {
       root.chain.insert(root.chain.end(), parent.chain.begin(), parent.chain.end());
       continue;
     }
-    // Nothing waits for it: it may run on after its parent, and after the
-    // task that waits for its parent.
     root.chain.push_back({root.parent, reach(root.parent, root.spawnAt)});
     for (const auto &[up, pieces] : parent.chain) {
       root.chain.push_back({up, reach(up, pieces)});
@@ -379,9 +357,6 @@ void Pieces::findJoins() {
   }
 }
 
-// The pieces of each task that may follow each other: within a function
-// from await to await, and around an awaited call, whose pieces come after
-// the piece that calls it and before the pieces that follow.
 void Pieces::buildFlow() {
   analysis_.flow_.assign(analysis_.roots_.size(), {});
   for (const Activation &act : analysis_.acts_) {
@@ -422,8 +397,6 @@ void Pieces::buildFlow() {
   }
 }
 
-// The pieces of the task that may run from those of `from` on, them
-// included.
 std::vector<unsigned> Pieces::reach(int root, const std::vector<unsigned> &from) const {
   std::set<unsigned> seen(from.begin(), from.end());
   std::vector<unsigned> pending(from.begin(), from.end());
@@ -445,4 +418,4 @@ std::vector<unsigned> Pieces::reach(int root, const std::vector<unsigned> &from)
   return std::vector<unsigned>(seen.begin(), seen.end());
 }
 
-} // namespace tz::parallel
+}

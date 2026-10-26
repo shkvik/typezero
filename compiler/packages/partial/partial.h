@@ -8,8 +8,6 @@
 
 namespace tz::pkg {
 
-// "1", "1.2", "1.x", "1.2.3-beta", "*": the leading components that are
-// numbers; the rest are wildcards or missing.
 struct Partial {
   uint64_t parts[3] = {0, 0, 0};
   unsigned count = 0;
@@ -28,7 +26,6 @@ struct Partial {
   }
 };
 
-// Parses a version that may lack its minor or patch, or have 'x' or '*' for them.
 bool parsePartial(llvm::StringRef text, Partial &out);
 
-} // namespace tz::pkg
+}

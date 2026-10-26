@@ -220,7 +220,6 @@ Val AssignEvaluator::evalObjectLit(const ObjectLitExpr *lit, State &st) {
       continue;
     }
     if (p.spread) {
-      // The fields it copies keep what they hold.
       const Type *from = p.value->type ? p.value->type->nonOptional() : nullptr;
       if (!from || !from->isObject()) {
         continue;
@@ -242,4 +241,4 @@ Val AssignEvaluator::evalObjectLit(const ObjectLitExpr *lit, State &st) {
   return Val();
 }
 
-} // namespace tz
+}

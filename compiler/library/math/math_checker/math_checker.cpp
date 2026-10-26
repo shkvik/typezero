@@ -23,10 +23,6 @@ namespace tz {
 
 namespace {
 
-// The type a call that gives a whole number has where `expected` is
-// expected: an int or a long when one is expected, which the program checks
-// the number fits in (JavaScript would go on with a number that type cannot
-// hold), and otherwise `type` itself.
 const Type *wholeNumberType(const Type *type, const Type *expected) {
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   bool narrows =
@@ -35,7 +31,7 @@ const Type *wholeNumberType(const Type *type, const Type *expected) {
   return narrows ? wanted : type;
 }
 
-} // namespace
+}
 
 MathChecker::MathChecker(Checker &checker) : checker_(checker) {}
 
@@ -57,18 +53,14 @@ Expr *MathChecker::numericArg(Expr *arg, const Type *hint) {
   return arg;
 }
 
-// The functions of Math, which work as in JavaScript. Most take and return
-// doubles. Others keep the type of their arguments: abs, sign, min and max
-// of ints give an int, and pow is `**`. floor, ceil, round and trunc give a
-// double, or an int or a long where one is expected (see wholeNumberType).
 Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   enum Kind {
-    Rounding, // floor, ceil, round, trunc
-    Float,    // doubles in, a double out
-    Same,     // the type of the argument out: abs, sign
-    MinMax,   // the common type of the arguments
+    Rounding,
+    Float,
+    Same,
+    MinMax,
     Pow,
-    Int32, // ToInt32 of the arguments, an int out: clz32, imul
+    Int32,
   };
   struct Function {
     llvm::StringLiteral name;
@@ -124,10 +116,9 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   }
 
   if (fn->kind == Pow) {
-    // Math.pow(x, y) is x ** y.
     auto *pow =
         checker_.ctx_.make<BinaryExpr>(call->loc(), BinaryOp::Pow, call->args[0], call->args[1]);
-    return checker_.binaryChecker().checkBinary(pow, expected, /*wraps=*/false);
+    return checker_.binaryChecker().checkBinary(pow, expected, false);
   }
 
   call->builtin = fn->builtin;
@@ -159,7 +150,6 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
     call->type = call->args[0]->type;
     break;
   case MinMax: {
-    // Math.min() is Infinity, a double.
     const Type *common = call->args.empty() ? Type::doubleTy() : call->args[0]->type;
     for (Expr *arg : call->args) {
       common = TypeRelations::commonNumericType(common, arg->type);
@@ -183,9 +173,6 @@ Expr *MathChecker::checkMathCall(CallExpr *call, MemberExpr *member, const Type 
   return call;
 }
 
-// `Math.max(...a, x)`: the elements of a count as arguments. Of an empty
-// array Math.max gives -Infinity, which only a double holds, so the result is
-// an integer only if some argument is surely there.
 Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
   const Type *common = nullptr;
   bool someValue = false, ok = true;
@@ -196,13 +183,12 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
       checker_.iteratorMethods().markFused(arg);
       arg = checker_.dictChecker().iterableOf(
           checker_.exprChecker().checkExpr(arg, hint ? Type::array(hint) : nullptr));
-      // The values of an iterator, a Set or a Map's values(), as an array.
       if (arg->type->isIterator() &&
           checker_.generatorChecker().checkSendsNothing(arg->type, arg->loc(), "a spread")) {
         auto *values = checker_.ctx_.make<ArrayLitExpr>(arg->loc());
-        values->elements.push_back({arg, /*spread=*/true});
+        values->elements.push_back({arg, true});
         values->type = Type::array(arg->type->yielded());
-        checker_.flowChecker().calledFunction(); // a generator runs
+        checker_.flowChecker().calledFunction();
         arg = values;
       }
       type = arg->type->isArray() ? arg->type->inner() : arg->type;
@@ -248,4 +234,4 @@ Expr *MathChecker::checkMinMaxSpread(CallExpr *call, const Type *hint) {
   return call;
 }
 
-} // namespace tz
+}

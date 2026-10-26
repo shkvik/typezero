@@ -1,14 +1,3 @@
-// console.log for arrays, objects, optionals and Results: the part of Node.js's
-// util.inspect (lib/internal/util/inspect.js) that the language's values
-// need, ported so that programs print exactly what Node prints. Function
-// names follow Node's.
-//
-// The defaults console.log uses: breakLength 80, compact 3, depth 2,
-// maxArrayLength 100, maxStringLength 10000.
-//
-// One difference is deliberate: an optional field that holds undefined is
-// not shown, since in tz a missing field and an undefined one are the same.
-
 #include "runtime/library/console/inspect/inspect.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -43,19 +32,14 @@ enum {
 };
 
 typedef struct {
-  int indentation; // ctx.indentationLvl
+  int indentation;
   int current_depth;
-  // ctx.seen: the arrays and objects being formatted, outermost first. No
-  // more than kDepth + 1 are, since deeper ones print as [Object].
   const void *seen[kDepth + 1];
   int seen_count;
-  // ctx.circular: the objects that some object inside them refers to; the
-  // first is <ref *1>, the next <ref *2>.
   const void **circular;
   int circular_count, circular_capacity;
 } Ctx;
 
-// The formatted entries of an array (Node's `output`).
 typedef struct {
   TzBuf *items;
   size_t count, capacity;
@@ -93,16 +77,10 @@ static void spaces(TzBuf *out, int n) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Display width (getStringWidth with ICU)
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   uint32_t first, last;
 } Range;
 
-// Control characters, combining marks, format characters and emoji
-// modifiers take no column.
 static const Range zero_width[] = {
     {0x0000, 0x001F},   {0x007F, 0x009F},   {0x0300, 0x036F},   {0x0483, 0x0489},
     {0x0591, 0x05BD},   {0x05BF, 0x05BF},   {0x05C1, 0x05C2},   {0x05C4, 0x05C5},
@@ -116,7 +94,6 @@ static const Range zero_width[] = {
     {0xE0020, 0xE007F}, {0xE0100, 0xE01EF},
 };
 
-// East Asian Wide and Fullwidth characters take two columns.
 static const Range wide[] = {
     {0x1100, 0x115F},   {0x231A, 0x231B},   {0x2329, 0x232A},   {0x23E9, 0x23EC},
     {0x23F0, 0x23F0},   {0x23F3, 0x23F3},   {0x25FD, 0x25FE},   {0x2614, 0x2615},
@@ -176,11 +153,6 @@ static size_t string_width(const TzBuf *s) {
   return width;
 }
 
-//===----------------------------------------------------------------------===//
-// Primitives
-//===----------------------------------------------------------------------===//
-
-// Escapes for control characters, the single quote and the backslash.
 static const char *const meta[] = {
     "\\x00", "\\x01", "\\x02", "\\x03", "\\x04", "\\x05", "\\x06", "\\x07",
     "\\b",   "\\t",   "\\n",   "\\x0B", "\\f",   "\\r",   "\\x0E", "\\x0F",
@@ -198,9 +170,6 @@ static int contains(const uint16_t *units, size_t n, uint16_t c) {
   return 0;
 }
 
-// strEscape: quotes and escapes a string. Single quotes by default; double
-// quotes if the text has single but no double quotes; backticks if it has
-// both but no backtick or `${`.
 static void str_escape(TzBuf *out, const uint16_t *units, size_t n) {
   uint16_t quote = '\'';
   if (contains(units, n, '\'')) {
@@ -237,7 +206,6 @@ static void str_escape(TzBuf *out, const uint16_t *units, size_t n) {
         tz_buf_push(out, units[++i]);
         continue;
       }
-      // A lone surrogate: \u followed by lowercase hex, as Number#toString(16).
       static const char hex[] = "0123456789abcdef";
       char text[8] = {'\\',       'u', hex[(c >> 12) & 15], hex[(c >> 8) & 15], hex[(c >> 4) & 15],
                       hex[c & 15]};
@@ -249,8 +217,6 @@ static void str_escape(TzBuf *out, const uint16_t *units, size_t n) {
   tz_buf_push(out, quote);
 }
 
-// formatPrimitive for strings. Long ones are split after line breaks into
-// pieces joined by `+`.
 static void format_string(Ctx *ctx, TzBuf *out, TzStr s) {
   TzBuf text;
   tz_buf_init(&text);
@@ -286,10 +252,6 @@ static void format_string(Ctx *ctx, TzBuf *out, TzStr s) {
   tz_buf_free(&text);
 }
 
-//===----------------------------------------------------------------------===//
-// Arrays
-//===----------------------------------------------------------------------===//
-
 static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *value,
                          int recurse_times);
 
@@ -306,7 +268,6 @@ static int is_number_element(const TzType *type, const void *value) {
     return j && j->kind == TZ_JSON_NUMBER;
   }
 
-  // Decimals line up as numbers, as bigints do in Node.
   return type->kind == TZ_T_INT || type->kind == TZ_T_LONG || type->kind == TZ_T_DOUBLE ||
          type->kind == TZ_T_DECIMAL;
 }
@@ -323,13 +284,11 @@ static void pad(TzBuf *out, const TzBuf *text, const char *suffix, long target, 
   }
 }
 
-// groupArrayElements: lines up more than six short entries in columns.
-// Returns 1 and fills `grouped` if it grouped them.
 static int group_array_elements(Ctx *ctx, Entries *output, const TzArray *array, Entries *grouped) {
   size_t total_length = 0, max_length = 0;
   size_t output_length = output->count;
   if (kMaxArrayLength < output->count) {
-    --output_length; // the "... more items" entry is not grouped
+    --output_length;
   }
   const size_t separator_space = 2;
   size_t *data_len = (size_t *)tz_alloc(output_length * sizeof(size_t));
@@ -366,7 +325,6 @@ static int group_array_elements(Ctx *ctx, Entries *output, const TzArray *array,
         }
         max_line_length[i] = line_max + separator_space;
       }
-      // Numbers are aligned to the right, everything else to the left.
       int pad_start = 1;
       for (size_t i = 0; i < output->count && i < array->length; ++i) {
         if (!is_number_element(array->type, array->data + i * array->type->size)) {
@@ -429,8 +387,6 @@ static void join_entries(TzBuf *out, const Entries *output, const char *separato
   }
 }
 
-// The `<ref *N>` that starts an array or object which something inside it
-// refers to (formatRaw's `base`), or "" for others.
 static void circular_base(Ctx *ctx, const void *value, char base[32]) {
   base[0] = 0;
   for (int i = 0; i < ctx->circular_count; ++i) {
@@ -440,11 +396,8 @@ static void circular_base(Ctx *ctx, const void *value, char base[32]) {
   }
 }
 
-// Appends UTF-8 text as UTF-16 code units.
 static void buf_utf8(TzBuf *out, const char *text, size_t n);
 
-// The name of an object's class and a space before its brace, as in
-// `Point { x: 1 }`; nothing for other objects.
 static void class_prefix(TzBuf *out, const TzLayout *layout) {
   if (!layout || !layout->name_length) {
     return;
@@ -453,10 +406,6 @@ static void class_prefix(TzBuf *out, const TzLayout *layout) {
   tz_buf_push(out, ' ');
 }
 
-// reduceToSingleString for arrays (with `array`, whose entries may be grouped
-// in columns) and objects. `open` and `close` are the braces, after the
-// class name of `layout` if it has one (`open` may be longer, as
-// `[Object: null prototype] {`); `base` is empty or `<ref *N>`.
 static void reduce_to_single_string(Ctx *ctx, TzBuf *out, Entries *output, int recurse_times,
                                     const TzArray *array, const TzLayout *layout, const char *open,
                                     char close, const char *base) {
@@ -490,7 +439,6 @@ static void reduce_to_single_string(Ctx *ctx, TzBuf *out, Entries *output, int r
       return;
     }
   }
-  // One entry per line.
   if (base_length) {
     tz_buf_ascii(out, base);
     tz_buf_push(out, ' ');
@@ -506,8 +454,6 @@ static void reduce_to_single_string(Ctx *ctx, TzBuf *out, Entries *output, int r
   entries_free(&grouped);
 }
 
-// formatValue's check for an array or object that contains itself: it
-// prints as `[Circular *N]`, and the outer one gets `<ref *N>`.
 static int format_circular(Ctx *ctx, TzBuf *out, const void *value) {
   int seen = 0;
   for (int i = 0; i < ctx->seen_count && !seen; ++i) {
@@ -543,8 +489,6 @@ static int format_circular(Ctx *ctx, TzBuf *out, const void *value) {
   return 1;
 }
 
-// formatRaw and formatArray for arrays; `extra`, if not NULL, is a property
-// shown after the elements (`groups: undefined` of a match's indices).
 static void format_array_with(Ctx *ctx, TzBuf *out, const TzArray *array, int recurse_times,
                               const char *extra) {
   if (array->length == 0 && !extra) {
@@ -584,17 +528,10 @@ static void format_array_with(Ctx *ctx, TzBuf *out, const TzArray *array, int re
   entries_free(&output);
 }
 
-// The indices of a match are an array with `groups` too: the positions of
-// the named groups, undefined without names (and with names, which tz does
-// not keep there, not shown).
 static void format_array(Ctx *ctx, TzBuf *out, const TzArray *array, int recurse_times) {
   format_array_with(ctx, out, array, recurse_times,
                     array->type == &tz_re_indices_type ? "groups: undefined" : NULL);
 }
-
-//===----------------------------------------------------------------------===//
-// Objects
-//===----------------------------------------------------------------------===//
 
 static void buf_utf8(TzBuf *out, const char *text, size_t n) {
   for (size_t i = 0; i < n;) {
@@ -617,8 +554,6 @@ static void buf_utf8(TzBuf *out, const char *text, size_t n) {
   }
 }
 
-// A key that matches keyStrRegExp, /^[a-zA-Z_][a-zA-Z_0-9]*$/, is shown as
-// it is; any other is quoted like a string.
 static int is_plain_key(const char *name, size_t n) {
   if (n == 0) {
     return 0;
@@ -634,10 +569,9 @@ static int is_plain_key(const char *name, size_t n) {
   return 1;
 }
 
-// formatRaw and formatArray for a tuple, which is an array in JavaScript.
 static void format_tuple(Ctx *ctx, TzBuf *out, const TzInstance *tuple, int recurse_times) {
   const TzLayout *layout = tuple->layout;
-  if (layout->count == 0) { // `[]`, as an empty array prints, at any depth
+  if (layout->count == 0) {
     tz_buf_ascii(out, "[]");
     return;
   }
@@ -645,7 +579,6 @@ static void format_tuple(Ctx *ctx, TzBuf *out, const TzInstance *tuple, int recu
     tz_buf_ascii(out, "[Array]");
     return;
   }
-  // The empty tuple `[]`, as node shows an empty array.
   if (layout->count == 0) {
     tz_buf_ascii(out, "[]");
     return;
@@ -664,13 +597,10 @@ static void format_tuple(Ctx *ctx, TzBuf *out, const TzInstance *tuple, int recu
   --ctx->seen_count;
   char base[32];
   circular_base(ctx, tuple, base);
-  // Node lines up more than six entries of an array in columns; a tuple has
-  // fewer.
   reduce_to_single_string(ctx, out, &output, recurse_times, NULL, NULL, "[", ']', base);
   entries_free(&output);
 }
 
-// `name: `, the key of a property.
 static void format_key(TzBuf *entry, const TzField *field) {
   if (is_plain_key(field->name, field->name_length)) {
     tz_buf_ascii_n(entry, field->name, field->name_length);
@@ -684,9 +614,6 @@ static void format_key(TzBuf *entry, const TzField *field) {
   tz_buf_ascii(entry, ": ");
 }
 
-// formatRaw for the match of a regex: in JavaScript an array of the
-// captures with the properties index, input and groups after them. The first
-// field of the layout is that array.
 static void format_match(Ctx *ctx, TzBuf *out, const TzInstance *match, int recurse_times) {
   const TzLayout *layout = match->layout;
   const char *fields = (const char *)match;
@@ -723,11 +650,6 @@ static void format_match(Ctx *ctx, TzBuf *out, const TzInstance *match, int recu
 
 static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times);
 
-// formatError and formatRaw for an Error: its stack, in brackets if it has
-// no places (`[Error: no file]`), every line indented as deep as the error
-// is; then what Node shows after it: the fields of a class derived from
-// Error, and the cause of an Error made by `new Error(message, { cause })`,
-// as in `{ status: 404, [cause]: ... }`. The name is in the stack already.
 static void format_error(Ctx *ctx, TzBuf *out, const TzInstance *error, int recurse_times) {
   TzBuf stack;
   tz_buf_init(&stack);
@@ -750,7 +672,6 @@ static void format_error(Ctx *ctx, TzBuf *out, const TzInstance *error, int recu
   const TzLayout *layout = error->layout;
   const char *fields = (const char *)error;
   const TzInstance *cause = (const TzInstance *)tz_error_cause(error);
-  // The keys: the fields that hold a value, as for other objects.
   uint32_t shown = cause != NULL;
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
@@ -806,7 +727,6 @@ static void format_error(Ctx *ctx, TzBuf *out, const TzInstance *error, int recu
     ctx->indentation -= 2;
   }
   --ctx->seen_count;
-  // reduceToSingleString with the stack as `base`: one line if it all fits.
   size_t start = output.count + (size_t)ctx->indentation + 1 + base.length + 10;
   int newline = contains(base.data, base.length, '\n');
   for (size_t i = 0; i < output.count && !newline; ++i) {
@@ -831,7 +751,6 @@ static void format_error(Ctx *ctx, TzBuf *out, const TzInstance *error, int recu
   tz_buf_free(&base);
 }
 
-// An error nobody caught, as Node prints it (see tz_uncaught in error.c).
 void tz_buf_inspect_error(TzBuf *out, const void *error) {
   Ctx ctx;
   memset(&ctx, 0, sizeof ctx);
@@ -841,10 +760,6 @@ void tz_buf_inspect_error(TzBuf *out, const void *error) {
 
 static void format_json_key(TzBuf *entry, TzStr key);
 
-// formatRaw with formatMap and formatSet for a Map and a Set: `Map(2) { 'a'
-// => 1, 'b' => 2 }`, `Set(1) { 1 }`, and deeper than two levels `[Map]`. A
-// Record is a plain object in JavaScript: `{ a: 1, 'b-c': 2 }`, its keys in
-// the order they were added (Node puts the keys that are indices first).
 static void format_dict(Ctx *ctx, TzBuf *out, const TzMap *m, int recurse_times) {
   const TzMapLayout *l = m->layout;
   char open[48];
@@ -870,7 +785,6 @@ static void format_dict(Ctx *ctx, TzBuf *out, const TzMap *m, int recurse_times)
   ctx->current_depth = recurse_times;
   Entries output = {NULL, 0, 0};
   uint32_t at = 0, shown = 0;
-  // A Map and a Set show at most as many entries as an array.
   uint32_t limit = l->kind == TZ_MAP_RECORD ? m->count : kMaxArrayLength;
   ctx->indentation += 2;
   for (const char *e; shown < limit && (e = (const char *)tz_map_next(m, &at)); ++shown) {
@@ -902,12 +816,6 @@ static void format_dict(Ctx *ctx, TzBuf *out, const TzMap *m, int recurse_times)
   entries_free(&output);
 }
 
-// formatIterator for the iterator of a Map or a Set: what it has left, as
-// Node shows it without taking it, `[Map Iterator] { 'a', 'b' }` and
-// `[Map Entries] { [ 'a', 1 ] }`. The coroutine keeps the map and its
-// position in the promise, which lies after the header and the two pointers
-// that start the frame (compiler/lower/codegen/codegen_iter.cpp); the map is
-// NULL once the iterator is done.
 static void format_dict_iterator(Ctx *ctx, TzBuf *out, const TzInstance *it, int recurse_times) {
   uint32_t flags = it->layout->flags;
   int set = (flags & TZ_LAYOUT_DICT_OF_SET) != 0, entries = (flags & TZ_LAYOUT_DICT_ENTRIES) != 0;
@@ -969,8 +877,6 @@ static void format_dict_iterator(Ctx *ctx, TzBuf *out, const TzInstance *it, int
   entries_free(&output);
 }
 
-// formatPromise: `Promise { 1 }`, `Promise { <pending> }`, `Promise {
-// <rejected> Error: ... }`; deeper than two levels `[Promise]`.
 static void format_promise(Ctx *ctx, TzBuf *out, const TzPromise *p, int recurse_times) {
   static const TzType error_type = {TZ_T_OBJECT, sizeof(void *), NULL};
   if (recurse_times > kDepth) {
@@ -1002,7 +908,6 @@ static void format_promise(Ctx *ctx, TzBuf *out, const TzPromise *p, int recurse
   entries_free(&output);
 }
 
-// An ArrayBuffer: formatArrayBuffer and its hidden byteLength.
 static void format_array_buffer(Ctx *ctx, TzBuf *out, const TzArrayBuffer *ab, int recurse_times) {
   if (recurse_times > kDepth) {
     tz_buf_ascii(out, "[ArrayBuffer]");
@@ -1024,9 +929,6 @@ static void format_array_buffer(Ctx *ctx, TzBuf *out, const TzArrayBuffer *ab, i
   entries_free(&output);
 }
 
-// Typed arrays (formatTypedArray), Buffer (its own inspect, which shows at
-// most 50 bytes at any depth), ArrayBuffer, DataView, and TextEncoder and
-// TextDecoder, which show their properties.
 static void format_bytes(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times) {
   int32_t kind = tz_bytes_kind(object);
   const TzBytes *b = (const TzBytes *)object;
@@ -1079,7 +981,6 @@ static void format_bytes(Ctx *ctx, TzBuf *out, const TzInstance *object, int rec
   default:
     break;
   }
-  // A typed array: `Uint8Array(3) [ 1, 2, 3 ]`.
   char open[48];
   snprintf(open, sizeof open, "%s(%d) [", object->layout->name, b->length);
   if (b->length == 0) {
@@ -1118,8 +1019,6 @@ static void format_bytes(Ctx *ctx, TzBuf *out, const TzInstance *object, int rec
     tz_buf_ascii_n(entries_add(&output), text, (size_t)n);
   }
   --ctx->seen_count;
-  // Every element is a number, which groupArrayElements lines up to the
-  // right: an array of elements of size 0, which it does not read.
   static const TzType number_type = {TZ_T_INT, 0, NULL};
   TzArray numbers = {0, &number_type, (char *)b->data, (uint32_t)b->length, 0, NULL};
   char base[32];
@@ -1128,24 +1027,17 @@ static void format_bytes(Ctx *ctx, TzBuf *out, const TzInstance *object, int rec
   entries_free(&output);
 }
 
-// Whether the class of `layout` is `name`.
 static int named(const TzLayout *layout, const char *name) {
   size_t n = strlen(name);
 
   return layout->name_length == n && memcmp(layout->name, name, n) == 0;
 }
 
-// An emitter of node:events shows `_maxListeners: undefined`, as node's does.
 static int shows_undefined(const TzLayout *layout, const TzField *field) {
   return (layout->flags & TZ_LAYOUT_LIBRARY) && field->name_length == 13 &&
          memcmp(field->name, "_maxListeners", 13) == 0;
 }
 
-// The getter of a class of tz's library that gives what the object shows
-// as its entries, as node's classes show what they hold
-// (TZ_FIELD_GETTER): `__tz_entries`, pairs shown as `'a' => '1'`
-// (URLSearchParams), or `__tz_keys`, shown as keys (`'content-type':
-// 'text/plain'`, Headers); NULL for any other class.
 static const TzField *entries_getter(const TzLayout *layout, int *arrows) {
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
@@ -1165,8 +1057,6 @@ static const TzField *entries_getter(const TzLayout *layout, int *arrows) {
   return NULL;
 }
 
-// An object of such a class: `URLSearchParams { 'a' => '1' }`, from the
-// pairs `[string, string][]` its getter gives.
 static void format_entries(Ctx *ctx, TzBuf *out, const TzInstance *object, const TzField *field,
                            int arrows, int recurse_times) {
   const TzLayout *layout = object->layout;
@@ -1209,26 +1099,19 @@ static void format_entries(Ctx *ctx, TzBuf *out, const TzInstance *object, const
   }
 }
 
-// formatRaw and formatProperty for objects.
 static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times) {
   const TzLayout *layout = object->layout;
   const char *fields = (const char *)object;
-  // The value in the box of an unknown, as it prints itself.
   if (layout->flags & TZ_LAYOUT_BOX) {
     const TzBox *box = (const TzBox *)object;
     format_value(ctx, out, box->type, TZ_BOX_VALUE(box), recurse_times);
     return;
   }
-  // A class as a value: `[class Dog extends Animal]`, with its static
-  // fields after it, and one of the language, a function in JavaScript:
-  // `[Function: String]`. The fields print as an object's, after that name.
   TzLayout titled;
   char title[256];
   int is_class = (layout->flags & TZ_LAYOUT_CLASS) != 0;
   if (is_class) {
     const TzClass *cls = (const TzClass *)object;
-    // As node shows a class without a name, and one that extends such a
-    // class.
     const TzLayout *parent = cls->parent ? cls->parent->layout : NULL;
     if (parent && !parent->name_length) {
       parent = NULL;
@@ -1270,7 +1153,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     format_promise(ctx, out, (const TzPromise *)object, recurse_times);
     return;
   }
-  // A timer shows only its kind (Node shows the fields of its own machinery).
   if (layout->flags & TZ_LAYOUT_TIMER) {
     buf_utf8(out, layout->name, layout->name_length);
     tz_buf_ascii(out, " {}");
@@ -1280,8 +1162,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     format_error(ctx, out, object, recurse_times);
     return;
   }
-  // An iterator shows only what made it, as Node shows one without own
-  // properties, at any depth.
   const char *iterator = layout->flags & TZ_LAYOUT_GENERATOR         ? "Generator"
                          : layout->flags & TZ_LAYOUT_ARRAY_ITERATOR  ? "Array Iterator"
                          : layout->flags & TZ_LAYOUT_STRING_ITERATOR ? "String Iterator"
@@ -1299,7 +1179,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     tz_buf_regex(out, (const TzRegex *)object);
     return;
   }
-  // A date shows its ISO text at any depth, as node shows it.
   if (layout->flags & TZ_LAYOUT_DATE) {
     tz_buf_date(out, ((const TzDate *)object)->time);
     return;
@@ -1312,8 +1191,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     format_bytes(ctx, out, object, recurse_times);
     return;
   }
-  // The other objects of Intl: `NumberFormat [Intl.NumberFormat] {}`, and
-  // what Segmenter's segment() gives as `{}`.
   if (layout->flags & TZ_LAYOUT_INTL) {
     if (layout->name_length) {
       tz_buf_ascii_n(out, layout->name, layout->name_length);
@@ -1334,10 +1211,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     format_entries(ctx, out, object, shown_entries, arrows, recurse_times);
     return;
   }
-  // The objects of tz's library that print as node's (TZ_LAYOUT_LIBRARY):
-  // the listeners of an event as their array, an async listener as its
-  // function, the wrapper of once() as node's bound onceWrapper with its
-  // property `listener`.
   if (layout->flags & TZ_LAYOUT_LIBRARY) {
     if ((named(layout, "ListenerList") || named(layout, "ThisListener")) && layout->count > 0) {
       const TzField *field = &layout->fields[0];
@@ -1345,7 +1218,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
       return;
     }
     if (named(layout, "AsyncListener") && layout->count > 0) {
-      // `[AsyncFunction: name]`, as node shows an async function.
       const TzField *field = &layout->fields[0];
       TzBuf text;
       tz_buf_init(&text);
@@ -1377,8 +1249,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
       layout = &titled;
     }
   }
-  // The groups of a match have no prototype in JavaScript, and every name
-  // is a key, even of a group that holds nothing.
   int groups = (layout->flags & TZ_LAYOUT_GROUPS) != 0;
   const char *open = groups ? "[Object: null prototype] {" : "{";
   uint32_t shown = 0;
@@ -1399,7 +1269,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     return;
   }
   if (recurse_times > kDepth) {
-    // `[Object]`, or the name of the class: `[Point]`.
     if (groups) {
       tz_buf_ascii(out, "[Object: null prototype]");
     } else {
@@ -1414,17 +1283,12 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
     return;
   }
   ++recurse_times;
-  // A CryptoKey of Web Crypto shows its fields a level deeper, as node's custom inspect of it
-  // does (library/crypto/webcrypto.tz).
   if ((layout->flags & TZ_LAYOUT_LIBRARY) && named(layout, "CryptoKey")) {
     ++recurse_times;
   }
   ctx->seen[ctx->seen_count++] = object;
   ctx->current_depth = recurse_times;
 
-  // An object whose keys getters give (a class of tz's library) prints as
-  // node's custom inspect of such a class does: its name, then the object
-  // of those properties as a fresh inspect formats it, indented from zero.
   int custom = 0;
   for (uint32_t i = 0; i < layout->count && !custom; ++i) {
     custom = layout->fields[i].offset == TZ_FIELD_GETTER;
@@ -1437,8 +1301,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
     if (field->offset == TZ_FIELD_GETTER) {
-      // A property of a class of tz's library: what its getter gives,
-      // undefined too, as node shows its getters.
       const TzGetterType *getter = (const TzGetterType *)field->type;
       _Alignas(16) char got[64];
       getter->get(object, got);
@@ -1457,14 +1319,13 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
       continue;
     }
     TzBuf *entry = entries_add(&output);
-    if (tz_field_is_symbol(layout, field)) { // `Symbol(kCapture): false`
+    if (tz_field_is_symbol(layout, field)) {
       buf_utf8(entry, field->name, field->name_length);
       tz_buf_ascii(entry, ": ");
     } else {
       format_key(entry, field);
     }
     if (method) {
-      // A method has the name of its key.
       tz_buf_ascii(entry, "[Function: ");
       buf_utf8(entry, field->name, field->name_length);
       tz_buf_push(entry, ']');
@@ -1487,7 +1348,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   entries_free(&output);
 }
 
-// `[Function: name]`, or `[Function (anonymous)]`.
 static void format_function(TzBuf *out, const TzFunction *fn) {
   TzStr name = {fn->info->name.obj, fn->info->name.meta};
   TzBuf text;
@@ -1503,10 +1363,6 @@ static void format_function(TzBuf *out, const TzFunction *fn) {
   tz_buf_free(&text);
 }
 
-// formatRaw for a Result of neverthrow, which is an instance of its class Ok
-// or Err with the one property `value` or `error`: `Ok { value: 84 }`, and
-// deeper than two levels `[Ok]`. reduceToSingleString with one entry and the
-// brace `Ok {`.
 static void format_result(Ctx *ctx, TzBuf *out, const TzResultType *type, const char *value,
                           int recurse_times) {
   int ok = value[type->ok_offset] != 0;
@@ -1553,8 +1409,6 @@ static void format_result(Ctx *ctx, TzBuf *out, const TzResultType *type, const 
   tz_buf_free(&entry);
 }
 
-// A key of a Json object: as it is when it is an identifier, else quoted;
-// `__proto__` is a key of its own there, which Node shows in brackets.
 static void format_json_key(TzBuf *entry, TzStr key) {
   TzBuf text;
   tz_buf_init(&text);
@@ -1580,8 +1434,6 @@ static void format_json_key(TzBuf *entry, TzStr key) {
   tz_buf_free(&text);
 }
 
-// formatRaw for an object that JSON.parse made: its keys in the order
-// JavaScript gives them, array indices first.
 static void format_json_object(Ctx *ctx, TzBuf *out, const TzJson *object, int recurse_times) {
   uint32_t count = object->u.object.count;
   if (count == 0) {
@@ -1614,7 +1466,6 @@ static void format_json_object(Ctx *ctx, TzBuf *out, const TzJson *object, int r
   entries_free(&output);
 }
 
-// A Json value, shown as Node shows what JSON.parse gives.
 static void format_json(Ctx *ctx, TzBuf *out, const TzJson *j, int recurse_times) {
   static const TzType double_type = {TZ_T_DOUBLE, sizeof(double), NULL};
   if (!j) {
@@ -1682,7 +1533,7 @@ static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *v
       format_object(ctx, out, *(TzInstance *const *)value, recurse_times);
     }
     return;
-  case TZ_T_UNKNOWN: // an object, a box, or undefined
+  case TZ_T_UNKNOWN:
     if (!*(void *const *)value) {
       tz_buf_ascii(out, "undefined");
     } else if (!format_circular(ctx, out, *(void *const *)value)) {
@@ -1696,16 +1547,13 @@ static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *v
       tz_buf_ascii(out, "undefined");
     }
     return;
-  default: // numbers, decimals, booleans, undefined
+  default:
     tz_buf_value(out, type, value, 0);
     return;
   }
 }
 
-// console.log of one argument that is not a plain number, boolean or string.
-// A string at the top level prints as it is; inside arrays it is quoted.
 void tz_print_value(const TzType *type, const void *value) {
-  // An unknown prints as what it holds.
   if (type->kind == TZ_T_UNKNOWN) {
     const TzInstance *u = *(const TzInstance *const *)value;
     if (!u) {
@@ -1731,7 +1579,7 @@ void tz_print_value(const TzType *type, const void *value) {
     tz_print_string(s->obj, s->meta);
     return;
   }
-  if (type->kind == TZ_T_JSON) { // a Json string prints as a string does
+  if (type->kind == TZ_T_JSON) {
     const TzJson *j = *(TzJson *const *)value;
     if (j && j->kind == TZ_JSON_STRING) {
       tz_print_string(j->u.string.obj, j->u.string.meta);
@@ -1748,8 +1596,6 @@ void tz_print_value(const TzType *type, const void *value) {
   tz_free((void *)ctx.circular);
 }
 
-// util.inspect of an unknown, for the messages of tz's library (library/):
-// a string is quoted, as in an array.
 void tz_lib_inspect(TzStr *out, const void *u, TzMaker make) {
   (void)make;
   static const TzType unknown_type = {TZ_T_UNKNOWN, sizeof(void *), NULL};

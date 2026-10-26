@@ -1,9 +1,7 @@
-// node:readline over stdin (docs/io.md, step 4).
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/readline/readline.h"
@@ -39,58 +37,36 @@
 #include <unistd.h>
 #endif
 
-// An Interface of node:readline over stdin (docs/io.md, step 4). Its lines
-// come from the buffer that readLine of tz:io reads (tz_in), as they are
-// asked for, by a question or by a step of `for await`, in the order they
-// are asked. What stdin does not have yet is read on a thread of the pool,
-// a chunk at a time, while someone waits for a line; that read keeps the
-// program alive. The lines end as Node's do: at "\n", "\r\n", a lone "\r",
-// U+2028 or U+2029; the last line may end with the input.
-//
-// Unlike Node, which gives each line to whoever listens when its chunk
-// comes and drops it if nobody does, a line waits here until it is asked
-// for: `await rl.question(a)` after another question gets the next line of
-// a file, as it does from a terminal. And an Interface nobody asks for
-// lines reads nothing, so it does not keep the program waiting for the end
-// of the input.
-
-// A read of stdin on a thread of the pool: what it gave, in memory of its
-// own. On Windows a console gives UTF-16, which the main thread puts
-// together as readLine does.
 typedef struct StdinRead {
   TzWork work;
   Raw data;
-  int32_t ended;   // nothing more: the end of the input, or an error
-  int32_t console; // `data` holds UTF-16 units of a console
+  int32_t ended;
+  int32_t console;
 } StdinRead;
 
-// Not static: see the rules in tzrt.h. The read in flight, if any.
 StdinRead *tz_stdin_read;
 
 extern TzErrorInfo tz_error_info;
 
-// Someone waiting for a line: a step of `for await` (a promise of the line,
-// or done at the end) or a question (a promise of the line).
 typedef struct Asker {
   struct Asker *next;
-  TzPromise *promise; // held
+  TzPromise *promise;
   int32_t step;
-  TzAbortListener listener; // of the question's signal
-  TzSignal *signal;         // held
+  TzAbortListener listener;
+  TzSignal *signal;
   struct Readline *readline;
 } Asker;
 
 typedef struct Readline {
   TzInstance base;
-  int32_t output; // where questions go: 1 stdout, 2 stderr, 0 nowhere
+  int32_t output;
   int32_t closed;
-  int32_t skip_lf;  // a line ended with "\r": a "\n" right after it goes with it
-  TzSignal *signal; // of createInterface: an abort closes it
+  int32_t skip_lf;
+  TzSignal *signal;
   TzAbortListener listener;
   Asker *head, *tail;
 } Readline;
 
-// All the interfaces there are, so that the reads find them.
 Readline **tz_readlines;
 
 size_t tz_readline_count, tz_readline_capacity;
@@ -121,7 +97,7 @@ static void stdin_read_work(TzWork *w) {
     DWORD got = 0;
     if (!ReadConsoleW(h, (wchar_t *)r->data.data, 4096, &got, NULL) || got == 0 ||
         ((const uint16_t *)r->data.data)[0] == 0x1A) {
-      r->ended = 1; // a line that starts with Ctrl+Z ends the input
+      r->ended = 1;
     } else {
       r->data.length = (size_t)got * 2;
     }
@@ -160,7 +136,6 @@ static void stdin_read_done(TzWork *w) {
     tz_in_eof = 1;
   } else if (r->console) {
 #ifdef _WIN32
-    // As in_fill: a pair of surrogates the console split waits for its half.
     const uint16_t *units = (const uint16_t *)r->data.data;
     size_t n = r->data.length / 2;
     uint16_t joined[4097];
@@ -184,8 +159,6 @@ static void stdin_read_done(TzWork *w) {
   }
   tz_fs_raw_free(&r->data);
   free(r);
-  // The interfaces take their lines, in the order they were made; then
-  // process.stdin as a stream takes what is left.
   for (size_t i = 0; i < tz_readline_count; ++i) {
     readline_serve(tz_readlines[i]);
   }
@@ -199,7 +172,6 @@ void tz_fs_stdin_read(int ref) {
     }
     return;
   }
-  // What waits to be written goes first: it may be the question.
   tz_out_flush(1);
   StdinRead *r = (StdinRead *)calloc(1, sizeof(StdinRead));
   if (!r) {
@@ -212,8 +184,6 @@ void tz_fs_stdin_read(int ref) {
   tz_work_queue(&r->work);
 }
 
-// The end of the next line in tz_in, from `start`: where it ends and where
-// the next starts; false if it has not come yet.
 static int line_end(size_t start, size_t *end, size_t *next) {
   const uint8_t *s = tz_in.data;
   size_t n = tz_in.length;
@@ -238,8 +208,6 @@ static int line_end(size_t start, size_t *end, size_t *next) {
   return 0;
 }
 
-// The next line, if it is there (or the rest at the end of the input):
-// false otherwise.
 static int take_line(Readline *rl, TzStr *line) {
   size_t start = 0;
   if (rl->skip_lf && tz_in.length > 0) {
@@ -297,9 +265,6 @@ static void readline_unlink(Readline *rl, Asker *a) {
   a->next = NULL;
 }
 
-// close(), the end of the input or an abort: the steps of `for await` are
-// done; questions wait for nothing more, as in Node, where they never
-// settle then.
 static void readline_shut(Readline *rl) {
   if (rl->closed) {
     return;
@@ -325,7 +290,6 @@ static void readline_shut(Readline *rl) {
   for (Asker *a = rl->head; a; a = a->next) {
     rl->tail = a;
   }
-  // A read in flight no longer keeps the program alive for it.
   if (tz_stdin_read && !tz_stdin_read->work.unref) {
     int needed = 0;
     for (size_t i = 0; i < tz_readline_count && !needed; ++i) {
@@ -337,8 +301,6 @@ static void readline_shut(Readline *rl) {
   }
 }
 
-// Gives the lines there are to those who wait, then reads more if someone
-// still does.
 static void readline_serve(Readline *rl) {
   ++rl->base.rc;
   while (rl->head && !rl->closed) {
@@ -367,7 +329,7 @@ static Asker *readline_ask(Readline *rl, TzPromise *p, int32_t step) {
   Asker *a = (Asker *)tz_alloc(sizeof(Asker));
   memset(a, 0, sizeof *a);
   a->promise = p;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   a->step = step;
   a->readline = rl;
   if (rl->tail) {
@@ -406,7 +368,7 @@ void *tz_readline_new(int32_t output, TzSignal *signal) {
       rl->closed = 1;
     } else {
       rl->signal = signal;
-      tz_ref_retain(signal); // a member of a group (signal.c)
+      tz_ref_retain(signal);
       rl->listener.run = readline_aborted;
       tz_signal_listen(signal, &rl->listener);
     }
@@ -416,7 +378,6 @@ void *tz_readline_new(int32_t output, TzSignal *signal) {
 }
 
 static void readline_drop(void *object) {
-  // It leaves lists of the runtime: in node's order (parallel.c).
   TZ_ORDERED();
   Readline *rl = (Readline *)object;
   for (size_t i = 0; i < tz_readline_count; ++i) {
@@ -442,7 +403,6 @@ static void readline_drop(void *object) {
   tz_obj_free(rl);
 }
 
-// A step of `for await (const line of rl)`.
 static void readline_step(void *object, TzPromise *p) {
   Readline *rl = (Readline *)object;
   if (rl->closed) {
@@ -454,7 +414,6 @@ static void readline_step(void *object, TzPromise *p) {
   readline_serve(rl);
 }
 
-// `for await` left early closes the interface, as in Node.
 static void readline_close_step(void *object, TzPromise *p) {
   readline_shut((Readline *)object);
   tz_promise_fulfill(p);
@@ -470,8 +429,6 @@ static void question_aborted(TzAbortListener *l) {
   asker_free(a);
 }
 
-// rl.question(query, { signal }): the query is written to the output, then
-// the next line answers it.
 void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t query_meta,
                           TzSignal *signal) {
   Readline *rl = (Readline *)object;
@@ -493,12 +450,11 @@ void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t 
   Asker *a = readline_ask(rl, p, 0);
   if (signal) {
     a->signal = signal;
-    tz_ref_retain(signal); // a member of a group (signal.c)
+    tz_ref_retain(signal);
     a->listener.run = question_aborted;
     tz_signal_listen(signal, &a->listener);
   }
   readline_serve(rl);
 }
 
-// Releases what the runtime holds, before the leak check.
 void tz_fs_shutdown(void) { tz_fs_bytes_free(&tz_in); }

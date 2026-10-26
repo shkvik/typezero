@@ -37,7 +37,7 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 FromJsonLowerer::FromJsonLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -80,8 +80,6 @@ llvm::Value *FromJsonLowerer::emitFromJson(const Type *type, llvm::Value *json, 
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_value", ptr, {ptr, ptr}),
         {json, path});
   case Type::Kind::Optional: {
-    // A key that is not there gives undefined, and so does null, except for
-    // a Json, which holds null.
     const Type *inner = type->inner();
     llvm::Value *present = inner->isJson() ? lowering_.builder_.CreateIsNotNull(json)
                                            : lowering_.jsonLowerer().jsonPresent(json);
@@ -105,7 +103,6 @@ llvm::Value *FromJsonLowerer::emitFromJson(const Type *type, llvm::Value *json, 
   case Type::Kind::Dict:
   case Type::Kind::Literal:
   case Type::Kind::Union:
-    // An object of a class, through its constructor (fromJson(cls, j)).
     if (const ClassDecl *cls = type->classDecl(); cls && !cls->literal) {
       return lowering_.builder_.CreateCall(lowering_.reflectLowerer().classFromJsonFunction(cls),
                                            {json, path});
@@ -116,17 +113,12 @@ llvm::Value *FromJsonLowerer::emitFromJson(const Type *type, llvm::Value *json, 
   }
 }
 
-// `T tz.fromJson.T(ptr json, ptr path)` for an array, an object, a literal
-// type or a union. It is emitted aside, while the function that needs it is
-// being emitted. A value that does not fit throws: the function releases
-// what it built and gives null, which its caller drops when it sees
-// tz_thrown.
 llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   if (llvm::Function *fn = fromJsonFunctions_.lookup(type)) {
     return fn;
   }
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
-  if (!lowering_.jsonPathTy_) { // runtime/library/json/json/json.c: TzJsonPath
+  if (!lowering_.jsonPathTy_) {
     lowering_.jsonPathTy_ =
         llvm::StructType::create(lowering_.ctx_, {ptr, ptr, i64, i64}, "tz.jsonpath");
   }
@@ -145,14 +137,12 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   llvm::Value *json = fn->getArg(0), *path = fn->getArg(1);
   llvm::Value *typeName = lowering_.stringLowerer().utf8Constant(name),
               *nameLength = lowering_.builder_.getInt64(name.size());
-  // Where the elements or the fields are, for their errors.
   llvm::Value *link = lowering_.functionFrame().createStackSlot(lowering_.jsonPathTy_, "path");
   lowering_.builder_.CreateStore(
       path, lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 0));
   llvm::Value *keyObj = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 1);
   llvm::Value *keyMeta = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 2);
   llvm::Value *at = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 3);
-  // After each step: an error goes back to the caller, with `release` run.
   auto failIfThrown = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
     llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
@@ -166,8 +156,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     lowering_.functionFrame().switchTo(goBlock);
   };
 
-  // Literal types: whether a Json holds the literal's value, and that value
-  // as the program holds it (a string literal is its atom).
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *f64 = lowering_.builder_.getDoubleTy();
   auto holdsLiteral = [&](const Type *literal, llvm::Value *j) {
     const Type *base = literal->literalBase();
@@ -205,8 +193,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     return llvm::ConstantInt::getSigned(lowering_.moduleBuilder().lower(base),
                                         static_cast<int64_t>(literal->literalNumber()));
   };
-  // A TypeError for a value that is not what `what` names; the function
-  // gives null then.
   auto mismatch = [&](llvm::Value *j, llvm::Value *at, llvm::StringRef what) {
     lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_mismatch", lowering_.builder_.getVoidTy(),
@@ -225,10 +211,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     lowering_.functionFrame().switchTo(goodBlock);
     lowering_.builder_.CreateRet(literalValue(type));
   } else if (type->isUnion()) {
-    // The member a value goes to is told by what kind of value it is, then by
-    // its value for a literal, and among objects by the tag field that Checker
-    // found (see jsonTagField). The kinds are TZ_JSON_* of
-    // runtime/core/tzrt/tzrt.h; tz_json_kind gives -1 for undefined.
     enum { kBool = 1, kNumber = 2, kString = 3, kArray = 4, kObject = 5 };
     std::map<int, std::vector<const Type *>> byKind;
     for (const Type *m : type->members()) {
@@ -244,13 +226,11 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
         lowering_.jsonLowerer().jsonFunction("tz_json_kind", i32, {ptr}), {json}, "kind");
     llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("json.union.bad");
     llvm::SwitchInst *sw = lowering_.builder_.CreateSwitch(kind, badBlock, unsigned(byKind.size()));
-    // Builds `member` from the Json found at `at`; its errors are its own.
     auto build = [&](const Type *member, llvm::Value *j) {
       llvm::Value *value = emitFromJson(member, j, path);
       failIfThrown([] {});
       lowering_.builder_.CreateRet(lowering_.exprLowerer().emitConversion(value, member, type));
     };
-    // Gives `literal` if `j` holds its value, and goes on otherwise.
     auto tryLiteral = [&](const Type *literal, llvm::Value *j, llvm::function_ref<void()> give) {
       llvm::BasicBlock *yesBlock = lowering_.functionFrame().newBlock("json.union.literal");
       llvm::BasicBlock *noBlock = lowering_.functionFrame().newBlock("json.union.next");
@@ -278,7 +258,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
         }
       }
       if (objects.size() > 1) {
-        // `{"kind": "circle", ...}`: the tag says which object it is.
         std::string tag = jsonTagField(objects);
         llvm::Value *key = lowering_.stringLowerer().stringLiteral(utf16(tag));
         lowering_.builder_.CreateStore(lowering_.stringLowerer().stringObj(key), keyObj);
@@ -345,7 +324,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     lowering_.functionFrame().switchTo(doneBlock);
     lowering_.builder_.CreateRet(result);
   } else if (type->isRecord()) {
-    // The keys in the order of the text, which the Record keeps.
     lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_object",
                                              lowering_.builder_.getVoidTy(), {ptr, ptr, ptr, i64}),
@@ -373,7 +351,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     llvm::Value *item = lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_object_entry", ptr, {ptr, i32, ptr}),
         {json, k, keySlot}, "item");
-    llvm::Value *key = lowering_.builder_.CreateLoad(lowering_.strTy_, keySlot, "key"); // borrowed
+    llvm::Value *key = lowering_.builder_.CreateLoad(lowering_.strTy_, keySlot, "key");
     lowering_.builder_.CreateStore(lowering_.stringLowerer().stringObj(key), keyObj);
     lowering_.builder_.CreateStore(lowering_.stringLowerer().stringMeta(key), keyMeta);
     llvm::Value *converted = emitFromJson(value, item, link);
@@ -392,8 +370,6 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
                                              lowering_.builder_.getVoidTy(), {ptr, ptr, ptr, i64}),
         {json, path, typeName, nameLength});
     failIfThrown([] {});
-    // The keys in the order of the type, whatever the order in the JSON. The
-    // values come first, so that an error leaves no object half made.
     llvm::ArrayRef<Field> fields = type->fields();
     lowering_.builder_.CreateStore(llvm::ConstantInt::getSigned(i64, -1), at);
     std::vector<llvm::Value *> values;
@@ -431,4 +407,4 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   return fn;
 }
 
-} // namespace tz
+}

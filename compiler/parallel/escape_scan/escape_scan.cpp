@@ -36,8 +36,6 @@ using llvm::isa;
 
 namespace {
 
-// The built-ins that read or change their receiver and give back no reference
-// to it, unless their result is dropped.
 bool keepsReceiver(Builtin b, bool discarded) {
   switch (b) {
   case Builtin::ArrReverse:
@@ -70,7 +68,6 @@ bool keepsReceiver(Builtin b, bool discarded) {
   }
 }
 
-// The built-ins that only read their arguments, or copy what they hold.
 bool onlyReadsArgs(Builtin b) {
   switch (b) {
   case Builtin::ConsoleLog:
@@ -103,7 +100,7 @@ bool onlyReadsArgs(Builtin b) {
   }
 }
 
-} // namespace
+}
 
 EscapeScan::EscapeScan(Analysis &analysis) : analysis_(analysis) {}
 
@@ -145,7 +142,7 @@ void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
     }
     return;
   case Stmt::Kind::Expr:
-    scanUses(cast<ExprStmt>(s)->expr, true, out, /*discarded=*/true);
+    scanUses(cast<ExprStmt>(s)->expr, true, out, true);
     return;
   case Stmt::Kind::If:
     scanUses(cast<IfStmt>(s)->cond, true, out);
@@ -200,10 +197,6 @@ void EscapeScan::scanStmt(const Stmt *s, Analysis::Escapes &out) {
   }
 }
 
-// Finds the variables whose value may leave the function: given to a call,
-// stored, returned, captured. `safe` says that the expression is in a place
-// that only reads or changes the object it gives (`x.f`, `x[i]`, `x.push(v)`,
-// console.log(x)).
 void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool discarded) {
   if (!e) {
     return;
@@ -275,9 +268,9 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool
       return;
     }
     if (m && c->method && analysis_.isLibrary(c->method->decl)) {
-      scanUses(m->object, true, out); // a built-in module keeps it from the program
+      scanUses(m->object, true, out);
     } else if (m && (c->method || !c->unionMethods.empty())) {
-      scanUses(m->object, false, out); // a method may keep `this`
+      scanUses(m->object, false, out);
     } else {
       scanUses(c->callee, true, out);
     }
@@ -337,14 +330,12 @@ void EscapeScan::scanUses(const Expr *e, bool safe, Analysis::Escapes &out, bool
   }
 }
 
-// Whether a constructor of the class (or of one up its chain) may give
-// `this` away before the object is done: then what it writes may be seen.
 bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
   auto found = analysis_.leaks_.find(cls);
   if (found != analysis_.leaks_.end()) {
     return found->second;
   }
-  analysis_.leaks_[cls] = true; // a cycle of classes is an error anyway
+  analysis_.leaks_[cls] = true;
   bool leaks = false;
   for (const ClassDecl *k = cls; k && !leaks; k = k->parent) {
     std::vector<const FunctionDecl *> fns(k->constructors.begin(), k->constructors.end());
@@ -365,4 +356,4 @@ bool EscapeScan::constructorLeaks(const ClassDecl *cls) {
   return analysis_.leaks_[cls] = leaks;
 }
 
-} // namespace tz::parallel
+}

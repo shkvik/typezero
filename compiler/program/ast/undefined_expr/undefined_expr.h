@@ -10,4 +10,4 @@ public:
   static bool classof(const Expr *e) { return e->kind() == Kind::Undefined; }
 };
 
-} // namespace tz
+}

@@ -117,8 +117,6 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
     checker_.thisMember_ = member->name;
   }
   if (object && object->name == "super") {
-    // JavaScript reads a field through `super` from the prototype, where it
-    // is not.
     checker_.diags_.error(member->loc(), "'super." + member->name +
                                              "' can only be called, 'super." + member->name +
                                              "(...)'; to read the field or the method, use "
@@ -142,8 +140,6 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   if (type->isUnknown() || type->isAnyObject() || type->isClassRef()) {
     return checker_.unknownChecker().checkUnknownMember(member);
   }
-  // A member of every member of a union: through a type they all are, or
-  // read from each (sema_union.cpp).
   if (type->isUnion()) {
     const Type *common = checker_.unionChecker().commonBaseWith(type, member->name);
     if (!common) {
@@ -158,7 +154,6 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   if (type->isTuple()) {
     return checker_.tupleChecker().checkTupleMember(member);
   }
-  // What a CryptoKey of Web Crypto is lies in its handle, which only tz:webcrypto reads.
   if (member->name == "handle" && checker_.webCryptoChecker().isSubtleClass(type, "CryptoKey") &&
       !checker_.libraryCalls().inLibrary(member->loc())) {
     checker_.diags_.error(member->loc(),
@@ -204,7 +199,6 @@ Expr *MemberChecker::checkMember(MemberExpr *member, const Type *expected) {
   if (type->isObject()) {
     return checker_.objectChecker().checkField(member);
   }
-  // `args.length` of a list of types too, in generic code.
   if ((type->isString() || type->isArray() || type->isListParam()) && member->name == "length") {
     member->type = Type::intTy();
     return member;
@@ -259,8 +253,7 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
       return checker_.typeDeclarer().checkEnumIndex(decl, index);
     }
   }
-  index->object =
-      checker_.builtinModuleChecker().processAlias(index->object); // `env[name]` of node:process
+  index->object = checker_.builtinModuleChecker().processAlias(index->object);
   if (Expr *variable = checker_.processChecker().checkProcessEnvIndex(index)) {
     return variable;
   }
@@ -287,9 +280,8 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     checker_.unknownChecker().reportUnknownUse(index->object, "");
     return index;
   }
-  // `o[key]` with a constant key reads the field it names.
   if (index->object->type->isObject()) {
-    return checker_.keyedFieldChecker().checkKeyedField(index, /*write=*/false);
+    return checker_.keyedFieldChecker().checkKeyedField(index, false);
   }
   if (index->object->type->isDict()) {
     return checker_.dictChecker().checkDictIndex(index);
@@ -305,8 +297,6 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
   if (type->isError() || index->index->type->isError()) {
     return index;
   }
-  // `args[i]` of a list of types, in generic code: `A[0]` for a number,
-  // `A[number]` of any.
   if (type->isListParam()) {
     const Expr *at = index->index;
     while (isa<CastExpr>(at) && cast<CastExpr>(at)->isImplicit()) {
@@ -330,13 +320,11 @@ Expr *MemberChecker::checkIndex(IndexExpr *index) {
     }
     return index;
   }
-  // Proved in range: a plain read. Otherwise JavaScript yields undefined.
-  bool inRange =
-      checker_.indexProofs().provesInBounds(index->object, index->index, /*allowEnd=*/false);
+  bool inRange = checker_.indexProofs().provesInBounds(index->object, index->index, false);
   index->mayBeOutOfRange = !inRange;
   index->type = inRange ? element : Type::optional(element);
 
   return index;
 }
 
-} // namespace tz
+}

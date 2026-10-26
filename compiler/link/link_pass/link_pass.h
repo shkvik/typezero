@@ -9,8 +9,6 @@ class Target;
 struct BuildOptions;
 struct ObjectFile;
 
-// The executable: the object file of the program, the runtime and, for node:crypto, its glue and
-// OpenSSL, linked by the LLD built into tz. On success, what is left are the linker's warnings.
 class LinkPass {
 public:
   LinkPass(const Target &target, const BuildOptions &options);
@@ -22,4 +20,4 @@ private:
   const BuildOptions &options_;
 };
 
-} // namespace tz
+}

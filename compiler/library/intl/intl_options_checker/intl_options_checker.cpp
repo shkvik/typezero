@@ -26,7 +26,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -38,7 +37,6 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-// A number written in the code: a literal, or one negated.
 std::optional<double> literalNumber(const Expr *e) {
   if (auto *lit = dyn_cast<IntLitExpr>(e)) {
     return double(lit->value);
@@ -65,11 +63,8 @@ const IntlService *serviceOf(IntlKind kind) {
   return nullptr;
 }
 
-// The options of supportedLocalesOf.
 const IntlService kSupported = {IntlKind::None, "supportedLocalesOf", 0, {kMatcher}, true};
 
-// The units of ECMA-402 (IsSanctionedSingleUnitIdentifier), and two joined
-// by "-per-".
 bool isSanctionedUnit(llvm::StringRef unit) {
   static const llvm::StringLiteral units[] = {
       "acre",        "bit",         "byte",        "celsius",
@@ -106,7 +101,6 @@ bool isKeywordType(llvm::StringRef text) {
   });
 }
 
-// The values of an option in a message: "'a', 'b' or 'c'".
 std::string valueList(const std::vector<llvm::StringLiteral> &values) {
   std::string out;
   for (size_t i = 0; i < values.size(); ++i) {
@@ -116,8 +110,6 @@ std::string valueList(const std::vector<llvm::StringLiteral> &values) {
   return out;
 }
 
-// What the string of a field holds, if the code says: a literal, or a
-// string literal type.
 std::optional<std::string> knownText(const Expr *value, const Type *type) {
   if (std::optional<std::u16string> text = value ? literalText(value) : std::nullopt) {
     return utf8(*text);
@@ -135,15 +127,10 @@ bool isStringLike(const Type *type) {
           llvm::all_of(type->members(), [](const Type *m) { return m->isStringLiteral(); }));
 }
 
-} // namespace
+}
 
 IntlOptionsChecker::IntlOptionsChecker(Checker &checker) : checker_(checker) {}
 
-// The locale and the options at args[from] and args[from + 1], both
-// optional. The locale is a string or undefined; the options an object
-// whose fields are options of the service, each of its type or that type or
-// undefined. What JavaScript rejects with an exception and is written in the
-// code is an error. False after an error.
 bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, IntlKind kind,
                                        llvm::StringRef what) {
   const IntlService *service = kind == IntlKind::None ? &kSupported : serviceOf(kind);
@@ -214,7 +201,6 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
 
     return nullptr;
   };
-  // What a field holds, if the code says.
   auto textOf = [&](llvm::StringRef name) -> std::optional<std::string> {
     const Field *field = type->field(name);
 
@@ -247,7 +233,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                              "; the options are " + names);
       continue;
     }
-    if (value->isUndefined()) { // as if not given
+    if (value->isUndefined()) {
       continue;
     }
     auto isBoolean = [](const Type *t) {
@@ -270,7 +256,6 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                              ", found '" + field.type->name().str() + "'");
       continue;
     }
-    // A value written in the code that is not one of the option.
     if (std::optional<std::string> text = textOf(field.name);
         text && !found->values.empty() && !llvm::is_contained(found->values, *text) &&
         !(found->kind == 'g' && text->empty())) {
@@ -284,7 +269,6 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     return false;
   }
 
-  // What JavaScript checks of the values themselves.
   if (std::optional<std::string> code = textOf("currency");
       code && !(code->size() == 3 && llvm::all_of(*code, llvm::isAlpha))) {
     report("currency", "'" + *code +
@@ -320,7 +304,6 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     report("type", "Intl.DisplayNames needs the option 'type', e.g. '{ type: \"region\" }', "
                    "which JavaScript would throw a TypeError without");
   }
-  // Digits: their ranges, and a minimum above its maximum.
   static const struct {
     const char *name;
     int min, max;
@@ -355,4 +338,4 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   return ok;
 }
 
-} // namespace tz
+}

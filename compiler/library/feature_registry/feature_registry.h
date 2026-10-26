@@ -6,14 +6,11 @@
 
 namespace tz {
 
-// The topics of the library, in the order the passes ask them.
 class FeatureRegistry {
 public:
-  // Every topic the compiler knows.
   static const FeatureRegistry &standard();
 
   llvm::ArrayRef<const Feature *> all() const { return order_; }
-  // The topic whose calls of `builtin` are; null for the calls of the language.
   const Feature *lowering(Builtin builtin) const;
 
 private:
@@ -23,4 +20,4 @@ private:
   std::vector<const Feature *> order_;
 };
 
-} // namespace tz
+}

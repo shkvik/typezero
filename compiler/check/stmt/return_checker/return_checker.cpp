@@ -32,9 +32,6 @@ static bool isTrueLiteral(const Expr *expr) {
 
 namespace {
 
-// Finds the `break` and `continue` statements inside a statement S that
-// leave S: those that jump to S itself (except `continue` to a loop S) or to
-// a statement around it.
 class Exits {
 public:
   Exits(bool isLoop, llvm::ArrayRef<llvm::StringRef> labels) : isLoop_(isLoop), labels_(labels) {}
@@ -108,12 +105,11 @@ private:
   }
 
   bool isLoop_;
-  llvm::ArrayRef<llvm::StringRef> labels_;      // of S
-  llvm::SmallVector<llvm::StringRef, 4> inner_; // declared inside S
-  unsigned loops_ = 0, breakables_ = 0;         // inside S, around the current statement
+  llvm::ArrayRef<llvm::StringRef> labels_;
+  llvm::SmallVector<llvm::StringRef, 4> inner_;
+  unsigned loops_ = 0, breakables_ = 0;
 };
 
-// Whether some `break` inside `stmt` jumps to one of `labels`.
 bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
   if (labels.empty()) {
     return false;
@@ -152,20 +148,15 @@ bool breaksTo(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
   }
 }
 
-} // namespace
+}
 
 ReturnChecker::ReturnChecker(Checker &checker) : checker_(checker) {}
 
-// The value of a return: of a function that returns a boolean, checked as a
-// condition, so that the function's summary knows what it shows (see
-// sema_predicate.cpp).
 Expr *ReturnChecker::checkReturnValue(ReturnStmt *ret, const Type *hint, bool tested) {
   if (checker_.predicateBuilds_.empty() || !checker_.predicateBuilds_.back().fn) {
     return checker_.exprChecker().checkExpr(ret->value, hint);
   }
   if (!tested) {
-    // A boolean all the same, such as what a function that tests returns:
-    // what it says as a condition.
     Expr *value = checker_.exprChecker().checkExpr(ret->value, hint);
     if (value->type->isBool()) {
       Checker::Flow whenTrue = checker_.flow_, whenFalse = checker_.flow_;
@@ -206,8 +197,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     }
     return;
   }
-  // What a generator returns is what its iterator gives when it is done; an
-  // async function, what its Promise gives.
   const Type *returned = fn->ret && fn->decl && fn->decl->isGenerator &&
                                  (fn->ret->isIterator() || fn->ret->isAsyncIterator())
                              ? fn->ret->returned()
@@ -215,8 +204,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
                              ? fn->ret->promised()
                              : fn->ret;
   if (!fn->ret) {
-    // Its type comes from what its return statements give. A literal takes
-    // the type of an object an earlier one gave.
     const Type *hint = nullptr;
     if (ret->value && Destination::literalShaped(ret->value)) {
       for (const ReturnStmt *earlier : *checker_.returns_) {
@@ -244,7 +231,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
 
-  // `return p` in an async generator awaits p.
   if (fn->decl && fn->decl->isAsync && fn->decl->isGenerator) {
     ret->value =
         checker_.exprChecker().checkExpr(ret->value, returned->isVoid() ? nullptr : returned);
@@ -259,7 +245,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   ret->value = checkReturnValue(ret, returned->isVoid() ? nullptr : returned, returned->isBool());
-  // `return p` in an async function: its Promise follows p.
   if (fn->decl && fn->decl->isAsync && fn->ret->isPromise() && ret->value->type->isPromise()) {
     const Type *given = ret->value->type->promised();
     if (given != returned && !given->isNever()) {
@@ -271,9 +256,6 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
   if (returned->isVoid()) {
-    // `return f()` with a void `f` is fine, as in TypeScript, and so are
-    // `return void f()` and `return undefined`, and any value in a callback
-    // whose result is dropped.
     const Type *type = ret->value->type;
     if (!type->isVoid() && !type->isError() && !type->isUndefined() && !fn->discardsResult) {
       checker_.diags_.error(ret->value->loc(), functionLabel(fn->name) +
@@ -282,7 +264,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
                                                    type->name() + "'");
       checker_.classLinks().noteInheritedReturn(fn->decl);
     } else if (fn->discardsResult) {
-      checker_.resultChecker().checkDiscarded(ret->value, /*callback=*/true);
+      checker_.resultChecker().checkDiscarded(ret->value, true);
     }
     return;
   }
@@ -302,7 +284,6 @@ bool ReturnChecker::isExit(const Stmt *stmt) {
   return call && call->builtin == Builtin::ProcessExit;
 }
 
-// Conservative: true only if control can never reach the end of `stmt`.
 bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {
   auto returns = [](const Stmt *s) { return alwaysReturns(s); };
   switch (stmt->kind()) {
@@ -311,8 +292,6 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
     return true;
   case Stmt::Kind::Expr:
     return isExit(stmt);
-  // A `finally` that never ends ends the whole statement; otherwise the
-  // block, and the `catch` that runs when it throws, must both never end.
   case Stmt::Kind::Try: {
     auto *s = cast<TryStmt>(stmt);
     if (breaksTo(stmt, labels)) {
@@ -327,8 +306,6 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
     return llvm::any_of(cast<BlockStmt>(stmt)->body, returns) && !breaksTo(stmt, labels);
   case Stmt::Kind::If: {
     auto *s = cast<IfStmt>(stmt);
-    // `if (true) S` runs S; so does the `if` of an instance whose types
-    // decided the condition, which keeps only the branch that runs.
     if (auto *lit = dyn_cast<BoolLitExpr>(s->cond)) {
       if (lit->value && !s->elseStmt) {
         return alwaysReturns(s->thenStmt) && !breaksTo(stmt, labels);
@@ -340,7 +317,6 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
     return s->elseStmt && alwaysReturns(s->thenStmt) && alwaysReturns(s->elseStmt) &&
            !breaksTo(stmt, labels);
   }
-  // An endless loop never falls through unless something leaves it.
   case Stmt::Kind::While: {
     auto *s = cast<WhileStmt>(stmt);
     return isTrueLiteral(s->cond) && !Exits(true, labels).in(s->body);
@@ -353,8 +329,6 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
     auto *s = cast<ForStmt>(stmt);
     return (!s->cond || isTrueLiteral(s->cond)) && !Exits(true, labels).in(s->body);
   }
-  // A switch with `default` always enters some case, and control falls
-  // through to the end of the last one unless something leaves the switch.
   case Stmt::Kind::Switch: {
     auto *s = cast<SwitchStmt>(stmt);
     bool hasDefault =
@@ -381,4 +355,4 @@ bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringR
   }
 }
 
-} // namespace tz
+}

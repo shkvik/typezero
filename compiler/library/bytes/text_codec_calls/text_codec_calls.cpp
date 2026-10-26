@@ -32,8 +32,6 @@ namespace tz {
 
 namespace {
 
-// The tables of the single-byte encodings, of which a program holds those
-// it names (docs/bytes.md, section 5).
 struct EncodingTable {
   const char *name;
   uint16_t high[128];
@@ -45,13 +43,8 @@ const EncodingTable kEncodingTables[] = {TZ_ENCODING_TABLES(TZ_ENCODING_TABLE)};
 
 #undef TZ_ENCODING_TABLE
 
-// The encodings of TextDecoder, numbered as in
-// runtime/library/bytes/buffer/buffer.c.
 enum { kTextUtf8, kTextUtf16le, kTextUtf16be, kTextSingleByte, kTextCjk };
 
-// The multi-byte encodings (runtime/library/bytes/cjk/cjk.c), each a
-// TzCjkEncoding of the runtime that names its indexes: a program that refers to
-// one gets those from the linker, and no others.
 const char *const kCjkEncodings[] = {"gbk",         "gb18030",   "big5",  "euc-jp",
                                      "iso-2022-jp", "shift_jis", "euc-kr"};
 
@@ -66,7 +59,7 @@ llvm::Constant *cjkEncodingOf(llvm::Module &module, llvm::StringRef name) {
   return module.getOrInsertGlobal(symbol, llvm::Type::getInt8Ty(module.getContext()));
 }
 
-} // namespace
+}
 
 llvm::Value *TextCodecCalls::emit() {
   switch (call->builtin) {
@@ -83,7 +76,7 @@ llvm::Value *TextCodecCalls::emit() {
           {lowering_.stringLowerer().stringObj(empty), lowering_.stringLowerer().stringMeta(empty)},
           "bytes");
     }
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *made =
         lowering_.builder_.CreateCall(fn("tz_text_encode", ptr, {ptr, i64}),
@@ -100,7 +93,7 @@ llvm::Value *TextCodecCalls::emit() {
         call->args[0], AssignLowerer::cannotAssign(call->args[1]));
     lowering_.throwLowerer().holdOperand(text,
                                          throws || lowering_.mayThrow().exprThrows(call->args[1]));
-    Lowering::Operand target = lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+    Lowering::Operand target = lowering_.refCounts().emitOperand(call->args[1], true);
     lowering_.throwLowerer().takeOperand(self);
     lowering_.throwLowerer().takeOperand(text);
     auto *pairTy = llvm::ArrayType::get(i32, 2);
@@ -124,7 +117,6 @@ llvm::Value *TextCodecCalls::emit() {
     return object;
   }
   case Builtin::TextDecoderNew: {
-    // The options first, as JavaScript reads them after the label.
     bool resolved = constantOf(call->args[0]) != 0;
     Lowering::Operand label{nullptr, false, nullptr};
     if (!resolved) {
@@ -135,8 +127,7 @@ llvm::Value *TextCodecCalls::emit() {
     }
     llvm::Value *fatal = lowering_.builder_.getInt32(0), *ignore = lowering_.builder_.getInt32(0);
     if (call->args.size() > 2) {
-      Lowering::Operand options =
-          lowering_.refCounts().emitOperand(call->args[2], /*canBorrow=*/true);
+      Lowering::Operand options = lowering_.refCounts().emitOperand(call->args[2], true);
       const Type *optionsType = options.type;
       auto flag = [&](llvm::StringRef name) -> llvm::Value * {
         const Type *t = optionsType->field(name)->type;
@@ -174,7 +165,6 @@ llvm::Value *TextCodecCalls::emit() {
           fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
           {lowering_.builder_.getInt32(uint32_t(which)), table, fatal, ignore}, "decoder");
     }
-    // A label known only now: the program holds every table.
     std::vector<llvm::Constant *> tables, cjk;
     for (const EncodingTable &t : kEncodingTables) {
       tables.push_back(lowering_.bytesLowerer().encodingTable(t.name));
@@ -185,7 +175,7 @@ llvm::Value *TextCodecCalls::emit() {
     auto list = [&](std::vector<llvm::Constant *> &items, const char *name) {
       auto *type = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), items.size());
 
-      return new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
+      return new llvm::GlobalVariable(*lowering_.module_, type, true,
                                       llvm::GlobalValue::PrivateLinkage,
                                       llvm::ConstantArray::get(type, items), name);
     };
@@ -199,7 +189,7 @@ llvm::Value *TextCodecCalls::emit() {
          lowering_.builder_.getInt32(uint32_t(cjk.size())), fatal, ignore},
         "decoder");
     lowering_.refCounts().dropOperand(label);
-    lowering_.throwLowerer().emitThrowCheck(); // RangeError: the encoding is not supported
+    lowering_.throwLowerer().emitThrowCheck();
     return made;
   }
   case Builtin::TextDecode: {
@@ -208,7 +198,7 @@ llvm::Value *TextCodecCalls::emit() {
     llvm::Value *length = lowering_.builder_.getInt64(0);
     Lowering::Operand input{nullptr, false, nullptr};
     if (!call->args.empty() && !call->args[0]->type->isUndefined()) {
-      input = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      input = lowering_.refCounts().emitOperand(call->args[0], true);
       data = lowering_.bytesLowerer().bytesData(input.value);
       length = lowering_.bytesLowerer().bytesLength(input.value);
       if (input.type->isTypedArray()) {
@@ -216,11 +206,9 @@ llvm::Value *TextCodecCalls::emit() {
             length, lowering_.builder_.getInt64(input.type->elementSize()));
       }
     }
-    // `{ stream: true }`: the text goes on in the next call.
     llvm::Value *stream = lowering_.builder_.getInt32(0);
     if (call->args.size() > 1) {
-      Lowering::Operand options =
-          lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+      Lowering::Operand options = lowering_.refCounts().emitOperand(call->args[1], true);
       const Type *t = options.type->field("stream")->type;
       llvm::Value *loaded = lowering_.builder_.CreateLoad(
           lowering_.moduleBuilder().lower(t),
@@ -239,7 +227,7 @@ llvm::Value *TextCodecCalls::emit() {
       lowering_.refCounts().dropOperand(input);
     }
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck(); // TypeError of a fatal decoder
+    lowering_.throwLowerer().emitThrowCheck();
     return text;
   }
   case Builtin::TextDecoderInfo: {
@@ -265,4 +253,4 @@ llvm::Value *TextCodecCalls::emit() {
   }
 }
 
-} // namespace tz
+}

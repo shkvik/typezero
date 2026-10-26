@@ -1,9 +1,3 @@
-// The hashes of the direct layer (docs/crypto.md, section 3): each a TzMd over the low-level
-// functions of OpenSSL, which the program names when it names the hash in its code. The file is
-// compiled once for each TZ_MD_* (runtime/CMakeLists.txt), so that each family is an object of
-// its own and a program brings only the hashes it uses.
-
-// The low-level functions are deprecated for programs; OpenSSL keeps them for itself, as this.
 #include "internal/deprecated.h"
 #include "runtime/library/crypto/crypto/crypto.h"
 #include <openssl/md5.h>
@@ -14,7 +8,6 @@
 #include "internal/sha3.h"
 #include "internal/sm3.h"
 
-// A TzMd named `id` over functions of the form f(ctx), f(ctx, data, n) and f(out, ctx).
 #define MD(id, label, ctx_type, init_fn, update_fn, final_fn, size_, block_)                       \
   static void md_##id##_init(void *c) { init_fn((ctx_type *)c); }                                  \
   static void md_##id##_update(void *c, const uint8_t *p, size_t n) {                              \
@@ -58,7 +51,6 @@ MD(sm3, "sm3", SM3_CTX, ossl_sm3_init, ossl_sm3_update, ossl_sm3_final, 32, 64)
 #endif
 
 #ifdef TZ_MD_MD5_SHA1
-// md5-sha1 of TLS 1.0: MD5 and SHA-1 of the same data, side by side.
 typedef struct {
   MD5_CTX md5;
   SHA_CTX sha1;
@@ -81,8 +73,6 @@ const TzMd tz_crypto_md_md5_sha1 = {&md5_sha1_ops, "md5-sha1", sizeof(Md5Sha1), 
 #endif
 
 #ifdef TZ_MD_SHA3
-// SHA-3 and SHAKE: Keccak with the padding of each (0x06 and 0x1f) and the rate of its strength;
-// `final` gives any length, which only SHAKE takes from the program.
 #define KECCAK(id, label, pad, bits, size_, xof_)                                                  \
   static void id##_init(void *c) { ossl_sha3_init((KECCAK1600_CTX *)c, pad, bits); }               \
   static const TzMdOps id##_ops = {id##_init, keccak_update, keccak_final, NULL, NULL};            \
@@ -105,8 +95,6 @@ KECCAK(shake256, "shake256", 0x1f, 256, 32, 1)
 #endif
 
 #if defined(TZ_MD_BLAKE2B) || defined(TZ_MD_BLAKE2S)
-// The BLAKE2 contexts of OpenSSL (providers/implementations/include/prov/blake2.h), whose header
-// brings much of its internals with it.
 typedef struct {
   uint8_t digest_length, key_length, fanout, depth, leaf_length[4];
 #ifdef TZ_MD_BLAKE2B

@@ -1,9 +1,7 @@
-// The synchronous functions of node:fs for directories: readdir, mkdir, rm and the like.
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs_dirs/fs_dirs.h"
@@ -35,7 +33,6 @@
 #include <unistd.h>
 #endif
 
-// One entry of a directory: its name and kind (S_REG...; 0 unknown).
 typedef struct {
   TzBuf name;
   uint32_t kind;
@@ -74,8 +71,6 @@ static Entry *entries_add(Entries *e) {
 }
 
 #ifdef _WIN32
-// The entries of a directory, in the order the file system keeps them, as
-// libuv's scandir gives them; false with the error thrown ("scandir").
 static int list_dir(const Path *p, Entries *out, TzMaker make) {
   DWORD attributes = GetFileAttributesW(tz_fs_wide(p));
   if (attributes == INVALID_FILE_ATTRIBUTES) {
@@ -101,7 +96,7 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   if (find == INVALID_HANDLE_VALUE) {
     DWORD error = GetLastError();
     if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) {
-      return 1; // empty, as the root of an empty drive is
+      return 1;
     }
     tz_fs_fail_win32(make, error, "scandir", p, NULL);
     return 0;
@@ -124,8 +119,6 @@ static int list_dir(const Path *p, Entries *out, TzMaker make) {
   return 1;
 }
 
-// Whether the path is a directory, following links, as Node's internal
-// stat does for readdirSync with `recursive`.
 static int is_directory(const Path *p) {
   TzStatsParts st;
 
@@ -150,7 +143,6 @@ static int compare_entries(const void *a, const void *b) {
   return c;
 }
 
-// The entries sorted by their bytes, as libuv's scandir sorts them.
 static int list_dir(const Path *p, Entries *out, TzMaker make) {
   DIR *dir = opendir(tz_fs_native(p));
   if (!dir) {
@@ -206,9 +198,6 @@ static int is_directory(const Path *p) {
 }
 #endif
 
-// readdirSync: the names (or with `make_dirent`, Dirents) of the entries of
-// a directory, and with `recursive` those of the directories in it, level by
-// level as Node lists them, by their paths relative to it.
 TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, const TzType *element,
                        TzMaker make_dirent, TzMaker make) {
   Path base;
@@ -216,8 +205,6 @@ TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, co
     return NULL;
   }
   TzArray *result = tz_arr_new(element, 0, 16);
-  // The directories to list: as the program sees them (joined to the path
-  // given), and relative to it.
   typedef struct {
     TzBuf path, relative;
   } Dir;
@@ -316,7 +303,6 @@ DWORD tz_fs_make_dir(const uint16_t *path) {
   return error == ERROR_INVALID_NAME || error == ERROR_DIRECTORY ? ERROR_INVALID_PARAMETER : error;
 }
 
-// Where the last `\` of a path is, or -1.
 static ptrdiff_t last_separator(const uint16_t *units, size_t n) {
   for (size_t i = n; i > 0; --i) {
     if (units[i - 1] == '\\') {
@@ -328,13 +314,6 @@ static ptrdiff_t last_separator(const uint16_t *units, size_t n) {
 }
 #endif
 
-// mkdirSync and mkdir of node:fs/promises, the calls of the system only:
-// makes the directory `path` names in the system's form (`n` units or bytes,
-// without the zero), and with `recursive` the directories on the way too, as
-// Node's MKDirpSync makes them. The first one made goes to `first` (UTF-16
-// on Windows, UTF-8 elsewhere: as the system got it, which Node gives), and
-// the result is 1 then, 0 for none; -1 with the failure of "mkdir", and in
-// `at`, if given, the path that failed, which the async mkdir of Node shows.
 #ifdef _WIN32
 int tz_fs_mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t mode, Raw *first,
                     Failure *failure, Raw *at) {
@@ -351,8 +330,6 @@ int tz_fs_mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t m
     *failure = tz_fs_win32_failure(error);
     return -1;
   }
-  // A stack of the paths to make, the target first: a parent that is not
-  // there goes on top of its child. Each ends with a zero.
   Raw *stack = (Raw *)malloc(sizeof(Raw) * 8);
   if (!stack) {
     abort();
@@ -394,8 +371,6 @@ int tz_fs_mkdir_raw(const uint16_t *path, size_t n, int32_t recursive, int32_t m
         continue;
       }
     } else {
-      // There already (or with nowhere to go up, as if it were): fine if it
-      // is a directory.
       if (f.index == E_ENOENT) {
         f = (Failure){E_EEXIST, tz_fs_errors[E_EEXIST].windows};
       }
@@ -442,7 +417,6 @@ int tz_fs_mkdir_raw(const uint8_t *path, size_t n, int32_t recursive, int32_t mo
     *failure = tz_fs_errno_failure(error);
     return -1;
   }
-  // The same on bytes, at '/'.
   Raw *stack = (Raw *)malloc(sizeof(Raw) * 8);
   if (!stack) {
     abort();
@@ -518,8 +492,6 @@ TzStr tz_fs_made_dir(const Raw *first) {
 #endif
 }
 
-// mkdirSync. The first directory made is the result, with `recursive`;
-// false for none.
 int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recursive, int32_t mode,
                     TzMaker make) {
   out->obj = NULL;
@@ -549,8 +521,6 @@ int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recu
   return made;
 }
 
-// mkdtempSync(prefix): a new directory named the prefix and six random
-// letters and digits, as given (not resolved).
 void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker make) {
   static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   out->obj = NULL;
@@ -591,7 +561,6 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
       break;
     }
     if (!exists || attempt >= 100) {
-      // The template, as Node shows it.
       TzBuf shown;
       tz_buf_init(&shown);
       tz_buf_units(&shown, prefix.given.data, prefix.given.length);
@@ -650,9 +619,6 @@ DWORD tz_fs_unlink_path(const wchar_t *path) {
   return error;
 }
 
-// Deletes a directory with everything in it; links are deleted, not
-// followed. `path` holds the units of the path, without a zero; `depth`
-// grows to the levels of directories it went down.
 static DWORD remove_tree(Raw *path, int *depth) {
   size_t length = path->length;
   tz_fs_raw_unit(path, 0);
@@ -709,7 +675,7 @@ static DWORD remove_tree(Raw *path, int *depth) {
 }
 #else
 static int remove_tree(Raw *path, int *depth) {
-  size_t length = path->length; // with the zero
+  size_t length = path->length;
   struct stat s;
   if (lstat((const char *)path->data, &s) != 0) {
     return errno;
@@ -821,7 +787,7 @@ void tz_fs_throw_rm_directory(const Path *p, TzMaker make) {
   memset(&parts, 0, sizeof parts);
   parts.message = tz_buf_take(&m);
   parts.name = tz_fs_ascii("SystemError");
-  parts.errno_value = 21; // EISDIR of POSIX, on every system
+  parts.errno_value = 21;
   parts.code = tz_fs_ascii("ERR_FS_EISDIR");
   parts.syscall = tz_fs_ascii("rm");
   parts.path = tz_fs_opt_of(&p->given);

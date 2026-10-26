@@ -1,7 +1,5 @@
 #pragma once
 
-// The types of a program: the class Type, the parts of types, and what is computed over them.
-
 #include "compiler/program/types/argument_lists/argument_lists.h"
 #include "compiler/program/types/field/field.h"
 #include "compiler/program/types/intl_kind/intl_kind.h"

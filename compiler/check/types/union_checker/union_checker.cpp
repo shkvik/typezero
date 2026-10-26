@@ -21,13 +21,10 @@ namespace tz {
 
 namespace {
 
-// The members of a type: those of a union, or the type itself (so `type`
-// must outlive the result).
 llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-// Whether `type` is a literal type or a union of them.
 bool isLiteralSet(const Type *type) {
   if (type->isLiteral()) {
     return true;
@@ -37,7 +34,7 @@ bool isLiteralSet(const Type *type) {
          llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); });
 }
 
-} // namespace
+}
 
 bool hasParamMember(const Type *type) {
   return type->isUnion() &&
@@ -61,7 +58,6 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
   std::vector<const Type *> fieldTypes;
   const Type *lacking = nullptr;
   for (const Type *m : type->members()) {
-    // A class whose fields are not known yet, as no code used it before.
     if (ClassDecl *cls = ClassDeclarer::classOf(m)) {
       checker_.classDeclarer().completeClass(cls);
     }
@@ -91,7 +87,6 @@ Expr *UnionChecker::checkUnionMember(MemberExpr *member) {
                           lacking->name().str() + "', which '" + type->name().str() +
                           "' may be; narrow it first";
     bool hinted = false;
-    // The tag that tells the members apart, if they have one.
     for (const Field &f : type->members().front()->fields()) {
       bool tags = llvm::all_of(type->members(), [&](const Type *m) {
         const Field *g = m->field(f.name);
@@ -183,7 +178,6 @@ const Type *UnionChecker::checkUnionFieldTarget(MemberExpr *member) {
 }
 
 const Type *UnionChecker::commonBaseWith(const Type *type, llvm::StringRef name) const {
-  // The types up the declared chain of each member, nearest first.
   auto chain = [](const Type *t) {
     std::vector<const Type *> up{t};
     for (size_t i = 0; i < up.size(); ++i) {
@@ -211,7 +205,7 @@ const Type *UnionChecker::commonBaseWith(const Type *type, llvm::StringRef name)
     }
     if (const ClassDecl *cls = ClassDeclarer::classOf(candidate)) {
       if (ClassBases::findField(cls, name) ||
-          !ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false).empty()) {
+          !ClassDeclarer::methodsNamed(cls, name, false).empty()) {
         return candidate;
       }
       continue;
@@ -236,7 +230,7 @@ UnionChecker::unhandledCases(const SwitchStmt *stmt) const {
   std::vector<const Type *> left(membersOf(type).begin(), membersOf(type).end());
   for (const SwitchCase &c : stmt->cases) {
     if (!c.test) {
-      return std::nullopt; // a default handles the rest
+      return std::nullopt;
     }
     if (const Type *literal = writtenLiteral(c.test)) {
       llvm::erase(left, literal);
@@ -277,14 +271,14 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
       checker_.classDeclarer().completeClass(cls);
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, name, &owner);
-      if (field && !field->method) { // a function in a field
+      if (field && !field->method) {
         if (field->access != Access::Public &&
             !checker_.classMemberChecker().checkAccess(owner, field->access, name, member->loc())) {
           return loosely();
         }
         type = m->field(name) ? m->field(name)->type : nullptr;
       } else if (std::vector<FunctionDecl *> variants =
-                     ClassDeclarer::methodsNamed(cls, name, /*isStatic=*/false);
+                     ClassDeclarer::methodsNamed(cls, name, false);
                  variants.size() > 1) {
         checker_.diags_.error(member->loc(), "'" + name + "' of '" + m->name() +
                                                  "' has several variants, which a call on '" +
@@ -306,8 +300,6 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
         type = checker_.returnInferrer().functionType(sym);
       }
     } else if (const Field *f = m->field(name); f && m->isBase()) {
-      // An interface that classes implement: its methods are in their
-      // tables, which a call on the union does not reach.
       checker_.diags_.error(member->loc(),
                             "'" + name + "' is called on '" + receiver->name() + "', and '" +
                                 m->name() +
@@ -345,4 +337,4 @@ Expr *UnionChecker::checkUnionMethodCall(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

@@ -1,10 +1,3 @@
-// Words of languages (docs/intl.md): Intl.RelativeTimeFormat ("3 дня
-// назад"), Intl.ListFormat ("a, b и c") and Intl.DisplayNames, made the way
-// V8 makes them (src/objects/js-relative-time-format.cc, js-list-format.cc,
-// js-display-names.cc).
-//
-// The data of the languages is the ICU of the system (icu.h, intl.h).
-
 #include "runtime/library/intl/intl/intl.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -15,7 +8,6 @@
 #include <math.h>
 #include <string.h>
 
-// UFieldCategory, UDisplayContext and the fields of ListFormatter.
 enum {
   UFIELD_CATEGORY_NUMBER = 2,
   UFIELD_CATEGORY_LIST = 3,
@@ -35,18 +27,18 @@ enum {
 
 typedef struct {
   TzIntl base;
-  void *formatter; // URelativeDateTimeFormatter
+  void *formatter;
 } TzRelativeTimeFormat;
 
 typedef struct {
   TzIntl base;
-  void *formatter; // UListFormatter
+  void *formatter;
 } TzListFormat;
 
 typedef struct {
   TzIntl base;
-  void *names;     // ULocaleDisplayNames
-  void *generator; // UDateTimePatternGenerator, for dateTimeField
+  void *names;
+  void *generator;
   char icu_locale[64];
 } TzDisplayNames;
 
@@ -72,10 +64,6 @@ static TzStr text_of(const TzIcu *icu, const void *value, TzUErrorCode *status) 
   return text && !TZ_U_FAILURE(*status) ? tz_str_from_utf16(text, (size_t)length)
                                         : tz_str_from_ascii("", 0);
 }
-
-//===----------------------------------------------------------------------===//
-// Intl.RelativeTimeFormat
-//===----------------------------------------------------------------------===//
 
 TzIntl *tz_rtf_create(const TzIntlOptions *o) {
   const char *method = "Intl.RelativeTimeFormat";
@@ -106,7 +94,6 @@ TzIntl *tz_rtf_create(const TzIntlOptions *o) {
   TzRelativeTimeFormat *f = (TzRelativeTimeFormat *)tz_intl_alloc(
       sizeof(TzRelativeTimeFormat), TZ_INTL_RELATIVE_TIME_FORMAT, &rtf_layout);
   TzIntl *r = &f->base;
-  // The numbering system, as for Intl.NumberFormat.
   char keyword[TZ_INTL_TEXT], tag[TZ_INTL_LOCALE], id[160];
   tz_intl_keyword(icu, requested, "nu", keyword, sizeof keyword);
   int keyword_ok = keyword[0] && tz_intl_has_numbering(icu, keyword);
@@ -157,8 +144,6 @@ static void rtf_drop(void *object) {
   tz_obj_free(f);
 }
 
-// The unit of format(value, unit) as URelativeDateTimeUnit, in the singular
-// in `singular`; -1 for none.
 static int rtf_unit(TzStr unit, const char **singular) {
   static const char *const units[] = {"year", "quarter", "month",  "week",
                                       "day",  "hour",    "minute", "second"};
@@ -180,8 +165,6 @@ static int rtf_unit(TzStr unit, const char **singular) {
   return -1;
 }
 
-// The result of format and formatToParts; NULL with a RangeError thrown for
-// a unit or a value JavaScript rejects.
 static void *rtf_result(TzRelativeTimeFormat *f, double value, void *unit_obj, uint64_t unit_meta,
                         const char *method, const char **singular) {
   TzStr unit = {unit_obj, unit_meta};
@@ -241,7 +224,6 @@ static const char *rtf_part_type(int32_t field, void *ctx) {
   }
 }
 
-// formatToParts: the parts of the number carry its unit, in the singular.
 TzArray *tz_rtf_format_to_parts(TzRelativeTimeFormat *f, double value, void *unit_obj,
                                 uint64_t unit_meta, const TzIntlShape *shape) {
   const char *singular;
@@ -262,10 +244,6 @@ TzArray *tz_rtf_format_to_parts(TzRelativeTimeFormat *f, double value, void *uni
 
   return parts;
 }
-
-//===----------------------------------------------------------------------===//
-// Intl.ListFormat
-//===----------------------------------------------------------------------===//
 
 TzIntl *tz_lf_create(const TzIntlOptions *o) {
   const char *method = "Intl.ListFormat";
@@ -309,7 +287,6 @@ static void lf_drop(void *object) {
   tz_obj_free(f);
 }
 
-// The list (borrowed) formatted into a new UFormattedList.
 static void *lf_result(TzListFormat *f, const TzArray *list, TzUErrorCode *status) {
   const TzIcu *icu = tz_icu();
   uint32_t n = list->length;
@@ -319,7 +296,6 @@ static void *lf_result(TzListFormat *f, const TzArray *list, TzUErrorCode *statu
   TzStr *items = (TzStr *)tz_alloc(((size_t)n + 1) * sizeof(TzStr));
   static const TzUChar empty[1] = {0};
   for (uint32_t i = 0; i < n; ++i) {
-    // Each item stays where it is while ICU reads its units.
     items[i] = ((const TzStr *)list->data)[i];
     strings[i] = tz_intl_utf16(&items[i], NULL, 0, &heaps[i], &lengths[i]);
     if (!strings[i]) {
@@ -366,10 +342,6 @@ TzArray *tz_lf_format_to_parts(TzListFormat *f, const TzArray *list, const TzInt
 
   return parts;
 }
-
-//===----------------------------------------------------------------------===//
-// Intl.DisplayNames
-//===----------------------------------------------------------------------===//
 
 TzIntl *tz_dn_create(const TzIntlOptions *o) {
   const char *method = "Intl.DisplayNames";
@@ -455,8 +427,6 @@ static int all_of(const char *text, int (*test)(char)) {
 static int is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
-// The code `of` takes for the type, checked as ECMA-402 checks it, as ICU
-// takes it in `id`; 0 for a code that is not one.
 static int checked_code(const TzIcu *icu, const char *type, const char *code, char *id,
                         size_t size) {
   size_t n = strlen(code);
@@ -480,9 +450,6 @@ static int checked_code(const TzIcu *icu, const char *type, const char *code, ch
     tz_intl_copy(id, size, legacy ? legacy : code);
     return 1;
   } else if (strcmp(type, "language") == 0) {
-    // A language with its script, region and variants, and nothing more
-    // (unicode_language_id): its ICU name has no keywords, and the tag is
-    // all ICU read.
     char parsed_id[160];
     int32_t parsed = 0;
     TzUErrorCode status = 0;
@@ -506,7 +473,6 @@ static int checked_code(const TzIcu *icu, const char *type, const char *code, ch
   return 1;
 }
 
-// The fields of dateTimeField as UDateTimePatternField.
 static int date_field(const char *code) {
   static const struct {
     const char *name;
@@ -523,8 +489,6 @@ static int date_field(const char *code) {
   return -1;
 }
 
-// of(code): the name, or 0 for undefined (fallback "none" and no name); a
-// code that is not one is a RangeError. The code is borrowed.
 int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_meta) {
   const TzIcu *icu = tz_icu();
   const char *type = d->base.text[TZ_IO_TYPE];
@@ -549,8 +513,6 @@ int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_me
   } else if (strcmp(type, "script") == 0) {
     n = icu->uldn_scriptDisplayName(names, id, name, 256, &status);
   } else if (strcmp(type, "currency") == 0) {
-    // Its long name, which ICU says it has not when it gives the code back
-    // (U_USING_DEFAULT_WARNING); LocaleDisplayNames would give the code.
     TzUChar units[4] = {(TzUChar)id[0], (TzUChar)id[1], (TzUChar)id[2], 0};
     const TzUChar *text =
         icu->ucurr_getName(units, d->icu_locale, UCURR_LONG_NAME, NULL, &n, &status);
@@ -569,7 +531,6 @@ int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_me
     *out = tz_str_from_utf16(name, (size_t)n);
     return 1;
   }
-  // No name: the code as given, or undefined.
   if (strcmp(d->base.text[TZ_IO_FALLBACK], "code") == 0) {
     tz_str_retain_value(given);
     *out = given;

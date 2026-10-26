@@ -1,22 +1,7 @@
-// Generates regex_tables.h: what regular expressions need of Unicode (see
-// regex_compile.c). The data comes from Node.js itself, so that tz matches
-// exactly what V8 matches:
-//
-//   - the classes of characters that /i treats as equal: by simple case
-//     folding with the u and v flags, and by JavaScript's Canonicalize
-//     (toUpperCase of one code unit) without them;
-//   - the code points of each property \p{...} accepts: General_Category,
-//     Script, Script_Extensions and the binary properties.
-//
-//   cd runtime/library/regex/regex_compile
-//   node gen_regex_tables.mjs > regex_tables.h
-
 const MAX = 0x10ffff;
 const isSurrogate = (cp) => cp >= 0xd800 && cp <= 0xdfff;
 const hex = (n) => '0x' + n.toString(16).toUpperCase();
 
-// Every code point but the surrogates, in order, in two strings split at the
-// surrogates: a run of matches in one of them is a range of code points.
 const low = [], high = [];
 for (let cp = 0; cp < 0xd800; cp++) low.push(String.fromCodePoint(cp));
 for (let cp = 0xe000; cp <= MAX; cp++) high.push(String.fromCodePoint(cp));
@@ -27,7 +12,6 @@ const lastCodePoint = (s) => {
   return end >= 0xdc00 && end <= 0xdfff && s.length > 1 ? s.codePointAt(s.length - 2) : end;
 };
 
-// The ranges of code points that `source` (a class) matches with the u flag.
 function ranges(source) {
   const result = [];
   const run = new RegExp(source + '+', 'gu');
@@ -41,7 +25,6 @@ function ranges(source) {
     else result.push([cp, cp]);
   }
   result.sort((a, b) => a[0] - b[0]);
-  // Merge what the surrogates joined.
   const merged = [];
   for (const r of result) {
     const last = merged[merged.length - 1];
@@ -60,15 +43,9 @@ const accepts = (property) => {
   }
 };
 
-//===----------------------------------------------------------------------===//
-// Case-insensitive classes
-//===----------------------------------------------------------------------===//
-
-// With u or v: a code point that changes under some case mapping finds all
-// those /iu takes for it; the others stand alone.
 function unicodeClasses() {
   const changes = ranges('[\\p{CWCF}\\p{CWCM}]');
-  const classes = new Map(); // code point -> sorted members
+  const classes = new Map();
   const all = lowText + highText;
   for (const [a, b] of changes) {
     for (let cp = a; cp <= b; cp++) {
@@ -83,8 +60,6 @@ function unicodeClasses() {
   return classes;
 }
 
-// Without u: Canonicalize(ch) is the one code unit toUpperCase gives, unless
-// it gives several or turns a non-ASCII unit into ASCII. Checked with /i.
 function legacyClasses() {
   const canon = (c) => {
     const u = String.fromCharCode(c).toUpperCase();
@@ -103,7 +78,6 @@ function legacyClasses() {
     if (members.length < 2) continue;
     for (const m of members) classes.set(m, members);
   }
-  // V8 must agree: each member matches each other one, and nothing else.
   const all = [];
   for (let c = 0; c <= 0xffff; c++) all.push(String.fromCharCode(c));
   const text = all.join('');
@@ -117,7 +91,6 @@ function legacyClasses() {
   return classes;
 }
 
-// A class as a cycle: each member points at the next one.
 function orbits(classes) {
   const result = [];
   for (const [cp, members] of classes) {
@@ -127,11 +100,6 @@ function orbits(classes) {
   return result.sort((a, b) => a[0] - b[0]);
 }
 
-//===----------------------------------------------------------------------===//
-// Properties
-//===----------------------------------------------------------------------===//
-
-// General_Category: the leaf values, and the groups made of them.
 const leafCategories = [
   ['Lu', 'Uppercase_Letter'], ['Ll', 'Lowercase_Letter'], ['Lt', 'Titlecase_Letter'],
   ['Lm', 'Modifier_Letter'], ['Lo', 'Other_Letter'], ['Mn', 'Nonspacing_Mark'],
@@ -155,8 +123,6 @@ const groupCategories = [
   [['C', 'Other'], ['Cc', 'Cf', 'Cs', 'Co', 'Cn']],
 ];
 
-// Script values: the long name, the short one and any other alias. Those
-// Node does not know are left out.
 const scripts = [
   ['Adlam', 'Adlm'], ['Ahom', 'Ahom'], ['Anatolian_Hieroglyphs', 'Hluw'], ['Arabic', 'Arab'],
   ['Armenian', 'Armn'], ['Avestan', 'Avst'], ['Balinese', 'Bali'], ['Bamum', 'Bamu'],
@@ -208,7 +174,6 @@ const scripts = [
   ['Zanabazar_Square', 'Zanb'],
 ].filter(([name]) => accepts(`Script=${name}`));
 
-// The binary properties ECMAScript lists, with their short names.
 const binaries = [
   ['ASCII'], ['ASCII_Hex_Digit', 'AHex'], ['Alphabetic', 'Alpha'], ['Any'], ['Assigned'],
   ['Bidi_Control', 'Bidi_C'], ['Bidi_Mirrored', 'Bidi_M'], ['Case_Ignorable', 'CI'], ['Cased'],
@@ -230,10 +195,6 @@ const binaries = [
   ['XID_Continue', 'XIDC'], ['XID_Start', 'XIDS'],
 ].filter(([name]) => accepts(name));
 
-//===----------------------------------------------------------------------===//
-// Output
-//===----------------------------------------------------------------------===//
-
 const out = [];
 const emitList = (type, name, items, perLine, format) => {
   out.push(`static const ${type} ${name}[] = {`);
@@ -242,19 +203,12 @@ const emitList = (type, name, items, perLine, format) => {
   out.push('};');
 };
 
-out.push('// Generated by gen_regex_tables.mjs from Node.js ' + process.version + ' (Unicode ' +
-         process.versions.unicode + '). Do not edit.');
-out.push('');
-
-out.push('// The classes /i treats as equal, as cycles: each code point with the next one');
-out.push('// of its class. With the u or v flag (simple case folding), then without them.');
 emitList('ReOrbit', 're_orbits_unicode', orbits(unicodeClasses()), 4,
          ([a, b]) => `{${hex(a)}, ${hex(b)}},`);
 emitList('ReOrbit', 're_orbits_legacy', orbits(legacyClasses()), 4,
          ([a, b]) => `{${hex(a)}, ${hex(b)}},`);
 out.push('');
 
-// Ranges of all lists in one array; each list is its offset and count.
 const rangeData = [];
 const addRanges = (list) => {
   const offset = rangeData.length;
@@ -262,7 +216,6 @@ const addRanges = (list) => {
   return [offset, list.length];
 };
 
-// General_Category as a partition: where each run of one leaf value starts.
 const category = new Uint8Array(MAX + 1);
 leafCategories.forEach(([short], index) => {
   for (const [a, b] of ranges(`\\p{gc=${short}}`)) category.fill(index, a, b + 1);
@@ -270,8 +223,6 @@ leafCategories.forEach(([short], index) => {
 const gcStarts = [];
 for (let cp = 0; cp <= MAX; cp++)
   if (cp === 0 || category[cp] !== category[cp - 1]) gcStarts.push([cp, category[cp]]);
-out.push('// General_Category: the code point where each run of one value starts, and the');
-out.push('// value, an index into the leaf values of re_property_names.');
 emitList('ReRun', 're_categories', gcStarts, 6, ([cp, v]) => `{${hex(cp)}, ${v}},`);
 out.push('');
 
@@ -282,21 +233,16 @@ scripts.forEach(([name], index) => {
 const scStarts = [];
 for (let cp = 0; cp <= MAX; cp++)
   if (cp === 0 || script[cp] !== script[cp - 1]) scStarts.push([cp, script[cp]]);
-out.push('// Script, the same way.');
 emitList('ReRun', 're_scripts', scStarts, 6, ([cp, v]) => `{${hex(cp)}, ${v}},`);
 out.push('');
 
-// Script_Extensions and the binary properties: ranges.
 const scxLists = scripts.map(([name]) => addRanges(ranges(`\\p{Script_Extensions=${name}}`)));
 const binaryLists = binaries.map(([name]) => addRanges(ranges(`\\p{${name}}`)));
-out.push('// The ranges of Script_Extensions (by script) and of the binary properties.');
 emitList('ReRange', 're_ranges', rangeData, 4, ([a, b]) => `{${hex(a)}, ${hex(b)}},`);
 emitList('ReList', 're_script_extensions', scxLists, 6, ([o, n]) => `{${o}, ${n}},`);
 emitList('ReList', 're_binary_properties', binaryLists, 6, ([o, n]) => `{${o}, ${n}},`);
 out.push('');
 
-// Names, sorted for binary search. A General_Category value is a mask of
-// leaf values.
 const names = [];
 leafCategories.forEach((aliases, index) => {
   for (const a of aliases) names.push([a, 'RE_NAME_CATEGORY', 2 ** index]);
@@ -311,13 +257,10 @@ scripts.forEach((aliases, index) => {
 binaries.forEach((aliases, index) => {
   for (const a of aliases) names.push([a, 'RE_NAME_BINARY', index]);
 });
-// Code unit order, as strcmp compares ASCII.
 names.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
 for (const [name, kind, value] of names)
   if (!accepts(kind === 'RE_NAME_SCRIPT' ? `sc=${name}` : name))
     throw new Error(`Node rejects the property name ${name}`);
-out.push('// Property names and values: General_Category values (a mask of leaf values),');
-out.push('// scripts (an index) and binary properties (an index).');
 out.push('static const ReName re_property_names[] = {');
 for (const [name, kind, value] of names) out.push(`    {"${name}", ${kind}, ${hex(value)}},`);
 out.push('};');

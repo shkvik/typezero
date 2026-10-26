@@ -1,6 +1,3 @@
-// The errors of the system that node:fs throws as Node does: a SystemError (an
-// Error with code, errno, syscall, path and dest), with libuv's codes, numbers and texts.
-
 #ifndef TZ_FS_ERRORS_H
 #define TZ_FS_ERRORS_H
 
@@ -16,8 +13,6 @@
 #include <windows.h>
 #endif
 
-// libuv's errors that files can give: the code, its text, and the number
-// Node gives on Windows (on other systems it is -errno).
 typedef struct {
   const char *code;
   const char *message;
@@ -66,17 +61,14 @@ enum {
 
 extern const SysError tz_fs_errors[];
 
-// A failure: which error, and the number the program sees.
 typedef struct {
   int index;
   int32_t number;
 } Failure;
 
 #ifdef _WIN32
-// An error of Windows as libuv translates it (uv_translate_sys_error).
 Failure tz_fs_win32_failure(DWORD error);
 #else
-// An errno, which Node gives negated.
 Failure tz_fs_errno_failure(int e);
 #endif
 
@@ -86,8 +78,6 @@ TzStr tz_fs_ascii(const char *text);
 
 void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts);
 
-// "ENOENT: no such file or directory, open 'C:\x.txt'", with the path and
-// the second path (of rename and copyFile) as errors show them.
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest);
 

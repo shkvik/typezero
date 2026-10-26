@@ -34,4 +34,4 @@ bool checkAlias(llvm::StringRef alias, std::string &error) {
   return true;
 }
 
-} // namespace tz::pkg
+}

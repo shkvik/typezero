@@ -1,38 +1,3 @@
-// Groups: how the memory of objects that may form cycles of references is
-// freed without a collector that walks memory from time to time
-// (docs/objects.md, section 11, layer 3).
-//
-// The compiler finds the types whose objects may form a cycle (see
-// compiler/lower/codegen/codegen_cycles.cpp) and makes their objects members of
-// groups (TzGroupLink in group.h); every other object is counted as before and
-// pays nothing. A group is a ring of members, linked through `next`, with one
-// count: the references from outside it, which its leader keeps. A reference
-// that a member holds to a member of the same group is not counted.
-//
-// Storing a reference to a member into a member of another group merges the
-// two: the smaller group joins the larger, its members get the larger's
-// leader, the rings become one and the counts add up, less the reference just
-// stored, which is inside now. Groups never split. When the count of a group
-// reaches zero, nothing outside can reach its members, and they are freed
-// together: first what each of them holds, skipping its references to the
-// group, then the memory.
-//
-// A global that is never assigned again keeps its object for the whole run.
-// Its group is eternal (tz_group_pin): references to it are not counted and
-// merge nothing, so that the objects that point at the registry of an
-// application do not all end up in its group; the references an eternal group
-// holds to other groups are counted, as if from outside.
-//
-// A weak reference (WeakRef) is found from its object through a table, and
-// becomes undefined exactly when the object dies: when its count reaches
-// zero, or when its group is freed.
-//
-// In the parallel runtime (TZ_PARALLEL) every operation on groups holds one
-// lock, which the thread that holds it may take again (freeing a group
-// releases what it held, other groups among it). The objects that threads
-// share and that are no members are counted here too, atomically
-// (TZ_RC_SHARED in group.h): every negative count comes here.
-
 #include "runtime/core/group/group.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -48,8 +13,6 @@
 #include <string.h>
 
 #if TZ_PARALLEL
-// The thread that holds the lock of the groups (its index + 1, 0 for none)
-// and how many times it took it. Not static: see the rules in tzrt.h.
 int32_t tz_group_lock_owner;
 int32_t tz_group_lock_depth;
 
@@ -84,16 +47,12 @@ static inline void group_unlock(void) {
 #define group_unlock() ((void)0)
 #endif
 
-// Set by tz_rt_init when TZ_CHECK_LEAKS is: every member is also listed, so
-// that the groups left at the end can be reported, and counts the references
-// to it from outside its group, for the walk of debug mode (see Debug mode
-// below). Not static: see the rules in tzrt.h.
 int32_t tz_group_listing;
 
 typedef struct Listed {
   struct Listed *prev, *next;
-  int64_t outside; // references to the member from outside its group
-  int64_t size;    // of the group, at its leader
+  int64_t outside;
+  int64_t size;
 } Listed;
 
 Listed tz_group_list = {&tz_group_list, &tz_group_list, 0, 0};
@@ -102,16 +61,11 @@ static inline Listed *listed(const void *member) {
   return (Listed *)((char *)member - sizeof(TzGroupLink) - sizeof(Listed));
 }
 
-// Debug mode (a program compiled with TZ_CHECK_LEAKS set): the place of the
-// store being made, which a merge notes; and the walk of large groups.
 int32_t tz_group_debugging;
-TZ_THREAD_LOCAL const TzGroupSite *tz_group_site; // each thread's stores
+TZ_THREAD_LOCAL const TzGroupSite *tz_group_site;
 TZ_NOINLINE void tz_group_merged(TzObject *leader, int64_t joined);
 TZ_NOINLINE void tz_group_check_unstored(const void *object);
 
-// The leader's own link points at itself; in the parallel runtime the low
-// bit of every member's link says the group is published (publish.c): other
-// threads may reach it.
 #define LEADER_PUBLISHED ((uintptr_t)1)
 
 static inline TzObject *leader_of(const void *member) {
@@ -119,10 +73,6 @@ static inline TzObject *leader_of(const void *member) {
 }
 
 #if TZ_PARALLEL
-// Each member says it, so that a thread that reads any of them sees it even
-// while another joins the group with one more (merge, under the lock). A
-// group not published is reached by one thread only, which alone could
-// publish it: that thread changes it without the lock.
 static inline int member_published(const void *member) {
   void *leader = __atomic_load_n(&tz_group_link(member)->leader, __ATOMIC_RELAXED);
 
@@ -131,8 +81,6 @@ static inline int member_published(const void *member) {
 
 static inline int published(const TzObject *leader) { return member_published(leader); }
 
-// The lock for the groups of the members `a` and `b` (or NULL), unless no
-// other thread can reach them; gives whether it took it.
 static inline int lock_for(const void *a, const void *b) {
   if (!tz_group_listing && !member_published(a) && (!b || !member_published(b))) {
     return 0;
@@ -158,17 +106,10 @@ static inline void *next_of(const void *member) { return untagged(tz_group_link(
 
 static inline int is_eternal(const TzObject *leader) { return leader->rc >= TZ_RC_ETERNAL; }
 
-// What lies in front of a member: its link, and in a program checked for
-// leaks its place in the list before that.
 static inline size_t front_size(void) {
   return sizeof(TzGroupLink) + (tz_group_listing ? sizeof(Listed) : 0);
 }
 
-//===----------------------------------------------------------------------===//
-// Members
-//===----------------------------------------------------------------------===//
-
-// A member in a program checked for leaks, listed.
 TZ_NOINLINE void *tz_group_alloc_listed(size_t size, uintptr_t tag) {
   Listed *l = (Listed *)tz_alloc(size + sizeof(Listed) + sizeof(TzGroupLink));
   l->prev = &tz_group_list;
@@ -179,8 +120,6 @@ TZ_NOINLINE void *tz_group_alloc_listed(size_t size, uintptr_t tag) {
   l->size = 1;
   char *member = (char *)l + sizeof(Listed) + sizeof(TzGroupLink);
 #if TZ_PARALLEL
-  // A merge may publish it before its fields are all stored (publish.c):
-  // those not stored yet hold nothing.
   memset(member, 0, size);
 #endif
   TzGroupLink *link = tz_group_link(member);
@@ -200,8 +139,6 @@ TZ_HOT void *tz_group_alloc_tagged(size_t size, uintptr_t tag) {
   }
   char *member = (char *)tz_alloc(size + sizeof(TzGroupLink)) + sizeof(TzGroupLink);
 #if TZ_PARALLEL
-  // A merge may publish it before its fields are all stored (publish.c):
-  // those not stored yet hold nothing.
   memset(member, 0, size);
 #endif
   TzGroupLink *link = tz_group_link(member);
@@ -239,12 +176,7 @@ TZ_HOT void tz_group_obj_free(void *object) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Counting
-//===----------------------------------------------------------------------===//
-
 #if TZ_PARALLEL
-// A member's group under the lock, or an object threads share.
 TZ_NOINLINE void tz_group_retain_locked(void *member) {
   group_lock();
   ++leader_of(member)->rc;
@@ -254,9 +186,6 @@ TZ_NOINLINE void tz_group_retain_locked(void *member) {
   group_unlock();
 }
 
-// A group that died is freed outside the lock: nothing else can reach it,
-// and what its members let go of takes the lock itself, or waits for its
-// turn (parallel.c), which a thread must not do holding the lock.
 TZ_NOINLINE void tz_group_release_locked(void *member) {
   group_lock();
   TzObject *leader = leader_of(member);
@@ -318,16 +247,9 @@ TZ_HOT void tz_group_release(void *member) {
 }
 #endif
 
-// Joins the groups of the leaders `a` and `b` and returns the leader of the
-// whole. Walking both rings a step at a time finds the smaller one in as many
-// steps as it has members; it then joins the other, so that a member changes
-// its leader only when its group at least doubles, and building a group of n
-// members takes O(n log n) steps at worst.
 #if TZ_PARALLEL
 void tz_publish_contents(void *member, int32_t array);
 
-// Calls `each` with every member of the group of `leader` and whether it is
-// an array: the tag of the reference to it, in the link before it.
 static void each_member(TzObject *leader, void (*each)(void *member, int32_t array)) {
   uintptr_t at = tz_group_link(leader)->next;
   for (;;) {
@@ -341,8 +263,6 @@ static void each_member(TzObject *leader, void (*each)(void *member, int32_t arr
   }
 }
 
-// Publishes the members of the group of `leader`, which was not: those of a
-// published one now reach them. Each says it is.
 static void publish_member(void *member, int32_t array) {
   TzGroupLink *link = tz_group_link(member);
   link->leader = (void *)((uintptr_t)link->leader | LEADER_PUBLISHED);
@@ -369,9 +289,6 @@ static TzObject *merge(TzObject *a, TzObject *b) {
   }
   void *joined = b;
 #if TZ_PARALLEL
-  // The members of the group that was not published are, once in one that
-  // is: before the rings join, so that only they are walked; and every
-  // member says so before any changes its leader.
   int pa = published(a), pb = published(b);
   if (pa != pb) {
     publish_ring(pa ? b : a);
@@ -400,17 +317,16 @@ static TzObject *merge(TzObject *a, TzObject *b) {
   return b;
 }
 
-// tz_group_store of members of two groups; `ref` is the member stored.
 TZ_NOINLINE void tz_group_link_groups(TzObject *owner, TzObject *leader, void *ref) {
   if (is_eternal(leader)) {
-    --leader->rc; // a reference to an eternal group is not counted
+    --leader->rc;
     if (tz_group_listing) {
       --listed(ref)->outside;
     }
     return;
   }
   if (is_eternal(owner)) {
-    return; // one from an eternal group is
+    return;
   }
   --merge(owner, leader)->rc;
   if (tz_group_listing) {
@@ -447,7 +363,7 @@ TZ_HOT void tz_group_store(void *owner, void *ref) {
 TZ_HOT void tz_group_unstore(void *owner, void *ref) {
 #if TZ_PARALLEL
   if (!tz_rc_is_member(((TzObject *)ref)->rc)) {
-    tz_group_release(ref); // shared, and counted as any reference
+    tz_group_release(ref);
     return;
   }
 #endif
@@ -456,7 +372,7 @@ TZ_HOT void tz_group_unstore(void *owner, void *ref) {
   TzObject *lr = leader_of(ref);
   if (member && (leader_of(owner) == lr || is_eternal(lr))) {
     unlock_for(locked);
-    return; // not counted
+    return;
   }
   if (tz_group_listing) {
     --listed(ref)->outside;
@@ -473,12 +389,12 @@ TZ_HOT void tz_group_unstore(void *owner, void *ref) {
 
 void tz_group_take(void *owner, void *ref) {
   if (!tz_rc_is_member(((TzObject *)owner)->rc) || !tz_rc_is_member(((TzObject *)ref)->rc)) {
-    return; // counted: the reference just moves
+    return;
   }
   int locked = lock_for(owner, ref);
   TzObject *lr = leader_of(ref);
   if (leader_of(owner) == lr || is_eternal(lr)) {
-    ++lr->rc; // not counted while the owner held it
+    ++lr->rc;
     if (tz_group_listing) {
       ++listed(ref)->outside;
     }
@@ -487,8 +403,6 @@ void tz_group_take(void *owner, void *ref) {
 }
 
 #if TZ_PARALLEL
-// publish.c: the group of `member` becomes published, and `each` gets every
-// member, whose contents are to be published; nothing if it was already.
 void tz_group_publish(void *member, void (*each)(void *member, int32_t array)) {
   if (member_published(member)) {
     return;
@@ -514,12 +428,6 @@ int32_t tz_group_published(const void *member) { return member_published(member)
 
 #endif
 
-//===----------------------------------------------------------------------===//
-// Values of any type
-//===----------------------------------------------------------------------===//
-
-// Calls `each(owner, ref)` for every reference to a counted object that a
-// value of `type` at `value` holds (none for undefined).
 static void each_reference(const TzType *type, void *value, void *owner,
                            void (*each)(void *owner, void *ref)) {
   if (type->kind == TZ_T_UNION) {
@@ -540,10 +448,10 @@ static void each_reference(const TzType *type, void *value, void *owner,
       each(owner, ((TzFunction *)value)->env);
     }
     break;
-  case TZ_T_OPTIONAL: // undefined holds zero
+  case TZ_T_OPTIONAL:
     each_reference(type->inner, value, owner, each);
     break;
-  case TZ_T_RESULT: { // the half not in use holds zero
+  case TZ_T_RESULT: {
     const TzResultType *result = (const TzResultType *)type;
     each_reference(type->inner, (char *)value + result->value_offset, owner, each);
     each_reference(result->error, (char *)value + result->error_offset, owner, each);
@@ -591,14 +499,6 @@ void tz_group_pin_value(const TzType *type, void *value) {
   each_reference(type, value, NULL, pin_one);
 }
 
-//===----------------------------------------------------------------------===//
-// Weak references
-//===----------------------------------------------------------------------===//
-
-// A WeakRef: an object of the language whose fields the program does not
-// see, the object it refers to (NULL once that died) and the next WeakRef to
-// the same object. The table finds the first by the object. Must match
-// Lowering (compiler/lower/codegen/codegen_cycles.cpp).
 typedef struct TzWeak {
   int64_t rc;
   const TzLayout *layout;
@@ -606,8 +506,6 @@ typedef struct TzWeak {
   struct TzWeak *next;
 } TzWeak;
 
-// Open addressing by the object's address; a slot whose key is TOMBSTONE
-// was freed. Not static: see the rules in tzrt.h.
 typedef struct {
   void *key;
   TzWeak *first;
@@ -615,7 +513,7 @@ typedef struct {
 
 WeakSlot *tz_weak_slots;
 uint32_t tz_weak_capacity, tz_weak_used;
-int64_t tz_weak_count; // live entries: objects that have weak references
+int64_t tz_weak_count;
 
 #define TOMBSTONE ((void *)1)
 
@@ -663,7 +561,6 @@ static void weak_grow(void) {
   tz_free(slots);
 }
 
-// `new WeakRef(target)`: `target` is borrowed, and stays uncounted.
 void *tz_weak_new(const TzLayout *layout, void *target) {
   TzWeak *w = (TzWeak *)tz_obj_alloc(sizeof(TzWeak));
   w->rc = 1;
@@ -695,7 +592,6 @@ void *tz_weak_new(const TzLayout *layout, void *target) {
   return w;
 }
 
-// `w.deref()`: the object, counted, or NULL.
 void *tz_weak_deref(void *weak) {
   group_lock();
   void *target = ((TzWeak *)weak)->target;
@@ -707,7 +603,6 @@ void *tz_weak_deref(void *weak) {
   return target;
 }
 
-// The object died: its weak references become undefined.
 TZ_NOINLINE void tz_weak_forget(void *target) {
   group_lock();
   WeakSlot *s = weak_find(target);
@@ -724,7 +619,6 @@ TZ_NOINLINE void tz_weak_forget(void *target) {
   group_unlock();
 }
 
-// The drop function of a WeakRef: it leaves the list of its object.
 void tz_weak_drop(void *object) {
   TzWeak *w = (TzWeak *)object;
   group_lock();
@@ -744,24 +638,10 @@ void tz_weak_drop(void *object) {
   tz_obj_free(w);
 }
 
-//===----------------------------------------------------------------------===//
-// Freeing groups
-//===----------------------------------------------------------------------===//
-
-// A group is freed on the spot, by the code that let go of it. Freeing groups
-// of more than ~10 000 members in the background is postponed (docs/objects.md,
-// step 10, says why): tz_group_free is where it would hand a large group over.
-//
-// The groups whose count reached zero while another was being freed, freed
-// one after another: a chain of groups takes no stack, however long. Not
-// static: see the rules in tzrt.h.
-// Each thread its own: a thread frees the groups that die on it.
 TZ_THREAD_LOCAL TzObject **tz_group_dead;
 TZ_THREAD_LOCAL size_t tz_group_dead_count, tz_group_dead_capacity;
 TZ_THREAD_LOCAL int32_t tz_group_freeing;
 
-// Eternal groups that the end of a program checked for leaks emptied: their
-// memory goes last, as other groups may point at them without counting.
 TzObject **tz_group_zombies;
 size_t tz_group_zombie_count, tz_group_zombie_capacity;
 
@@ -781,16 +661,8 @@ static void push(TzObject ***items, size_t *count, size_t *capacity, TzObject *l
   (*items)[(*count)++] = leader;
 }
 
-// Walking a ring waits for each member to come from memory before it knows
-// the next. So that free_memory fetches many at once, drop_contents turns the
-// ring into this many chains, of every 16th member each, through the `next`
-// of the members that it has passed: the drops look at the leaders only.
 #define CHAINS 16
 
-// What each member holds, while all of them are still there, so that the
-// references among them are recognized and skipped; and its weak references
-// go first, as the group is dead from now on. With `chains`, makes the
-// chains and puts their first members there. Gives the number of members.
 static size_t drop_contents(TzObject *leader, uintptr_t *chains) {
   uintptr_t at = tz_group_link(leader)->next;
   if (tz_weak_count) {
@@ -804,12 +676,11 @@ static size_t drop_contents(TzObject *leader, uintptr_t *chains) {
     }
     at = tz_group_link(leader)->next;
   }
-  uintptr_t last[CHAINS]; // the members passed last, one per chain
+  uintptr_t last[CHAINS];
   size_t count = 0;
   for (;;) {
     void *m = untagged(at);
     uintptr_t following = tz_group_link(m)->next;
-    // The next member comes from memory while this one is dropped.
     __builtin_prefetch(tz_group_link(untagged(following)));
     if (chains) {
       size_t chain = count % CHAINS;
@@ -844,9 +715,6 @@ static void free_member(uintptr_t at) {
   member_free(untagged(at));
 }
 
-// The memory of the `count` members, a member of each chain in turn: the
-// order drop_contents passed them in. The `next` of the last member of a
-// chain is stale, and only fetched ahead in vain.
 static void free_memory(uintptr_t *chains, size_t count) {
   for (size_t i = 0; i < count; ++i) {
     uintptr_t *chain = &chains[i % CHAINS];
@@ -857,7 +725,6 @@ static void free_memory(uintptr_t *chains, size_t count) {
   }
 }
 
-// The same for a group whose contents went earlier, round its ring.
 static void free_ring(TzObject *leader) {
   uintptr_t at = tz_group_link(leader)->next;
   for (;;) {
@@ -889,11 +756,6 @@ TZ_NOINLINE void tz_group_free(TzObject *leader) {
   tz_group_freeing = 0;
 }
 
-// A global that held its value for good lets it go at the end of a program
-// checked for leaks: an eternal group goes whatever its count, as the
-// references to it were not counted; its memory stays until the others are
-// gone (see tz_group_shutdown), and what still counts on it from then on
-// counts in vain.
 static void end_one(void *owner, void *ref) {
   (void)owner;
   if (!tz_rc_is_member(((TzObject *)ref)->rc)) {
@@ -901,7 +763,7 @@ static void end_one(void *owner, void *ref) {
   }
   TzObject *leader = leader_of(ref);
   if (!is_eternal(leader) || leader->rc >= TZ_RC_ZOMBIE - (INT64_C(1) << 58)) {
-    return; // not eternal, or emptied already
+    return;
   }
   leader->rc = TZ_RC_ZOMBIE;
   push(&tz_group_zombies, &tz_group_zombie_count, &tz_group_zombie_capacity, leader);
@@ -921,24 +783,11 @@ void tz_group_end_value(const TzType *type, void *value) {
   tz_value_release(type, value);
 }
 
-//===----------------------------------------------------------------------===//
-// Debug mode
-//===----------------------------------------------------------------------===//
-
-// A program compiled with TZ_CHECK_LEAKS set, as the tests are, checks at run
-// time what the compiler proved about its memory (docs/objects.md, section
-// 11), and walks a group from time to time to find the members that nothing
-// outside the group reaches, which stay until the whole group goes.
-//
-// The walk needs to know the references in each member: arrays and
-// dictionaries by their types, the other objects by a function the
-// compiler makes for their layouts, which main hands over first.
 typedef struct {
   const void *layout;
   void (*trace)(void *object, void *walk);
 } TzGroupTrace;
 
-// What the walk finds a reference to `ref` in a member, in its field `field`.
 typedef struct Walk Walk;
 void tz_group_trace_ref(void *walk, void *ref, const char *field, uint32_t field_length);
 
@@ -960,7 +809,6 @@ static void (*trace_of(const void *layout))(void *, void *) {
   return NULL;
 }
 
-// A set of addresses, open addressing; TOMBSTONE marks a freed slot.
 typedef struct {
   const void **keys;
   const void **values;
@@ -1031,13 +879,11 @@ static void set_free(AddressSet *set) {
   memset(set, 0, sizeof *set);
 }
 
-// The text of a place of the program, `file:line`.
 static void place(char *out, size_t size, const TzFrame *at) {
   if (!at) {
     snprintf(out, size, "?");
     return;
   }
-  // The file's name without its directories.
   const char *file = at->file;
   uint32_t length = at->file_length;
   for (uint32_t i = 0; i < at->file_length; ++i) {
@@ -1054,8 +900,6 @@ static void debug_report(const char *text, size_t length) {
   tz_std_write_bytes(2, (const uint8_t *)text, length);
 }
 
-// Layer 1: the objects the compiler found are never stored where a
-// reference can be kept from, by where they were made.
 AddressSet tz_group_unstored;
 
 void tz_group_note_unstored(const void *object, const TzFrame *made) {
@@ -1073,9 +917,6 @@ void tz_group_forget_unstored(const void *object) {
   group_unlock();
 }
 
-// An object of a type that may form cycles took over a reference to an
-// object that is no member: one made where the compiler proved that what it
-// makes is never stored breaks the proof (and may leak, in a cycle).
 TZ_NOINLINE void tz_group_check_unstored(const void *object) {
   group_lock();
   const TzFrame *made = (const TzFrame *)set_get(&tz_group_unstored, object);
@@ -1098,13 +939,10 @@ TZ_NOINLINE void tz_group_check_unstored(const void *object) {
   debug_report(text, (size_t)length);
 }
 
-// Layer 2: an object that its owner made and holds alone, about to be let go
-// by the owner, must have no other reference: what it holds refers to the
-// owner without counting.
 void tz_group_check_owned(const void *object, const TzFrame *at, const char *owner,
                           uint32_t owner_length) {
   const TzObject *o = (const TzObject *)object;
-  if (!o || o->rc < 0 || o->rc == 1) { // a member, or shared
+  if (!o || o->rc < 0 || o->rc == 1) {
     return;
   }
   char where[256];
@@ -1115,8 +953,6 @@ void tz_group_check_owned(const void *object, const TzFrame *at, const char *own
             (int)owner_length, owner, where, (long long)o->rc);
 }
 
-// The sites of the stores that merged groups, with how many members each
-// brought: the report names where the reference it blames is stored.
 typedef struct {
   const TzGroupSite *site;
   int64_t joined;
@@ -1124,24 +960,22 @@ typedef struct {
 
 SiteCount tz_group_sites[64];
 uint32_t tz_group_site_count;
-// The holders reported already.
 char tz_group_reported[16][96];
 uint32_t tz_group_reported_count;
 
 struct Walk {
   TzObject *leader;
-  AddressSet members; // the members, with their tags (+ 2)
-  AddressSet reached; // the members reached
+  AddressSet members;
+  AddressSet reached;
   void **work;
   size_t work_count, work_capacity;
-  int counting;        // the second pass: counts the references to unreached members
-  const void *owner;   // the member being traced
-  uintptr_t owner_tag; // its tag: TZ_GROUP_ARRAY for an array
-  // By holder (`Type.field`): how many references to unreached members.
+  int counting;
+  const void *owner;
+  uintptr_t owner_tag;
   char holders[16][96];
   int64_t holds[16];
   uint32_t holder_count;
-  int untraced; // a member whose references are not known
+  int untraced;
 };
 
 static void work_push(Walk *w, void *m) {
@@ -1226,7 +1060,6 @@ void tz_group_trace_value(void *walk, const TzType *type, void *value, const cha
   trace_value((Walk *)walk, type, value, field);
 }
 
-// The references a member holds, to tz_group_trace_ref.
 static void trace_member(Walk *w, void *m, uintptr_t tag) {
   w->owner = m;
   w->owner_tag = tag & TZ_GROUP_ARRAY;
@@ -1258,14 +1091,10 @@ static void trace_member(Walk *w, void *m, uintptr_t tag) {
   }
 }
 
-// The tag of a member, which the pointer to it in the ring holds.
 static uintptr_t tag_of(Walk *w, void *m) {
   return (uintptr_t)set_get(&w->members, m) & TZ_GROUP_ARRAY;
 }
 
-// Walks the group of `leader`: the members that the references from outside
-// do not reach, through the references inside it, stay only because the
-// group does. Reports where they are held, once for each holder.
 static void walk_group(TzObject *leader) {
   Walk w;
   memset(&w, 0, sizeof w);
@@ -1285,7 +1114,6 @@ static void walk_group(TzObject *leader) {
     }
     at = tz_group_link(m)->next;
   }
-  // Pass 1: what the roots reach.
   while (w.work_count && !w.untraced) {
     void *m = w.work[--w.work_count];
     trace_member(&w, m, tag_of(&w, m));
@@ -1304,7 +1132,6 @@ static void walk_group(TzObject *leader) {
   }
   int64_t lost = total - reached;
   if (!w.untraced && lost * 2 >= total) {
-    // Pass 2: who holds the members not reached.
     w.counting = 1;
     at = tz_group_link(leader)->next;
     for (;;) {
@@ -1322,7 +1149,6 @@ static void walk_group(TzObject *leader) {
       }
     }
     const char *holder = w.holder_count ? w.holders[best] : "?";
-    // The store of that field that joined the most.
     const TzGroupSite *site = NULL;
     const char *dot = strrchr(holder, '.');
     for (uint32_t i = 0; i < tz_group_site_count; ++i) {
@@ -1339,7 +1165,6 @@ static void walk_group(TzObject *leader) {
       place(at_text, sizeof at_text, site->at);
       snprintf(where, sizeof where, " at %s", at_text);
     }
-    // The type most members are of.
     char names[8][64];
     int64_t counts[8];
     uint32_t kinds = 0;
@@ -1378,7 +1203,6 @@ static void walk_group(TzObject *leader) {
                  "they stay until the whole group goes: make that reference a WeakRef, "
                  "or clear it when it is done (docs/objects.md, section 11)\n",
                  kinds ? names[most] : "?", (long long)lost, (long long)total, holder, where);
-    // Once for each holder.
     uint32_t k = 0;
     while (k < tz_group_reported_count && strcmp(tz_group_reported[k], holder) != 0) {
       ++k;
@@ -1394,8 +1218,6 @@ static void walk_group(TzObject *leader) {
   tz_free(w.work);
 }
 
-// Debug mode, after two groups merged: notes the store's place, and walks a
-// group whose size reached a power of two from 4096 on.
 TZ_NOINLINE void tz_group_merged(TzObject *leader, int64_t joined) {
   if (tz_group_site) {
     uint32_t i = 0;
@@ -1409,7 +1231,6 @@ TZ_NOINLINE void tz_group_merged(TzObject *leader, int64_t joined) {
       tz_group_sites[i].joined += joined;
     }
   }
-  // A walk each time the group reaches a power of two from 4096 on.
   int64_t size = listed(leader)->size, power = 4096;
   while (power <= size - joined) {
     power <<= 1;
@@ -1419,11 +1240,6 @@ TZ_NOINLINE void tz_group_merged(TzObject *leader, int64_t joined) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The end of the program
-//===----------------------------------------------------------------------===//
-
-// The name the report gives a member.
 static void member_name(char *out, size_t size, void *m, uintptr_t tag) {
   if (!m) {
     snprintf(out, size, "?");
@@ -1443,7 +1259,6 @@ static void member_name(char *out, size_t size, void *m, uintptr_t tag) {
     snprintf(out, size, "%.*s", (int)layout->name_length, layout->name);
     return;
   }
-  // An object of a literal: its keys.
   size_t at = (size_t)snprintf(out, size, "{");
   for (uint32_t i = 0; i < layout->count && at + 8 < size; ++i) {
     at += (size_t)snprintf(out + at, size - at, "%s %.*s", i ? "," : "",
@@ -1454,10 +1269,7 @@ static void member_name(char *out, size_t size, void *m, uintptr_t tag) {
   }
 }
 
-// Reports one line per group still alive: how many members it has, and of
-// which types.
 static void report(void) {
-  // The leaders, and for each the names of its members with their counts.
   typedef struct {
     char name[64];
     int64_t count;
@@ -1487,7 +1299,6 @@ static void report(void) {
         ++kinds[k].count;
       }
       ++members;
-      // Unlisted as reported, so that the walk ends.
       Listed *ml = (Listed *)((char *)m - sizeof(TzGroupLink) - sizeof(Listed));
       ml->prev->next = ml->next;
       ml->next->prev = ml->prev;

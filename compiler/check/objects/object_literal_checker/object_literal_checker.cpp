@@ -21,8 +21,6 @@ namespace tz {
 
 namespace {
 
-// Whether an instance of the class has keys that are methods: a literal's
-// methods, or arrows in fields of classes up the chain.
 bool hasMethodFields(const ClassDecl *cls) {
   if (cls->literal) {
     return true;
@@ -36,12 +34,11 @@ bool hasMethodFields(const ClassDecl *cls) {
   return false;
 }
 
-// The tail of the messages about keys that are not constants.
 const char kRuntimeKeys[] =
     "keys computed when the program runs need a dictionary: declare it as one, e.g. "
     "'const d: Record<string, int> = {}'";
 
-} // namespace
+}
 
 ObjectLiteralChecker::ObjectLiteralChecker(Checker &checker) : checker_(checker) {}
 
@@ -52,11 +49,7 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   if (expected && expected->nonOptional()->isRecord()) {
     return checker_.recordLiteralChecker().checkRecordLit(lit, expected->nonOptional());
   }
-  // A literal is never an instance of a class: where one is expected, the
-  // literal keeps its own type, and the place reports the difference.
   const Type *target = expected ? expected->nonOptional() : nullptr;
-  // Where a union is expected, the member the literal is written for (see
-  // literalMember), once its keys are known.
   const Type *expectedUnion = target && target->isUnion() ? target : nullptr;
   auto usable = [](const Type *t) {
     return t && t->isObject() && !t->isIncomplete() && !t->isTuple() && !t->isClass() &&
@@ -68,13 +61,11 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   }
   bool ok = true;
 
-  // Whether each property names a field: a key in brackets may not.
   llvm::SmallVector<bool, 8> named(lit->props.size(), true);
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
     named[i] = !prop.spread;
     if (prop.defaulted) {
-      // `{ x = 1 }` belongs to destructuring patterns.
       checker_.diags_.error(prop.loc,
                             "'" + prop.name +
                                 " = ...' gives a default value, which only a destructuring "
@@ -88,7 +79,6 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (!prop.key) {
       continue;
     }
-    // `[key]: value`: the key must name the field when compiling.
     prop.key = checker_.exprChecker().checkExpr(prop.key);
     const Type *keyType = prop.key->type;
     if (std::optional<std::string> name = checker_.keyedFieldChecker().constantKey(prop.key)) {
@@ -133,8 +123,6 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
     if (!usable(target)) {
       target = nullptr;
     }
-    // No object type of the union takes it: a Record of it does
-    // (`Record<string, int> | int[]`).
     if (!target) {
       for (const Type *m : expectedUnion->members()) {
         if (m->isRecord()) {
@@ -143,9 +131,6 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
       }
     }
   }
-  // A method where the type expected has a function that takes `this`,
-  // `{ read() { this.push(x) } }` for `read?: (this: Readable, size: int) =>
-  // void`, is that function: its `this` is what the caller gives.
   if (target) {
     for (ObjectLitExpr::Property &prop : lit->props) {
       if (const Field *wanted = prop.method ? target->field(prop.name) : nullptr;
@@ -165,19 +150,19 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   std::vector<Field> fields;
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
-    if (!named[i]) { // a key in brackets that names nothing
+    if (!named[i]) {
       prop.value = checker_.exprChecker().checkExpr(prop.value);
       continue;
     }
     if (auto *fe = dyn_cast<FunctionExpr>(prop.value); fe && fe->fn->name.empty()) {
-      fe->fn->name = prop.name; // as JavaScript names it
+      fe->fn->name = prop.name;
     }
     std::string what = ("field '" + prop.name + "'").str();
     if (target) {
       const Field *field = target->field(prop.name);
       if (!field) {
         prop.value = checker_.exprChecker().checkExpr(prop.value);
-        if (!target->overload(prop.name)) { // reported below
+        if (!target->overload(prop.name)) {
           checker_.diags_.error(prop.loc,
                                 "type '" + target->name() + "' has no field '" + prop.name +
                                     "'; an object must have exactly the fields of its type");
@@ -230,15 +215,8 @@ Expr *ObjectLiteralChecker::checkObjectLit(ObjectLitExpr *lit, const Type *expec
   return lit;
 }
 
-// `{ ...a, x: 1, ...b }`: the fields of its parts, in order. A later part
-// replaces a field an earlier one gave, except that an optional field that
-// holds undefined is not copied, so `{ ...defaults, ...options }` keeps the
-// defaults that the options leave out. The field then holds a value if any
-// part gave it one.
 Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *target,
                                            llvm::ArrayRef<bool> named, bool ok) {
-  // Spreading a Record makes a Record, as its keys are known only when the
-  // program runs.
   bool records = false;
   std::vector<Field> fields;
   auto slot = [&](llvm::StringRef name) -> Field * {
@@ -322,9 +300,6 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
       ok = false;
       continue;
     }
-    // The rest of a pattern leaves out the fields the pattern names, also
-    // those named by keys in brackets, which are known by now. An instance
-    // of a class keeps its `#private` fields, as in JavaScript.
     for (const IndexExpr *read : prop.omitKeys) {
       if (!read->field.empty()) {
         prop.omit.push_back(read->field);
@@ -359,7 +334,6 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
         field->type = f.type;
         continue;
       }
-      // Undefined is not copied: the earlier value may stay.
       const Type *base = TypeRelations::unify(field->type->nonOptional(), f.type->inner());
       if (!base || base->isError()) {
         checker_.diags_.error(prop.loc, "field '" + f.name + "' is '" + field->type->name() +
@@ -379,8 +353,6 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     return lit;
   }
 
-  // An expected type with these fields gives the object its type; otherwise
-  // the place it goes reports the difference.
   const Type *result = Type::object(fields);
   if (target) {
     bool fits = llvm::all_of(fields, [&](const Field &f) {
@@ -395,8 +367,6 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     }
   }
 
-  // The values convert to the types of their fields as they are stored; a
-  // value that a later part surely replaces is only evaluated.
   for (size_t i = 0; i < lit->props.size(); ++i) {
     ObjectLitExpr::Property &prop = lit->props[i];
     auto replacedLater = [&](llvm::StringRef name) {
@@ -434,4 +404,4 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
   return lit;
 }
 
-} // namespace tz
+}

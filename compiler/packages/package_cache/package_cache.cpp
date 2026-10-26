@@ -21,7 +21,7 @@ std::string cacheDir() {
   }
   llvm::SmallString<256> dir;
   if (!path::cache_directory(dir)) {
-    path::system_temp_directory(/*ErasedOnReboot=*/false, dir);
+    path::system_temp_directory(false, dir);
   }
 #ifdef _WIN32
   path::append(dir, "tz", "cache");
@@ -46,7 +46,7 @@ std::string sha256Hex(llvm::StringRef data) {
   hasher.update(data);
   std::array<uint8_t, 32> digest = hasher.final();
 
-  return llvm::toHex(digest, /*LowerCase=*/true);
+  return llvm::toHex(digest, true);
 }
 
 std::string treeHash(std::vector<std::pair<std::string, std::string>> files) {
@@ -66,8 +66,7 @@ bool hashDirectory(llvm::StringRef dir, std::string &hash, std::string &error) {
     if (!fs::is_regular_file(it->path())) {
       continue;
     }
-    auto buffer = llvm::MemoryBuffer::getFile(it->path(), /*IsText=*/false,
-                                              /*RequiresNullTerminator=*/false);
+    auto buffer = llvm::MemoryBuffer::getFile(it->path(), false, false);
     if (!buffer) {
       error = "cannot read '" + it->path() + "': " + buffer.getError().message();
       return false;
@@ -94,7 +93,7 @@ bool writeFileAtomically(llvm::StringRef file, llvm::StringRef data, std::string
   llvm::SmallString<256> temp;
   std::error_code ec = fs::createUniqueFile(file + ".tmp-%%%%%%", fd, temp);
   if (!ec) {
-    llvm::raw_fd_ostream out(fd, /*shouldClose=*/true);
+    llvm::raw_fd_ostream out(fd, true);
     out << data;
     out.close();
     if (out.has_error()) {
@@ -116,4 +115,4 @@ bool writeFileAtomically(llvm::StringRef file, llvm::StringRef data, std::string
   return true;
 }
 
-} // namespace tz::pkg
+}

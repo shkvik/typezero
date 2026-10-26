@@ -4,18 +4,15 @@
 
 namespace tz {
 
-// Generators as coroutines: their layout, next and return.
 class GeneratorLowerer {
 public:
   explicit GeneratorLowerer(Lowering &lowering);
 
-  // Coroutines.
   llvm::Constant *iteratorLayout(unsigned flags);
   void emitGenerator(FunctionDecl *fn, llvm::Function *function);
   void emitPendingIterators();
   llvm::Function *iteratorFunction(Builtin builtin, const Type *source, const Type *operand,
                                    const Type *result);
-  // `void tz.iter.close(ptr iterator)`: return() of JavaScript.
   llvm::Function *iterCloseFunction();
 
 private:
@@ -27,4 +24,4 @@ private:
   std::map<unsigned, llvm::Constant *> iteratorLayouts_;
 };
 
-} // namespace tz
+}

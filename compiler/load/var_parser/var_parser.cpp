@@ -26,11 +26,9 @@ namespace tz {
 
 VarParser::VarParser(Parser &parser) : parser_(parser) {}
 
-// Parses `let`/`const` declarators without the trailing semicolon, so that it
-// also serves `for (let i = 0; ...)`.
 VarDeclStmt *VarParser::parseVarDecl() {
   auto *decl = parser_.ctx_.make<VarDeclStmt>(parser_.tok_.loc(), parser_.tok_.is(Tok::KwConst));
-  parser_.cursor().advance(); // 'let' / 'const' / 'var'
+  parser_.cursor().advance();
   parseDeclarators(decl);
 
   return decl;
@@ -39,7 +37,6 @@ VarDeclStmt *VarParser::parseVarDecl() {
 void VarParser::parseDeclarators(VarDeclStmt *decl) {
   do {
     if (parser_.tok_.is(Tok::LBracket) || parser_.tok_.is(Tok::LBrace)) {
-      // `const [a, b]: int[] = value`, `const { x, y }: Point = value`
       std::unique_ptr<Parser::Pattern> pattern = parser_.patterns().parseBindingPattern();
       std::optional<TypeRef> typeAnn;
       if (parser_.cursor().accept(Tok::Colon)) {
@@ -64,7 +61,6 @@ void VarParser::parseDeclarators(VarDeclStmt *decl) {
     if (parser_.cursor().accept(Tok::Assign)) {
       d.init = parser_.exprs().parseExpr();
     }
-    // `const Point = class { ... }` names the class, as in JavaScript.
     if (auto *ce = llvm::dyn_cast_or_null<ClassExpr>(d.init); ce && ce->decl->name.empty()) {
       ce->decl->name = d.name;
     }
@@ -82,13 +78,12 @@ void VarParser::recordConstant(llvm::StringRef name, const Expr *init) {
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(init); tmpl && tmpl->exprs.empty()) {
     values.push_back(toUtf8(tmpl->quasis[0]));
   } else if (auto *other = dyn_cast<NameExpr>(init)) {
-    values = parser_.stringConstants_.lookup(other->name); // declared earlier
+    values = parser_.stringConstants_.lookup(other->name);
   }
   std::vector<std::string> &all = parser_.stringConstants_[name];
   all.insert(all.end(), values.begin(), values.end());
 }
 
-// A variable name with an optional type annotation.
 bool VarParser::parseBinding(VarDeclarator &d) {
   d.loc = parser_.tok_.loc();
   if (!parser_.tok_.is(Tok::Identifier)) {
@@ -104,4 +99,4 @@ bool VarParser::parseBinding(VarDeclarator &d) {
   return true;
 }
 
-} // namespace tz
+}

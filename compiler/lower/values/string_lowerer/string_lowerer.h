@@ -4,15 +4,13 @@
 
 namespace tz {
 
-// Strings: literals, concatenation, templates, comparisons and indices.
 class StringLowerer {
 public:
   explicit StringLowerer(Lowering &lowering);
 
   llvm::Value *stringObj(llvm::Value *str);
   llvm::Value *stringMeta(llvm::Value *str);
-  llvm::Value *stringLength(llvm::Value *str); // as i64
-  // Calls a runtime function that returns a string through its first argument.
+  llvm::Value *stringLength(llvm::Value *str);
   llvm::Value *callReturningString(llvm::FunctionCallee fn, llvm::ArrayRef<llvm::Value *> args);
   llvm::Value *concatOperands(llvm::ArrayRef<Lowering::Operand> operands);
   Lowering::Operand emitConcatPart(Expr *expr, bool canBorrow);
@@ -29,4 +27,4 @@ private:
   std::map<std::u16string, llvm::Constant *> literals_;
 };
 
-} // namespace tz
+}

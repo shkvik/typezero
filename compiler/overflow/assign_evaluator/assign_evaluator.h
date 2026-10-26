@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// Where values go: places, reads and writes of them, assignments, updates and object
-// literals.
 class AssignEvaluator {
 public:
   explicit AssignEvaluator(OverflowCheck &check);
@@ -21,4 +19,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

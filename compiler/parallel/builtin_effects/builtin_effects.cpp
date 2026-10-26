@@ -32,7 +32,6 @@ using llvm::dyn_cast_or_null;
 
 BuiltinEffects::BuiltinEffects(Analysis &analysis) : analysis_(analysis) {}
 
-// What a built-in reads and writes, once its arguments are evaluated.
 void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   llvm::SMLoc at = c->loc();
   Builtin b = c->builtin;
@@ -60,7 +59,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     analysis_.resource(Res::Stderr, true, at);
     return;
   case Builtin::ProcessExit:
-    // Ends the program: after what was printed, before what was not.
     analysis_.resource(Res::Process, true, at);
     analysis_.resource(Res::Stdout, true, at);
     analysis_.resource(Res::Stderr, true, at);
@@ -76,7 +74,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::ReadLine:
   case Builtin::RlQuestion:
   case Builtin::RlQuestionCallback:
-    // Takes the next line of input, after writing the question.
     analysis_.resource(Res::Stdin, true, at);
     analysis_.resource(Res::Stdout, true, at);
     return;
@@ -90,7 +87,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::TupleJoin:
     field(recv, "*", false);
     return;
-  // Arrays.
   case Builtin::ArrPush:
   case Builtin::ArrPop:
   case Builtin::ArrShift:
@@ -149,7 +145,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
       analysis_.exprWalk().elements(a, false, at);
     }
     return;
-  // Iterators: a step moves an iterator on, and a generator runs.
   case Builtin::IterNext:
     if (recv) {
       analysis_.codeWalk().iterate(recv, c);
@@ -180,7 +175,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
       analysis_.codeWalk().iterate(recv, c);
     }
     return;
-  // Dictionaries.
   case Builtin::MapGet:
   case Builtin::MapHas:
   case Builtin::MapSize:
@@ -217,7 +211,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::DictGroupBy:
     analysis_.exprWalk().contents(arg(0), false, at);
     return;
-  // The files, with fd 0 for input and 1 and 2 for output.
   case Builtin::FsReadFile:
     if (const Expr *a = arg(0); a && a->type && a->type->isInteger()) {
       analysis_.resource(Res::Stdin, true, at);
@@ -250,7 +243,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::FsCopyFile:
     analysis_.resource(Res::Files, true, at);
     return;
-  // Regular expressions keep their lastIndex.
   case Builtin::RegExpTest:
   case Builtin::RegExpExec:
     field(recv, "lastIndex", true);
@@ -264,7 +256,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::StrSplitRegex:
     field(arg(0), "lastIndex", true);
     return;
-  // Dates hold their time.
   case Builtin::DateSetTime:
   case Builtin::DateSetUTC:
   case Builtin::DateSetLocal:
@@ -285,7 +276,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::DtfFormatToParts:
     field(arg(0), "%time", false);
     return;
-  // Binary data.
   case Builtin::BytesFromArray:
   case Builtin::BytesFromBytes:
   case Builtin::BytesOf:
@@ -343,13 +333,10 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::TextDecode:
     analysis_.exprWalk().elements(arg(0), false, at);
     return;
-  // Metadata.
   case Builtin::MetaDefine:
   case Builtin::MetaDelete:
     analysis_.resource(Res::Metadata, true, at);
     return;
-  // A child process of child_process: what it does, the program cannot see
-  // but in the files, the output it shares and the environment.
   case Builtin::ChildSpawnSync:
   case Builtin::ChildExecFileSync:
   case Builtin::ChildExecSync:
@@ -359,10 +346,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     analysis_.resource(Res::Stderr, true, at);
     analysis_.resource(Res::Process, false, at);
     return;
-  // node:crypto, by the kinds of the arguments of its function (sema/
-  // crypto_api.h): an object of node:crypto changes as it is used (update,
-  // final, digest), the bytes that randomFill and getRandomValues fill are
-  // written, and the data given read.
   case Builtin::Crypto: {
     auto *number = dyn_cast_or_null<IntLitExpr>(strip(arg(0)));
     if (!number || number->value >= std::size(kCryptoFunctions)) {
@@ -395,8 +378,6 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   case Builtin::CryptoKeyPair:
     readArgs();
     return;
-  // Reflection: the fields read by a name known only when the program runs,
-  // and the method or the constructor it runs (Analysis::resolve).
   case Builtin::ReflectGet:
     if (const Expr *a = arg(0); a && holdsReferences(a->type)) {
       analysis_.codeWalk().touch(LocKind::Field, analysis_.aliasAnalysis().refOf(a),
@@ -411,11 +392,9 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     rec.call = c;
     const Expr *fn = strip(arg(0));
     if (fn && fn->type && fn->type->nonOptional()->isFunction()) {
-      rec.byType = fn->type; // a function the program has as a value
+      rec.byType = fn->type;
       return;
     }
-    // A method that Reflect.get found by name: one of the classes of the
-    // object it is applied to.
     rec.reflect = CallRec::Reflect::Apply;
     const Expr *self = strip(arg(1));
     rec.bySelf =
@@ -443,9 +422,8 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
     break;
   }
   if (knownBuiltin(b)) {
-    return; // numbers, strings, paths, promises, timers...: nothing shared
+    return;
   }
-  // A built-in the pass does not know may change what it is given.
   analysis_.exprWalk().contents(recv, true, at);
   for (const Expr *a : c->args) {
     analysis_.exprWalk().contents(a, true, at);
@@ -453,4 +431,4 @@ void BuiltinEffects::builtinEffects(const CallExpr *c, const Expr *recv) {
   analysis_.resource(Res::Runtime, true, at);
 }
 
-} // namespace tz::parallel
+}

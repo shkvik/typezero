@@ -41,8 +41,6 @@ llvm::Value *MathLowerer::spillArray(llvm::ArrayRef<llvm::Value *> values, llvm:
   return array;
 }
 
-// Checker made the arguments doubles where the function takes doubles, ints for
-// clz32 and imul, and the common type for abs, sign, min and max.
 llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   std::vector<llvm::Value *> args;
   for (Expr *arg : call->args) {
@@ -53,8 +51,6 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   llvm::Value *x = args.empty() ? nullptr : args[0];
 
   if (isRoundingBuiltin(call->builtin)) {
-    // An integer is whole already. Checker typed the call as an integer where
-    // one is expected: then the result must fit, or the program stops.
     const Type *from = call->args[0]->type;
     if (from->isFloat()) {
       switch (call->builtin) {
@@ -67,7 +63,7 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       case Builtin::MathTrunc:
         x = lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::trunc, x);
         break;
-      default: // JavaScript rounds halves up, which no intrinsic does
+      default:
         x = lowering_.builder_.CreateCall(lowering_.rt_.mathRound, {x});
         break;
       }
@@ -78,7 +74,6 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
     if (from->isFloat()) {
       return lowering_.numberLowerer().emitCheckedInteger(x, type);
     }
-    // A long where an int is expected.
     llvm::Value *fits = lowering_.builder_.CreateICmpULE(
         lowering_.builder_.CreateAdd(x, lowering_.builder_.getInt64(0x80000000)),
         lowering_.builder_.getInt64(0xFFFFFFFF));
@@ -98,12 +93,11 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
     if (type->isFloat()) {
       return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, x);
     }
-    // The smallest int stays as it is, as `-x` does.
     return lowering_.builder_.CreateBinaryIntrinsic(llvm::Intrinsic::abs, x,
                                                     lowering_.builder_.getFalse());
   case Builtin::MathSign: {
     llvm::Type *t = x->getType();
-    if (type->isFloat()) { // NaN, 0 and -0 come back as they are
+    if (type->isFloat()) {
       llvm::Value *sign = lowering_.builder_.CreateSelect(
           lowering_.builder_.CreateFCmpOLT(x, llvm::ConstantFP::get(t, 0.0)),
           llvm::ConstantFP::get(t, -1.0), x);
@@ -121,10 +115,8 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   case Builtin::MathMax: {
     bool isMin = call->builtin == Builtin::MathMin;
     if (args.empty()) {
-      return llvm::ConstantFP::getInfinity(f64, /*Negative=*/!isMin);
+      return llvm::ConstantFP::getInfinity(f64, !isMin);
     }
-    // minimum and maximum give NaN if either side is NaN, and order -0
-    // before 0, as JavaScript does.
     llvm::Intrinsic::ID id = type->isFloat()
                                  ? (isMin ? llvm::Intrinsic::minimum : llvm::Intrinsic::maximum)
                                  : (isMin ? llvm::Intrinsic::smin : llvm::Intrinsic::smax);
@@ -135,12 +127,9 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
       }
       return result;
     }
-    // `Math.max(...a)`: from the value that changes nothing, ±Infinity (or
-    // the extreme integer, where Checker proved some value is there), over the
-    // arguments and the elements of the arrays, in order.
     llvm::Value *result;
     if (type->isFloat()) {
-      result = llvm::ConstantFP::getInfinity(f64, /*Negative=*/!isMin);
+      result = llvm::ConstantFP::getInfinity(f64, !isMin);
     } else {
       result = isMin ? llvm::ConstantInt::get(lowering_.moduleBuilder().lower(type),
                                               llvm::APInt::getSignedMaxValue(type->bitWidth()))
@@ -164,7 +153,7 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   }
   case Builtin::MathSqrt:
     return lowering_.builder_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, x);
-  case Builtin::MathFround: // to the nearest float
+  case Builtin::MathFround:
     return lowering_.builder_.CreateFPExt(
         lowering_.builder_.CreateFPTrunc(x, lowering_.builder_.getFloatTy()), f64);
   case Builtin::MathClz32:
@@ -202,4 +191,4 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
   llvm_unreachable("not a function of Math");
 }
 
-} // namespace tz
+}

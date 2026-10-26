@@ -15,15 +15,10 @@ public:
   static bool classof(const Expr *e) { return e->kind() == Kind::Name; }
 
   llvm::StringRef name;
-  // `first<int>`: the type arguments of a generic function, as a value or
-  // as the callee of a call.
   std::vector<TypeRef> typeArgs;
-  VarSymbol *var = nullptr; // set by Checker
-  // Set by Checker for a top-level function used as a value.
+  VarSymbol *var = nullptr;
   FuncSymbol *func = nullptr;
-  // Set by Checker for a class used as a value (docs/decorators.md): the
-  // object of the class.
   ClassDecl *cls = nullptr;
 };
 
-} // namespace tz
+}

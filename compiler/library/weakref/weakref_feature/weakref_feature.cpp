@@ -7,7 +7,7 @@
 namespace tz {
 
 Expr *WeakRefFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                      const Type * /*expected*/) const {
+                                      const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isWeakRef()) {
     return nullptr;
@@ -24,4 +24,4 @@ llvm::Value *WeakRefFeature::lowerCall(Lowering &lowering, CallExpr *call) const
   return lowering.weakRefLowerer().emitWeakRefCall(call);
 }
 
-} // namespace tz
+}

@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// new: which class checks the construction.
 class NewChecker {
 public:
   explicit NewChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

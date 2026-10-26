@@ -4,8 +4,6 @@
 
 namespace tz::parallel {
 
-// How --explain-parallel names what it shows: places, types, calls, references and
-// locations.
 class ExplainNames {
 public:
   explicit ExplainNames(Analysis &analysis);
@@ -24,4 +22,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

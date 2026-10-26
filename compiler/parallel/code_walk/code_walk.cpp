@@ -149,7 +149,6 @@ void CodeWalk::var(const VarSymbol *v, bool write, llvm::SMLoc at) {
   }
 }
 
-// The pieces active now may throw, into the nearest `catch` or `finally`.
 void CodeWalk::throwPoint() {
   for (auto it = analysis_.tries_.rbegin(); it != analysis_.tries_.rend(); ++it) {
     if (it->phase == Analysis::Phase::Block) {
@@ -164,7 +163,6 @@ void CodeWalk::throwPoint() {
   }
 }
 
-// A return, break or continue runs the `finally` blocks it leaves.
 void CodeWalk::throughFinally() {
   for (Analysis::TryState &t : analysis_.tries_) {
     if (t.finalizer && t.phase != Analysis::Phase::Finalizer) {
@@ -173,8 +171,6 @@ void CodeWalk::throughFinally() {
   }
 }
 
-// Whether an error here could be caught in this function, or run a
-// `finally` block, before it leaves the function.
 bool CodeWalk::caught() const {
   for (auto it = analysis_.tries_.rbegin(); it != analysis_.tries_.rend(); ++it) {
     if (it->phase == Analysis::Phase::Block && (it->handler || it->finalizer)) {
@@ -194,7 +190,6 @@ void CodeWalk::joinPoint() {
   }
 }
 
-// The code waits here and goes on in segment `seg`.
 void CodeWalk::moveTo(unsigned seg) {
   for (unsigned s : analysis_.cur_) {
     analysis_.fn_->succ.insert({s, seg});
@@ -204,10 +199,6 @@ void CodeWalk::moveTo(unsigned seg) {
   throwPoint();
 }
 
-// A loop: `head` runs before each pass (the condition, or the next step of an
-// iteration) and the loop may end after it; then the pass, `body`, and
-// `step`, where `continue` goes too. A do-while has its head after the body.
-// The passes are walked until the pieces active at the head settle.
 void CodeWalk::loop(llvm::StringRef label, llvm::function_ref<void()> head,
                     llvm::function_ref<void()> body, llvm::function_ref<void()> step,
                     bool headFirst) {
@@ -259,7 +250,6 @@ void CodeWalk::stmt(const Stmt *s) {
     }
     return;
   case Stmt::Kind::Function:
-    // Declared here; it runs when something calls it.
     return;
   case Stmt::Kind::Expr:
     analysis_.exprWalk().expr(cast<ExprStmt>(s)->expr);
@@ -348,7 +338,6 @@ void CodeWalk::stmt(const Stmt *s) {
     auto *r = cast<ReturnStmt>(s);
     Use use;
     use.returned = analysis_.fn_->async;
-    // A callback of map whose results Promise.all waits for.
     if (!analysis_.fn_->async && analysis_.fn_->decl) {
       use.join = analysis_.joinReturns_.lookup(analysis_.fn_->decl);
     }
@@ -362,8 +351,6 @@ void CodeWalk::stmt(const Stmt *s) {
     bool isBreak = isa<BreakStmt>(s);
     llvm::StringRef label = isBreak ? cast<BreakStmt>(s)->label : cast<ContinueStmt>(s)->label;
     for (auto it = analysis_.targets_.rbegin(); it != analysis_.targets_.rend(); ++it) {
-      // Without a label, break leaves the innermost loop or switch, and
-      // continue goes on with the innermost loop.
       bool matches = !label.empty() ? it->label == label : isBreak ? !it->block : it->loop;
       if (!matches) {
         continue;
@@ -397,8 +384,6 @@ void CodeWalk::stmt(const Stmt *s) {
     Analysis::TryState done = std::move(analysis_.tries_.back());
     analysis_.tries_.pop_back();
     if (t->finalizer) {
-      // The block runs on every way out of the try; after it the code goes
-      // on from any piece it may end in.
       analysis_.cur_ = std::move(done.finallyEntry);
       stmt(t->finalizer);
     } else {
@@ -407,8 +392,6 @@ void CodeWalk::stmt(const Stmt *s) {
     return;
   }
   case Stmt::Kind::Class: {
-    // The static fields get their values and the decorators run where the
-    // class is declared; its methods run when called.
     auto *cls = cast<ClassDecl>(s);
     if (cls->builtin || cls->generic) {
       return;
@@ -434,7 +417,7 @@ void CodeWalk::declarator(const VarDeclarator &d) {
   }
   Use use;
   if (d.sym && d.sym->lambda) {
-    use.lambda = true; // calls through the constant go to the arrow directly
+    use.lambda = true;
   }
   analysis_.exprWalk().expr(d.init, use);
   if (!d.sym) {
@@ -445,7 +428,6 @@ void CodeWalk::declarator(const VarDeclarator &d) {
   if (!d.sym->reassigned && analysis_.aliasAnalysis().isAllocation(init)) {
     analysis_.siteName_.try_emplace(init, d.name);
   }
-  // A closure made before the declaration may see the variable change here.
   if (d.sym->capturedEarly) {
     var(d.sym, true, d.loc);
   }
@@ -458,14 +440,12 @@ void CodeWalk::forOf(const ForOfStmt *f, llvm::StringRef label) {
       [&] {
         iterate(f->iterable, f);
         if (f->isAwait) {
-          moveTo(segment(f, SegKind::ForAwait, f->loc())); // each step waits for the next value
+          moveTo(segment(f, SegKind::ForAwait, f->loc()));
         }
       },
       [&] { stmt(f->body); }, {}, true);
 }
 
-// One step of iterating `iterable`: an iterator moves on, and a generator
-// runs up to its next value.
 void CodeWalk::iterate(const Expr *iterable, const Node *site) {
   if (!iterable || !iterable->type) {
     return;
@@ -473,21 +453,17 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
   const Type *type = iterable->type->nonOptional();
   llvm::SMLoc at = iterable->loc();
   const Expr *source = strip(iterable);
-  // The lines of readline: each step takes the next line of input.
   if (type->runtimeKind() == Type::Runtime::Readline ||
       type->runtimeKind() == Type::Runtime::ReadlinePromises) {
     analysis_.resource(Res::Stdin, true, at);
     return;
   }
   if (type->isAsyncIterator() || type->isIterator()) {
-    throwPoint(); // a generator may throw as it runs
+    throwPoint();
     bool asyncIter = type->isAsyncIterator();
     CallRec &rec = record(site, asyncIter ? CallKind::IterAsync : CallKind::IterSync, {}, at);
     auto *c = dyn_cast<CallExpr>(source);
     if (c && analysis_.libraryEffects().libraryTarget(c)) {
-      // An iterator of a built-in module (a stream, on() of node:events):
-      // each step moves on what it iterates, and the listeners and sources
-      // the program gave run as their calls say.
       const FunctionDecl *lib = analysis_.libraryEffects().libraryTarget(c);
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (m && c->method) {
@@ -498,7 +474,6 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       return;
     }
     if (c && (c->func || c->method)) {
-      // A generator called right here: its iterator is no one else's.
       auto *m = dyn_cast<MemberExpr>(c->callee);
       if (c->method) {
         for (const FunctionDecl *fn :
@@ -514,8 +489,6 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
       }
       return;
     }
-    // An iterator a built-in makes right here (of an array, a map...) runs
-    // no code of the program, and is no one else's.
     if (c && c->builtin != Builtin::None && makesNewObject(c->builtin)) {
       return;
     }
@@ -528,4 +501,4 @@ void CodeWalk::iterate(const Expr *iterable, const Node *site) {
   }
 }
 
-} // namespace tz::parallel
+}

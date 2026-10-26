@@ -24,14 +24,11 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
     if (!module->builtin) {
       continue;
     }
-    // Their code finds a listener by what it is: every evaluation of a
-    // function expression must give a function of its own.
     program.comparesFunctions = true;
     llvm::SourceMgr &sm = checker_.diags_.sourceMgr();
     for (unsigned id : module->buffers) {
       const llvm::MemoryBuffer *buffer = sm.getMemoryBuffer(id);
       libraryRanges_.push_back({buffer->getBufferStart(), buffer->getBufferEnd()});
-      // Its warnings are not the program's author's to fix.
       checker_.diags_.quietRange(buffer->getBufferStart(), buffer->getBufferEnd());
     }
     for (Stmt *item : module->file.items) {
@@ -49,7 +46,6 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
       }
       cls->library = true;
       checker_.libClasses_[cls->name] = cls;
-      // `@__tz_hidden x`: a field that is no key.
       for (ClassField &f : cls->fields) {
         llvm::erase_if(f.decorators, [&](const Decorator &d) {
           auto *name = dyn_cast<NameExpr>(d.expr);
@@ -83,8 +79,6 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  // A name of the program's own is that; anywhere else but the built-in
-  // modules, these are no names.
   if (Checker::ScopeEntry own = checker_.scopes().lookup(name->name);
       own.var || own.func || own.cls) {
     return nullptr;
@@ -102,8 +96,6 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     Builtin builtin;
     unsigned args, typeArgs;
   };
-  // Those that take a type; the others are declared by the code that
-  // calls them (sema_library.cpp).
   static const Intrinsic intrinsics[] = {{"__tz_listener", Builtin::LibListener, 1, 1},
                                          {"__tz_as", Builtin::LibAs, 1, 1},
                                          {"__tz_chunk", Builtin::LibChunk, 1, 1},
@@ -129,15 +121,10 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
     return call;
   }
   const Type *typeArg =
-      intrinsic->typeArgs
-          ? checker_.typeResolver().resolveType(name->typeArgs[0], /*allowVoid=*/false)
-          : nullptr;
+      intrinsic->typeArgs ? checker_.typeResolver().resolveType(name->typeArgs[0], false) : nullptr;
   call->builtin = intrinsic->builtin;
   switch (intrinsic->builtin) {
   case Builtin::LibListener: {
-    // A function type whose last parameter is a tuple of arguments, `(...args:
-    // A) => void` with A a tuple in a copy, is the function of those
-    // parameters: the one a listener was converted from.
     const Type *fn = typeArg;
     std::vector<const Type *> flat;
     size_t minArgs = 0;
@@ -191,4 +178,4 @@ Expr *LibraryCalls::checkLibCall(CallExpr *call, NameExpr *name) {
   return call;
 }
 
-} // namespace tz
+}

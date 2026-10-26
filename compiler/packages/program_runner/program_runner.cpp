@@ -27,7 +27,6 @@ int runProgram(llvm::StringRef program, llvm::ArrayRef<std::string> args, std::s
   for (const std::string &arg : args) {
     argv.push_back(arg);
   }
-  // No input: git must not wait for a password.
   std::optional<llvm::StringRef> redirects[] = {llvm::StringRef(""), llvm::StringRef(outFile),
                                                 llvm::StringRef(errFile)};
   int code = llvm::sys::ExecuteAndWait(program, argv, std::nullopt, redirects, 0, 0, &error);
@@ -41,4 +40,4 @@ int runProgram(llvm::StringRef program, llvm::ArrayRef<std::string> args, std::s
   return code < 0 ? -1 : code;
 }
 
-} // namespace tz::pkg
+}

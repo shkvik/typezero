@@ -57,7 +57,6 @@ unsigned ExplainNames::lineOf(llvm::SMLoc loc) const {
   return analysis_.sources_.FindLineNumber(loc);
 }
 
-// "12" in the entry file, "lib/math.tz:12" in another.
 std::string ExplainNames::where(llvm::SMLoc loc) const {
   if (!loc.isValid()) {
     return "?";
@@ -103,7 +102,6 @@ std::string ExplainNames::calleeText(const Expr *e) const {
   return "(...)";
 }
 
-// The text of a call as written, `a.run(2)`; a shorter one for a long call.
 std::string ExplainNames::callText(const CallExpr *c) const {
   std::string fallback = calleeText(c->callee) + "()";
   const Expr *first = c->callee;
@@ -178,8 +176,6 @@ std::string ExplainNames::refName(Ref r) const {
 std::string ExplainNames::locName(const Loc &loc) const {
   switch (loc.kind) {
   case LocKind::Var: {
-    // The compiler's own variables: what a decorator put in a method's
-    // place ("%Calc.add.0"), and the others.
     llvm::StringRef name = static_cast<const VarSymbol *>(loc.key)->name;
     if (!name.consume_front("%")) {
       return name.str();
@@ -288,4 +284,4 @@ std::string ExplainNames::positions(
   return out;
 }
 
-} // namespace tz::parallel
+}

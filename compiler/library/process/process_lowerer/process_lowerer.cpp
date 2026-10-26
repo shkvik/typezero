@@ -33,12 +33,9 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   llvm::Type *f64 = lowering_.builder_.getDoubleTy();
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *zero = lowering_.builder_.getInt32(0);
-  // A string that the runtime returns through a pointer.
   auto stringResult = [&](llvm::StringRef name) {
     return lowering_.stringLowerer().callReturningString(processFunction(name, voidTy, {ptr}), {});
   };
-  // An exit code, `int | undefined`, as the runtime takes it: the code and
-  // whether there is one.
   auto exitCode = [&]() -> std::pair<llvm::Value *, llvm::Value *> {
     if (call->args.empty()) {
       return {zero, zero};
@@ -51,12 +48,11 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
 
   switch (call->builtin) {
   case Builtin::ProcessArgv:
-    // One array that the runtime keeps; this reference is the caller's.
     return lowering_.builder_.CreateCall(
         processFunction("tz_process_argv", ptr, {ptr}),
         {lowering_.typeDescriptors().typeDescriptor(Type::string())});
   case Builtin::ProcessEnv: {
-    Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::AllocaInst *value =
         lowering_.functionFrame().createStackSlot(lowering_.strTy_, "env.value");
     llvm::Value *found =
@@ -101,10 +97,7 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   case Builtin::ProcessStderrWrite: {
     bool toStdout = call->builtin == Builtin::ProcessStdoutWrite;
     if (const Type *type = call->args[0]->type; type->isBuffer() || type->isBytes()) {
-      // The bytes of a Buffer or a Uint8Array, as they are
-      // (runtime/library/stream/stream/stream.c).
-      Lowering::Operand bytes =
-          lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
       lowering_.builder_.CreateCall(processFunction("tz_lib_std_write",
                                                     lowering_.builder_.getVoidTy(),
                                                     {i32, lowering_.builder_.getPtrTy()}),
@@ -112,7 +105,7 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
       lowering_.refCounts().dropOperand(bytes);
       return lowering_.builder_.getTrue();
     }
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *written = lowering_.builder_.CreateCall(
         processFunction(toStdout ? "tz_stdout_write" : "tz_stderr_write", i32, {ptr, i64}),
         {lowering_.stringLowerer().stringObj(text.value),
@@ -134,4 +127,4 @@ llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

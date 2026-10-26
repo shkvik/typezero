@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// switch.
 class SwitchLowerer {
 public:
   explicit SwitchLowerer(Lowering &lowering);
@@ -15,4 +14,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

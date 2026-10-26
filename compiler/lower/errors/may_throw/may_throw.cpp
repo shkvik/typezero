@@ -29,8 +29,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     }
   }
 
-  // The functions of the program and what each may run, from top-level code
-  // and the functions it declares, through the functions found in them.
   std::vector<const FunctionDecl *> functions;
   std::map<const FunctionDecl *, ThrowSummary> summaries;
   std::vector<const FunctionDecl *> work;
@@ -52,8 +50,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       continue;
     }
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
-      // Of a generic class, only its static methods are emitted; of an
-      // instance, the others; a generic method only as its copies.
       for (const FunctionDecl *fn : cls->methods) {
         if (fn->typeParams.empty() && (fn->isStatic ? !cls->generic : cls->isEmitted())) {
           add(fn);
@@ -89,12 +85,9 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       scanner.expr(param.defaultValue, false);
     }
     scanner.stmt(fn->body, false);
-    // An intrinsic may throw what the runtime throws.
     if (fn->external) {
       summary.intrinsic = true;
     }
-    // A constructor runs the initializers of its class and of those up the
-    // chain (its `super(...)` does).
     if (fn->isConstructor) {
       for (const ClassDecl *c = fn->cls; c; c = c->parent) {
         if (c->init && c->init != fn) {
@@ -107,14 +100,11 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       add(nested);
     }
     summaries[fn] = std::move(summary);
-    // The tail calls of a closure that are jumps, which do not recurse.
     if (fn->isClosure() && !fn->isGenerator && fn->sym && fn->sym->ret) {
       lowering_.tailCallLowerer().findTailGroups(const_cast<FunctionDecl *>(fn));
     }
   }
 
-  // A method a decorator may replace calls what its global holds, which
-  // may be its adapter, which throws for a `this` of another class.
   for (const FunctionDecl *fn : functions) {
     if (fn->impl) {
       summaries[fn].valueCalls.push_back(fn->impl->type);
@@ -123,7 +113,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     }
   }
 
-  // The functions each type of function value may be.
   llvm::DenseMap<const Type *, std::vector<const FunctionDecl *>> valuesOf;
   std::vector<std::pair<const Type *, const Expr *>> fromThrowables;
   std::vector<std::pair<const Type *, const Type *>> adapters;
@@ -139,8 +128,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
   for (const auto &[fn, summary] : summaries) {
     collect(summary);
   }
-  // A value that adapts the result of another runs what that one may be,
-  // through adapters of adapters too.
   for (bool changed = !adapters.empty(); changed;) {
     changed = false;
     for (const auto &[to, from] : adapters) {
@@ -154,8 +141,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       }
     }
   }
-  // A call through an interface runs the method of a class that implements
-  // it (see emitInterfaceCall): such methods are values of the member's type.
   for (const auto &[iface, info] : lowering_.interfaces_) {
     for (const Type *implementer : info.implementers) {
       const ClassDecl *cls = implementer->classDecl();
@@ -181,8 +166,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     }
   }
 
-  // The functions that may recurse: those in a cycle of calls, through
-  // function values too, but not through tail calls, which are jumps.
   llvm::DenseMap<const FunctionDecl *, size_t> indexOf;
   for (size_t i = 0; i < functions.size(); ++i) {
     indexOf[functions[i]] = i;
@@ -239,8 +222,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       return;
     }
     for (size_t member : cycle) {
-      // A generator runs its body when resumed, where the stack is checked
-      // by nothing (see README); calling it only makes it.
       if (!functions[member]->isGenerator) {
         lowering_.recursive_.insert(functions[member]);
       }
@@ -252,10 +233,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
     }
   }
 
-  // The functions that may throw: those with a throw of their own (the stack
-  // check is one), and those that call one, until nothing changes.
-  // A call of an async function never throws: what its body throws
-  // rejects the promise it gives.
   for (const FunctionDecl *fn : functions) {
     const ThrowSummary &summary = summaries[fn];
     if ((summary.intrinsic || summary.resumes || lowering_.recursive_.contains(fn)) &&
@@ -333,4 +310,4 @@ bool MayThrow::exprThrows(const Expr *expr) {
   return throws;
 }
 
-} // namespace tz
+}

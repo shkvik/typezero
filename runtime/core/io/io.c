@@ -1,41 +1,3 @@
-// Waiting for I/O (docs/async.md, step 2): the thread pool that makes the
-// calls of the system that block, as libuv's does for the files of Node, and
-// the wait of the poll phase of the loop (runtime/core/async/async.c) for what
-// it finished.
-//
-// The language runs on one thread, the main one. A piece of work (TzWork)
-// the runtime queues goes to the first free thread of the pool, which makes
-// its calls of the system and nothing else: the allocator and the objects of
-// the runtime are not thread-safe, so the threads only read what the main
-// thread prepared and write what they find into memory of their own. Then
-// the work is posted back, and the main thread settles what it is for (a
-// promise, mostly) in the poll phase, each as a callback of Node is: the
-// nextTick callbacks and the microtasks run after it.
-//
-// On Windows the work is posted to the completion port of the loop, which
-// the poll phase waits on: everything that wakes the loop comes from there.
-// A timeout, the time until the next timer, is measured by a waitable timer
-// of high resolution, whose completion routine ends the wait, which is
-// alertable; the timeout of the wait itself would be as coarse as the clock
-// of the system, 15.6 ms. Elsewhere the threads write a byte to a pipe that
-// the poll phase waits on with poll().
-//
-// The pool has UV_THREADPOOL_SIZE threads, 4 by default, as in Node; they
-// start with the first work.
-//
-// Sockets (net.c) wait on the same port without the pool: the system posts
-// what they asked for when it is done, with the function that takes it as
-// the key of the completion (tz_io_begin, tz_io_due).
-//
-// Order. A function of node:fs/promises makes several round trips to the
-// pool in Node (readFile: open, fstat, read, close), each in a turn of the
-// loop of its own; here it is one work. So that the program sees nothing
-// Node could not do, a work says how many turns Node takes for it at the
-// least, and its result waits until the poll phase that many turns after the
-// one it was queued before: an immediate set together with a readFile still
-// runs first, as it always does in Node. A work may finish later, as the
-// system decides, which Node may as well.
-
 #include "runtime/core/io/io.h"
 #include "runtime/core/async/async.h"
 #include "runtime/core/closure/closure.h"
@@ -62,8 +24,6 @@
 
 #define MAX_THREADS 1024
 
-// The count of what keeps the loop alive changes on the threads of the pool
-// too in the parallel runtime (net.c, parallel.c).
 #if TZ_PARALLEL
 #define PENDING_ADD(n) __atomic_add_fetch(&tz_io_pending, (n), __ATOMIC_RELAXED)
 #define PENDING() __atomic_load_n(&tz_io_pending, __ATOMIC_RELAXED)
@@ -72,18 +32,15 @@
 #define PENDING() tz_io_pending
 #endif
 
-// None of the state is static: see the rules in tzrt.h.
-TzWork *tz_io_queue_head, *tz_io_queue_tail; // for the pool, under the lock
-TzWork *tz_io_due_head, *tz_io_due_tail;     // back, waiting for their turn
-int64_t tz_io_pending;                       // queued, not done, keeping the loop alive
-uint64_t tz_io_polls;                        // poll phases started
-int32_t tz_io_threads;                       // threads of the pool started
+TzWork *tz_io_queue_head, *tz_io_queue_tail;
+TzWork *tz_io_due_head, *tz_io_due_tail;
+int64_t tz_io_pending;
+uint64_t tz_io_polls;
+int32_t tz_io_threads;
 
 #ifdef _WIN32
 HANDLE tz_io_port;
 SRWLOCK tz_io_lock = SRWLOCK_INIT;
-// Works that threads of the parallel runtime took from their port and hand
-// back (net.c), in the order they came; under the lock.
 SRWLOCK tz_io_remote_lock = SRWLOCK_INIT;
 TzWork *tz_io_remote_head, *tz_io_remote_tail;
 CONDITION_VARIABLE tz_io_wake = CONDITION_VARIABLE_INIT;
@@ -91,11 +48,10 @@ HANDLE tz_io_timer;
 #else
 pthread_mutex_t tz_io_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t tz_io_wake = PTHREAD_COND_INITIALIZER;
-TzWork *tz_io_back_head, *tz_io_back_tail; // finished, under the lock
+TzWork *tz_io_back_head, *tz_io_back_tail;
 int tz_io_pipe[2] = {-1, -1};
 #endif
 
-// How many threads the pool has: UV_THREADPOOL_SIZE, as libuv reads it.
 static int32_t pool_size(void) {
   const char *value = getenv("UV_THREADPOOL_SIZE");
   int32_t n = value ? (int32_t)atoi(value) : 4;
@@ -106,8 +62,6 @@ static int32_t pool_size(void) {
   return n > MAX_THREADS ? MAX_THREADS : n;
 }
 
-// Takes the first work of the queue, which has one; on a thread of the
-// pool, with the lock held.
 static TzWork *take_work(void) {
   TzWork *w = tz_io_queue_head;
   tz_io_queue_head = w->next;
@@ -166,7 +120,6 @@ static void push_work(TzWork *w) {
   WakeConditionVariable(&tz_io_wake);
 }
 
-// The completion routine of the timer: it only ends the wait.
 static void CALLBACK timer_fired(void *arg, DWORD low, DWORD high) {
   (void)arg;
   (void)low;
@@ -180,7 +133,7 @@ static void sleep_ms(int64_t ms) {
   }
   if (tz_io_timer) {
     LARGE_INTEGER due;
-    due.QuadPart = -ms * 10000; // relative, in 100 ns
+    due.QuadPart = -ms * 10000;
     if (SetWaitableTimer(tz_io_timer, &due, 0, NULL, NULL, FALSE)) {
       WaitForSingleObject(tz_io_timer, INFINITE);
       return;
@@ -189,11 +142,8 @@ static void sleep_ms(int64_t ms) {
   Sleep((DWORD)ms);
 }
 
-// Waits up to `timeout` ms (-1: without a limit) for what the pool posts,
-// and puts it at the end of the list of works back.
 static void gather(int64_t timeout) {
   if (!tz_io_port) {
-    // Nothing was ever queued: only the timers wait.
     if (timeout > 0) {
       sleep_ms(timeout);
     }
@@ -221,11 +171,10 @@ static void gather(int64_t timeout) {
     ULONG count = 0;
     BOOL ok = GetQueuedCompletionStatusEx(tz_io_port, entries, 64, &count, wait, alertable);
     if (!ok) {
-      count = 0; // timed out, or the timer fired
+      count = 0;
     }
     for (ULONG i = 0; i < count; ++i) {
       if (entries[i].lpCompletionKey) {
-        // A wait of the runtime's own (net.c): its function takes it.
         ((void (*)(OVERLAPPED_ENTRY *))entries[i].lpCompletionKey)(&entries[i]);
         continue;
       }
@@ -239,14 +188,12 @@ static void gather(int64_t timeout) {
       }
       tz_io_due_tail = w;
     }
-    // Whatever else came meanwhile, without waiting.
     if (count < 64) {
       break;
     }
     wait = 0;
     alertable = FALSE;
   }
-  // What threads of the pool handed back.
   if (__atomic_load_n(&tz_io_remote_head, __ATOMIC_ACQUIRE)) {
     AcquireSRWLockExclusive(&tz_io_remote_lock);
     TzWork *back = tz_io_remote_head;
@@ -266,8 +213,6 @@ static void gather(int64_t timeout) {
     }
   }
   if (timed) {
-    // A completion routine queued after the wait ended would end the next
-    // alertable wait too early: it runs now.
     CancelWaitableTimer(tz_io_timer);
     SleepEx(0, TRUE);
   }
@@ -387,7 +332,6 @@ void tz_work_queue(TzWork *w) {
     PENDING_ADD(1);
   }
   if (!w->work) {
-    // Nothing for the pool: it only waits for its turn.
     w->due = w->queued + (w->turns ? w->turns : 1);
     if (tz_io_due_tail) {
       tz_io_due_tail->next = w;
@@ -398,7 +342,6 @@ void tz_work_queue(TzWork *w) {
     return;
   }
   if (!tz_io_threads) {
-    // The sockets of net.c may have made the port already, and wait on it.
 #ifdef _WIN32
     if (!tz_io_port) {
       start_port();
@@ -415,7 +358,7 @@ void tz_work_queue(TzWork *w) {
 
 void tz_work_queue_settles(TzWork *w, TzPromise *p) {
   tz_work_queue(w);
-  w->settles = p; // only the main thread reads it, once the work is back
+  w->settles = p;
 }
 
 void tz_io_begin(TzWork *w) {
@@ -449,7 +392,7 @@ void tz_io_due_remote(TzWork *w) {
 
 void tz_io_done_remote(TzWork *w) {
   if (!w->unref && PENDING_ADD(-1) == 0) {
-    tz_io_wake_loop(); // the loop may end now
+    tz_io_wake_loop();
   }
 }
 #endif
@@ -475,7 +418,6 @@ void *tz_io_port_handle(void) {
 }
 #endif
 
-// The loop waits for `n` more things of the runtime's own (n < 0: fewer).
 void tz_work_ref_count(int32_t n) { PENDING_ADD(n); }
 
 void tz_work_ref(TzWork *w) {
@@ -497,22 +439,12 @@ void tz_work_unref(TzWork *w) {
 int tz_io_alive(void) { return PENDING() > 0; }
 
 #if TZ_PARALLEL
-// parallel.c: the piece that waits for `p` alone, settled by an event of
-// I/O, goes to a thread at once, and the event comes later (1); or not (0).
-// What came that way and is ready to be delivered goes now.
 int32_t tz_ahead_defer(TzPromise *p);
 int32_t tz_ahead_deliver(void);
 extern int32_t tz_ahead_on;
-// async.c: while held, the promises that settle keep their reactions, which
-// tz_trigger_release queues afterwards, in the order they settled; it gives
-// the one promise if only one settled.
 void tz_trigger_hold(void);
 TzPromise *tz_trigger_release(int32_t queue);
 
-// The callback of an event, its reactions held while it runs: they would
-// only be queued, to run after it, so nothing changes, but that one
-// promise alone settled by the event may be delivered later, with what
-// waits for it running ahead meanwhile.
 static void done_holding(TzWork *w) {
   tz_trigger_hold();
   w->done(w);
@@ -526,24 +458,16 @@ static void done_holding(TzWork *w) {
 }
 #endif
 
-// The poll phase of libuv: waits for the pool up to `timeout` ms (-1: as
-// long as it takes), then hands each work back that is due, in the order
-// they came back, each followed by the nextTick callbacks and the
-// microtasks; the others wait for a later poll.
 void tz_io_poll(int64_t timeout) {
 #if TZ_PARALLEL
   uint64_t poll = __atomic_add_fetch(&tz_io_polls, 1, __ATOMIC_RELAXED);
 #else
   uint64_t poll = ++tz_io_polls;
 #endif
-  // A work back already is due now or in one of the next few polls: the
-  // loop goes on turning without waiting.
   if (tz_io_due_head || (timeout < 0 && !PENDING())) {
     timeout = 0;
   }
 #if TZ_PARALLEL
-  // What ran ahead and is ready: delivered as events of this phase. What
-  // still runs wakes the wait below once it is ready.
   if (tz_ahead_on) {
     tz_ahead_deliver();
   }
@@ -556,7 +480,6 @@ void tz_io_poll(int64_t timeout) {
     list = w->next;
     w->next = NULL;
     if (w->due > poll) {
-      // Not yet: back to the end of the list, with what came meanwhile.
       if (tz_io_due_tail) {
         tz_io_due_tail->next = w;
       } else {
@@ -586,8 +509,6 @@ void tz_io_poll(int64_t timeout) {
 }
 
 #ifdef _WIN32
-// Wakes the poll phase, which waits on the port (parallel.c: a piece that
-// ran ahead of its event is ready).
 static void woken(OVERLAPPED_ENTRY *entry) { (void)entry; }
 
 void tz_io_wake_loop(void) {
@@ -596,7 +517,5 @@ void tz_io_wake_loop(void) {
   }
 }
 #else
-void tz_io_wake_loop(void) {
-  // TODO(linux): a byte to the pipe of the loop.
-}
+void tz_io_wake_loop(void) {}
 #endif

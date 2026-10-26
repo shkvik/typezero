@@ -27,14 +27,13 @@ namespace tz {
 
 PatternParser::PatternParser(Parser &parser) : parser_(parser) {}
 
-// `[a, , b = 1, [c, d], ...rest]` in a declaration.
 std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
   if (parser_.tok_.is(Tok::LBrace)) {
     return parseObjectPattern();
   }
   auto pattern = std::make_unique<Parser::Pattern>();
   pattern->loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // '['
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBracket) && !parser_.tok_.is(Tok::Eof)) {
     Parser::Pattern::Element e;
     e.loc = parser_.tok_.loc();
@@ -77,13 +76,11 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
   return pattern;
 }
 
-// `{ a, b: c, d = 1, e: { f }, "g-h": g, [key]: k, ...rest }` in a
-// declaration.
 std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
   auto pattern = std::make_unique<Parser::Pattern>();
   pattern->loc = parser_.tok_.loc();
   pattern->object = true;
-  parser_.cursor().advance(); // '{'
+  parser_.cursor().advance();
   while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
     Parser::Pattern::Element e;
     e.loc = parser_.tok_.loc();
@@ -119,7 +116,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
           return pattern;
         }
       } else if (identifier && !e.keyExpr) {
-        e.name = e.key; // `{ x }` is `{ x: x }`
+        e.name = e.key;
       } else {
         parser_.cursor().error(parser_.tok_.loc(),
                                llvm::Twine("a key in a destructuring pattern needs a variable: '") +
@@ -149,7 +146,6 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
   auto pattern = std::make_unique<Parser::Pattern>();
   pattern->loc = expr->loc();
   if (auto *object = dyn_cast<ObjectLitExpr>(expr)) {
-    // `({ a, b: o.c, d = 1, ...rest } = value)`
     pattern->object = true;
     for (size_t i = 0; i < object->props.size(); ++i) {
       const ObjectLitExpr::Property &prop = object->props[i];
@@ -163,7 +159,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
       }
       Expr *target = prop.value;
       if (auto *assign = dyn_cast<AssignExpr>(target); assign && !assign->op && !e.rest) {
-        target = assign->target; // `{ a = 1 }` or `{ a: b = 1 }`
+        target = assign->target;
         e.defaultValue = assign->value;
       }
       if (isa<ArrayLitExpr>(target) || isa<ObjectLitExpr>(target)) {
@@ -187,7 +183,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::patternFromLiteral(Expr *expr) {
     }
     Expr *target = element.expr;
     if (auto *assign = dyn_cast<AssignExpr>(target); assign && !assign->op && !e.rest) {
-      target = assign->target; // `[a = 1] = values`
+      target = assign->target;
       e.defaultValue = assign->value;
     }
     if (isa<ArrayLitExpr>(target) || isa<ObjectLitExpr>(target)) {
@@ -210,8 +206,6 @@ VarDeclarator PatternParser::hiddenDeclarator(llvm::SMLoc loc, Expr *init) {
   return d;
 }
 
-// `const [a, b = 1, ...rest] = value` is
-// `const %0 = value, a = %0[0], b = %0[1] ?? 1, rest = %0.slice(2)`.
 void PatternParser::declarePattern(VarDeclStmt *decl, const Parser::Pattern &pattern, Expr *value,
                                    std::optional<TypeRef> typeAnn) {
   VarDeclarator hidden = hiddenDeclarator(pattern.loc, value);
@@ -245,13 +239,9 @@ void PatternParser::declareElements(VarDeclStmt *decl, const Parser::Pattern &pa
   }
 }
 
-// `[a, b] = value` is `{ const %0 = value; a = %0[0]; b = %0[1] }`. When value
-// is an array literal, as in `[a, b] = [b, a]`, its elements go to hidden
-// variables instead, and no array is made: `{ const %0 = b, %1 = a; a = %0;
-// b = %1 }`. The same for an object pattern, `({ a, b } = o)`, with fields.
 Stmt *PatternParser::assignPattern(llvm::SMLoc loc, const Parser::Pattern &pattern, Expr *value) {
   auto *block = parser_.ctx_.make<BlockStmt>(loc);
-  auto *decl = parser_.ctx_.make<VarDeclStmt>(loc, /*isConst=*/true);
+  auto *decl = parser_.ctx_.make<VarDeclStmt>(loc, true);
   block->body.push_back(decl);
   auto *lit = dyn_cast<ArrayLitExpr>(value);
   bool direct =
@@ -313,8 +303,6 @@ Expr *PatternParser::elementOf(llvm::StringRef base, const Parser::Pattern &patt
     }
     element = parser_.ctx_.make<IndexExpr>(e.loc, source, position);
   } else if (e.rest) {
-    // `{ a, ...rest }`: a new object with the other fields, `{ ...%0 }`
-    // without a.
     auto *copy = parser_.ctx_.make<ObjectLitExpr>(e.loc);
     ObjectLitExpr::Property spread;
     spread.loc = e.loc;
@@ -342,4 +330,4 @@ Expr *PatternParser::elementOf(llvm::StringRef base, const Parser::Pattern &patt
   return element;
 }
 
-} // namespace tz
+}

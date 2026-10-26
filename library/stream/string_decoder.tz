@@ -1,11 +1,3 @@
-// node:string_decoder: StringDecoder, which turns a series of Buffers into
-// strings without cutting a character in two (docs/streams.md, section 2).
-// Node 24 decodes in C++ (src/string_decoder.cc); this is a port of that
-// code to tz: the bytes of a character that a chunk cuts off wait in
-// `lastChar` for the next one, and what is complete is decoded as
-// Buffer.toString() decodes it, with the same replacement of bad bytes.
-
-// node's ERR_UNKNOWN_ENCODING.
 class UnknownEncodingError extends TypeError {
   code = "ERR_UNKNOWN_ENCODING"
   constructor(encoding: string) {
@@ -13,8 +5,6 @@ class UnknownEncodingError extends TypeError {
   }
 }
 
-// node's normalizeEncoding (lib/internal/util.js): the name Buffer knows an
-// encoding by, or "" for none.
 export function normalizeEncoding(encoding: string | undefined): string {
   if (encoding == undefined || encoding == "") return "utf8"
   const lower = encoding.toLowerCase()
@@ -42,8 +32,6 @@ export function normalizeEncoding(encoding: string | undefined): string {
 
 export class StringDecoder {
   readonly encoding: string
-  // The bytes of the character that the last chunk cut off, as node's
-  // lastChar; how many it still needs (lastNeed) and how many it has.
   readonly lastChar = Buffer.alloc(4)
   lastNeed: int = 0
   lastTotal: int = 0
@@ -55,23 +43,18 @@ export class StringDecoder {
     this.encoding = normalized
   }
 
-  // The text of the bytes of `buf`, without the end of a character that
-  // the next chunk finishes.
   write(buf: Buffer | Uint8Array | string): string {
     if (typeof buf == "string") return buf
     const data = buf instanceof Buffer ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.length)
     return this.#decode(data)
   }
 
-  // The rest: what write() gives of `buf`, then the bytes still waiting,
-  // decoded as they are (an unfinished character of UTF-8 becomes U+FFFD).
   end(buf?: Buffer | Uint8Array | string): string {
     const ret = buf == undefined ? "" : this.write(buf)
     if (this.buffered > 0) return ret + this.#flush()
     return ret
   }
 
-  // Legacy: decodes `buf` from `offset` with nothing waiting.
   text(buf: Buffer, offset: int): string {
     this.#setState(0, 0)
     return this.write(buf.subarray(offset))
@@ -87,7 +70,6 @@ export class StringDecoder {
     return data.toString(this.encoding, start, end)
   }
 
-  // StringDecoder::DecodeData of node.
   #decode(data: Buffer): string {
     const encoding = this.encoding
     if (encoding != "utf8" && encoding != "utf16le" && encoding != "base64" &&
@@ -96,12 +78,8 @@ export class StringDecoder {
     let start = 0
     let nread = data.length
     let prepend: string | undefined = undefined
-    // Bytes that finish a character of the last chunk.
     if (this.lastNeed > 0) {
       if (encoding == "utf8") {
-        // A byte that is not a continuation byte, though it should be,
-        // starts a new character: the unfinished one takes the bytes
-        // before it.
         for (let i = 0; i < nread && i < this.lastNeed; i++) {
           if (((data[start + i] ?? 0) & 0xc0) != 0x80) {
             data.copy(this.lastChar, this.buffered, start, start + i)
@@ -127,7 +105,6 @@ export class StringDecoder {
       body = prepend ?? ""
       prepend = undefined
     } else {
-      // A character the chunk may cut off, which the next one finishes.
       let buffered = 0
       let missing = 0
       const last = data[start + nread - 1] ?? 0
@@ -136,14 +113,11 @@ export class StringDecoder {
           buffered++
           const byte = data[start + i] ?? 0
           if ((byte & 0xc0) == 0x80) {
-            // A trailing byte: four of them, or one at the start of the
-            // chunk, belong to a character that is not cut off here.
             if (buffered >= 4 || i == 0) {
               buffered = 0
               break
             }
           } else {
-            // The lead byte of a character tells how long it should be.
             if ((byte & 0xe0) == 0xc0) {
               missing = 2
             } else if ((byte & 0xf0) == 0xe0) {
@@ -167,7 +141,6 @@ export class StringDecoder {
           buffered = 1
           missing = 1
         } else if ((last & 0xfc) == 0xd8) {
-          // The first half of a surrogate pair.
           buffered = 2
           missing = 2
         }
@@ -185,10 +158,8 @@ export class StringDecoder {
     return prepend == undefined ? body : prepend + body
   }
 
-  // StringDecoder::FlushData of node.
   #flush(): string {
     if (this.encoding == "utf16le" && this.buffered % 2 == 1)
-      // A single trailing byte is dropped, as the JavaScript decoder does.
       this.#setState(this.buffered - 1, this.lastNeed - 1)
     if (this.buffered == 0) return ""
     const ret = this.lastChar.toString(this.encoding, 0, this.buffered)

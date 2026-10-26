@@ -69,8 +69,6 @@ Val widenVal(const Val &old, const Val &grown, const Type *type) {
     if (o.empty() || n.empty()) {
       return n;
     }
-    // An end that grows across rounds comes of recursion, or of data that
-    // is updated from itself.
     if (n.lo < o.lo) {
       n.lo = l.lo;
       if (!dangerous(n.loOrigin)) {
@@ -144,9 +142,9 @@ bool containsLoop(const Stmt *stmt) {
           }
         }
       },
-      /*intoFunctions=*/false);
+      false);
 
   return found;
 }
 
-} // namespace tz
+}

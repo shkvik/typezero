@@ -17,7 +17,6 @@
 
 namespace tz {
 
-// Who may use a member of a class; checked when compiling. `#x` is private.
 enum class Access { Public, Protected, Private };
 
-} // namespace tz
+}

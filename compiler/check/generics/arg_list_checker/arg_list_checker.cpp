@@ -27,9 +27,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Whether the body uses the variable `name` other than spread, `...name`,
-// or (with `known`, for a list of a known length) as `name.length` and
-// `name[0]`: then the tuple of the list is made.
 bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   llvm::SmallPtrSet<const Expr *, 4> spreads;
   bool value = false;
@@ -63,7 +60,7 @@ bool usedAsValue(const Stmt *body, llvm::StringRef name, bool known) {
   return value;
 }
 
-} // namespace
+}
 
 bool spreadsLists(const Type *type) {
   return type->isTuple() &&
@@ -77,7 +74,6 @@ const Type *ArgListChecker::listElement(const Type *list) {
 }
 
 const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
-  // Of a tuple, an element by its number, or any of them.
   if (object->isTuple()) {
     llvm::ArrayRef<Field> fields = object->fields();
     if (key->isLiteral() && key->literalBase()->isNumeric()) {
@@ -103,8 +99,6 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
       (key->isNumeric() || (key->isLiteral() && key->literalBase()->isNumeric()))) {
     return object->inner();
   }
-  // Of an object, a field by its name, or the fields a union of names
-  // names.
   if (object->isObject() && !object->isTuple()) {
     if (ClassDecl *cls = ClassDeclarer::classOf(object)) {
       checker_.classDeclarer().completeClass(cls);
@@ -158,7 +152,6 @@ void ArgListChecker::expandArgumentList(FunctionDecl *fn, FuncSymbol *sym) {
     param.declaredType = list->fields()[k].type;
     fn->params.push_back(param);
   }
-  // The rest of the list stays a rest parameter, of its array.
   if (const Type *more = list->tupleRest()) {
     Param param;
     param.name = checker_.ctx_.keepName("%" + rest.name.str() + ".rest");
@@ -186,10 +179,7 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   }
   llvm::SMLoc loc = fn->params.size() > fn->listStart ? fn->params[fn->listStart].loc : fn->loc();
   if (!usedAsValue(fn->body, fn->listName, !fn->listType->tupleRest())) {
-    // Every use spreads it: no tuple, only its parameters (see
-    // expandListSpreads).
-    VarSymbol *var =
-        checker_.scopes().declareVar(fn->listName, loc, Type::tuple(elements), /*isConst=*/true);
+    VarSymbol *var = checker_.scopes().declareVar(fn->listName, loc, Type::tuple(elements), true);
     argumentLists_[var] = std::move(parts);
     return;
   }
@@ -197,17 +187,15 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
     checker_.diags_.error(loc, "'" + fn->listName + "' of the parameters '" + fn->listType->name() +
                                    "', which end with a rest parameter, can only be spread, '..." +
                                    fn->listName + "'");
-    checker_.scopes().declareVar(fn->listName, loc, Type::error(), /*isConst=*/true);
+    checker_.scopes().declareVar(fn->listName, loc, Type::error(), true);
     return;
   }
-  // `const args: [int, int] = [a0, a1]` before the body, by a name of its
-  // type that no program can write.
   auto *alias = checker_.ctx_.make<TypeAliasDecl>(loc, checker_.ctx_.hiddenName(), TypeRef());
   alias->resolved = Type::tuple(elements);
   checker_.typeScopes_.back()[alias->name] = alias;
   auto *tuple = checker_.ctx_.make<ArrayLitExpr>(loc);
   for (llvm::StringRef part : parts) {
-    tuple->elements.push_back({checker_.ctx_.make<NameExpr>(loc, part), /*spread=*/false});
+    tuple->elements.push_back({checker_.ctx_.make<NameExpr>(loc, part), false});
   }
   VarDeclarator d;
   d.name = fn->listName;
@@ -217,7 +205,7 @@ void ArgListChecker::declareArgumentList(FunctionDecl *fn) {
   ref.loc = loc;
   d.typeAnn = ref;
   d.init = tuple;
-  auto *decl = checker_.ctx_.make<VarDeclStmt>(loc, /*isConst=*/true);
+  auto *decl = checker_.ctx_.make<VarDeclStmt>(loc, true);
   decl->decls.push_back(d);
   fn->body->body.insert(fn->body->body.begin(), decl);
 }
@@ -235,7 +223,6 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
     VarSymbol *var = spreads && name ? checker_.scopes().lookup(name->name).var : nullptr;
     auto found = var ? argumentLists_.find(var) : argumentLists_.end();
     if (found != argumentLists_.end()) {
-      // `...args`: the parameters of the list, one by one.
       changed = true;
       for (llvm::StringRef part : found->second) {
         out.push_back(checker_.ctx_.make<NameExpr>(name->loc(), part));
@@ -243,7 +230,6 @@ void ArgListChecker::expandListSpreads(std::vector<Expr *> &args, std::vector<bo
       }
       continue;
     }
-    // `...t` of a tuple in a variable: its elements, `t[0], t[1]`.
     if (var && var->type && var->type->isTuple() && !var->type->tupleRest() &&
         llvm::none_of(var->type->fields(), [](const Field &f) { return f.type->isListParam(); })) {
       changed = true;
@@ -275,13 +261,11 @@ Expr *ArgListChecker::listPart(Expr *expr) {
     return nullptr;
   }
   const std::vector<llvm::StringRef> &parts = found->second;
-  // `args.length`: how many parameters the list has, which is known.
   if (member && member->name == "length") {
     auto *count = checker_.ctx_.make<IntLitExpr>(member->loc(), parts.size());
     count->type = Type::intTy();
     return count;
   }
-  // `args[1]`: that parameter.
   auto *k = index ? dyn_cast<IntLitExpr>(index->index) : nullptr;
   if (!k || k->value >= parts.size()) {
     return nullptr;
@@ -293,7 +277,6 @@ Expr *ArgListChecker::listPart(Expr *expr) {
 
 bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type *list,
                                         llvm::SMLoc loc, const std::vector<bool> *checked) {
-  // What the list is made of: itself, or the elements of a tuple of lists.
   std::vector<const Type *> parts;
   if (list->isListParam()) {
     parts.push_back(list);
@@ -353,4 +336,4 @@ bool ArgListChecker::checkListArguments(CallExpr *call, size_t fixed, const Type
   return ok;
 }
 
-} // namespace tz
+}

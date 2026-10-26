@@ -7,7 +7,6 @@ namespace tz {
 
 class Args;
 
-// `tz build`: the program checked, then built into `output`.
 class BuildCommand {
 public:
   explicit BuildCommand(const RuntimeFiles &runtime);
@@ -18,4 +17,4 @@ private:
   const RuntimeFiles &runtime_;
 };
 
-} // namespace tz
+}

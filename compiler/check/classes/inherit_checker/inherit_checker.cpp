@@ -27,13 +27,11 @@ namespace tz {
 
 namespace {
 
-// Whether a function type takes the parameters of `sym`.
 bool takesParams(const Type *fnType, const FuncSymbol *sym) {
   return fnType->isFunction() && fnType->params() == llvm::ArrayRef<const Type *>(sym->params) &&
          fnType->minArgs() == sym->minArgs && fnType->hasRest() == sym->hasRest;
 }
 
-// An arrow in a field of a class that is compiled as a method.
 bool isArrowMethod(const FunctionDecl *fn) {
   if (!fn->cls) {
     return false;
@@ -47,7 +45,6 @@ bool isArrowMethod(const FunctionDecl *fn) {
   return false;
 }
 
-// The interfaces a class implements, and those they extend, nearest first.
 void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   std::vector<const Type *> queue(cls->implemented.begin(), cls->implemented.end());
   for (size_t i = 0; i < queue.size(); ++i) {
@@ -61,7 +58,7 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   }
 }
 
-} // namespace
+}
 
 InheritChecker::InheritChecker(Checker &checker) : checker_(checker) {}
 
@@ -86,7 +83,6 @@ void InheritChecker::checkAbstract(ClassDecl *cls) {
     if (cls->vtable[slot]) {
       continue;
     }
-    // The abstract method of this slot, as the nearest class declares it.
     for (const ClassDecl *c = cls; c; c = c->parent) {
       FunctionDecl *found = nullptr;
       for (FunctionDecl *fn : ClassLinks::ownMethods(c)) {
@@ -114,7 +110,6 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
   std::vector<const Type *> interfaces;
   interfacesOf(cls, interfaces);
   for (const Type *iface : interfaces) {
-    // The interfaces an implemented one extends have their fields in it.
     if (!llvm::is_contained(cls->implemented, iface)) {
       continue;
     }
@@ -126,10 +121,6 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
         if (!actual || actual->type->isError() || member.type->isError()) {
           continue;
         }
-        // At the field, if the class declares it itself. The class may
-        // narrow it to a type of the same references, or make it read-only:
-        // code that writes through the interface is found by the check of
-        // the whole program (sema_widen.cpp).
         llvm::SMLoc loc = cls->field(member.name) ? field->loc : cls->loc();
         if (actual->type != member.type && !WideWrites::sameReference(actual->type, member.type)) {
           checker_.diags_.error(
@@ -141,8 +132,7 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
         }
         continue;
       }
-      std::vector<FunctionDecl *> methods =
-          ClassDeclarer::methodsNamed(cls, member.name, /*isStatic=*/false);
+      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member.name, false);
       if (methods.empty()) {
         std::string type = member.type->isOptional() ? member.type->inner()->name().str()
                                                      : member.type->name().str();
@@ -189,10 +179,8 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
                                   "' takes other parameters: " + variantList(methods));
       }
     }
-    // Each signature of a method with several, by a variant of its own.
     for (const Overload &overload : iface->overloads()) {
-      std::vector<FunctionDecl *> methods =
-          ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
+      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, false);
       for (const Type *signature : overload.signatures) {
         auto fn = llvm::find_if(methods, [&](const FunctionDecl *m) {
           return m->sym && takesParams(signature, m->sym);
@@ -216,10 +204,6 @@ void InheritChecker::checkImplements(ClassDecl *cls) {
   }
 }
 
-// `super(args)`: the constructor of the class extended, chosen by the
-// arguments among its variants (or those of the nearest class up the chain
-// that has any). Then the initializers of this class's fields run, as in
-// JavaScript, and `this` may be used.
 Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   call->type = Type::voidTy();
   call->callee->type = Type::voidTy();
@@ -239,7 +223,7 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
   }
   ClassDecl *cls = ctor->cls;
   if (!cls->parent) {
-    if (!cls->base) { // with an error in `extends`, it was reported there
+    if (!cls->base) {
       checker_.diags_.error(call->loc(), "'super(...)' calls the constructor of the class that '" +
                                              cls->name + "' extends, and it extends none");
     }
@@ -282,7 +266,6 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
                                                 call->loc(), &given);
     }
   }
-  // The fields up the chain are set now, and so are those with initializers.
   checker_.flow_.beforeSuper = false;
   for (const ClassField &f : cls->fields) {
     if (!f.isStatic && ((f.init && !f.method) || f.redeclared) &&
@@ -290,13 +273,11 @@ Expr *InheritChecker::checkSuperCall(CallExpr *call) {
       checker_.flow_.setFields.push_back(f.name);
     }
   }
-  checker_.flowChecker().calledFunction(); // the constructors run
+  checker_.flowChecker().calledFunction();
 
   return call;
 }
 
-// `super.m(args)`: the method m of the class extended, called directly on
-// `this`, whatever the classes down the chain override.
 Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   member->type = Type::error();
@@ -305,7 +286,6 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  // An arrow sees the `super` of the method around it.
   FunctionDecl *method = nullptr;
   for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
     if (fn->isArrow) {
@@ -327,7 +307,6 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
     return call;
   }
   ClassDecl *parent = method->cls->parent;
-  // The object is `this`, with its rules while the constructor sets fields.
   auto *self = checker_.ctx_.make<NameExpr>(member->object->loc(), "this");
   checker_.thisMember_ = member->name;
   member->object = checker_.classChecker().checkThis(self);
@@ -343,8 +322,7 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
                                              checker_.classChecker().firstUnset(checker_.flow_) +
                                              "' is not set yet, and the method may read it");
   }
-  std::vector<FunctionDecl *> methods =
-      ClassDeclarer::methodsNamed(parent, member->name, /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(parent, member->name, false);
   if (methods.empty()) {
     if (ClassBases::findField(parent, member->name)) {
       checker_.diags_.error(member->loc(), "'" + member->name + "' is a field of '" + parent->name +
@@ -359,10 +337,8 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   }
   checker_.classMemberChecker().checkAccess(methods[0]->cls, methods[0]->access, member->name,
                                             member->loc());
-  // `super.on(...)` of an emitter, checked against its event map.
   if (checker_.eventMaps().isEmitterClass(parent)) {
-    if (Expr *checked =
-            checker_.emitterChecker().checkEmitterCall(call, member, parent, /*super=*/true)) {
+    if (Expr *checked = checker_.emitterChecker().checkEmitterCall(call, member, parent, true)) {
       return checked;
     }
   }
@@ -381,10 +357,8 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
   }
   checker_.returnInferrer().resolveParams(sym);
   call->superCall = true;
-  // A generic method of the class extended: the copy for these types.
   if (sym->isGeneric() && checked) {
-    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(),
-                                                          /*method=*/true);
+    return checker_.overloadResolver().callGenericVariant(call, sym, bound, member->loc(), true);
   }
   if (sym->isGeneric()) {
     checker_.typeArgInferrer().checkGenericCall(call, sym, member->loc(), nullptr,
@@ -405,4 +379,4 @@ Expr *InheritChecker::checkSuperMethodCall(CallExpr *call, MemberExpr *member) {
                                                    member->loc(), &given);
 }
 
-} // namespace tz
+}

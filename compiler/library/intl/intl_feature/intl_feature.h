@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Intl beyond dates, and the methods of strings and numbers that take locales (docs/intl.md).
 class IntlFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "intl"; }
@@ -20,4 +19,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

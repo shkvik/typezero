@@ -25,7 +25,6 @@ std::string utf8Of(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::string> literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -40,12 +39,10 @@ std::optional<std::string> literalOf(const Expr *e) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 KeyPairChecker::KeyPairChecker(Checker &checker) : checker_(checker) {}
 
-// generateKeyPairSync(type, options): `{ publicKey, privateKey }`, each a KeyObject, or the key
-// written as its encoding asks: a string (PEM), a Buffer (DER) or a Json (JWK).
 Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
   std::vector<Expr *> &args = call->args;
   if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
@@ -99,7 +96,7 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
     has |= 2;
   }
   if (Expr *d = options.lookup("divisorLength")) {
-    checker_.cryptoArgs().cryptoNumber(d); // OpenSSL chooses it, as node does without it
+    checker_.cryptoArgs().cryptoNumber(d);
   }
   if (Expr *c = options.lookup("namedCurve")) {
     curve = checker_.argumentChecker().checkArg(c, Type::string());
@@ -111,9 +108,6 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
       {checker_.cryptoArgs().cryptoInt(loc, which < 0 ? 0xffffffff : which), name, modulus,
        exponent, checker_.cryptoArgs().cryptoInt(loc, has), curve},
       Type::cryptoType(Crypto::KeyObject));
-  // The encodings: the format (-1 for a KeyObject, 0 'pem', 1 'der', 2 'jwk'), which options
-  // were given (1 type, 2 cipher, 4 passphrase), the type, the cipher and the passphrase of
-  // each key, after the call that makes the private one.
   std::vector<Expr *> parts = {generate};
   const Type *fields[2];
   for (int k = 0; k < 2; ++k) {
@@ -189,4 +183,4 @@ Expr *KeyPairChecker::checkGenerateKeyPair(CallExpr *call, llvm::SMLoc loc) {
   return call;
 }
 
-} // namespace tz
+}

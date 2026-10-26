@@ -12,7 +12,7 @@
 namespace tz {
 
 Expr *CryptoFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                     const Type * /*expected*/) const {
+                                     const Type *) const {
   if (!checker.callChecker().isGlobalName(member->object, "crypto")) {
     return nullptr;
   }
@@ -21,7 +21,7 @@ Expr *CryptoFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExp
 }
 
 Expr *CryptoFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                     const Type * /*expected*/) const {
+                                     const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isCrypto()) {
     return nullptr;
@@ -33,8 +33,6 @@ Expr *CryptoFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExp
 Expr *CryptoFeature::checkClassMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
                                           const Type *expected) const {
   const Type *receiver = member->object->type;
-  // crypto.subtle, a SubtleCrypto of tz:webcrypto: its algorithms are checked where they are
-  // written, outside the module itself.
   if (!receiver->isClass() || !checker.webCryptoChecker().isSubtleClass(receiver, "SubtleCrypto") ||
       checker.libraryCalls().inLibrary(call->loc())) {
     return nullptr;
@@ -49,4 +47,4 @@ llvm::Value *CryptoFeature::lowerCall(Lowering &lowering, CallExpr *call) const 
   return lowering.cryptoLowerer().emitCryptoCall(call);
 }
 
-} // namespace tz
+}

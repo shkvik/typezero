@@ -27,10 +27,10 @@ unsigned Type::count_ = 0;
 
 bool Type::isManaged() const {
   switch (kind_) {
-  case Kind::Decimal: // its long form
+  case Kind::Decimal:
   case Kind::String:
   case Kind::Array:
-  case Kind::Function: // its environment
+  case Kind::Function:
   case Kind::Object:
   case Kind::Iterator:
   case Kind::Json:
@@ -44,7 +44,7 @@ bool Type::isManaged() const {
     return inner_->isManaged() || error_->isManaged();
   case Kind::Union:
     return llvm::any_of(params_, [](const Type *m) { return m->isManaged(); });
-  default: // a literal: a string one is its atom, which is not counted
+  default:
     return false;
   }
 }
@@ -137,13 +137,10 @@ const Type *Type::unknown() {
   return &t;
 }
 
-// Composite types, created on first use and kept for the whole compilation.
 struct Interned {
   llvm::DenseMap<const Type *, std::unique_ptr<Type>> optionals, arrays;
   using FunctionKey = std::tuple<std::vector<const Type *>, size_t, bool, const Type *, bool>;
   std::map<FunctionKey, std::unique_ptr<Type>> functions;
-  // Object types by their fields, sorted by name, and the signatures of
-  // their methods with several (marked 2); the recursive ones apart.
   using ObjectKey = std::vector<std::tuple<std::string, const Type *, int>>;
   std::map<ObjectKey, const Type *> objectsByKey;
   std::vector<std::unique_ptr<Type>> objects;
@@ -160,9 +157,8 @@ struct Interned {
   std::map<std::u16string, std::unique_ptr<Type>> strings;
   std::map<std::pair<std::vector<std::u16string>, std::vector<const Type *>>, std::unique_ptr<Type>>
       patterns;
-  std::vector<const Type *> atoms{nullptr}; // by atom, from 1
+  std::vector<const Type *> atoms{nullptr};
   std::map<std::pair<double, const Type *>, std::unique_ptr<Type>> numbers;
-  // Unions by their members, sorted by id.
   std::map<std::vector<const Type *>, std::unique_ptr<Type>> unions;
   std::map<const ClassDecl *, std::unique_ptr<Type>> classRefs;
   llvm::DenseMap<const Type *, std::unique_ptr<Type>> constructors;
@@ -175,7 +171,6 @@ Interned &interned() {
 }
 
 const Type *Type::optional(const Type *type) {
-  // unknown holds undefined already.
   if (type->isError() || type->isUndefined() || type->isOptional() || type->isUnknown()) {
     return type;
   }
@@ -203,8 +198,6 @@ const Type *Type::array(const Type *element) {
   return slot.get();
 }
 
-// `(int, string?) => double`: a parameter that may be left out shows its value
-// type with `?`.
 const Type *Type::function(llvm::ArrayRef<const Type *> params, size_t minArgs, bool hasRest,
                            const Type *ret, bool hasThis) {
   for (const Type *t : params) {
@@ -215,8 +208,6 @@ const Type *Type::function(llvm::ArrayRef<const Type *> params, size_t minArgs, 
   if (ret->isError()) {
     return ret;
   }
-  // `(...args: [int, string?]) => R` is `(a: int, b?: string) => R`: a list
-  // of the types of parameters takes their place.
   std::vector<const Type *> flat;
   if (flattenArguments(params, minArgs, hasRest, flat)) {
     return function(flat, minArgs, hasRest, ret, hasThis);
@@ -356,7 +347,6 @@ const Type *Type::argumentList(llvm::ArrayRef<const Type *> elements, size_t min
       if (i > 0) {
         name += ", ";
       }
-      // `string?` for an element a call may leave out.
       name += i >= min && elements[i]->isOptional() ? elements[i]->inner()->name().str() + "?"
                                                     : elements[i]->name().str();
       fields.push_back({std::to_string(i), elements[i], false});
@@ -398,8 +388,6 @@ const Type *Type::result(const Type *ok, const Type *err) {
   return slot.get();
 }
 
-// `Generator<int>`, `Generator<int, string>`, `Generator<string, void,
-// string>`: the arguments that are void at the end are left out.
 const Type *Type::iterator(const Type *yielded, const Type *returned, const Type *sent) {
   for (const Type *t : {yielded, returned, sent}) {
     if (t->isError()) {
@@ -446,7 +434,6 @@ const Type *Type::dict(DictKind kind, const Type *key, const Type *value) {
   return slot.get();
 }
 
-// `"circle"`, with the characters a string literal escapes.
 static std::string quotedText(const std::u16string &text) {
   std::string utf8;
   llvm::convertUTF16ToUTF8String(
@@ -468,8 +455,6 @@ static std::string quotedText(const std::u16string &text) {
   return quoted + "\"";
 }
 
-// The shortest text that reads back as `value`, as JavaScript prints most
-// numbers.
 static std::string numberText(double value) {
   if (value == std::trunc(value) && std::fabs(value) < 1e21) {
     char buffer[32];
@@ -498,7 +483,6 @@ static std::string utf8Text(const std::u16string &text) {
 
 const Type *Type::stringPattern(std::vector<std::u16string> texts,
                                 std::vector<const Type *> holes) {
-  // `${string}` is any string.
   if (holes.size() == 1 && holes[0]->isString() && texts[0].empty() && texts[1].empty()) {
     return holes[0];
   }
@@ -609,12 +593,9 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
     }
   }
   auto has = [&](const Type *t) { return llvm::is_contained(members, t); };
-  // An unknown holds any value already, as in TypeScript: `unknown | int` is
-  // unknown.
   if (has(unknown())) {
     return unknown();
   }
-  // `true | false` is boolean.
   if (has(boolLiteral(true)) && has(boolLiteral(false))) {
     llvm::erase(members, boolLiteral(true));
     llvm::erase(members, boolLiteral(false));
@@ -622,7 +603,6 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
       members.push_back(boolTy());
     }
   }
-  // A literal is a value of its base type.
   llvm::erase_if(members, [&](const Type *m) {
     if (!m->isLiteral()) {
       return false;
@@ -634,8 +614,6 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
 
     return has(base);
   });
-  // A string of a pattern is a string, and a string literal that matches a
-  // pattern is a string of it.
   if (has(string())) {
     llvm::erase_if(members, [](const Type *m) { return m->isPattern(); });
   }
@@ -644,7 +622,6 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
              return p->isPattern() && matchesPattern(m->literalText(), p);
            });
   });
-  // Whole numbers next to fractions are doubles too: `0 | 0.5`.
   bool fractions = llvm::any_of(
       members, [](const Type *m) { return m->isLiteral() && m->literalBase()->isFloat(); });
   if (fractions) {
@@ -654,8 +631,6 @@ const Type *Type::unionOf(llvm::ArrayRef<const Type *> types) {
       }
     }
   }
-  // Some object, in generic code, holds any other; an object that is
-  // declared to be another member is that member.
   if (llvm::any_of(members, [](const Type *m) { return m->isAnyObject(); })) {
     llvm::erase_if(members, [](const Type *m) { return m->isObject() && !m->isAnyObject(); });
   }
@@ -803,7 +778,6 @@ const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
     case TypeOp::KeyOf:
       name = "keyof " + of(0);
       break;
-    // `A[number]` of any number: the int that indices are.
     case TypeOp::Index:
       name = of(0) + "[" + (operands[1]->isInt() ? "number" : of(1)) + "]";
       break;
@@ -822,12 +796,9 @@ const Type *Type::typeOp(TypeOp op, llvm::ArrayRef<const Type *> operands) {
     case TypeOp::NonNullable:
       name = "NonNullable<" + of(0) + ">";
       break;
-    // Named by the text written, which the tag carries (see
-    // Checker::resolveConditional).
     case TypeOp::Conditional:
       name = of(0);
       break;
-    // The texts and the types between them: `on${K}`.
     case TypeOp::Template:
       name = "`";
       for (size_t i = 0; i < operands.size(); ++i) {
@@ -934,8 +905,6 @@ const Type *Type::constructorOf(const Type *instance) {
   return slot.get();
 }
 
-// Not interned with the other object types: no object type a program
-// declares is a regex, even one with just `lastIndex: int`.
 const Type *Type::regExp() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "RegExp")).get();
@@ -948,8 +917,6 @@ const Type *Type::regExp() {
   return type;
 }
 
-// Not interned either: a Date is only itself. Its field has a name no program
-// can write, so only the methods of Date reach it.
 const Type *Type::date() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Date")).get();
@@ -962,9 +929,6 @@ const Type *Type::date() {
   return type;
 }
 
-// Not interned with the object types: each WeakRef<T> is only itself, and
-// what the runtime keeps in it the program does not see
-// (runtime/core/group/group.c).
 const Type *Type::weakRef(const Type *target) {
   static std::map<const Type *, Type *> types;
   Type *&type = types[target];
@@ -980,12 +944,8 @@ const Type *Type::weakRef(const Type *target) {
   return type;
 }
 
-// What the runtime keeps in one (a formatter of ICU) the program does not
-// see: the type has no fields.
 const Type *Type::dateFormat() { return intl(IntlKind::DateTimeFormat); }
 
-// So with the other objects of Intl: a type of its own for each kind, which
-// no object type a program declares is.
 const Type *Type::intl(IntlKind kind) {
   static const char *const names[] = {
       "",
@@ -1009,8 +969,6 @@ const Type *Type::intl(IntlKind kind) {
   return type;
 }
 
-// The timers of the runtime: their objects hold what the program does not
-// see (TzTimer in runtime/core/async/async.h).
 const Type *Type::timeout() {
   static Type *type = [] {
     Type *t = interned().objects.emplace_back(new Type(Kind::Object, "Timeout")).get();
@@ -1033,8 +991,6 @@ const Type *Type::immediate() {
   return type;
 }
 
-// Not interned either: each class of node:crypto is only itself, and the
-// runtime makes its objects.
 const Type *Type::cryptoType(Crypto kind) {
   static const char *const names[] = {"",          "Hash", "Hmac",   "Cipheriv", "Decipheriv",
                                       "KeyObject", "Sign", "Verify", "ECDH",     "X509Certificate"};
@@ -1048,8 +1004,6 @@ const Type *Type::cryptoType(Crypto kind) {
   return type;
 }
 
-// Not interned either: no object type a program declares is a Uint8Array.
-// They have no fields; their methods reach what the runtime keeps in them.
 const Type *Type::bytesType(Bytes kind) {
   static const char *const names[] = {"",
                                       "Uint8Array",
@@ -1170,9 +1124,6 @@ const Type *Type::asyncIterator(const Type *yielded, const Type *returned, const
   return slot;
 }
 
-// Every match has the same fields of the same sizes, so the same layout,
-// whatever the regex: a match of a known regex can be seen as one of an
-// unknown regex without any change in memory.
 const Type *Type::match(int groups, std::vector<bool> mandatory, const Type *named, bool indices) {
   if (groups < 0) {
     mandatory.clear();
@@ -1226,4 +1177,4 @@ const Type *Type::fromName(llvm::StringRef name) {
       .Default(nullptr);
 }
 
-} // namespace tz
+}

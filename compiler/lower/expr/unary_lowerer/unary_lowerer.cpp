@@ -27,8 +27,6 @@ using llvm::Value;
 
 namespace tz {
 
-// The text of a name or a field read through names, for messages; empty for
-// anything else.
 static std::string valueText(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -69,24 +67,23 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   }
   if (unary->op == UnaryOp::Void) {
     lowering_.stmtLowerer().emitDiscarded(unary->operand);
-    return lowering_.builder_.getFalse(); // undefined, as for the literal
+    return lowering_.builder_.getFalse();
   }
   const Type *type = unary->operand->type;
   if ((unary->op == UnaryOp::Plus || unary->op == UnaryOp::Neg) && type->isString()) {
-    // `+s` is Number(s), and `-s` is -Number(s).
-    Lowering::Operand str = lowering_.refCounts().emitOperand(unary->operand, /*canBorrow=*/true);
+    Lowering::Operand str = lowering_.refCounts().emitOperand(unary->operand, true);
     llvm::Value *number = lowering_.numberLowerer().emitStringToNumber(str.value);
     lowering_.refCounts().dropOperand(str);
     return unary->op == UnaryOp::Neg ? lowering_.builder_.CreateFNeg(number) : number;
   }
-  if (type->isDecimal()) { // Checker allows only `-x` and `+literal`
+  if (type->isDecimal()) {
     if (unary->op == UnaryOp::Plus) {
       return lowering_.exprLowerer().emitExpr(unary->operand);
     }
     if (llvm::isa<IntLitExpr>(unary->operand) || llvm::isa<FloatLitExpr>(unary->operand)) {
       return lowering_.decimalLowerer().emitDecimalLiteral(unary);
     }
-    Lowering::Operand value = lowering_.refCounts().emitOperand(unary->operand, /*canBorrow=*/true);
+    Lowering::Operand value = lowering_.refCounts().emitOperand(unary->operand, true);
     llvm::Value *negated = lowering_.decimalLowerer().callReturningDecimal(
         "tz_dec_neg", {lowering_.decimalLowerer().decimalCoef(value.value),
                        lowering_.decimalLowerer().decimalMeta(value.value)});
@@ -96,7 +93,7 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   llvm::Value *operand = lowering_.exprLowerer().emitExpr(unary->operand);
   switch (unary->op) {
   case UnaryOp::Neg:
-    if (type->isBool()) { // `-true` is -1
+    if (type->isBool()) {
       return lowering_.builder_.CreateFNeg(
           lowering_.builder_.CreateUIToFP(operand, lowering_.builder_.getDoubleTy()));
     }
@@ -112,13 +109,12 @@ llvm::Value *UnaryLowerer::emitUnary(UnaryExpr *unary) {
   case UnaryOp::TypeOf:
   case UnaryOp::NonNull:
   case UnaryOp::Void:
-  case UnaryOp::Delete: // Checker rejects it for now
+  case UnaryOp::Delete:
     break;
   }
   llvm_unreachable("unknown unary operator");
 }
 
-// `x!`: TypeError if x is undefined (undefined holds nothing to release).
 llvm::Value *UnaryLowerer::emitNonNull(UnaryExpr *unary) {
   const Type *type = unary->operand->type;
   llvm::Value *value = lowering_.exprLowerer().emitExpr(unary->operand);
@@ -138,7 +134,6 @@ llvm::Value *UnaryLowerer::emitNonNull(UnaryExpr *unary) {
   return lowering_.optionalLowerer().optionalValue(value, type);
 }
 
-// `typeof x` follows from the type of x, except for `T | undefined`.
 llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
   const Type *type = operand->type;
   if (type->nonOptional()->isJson()) {
@@ -147,35 +142,31 @@ llvm::Value *UnaryLowerer::emitTypeOf(Expr *operand) {
   if (type->isUnknown() || type->isAnyObject()) {
     return lowering_.unknownLowerer().emitUnknownTypeOf(operand);
   }
-  // A tagged union: by its tag, which is 0 for undefined.
   if (type->nonOptional()->isTagged()) {
-    Lowering::Operand value = lowering_.refCounts().emitOperand(operand, /*canBorrow=*/true);
+    Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
     llvm::Value *name = lowering_.unionLowerer().emitUnionTypeOf(value.value, type->nonOptional());
     lowering_.refCounts().dropOperand(value);
     return name;
   }
   if (type->isOptional()) {
-    Lowering::Operand value = lowering_.refCounts().emitOperand(operand, /*canBorrow=*/true);
+    Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
     llvm::Value *has = lowering_.optionalLowerer().optionalHas(value.value, type);
     lowering_.refCounts().dropOperand(value);
     return lowering_.builder_.CreateSelect(
         has, lowering_.stringLowerer().stringLiteral(ascii16(typeOfName(type->inner()))),
         lowering_.stringLowerer().stringLiteral(u"undefined"));
   }
-  if (!isa<NameExpr>(operand)) { // evaluated for its side effects
+  if (!isa<NameExpr>(operand)) {
     lowering_.stmtLowerer().emitDiscarded(operand);
   }
 
   return lowering_.stringLowerer().stringLiteral(ascii16(typeOfName(type)));
 }
 
-// `Color[value]`: the name of the enum member with that value, or undefined.
 llvm::Value *UnaryLowerer::emitEnumName(IndexExpr *index) {
   llvm::Value *value = lowering_.exprLowerer().emitExpr(index->index);
   const Type *type = index->type;
   llvm::Value *result = lowering_.optionalLowerer().undefinedValue(type);
-  // Each member's test wraps those of the members before it, so that of
-  // members with one value the last names it, as in JavaScript.
   for (const EnumMember &m : index->enumDecl->members) {
     llvm::SmallVector<llvm::UTF16, 16> units;
     llvm::convertUTF8ToUTF16String(m.name, units);
@@ -190,4 +181,4 @@ llvm::Value *UnaryLowerer::emitEnumName(IndexExpr *index) {
   return result;
 }
 
-} // namespace tz
+}

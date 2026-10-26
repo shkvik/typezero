@@ -4,8 +4,6 @@
 
 namespace tz::parallel {
 
-// Which objects a function lets go: where the references it makes may end up, and the
-// constructors that let `this` out.
 class EscapeScan {
 public:
   explicit EscapeScan(Analysis &analysis);
@@ -19,4 +17,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

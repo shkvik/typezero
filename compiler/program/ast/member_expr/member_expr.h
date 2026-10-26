@@ -14,16 +14,11 @@ public:
 
   Expr *object;
   llvm::StringRef name;
-  bool optional = false; // `object?.name`
-  // Set by Checker for a method read as a value: a function bound to the object.
-  // With `virtualCall`, the method of the object's class at the slot of
-  // `method`, as for CallExpr.
+  bool optional = false;
   FuncSymbol *method = nullptr;
-  // `JSON.parse<User>(text)`: the type arguments of the callee of a call.
   std::vector<TypeRef> typeArgs;
   bool virtualCall = false;
-  // A method of an interface with several signatures, as a value: which one.
   int signature = -1;
 };
 
-} // namespace tz
+}

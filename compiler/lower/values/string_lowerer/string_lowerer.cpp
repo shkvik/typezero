@@ -24,7 +24,6 @@ namespace tz {
 
 namespace {
 
-// String value layout; must match runtime/core/string/string.c.
 constexpr uint64_t kStrLengthMask = (uint64_t(1) << 30) - 1;
 
 constexpr uint64_t kStrAscii = uint64_t(1) << 60;
@@ -33,13 +32,8 @@ constexpr uint64_t kStrTwoByte = uint64_t(1) << 61;
 
 constexpr uint64_t kStrRope = uint64_t(1) << 62;
 
-// A one-byte string of up to this many code units is stored in the value
-// itself: `obj` holds the code units and `meta` has ROPE without HEAP.
 constexpr size_t kInlineMax = 8;
 
-// A number passed to tz_str_concat_n as it is (see
-// runtime/core/string/string.c): the ROPE and TWO_BYTE flags without HEAP, and
-// the kind of number in the low bits.
 constexpr uint64_t kNumberPart = kStrRope | kStrTwoByte;
 
 constexpr uint64_t kNumberInt = 1;
@@ -50,12 +44,8 @@ constexpr uint32_t kKindBuffer1 = 1;
 
 constexpr uint32_t kKindBuffer2 = 2;
 
-// Literals are never counted (their values lack the HEAP flag); a huge count
-// just makes them look alive to anyone inspecting memory.
 constexpr int64_t kLiteralRefCount = int64_t(1) << 62;
 
-// Collects the operands of a chain of string `+`. Concatenation is
-// associative, so a + (b + c) flattens as well as (a + b) + c.
 void collectConcat(Expr *expr, std::vector<Expr *> &parts) {
   auto *bin = dyn_cast<BinaryExpr>(expr);
   if (bin && bin->op == BinaryOp::Add && bin->type->isString()) {
@@ -66,7 +56,7 @@ void collectConcat(Expr *expr, std::vector<Expr *> &parts) {
   }
 }
 
-} // namespace
+}
 
 StringLowerer::StringLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -122,7 +112,6 @@ llvm::Value *StringLowerer::concatOperands(llvm::ArrayRef<Lowering::Operand> ope
 llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
   std::vector<Expr *> parts;
   collectConcat(bin, parts);
-  // A part can be borrowed if nothing after it can reassign its variable.
   std::vector<bool> laterCannotAssign(parts.size(), true);
   for (size_t i = parts.size() - 1; i > 0; --i) {
     laterCannotAssign[i - 1] = laterCannotAssign[i] && AssignLowerer::cannotAssign(parts[i]);
@@ -144,9 +133,6 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
   return concatOperands(operands);
 }
 
-// A part of a concatenation. A number converted to a string goes to the
-// runtime as it is, which writes its digits straight into the result instead
-// of making a string for them first.
 Lowering::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
   auto *conv = dyn_cast<CastExpr>(expr);
   const Type *from = conv && conv->isImplicit() ? conv->operand->type : nullptr;
@@ -164,7 +150,7 @@ Lowering::Operand StringLowerer::emitConcatPart(Expr *expr, bool canBorrow) {
       part,
       lowering_.builder_.getInt64(kNumberPart | (from->isFloat() ? kNumberDouble : kNumberInt)), 1);
 
-  return {part, /*owned=*/false, Type::string()};
+  return {part, false, Type::string()};
 }
 
 llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
@@ -175,7 +161,6 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
         laterCannotAssign[i - 1] && AssignLowerer::cannotAssign(tmpl->exprs[i - 1]);
   }
 
-  // `${x}` alone is just x as a string.
   if (count == 1 && tmpl->quasis[0].empty() && tmpl->quasis[1].empty()) {
     return lowering_.exprLowerer().emitExpr(tmpl->exprs[0]);
   }
@@ -199,7 +184,7 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
   if (operands.empty()) {
     return stringLiteral(u"");
   }
-  if (operands.size() == 1) { // a template without substitutions
+  if (operands.size() == 1) {
     return operands[0].value;
   }
 
@@ -210,7 +195,7 @@ llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
   Lowering::Operand lhs =
       lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
   lowering_.throwLowerer().holdOperand(lhs, lowering_.mayThrow().exprThrows(bin->rhs));
-  Lowering::Operand rhs = lowering_.refCounts().emitOperand(bin->rhs, /*canBorrow=*/true);
+  Lowering::Operand rhs = lowering_.refCounts().emitOperand(bin->rhs, true);
   lowering_.throwLowerer().takeOperand(lhs);
   llvm::Value *args[] = {stringObj(lhs.value), stringMeta(lhs.value), stringObj(rhs.value),
                          stringMeta(rhs.value)};
@@ -249,8 +234,6 @@ llvm::Value *StringLowerer::emitStringComparison(BinaryExpr *bin) {
   return result;
 }
 
-// `s[i]`: a string of one code unit; `undefined` out of range unless Checker
-// proved the index in range.
 llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
   Lowering::Operand object =
       lowering_.refCounts().emitOperand(index->object, AssignLowerer::cannotAssign(index->index));
@@ -273,9 +256,6 @@ llvm::Value *StringLowerer::emitStringIndex(IndexExpr *index) {
   return result;
 }
 
-// A short literal is an inline string. A longer one lives in the executable
-// in the same layout as a heap buffer (see runtime/core/string/string.c), one
-// byte per code unit when all of them fit.
 llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
   auto found = literals_.find(text);
   if (found != literals_.end()) {
@@ -290,7 +270,6 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
         lowering_.strTy_, {llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                            lowering_.builder_.getInt64(kStrAscii)});
   } else if (!twoByte && text.size() <= kInlineMax) {
-    // The first code unit goes to the lowest address, zeros after the last.
     bool little = lowering_.module_->getDataLayout().isLittleEndian();
     uint64_t bits = 0;
     for (size_t i = 0; i < text.size(); ++i) {
@@ -322,7 +301,7 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
                  lowering_.builder_.getInt32(twoByte ? kKindBuffer2 : kKindBuffer1),
                  lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(length),
                  lowering_.builder_.getInt32(length), data});
-    auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, /*isConstant=*/true,
+    auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, true,
                                             llvm::GlobalValue::PrivateLinkage, init, ".str");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     global->setAlignment(llvm::Align(8));
@@ -335,4 +314,4 @@ llvm::Constant *StringLowerer::stringLiteral(const std::u16string &text) {
   return value;
 }
 
-} // namespace tz
+}

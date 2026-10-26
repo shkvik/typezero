@@ -23,12 +23,9 @@ namespace tz {
 
 namespace {
 
-// How Lowering walks the references in a value for the group functions: the
-// reference itself, or the environment of a function; anything else goes to
-// the runtime by its descriptor.
 enum class RefShape { None, Pointer, Function, Optional, Other };
 
-} // namespace
+}
 
 GroupLowerer::GroupLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -78,9 +75,9 @@ llvm::Constant *GroupLowerer::memberDescriptor(llvm::Function *drop, llvm::Strin
       {drop, null, lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0),
        lowering_.stringLowerer().utf8Constant(name),
        lowering_.builder_.getInt32(uint32_t(name.size())), lowering_.builder_.getInt32(0)});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_,
-                                          /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
-                                          init, drop->getName() + ".layout");
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_, true,
+                                          llvm::GlobalValue::PrivateLinkage, init,
+                                          drop->getName() + ".layout");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   descriptor = global;
 
@@ -126,8 +123,6 @@ llvm::Function *GroupLowerer::groupAwareRelease(llvm::Function *plain) {
   b.SetInsertPoint(countedBlock);
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), object, "rc");
   if (lowering_.parallel_) {
-    // A shared object, no member: counted atomically; the last release
-    // hands it to the plain release with a count of 1, which frees it.
     auto *notMemberBlock = llvm::BasicBlock::Create(lowering_.ctx_, "not.member", fn);
     auto *sharedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "shared", fn);
     auto *lastBlock = llvm::BasicBlock::Create(lowering_.ctx_, "shared.last", fn);
@@ -175,7 +170,7 @@ llvm::Constant *GroupLowerer::groupSite() {
   llvm::Constant *init = llvm::ConstantStruct::get(
       type, {frame, lowering_.stringLowerer().utf8Constant(lowering_.storeField_),
              lowering_.builder_.getInt32(uint32_t(lowering_.storeField_.size()))});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, true,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.site");
   site = global;
 
@@ -192,4 +187,4 @@ void GroupLowerer::noteUnstored(llvm::Value *object, const Expr *site) {
       {object, lowering_.unwindLowerer().frameDescriptor(site->loc())});
 }
 
-} // namespace tz
+}

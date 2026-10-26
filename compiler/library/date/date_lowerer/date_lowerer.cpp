@@ -28,15 +28,12 @@ namespace tz {
 
 namespace {
 
-// The names of the options that are strings, by TZ_DTO_*, as Checker checked
-// them (sema_date.cpp).
 const llvm::StringLiteral kOptionNames[TZ_DTO_COUNT] = {
     "localeMatcher", "calendar", "numberingSystem", "hourCycle",     "timeZone",  "weekday",
     "era",           "year",     "month",           "day",           "dayPeriod", "hour",
     "minute",        "second",   "timeZoneName",    "formatMatcher", "dateStyle", "timeStyle",
 };
 
-// Text known when compiling: a literal, or a template without values.
 bool isLiteralText(const Expr *e) {
   if (auto *cast = dyn_cast<CastExpr>(e); cast && cast->isImplicit()) {
     return isLiteralText(cast->operand);
@@ -54,11 +51,8 @@ bool isLiteralValue(const Expr *e) {
   return isLiteralText(e) || llvm::isa<BoolLitExpr, IntLitExpr, FloatLitExpr, UndefinedExpr>(e);
 }
 
-} // namespace
+}
 
-// Checker checked what is written out (Checker::checkLocaleArgs); the time zone,
-// the calendar and the numbering system only ICU knows, and a value that is
-// not written out is known only when the program runs.
 bool dateOptionsMayThrow(llvm::ArrayRef<Expr *> args) {
   if (!args.empty() && !args[0]->type->isUndefined() && !isLiteralText(args[0])) {
     return true;
@@ -90,9 +84,6 @@ llvm::Value *DateLowerer::newDate(llvm::Value *time) {
   return date;
 }
 
-// TzDateOptions (runtime/core/tzrt/tzrt.h): { string locale, [TZ_DTO_COUNT x
-// string] values, i32 present, i32 hour12, double fractional }. The strings are
-// borrowed from the operands, which `held` keeps until after the call.
 llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
                                           std::vector<Lowering::Operand> &held) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *f64 = lowering_.builder_.getDoubleTy();
@@ -104,7 +95,6 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
   llvm::Value *present = lowering_.builder_.getInt32(0);
   llvm::Value *hour12 = llvm::ConstantInt::getSigned(i32, -1);
   llvm::Value *fractional = llvm::ConstantFP::getNaN(f64);
-  // A value and whether it is there, of a `T | undefined` or a T.
   auto split = [&](llvm::Value *value,
                    const Type *type) -> std::pair<llvm::Value *, llvm::Value *> {
     if (!type->isOptional()) {
@@ -138,7 +128,7 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
     if (args[1]->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(args[1]);
     } else {
-      Lowering::Operand object = lowering_.refCounts().emitOperand(args[1], /*canBorrow=*/true);
+      Lowering::Operand object = lowering_.refCounts().emitOperand(args[1], true);
       held.push_back(object);
       for (const Field &field : object.type->fields()) {
         llvm::Value *loaded = lowering_.builder_.CreateLoad(
@@ -186,13 +176,9 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   auto constant = [&](size_t i) {
     return lowering_.builder_.getInt32(uint32_t(cast<IntLitExpr>(call->args[i])->value));
   };
-  // The time of a borrowed date.
   auto timeOf = [&](llvm::Value *date) {
     return lowering_.builder_.CreateLoad(f64, dateTimeAddress(date), "time");
   };
-  // The receiver of a method, kept while the arguments from `from` on are
-  // evaluated (held, if they may throw: then takeOperand); its time is read
-  // after them, as JavaScript reads it in the call.
   auto receiver = [&](size_t from) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
     Lowering::Operand self = lowering_.refCounts().emitOperand(
@@ -222,14 +208,14 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     return newDate(time);
   }
   case Builtin::DateCopy: {
-    Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     return newDate(time);
   }
   case Builtin::DateFromString:
   case Builtin::DateParse: {
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *time = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_date_parse", f64, {ptr, i64}),
         {lowering_.stringLowerer().stringObj(text.value),
@@ -239,7 +225,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   }
   case Builtin::DateFromFields:
   case Builtin::DateUTC: {
-    // The parts left out: day 1, the rest 0.
     std::vector<llvm::Value *> values;
     for (Expr *arg : call->args) {
       values.push_back(lowering_.exprLowerer().emitExpr(arg));
@@ -312,14 +297,14 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   case Builtin::DateToJSON: {
     Lowering::Operand date = receiver(0);
     if (call->builtin == Builtin::DateToJSON && !call->args.empty()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[0]); // the key, which a date ignores
+      lowering_.stmtLowerer().emitDiscarded(call->args[0]);
     }
     lowering_.throwLowerer().takeOperand(date);
     llvm::Value *time = timeOf(date.value);
     lowering_.refCounts().dropOperand(date);
     if (call->builtin == Builtin::DateToISOString) {
       llvm::Value *text = stringOf("tz_date_iso", {time}, {f64});
-      lowering_.throwLowerer().emitThrowCheck(); // RangeError: Invalid time value
+      lowering_.throwLowerer().emitThrowCheck();
       return text;
     }
     if (call->builtin == Builtin::DateToUTCString) {
@@ -364,13 +349,12 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   case Builtin::DtfFormat:
   case Builtin::DtfFormatToParts: {
     Lowering::Operand format = receiver(0);
-    // A date, a time in milliseconds, or now.
     llvm::Value *time = nullptr;
     if (call->args.empty()) {
       time = lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction("tz_date_now", f64, {}));
     } else if (call->args[0]->type->isDate()) {
-      Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      Lowering::Operand date = lowering_.refCounts().emitOperand(call->args[0], true);
       time = timeOf(date.value);
       lowering_.refCounts().dropOperand(date);
     } else {
@@ -383,7 +367,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
     if (call->builtin == Builtin::DtfFormat) {
       result = stringOf("tz_dtf_format", {format.value, time}, {ptr, f64});
     } else {
-      // Each part is a new object { type, value }.
       const Type *part = call->type->inner();
       const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(part);
       const llvm::StructLayout *offsets =
@@ -403,7 +386,7 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
           "parts");
     }
     lowering_.refCounts().dropOperand(format);
-    lowering_.emitThrowCheckIf(!call->args.empty()); // RangeError: Invalid time value
+    lowering_.emitThrowCheckIf(!call->args.empty());
     return result;
   }
   case Builtin::DtfResolvedOptions: {
@@ -429,7 +412,6 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
         value = lowering_.optionalLowerer().makeOptional(
             v, lowering_.builder_.CreateICmpSGT(v, lowering_.builder_.getInt32(0)), field.type);
       } else {
-        // The locale is -1, the others the options of the same names.
         auto at = llvm::find(kOptionNames, field.name);
         int which = at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
         llvm::AllocaInst *out =
@@ -455,4 +437,4 @@ llvm::Value *DateLowerer::emitDateCall(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

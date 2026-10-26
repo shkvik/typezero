@@ -27,7 +27,7 @@ namespace fs = llvm::sys::fs;
 
 namespace path = llvm::sys::path;
 
-} // namespace
+}
 
 bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   if (path::extension(entryPath) != ".tz") {
@@ -62,8 +62,6 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
     for (const auto &name : file.fieldNames) {
       program.fieldNames.insert(name.getKey());
     }
-    // A name declared in several files gets all their strings: a field write
-    // through such a key may assign any of them.
     for (const auto &constant : file.stringConstants) {
       std::vector<std::string> &all = program.stringConstants[constant.getKey()];
       all.insert(all.end(), constant.getValue().begin(), constant.getValue().end());
@@ -103,7 +101,6 @@ void Loader::visit(Module *module) {
   loading_.push_back(module);
   module->loadPath = loading_;
 
-  // The files it names, in the order they appear in it.
   struct Request {
     const char *at;
     llvm::StringRef path;
@@ -123,12 +120,9 @@ void Loader::visit(Module *module) {
                    [](const Request &a, const Request &b) { return a.at < b.at; });
 
   for (const Request &request : requests) {
-    // The globals written in tz come resolved (see importLibraryGlobals).
     Module *target =
         *request.from ? *request.from : resolver().resolve(module, request.path, request.loc);
     *request.from = target;
-    // A file that is loading already is part of a cycle: it is not waited for
-    // (docs/modules.md, section 4).
     if (target && states_[target] == State::New) {
       visit(target);
     }
@@ -147,7 +141,7 @@ std::string Loader::relativeName(llvm::StringRef realPath) const {
   while (common < base.size() && common < target.size() && base[common] == target[common]) {
     ++common;
   }
-  if (common == 0) { // another drive
+  if (common == 0) {
     return path::convert_to_slash(realPath);
   }
   std::string name;
@@ -190,4 +184,4 @@ Loader::Loader(llvm::SourceMgr &sourceMgr, AstContext &ctx, Diagnostics &diags,
 }
 
 Loader::~Loader() = default;
-} // namespace tz
+}

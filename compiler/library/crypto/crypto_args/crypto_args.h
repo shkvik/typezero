@@ -4,14 +4,10 @@
 
 namespace tz {
 
-// The arguments of the functions of node:crypto.
 class CryptoArgs {
 public:
   explicit CryptoArgs(Checker &checker);
 
-  // The parts of those calls: the call of the runtime function `fn` with
-  // `args`, literals for the arguments Checker fills in, and the checks of the
-  // arguments (an error leaves the type error, or gives null or false).
   Expr *cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
   Expr *cryptoInt(llvm::SMLoc loc, int64_t value);
   Expr *cryptoDouble(llvm::SMLoc loc, double value);
@@ -36,4 +32,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

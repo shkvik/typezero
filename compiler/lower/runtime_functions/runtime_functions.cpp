@@ -18,11 +18,9 @@ namespace tz {
 
 namespace {
 
-// The count of a shared object starts here (TZ_RC_SHARED,
-// runtime/core/group/group.h); those of the members of groups are below it.
 constexpr int64_t kRcShared = -(int64_t(1) << 60);
 
-} // namespace
+}
 
 RuntimeFunctions::RuntimeFunctions(Lowering &lowering) : lowering_(lowering) {}
 
@@ -51,7 +49,6 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.printString = declare("tz_print_string", voidTy, {ptr, i64});
   lowering_.rt_.printValue = declare("tz_print_value", voidTy, {ptr, ptr});
   lowering_.rt_.debugger = declare("tz_debugger", voidTy, {});
-  // Numbers (runtime/core/output/output.c, number.c and math.c).
   lowering_.rt_.toInt32 = declare("tz_to_int32", i32, {f64});
   lowering_.rt_.mathRound = declare("tz_math_round", f64, {f64});
   lowering_.rt_.mathPow = declare("tz_math_pow", f64, {f64, f64});
@@ -65,8 +62,6 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.numToFixed = declare("tz_num_to_fixed", voidTy, {ptr, f64, i64});
   lowering_.rt_.numToRadix = declare("tz_num_to_radix", voidTy, {ptr, f64, i64});
 
-  // String functions take strings as (obj, meta) pairs and return them
-  // through a pointer passed first.
   lowering_.rt_.strFree = declare("tz_str_free", voidTy, {ptr});
   lowering_.rt_.strConcatN = declare("tz_str_concat_n", voidTy, {ptr, ptr, i64});
   lowering_.rt_.strEqual = declare("tz_str_equal", i32, {ptr, i64, ptr, i64});
@@ -98,8 +93,6 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.strFromCharCodes = declare("tz_str_from_char_codes", voidTy, {ptr, ptr, i64});
   lowering_.rt_.strFromCodePoints = declare("tz_str_from_code_points", voidTy, {ptr, ptr, i64});
 
-  // Arrays (runtime/core/array/array.c). Values of any type go by address, with
-  // the type descriptor of the elements stored in the array.
   lowering_.rt_.arrNew = declare("tz_arr_new", ptr, {ptr, i64, i64});
   lowering_.rt_.arrNewLength = declare("tz_arr_new_length", ptr, {ptr, i64});
   lowering_.rt_.arrFree = declare("tz_arr_free", voidTy, {ptr});
@@ -118,15 +111,12 @@ void RuntimeFunctions::declareRuntime() {
   lowering_.rt_.arrSort = declare("tz_arr_sort", voidTy, {ptr});
   lowering_.rt_.arrSortWith = declare("tz_arr_sort_with", voidTy, {ptr, ptr, ptr});
   lowering_.rt_.arrSplice = declare("tz_arr_splice", ptr, {ptr, i64, i64, i32, i64, ptr});
-  // The objects of closures (runtime/core/closure/closure.c).
   lowering_.rt_.objAlloc = declare("tz_obj_alloc", ptr, {i64});
   lowering_.rt_.objFree = declare("tz_obj_free", voidTy, {ptr});
-  // Object.keys and the like (runtime/core/object/object.c).
   lowering_.rt_.objKeys = declare("tz_obj_keys", ptr, {ptr, ptr});
   lowering_.rt_.objValues = declare("tz_obj_values", ptr, {ptr, ptr});
   lowering_.rt_.objEntries = declare("tz_obj_entries", ptr, {ptr, ptr, ptr, i64});
 
-  // Functions that return memory nothing else points to yet.
   for (llvm::FunctionCallee fresh :
        {lowering_.rt_.arrNew, lowering_.rt_.arrNewLength, lowering_.rt_.arrSlice,
         lowering_.rt_.arrCopy, lowering_.rt_.objAlloc, lowering_.rt_.objKeys,
@@ -137,13 +127,6 @@ void RuntimeFunctions::declareRuntime() {
   cast<llvm::Function>(lowering_.rt_.arrGrow.getCallee())->addFnAttr(llvm::Attribute::Cold);
 }
 
-// The inline fast paths of reference counting:
-// - tz.str.retain / tz.str.release: only heap strings, whose meta has the sign
-//   bit set, are counted;
-// - tz.arr.retain / tz.arr.release: every array is counted; null (the zero
-//   value of a slot) is skipped. tz.arr.retain serves objects too, whose
-//   count is the first word as well (see codegen_object.cpp for releasing
-//   them).
 void RuntimeFunctions::defineRefCountHelpers() {
   for (bool isString : {true, false}) {
     llvm::Type *param =
@@ -174,8 +157,6 @@ void RuntimeFunctions::defineRefCountHelpers() {
       b.SetInsertPoint(countedBlock);
       llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
       auto *freeBlock = isRetain ? nullptr : llvm::BasicBlock::Create(lowering_.ctx_, "free", fn);
-      // A shared object's count goes atomically
-      // (runtime/core/publish/publish.c).
       if (lowering_.parallel_) {
         countShared(b, obj, count, isRetain, freeBlock, doneBlock);
       }
@@ -201,10 +182,6 @@ void RuntimeFunctions::defineRefCountHelpers() {
     }
   }
 
-  // tz.obj.retain / tz.obj.release: the objects of closures, which start with
-  // { i64 rc, ptr descriptor }, where the descriptor starts with the drop
-  // function; the last release calls it. Objects of the language start the
-  // same way, so a function value's environment may be one (a bound method).
   auto *objHeader = llvm::StructType::get(
       lowering_.ctx_, {lowering_.builder_.getInt64Ty(), lowering_.builder_.getPtrTy()});
   auto *type = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
@@ -247,9 +224,6 @@ void RuntimeFunctions::defineRefCountHelpers() {
   lowering_.plainObjRetainFn_ = lowering_.objRetainFn_;
   lowering_.plainObjReleaseFn_ = lowering_.objReleaseFn_;
 
-  // tz.ref.retain: a reference that may point at a member of a group, whose
-  // count is negative (see runtime/core/group/group.c): its group's count goes
-  // up.
   lowering_.refRetainFn_ = llvm::Function::Create(type, llvm::GlobalValue::InternalLinkage,
                                                   "tz.ref.retain", lowering_.module_.get());
   lowering_.refRetainFn_->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -277,17 +251,12 @@ void RuntimeFunctions::defineRefCountHelpers() {
     b.SetInsertPoint(doneBlock);
     b.CreateRetVoid();
   }
-  // Environments, boxes and objects that code counts without knowing their
-  // types may be members when the program has any.
   if (lowering_.memory().hasCycles) {
     lowering_.objRetainFn_ = lowering_.refRetainFn_;
     lowering_.objReleaseFn_ =
         lowering_.groupLowerer().groupAwareRelease(lowering_.plainObjReleaseFn_);
   }
 
-  // tz.instance.release: an object of the language whose type the code does
-  // not know (Type::anyObject); its header { i64 rc, ptr layout } leads to
-  // the drop function, the first word of the layout.
   lowering_.instanceReleaseFn_ = llvm::Function::Create(
       type, llvm::GlobalValue::InternalLinkage, "tz.instance.release", lowering_.module_.get());
   lowering_.instanceReleaseFn_->addFnAttr(llvm::Attribute::AlwaysInline);
@@ -303,7 +272,7 @@ void RuntimeFunctions::defineRefCountHelpers() {
   b.SetInsertPoint(countedBlock);
   llvm::Value *instanceCount = b.CreateLoad(b.getInt64Ty(), obj, "rc");
   if (lowering_.parallel_) {
-    countShared(b, obj, instanceCount, /*retain=*/false, dropBlock, doneBlock);
+    countShared(b, obj, instanceCount, false, dropBlock, doneBlock);
   }
   llvm::Value *left = b.CreateSub(instanceCount, b.getInt64(1));
   b.CreateStore(left, obj);
@@ -322,11 +291,6 @@ void RuntimeFunctions::defineRefCountHelpers() {
   }
 }
 
-// In a parallel program, the count of a shared object (below zero, see
-// TZ_RC_SHARED in runtime/core/group/group.h) goes atomically; the last release
-// drops the object, which is this thread's alone then, with a count of zero.
-// Leaves `b` in the block for the other objects, whose `count` is the one
-// loaded.
 void RuntimeFunctions::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm::Value *count,
                                    bool retain, llvm::BasicBlock *freeBlock,
                                    llvm::BasicBlock *doneBlock) {
@@ -352,4 +316,4 @@ void RuntimeFunctions::countShared(llvm::IRBuilder<> &b, llvm::Value *obj, llvm:
   b.SetInsertPoint(plainBlock);
 }
 
-} // namespace tz
+}

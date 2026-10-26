@@ -21,7 +21,6 @@ bool sameParams(const FuncSymbol *a, const FuncSymbol *b) {
   return a->params == b->params && a->minArgs == b->minArgs && a->hasRest == b->hasRest;
 }
 
-// Whether a function type takes the parameters of `sym`.
 bool takesParams(const Type *fnType, const FuncSymbol *sym) {
   return fnType->isFunction() && fnType->params() == llvm::ArrayRef<const Type *>(sym->params) &&
          fnType->minArgs() == sym->minArgs && fnType->hasRest() == sym->hasRest;
@@ -33,7 +32,6 @@ const char *accessName(Access access) {
                                        : "private";
 }
 
-// An arrow in a field of a class that is compiled as a method.
 bool isArrowMethod(const FunctionDecl *fn) {
   if (!fn->cls) {
     return false;
@@ -47,8 +45,6 @@ bool isArrowMethod(const FunctionDecl *fn) {
   return false;
 }
 
-// Whether the return type of a method is written: in its declaration, or by
-// the type of the field an arrow method is in.
 bool declaresReturn(const FunctionDecl *fn) {
   if (fn->returnType) {
     return true;
@@ -65,7 +61,6 @@ bool declaresReturn(const FunctionDecl *fn) {
   return false;
 }
 
-// The interfaces a class implements, and those they extend, nearest first.
 void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   std::vector<const Type *> queue(cls->implemented.begin(), cls->implemented.end());
   for (size_t i = 0; i < queue.size(); ++i) {
@@ -79,7 +74,7 @@ void interfacesOf(const ClassDecl *cls, std::vector<const Type *> &out) {
   }
 }
 
-} // namespace
+}
 
 ClassLinks::ClassLinks(Checker &checker) : checker_(checker) {}
 
@@ -120,15 +115,12 @@ bool ClassLinks::overridesTransitively(const FunctionDecl *fn, const FunctionDec
 }
 
 FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl *variant) {
-  // Classes made later, as code is checked, may override it.
   if (variant->openToLate) {
     return nullptr;
   }
   if (!variant->overridden && !variant->isAbstract) {
     return variant;
   }
-  // A method of an instance of a generic class that some class overrides:
-  // the instances that extend it may come later than this call.
   if (variant->generic && variant->overridden) {
     return nullptr;
   }
@@ -139,7 +131,6 @@ FunctionDecl *ClassLinks::soleImplementation(const ClassDecl *cls, FunctionDecl 
       for (FunctionDecl *fn : ownMethods(child)) {
         if (!fn->isAbstract && fn != variant && overridesTransitively(fn, variant)) {
           only = fn;
-          // A generic class stands for its instances, which may be many.
           count += child->isEmitted() ? 1 : 2;
         }
       }
@@ -168,7 +159,6 @@ const Type *ClassLinks::commonClass(const Type *a, const Type *b) {
 }
 
 void ClassLinks::linkClasses() {
-  // Each class before those down its chain, in the order declared.
   std::vector<ClassDecl *> order;
   std::function<void(ClassDecl *)> visit = [&](ClassDecl *cls) {
     order.push_back(cls);
@@ -187,18 +177,11 @@ void ClassLinks::linkClasses() {
   }
   numberClasses();
 
-  // The method tables: a class has the slots of the one it extends, then one
-  // for each method of its own that is abstract or that a class down the
-  // chain overrides.
   for (ClassDecl *cls : order) {
     buildVtable(cls);
   }
   checker_.classesLinked_ = true;
 
-  // The return types that methods take from what they override or
-  // implement, when they declare none. An abstract method without one takes
-  // that of its first implementation. A method of an instance of a generic
-  // class has the type of the method of the generic class.
   llvm::SmallPtrSet<const FunctionDecl *, 4> sources;
   for (ClassDecl *cls : order) {
     if (cls->generic) {
@@ -238,7 +221,6 @@ void ClassLinks::linkClasses() {
         }
         continue;
       }
-      // A method of an interface the class implements gives its type.
       std::vector<const Type *> interfaces;
       for (const ClassDecl *c = cls; c; c = c->parent) {
         interfacesOf(c, interfaces);
@@ -262,7 +244,6 @@ void ClassLinks::linkClasses() {
 }
 
 void ClassLinks::numberClasses() {
-  // Each class before those down its chain, in the order declared.
   std::vector<ClassDecl *> order;
   std::function<void(ClassDecl *)> visit = [&](ClassDecl *cls) {
     order.push_back(cls);
@@ -275,8 +256,6 @@ void ClassLinks::numberClasses() {
       visit(cls);
     }
   }
-  // The numbers: a class, then those down its chain; the classes of
-  // literals after them all.
   unsigned next = 0;
   for (ClassDecl *cls : order) {
     cls->id = ++next;
@@ -313,8 +292,6 @@ void ClassLinks::buildVtable(ClassDecl *cls) {
 }
 
 void ClassLinks::linkOverrides(ClassDecl *cls) {
-  // What an instance of a generic class would report, the generic class
-  // reports.
   bool muted = checker_.diags_.setMuted(false);
   checker_.diags_.setMuted(muted || cls->generic != nullptr);
   for (FunctionDecl *fn : ownMethods(cls)) {
@@ -324,7 +301,7 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
     FunctionDecl *base = nullptr;
     std::vector<FunctionDecl *> inherited;
     if (cls->parent) {
-      inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, /*isStatic=*/false);
+      inherited = ClassDeclarer::methodsNamed(cls->parent, fn->name, false);
       for (FunctionDecl *v : inherited) {
         if (v->sym && sameParams(v->sym, fn->sym)) {
           base = v;
@@ -359,19 +336,15 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
                              "; an override takes the same parameters");
         }
       }
-      // A hook of node:stream with other parameters (sema_stream.cpp).
-      if (!inherited.empty() && checker_.chunkTypes().isStreamHook(fn, /*linked=*/true)) {
+      if (!inherited.empty() && checker_.chunkTypes().isStreamHook(fn, true)) {
         checker_.chunkTypes().reportStreamHook(fn, inherited);
         continue;
       }
-      // One more variant of the name: it must differ from the inherited ones.
       for (FunctionDecl *v : inherited) {
         checker_.classDeclarer().checkVariantPair(v, fn);
       }
       continue;
     }
-    // An arrow in a field is a field of each object in JavaScript, which a
-    // method of a subclass would not replace.
     if (isArrowMethod(base) && !isArrowMethod(fn)) {
       checker_.diags_.error(fn->loc(),
                             "'" + fn->name + "' is an arrow in a field of '" + base->cls->name +
@@ -400,9 +373,6 @@ void ClassLinks::linkOverrides(ClassDecl *cls) {
     }
     fn->overrides = base;
     for (FunctionDecl *p = base; p; p = p->overrides) {
-      // After the classes are linked, only an instance comes; that its
-      // method overrides one that no other class overrides means the
-      // method tables would be laid out again.
       if (checker_.classesLinked_ && !p->overridden && p->slot < 0) {
         bool outer = checker_.diags_.setMuted(false);
         checker_.diags_.error(fn->loc(),
@@ -449,4 +419,4 @@ void ClassLinks::noteInheritedReturn(const FunctionDecl *fn) {
   }
 }
 
-} // namespace tz
+}

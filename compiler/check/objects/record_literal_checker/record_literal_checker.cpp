@@ -103,8 +103,6 @@ bool RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, cons
         return false;
       }
     }
-    // Methods are no own properties of an instance in JavaScript, but the
-    // methods of a literal and arrows in fields are.
     bool methods = false;
     for (const ClassDecl *c = ClassDeclarer::classOf(type); c; c = c->parent) {
       methods |=
@@ -129,8 +127,6 @@ bool RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, cons
 }
 
 Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
-  // The type of the values: of every named value, of the values of the
-  // Records spread and of the fields of the objects spread.
   const Type *value = nullptr;
   bool ok = true;
   auto meet = [&](const Type *t, llvm::SMLoc loc) {
@@ -192,4 +188,4 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
   return lit;
 }
 
-} // namespace tz
+}

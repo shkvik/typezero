@@ -31,7 +31,6 @@ namespace tz {
 
 namespace {
 
-// TzMap; must match runtime/core/map/map.h.
 enum MapField : unsigned {
   kMapRefCount,
   kMapLayout,
@@ -46,7 +45,7 @@ enum MapField : unsigned {
   kMapNextDead,
 };
 
-} // namespace
+}
 
 DictMethodLowerer::DictMethodLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -74,14 +73,14 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
   const Type *key = type->keyType(), *value = type->valueType();
   switch (call->builtin) {
   case Builtin::MapSize: {
-    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, /*canBorrow=*/true);
+    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
     llvm::Value *size = lowering_.builder_.CreateLoad(
         i32, lowering_.dictLowerer().dictField(map.value, kMapCount), "size");
     lowering_.refCounts().dropOperand(map);
     return size;
   }
   case Builtin::MapClear: {
-    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, /*canBorrow=*/true);
+    Lowering::Operand map = lowering_.refCounts().emitOperand(receiver, true);
     lowering_.builder_.CreateCall(
         lowering_.dictLowerer().dictFunction("tz_map_clear", lowering_.builder_.getVoidTy(), {ptr}),
         {map.value});
@@ -95,7 +94,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     Lowering::Operand map =
         lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(keyExpr));
     lowering_.throwLowerer().holdOperand(map, lowering_.mayThrow().exprThrows(keyExpr));
-    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, /*canBorrow=*/true);
+    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, true);
     lowering_.throwLowerer().takeOperand(map);
     llvm::Value *result;
     if (call->builtin == Builtin::MapDelete) {
@@ -117,7 +116,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
       llvm::Value *found = lowering_.builder_.CreateIsNotNull(entry, "found");
       if (call->builtin == Builtin::MapHas) {
         result = found;
-      } else { // read before the map may go
+      } else {
         result = lowering_.arrayLowerer().emitCheckedRead(found, call->type, [&] {
           llvm::Value *v =
               lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),
@@ -134,7 +133,6 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
   case Builtin::MapSet:
   case Builtin::SetAdd:
   case Builtin::RecordSet: {
-    // The map, the key and the value in order, then the store.
     Expr *keyExpr = call->args[0];
     Expr *valueExpr = call->args.size() > 1 ? call->args[1] : nullptr;
     bool later = valueExpr && !AssignLowerer::cannotAssign(valueExpr);
@@ -143,7 +141,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     lowering_.throwLowerer().holdOperand(
         map, lowering_.mayThrow().exprThrows(keyExpr) ||
                  (valueExpr && lowering_.mayThrow().exprThrows(valueExpr)));
-    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, /*canBorrow=*/!later);
+    Lowering::Operand k = lowering_.refCounts().emitOperand(keyExpr, !later);
     lowering_.throwLowerer().holdOperand(k,
                                          valueExpr && lowering_.mayThrow().exprThrows(valueExpr));
     llvm::Value *v = valueExpr ? lowering_.exprLowerer().emitExpr(valueExpr) : nullptr;
@@ -157,24 +155,20 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     lowering_.refCounts().dropOperand(k);
     if (call->builtin == Builtin::RecordSet) {
       lowering_.dictLowerer().emitEntryStored(map.value, entry);
-      // The value assigned is the value of the assignment.
       llvm::Value *result = lowering_.builder_.CreateLoad(
           lowering_.moduleBuilder().lower(value), lowering_.dictLowerer().entryValue(entry, type));
       lowering_.refCounts().retainValue(result, value);
       lowering_.refCounts().dropOperand(map);
       return result;
     }
-    // The map itself, for chaining: `m.set(a, 1).set(b, 2)`.
     if (!map.owned) {
       lowering_.refCounts().retainValue(map.value, type);
     }
     return map.value;
   }
   case Builtin::RecordNullishSet: {
-    // `r[k] ??= v`: v only if r has no value at k.
     Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
     const Type *resultType = call->type;
-    // Both owned: v may run any code.
     llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
     Lowering::Held heldMap = lowering_.throwLowerer().hold(
         m, type,
@@ -221,12 +215,11 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     return result;
   }
   default: {
-    // The methods of ES2025 that combine two sets.
     Expr *other = call->args[0];
     Lowering::Operand a =
         lowering_.refCounts().emitOperand(receiver, AssignLowerer::cannotAssign(other));
     lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(other));
-    Lowering::Operand b = lowering_.refCounts().emitOperand(other, /*canBorrow=*/true);
+    Lowering::Operand b = lowering_.refCounts().emitOperand(other, true);
     lowering_.throwLowerer().takeOperand(a);
     llvm::Value *result;
     switch (call->builtin) {
@@ -261,9 +254,6 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
   }
 }
 
-// `new Map(entries)`, `new Set(values)` and Object.fromEntries(entries): the
-// map is made first, then filled as the source gives its values, with a
-// later value for a key replacing an earlier one.
 llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   const Type *type = call->type;
   const Lowering::DictLayout &layout = lowering_.dictLowerer().dictLayout(type);
@@ -277,13 +267,12 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
     return map;
   }
   Expr *source = call->args[0];
-  // `new Map(m)` and `new Set(s)` of the same type copy the entries.
   if (auto *iterator = dyn_cast<CallExpr>(source);
       iterator &&
       (iterator->builtin == Builtin::MapEntries || iterator->builtin == Builtin::SetValues)) {
     Expr *from = cast<MemberExpr>(iterator->callee)->object;
     if (from->type == type) {
-      Lowering::Operand map = lowering_.refCounts().emitOperand(from, /*canBorrow=*/true);
+      Lowering::Operand map = lowering_.refCounts().emitOperand(from, true);
       llvm::Value *copy = lowering_.builder_.CreateCall(
           lowering_.dictLowerer().dictFunction("tz_map_copy", ptr, {ptr, ptr}),
           {map.value, descriptor}, "map");
@@ -294,11 +283,11 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   const Type *element = source->type->isArray()    ? source->type->inner()
                         : source->type->isString() ? source->type
                                                    : source->type->yielded();
-  lowering_.functionFrame().pushScope(); // the operands of the iteration
+  lowering_.functionFrame().pushScope();
   Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
   llvm::Value *map = lowering_.builder_.CreateCall(create, {descriptor}, "map");
   lowering_.groupLowerer().noteUnstored(map, call);
-  Lowering::Held held = lowering_.throwLowerer().hold(map, type, /*needed=*/true);
+  Lowering::Held held = lowering_.throwLowerer().hold(map, type, true);
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("dict.filled");
   const Type *key = type->keyType(), *value = type->valueType();
@@ -311,10 +300,9 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
     if (type->isSet()) {
       llvm::Value *k = lowering_.exprLowerer().emitConversion(given, element, key);
       lowering_.dictLowerer().emitDictAdd(map, k, key);
-      lowering_.refCounts().releaseValue(k, key); // the map keeps a copy
+      lowering_.refCounts().releaseValue(k, key);
       return nullptr;
     }
-    // A [key, value] pair, which goes once its parts are taken.
     const Type *kType = element->fields()[0].type, *vType = element->fields()[1].type;
     llvm::Value *k =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(kType),
@@ -342,8 +330,6 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   return result;
 }
 
-// Map.groupBy(items, f) and Object.groupBy(items, f): each item goes to the
-// array of the key f gives for it, in the order the keys first come.
 llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   const Type *type = call->type;
   const Lowering::DictLayout &layout = lowering_.dictLowerer().dictLayout(type);
@@ -360,13 +346,11 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), callback);
   llvm::Value *map = lowering_.builder_.CreateCall(
       lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor}, "map");
-  Lowering::Held held = lowering_.throwLowerer().hold(map, type, /*needed=*/true);
+  Lowering::Held held = lowering_.throwLowerer().hold(map, type, true);
   llvm::Type *i32 = lowering_.builder_.getInt32Ty();
-  // The object of Object.groupBy has no prototype, and prints so.
   if (type->isRecord()) {
-    lowering_.builder_.CreateStore(
-        lowering_.builder_.getInt32(4),
-        lowering_.dictLowerer().dictField(map, kMapFlags)); // TZ_MAP_BARE
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(4),
+                                   lowering_.dictLowerer().dictField(map, kMapFlags));
   }
   llvm::Value *counter = lowering_.functionFrame().createStackSlot(i32, "counter");
   lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0), counter);
@@ -381,7 +365,7 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
     llvm::Value *count = lowering_.builder_.CreateLoad(i32, counter);
     lowering_.builder_.CreateStore(
         lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
-    lowering_.refCounts().retainValue(item, element); // the callback owns what it gets
+    lowering_.refCounts().retainValue(item, element);
     Lowering::Held heldItem =
         lowering_.throwLowerer().hold(item, element, lowering_.typeThrows(callbackType));
     llvm::Value *k = lowering_.lazyChainLowerer().callCallback(
@@ -416,9 +400,8 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   return result;
 }
 
-// Object.keys, Object.values and Object.entries of a Record.
 llvm::Value *DictMethodLowerer::emitDictObjectCall(CallExpr *call) {
-  Lowering::Operand map = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+  Lowering::Operand map = lowering_.refCounts().emitOperand(call->args[0], true);
   const Type *element = call->type->inner();
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *result;
@@ -446,4 +429,4 @@ llvm::Value *DictMethodLowerer::emitDictObjectCall(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

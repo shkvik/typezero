@@ -14,4 +14,4 @@ struct DoWhileStmt : Stmt {
   Expr *cond;
 };
 
-} // namespace tz
+}

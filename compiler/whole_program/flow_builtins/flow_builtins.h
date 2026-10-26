@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The flows of the built-in functions and methods.
 class FlowBuiltins {
 public:
   explicit FlowBuiltins(Flows &flows);
@@ -16,4 +15,4 @@ private:
   Flows &flows_;
 };
 
-} // namespace tz
+}

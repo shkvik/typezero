@@ -32,4 +32,4 @@ int ExplainCommand::run(const Args &args) const {
   return 0;
 }
 
-} // namespace tz
+}

@@ -19,13 +19,10 @@ namespace tz {
 
 namespace {
 
-// What a function given to a method gets for a half: `ok()` holds undefined.
 const Type *halfParam(const Type *half) { return half->isVoid() ? Type::undefinedTy() : half; }
 
-// Whether a half can tell a value its type: a hint of never or void cannot.
 bool givesType(const Type *half) { return !half->isNever() && !half->isVoid(); }
 
-// The variable a Result comes from, for hints: `r` in `r.map(f)`.
 std::string receiverText(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
     expr = conv->operand;
@@ -35,8 +32,6 @@ std::string receiverText(const Expr *expr) {
   return name && !name->name.starts_with("%") ? name->name.str() : "r";
 }
 
-// The value of an expression strips the conversion Checker adds to a narrowed
-// variable or to a value given where another type is expected.
 const Expr *unconverted(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -48,10 +43,8 @@ const Expr *unconverted(const Expr *expr) {
   return expr;
 }
 
-} // namespace
+}
 
-// Why the halves `a` and `b` of Results make no union, for the messages
-// that say so: ": <the problem>", or empty.
 static std::string noUnion(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return ": one of them is nothing, 'ok()'";
@@ -73,8 +66,7 @@ Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type 
   }
   if (which == "okAsync" || which == "errAsync" || which == "fromPromise" ||
       which == "fromSafePromise" || which == "fromAsyncThrowable") {
-    return checker_.resultAsyncChecker().checkResultAsyncCall(call, name, which,
-                                                              expected); // sema_async.cpp
+    return checker_.resultAsyncChecker().checkResultAsyncCall(call, name, which, expected);
   }
   if (which != "ok" && which != "err") {
     return nullptr;
@@ -89,13 +81,12 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
     return call;
   }
 
-  // The type expected gives the half this call makes, and the other one.
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   if (wanted && !wanted->isResult()) {
     wanted = nullptr;
   }
   const Type *wantedHalf = wanted ? (isOk ? wanted->okType() : wanted->errType()) : nullptr;
-  const Type *half = Type::voidTy(); // `ok()`
+  const Type *half = Type::voidTy();
   if (!call->args.empty()) {
     Expr *&arg = call->args[0];
     bool hinted = wantedHalf && givesType(wantedHalf);
@@ -147,7 +138,6 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   bool all = method == "combineWithAllErrors";
   call->builtin = all ? Builtin::ResultCombineWithAllErrors : Builtin::ResultCombine;
   std::string what = name->name.str() + "." + method.str();
-  // The values (or errors) would make an array of undefined.
   auto holds = [&](const Type *result, const Expr *at) {
     if (givesType(result->okType()) && !(all && result->errType()->isVoid())) {
       return true;
@@ -164,9 +154,6 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
     return !all || error->isNever() ? error : Type::array(error);
   };
 
-  // A list of Results with values of different types is a tuple of them, as
-  // neverthrow types it: `Result.combine([parseName(s), parseAge(s)])` is a
-  // `Result<[string, int], E>`.
   Expr *&arg = call->args[0];
   if (auto *lit = dyn_cast<ArrayLitExpr>(arg);
       lit && !lit->elements.empty() &&
@@ -186,7 +173,6 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
                             "'" + what + "' takes Results, found '" + (*other)->name() + "'");
       return call;
     }
-    // Values of one type make an array; their errors may differ, `E | F`.
     auto sameValues = [](const Type *a, const Type *b) -> const Type * {
       const Type *x = a->okType(), *y = b->okType();
       const Type *value = x == y || y->isNever()       ? x
@@ -202,7 +188,6 @@ Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
       common = common ? sameValues(common, t) : nullptr;
     }
     if (common && !common->isError()) {
-      // Of one type: an array.
       if (!holds(common, arg)) {
         return call;
       }
@@ -292,24 +277,19 @@ Expr *ResultChecker::checkResultMember(MemberExpr *member) {
 
 void ResultChecker::checkDiscarded(const Expr *expr, bool callback, llvm::SMLoc at) {
   const Type *type = expr->type;
-  // A Promise nothing waits for (sema_async.cpp).
   if (type && Checker::holdsPromises(type)) {
     checker_.asyncChecker().checkDiscardedPromise(expr, callback, at);
     return;
   }
-  // `r = ok(1)` keeps it.
   if (!type || !Checker::holdsResults(type) || isa<AssignExpr>(expr)) {
     return;
   }
-  // What pop(), shift() and splice() take out of an array was kept there,
-  // and is removed on purpose; reverse() and the like give the array itself.
   auto *call = dyn_cast<CallExpr>(expr);
   if (call && (call->builtin == Builtin::ArrPop || call->builtin == Builtin::ArrShift ||
                call->builtin == Builtin::ArrSplice)) {
     return;
   }
   if (!type->nonOptional()->isResult()) {
-    // New Results nobody takes: `files.map(f => save(f))`.
     if (call && (call->builtin == Builtin::ArrMap || call->builtin == Builtin::ArrFlatMap)) {
       checker_.diags_.error(expr->loc(),
                             "the Results are not used, so errors in them would go unchecked; "
@@ -347,10 +327,6 @@ void ResultChecker::addResultFacts(const Expr *cond, Checker::Flow &whenTrue,
   err.okResults.erase(name->var);
 }
 
-// `Result.fromThrowable(f, toError?)`: a function with the parameters of f
-// that calls it and gives what it returns as an Ok, and what it throws as an
-// Err, an Error or what toError makes of it. f and toError are evaluated once,
-// here (see Lowering::emitFromThrowable).
 Expr *ResultChecker::checkFromThrowable(CallExpr *call, llvm::SMLoc loc) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call) ||
@@ -371,7 +347,6 @@ Expr *ResultChecker::checkFromThrowable(CallExpr *call, llvm::SMLoc loc) {
                           "'fromThrowable' takes a function, found '" + fnType->name() + "'");
     return call;
   }
-  // An async function throws nothing: its errors reject its Promise.
   if (fnType->ret()->isPromise()) {
     checker_.diags_.error(fn->loc(),
                           "'fromThrowable' of a function that gives a Promise would give an Ok "
@@ -384,8 +359,6 @@ Expr *ResultChecker::checkFromThrowable(CallExpr *call, llvm::SMLoc loc) {
     Checker::Signature sig;
     sig.params = {checker_.errorClass_->type};
     sig.minArgs = 1;
-    // It is kept in the function made here, so an arrow's environment
-    // cannot live on the stack (as checkFunctionArg would have it).
     Expr *&toError = call->args[1];
     if (auto *fe = dyn_cast<FunctionExpr>(toError)) {
       toError = checker_.closureChecker().checkFunctionExpr(fe, &sig);
@@ -420,4 +393,4 @@ Expr *ResultChecker::checkFromThrowable(CallExpr *call, llvm::SMLoc loc) {
   return call;
 }
 
-} // namespace tz
+}

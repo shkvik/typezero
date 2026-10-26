@@ -44,4 +44,4 @@ int RunCommand::run(const Args &args) const {
   return code;
 }
 
-} // namespace tz
+}

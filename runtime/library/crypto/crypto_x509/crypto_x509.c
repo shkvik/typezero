@@ -1,6 +1,3 @@
-// The full layer (docs/crypto.md, section 3): X509Certificate, as node reads certificates with
-// OpenSSL and words what it finds in them.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
@@ -36,7 +33,6 @@ static void certificate_drop(void *object) {
 
 static const TzLayout certificate_layout = TZ_CRYPTO_LAYOUT(certificate_drop, "X509Certificate");
 
-// new X509Certificate(buffer): PEM or DER, a string or bytes.
 Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   TzCryptoData d;
   if (!tz_crypto_data(&d, type, value, TZ_ENC_UTF8, "buffer")) {
@@ -63,7 +59,6 @@ Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   return c;
 }
 
-// What a memory BIO holds, as a string, and frees it.
 static void bio_text(TzStr *out, BIO *bio) {
   char *data = NULL;
   long n = BIO_get_mem_data(bio, &data);
@@ -71,7 +66,6 @@ static void bio_text(TzStr *out, BIO *bio) {
   BIO_free(bio);
 }
 
-// subject and issuer: a line for each part, `CN=example.com`, as node prints them.
 static void name_text(TzStr *out, const X509_NAME *name) {
   BIO *bio = BIO_new(BIO_s_mem());
   X509_NAME_print_ex(bio, name, 0,
@@ -88,7 +82,6 @@ void tz_openssl_x509_issuer(TzStr *out, const Certificate *c) {
   name_text(out, X509_get_issuer_name(c->cert));
 }
 
-// validFrom and validTo: `Jan  1 00:00:00 2026 GMT`.
 static void time_text(TzStr *out, const ASN1_TIME *t) {
   BIO *bio = BIO_new(BIO_s_mem());
   ASN1_TIME_print(bio, t);
@@ -103,14 +96,12 @@ void tz_openssl_x509_valid_to(TzStr *out, const Certificate *c) {
   time_text(out, X509_get0_notAfter(c->cert));
 }
 
-// validFromDate and validToDate: the time in milliseconds, of which the program makes a Date.
 static double time_ms(const ASN1_TIME *t) {
   struct tm tm;
   if (!ASN1_TIME_to_tm(t, &tm)) {
     return 0.0 / 0.0;
   }
   int64_t y = tm.tm_year + 1900, m = tm.tm_mon + 1;
-  // Days since 1970 of the civil date (Howard Hinnant's days_from_civil).
   y -= m <= 2;
   int64_t era = (y >= 0 ? y : y - 399) / 400;
   int64_t yoe = y - era * 400;
@@ -129,7 +120,6 @@ double tz_openssl_x509_valid_to_date(const Certificate *c) {
   return time_ms(X509_get0_notAfter(c->cert));
 }
 
-// serialNumber: hex digits in upper case.
 void tz_openssl_x509_serial_number(TzStr *out, const Certificate *c) {
   BIGNUM *bn = ASN1_INTEGER_to_BN(X509_get0_serialNumber(c->cert), NULL);
   char *hex = bn ? BN_bn2hex(bn) : NULL;
@@ -138,7 +128,6 @@ void tz_openssl_x509_serial_number(TzStr *out, const Certificate *c) {
   BN_free(bn);
 }
 
-// fingerprint (SHA-1), fingerprint256 and fingerprint512: `AB:CD:...`.
 void tz_openssl_x509_fingerprint(TzStr *out, const Certificate *c, int32_t bits) {
   const EVP_MD *md = bits == 512 ? EVP_sha512() : bits == 256 ? EVP_sha256() : EVP_sha1();
   unsigned char digest[EVP_MAX_MD_SIZE];
@@ -157,7 +146,6 @@ void tz_openssl_x509_fingerprint(TzStr *out, const Certificate *c, int32_t bits)
   *out = tz_str_from_ascii(text, o);
 }
 
-// subjectAltName: `DNS:example.com, IP Address:127.0.0.1`, or undefined without one.
 int32_t tz_openssl_x509_subject_alt_name(TzStr *out, const Certificate *c) {
   GENERAL_NAMES *names =
       (GENERAL_NAMES *)X509_get_ext_d2i(c->cert, NID_subject_alt_name, NULL, NULL);
@@ -188,7 +176,6 @@ int32_t tz_openssl_x509_subject_alt_name(TzStr *out, const Certificate *c) {
   return 1;
 }
 
-// infoAccess: a line for each access method, `OCSP - URI:http://...`, or undefined.
 int32_t tz_openssl_x509_info_access(TzStr *out, const Certificate *c) {
   AUTHORITY_INFO_ACCESS *info =
       (AUTHORITY_INFO_ACCESS *)X509_get_ext_d2i(c->cert, NID_info_access, NULL, NULL);
@@ -211,7 +198,6 @@ int32_t tz_openssl_x509_info_access(TzStr *out, const Certificate *c) {
   return 1;
 }
 
-// keyUsage: the extended key usages as OIDs, or undefined (NULL).
 TzArray *tz_openssl_x509_key_usage(const Certificate *c) {
   EXTENDED_KEY_USAGE *usage =
       (EXTENDED_KEY_USAGE *)X509_get_ext_d2i(c->cert, NID_ext_key_usage, NULL, NULL);
@@ -232,7 +218,6 @@ TzArray *tz_openssl_x509_key_usage(const Certificate *c) {
 
 int32_t tz_openssl_x509_ca(const Certificate *c) { return X509_check_ca(c->cert) == 1; }
 
-// raw: the DER bytes.
 TzBytes *tz_openssl_x509_raw(const Certificate *c) {
   unsigned char *der = NULL;
   int n = i2d_X509(c->cert, &der);
@@ -242,14 +227,12 @@ TzBytes *tz_openssl_x509_raw(const Certificate *c) {
   return b;
 }
 
-// toString() and toJSON(): the PEM text.
 void tz_openssl_x509_pem(TzStr *out, const Certificate *c) {
   BIO *bio = BIO_new(BIO_s_mem());
   PEM_write_bio_X509(bio, c->cert);
   bio_text(out, bio);
 }
 
-// publicKey: a KeyObject of the key of the certificate.
 TzKey *tz_openssl_key_of(void *pkey, int private_key);
 
 TzKey *tz_openssl_x509_public_key(const Certificate *c) {
@@ -262,9 +245,6 @@ TzKey *tz_openssl_x509_public_key(const Certificate *c) {
   return tz_openssl_key_of(pkey, 0);
 }
 
-// The flags of checkHost and checkEmail from their options: `subject` (0 'default', 1 'always',
-// 2 'never') and the wildcard options, which `has` says were given (1 wildcards, 2
-// partialWildcards, 4 multiLabelWildcards, 8 singleLabelSubdomains).
 static unsigned int check_flags(int32_t subject, int32_t has, int32_t wildcards, int32_t partial,
                                 int32_t multi, int32_t single) {
   unsigned int flags = 0;
@@ -289,7 +269,6 @@ static unsigned int check_flags(int32_t subject, int32_t has, int32_t wildcards,
   return flags;
 }
 
-// checkHost(name, options): the name of the certificate that matched, or undefined.
 int32_t tz_openssl_x509_check_host(TzStr *out, const Certificate *c, void *obj, uint64_t meta,
                                    int32_t subject, int32_t has, int32_t wildcards, int32_t partial,
                                    int32_t multi, int32_t single) {
@@ -333,7 +312,6 @@ int32_t tz_openssl_x509_check_ip(TzStr *out, const Certificate *c, void *obj, ui
   return ok;
 }
 
-// checkIssued(otherCert): whether the other one issued this one.
 int32_t tz_openssl_x509_check_issued(const Certificate *c, const Certificate *issuer) {
   int ok = X509_check_issued(issuer->cert, c->cert) == X509_V_OK;
   ERR_clear_error();
@@ -353,7 +331,6 @@ int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key
   return ok;
 }
 
-// verify(publicKey): whether the key signed the certificate.
 int32_t tz_openssl_x509_verify(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PUBLIC) {
     tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected public.",

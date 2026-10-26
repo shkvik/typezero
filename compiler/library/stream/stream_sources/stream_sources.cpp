@@ -49,8 +49,6 @@ Expr *StreamSources::checkFsStreamFunction(CallExpr *call, FunctionDecl *decl, l
   Expr *path = checker_.argumentChecker().checkArg(call->args[0], Type::string());
   Expr *opts = nullptr;
   Expr *encoding = nullptr;
-  // The encoding gives strings: written in place of the options, or among
-  // them, as a literal (docs/streams.md, section 2).
   bool text = false;
   if (call->args.size() == 2) {
     Expr *arg = call->args[1];
@@ -98,7 +96,7 @@ Expr *StreamSources::processStream(MemberExpr *member) {
   bool in = name == "stdin";
   llvm::StringRef fn = in ? "processStdin" : "processStdout";
   if (!checker_.libFunctions_.lookup(fn)) {
-    return nullptr; // not used as a stream (see the loader)
+    return nullptr;
   }
   llvm::SMLoc loc = member->loc();
   std::vector<Expr *> args;
@@ -111,7 +109,6 @@ Expr *StreamSources::processStream(MemberExpr *member) {
   call->type = Type::error();
   std::vector<bool> given(call->args.size(), true);
   Expr *stream = checker_.eventTargetChecker().callLibraryFunction(call, fn, {}, given, loc);
-  // After process.stdin.setEncoding().
   if (in && !checker_.streamViews_.empty()) {
     Checker::FieldPath path;
     path.var = processStdinVar();
@@ -165,15 +162,12 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return call;
   }
   std::vector<bool> given{true, true};
-  // A string or a Buffer: one chunk.
   if (type->isString() || type->isStringLiteral() || type->isBuffer()) {
     const Type *chunk = type->isBuffer() ? type : Type::string();
     call->args = {checker_.typeRelations().coerce(source, chunk), options};
     return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromValue", {chunk},
                                                              given, loc);
   }
-  // An async iterable: an async generator, or an object with
-  // `[Symbol.asyncIterator]()` (a stream among them).
   if (type->isAsyncIterator()) {
     call->args = {source, options};
     return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromAsyncIterator",
@@ -185,7 +179,6 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
     return checker_.eventTargetChecker().callLibraryFunction(call, "streamFromAsyncIterator",
                                                              {async->type->yielded()}, given, loc);
   }
-  // Any other iterable: an array, a Set, a generator...
   Expr *iterator = checker_.streamPipeline().valuesIteratorOf(source);
   if (!iterator) {
     checker_.diags_.error(source->loc(),
@@ -200,4 +193,4 @@ Expr *StreamSources::checkStreamFrom(CallExpr *call, MemberExpr *member) {
                                                            {iterator->type->yielded()}, given, loc);
 }
 
-} // namespace tz
+}

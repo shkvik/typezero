@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// `label: body`, a target of `break label` and, for a loop, `continue label`.
 struct LabeledStmt : Stmt {
   LabeledStmt(llvm::SMLoc loc, llvm::StringRef label, Stmt *body)
       : Stmt(Kind::Labeled, loc), label(label), body(body) {}
@@ -14,4 +13,4 @@ struct LabeledStmt : Stmt {
   Stmt *body;
 };
 
-} // namespace tz
+}

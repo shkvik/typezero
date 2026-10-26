@@ -46,7 +46,7 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
       }
       out.push_back(scanner_.result(m));
     };
-    if (fn->impl) { // what a decorator made of it runs instead
+    if (fn->impl) {
       scanner_.store(receiver);
       scanner_.storeStmts().bindArgs(nullptr, args);
       return;
@@ -58,8 +58,6 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     }
   };
   if (c->superCall && !member) {
-    // `super(args)`: the constructor of the class extended, and the
-    // initializers, with this object.
     const FunctionDecl *ctor = c->method ? c->method->decl : nullptr;
     scanner_.storeStmts().bindArgs(ctor, args);
     StoreScanner::Sources self =
@@ -103,7 +101,6 @@ StoreScanner::Sources StoreCalls::call(const CallExpr *c) {
     out.push_back(scanner_.result(c->func->decl));
     return out;
   }
-  // Through a function value, or a method of an interface: code not known.
   scanner_.store(receiver);
   scanner_.storeStmts().bindArgs(nullptr, args);
 
@@ -116,9 +113,6 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
   if (scanner_.isSite_(c)) {
     out.push_back(scanner_.node({StoreScanner::Kind::Site, c}));
   }
-  // A callback that gets the receiver: an arrow written there gets it in
-  // its third parameter (forEach of an array or a map...); one known only
-  // as a value may keep it.
   for (const Expr *arg : c->args) {
     if (!arg->type || !arg->type->nonOptional()->isFunction()) {
       continue;
@@ -134,7 +128,6 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
   case Builtin::ArrReverse:
   case Builtin::ArrSort:
   case Builtin::ArrSortWith:
-    // The array itself is the result.
     out.insert(out.end(), receiver.begin(), receiver.end());
     break;
   case Builtin::ConsoleLog:
@@ -180,8 +173,6 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
   case Builtin::SetAdd:
   case Builtin::RecordSet:
   case Builtin::RecordNullishSet:
-    // The values go into the receiver (or a new array), which they do
-    // not make stored; set() and add() give the receiver back.
     for (const StoreScanner::Sources &a : args) {
       scanner_.store(a);
     }
@@ -191,7 +182,6 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
     break;
   case Builtin::ArrMap:
   case Builtin::ArrFlatMap:
-    // What the callback gives goes into the new array.
     for (const Expr *arg : c->args) {
       if (auto *fe = llvm::dyn_cast<FunctionExpr>(arg)) {
         scanner_.edge(scanner_.stored(), scanner_.result(fe->fn));
@@ -209,4 +199,4 @@ StoreScanner::Sources StoreCalls::builtin(const CallExpr *c, const StoreScanner:
   return out;
 }
 
-} // namespace tz
+}

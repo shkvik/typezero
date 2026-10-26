@@ -25,8 +25,6 @@ namespace tz {
 
 namespace {
 
-// Calls `visit` on the value of every `return` in `stmt`, outside the
-// functions declared in it.
 void forEachReturn(Stmt *stmt, llvm::function_ref<void(Expr *)> visit) {
   if (!stmt) {
     return;
@@ -73,8 +71,6 @@ void forEachReturn(Stmt *stmt, llvm::function_ref<void(Expr *)> visit) {
   }
 }
 
-// The direct calls `value` returns as they are: itself, the branches of
-// `?:`, and the right side of `&&`, `||` and `??`.
 void tailCallsOf(Expr *value, std::vector<CallExpr *> &calls) {
   if (auto *call = dyn_cast<CallExpr>(value)) {
     if (call->func && call->builtin == Builtin::None) {
@@ -92,9 +88,6 @@ void tailCallsOf(Expr *value, std::vector<CallExpr *> &calls) {
   }
 }
 
-// In a function that returns nothing, the statements that are calls after
-// which the function ends: the last statement of the body, or one right
-// before a `return`, also in the branches of an `if` there.
 void tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts) {
   if (auto *block = dyn_cast<BlockStmt>(stmt)) {
     for (size_t i = 0; i < block->body.size(); ++i) {
@@ -116,7 +109,6 @@ void tailStatementsOf(Stmt *stmt, bool tail, std::vector<Stmt *> &stmts) {
   }
 }
 
-// The calls in tail position of `fn`.
 std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn) {
   std::vector<CallExpr *> calls;
   forEachReturn(fn->body, [&](Expr *value) { tailCallsOf(value, calls); });
@@ -131,20 +123,15 @@ std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn) {
   return calls;
 }
 
-} // namespace
+}
 
 TailCallLowerer::TailCallLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
-  // The tail calls between them, to a function with the same return type:
-  // converting the result would run after the call.
   std::vector<std::vector<size_t>> calls(functions.size());
   std::vector<bool> self(functions.size(), false);
   for (size_t i = 0; i < functions.size(); ++i) {
     FunctionDecl *fn = functions[i];
-    // A generator's `return` gives a value to whoever iterates it, and
-    // calling one runs none of its code; an async function's settles its
-    // promise. A method a decorator may replace is called through its stub.
     if (!fn->body || !fn->sym || !fn->sym->ret || fn->isGenerator || fn->isAsync || fn->impl) {
       continue;
     }
@@ -162,7 +149,6 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
     }
   }
 
-  // Tarjan's algorithm finds the cycles.
   std::vector<int> index(functions.size(), -1), low(functions.size(), 0);
   std::vector<bool> onStack(functions.size(), false);
   std::vector<size_t> stack;
@@ -199,8 +185,6 @@ void TailCallLowerer::findTailGroups(llvm::ArrayRef<FunctionDecl *> functions) {
       group.members.push_back(functions[member]);
       lowering_.tailGroupOf_[functions[member]] = &group;
     }
-    // The tail calls between them are jumps, which do not grow the stack
-    // (see Lowering::analyzeThrows).
     for (FunctionDecl *member : group.members) {
       for (CallExpr *call : tailCallsIn(member)) {
         if (llvm::is_contained(group.members, call->func->decl) &&
@@ -242,7 +226,6 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     function = closure ? lowering_.closureLowerer().closureCode(first)
                        : lowering_.functions_.lookup(first->sym);
   } else {
-    // (env, which, the parameters of every member) -> the return type.
     std::vector<llvm::Type *> params;
     if (closure) {
       params.push_back(lowering_.builder_.getPtrTy());
@@ -271,7 +254,6 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     lowering_.envLowerer().bindCaptures(first);
   }
   llvm::Value *which = merged ? function->getArg(next++) : nullptr;
-  // The arguments live in slots, which a tail call fills before it jumps.
   group.slots.assign(group.members.size(), {});
   group.starts.clear();
   for (size_t k = 0; k < group.members.size(); ++k) {
@@ -326,7 +308,6 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     return;
   }
 
-  // Each member's own function calls the cycle's.
   for (size_t k = 0; k < group.members.size(); ++k) {
     FunctionDecl *member = group.members[k];
     llvm::Function *own = closure ? lowering_.closureLowerer().closureCode(member)
@@ -373,8 +354,6 @@ bool TailCallLowerer::hasTailCall(Expr *value) const {
   return llvm::any_of(calls, [&](CallExpr *call) { return tailCall(call) != nullptr; });
 }
 
-// `return value` where a tail call is among what value may give: the parts
-// that decide which are evaluated, then each way returns, or jumps.
 void TailCallLowerer::emitTailReturn(Expr *value) {
   if (CallExpr *call = tailCall(value)) {
     emitTailJump(call);
@@ -391,7 +370,7 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     lowering_.builder_.CreateCondBr(test, thenBlock, elseBlock);
     lowering_.functionFrame().switchTo(thenBlock);
     emitTailReturn(cond->thenExpr);
-    lowering_.builder_.CreateUnreachable(); // ends the dead block after the return
+    lowering_.builder_.CreateUnreachable();
     lowering_.functionFrame().switchTo(elseBlock);
     emitTailReturn(cond->elseExpr);
     return;
@@ -409,8 +388,6 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
   bool logical = bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
   llvm::Value *lhs = nullptr;
   if (logical) {
-    // The left side decides when falsy for `&&`, truthy for `||`, and is
-    // then the result.
     bool isAnd = bin->op == BinaryOp::LogAnd;
     lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
     llvm::Value *truth = lowering_.truthLowerer().emitTruth(lhs, bin->lhs->type);
@@ -421,7 +398,6 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(result);
   } else if (bin->lhs->type->isOptional()) {
-    // `a ?? f(x)`: a when it holds a value.
     lhs = lowering_.exprLowerer().emitExpr(bin->lhs);
     lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(lhs, bin->lhs->type),
                                     decidedBlock, restBlock);
@@ -432,12 +408,11 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(result);
   } else {
-    // The left side is never undefined.
     lowering_.stmtLowerer().emitReturnValue(value);
     return;
   }
   lowering_.functionFrame().switchTo(restBlock);
-  if (logical) { // undefined after `??` holds nothing to release
+  if (logical) {
     lowering_.refCounts().releaseValue(lhs, bin->lhs->type);
   }
   emitTailReturn(bin->rhs);
@@ -446,8 +421,6 @@ void TailCallLowerer::emitTailReturn(Expr *value) {
 void TailCallLowerer::emitTailJump(CallExpr *call) {
   size_t k = size_t(llvm::find(lowering_.tailGroup_->members, call->func->decl) -
                     lowering_.tailGroup_->members.begin());
-  // The callee owns its arguments, as for any call; then this call is done
-  // with its own variables.
   std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
   const FuncSymbol *func = call->func;
   for (size_t i = args.size(); i < func->params.size(); ++i) {
@@ -461,4 +434,4 @@ void TailCallLowerer::emitTailJump(CallExpr *call) {
   lowering_.functionFrame().startDeadBlock();
 }
 
-} // namespace tz
+}

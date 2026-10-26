@@ -33,15 +33,11 @@ std::string toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-// A problem with the text of a JSON file, and where it is (a byte offset).
 struct JsonProblem {
   std::string message;
   size_t offset = 0;
 };
 
-// Checks the text of a file that embedJson reads, with the grammar of
-// JSON.parse (runtime/library/json/json/json.c), so that the program cannot
-// fail to parse it.
 JsonProblem checkJsonText(llvm::StringRef s) {
   size_t i = 0, n = s.size();
   auto whitespace = [&] {
@@ -58,7 +54,6 @@ JsonProblem checkJsonText(llvm::StringRef s) {
     return i > start;
   };
   auto problem = [&](std::string message) { return JsonProblem{std::move(message), i}; };
-  // A string from its opening quote; empty on success.
   auto string = [&]() -> std::string {
     ++i;
     for (;;) {
@@ -110,7 +105,7 @@ JsonProblem checkJsonText(llvm::StringRef s) {
     return "";
   };
 
-  std::vector<char> open; // '[' and '{' around the value being read
+  std::vector<char> open;
   for (;;) {
     whitespace();
     if (i >= n) {
@@ -176,7 +171,6 @@ JsonProblem checkJsonText(llvm::StringRef s) {
       return problem(u >= 0x21 && u < 0x7F ? "expected a value, found '" + std::string(1, c) + "'"
                                            : std::string("expected a value"));
     }
-    // The value ends the arrays and objects it completes.
     for (;;) {
       whitespace();
       if (open.empty()) {
@@ -206,8 +200,6 @@ JsonProblem checkJsonText(llvm::StringRef s) {
   }
 }
 
-// A class among `type`, its arrays and its fields with a method toJSON,
-// which JSON.stringify in JavaScript would call; null if none.
 const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen) {
   while (type->isOptional() || type->isArray()) {
     type = type->inner();
@@ -218,7 +210,6 @@ const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const T
     }
     return classWithToJson(type->errType(), seen);
   }
-  // A Record writes its values; a Map and a Set write `{}`.
   if (type->isRecord()) {
     return classWithToJson(type->valueType(), seen);
   }
@@ -241,14 +232,12 @@ const ClassDecl *classWithToJson(const Type *type, llvm::SmallPtrSetImpl<const T
   return nullptr;
 }
 
-// Whether JSON.stringify of a value of `type` may give undefined: for
-// undefined itself, a function, or a `T | undefined`.
 bool mayStringifyToUndefined(const Type *type) {
   return type->isUndefined() || type->isOptional() || type->isFunction() || type->isNever() ||
          type->isUnknown();
 }
 
-} // namespace
+}
 
 JsonStaticChecker::JsonStaticChecker(Checker &checker) : checker_(checker) {}
 
@@ -287,8 +276,7 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
                                            "'JSON.parse<User>(text)'");
       return call;
     }
-    const Type *target =
-        checker_.typeResolver().resolveType(member->typeArgs[0], /*allowVoid=*/false);
+    const Type *target = checker_.typeResolver().resolveType(member->typeArgs[0], false);
     if (!checker_.jsonTypeChecker().checkFromJsonType(target, member->typeArgs[0].loc,
                                                       "JSON.parse")) {
       return call;
@@ -309,8 +297,6 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
     return call;
   }
-  // JSON.stringify(value, replacer, space): the replacer may only be null or
-  // undefined, and is dropped; the space is a number or a string.
   Expr *value = call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
   bool ok = !value->type->isError();
   if (value->type->isVoid()) {
@@ -403,11 +389,10 @@ bool JsonStaticChecker::readEmbedded(CallExpr *call, llvm::StringRef fn, std::st
   llvm::StringRef source = id ? sources.getMemoryBuffer(id)->getBufferIdentifier() : "";
   llvm::SmallString<256> path8(llvm::sys::path::parent_path(source));
   llvm::sys::path::append(path8, shown);
-  llvm::sys::path::remove_dots(path8, /*remove_dot_dot=*/true);
+  llvm::sys::path::remove_dots(path8, true);
   llvm::sys::path::native(path8);
   full = std::string(path8);
-  auto buffer =
-      llvm::MemoryBuffer::getFile(full, /*IsText=*/false, /*RequiresNullTerminator=*/false);
+  auto buffer = llvm::MemoryBuffer::getFile(full, false, false);
   if (!buffer) {
     checker_.diags_.error(arg->loc(),
                           "cannot read '" + shown + "': " + buffer.getError().message());
@@ -436,7 +421,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   }
 
   if (fn == "fromJson") {
-    // fromJson(User, j): through the constructor of a class.
     if (name->typeArgs.empty() && call->args.size() == 2) {
       return checker_.reflectChecker().checkFromJsonClass(call, name);
     }
@@ -450,13 +434,11 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     if (!checker_.argumentChecker().checkArity(call, name->loc(), 1, 1)) {
       return call;
     }
-    // A `Json | undefined` too: undefined is for an optional type to take.
     Expr *arg = checker_.exprChecker().checkExpr(call->args[0], Type::json());
     call->args[0] = checker_.typeRelations().coerce(
         arg, arg->type->isOptional() || arg->type->isUndefined() ? Type::optional(Type::json())
                                                                  : Type::json());
-    const Type *target =
-        checker_.typeResolver().resolveType(name->typeArgs[0], /*allowVoid=*/false);
+    const Type *target = checker_.typeResolver().resolveType(name->typeArgs[0], false);
     if (!checker_.jsonTypeChecker().checkFromJsonType(target, name->typeArgs[0].loc, "fromJson")) {
       return call;
     }
@@ -479,8 +461,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     return call;
   }
   llvm::StringRef text(bytes);
-  // A file saved with a byte order mark: require() of a JSON file skips it
-  // in node too.
   if (fn == "embedJson") {
     text.consume_front("\xEF\xBB\xBF");
   }
@@ -497,7 +477,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
     return lit;
   }
   if (JsonProblem problem = checkJsonText(text); !problem.message.empty()) {
-    // The line and the column in the file, which a note shows.
     size_t line = 1, column = 1;
     for (size_t i = 0; i < problem.offset && i < text.size(); ++i) {
       if (text[i] == '\n') {
@@ -518,8 +497,6 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
                          "the JSON is wrong here");
     return call;
   }
-  // The text, and the file it came from: one file gives one value, whichever
-  // file of the program embeds it (see Lowering::emitJsonCall).
   llvm::SMLoc loc = call->args[0]->loc();
   auto *lit = checker_.ctx_.make<StringLitExpr>(loc, std::move(content));
   lit->type = Type::string();
@@ -534,4 +511,4 @@ Expr *JsonStaticChecker::checkJsonGlobal(CallExpr *call, NameExpr *name) {
   return call;
 }
 
-} // namespace tz
+}

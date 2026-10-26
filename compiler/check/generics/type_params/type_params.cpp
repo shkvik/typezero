@@ -23,14 +23,9 @@ namespace tz {
 
 namespace {
 
-// Whether `type` holds an object type that mentions one of `params`: a
-// class made from a generic one, an interface made from a generic one, a
-// literal type. Objects of such types for T = User and for T = Post are
-// told apart by their descriptors, unlike arrays of them.
 bool mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
                       llvm::SmallPtrSetImpl<const Type *> &seen) {
   switch (type->kind()) {
-  // `keyof T`, `T[K]`: of the very type T.
   case Type::Kind::Param:
     return type->typeOp() != TypeOp::None && mentionsAnyOf(type, params);
   case Type::Kind::Optional:
@@ -59,7 +54,7 @@ bool mentionsInObject(const Type *type, llvm::ArrayRef<const Type *> params,
   }
 }
 
-} // namespace
+}
 
 TypeParams::TypeParams(Checker &checker) : checker_(checker) {}
 
@@ -92,28 +87,22 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
       bool ok = true;
       if (ref.kind == TypeRef::Kind::Array && ref.args[0].kind == TypeRef::Kind::Name &&
           ref.args[0].name == "unknown") {
-        // `A extends unknown[]`: the types of the parameters of some
-        // function, a list of them (section 9); `unknown[]` means that only
-        // here.
         created[i]->setList();
       } else if (ref.kind == TypeRef::Kind::Name && ref.name == "unknown") {
-        // Any type at all, which is what no constraint says.
       } else if (ref.kind == TypeRef::Kind::Union) {
-        // `T extends string | int`: an instance for each.
         for (const TypeRef &member : ref.args) {
-          const Type *type = checker_.typeResolver().resolveType(member, /*allowVoid=*/false);
+          const Type *type = checker_.typeResolver().resolveType(member, false);
           ok &= !type->isError();
           if (!llvm::is_contained(alternatives, type)) {
             alternatives.push_back(type);
           }
         }
-        // `T extends int | undefined` is one type.
         auto isUndefined = [](const Type *t) { return t->isUndefined(); };
         if (ok && alternatives.size() == 2 && llvm::any_of(alternatives, isUndefined)) {
           constraint = Type::optional(alternatives[alternatives[0]->isUndefined() ? 1 : 0]);
         }
       } else {
-        constraint = checker_.typeResolver().resolveType(ref, /*allowVoid=*/false);
+        constraint = checker_.typeResolver().resolveType(ref, false);
         ok &= !constraint->isError();
       }
       llvm::ArrayRef<const Type *> all = constraint ? llvm::ArrayRef<const Type *>(constraint)
@@ -135,7 +124,7 @@ std::vector<const Type *> TypeParams::declareTypeParams(llvm::ArrayRef<TypeParam
     }
     const Type *fallback = nullptr;
     if (decl.defaultType) {
-      fallback = checker_.typeResolver().resolveType(*decl.defaultType, /*allowVoid=*/false);
+      fallback = checker_.typeResolver().resolveType(*decl.defaultType, false);
       if (!fallback->isError() && !satisfies(fallback, params[i])) {
         checker_.diags_.error(decl.defaultType->loc,
                               "the default '" + fallback->name() + "' of '" + decl.name +
@@ -173,7 +162,6 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
   auto sub = [&](const Type *t) { return substitute(t, params, args); };
   switch (type->kind()) {
   case Type::Kind::Param: {
-    // `T[K]` and the other computations, once their operands are known.
     if (type->typeOp() != TypeOp::None) {
       std::vector<const Type *> operands;
       for (const Type *t : type->operands()) {
@@ -182,7 +170,7 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       return checker_.typeOperators().evalTypeOp(type, operands);
     }
     const Type *arg = args[size_t(llvm::find(params, type) - params.begin())];
-    return arg ? arg : type; // not known yet
+    return arg ? arg : type;
   }
   case Type::Kind::Optional:
     return Type::optional(sub(type->inner()));
@@ -210,36 +198,28 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
   }
   case Type::Kind::Promise:
     return Type::promise(sub(type->promised()));
-  case Type::Kind::ClassRef: // `Constructor<T>`
+  case Type::Kind::ClassRef:
     return type->isConstructor() ? Type::constructorOf(sub(type->constructed())) : type;
   case Type::Kind::Object: {
     if (type->isAsyncIterator()) {
       return Type::asyncIterator(sub(type->yielded()), sub(type->returned()), sub(type->sent()));
     }
-    // `MethodDescriptor<A, R>` keeps its name.
     if (auto origin = checker_.descriptorOrigins_.find(type);
         origin != checker_.descriptorOrigins_.end()) {
       auto [list, ret] = origin->second;
       return checker_.decoratorChecker().methodDescriptorType(sub(list), sub(ret));
     }
-    // A class made from a generic one is the instance for the other
-    // arguments.
     if (const ClassDecl *cls = type->classDecl(); cls && !type->typeArgs().empty()) {
       std::vector<const Type *> newArgs;
       for (const Type *a : type->typeArgs()) {
         newArgs.push_back(sub(a));
       }
-      // Where the instance is first needed in the program, if anywhere, is
-      // where its errors are reported (see instantiateClass).
       auto *generic = const_cast<ClassDecl *>(cls->generic ? cls->generic : cls);
       ClassDecl *inst = checker_.genericClassInstantiator().instantiateClass(
           generic, std::move(newArgs), checker_.instanceLoc_);
       return inst ? inst->type : Type::error();
     }
-    // An instance of a generic alias is that alias with other arguments; a
-    // recursive one cannot be rebuilt field by field.
     if (auto origin = checker_.aliasOrigins_.find(type); origin != checker_.aliasOrigins_.end()) {
-      // Copied: substituting may add entries.
       auto [alias, oldArgs] = origin->second;
       std::vector<const Type *> newArgs;
       for (const Type *a : oldArgs) {
@@ -247,8 +227,6 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
       }
       return checker_.aliasInstantiator().instantiateAlias(alias, std::move(newArgs), alias->loc());
     }
-    // `[int, T]` stays a tuple; `[int, ...A]` takes the types A stands for,
-    // and an argument list keeps the elements that may be left out.
     if (type->isTuple()) {
       std::vector<const Type *> elements;
       std::vector<bool> spread;
@@ -284,8 +262,6 @@ const Type *TypeParams::substitute(const Type *type, llvm::ArrayRef<const Type *
 
 const Type *TypeParams::representation(const Type *type) {
   switch (type->kind()) {
-  // An iterator and a dictionary are objects of the runtime, released
-  // through their own descriptors as objects are.
   case Type::Kind::Object:
   case Type::Kind::Iterator:
   case Type::Kind::Dict:
@@ -296,11 +272,9 @@ const Type *TypeParams::representation(const Type *type) {
     return Type::array(representation(type->inner()));
   case Type::Kind::Optional:
     return Type::optional(representation(type->inner()));
-  case Type::Kind::Result: // its halves lie as such values do
+  case Type::Kind::Result:
     return Type::result(representation(type->okType()), representation(type->errType()));
   case Type::Kind::Union: {
-    // The objects of a union are one reference; the tags of the other
-    // members stay.
     std::vector<const Type *> members;
     for (const Type *m : type->members()) {
       members.push_back(representation(m));
@@ -317,7 +291,6 @@ bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<co
   if (arg->isError()) {
     return true;
   }
-  // `K extends keyof T`: with the type T stands for.
   const Type *own = param->constraint();
   if (own && !params.empty() && mentionsAnyOf(own, params)) {
     own = substitute(own, params, args);
@@ -325,7 +298,6 @@ bool TypeParams::satisfies(const Type *arg, const Type *param, llvm::ArrayRef<co
   if (own && own->isError()) {
     return true;
   }
-  // A type parameter whose constraint is as strict.
   if (arg->isParam() && arg->constraint() && own &&
       TypeRelations::isImplicitlyConvertible(arg->constraint(), own)) {
     return true;
@@ -356,17 +328,14 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
   const ClassDecl *cls = arg->classDecl();
   for (const Field &f : constraint->fields()) {
     if (const Field *have = arg->field(f.name)) {
-      // A read-only field of the constraint may be one that code changes.
       if (have->type != f.type || (have->readonly && !f.readonly)) {
         return false;
       }
       continue;
     }
-    // A method of a class, for a field of the constraint that holds a
-    // function and cannot be replaced, `greet(): string`.
     bool method = false;
     if (cls && f.readonly && f.type->isFunction()) {
-      for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, f.name, /*isStatic=*/false)) {
+      for (FunctionDecl *fn : ClassDeclarer::methodsNamed(cls, f.name, false)) {
         method |= fn->sym && fn->typeParams.empty() &&
                   checker_.returnInferrer().functionType(fn->sym) == f.type;
       }
@@ -379,8 +348,7 @@ bool TypeParams::hasMembersOf(const Type *arg, const Type *constraint) {
     if (!cls) {
       return false;
     }
-    std::vector<FunctionDecl *> methods =
-        ClassDeclarer::methodsNamed(cls, overload.name, /*isStatic=*/false);
+    std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, overload.name, false);
     for (const Type *signature : overload.signatures) {
       if (llvm::none_of(methods, [&](FunctionDecl *fn) {
             return fn->sym && checker_.returnInferrer().functionType(fn->sym) == signature;
@@ -399,26 +367,17 @@ bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
     llvm::ArrayRef<const Type *> params = generic->typeParams;
     std::vector<bool> exact(params.size(), false);
     for (size_t i = 0; i < params.size(); ++i) {
-      // The body may read the fields of an object.
       auto objectLike = [](const Type *t) { return t && t->nonOptional()->isObject(); };
       exact[i] = objectLike(params[i]->constraint()) ||
                  llvm::any_of(params[i]->alternatives(), objectLike);
-      // And iterates the type its own way: `xs: Iterable<int>`, and what it
-      // gives, `xs: Iterable<T>`; a list of the types of parameters is the
-      // parameters of the copy.
       exact[i] = exact[i] || params[i]->iterated() || params[i]->isListParam();
       for (const Type *p : params) {
         exact[i] = exact[i] || (p->iterated() && mentionsAnyOf(p->iterated(), params[i]));
       }
-      // The keys of T: `K extends keyof T`, and `T[K]`, read the fields of
-      // T by name.
       for (const Type *p : params) {
         exact[i] = exact[i] ||
                    (p != params[i] && p->constraint() && mentionsAnyOf(p->constraint(), params[i]));
       }
-      // An instance of a generic class is a class of its own, and an
-      // interface made of a generic one an interface of its own: a copy that
-      // makes or takes `Box<T>` must make and take that of its own type.
       llvm::SmallPtrSet<const Type *, 4> seen;
       for (const Type *p : generic->params) {
         exact[i] = exact[i] || (p && mentionsInObject(p, params[i], seen));
@@ -433,4 +392,4 @@ bool TypeParams::exactTypeParam(FuncSymbol *generic, size_t k) {
   return k < found->second.size() && found->second[k];
 }
 
-} // namespace tz
+}

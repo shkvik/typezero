@@ -67,19 +67,14 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
   if (!assign->op) {
     value = lowering_.exprLowerer().emitExpr(assign->value);
   } else if (type->isString()) {
-    // `s += x`: the variable's own value is borrowed unless evaluating `x`
-    // could reassign the variable.
     Lowering::Operand old{lowering_.builder_.CreateLoad(lowering_.strTy_, address), false, type};
     if (!cannotAssign(assign->value)) {
       lowering_.refCounts().retainString(old.value);
       old.owned = true;
     }
-    Lowering::Operand rhs =
-        lowering_.stringLowerer().emitConcatPart(assign->value, /*canBorrow=*/false);
+    Lowering::Operand rhs = lowering_.stringLowerer().emitConcatPart(assign->value, false);
     value = lowering_.stringLowerer().concatOperands({old, rhs});
   } else if (type->isDecimal()) {
-    // As for strings, the old value is borrowed unless evaluating the right
-    // side could reassign the variable.
     llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.decTy_, address);
     bool hold = !cannotAssign(assign->value);
     if (hold) {
@@ -90,13 +85,12 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
       lowering_.refCounts().releaseValue(old, type);
     }
   } else {
-    // As in JavaScript, the old value is read before the right side runs.
     llvm::Value *old =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(type), address);
     llvm::Value *rhs = lowering_.exprLowerer().emitExpr(assign->value);
     value = lowering_.binaryLowerer().emitArithmetic(*assign->op, old, rhs, type);
   }
-  lowering_.storeLowerer().storeVar(var, address, value, /*replacing=*/true);
+  lowering_.storeLowerer().storeVar(var, address, value, true);
   if (!needResult) {
     return nullptr;
   }
@@ -105,7 +99,6 @@ llvm::Value *AssignLowerer::emitAssign(AssignExpr *assign, bool needResult) {
   return value;
 }
 
-// `x ??= v`
 llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResult) {
   const VarSymbol *var = cast<NameExpr>(assign->target)->var;
   const Type *varType = var->type;
@@ -115,7 +108,6 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
   llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
   llvm::BasicBlock *assignBlock = lowering_.functionFrame().newBlock("nullish.assign");
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("nullish.end");
-  // A Json that holds null is replaced too, as in JavaScript.
   llvm::Value *has = varType->nonOptional()->isJson()
                          ? lowering_.jsonLowerer().jsonPresent(old)
                          : lowering_.optionalLowerer().optionalHas(old, varType);
@@ -138,7 +130,7 @@ llvm::Value *AssignLowerer::emitNullishAssign(AssignExpr *assign, bool needResul
       valueType->isOptional()
           ? value
           : lowering_.optionalLowerer().makeOptional(value, lowering_.builder_.getTrue(), varType);
-  lowering_.storeLowerer().storeVar(var, address, stored, /*replacing=*/true);
+  lowering_.storeLowerer().storeVar(var, address, stored, true);
   llvm::Value *assigned = nullptr;
   if (needResult) {
     lowering_.refCounts().retainValue(stored, varType);
@@ -170,20 +162,17 @@ llvm::Value *AssignLowerer::emitUpdate(UpdateExpr *update) {
   llvm::Value *address;
   Lowering::Operand holder{nullptr, false, nullptr};
   if (auto *keyed = dyn_cast<IndexExpr>(update->target); keyed && keyed->keyed) {
-    // `o[k]++` with a key of literals.
     holder = lowering_.refCounts().emitOperand(keyed->object, cannotAssign(keyed->index));
     address = lowering_.objectLowerer().keyedFieldAddress(
         holder.value, keyed->object->type, lowering_.exprLowerer().emitExpr(keyed->index),
         keyed->index->type);
   } else if (auto *index = dyn_cast<IndexExpr>(update->target)) {
-    // `a[i]++`: Checker proved the index in range.
     holder = lowering_.refCounts().emitOperand(index->object, cannotAssign(index->index));
     llvm::Value *position = lowering_.exprLowerer().emitExpr(index->index);
     address = lowering_.arrayLowerer().elementAddress(
         lowering_.arrayLowerer().arrayData(holder.value), update->type, position);
   } else if (auto *member = dyn_cast<MemberExpr>(update->target)) {
-    // `o.count++`: the object holds the number.
-    holder = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+    holder = lowering_.refCounts().emitOperand(member->object, true);
     address =
         lowering_.objectLayouts().fieldAddress(holder.value, member->object->type, member->name);
   } else {
@@ -225,12 +214,11 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
   case Expr::Kind::RegexLit:
   case Expr::Kind::Undefined:
   case Expr::Kind::Name:
-  case Expr::Kind::Function: // creating a closure runs none of its code
+  case Expr::Kind::Function:
     return true;
   case Expr::Kind::Template:
     return llvm::all_of(cast<TemplateExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::ArrayLit:
-    // Spreading an iterator runs a generator or the callbacks of helpers.
     return llvm::all_of(cast<ArrayLitExpr>(expr)->elements, [](const ArrayLitExpr::Element &e) {
       return cannotAssign(e.expr) && !(e.spread && e.expr->type->isIterator());
     });
@@ -259,20 +247,15 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
     return llvm::all_of(cast<SequenceExpr>(expr)->exprs, cannotAssign);
   case Expr::Kind::OptionalChain:
     return cannotAssign(cast<OptionalChainExpr>(expr)->chain);
-  case Expr::Kind::New: // a constructor runs code
+  case Expr::Kind::New:
     return !cast<NewExpr>(expr)->cls && !cast<NewExpr>(expr)->reflect &&
            llvm::all_of(cast<NewExpr>(expr)->args, cannotAssign);
   case Expr::Kind::Call: {
-    // A user function may assign to globals and fields, and so may the
-    // callback of a built-in, and a generator that next() or a consumer of
-    // an iterator runs; other built-ins only evaluate their operands (array
-    // methods change arrays, not variables).
     auto *call = cast<CallExpr>(expr);
     if (call->builtin == Builtin::None ||
         (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
         isResultCallback(call->builtin) || call->builtin == Builtin::SafeTry ||
-        call->builtin == Builtin::PromiseNew ||     // runs its executor
-        call->builtin == Builtin::ResultAsyncMap || // asyncMap of a Result runs its function
+        call->builtin == Builtin::PromiseNew || call->builtin == Builtin::ResultAsyncMap ||
         call->builtin == Builtin::ResultAsyncAndThen || call->builtin == Builtin::IterNext ||
         call->builtin == Builtin::ArrayFrom || isIteratorSink(call->builtin) ||
         call->builtin == Builtin::StrReplaceRegexFn || call->builtin == Builtin::MapForEach ||
@@ -289,13 +272,13 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
   }
   case Expr::Kind::Assign:
   case Expr::Kind::Update:
-  case Expr::Kind::Yield: // whoever iterates runs any code
-  case Expr::Kind::Await: // so do the other tasks meanwhile
-  case Expr::Kind::Class: // its static initializers run
+  case Expr::Kind::Yield:
+  case Expr::Kind::Await:
+  case Expr::Kind::Class:
     return false;
   }
 
   return false;
 }
 
-} // namespace tz
+}

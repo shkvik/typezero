@@ -131,21 +131,14 @@ llvm::StringRef libraryClassName(const ClassDecl *cls) {
 }
 
 bool knownBuiltin(Builtin b) {
-  // Families that compute values, and touch data only as builtinEffects
-  // says.
   if (b == Builtin::None || isMathBuiltin(b) || isDecimalBuiltin(b) || isIntlBuiltin(b) ||
       isResultBuiltin(b) || isDateBuiltin(b) || isRegexBuiltin(b) || isJsonBuiltin(b) ||
       isDictBuiltin(b) || isBytesBuiltin(b) || isMetaBuiltin(b)) {
     return true;
   }
-  // console, process, numbers, strings, arrays, objects and iterators.
   if (b >= Builtin::ConsoleLog && b <= Builtin::IterFind) {
     return true;
   }
-  // The modules of node and the async ones by name, and those since: a new
-  // built-in is not known until it is added here (the built-in modules
-  // written in tz, such as the server of tz:http, are described apart: see
-  // libraryCall).
   switch (b) {
   case Builtin::ErrorStack:
   case Builtin::ErrorToString:
@@ -274,4 +267,4 @@ bool knownBuiltin(Builtin b) {
   }
 }
 
-} // namespace tz::parallel
+}

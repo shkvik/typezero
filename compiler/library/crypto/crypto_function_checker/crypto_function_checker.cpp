@@ -30,7 +30,6 @@ std::string utf8Of(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::string> literalOf(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -45,7 +44,7 @@ std::optional<std::string> literalOf(const Expr *e) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 CryptoFunctionChecker::CryptoFunctionChecker(Checker &checker) : checker_(checker) {}
 
@@ -116,7 +115,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     }
     Expr *md = checker_.cryptoArgs().cryptoMd(args[0], false);
     Expr *data = checker_.cryptoArgs().cryptoData(args[1], "data", true, false, false);
-    Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, 2, fn, 6); // hex
+    Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, 2, fn, 6);
     if (!md || data->type->isError() || !encoding) {
       return call;
     }
@@ -258,7 +257,6 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!optionsAt(3, {"N", "r", "p", "maxmem", "cost", "blockSize", "parallelization"})) {
       return call;
     }
-    // N, r and p have a second name each; node rejects both together.
     static const std::pair<llvm::StringLiteral, llvm::StringLiteral> pairs[] = {
         {"N", "cost"}, {"r", "blockSize"}, {"p", "parallelization"}};
     Expr *values[3];
@@ -298,7 +296,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       type = checker_.cryptoArgs().cryptoInt(loc, which);
       name = checker_.cryptoArgs().cryptoString(loc, "");
     } else {
-      type = checker_.cryptoArgs().cryptoInt(loc, 0xffffffff); // -1: the name is known only now
+      type = checker_.cryptoArgs().cryptoInt(loc, 0xffffffff);
       name = checker_.argumentChecker().checkArg(args[0], Type::string());
     }
     if (!checker_.cryptoArgs().cryptoOptions(args[1], fn,
@@ -551,4 +549,4 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   return loosely();
 }
 
-} // namespace tz
+}

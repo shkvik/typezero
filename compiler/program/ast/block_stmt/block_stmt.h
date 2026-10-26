@@ -11,8 +11,7 @@ struct BlockStmt : Stmt {
   static bool classof(const Stmt *s) { return s->kind() == Kind::Block; }
 
   std::vector<Stmt *> body;
-  // Set by Checker: the functions declared in this block, if any.
   NestedGroup *group = nullptr;
 };
 
-} // namespace tz
+}

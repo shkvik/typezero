@@ -32,7 +32,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *lit = dyn_cast<StringLitExpr>(e)) {
     return lit->value;
@@ -44,7 +43,6 @@ std::optional<std::u16string> literalText(const Expr *e) {
   return std::nullopt;
 }
 
-// The fields of the parts and of the data the runtime makes.
 const Type *relativePartType() {
   return Type::object({{"type", Type::string(), false},
                        {"value", Type::string(), false},
@@ -52,12 +50,10 @@ const Type *relativePartType() {
                       "Intl.RelativeTimeFormatPart");
 }
 
-} // namespace
+}
 
 IntlMethodChecker::IntlMethodChecker(Checker &checker) : checker_(checker) {}
 
-// A number of format, select and toLocaleString: an int, a long, a double or
-// a decimal, as it is.
 Expr *IntlMethodChecker::checkIntlNumber(Expr *arg, llvm::StringRef method) {
   arg = checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(arg));
   const Type *type = arg->type;
@@ -224,8 +220,6 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
   return loosely();
 }
 
-// x.toLocaleString(locale?, options?) of a number or a decimal: as
-// Intl.NumberFormat formats it.
 Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call) ||
@@ -242,7 +236,6 @@ Expr *IntlMethodChecker::checkNumberLocale(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// a.localeCompare(b, locale?, options?) and s.normalize(form?).
 Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
   call->type = Type::error();
   if (checker_.callChecker().rejectSpread(call)) {
@@ -267,7 +260,6 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
     call->type = Type::string();
     return call;
   }
-  // localeCompare
   if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {
     return call;
   }
@@ -283,4 +275,4 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

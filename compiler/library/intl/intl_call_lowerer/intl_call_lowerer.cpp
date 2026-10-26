@@ -53,7 +53,6 @@ const Expr *withoutCasts(const Expr *e) {
   return e;
 }
 
-// Text known when compiling: a literal, or a template without values.
 bool isLiteralText(const Expr *e) {
   e = withoutCasts(e);
   auto *tmpl = dyn_cast<TemplateExpr>(e);
@@ -75,10 +74,6 @@ bool isLiteralValue(const Expr *e) {
          llvm::isa<BoolLitExpr, UndefinedExpr>(withoutCasts(e));
 }
 
-// The locale and the options (both may be left out), with all Checker could
-// check written out: a locale that is a literal and an object literal of
-// literals, without roundingIncrement, whose combinations only the running
-// program checks.
 bool optionsMayThrow(const Expr *locale, const Expr *options) {
   if (locale && !locale->type->isUndefined() && !isLiteralText(locale)) {
     return true;
@@ -101,8 +96,6 @@ const Expr *argAt(const CallExpr *call, size_t i) {
   return i < call->args.size() ? call->args[i] : nullptr;
 }
 
-// The locales of getCanonicalLocales and supportedLocalesOf: a literal, or
-// an array literal of them, Checker checked.
 bool localesMayThrow(const Expr *arg) {
   if (!arg) {
     return false;
@@ -116,13 +109,13 @@ bool localesMayThrow(const Expr *arg) {
   return !isLiteralValue(arg);
 }
 
-} // namespace
+}
 
 bool intlCallMayThrow(const CallExpr *call) {
   switch (call->builtin) {
-  case Builtin::IntlNew: // the kind, then the locale and the options
+  case Builtin::IntlNew:
     return optionsMayThrow(argAt(call, 1), argAt(call, 2));
-  case Builtin::IntlSupportedLocales: // the name, the locales and the options
+  case Builtin::IntlSupportedLocales:
     return localesMayThrow(argAt(call, 1)) || optionsMayThrow(nullptr, argAt(call, 2));
   case Builtin::NumToLocale:
     return optionsMayThrow(argAt(call, 0), argAt(call, 1));
@@ -134,10 +127,9 @@ bool intlCallMayThrow(const CallExpr *call) {
     return !call->args.empty() && !isLiteralText(call->args[0]);
   case Builtin::RtfFormat:
   case Builtin::RtfFormatToParts:
-    // A unit that is not one; a value that is NaN or infinite.
     return !isLiteralText(call->args[1]) || !isLiteralNumber(call->args[0]);
   case Builtin::DnOf:
-    return true; // a code that is not one, which only the runtime knows
+    return true;
   default:
     return false;
   }
@@ -151,8 +143,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
              *ptr = lowering_.builder_.getPtrTy();
   auto *member = dyn_cast<MemberExpr>(call->callee);
   bool throws = intlCallMayThrow(call);
-  // The receiver of a method, kept while the arguments from `from` on are
-  // evaluated (held, if they may throw).
   auto receiver = [&](size_t from) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
     Lowering::Operand self = lowering_.refCounts().emitOperand(
@@ -234,7 +224,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
             lowering_.processLowerer().processFunction("tz_pr_categories", ptr, {ptr}),
             {self.value});
       } else if (field.name == "useGrouping") {
-        // A string, or false.
         llvm::AllocaInst *out =
             lowering_.functionFrame().createStackSlot(lowering_.strTy_, "grouping.out");
         llvm::Value *on = lowering_.builder_.CreateICmpNE(
@@ -281,8 +270,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   }
   case Builtin::IntlBound: {
     IntlKind kind = member->object->type->intlKind();
-    llvm::Value *object =
-        lowering_.exprLowerer().emitExpr(member->object); // the environment's reference
+    llvm::Value *object = lowering_.exprLowerer().emitExpr(member->object);
     return lowering_.closureLowerer().makeFunctionValue(
         lowering_.intlLowerer().intlBoundInfo(kind, call->type), object);
   }
@@ -332,7 +320,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     Lowering::Operand a = lowering_.refCounts().emitOperand(
         call->args[0], AssignLowerer::cannotAssign(call->args[1]));
     lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(call->args[1]));
-    Lowering::Operand b = lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+    Lowering::Operand b = lowering_.refCounts().emitOperand(call->args[1], true);
     lowering_.throwLowerer().takeOperand(a);
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result =
@@ -381,7 +369,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     llvm::Value *formMeta = lowering_.builder_.getInt64(0);
     std::optional<Lowering::Operand> form;
     if (!call->args.empty()) {
-      form = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      form = lowering_.refCounts().emitOperand(call->args[0], true);
       has = lowering_.builder_.getInt32(1);
       formObj = lowering_.stringLowerer().stringObj(form->value);
       formMeta = lowering_.stringLowerer().stringMeta(form->value);
@@ -403,7 +391,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   case Builtin::RtfFormatToParts: {
     Lowering::Operand self = receiver(0);
     llvm::Value *value = lowering_.exprLowerer().emitExpr(call->args[0]);
-    Lowering::Operand unit = lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+    Lowering::Operand unit = lowering_.refCounts().emitOperand(call->args[1], true);
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result;
     if (call->builtin == Builtin::RtfFormat) {
@@ -428,7 +416,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   case Builtin::LfFormat:
   case Builtin::LfFormatToParts: {
     Lowering::Operand self = receiver(0);
-    Lowering::Operand list = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand list = lowering_.refCounts().emitOperand(call->args[0], true);
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *result =
         call->builtin == Builtin::LfFormat
@@ -444,7 +432,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   }
   case Builtin::DnOf: {
     Lowering::Operand self = receiver(0);
-    Lowering::Operand code = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand code = lowering_.refCounts().emitOperand(call->args[0], true);
     lowering_.throwLowerer().takeOperand(self);
     llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "name.out");
     llvm::Value *has = lowering_.builder_.CreateCall(
@@ -460,7 +448,7 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   }
   case Builtin::SegSegment: {
     Lowering::Operand self = receiver(0);
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     lowering_.throwLowerer().takeOperand(self);
     llvm::Value *segments = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_seg_segment", ptr, {ptr, ptr, i64}),
@@ -498,4 +486,4 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

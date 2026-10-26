@@ -9,7 +9,7 @@
 namespace tz {
 
 Expr *RegexFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                    const Type * /*expected*/) const {
+                                    const Type *) const {
   if (!checker.callChecker().isGlobalName(member->object, "RegExp")) {
     return nullptr;
   }
@@ -24,7 +24,7 @@ llvm::ArrayRef<llvm::StringLiteral> RegexFeature::typeArgFreeGlobals() const {
 }
 
 Expr *RegexFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                    const Type * /*expected*/) const {
+                                    const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isRegExp()) {
     return nullptr;
@@ -34,7 +34,6 @@ Expr *RegexFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr
 }
 
 Expr *RegexFeature::methodReceiver(Checker &checker, Expr *object) const {
-  // The methods of arrays work on a match: its captures are an array.
   if (!object->type->isMatch()) {
     return nullptr;
   }
@@ -48,4 +47,4 @@ llvm::Value *RegexFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.regexLowerer().emitRegexCall(call);
 }
 
-} // namespace tz
+}

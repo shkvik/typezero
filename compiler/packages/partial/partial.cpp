@@ -26,7 +26,7 @@ bool parsePre(llvm::StringRef text, std::vector<std::string> &out) {
   return true;
 }
 
-} // namespace
+}
 
 bool parsePartial(llvm::StringRef text, Partial &out) {
   text.consume_front("=");
@@ -53,8 +53,7 @@ bool parsePartial(llvm::StringRef text, Partial &out) {
     ++out.count;
   }
 
-  // A prerelease belongs to a full version: "1.2-beta" means nothing.
   return out.pre.empty() || out.count == 3;
 }
 
-} // namespace tz::pkg
+}

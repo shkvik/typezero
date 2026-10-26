@@ -32,7 +32,6 @@ namespace tz {
 
 namespace {
 
-// String value layout; must match runtime/core/string/string.c.
 constexpr uint64_t kStrLengthMask = (uint64_t(1) << 30) - 1;
 
 constexpr uint64_t kStrTwoByte = uint64_t(1) << 61;
@@ -41,28 +40,25 @@ constexpr uint64_t kStrRope = uint64_t(1) << 62;
 
 constexpr uint64_t kStrHeap = uint64_t(1) << 63;
 
-// A value held as a pointer, null for undefined in `T | undefined`: an
-// object, an iterator, a Json, a dictionary or a Promise.
 bool isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-} // namespace
+}
 
 EqualityLowerer::EqualityLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, const Type *type) {
   type = UnionLayout::storedType(type);
-  // Atoms are numbers, a union of objects a reference.
   if (UnionLayout::isAtomType(type) || UnionLayout::isObjectUnion(type)) {
     return lowering_.builder_.CreateICmpEQ(a, b);
   }
   if (type->isTagged()) {
     return lowering_.unionLowerer().emitUnionEqual(a, b, type);
   }
-  if (type->nonOptional()->isJson()) { // as `===`, which a switch uses
+  if (type->nonOptional()->isJson()) {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     llvm::Value *equal = lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_strict_equal",
@@ -72,9 +68,6 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
   }
   switch (type->kind()) {
   case Type::Kind::String: {
-    // Comparing with a literal needs no call when the literal is empty or
-    // inline: every one-byte string that short is inline, so equal ones have
-    // equal words.
     if (isa<llvm::Constant>(a)) {
       std::swap(a, b);
     }
@@ -102,14 +95,14 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
         lowering_.builder_.CreateCall(lowering_.rt_.strEqual, args),
         lowering_.builder_.getInt32(0));
   }
-  case Type::Kind::Array:  // the same array
-  case Type::Kind::Object: // the same object
+  case Type::Kind::Array:
+  case Type::Kind::Object:
   case Type::Kind::Iterator:
   case Type::Kind::Dict:
   case Type::Kind::Bool:
   case Type::Kind::ClassRef:
     return lowering_.builder_.CreateICmpEQ(a, b);
-  case Type::Kind::Unknown: { // as `===`
+  case Type::Kind::Unknown: {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     llvm::Value *equal = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_unknown_equal",
@@ -117,7 +110,7 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
         {a, b});
     return lowering_.builder_.CreateICmpNE(equal, lowering_.builder_.getInt32(0));
   }
-  case Type::Kind::Decimal: { // the same value: 0.30 == 0.3
+  case Type::Kind::Decimal: {
     llvm::Type *i64 = lowering_.builder_.getInt64Ty();
     llvm::Value *equal = lowering_.builder_.CreateCall(
         lowering_.decimalLowerer().decimalFunction("tz_dec_equal", lowering_.builder_.getInt32Ty(),
@@ -126,18 +119,17 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
          lowering_.decimalLowerer().decimalCoef(b), lowering_.decimalLowerer().decimalMeta(b)});
     return lowering_.builder_.CreateICmpNE(equal, lowering_.builder_.getInt32(0));
   }
-  case Type::Kind::Function: // the same function with the same environment
+  case Type::Kind::Function:
     return lowering_.builder_.CreateAnd(
         lowering_.builder_.CreateICmpEQ(lowering_.builder_.CreateExtractValue(a, 0),
                                         lowering_.builder_.CreateExtractValue(b, 0)),
         lowering_.builder_.CreateICmpEQ(lowering_.builder_.CreateExtractValue(a, 1),
                                         lowering_.builder_.CreateExtractValue(b, 1)));
   case Type::Kind::Optional: {
-    if (isReference(type->inner()) ||
-        UnionLayout::isAtomType(type->inner())) { // both null, or the same object
+    if (isReference(type->inner()) || UnionLayout::isAtomType(type->inner())) {
       return lowering_.builder_.CreateICmpEQ(a, b);
     }
-    if (type->inner()->isTagged()) { // a tag 0 is undefined
+    if (type->inner()->isTagged()) {
       return lowering_.unionLowerer().emitUnionEqual(a, b, type->inner());
     }
     llvm::Value *hasA = lowering_.builder_.CreateExtractValue(a, 1),
@@ -145,8 +137,6 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
     llvm::Value *values =
         emitValuesEqual(lowering_.builder_.CreateExtractValue(a, 0),
                         lowering_.builder_.CreateExtractValue(b, 0), type->inner());
-    // Both undefined, or both defined and equal. The zero values of undefined
-    // are valid, so comparing them is harmless.
     llvm::Value *both = lowering_.builder_.CreateAnd(hasA, hasB);
     llvm::Value *neither = lowering_.builder_.CreateNot(lowering_.builder_.CreateOr(hasA, hasB));
     return lowering_.builder_.CreateOr(neither, lowering_.builder_.CreateAnd(both, values));
@@ -156,8 +146,6 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
   }
 }
 
-// `==` and `!=`. Checker converted both sides to one type, unless one of them
-// is `undefined`.
 llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
   bool isEq = bin->op == BinaryOp::Eq;
   Expr *lhs = bin->lhs, *rhs = bin->rhs;
@@ -165,8 +153,6 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
     return lowering_.jsonLowerer().emitJsonEquality(bin);
   }
   if (lhs->type->isUndefined() || rhs->type->isUndefined()) {
-    // A side that is always undefined, such as `void f()`, still runs, in
-    // its turn.
     if (lhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(lhs);
     }
@@ -175,8 +161,8 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
       lowering_.stmtLowerer().emitDiscarded(rhs);
       return lowering_.builder_.getInt1(isEq);
     }
-    Lowering::Operand value = lowering_.refCounts().emitOperand(
-        other, /*canBorrow=*/other == rhs || AssignLowerer::cannotAssign(rhs));
+    Lowering::Operand value =
+        lowering_.refCounts().emitOperand(other, other == rhs || AssignLowerer::cannotAssign(rhs));
     if (rhs->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(rhs);
     }
@@ -192,7 +178,7 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
 
   Lowering::Operand a = lowering_.refCounts().emitOperand(lhs, AssignLowerer::cannotAssign(rhs));
   lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(rhs));
-  Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, /*canBorrow=*/true);
+  Lowering::Operand b = lowering_.refCounts().emitOperand(rhs, true);
   lowering_.throwLowerer().takeOperand(a);
   llvm::Value *equal = emitValuesEqual(a.value, b.value, lhs->type);
   lowering_.refCounts().dropOperand(a);
@@ -201,17 +187,16 @@ llvm::Value *EqualityLowerer::emitEquality(BinaryExpr *bin) {
   return isEq ? equal : lowering_.builder_.CreateNot(equal);
 }
 
-// `a ?? b`: b is evaluated only when a is undefined.
 llvm::Value *EqualityLowerer::emitNullish(BinaryExpr *bin) {
   const Type *lhsType = bin->lhs->type;
   if (lhsType->nonOptional()->isJson()) {
     return lowering_.jsonLowerer().emitJsonNullish(bin);
   }
   if (lhsType->isUndefined()) {
-    lowering_.stmtLowerer().emitDiscarded(bin->lhs); // `void f() ?? x` still runs f
+    lowering_.stmtLowerer().emitDiscarded(bin->lhs);
     return lowering_.exprLowerer().emitExpr(bin->rhs);
   }
-  if (!lhsType->isOptional() && !lhsType->isUnknown()) { // never undefined
+  if (!lhsType->isOptional() && !lhsType->isUnknown()) {
     return lowering_.exprLowerer().emitExpr(bin->lhs);
   }
 
@@ -228,7 +213,7 @@ llvm::Value *EqualityLowerer::emitNullish(BinaryExpr *bin) {
   llvm::BasicBlock *valueEnd = lowering_.builder_.GetInsertBlock();
   lowering_.builder_.CreateBr(endBlock);
 
-  lowering_.functionFrame().switchTo(defaultBlock); // lhs is undefined and holds nothing to release
+  lowering_.functionFrame().switchTo(defaultBlock);
   llvm::Value *fallback = lowering_.exprLowerer().emitExpr(bin->rhs);
   llvm::BasicBlock *defaultEnd = lowering_.builder_.GetInsertBlock();
   lowering_.builder_.CreateBr(endBlock);
@@ -241,4 +226,4 @@ llvm::Value *EqualityLowerer::emitNullish(BinaryExpr *bin) {
   return phi;
 }
 
-} // namespace tz
+}

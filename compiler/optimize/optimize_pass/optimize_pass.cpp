@@ -13,8 +13,6 @@ OptimizePass::OptimizePass(const Target &target, const BuildOptions &options)
 Errors OptimizePass::run(llvm::Module &module, bool parallel) const {
   Errors errors;
   if (options_.optimize) {
-    // The runtime of the threads, or the one of a single thread (see
-    // TZ_PARALLEL in runtime/core/tzrt/tzrt.h).
     RuntimeLinker linker;
     errors = linker.run(module, options_.runtime.path(parallel ? "tzrt_mt.bc" : "tzrt.bc"));
     if (errors) {
@@ -27,7 +25,6 @@ Errors OptimizePass::run(llvm::Module &module, bool parallel) const {
 }
 
 void OptimizePass::runPasses(llvm::Module &module) const {
-  // The analysis managers must be destroyed in this reverse order.
   llvm::LoopAnalysisManager lam;
   llvm::FunctionAnalysisManager fam;
   llvm::CGSCCAnalysisManager cgam;
@@ -42,8 +39,6 @@ void OptimizePass::runPasses(llvm::Module &module) const {
 
   llvm::ModulePassManager mpm;
   if (options_.optimize) {
-    // First drop what RuntimeLinker left unused, so it is not optimized for
-    // nothing.
     mpm.addPass(llvm::GlobalDCEPass());
     mpm.addPass(pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
   } else {
@@ -52,4 +47,4 @@ void OptimizePass::runPasses(llvm::Module &module) const {
   mpm.run(module, mam);
 }
 
-} // namespace tz
+}

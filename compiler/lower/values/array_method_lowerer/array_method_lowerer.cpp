@@ -26,10 +26,9 @@ namespace tz {
 
 namespace {
 
-// Header fields; must match runtime/core/array/array.c.
 enum ArrayField : unsigned { kRefCount, kElementType, kData, kLength, kCapacity, kAlloc };
 
-} // namespace
+}
 
 ArrayMethodLowerer::ArrayMethodLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -40,7 +39,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
   Lowering::Operand array = lowering_.refCounts().emitOperand(
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
 
-  // All arguments are evaluated before the method runs, as in JavaScript.
   auto ownedArgs = [&](size_t from) {
     lowering_.throwLowerer().holdOperand(array, llvm::any_of(call->args, [&](Expr *arg) {
                                            return lowering_.mayThrow().exprThrows(arg);
@@ -51,7 +49,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
 
     return values;
   };
-  // An optional position argument: its value and whether it was given.
   auto position = [&](llvm::ArrayRef<llvm::Value *> values,
                       size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < values.size()) {
@@ -60,7 +57,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
 
     return {lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)};
   };
-  // Methods that return the array itself hand over the receiver's reference.
   auto returnArray = [&] {
     if (!array.owned) {
       lowering_.refCounts().retainValue(array.value, arrayType);
@@ -74,7 +70,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::ArrPush: {
     std::vector<llvm::Value *> values = ownedArgs(0);
-    // `a.push(x, ...b)`: the arrays spread are appended where they stand.
     std::vector<llvm::Value *> run;
     for (size_t i = 0; i < values.size(); ++i) {
       if (!call->spreads(i)) {
@@ -112,7 +107,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     break;
   }
   case Builtin::ArrPop: {
-    // The element moves out of the array: no counting needed.
     llvm::Value *length = lowering_.arrayLowerer().arrayLength(array.value);
     auto pop = [&] {
       llvm::Value *last = lowering_.builder_.CreateSub(length, lowering_.builder_.getInt64(1));
@@ -123,7 +117,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       lowering_.builder_.CreateStore(
           lowering_.builder_.CreateTrunc(last, lowering_.builder_.getInt32Ty()),
           lowering_.arrayLowerer().arrayField(array.value, kLength));
-      // Out of a member, a reference inside its group counts again.
       if (lowering_.memory().refMayBeMember(arrayType)) {
         lowering_.storeLowerer().takeFrom(array.value, value, element);
       }
@@ -143,7 +136,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     llvm::Value *has = lowering_.builder_.CreateCall(lowering_.rt_.arrShift, {array.value, slot});
     llvm::Value *value =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(element), slot);
-    // Out of a member, a reference inside its group counts again.
     if (lowering_.memory().refMayBeMember(arrayType)) {
       lowering_.storeLowerer().takeFrom(array.value, value, element);
     }
@@ -179,8 +171,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     std::vector<llvm::Value *> values = ownedArgs(0);
     llvm::Value *start = values.empty() ? lowering_.builder_.getInt64(0) : values[0];
     auto [end, hasEnd] = position(values, 1);
-    // A copy of a type that may form cycles is a member unless nothing
-    // stores it, whatever the array copied is.
     llvm::FunctionCallee slice = lowering_.rt_.arrSlice;
     if (lowering_.isCyclic(call->type)) {
       slice = lowering_.groupLowerer().groupFunction(
@@ -211,8 +201,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
         lowering_.builder_.CreateCall(lowering_.rt_.arrAppend, {result, part.value});
         lowering_.refCounts().dropOperand(part);
       } else {
-        lowering_.arrayLowerer().emitPush(result, {part.value},
-                                          element); // the array takes ownership
+        lowering_.arrayLowerer().emitPush(result, {part.value}, element);
       }
     }
     break;
@@ -243,8 +232,7 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
           lowering_.rt_.arrJoin,
           {array.value, none, lowering_.builder_.getInt64(0), lowering_.builder_.getInt32(0)});
     } else {
-      Lowering::Operand separator =
-          lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      Lowering::Operand separator = lowering_.refCounts().emitOperand(call->args[0], true);
       result = lowering_.stringLowerer().callReturningString(
           lowering_.rt_.arrJoin,
           {array.value, lowering_.stringLowerer().stringObj(separator.value),
@@ -273,8 +261,6 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
     break;
   }
   case Builtin::ArrSplice: {
-    // The runtime moves the removed elements into a new array and opens a
-    // gap for the inserted ones, which take over the values.
     std::vector<llvm::Value *> values = ownedArgs(0);
     auto [count, hasCount] = position(values, 1);
     size_t inserted = values.size() > 2 ? values.size() - 2 : 0;
@@ -309,4 +295,4 @@ llvm::Value *ArrayMethodLowerer::emitValueToString(llvm::Value *value, const Typ
                                     lowering_.functionFrame().spill(value, "value")});
 }
 
-} // namespace tz
+}

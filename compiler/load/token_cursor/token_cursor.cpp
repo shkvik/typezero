@@ -50,7 +50,7 @@ bool startsStatement(Tok kind) {
   }
 }
 
-} // namespace
+}
 
 TokenCursor::TokenCursor(Parser &parser) : parser_(parser) {}
 
@@ -96,8 +96,6 @@ bool TokenCursor::expect(Tok kind, llvm::StringRef context) {
   return false;
 }
 
-// A statement ends with `;`, or, by automatic semicolon insertion, before `}`,
-// at the end of the file, or at a line break.
 void TokenCursor::expectSemicolon() {
   if (accept(Tok::Semi)) {
     return;
@@ -137,7 +135,6 @@ void TokenCursor::rewind(Parser::Snapshot s) {
   parser_.recovering_ = s.recovering;
 }
 
-// Skips to a likely statement boundary after a syntax error.
 void TokenCursor::synchronize() {
   parser_.recovering_ = false;
   for (;;) {
@@ -181,4 +178,4 @@ llvm::StringRef TokenCursor::textFrom(const char *start) const {
   return llvm::StringRef(start, static_cast<size_t>(std::max(parser_.prevEnd_, start) - start));
 }
 
-} // namespace tz
+}

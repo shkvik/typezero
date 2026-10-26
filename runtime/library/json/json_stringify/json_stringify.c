@@ -1,5 +1,3 @@
-// JSON.stringify of any value.
-
 #include "runtime/library/json/json_stringify/json_stringify.h"
 #include "runtime/library/json/json/json.h"
 #include "runtime/core/alloc/alloc.h"
@@ -22,12 +20,10 @@
 
 typedef struct {
   TzBuf out;
-  TzBuf gap;    // what each level indents by; empty for none
-  TzBuf indent; // the current indentation
-  // The arrays and objects being written, to find one inside itself.
+  TzBuf gap;
+  TzBuf indent;
   const void **open;
   size_t depth, capacity;
-  // Where an error goes back to (__builtin_setjmp): tz_json_stringify.
   void *fail[5];
 } Writer;
 
@@ -68,7 +64,6 @@ static void leave(Writer *w) {
   w->indent.length -= w->gap.length;
 }
 
-// Before an element or a property: the comma, and with a gap a new line.
 static void separate(Writer *w, uint32_t written) {
   if (written) {
     tz_buf_push(&w->out, ',');
@@ -79,8 +74,6 @@ static void separate(Writer *w, uint32_t written) {
   }
 }
 
-// After the last one, and after leave(), before the bracket: the new line and
-// the outer indentation, when something was written.
 static void close_with(Writer *w, uint32_t written, char bracket) {
   if (written && w->gap.length) {
     tz_buf_push(&w->out, '\n');
@@ -156,7 +149,7 @@ static void write_number(TzBuf *out, double value) {
     return;
   }
   char text[32];
-  tz_buf_ascii_n(out, text, tz_format_f64(value == 0 ? 0 : value, text)); // -0 is "0"
+  tz_buf_ascii_n(out, text, tz_format_f64(value == 0 ? 0 : value, text));
 }
 
 static int write_value(Writer *w, const TzType *type, const void *value);
@@ -201,7 +194,6 @@ static int write_json(Writer *w, const TzJson *j) {
   return 1;
 }
 
-// Whether a value would be written at all: undefined and functions are not.
 static int has_json(const TzType *type, const void *value) {
   type = tz_resolve(type, &value);
   switch (type->kind) {
@@ -213,7 +205,6 @@ static int has_json(const TzType *type, const void *value) {
   case TZ_T_JSON:
     return *(TzJson *const *)value != NULL;
   case TZ_T_UNKNOWN: {
-    // What it holds: a box's value, or an object.
     const TzInstance *u = *(const TzInstance *const *)value;
     if (!u) {
       return 0;
@@ -228,8 +219,6 @@ static int has_json(const TzType *type, const void *value) {
   }
 }
 
-// An array of values of `type`, laid out one after another; `type` NULL for
-// an array of Json.
 static void write_elements(Writer *w, const TzType *type, const char *data, uint32_t count,
                            uint32_t stride) {
   for (uint32_t i = 0; i < count; ++i) {
@@ -241,7 +230,6 @@ static void write_elements(Writer *w, const TzType *type, const char *data, uint
   }
 }
 
-// A key of a field, which a descriptor holds as UTF-8, quoted.
 static void quote_utf8(TzBuf *out, const char *name, size_t n) {
   TzBuf key;
   tz_buf_init(&key);
@@ -268,9 +256,6 @@ static void quote_utf8(TzBuf *out, const char *name, size_t n) {
   tz_str_release_value(s);
 }
 
-// Writes a value of `type` (NULL: an array of Json, at `value`) as
-// JSON.stringify does; returns 0 for a value it leaves out (undefined, a
-// function), and then writes nothing.
 static int write_value(Writer *w, const TzType *type, const void *value) {
   TzBuf *out = &w->out;
   if (!type) {
@@ -288,8 +273,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     write_number(out, *(const int32_t *)value);
     return 1;
   case TZ_T_LONG:
-    // Up to 2^53 a double holds it; JavaScript would print beyond that what
-    // its double holds, and so does this.
     write_number(out, (double)*(const int64_t *)value);
     return 1;
   case TZ_T_DOUBLE:
@@ -302,8 +285,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     tz_json_quote(out, *(const TzStr *)value);
     return 1;
   case TZ_T_DECIMAL: {
-    // A string, as BigNumber.js writes it (docs/decimal.md): as a number
-    // JavaScript would read it back inexactly.
     TzBuf text;
     tz_buf_init(&text);
     tz_buf_decimal(&text, *(const TzDec *)value);
@@ -337,7 +318,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     return 1;
   }
   case TZ_T_RESULT: {
-    // The objects of neverthrow's classes Ok and Err have one property.
     const TzResultType *result = (const TzResultType *)type;
     const char *object = (const char *)value;
     int ok = object[result->ok_offset] != 0;
@@ -360,20 +340,15 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     const TzInstance *object = *(TzInstance *const *)value;
     const TzLayout *layout = object->layout;
     const char *fields = (const char *)object;
-    // An unknown's box, seen as an object: what it holds. A class is a
-    // function in JavaScript, which JSON leaves out.
     if (layout->flags & TZ_LAYOUT_BOX) {
       return write_value(w, ((const TzBox *)object)->type, TZ_BOX_VALUE(object));
     }
     if (layout->flags & TZ_LAYOUT_CLASS) {
       return 0;
     }
-    // The match of a regex is the array of its captures in JavaScript; its
-    // index, input, groups and indices are no elements of it.
     if (layout->flags & TZ_LAYOUT_MATCH) {
       return write_value(w, layout->fields[0].type, fields + layout->fields[0].offset);
     }
-    // A date is its toJSON(): the ISO text, or null for an invalid date.
     if (layout->flags & TZ_LAYOUT_DATE) {
       TzStr text;
       if (tz_date_json(&text, ((const TzDate *)object)->time)) {
@@ -384,9 +359,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
       }
       return 1;
     }
-    // A typed array has its indices as keys, `{"0":1,"1":2}`; a Buffer is
-    // its toJSON(), `{"type":"Buffer","data":[1,2]}`; the other objects of
-    // binary data have no keys.
     if ((layout->flags & TZ_LAYOUT_BYTES) && tz_bytes_kind(object) <= TZ_BYTES_BUFFER) {
       const TzBytes *bytes = (const TzBytes *)object;
       const char *colon = w->gap.length ? ": " : ":";
@@ -423,8 +395,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
       return 1;
     }
     enter(w, object);
-    // A Record is an object of its keys; a Map and a Set have no own
-    // properties in JavaScript: `{}`.
     if (layout->flags & TZ_LAYOUT_DICT) {
       const TzMap *m = (const TzMap *)object;
       const TzMapLayout *l = m->layout;
@@ -457,11 +427,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
       close_with(w, layout->count, ']');
       return 1;
     }
-    // The fields in the order the object prints them; methods are
-    // functions, and an iterator has no fields of its own: `{}`. The
-    // message and the cause of an Error are no keys in JavaScript, nor is
-    // its name, unless the program gave it one (`this.name = ...`), which
-    // usually comes after the fields of its class.
     int error = (layout->flags & TZ_LAYOUT_ERROR) != 0;
     const TzField *name = NULL;
     tz_buf_push(out, '{');
@@ -494,27 +459,22 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
     close_with(w, written, '}');
     return 1;
   }
-  default: // undefined, functions
+  default:
     return 0;
   }
 }
 
-// JSON.stringify(value, null, space): the text in `out`, or 0 when the value
-// has none (undefined, a function), which JavaScript returns as undefined.
-// `space` is a number of spaces (`space_kind` 1), a string (2) or nothing. A
-// value inside itself is a TypeError, and 0 with the empty string.
 int32_t tz_json_stringify(TzStr *out, const TzType *type, const void *value, int32_t space_kind,
                           double space_number, void *space_obj, uint64_t space_meta) {
   Writer w;
   memset(&w, 0, sizeof w);
   *out = tz_str_from_ascii("", 0);
   if (__builtin_setjmp(w.fail)) {
-    return 0; // enter released the writer
+    return 0;
   }
   tz_buf_init(&w.out);
   tz_buf_init(&w.gap);
   tz_buf_init(&w.indent);
-  // At most ten spaces or ten code units, as in JavaScript.
   if (space_kind == 1) {
     double n = space_number < 10 ? floor(space_number) : 10;
     for (int i = 0; i < (int)n; ++i) {

@@ -14,4 +14,4 @@ struct WhileStmt : Stmt {
   Stmt *body;
 };
 
-} // namespace tz
+}

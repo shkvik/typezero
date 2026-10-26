@@ -21,14 +21,11 @@ namespace tz {
 
 NumberMethods::NumberMethods(Checker &checker) : checker_(checker) {}
 
-// String.fromCharCode, String.fromCodePoint, and the functions of Number.
 Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const Type *expected) {
   bool isString = checker_.callChecker().isGlobalName(member->object, "String");
   llvm::StringRef fn = member->name;
   call->type = Type::error();
   if (isString && fn == "raw") {
-    // String.raw`C:\dir` is the template itself, with its texts as written
-    // (see Parser::parseCallOrMember).
     if (!call->tagged) {
       checker_.diags_.error(member->loc(),
                             "String.raw can only tag a template, e.g. String.raw`C:\\dir`");
@@ -48,8 +45,6 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
   if (isString && (fn == "fromCharCode" || fn == "fromCodePoint")) {
     bool codeUnits = fn == "fromCharCode";
     for (Expr *&arg : call->args) {
-      // Code units are taken modulo 2^16, as JavaScript does; a code point
-      // must be one, or the program stops with a RangeError.
       arg = checker_.mathChecker().numericArg(arg);
       arg = codeUnits ? checker_.binaryChecker().toInt32(arg)
                       : checker_.typeRelations().convert(arg, Type::doubleTy());
@@ -59,8 +54,7 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
     return call;
   }
   if (!isString && (fn == "parseInt" || fn == "parseFloat")) {
-    return checker_.globalFunctionChecker().checkGlobalFunction(
-        call, fn, member->loc(), expected); // Number.parseInt is parseInt
+    return checker_.globalFunctionChecker().checkGlobalFunction(call, fn, member->loc(), expected);
   }
   static const std::pair<llvm::StringLiteral, Builtin> predicates[] = {
       {"isNaN", Builtin::IsNaN},
@@ -91,10 +85,8 @@ Expr *NumberMethods::checkStaticCall(CallExpr *call, MemberExpr *member, const T
   return call;
 }
 
-// x.toString(), x.toString(radix) and x.toFixed(digits) of a number.
 Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
   if (member->name == "toString" && call->args.size() == 1) {
-    // The digits in base 2 to 36, as JavaScript writes them: `(255).toString(16)` is "ff".
     if (auto *lit = dyn_cast<IntLitExpr>(call->args[0]);
         lit && (lit->value < 2 || lit->value > 36)) {
       checker_.diags_.error(lit->loc(), "toString() takes a radix from 2 to 36, found " +
@@ -110,7 +102,6 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
       return call;
     }
-    // `x.toString()` is `String(x)`.
     call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
     call->builtin = Builtin::StringOf;
     call->type = Type::string();
@@ -137,4 +128,4 @@ Expr *NumberMethods::checkNumberMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

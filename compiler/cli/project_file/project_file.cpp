@@ -51,4 +51,4 @@ bool applyDependencies(const Manifest &project, const std::vector<Dependency> &d
   return text == project.text || writeText(project.path, text);
 }
 
-} // namespace tz::pkg
+}

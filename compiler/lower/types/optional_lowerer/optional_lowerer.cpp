@@ -18,20 +18,16 @@ namespace tz {
 
 namespace {
 
-// A value held as a pointer, null for undefined in `T | undefined`: an
-// object, an iterator, a Json, a dictionary or a Promise.
 bool isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-} // namespace
+}
 
 OptionalLowerer::OptionalLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// An unknown holds undefined itself: it is its own `T | undefined`, null for
-// undefined.
 llvm::Value *OptionalLowerer::makeOptional(llvm::Value *value, llvm::Value *has, const Type *type) {
   if (type->isUnknown() || UnionLayout::zeroIsUndefined(type->inner())) {
     if (auto *always = dyn_cast<llvm::ConstantInt>(has); always && always->isOne()) {
@@ -58,10 +54,10 @@ llvm::Value *OptionalLowerer::optionalHas(llvm::Value *value, const Type *option
   if (isReference(inner)) {
     return lowering_.builder_.CreateIsNotNull(value);
   }
-  if (UnionLayout::isAtomType(inner)) { // atoms start at 1
+  if (UnionLayout::isAtomType(inner)) {
     return lowering_.builder_.CreateICmpNE(value, lowering_.builder_.getInt32(0));
   }
-  if (inner->isTagged()) { // tags too
+  if (inner->isTagged()) {
     return lowering_.builder_.CreateICmpNE(lowering_.unionLayout().unionTag(value),
                                            lowering_.builder_.getInt32(0));
   }
@@ -77,4 +73,4 @@ llvm::Value *OptionalLowerer::optionalValue(llvm::Value *value, const Type *opti
   return lowering_.builder_.CreateExtractValue(value, 0);
 }
 
-} // namespace tz
+}

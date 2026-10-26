@@ -23,8 +23,6 @@ namespace tz {
 
 namespace {
 
-// A name bound to a type, as a type parameter is (Checker::bindTypeParams),
-// rather than declared.
 bool isBinding(const Stmt *decl) {
   auto *alias = llvm::dyn_cast_or_null<TypeAliasDecl>(decl);
 
@@ -39,8 +37,6 @@ std::vector<const Type *> distributed(const Type *type) {
   return out;
 }
 
-// The names of types that a type written uses, but `infer` and the keys of
-// mapped types, which it declares.
 void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
   if ((ref.kind == TypeRef::Kind::Name || ref.kind == TypeRef::Kind::Generic) &&
       !ref.name.empty() && !llvm::is_contained(names, ref.name)) {
@@ -51,10 +47,6 @@ void collectNames(const TypeRef &ref, std::vector<llvm::StringRef> &names) {
   }
 }
 
-// The types `infer` declares in the pattern of a conditional type (not in
-// one nested there, which has its own), and whether each is spread into a
-// tuple or into the parameters of a function: `[infer H, ...infer R]` makes R
-// a list of types.
 void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
                    std::vector<bool> &lists, bool spread = false) {
   if (ref.kind == TypeRef::Kind::Conditional) {
@@ -77,7 +69,6 @@ void collectInfers(const TypeRef &ref, std::vector<const TypeRef *> &infers,
   }
 }
 
-// See mentionsParamBesides.
 bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
                          llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (!mentionsParam(type)) {
@@ -86,7 +77,6 @@ bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
   auto other = [&](const Type *t) { return t && mentionsOtherParams(t, allowed, seen); };
   switch (type->kind()) {
   case Type::Kind::Param:
-    // A conditional type that waits, by what its names stand for.
     if (type->typeOp() == TypeOp::Conditional) {
       return llvm::any_of(type->operands().drop_front(), other);
     }
@@ -127,7 +117,6 @@ bool mentionsOtherParams(const Type *type, llvm::ArrayRef<const Type *> allowed,
   }
 }
 
-// The type parameters `type` mentions, but those of the computations in it.
 void collectParams(const Type *type, std::vector<const Type *> &params,
                    llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (!mentionsParam(type) || !seen.insert(type).second) {
@@ -181,7 +170,7 @@ void collectParams(const Type *type, std::vector<const Type *> &params,
   }
 }
 
-} // namespace
+}
 
 bool mentionsParamBesides(const Type *type, llvm::ArrayRef<const Type *> allowed) {
   llvm::SmallPtrSet<const Type *, 4> seen;
@@ -204,14 +193,12 @@ const Type *ConditionalTypes::resolveTypeArgument(const TypeRef &ref) {
 const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   bool tail = std::exchange(checker_.tailAllowed_, false);
   if (ref.args.size() != 4) {
-    return Type::error(); // the parser reported it
+    return Type::error();
   }
   const Type *check = checker_.typeResolver().resolveTypeInner(ref.args[0]);
   if (check->isError()) {
     return check;
   }
-  // The types `infer` declares: type parameters of the pattern, which the
-  // match gives types.
   std::vector<const TypeRef *> inferRefs;
   std::vector<bool> lists;
   collectInfers(ref.args[1], inferRefs, lists);
@@ -243,13 +230,9 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   if (pattern->isError()) {
     return pattern;
   }
-  // Over type parameters it waits for a copy.
   if (mentionsParam(check) || mentionsParamBesides(pattern, infers)) {
     return deferConditional(ref);
   }
-  // A type parameter that stands for a union gives the union of what each
-  // of its members gives, as in TypeScript; the check of a type parameter
-  // that stands for never gives never.
   if (ref.args[0].kind == TypeRef::Kind::Name &&
       isBinding(checker_.typeDeclarer().lookupType(ref.args[0].name))) {
     std::vector<const Type *> members = distributed(check);
@@ -271,8 +254,6 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
   Checker::InferMatch inference{infers, std::vector<const Type *>(infers.size(), nullptr)};
   bool yes = checker_.extendsRelation().extendsType(check, pattern, &inference);
   checker_.typeScopes_.emplace_back();
-  // What `infer` matched; one that matched nothing is its constraint, or
-  // unknown.
   for (size_t i = 0; yes && i < infers.size(); ++i) {
     const Type *bound = inference.bound[i];
     if (!bound) {
@@ -290,7 +271,6 @@ const Type *ConditionalTypes::resolveConditional(const TypeRef &ref) {
                                      checker_.typeDeclarer().lookupType(branch.name))
                                : nullptr;
              alias && !alias->typeParams.empty()) {
-    // A tail call: instantiateAlias goes on with it.
     std::vector<const Type *> args;
     for (const TypeRef &arg : branch.args) {
       args.push_back(resolveTypeArgument(arg));
@@ -313,7 +293,6 @@ const Type *ConditionalTypes::deferConditional(const TypeRef &ref) {
   Checker::ConditionalInfo &info = conditionals_[&ref];
   if (!info.tag) {
     info.ref = &ref;
-    // Named by its text, the spaces in it collapsed.
     std::string spelling;
     for (char c : ref.source) {
       if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
@@ -393,7 +372,6 @@ std::vector<const Type *> ConditionalTypes::conditionalBranches(const Type *cond
   for (size_t i = 0; i < info->bound.size() && i + 1 < operands.size(); ++i) {
     bindType(info->bound[i], operands[i + 1], info->ref->loc);
   }
-  // What `infer` gives is not known: type parameters of their own.
   std::vector<const TypeRef *> inferRefs;
   std::vector<bool> lists;
   collectInfers(info->ref->args[1], inferRefs, lists);
@@ -422,7 +400,6 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
   if (depth > 8 || to->typeOp() != TypeOp::Conditional) {
     return false;
   }
-  // A value of a union, `flag ? "text" : "other"`: each member of either.
   if (from->isUnion()) {
     return llvm::all_of(from->members(),
                         [&](const Type *m) { return fitsConditional(m, to, depth + 1); });
@@ -432,8 +409,6 @@ bool ConditionalTypes::fitsConditional(const Type *from, const Type *to, unsigne
         fitsConditional(from, branch, depth + 1)) {
       return true;
     }
-    // Or it fits for some types of the type parameters the branch mentions:
-    // `{ text: x }` with x narrowed to a string, for `{ text: T }`.
     std::vector<const Type *> params;
     llvm::SmallPtrSet<const Type *, 8> seen;
     collectParams(branch, params, seen);
@@ -464,12 +439,10 @@ const Type *ConditionalTypes::resolveIntersection(const TypeRef &ref) {
   if (parts.size() == 2) {
     for (size_t i : {0, 1}) {
       const Type *other = parts[1 - i];
-      // `K & string`: what of K is a string, as `Extract<K, string>`.
       if (primitive(parts[i])) {
         return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::Extract, {other, parts[i]}),
                                                    {other, parts[i]});
       }
-      // `T & {}`: T without undefined, as `NonNullable<T>`.
       if (emptyObject(parts[i])) {
         return checker_.typeOperators().evalTypeOp(Type::typeOp(TypeOp::NonNullable, {other}),
                                                    {other});
@@ -488,8 +461,6 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   if (ref.kind != TypeRef::Kind::TypeOf || ref.names.empty()) {
     return nullptr;
   }
-  // Each type parameter as its constraint, or unknown, as TypeScript
-  // instantiates a generic signature here.
   auto erased = [&](FuncSymbol *fn) {
     const Type *type = checker_.returnInferrer().functionType(fn);
     std::vector<const Type *> args;
@@ -514,8 +485,6 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
     }
     return nullptr;
   }
-  // `typeof obj.method`: a method of the class of obj; of several, the last
-  // one.
   if (ref.names.size() != 2) {
     return nullptr;
   }
@@ -532,8 +501,7 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
     return nullptr;
   }
   checker_.classDeclarer().completeClass(cls);
-  std::vector<FunctionDecl *> methods =
-      ClassDeclarer::methodsNamed(cls, ref.names[1], /*isStatic=*/false);
+  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names[1], false);
   if (methods.empty() || !methods.back()->sym) {
     return nullptr;
   }
@@ -541,4 +509,4 @@ const Type *ConditionalTypes::signatureForUtility(const TypeRef &ref) {
   return erased(methods.back()->sym);
 }
 
-} // namespace tz
+}

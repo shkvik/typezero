@@ -38,11 +38,9 @@ namespace tz {
 
 namespace {
 
-// A summary that keeps growing after this many rounds goes to the end of its
-// type's range; the rounds stop at the limit in any case.
 constexpr unsigned kGrowthsBeforeWidening = 3;
 
-} // namespace
+}
 
 Slots::Slots(OverflowCheck &check) : check_(check) {}
 
@@ -105,9 +103,6 @@ void Slots::storeField(const Type *objectType, llvm::StringRef field, const Type
   check_.contribute(slot, check_.overflowWarnings().fitVal(v, type));
 }
 
-// Whether no other name may reach the array that `expr` gives: a variable
-// whose array has no other names, or an array made right there (a literal,
-// `new Array`, what map or slice make).
 bool Slots::isPrivateArray(const Expr *expr) const {
   expr = stripCasts(expr);
   if (!expr) {
@@ -145,8 +140,6 @@ bool Slots::isPrivateArray(const Expr *expr) const {
   return false;
 }
 
-// The elements of `array`, the value of `arrayExpr`: for an array that may
-// have other names, also what is stored through them.
 Val Slots::elementsOf(const Expr *arrayExpr, const Val &array, const Type *arrayType) {
   const Type *element = arrayType && arrayType->nonOptional()->isArray()
                             ? arrayType->nonOptional()->inner()
@@ -185,7 +178,6 @@ void Slots::storeElements(const Expr *arrayExpr, const Type *arrayType, const Va
   }
 }
 
-// Builds the reason of a parameter that some calls pass a dangerous value.
 const Reason *Slots::paramReason(const FunctionDecl *fn, size_t index) {
   auto found = check_.next_.dangerousCalls.find({fn, index});
   if (found == check_.next_.dangerousCalls.end() || found->second.empty()) {
@@ -208,7 +200,6 @@ const Reason *Slots::paramReason(const FunctionDecl *fn, size_t index) {
 bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from, const Type *type,
                       bool narrowing) {
   if (narrowing) {
-    // What the settled summaries give again, within them.
     if (!from) {
       return false;
     }
@@ -239,4 +230,4 @@ bool Slots::mergeSlot(OverflowCheck::Slot &into, const OverflowCheck::Slot *from
   return true;
 }
 
-} // namespace tz
+}

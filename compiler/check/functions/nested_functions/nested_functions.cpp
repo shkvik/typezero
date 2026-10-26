@@ -65,7 +65,6 @@ void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
     }
     break;
   case Expr::Kind::New: {
-    // Once checked, the arguments of a class's constructor are in its call.
     auto *create = cast<NewExpr>(expr);
     if (create->callee) {
       sub(create->callee);
@@ -104,7 +103,7 @@ void visitExprs(const Expr *expr, llvm::function_ref<void(const Expr *)> visit,
   case Expr::Kind::Await:
     sub(cast<AwaitExpr>(expr)->value);
     break;
-  case Expr::Kind::Class: // as a declaration of the class
+  case Expr::Kind::Class:
     visitExprs(cast<ClassExpr>(expr)->decl, visit, intoFunctions);
     break;
   default:
@@ -203,8 +202,6 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
     break;
   }
   case Stmt::Kind::Class: {
-    // The static initializers run where the class is declared, and so does
-    // a base that is a value; the rest is the code of functions.
     auto *cls = cast<ClassDecl>(stmt);
     expr(cls->baseExpr);
     for (const ClassField &f : cls->fields) {
@@ -212,7 +209,6 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
         expr(f.init);
       }
     }
-    // So do the decorators, and what applies them (Checker::decorateClass).
     for (const Decorator &d : cls->decorators) {
       expr(d.expr);
     }
@@ -254,7 +250,6 @@ void visitExprs(const Stmt *stmt, llvm::function_ref<void(const Expr *)> visit,
 
 namespace {
 
-// The names `stmt` assigns to: `x = v`, `x += v`, `x++`...
 void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
   visitExprs(stmt, [&](const Expr *e) {
     const Expr *target = nullptr;
@@ -271,7 +266,7 @@ void collectAssigned(const Stmt *stmt, std::vector<llvm::StringRef> &names) {
   });
 }
 
-} // namespace
+}
 
 NestedFunctions::NestedFunctions(Checker &checker) : checker_(checker) {}
 
@@ -313,8 +308,6 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
       }
     }
   }
-  // The functions are created before the first statement that mentions
-  // them, so that they can copy the variables declared before it.
   for (size_t i = 0; i < block->body.size() && group->firstUse == ~size_t(0); ++i) {
     if (isa<FunctionDecl>(block->body[i])) {
       continue;
@@ -331,7 +324,6 @@ NestedGroup *NestedFunctions::declareNested(BlockStmt *block) {
 }
 
 void NestedFunctions::finishGroup(NestedGroup *group) {
-  // Every variable of the block is declared now.
   group->finished = true;
   for (FunctionDecl *fn : group->members) {
     if (!fn->sym->ret) {
@@ -345,8 +337,6 @@ void NestedFunctions::finishGroup(NestedGroup *group) {
     checker_.returnInferrer().leaveBody(saved);
   }
 
-  // A function the block calls (or passes on) before a variable it uses is
-  // declared: JavaScript would throw a ReferenceError when it reads it.
   auto declaredAfter = [&](const NestedGroup::Use &use) -> VarSymbol * {
     std::vector<FunctionDecl *> reached{use.fn};
     for (size_t i = 0; i < reached.size(); ++i) {
@@ -382,20 +372,15 @@ void NestedFunctions::noteUse(VarSymbol *var, llvm::SMLoc loc) {
   if (var->isGlobal) {
     return;
   }
-  // The block's own code uses one of its functions: it runs, or may run,
-  // from here (see finishGroup).
   if (FunctionDecl *member = var->function;
       member && checker_.currentDecl() == member->group->owner) {
     member->group->uses.push_back({member, checker_.seq_, loc});
   }
   for (size_t i = checker_.functions_.size(); i-- > 0;) {
     FunctionDecl *fn = checker_.functions_[i];
-    // Its own variables, and the function itself through its name.
     if (fn == var->owner || fn == var->lambda) {
       break;
     }
-    // The functions of a group share their environment: they reach each
-    // other through it.
     if (var->function && fn->group && fn->group == var->function->group) {
       if (fn != var->function && !llvm::is_contained(fn->siblings, var->function)) {
         fn->siblings.push_back(var->function);
@@ -431,4 +416,4 @@ FunctionDecl *NestedFunctions::namedFunction(const Expr *expr) const {
   return nullptr;
 }
 
-} // namespace tz
+}

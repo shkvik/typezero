@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Reflect and the metadata of decorators (docs/decorators.md, sections 5 and 6).
 class ReflectFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "reflect"; }
@@ -15,4 +14,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

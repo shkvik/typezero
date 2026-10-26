@@ -28,8 +28,6 @@ std::u16string toUtf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-// The methods of Map and Set, to tell a method read as a value from a
-// property that does not exist.
 const llvm::StringLiteral kMapMethods[] = {"get",  "set",    "has",     "delete", "clear",
                                            "keys", "values", "entries", "forEach"};
 
@@ -39,7 +37,7 @@ const llvm::StringLiteral kSetMethods[] = {"add",          "has",          "dele
                                            "intersection", "difference",   "symmetricDifference",
                                            "isSubsetOf",   "isSupersetOf", "isDisjointFrom"};
 
-} // namespace
+}
 
 DictChecker::DictChecker(Checker &checker) : checker_(checker) {}
 
@@ -70,15 +68,13 @@ const Type *DictChecker::resolveDictType(const TypeRef &ref) {
                                      "e.g. 'Record<string, int>'"));
     return Type::error();
   }
-  const Type *key = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *key = checker_.typeResolver().resolveType(ref.args[0], false);
   const Type *value =
-      set ? Type::voidTy() : checker_.typeResolver().resolveType(ref.args[1], /*allowVoid=*/false);
+      set ? Type::voidTy() : checker_.typeResolver().resolveType(ref.args[1], false);
   if (key->isError() || value->isError()) {
     return Type::error();
   }
   if (record) {
-    // `Record<"up" | "down", T>`, as in TypeScript: an object with exactly
-    // those keys, each a T; no dictionary.
     llvm::ArrayRef<const Type *> literals =
         key->isUnion() ? key->members() : llvm::ArrayRef<const Type *>(key);
     if (key->isStringLiteral() || (key->isUnion() && llvm::all_of(literals, [](const Type *m) {
@@ -152,15 +148,12 @@ Expr *DictChecker::dictCall(llvm::SMLoc loc, Expr *receiver, llvm::StringRef nam
 
 Expr *DictChecker::iterableOf(Expr *expr) {
   const Type *type = expr->type;
-  // An object with `[Symbol.iterator]()` (sema_iterable.cpp); in generic
-  // code, `xs: Iterable<int>` as some iterator of ints.
   if (Expr *iterator = checker_.iterableChecker().userIterator(expr)) {
     return iterator;
   }
   if (type && type->isParam() && type->iterated()) {
     return checker_.typeRelations().convert(expr, Type::iterator(type->iterated()));
   }
-  // `args` of a list of types: some types.
   if (type && type->isListParam()) {
     return checker_.typeRelations().convert(
         expr, Type::iterator(checker_.argListChecker().listElement(type)));
@@ -187,7 +180,6 @@ Expr *DictChecker::keyLiteral(llvm::SMLoc loc, llvm::StringRef name) {
   return key;
 }
 
-// The key of a Record, `r[key]`: a string.
 Expr *DictChecker::checkRecordKey(Expr *key) {
   key = checker_.exprChecker().checkExpr(key, Type::string());
   const Type *type = key->type;
@@ -207,8 +199,6 @@ Expr *DictChecker::checkDictMember(MemberExpr *member) {
   const Type *type = member->object->type;
   llvm::SMLoc loc = member->loc();
   if (type->isRecord()) {
-    // `r.key` is `r["key"]`; a key that names a method of Object.prototype
-    // is a key like any other (docs/objects.md, section 9).
     Expr *key = keyLiteral(loc, member->name);
     return dictCall(loc, member->object, "get", Builtin::MapGet, {key},
                     Type::optional(type->valueType()));
@@ -325,7 +315,6 @@ Expr *DictChecker::recordAssign(AssignExpr *assign) {
                   object->type->valueType());
 }
 
-// `r[k] ??= v`: v is evaluated and stored only when r has no value at k.
 Expr *DictChecker::checkRecordNullishAssign(AssignExpr *assign, IndexExpr *index) {
   index->object = checker_.exprChecker().checkExpr(index->object);
   const Type *type = index->object->type;
@@ -361,7 +350,6 @@ Expr *DictChecker::checkDictDelete(UnaryExpr *unary, Expr *object, Expr *keyExpr
     return unary;
   }
   Expr *key = keyExpr ? checkRecordKey(keyExpr) : keyLiteral(unary->loc(), name);
-  // As in JavaScript, `delete` is true even for a key that was not there.
   auto *yes = checker_.ctx_.make<BoolLitExpr>(unary->loc(), true);
   yes->type = Type::boolTy();
   auto *seq = checker_.ctx_.make<SequenceExpr>(
@@ -400,4 +388,4 @@ Expr *DictChecker::checkDictIn(BinaryExpr *bin) {
   return dictCall(bin->loc(), bin->rhs, "has", Builtin::MapHas, {key}, Type::boolTy());
 }
 
-} // namespace tz
+}

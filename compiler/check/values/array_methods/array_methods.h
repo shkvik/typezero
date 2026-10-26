@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of arrays.
 class ArrayMethods {
 public:
   explicit ArrayMethods(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

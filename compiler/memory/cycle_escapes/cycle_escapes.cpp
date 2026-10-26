@@ -45,15 +45,11 @@ void CycleEscapes::ordered(const Stmt *stmt, const VarSymbol *self, bool &escape
     ordered(llvm::cast<LabeledStmt>(stmt)->body, self, escaped, afterSuper, safe);
     break;
   case Stmt::Kind::Function: {
-    // A nested function that captures `self` lets it go.
     auto *fn = llvm::cast<FunctionDecl>(stmt);
     escaped = escaped || llvm::is_contained(fn->captures, self);
     break;
   }
   default:
-    // A loop may run its body again after `self` went in it, and so may a
-    // `switch` fall through or a `try` jump: their writes count as late if
-    // `self` goes anywhere in them.
     escaped = escaped || CycleScanner::thisEscapes(stmt, self);
     walkStmt(stmt, [&](const Expr *e) {
       bool late = true;
@@ -285,7 +281,6 @@ void CycleEscapes::walkStmt(const Stmt *stmt, const std::function<void(const Exp
     walkStmt(llvm::cast<TryStmt>(stmt)->finalizer, visit);
     break;
   case Stmt::Kind::Function: {
-    // A nested function that captures `this` lets it go.
     auto *fn = llvm::cast<FunctionDecl>(stmt);
     for (const VarSymbol *var : fn->captures) {
       NameExpr fake(llvm::SMLoc(), var->name);
@@ -299,4 +294,4 @@ void CycleEscapes::walkStmt(const Stmt *stmt, const std::function<void(const Exp
   }
 }
 
-} // namespace tz
+}

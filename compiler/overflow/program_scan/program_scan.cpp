@@ -38,7 +38,6 @@ namespace tz {
 
 namespace {
 
-// The builtins that read their array arguments and keep nothing of them.
 bool onlyReads(Builtin builtin) {
   switch (builtin) {
   case Builtin::ConsoleLog:
@@ -56,7 +55,7 @@ bool onlyReads(Builtin builtin) {
   }
 }
 
-} // namespace
+}
 
 ProgramScan::ProgramScan(OverflowCheck &check) : check_(check) {}
 
@@ -64,7 +63,6 @@ void ProgramScan::addFunction(const FunctionDecl *fn) {
   if (!fn || !fn->body || check_.program_.unusedFunctions.contains(fn)) {
     return;
   }
-  // A generic function runs as its instances.
   if (!fn->typeParams.empty() && !fn->isInstance) {
     return;
   }
@@ -114,7 +112,7 @@ void ProgramScan::scanFunction(const FunctionDecl *fn) {
   for (const Param &p : fn->params) {
     declareVar(p.sym);
     if (!check_.declaring_ && p.sym && p.sym->type && p.sym->type->nonOptional()->isArray()) {
-      check_.vars_[p.sym].aliased = true; // the caller's array
+      check_.vars_[p.sym].aliased = true;
     }
     if (p.defaultValue) {
       scanExpr(p.defaultValue, false);
@@ -141,7 +139,6 @@ void ProgramScan::scanClass(const ClassDecl *cls) {
     if (f.method) {
       addFunction(f.method);
     }
-    // A static field is a global of main's code, which sets it.
     if (f.isStatic) {
       declareVar(f.var);
       if (f.init) {
@@ -172,8 +169,6 @@ void ProgramScan::scanProgram() {
     for (const FunctionDecl *fn : check_.program_.instances) {
       addFunction(fn);
     }
-    // The functions found so far, and those found inside them as they are
-    // scanned.
     for (size_t i = 0; i < check_.functions_.size(); ++i) {
       scanFunction(check_.functions_[i]);
     }
@@ -197,7 +192,6 @@ void ProgramScan::scanStmt(const Stmt *stmt) {
       if (!d.init) {
         continue;
       }
-      // The hidden variable of a pattern only reads what it takes apart.
       scanExpr(d.init, d.destructured);
       if (check_.declaring_) {
         check_.inits_[d.init] = {&d, decl->isConst};
@@ -209,7 +203,6 @@ void ProgramScan::scanStmt(const Stmt *stmt) {
     break;
   }
   case Stmt::Kind::Function: {
-    // A function declared in a block runs on its own, when it is called.
     auto *fn = cast<FunctionDecl>(stmt);
     if (check_.declaring_) {
       addFunction(fn);
@@ -321,7 +314,6 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
     useVar(name->var, consumed, false);
-    // A function used as a value: any code may call it.
     if (!check_.declaring_) {
       if (name->func && name->func->decl) {
         check_.unknownCallers_.insert(name->func->decl);
@@ -353,7 +345,6 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   case Expr::Kind::Binary: {
     auto *bin = cast<BinaryExpr>(expr);
     bool compares = bin->op == BinaryOp::Eq || bin->op == BinaryOp::Ne;
-    // `a ?? b`, `a || b` give one of their sides.
     bool gives =
         bin->op == BinaryOp::Nullish || bin->op == BinaryOp::LogAnd || bin->op == BinaryOp::LogOr;
     scanExpr(bin->lhs, compares || !gives);
@@ -392,7 +383,7 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
       scanExpr(member->object, true);
     } else if (auto *name = dyn_cast<NameExpr>(call->callee);
                name && (call->func || call->builtin != Builtin::None)) {
-      useVar(name->var, true, false); // a direct call, not a use of the function as a value
+      useVar(name->var, true, false);
     } else {
       scanExpr(call->callee, true);
     }
@@ -402,11 +393,9 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
       const Expr *arg = call->args[i];
       if (callback && *callback == i) {
         if (auto *fe = dyn_cast<FunctionExpr>(stripCasts(arg))) {
-          // Runs during the call, as part of the code around it.
           if (check_.declaring_) {
             check_.inlined_.insert(fe->fn);
           }
-          // The sum that reduce carries from element to element.
           if (check_.declaring_ && !fe->fn->params.empty() &&
               (call->builtin == Builtin::ArrReduce || call->builtin == Builtin::ArrReduceRight)) {
             check_.accumulators_.insert(fe->fn->params[0].sym);
@@ -455,7 +444,6 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
     scanExpr(cast<OptionalChainExpr>(expr)->chain, consumed);
     break;
   case Expr::Kind::Function: {
-    // A closure that runs on its own, whenever something calls it.
     const FunctionDecl *fn = cast<FunctionExpr>(expr)->fn;
     if (check_.declaring_ && !check_.inlined_.contains(fn)) {
       addFunction(fn);
@@ -471,8 +459,6 @@ void ProgramScan::scanExpr(const Expr *expr, bool consumed) {
   }
 }
 
-// Literals and operators on them, and constants of those: Checker computes such
-// values when compiling and reports those that do not fit.
 bool ProgramScan::isConstantTree(const Expr *expr) const {
   expr = stripCasts(expr);
   if (!expr) {
@@ -494,4 +480,4 @@ bool ProgramScan::isConstantTree(const Expr *expr) const {
   return false;
 }
 
-} // namespace tz
+}

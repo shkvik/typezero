@@ -60,19 +60,18 @@ const char *typeOfName(const Type *type) {
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::Decimal:
-    return "object"; // as for a BigNumber.js object
+    return "object";
   case Type::Kind::Function:
     return "function";
   case Type::Kind::Optional:
     return typeOfName(type->inner());
   case Type::Kind::Param:
-    return ""; // not known until a copy gives it a type
+    return "";
   case Type::Kind::Json:
-    return ""; // known when the program runs
+    return "";
   case Type::Kind::Literal:
     return typeOfName(type->literalBase());
   case Type::Kind::Union: {
-    // Known when the program runs, unless every member gives the same.
     const char *name = typeOfName(type->members().front());
     for (const Type *m : type->members()) {
       if (llvm::StringRef(typeOfName(m)) != name) {
@@ -84,7 +83,7 @@ const char *typeOfName(const Type *type) {
   case Type::Kind::Unknown:
     return "";
   case Type::Kind::ClassRef:
-    return "function"; // a class is a function in JavaScript
+    return "function";
   default:
     return "undefined";
   }
@@ -111,4 +110,4 @@ std::string jsonTagField(llvm::ArrayRef<const Type *> objects) {
   return "";
 }
 
-} // namespace tz
+}

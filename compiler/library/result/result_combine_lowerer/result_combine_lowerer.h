@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Result.combine.
 class ResultCombineLowerer {
 public:
   explicit ResultCombineLowerer(Lowering &lowering);
@@ -16,4 +15,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

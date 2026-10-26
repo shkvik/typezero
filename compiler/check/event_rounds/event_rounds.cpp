@@ -6,7 +6,7 @@ namespace {
 
 constexpr unsigned kRounds = 8;
 
-} // namespace
+}
 
 bool EventRounds::again() {
   if (!inference_.open || inference_.final) {
@@ -21,4 +21,4 @@ bool EventRounds::again() {
   return true;
 }
 
-} // namespace tz
+}

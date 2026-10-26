@@ -40,7 +40,6 @@ public:
   Kind kind() const { return kind_; }
   llvm::SMLoc loc() const { return loc_; }
 
-  // Set by Checker.
   const Type *type = nullptr;
 
 protected:
@@ -51,4 +50,4 @@ private:
   llvm::SMLoc loc_;
 };
 
-} // namespace tz
+}

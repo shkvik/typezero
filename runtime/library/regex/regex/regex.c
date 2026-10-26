@@ -1,15 +1,3 @@
-// Regular expressions at run time: the matcher, which runs the programs of
-// regex_compile.c (see regex.h), and the methods of RegExp and of strings
-// that take one.
-//
-// The matcher backtracks, as JavaScript's does, with an explicit stack
-// instead of recursion, so a long input never overflows the C stack. Each
-// choice point records where to resume; each change of a capture or a
-// register records the old value first, so that going back to a choice
-// point undoes exactly what happened after it (a trail, as in Prolog
-// machines). Only a lookaround recurses, as deep as lookarounds nest in
-// the pattern.
-
 #include "runtime/library/regex/regex/regex.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -19,16 +7,12 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 
-//===----------------------------------------------------------------------===//
-// The matcher
-//===----------------------------------------------------------------------===//
-
 enum {
-  E_CHOICE,        // resume at pc, position pos
-  E_CAPTURE,       // capture slot n had the value pos
-  E_REGISTER,      // register n had the value pos
-  E_REPEAT_GREEDY, // RE_REPEAT at pc matched up to pos; n: where `min` ended
-  E_REPEAT_LAZY,   // RE_REPEAT at pc matched up to pos, n times
+  E_CHOICE,
+  E_CAPTURE,
+  E_REGISTER,
+  E_REPEAT_GREEDY,
+  E_REPEAT_LAZY,
 };
 
 typedef struct {
@@ -39,7 +23,7 @@ typedef struct {
 } ReEntry;
 
 typedef struct {
-  const uint32_t *code; // the code of the program; pcs index it
+  const uint32_t *code;
   const uint8_t *s8;
   const uint16_t *s16;
   int32_t length;
@@ -48,8 +32,6 @@ typedef struct {
   int32_t *regs;
 } Vm;
 
-// The stack of choice points and undo records, kept from one match to the
-// next. Not static: see the rules in tzrt.h.
 TZ_THREAD_LOCAL ReEntry *tz_re_stack;
 TZ_THREAD_LOCAL size_t tz_re_stack_size, tz_re_stack_capacity;
 
@@ -84,10 +66,6 @@ static inline int is_line_terminator(uint32_t c) {
   return c == '\n' || c == '\r' || c == 0x2028 || c == 0x2029;
 }
 
-// The character at *pos, moving past it; -1 at the end. With u a surrogate
-// pair is one character, and between its halves there is none: V8 tries a
-// match at every code unit, but only an assertion can match in the middle
-// of a pair.
 static inline int32_t read_forward(const Vm *vm, int32_t *pos) {
   int32_t p = *pos;
   if (p >= vm->length) {
@@ -108,7 +86,6 @@ static inline int32_t read_forward(const Vm *vm, int32_t *pos) {
   return (int32_t)c;
 }
 
-// The character before *pos, moving to its start.
 static inline int32_t read_backward(const Vm *vm, int32_t *pos) {
   int32_t p = *pos;
   if (p <= 0) {
@@ -129,7 +106,6 @@ static inline int32_t read_backward(const Vm *vm, int32_t *pos) {
   return (int32_t)c;
 }
 
-// RE_SET: n, 8 words of bits below 256, then n ranges.
 static int in_set(const uint32_t *op, uint32_t c) {
   if (c < 256) {
     return (op[1 + c / 32] >> (c % 32)) & 1;
@@ -155,8 +131,6 @@ static inline int is_word(uint32_t c, int folded) {
          (folded && (c == 0x017F || c == 0x212A));
 }
 
-// One character instruction at `pc` (RE_CHAR, RE_ANY, RE_ALL, RE_SET or
-// their back forms): whether it matches at *pos, moving past it.
 static int match_one(const Vm *vm, uint32_t pc, int32_t *pos) {
   const uint32_t *op = vm->code + pc;
   int32_t p = *pos;
@@ -187,7 +161,7 @@ static int match_one(const Vm *vm, uint32_t pc, int32_t *pos) {
   case RE_SET:
     c = read_forward(vm, &p);
     break;
-  default: // the back forms
+  default:
     c = read_backward(vm, &p);
     break;
   }
@@ -237,7 +211,6 @@ static inline void set_register(Vm *vm, uint32_t r, int32_t value) {
   vm->regs[r] = value;
 }
 
-// The next code point of a capture's text for a case-insensitive compare.
 static inline uint32_t fold(uint32_t c, uint32_t flags) {
   if (!(flags & RE_REF_IGNORE_CASE)) {
     return c;
@@ -246,14 +219,10 @@ static inline uint32_t fold(uint32_t c, uint32_t flags) {
   return tz_re_canonicalize(c, (flags & RE_REF_UNICODE) != 0);
 }
 
-// Whether `pos` is between the halves of a surrogate pair.
 static inline int inside_pair(const Vm *vm, int32_t pos) {
   return pos > 0 && pos < vm->length && is_trail(unit(vm, pos)) && is_lead(unit(vm, pos - 1));
 }
 
-// RE_BACKREF: the text of the first of its captures that holds a value,
-// again at *pos (or before it, back). With u, as in V8, a reference never
-// ends between the halves of a surrogate pair, not even an empty one.
 static int match_backref(const Vm *vm, const uint32_t *op, int32_t *pos) {
   uint32_t flags = op[1], n = op[2];
   int32_t start = -1, end = -1;
@@ -265,7 +234,7 @@ static int match_backref(const Vm *vm, const uint32_t *op, int32_t *pos) {
       break;
     }
   }
-  if (start < 0) { // an undefined group matches the empty string
+  if (start < 0) {
     return !(vm->unicode && inside_pair(vm, *pos));
   }
   int32_t length = end - start;
@@ -282,7 +251,6 @@ static int match_backref(const Vm *vm, const uint32_t *op, int32_t *pos) {
       }
     }
   } else {
-    // Character by character, as the regex reads them.
     Vm view = *vm;
     view.unicode = (flags & RE_REF_UNICODE) != 0;
     int32_t a = start, b = from;
@@ -303,8 +271,6 @@ static int match_backref(const Vm *vm, const uint32_t *op, int32_t *pos) {
 
 static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end);
 
-// The code unit the code at `pc` must match first, past what only notes
-// positions (which a failure undoes): -1 if there is none.
 static int32_t next_char(const uint32_t *code, uint32_t pc, int unicode) {
   for (;;) {
     const uint32_t *op = code + pc;
@@ -327,8 +293,6 @@ static int32_t next_char(const uint32_t *code, uint32_t pc, int unicode) {
   }
 }
 
-// After a lookaround's body matched: its choice points go (a lookaround is
-// atomic), its undo records stay, so that backtracking past it undoes it.
 static void drop_choices(size_t mark) {
   size_t kept = mark;
   for (size_t i = mark; i < tz_re_stack_size; ++i) {
@@ -339,7 +303,6 @@ static void drop_choices(size_t mark) {
   tz_re_stack_size = kept;
 }
 
-// Undoes everything above `mark`.
 static void unwind(Vm *vm, size_t mark) {
   while (tz_re_stack_size > mark) {
     ReEntry *e = &tz_re_stack[--tz_re_stack_size];
@@ -351,9 +314,6 @@ static void unwind(Vm *vm, size_t mark) {
   }
 }
 
-// Runs the code from `pc` at position `pos` until RE_MATCH, backtracking
-// as needed: 1 and the position where it matched, or 0 with every change
-// undone.
 static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
   const uint32_t *code = vm->code;
   size_t base = tz_re_stack_size;
@@ -469,7 +429,6 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
       pc += 3;
       continue;
     case RE_LOOP: {
-      // counter, min, max, greedy, body, exit
       uint32_t n = (uint32_t)vm->regs[op[1]];
       if (n < op[2]) {
         pc = op[5];
@@ -485,8 +444,6 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
       continue;
     }
     case RE_LOOP_END: {
-      // counter, min, position, loop: an optional iteration that matched
-      // nothing fails.
       uint32_t n = (uint32_t)vm->regs[op[1]];
       if (n >= op[2] && pos == vm->regs[op[3]]) {
         goto fail;
@@ -498,12 +455,10 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
       continue;
     }
     case RE_REPEAT: {
-      // min, max, greedy, length, then the character's instruction
       uint32_t min = op[1], max = op[2], atom = pc + 5, next = atom + op[4];
       uint32_t count = 0;
       int32_t p = pos, min_pos = pos;
       if (op[3] && !vm->unicode && (code[atom] == RE_SET || code[atom] == RE_CHAR)) {
-        // The common case, `[a-z]+` or `a*`, by code units without a call.
         const uint32_t *set = code + atom + 1;
         int32_t limit = max < (uint32_t)(vm->length - pos) ? pos + (int32_t)max : vm->length;
         if (code[atom] == RE_CHAR) {
@@ -581,7 +536,7 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
       pc = op[2];
       continue;
     }
-    default: // RE_FAIL
+    default:
       goto fail;
     }
 
@@ -603,7 +558,6 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
         pos = e->pos;
         break;
       case E_REPEAT_GREEDY: {
-        // One character less than last time.
         const uint32_t *rep = code + e->pc;
         uint32_t atom = e->pc + 5;
         int back = code[atom] == RE_CHAR_BACK || code[atom] == RE_ANY_BACK ||
@@ -616,9 +570,6 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
                        is_lead(unit(vm, p - 2))
                    ? 2
                    : 1;
-          // Where the character that must follow is not, what follows would
-          // fail and undo itself: those positions are skipped. A position
-          // before a code unit that is no surrogate is a character's start.
           if (hint >= 0) {
             while (p > min_pos && unit(vm, p) != (uint32_t)hint) {
               --p;
@@ -634,14 +585,13 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
         }
         if (p != min_pos) {
           e->pos = p;
-          ++tz_re_stack_size; // stays for the next time
+          ++tz_re_stack_size;
         }
         pc = next;
         pos = p;
         break;
       }
       case E_REPEAT_LAZY: {
-        // One character more than last time.
         const uint32_t *rep = code + e->pc;
         int32_t p = e->pos;
         uint32_t count = (uint32_t)e->n;
@@ -666,12 +616,9 @@ static int run(Vm *vm, uint32_t pc, int32_t pos, int32_t *end) {
   }
 }
 
-// Scratch space for the registers, kept between matches.
 TZ_THREAD_LOCAL int32_t *tz_re_registers;
 TZ_THREAD_LOCAL size_t tz_re_register_capacity;
 
-// One match at or after `start` (only at it when sticky): 1 and the captures
-// in `caps` if there is one.
 static int interpret_one(const uint32_t *program, const void *units, int32_t wide, int32_t length,
                          int32_t start, int32_t *caps, int32_t sticky) {
   uint32_t flags = program[TZ_RE_H_FLAGS];
@@ -695,7 +642,6 @@ static int interpret_one(const uint32_t *program, const void *units, int32_t wid
   int filter = (first_flags & TZ_RE_FIRST_KNOWN) && !sticky;
   int wide_first = (first_flags & TZ_RE_FIRST_WIDE) != 0;
 
-  // With u, a start inside a surrogate pair is the start of the pair.
   if (vm.unicode && start > 0 && start < length && is_trail(unit(&vm, start)) &&
       is_lead(unit(&vm, start - 1))) {
     --start;
@@ -705,7 +651,6 @@ static int interpret_one(const uint32_t *program, const void *units, int32_t wid
       return 0;
     }
     if (filter) {
-      // Skip what cannot start a match.
       while (i < length) {
         uint32_t c = unit(&vm, i);
         if (c < 256 ? (first[c / 32] >> (c % 32)) & 1 : wide_first) {
@@ -731,13 +676,12 @@ static int interpret_one(const uint32_t *program, const void *units, int32_t wid
     if (sticky) {
       return 0;
     }
-    ++i; // also into a surrogate pair, as V8 does (see read_forward)
+    ++i;
   }
 
   return 0;
 }
 
-// AdvanceStringIndex: past a whole surrogate pair with u or v.
 static int32_t advance_units(const void *units, int32_t wide, int32_t length, int32_t index,
                              uint32_t flags) {
   if (wide && (flags & (TZ_RE_UNICODE | TZ_RE_UNICODE_SETS)) && index + 1 < length &&
@@ -748,9 +692,6 @@ static int32_t advance_units(const void *units, int32_t wide, int32_t length, in
   return index + 1;
 }
 
-// The interpreter as a matcher (TzReMatch in regex.h): the regexes of
-// `new RegExp(s)`. Only they refer to it, so a program without them has
-// no interpreter in it.
 int32_t tz_re_interpret(const uint32_t *program, const void *units, int32_t wide, int32_t length,
                         int32_t start, int32_t *caps, int32_t sticky, int32_t max) {
   uint32_t slots = 2 * program[TZ_RE_H_CAPTURES];
@@ -767,20 +708,9 @@ int32_t tz_re_interpret(const uint32_t *program, const void *units, int32_t wide
   return found;
 }
 
-//===----------------------------------------------------------------------===//
-// What compiled matchers call
-//===----------------------------------------------------------------------===//
-
-// The machine code that tz makes of a literal (codegen_regex_native.cpp) runs
-// the same program as the interpreter, and keeps its choice points and undo
-// records here: a word of 64 bits each, the entry's code in the low half and a
-// value in the high half; a negative code is an undo record, ~code the slot it
-// restores. Kept from one match to the next. Not static: see the rules in
-// tzrt.h.
 TZ_THREAD_LOCAL int64_t *tz_re_bt;
 TZ_THREAD_LOCAL int32_t tz_re_bt_capacity;
 
-// Room for `need` entries, of which `top` are there: returns the new stack.
 TZ_NOINLINE int64_t *tz_re_bt_grow(int32_t top, int32_t need) {
   int64_t capacity = (int64_t)tz_re_bt_capacity * 2 + 256;
   if (capacity < need) {
@@ -800,9 +730,6 @@ TZ_NOINLINE int64_t *tz_re_bt_grow(int32_t top, int32_t need) {
   return stack;
 }
 
-// After a lookaround's body matched: the entries above `mark` lose their
-// choice points and keep their undo records (see drop_choices); returns the
-// new top.
 int32_t tz_re_bt_drop_choices(int64_t *stack, int32_t mark, int32_t top) {
   int32_t kept = mark;
   for (int32_t i = mark; i < top; ++i) {
@@ -814,7 +741,6 @@ int32_t tz_re_bt_drop_choices(int64_t *stack, int32_t mark, int32_t top) {
   return kept;
 }
 
-// Undoes the entries above `mark` (see unwind); the top is then `mark`.
 void tz_re_bt_unwind(const int64_t *stack, int32_t mark, int32_t top, int32_t *slots) {
   while (top > mark) {
     int64_t e = stack[--top];
@@ -825,9 +751,6 @@ void tz_re_bt_unwind(const int64_t *stack, int32_t mark, int32_t top, int32_t *s
   }
 }
 
-// With u, the character at `pos` (before it, `back`) of two-byte units
-// where the unit there is a surrogate: the position past it (before it) << 32
-// | the code point, or -1 where there is none (see read_forward).
 int64_t tz_re_read_pair(const uint16_t *units, int32_t length, int32_t pos, int32_t back) {
   Vm vm;
   memset(&vm, 0, sizeof vm);
@@ -839,9 +762,6 @@ int64_t tz_re_read_pair(const uint16_t *units, int32_t length, int32_t pos, int3
   return c < 0 ? -1 : (int64_t)pos << 32 | (uint32_t)c;
 }
 
-// RE_BACKREF, whose words are at `op`, at `pos` with the captures in
-// `caps`, with u or v if `unicode`: the position past the text (before it,
-// back), or -1.
 int32_t tz_re_backref(const void *units, int32_t wide, int32_t length, int32_t *caps, int32_t pos,
                       const uint32_t *op, int32_t unicode) {
   Vm vm;
@@ -855,9 +775,6 @@ int32_t tz_re_backref(const void *units, int32_t wide, int32_t length, int32_t *
   return match_backref(&vm, op, &pos) ? pos : -1;
 }
 
-// The memo of a compiled matcher (TzReMemo in regex.h), which keeps
-// backtracking from blowing up. Its pages are made as the match gets to them,
-// so that a blowup in a small part of a long text costs only that part.
 TzReMemo *tz_re_memo_start(int32_t rows, int32_t length) {
   TzReMemo *m = (TzReMemo *)tz_alloc(sizeof(TzReMemo));
   size_t pages = (size_t)length / TZ_RE_MEMO_PAGE + 1;
@@ -871,7 +788,6 @@ TzReMemo *tz_re_memo_start(int32_t rows, int32_t length) {
   return m;
 }
 
-// The page for positions from page * TZ_RE_MEMO_PAGE on, zeroed.
 TZ_NOINLINE uint8_t *tz_re_memo_page(TzReMemo *m, int32_t page) {
   size_t bytes = (size_t)m->rows * TZ_RE_MEMO_PAGE / 8;
   uint8_t *bits = (uint8_t *)tz_alloc(bytes);
@@ -890,9 +806,6 @@ static void memo_unset(TzReMemo *m, int32_t pos, int32_t row) {
   page[bit / 8] &= (uint8_t)~(1u << (bit % 8));
 }
 
-// What the memo noted inside lookarounds, a row and a position each: a
-// lookaround that matches may have gone through states that the memo must
-// not take for failures.
 TZ_NOINLINE void tz_re_memo_log(TzReMemo *m, int32_t row, int32_t pos) {
   if (m->log_length == m->log_capacity) {
     int32_t capacity = m->log_capacity * 2 + 64;
@@ -907,8 +820,6 @@ TZ_NOINLINE void tz_re_memo_log(TzReMemo *m, int32_t row, int32_t pos) {
   m->log[m->log_length++] = (int64_t)pos << 32 | (uint32_t)row;
 }
 
-// Whether the match got to `row` at `pos` before: if not, notes that it has
-// now (in the log too, if `log`) and returns 0.
 int32_t tz_re_memo_visit(TzReMemo *m, int32_t row, int32_t pos, int32_t log) {
   uint8_t *page = m->pages[pos / TZ_RE_MEMO_PAGE];
   if (!page) {
@@ -927,7 +838,6 @@ int32_t tz_re_memo_visit(TzReMemo *m, int32_t row, int32_t pos, int32_t log) {
   return 0;
 }
 
-// Forgets what was noted since the log had `mark` entries.
 void tz_re_memo_forget(TzReMemo *m, int32_t mark) {
   for (int32_t i = mark; i < m->log_length; ++i) {
     memo_unset(m, (int32_t)(m->log[i] >> 32), (int32_t)(uint32_t)m->log[i]);
@@ -937,7 +847,6 @@ void tz_re_memo_forget(TzReMemo *m, int32_t mark) {
   }
 }
 
-// Forgets what was noted at `pos`, in every row.
 void tz_re_memo_clear(TzReMemo *m, int32_t pos) {
   for (int32_t row = 0; row < m->rows; ++row) {
     memo_unset(m, pos, row);
@@ -953,8 +862,6 @@ void tz_re_memo_end(TzReMemo *m) {
   tz_free(m);
 }
 
-// Whether `c` is in one of `n` sorted ranges [first, last]: a class too
-// large to test range by range.
 int32_t tz_re_in_ranges(uint32_t c, const uint32_t *ranges, uint32_t n) {
   uint32_t lo = 0, hi = n;
   while (lo < hi) {
@@ -971,12 +878,6 @@ int32_t tz_re_in_ranges(uint32_t c, const uint32_t *ranges, uint32_t n) {
   return 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Regex objects
-//===----------------------------------------------------------------------===//
-
-// What a regex object releases when its count reaches zero: the program of
-// `new RegExp`. (A literal's program is a constant.)
 void tz_re_drop(void *object) {
   TzRegex *re = (TzRegex *)object;
   if (re->owned) {
@@ -987,8 +888,6 @@ void tz_re_drop(void *object) {
 
 const TzLayout tz_re_layout = {tz_re_drop, NULL, 0, TZ_LAYOUT_REGEX, NULL, 0, 0};
 
-// A literal with g or y: a new object each time the literal is evaluated, as
-// in JavaScript, so that each has its own lastIndex.
 TzRegex *tz_re_new(const uint32_t *program, TzReMatch match) {
   TzRegex *re = (TzRegex *)tz_obj_alloc(sizeof(TzRegex));
   re->rc = 1;
@@ -1002,7 +901,6 @@ TzRegex *tz_re_new(const uint32_t *program, TzReMatch match) {
   return re;
 }
 
-// UTF-16 as UTF-8 in a fixed buffer, for messages.
 static size_t utf8_of(const uint16_t *units, size_t n, char *out, size_t capacity) {
   size_t length = 0;
   for (size_t i = 0; i < n && length + 4 < capacity; ++i) {
@@ -1032,8 +930,6 @@ static size_t utf8_of(const uint16_t *units, size_t n, char *out, size_t capacit
   return length;
 }
 
-// `new RegExp(pattern, flags)`: a pattern or flags that are no regex throw
-// a SyntaxError with V8's message, and give NULL.
 TzRegex *tz_re_from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t f_meta,
                            int32_t has_flags) {
   TzStr pattern = {p_obj, p_meta}, flag_text = {f_obj, f_meta};
@@ -1121,13 +1017,8 @@ int32_t tz_re_flag(TzRegex *re, int32_t flag) {
   return (tz_re_flags(re->program) & (uint32_t)flag) != 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Matching strings
-//===----------------------------------------------------------------------===//
-
-// The code units of a string being matched; `flat` must stay where it is.
 typedef struct {
-  TzStr original; // as the caller gave it, borrowed
+  TzStr original;
   TzStr flat;
   const void *units;
   uint32_t length;
@@ -1145,8 +1036,6 @@ static inline uint32_t text_unit(const Text *t, uint32_t i) {
   return t->two ? ((const uint16_t *)t->units)[i] : ((const uint8_t *)t->units)[i];
 }
 
-// A string built of pieces, which are joined once at the end into a buffer
-// of the exact size: the substrings of the input stay views until then.
 typedef struct {
   TzStr *items;
   uint32_t length, capacity;
@@ -1166,7 +1055,6 @@ static void pieces_add(Pieces *p, TzStr piece) {
   p->items[p->length++] = piece;
 }
 
-// Units from..to of `t`.
 static void pieces_text(Pieces *p, const Text *t, uint32_t from, uint32_t to) {
   if (to > from) {
     pieces_add(p, tz_str_sub(t->original, from, to));
@@ -1187,7 +1075,6 @@ static TzStr pieces_join(Pieces *p) {
   return out;
 }
 
-// AdvanceStringIndex: past a whole surrogate pair with u or v.
 static uint32_t advance(const Text *t, uint32_t index, uint32_t flags) {
   if ((flags & (TZ_RE_UNICODE | TZ_RE_UNICODE_SETS)) && index + 1 < t->length &&
       is_lead(text_unit(t, index)) && is_trail(text_unit(t, index + 1))) {
@@ -1197,7 +1084,6 @@ static uint32_t advance(const Text *t, uint32_t index, uint32_t flags) {
   return index + 1;
 }
 
-// Room for the captures of a match: on the stack for most regexes.
 typedef struct {
   int32_t local[64];
   int32_t *caps;
@@ -1216,8 +1102,6 @@ static void captures_free(Captures *c) {
   }
 }
 
-// RegExpBuiltinExec: with g or y the match starts at lastIndex, which then
-// moves past it, or back to 0 when there is none.
 static int builtin_exec(TzRegex *re, const Text *t, int32_t *caps) {
   uint32_t flags = tz_re_flags(re->program);
   int stateful = (flags & (TZ_RE_GLOBAL | TZ_RE_STICKY)) != 0;
@@ -1237,14 +1121,10 @@ static int builtin_exec(TzRegex *re, const Text *t, int32_t *caps) {
   return 1;
 }
 
-// The matches of a regex with g over all of a text, as the loop of
-// RegExpBuiltinExec finds them from lastIndex 0 on, found many at a time by
-// one call to the matcher. lastIndex is 0 again at the end, as after that
-// loop; nothing sees it in between.
 typedef struct {
   TzRegex *re;
   const Text *t;
-  int32_t *caps; // the slots of `size` matches
+  int32_t *caps;
   int32_t local[256];
   int32_t slots, size, found, next, start;
   int done;
@@ -1261,7 +1141,6 @@ static void batch_init(Batch *b, TzRegex *re, const Text *t) {
   re->last_index = 0;
 }
 
-// The captures of the next match, or NULL after the last.
 static const int32_t *batch_next(Batch *b) {
   if (b->next == b->found) {
     if (b->done || b->start > (int32_t)b->t->length) {
@@ -1289,8 +1168,6 @@ static void batch_free(Batch *b) {
   b->re->last_index = 0;
 }
 
-// Two descriptors of one type (an optional pair); writable data, so that the
-// linker does not fold them into one.
 static const TzType pair_object_type = {TZ_T_OBJECT, sizeof(void *), NULL};
 TzType tz_re_indices_type = {TZ_T_OPTIONAL, sizeof(void *), &pair_object_type};
 TzType tz_re_named_indices_type = {TZ_T_OPTIONAL, sizeof(void *), &pair_object_type};
@@ -1304,7 +1181,6 @@ static void *new_instance(const TzLayout *layout, uint32_t size) {
   return object;
 }
 
-// The named groups of a match as the object `groups`.
 static void *build_groups(const TzMatchShape *shape, TzStr input, const int32_t *caps) {
   char *groups = (char *)new_instance(shape->groups_layout, shape->groups_size);
   for (uint32_t i = 0; i < shape->name_count; ++i) {
@@ -1323,12 +1199,10 @@ static void *build_groups(const TzMatchShape *shape, TzStr input, const int32_t 
   return groups;
 }
 
-// A match: the captures, index, input, groups and indices.
 static void *build_match(const TzMatchShape *shape, const uint32_t *program, TzStr input,
                          const int32_t *caps) {
   uint32_t n = tz_re_captures(program);
   char *match = (char *)new_instance(shape->layout, shape->size);
-  // The captures as `string | undefined`, zeroed (undefined) to start with.
   TzArray *items = tz_arr_new(shape->item_type, n, n);
   size_t size = shape->item_type->size, has = shape->item_type->inner->size;
   for (uint32_t k = 0; k < n; ++k) {
@@ -1364,7 +1238,6 @@ static void *build_match(const TzMatchShape *shape, const uint32_t *program, TzS
   return match;
 }
 
-// re.test(s)
 int32_t tz_re_test(TzRegex *re, void *s_obj, uint64_t s_meta) {
   Text t;
   text_of(&t, s_obj, s_meta);
@@ -1375,7 +1248,6 @@ int32_t tz_re_test(TzRegex *re, void *s_obj, uint64_t s_meta) {
   return found;
 }
 
-// re.exec(s), and s.match(re) without g: the match, or NULL for undefined.
 void *tz_re_exec(TzRegex *re, void *s_obj, uint64_t s_meta, const TzMatchShape *shape) {
   Text t;
   text_of(&t, s_obj, s_meta);
@@ -1388,7 +1260,6 @@ void *tz_re_exec(TzRegex *re, void *s_obj, uint64_t s_meta, const TzMatchShape *
   return match;
 }
 
-// s.match(re) with g: the matched texts, or NULL for undefined.
 TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzType *string_type) {
   Text t;
   text_of(&t, s_obj, s_meta);
@@ -1402,8 +1273,6 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
     }
     TzStr text = tz_str_sub(t.original, (uint32_t)caps[0], (uint32_t)caps[1]);
     if (texts->length == texts->capacity && texts->length >= 64 && caps[1] > 0) {
-      // As many matches as the text has had so far for its length: room
-      // for all at once instead of growing again and again.
       uint64_t estimate = (uint64_t)texts->length * t.length / (uint32_t)caps[1];
       estimate += estimate / 8 + 64;
       if (estimate > (uint64_t)t.length + 1) {
@@ -1413,8 +1282,6 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
         tz_arr_grow(texts, (int64_t)estimate);
       }
     }
-    // An element of a string[] is the string itself: stored without the
-    // copy of tz_arr_push_value, which knows no sizes.
     if (texts->length < texts->capacity) {
       ((TzStr *)texts->data)[texts->length++] = text;
     } else {
@@ -1426,21 +1293,14 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
   return texts;
 }
 
-// s.matchAll(re) makes an iterator (compiler/lower/codegen/codegen_iter.cpp)
-// that works on a copy of the regex, as JavaScript does. Before it is made, the
-// check of the g flag, where the regex is known only when the program runs: a
-// TypeError without it.
 void tz_re_check_match_all(const TzRegex *re) {
   if (!(tz_re_flags(re->program) & TZ_RE_GLOBAL)) {
     tz_throw(TZ_TYPE_ERROR, "String.prototype.matchAll called with a non-global RegExp argument");
   }
 }
 
-// When it is made: the lastIndex the copy starts at.
 int32_t tz_re_match_all_begin(TzRegex *re) { return re->last_index; }
 
-// The next value of that iterator: the match at or after `*last_index`, the
-// lastIndex of the copy, which then moves past it; NULL when there is none.
 void *tz_re_match_next(TzRegex *re, int32_t *last_index, void *s_obj, uint64_t s_meta,
                        const TzMatchShape *shape) {
   uint32_t flags = tz_re_flags(re->program);
@@ -1463,7 +1323,6 @@ void *tz_re_match_next(TzRegex *re, int32_t *last_index, void *s_obj, uint64_t s
   return match;
 }
 
-// s.search(re): where the first match is, from the start; lastIndex stays.
 int32_t tz_re_search(TzRegex *re, void *s_obj, uint64_t s_meta) {
   Text t;
   text_of(&t, s_obj, s_meta);
@@ -1489,8 +1348,6 @@ static int has_names(const uint32_t *program) {
   return 0;
 }
 
-// The first group named by units from..to of `replacement` that holds a
-// value, or 0.
 static uint32_t named_capture(const uint32_t *program, const Text *replacement, uint32_t from,
                               uint32_t to, const int32_t *caps) {
   for (uint32_t k = 1; k < tz_re_captures(program); ++k) {
@@ -1510,8 +1367,6 @@ static uint32_t named_capture(const uint32_t *program, const Text *replacement, 
   return 0;
 }
 
-// GetSubstitution: the replacement text with its patterns, `$&`, `$1`,
-// `$<name>`, `` $` ``, `$'` and `$$`.
 static void substitute(Pieces *out, const Text *rep, const Text *s, const uint32_t *program,
                        const int32_t *caps) {
   uint32_t n = tz_re_captures(program), length = rep->length, plain = 0;
@@ -1580,8 +1435,6 @@ static void substitute(Pieces *out, const Text *rep, const Text *s, const uint32
   pieces_text(out, rep, plain, length);
 }
 
-// replace(re, text) and replaceAll(re, text) (`all`, which needs g: a
-// TypeError, and the empty string, without it).
 void tz_re_replace(TzStr *out, TzRegex *re, void *s_obj, uint64_t s_meta, void *r_obj,
                    uint64_t r_meta, int32_t all) {
   uint32_t flags = tz_re_flags(re->program);
@@ -1642,11 +1495,9 @@ static void push_piece(TzArray *a, TzStr s, int32_t from, int32_t to, int option
   tz_arr_push_value(a, value);
 }
 
-// s.split(re, limit): the pieces between the matches, with the captures of
-// each match between them (undefined for one that holds none).
 TzArray *tz_re_split(TzRegex *re, void *s_obj, uint64_t s_meta, int64_t limit, int32_t has_limit,
                      const TzType *item_type) {
-  uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX; // ToUint32
+  uint32_t max = has_limit ? (uint32_t)limit : UINT32_MAX;
   int optional = item_type->kind == TZ_T_OPTIONAL;
   TzArray *a = tz_arr_new(item_type, 0, 0);
   if (max == 0) {
@@ -1658,8 +1509,6 @@ TzArray *tz_re_split(TzRegex *re, void *s_obj, uint64_t s_meta, int64_t limit, i
   uint32_t flags = tz_re_flags(program), n = tz_re_captures(program);
   Captures c;
   int32_t *caps = captures_for(&c, program);
-  // JavaScript tries a sticky copy of the regex at each position; looking
-  // for the next match finds the same ones.
   if (t.length == 0) {
     if (!re->match(program, t.units, t.two, 0, 0, caps, 1, 1)) {
       push_piece(a, t.original, 0, 0, optional);
@@ -1701,14 +1550,8 @@ done:
   return a;
 }
 
-//===----------------------------------------------------------------------===//
-// replace() with a function
-//===----------------------------------------------------------------------===//
-
 _Static_assert(sizeof(TzReplacer) <= TZ_REPLACER_SIZE, "TzReplacer does not fit its room");
 
-// replaceAll needs g: without it a TypeError, and a replacer without
-// matches, which tz_re_replacer_drop frees.
 void tz_re_replacer_init(TzReplacer *r, TzRegex *re, void *s_obj, uint64_t s_meta, int32_t all) {
   uint32_t flags = tz_re_flags(re->program);
   int global = (flags & TZ_RE_GLOBAL) != 0;
@@ -1762,7 +1605,6 @@ void tz_re_replacer_init(TzReplacer *r, TzRegex *re, void *s_obj, uint64_t s_met
   }
 }
 
-// The captures of the next match, or NULL after the last one.
 const int32_t *tz_re_replacer_next(TzReplacer *r) {
   if (r->next == r->count) {
     return NULL;
@@ -1771,7 +1613,6 @@ const int32_t *tz_re_replacer_next(TzReplacer *r) {
   return r->matches + (size_t)(r->next++) * 2 * r->captures;
 }
 
-// Capture k of a match: whether it holds a value, and then the text.
 int32_t tz_re_replacer_capture(TzStr *out, TzReplacer *r, const int32_t *caps, int32_t k) {
   if (caps[2 * k] < 0) {
     out->obj = NULL;
@@ -1787,7 +1628,6 @@ void *tz_re_replacer_groups(TzReplacer *r, const TzMatchShape *shape, const int3
   return build_groups(shape, r->input, caps);
 }
 
-// What the function gave for a match (borrowed).
 void tz_re_replacer_put(TzReplacer *r, const int32_t *caps, void *obj, uint64_t meta) {
   if ((uint32_t)caps[0] < r->copied) {
     return;
@@ -1807,7 +1647,6 @@ void tz_re_replacer_put(TzReplacer *r, const int32_t *caps, void *obj, uint64_t 
   r->copied = (uint32_t)caps[1];
 }
 
-// The function threw: what the replacer holds goes, and there is no result.
 void tz_re_replacer_drop(TzReplacer *r) {
   tz_free(r->matches);
   r->matches = NULL;
@@ -1834,10 +1673,6 @@ void tz_re_replacer_finish(TzStr *out, TzReplacer *r) {
   *out = pieces_join(&pieces);
 }
 
-//===----------------------------------------------------------------------===//
-// RegExp.escape
-//===----------------------------------------------------------------------===//
-
 static void buf_hex(TzBuf *out, uint32_t value, int digits) {
   static const char hex[] = "0123456789abcdef";
   for (int i = digits - 1; i >= 0; --i) {
@@ -1845,7 +1680,6 @@ static void buf_hex(TzBuf *out, uint32_t value, int digits) {
   }
 }
 
-// RegExp.escape(s): s as a pattern that matches it as it is.
 void tz_re_escape(TzStr *out, void *obj, uint64_t meta) {
   Text t;
   text_of(&t, obj, meta);

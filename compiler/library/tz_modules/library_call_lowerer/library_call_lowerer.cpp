@@ -21,10 +21,7 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   switch (call->builtin) {
   case Builtin::LibListener: {
-    // The function lies in its box after the header (TZ_BOX_VALUE in
-    // runtime/core/unknown/unknown.h), the box of an unknown that holds it; retained,
-    // as the listener may remove itself while it runs.
-    Lowering::Operand box = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand box = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *value =
         lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(call->type),
                                       lowering_.builder_.CreateConstInBoundsGEP1_64(
@@ -35,8 +32,6 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     return value;
   }
   case Builtin::LibAs: {
-    // The object, if its class is C or one down its chain, as `instanceof`
-    // compares; otherwise undefined, and the reference goes.
     const Type *from = call->args[0]->type;
     const Type *wanted = call->type->nonOptional();
     llvm::Value *object = lowering_.exprLowerer().emitExpr(call->args[0]);
@@ -81,7 +76,7 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
   case Builtin::LibStdinChunk:
   case Builtin::LibStdWrite:
     return lowering_.streamLowerer().emitStreamBuiltin(call);
-  case Builtin::LibAhead: // the promise itself; emitAwait makes the site
+  case Builtin::LibAhead:
     return lowering_.exprLowerer().emitExpr(call->args[0]);
   case Builtin::LibOrder:
     if (lowering_.parallel_) {
@@ -90,10 +85,9 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     }
     return nullptr;
   case Builtin::LibNativeSignal: {
-    // The runtime's side of the signal, retained, or null for undefined.
     const Type *type = call->args[0]->type;
-    Lowering::Operand signal = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
-    llvm::Value *native = nativeSignal(signal.value, type, /*retain=*/true);
+    Lowering::Operand signal = lowering_.refCounts().emitOperand(call->args[0], true);
+    llvm::Value *native = nativeSignal(signal.value, type, true);
     lowering_.refCounts().dropOperand(signal);
     return native;
   }
@@ -135,4 +129,4 @@ llvm::Value *LibraryCallLowerer::nativeSignal(llvm::Value *signal, const Type *t
   return phi;
 }
 
-} // namespace tz
+}

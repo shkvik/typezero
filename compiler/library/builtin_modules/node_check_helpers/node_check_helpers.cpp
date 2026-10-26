@@ -23,7 +23,6 @@ std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringR
     }
     std::string sync = (name + "Sync").str();
     if (llvm::is_contained(kFsFunctions, sync)) {
-      // The one of node:fs/promises gives a Promise instead.
       if (llvm::is_contained(kFspFunctions, name)) {
         return what + " takes a callback, which tz does not have; import '" + name.str() +
                "' from \"node:fs/promises\", which gives a Promise, or '" + sync +
@@ -170,4 +169,4 @@ std::string moduleLabel(NodeModule module) {
   return "";
 }
 
-} // namespace tz
+}

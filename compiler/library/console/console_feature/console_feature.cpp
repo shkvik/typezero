@@ -7,7 +7,7 @@
 namespace tz {
 
 Expr *ConsoleFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                      const Type * /*expected*/) const {
+                                      const Type *) const {
   return checker.consoleChecker().checkConsoleCall(call, member);
 }
 
@@ -27,4 +27,4 @@ llvm::Value *ConsoleFeature::lowerCall(Lowering &lowering, CallExpr *call) const
   return nullptr;
 }
 
-} // namespace tz
+}

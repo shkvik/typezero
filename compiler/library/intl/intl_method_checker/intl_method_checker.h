@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of Intl objects, toLocaleString and localeCompare.
 class IntlMethodChecker {
 public:
   explicit IntlMethodChecker(Checker &checker);
@@ -18,4 +17,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

@@ -4,12 +4,10 @@
 
 namespace tz {
 
-// The head of the matcher: the width of units and the scan for where a match starts.
 class MatcherHead {
 public:
   explicit MatcherHead(MatcherBuilder &builder);
 
-  // Emitting
   void emitWidth(bool wide);
   void emitHead();
   void emitByteScan(llvm::Value *from, llvm::BasicBlock *found, llvm::AllocaInst *at,
@@ -21,4 +19,4 @@ private:
   MatcherBuilder &builder_;
 };
 
-} // namespace tz
+}

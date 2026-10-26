@@ -15,4 +15,4 @@ public:
   Expr *operand;
 };
 
-} // namespace tz
+}

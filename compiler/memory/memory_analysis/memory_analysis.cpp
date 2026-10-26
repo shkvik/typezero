@@ -14,7 +14,6 @@ namespace tz {
 
 namespace {
 
-// A class whose construction or methods let `this` go somewhere.
 bool letsThisGo(const ClassDecl *cls) {
   for (const FunctionDecl *fn : cls->constructors) {
     if (fn->thisVar && CycleScanner::thisEscapes(fn->body, fn->thisVar)) {
@@ -41,20 +40,16 @@ bool letsThisGo(const ClassDecl *cls) {
   return false;
 }
 
-} // namespace
+}
 
 MemoryAnalysis::MemoryAnalysis(MemoryPlan &plan) : plan_(plan) {}
 
 void MemoryAnalysis::analyzeCycles(SourceFile &file) {
   CycleScanner scan;
   scanProgram(file, scan);
-  // Layer 2: the functions in owned objects whose references to their owners need no count.
   OwnerScanner owners;
   std::vector<OwnerScanner::BackRef> backRefs = findBackRefs(file, owners);
 
-  // The graph, without the references layer 2 proved need no count; an owned object that is
-  // cyclic all the same may outlive its owner through its group, so its proof is dropped and the
-  // graph made again.
   CycleFinder finder(plan_, scan, file);
   for (;;) {
     plan_.uncounted.clear();
@@ -81,7 +76,6 @@ void MemoryAnalysis::analyzeCycles(SourceFile &file) {
     }
   }
 
-  // WeakRef<T>: the objects of T, and of the types declared to be it.
   for (const Type *t : scan.types) {
     if (t->isWeakRef()) {
       for (const Type *s : finder.runtimeTypesOf(t->weakTarget())) {
@@ -177,9 +171,6 @@ std::vector<OwnerScanner::BackRef> MemoryAnalysis::findBackRefs(SourceFile &file
 }
 
 void MemoryAnalysis::findEternals(SourceFile &file) {
-  // The globals that hold their values for good: declared at the top level of a file and never
-  // assigned again (see pinValue). Top-level code that awaits keeps those no function uses in its
-  // coroutine, which ends while timers may still run: they are not eternal there.
   for (Stmt *item : file.items) {
     if (auto *decl = dyn_cast<VarDeclStmt>(item)) {
       for (const VarDeclarator &d : decl->decls) {
@@ -189,7 +180,6 @@ void MemoryAnalysis::findEternals(SourceFile &file) {
         }
       }
     }
-    // The static fields of a class are globals too.
     if (auto *cls = dyn_cast<ClassDecl>(item)) {
       for (const ClassField &f : cls->fields) {
         if (f.isStatic && f.var && f.init && !f.var->reassigned &&
@@ -263,8 +253,6 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
           scan.function(f.method);
         }
       }
-      // Reflection may call any method of the class (Reflect.get, then
-      // Reflect.apply), and whoever called it may keep what it gives.
       if (cls->reflectMethods) {
         for (const ClassDecl *c = cls; c; c = c->parent) {
           for (const FunctionDecl *fn : c->methods) {
@@ -283,4 +271,4 @@ void MemoryAnalysis::findUnstored(SourceFile &file) {
   plan_.unstoredSites = scan.unstored();
 }
 
-} // namespace tz
+}

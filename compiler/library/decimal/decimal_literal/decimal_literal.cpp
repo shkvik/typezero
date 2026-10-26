@@ -7,8 +7,6 @@ namespace tz {
 
 namespace {
 
-// Drops leading zeros from the digits and moves trailing ones into the
-// exponent.
 DecimalLiteral normalized(std::string digits, int64_t exponent) {
   size_t first = digits.find_first_not_of('0');
   if (first == std::string::npos) {
@@ -20,7 +18,7 @@ DecimalLiteral normalized(std::string digits, int64_t exponent) {
   return {digits.substr(first, last + 1 - first), exponent};
 }
 
-} // namespace
+}
 
 std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text) {
   std::string clean;
@@ -80,7 +78,7 @@ std::optional<DecimalLiteral> readDecimalLiteral(llvm::StringRef text) {
       if (!llvm::isDigit(s[i])) {
         return std::nullopt;
       }
-      if (power < (int64_t(1) << 40)) { // far beyond the range either way
+      if (power < (int64_t(1) << 40)) {
         power = power * 10 + (s[i] - '0');
       }
     }
@@ -108,4 +106,4 @@ int decimalRoundingMode(const std::u16string &name) {
   return -1;
 }
 
-} // namespace tz
+}

@@ -19,12 +19,8 @@ namespace tz {
 
 namespace {
 
-// How many instances of one generic class the instances being made may hold
-// before they count as endless: `class Node<T> { next?: Node<T[]> }` needs
-// Node<int>, Node<int[]>, Node<int[][]>...
 constexpr unsigned kMaxClassChain = 16;
 
-// "int, string"
 std::string typeNames(llvm::ArrayRef<const Type *> types) {
   std::string text;
   for (const Type *t : types) {
@@ -34,7 +30,7 @@ std::string typeNames(llvm::ArrayRef<const Type *> types) {
   return text;
 }
 
-} // namespace
+}
 
 GenericClassInstantiator::GenericClassInstantiator(Checker &checker) : checker_(checker) {}
 
@@ -42,10 +38,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
                                                       std::vector<const Type *> args,
                                                       llvm::SMLoc use) {
   checker_.genericClassChecker().declareClassTypeParams(generic);
-  // Without a place of its own (a type that substitute makes), errors are
-  // reported at the generic class.
   llvm::SMLoc loc = use.isValid() ? use : generic->loc();
-  // Copied: making instances below may add entries.
   std::vector<const Type *> params = generic->typeArgs;
   std::vector<const Type *> defaults = checker_.classDefaults_.lookup(generic);
   std::string name = generic->name.str();
@@ -74,7 +67,6 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
                                      ", e.g. '" + name + "<" + ints + ">'");
       return nullptr;
     }
-    // A default may use the type parameters before it.
     std::vector<const Type *> known = args;
     known.resize(params.size(), nullptr);
     args.push_back(checker_.typeParams().substitute(defaults[k], params, known));
@@ -104,14 +96,11 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
       return nullptr;
     }
   }
-  // The event map of an emitter (sema_events.cpp).
   if (emitter && !checker_.eventMaps().checkEventMap(args[0], loc)) {
     return nullptr;
   }
   auto key = std::make_pair(static_cast<const ClassDecl *>(generic), args);
   if (auto found = checker_.classInstances_.find(key); found != checker_.classInstances_.end()) {
-    // The first place in the program that names the instance is where its
-    // errors are reported.
     if (Checker::Instance *check = classChecks_.lookup(found->second);
         check && !check->callLoc.isValid()) {
       check->callLoc = use;
@@ -131,10 +120,9 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     return nullptr;
   }
 
-  // A copy of the declaration. It was parsed once without errors.
   bool muted = checker_.diags_.setMuted(true);
   Lexer lexer(generic->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, /*library=*/generic->library);
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, generic->library);
   ClassDecl *inst = parser.parseClassCopy();
   checker_.diags_.setMuted(muted);
   inst->generic = generic;
@@ -155,7 +143,6 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     checker_.declModules_[inst] = home;
   }
 
-  // The check of its bodies, by the place that first needs it.
   Checker::Instance *check = nullptr;
   if (!inst->checkOnly) {
     check = &checker_.instanceStore_.emplace_back();
@@ -165,7 +152,7 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     classChecks_[inst] = check;
   }
   if (!checker_.methodsDeclared_) {
-    checker_.unfilled_.push_back(inst); // its generic class may not have its methods yet
+    checker_.unfilled_.push_back(inst);
   } else {
     checker_.filling_.push_back(inst);
     fillInstance(inst);
@@ -175,7 +162,6 @@ ClassDecl *GenericClassInstantiator::instantiateClass(ClassDecl *generic,
     }
   }
   if (check) {
-    // From the body of another instance: that one fails if this one does.
     if (checker_.checkingInstance_) {
       checker_.genericClassChecker().checkClassInstance(check);
       if (check->failed) {
@@ -202,11 +188,9 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   fn->overridden = generic->overridden;
   fn->openToLate = generic->openToLate;
   if (!of) {
-    return; // an error in the generic class
+    return;
   }
   auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
-  // A generic method keeps its own type parameters; one that a parameter
-  // `xs: Iterable<T>` makes is one of the values of this instance.
   std::vector<const Type *> own = of->typeParams, mine = of->typeParams;
   for (const Type *&p : mine) {
     if (p->iterated() && typeMentions(p->iterated(), inst->generic->typeArgs)) {
@@ -230,19 +214,16 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
   for (size_t i = 0; i < fn->params.size() && i < generic->params.size(); ++i) {
     fn->params[i].declaredType = sub2(generic->params[i].declaredType);
   }
-  // The parameters an arrow method takes without naming them (see
-  // declareTyped).
   for (size_t i = fn->params.size(); i < generic->params.size(); ++i) {
     fn->params.push_back(generic->params[i]);
     fn->params.back().declaredType = sub2(generic->params[i].declaredType);
   }
-  // The hidden type parameters an instance's copy of the method declares.
   for (size_t i = fn->typeParams.size(); i < generic->typeParams.size(); ++i) {
     fn->typeParams.push_back(generic->typeParams[i]);
   }
   sym->minArgs = of->minArgs;
   sym->hasRest = of->hasRest;
-  sym->ret = sub2(of->ret); // null: found from the generic method (see inferReturnType)
+  sym->ret = sub2(of->ret);
   sym->discardsResult = of->discardsResult;
   sym->predicateParam = of->predicateParam;
   sym->asserts = of->asserts;
@@ -255,17 +236,12 @@ void GenericClassInstantiator::declareInstanceMember(ClassDecl *inst, FunctionDe
 void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
   ClassDecl *generic = inst->generic;
   auto sub = [&](const Type *t) { return checker_.genericClassChecker().instanceType(inst, t); };
-  // Its bases, whatever code makes the instance: Lowering lays out the
-  // objects of every instance it emits (see addBase).
   auto addInstanceBase = [&](const Type *base) {
     checker_.classBases().addBase(inst->type, base);
     if (inst->isEmitted() && !llvm::is_contained(checker_.file_->subtypes, inst->type)) {
       checker_.file_->subtypes.push_back(inst->type);
     }
   };
-  // The class it extends and the interfaces it implements, those of the
-  // generic class with its types: `class A<T> extends B<T>` makes A<int>
-  // extend B<int>.
   if (const ClassDecl *parent = generic->parent) {
     if (ClassDecl *cls = ClassDeclarer::classOf(sub(parent->type))) {
       inst->parent = cls;
@@ -280,10 +256,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       addInstanceBase(type);
     }
   }
-  // A Duplex of node:stream is a Writable too (sema_stream.cpp).
   checker_.chunkTypes().addStreamBases(inst, inst->loc());
-  // The fields, in the order of the generic class: the copy is parsed from
-  // its text. The static ones are the generic class's.
   for (size_t i = 0; i < inst->fields.size() && i < generic->fields.size(); ++i) {
     ClassField &f = inst->fields[i];
     const ClassField &g = generic->fields[i];
@@ -292,7 +265,7 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     if (f.isStatic) {
       continue;
     }
-    f.resolved = sub(g.resolved); // null: found when the generic class is complete
+    f.resolved = sub(g.resolved);
     if (g.method) {
       FunctionDecl *fn = cast<FunctionExpr>(f.init)->fn;
       fn->name = g.method->name;
@@ -316,7 +289,6 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
       declareInstanceMember(inst, inst->fields[i].method, generic->fields[i].method);
     }
   }
-  // The initializers of the fields, as `init` (see declareMethods).
   if (generic->init) {
     std::vector<Stmt *> sets;
     for (const ClassField &f : inst->fields) {
@@ -336,8 +308,6 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
     init->sym->ret = Type::voidTy();
     inst->init = init;
   }
-  // Variants that these types make the same (`add(x: T)` and `add(x:
-  // string)` with T = string): the check of the instance reports them.
   std::vector<Diagnostics::Captured> errors;
   std::vector<Diagnostics::Captured> *outer = checker_.diags_.setCapture(&errors);
   checker_.classDeclarer().checkVariants(inst);
@@ -352,7 +322,6 @@ void GenericClassInstantiator::fillInstance(ClassDecl *inst) {
 }
 
 void GenericClassInstantiator::linkInstance(ClassDecl *inst) {
-  // What the generic class reported is not reported again.
   bool muted = checker_.diags_.setMuted(true);
   checker_.classLinks().linkOverrides(inst);
   checker_.diags_.setMuted(muted);
@@ -376,4 +345,4 @@ void GenericClassInstantiator::markOverridden(FunctionDecl *fn) {
   }
 }
 
-} // namespace tz
+}

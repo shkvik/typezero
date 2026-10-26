@@ -55,7 +55,6 @@ llvm::Value *BytesMakeCalls::emit() {
     Expr *source = call->args[0];
     llvm::Value *made;
     if (source->type->isIterator()) {
-      // The values first, in an array.
       const Type *element = source->type->yielded();
       llvm::Value *values = lowering_.builder_.CreateCall(
           lowering_.rt_.arrNew,
@@ -70,14 +69,14 @@ llvm::Value *BytesMakeCalls::emit() {
       lowering_.refCounts().releaseValue(values, Type::array(element));
       return made;
     }
-    Lowering::Operand array = lowering_.refCounts().emitOperand(source, /*canBorrow=*/true);
+    Lowering::Operand array = lowering_.refCounts().emitOperand(source, true);
     made = lowering_.builder_.CreateCall(fn("tz_bytes_from_array", ptr, {i32, ptr}),
                                          {kindOf(type), array.value}, "bytes");
     lowering_.refCounts().dropOperand(array);
     return made;
   }
   case Builtin::BytesFromBytes: {
-    Lowering::Operand source = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand source = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *made = lowering_.builder_.CreateCall(fn("tz_bytes_from_bytes", ptr, {i32, ptr}),
                                                       {kindOf(type), source.value}, "bytes");
     lowering_.refCounts().dropOperand(source);
@@ -90,8 +89,6 @@ llvm::Value *BytesMakeCalls::emit() {
     if (call->args.empty()) {
       return made;
     }
-    // Nothing else reaches it while the values are evaluated; one that
-    // throws drops it, with the elements stored so far.
     Lowering::Held held = lowering_.throwLowerer().hold(
         made, type,
         llvm::any_of(call->args, [&](Expr *e) { return lowering_.mayThrow().exprThrows(e); }));
@@ -134,4 +131,4 @@ llvm::Value *BytesMakeCalls::emit() {
   }
 }
 
-} // namespace tz
+}

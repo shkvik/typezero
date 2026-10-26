@@ -1,14 +1,3 @@
-// Values of the type unknown (docs/decorators.md, section 4), and classes as
-// values.
-//
-// An unknown is a reference, NULL for undefined. An object of the language
-// (an instance, a literal, a date, a dictionary, an iterator, a class) is
-// that reference itself; any other value lies in a box, an object of the
-// language whose layout is tz_box_layout and which holds the value with the
-// descriptor of its type. The compiler converts to unknown and back (see
-// compiler/lower/codegen/codegen_unknown.cpp) and calls these functions for
-// what needs the type at run time: typeof, the values a check showed, equality.
-
 #include "runtime/core/unknown/unknown.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
@@ -24,8 +13,6 @@
 
 static void box_drop(void *object) {
   TzBox *box = (TzBox *)object;
-  // A box that is a member of a group (tz_unknown_box_member) lets go of its
-  // value as a member does, and its group frees it.
   if (box->rc < 0) {
     tz_value_release_in(box, box->type, TZ_BOX_VALUE(box));
     tz_group_obj_free(box);
@@ -55,11 +42,6 @@ void *tz_unknown_box(const TzType *type, const void *value) {
   return box;
 }
 
-// The box of a value that may hold a member of a group, such as a function
-// whose environment is one (a listener of node:events in its Record): a
-// member itself, which joins the groups of what it holds (group.c). A box
-// outside them would count its reference from outside the group that holds
-// it, which could then never be freed.
 void *tz_unknown_box_member(const TzType *type, const void *value) {
   TzBox *box = (TzBox *)tz_group_alloc((int64_t)(sizeof(TzBox) + type->size));
   box->layout = &tz_box_layout;
@@ -71,7 +53,6 @@ void *tz_unknown_box_member(const TzType *type, const void *value) {
 }
 
 void *tz_unknown_of(const TzType *type, const void *value) {
-  // Of a union, what it holds; of a string literal, its string.
   type = tz_resolve(type, &value);
   switch (type->kind) {
   case TZ_T_OBJECT:
@@ -80,7 +61,6 @@ void *tz_unknown_of(const TzType *type, const void *value) {
   case TZ_T_UNDEFINED:
     return NULL;
   case TZ_T_OPTIONAL:
-    // Undefined holds the zero value, which needs no release.
     return tz_optional_has(type, value) ? tz_unknown_of(type->inner, value) : NULL;
   default:
     return tz_unknown_box(type, value);
@@ -96,14 +76,12 @@ static int32_t json_kind(const TzJson *j) {
   case TZ_JSON_STRING:
     return TZ_KIND_STRING;
   default:
-    return TZ_KIND_OBJECT; // null, an array, an object
+    return TZ_KIND_OBJECT;
   }
 }
 
-extern TzErrorInfo tz_error_info; // error.c
+extern TzErrorInfo tz_error_info;
 
-// `throw u` of an unknown (owned): the Error it holds, or a TypeError in place
-// of anything else, since only an Error can be thrown.
 void *tz_unknown_error(void *u) {
   if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_ERROR)) {
     return u;
@@ -127,9 +105,8 @@ int32_t tz_unknown_kind(const void *u) {
     return TZ_KIND_UNDEFINED;
   }
   const TzBox *box = as_box(u);
-  if (!box) { // a class is a function in JavaScript
+  if (!box) {
     const TzLayout *layout = ((const TzInstance *)u)->layout;
-    // So is a listener that node:events wraps (see TZ_LAYOUT_LIBRARY).
     if ((layout->flags & TZ_LAYOUT_LIBRARY) &&
         ((layout->name_length == 11 && memcmp(layout->name, "OnceWrapper", 11) == 0) ||
          (layout->name_length == 13 && memcmp(layout->name, "AsyncListener", 13) == 0) ||
@@ -151,7 +128,7 @@ int32_t tz_unknown_kind(const void *u) {
     return TZ_KIND_FUNCTION;
   case TZ_T_JSON:
     return json_kind(*(const TzJson *const *)TZ_BOX_VALUE(box));
-  default: // an array, a decimal (an object of BigNumber.js), a Result
+  default:
     return TZ_KIND_OBJECT;
   }
 }
@@ -191,7 +168,7 @@ int32_t tz_unknown_bool(const void *u) {
 
 int32_t tz_unknown_is_array(const void *u) {
   const TzBox *box = as_box(u);
-  if (!box) { // a tuple is an array in JavaScript
+  if (!box) {
     return u && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_TUPLE) != 0;
   }
   if (box->type->kind == TZ_T_ARRAY) {
@@ -205,7 +182,6 @@ int32_t tz_unknown_is_array(const void *u) {
 void *tz_unknown_array(const void *u, const TzType *array_type) {
   TzBox *box = (TzBox *)as_box(u);
   if (!box) {
-    // A tuple: its elements, in a new array each time.
     const TzInstance *tuple = (const TzInstance *)u;
     const TzLayout *layout = tuple->layout;
     TzArray *result = tz_arr_new(array_type->inner, layout->count, layout->count);
@@ -224,8 +200,6 @@ void *tz_unknown_array(const void *u, const TzType *array_type) {
     tz_ref_retain((void *)array);
     return (void *)array;
   }
-  // Each element becomes an unknown of its own, in another array, which the
-  // box holds from now on: every check of this unknown gives that one.
   TzArray *result = tz_arr_new(array_type->inner, array->length, array->length);
   for (uint32_t i = 0; i < array->length; ++i) {
     char *element = array->data + (size_t)i * array->type->size;
@@ -240,7 +214,6 @@ void *tz_unknown_array(const void *u, const TzType *array_type) {
   return result;
 }
 
-// A box's value as a number, if it is one, for equality.
 static int box_number(const TzBox *box, double *out) {
   const char *value = TZ_BOX_VALUE(box);
   switch (box->type->kind) {
@@ -280,8 +253,6 @@ static int box_string(const TzBox *box, TzStr *out) {
   return 0;
 }
 
-// `a === b`: the same object, or values of the same kind that are equal, as
-// JavaScript compares what a box holds.
 int32_t tz_unknown_equal(const void *a, const void *b) {
   if (a == b) {
     return 1;
@@ -304,7 +275,6 @@ int32_t tz_unknown_equal(const void *a, const void *b) {
     return tz_json_strict_equal(*(const TzJson *const *)p, *(const TzJson *const *)q);
   }
   if (kind == TZ_T_JSON || y->type->kind == TZ_T_JSON) {
-    // A boolean against a Json true or false.
     const TzJson *j = *(const TzJson *const *)(kind == TZ_T_JSON ? p : q);
     const TzBox *other = kind == TZ_T_JSON ? y : x;
     return j->kind == TZ_JSON_BOOL && other->type->kind == TZ_T_BOOL &&
@@ -324,7 +294,7 @@ int32_t tz_unknown_equal(const void *a, const void *b) {
     const TzDec *c = (const TzDec *)p, *d = (const TzDec *)q;
     return tz_dec_equal(c->coef, c->meta, d->coef, d->meta);
   }
-  default: // two Results are two objects in JavaScript
+  default:
     return 0;
   }
 }

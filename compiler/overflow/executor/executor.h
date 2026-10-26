@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Statements run abstractly.
 class Executor {
 public:
   explicit Executor(OverflowCheck &check);
@@ -20,4 +19,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

@@ -7,4 +7,4 @@ namespace tz {
 
 void FsFeature::declare(Checker &checker) const { checker.fsDeclarer().declareFsClasses(); }
 
-} // namespace tz
+}

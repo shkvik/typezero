@@ -42,7 +42,6 @@ void CallResolver::resolve() {
       analysis_.worklist_.pop_front();
       analysis_.codeWalk().walk(fi);
     }
-    // The functions called through values, now that the values are known.
     std::map<const Type *, std::vector<unsigned>> generators;
     for (unsigned fi = 0; fi < analysis_.fns_.size(); ++fi) {
       const FnInfo &f = analysis_.fns_[fi];
@@ -172,7 +171,6 @@ std::optional<Access> CallResolver::substitute(const Access &a, const FnInfo &ca
   return b;
 }
 
-// What calls do goes into the pieces that make them, until nothing grows.
 void CallResolver::fold() {
   for (unsigned fi = 0; fi < analysis_.fns_.size(); ++fi) {
     FnInfo &f = analysis_.fns_[fi];
@@ -247,4 +245,4 @@ std::optional<Ref> CallResolver::bind(const std::optional<Ref> &self,
   return analysis_.callWalk().classRef(owner);
 }
 
-} // namespace tz::parallel
+}

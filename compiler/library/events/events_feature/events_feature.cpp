@@ -10,4 +10,4 @@ Expr *EventsFeature::checkLibraryCall(Checker &checker, CallExpr *call, NameExpr
   return checker.eventTargetChecker().checkLibraryCall(call, name, func);
 }
 
-} // namespace tz
+}

@@ -27,7 +27,6 @@ namespace tz {
 
 namespace {
 
-// Whether a value of `type` may hold an object of `target`.
 bool holdsType(const Type *type, const Type *target, llvm::SmallPtrSetImpl<const Type *> &seen) {
   if (type == target) {
     return true;
@@ -52,21 +51,17 @@ bool holdsType(const Type *type, const Type *target, llvm::SmallPtrSetImpl<const
   }
 }
 
-} // namespace
+}
 
 LateClasses::LateClasses(Checker &checker) : checker_(checker) {}
 
 Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
   (void)expected;
   ClassDecl *cls = expr->decl;
-  // The same expression checked again (a body checked twice) keeps its
-  // class.
   if (!cls->type) {
     makeLateClass(cls);
   }
   cls->usedAsValue = true;
-  // Its static fields get their values here, the first time it runs, and
-  // the decorators of its members run then.
   if (!cls->declared) {
     checkStaticFields(cls);
     if (ClassChecker::hasDecorators(cls)) {
@@ -81,11 +76,7 @@ Expr *LateClasses::checkClassExpr(ClassExpr *expr, const Type *expected) {
 }
 
 void LateClasses::makeLateClass(ClassDecl *cls) {
-  // In generic code that is no copy (a generic class, a trial copy of a
-  // function), the class is only checked.
   cls->checkOnly = checker_.reflectChecker().onlyChecked();
-  // A class expression is declared here; a declaration with a value as its
-  // base (`class A extends Mixin(B)`) was, with the types.
   if (!cls->type) {
     cls->id = ++checker_.classCount_;
     cls->type = Type::classType(cls->name.empty() ? "(anonymous class)" : cls->name, cls);
@@ -94,8 +85,6 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   if (checker_.module_ && !checker_.declModules_.count(cls)) {
     checker_.declModules_[cls] = checker_.module_;
   }
-  // The copy of a generic function around it, whose type parameters it
-  // sees, and the variables of the functions around it, which it cannot.
   for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
     if (fn->isInstance && !fn->typeArgs.empty()) {
       cls->outer = fn;
@@ -110,14 +99,12 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
     }
   }
 
-  // The class it extends, which must be known when compiling.
   if (cls->baseExpr) {
     cls->baseExpr = checker_.exprChecker().checkExpr(cls->baseExpr);
     const Type *type = cls->baseExpr->type;
     ClassDecl *parent = const_cast<ClassDecl *>(type->classRef());
     llvm::SMLoc loc = cls->baseExpr->loc();
     if (type->isError()) {
-      // Reported.
     } else if (type->isConstructor()) {
       checker_.diags_.error(
           loc, "the class extended must be known when compiling: the fields of an object "
@@ -143,8 +130,6 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
                                      "': only the functions of node:fs make its objects");
       parent = nullptr;
     }
-    // A class only checked is no class down the chain of its parent, and
-    // Lowering lays out no type of it.
     if (parent) {
       cls->parent = parent;
       if (cls->checkOnly) {
@@ -167,7 +152,6 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
   checker_.classDeclarer().declareMethods(cls);
   checker_.currentClass_ = outerClass;
   checker_.declaringClass_ = outerDeclaring;
-  // Its methods are functions of the file it is in.
   std::vector<FunctionDecl *> methods = cls->methods;
   methods.insert(methods.end(), cls->constructors.begin(), cls->constructors.end());
   if (cls->init) {
@@ -183,8 +167,6 @@ void LateClasses::makeLateClass(ClassDecl *cls) {
       checker_.declModules_[fn] = home;
     }
   }
-  // Linked as an instance of a generic class is, after the others: a class
-  // made later still may override its methods.
   markLateOverrides(cls);
   if (checker_.classesLinked_) {
     checker_.classLinks().linkOverrides(cls);
@@ -214,7 +196,7 @@ void LateClasses::checkStaticFields(ClassDecl *cls) {
     }
     const Type *declared = f.var->type;
     if (declared && f.resolved && !f.type && !f.optional) {
-      declared = nullptr; // the type of a literal, which the value gives again
+      declared = nullptr;
     }
     f.init = checker_.exprChecker().checkExpr(f.init, declared && !declared->isError() ? declared
                                                                                        : nullptr);
@@ -246,8 +228,6 @@ void LateClasses::checkLateClasses() {
     if (Module *home = checker_.declModules_.lookup(cls); home && checker_.scopes_.size() == 1) {
       checker_.moduleDeclarer().useModule(home);
     }
-    // The code of a class a copy of a template made: its errors are the
-    // copy's.
     Checker::Instance *owner = checker_.lateOwners_.lookup(cls);
     Checker::Instance *outerInstance = checker_.checkingInstance_;
     std::vector<Diagnostics::Captured> *outerCapture = checker_.diags_.capture();
@@ -260,7 +240,6 @@ void LateClasses::checkLateClasses() {
     checker_.checkingInstance_ = outerInstance;
     checker_.diags_.setCapture(outerCapture);
   }
-  // Reported at the calls that made the copies, once each.
   for (auto &[instance, errors] : checker_.lateErrors_) {
     if (errors.empty() || instance->failed) {
       continue;
@@ -273,7 +252,6 @@ void LateClasses::checkLateClasses() {
 }
 
 void LateClasses::markLateOverrides(SourceFile &program) {
-  // The methods that classes made later declare, by name.
   auto note = [&](const ClassDecl *cls) {
     for (const FunctionDecl *fn : cls->methods) {
       if (!fn->isStatic) {
@@ -346,8 +324,6 @@ void LateClasses::checkTemplateInstance(Checker::Instance *instance) {
   Checker::BodyState saved = checker_.returnInferrer().enterBody(decl);
   checker_.checkingInstance_ = instance;
   checker_.diags_.setCapture(&errors);
-  // The call runs it now: in top-level code, the globals declared later are
-  // not there yet.
   if (!checker_.topLevelDone_) {
     checker_.early_ = decl->sym;
   }
@@ -370,8 +346,6 @@ void LateClasses::checkTemplateInstance(Checker::Instance *instance) {
 
 void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SMLoc loc) {
   Type *mine = const_cast<Type *>(cls->type), *theirs = const_cast<Type *>(replacement->type);
-  // An object a static field holds was made as declared, before the
-  // decorator ran: it would not be of the class the name means from here on.
   for (const ClassField &f : cls->fields) {
     llvm::SmallPtrSet<const Type *, 8> seen;
     if (f.isStatic && f.var && f.var->type && holdsType(f.var->type, mine, seen)) {
@@ -387,10 +361,6 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
       return;
     }
   }
-  // The name means the replacement from here on, and so does the type every
-  // annotation resolved so far gives it: the types change places (see
-  // Type::swapClasses). The class as declared keeps another one, which
-  // `this` has in its methods.
   std::string name = mine->name().str();
   Type::swapClasses(mine, theirs);
   cls->type = theirs;
@@ -404,17 +374,12 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
     if (child == replacement) {
       continue;
     }
-    // A class between them, as `Tagged(Timestamped(cls))` makes: it extends
-    // the class as declared.
     if (replacement->derivesFrom(child)) {
       const_cast<Type *>(child->type)->replaceBase(mine, theirs);
       continue;
     }
     declared.push_back(child);
   }
-  // A class declared to extend it extends the replacement, as in
-  // JavaScript: its fields, after those of the replacement, and its method
-  // table are found again.
   std::function<void(ClassDecl *)> again = [&](ClassDecl *c) {
     const_cast<Type *>(c->type)->forgetFields();
     bool muted = checker_.diags_.setMuted(true);
@@ -447,4 +412,4 @@ void LateClasses::replaceClass(ClassDecl *cls, ClassDecl *replacement, llvm::SML
   replacement->usedAsValue = true;
 }
 
-} // namespace tz
+}

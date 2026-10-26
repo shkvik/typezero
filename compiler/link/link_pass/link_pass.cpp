@@ -12,8 +12,6 @@ namespace tz {
 
 namespace {
 
-// Whether `path` is a file that nothing forbids writing but that cannot be
-// opened for it: in Windows, an executable that is running.
 bool inUse(llvm::StringRef path) {
   namespace fs = llvm::sys::fs;
   if (!fs::is_regular_file(path) || fs::access(path, fs::AccessMode::Write)) {
@@ -29,7 +27,7 @@ bool inUse(llvm::StringRef path) {
   return ec == std::errc::permission_denied;
 }
 
-} // namespace
+}
 
 LinkPass::LinkPass(const Target &target, const BuildOptions &options)
     : target_(target), options_(options) {}
@@ -45,8 +43,6 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
     return errors;
   }
 
-  // node:crypto: the glue, and OpenSSL, all of it or only the objects its direct layer calls
-  // (docs/crypto.md, section 3); TLS, with libssl (docs/net.md, section 4).
   std::vector<std::string> inputs = {object.path, runtime};
   if (crypto.any) {
     std::vector<const char *> libs = {"tzcrypto.lib"};
@@ -87,4 +83,4 @@ Errors LinkPass::run(const ObjectFile &object, const CryptoUse &crypto, bool par
   return errors;
 }
 
-} // namespace tz
+}

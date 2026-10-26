@@ -19,8 +19,6 @@ namespace tz {
 
 namespace {
 
-// What JavaScript objects get from Object.prototype, which tz objects do not
-// have.
 bool isInherited(llvm::StringRef name) {
   static const char *const names[] = {"toString",      "valueOf",        "hasOwnProperty",
                                       "isPrototypeOf", "toLocaleString", "propertyIsEnumerable",
@@ -48,12 +46,11 @@ std::string toUtf8(const std::u16string &text) {
   return utf8;
 }
 
-// The tail of the messages about keys that are not constants.
 const char kRuntimeKeys[] =
     "keys computed when the program runs need a dictionary: declare it as one, e.g. "
     "'const d: Record<string, int> = {}'";
 
-} // namespace
+}
 
 KeyedFieldChecker::KeyedFieldChecker(Checker &checker) : checker_(checker) {}
 
@@ -80,7 +77,7 @@ void KeyedFieldChecker::keyNames(const Expr *key,
   } else if (auto *tmpl = dyn_cast<TemplateExpr>(key); tmpl && tmpl->exprs.empty()) {
     each(toUtf8(tmpl->quasis[0]));
   } else if (auto *number = dyn_cast<IntLitExpr>(key)) {
-    each(std::to_string(number->value)); // an element of a tuple
+    each(std::to_string(number->value));
   } else if (auto *name = dyn_cast<NameExpr>(key)) {
     for (const std::string &text : checker_.file_->stringConstants.lookup(name->name)) {
       each(text);
@@ -99,8 +96,6 @@ const Type *KeyedFieldChecker::keyedFieldType(const Type *type, const Type *keyT
   if (type->isTuple() || !type->isObject()) {
     return nullptr;
   }
-  // Of a class, its public fields, which lie at the same place in the
-  // objects of the classes that extend it (`K extends keyof T` with a class).
   const ClassDecl *cls = type->isClass() ? ClassDeclarer::classOf(type) : nullptr;
   if (type->isClass() && !cls) {
     return nullptr;
@@ -134,7 +129,6 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
   index->type = Type::error();
   std::string name;
   if (type->isTuple()) {
-    // Each element has its own type, so the position must be a constant.
     index->index = checker_.exprChecker().checkExpr(index->index, Type::intTy());
     const Type *keyType = index->index->type;
     if (keyType->isError()) {
@@ -170,13 +164,10 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
       return index;
     }
     std::optional<std::string> key = constantKey(index->index);
-    // A key of literals, each naming a field of one type: `counts[f.kind]`.
     if (const Type *field = key ? nullptr : keyedFieldType(type, keyType)) {
       llvm::ArrayRef<const Type *> names =
           keyType->isUnion() ? keyType->members() : llvm::ArrayRef<const Type *>(keyType);
       if (write) {
-        // What Checker knows of a field (narrowed, defined) it learns from
-        // assignments by name.
         if (field->isOptional() || field->isUnion() || field->isLiteral() ||
             llvm::any_of(names, [&](const Type *n) {
               return type->field(toUtf8(n->literalText()))->readonly;
@@ -219,8 +210,6 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
     }
     name = std::move(*key);
   }
-  // The program is scanned for the fields it assigns before it is checked
-  // (see keyNames): a key it could not tell there cannot be written through.
   if (write && !checker_.assignedFields_.contains(name)) {
     checker_.diags_.error(index->index->loc(),
                           type->isTuple()
@@ -239,4 +228,4 @@ Expr *KeyedFieldChecker::checkKeyedField(IndexExpr *index, bool write) {
   return checker_.objectChecker().checkField(member);
 }
 
-} // namespace tz
+}

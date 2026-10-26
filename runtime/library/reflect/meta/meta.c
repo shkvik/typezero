@@ -1,15 +1,3 @@
-// The metadata of Reflect.defineMetadata and Reflect.getMetadata
-// (docs/decorators.md, section 3), as the package reflect-metadata keeps it,
-// built in.
-//
-// A record is the value of a key on a target, or on a property of it. A key
-// is an object of the program the compiler knows (a decorator, a class, a
-// constant), which it gives as the address of a constant of its own, or a
-// string. The value is an unknown: the compiler knows the type each object
-// key holds, and reads it back as that type. getMetadata looks up the chain of
-// the target, as reflect-metadata walks prototypes: an object's class, then
-// the class that one extends, and so on.
-
 #include "runtime/library/reflect/meta/meta.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
@@ -20,24 +8,22 @@
 #include <string.h>
 
 typedef struct {
-  const void *key; // an object key, or NULL for a string key
-  TzStr text;      // a string key, flat
+  const void *key;
+  TzStr text;
   void *target;
-  TzStr property; // flat
+  TzStr property;
   int32_t has_property;
-  void *value; // an unknown
+  void *value;
 } TzMetaEntry;
 
 typedef struct {
   TzMetaEntry *entries;
   uint32_t count, capacity;
-  // The objects of the classes, by their numbers, for the chain of an
-  // instance; the program gives them in main (tz_meta_init).
   TzClass *const *classes;
   uint32_t class_count;
 } TzMetaStore;
 
-TzMetaStore tz_meta_store; // not static: see the rules in tzrt.h
+TzMetaStore tz_meta_store;
 
 void tz_meta_init(TzClass *const *classes, uint32_t count) {
   tz_meta_store.classes = classes;
@@ -77,8 +63,6 @@ static TzMetaEntry *find(const void *key, void *key_obj, uint64_t key_meta, cons
   return NULL;
 }
 
-// The next object up the chain of `target`: a class's parent; an instance's
-// class.
 static const void *up(const void *target) {
   const TzInstance *o = (const TzInstance *)target;
   if (o->layout->flags & TZ_LAYOUT_CLASS) {
@@ -203,7 +187,6 @@ int32_t tz_meta_delete(const void *key, void *key_obj, uint64_t key_meta, const 
 }
 
 void tz_meta_shutdown(void) {
-  // Released from the last: a value may be a target of an earlier record.
   while (tz_meta_store.count > 0) {
     release_entry(&tz_meta_store.entries[--tz_meta_store.count]);
   }

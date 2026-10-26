@@ -30,8 +30,8 @@ LoopLowerer::LoopLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 void LoopLowerer::pushLoop(llvm::BasicBlock *breakTarget, llvm::BasicBlock *continueTarget,
                            size_t scopeDepth) {
-  lowering_.targets_.push_back({std::move(lowering_.pendingLabels_), /*isLoop=*/true,
-                                /*isSwitch=*/false, breakTarget, continueTarget, scopeDepth});
+  lowering_.targets_.push_back(
+      {std::move(lowering_.pendingLabels_), true, false, breakTarget, continueTarget, scopeDepth});
   lowering_.pendingLabels_.clear();
 }
 
@@ -60,14 +60,12 @@ void LoopLowerer::emitLabeled(LabeledStmt *stmt) {
   }
   if (isa<WhileStmt>(body) || isa<DoWhileStmt>(body) || isa<ForStmt>(body) ||
       isa<ForOfStmt>(body) || isa<SwitchStmt>(body)) {
-    lowering_.pendingLabels_ = labels; // the loop or switch takes them
+    lowering_.pendingLabels_ = labels;
     lowering_.stmtLowerer().emitStmt(body);
     return;
   }
-  // `label: { ... break label; ... }`
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("label.end");
-  lowering_.targets_.push_back(
-      {labels, /*isLoop=*/false, /*isSwitch=*/false, endBlock, nullptr, lowering_.scopes_.size()});
+  lowering_.targets_.push_back({labels, false, false, endBlock, nullptr, lowering_.scopes_.size()});
   lowering_.stmtLowerer().emitStmt(body);
   lowering_.targets_.pop_back();
   lowering_.functionFrame().emitBlock(endBlock);
@@ -109,7 +107,7 @@ void LoopLowerer::emitDoWhile(DoWhileStmt *stmt) {
 }
 
 void LoopLowerer::emitFor(ForStmt *stmt) {
-  lowering_.functionFrame().pushScope(); // variables declared in the loop header
+  lowering_.functionFrame().pushScope();
   if (stmt->init) {
     lowering_.stmtLowerer().emitStmt(stmt->init);
   }
@@ -133,9 +131,6 @@ void LoopLowerer::emitFor(ForStmt *stmt) {
   lowering_.targets_.pop_back();
 
   lowering_.functionFrame().emitBlock(stepBlock);
-  // `for (let i ...)`: every iteration has an i of its own. A closure that
-  // captured i keeps that iteration's box; the next iteration goes on in a
-  // copy.
   if (auto *decl = llvm::dyn_cast_or_null<VarDeclStmt>(stmt->init)) {
     for (VarDeclarator &d : decl->decls) {
       if (d.alias || !d.sym->boxed()) {
@@ -152,7 +147,7 @@ void LoopLowerer::emitFor(ForStmt *stmt) {
       lowering_.builder_.CreateStore(
           value, lowering_.builder_.CreateStructGEP(lowering_.envLowerer().boxType(type), box, 2));
       if (lowering_.isCyclicBox(type)) {
-        lowering_.storeLowerer().groupStore(box, value, type); // inside the group of the box now
+        lowering_.storeLowerer().groupStore(box, value, type);
       }
       lowering_.builder_.CreateStore(box, slot);
       lowering_.builder_.CreateCall(lowering_.objReleaseFn_, {old});
@@ -167,9 +162,6 @@ void LoopLowerer::emitFor(ForStmt *stmt) {
   lowering_.functionFrame().popScope();
 }
 
-// `for (const x of iterable)`: the iterable is evaluated once and held in a
-// hidden slot; each step reads the current length, as JavaScript's iterators
-// do, so elements pushed by the body are visited too.
 void LoopLowerer::emitForOf(ForOfStmt *stmt) {
   if (stmt->isAwait) {
     lowering_.asyncGeneratorLowerer().emitForAwait(stmt);
@@ -179,7 +171,7 @@ void LoopLowerer::emitForOf(ForOfStmt *stmt) {
     lowering_.iteratorLowerer().emitIteratorForOf(stmt);
     return;
   }
-  lowering_.functionFrame().pushScope(); // the hidden iterable
+  lowering_.functionFrame().pushScope();
   const Type *iterableType = stmt->iterable->type;
   llvm::Value *iterableSlot =
       lowering_.functionFrame().createManagedSlot(iterableType, "for.iterable");
@@ -193,4 +185,4 @@ void LoopLowerer::emitForOf(ForOfStmt *stmt) {
   lowering_.functionFrame().popScope();
 }
 
-} // namespace tz
+}

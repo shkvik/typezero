@@ -42,8 +42,6 @@ namespace tz {
 ExprChecker::ExprChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {
-  // In an instance, an expression the generic code converted is converted
-  // the same way (see noteForced).
   if (checker_.checkingInstance_ && !checker_.forced_.empty()) {
     auto found = checker_.forced_.find({expr->loc().getPointer(), unsigned(expr->kind())});
     if (found != checker_.forced_.end()) {
@@ -56,8 +54,6 @@ Expr *ExprChecker::checkExpr(Expr *expr, const Type *expected, bool wraps) {
 }
 
 Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
-  // A generic function as a value: its type arguments come from the type
-  // expected.
   if (auto *name = dyn_cast<NameExpr>(expr)) {
     if (FuncSymbol *generic = checker_.genericChecker().genericNamed(name)) {
       const Type *function = expected ? expected->nonOptional() : nullptr;
@@ -68,7 +64,6 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
           name, generic, function && function->isFunction() ? &sig : nullptr);
     }
   }
-  // A built-in such as Math.sqrt where a function is expected.
   if (expected && (isa<NameExpr>(expr) || isa<MemberExpr>(expr))) {
     if (const Type *function = expected->nonOptional(); function->isFunction()) {
       Checker::Signature sig = ClosureChecker::signatureOf(function);
@@ -80,18 +75,15 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   }
   switch (expr->kind()) {
   case Expr::Kind::IntLit:
-    return checker_.literalChecker().checkIntLit(cast<IntLitExpr>(expr), expected,
-                                                 /*negated=*/false);
+    return checker_.literalChecker().checkIntLit(cast<IntLitExpr>(expr), expected, false);
   case Expr::Kind::FloatLit: {
-    // Where a literal type is expected, the type of its value.
     if (const Type *literal = checker_.literalTypes().numberLiteralFor(
             expected, cast<FloatLitExpr>(expr)->value, true)) {
       expr->type = literal;
 
       return expr;
     }
-    // Where a decimal is expected, the literal is read exactly.
-    const Type *member = LiteralTypes::numberMemberOf(expected, /*fraction=*/true);
+    const Type *member = LiteralTypes::numberMemberOf(expected, true);
     if (expected && (expected->nonOptional()->isDecimal() || (member && member->isDecimal()))) {
       expr->type = Type::decimalTy();
       checker_.decimalChecker().checkDecimalLiteralRange(expr);
@@ -155,7 +147,6 @@ Expr *ExprChecker::checkExprKind(Expr *expr, const Type *expected, bool wraps) {
   case Expr::Kind::OptionalChain:
     return checkOptionalChain(cast<OptionalChainExpr>(expr));
   case Expr::Kind::Function: {
-    // Where a function type is expected, the parameters take its types.
     const Type *function = expected ? expected->nonOptional() : nullptr;
     if (function && function->isFunction()) {
       Checker::Signature sig = ClosureChecker::signatureOf(function);
@@ -194,7 +185,6 @@ Expr *ExprChecker::checkOptionalChain(OptionalChainExpr *chain) {
   if (!chain->mayShortCircuit || type->isError()) {
     return chain;
   }
-  // The rest of the chain may not have run.
   checker_.flow_ = FlowChecker::join(before, checker_.flow_);
   if (!type->isVoid()) {
     chain->type = Type::optional(type);
@@ -205,7 +195,6 @@ Expr *ExprChecker::checkOptionalChain(OptionalChainExpr *chain) {
 
 Expr *ExprChecker::chainLink(Expr *object) {
   const Type *type = object->type;
-  // A Json that is null ends the chain too, as in JavaScript: `j?.name`.
   if (type->nonOptional()->isJson()) {
     auto *link = checker_.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
     link->type = Type::json();
@@ -214,7 +203,7 @@ Expr *ExprChecker::chainLink(Expr *object) {
     return link;
   }
   if (!type->isOptional()) {
-    return object; // `?.` on a value that is always there is a plain `.`
+    return object;
   }
   auto *link = checker_.ctx_.make<CastExpr>(object->loc(), object, std::nullopt);
   link->type = type->inner();
@@ -227,16 +216,12 @@ Expr *ExprChecker::chainLink(Expr *object) {
 Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected) {
   Checker::Flow whenTrue, whenFalse;
   cond->cond = checker_.truthChecker().checkCondition(cond->cond, whenTrue, whenFalse);
-  // As in checkIf: the branch an instance's types rule out is dropped.
   if (std::optional<bool> constant = checker_.checkingInstance_
                                          ? checker_.genericChecker().constantCondition(cond->cond)
                                          : std::nullopt) {
     checker_.flow_ = *constant ? whenTrue : whenFalse;
     return checkExpr(*constant ? cond->thenExpr : cond->elseExpr, expected);
   }
-  // A literal branch takes the type of the other one, which is checked first
-  // then (each branch in its own flow): `flag ? { x: 1 } : p`, and a number
-  // literal next to a decimal is a decimal.
   auto waits = [&](const Expr *branch) {
     return Destination::literalShaped(branch) || DecimalChecker::isLiteralTree(branch);
   };
@@ -273,8 +258,6 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
   const Type *a = cond->thenExpr->type, *b = cond->elseExpr->type;
   cond->type = Type::error();
   if (a->isError() || b->isError()) {
-    // A call in a cycle may have no type yet (see inferCycle): the other
-    // branch tells.
     if (checker_.trial_ && a->isError() != b->isError()) {
       cond->type = a->isError() ? b : a;
     }
@@ -297,13 +280,8 @@ Expr *ExprChecker::checkConditional(ConditionalExpr *cond, const Type *expected)
   return cond;
 }
 
-// `x as T` is not part of the language: in TypeScript it changes nothing at
-// run time, so a conversion written with it would behave differently under
-// tsc. The error says what to write instead.
 Expr *ExprChecker::checkCast(CastExpr *cast) {
-  const Type *to = checker_.typeResolver().resolveType(*cast->target, /*allowVoid=*/false);
-  // An array literal gets the type it is cast to, so that `[] as int[]`
-  // reports only this error.
+  const Type *to = checker_.typeResolver().resolveType(*cast->target, false);
   bool arrayLiteral = isa<ArrayLitExpr>(cast->operand);
   cast->operand = checkExpr(cast->operand, arrayLiteral && !to->isError() ? to : nullptr);
   const Type *from = cast->operand->type;
@@ -342,4 +320,4 @@ Expr *ExprChecker::checkCast(CastExpr *cast) {
   return cast;
 }
 
-} // namespace tz
+}

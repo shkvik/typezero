@@ -47,7 +47,6 @@ std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
     if (partner.piece == piece) {
       who = "the same piece in other tasks";
     } else {
-      // The partner's task, if its piece runs in more than one.
       const PieceInst &p = analysis_.pieces_[partner.piece];
       who = analysis_.explainTitles().pieceTitle(partner.piece,
                                                  analysis_.segPieces_.at({p.fn, p.seg}).size() > 1);
@@ -74,7 +73,6 @@ std::vector<std::string> Explainer::decisionLines(unsigned piece) const {
   if (from == to) {
     lines.push_back("in order: " + Analysis::lineText(from));
   } else if (Analysis::inOtherFile(from) || Analysis::inOtherFile(to)) {
-    // In another file: "lib.tz:3-5" within it.
     llvm::StringRef a(from), b(to);
     if (a.rsplit(':').first == b.rsplit(':').first) {
       lines.push_back("in order: " + from + "-" + b.rsplit(':').second.str());
@@ -93,14 +91,11 @@ void Explainer::print(llvm::raw_ostream &out) {
     out << "no async code: the program runs as one piece\n";
     return;
   }
-  // The functions with pieces, in the order of the source: the top-level
-  // code first.
   std::vector<unsigned> order;
   std::vector<bool> shown(analysis_.fns_.size(), false);
   for (const PieceInst &p : analysis_.pieces_) {
     shown[p.fn] = true;
   }
-  // An async function whose start runs inside its callers is shown too.
   for (const Activation &act : analysis_.acts_) {
     if (analysis_.fns_[act.fn].async || analysis_.fns_[act.fn].asyncGen) {
       shown[act.fn] = true;
@@ -155,7 +150,7 @@ void Explainer::print(llvm::raw_ostream &out) {
       std::string title = analysis_.explainTitles().segTitle(f, s);
       if (mine.empty()) {
         if (!f.isInline(s)) {
-          continue; // never runs
+          continue;
         }
         title +=
             f.asyncGen ? ": runs inside the loop that iterates it" : ": runs inside its caller";
@@ -163,7 +158,6 @@ void Explainer::print(llvm::raw_ostream &out) {
         title += " (in " + analysis_.explainTitles().contextOf(mine[0]) + ")";
       }
       out << "  " << title << "\n";
-      // What it does, with `this` as the code writes it.
       std::vector<Touch> list = analysis_.conflicts().touches(f.segs[s].effects);
       std::stable_sort(list.begin(), list.end(), [&](const Touch &a, const Touch &b) {
         Analysis::Pos pa = analysis_.explainNames().posOf(a.ats.front().first),
@@ -210,4 +204,4 @@ void Explainer::print(llvm::raw_ostream &out) {
   }
 }
 
-} // namespace tz::parallel
+}

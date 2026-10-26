@@ -36,8 +36,6 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-// The name of a closure's code in the IR: the functions it is nested in, then
-// its own.
 std::string qualifiedName(const FunctionDecl *fn) {
   std::string name = fn->name.empty() ? "lambda" : fn->name.str();
   for (const FunctionDecl *p = fn->parent; p; p = p->parent) {
@@ -47,7 +45,6 @@ std::string qualifiedName(const FunctionDecl *fn) {
   return "tz." + name;
 }
 
-// The function a name refers to directly (see Checker::namedFunction).
 FunctionDecl *knownFunction(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
   if (!name) {
@@ -63,7 +60,7 @@ FunctionDecl *knownFunction(const Expr *expr) {
   return nullptr;
 }
 
-} // namespace
+}
 
 ClosureLowerer::ClosureLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -121,12 +118,10 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
   }
   llvm::Function *code;
   if (fn->takesThis()) {
-    code = lowering_.classDescriptors().methodCode(fn); // the object is its environment
+    code = lowering_.classDescriptors().methodCode(fn);
   } else if (fn->isClosure()) {
     code = closureCode(fn);
   } else {
-    // A top-level function as a value: code that takes an environment and
-    // calls it.
     llvm::Function *target = lowering_.functions_.lookup(fn->sym);
     code = llvm::Function::Create(closureFnType(functionTypeOf(fn->sym)),
                                   llvm::GlobalValue::InternalLinkage, "tz." + fn->name + ".value",
@@ -145,8 +140,7 @@ llvm::Constant *ClosureLowerer::functionInfo(FunctionDecl *fn) {
     }
   }
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(utf16(fn->name))}),
       "tz.fninfo." + fn->name);
@@ -159,8 +153,6 @@ llvm::Value *ClosureLowerer::emitFunctionExpr(FunctionExpr *fe) {
   FunctionDecl *fn = fe->fn;
   llvm::Constant *info = functionInfo(fn);
   const Lowering::EnvLayout &layout = lowering_.envLowerer().envLayout(fn);
-  // Without captures there is no environment, unless the program compares
-  // functions: then each evaluation needs an identity of its own.
   llvm::Value *env = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   if (!layout.fields.empty() || (lowering_.comparesFunctions_ && !fn->nonEscaping)) {
     env = lowering_.envLowerer().createEnv(layout, fn->nonEscaping,
@@ -182,11 +174,9 @@ llvm::Value *ClosureLowerer::closureEnv(CallExpr *call) {
     return lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(),
                                          lowering_.groupEnvs_.lookup(fn->group));
   }
-  // Through the variable that holds it, which cannot change.
   const VarSymbol *var = cast<NameExpr>(call->callee)->var;
 
-  return lowering_.builder_.CreateExtractValue(
-      lowering_.envLowerer().emitVarValue(var, /*borrow=*/true), 1);
+  return lowering_.builder_.CreateExtractValue(lowering_.envLowerer().emitVarValue(var, true), 1);
 }
 
 llvm::Value *ClosureLowerer::callFunctionValue(llvm::Value *fn, const Type *fnType,
@@ -205,10 +195,7 @@ llvm::Value *ClosureLowerer::callFunctionValue(llvm::Value *fn, const Type *fnTy
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
-// `f(x)` with a function value f: the function stays alive during the call.
-// One in a field, `o.f(x)`, is not borrowed: the call may assign to the field.
 llvm::Value *ClosureLowerer::emitValueCall(CallExpr *call) {
-  // A method of an interface: the code the object's table gives.
   if (auto *member = dyn_cast<MemberExpr>(call->callee)) {
     if (const Lowering::InterfaceMember *method = lowering_.inheritLowerer().dispatchedMember(
             member->object->type, member->name, call->signature);
@@ -232,9 +219,6 @@ llvm::Value *ClosureLowerer::emitValueCall(CallExpr *call) {
   return result;
 }
 
-// A function known by name, given a type that passes more or fewer
-// arguments or drops the result: the same environment, with code that adapts
-// the call.
 llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
   FunctionDecl *fn = knownFunction(cast->operand);
   assert(fn && "Checker adapts only functions known by name");
@@ -259,7 +243,6 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
                                            : lowering_.optionalLowerer().makeOptional(
                                                  arg, lowering_.builder_.getTrue(), params[i]));
     }
-    // The arguments it does not take are released here: the callee owns them.
     for (size_t i = params.size(); i < given.size(); ++i) {
       lowering_.refCounts().releaseValue(code->getArg(unsigned(i + 1)), given[i]);
     }
@@ -280,14 +263,12 @@ llvm::Value *ClosureLowerer::emitFunctionAdapter(CastExpr *cast) {
     }
     lowering_.builder_.restoreIP(point);
     info = new llvm::GlobalVariable(
-        *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-        llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                   {code, lowering_.stringLowerer().stringLiteral(utf16(fn->name))}),
         "tz.fninfo." + fn->name);
   }
 
-  // The environment's reference moves to the new value.
   return makeFunctionValue(info, lowering_.builder_.CreateExtractValue(value, 1));
 }
 
@@ -324,4 +305,4 @@ void ClosureLowerer::emitPendingClosures() {
   }
 }
 
-} // namespace tz
+}

@@ -18,7 +18,6 @@ namespace tz {
 
 namespace {
 
-// The words a value of a slot takes in a tagged union.
 unsigned slotWords(UnionSlot slot) {
   switch (slot) {
   case UnionSlot::String:
@@ -30,17 +29,14 @@ unsigned slotWords(UnionSlot slot) {
   }
 }
 
-// A value held as a pointer, null for undefined: see isReference in
-// codegen.cpp.
 bool isReferenceLike(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-} // namespace
+}
 
-// A scalar as a word, and back.
 static llvm::Value *toWord(llvm::IRBuilder<> &b, llvm::Value *v) {
   llvm::Type *type = v->getType();
   if (type->isPointerTy()) {
@@ -86,7 +82,6 @@ const Type *UnionLayout::storedType(const Type *type) {
     const Type *inner = storedType(type->inner());
     return inner == type->inner() ? type : Type::optional(inner);
   }
-  // A number or boolean literal, or a union of them, is its base.
   if (type->isLiteral() && !type->isStringLiteral()) {
     return type->literalBase();
   }
@@ -135,13 +130,12 @@ llvm::GlobalVariable *UnionLayout::atomTable() {
   if (atomTable_) {
     return atomTable_;
   }
-  // Index 0 is undefined; then the string literals of the program by atom.
   std::vector<llvm::Constant *> strings{lowering_.stringLowerer().stringLiteral(u"undefined")};
   for (const Type *literal : Type::stringLiterals()) {
     strings.push_back(lowering_.stringLowerer().stringLiteral(literal->literalText()));
   }
   auto *arrayType = llvm::ArrayType::get(lowering_.strTy_, strings.size());
-  atomTable_ = new llvm::GlobalVariable(*lowering_.module_, arrayType, /*isConstant=*/true,
+  atomTable_ = new llvm::GlobalVariable(*lowering_.module_, arrayType, true,
                                         llvm::GlobalValue::PrivateLinkage,
                                         llvm::ConstantArray::get(arrayType, strings), "tz.atoms");
 
@@ -175,7 +169,7 @@ llvm::Constant *UnionLayout::atomDescriptor() {
       lowering_.typeDescTy_, {lowering_.builder_.getInt32(15), lowering_.builder_.getInt32(4),
                               llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, descType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, descType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(descType, {base, atomTable()}), "tz.type.atom");
   atomDescriptor_ = global;
 
@@ -195,7 +189,6 @@ llvm::Constant *UnionLayout::unionDescriptor(const Type *type) {
   if (llvm::Constant *found = lowering_.typeDescriptors_.lookup(type)) {
     return found;
   }
-  // { TzType, slots[12] }: TzUnionType in runtime/core/tzrt/tzrt.h.
   constexpr unsigned kSlots = 12;
   auto *slotsType = llvm::ArrayType::get(lowering_.builder_.getPtrTy(), kSlots);
   std::vector<llvm::Constant *> slots(
@@ -211,7 +204,7 @@ llvm::Constant *UnionLayout::unionDescriptor(const Type *type) {
        llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
   auto *descType = llvm::StructType::get(lowering_.ctx_, {lowering_.typeDescTy_, slotsType});
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, descType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, descType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(descType, {base, llvm::ConstantArray::get(slotsType, slots)}),
       "tz.type." + type->name());
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -308,7 +301,6 @@ void UnionLayout::countTagged(llvm::Value *value, const Type *type, bool retain)
   }
   llvm::Function *&helper = (retain ? lowering_.unionRetains_ : lowering_.unionReleases_)[type];
   if (!helper) {
-    // One function for each union, which code calls: the switch is small.
     auto *fnType = llvm::FunctionType::get(lowering_.builder_.getVoidTy(),
                                            {lowering_.moduleBuilder().lower(type)}, false);
     helper =
@@ -340,4 +332,4 @@ void UnionLayout::countTagged(llvm::Value *value, const Type *type, bool retain)
   lowering_.builder_.CreateCall(helper, {value});
 }
 
-} // namespace tz
+}

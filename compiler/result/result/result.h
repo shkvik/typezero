@@ -22,4 +22,4 @@ private:
   std::optional<E> error_;
 };
 
-} // namespace tz
+}

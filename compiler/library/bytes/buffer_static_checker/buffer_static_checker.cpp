@@ -40,7 +40,6 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-// Text known when compiling: a literal, or a template without values.
 std::optional<std::u16string> literalText(const Expr *e) {
   if (auto *conv = dyn_cast<CastExpr>(e); conv && conv->isImplicit()) {
     e = conv->operand;
@@ -59,7 +58,7 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-} // namespace
+}
 
 BufferStaticChecker::BufferStaticChecker(Checker &checker) : checker_(checker) {}
 
@@ -147,8 +146,6 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
 
 Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
                                               const std::string &what) {
-  // `Uint8Array.from(xs, f)`: each value through f, whose result must fit;
-  // made as Array.from(xs, f) is, and then the typed array of that.
   Expr *&source = call->args[0];
   checker_.iteratorMethods().markFused(source);
   source = checker_.exprChecker().checkExpr(source);
@@ -196,7 +193,7 @@ Expr *BufferStaticChecker::checkBytesFromWith(CallExpr *call, const Type *type,
             wrapHint(type->bytes(), "f(x)") + "'");
     return call;
   }
-  checker_.flowChecker().calledFunction(); // a generator or the callback may change anything
+  checker_.flowChecker().calledFunction();
   auto *arrayFrom = checker_.ctx_.make<CallExpr>(
       call->loc(),
       checker_.ctx_.make<MemberExpr>(call->loc(),
@@ -381,8 +378,6 @@ Expr *BufferStaticChecker::checkBufferStatic(CallExpr *call, MemberExpr *member)
       return call;
     }
     call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);
-    // Of a value that may be a Buffer, but not surely, the check of
-    // `instanceof Buffer`, which narrows it too.
     const Type *arg = call->args[0]->type, *base = arg->nonOptional();
     auto mayBe = [&](const Type *t) { return t->isBuffer() || t->bytes() == Bytes::Uint8; };
     llvm::ArrayRef<const Type *> members =
@@ -436,8 +431,6 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
                                                     "may have");
     return call;
   }
-  // The bytes, each a code unit of a literal, and the file they came from:
-  // one file gives one array, whichever file of the program embeds it.
   llvm::SMLoc loc = call->args[0]->loc();
   std::u16string units(bytes.size(), u'\0');
   for (size_t i = 0; i < bytes.size(); ++i) {
@@ -456,4 +449,4 @@ Expr *BufferStaticChecker::checkEmbedBytes(CallExpr *call, NameExpr *name) {
   return call;
 }
 
-} // namespace tz
+}

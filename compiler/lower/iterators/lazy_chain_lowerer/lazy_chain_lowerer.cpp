@@ -48,8 +48,6 @@ Lowering::Producer LazyChainLowerer::arrayProducer(llvm::Value *slot, const Type
   producer.run = [this, slot, arrayType, mode](const Lowering::Consumer &consumer) {
     const Type *element = arrayType->inner();
     llvm::Type *i64 = lowering_.builder_.getInt64Ty();
-    // As JavaScript's iterator, each step reads the current length, so
-    // elements pushed meanwhile are visited too.
     llvm::Value *indexSlot = lowering_.functionFrame().createStackSlot(i64, "index");
     lowering_.builder_.CreateStore(lowering_.builder_.getInt64(0), indexSlot);
     llvm::BasicBlock *headBlock = lowering_.functionFrame().newBlock("iter.array");
@@ -76,7 +74,6 @@ Lowering::Producer LazyChainLowerer::arrayProducer(llvm::Value *slot, const Type
           "element");
       lowering_.refCounts().retainValue(value, element);
       if (mode == Builtin::ArrEntries) {
-        // A new [index, value] each time, as in JavaScript.
         const Type *tuple = Type::tuple({Type::intTy(), element});
         llvm::Value *entry = lowering_.objectLayouts().allocObject(tuple, {0, 1});
         lowering_.builder_.CreateStore(
@@ -122,7 +119,6 @@ Lowering::Producer LazyChainLowerer::valueProducer(llvm::Value *slot, const Type
           lowering_.builder_.CreateICmpULT(index, lowering_.stringLowerer().stringLength(str)),
           bodyBlock, endBlock);
       lowering_.functionFrame().switchTo(bodyBlock);
-      // One code point: one code unit, or two for a surrogate pair.
       llvm::Value *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "code.point");
       llvm::Value *units = lowering_.builder_.CreateCall(
           lowering_.rt_.strCodePointAt, {out, lowering_.stringLowerer().stringObj(str),
@@ -138,14 +134,10 @@ Lowering::Producer LazyChainLowerer::valueProducer(llvm::Value *slot, const Type
     };
     return producer;
   }
-  // An iterator object: next() until it is done; what a generator returns
-  // goes to `returnSlot`, if anywhere.
   producer.run = [this, slot, type, returnSlot](const Lowering::Consumer &consumer) {
     const Type *element = type->yielded();
     llvm::Value *out = lowering_.functionFrame().createStackSlot(
         lowering_.moduleBuilder().lower(element), "next.value");
-    // What the consumer gives back goes to the next call of next(), as
-    // `yield*` passes on what is sent to it.
     llvm::Value *sentSlot = nullptr, *hasSent = nullptr;
     if (consumer.sent) {
       sentSlot = lowering_.functionFrame().createStackSlot(
@@ -168,7 +160,6 @@ Lowering::Producer LazyChainLowerer::valueProducer(llvm::Value *slot, const Type
     }
     llvm::Value *has = lowering_.coroutineLowerer().emitResume(it, out, in, returnSlot);
     if (hasSent) {
-      // The generator took a copy of what it needed.
       llvm::BasicBlock *releaseBlock = lowering_.functionFrame().newBlock("next.release");
       llvm::BasicBlock *afterBlock = lowering_.functionFrame().newBlock("next.after");
       lowering_.builder_.CreateCondBr(
@@ -197,8 +188,6 @@ Lowering::Producer LazyChainLowerer::valueProducer(llvm::Value *slot, const Type
   return producer;
 }
 
-// The stages of a chain take each value from the stage before them and give
-// what they make of it to the next one.
 Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *callbackType,
                                                    const Type *element, const Type *result,
                                                    llvm::Value *operand,
@@ -206,14 +195,11 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty();
   Lowering::Consumer stageOut;
   stageOut.stop = down.stop;
-  // What the next stage gives back is not passed on: helpers call next()
-  // without a value.
   auto give = [this, down](llvm::Value *value) {
     if (llvm::Value *sent = down.each(value)) {
       lowering_.refCounts().releaseValue(sent, down.sent);
     }
   };
-  // The counter callbacks get.
   llvm::Value *counter = nullptr;
   if (callbackType) {
     counter = lowering_.functionFrame().createStackSlot(i32, "counter");
@@ -237,7 +223,7 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
     break;
   case Builtin::IterFilter:
     stageOut.each = [=, this](llvm::Value *value) -> llvm::Value * {
-      lowering_.refCounts().retainValue(value, element); // the callback owns what it gets
+      lowering_.refCounts().retainValue(value, element);
       llvm::Value *keep =
           callCallback(operand, callbackType, {value, nextCount()}, {element, Type::intTy()});
       llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("filter.keep");
@@ -245,7 +231,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
       llvm::BasicBlock *nextBlock = lowering_.functionFrame().newBlock("filter.next");
       lowering_.builder_.CreateCondBr(keep, keepBlock, dropBlock);
       lowering_.functionFrame().switchTo(keepBlock);
-      // `filter(x => x != undefined)` gives the values themselves.
       give(lowering_.exprLowerer().emitConversion(value, element, result));
       lowering_.functionFrame().branchTo(nextBlock);
       lowering_.functionFrame().switchTo(dropBlock);
@@ -258,7 +243,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
     break;
   case Builtin::IterTake:
   case Builtin::IterDrop: {
-    // The count left; a negative one is a RangeError, as in JavaScript.
     llvm::Value *left = lowering_.functionFrame().createStackSlot(i64, "left");
     llvm::Value *count = lowering_.builder_.CreateLoad(i64, operand, "limit");
     llvm::BasicBlock *badBlock = lowering_.functionFrame().newBlock("limit.negative");
@@ -274,7 +258,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
     lowering_.functionFrame().switchTo(okBlock);
     lowering_.builder_.CreateStore(count, left);
     if (stage == Builtin::IterTake) {
-      // take(0) gives nothing and asks for nothing.
       llvm::BasicBlock *zeroBlock = lowering_.functionFrame().newBlock("take.none");
       llvm::BasicBlock *startBlock = lowering_.functionFrame().newBlock("take.start");
       lowering_.builder_.CreateCondBr(
@@ -291,7 +274,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
         if (!lowering_.functionFrame().blockIsOpen()) {
           return nullptr;
         }
-        // After the last one, the iteration ends without asking for more.
         llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("take.done");
         llvm::BasicBlock *moreBlock = lowering_.functionFrame().newBlock("take.more");
         lowering_.builder_.CreateCondBr(
@@ -329,7 +311,6 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
   }
   case Builtin::IterFlatMap:
     stageOut.each = [=, this](llvm::Value *value) -> llvm::Value * {
-      // Each result is iterated to the end before the next value.
       const Type *inner = callbackType->ret();
       llvm::Value *iterable =
           callCallback(operand, callbackType, {value, nextCount()}, {element, Type::intTy()});
@@ -356,4 +337,4 @@ Lowering::Consumer LazyChainLowerer::stageConsumer(Builtin stage, const Type *ca
   return stageOut;
 }
 
-} // namespace tz
+}

@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// The calls that make binary data: new of a typed array, an ArrayBuffer or a DataView, from a
-// length, an array, other binary data or a list of values, and views of a buffer.
 class BytesMakeCalls : public BytesCallSite {
 public:
   using BytesCallSite::BytesCallSite;
@@ -13,4 +11,4 @@ public:
   llvm::Value *emit();
 };
 
-} // namespace tz
+}

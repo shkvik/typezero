@@ -39,8 +39,6 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
   auto present = [&](size_t i) { return i < args.size() && !isa<UndefinedExpr>(args[i]); };
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
   Expr *self = member->object;
-  // The bytes of `made` (a call of the receiver's method), or their text in the encoding at
-  // args[index].
   auto bytesOrText = [&](CryptoFn fn, std::vector<Expr *> fnArgs, size_t index) -> Expr * {
     Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, index, name, -1);
     if (!encoding) {
@@ -212,7 +210,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                              {"format", "type", "cipher", "passphrase"}, options)) {
       return call;
     }
-    int format = 3; // buffer
+    int format = 3;
     if (Expr *f = options.lookup("format")) {
       if ((format = checker_.cryptoArgs().cryptoChoice(f, "format of the key",
                                                        {"pem", "der", "jwk", "buffer"})) < 0) {
@@ -267,7 +265,6 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
                                             Type::boolTy());
   }
   if (kind == Crypto::Ecdh) {
-    // The format of a point: 'uncompressed' (0), 'compressed' or 'hybrid'.
     auto format = [&](size_t index) -> Expr * {
       if (!present(index)) {
         return checker_.cryptoArgs().cryptoInt(loc, 0);
@@ -400,7 +397,6 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       return checker_.cryptoArgs().cryptoCall(call, fn, {self, other}, Type::boolTy());
     }
   }
-  // In node these are streams too; tz has no streams yet (docs/streams.md).
   static const llvm::StringLiteral streamMethods[] = {
       "write",   "end",         "pipe", "unpipe", "read",           "on",
       "once",    "off",         "emit", "pause",  "resume",         "setEncoding",
@@ -423,4 +419,4 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
   return loosely();
 }
 
-} // namespace tz
+}

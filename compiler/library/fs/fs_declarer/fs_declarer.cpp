@@ -17,8 +17,6 @@ namespace tz {
 
 namespace {
 
-// The kinds of files the tests of Stats and Dirent ask about, as the bits of
-// a mode (S_IFREG...).
 std::optional<int> fileKind(llvm::StringRef method) {
   if (method == "isFile") {
     return 0100000;
@@ -45,7 +43,7 @@ std::optional<int> fileKind(llvm::StringRef method) {
   return std::nullopt;
 }
 
-} // namespace
+}
 
 FsDeclarer::FsDeclarer(Checker &checker) : checker_(checker) {}
 
@@ -71,9 +69,6 @@ void FsDeclarer::declareFsClasses() {
 
     return cls;
   };
-  // The numbers of a Stats, in the order Node prints them. Its dates
-  // (`mtime`...) are made from them when read, as Node's getters make them,
-  // and so are no fields: Node prints none (see checkStatsDate).
   const Type *d = Type::doubleTy();
   checker_.statsClass_ = declare("Stats", {{"dev", d},
                                            {"mode", d},
@@ -89,15 +84,11 @@ void FsDeclarer::declareFsClasses() {
                                            {"mtimeMs", d},
                                            {"ctimeMs", d},
                                            {"birthtimeMs", d}});
-  // A Dirent keeps the kind of the file as the bits of a mode, which only
-  // its tests read.
   checker_.direntClass_ =
       declare("Dirent",
               {{"name", Type::string()}, {"parentPath", Type::string()}, {"#type", Type::intTy()}});
 }
 
-// `st.atime`, `st.mtime`, `st.ctime` and `st.birthtime`: a new date from
-// the number of milliseconds next to it; null for another name.
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
   static const llvm::StringLiteral dates[] = {"atime", "mtime", "ctime", "birthtime"};
   if (cls != checker_.statsClass_ || !llvm::is_contained(dates, member->name)) {
@@ -135,4 +126,4 @@ Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDe
   return call;
 }
 
-} // namespace tz
+}

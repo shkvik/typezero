@@ -82,10 +82,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  // `...args` of an argument list: its parameters.
   checker_.argListChecker().expandListSpreads(call->args, call->spread);
-  // `x[Symbol.iterator]()`: the method of that name (docs/iterators.md,
-  // section 5).
   if (auto *index = dyn_cast<IndexExpr>(call->callee); index && !index->optional) {
     if (auto *key = dyn_cast<MemberExpr>(index->index);
         key && (key->name == "iterator" || key->name == "asyncIterator") &&
@@ -99,19 +96,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && name->name == "super") {
     return checker_.inheritChecker().checkSuperCall(call);
   }
-  // A call a topic of the library takes before the language looks at it: the functions of
-  // node's modules by their imported names.
   for (const Feature *feature : checker_.features_->all()) {
     if (Expr *checked = feature->checkAnyCall(checker_, call, expected)) {
       return checked;
     }
   }
   if (auto *member = dyn_cast<MemberExpr>(call->callee); member && !call->optional) {
-    if (isGlobalName(member->object, "Promise")) { // Promise.withResolvers<T>() too
+    if (isGlobalName(member->object, "Promise")) {
       return checker_.promiseStaticChecker().checkPromiseStatic(call, member, expected);
     }
-    // Type arguments, for a generic method of a class; those of anything else
-    // are reported once the receiver is known.
     auto rejectTypeArgs = [&] {
       if (member->typeArgs.empty()) {
         return;
@@ -136,8 +129,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (auto *object = dyn_cast<NameExpr>(member->object); object && object->name == "super") {
       return checker_.inheritChecker().checkSuperMethodCall(call, member);
     }
-    // `JSON.parse(...)`, `Math.max(...)`, `Buffer.from(...)`: a function of a topic of the
-    // library.
     for (const Feature *feature : checker_.features_->all()) {
       if (Expr *checked = feature->checkStaticCall(checker_, call, member, expected)) {
         return checked;
@@ -168,7 +159,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (isGlobalName(member->object, "Map")) {
       return checker_.dictMethods().checkMapStatic(call, member);
     }
-    // A consumer of a lazy chain runs it where it is written.
     static const llvm::StringLiteral consumers[] = {"toArray", "forEach", "reduce",
                                                     "some",    "every",   "find"};
     if (llvm::is_contained(consumers, member->name)) {
@@ -184,7 +174,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (!receiver->isClass() && !receiver->isUnion()) {
       rejectTypeArgs();
     }
-    // `x.f(...)` of a value of a type of a topic: a Date, a RegExp, a Buffer.
     for (const Feature *feature : checker_.features_->all()) {
       if (Expr *checked = feature->checkMethodCall(checker_, call, member, expected)) {
         return checked;
@@ -205,7 +194,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (receiver->isTimer()) {
       return checker_.timerChecker().checkTimerMethod(call, member);
     }
-    // The value whose methods those of the receiver are, as a match's are its captures'.
     for (const Feature *feature : checker_.features_->all()) {
       if (Expr *values = feature->methodReceiver(checker_, member->object)) {
         member->object = values;
@@ -213,8 +201,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         break;
       }
     }
-    // A method of every member of a union: through a type they all are, or
-    // that of each.
     if (receiver->isUnion()) {
       const Type *common = checker_.unionChecker().commonBaseWith(receiver, member->name);
       if (!common) {
@@ -242,7 +228,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     if (!(receiver->isArray() && member->name == "push") && rejectSpread(call)) {
       return call;
     }
-    // A method a topic gives the values of the language: `s.localeCompare(t)`.
     for (const Feature *feature : checker_.features_->all()) {
       if (Expr *checked = feature->checkValueMethodCall(checker_, call, member, expected)) {
         return checked;
@@ -264,7 +249,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checker_.numberMethods().checkNumberMethod(call, member);
     }
     if (receiver->isBool() && member->name == "toString" && call->args.empty()) {
-      // `x.toString()` is `String(x)`.
       call->args.push_back(checker_.concatChecker().toStringOperand(member->object));
       call->builtin = Builtin::StringOf;
       call->type = Type::string();
@@ -291,7 +275,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   }
 
   if (auto *name = dyn_cast<NameExpr>(call->callee); name && !call->optional) {
-    // `ok(x)`, `embedJson(...)`: a function of a topic of the library.
     for (const Feature *feature : checker_.features_->all()) {
       if (Expr *checked = feature->checkFunctionCall(checker_, call, name, expected)) {
         return checked;
@@ -304,8 +287,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return builtin;
     }
     Checker::ScopeEntry entry = checker_.topLevelChecker().lookupValue(name->name);
-    // once() of node:events, pipeline() of node:stream: a function of a module of a topic
-    // written in tz, which the topic checks itself.
     if (entry.func && !entry.var) {
       for (const Feature *feature : checker_.features_->all()) {
         if (Expr *checked = feature->checkLibraryCall(checker_, call, name, entry.func)) {
@@ -313,13 +294,11 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         }
       }
     }
-    if (entry.func && !entry.var) { // a top-level function
+    if (entry.func && !entry.var) {
       Expr *checked = checkDirectCall(call, entry.func, name->loc(), expected);
       checker_.tzModulesChecker().noteHttpsCall(call, entry.func->decl);
       return checked;
     }
-    // A function declared in a block, or a constant arrow: called directly,
-    // with the environment its variable holds.
     VarSymbol *var = entry.var;
     FunctionDecl *known = var ? (var->function  ? var->function
                                  : var->isConst ? var->lambda
@@ -332,18 +311,15 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checkDirectCall(call, known->sym, name->loc());
     }
     if (!entry.var && !entry.func) {
-      // `TypeError("bad")` makes the error as `new TypeError("bad")` does, as JavaScript has
-      // its kinds of Error (not other classes) callable.
       if (entry.cls && entry.cls == checker_.throwChecker().errorKindClass(name->name) &&
           name->typeArgs.empty() && !call->optional && !call->hasSpread()) {
         auto *made = checker_.ctx_.make<NewExpr>(call->loc(), name->name, std::vector<TypeRef>{},
                                                  call->args);
         return checker_.exprChecker().checkExpr(made, expected);
       }
-      // `Function("a", "return a")`, which is a value only as a class.
       if (const char *why = !entry.cls ? whyUnsupported(name->name) : nullptr) {
         checker_.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
-      } else if (!checker_.nameChecker().checkName(name)->type->isError()) { // NaN, Infinity
+      } else if (!checker_.nameChecker().checkName(name)->type->isError()) {
         checker_.diags_.error(name->loc(), "'" + name->name + "' is not a function");
       }
       checkArgsLoosely();
@@ -351,8 +327,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
     }
   }
 
-  // A call through a function value: `f(x)` with a variable f, `fs[i](x)`,
-  // `make()(x)`, `f?.(x)`.
   auto *calleeName = dyn_cast<NameExpr>(call->callee);
   call->callee = checker_.exprChecker().checkExpr(call->callee);
   if (call->optional) {
@@ -361,7 +335,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
   const Type *type = call->callee->type;
   if (type->isFunction()) {
     Expr *checked = checkValueCall(call, type);
-    // The callback of a Transform's transform() (sema_stream.cpp).
     if (calleeName && calleeName->var && !checker_.streamCallbacks_.empty()) {
       checker_.chunkTypes().noteStreamCallback(call, calleeName->var);
     }
@@ -407,7 +380,6 @@ Expr *CallChecker::checkDirectCall(CallExpr *call, FuncSymbol *func, llvm::SMLoc
 Expr *CallChecker::checkValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
-    // `f(x)` of `(this: unknown, x: int) => R` would give it no `this`.
     checker_.diags_.error(call->callee->loc(),
                           "the function takes its 'this' first, which a plain call "
                           "does not pass; call it with '.call(obj, ...)' or "
@@ -442,7 +414,6 @@ bool CallChecker::rejectSpread(CallExpr *call) {
 }
 
 bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
-  // `globalThis.crypto` is the global crypto (Web Crypto, sema_webcrypto.cpp).
   if (auto *m = dyn_cast<MemberExpr>(expr); m && name == "crypto" && m->name == "crypto" &&
                                             !m->optional && isGlobalName(m->object, "globalThis")) {
     return true;
@@ -451,8 +422,6 @@ bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
   if (!n || n->name != name) {
     return false;
   }
-  // A name imported from a built-in module hides the global one too
-  // (setTimeout of node:timers/promises).
   if (checker_.builtinModuleChecker().nodeName(name)) {
     return false;
   }
@@ -461,4 +430,4 @@ bool CallChecker::isGlobalName(const Expr *expr, llvm::StringRef name) const {
   return !shadow.var && !shadow.func && !shadow.cls;
 }
 
-} // namespace tz
+}

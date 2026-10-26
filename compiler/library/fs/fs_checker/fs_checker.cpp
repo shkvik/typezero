@@ -36,7 +36,7 @@ std::string utf8(const std::u16string &text) {
   return out;
 }
 
-} // namespace
+}
 
 FsChecker::FsChecker(Checker &checker) : checker_(checker) {}
 
@@ -103,8 +103,6 @@ Expr *FsChecker::checkEncoding(Expr *encoding, llvm::StringRef fn, bool any) {
 
 Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
-  // node:fs/promises checks its functions as those of node:fs that end in
-  // Sync: `op` is that name, `fn` the one written.
   std::string syncName = checker_.fsAsync_ ? (fn + "Sync").str() : fn.str();
   llvm::StringRef op = syncName;
   auto loosely = [&] {
@@ -140,8 +138,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
 
     return lit;
   };
-  // A path, or with `fd`, an int file descriptor too (0 is stdin); those of
-  // node:fs/promises take a FileHandle instead.
   auto path = [&](Expr *arg, bool fd) {
     arg = checker_.exprChecker().checkExpr(arg, string);
     if (fd && !checker_.fsAsync_ && arg->type->isInt()) {
@@ -150,7 +146,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
 
     return checker_.typeRelations().coerce(arg, string);
   };
-  // A boolean option that decides the type, which must be a literal.
   auto literalFlag = [&](Expr *value, llvm::StringRef option, bool &out) {
     if (auto *lit = dyn_cast<BoolLitExpr>(value)) {
       lit->type = Type::boolTy();
@@ -166,7 +161,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     return false;
   };
   llvm::StringMap<Expr *> options;
-  // The argument at `index`: the encoding alone, or the options.
   auto encodingOrOptions = [&](size_t index, llvm::ArrayRef<llvm::StringRef> allowed) {
     if (index >= call->args.size()) {
       return true;
@@ -199,7 +193,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
       return call;
     }
-    Expr *file = path(call->args[0], /*fd=*/true);
+    Expr *file = path(call->args[0], true);
     using Names = llvm::ArrayRef<llvm::StringRef>;
     if (!encodingOrOptions(1, checker_.fsAsync_ ? Names{"encoding", "flag", "signal"}
                                                 : Names{"encoding", "flag"})) {
@@ -218,7 +212,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
           checker_.runtimeObjectChecker().signalOption(options.lookup("signal"), loc));
     }
     call->builtin = Builtin::FsReadFile;
-    // Without an encoding, the bytes, as Node gives them: a Buffer.
     call->type = number ? string : Type::bytesType(Type::Bytes::Buffer);
     if (number) {
       call->args.push_back(number);
@@ -229,10 +222,8 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
       return call;
     }
-    Expr *file = path(call->args[0], /*fd=*/true);
+    Expr *file = path(call->args[0], true);
     Expr *data = checker_.exprChecker().checkExpr(call->args[1], string);
-    // Text, or the bytes of a typed array, a Buffer or a DataView (or of a
-    // union of them, a pointer to one as well).
     auto view = [](const Type *t) { return t->isByteView(); };
     bool bytes =
         view(data->type) || (data->type->isUnion() && llvm::all_of(data->type->members(), view));
@@ -255,7 +246,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *number = nullptr;
     if (Expr *encoding = options.lookup("encoding"); encoding && !isa<UndefinedExpr>(encoding)) {
       if (bytes) {
-        // Node ignores it: the bytes are written as they are.
         checker_.diags_.error(encoding->loc(),
                               "an encoding is for text; '" + fn +
                                   "' writes the bytes as they are: drop the encoding");
@@ -272,7 +262,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
                        : stringLit(op == "writeFileSync" ? "w" : "a"),
                   mode ? checker_.argumentChecker().checkArg(mode, Type::intTy()) : intLit(0666)};
     if (!bytes) {
-      call->args.push_back(number ? number : intLit(0)); // utf8
+      call->args.push_back(number ? number : intLit(0));
     }
     if (checker_.fsAsync_) {
       call->args.push_back(
@@ -320,7 +310,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         value = zero;
       }
     } else if (op == "chmodSync" && isa<StringLitExpr>(call->args[1])) {
-      // An octal string, as Node takes it: "755".
       std::string text = utf8(cast<StringLitExpr>(call->args[1])->value);
       unsigned mode = 0;
       if (text.empty() || llvm::StringRef(text).getAsInteger(8, mode)) {
@@ -347,7 +336,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       return call;
     }
     Expr *file = path(call->args[0], false);
-    // Only statSync has throwIfNoEntry.
     if (!nodeOptions(call, 1, fn,
                      checker_.fsAsync_
                          ? llvm::ArrayRef<llvm::StringRef>{"bigint"}
@@ -408,8 +396,7 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     Expr *mode = nullptr;
     if (call->args.size() > 1 && !isa<ObjectLitExpr>(call->args[1]) &&
         !isa<UndefinedExpr>(call->args[1])) {
-      mode = checker_.argumentChecker().checkArg(call->args[1],
-                                                 Type::intTy()); // mkdirSync(path, 0o755)
+      mode = checker_.argumentChecker().checkArg(call->args[1], Type::intTy());
     } else {
       if (!nodeOptions(call, 1, fn, {"recursive", "mode"}, options)) {
         return call;
@@ -419,8 +406,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
       }
     }
     Expr *recursive = options.lookup("recursive");
-    // The first directory made, with `recursive`; undefined otherwise, as
-    // in Node.
     call->args = {dir,
                   recursive ? checker_.argumentChecker().checkArg(recursive, Type::boolTy())
                             : boolLit(false),
@@ -456,8 +441,6 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     }
     Expr *recursive = options.lookup("recursive");
     Expr *force = options.lookup("force");
-    // Retries are for systems where another program may hold a file: the
-    // values are checked, and nothing waits.
     for (llvm::StringRef retry : {"maxRetries", "retryDelay"}) {
       if (Expr *value = options.lookup(retry)) {
         checker_.argumentChecker().checkArg(value, Type::intTy());
@@ -495,4 +478,4 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
   return loosely();
 }
 
-} // namespace tz
+}

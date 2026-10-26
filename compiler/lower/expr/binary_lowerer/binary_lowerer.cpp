@@ -38,7 +38,7 @@ llvm::Value *BinaryLowerer::emitBinary(BinaryExpr *bin) {
     return lowering_.equalityLowerer().emitEquality(bin);
   case BinaryOp::InstanceOf:
     return lowering_.classLowerer().emitInstanceOf(bin);
-  case BinaryOp::In: // of a union, which Checker allows
+  case BinaryOp::In:
     return lowering_.unionMemberLowerer().emitObjectIn(bin);
   default:
     break;
@@ -62,7 +62,6 @@ llvm::Value *BinaryLowerer::emitBinary(BinaryExpr *bin) {
   case BinaryOp::Ge:
     return emitComparison(bin->op, lhs, rhs, bin->lhs->type);
   case BinaryOp::UShr:
-    // An int's `x >>> n` that Checker made a long: the unsigned 32-bit result.
     if (bin->type != bin->lhs->type) {
       return lowering_.builder_.CreateZExt(emitArithmetic(bin->op, lhs, rhs, bin->lhs->type),
                                            lowering_.moduleBuilder().lower(bin->type));
@@ -79,23 +78,17 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
   bool bitwise = op == BinaryOp::BitAnd || op == BinaryOp::BitOr || op == BinaryOp::BitXor ||
                  op == BinaryOp::Shl || op == BinaryOp::Shr || op == BinaryOp::UShr;
   if (isFloat && bitwise) {
-    // `x |= v` where x is a double: on 32-bit integers, as in JavaScript (Checker
-    // made v an int), and the result goes back as a double; that of `>>>=`
-    // is unsigned.
     llvm::Value *result = emitArithmetic(
         op, lowering_.builder_.CreateCall(lowering_.rt_.toInt32, {lhs}), rhs, Type::intTy());
     return op == BinaryOp::UShr ? lowering_.builder_.CreateUIToFP(result, lhs->getType())
                                 : lowering_.builder_.CreateSIToFP(result, lhs->getType());
   }
   if (bitwise && lhs->getType() != rhs->getType()) {
-    // `x |= v` where x is a long and v an int: on 32-bit integers too (Checker
-    // left v an int), and the result goes back as a long.
     llvm::Value *result =
         emitArithmetic(op, lowering_.builder_.CreateTrunc(lhs, rhs->getType()), rhs, Type::intTy());
     return lowering_.builder_.CreateSExt(result, lhs->getType());
   }
   switch (op) {
-  // Integer arithmetic wraps around on overflow, as in Go.
   case BinaryOp::Add:
     return isFloat ? lowering_.builder_.CreateFAdd(lhs, rhs)
                    : lowering_.builder_.CreateAdd(lhs, rhs);
@@ -113,13 +106,11 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
     if (isFloat) {
       return lowering_.builder_.CreateCall(lowering_.rt_.mathPow, {lhs, rhs});
     }
-    // Integers: computed as longs, which wrap around like repeated `*`; the
-    // low half of that is the int result.
     llvm::Type *i64 = lowering_.builder_.getInt64Ty();
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.rt_.mathPowLong,
         {lowering_.builder_.CreateSExt(lhs, i64), lowering_.builder_.CreateSExt(rhs, i64)});
-    lowering_.throwLowerer().emitThrowCheck(); // 0 ** -1
+    lowering_.throwLowerer().emitThrowCheck();
     return lowering_.builder_.CreateTrunc(result, lhs->getType());
   }
   case BinaryOp::BitAnd:
@@ -131,8 +122,6 @@ llvm::Value *BinaryLowerer::emitArithmetic(BinaryOp op, llvm::Value *lhs, llvm::
   case BinaryOp::Shl:
   case BinaryOp::Shr:
   case BinaryOp::UShr: {
-    // As in JavaScript, only the low bits of the count are used. This also
-    // keeps the shift defined for any count.
     llvm::Value *mask = llvm::ConstantInt::get(lhs->getType(), type->bitWidth() - 1);
     llvm::Value *count = lowering_.builder_.CreateAnd(rhs, mask);
     if (op == BinaryOp::Shl) {
@@ -164,7 +153,7 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
     case BinaryOp::Eq:
       return lowering_.builder_.CreateFCmpOEQ(lhs, rhs);
     case BinaryOp::Ne:
-      return lowering_.builder_.CreateFCmpUNE(lhs, rhs); // NaN != NaN
+      return lowering_.builder_.CreateFCmpUNE(lhs, rhs);
     default:
       break;
     }
@@ -189,9 +178,6 @@ llvm::Value *BinaryLowerer::emitComparison(BinaryOp op, llvm::Value *lhs, llvm::
   llvm_unreachable("not a comparison operator");
 }
 
-// Dividing by zero throws RangeError, as JavaScript's `1n / 0n`. MIN / -1
-// wraps around to MIN (and MIN % -1 is 0) where the machine instruction
-// would trap.
 llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::Value *rhs) {
   bool isRem = op == BinaryOp::Rem;
   if (auto *divisor = dyn_cast<llvm::ConstantInt>(rhs);
@@ -215,11 +201,11 @@ llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::V
   llvm::Value *divisor =
       lowering_.builder_.CreateSelect(isMinusOne, llvm::ConstantInt::get(type, 1), rhs);
   if (isRem) {
-    return lowering_.builder_.CreateSRem(lhs, divisor); // x % 1 == x % -1 == 0
+    return lowering_.builder_.CreateSRem(lhs, divisor);
   }
   llvm::Value *quotient = lowering_.builder_.CreateSDiv(lhs, divisor);
 
   return lowering_.builder_.CreateSelect(isMinusOne, lowering_.builder_.CreateNeg(lhs), quotient);
 }
 
-} // namespace tz
+}

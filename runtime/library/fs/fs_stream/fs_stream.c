@@ -1,9 +1,7 @@
-// The descriptors behind fs.ReadStream and fs.WriteStream (library/stream/fs_stream.tz).
-
 #ifdef _WIN32
-#define _CRT_RAND_S // rand_s
+#define _CRT_RAND_S
 #else
-#define _DEFAULT_SOURCE // lstat, realpath, d_type and the like, which -std=c17 hides
+#define _DEFAULT_SOURCE
 #endif
 
 #include "runtime/library/fs/fs/fs.h"
@@ -34,25 +32,19 @@
 #include <unistd.h>
 #endif
 
-// fs.ReadStream and fs.WriteStream (library/stream/fs_stream.tz,
-// docs/streams.md, step 3) open, read, write and close a file as Node's do:
-// each call a work for the pool, as a call with a callback of node:fs is, the
-// descriptor a CRT one, as libuv gives it on Windows. A read or a write holds
-// its Buffer until it is back.
-
 typedef struct FdRequest {
   TzWork work;
-  TzPromise *promise; // held until settled
-  TzMaker make;       // of SystemError
+  TzPromise *promise;
+  TzMaker make;
   Path path;
   int has_path;
   OpenFlags flags;
   int32_t mode;
   int32_t fd;
-  TzBytes *bytes; // held
+  TzBytes *bytes;
   int32_t offset, length;
-  int64_t position; // -1: where the descriptor is
-  int64_t done;     // what the call gave: a descriptor, or bytes moved
+  int64_t position;
+  int64_t done;
   int failed;
   Failure failure;
   const char *syscall;
@@ -101,8 +93,6 @@ static void fd_fail(FdRequest *r, int error, const char *syscall) {
 }
 #endif
 
-// Settles the promise with what the call gave (an int), or rejects it with
-// the SystemError, and frees the request.
 static void fd_done_int(TzWork *w) {
   FdRequest *r = (FdRequest *)w;
   if (r->failed) {
@@ -145,7 +135,6 @@ static void fd_open_work(TzWork *w) {
 #endif
 }
 
-// fs.open(path, flags, mode): a Promise of the descriptor.
 void tz_fss_open(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_obj,
                  uint64_t flag_meta, int32_t mode, TzMaker make) {
   FdRequest *r = fd_new(p, make);
@@ -234,8 +223,6 @@ static void fd_write_work(TzWork *w) {
 #endif
 }
 
-// fs.read(fd, buffer, offset, length, position) and fs.write(...): a
-// Promise of the bytes moved; a position below 0 is where the descriptor is.
 static void fd_transfer(TzPromise *p, int32_t fd, TzBytes *b, int32_t offset, int32_t length,
                         double position, TzMaker make, int writing) {
   FdRequest *r = fd_new(p, make);
@@ -289,7 +276,6 @@ static void fd_fsync_work(TzWork *w) {
 #endif
 }
 
-// fs.close(fd) and fs.fsync(fd): a Promise of 0.
 void tz_fss_close(TzPromise *p, int32_t fd, int32_t sync, TzMaker make) {
   FdRequest *r = fd_new(p, make);
   r->fd = fd;

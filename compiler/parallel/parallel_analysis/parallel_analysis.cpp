@@ -18,4 +18,4 @@ void explainParallel(const SourceFile &program, const llvm::SourceMgr &sources,
   analysis.explainer().print(out);
 }
 
-} // namespace tz
+}

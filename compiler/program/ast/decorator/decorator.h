@@ -4,11 +4,9 @@
 
 namespace tz {
 
-// `@Log` or `@Table("users")` before a class, a member of one or a parameter
-// of a method or a constructor (docs/decorators.md).
 struct Decorator {
-  llvm::SMLoc loc; // of the `@`
-  Expr *expr;      // `Log`, `Table("users")`, `(make())`
+  llvm::SMLoc loc;
+  Expr *expr;
 };
 
-} // namespace tz
+}

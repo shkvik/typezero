@@ -32,4 +32,4 @@ void merge(Active &into, llvm::ArrayRef<unsigned> from) {
   }
 }
 
-} // namespace tz::parallel
+}

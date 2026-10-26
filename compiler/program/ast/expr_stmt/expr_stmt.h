@@ -12,4 +12,4 @@ struct ExprStmt : Stmt {
   Expr *expr;
 };
 
-} // namespace tz
+}

@@ -97,16 +97,16 @@ void MetadataChecker::checkBodyEarly(FunctionDecl *fn) {
       llvm::is_contained(checker_.functions_, fn)) {
     return;
   }
-  if (!fn->sym->ret) { // checking it finds what it returns
+  if (!fn->sym->ret) {
     checker_.returnInferrer().inferReturnType(fn->sym);
     return;
   }
-  if (fn->cls) { // checked with its class
+  if (fn->cls) {
     return;
   }
   Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
   if (!checker_.topLevelDone_) {
-    checker_.early_ = fn->sym; // top-level code reads it: globals declared later are not there yet
+    checker_.early_ = fn->sym;
   }
   checker_.flow_ = Checker::Flow();
   checker_.functionChecker().checkFunctionBody(fn);
@@ -126,8 +126,6 @@ const Type *MetadataChecker::metadataType(const void *key, llvm::StringRef label
       }
     }
   }
-  // `const names: string[] = Reflect.getMetadata(Column, cls) ?? []` in the
-  // function that writes them next.
   if (expected && !expected->nonOptional()->isUnknown() && !mentionsParam(expected)) {
     checker_.metaTypes_[key] = {expected->nonOptional(), loc};
     return expected->nonOptional();
@@ -150,8 +148,6 @@ Expr *MetadataChecker::designClass(const Type *type, llvm::SMLoc loc) {
 
 ClassDecl *MetadataChecker::designConstructor(const Type *type) {
   type = type->nonOptional();
-  // A literal type is a value of its base; a union is of the constructor all
-  // its members have, or else Object, as TypeScript writes them.
   if (type->isLiteral()) {
     type = type->literalBase();
   }
@@ -198,7 +194,7 @@ ClassDecl *MetadataChecker::designConstructor(const Type *type) {
 void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Expr *value,
                                         llvm::StringRef member, llvm::SMLoc loc) {
   auto *callee = checker_.ctx_.make<NameExpr>(loc, "Reflect");
-  callee->type = Type::error(); // the call is a built-in, which needs none
+  callee->type = Type::error();
   auto *keyLit = checker_.ctx_.make<StringLitExpr>(loc, key);
   keyLit->type = Type::string();
   Expr *property;
@@ -224,8 +220,6 @@ void MetadataChecker::writeDesignRecord(ClassDecl *cls, const char16_t *key, Exp
   cls->decorations.push_back(checker_.ctx_.make<ExprStmt>(loc, call));
 }
 
-// As TypeScript's emitDecoratorMetadata writes them, here always: in the
-// order TypeScript applies them, design:returntype first.
 void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, FunctionDecl *method,
                                          const FunctionDecl *ctor, llvm::SMLoc loc) {
   auto paramTypes = [&](const FunctionDecl *fn) {
@@ -243,7 +237,7 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
     return list;
   };
   if (field) {
-    checker_.classDeclarer().completeClass(cls); // the types that come from the initializers
+    checker_.classDeclarer().completeClass(cls);
     if (field->resolved && !field->resolved->isError()) {
       writeDesignRecord(cls, u"design:type", designClass(field->resolved, loc), field->name, loc);
     }
@@ -266,4 +260,4 @@ void MetadataChecker::writeDesignRecords(ClassDecl *cls, ClassField *field, Func
   }
 }
 
-} // namespace tz
+}

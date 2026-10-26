@@ -32,7 +32,6 @@ int EntryFile::find(Args &args) const {
   llvm::SmallString<256> main(manifest.dir);
   llvm::sys::path::append(main, manifest.main);
   args.input = std::string(main);
-  // "@scope/api" builds api.exe.
   llvm::StringRef name = manifest.name;
   name = name.substr(name.rfind('/') + 1);
   if (!name.empty()) {
@@ -42,4 +41,4 @@ int EntryFile::find(Args &args) const {
   return -1;
 }
 
-} // namespace tz
+}

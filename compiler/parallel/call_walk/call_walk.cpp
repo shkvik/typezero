@@ -37,8 +37,6 @@ namespace tz::parallel {
 
 namespace {
 
-// The built-ins that call the functions given to them, and when; the others
-// keep them as values, which code may call later.
 std::optional<CallKind> callbackKind(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseThen:
@@ -62,7 +60,7 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
     return CallKind::Later;
   case Builtin::ResultFromThrowable:
   case Builtin::ResultAsyncFromThrowable:
-    return std::nullopt; // the function it makes calls them: they are values of its type
+    return std::nullopt;
   default:
     break;
   }
@@ -95,8 +93,6 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
   }
 }
 
-// The built-ins of `callbackKind` that call a function once, rather than for
-// each element.
 bool callsOnce(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseNew:
@@ -107,8 +103,6 @@ bool callsOnce(Builtin builtin) {
   }
 }
 
-// Whether a built-in may throw where it is called. Those of promises, timers
-// and output do not: an error there rejects a Promise, or comes later.
 bool mayThrow(Builtin builtin) {
   if (isPromiseBuiltin(builtin)) {
     return false;
@@ -129,7 +123,7 @@ bool mayThrow(Builtin builtin) {
   }
 }
 
-} // namespace
+}
 
 CallWalk::CallWalk(Analysis &analysis) : analysis_(analysis) {}
 
@@ -143,8 +137,6 @@ void CallWalk::addCallee(CallRec &rec, const FunctionDecl *decl, std::optional<R
   Mode mode = Mode::Sync;
   switch (rec.kind) {
   case CallKind::Call:
-    // Calling an async generator only makes it: the loop that iterates it
-    // runs it.
     if (callee.asyncGen) {
       return;
     }
@@ -188,7 +180,6 @@ std::vector<const FunctionDecl *> CallWalk::methodTargets(const FunctionDecl *me
   if (!virtualCall || !method) {
     return targets;
   }
-  // The methods that override it, down the chain: any of them may run.
   std::vector<const ClassDecl *> pending;
   if (method->cls) {
     for (const ClassDecl *child : method->cls->children) {
@@ -246,7 +237,6 @@ void CallWalk::registerValue(const FunctionDecl *fn, const Type *type) {
   }
 }
 
-// Registers the function `e` names, if it names one, as a value of `type`.
 bool CallWalk::functionRef(const Expr *e, const Use &use, const Type *type) {
   e = strip(e);
   if (auto *fe = dyn_cast_or_null<FunctionExpr>(e)) {
@@ -295,12 +285,11 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     analysis_.exprWalk().expr(m->object);
     self = analysis_.aliasAnalysis().receiverRef(m->object);
   } else if (!c->func) {
-    analysis_.exprWalk().expr(c->callee); // the function value
+    analysis_.exprWalk().expr(c->callee);
   }
   for (const Expr *arg : c->args) {
     analysis_.exprWalk().expr(arg);
   }
-  // An async function does not throw: its error rejects its Promise.
   const FunctionDecl *direct = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
   if (!direct || !direct->isAsync || c->virtualCall || superCtor) {
     analysis_.codeWalk().throwPoint();
@@ -308,8 +297,6 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   CallRec &rec = analysis_.codeWalk().record(c, CallKind::Call, use, c->loc());
   rec.call = c;
   if (superCtor) {
-    // The constructor of the class extended, then the initializers of the
-    // fields.
     if (c->method) {
       addCallee(rec, c->method->decl, self);
     }
@@ -324,7 +311,6 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   if (c->method) {
     for (const FunctionDecl *fn : methodTargets(c->method->decl, c->virtualCall)) {
       addCallee(rec, fn, self);
-      // A decorator may have put another function in the method's place.
       if (fn->impl && fn->impl->type && !rec.byType) {
         rec.byType = fn->impl->type;
       }
@@ -334,7 +320,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   if (!c->unionMethods.empty()) {
     for (const CallExpr::UnionMethod &um : c->unionMethods) {
       if (!um.method) {
-        rec.byType = c->callee->type; // a function in a field
+        rec.byType = c->callee->type;
         continue;
       }
       for (const FunctionDecl *fn : methodTargets(um.method->decl, um.virtualCall)) {
@@ -347,8 +333,6 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     addCallee(rec, c->func->decl, closureSelf(c->func->decl, *analysis_.fn_));
     return;
   }
-  // A function value: any function of its type that the program has as a
-  // value, and through an object, any method of that name of its classes.
   auto *callee = dyn_cast<NameExpr>(strip(c->callee));
   if (callee && callee->var && analysis_.resolvers_.contains(callee->var)) {
     return;
@@ -356,7 +340,7 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
   if (m && (m->name == "resolve" || m->name == "reject") && m->object->type &&
       m->object->type->nonOptional()->isObject() &&
       m->object->type->nonOptional()->field("promise")) {
-    return; // of Promise.withResolvers()
+    return;
   }
   rec.byType = c->callee->type;
   if (m) {
@@ -373,8 +357,6 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
     analysis_.exprWalk().expr(recv);
   }
   Builtin b = c->builtin;
-  // Promise.all and allSettled awaited right away wait there for the tasks
-  // given to them.
   Use inner;
   if (b == Builtin::PromiseAll || b == Builtin::PromiseAllSettled) {
     inner.join = use.awaited;
@@ -385,7 +367,6 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
     const Expr *arg = c->args[i];
     bool fn = arg->type && arg->type->nonOptional()->isFunction();
     if (fn && (kind || unknown)) {
-      // One the pass does not know may call it now or later.
       if (unknown) {
         functionArg(c, arg, CallKind::Inline, use);
         functionArg(c, arg, CallKind::Later, use);
@@ -410,7 +391,6 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
 void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, const Use &use) {
   const Expr *f = strip(arg);
   Builtin b = c->builtin;
-  // What the callback is given.
   auto *fe = dyn_cast<FunctionExpr>(f);
   if (fe && b == Builtin::PromiseNew) {
     for (size_t i = 0; i < fe->fn->params.size() && i < 2; ++i) {
@@ -448,7 +428,6 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
   addFunctionCallees(f, arg, kind);
 }
 
-// The functions that `f`, given to be called, may be: (the strip of `arg`).
 void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind) {
   CallRec &rec =
       analysis_.fn_
@@ -462,7 +441,6 @@ void CallWalk::addFunctionCallees(const Expr *f, const Expr *arg, CallKind kind)
     const FunctionDecl *decl = n->var->function ? n->var->function : n->var->lambda;
     addCallee(rec, decl, closureSelf(decl, *analysis_.fn_));
   } else if (n && n->var && analysis_.resolvers_.contains(n->var)) {
-    // It settles a Promise: no code of the program runs.
   } else if (auto *mem = dyn_cast<MemberExpr>(f); mem && mem->method) {
     analysis_.exprWalk().expr(mem->object);
     CallRec &again =
@@ -501,8 +479,6 @@ void CallWalk::newExpr(const NewExpr *n) {
   }
   analysis_.codeWalk().throwPoint();
   CallRec &rec = analysis_.codeWalk().record(n, CallKind::Call, {}, n->loc());
-  // Until the constructors give the object away, it is nobody else's: what
-  // they do to it is not shared.
   std::optional<Ref> self = analysis_.escapeScan().constructorLeaks(n->cls)
                                 ? Ref{RefKind::Site, n}
                                 : Ref{RefKind::Local, nullptr};
@@ -525,4 +501,4 @@ void CallWalk::newExpr(const NewExpr *n) {
   }
 }
 
-} // namespace tz::parallel
+}

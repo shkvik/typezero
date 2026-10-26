@@ -15,9 +15,6 @@ namespace tz {
 
 namespace {
 
-// Why JSON.parse<T> cannot build a value of `type`, or empty if it can. A
-// class is made through its constructor, with `classProblem` (fromJson(cls,
-// j)); JSON.parse<T> and fromJson<T> make none.
 using ClassProblem = llvm::function_ref<std::string(const ClassDecl *)>;
 
 std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *> &seen,
@@ -48,7 +45,6 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
     if (type->isTuple()) {
       return "tuples are not supported yet; read an array, or an object with named fields";
     }
-    // Only a regex literal, `new RegExp` and a match make them.
     if (type->isRegExp()) {
       return "a RegExp comes only from a literal or 'new RegExp'; read the pattern as a string "
              "and pass it to 'new RegExp(pattern)'";
@@ -56,8 +52,6 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
     if (type->isMatch()) {
       return "a match comes only from a regex; read the text and match it";
     }
-    // JSON has no dates: JSON.stringify writes one as its ISO text, and
-    // JSON.parse gives that string back.
     if (type->isDate()) {
       return "JSON has no dates, and JSON.parse in JavaScript gives the string JSON.stringify "
              "wrote; read it as a 'string' and make the date with 'new Date(text)'";
@@ -71,8 +65,6 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
     if (type->isCrypto()) {
       return "a " + type->name().str() + " comes only from the functions of 'node:crypto'";
     }
-    // JSON.stringify writes a Uint8Array as an object with the indices as
-    // keys, and JSON.parse gives that object back.
     if (type->isBytes()) {
       return "JSON has no binary data; read the bytes as a 'Json' or an 'int[]' and make the '" +
              type->name().str() + "' from them";
@@ -102,8 +94,6 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
   case Type::Kind::Literal:
     return "";
   case Type::Kind::Union: {
-    // The member a value goes to is told by what kind of JSON value it is, by
-    // the value itself for a literal, and among objects by a tag field.
     std::vector<const Type *> numbers, objects;
     for (const Type *m : type->members()) {
       if (std::string problem = fromJsonProblem(m, seen); !problem.empty()) {
@@ -141,7 +131,7 @@ std::string fromJsonProblem(const Type *type, llvm::SmallPtrSetImpl<const Type *
   }
 }
 
-} // namespace
+}
 
 JsonTypeChecker::JsonTypeChecker(Checker &checker) : checker_(checker) {}
 
@@ -166,4 +156,4 @@ bool JsonTypeChecker::checkFromJsonType(const Type *type, llvm::SMLoc loc, llvm:
   return false;
 }
 
-} // namespace tz
+}

@@ -34,8 +34,7 @@ namespace tz {
 
 namespace {
 
-// Must match runtime/core/tzrt/tzrt.h.
-constexpr uint64_t kPromiseHeader = 48; // TZ_PROMISE_VALUE
+constexpr uint64_t kPromiseHeader = 48;
 
 constexpr uint64_t kReactorSize = 40;
 
@@ -43,10 +42,8 @@ enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlag
 
 constexpr uint32_t kFulfilled = 1;
 
-// The alignment of a coroutine's frame, as for generators.
 constexpr uint32_t kAsyncFrameAlign = 8;
 
-// `Promise.resolve(x)` of a value that is no Promise.
 const Expr *resolvedValue(const Expr *expr) {
   auto *call = dyn_cast<CallExpr>(expr);
   if (!call || call->builtin != Builtin::PromiseResolve || call->args.size() != 1 ||
@@ -57,7 +54,7 @@ const Expr *resolvedValue(const Expr *expr) {
   return call->args[0];
 }
 
-} // namespace
+}
 
 AsyncLowerer::AsyncLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -66,8 +63,6 @@ llvm::FunctionCallee AsyncLowerer::asyncFunction(llvm::StringRef name, llvm::Typ
   return lowering_.processLowerer().processFunction(name, ret, params);
 }
 
-// void (ptr reactor, ptr source): what the runtime calls to go on with an
-// async function, whose frame follows the reactor.
 llvm::Function *AsyncLowerer::asyncResumeFunction() {
   if (asyncResumeFn_) {
     return asyncResumeFn_;
@@ -86,8 +81,6 @@ llvm::Function *AsyncLowerer::asyncResumeFunction() {
   return asyncResumeFn_;
 }
 
-// The start of an async function: the promise, the reactor and the frame
-// in one allocation, which the ramp gives back.
 void AsyncLowerer::beginAsync() {
   lowering_.function_->addFnAttr(llvm::Attribute::PresplitCoroutine);
   Lowering::Coroutine &c = *lowering_.coro_;
@@ -101,8 +94,6 @@ void AsyncLowerer::beginAsync() {
       {lowering_.builder_.getInt32(kAsyncFrameAlign), null, null, null}, "id");
   llvm::Value *size = lowering_.builder_.CreateCall(
       lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_size, {i64}), {}, "size");
-  // A promise that may hold a member is one, with its frame (see
-  // promiseIsMember); its count is set already.
   bool member = lowering_.memory().promiseIsMember(a.value);
   llvm::Value *total = lowering_.builder_.CreateAdd(size, lowering_.builder_.getInt64(frameOffset));
   llvm::Value *memory =
@@ -129,8 +120,6 @@ void AsyncLowerer::beginAsync() {
   c.handle = lowering_.builder_.CreateCall(
       lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_begin), {c.id, frame},
       "handle");
-  // As for a generator, the object comes from the handle: LLVM takes the
-  // frame to be reached only through it.
   c.object = lowering_.builder_.CreateGEP(
       i8, c.handle, llvm::ConstantInt::getSigned(i64, -int64_t(frameOffset)), "promise");
   a.object = c.object;
@@ -140,8 +129,6 @@ void AsyncLowerer::beginAsync() {
   c.returnBlock = lowering_.functionFrame().newBlock("coro.return");
 }
 
-// The final suspension. The memory is the promise's, which its last release
-// frees: nothing destroys the coroutine.
 void AsyncLowerer::finishAsync() {
   Lowering::Coroutine &c = *lowering_.coro_;
   if (lowering_.functionFrame().blockIsOpen()) {
@@ -164,8 +151,6 @@ void AsyncLowerer::finishAsync() {
   lowering_.builder_.CreateCall(
       lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_end),
       {c.handle, lowering_.builder_.getFalse(), none});
-  // Only the ramp goes on after coro.end: it gives the promise to the
-  // caller, or drops it for a callback whose promise nobody takes.
   if (lowering_.async_->dropsPromise) {
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {c.object});
     lowering_.builder_.CreateRetVoid();
@@ -184,7 +169,7 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
   state.value = ret->isPromise() ? ret->promised() : Type::voidTy();
   state.dropsPromise = !ret->isPromise();
   beginAsync();
-  lowering_.functionFrame().pushScope(); // the parameters, and the environment of a closure
+  lowering_.functionFrame().pushScope();
   std::vector<llvm::Value *> args;
   unsigned first = 0;
   if (fn->isClosure() || fn->takesThis()) {
@@ -194,8 +179,6 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
     } else {
       lowering_.envParam_->setName("this");
     }
-    // The function value and the object of a method may go before the
-    // coroutine is done: it keeps them.
     llvm::Value *slot = lowering_.functionFrame().createObjectSlot("env");
     lowering_.builder_.CreateCall(lowering_.objRetainFn_, {lowering_.envParam_});
     lowering_.builder_.CreateStore(lowering_.envParam_, slot);
@@ -205,8 +188,6 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
     args.push_back(lowering_.function_->getArg(i));
   }
   lowering_.functionBuilder().emitParams(fn, args);
-  // Its pieces may run on other threads while the caller goes on with what
-  // it passed: shared (runtime/core/publish/publish.c).
   if (lowering_.parallel_ && (lowering_.aheadFunctions_.contains(fn) || fn->awaitsAhead)) {
     if (fn->isClosure() || fn->takesThis()) {
       lowering_.builder_.CreateCall(
@@ -228,7 +209,7 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
     emitAsyncReturn(nullptr);
   }
   lowering_.unwindLowerer().finishScopeUnwind(0);
-  lowering_.scopes_.pop_back(); // every way out released it
+  lowering_.scopes_.pop_back();
   lowering_.unwindLowerer().finishFunctionUnwind();
   finishAsync();
   lowering_.coro_ = nullptr;
@@ -236,8 +217,6 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
   lowering_.function_ = nullptr;
 }
 
-// The top-level code of a program that awaits: a coroutine of its own,
-// whose promise is that of the code.
 llvm::Function *AsyncLowerer::emitAsyncMain(SourceFile &file) {
   auto *body = llvm::Function::Create(llvm::FunctionType::get(lowering_.builder_.getPtrTy(), false),
                                       llvm::GlobalValue::InternalLinkage, "tz.main.async",
@@ -290,7 +269,7 @@ void AsyncLowerer::emitAsyncUnwind() {
       lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "error");
   lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                  lowering_.throwLowerer().thrownSlot());
-  if (lowering_.async_->generator) { // the step it ran for is rejected
+  if (lowering_.async_->generator) {
     lowering_.asyncGeneratorLowerer().finishAsyncGenerator(error);
   } else {
     lowering_.promiseLowerer().rejectPromise(lowering_.async_->object, error);
@@ -305,9 +284,6 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
     return;
   }
   if (value->type->isPromise()) {
-    // `return p`: the function's promise follows p, a turn of the queue
-    // later, as in JavaScript. Through a `finally`, which runs first, it
-    // waits for p here instead.
     if (!lowering_.tryLowerer().finallyBetween(~size_t(0))) {
       llvm::Value *other = lowering_.exprLowerer().emitExpr(value);
       lowering_.functionFrame().emitCleanups(0);
@@ -325,14 +301,12 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
   llvm::Value *result = lowering_.exprLowerer().emitExpr(value);
   if (!lowering_.promiseLowerer().promiseValueSize(lowering_.async_->value) &&
       !value->type->isVoid()) {
-    lowering_.refCounts().releaseValue(result, value->type); // a callback whose promise is dropped
+    lowering_.refCounts().releaseValue(result, value->type);
     result = nullptr;
   }
   lowering_.tryLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
 }
 
-// The places of an error that comes out of an `await`: "async f", as V8
-// names them.
 llvm::Constant *AsyncLowerer::asyncFrameDescriptor(llvm::SMLoc loc) {
   std::string name = lowering_.unwindLowerer().frameFunctionName();
   name = name.empty() ? "async" : "async " + name;
@@ -340,10 +314,6 @@ llvm::Constant *AsyncLowerer::asyncFrameDescriptor(llvm::SMLoc loc) {
   return lowering_.unwindLowerer().frameDescriptor(loc, &name);
 }
 
-// Waits for the coroutine's turn: the runtime queues its reactor once
-// `promise` (null: none) settles. The piece after an await may run ahead of
-// its turn (aheadStarts_): the runtime marks the reactor, once this piece
-// has its turn.
 void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   uint32_t site = awaiting_ ? lowering_.aheadStarts_.lookup(awaiting_) : 0;
@@ -352,8 +322,6 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
                                 {lowering_.async_->reactor,
                                  promise ? promise : llvm::ConstantPointerNull::get(ptr),
                                  lowering_.builder_.getInt32(site)});
-  // Where top-level code waits, for the warning about an await that never
-  // ends: after the call, which waits for the turn.
   if (!lowering_.currentFn_) {
     auto *where =
         cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_main_await", ptr));
@@ -373,7 +341,6 @@ llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, 
   lowering_.builder_.CreateCondBr(
       lowering_.builder_.CreateICmpEQ(state, lowering_.builder_.getInt32(kFulfilled)),
       fulfilledBlock, rejectedBlock, llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-  // Rejected: its error goes up from here, with this place.
   lowering_.functionFrame().switchTo(rejectedBlock);
   llvm::Value *error = lowering_.builder_.CreateLoad(
       lowering_.builder_.getPtrTy(), lowering_.promiseLowerer().promiseField(promise, kError),
@@ -401,17 +368,12 @@ llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, 
 
 llvm::Value *AsyncLowerer::emitAwait(AwaitExpr *await) {
   Expr *operand = await->value;
-  // `await __tz_ahead(p)` in the built-in modules: the piece after it may
-  // run ahead of its turn (runtime/core/parallel/parallel.c), as the code
-  // guarantees.
   if (auto *call = dyn_cast<CallExpr>(operand); call && call->builtin == Builtin::LibAhead) {
     if (lowering_.parallel_) {
       lowering_.aheadStarts_.try_emplace(await, uint32_t(lowering_.aheadStarts_.size() + 1));
     }
     operand = call->args[0];
   }
-  // `await Promise.resolve(x)` waits as `await x` does, one turn of the
-  // queue, without the promise.
   if (const Expr *inner = resolvedValue(operand)) {
     operand = const_cast<Expr *>(inner);
   }
@@ -442,9 +404,6 @@ bool AsyncLowerer::holdsPromise(const Type *type) {
          llvm::any_of(type->members(), [](const Type *m) { return m->isPromise(); });
 }
 
-// `await` of a union (or `T | undefined`) that may hold a Promise, as in
-// JavaScript: it waits for the Promise, or a turn of the queue for any
-// other value.
 llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, const Type *result,
                                       llvm::SMLoc loc) {
   llvm::Type *resultType = result->isVoid() ? nullptr : lowering_.moduleBuilder().lower(result);
@@ -505,7 +464,6 @@ llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, cons
     lowering_.functionFrame().switchTo(promiseBlock);
     finish(part(lowering_.optionalLowerer().optionalValue(value, type), type->inner()));
   } else {
-    // Objects, one of them a Promise: told apart by the number of its layout.
     const Type *promiseType =
         *llvm::find_if(type->members(), [](const Type *m) { return m->isPromise(); });
     lowering_.builder_.CreateCondBr(lowering_.unionLowerer().emitIsOneOf(
@@ -528,4 +486,4 @@ llvm::Value *AsyncLowerer::awaitUnion(llvm::Value *value, const Type *type, cons
   return phi;
 }
 
-} // namespace tz
+}

@@ -215,7 +215,6 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
     if (!e || escapes) {
       return;
     }
-    // A method gets the object: called on it, or on `super`.
     if (auto *call = llvm::dyn_cast<CallExpr>(e)) {
       auto *member = llvm::dyn_cast<MemberExpr>(call->callee);
       auto *object = member ? llvm::dyn_cast<NameExpr>(member->object) : nullptr;
@@ -228,7 +227,7 @@ bool CycleScanner::thisEscapes(const Stmt *stmt, const VarSymbol *self) {
     if (auto *member = llvm::dyn_cast<MemberExpr>(e)) {
       auto *object = llvm::dyn_cast<NameExpr>(member->object);
       if (object && object->var == self && !member->method) {
-        return; // a field of it
+        return;
       }
       visit(member->object);
       return;
@@ -255,4 +254,4 @@ CycleScanner::CycleScanner() {
 }
 
 CycleScanner::~CycleScanner() = default;
-} // namespace tz
+}

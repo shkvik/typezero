@@ -28,12 +28,8 @@ const Type *literalType(const Expr *value);
 
 namespace {
 
-// What `await` of a value of `type` gives: the value of a Promise, or the
-// value itself.
 const Type *awaited(const Type *type) { return type->isPromise() ? type->promised() : type; }
 
-// The text of a statement that starts at `at`, for hints: up to the end of
-// its line, without a `;` or a comment at the end.
 std::string statementText(llvm::SMLoc at) {
   if (!at.isValid()) {
     return "";
@@ -54,7 +50,7 @@ std::string statementText(llvm::SMLoc at) {
   return depth == 0 && text.size() <= 60 ? text.str() : "";
 }
 
-} // namespace
+}
 
 AsyncChecker::AsyncChecker(Checker &checker) : checker_(checker) {}
 
@@ -68,9 +64,8 @@ const Type *AsyncChecker::resolvePromiseType(const TypeRef &ref) {
                                        ref.name + "<int>'");
     return Type::error();
   }
-  const Type *value = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/true);
+  const Type *value = checker_.typeResolver().resolveType(ref.args[0], true);
 
-  // A Promise of a Promise is a Promise of its value in JavaScript.
   return Type::promise(awaited(value));
 }
 
@@ -140,7 +135,6 @@ void AsyncChecker::finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt 
     }
     const Type *t = ret->value->type;
     if (t->isPromise()) {
-      // `return p`: the Promise of the function follows p.
       if (t->promised() != value && !t->promised()->isNever()) {
         checker_.diags_.error(ret->value->loc(), "this Promise gives '" + t->promised()->name() +
                                                      "', but " + quotedName(fn->name) + " gives '" +
@@ -172,8 +166,6 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   } else if (!fn) {
     checker_.file_->topLevelAwait = true;
   }
-  // `await new Promise(...)` where an int is expected waits for a
-  // Promise<int>.
   const Type *hint = nullptr;
   if (expected && !expected->isError() && !expected->isVoid() &&
       (isa<NewExpr>(await->value) || isa<CallExpr>(await->value))) {
@@ -181,7 +173,6 @@ Expr *AsyncChecker::checkAwait(AwaitExpr *await, const Type *expected) {
   }
   await->value = checker_.exprChecker().checkExpr(await->value, hint);
   const Type *type = await->value->type;
-  // Other tasks run while this one waits: they may change anything.
   checker_.flowChecker().calledFunction();
   if (type->isError()) {
     return await;
@@ -227,10 +218,6 @@ const Type *AsyncChecker::awaitedType(const Type *type) {
   return result;
 }
 
-// `for await (const x of xs)` (docs/iterators.md, step 4): over the values
-// of an async iterator, the lines of readline, or the elements of an array
-// or an iterator, each awaited. It waits, as `await` does, so it goes where
-// `await` goes.
 void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   checker_.file_->usesAsync = true;
   FuncSymbol *fn = checker_.currentFunction_;
@@ -244,14 +231,12 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   checker_.iteratorMethods().markFused(stmt->iterable);
   stmt->iterable =
       checker_.genericChecker().apparent(checker_.exprChecker().checkExpr(stmt->iterable));
-  // An object with `[Symbol.asyncIterator]()` gives what that gives; one
-  // with `[Symbol.iterator]()`, its iterator.
   if (Expr *iterator = checker_.iterableChecker().asyncUserIterator(stmt->iterable)) {
     stmt->iterable = iterator;
   } else {
     stmt->iterable = checker_.dictChecker().iterableOf(stmt->iterable);
   }
-  if (stmt->iterable->type->isMatch()) { // the captures
+  if (stmt->iterable->type->isMatch()) {
     stmt->iterable = checker_.matchChecker().matchItems(stmt->iterable);
   }
   const Type *type = stmt->iterable->type;
@@ -286,13 +271,11 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
                                                  element->name() + "'");
     element = Type::error();
   }
-  // Other tasks run while it waits: they may change anything, as the
-  // iterator itself may.
   checker_.flowChecker().calledFunction();
   Checker::LoopScan scan = checker_.loopScanner().scanLoop({stmt->body}, {});
   scan.callsFunctions = true;
   stmt->borrowElements = false;
-  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, /*induction=*/false);
+  Checker::Flow head = checker_.loopBounds().loopHead(scan, nullptr, false);
   checker_.flow_ = head;
   checker_.pushScope();
   stmt->binding.sym =
@@ -308,8 +291,6 @@ bool AsyncChecker::isHandledPromise(const Expr *expr) const {
   if (!call) {
     return false;
   }
-  // As the lint rule no-floating-promises of TypeScript says: a rejection
-  // handler handles it, and finally() keeps what the Promise before it is.
   if (call->builtin == Builtin::PromiseCatch) {
     return true;
   }
@@ -366,4 +347,4 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
   }
 }
 
-} // namespace tz
+}

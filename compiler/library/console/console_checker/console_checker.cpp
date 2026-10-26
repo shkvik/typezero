@@ -25,8 +25,6 @@ Expr *ConsoleChecker::checkConsoleLog(CallExpr *call) {
     if (arg->type->isVoid()) {
       checker_.diags_.error(arg->loc(), "an expression of type 'void' cannot be printed");
     }
-    // `console.log(...xs)`: each element as an argument of its own; in
-    // generic code, `...args` of a list of types.
     const Type *type = arg->type;
     if (call->spreads(i) && !type->isArray() && !type->isListParam() && !spreadsLists(type) &&
         !type->isError()) {
@@ -42,8 +40,6 @@ Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
   if (!checker_.callChecker().isGlobalName(member->object, "console")) {
     return nullptr;
   }
-  // info and debug print to stdout, as log does; error and warn the same
-  // way to stderr.
   bool toStderr = member->name == "error" || member->name == "warn";
   if (toStderr || member->name == "log" || member->name == "info" || member->name == "debug") {
     checkConsoleLog(call);
@@ -62,4 +58,4 @@ Expr *ConsoleChecker::checkConsoleCall(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

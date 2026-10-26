@@ -59,7 +59,6 @@ llvm::Value *BufferCalls::emit() {
     llvm::Value *made = lowering_.builder_.CreateCall(
         fn("tz_buffer_alloc", ptr, {i64, i32}), {size, lowering_.builder_.getInt32(1)}, "buffer");
     llvm::Value *zero = lowering_.builder_.getInt64(0), *none = lowering_.builder_.getInt32(0);
-    // A buffer that failed is NULL: nothing to fill, and the error goes up.
     llvm::BasicBlock *fillBlock = lowering_.functionFrame().newBlock("alloc.fill");
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("alloc.end");
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(made), fillBlock, endBlock);
@@ -113,7 +112,7 @@ llvm::Value *BufferCalls::emit() {
       lowering_.refCounts().dropOperand(text);
       return length;
     }
-    Lowering::Operand bytes = lowering_.refCounts().emitOperand(source, /*canBorrow=*/true);
+    Lowering::Operand bytes = lowering_.refCounts().emitOperand(source, true);
     llvm::Value *length = lowering_.bytesLowerer().bytesLength(bytes.value);
     lowering_.refCounts().dropOperand(bytes);
     unsigned size = source->type->isTypedArray() ? source->type->elementSize() : 1;
@@ -127,7 +126,7 @@ llvm::Value *BufferCalls::emit() {
     Lowering::Operand a =
         lowering_.refCounts().emitOperand(first, AssignLowerer::cannotAssign(second));
     lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(second));
-    Lowering::Operand b = lowering_.refCounts().emitOperand(second, /*canBorrow=*/true);
+    Lowering::Operand b = lowering_.refCounts().emitOperand(second, true);
     lowering_.throwLowerer().takeOperand(a);
     llvm::Value *result = call->builtin == Builtin::BufferCompare
                               ? lowering_.builder_.CreateCall(
@@ -167,15 +166,14 @@ llvm::Value *BufferCalls::emit() {
       lowering_.stmtLowerer().emitDiscarded(call->args[0]);
       return lowering_.builder_.getInt1(t->isBuffer());
     }
-    // A Uint8Array may be a Buffer.
-    Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand bytes = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *is =
         lowering_.builder_.CreateCall(fn("tz_bytes_is_buffer", i32, {ptr}), {bytes.value});
     lowering_.refCounts().dropOperand(bytes);
     return lowering_.builder_.CreateICmpNE(is, lowering_.builder_.getInt32(0));
   }
   case Builtin::BufferIsEncoding: {
-    Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand name = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *found =
         lowering_.builder_.CreateCall(fn("tz_buffer_encoding", i32, {ptr, i64}),
                                       {lowering_.stringLowerer().stringObj(name.value),
@@ -323,4 +321,4 @@ llvm::Value *BufferCalls::emit() {
   }
 }
 
-} // namespace tz
+}

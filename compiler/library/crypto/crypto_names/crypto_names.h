@@ -8,11 +8,6 @@
 
 namespace tz {
 
-// The names node:crypto knows: hashes, ciphers, functions, classes and exports.
-
-// The names of each hash of the direct layer that node takes (lower case): those of OpenSSL's
-// provider (SHA2-256, SHA-256, its OID), of its objects, and the names of signatures that
-// getHashes() lists ("RSA-SHA256").
 struct HashNames {
   llvm::StringLiteral name;
   std::vector<llvm::StringLiteral> aliases;
@@ -20,7 +15,6 @@ struct HashNames {
 
 const std::vector<HashNames> &hashNames();
 
-// What getCiphers() lists in node 24 with OpenSSL 3.5: every cipher name node takes.
 inline const llvm::StringLiteral kCipherNames[] = {"aes-128-cbc",
                                                    "aes-128-cbc-hmac-sha1",
                                                    "aes-128-cbc-hmac-sha256",
@@ -156,7 +150,6 @@ inline const llvm::StringLiteral kCipherNames[] = {"aes-128-cbc",
                                                    "sm4-ecb",
                                                    "sm4-ofb"};
 
-// The names of node:crypto in node 24, and what tz has of them.
 inline const llvm::StringLiteral kFunctions[] = {"createHash",
                                                  "createHmac",
                                                  "hash",
@@ -191,7 +184,6 @@ inline const llvm::StringLiteral kClasses[] = {"Hash",       "Hmac",      "Ciphe
                                                "Decipheriv", "KeyObject", "Sign",
                                                "Verify",     "ECDH",      "X509Certificate"};
 
-// The functions that take a callback, with their Sync form.
 inline const std::pair<llvm::StringLiteral, llvm::StringLiteral> kCallbackForms[] = {
     {"pbkdf2", "pbkdf2Sync"},          {"scrypt", "scryptSync"},
     {"argon2", "argon2Sync"},          {"hkdf", "hkdfSync"},
@@ -220,14 +212,12 @@ inline const llvm::StringLiteral kExports[] = {"Certificate",
                                                "setEngine",
                                                "setFips"};
 
-// The hashes node 24 turns off, which fail in node with ERR_OSSL_EVP_UNSUPPORTED.
 bool turnedOffHash(llvm::StringRef name);
 
 bool turnedOffCipher(llvm::StringRef name);
 
-// The methods each class has, for the message about a method it has not.
 llvm::StringRef methodsOf(Crypto kind);
 
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
-} // namespace tz
+}

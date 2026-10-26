@@ -33,7 +33,6 @@ void TopLevelChecker::checkTopLevel(Module *module, llvm::StringRef until) {
     if (isa<FunctionDecl>(item)) {
       continue;
     }
-    // A global may also go where the functions of the file take it.
     checker_.block_ = items;
     checker_.blockIndex_ = here.next - 1;
     checker_.stmtChecker().checkStmt(item);
@@ -46,7 +45,7 @@ void TopLevelChecker::checkTopLevel(Module *module, llvm::StringRef until) {
   if (here.next == items.size()) {
     here.loaded = true;
   } else {
-    here.flow = checker_.flow_; // for when the check goes on
+    here.flow = checker_.flow_;
   }
   here.busy = false;
   checker_.loading_ = outerLoading;
@@ -65,8 +64,6 @@ Module *TopLevelChecker::laterSource(llvm::StringRef name, llvm::StringRef &decl
     Module *source = found->second.target.module;
     return checker_.state(source).loaded ? nullptr : source;
   }
-  // A function of a file that loads later, checked early, uses a global of
-  // its own file.
   if (checker_.loading_ && checker_.module_ != checker_.loading_ && !here.loaded &&
       here.topLevelNames.contains(name)) {
     return checker_.module_;
@@ -82,14 +79,11 @@ Checker::ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
   }
   llvm::StringRef declared;
   Module *source = laterSource(name, declared);
-  // Read right as the file loads: an error however the types turn out (see
-  // reportNotLoaded).
   if (!source || (checker_.functions_.empty() && checker_.module_ == checker_.loading_) ||
       !loadEarly(source, declared)) {
     return entry;
   }
   if (source == checker_.module_) {
-    // Its own global, declared now; the scope of the file here is older.
     for (const auto &value : checker_.state(checker_.module_).values) {
       checker_.scopes_[0].try_emplace(value.getKey(), value.getValue());
     }
@@ -100,10 +94,6 @@ Checker::ScopeEntry TopLevelChecker::lookupValue(llvm::StringRef name) {
   return checker_.scopes().lookup(name);
 }
 
-// The state of the check is saved as for a function body, and the file is
-// checked as top-level code; its check goes on from there in its turn.
-// Diagnostics are real even inside a trial: these statements are not
-// checked again.
 bool TopLevelChecker::loadEarly(Module *source, llvm::StringRef name) {
   Checker::ModuleState &there = checker_.state(source);
   if (there.loaded || there.busy || !there.topLevelNames.contains(name)) {
@@ -155,7 +145,7 @@ std::string TopLevelChecker::readBeforeLoad(const Module *reader, const std::str
 
 bool TopLevelChecker::reportNotLoaded(const NameExpr *name) {
   if (checker_.state(checker_.module_).badImports.contains(name->name)) {
-    return true; // reported at the import
+    return true;
   }
   llvm::StringRef declared;
   Module *source = laterSource(name->name, declared);
@@ -173,8 +163,6 @@ bool TopLevelChecker::reportNotLoaded(const NameExpr *name) {
     checker_.diags_.error(name->loc(), readBeforeLoad(reader, what, source, declared));
     return true;
   }
-  // Its file could not be checked ahead of its turn: it is being checked,
-  // and has not got to the declaration (see loadEarly).
   if (checker_.early_) {
     checker_.diags_.error(
         name->loc(), what + " has no type yet when " + reader->name + " first calls '" +
@@ -205,4 +193,4 @@ bool TopLevelChecker::reportImportAssign(const NameExpr *name, const VarSymbol *
   return true;
 }
 
-} // namespace tz
+}

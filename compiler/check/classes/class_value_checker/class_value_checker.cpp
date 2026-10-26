@@ -19,9 +19,6 @@ using llvm::isa;
 
 namespace tz {
 
-// The value of `object`, a class as a value, is not needed for `result`,
-// which is about the class it is: of a name, nothing; of anything else, the
-// expression is evaluated first.
 static Expr *afterClassValue(AstContext &ctx, Expr *object, Expr *result) {
   if (isa<NameExpr>(object)) {
     return result;
@@ -54,7 +51,6 @@ ClassDecl *ClassValueChecker::finalClass(ClassDecl *cls) {
 const Type *ClassValueChecker::classValueType(ClassDecl *cls) {
   cls = finalClass(cls);
 
-  // A class without a name shows as what it extends.
   return Type::classRef(cls, cls->name.empty() && cls->type ? cls->type->name() : cls->name);
 }
 
@@ -65,11 +61,10 @@ const Type *ClassValueChecker::resolveConstructorType(const TypeRef &ref) {
                           "'Constructor<User>', or nothing for any class");
     return Type::error();
   }
-  const Type *made = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *made = checker_.typeResolver().resolveType(ref.args[0], false);
   if (made->isError()) {
     return made;
   }
-  // A class, an interface, `object`; in generic code a type parameter.
   if ((!made->isObject() || made->isTuple()) && !made->isParam()) {
     checker_.diags_.error(ref.args[0].loc,
                           "a class makes objects, and '" + made->name() +
@@ -142,7 +137,6 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
     checkArgsLoosely();
     return expr;
   }
-  // A class known when compiling: as `new C(...)`, after the class value.
   if (ClassDecl *cls = const_cast<ClassDecl *>(type->classRef())) {
     if (!cls->type) {
       checker_.diags_.error(expr->callee->loc(), "'new' of '" + cls->name +
@@ -153,8 +147,6 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
     }
     return checker_.methodCallChecker().checkClassNew(expr, cls, expected);
   }
-  // A class known only when the program runs: its description makes the
-  // object, checking the arguments against its constructor then.
   if (!expr->typeArgs.empty()) {
     checker_.diags_.error(expr->loc(), "a class known only when the program runs takes no type "
                                        "arguments");
@@ -168,7 +160,7 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
       arg = checker_.typeRelations().convert(arg, Type::unknown());
     }
   }
-  checker_.flowChecker().calledFunction(); // the code of the class runs
+  checker_.flowChecker().calledFunction();
   checker_.reflectionUsed_ |= !checker_.reflectChecker().onlyChecked();
   expr->type = type->constructed();
 
@@ -176,8 +168,6 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
 }
 
 Expr *ClassValueChecker::checkClassValue(NameExpr *name, ClassDecl *cls) {
-  // Before its declaration has run, JavaScript has no class there yet (a
-  // ReferenceError), as for `new C()`.
   if (!cls->declared && checker_.loading_ && checker_.functions_.empty() &&
       checker_.declModules_.lookup(cls) == checker_.loading_) {
     checker_.diags_.error(name->loc(),
@@ -185,7 +175,6 @@ Expr *ClassValueChecker::checkClassValue(NameExpr *name, ClassDecl *cls) {
                               "' is used before its declaration, which JavaScript has not run "
                               "yet here (a ReferenceError); move the class up");
   }
-  // The class a decorator gave in its place, from where it is declared on.
   cls = finalClass(cls);
   name->cls = cls;
   name->type = classValueType(cls);
@@ -205,7 +194,6 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
     return member;
   }
   if (!cls) {
-    // A class known only when the program runs: its name is in its object.
     if (member->name == "name") {
       auto *call =
           checker_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>{member->object});
@@ -222,7 +210,6 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
   }
   if (member->name == "name" &&
       (!cls->type || ClassDeclarer::methodsNamed(cls, "name", true).empty())) {
-    // `cls.name`, as in JavaScript: the class's name.
     auto *text = checker_.ctx_.make<StringLitExpr>(
         member->loc(), std::u16string(cls->name.begin(), cls->name.end()));
     text->type = Type::string();
@@ -233,7 +220,6 @@ Expr *ClassValueChecker::checkClassRefMember(MemberExpr *member) {
                           "'" + cls->name + "' as a value has only its 'name' in tz");
     return member;
   }
-  // A static member of the class it is, known when compiling.
   Expr *object = member->object;
 
   return afterClassValue(
@@ -250,4 +236,4 @@ Expr *ClassValueChecker::classValueAt(ClassDecl *cls, llvm::SMLoc loc) {
   return name;
 }
 
-} // namespace tz
+}

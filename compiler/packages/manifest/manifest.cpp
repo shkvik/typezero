@@ -26,7 +26,7 @@ std::string findManifest(llvm::StringRef dir) {
     fs::current_path(current);
   }
   fs::make_absolute(current);
-  path::remove_dots(current, /*remove_dot_dot=*/true);
+  path::remove_dots(current, true);
   while (!current.empty()) {
     llvm::SmallString<256> candidate(current);
     path::append(candidate, "tz.json");
@@ -101,7 +101,6 @@ bool parseManifest(Manifest &out) {
   out.rootEnd = root.end;
   if (!root.keys.empty()) {
     out.lastMemberEnd = root.items.back().end;
-    // The indentation of the first member.
     size_t lineStart = out.text.rfind('\n', root.keyOffsets[0]);
     lineStart = lineStart == std::string::npos ? 0 : lineStart + 1;
     llvm::StringRef lead = llvm::StringRef(out.text).slice(lineStart, root.keyOffsets[0]);
@@ -158,7 +157,7 @@ bool parseManifest(Manifest &out) {
   return true;
 }
 
-} // namespace
+}
 
 bool readManifest(llvm::StringRef file, Manifest &out) {
   std::string text;
@@ -184,7 +183,6 @@ bool readPackageDir(llvm::StringRef dir, Manifest &out) {
   }
   out = Manifest();
   out.dir = canonical(dir);
-  // A package made for Deno or JSR: its name and exports, no more.
   for (const char *name : {"jsr.json", "deno.json", "deno.jsonc"}) {
     file = dir;
     path::append(file, name);
@@ -241,4 +239,4 @@ std::string withDependencies(const Manifest &m, std::vector<Dependency> deps) {
          text.substr(m.rootEnd);
 }
 
-} // namespace tz::pkg
+}

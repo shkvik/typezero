@@ -21,10 +21,9 @@ namespace tz {
 
 namespace {
 
-// The helpers that make a stage of a lazy chain.
 const llvm::StringLiteral kStages[] = {"map", "filter", "take", "drop", "flatMap"};
 
-} // namespace
+}
 
 IteratorMethods::IteratorMethods(Checker &checker) : checker_(checker) {}
 
@@ -34,7 +33,6 @@ void IteratorMethods::markFused(Expr *expr) const {
     if (!member || member->optional || call->optional) {
       return;
     }
-    // `Iterator.from(x)` of an iterator is the iterator itself.
     if (checker_.callChecker().isGlobalName(member->object, "Iterator") && member->name == "from" &&
         call->args.size() == 1) {
       expr = call->args[0];
@@ -97,7 +95,6 @@ Expr *IteratorMethods::checkIteratorFrom(CallExpr *call, MemberExpr *member) {
     return call;
   }
   call->builtin = Builtin::IterFrom;
-  // An iterator is its own: Iterator.from gives it back.
   call->type = type->isIterator() ? type : Type::iterator(element);
 
   return call;
@@ -141,7 +138,6 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
   call->builtin = Builtin::ArrayFrom;
   call->type = Type::array(element);
   if (call->args.size() == 2) {
-    // `Array.from(xs, (x, i) => ...)`: each value through the function.
     Checker::Signature sig;
     sig.pad = false;
     sig.params = {element, Type::intTy()};
@@ -160,7 +156,7 @@ Expr *IteratorMethods::checkArrayFrom(CallExpr *call, MemberExpr *member) {
     }
     call->type = Type::array(result);
   }
-  checker_.flowChecker().calledFunction(); // a generator or the callback may change anything
+  checker_.flowChecker().calledFunction();
 
   return call;
 }
@@ -180,8 +176,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 1)) {
       return call;
     }
-    // The value is undefined when the iterator is done, or what a generator
-    // returns then: `T | R | undefined`.
     const Type *returned = iterator->returned();
     const Type *value = returned->isVoid() ? element : Type::unionOf({element, returned});
     if (std::string problem = unionProblem(value); !problem.empty()) {
@@ -194,7 +188,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
       return call;
     }
     if (count == 1) {
-      // What a generator that ignores it gets is evaluated and dropped.
       const Type *sent = iterator->sent();
       call->args[0] = sent->isVoid() ? checker_.exprChecker().checkExpr(call->args[0])
                                      : checker_.argumentChecker().checkArg(call->args[0], sent);
@@ -203,7 +196,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     call->type =
         Type::object({{"value", Type::optional(value), false}, {"done", Type::boolTy(), false}},
                      "IteratorResult<" + value->name().str() + ">");
-    checker_.flowChecker().calledFunction(); // the generator runs
+    checker_.flowChecker().calledFunction();
     return call;
   }
   if (name == "return" || name == "throw") {
@@ -245,7 +238,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     return call;
   }
   Builtin builtin = helper->builtin;
-  // The helpers call next() without a value.
   if (!checker_.generatorChecker().checkSendsNothing(iterator, member->loc(),
                                                      "'" + name.str() + "'")) {
     checkArgsLoosely();
@@ -267,7 +259,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     }
     call->builtin = builtin;
     call->type = Type::array(element);
-    checker_.flowChecker().calledFunction(); // the iterator runs
+    checker_.flowChecker().calledFunction();
     return call;
   }
 
@@ -282,8 +274,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     checkArgsLoosely();
     return call;
   }
-  // The callback gets the value and a counter (and first the accumulator
-  // for reduce), not an index and an array as for arrays.
   Checker::Signature sig;
   sig.pad = false;
   unsigned primary = 1;
@@ -330,7 +320,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
                       : std::vector<const Type *>{element, Type::intTy()};
   bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
   call->args[0] = checker_.callbackChecker().checkFunctionArg(call->args[0], sig, primary, name);
-  // A stage that is not consumed where it is written keeps its callback.
   if (isIteratorStage(builtin)) {
     if (auto *fe = dyn_cast<FunctionExpr>(call->args[0])) {
       fe->fn->nonEscaping = call->fused;
@@ -338,7 +327,7 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   }
   call->builtin = builtin;
   if (isIteratorSink(builtin)) {
-    checker_.flowChecker().calledFunction(); // the callback may change anything
+    checker_.flowChecker().calledFunction();
   }
   const Type *callback = call->args[0]->type;
   if (!callback->isFunction()) {
@@ -354,7 +343,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::iterator(result);
     break;
   case Builtin::IterFlatMap: {
-    // Each result is iterated in turn. JavaScript rejects a string here.
     const Type *inner = result->isString() ? nullptr : GeneratorChecker::iteratedType(result);
     if (!inner) {
       checker_.diags_.error(call->args[0]->loc(),
@@ -371,7 +359,6 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
     break;
   }
   case Builtin::IterFilter:
-    // `filter(x => x != undefined)` keeps only the values that hold one.
     if (const Type *kept = checker_.predicateChecker().filteredType(call->args[0], element)) {
       call->type = Type::iterator(kept);
     } else {
@@ -405,4 +392,4 @@ Expr *IteratorMethods::checkIteratorMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

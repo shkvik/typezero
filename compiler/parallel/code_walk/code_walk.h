@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// The code of the program walked: its pieces, statements and what they touch.
 class CodeWalk {
 public:
   explicit CodeWalk(Analysis &analysis);
@@ -33,4 +32,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

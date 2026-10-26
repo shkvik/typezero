@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The static functions and methods of Buffer.
 class BufferCalls : public BytesCallSite {
 public:
   using BytesCallSite::BytesCallSite;
@@ -12,4 +11,4 @@ public:
   llvm::Value *emit();
 };
 
-} // namespace tz
+}

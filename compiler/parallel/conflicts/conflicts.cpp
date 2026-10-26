@@ -44,7 +44,6 @@ bool Conflicts::concurrent(unsigned a, unsigned b) const {
   auto contains = [](const std::vector<unsigned> &v, unsigned x) {
     return std::binary_search(v.begin(), v.end(), x);
   };
-  // One task runs only while the other is at some of its pieces.
   for (const auto &[r, interval] : analysis_.roots_[pa.root].chain) {
     if (r == pb.root) {
       return analysis_.roots_[r].multi || contains(interval, b);
@@ -55,7 +54,6 @@ bool Conflicts::concurrent(unsigned a, unsigned b) const {
       return analysis_.roots_[r].multi || contains(interval, a);
     }
   }
-  // Both run while a task up both chains is at some of its pieces.
   for (const auto &[ra, ia] : analysis_.roots_[pa.root].chain) {
     for (const auto &[rb, ib] : analysis_.roots_[pb.root].chain) {
       if (ra == rb) {
@@ -99,10 +97,6 @@ std::vector<Touch> Conflicts::touches(const Effects &effects) const {
   return out;
 }
 
-// The bits of a location for the quick test of decide(): output, input and
-// the other resources each have one; variables and named fields one by a
-// hash; the elements of objects one. A location that may be any field, or
-// anything inside an object, has the bits of all that it may meet.
 uint64_t Conflicts::maskOf(const Loc &loc) const {
   constexpr uint64_t kElements = uint64_t(1) << 8, kAnyField = uint64_t(1) << 9;
   constexpr uint64_t kFieldBits = ~uint64_t(0) << 40;
@@ -150,8 +144,6 @@ void Conflicts::decide() {
     analysis_.pieceTouches_[i] = touches(effects);
   }
   analysis_.decisions_.assign(analysis_.pieces_.size(), {});
-  // What each piece touches and writes, as bits: two pieces may conflict
-  // only where the writes of one meet the touches of the other.
   std::vector<uint64_t> touched(analysis_.pieces_.size(), 0), written(analysis_.pieces_.size(), 0);
   for (unsigned i = 0; i < analysis_.pieces_.size(); ++i) {
     for (const Touch &t : analysis_.pieceTouches_[i]) {
@@ -165,8 +157,6 @@ void Conflicts::decide() {
   for (unsigned i = 0; i < analysis_.pieces_.size(); ++i) {
     for (unsigned j = i; j < analysis_.pieces_.size(); ++j) {
       bool maybe = (written[i] & touched[j]) || (written[j] & touched[i]);
-      // Whether two pieces meet matters only for a conflict, or to know that
-      // a piece runs alone.
       if (!maybe && !analysis_.decisions_[i].alone && !analysis_.decisions_[j].alone) {
         continue;
       }
@@ -184,7 +174,6 @@ void Conflicts::decide() {
           if (!(x.write || y.write)) {
             continue;
           }
-          // The element of its own index that each copy of a task writes.
           if (x.loc.kind == LocKind::OwnCell && y.loc.kind == LocKind::OwnCell &&
               x.loc.key == y.loc.key && analysis_.pieces_[i].root == analysis_.pieces_[j].root &&
               analysis_.roots_[analysis_.pieces_[i].root].ownCell == x.loc.key) {
@@ -243,4 +232,4 @@ void Conflicts::decide() {
   }
 }
 
-} // namespace tz::parallel
+}

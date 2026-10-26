@@ -99,15 +99,15 @@ llvm::Value *BytesCallSite::encoding(Expr *arg) {
   if (auto *lit = dyn_cast<IntLitExpr>(arg)) {
     return lowering_.builder_.getInt32(uint32_t(lit->value));
   }
-  Lowering::Operand name = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+  Lowering::Operand name = lowering_.refCounts().emitOperand(arg, true);
   llvm::Value *value =
       lowering_.builder_.CreateCall(fn("tz_buffer_encoding_checked", i32, {ptr, i64}),
                                     {lowering_.stringLowerer().stringObj(name.value),
                                      lowering_.stringLowerer().stringMeta(name.value)});
   lowering_.refCounts().dropOperand(name);
-  lowering_.throwLowerer().emitThrowCheck(); // an unknown one
+  lowering_.throwLowerer().emitThrowCheck();
 
   return value;
 }
 
-} // namespace tz
+}

@@ -8,7 +8,6 @@
 
 namespace tz {
 
-// Owns all AST nodes and symbols of a compilation.
 class AstContext {
 public:
   template <typename T, typename... Args> T *make(Args &&...args) {
@@ -23,11 +22,7 @@ public:
   FuncSymbol *newFunc() { return &funcs_.emplace_back(); }
   NestedGroup *newGroup() { return &groups_.emplace_back(); }
   Module *newModule() { return &modules_.emplace_back(); }
-  // A name the source cannot contain, for a hidden variable the parser
-  // introduces (destructuring keeps the value there).
   llvm::StringRef hiddenName() { return names_.emplace_back("%" + std::to_string(names_.size())); }
-  // A name that is not in the source as it is, such as a field name written
-  // as a string literal.
   llvm::StringRef keepName(std::string name) { return names_.emplace_back(std::move(name)); }
 
 private:
@@ -39,4 +34,4 @@ private:
   std::deque<Module> modules_;
 };
 
-} // namespace tz
+}

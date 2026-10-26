@@ -14,13 +14,10 @@ namespace tz {
 
 namespace {
 
-// The members of a type: those of a union, or the type itself (so `type`
-// must outlive the result).
 llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
   return type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
 }
 
-// Whether `type` is a literal type or a union of them.
 bool isLiteralSet(const Type *type) {
   if (type->isLiteral()) {
     return true;
@@ -30,8 +27,6 @@ bool isLiteralSet(const Type *type) {
          llvm::all_of(type->members(), [](const Type *m) { return m->isLiteral(); });
 }
 
-// The part of `expected` in `slot` if it is made of literal types only, as
-// `0 | 1` is: a literal written there takes its literal type.
 const Type *literalPart(const Type *expected, UnionSlot slot) {
   if (!expected) {
     return nullptr;
@@ -41,7 +36,7 @@ const Type *literalPart(const Type *expected, UnionSlot slot) {
   return part && isLiteralSet(part) ? part : nullptr;
 }
 
-} // namespace
+}
 
 LiteralTypes::LiteralTypes(Checker &checker) : checker_(checker) {}
 
@@ -51,7 +46,6 @@ const Type *LiteralTypes::unionMemberFor(const Type *from, const Type *to) {
       return m;
     }
   }
-  // A literal goes into its base: "circle" into string.
   if (from->isLiteral()) {
     for (const Type *m : to->members()) {
       if (m == from->literalBase()) {
@@ -78,7 +72,6 @@ const Type *LiteralTypes::unionUnify(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return nullptr;
   }
-  // A decimal and a double do not mix, even in a union (docs/decimal.md).
   auto number = [](const Type *t) {
     t = t->nonOptional();
 
@@ -99,7 +92,6 @@ const Type *LiteralTypes::literalExpectation(const Type *expected, unsigned dept
   if (!expected || depth > 8 || expected->nonOptional()->typeOp() != TypeOp::Conditional) {
     return expected;
   }
-  // A conditional type that waits: what its branches expect.
   std::vector<const Type *> branches;
   for (const Type *branch :
        checker_.conditionalTypes().conditionalBranches(expected->nonOptional())) {
@@ -114,8 +106,6 @@ const Type *LiteralTypes::stringLiteralFor(const Type *expected, const std::u16s
   if (literalPart(expected, UnionSlot::Atom)) {
     return Type::stringLiteral(text);
   }
-  // A literal written where a string of a pattern is expected keeps its text,
-  // which tells whether it is one.
   const Type *strings = expected ? expected->nonOptional()->slotPart(UnionSlot::String) : nullptr;
   if (strings &&
       llvm::any_of(strings->isUnion() ? strings->members() : llvm::ArrayRef<const Type *>(strings),
@@ -178,7 +168,6 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
         m->isAnyObject() || m->isIncomplete()) {
       continue;
     }
-    // Exactly the fields of the type.
     bool fits = llvm::all_of(lit->props, [&](const ObjectLitExpr::Property &p) {
       return m->field(p.name) || m->overload(p.name);
     });
@@ -190,7 +179,6 @@ const Type *LiteralTypes::literalMember(const ObjectLitExpr *lit, const Type *ta
     if (!fits) {
       continue;
     }
-    // The tags it gives tell the members apart: `kind: "circle"`.
     int score = 0;
     bool mismatch = false;
     for (const ObjectLitExpr::Property &p : lit->props) {
@@ -237,4 +225,4 @@ const Type *LiteralTypes::typeIn(const Checker::Flow &flow, const VarSymbol *var
   return var->type;
 }
 
-} // namespace tz
+}

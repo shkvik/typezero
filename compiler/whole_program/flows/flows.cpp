@@ -93,10 +93,6 @@ void Flows::walkProgram(SourceFile &file) {
   for (FunctionDecl *fn : file.instances) {
     flowStmts().function(fn);
   }
-  // A call of a function value may call any function the program uses as
-  // a value that takes as many arguments, of types that what the value's
-  // type passes may go to (a listener of Animal[] is no callback of a
-  // stream's Uint8Array chunks).
   for (const ValueCall &call : valueCalls_) {
     for (const FunctionDecl *fn : functionValues_) {
       size_t count = fn->params.size();
@@ -111,8 +107,6 @@ void Flows::walkProgram(SourceFile &file) {
       edges[size_t(returned(fn))].push_back({call.result, 0, 0});
     }
   }
-  // A Result made from what a function throws or a promise rejects holds
-  // the error, which this check does not follow there.
   if (resultOfErrors_) {
     escape({{thrown_, 0, 0}});
   }
@@ -176,4 +170,4 @@ void Flows::flow(const Refs &refs, int to) {
 void Flows::escape(const Refs &refs) { flow(refs, unknown_); }
 
 Flows::~Flows() = default;
-} // namespace tz
+}

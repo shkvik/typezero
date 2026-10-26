@@ -11,18 +11,12 @@ enum class Tok {
   IntLiteral,
   FloatLiteral,
   StringLiteral,
-  // Template literals: `text` is a TemplateString; `a${x}b${y}c` lexes as
-  // TemplateHead `a${, the tokens of x, TemplateMiddle }b${, the tokens of y,
-  // TemplateTail }c`.
   TemplateString,
   TemplateHead,
   TemplateMiddle,
   TemplateTail,
-  // `/pattern/flags`, which the lexer reads only when the parser asks: in
-  // other places `/` divides.
   RegexLiteral,
 
-  // Keywords
   KwAs,
   KwBreak,
   KwCase,
@@ -49,7 +43,6 @@ enum class Tok {
   KwVoid,
   KwWhile,
 
-  // Punctuation
   LParen,
   RParen,
   LBrace,
@@ -63,11 +56,10 @@ enum class Tok {
   Ellipsis,
   Question,
   QuestionQuestion,
-  QuestionDot, // `?.`
-  Arrow,       // `=>`
-  At,          // `@`, before a decorator
+  QuestionDot,
+  Arrow,
+  At,
 
-  // Operators
   Plus,
   Minus,
   Star,
@@ -112,22 +104,17 @@ enum class Tok {
   PipePipeAssign,
 };
 
-// How a token kind is shown in diagnostics, e.g. "'('" or "identifier".
 const char *tokSpelling(Tok kind);
 
-// The keywords come in one run of Tok, from KwAs to KwWhile.
 inline bool isKeyword(Tok kind) { return kind >= Tok::KwAs && kind <= Tok::KwWhile; }
 
 struct Token {
   Tok kind = Tok::Eof;
-  // The exact source text; it points into the source buffer.
   llvm::StringRef text;
-  // A line break separates this token from the previous one. Drives automatic
-  // semicolon insertion.
   bool newlineBefore = false;
 
   bool is(Tok k) const { return kind == k; }
   llvm::SMLoc loc() const { return llvm::SMLoc::getFromPointer(text.data()); }
 };
 
-} // namespace tz
+}

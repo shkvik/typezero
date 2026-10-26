@@ -19,7 +19,6 @@ public:
       : root_(root), old_(old), options_(options) {}
 
   bool run(Lock &out);
-  // The local packages reached, by id.
   std::map<std::string, Manifest> locals;
 
 private:
@@ -33,7 +32,6 @@ private:
   bool choose(const std::string &id, const std::vector<Requirement> &reqs, Locked &out);
   bool chooseJsr(const std::string &id, const std::vector<Requirement> &reqs, Locked &out);
   bool chooseGit(const std::string &id, const std::vector<Requirement> &reqs, Locked &out);
-  // Reports a dependency that is written wrongly, in the file that writes it.
   void reportSpec(const std::string &by, const Dependency *dep, const std::string &message);
 
   const Manifest &root_;
@@ -43,4 +41,4 @@ private:
   std::map<std::string, JsrVersions> versions_;
 };
 
-} // namespace tz::pkg
+}

@@ -5,16 +5,10 @@
 
 namespace tz {
 
-// Functions that several classes made from sema_destination.cpp use.
-
 struct Checker::DestinationScan {
-  llvm::StringRef name; // the variable
+  llvm::StringRef name;
   std::vector<std::pair<const Type *, llvm::SMLoc>> found;
-  // The names declared in the code scanned so far, which hide the variables
-  // of the same name visible at the declaration, with their types where the
-  // declaration gives one.
   std::vector<llvm::StringMap<const Type *>> locals;
-  // The declared return type of the function whose returns are scanned.
   const Type *returns = nullptr;
 
   bool hidden(llvm::StringRef other) const {
@@ -28,4 +22,4 @@ struct Checker::DestinationScan {
   }
 };
 
-} // namespace tz
+}

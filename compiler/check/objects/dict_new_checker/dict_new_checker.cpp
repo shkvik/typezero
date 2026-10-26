@@ -18,8 +18,6 @@ namespace tz {
 
 DictNewChecker::DictNewChecker(Checker &checker) : checker_(checker) {}
 
-// `[["a", 1], ["b", 2]]`, where nothing gives the types of a Map: its pairs
-// say them. Returns false if `arg` is no such literal.
 bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value) {
   auto *lit = dyn_cast<ArrayLitExpr>(arg);
   if (!lit || lit->elements.empty()) {
@@ -80,10 +78,6 @@ bool DictNewChecker::inferPairs(Expr *arg, const Type *&key, const Type *&value)
   return true;
 }
 
-// The entries a new Map takes ([key, value] pairs, with `pairs`), or the
-// values of a new Set: whatever can be iterated. `element` is what each must
-// be, null if nothing says yet; it becomes what each is. The result is the
-// iterable: a Map or a Set as its iterator.
 Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&element,
                                       llvm::StringRef what) {
   checker_.iteratorMethods().markFused(arg);
@@ -107,7 +101,7 @@ Expr *DictNewChecker::checkDictSource(Expr *arg, bool pairs, const Type *&elemen
   }
   if (type->isIterator()) {
     checker_.generatorChecker().checkSendsNothing(type, arg->loc(), what);
-    checker_.flowChecker().calledFunction(); // a generator runs
+    checker_.flowChecker().calledFunction();
   }
   if (pairs) {
     bool pair = given->isTuple() && given->fields().size() == 2;
@@ -142,7 +136,7 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     TypeRef ref;
     ref.name = expr->name;
     ref.loc = loc;
-    checker_.dictChecker().resolveDictType(ref); // reports it
+    checker_.dictChecker().resolveDictType(ref);
     for (Expr *&arg : expr->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
@@ -158,7 +152,6 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
     return expr;
   };
   const Type *type = nullptr;
-  // Where a union is expected, its one Map (or Set), if it has one.
   if (expected && expected->nonOptional()->isUnion()) {
     const Type *only = nullptr;
     int count = 0;
@@ -201,7 +194,6 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
       return fail();
     }
   } else if (Expr *arg = expr->args[0]; isa<UndefinedExpr>(arg)) {
-    // `new Map(undefined)` starts empty, as JavaScript's does.
     if (!type) {
       checker_.diags_.error(
           loc, "'new " + expr->name + "(undefined)' needs the types of the " +
@@ -262,4 +254,4 @@ Expr *DictNewChecker::checkDictNew(NewExpr *expr, const Type *expected) {
   return call;
 }
 
-} // namespace tz
+}

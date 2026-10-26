@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// Which pieces may not run at the same time, and what runs in parallel.
 class Conflicts {
 public:
   explicit Conflicts(Analysis &analysis);
@@ -18,4 +17,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

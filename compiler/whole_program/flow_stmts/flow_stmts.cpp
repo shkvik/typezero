@@ -239,7 +239,6 @@ void FlowStmts::assignTo(Expr *target, const Refs &value, const Expr *valueExpr,
     } else if (objectType && objectType->isDict()) {
       flows_.flow(value, flows_.contents(objectType));
     } else {
-      // A field by its key: known in a copy, or any.
       std::string field = !index->field.empty() ? index->field.str() : "*";
       if (auto *key = llvm::dyn_cast<IntLitExpr>(index->index);
           key && objectType && objectType->isTuple()) {
@@ -254,4 +253,4 @@ void FlowStmts::assignTo(Expr *target, const Refs &value, const Expr *valueExpr,
   flows_.escape(value);
 }
 
-} // namespace tz
+}

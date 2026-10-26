@@ -21,10 +21,6 @@ namespace tz {
 
 namespace {
 
-// What a decorator gets where it stands, as TypeScript's __decorate passes it
-// (docs/decorators.md, section 1): the class; the class and the name of a
-// field; those and the descriptor of a method; or the class, the name of the
-// method (undefined for a constructor) and the position of a parameter.
 enum class Place { Class, Field, Method, Parameter };
 
 size_t argumentsOf(Place place) {
@@ -65,8 +61,6 @@ const char *argumentsText(Place place) {
   }
 }
 
-// `Log`, `Table`, `Reflect.metadata`: a decorator in messages, and what
-// tells two apart.
 std::string decoratorName(const Expr *expr) {
   if (auto *call = dyn_cast<CallExpr>(expr)) {
     return decoratorName(call->callee);
@@ -82,7 +76,6 @@ std::string decoratorName(const Expr *expr) {
   return "";
 }
 
-// A decorator used as it is, which no call makes: `@Log`, `@rules.required`.
 bool isPlainReference(const Expr *expr) {
   if (isa<NameExpr>(expr)) {
     return true;
@@ -98,13 +91,12 @@ bool decoratedParams(const FunctionDecl *fn) {
   return llvm::any_of(fn->params, [](const Param &p) { return !p.decorators.empty(); });
 }
 
-} // namespace
+}
 
 DecoratorChecker::DecoratorChecker(Checker &checker) : checker_(checker) {}
 
 const Type *DecoratorChecker::methodDescriptorType(const Type *args, const Type *ret) {
-  const Type *value =
-      Type::function({Type::unknown(), args}, 1, /*hasRest=*/true, ret, /*hasThis=*/true);
+  const Type *value = Type::function({Type::unknown(), args}, 1, true, ret, true);
   const Type *flag = Type::boolTy();
   const Type *type =
       Type::object({{"value", value, false},
@@ -131,11 +123,9 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
     }
     sym = entry.func;
   } else if (auto *member = dyn_cast<MemberExpr>(callee)) {
-    // A static method of a class.
     auto *object = dyn_cast<NameExpr>(member->object);
     if (ClassDecl *cls = object ? checker_.scopes().lookup(object->name).cls : nullptr) {
-      std::vector<FunctionDecl *> methods =
-          ClassDeclarer::methodsNamed(cls, member->name, /*isStatic=*/true);
+      std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, member->name, true);
       if (methods.size() == 1) {
         sym = methods[0]->sym;
       }
@@ -154,7 +144,6 @@ bool DecoratorChecker::decoratorParams(Expr *callee, std::vector<const Type *> &
 }
 
 void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
-  // The decorated members and the names of their decorators.
   struct Member {
     llvm::StringRef name;
     llvm::SMLoc loc;
@@ -211,9 +200,6 @@ void DecoratorChecker::checkDecoratedNames(ClassDecl *cls) {
       break;
     }
   }
-  // The decorators of the parameters of a constructor write on the class
-  // itself, and the compiler writes its 'design:paramtypes' there: of two
-  // constructors, those would be one (docs/overloads.md, section 6).
   const FunctionDecl *first = nullptr;
   for (const FunctionDecl *ctor : cls->constructors) {
     if (!decoratedParams(ctor)) {
@@ -253,8 +239,6 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
       members.push_back({nullptr, fn, fn->isStatic, fn->loc().getPointer()});
     }
   }
-  // As TypeScript applies them: the members of the instances, then the
-  // static ones, each in the order written; then the class.
   llvm::stable_sort(members, [](const Member &a, const Member &b) {
     return std::make_pair(a.isStatic, a.at) < std::make_pair(b.isStatic, b.at);
   });
@@ -272,7 +256,6 @@ void DecoratorChecker::decorateClass(ClassDecl *cls) {
     }
     decorate(cls, m.field, m.method, uses);
   }
-  // The class gets the decorators of the parameters of its constructor.
   std::vector<Checker::DecoratorUse> uses;
   for (const Decorator &d : cls->decorators) {
     uses.push_back({&d});
@@ -316,9 +299,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     return;
   }
 
-  // The decorators are evaluated top to bottom: one that a call makes is
-  // made now, and applied later (from the bottom up). `@Reflect.metadata(k,
-  // v)` writes its record when it is applied (null here).
   auto isMetadata = [&](const Expr *expr) {
     auto *call = dyn_cast<CallExpr>(expr);
     auto *member = call ? dyn_cast<MemberExpr>(call->callee) : nullptr;
@@ -338,7 +318,7 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       continue;
     }
     llvm::StringRef hidden = checker_.ctx_.hiddenName();
-    auto *decl = checker_.ctx_.make<VarDeclStmt>(use.decorator->loc, /*isConst=*/true);
+    auto *decl = checker_.ctx_.make<VarDeclStmt>(use.decorator->loc, true);
     VarDeclarator d;
     d.name = hidden;
     d.loc = use.decorator->loc;
@@ -349,9 +329,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     callees.push_back(checker_.ctx_.make<NameExpr>(use.decorator->loc, hidden));
   }
 
-  // What each takes: as many arguments as it declares, up to what its place
-  // gives. A decorator of a method that takes its descriptor may replace
-  // what the method does: then every call goes through it.
   std::vector<size_t> takes;
   bool descriptor = false, ok = true;
   for (size_t i = 0; i < uses.size(); ++i) {
@@ -391,8 +368,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   if (!ok) {
     return;
   }
-  // A method of a generic class is a method of each of its instances, with
-  // their own types: one descriptor cannot stand for them all.
   if (descriptor && cls->isGeneric()) {
     checker_.diags_.error(
         at, "a decorator that takes the descriptor of a method of a generic class is not "
@@ -403,8 +378,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     return;
   }
 
-  // The descriptor: `value` is what the method runs, its own code until a
-  // decorator replaces it (see codegen_decorate.cpp).
   VarSymbol *descVar = nullptr;
   const Type *descType = nullptr;
   if (descriptor) {
@@ -440,10 +413,9 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     prop("configurable", checker_.ctx_.make<BoolLitExpr>(at, true));
     Expr *init =
         checker_.typeRelations().coerce(checker_.exprChecker().checkExpr(lit, descType), descType);
-    descVar =
-        checker_.scopes().declareVar(checker_.ctx_.hiddenName(), at, descType, /*isConst=*/false);
+    descVar = checker_.scopes().declareVar(checker_.ctx_.hiddenName(), at, descType, false);
     descVar->reassigned = true;
-    auto *decl = checker_.ctx_.make<VarDeclStmt>(at, /*isConst=*/false);
+    auto *decl = checker_.ctx_.make<VarDeclStmt>(at, false);
     VarDeclarator d;
     d.name = descVar->name;
     d.loc = at;
@@ -453,10 +425,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     out.push_back(decl);
   }
 
-  // The records the compiler writes come first: TypeScript puts them last
-  // among the decorators, which it applies from the bottom up. Those of the
-  // class are of its constructor (with several, of the one whose
-  // parameters are decorated).
   const FunctionDecl *ctor = nullptr;
   if (own == Place::Class) {
     for (const FunctionDecl *c : cls->constructors) {
@@ -467,16 +435,12 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   }
   checker_.metadataChecker().writeDesignRecords(cls, field, method, ctor, at);
 
-  // Applied from the bottom up, the parameters' first. A class decorator
-  // gets the class the one below it gave, if any.
   ClassDecl *current = cls;
   for (size_t i = uses.size(); i-- > 0;) {
     const Checker::DecoratorUse &use = uses[i];
     llvm::SMLoc loc = use.decorator->loc;
     Place place = use.param >= 0 ? Place::Parameter : own;
     if (!callees[i]) {
-      // `@Reflect.metadata(key, value)`: Reflect.defineMetadata(key, value,
-      // cls, name) right here.
       auto *metadata = cast<CallExpr>(use.decorator->expr);
       if (metadata->args.size() != 2 || metadata->hasSpread()) {
         checker_.diags_.error(loc,
@@ -518,7 +482,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     Expr *applied = checker_.exprChecker().checkExpr(call);
     const Type *result = applied->type;
     if (descVar && place == Place::Method && result == descType) {
-      // `return descriptor`: what it gives back is the descriptor from now on.
       auto *target = checker_.ctx_.make<NameExpr>(loc, descVar->name);
       target->var = descVar;
       target->type = descType;
@@ -527,8 +490,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
       applied = assign;
     } else if (place == Place::Class && result->classRef() &&
                result->classRef()->derivesFrom(current)) {
-      // A class that extends the one it got, or that one: the name means it
-      // from here on (docs/decorators.md, section 5).
       if (ClassDecl *given = const_cast<ClassDecl *>(result->classRef()); given != current) {
         checker_.lateClasses().replaceClass(current, given, loc);
         current = given;
@@ -564,7 +525,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
     out.push_back(checker_.ctx_.make<ExprStmt>(loc, applied));
   }
   if (descVar) {
-    // What the calls of the method run from now on.
     auto *target = checker_.ctx_.make<NameExpr>(at, method->impl->name);
     auto *value = checker_.ctx_.make<MemberExpr>(
         at, checker_.ctx_.make<NameExpr>(at, descVar->name), "value");
@@ -573,4 +533,4 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
   }
 }
 
-} // namespace tz
+}

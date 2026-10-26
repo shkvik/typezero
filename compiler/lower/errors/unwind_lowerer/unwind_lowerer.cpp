@@ -22,8 +22,6 @@ namespace tz {
 
 UnwindLowerer::UnwindLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// As V8 names them: `f`, `Point.length`, `new Point`; nothing for top-level
-// code and a function without a name.
 std::string UnwindLowerer::frameFunctionName() const {
   const FunctionDecl *fn = lowering_.currentFn_;
   if (!fn) {
@@ -39,8 +37,6 @@ std::string UnwindLowerer::frameFunctionName() const {
   return fn->name.str();
 }
 
-// { ptr function, i32 length, i32 line, ptr file, i32 length, i32 column }:
-// TzFrame in runtime/core/error/error.h.
 llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::string *name) {
   std::string function = name ? *name : frameFunctionName();
   auto key = std::make_pair(function, loc.getPointer());
@@ -53,16 +49,13 @@ llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::strin
     if (unsigned buffer = lowering_.sourceMgr_->FindBufferContainingLoc(loc)) {
       std::tie(line, column) = lowering_.sourceMgr_->getLineAndColumn(loc, buffer);
       llvm::StringRef id = lowering_.sourceMgr_->getMemoryBuffer(buffer)->getBufferIdentifier();
-      // The full path, as Node shows it.
       auto [it, inserted] = filePaths_.try_emplace(id);
-      // A built-in module written in tz is named as node names its own,
-      // `tz:http:12:5`.
       if (inserted && id.starts_with("tz:")) {
         it->second = id.str();
       } else if (inserted) {
         llvm::SmallString<256> path(id);
         llvm::sys::fs::make_absolute(path);
-        llvm::sys::path::remove_dots(path, /*remove_dot_dot=*/true);
+        llvm::sys::path::remove_dots(path, true);
         llvm::sys::path::native(path);
         it->second = std::string(path);
       }
@@ -77,7 +70,7 @@ llvm::Constant *UnwindLowerer::frameDescriptor(llvm::SMLoc loc, const std::strin
        lowering_.builder_.getInt32(uint32_t(function.size())), lowering_.builder_.getInt32(line),
        lowering_.stringLowerer().utf8Constant(file),
        lowering_.builder_.getInt32(uint32_t(file.size())), lowering_.builder_.getInt32(column)});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, type, true,
                                           llvm::GlobalValue::PrivateLinkage, init, "tz.frame");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   frames_[key] = global;
@@ -100,8 +93,6 @@ llvm::BasicBlock *UnwindLowerer::unwindBlock(size_t i) {
   return scope.unwind;
 }
 
-// After scope `i`: the `catch` or `finally` of a `try` whose block (or
-// `catch`) it is, or the scope around it, or the way out of the function.
 llvm::BasicBlock *UnwindLowerer::outerUnwind(size_t i) {
   for (Lowering::TryContext &t : llvm::reverse(lowering_.tries_)) {
     if (t.scopeDepth != i) {
@@ -138,8 +129,6 @@ void UnwindLowerer::finishScopeUnwind(size_t i) {
   lowering_.builder_.restoreIP(point);
 }
 
-// Out of the function: a generator is done, top-level code reports the
-// error, and anything else returns zero, which its caller drops.
 void UnwindLowerer::finishFunctionUnwind() {
   llvm::BasicBlock *exit = std::exchange(lowering_.unwindExit_, nullptr);
   if (!exit) {
@@ -153,9 +142,7 @@ void UnwindLowerer::finishFunctionUnwind() {
     lowering_.asyncLowerer().emitAsyncUnwind();
   } else if (lowering_.coro_) {
     lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
-  } else if (lowering_.function_->hasExternalLinkage()) { // main
-    // Node reports the error of an ES module a few turns of the microtask
-    // queue later (runtime/core/async/async.c).
+  } else if (lowering_.function_->hasExternalLinkage()) {
     llvm::CallInst *call = lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
         lowering_.usesAsync_ && lowering_.esModule_ ? "tz_async_main_failed" : "tz_uncaught",
         lowering_.builder_.getVoidTy(), {}));
@@ -169,4 +156,4 @@ void UnwindLowerer::finishFunctionUnwind() {
   lowering_.builder_.restoreIP(point);
 }
 
-} // namespace tz
+}

@@ -23,10 +23,6 @@ namespace tz {
 
 namespace {
 
-// The type a call that gives a whole number has where `expected` is
-// expected: an int or a long when one is expected, which the program checks
-// the number fits in (JavaScript would go on with a number that type cannot
-// hold), and otherwise `type` itself.
 const Type *wholeNumberType(const Type *type, const Type *expected) {
   const Type *wanted = expected ? expected->nonOptional() : nullptr;
   bool narrows =
@@ -35,18 +31,16 @@ const Type *wholeNumberType(const Type *type, const Type *expected) {
   return narrows ? wanted : type;
 }
 
-} // namespace
+}
 
 GlobalFunctionChecker::GlobalFunctionChecker(Checker &checker) : checker_(checker) {}
 
-// String(x), Number(x), parseInt(s), parseFloat(s), isNaN(x), isFinite(x),
-// decimal(x), the functions of URIs.
 Expr *GlobalFunctionChecker::checkGlobalCall(CallExpr *call, NameExpr *name, const Type *expected) {
   static const llvm::StringLiteral names[] = {
       "String",    "Number",  "parseInt", "parseFloat",         "isNaN",     "isFinite",
       "Boolean",   "decimal", "BigInt",   "encodeURIComponent", "encodeURI", "decodeURIComponent",
       "decodeURI", "escape",  "unescape"};
-  if (checker_.callChecker().isGlobalName(name, "RegExp")) { // `RegExp(s)` is `new RegExp(s)`
+  if (checker_.callChecker().isGlobalName(name, "RegExp")) {
     return checker_.callChecker().rejectSpread(call)
                ? call
                : checker_.regexChecker().checkRegExpConstructor(name->loc(), call->args);
@@ -83,8 +77,6 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     if (fn != name) {
       continue;
     }
-    // `decodeURIComponent(escape(s))`, the old way to read UTF-8 bytes kept
-    // in a string (see reportLegacyEscape).
     if (auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
         inner && fn == "decodeURIComponent" &&
         checker_.callChecker().isGlobalName(inner->callee, "escape")) {
@@ -92,7 +84,6 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
                             "'decodeURIComponent(escape(s))' reads the UTF-8 bytes that s holds as "
                             "characters, a legacy trick; keep the bytes in a Uint8Array and decode "
                             "them with 'new TextDecoder().decode(bytes)'");
-      // The error is the idiom's, not that of escape() in it.
       for (Expr *&arg : inner->args) {
         arg = checker_.exprChecker().checkExpr(arg);
       }
@@ -102,7 +93,6 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
-    // encodeURIComponent takes a number or a boolean too, as its text.
     Expr *arg = checker_.exprChecker().checkExpr(call->args[0], Type::string());
     if (fn == "encodeURIComponent" && (arg->type->isNumeric() || arg->type->isBool())) {
       call->args[0] = checker_.concatChecker().toStringOperand(arg);
@@ -121,7 +111,6 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
     return call;
   }
   if (fn == "Boolean") {
-    // The truth of the value, as a condition tests it; `Boolean()` is false.
     if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
       return call;
     }
@@ -147,15 +136,13 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
       call->type = Type::string();
       return call;
     }
-    // Number(x) of a number, a boolean, a string, a decimal (the nearest
-    // double) or undefined.
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
       const Type *type = arg->type, *base = type->nonOptional();
       if (type->isError()) {
         return call;
       }
-      if (type->isDate()) { // its time
+      if (type->isDate()) {
         return checker_.dateChecker().dateTime(arg);
       }
       if (base->isNumeric()) {
@@ -186,12 +173,10 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
           checker_.binaryChecker().toInt32(checker_.mathChecker().numericArg(call->args[1]));
     }
     call->builtin = isInt ? Builtin::ParseInt : Builtin::ParseFloat;
-    // parseInt gives a whole number (or NaN), so an int where one is expected.
     call->type = isInt ? wholeNumberType(Type::doubleTy(), expected) : Type::doubleTy();
     return call;
   }
 
-  // isNaN, isFinite
   if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
     return call;
   }
@@ -202,9 +187,6 @@ Expr *GlobalFunctionChecker::checkGlobalFunction(CallExpr *call, llvm::StringRef
   return call;
 }
 
-// The `%uXXXX` escapes of escape() are no encoding that URIs or anything else
-// read, as regex.md treats RegExp.$1. `unescape(encodeURIComponent(s))` is
-// the old way to get the UTF-8 of s, a byte in each character.
 Expr *GlobalFunctionChecker::reportLegacyEscape(CallExpr *call, llvm::StringRef fn,
                                                 llvm::SMLoc loc) {
   auto *inner = call->args.size() == 1 ? dyn_cast<CallExpr>(call->args[0]) : nullptr;
@@ -230,4 +212,4 @@ Expr *GlobalFunctionChecker::reportLegacyEscape(CallExpr *call, llvm::StringRef 
   return call;
 }
 
-} // namespace tz
+}

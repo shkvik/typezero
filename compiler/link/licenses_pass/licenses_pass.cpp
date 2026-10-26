@@ -9,4 +9,4 @@ CryptoUse LicensesPass::run(llvm::Module &module) const {
   return crypto;
 }
 
-} // namespace tz
+}

@@ -7,7 +7,6 @@ namespace tz::pkg {
 
 namespace {
 
-// The lowest version with these leading components: what "<1.2" excludes.
 Version floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
   Version v;
   v.major = major;
@@ -18,7 +17,6 @@ Version floorOf(uint64_t major, uint64_t minor, uint64_t patch) {
   return v;
 }
 
-// The first version after the components a partial gives: "1.2" -> 1.3.0-0.
 Version after(const Partial &p) {
   if (p.count == 1) {
     return floorOf(p.parts[0] + 1, 0, 0);
@@ -30,7 +28,7 @@ Version after(const Partial &p) {
   return floorOf(p.parts[0], p.parts[1], p.parts[2] + 1);
 }
 
-} // namespace
+}
 
 bool Range::parse(llvm::StringRef text, Range &out, std::string &error) {
   out = Range();
@@ -53,9 +51,8 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
   auto add = [&](Op op, Version v, bool synthetic = false) {
     out.push_back({op, std::move(v), synthetic});
   };
-  // The words, with an operator joined to the version after it: ">= 1.2".
   llvm::SmallVector<llvm::StringRef, 4> pieces;
-  text.split(pieces, ' ', -1, /*KeepEmpty=*/false);
+  text.split(pieces, ' ', -1, false);
   std::vector<std::string> words;
   for (size_t i = 0; i < pieces.size(); ++i) {
     std::string word = pieces[i].trim().str();
@@ -75,7 +72,7 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
     return false;
   };
 
-  if (words.empty()) { // "" is any version, like "*"
+  if (words.empty()) {
     return true;
   }
   if (words.size() == 3 && words[1] == "-") {
@@ -97,7 +94,7 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
 
   for (llvm::StringRef word : words) {
     Op op = Op::Equal;
-    char kind = 0; // '^' or '~'
+    char kind = 0;
     if (word.consume_front(">=")) {
       op = Op::GreaterEq;
     } else if (word.consume_front("<=")) {
@@ -153,7 +150,7 @@ bool Range::parseSet(llvm::StringRef text, Set &out, std::string &error) {
       if (p.count == 3) {
         add(Op::Greater, v);
       } else if (p.count == 0) {
-        add(Op::Less, floorOf(0, 0, 0), true); // nothing
+        add(Op::Less, floorOf(0, 0, 0), true);
       } else {
         Version next = after(p);
         next.pre.clear();
@@ -213,7 +210,6 @@ bool Range::test(const Set &set, const Version &version) {
   if (!version.isPrerelease()) {
     return true;
   }
-  // A prerelease only where the range names one of the same version.
   for (const Comparator &c : set) {
     if (!c.synthetic && c.version.isPrerelease() && c.version.major == version.major &&
         c.version.minor == version.minor && c.version.patch == version.patch) {
@@ -234,4 +230,4 @@ bool Range::satisfies(const Version &version) const {
   return false;
 }
 
-} // namespace tz::pkg
+}

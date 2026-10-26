@@ -35,7 +35,6 @@ private:
   }
   char peek() const { return at_ < text_.size() ? text_[at_] : '\0'; }
 
-  // Whitespace and comments.
   bool skip() {
     while (at_ < text_.size()) {
       char c = text_[at_];
@@ -205,7 +204,7 @@ private:
   }
 
   bool string(std::string &out) {
-    ++at_; // '"'
+    ++at_;
     while (true) {
       if (at_ >= text_.size()) {
         return fail("unterminated string");
@@ -256,7 +255,6 @@ private:
         if (!hex4(code)) {
           return false;
         }
-        // A surrogate pair is one code point.
         if (code >= 0xD800 && code < 0xDC00 && text_.substr(at_).starts_with("\\u")) {
           at_ += 2;
           unsigned low;
@@ -288,7 +286,7 @@ private:
   std::string error_;
 };
 
-} // namespace
+}
 
 bool parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset, std::string &error) {
   out = JsonValue();
@@ -296,4 +294,4 @@ bool parseJson(llvm::StringRef text, JsonValue &out, size_t &errorOffset, std::s
   return Parser(text).parse(out, errorOffset, error);
 }
 
-} // namespace tz::pkg
+}

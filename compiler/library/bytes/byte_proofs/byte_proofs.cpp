@@ -22,7 +22,6 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
-// What JavaScript stores of the integer v in an element of `kind`.
 int64_t wrapped(Bytes kind, int64_t v) {
   switch (kind) {
   case Bytes::Int8:
@@ -56,7 +55,6 @@ Range unite(const Range &a, const Range &b) {
   return r;
 }
 
-// The smallest 2^n - 1 at or above v >= 0.
 int64_t allOnes(int64_t v) {
   int64_t m = 0;
   while (m < v) {
@@ -70,12 +68,11 @@ int64_t floorShift(int64_t v, int64_t n) {
   return v >= 0 ? v >> n : -((-v + (int64_t(1) << n) - 1) >> n);
 }
 
-} // namespace
+}
 
 ByteProofs::ByteProofs(Checker &checker) : checker_(checker) {}
 
 ValueRange ByteProofs::valueRange(const Expr *e) const {
-  // Of `T | undefined`, what it holds when it holds a value: `u[i] ?? 0`.
   if (!e->type || !e->type->nonOptional()->isInteger()) {
     return {};
   }
@@ -90,7 +87,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
       return {};
     }
     Range r = valueRange(conv->operand);
-    // A long cut to its low 32 bits keeps its value if it fits in an int.
     if (isInt && conv->operand->type->kind() == Type::Kind::Long &&
         !(known(r) && *r.lo >= kIntMin && *r.hi <= kIntMax)) {
       return {};
@@ -102,15 +98,13 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
     if (!var || !var->type->isInt()) {
       return {};
     }
-    // The bounds the facts give it: `x < 256`, `0 <= x`, `i < u.length` of
-    // a u whose length is known.
     Range r;
     Term self = Term::of(var);
     if (std::optional<int64_t> above = checker_.flow_.facts.bound(self, Term::zero())) {
-      r.hi = std::min(*above - 1, kIntMax); // x < above
+      r.hi = std::min(*above - 1, kIntMax);
     }
     if (std::optional<int64_t> below = checker_.flow_.facts.bound(Term::zero(), self)) {
-      r.lo = std::max(1 - *below, kIntMin); // 0 < x + below
+      r.lo = std::max(1 - *below, kIntMin);
     }
     return r;
   }
@@ -122,7 +116,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
     return {};
   }
   case Expr::Kind::Index: {
-    // An element holds what its kind holds.
     auto *index = cast<IndexExpr>(e);
     int64_t lo, hi;
     if (index->object->type && index->object->type->elementRange(lo, hi)) {
@@ -159,7 +152,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
       for (size_t i = 1; i < call->args.size(); ++i) {
         Range next = valueRange(call->args[i]);
         Range both;
-        // min: below each upper bound; above the lowest of the lower ones.
         if (min) {
           if (r.hi || next.hi) {
             both.hi = r.hi && next.hi ? std::min(*r.hi, *next.hi) : r.hi ? *r.hi : *next.hi;
@@ -205,7 +197,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
     if (bin->op == BinaryOp::Nullish) {
       return unite(valueRange(bin->lhs), valueRange(bin->rhs));
     }
-    // An int's `>>>` is a long, of a 32-bit shift.
     bool shift = bin->op == BinaryOp::Shl || bin->op == BinaryOp::Shr || bin->op == BinaryOp::UShr;
     return operate(bin->op, valueRange(bin->lhs), valueRange(bin->rhs),
                    shift ? bin->lhs->type->isInt() : isInt);
@@ -222,7 +213,6 @@ ValueRange ByteProofs::valueRange(const Expr *e) const {
 }
 
 bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
-  // An int widened to a long keeps its value.
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit() || !conv->operand->type || !conv->operand->type->isInt() ||
         !conv->type->isInteger()) {
@@ -234,7 +224,6 @@ bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
     return provesFits(cond->thenExpr, lo, hi) && provesFits(cond->elseExpr, lo, hi);
   }
   bool lower = false, upper = false;
-  // `x` or `x + k` with facts about x: `if (x >= 0 && x <= 255)`.
   if (std::optional<Linear> l = checker_.indexProofs().linear(expr)) {
     if (l->term.isZero()) {
       lower = l->offset >= lo;
@@ -253,14 +242,10 @@ bool ByteProofs::provesFits(const Expr *expr, int64_t lo, int64_t hi) const {
 
 void ByteProofs::checkFits(const Expr *value, const Type *target, llvm::StringRef what) {
   int64_t lo, hi;
-  // A floating element holds any number, losing precision only; a value
-  // that is no integer was reported where it was converted.
   if (!value->type->isInteger() || !target->elementRange(lo, hi)) {
     return;
   }
   Bytes kind = target->bytes();
-  // A clamped element takes any int (that is what it is for), and one of an
-  // Int32Array is an int.
   if (kind == Bytes::Uint8Clamped || kind == Bytes::Int32 || provesFits(value, lo, hi)) {
     return;
   }
@@ -290,7 +275,6 @@ bool ByteProofs::provesWithin(const Expr *object, const Expr *offset, int64_t si
     return false;
   }
 
-  // 0 <= at, and at + size <= length, that is at < length - size + 1.
   return checker_.flow_.facts.proves(Term::zero(), at->term, at->offset + 1) &&
          checker_.flow_.facts.proves(at->term, length->term,
                                      length->offset - size + 1 - at->offset);
@@ -306,7 +290,6 @@ void ByteProofs::addByteCallbackFacts(const FunctionDecl *fn) {
   if (!var || !var->type->isInt() || (info.lo <= kIntMin && info.hi >= kIntMax)) {
     return;
   }
-  // lo <= x and x <= hi, as the facts write them.
   checker_.flow_.facts.add(Term::zero(), Term::of(var), 1 - info.lo);
   checker_.flow_.facts.add(Term::of(var), Term::zero(), info.hi + 1);
 }
@@ -319,4 +302,4 @@ void ByteProofs::checkByteCallbackResult(const FunctionDecl *fn, const Expr *val
   checkFits(value, it->second.target, "an element of '" + it->second.target->name().str() + "'");
 }
 
-} // namespace tz
+}

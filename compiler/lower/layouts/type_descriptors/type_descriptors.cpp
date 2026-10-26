@@ -14,7 +14,6 @@ namespace tz {
 
 namespace {
 
-// Type descriptor kinds; must match runtime/core/tzrt/tzrt.h.
 uint32_t descriptorKind(const Type *type) {
   switch (type->kind()) {
   case Type::Kind::Int:
@@ -32,8 +31,8 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::Optional:
     return 7;
   case Type::Kind::Undefined:
-  case Type::Kind::Void:  // the half of `ok()`, which holds undefined
-  case Type::Kind::Never: // a half that holds nothing
+  case Type::Kind::Void:
+  case Type::Kind::Never:
     return 8;
   case Type::Kind::Function:
     return 9;
@@ -42,7 +41,7 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::Dict:
   case Type::Kind::Promise:
   case Type::Kind::ClassRef:
-    return 10; // an object of the runtime, which prints as one
+    return 10;
   case Type::Kind::Decimal:
     return 11;
   case Type::Kind::Result:
@@ -50,18 +49,16 @@ uint32_t descriptorKind(const Type *type) {
   case Type::Kind::Json:
     return 13;
   case Type::Kind::Unknown:
-    return 16; // TZ_T_UNKNOWN
+    return 16;
   default:
     llvm_unreachable("no runtime descriptor for this type");
   }
 }
 
-} // namespace
+}
 
 TypeDescriptors::TypeDescriptors(Lowering &lowering) : lowering_(lowering) {}
 
-// A constant { i32 kind, i32 size, ptr inner } describing a type to the
-// runtime: how big its values are and how to release, compare and print them.
 llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   if (llvm::Constant *found = lowering_.typeDescriptors_.lookup(type)) {
     return found;
@@ -72,8 +69,6 @@ llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   if (type->isUnion() || type->isLiteral()) {
     return lowering_.unionLayout().unionDescriptor(type);
   }
-  // The element of an array, the value of `T | undefined`; a function's
-  // inner() is its return type, which is not part of the value.
   llvm::Constant *inner = type->isArray() || type->isOptional()
                               ? typeDescriptor(type->inner())
                               : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -83,11 +78,8 @@ llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
       lowering_.typeDescTy_, {lowering_.builder_.getInt32(descriptorKind(type)),
                               lowering_.builder_.getInt32(static_cast<uint32_t>(size)), inner});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, lowering_.typeDescTy_, /*isConstant=*/true,
+      new llvm::GlobalVariable(*lowering_.module_, lowering_.typeDescTy_, true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.type." + type->name());
-  // Reflection tells the types of functions and arrays in unknowns apart by
-  // their descriptors (runtime/library/reflect/reflect/reflect.c), which must
-  // not be merged.
   if (!type->isFunction() && !type->isArray()) {
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   }
@@ -96,4 +88,4 @@ llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   return global;
 }
 
-} // namespace tz
+}

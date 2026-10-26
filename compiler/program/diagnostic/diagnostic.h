@@ -19,4 +19,4 @@ struct Diagnostic {
   std::string message;
 };
 
-} // namespace tz
+}

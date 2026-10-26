@@ -42,7 +42,6 @@ bool isOperandEnd(const Token &t) {
   }
 }
 
-// A string literal's text as the text of a template literal.
 std::string templateText(llvm::StringRef literal) {
   llvm::StringRef raw = literal.drop_front().drop_back();
   std::string out;
@@ -63,7 +62,7 @@ std::string templateText(llvm::StringRef literal) {
   return out;
 }
 
-} // namespace
+}
 
 void FilePort::retokenize() {
   toks_ = tokenize(text_);
@@ -105,7 +104,6 @@ bool FilePort::apply() {
     taken.push_back(&edit);
     last = std::max(last, edit.end);
   }
-  // Where an offset of the old text is in the new one.
   auto shift = [&](size_t offset) {
     long long delta = 0;
     for (const Edit *edit : taken) {
@@ -154,8 +152,6 @@ void FilePort::run() {
   if (apply()) {
     retokenize();
   }
-  // A change may make another one possible: a '+' inside a '+' becomes a
-  // template inside a template on the next pass.
   for (int pass = 0; pass < 8; ++pass) {
     tokens();
     concatenations();
@@ -181,7 +177,6 @@ void FilePort::modules() {
         add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
         exportList(i + 2, close_[i + 2]);
       } else if (isName(i + 1, "type") && is(i + 2, Tok::Star)) {
-        // `export type * from "./types"`: the types are exported as everything is.
         add(at(i + 1), at(i + 2), "", "'import type' and 'export type' lost 'type'");
       } else if (is(i + 1, Tok::LBrace)) {
         exportList(i + 1, close_[i + 1]);
@@ -190,8 +185,6 @@ void FilePort::modules() {
       importDecl(i);
     }
   }
-  // The copy is of tz: a relative import of a .ts or .js file names the .tz
-  // file it becomes.
   for (size_t i = 1; i < toks_.size(); ++i) {
     if (!is(i, Tok::StringLiteral) ||
         !(isName(i - 1, "from") || (isName(i - 1, "import") && !afterDot(i - 1)))) {
@@ -220,8 +213,6 @@ void FilePort::exportDefault(size_t i) {
   fs::real_path(file_, real);
   auto known = ctx_.defaultNames.find(std::string(real));
   std::string name = known != ctx_.defaultNames.end() ? known->second : "";
-  // `export default function f`, `export default async function* f`,
-  // `export default class C`, `export default abstract class C`.
   size_t keyword = k;
   if (isName(keyword, "async") && is(keyword + 1, Tok::KwFunction)) {
     ++keyword;
@@ -239,8 +230,6 @@ void FilePort::exportDefault(size_t i) {
     if (named) {
       add(at(def), at(k), "", kind);
     } else {
-      // Anonymous: it gets the name importers will use, `function f(` and
-      // `class C {`.
       std::string words = text_.substr(at(k), endOf(last) - at(k));
       if (last + 1 < toks_.size()) {
         add(at(def), at(last + 1), words + " " + name + (is(last + 1, Tok::LParen) ? "" : " "),
@@ -251,13 +240,11 @@ void FilePort::exportDefault(size_t i) {
     }
     return;
   }
-  // `export default foo`
   if (is(k, Tok::Identifier) &&
       (k + 1 >= toks_.size() || is(k + 1, Tok::Semi) || toks_[k + 1].newlineBefore)) {
     add(at(i), endOf(k), "export { " + toks_[k].text.str() + " }", kind);
     return;
   }
-  // `export default <expression>`
   add(at(def), endOf(def), "const " + name + " =", kind);
 }
 
@@ -265,7 +252,6 @@ void FilePort::exportList(size_t open, size_t close) {
   if (close == std::string::npos) {
     return;
   }
-  // `export { a as default }` and `export { default } from "./x"`.
   std::string target;
   if (isName(close + 1, "from") && is(close + 2, Tok::StringLiteral)) {
     std::string spec = stringValue(toks_[close + 2]);
@@ -297,7 +283,6 @@ void FilePort::exportList(size_t open, size_t close) {
 
 bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd,
                        std::vector<std::string> &items) {
-  // A member that is also a name of the file is imported under another one.
   llvm::StringSet<> own;
   for (size_t j = 0; j < toks_.size(); ++j) {
     if ((j < skipBegin || j >= skipEnd) && is(j, Tok::Identifier) && !afterDot(j)) {
@@ -313,7 +298,6 @@ bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd
     if (!isName(j, name) || afterDot(j)) {
       continue;
     }
-    // `{ name: ... }` is a key, not a use.
     if (is(j + 1, Tok::Colon) && j > 0 && (is(j - 1, Tok::LBrace) || is(j - 1, Tok::Comma))) {
       continue;
     }
@@ -336,9 +320,8 @@ bool FilePort::members(const std::string &name, size_t skipBegin, size_t skipEnd
 
 void FilePort::importDecl(size_t i) {
   if (is(i + 1, Tok::StringLiteral) || is(i + 1, Tok::LParen)) {
-    return; // for the manual pass
+    return;
   }
-  // The clause up to `from "x"`.
   size_t from = std::string::npos;
   for (size_t j = i + 1; j < toks_.size() && j < i + 2000; ++j) {
     if (is(j, Tok::LBrace) && close_[j] != std::string::npos) {
@@ -366,8 +349,6 @@ void FilePort::importDecl(size_t i) {
   std::string spec = stringValue(toks_[from + 1]);
   llvm::StringRef specRef(spec);
 
-  // "jsr:@std/path@^1/join" becomes "@std/path/join", a dependency in
-  // tz.json.
   std::string package, source, sub;
   if (splitJsrImport(specRef, package, source, sub)) {
     char quote = toks_[from + 1].text.front();
@@ -384,7 +365,6 @@ void FilePort::importDecl(size_t i) {
     ns = toks_[c + 2].text.str();
     c += 3;
   }
-  // The names in braces, without 'type'.
   std::vector<std::string> items;
   if (is(c, Tok::LBrace) && close_[c] != std::string::npos) {
     bool rewrite = !defaultName.empty() || !ns.empty();
@@ -473,10 +453,8 @@ void FilePort::tokens() {
       }
       if (t.text == "null") {
         if (is(i + 1, Tok::Colon) && i > 0 && (is(i - 1, Tok::LBrace) || is(i - 1, Tok::Comma))) {
-          break; // a key
+          break;
         }
-        // A Json holds null itself (docs/modules.md): `Json | null` is Json,
-        // and `const j: Json = null` stays as it is.
         const char *json = "'| null' next to Json was dropped: a Json holds null itself";
         if (i >= 2 && is(i - 1, Tok::Pipe) && isName(i - 2, "Json")) {
           add(endOf(i - 2), endOf(i), "", json);
@@ -490,7 +468,6 @@ void FilePort::tokens() {
           break;
         }
         const char *kind = "'null' and 'void 0' became 'undefined'";
-        // `T | null | undefined` has one 'undefined' afterwards.
         if (i >= 2 && is(i - 1, Tok::Pipe) && isName(i - 2, "undefined")) {
           add(endOf(i - 2), endOf(i), "", kind);
         } else if (is(i + 1, Tok::Pipe) && isName(i + 2, "undefined")) {
@@ -517,9 +494,6 @@ void FilePort::tokens() {
   }
 }
 
-// One operand of '*' and the like: prefix operators, a primary expression and
-// what follows it (members, calls, indexes, '!'). The index after it, or 0
-// if it is something this rule does not take apart (a function, an object).
 size_t FilePort::unary(size_t i) const {
   size_t n = toks_.size();
   while (i < n && (is(i, Tok::Bang) || is(i, Tok::Tilde) || is(i, Tok::Minus) || is(i, Tok::Plus) ||
@@ -595,7 +569,6 @@ size_t FilePort::unary(size_t i) const {
   return i;
 }
 
-// An operand of '+': unary operands joined by '*', '/', '%' and '**'.
 size_t FilePort::operand(size_t i) const {
   size_t end = unary(i);
   while (end && (is(end, Tok::Star) || is(end, Tok::Slash) || is(end, Tok::Percent) ||
@@ -667,9 +640,6 @@ bool FilePort::chainEnds(size_t i) const {
   }
 }
 
-// `"x = " + x + "!"` becomes `x = ${x}!`. A string literal makes the rest of
-// the chain strings, so only what comes before the first one stays one
-// expression: `a + b + "!"` is `${a + b}!`.
 void FilePort::concatenations() {
   for (size_t i = 0; i < toks_.size(); ++i) {
     if (!chainMayStart(i)) {
@@ -709,7 +679,6 @@ void FilePort::concatenations() {
     for (size_t k = first == 0 ? 0 : first - 1; k < ops.size(); ++k) {
       plusAfter &= is(ops[k], Tok::Plus);
     }
-    // Comments between the tokens would be lost.
     bool quiet = true;
     for (size_t k = i; k + 1 < end; ++k) {
       if (!llvm::StringRef(text_).slice(endOf(k), at(k + 1)).trim().empty()) {
@@ -744,7 +713,6 @@ void FilePort::concatenations() {
 }
 
 void FilePort::manual() {
-  // The braces of imports and exports, where 'as' renames.
   std::vector<std::pair<size_t, size_t>> lists;
   std::map<std::string, unsigned> functions;
   for (size_t i = 0; i < toks_.size(); ++i) {
@@ -787,8 +755,6 @@ void FilePort::manual() {
       continue;
     }
     if (t.is(Tok::KwFunction) && is(i + 1, Tok::Identifier)) {
-      // Several signatures and one body, as TypeScript overloads plain
-      // functions.
       if (++functions[toks_[i + 1].text.str()] == 2) {
         note(i, "several signatures with one body ('" + toks_[i + 1].text.str() +
                     "') are not supported for plain functions (docs/overloads.md): keep one "
@@ -871,7 +837,6 @@ void FilePort::manual() {
       }
     }
   }
-  // Template literal types: `${number}px` where a type is written.
   for (size_t i = 1; i < toks_.size(); ++i) {
     if ((is(i, Tok::TemplateHead) || is(i, Tok::TemplateString)) &&
         (is(i - 1, Tok::Pipe) || (is(i - 1, Tok::Assign) && i >= 3 && isName(i - 3, "type")))) {
@@ -880,4 +845,4 @@ void FilePort::manual() {
   }
 }
 
-} // namespace tz::pkg
+}

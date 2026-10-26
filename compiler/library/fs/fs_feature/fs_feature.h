@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// node:fs, node:fs/promises and node:readline (docs/io.md): the classes they make.
 class FsFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "fs"; }
@@ -12,4 +11,4 @@ public:
   void declare(Checker &checker) const override;
 };
 
-} // namespace tz
+}

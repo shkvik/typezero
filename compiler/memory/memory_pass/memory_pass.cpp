@@ -13,4 +13,4 @@ MemoryPlan MemoryPass::run(Program &program) const {
   return plan;
 }
 
-} // namespace tz
+}

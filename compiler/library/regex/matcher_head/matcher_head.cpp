@@ -25,7 +25,6 @@ void MatcherHead::emitWidth(bool wide) {
   builder_.repeatLabels_.clear();
   builder_.nextId_ = 1;
 
-  // The backtracking: pop the stack, apply undo records, resume a choice.
   builder_.fail_ = builder_.newBlock("fail");
   builder_.attemptFail_ = builder_.newBlock("attempt.fail");
   builder_.success_ = builder_.newBlock("success");
@@ -67,7 +66,6 @@ void MatcherHead::emitWidth(bool wide) {
   builder_.b_.SetInsertPoint(startBlock);
   emitHead();
 
-  // The code, block by block.
   for (uint32_t pc = 0; pc < builder_.codeSize_;) {
     if (builder_.leader_[pc]) {
       BasicBlock *block = builder_.blockAt(pc);
@@ -80,7 +78,7 @@ void MatcherHead::emitWidth(bool wide) {
                                          builder_.fail_);
       }
     } else if (!builder_.open()) {
-      pc += instructionSize(builder_.code_, pc); // nothing gets here
+      pc += instructionSize(builder_.code_, pc);
       continue;
     }
     if (uint32_t run = builder_.matcherInstructions().literalRun(pc); run >= 2) {
@@ -95,11 +93,9 @@ void MatcherHead::emitWidth(bool wide) {
   }
 }
 
-// The loop over where a match may start, and what comes after an attempt.
 void MatcherHead::emitHead() {
   const uint32_t *first = builder_.program_ + builder_.program_[TZ_RE_H_FIRST];
   bool filter = (first[8] & TZ_RE_FIRST_KNOWN) != 0;
-  // A search starts here, and again after each match of a batch.
   builder_.store(builder_.start_, builder_.next_);
   BasicBlock *begin = builder_.newBlock("begin");
   builder_.b_.CreateBr(begin);
@@ -108,7 +104,6 @@ void MatcherHead::emitHead() {
   builder_.store(start, builder_.search_);
   builder_.store(builder_.i32(0), builder_.steps_);
   if (builder_.wide_ && builder_.unicode_) {
-    // With u, a start inside a surrogate pair is the start of the pair.
     Value *inside = builder_.matcherChars().test(
         builder_.b_.CreateAnd(builder_.b_.CreateICmpSGT(start, builder_.i32(0)),
                               builder_.b_.CreateICmpSLT(start, builder_.length_)),
@@ -141,7 +136,6 @@ void MatcherHead::emitHead() {
     if (!builder_.scan_.empty() && (!builder_.wide_ || builder_.scanUnits_)) {
       emitByteScan(i, attempt, builder_.next_, none);
     } else {
-      // Unit by unit, past those that cannot start a match.
       BasicBlock *loop = builder_.newBlock("scan.loop"), *body = builder_.newBlock("scan.unit"),
                  *found = builder_.newBlock("scan.found");
       builder_.store(i, builder_.scanAt_);
@@ -172,7 +166,6 @@ void MatcherHead::emitHead() {
     builder_.b_.CreateBr(attempt);
   }
 
-  // An attempt: the captures undefined, the stack empty.
   builder_.b_.SetInsertPoint(attempt);
   i = builder_.load(builder_.next_);
   if (builder_.captures_ > 0) {
@@ -186,7 +179,6 @@ void MatcherHead::emitHead() {
   builder_.matcherMemo().budgetCheck();
   builder_.b_.CreateBr(builder_.blockAt(0));
 
-  // No match from there: the next start, past a run the first repeat read.
   builder_.b_.SetInsertPoint(builder_.attemptFail_);
   BasicBlock *again = builder_.newBlock("attempt.next");
   builder_.b_.CreateCondBr(builder_.b_.CreateICmpNE(builder_.sticky_, builder_.i32(0)), none,
@@ -206,7 +198,6 @@ void MatcherHead::emitHead() {
   builder_.b_.SetInsertPoint(none);
   builder_.finish(builder_.load(builder_.found_));
 
-  // A match: its slots after those of the matches before it in the batch.
   builder_.b_.SetInsertPoint(builder_.success_);
   Value *found = builder_.load(builder_.found_);
   Value *matchStart = builder_.load(builder_.attempt_), *matchEnd = builder_.load(builder_.pos_);
@@ -230,14 +221,8 @@ void MatcherHead::emitHead() {
   builder_.b_.CreateCondBr(builder_.b_.CreateICmpEQ(counted, builder_.max_), full, more);
   builder_.b_.SetInsertPoint(full);
   builder_.finish(counted);
-  // The next search: from the end of this match, past it if it was empty
-  // (AdvanceStringIndex: a whole surrogate pair with u).
   builder_.b_.SetInsertPoint(more);
   if (builder_.memo_) {
-    // What the memo noted on the way to this match did not fail. The next
-    // searches start at its end or later, and only lookarounds look back
-    // (what they noted on the way to a match is forgotten anyway), so of
-    // that only the position of the end can come again.
     builder_.matcherMemo().withMemo("tz_re_memo_clear", {matchEnd});
   }
   Value *after = builder_.b_.CreateAdd(matchEnd, builder_.i32(1));
@@ -258,7 +243,6 @@ void MatcherHead::emitHead() {
   builder_.b_.CreateBr(begin);
 }
 
-// Which units of a vector are in `units`, by the compares of byteTests.
 Value *MatcherHead::vectorIn(Value *v, const OffsetSet &units) {
   auto *vecTy = llvm::cast<llvm::FixedVectorType>(v->getType());
   Value *folded = nullptr, *in = nullptr;
@@ -283,8 +267,6 @@ Value *MatcherHead::vectorIn(Value *v, const OffsetSet &units) {
   return in;
 }
 
-// A bit for each unit of the 16 bytes from unit `at` on: which are in
-// `units`.
 Value *MatcherHead::unitMask(Value *at, const OffsetSet &units) {
   uint32_t lanes = builder_.wide_ ? 8 : 16;
   auto *vecTy = llvm::FixedVectorType::get(builder_.unitTy_, lanes);
@@ -297,9 +279,6 @@ Value *MatcherHead::unitMask(Value *at, const OffsetSet &units) {
       builder_.b_.getInt32Ty());
 }
 
-// The scan for where a match may start: 32 bytes at a time for the units at
-// the offsets of `scan_`, then 16, then unit by unit at the end. Stores the
-// start found in `at` and goes to `found`, or to `none`.
 void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst *at,
                                BasicBlock *none) {
   llvm::Type *i64 = builder_.b_.getInt64Ty();
@@ -317,7 +296,6 @@ void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst 
 
     return mask;
   };
-  // Whether `width` more bytes and the offsets fit before the end.
   auto fits = [&](Value *i, uint32_t width) {
     Value *end =
         builder_.b_.CreateAdd(builder_.b_.CreateSExt(i, i64), builder_.b_.getInt64(reach + width));
@@ -366,7 +344,6 @@ void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst 
   builder_.store(builder_.b_.CreateAdd(builder_.load(builder_.scanAt_), first), at);
   builder_.b_.CreateBr(found);
 
-  // The last bytes, one at a time: a match needs room for its offsets.
   builder_.b_.SetInsertPoint(tailHead);
   i = builder_.load(builder_.scanAt_);
   builder_.b_.CreateCondBr(
@@ -392,4 +369,4 @@ void MatcherHead::emitByteScan(Value *from, BasicBlock *found, llvm::AllocaInst 
   builder_.b_.CreateBr(tailHead);
 }
 
-} // namespace tz
+}

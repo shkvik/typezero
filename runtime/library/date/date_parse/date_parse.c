@@ -1,26 +1,6 @@
-// The parser of date strings, for `new Date(s)` and Date.parse(s), and the
-// arithmetic of time values (see date.h).
-//
-// The parser is a port of V8's DateParser (src/date/dateparser*), so that a
-// string gives what it gives in node: the ISO format of the standard
-// (`2026-10-23T10:00:00.000+06:00`), and the formats the standard leaves to
-// each engine, which V8 reads as Safari does: "2026/10/23", "Oct 23 2026
-// 10:00", "Fri, 23 Oct 2026 10:00:00 GMT" (what toUTCString writes), what
-// toString writes, and many more. Words before the first number are skipped,
-// text in parentheses too.
-//
-// tz builds this file into itself as C++
-// (compiler/library/date/date_syntax/date_syntax.cpp) to check the date strings
-// written in a program, so the code keeps to what C and C++ share.
-
 #include "runtime/library/date/date/date.h"
 #include <math.h>
 
-//===----------------------------------------------------------------------===//
-// Time values
-//===----------------------------------------------------------------------===//
-
-// ToIntegerOrInfinity, with -0 as +0.
 static double to_integer(double x) {
   if (isnan(x)) {
     return 0;
@@ -32,8 +12,6 @@ static double to_integer(double x) {
   return trunc(x) + 0.0;
 }
 
-// As V8's MakeDay: the years and months it takes are limited, so that the
-// day fits in an int on the way.
 double tz_date_make_day(double year, double month, double date) {
   if (!(year >= -1000000 && year <= 1000000) || !(month >= -10000000 && month <= 10000000) ||
       !isfinite(date)) {
@@ -47,8 +25,6 @@ double tz_date_make_day(double year, double month, double date) {
     m += 12;
     y -= 1;
   }
-  // Shifted by a multiple of 400 years (less one), so that the divisions
-  // below see positive numbers.
   const int delta = 399999;
   const int base =
       365 * (1970 + delta) + (1970 + delta) / 4 - (1970 + delta) / 100 + (1970 + delta) / 400;
@@ -91,20 +67,15 @@ double tz_date_time_clip(double time) {
   return to_integer(time);
 }
 
-//===----------------------------------------------------------------------===//
-// Reading characters
-//===----------------------------------------------------------------------===//
+enum { NONE = 0x7FFFFFFF };
 
-enum { NONE = 0x7FFFFFFF }; // V8's kNone: no value yet
-
-// Digits of a number past the first nine are dropped.
 enum { MAX_SIGNIFICANT_DIGITS = 9 };
 
 typedef struct {
   const uint16_t *units;
   size_t length;
-  size_t index; // one past the current character
-  uint32_t ch;  // the current character, 0 at the end (and at a NUL, as in V8)
+  size_t index;
+  uint32_t ch;
 } Reader;
 
 static void next_char(Reader *in) {
@@ -114,8 +85,6 @@ static void next_char(Reader *in) {
 
 static int is_digit(uint32_t c) { return c >= '0' && c <= '9'; }
 
-// WhiteSpace of ECMAScript: tab, vertical tab, form feed, the BOM and the
-// spaces of Unicode.
 static int is_white_space(uint32_t c) {
   switch (c) {
   case 0x09:
@@ -163,8 +132,6 @@ static int read_number(Reader *in) {
   return n;
 }
 
-// A word of characters from 'A' on that are not spaces: its first three in
-// lower case (in ASCII's way, by setting bit 5), and its length.
 static int read_word(Reader *in, uint32_t prefix[3]) {
   int length = 0;
   for (; in->ch >= 'A' && !is_white_space(in->ch); next_char(in), length++) {
@@ -179,10 +146,6 @@ static int read_word(Reader *in, uint32_t prefix[3]) {
   return length;
 }
 
-//===----------------------------------------------------------------------===//
-// Tokens
-//===----------------------------------------------------------------------===//
-
 enum {
   TOKEN_INVALID = -6,
   TOKEN_UNKNOWN = -5,
@@ -190,11 +153,10 @@ enum {
   TOKEN_NUMBER = -3,
   TOKEN_SYMBOL = -2,
   TOKEN_END = -1,
-  // Words, from 0: the kind of keyword.
   WORD_OTHER = 0,
   WORD_MONTH = 1,
   WORD_ZONE = 2,
-  WORD_T = 3, // the separator of an ISO date and time
+  WORD_T = 3,
   WORD_AM_PM = 4,
 };
 
@@ -231,7 +193,6 @@ static const struct {
     {{'t', 0, 0}, WORD_T, 0},
 };
 
-// A word longer than its keyword names it only for months: "October".
 static Token keyword(const uint32_t prefix[3], int length) {
   for (size_t i = 0; i < sizeof keywords / sizeof keywords[0]; i++) {
     int j = 0;
@@ -287,7 +248,6 @@ static Token scan(Reader *in) {
   return make_token(TOKEN_UNKNOWN, 1, -1);
 }
 
-// The tokens with one of look-ahead.
 typedef struct {
   Reader *in;
   Token next;
@@ -302,7 +262,7 @@ static Token next_token(Scanner *s) {
 
 static int is_symbol(Token t, char c) { return t.tag == TOKEN_SYMBOL && t.value == c; }
 static int is_sign(Token t) { return is_symbol(t, '+') || is_symbol(t, '-'); }
-static int sign_of(Token t) { return 44 - t.value; } // '+' is 43, '-' 45
+static int sign_of(Token t) { return 44 - t.value; }
 static int is_fixed_number(Token t, int length) {
   return t.tag == TOKEN_NUMBER && t.length == length;
 }
@@ -327,7 +287,6 @@ static int is_second(int x) { return between(x, 0, 59); }
 static int is_hour12(int x) { return between(x, 0, 12); }
 static int is_millisecond(int x) { return between(x, 0, 999); }
 
-// A number of milliseconds of any length: "5" is 500, "12345" is 123.
 static int read_milliseconds(Token number) {
   int n = number.value, length = number.length;
   if (length == 1) {
@@ -349,10 +308,6 @@ static int read_milliseconds(Token number) {
   return n;
 }
 
-//===----------------------------------------------------------------------===//
-// Composing the fields
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   int comp[3];
   int index;
@@ -373,19 +328,18 @@ static int day_write(Day *d, TzDateFields *out) {
   if (d->index < 1) {
     return 0;
   }
-  // The day and the month default to 1.
   while (d->index < 3) {
     d->comp[d->index++] = 1;
   }
-  int year = 0; // 2000, for KJS
+  int year = 0;
   int month = NONE, day = NONE;
   if (d->named_month == NONE) {
     if (d->iso || (d->index == 3 && !is_day(d->comp[0]))) {
-      year = d->comp[0]; // YMD
+      year = d->comp[0];
       month = d->comp[1];
       day = d->comp[2];
     } else {
-      month = d->comp[0]; // MD(Y)
+      month = d->comp[0];
       day = d->comp[1];
       if (d->index == 3) {
         year = d->comp[2];
@@ -396,10 +350,10 @@ static int day_write(Day *d, TzDateFields *out) {
     if (d->index == 1) {
       day = d->comp[0];
     } else if (!is_day(d->comp[0])) {
-      year = d->comp[0]; // YMD, MYD or YDM
+      year = d->comp[0];
       day = d->comp[1];
     } else {
-      day = d->comp[0]; // DMY, MDY or DYM
+      day = d->comp[0];
       year = d->comp[1];
     }
   }
@@ -464,7 +418,6 @@ static int time_write(Time *t, TzDateFields *out) {
     hour += t->hour_offset;
   }
   if (!is_hour(hour) || !is_minute(minute) || !is_second(second) || !is_millisecond(ms)) {
-    // 24:00:00.000 is the end of the day.
     if (hour != 24 || minute != 0 || second != 0 || ms != 0) {
       return 0;
     }
@@ -504,8 +457,6 @@ static int zone_write(Zone *z, TzDateFields *out) {
   if (z->minute == NONE) {
     z->minute = 0;
   }
-  // In unsigned arithmetic, as V8 does, which then rejects what does not fit
-  // in a small integer.
   unsigned total = (unsigned)z->hour * 3600u + (unsigned)z->minute * 60u;
   if (total > 0x7FFFFFFFu) {
     return 0;
@@ -515,17 +466,8 @@ static int zone_write(Zone *z, TzDateFields *out) {
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// The parser
-//===----------------------------------------------------------------------===//
-
-// The ISO format: [('-'|'+')yy]yyyy[-MM[-DD]][THH:mm[:ss[.sss]][Z|(+|-)hh:mm]].
-// Returns the first token it does not take, for the legacy parser, or the
-// end; an invalid token for a string that is surely not a date.
 static Token parse_iso(Scanner *s, Day *day, Time *time, Zone *zone) {
   if (is_sign(s->next)) {
-    // The sign stays for the legacy parser, so that what is not a date is
-    // found to be none.
     Token sign = next_token(s);
     if (!is_fixed_number(s->next, 6)) {
       return sign;
@@ -561,7 +503,6 @@ static Token parse_iso(Scanner *s, Day *day, Time *time, Zone *zone) {
     if (!is_fixed_number(s->next, 2) || !between(s->next.value, 0, 24)) {
       return make_token(TOKEN_INVALID, 0, -1);
     }
-    // 24:00[:00[.000]], and no other time with hour 24.
     int hour_is_24 = s->next.value == 24;
     time_add(time, next_token(s).value);
     if (!skip_symbol(s, ':')) {
@@ -582,7 +523,6 @@ static Token parse_iso(Scanner *s, Day *day, Time *time, Zone *zone) {
         if (s->next.tag != TOKEN_NUMBER || (hour_is_24 && s->next.value > 0)) {
           return make_token(TOKEN_INVALID, 0, -1);
         }
-        // More or fewer than three digits are fine.
         time_add(time, read_milliseconds(next_token(s)));
       }
     }
@@ -592,7 +532,6 @@ static Token parse_iso(Scanner *s, Day *day, Time *time, Zone *zone) {
     } else if (is_sign(s->next)) {
       zone->sign = next_token(s).value == '+' ? 1 : -1;
       if (is_fixed_number(s->next, 4)) {
-        // hhmm, an extension.
         int hourmin = next_token(s).value;
         int hour = hourmin / 100, min = hourmin % 100;
         if (!is_hour(hour) || !is_minute(min)) {
@@ -618,8 +557,6 @@ static Token parse_iso(Scanner *s, Day *day, Time *time, Zone *zone) {
       return make_token(TOKEN_INVALID, 0, -1);
     }
   }
-  // A date without a time is UTC, a date with a time local (ECMA-262,
-  // 21.4.3.2).
   if (zone->hour == NONE && time->index == 0) {
     zone_set(zone, 0);
   }
@@ -647,21 +584,18 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
   }
   int iso_date_only = token.tag == TOKEN_END && day.iso && time.index == 0;
   int has_read_number = day.index > 0;
-  // Whatever is left goes to the legacy parser.
   for (; token.tag != TOKEN_END; token = next_token(&s)) {
     if (token.tag == TOKEN_NUMBER) {
       has_read_number = 1;
       int n = token.value;
       if (skip_symbol(&s, ':')) {
         if (skip_symbol(&s, ':')) {
-          // n::
           if (time.index != 0) {
             return 0;
           }
           time_add(&time, n);
           time_add(&time, 0);
         } else {
-          // n:
           if (!time_add(&time, n)) {
             return 0;
           }
@@ -683,7 +617,6 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
         zone.minute = n;
       } else if (time_is_expecting(&time, n)) {
         time_add_final(&time, n);
-        // The end, a space, "Z", "+" or "-" must follow a complete time.
         Token peek = s.next;
         if (peek.tag != TOKEN_END && peek.tag != TOKEN_SPACE && !is_z(peek) && !is_sign(peek)) {
           return 0;
@@ -703,8 +636,6 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
       } else if (token.tag == WORD_ZONE && has_read_number) {
         zone_set(&zone, token.value);
       } else {
-        // Words are not allowed once a number is read, and the first number
-        // must be apart from the words before it.
         if (has_read_number) {
           return 0;
         }
@@ -713,7 +644,6 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
         }
       }
     } else if (is_sign(token) && (zone_is_utc(&zone) || time.index != 0)) {
-      // An offset from UTC, after "UTC" or a time.
       zone.sign = sign_of(token) < 0 ? -1 : 1;
       int n = 0, digits = 0;
       if (s.next.tag == TOKEN_NUMBER) {
@@ -726,10 +656,10 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
         zone.hour = n;
         zone.minute = NONE;
       } else if (digits == 1 || digits == 2) {
-        zone.hour = n; // GMT-8
+        zone.hour = n;
         zone.minute = 0;
       } else if (digits == 3 || digits == 4) {
-        zone.hour = n / 100; // GMT-0800
+        zone.hour = n / 100;
         zone.minute = n % 100;
       } else {
         return 0;
@@ -737,7 +667,6 @@ int tz_date_parse_fields(const uint16_t *units, size_t length, TzDateFields *out
     } else if ((is_sign(token) || is_symbol(token, ')')) && has_read_number) {
       return 0;
     }
-    // Anything else is skipped.
   }
   if (!day_write(&day, out) || !time_write(&time, out) || !zone_write(&zone, out)) {
     return 0;

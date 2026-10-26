@@ -1,19 +1,3 @@
-// Dictionaries: Record, Map and Set (docs/objects.md, section 9), which are
-// one hash table (TzMap in map.h) that keeps its keys in the order they
-// were added.
-//
-// Keys compare as JavaScript's Map compares them (SameValueZero): strings
-// and numbers by value, NaN equal to NaN and -0 to 0; objects, arrays and
-// functions by reference; a Json as `===` compares it. A decimal compares by
-// value, as `==` compares decimals (docs/decimal.md): 0.30 and 0.3 are one
-// key. Each entry keeps the hash of its key, so growing the table hashes
-// nothing again.
-//
-// Compiled code finds and adds entries through tz_map_find and tz_map_add,
-// and through the variants for strings, whose fast path for a short string
-// (one that lives in its value) is inlined into the program. It stores the
-// values itself, at the offset the layout gives.
-
 #include "runtime/core/map/map.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -29,7 +13,6 @@
 #include <math.h>
 #include <string.h>
 
-// String values; must match runtime/core/string/string.c.
 #define STR_LEN_MASK ((1ull << 30) - 1)
 #define STR_TWO_BYTE (1ull << 61)
 #define STR_ROPE (1ull << 62)
@@ -44,10 +27,6 @@ static inline char *entry_at(const TzMap *m, uint32_t i) {
 }
 
 static inline TzMapEntry *header(void *entry) { return (TzMapEntry *)entry; }
-
-//===----------------------------------------------------------------------===//
-// Hashes
-//===----------------------------------------------------------------------===//
 
 #define K0 0x9E3779B97F4A7C15ull
 
@@ -65,12 +44,6 @@ static inline uint32_t finish(uint64_t h) {
   return (uint32_t)h;
 }
 
-// The hash of a string, the same whatever holds its code units: they are
-// taken eight at a time, each folded to a byte (a unit below 256 is its own
-// byte), so a short string, which lives in its value, hashes as the word it
-// is, and a two-byte string hashes as a one-byte one with the same text.
-// Texts that differ only in the upper bytes of units collide, which costs a
-// comparison.
 static inline uint32_t inline_hash(void *obj, uint64_t meta) {
   return finish(mix_word(meta & STR_LEN_MASK, (uint64_t)(uintptr_t)obj));
 }
@@ -78,8 +51,6 @@ static inline uint32_t inline_hash(void *obj, uint64_t meta) {
 static uint32_t units_hash(const void *data, uint32_t len, int two, int fold) {
   uint64_t h = len;
   if (!two && !fold && len >= 8) {
-    // One-byte units are their own bytes: eight of them are one load, and
-    // the last word, which holds fewer, the last eight bytes shifted down.
     const uint8_t *bytes = (const uint8_t *)data;
     uint32_t i = 0;
     uint64_t w;
@@ -119,8 +90,6 @@ static uint32_t string_hash(TzStr s, int fold) {
   return units_hash(data, length, two, fold);
 }
 
-// The text of two strings with the case of ASCII letters ignored, for the
-// names of variables on Windows.
 static int folded_equal(TzStr a, TzStr b) {
   uint32_t la, lb;
   int ta, tb;
@@ -146,7 +115,6 @@ static int folded_equal(TzStr a, TzStr b) {
   return 1;
 }
 
-// A double as a key: -0 is 0, and every NaN is one NaN.
 static inline uint64_t double_bits(double d) {
   if (d == 0) {
     d = 0;
@@ -175,7 +143,7 @@ static uint32_t json_hash(const TzJson *j) {
     return finish(mix_word(TZ_JSON_NUMBER, double_bits(j->u.number.value)));
   case TZ_JSON_STRING:
     return string_hash(j->u.string, 0);
-  default: // an array or an object: the one it is
+  default:
     return finish(mix_word(TZ_JSON_OBJECT, (uint64_t)(uintptr_t)j));
   }
 }
@@ -193,7 +161,6 @@ static uint32_t value_hash(const TzType *type, const void *key, int fold) {
   case TZ_T_STRING:
     return string_hash(*(const TzStr *)key, fold);
   case TZ_T_DECIMAL: {
-    // By value: equal decimals have the same text.
     TzBuf text;
     tz_buf_init(&text);
     tz_buf_decimal(&text, *(const TzDec *)key);
@@ -209,25 +176,24 @@ static uint32_t value_hash(const TzType *type, const void *key, int fold) {
     return json_hash(*(TzJson *const *)key);
   case TZ_T_OPTIONAL:
     if (!tz_optional_has(type, key)) {
-      return 0x9e3779b9u; // undefined
+      return 0x9e3779b9u;
     }
     return value_hash(type->inner, key, fold);
-  case TZ_T_ATOM: // a string literal type: the number of its string
+  case TZ_T_ATOM:
     return finish(mix_word(TZ_T_ATOM, (uint64_t)*(const uint32_t *)key));
-  case TZ_T_UNION: { // what the member it holds gives
+  case TZ_T_UNION: {
     if (*(const uint32_t *)key == 0) {
-      return 0x9e3779b9u; // undefined
+      return 0x9e3779b9u;
     }
     const void *held = key;
     const TzType *member = tz_resolve(type, &held);
     return value_hash(member, held, fold);
   }
-  default: // an array, an object or a dictionary: the one it is
+  default:
     return finish(mix_word(TZ_T_OBJECT, (uint64_t)(uintptr_t)*(void *const *)key));
   }
 }
 
-// SameValueZero, with strings compared without case for `fold`.
 static int values_equal(const TzType *type, const void *a, const void *b, int fold) {
   switch (type->kind) {
   case TZ_T_INT:
@@ -257,7 +223,6 @@ static int values_equal(const TzType *type, const void *a, const void *b, int fo
   }
   case TZ_T_JSON: {
     const TzJson *x = *(TzJson *const *)a, *y = *(TzJson *const *)b;
-    // As Map compares them: one NaN equals another (JSON has none, though).
     return tz_json_strict_equal(x, y);
   }
   case TZ_T_OPTIONAL: {
@@ -269,12 +234,12 @@ static int values_equal(const TzType *type, const void *a, const void *b, int fo
   }
   case TZ_T_ATOM:
     return *(const int32_t *)a == *(const int32_t *)b;
-  case TZ_T_UNION: { // of the same member, and equal there
+  case TZ_T_UNION: {
     uint32_t tag = *(const uint32_t *)a;
     if (tag != *(const uint32_t *)b) {
       return 0;
     }
-    if (tag == 0) { // both undefined
+    if (tag == 0) {
       return 1;
     }
     const void *x = a, *y = b;
@@ -287,12 +252,7 @@ static int values_equal(const TzType *type, const void *a, const void *b, int fo
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The table
-//===----------------------------------------------------------------------===//
-
 TzMap *tz_map_new(const TzMapLayout *layout) {
-  // The maps of a type that may form cycles are members of groups.
   int member = (layout->base.flags & TZ_LAYOUT_GROUP) != 0;
   TzMap *m = (TzMap *)(member ? tz_group_alloc(sizeof(TzMap)) : tz_obj_alloc(sizeof(TzMap)));
   int64_t rc = member ? m->rc : 1;
@@ -311,8 +271,6 @@ static void index_insert(TzMap *m, uint32_t hash, uint32_t position) {
   m->index[slot] = position + 1;
 }
 
-// The index for the entries as they lie, sized for `capacity` of them: at
-// least twice as many slots, so that probes stay short.
 static void rebuild_index(TzMap *m) {
   tz_free(m->index);
   m->index = NULL;
@@ -335,8 +293,6 @@ static void rebuild_index(TzMap *m) {
   }
 }
 
-// Moves the live entries over the holes, keeping their order; only while
-// nothing iterates.
 static void compact(TzMap *m) {
   uint32_t size = m->layout->entry_size, to = 0;
   for (uint32_t i = 0; i < m->used; ++i) {
@@ -353,8 +309,6 @@ static void compact(TzMap *m) {
   rebuild_index(m);
 }
 
-// Room for one more entry: the holes, if at least half the entries are
-// deleted and nothing iterates; otherwise twice the room.
 TZ_NOINLINE static void make_room(TzMap *m) {
   if (m->iterating == 0 && m->count <= m->used / 2 && m->used >= TZ_MAP_SMALL) {
     compact(m);
@@ -373,7 +327,7 @@ TZ_NOINLINE static void make_room(TzMap *m) {
   m->entries = entries;
   m->capacity = capacity;
   if (m->iterating == 0 && m->count < m->used) {
-    compact(m); // rebuilds the index
+    compact(m);
   } else {
     rebuild_index(m);
   }
@@ -409,9 +363,6 @@ static inline uint32_t key_hash(const TzMap *m, const void *key) {
   return value_hash(m->layout->key, key, (m->flags & TZ_MAP_FOLD) != 0);
 }
 
-// A new entry for a key the map lacks: a copy of the key, retained (a string
-// in its flat form, which later comparisons read directly), and a value of
-// zero.
 static void *append(TzMap *m, const void *key, uint32_t hash) {
   if (m->used == m->capacity) {
     make_room(m);
@@ -432,7 +383,7 @@ static void *append(TzMap *m, const void *key, uint32_t hash) {
   } else if (l->key->kind == TZ_T_DOUBLE) {
     double *d = (double *)k;
     if (*d == 0) {
-      *d = 0; // -0 becomes 0, as JavaScript's Map makes it
+      *d = 0;
     }
   }
   tz_value_retain(l->key, k);
@@ -464,12 +415,6 @@ void *tz_map_add(TzMap *m, const void *key, int32_t *added) {
   return e ? e : append(m, key, hash);
 }
 
-// Strings, the usual keys. A short one is its own word, so its hash is a
-// multiplication and a match a comparison of words; anything else takes the
-// way above.
-//
-// Whether an entry holds the short string key `obj, meta` of hash `hash`. A
-// stored key that is equal but not short is a two-byte string.
 TZ_NOINLINE int32_t tz_map_str_key_equal(const TzStr *stored, void *obj, uint64_t meta) {
   return tz_str_equal(stored->obj, stored->meta, obj, meta);
 }
@@ -487,7 +432,6 @@ static inline int short_key_matches(const char *e, uint32_t offset, uint32_t has
   return !str_is_inline(stored->meta) && tz_map_str_key_equal(stored, obj, meta);
 }
 
-// A map without an index: its entries one by one.
 TZ_NOINLINE void *tz_map_find_short_small(TzMap *m, void *obj, uint64_t meta, uint32_t hash) {
   uint32_t size = m->layout->entry_size, offset = m->layout->key_offset;
   for (uint32_t i = 0; i < m->used; ++i) {
@@ -509,7 +453,6 @@ TZ_NOINLINE void *tz_map_find_str_slow(TzMap *m, void *obj, uint64_t meta) {
   return tz_map_find(m, &key);
 }
 
-// A map with an index, from slot `slot` on.
 TZ_NOINLINE void *tz_map_find_short_probe(TzMap *m, void *obj, uint64_t meta, uint32_t hash,
                                           uint32_t slot) {
   uint32_t size = m->layout->entry_size, offset = m->layout->key_offset;
@@ -525,8 +468,6 @@ TZ_NOINLINE void *tz_map_find_short_probe(TzMap *m, void *obj, uint64_t meta, ui
   }
 }
 
-// The first entry the index points at is usually the one: that is inlined
-// into the program, and the rest is called.
 TZ_HOT void *tz_map_find_str(TzMap *m, void *obj, uint64_t meta) {
   if (!str_is_inline(meta) || !m->index || (m->flags & TZ_MAP_FOLD)) {
     return tz_map_find_str_slow(m, obj, meta);
@@ -570,8 +511,6 @@ void *tz_map_next(const TzMap *m, uint32_t *at) {
   return NULL;
 }
 
-// The key and the value of a live entry become zero, and are released after
-// it is marked deleted.
 static void remove_entry(TzMap *m, char *e) {
   const TzMapLayout *l = m->layout;
   uint32_t key_size = l->key->size, value_size = l->value ? l->value->size : 0;
@@ -588,7 +527,6 @@ static void remove_entry(TzMap *m, char *e) {
   header(e)->live = 0;
   --m->count;
   if (m->count == 0 && m->iterating == 0) {
-    // Empty: the entries are free again.
     m->used = 0;
     if (m->index) {
       memset(m->index, 0, ((size_t)m->index_mask + 1) * sizeof(uint32_t));
@@ -631,8 +569,6 @@ void tz_map_clear(TzMap *m) {
   }
 }
 
-// After compiled code stored the value of a Record's entry: process.env
-// tells the environment.
 void tz_map_stored(TzMap *m, void *entry) {
   if (m->flags & TZ_MAP_ENV) {
     tz_process_env_changed((const TzStr *)((char *)entry + m->layout->key_offset),
@@ -640,13 +576,9 @@ void tz_map_stored(TzMap *m, void *entry) {
   }
 }
 
-// Maps whose count reached zero while another one was being freed: freed one
-// after another, so that a chain of maps (a trie, a map of maps of maps)
-// takes no stack however long it is. Not static: see the rules in tzrt.h.
-TZ_THREAD_LOCAL TzMap *tz_map_dead; // each thread frees its own
+TZ_THREAD_LOCAL TzMap *tz_map_dead;
 TZ_THREAD_LOCAL int32_t tz_map_dropping;
 
-// What a map holds: its entries, and what they hold.
 static void release_entries(TzMap *m) {
   const TzMapLayout *l = m->layout;
   int managed_key = tz_is_managed(l->key);
@@ -670,7 +602,6 @@ static void release_entries(TzMap *m) {
 }
 
 #if TZ_PARALLEL
-// publish.c: what a map other threads may reach holds, which is shared now.
 void tz_map_publish(TzMap *m) {
   const TzMapLayout *l = m->layout;
   int managed_key = tz_is_managed(l->key);
@@ -695,8 +626,6 @@ void tz_map_publish(TzMap *m) {
 
 void tz_map_drop(void *object) {
   TzMap *m = (TzMap *)object;
-  // A member of a group, which frees its memory with the others: what it
-  // holds goes now, while the other members are still there.
   if (m->rc < 0) {
     release_entries(m);
     m->entries = NULL;
@@ -724,16 +653,10 @@ void tz_map_drop(void *object) {
   tz_map_dropping = 0;
 }
 
-//===----------------------------------------------------------------------===//
-// Whole maps
-//===----------------------------------------------------------------------===//
-
-// `{ ...r }` and new Map(m): the same keys and values in a new map.
 TzMap *tz_map_copy(const TzMap *m, const TzMapLayout *layout) {
   TzMap *copy = tz_map_new(layout);
   uint32_t at = 0;
   for (char *e; (e = (char *)tz_map_next(m, &at));) {
-    // The hashes of keys that ignore case are not those of the copy.
     const void *key = e + m->layout->key_offset;
     uint32_t hash = m->flags & TZ_MAP_FOLD ? key_hash(copy, key) : header(e)->hash;
     char *to = (char *)append(copy, key, hash);
@@ -749,8 +672,6 @@ TzMap *tz_map_copy(const TzMap *m, const TzMapLayout *layout) {
   return copy;
 }
 
-// Object.keys of a Record, [...m.keys()] and the like: the keys (or the
-// values) as an array of `element`.
 TzArray *tz_map_keys(const TzMap *m, const TzType *element) {
   TzArray *a = tz_arr_new(element, 0, m->count);
   uint32_t at = 0;
@@ -773,8 +694,6 @@ TzArray *tz_map_values(const TzMap *m, const TzType *element) {
   return a;
 }
 
-// Object.entries of a Record: a new [key, value] for each entry, laid out
-// as `tuple` says.
 TzArray *tz_map_entries(const TzMap *m, const TzType *element, const TzLayout *tuple,
                         int64_t size) {
   TzArray *a = tz_arr_new(element, 0, m->count);
@@ -797,9 +716,6 @@ TzArray *tz_map_entries(const TzMap *m, const TzType *element, const TzLayout *t
   return a;
 }
 
-// The methods of ES2025 that make a set from two: union (0), intersection
-// (1), difference (2) and symmetricDifference (3). `b` is a Set or a Map,
-// whose keys are its elements; the order is that of the spec.
 TzMap *tz_map_set_op(const TzMap *a, const TzMap *b, int32_t op) {
   const TzMapLayout *l = a->layout;
   TzMap *result;
@@ -815,7 +731,6 @@ TzMap *tz_map_set_op(const TzMap *a, const TzMap *b, int32_t op) {
     return result;
   case 1: {
     result = tz_map_new(l);
-    // The smaller one is walked, and gives the order.
     const TzMap *walked = a->count <= b->count ? a : b, *other = walked == a ? b : a;
     while ((e = (char *)tz_map_next(walked, &at))) {
       if (tz_map_find((TzMap *)other, e + walked->layout->key_offset)) {
@@ -846,7 +761,6 @@ TzMap *tz_map_set_op(const TzMap *a, const TzMap *b, int32_t op) {
   }
 }
 
-// isSubsetOf (0), isSupersetOf (1) and isDisjointFrom (2).
 int32_t tz_map_set_test(const TzMap *a, const TzMap *b, int32_t op) {
   uint32_t at = 0;
   char *e;

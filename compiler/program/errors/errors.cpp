@@ -23,4 +23,4 @@ void Errors::raw(const llvm::Twine &text, llvm::SourceMgr::DiagKind kind) {
   add({kind, Diagnostic::Form::Raw, llvm::SMLoc(), text.str()});
 }
 
-} // namespace tz
+}

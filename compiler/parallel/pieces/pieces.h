@@ -4,7 +4,6 @@
 
 namespace tz::parallel {
 
-// The pieces of async code, the tasks they run in, and where tasks join.
 class Pieces {
 public:
   explicit Pieces(Analysis &analysis);
@@ -30,4 +29,4 @@ private:
   Analysis &analysis_;
 };
 
-} // namespace tz::parallel
+}

@@ -49,7 +49,6 @@ void FieldFacts::defineField(Checker::Flow &flow, const Checker::FieldPath &path
 }
 
 void FieldFacts::fieldsAssigned(llvm::StringRef name) {
-  // Any object with a field of this name may be the one assigned to.
   llvm::erase_if(checker_.flow_.definedFields, [&](const Checker::FieldPath &path) {
     return llvm::is_contained(path.names, name);
   });
@@ -64,7 +63,6 @@ void FieldFacts::forgetFieldsOf(Checker::Flow &flow, const VarSymbol *var) {
 }
 
 Expr *FieldFacts::narrowedField(MemberExpr *member) {
-  // A stream after its setEncoding() (sema_stream.cpp).
   if (!checker_.streamViews_.empty()) {
     if (std::optional<Checker::FieldPath> path = fieldPath(member)) {
       if (const Type *view = checker_.setEncodingChecker().streamViewOf(*path, member->loc())) {
@@ -88,4 +86,4 @@ Expr *FieldFacts::narrowedField(MemberExpr *member) {
   return member;
 }
 
-} // namespace tz
+}

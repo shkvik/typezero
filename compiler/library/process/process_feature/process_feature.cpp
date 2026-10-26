@@ -7,7 +7,7 @@
 namespace tz {
 
 Expr *ProcessFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                      const Type * /*expected*/) const {
+                                      const Type *) const {
   return checker.processChecker().checkProcessCall(call, member);
 }
 
@@ -23,4 +23,4 @@ llvm::Value *ProcessFeature::lowerCall(Lowering &lowering, CallExpr *call) const
   return lowering.processLowerer().emitProcessBuiltin(call);
 }
 
-} // namespace tz
+}

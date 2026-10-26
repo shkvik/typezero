@@ -9,16 +9,11 @@
 
 namespace tz::pkg {
 
-// Writes `text` to `file`, reporting why it cannot.
-
 bool writeText(llvm::StringRef file, llvm::StringRef text);
 
-// The project of the current directory.
 bool currentProject(Manifest &out);
 
-// Prepares the packages of the project as tz.json would be with `deps`, and
-// writes tz.json if that works.
 bool applyDependencies(const Manifest &project, const std::vector<Dependency> &deps,
                        const PrepareOptions &options, Lock *before, Lock *after);
 
-} // namespace tz::pkg
+}

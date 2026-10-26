@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of Map and Set, new Map, groupBy and Object.fromEntries.
 class DictMethodLowerer {
 public:
   explicit DictMethodLowerer(Lowering &lowering);
@@ -18,4 +17,4 @@ private:
   Lowering &lowering_;
 };
 
-} // namespace tz
+}

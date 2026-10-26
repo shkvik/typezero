@@ -23,23 +23,17 @@ namespace tz {
 
 namespace {
 
-// The flags of meta; must match runtime/core/tzrt/tzrt.h.
 constexpr uint64_t kDecLong = uint64_t(1) << 62;
 
-// The largest scale of a short decimal.
 constexpr int64_t kDecScaleMax = 0x7fffffff;
 
-// A literal is never counted (it lacks the heap flag); the count only makes
-// it look alive to anyone inspecting memory, as for strings.
 constexpr int64_t kLiteralRefCount = int64_t(1) << 62;
 
-// What `/` rounds to: 20 places, half up, as BigNumber.js by default.
 constexpr int64_t kDivisionPlaces = 20;
 
-// The folds of runtime/library/decimal/decimal/decimal.c.
 enum Fold : int32_t { kFoldSum, kFoldMax, kFoldMin };
 
-} // namespace
+}
 
 DecimalLowerer::DecimalLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -74,8 +68,6 @@ llvm::Value *DecimalLowerer::callReturningDecimal(llvm::StringRef name,
   return lowering_.builder_.CreateLoad(lowering_.decTy_, out);
 }
 
-// Only long decimals on the heap, whose meta has the sign bit set, are
-// counted; the last release frees them in the runtime.
 llvm::Function *DecimalLowerer::decimalRefCount(bool retain) {
   llvm::Function *&fn = retain ? decRetainFn_ : decReleaseFn_;
   if (fn) {
@@ -96,7 +88,7 @@ llvm::Function *DecimalLowerer::decimalRefCount(bool retain) {
   llvm::Value *obj = b.CreateIntToPtr(b.CreateExtractValue(value, 0, "coef"), b.getPtrTy(), "obj");
   llvm::Value *count = b.CreateLoad(b.getInt64Ty(), obj, "rc");
   auto *freeBlock = retain ? nullptr : llvm::BasicBlock::Create(lowering_.ctx_, "free", fn);
-  if (lowering_.parallel_) { // a shared one, atomically (runtime/core/publish/publish.c)
+  if (lowering_.parallel_) {
     lowering_.runtimeFunctions().countShared(b, obj, count, retain, freeBlock, doneBlock);
   }
   if (retain) {
@@ -116,8 +108,6 @@ llvm::Function *DecimalLowerer::decimalRefCount(bool retain) {
   return fn;
 }
 
-// A literal read from the text of the program: short if it fits, otherwise
-// a constant TzDecObj { rc, exp, neg, n, digits } in the executable.
 llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
   bool negative = false;
   if (auto *unary = dyn_cast<UnaryExpr>(expr); unary && unary->op == UnaryOp::Neg) {
@@ -129,7 +119,7 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
     value =
         lit->text.empty() ? decimalOf(lit->value) : readDecimalLiteral(lit->text).value_or(value);
   } else {
-    value = readDecimalLiteral(cast<FloatLitExpr>(expr)->text).value_or(value); // Checker read it
+    value = readDecimalLiteral(cast<FloatLitExpr>(expr)->text).value_or(value);
   }
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
   auto shortValue = [&](uint64_t magnitude, int64_t scale) {
@@ -139,7 +129,6 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
         lowering_.decTy_,
         {llvm::ConstantInt::get(i64, coef), llvm::ConstantInt::get(i64, uint64_t(scale))});
   };
-  // Below the range, a decimal is zero (as in BigNumber.js).
   if (value.isZero() || value.top() < kDecimalMinExp) {
     return shortValue(0, 0);
   }
@@ -160,7 +149,6 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
       return shortValue(magnitude * power, 0);
     }
   }
-  // Base 10^9 digits, the lowest first.
   std::vector<uint32_t> limbs;
   for (size_t end = digits.size(); end > 0;) {
     size_t start = end >= 9 ? end - 9 : 0;
@@ -175,7 +163,7 @@ llvm::Constant *DecimalLowerer::emitDecimalLiteral(const Expr *expr) {
       {lowering_.builder_.getInt64(kLiteralRefCount),
        llvm::ConstantInt::get(i64, uint64_t(exponent)), lowering_.builder_.getInt32(negative),
        lowering_.builder_.getInt32(static_cast<uint32_t>(limbs.size())), data});
-  auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, /*isConstant=*/true,
+  auto *global = new llvm::GlobalVariable(*lowering_.module_, layout, true,
                                           llvm::GlobalValue::PrivateLinkage, init, ".decimal");
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   global->setAlignment(llvm::Align(8));
@@ -217,13 +205,11 @@ llvm::Value *DecimalLowerer::emitDecimalArithmetic(BinaryOp op, llvm::Value *lhs
   }
 }
 
-// Arithmetic may throw (division by zero, a value too large): checked after
-// the operands are released.
 llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
   Lowering::Operand a =
       lowering_.refCounts().emitOperand(bin->lhs, AssignLowerer::cannotAssign(bin->rhs));
   lowering_.throwLowerer().holdOperand(a, lowering_.mayThrow().exprThrows(bin->rhs));
-  Lowering::Operand b = lowering_.refCounts().emitOperand(bin->rhs, /*canBorrow=*/true);
+  Lowering::Operand b = lowering_.refCounts().emitOperand(bin->rhs, true);
   lowering_.throwLowerer().takeOperand(a);
   bool arithmetic = false;
   llvm::Value *result;
@@ -253,7 +239,7 @@ llvm::Value *DecimalLowerer::emitDecimalBinary(BinaryExpr *bin) {
 }
 
 llvm::Value *DecimalLowerer::emitDecimalCompound(BinaryOp op, llvm::Value *old, Expr *value) {
-  Lowering::Operand rhs = lowering_.refCounts().emitOperand(value, /*canBorrow=*/true);
+  Lowering::Operand rhs = lowering_.refCounts().emitOperand(value, true);
   llvm::Value *result = emitDecimalArithmetic(op, old, rhs.value);
   lowering_.refCounts().dropOperand(rhs);
   lowering_.throwLowerer().emitThrowCheck();
@@ -261,15 +247,13 @@ llvm::Value *DecimalLowerer::emitDecimalCompound(BinaryOp op, llvm::Value *old, 
   return result;
 }
 
-// `x++` and `--x`: the slot gets a new value, and `x++` gives the old one,
-// with the slot's reference.
 llvm::Value *DecimalLowerer::emitDecimalUpdate(UpdateExpr *update, llvm::Value *address) {
   llvm::Value *old = lowering_.builder_.CreateLoad(lowering_.decTy_, address);
   llvm::Constant *one = llvm::ConstantStruct::get(
       lowering_.decTy_, {lowering_.builder_.getInt64(1), lowering_.builder_.getInt64(0)});
   llvm::Value *updated =
       emitDecimalArithmetic(update->increment ? BinaryOp::Add : BinaryOp::Sub, old, one);
-  lowering_.throwLowerer().emitThrowCheck(); // a value too large
+  lowering_.throwLowerer().emitThrowCheck();
   lowering_.builder_.CreateStore(updated, address);
   if (!update->prefix) {
     return old;
@@ -296,20 +280,18 @@ llvm::Value *DecimalLowerer::emitRoundingMode(CallExpr *call, size_t index) {
   if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
     return lowering_.builder_.getInt32(static_cast<uint32_t>(decimalRoundingMode(lit->value)));
   }
-  Lowering::Operand mode = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+  Lowering::Operand mode = lowering_.refCounts().emitOperand(arg, true);
   llvm::Value *result = lowering_.builder_.CreateCall(
       decimalFunction("tz_dec_rounding_mode", lowering_.builder_.getInt32Ty(),
                       {lowering_.builder_.getPtrTy(), lowering_.builder_.getInt64Ty()}),
       {lowering_.stringLowerer().stringObj(mode.value),
        lowering_.stringLowerer().stringMeta(mode.value)});
   lowering_.refCounts().dropOperand(mode);
-  lowering_.throwLowerer().emitThrowCheck(); // a mode that does not exist
+  lowering_.throwLowerer().emitThrowCheck();
 
   return result;
 }
 
-// decimal.sum, max and min: the arguments are evaluated first, as for any
-// call; then the runtime goes over the values and the arrays spread.
 llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
   int32_t op = call->builtin == Builtin::DecSum   ? kFoldSum
                : call->builtin == Builtin::DecMax ? kFoldMax
@@ -341,10 +323,8 @@ llvm::Value *DecimalLowerer::emitDecimalFold(CallExpr *call) {
   for (const Lowering::Operand &arg : args) {
     lowering_.refCounts().dropOperand(arg);
   }
-  lowering_.emitThrowCheckIf(op == kFoldSum); // a sum too large
+  lowering_.emitThrowCheckIf(op == kFoldSum);
   if (op != kFoldSum) {
-    // Checker proved that some value is there; the arrays could have been
-    // emptied by the arguments after them.
     llvm::BasicBlock *emptyBlock = lowering_.functionFrame().newBlock("fold.empty");
     llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("fold.done");
     lowering_.builder_.CreateCondBr(
@@ -368,7 +348,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   switch (call->builtin) {
   case Builtin::DecimalOf: {
-    // Checker made an integer argument a decimal already.
     Expr *arg = call->args[0];
     if (arg->type->isDecimal()) {
       return lowering_.exprLowerer().emitExpr(arg);
@@ -376,15 +355,15 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     if (arg->type->isFloat()) {
       llvm::Value *result =
           callReturningDecimal("tz_dec_from_f64", {lowering_.exprLowerer().emitExpr(arg)});
-      lowering_.throwLowerer().emitThrowCheck(); // NaN and the infinities
+      lowering_.throwLowerer().emitThrowCheck();
       return result;
     }
-    Lowering::Operand text = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(arg, true);
     llvm::Value *result = callReturningDecimal("tz_dec_from_string",
                                                {lowering_.stringLowerer().stringObj(text.value),
                                                 lowering_.stringLowerer().stringMeta(text.value)});
     lowering_.refCounts().dropOperand(text);
-    lowering_.throwLowerer().emitThrowCheck(); // SyntaxError
+    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::DecMax:
@@ -395,17 +374,13 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     break;
   }
 
-  // A method: the receiver, then the arguments in order.
   auto *member = cast<MemberExpr>(call->callee);
   Lowering::Operand self = lowering_.refCounts().emitOperand(
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
-  // Held in a slot only while an argument may throw; its words are used on
-  // the normal path.
   lowering_.throwLowerer().holdOperand(self, llvm::any_of(call->args, [&](Expr *arg) {
                                          return lowering_.mayThrow().exprThrows(arg);
                                        }));
   llvm::Value *a = decimalCoef(self.value), *am = decimalMeta(self.value);
-  // An integer argument and whether it is given.
   auto count = [&](size_t i, int64_t absent) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < call->args.size()) {
       return {lowering_.exprLowerer().emitExpr(call->args[i]), lowering_.builder_.getInt32(1)};
@@ -453,7 +428,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
     break;
   }
   case Builtin::DecToString:
-    // Without a base, String(x); with one, rounded as BigNumber.js rounds.
     if (call->args.empty()) {
       result = text("tz_dec_to_string", {a, am});
     } else {
@@ -486,7 +460,7 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
                 *maxMeta = lowering_.builder_.getInt64(0);
     Lowering::Operand limit{nullptr, false, nullptr};
     if (!call->args.empty()) {
-      limit = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+      limit = lowering_.refCounts().emitOperand(call->args[0], true);
       maxCoef = decimalCoef(limit.value);
       maxMeta = decimalMeta(limit.value);
     }
@@ -505,7 +479,6 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   }
   lowering_.throwLowerer().takeOperand(self);
   lowering_.refCounts().dropOperand(self);
-  // Arguments out of range, a negative square root, a value too large.
   lowering_.emitThrowCheckIf(call->builtin != Builtin::DecIsInteger &&
                              call->builtin != Builtin::DecDecimalPlaces &&
                              call->builtin != Builtin::DecAbs &&
@@ -514,4 +487,4 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

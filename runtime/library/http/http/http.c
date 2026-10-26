@@ -1,20 +1,3 @@
-// HTTP/1.1 on the connections of net.c (docs/net.md, steps 2 and 3): the
-// heads of requests and responses read and checked, bodies of a length or
-// in chunks, and heads written in one piece with the body. The program's
-// side (Request, Response, serve, fetch) is in library/, which calls the
-// `__tz_http_*` functions here.
-//
-// Reading is strict, as a server facing the internet must be (RFC 9112 and
-// the rules against request smuggling): lines end with CRLF, a name of a
-// header is a token right before its colon, no folded lines, no control
-// characters in values, one Content-Length (or the same one repeated) and
-// never together with Transfer-Encoding, which must end with chunked, a Host
-// in every HTTP/1.1 request, and limits: 16 KB for the head (node's
-// maxHeaderSize) and maxBodySize for a body. A request that breaks them is
-// answered with 400 (431 for a head too big, 413 for a body, 501 for a
-// transfer coding other than chunked, 505 for a version other than 1.x) and
-// its connection closed.
-
 #include "runtime/library/net/net/net.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -33,32 +16,22 @@
 
 #define HTTP_MAX_HEAD 16384
 #define HTTP_MAX_HEADERS 1000
-#define HTTP_MAX_LINE 4096       // a line of a chunk's size or of its trailer
-#define HTTP_MAX_DISCARD 1048576 // of a body the program did not read, to keep the connection
+#define HTTP_MAX_LINE 4096
+#define HTTP_MAX_DISCARD 1048576
 
-// What a promise of the program waits for.
 enum { WAIT_NONE, WAIT_REQUEST, WAIT_RESPONSE, WAIT_CHUNK, WAIT_ALL, WAIT_DRAIN };
 
-// How a body is framed.
 enum { BODY_NONE, BODY_LENGTH, BODY_CHUNKED, BODY_TO_END };
 
-// Where the reading of chunks is.
 enum { CHUNK_SIZE, CHUNK_DATA, CHUNK_DATA_END, CHUNK_TRAILER };
 
-// How the response (or request) being written sends its body.
 enum { SEND_FIXED, SEND_CHUNKED, SEND_RAW };
 
-// The date of the Date header, made once a second.
-TZ_THREAD_LOCAL char tz_http_date[32]; // each thread its own
+TZ_THREAD_LOCAL char tz_http_date[32];
 TZ_THREAD_LOCAL int64_t tz_http_date_second = -1;
 
 static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
-//===----------------------------------------------------------------------===//
-// Characters
-//===----------------------------------------------------------------------===//
-
-// tchar of RFC 9110.
 static int is_token(uint8_t c) {
   if (c >= 'a' && c <= 'z') {
     return 1;
@@ -75,7 +48,6 @@ static int is_token(uint8_t c) {
          c == '~';
 }
 
-// A character of a value: visible, a space, a tab, or obs-text.
 static int is_value(uint8_t c) { return c == '\t' || (c >= 0x20 && c != 0x7F); }
 
 static uint8_t lower(uint8_t c) { return c >= 'A' && c <= 'Z' ? (uint8_t)(c + 32) : c; }
@@ -96,7 +68,6 @@ static int equals_lower(const uint8_t *s, size_t n, const char *lowered) {
 
 static int is_space(uint8_t c) { return c == ' ' || c == '\t'; }
 
-// Bytes as a string, each a character (latin1), as node reads heads.
 static TzStr latin1(const uint8_t *s, size_t n) {
   int ascii_only = 1;
   for (size_t i = 0; i < n && ascii_only; ++i) {
@@ -130,10 +101,6 @@ static TzStr lowered(const uint8_t *s, size_t n) {
   return text;
 }
 
-//===----------------------------------------------------------------------===//
-// The state of a connection
-//===----------------------------------------------------------------------===//
-
 static void clear_head(HttpState *h) {
   tz_str_release_value(h->method);
   tz_str_release_value(h->target);
@@ -155,7 +122,6 @@ static void stop_listening(HttpState *h) {
   }
 }
 
-// What HTTP holds of a connection that goes (net.c).
 void tz_http_release(NetConn *c) {
   HttpState *h = &c->http;
   clear_head(h);
@@ -191,8 +157,6 @@ static void settle_error(NetConn *c, void *error) {
   }
 }
 
-// The connection broke while a client waited: "fetch failed" has this as
-// its cause, as undici's SocketError "other side closed".
 static void *broken_error(NetConn *c) {
   if (c->error == NET_TLS_FAILED) {
     return c->tls_ops->error(c, c->http.make);
@@ -220,17 +184,14 @@ static void abort_wait(TzAbortListener *l) {
   } else {
     tz_instance_release((TzInstance *)reason);
   }
-  // The rest of the message will not be read.
   h->keep_alive = 0;
   net_abort(c);
   conn_unlock(c);
 }
 
-// Starts a wait of the program: `p` (held), for `kind`, cancelled by
-// `signal`.
 static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker make) {
   HttpState *h = &c->http;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   h->waiting = p;
   h->wait_kind = kind;
   h->make = make;
@@ -243,7 +204,7 @@ static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker 
       net_abort(c);
       return 0;
     }
-    tz_ref_retain(signal); // a member of a group (signal.c)
+    tz_ref_retain(signal);
     h->signal = (TzSignal *)signal;
     h->abort.run = abort_wait;
     tz_signal_listen(h->signal, &h->abort);
@@ -253,13 +214,6 @@ static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker 
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// Heads
-//===----------------------------------------------------------------------===//
-
-// The end of a line at or after `at` before `end`: the position of its CR,
-// which an LF follows. -1 if the line is not complete; -2 for a CR or an LF
-// alone.
 static ptrdiff_t line_end(const uint8_t *s, size_t at, size_t end) {
   for (size_t i = at; i < end; ++i) {
     if (s[i] == '\n') {
@@ -281,15 +235,13 @@ typedef struct {
   uint32_t name_length, value_length;
 } Field;
 
-// What the headers say about the message.
 typedef struct {
-  int64_t length; // -1 without Content-Length
-  int chunked;    // Transfer-Encoding ends with chunked
-  int coded;      // it has another coding
+  int64_t length;
+  int chunked;
+  int coded;
   int close, keep_alive, hosts, expect_continue;
 } Framing;
 
-// A number of Content-Length: digits, maybe repeated with commas ("5, 5").
 static int content_length(const uint8_t *v, size_t n, int64_t *out) {
   int64_t found = -1;
   size_t i = 0;
@@ -331,7 +283,6 @@ static int content_length(const uint8_t *v, size_t n, int64_t *out) {
   return 1;
 }
 
-// The codings of Transfer-Encoding, the last of which must be chunked.
 static int transfer_encoding(const uint8_t *v, size_t n, Framing *f) {
   size_t i = 0;
   while (i < n) {
@@ -343,13 +294,13 @@ static int transfer_encoding(const uint8_t *v, size_t n, Framing *f) {
       ++i;
     }
     size_t length = i - start;
-    while (i < n && v[i] != ',') { // parameters of a coding
+    while (i < n && v[i] != ',') {
       ++i;
     }
     if (!length) {
       continue;
     }
-    if (f->chunked) { // chunked must be the last, and only once
+    if (f->chunked) {
       return 0;
     }
     if (equals_lower(v + start, length, "chunked")) {
@@ -383,8 +334,6 @@ static void connection_tokens(const uint8_t *v, size_t n, Framing *f) {
   }
 }
 
-// The header lines from `at` up to the empty line that ends the head at
-// `end` (its CR): the fields, and what they say. 0 if one is malformed.
 static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, Framing *f,
                         int server) {
   memset(f, 0, sizeof *f);
@@ -400,7 +349,6 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
       break;
     }
     size_t line = (size_t)eol;
-    // A folded line, or a space before the name.
     if (is_space(s[at])) {
       ok = 0;
       break;
@@ -465,7 +413,7 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
   }
   (void)lengths;
   if (ok && encodings && !f->chunked && !f->coded) {
-    f->coded = 1; // an empty Transfer-Encoding
+    f->coded = 1;
   }
   if (!ok) {
     if (tz_rc_dec(&headers->rc)) {
@@ -478,8 +426,6 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
   return 1;
 }
 
-// Finds the empty line that ends the head in the input: the position of its
-// CR, or -1 if it has not come yet.
 static ptrdiff_t head_end(NetConn *c) {
   const uint8_t *s = c->in;
   for (size_t i = c->in_start; i + 3 < c->in_end; ++i) {
@@ -491,7 +437,6 @@ static ptrdiff_t head_end(NetConn *c) {
   return -1;
 }
 
-// "HTTP/1.1": the version, 10 or 11; 0 if malformed, -1 for another major.
 static int version_of(const uint8_t *s, size_t n) {
   if (n != 8 || memcmp(s, "HTTP/", 5) != 0 || s[6] != '.' || s[5] < '0' || s[5] > '9' ||
       s[7] < '0' || s[7] > '9') {
@@ -637,13 +582,11 @@ static const char *reason_of(int status) {
   }
 }
 
-// `__tz_http_reason(status)`: the text node gives a status.
 void tz_http_reason(TzStr *out, int32_t status, TzMaker make) {
   (void)make;
   *out = ascii(reason_of(status));
 }
 
-// A request the server cannot take: its answer, and the connection ends.
 static void answer_error(NetConn *c, int status) {
   char text[160];
   int n = snprintf(text, sizeof text,
@@ -660,11 +603,8 @@ static void refuse(NetConn *c, int status) {
   settle_int(c, 0);
 }
 
-// Reads the head of a request; 1 once it is read, 0 if more input is
-// needed, -1 if the request was refused or the connection ended.
 static int read_request(NetConn *c) {
   HttpState *h = &c->http;
-  // Empty lines before a request are allowed (RFC 9112, 2.2).
   while (c->in_end - c->in_start >= 2 && c->in[c->in_start] == '\r' &&
          c->in[c->in_start + 1] == '\n') {
     c->in_start += 2;
@@ -675,14 +615,10 @@ static int read_request(NetConn *c) {
       refuse(c, 431);
       return -1;
     }
-    // A request starts with its method, a token: anything else, such as the
-    // handshake of TLS sent to a server of http, is answered at once, as node
-    // does, rather than waited on for the end of a head that never comes.
     if (c->in_end > c->in_start && c->in[c->in_start] != '\r' && !is_token(c->in[c->in_start])) {
       refuse(c, 400);
       return -1;
     }
-    // A line that ends with LF alone, or a CR alone, is no line of HTTP.
     for (size_t i = c->in_start; i < c->in_end; ++i) {
       if ((c->in[i] == '\n' && (i == c->in_start || c->in[i - 1] != '\r')) ||
           (c->in[i] == '\r' && i + 1 < c->in_end && c->in[i + 1] != '\n')) {
@@ -690,7 +626,6 @@ static int read_request(NetConn *c) {
         return -1;
       }
     }
-    // A line that already ends badly need not wait for more.
     if (c->eof || c->error) {
       if (c->in_end > c->in_start) {
         refuse(c, 400);
@@ -712,7 +647,6 @@ static int read_request(NetConn *c) {
     refuse(c, 400);
     return -1;
   }
-  // METHOD SP target SP HTTP/1.1
   size_t line = (size_t)eol, i = at;
   while (i < line && is_token(s[i])) {
     ++i;
@@ -742,7 +676,6 @@ static int read_request(NetConn *c) {
     refuse(c, 400);
     return -1;
   }
-  // The rules against smuggling: one way to tell where the body ends.
   int bad = (f.chunked || f.coded) && (f.length >= 0 || version == 10);
   if (version == 11 && f.hosts != 1) {
     bad = 1;
@@ -781,7 +714,6 @@ static int read_request(NetConn *c) {
   return 1;
 }
 
-// Reads the head of a response, after the 1xx ones; as read_request.
 static int read_response(NetConn *c) {
   HttpState *h = &c->http;
   for (;;) {
@@ -823,7 +755,7 @@ static int read_response(NetConn *c) {
       return -1;
     }
     c->in_start = (uint32_t)end + 2;
-    if (status < 200 && status != 101) { // 100 Continue, 103 Early Hints
+    if (status < 200 && status != 101) {
       if (tz_rc_dec(&headers->rc)) {
         tz_arr_free(headers);
       }
@@ -866,13 +798,6 @@ static int read_response(NetConn *c) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Bodies
-//===----------------------------------------------------------------------===//
-
-// Takes the next piece of the body from the input: 1 with `*data` and
-// `*length` (in the input, which the caller copies before reading more), 0
-// if more input is needed, 2 at the end of the body, -1 if it is malformed.
 static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
   HttpState *h = &c->http;
   for (;;) {
@@ -944,7 +869,6 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
         if (!digits) {
           return -1;
         }
-        // Extensions after ';', which mean nothing here.
         while (i < end && is_space(c->in[i])) {
           ++i;
         }
@@ -984,7 +908,6 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
         h->chunk_state = CHUNK_SIZE;
         continue;
       case CHUNK_TRAILER: {
-        // Fields of the trailer, which are dropped, up to an empty line.
         ptrdiff_t eol = line_end(c->in, c->in_start, c->in_end);
         if (eol == -2) {
           return -1;
@@ -1014,7 +937,6 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
   }
 }
 
-// What breaks a body, for the promise that waits for it.
 static void *body_error(NetConn *c) {
   if (c->server) {
     return net_error(TZ_TYPE_ERROR, "the body of the request is malformed or was cut off", NULL);
@@ -1028,7 +950,6 @@ static void *too_large(void) {
   return net_error(TZ_RANGE_ERROR, "the body of the request is larger than maxBodySize", NULL);
 }
 
-// 100 Continue, once the program reads the body of a request that asked.
 static void send_continue(NetConn *c) {
   HttpState *h = &c->http;
   if (!h->expect_continue || h->continue_sent) {
@@ -1040,8 +961,6 @@ static void send_continue(NetConn *c) {
   net_flush(c);
 }
 
-// The next piece of the body for the program waiting for it; or the whole
-// body.
 static void feed_body(NetConn *c) {
   HttpState *h = &c->http;
   for (;;) {
@@ -1053,8 +972,6 @@ static void feed_body(NetConn *c) {
       return;
     }
     if (got < 0) {
-      // A server answers a malformed body itself, as node does: its handler
-      // gets the error and what it answers goes.
       if (c->server && !c->eof && !c->error) {
         answer_error(c, 400);
       } else {
@@ -1077,7 +994,6 @@ static void feed_body(NetConn *c) {
       settle_value(c, &chunk, sizeof chunk);
       return;
     }
-    // The whole body.
     if (got == 1) {
       if (h->all_length + length > h->all_capacity) {
         size_t cap = h->all_capacity * 2 + length + 4096;
@@ -1102,9 +1018,6 @@ static void feed_body(NetConn *c) {
   }
 }
 
-// Drops the rest of a body the program did not read, before the next
-// message; false if that is too much to wait for (or broken), and the
-// connection is not kept.
 static int discard_body(NetConn *c, int *wait) {
   HttpState *h = &c->http;
   *wait = 0;
@@ -1129,10 +1042,6 @@ static int discard_body(NetConn *c, int *wait) {
 
   return 1;
 }
-
-//===----------------------------------------------------------------------===//
-// What the program waits for
-//===----------------------------------------------------------------------===//
 
 static void input(NetConn *c) {
   HttpState *h = &c->http;
@@ -1182,16 +1091,11 @@ int tz_http_waits_request(NetConn *c) {
   return c->on_input == input && c->http.wait_kind == WAIT_REQUEST && c->http.waiting;
 }
 
-// `__tz_http_next(conn)`: the next request of a server's connection: 1 when
-// its head is read, 0 when the connection ends (or a request was refused).
-// It needs no turn: it touches only the connection, under its lock, which
-// the await that follows lets go of once it waits (async.c), so that the
-// promise cannot settle on another thread before (net_completed_pooled).
 void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
   NetConn *c = (NetConn *)conn;
   conn_lock(c);
   c->busy = 0;
-  if (!c->http.version) { // the first request
+  if (!c->http.version) {
     c->http.keep_alive = !c->http.ending;
   }
   if (begin_wait(c, p, WAIT_REQUEST, NULL, make)) {
@@ -1204,8 +1108,6 @@ void tz_http_next(TzPromise *p, void *conn, TzMaker make) {
 #endif
 }
 
-// `__tz_http_response(conn, signal)`: the status of the response, once its
-// head is read.
 void tz_http_response(TzPromise *p, void *conn, void *signal, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
@@ -1216,8 +1118,6 @@ void tz_http_response(TzPromise *p, void *conn, void *signal, TzMaker make) {
   conn_unlock(c);
 }
 
-// `__tz_http_read(conn, signal)`: the next piece of the body, or undefined
-// at its end.
 void tz_http_read(TzPromise *p, void *conn, void *signal, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
@@ -1229,7 +1129,6 @@ void tz_http_read(TzPromise *p, void *conn, void *signal, TzMaker make) {
   conn_unlock(c);
 }
 
-// `__tz_http_readAll(conn, signal)`: the rest of the body at once.
 void tz_http_read_all(TzPromise *p, void *conn, void *signal, TzMaker make) {
   TZ_ORDERED();
   NetConn *c = (NetConn *)conn;
@@ -1241,9 +1140,6 @@ void tz_http_read_all(TzPromise *p, void *conn, void *signal, TzMaker make) {
   conn_unlock(c);
 }
 
-// The parts of the head last read, each taken once, by the task of the
-// connection: the connection lets go of them, so that what reads the next
-// head (on another thread, maybe) never counts them at the same time.
 static TzStr take_str(TzStr *s) {
   TzStr taken = *s;
   memset(s, 0, sizeof *s);
@@ -1278,16 +1174,12 @@ void *tz_http_headers(void *conn, TzMaker make) {
   return headers;
 }
 
-// Whether the message has a body (a length above zero, chunks, or up to the
-// end of the connection).
 int32_t tz_http_has_body(void *conn, TzMaker make) {
   (void)make;
 
   return ((NetConn *)conn)->http.body != BODY_NONE;
 }
 
-// Whether the connection can carry the next message: kept alive, the body
-// read to its end, nothing broken.
 int32_t tz_http_reusable(void *conn, TzMaker make) {
   TZ_ORDERED();
   (void)make;
@@ -1310,7 +1202,6 @@ int32_t tz_http_keep_alive(void *conn, TzMaker make) {
   return keep;
 }
 
-// The connection ends after the response being made.
 void tz_http_end_after(void *conn, TzMaker make) {
   (void)make;
   NetConn *c = (NetConn *)conn;
@@ -1319,11 +1210,6 @@ void tz_http_end_after(void *conn, TzMaker make) {
   conn_unlock(c);
 }
 
-//===----------------------------------------------------------------------===//
-// Writing
-//===----------------------------------------------------------------------===//
-
-// The Date header, "Sat, 24 Oct 2026 10:00:00 GMT".
 static const char *http_date(void) {
   time_t now = time(NULL);
   if ((int64_t)now != tz_http_date_second) {
@@ -1340,8 +1226,6 @@ static const char *http_date(void) {
   return tz_http_date;
 }
 
-// The UTF-8 of a string: its length, and the bytes written at `out` (when
-// not NULL).
 static size_t utf8_of(TzStr text, uint8_t *out) {
   uint32_t n;
   int two;
@@ -1403,8 +1287,6 @@ static size_t utf8_of(TzStr text, uint8_t *out) {
   return length;
 }
 
-// A header name or value as bytes (latin1, as node writes them): false if it
-// has a character that does not fit a head (CR, LF, a zero, above 0xFF).
 static int head_bytes(TzStr text, uint8_t *out, size_t *length) {
   uint32_t n;
   int two;
@@ -1435,9 +1317,6 @@ static void put_str(NetConn *c, TzStr text) {
   net_wrote(c, n);
 }
 
-// The headers of the program, but those of the framing, which this file
-// writes; whether it gave Date and Content-Length (its value then in
-// `*length`).
 static void put_headers(NetConn *c, const TzArray *headers, int *date, int64_t *length) {
   *date = 0;
   const TzStr *items = (const TzStr *)headers->data;
@@ -1480,20 +1359,16 @@ static void put_headers(NetConn *c, const TzArray *headers, int *date, int64_t *
   }
 }
 
-// The body as it is sent, from `flags` of tz_http_respond.
 enum {
-  RESPOND_STREAM = 1, // pieces follow (tz_http_write, tz_http_end)
-  RESPOND_CLOSE = 2,  // the connection ends after it
+  RESPOND_STREAM = 1,
+  RESPOND_CLOSE = 2,
   RESPOND_NO_BODY = 4,
-  RESPOND_BYTES = 8, // the body is the bytes, not the text
+  RESPOND_BYTES = 8,
 };
 
 static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
                     void *body_obj, uint64_t body_meta, void *bytes, int32_t flags);
 
-// `__tz_http_respond(conn, status, statusText, headers, text, bytes,
-// flags)`: the head and the body of a response, in one write. Without the
-// turn: it touches only the connection, under its lock.
 void tz_http_respond(void *conn, int32_t status, void *text_obj, uint64_t text_meta, void *headers,
                      void *body_obj, uint64_t body_meta, void *bytes, int32_t flags, TzMaker make) {
   (void)make;
@@ -1512,8 +1387,6 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
   if (flags & RESPOND_CLOSE) {
     h->keep_alive = 0;
   }
-  // A body the program did not read (or a request that asked to send one
-  // first) keeps the connection only if it is small.
   if (h->expect_continue && !h->continue_sent) {
     h->keep_alive = 0;
   }
@@ -1561,7 +1434,6 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
       h->keep_alive = 0;
     }
   } else if (status != 204 && status != 304 && !(status >= 100 && status < 200)) {
-    // HEAD tells the length the body would have had.
     snprintf(
         line, sizeof line, "content-length: %llu\r\n",
         (unsigned long long)((flags & RESPOND_NO_BODY) && given >= 0 ? (size_t)given : length));
@@ -1591,8 +1463,6 @@ static void respond(NetConn *c, int32_t status, void *text_obj, uint64_t text_me
   }
 }
 
-// `__tz_http_request(conn, method, target, headers, text, bytes, flags)`:
-// the head and the body of a request, in one write. The headers have Host.
 static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *target_obj,
                     uint64_t target_meta, void *headers, void *body_obj, uint64_t body_meta,
                     void *bytes, int32_t flags);
@@ -1644,7 +1514,6 @@ static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *ta
     }
     net_wrote(c, length);
   }
-  // What the response to it will be read as.
   uint32_t n;
   int two;
   const void *units = tz_str_units(&method, &n, &two);
@@ -1653,8 +1522,6 @@ static void request(NetConn *c, void *method_obj, uint64_t method_meta, void *ta
   net_flush(c);
 }
 
-// `__tz_http_write(conn, chunk)`: a piece of a body that streams; waits
-// while too much is queued.
 static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make);
 
 void tz_http_write(TzPromise *p, void *conn, void *bytes, TzMaker make) {
@@ -1686,9 +1553,8 @@ static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
     net_flush(c);
   }
   tz_net_make = make;
-  tz_ref_retain(p); // it may be a member of a group (async.c)
+  tz_ref_retain(p);
   if (c->drain) {
-    // One waits at a time; the program awaits each write.
     TzPromise *old = c->drain;
     c->drain = NULL;
     net_fulfill(&old, NULL, 0);
@@ -1699,7 +1565,6 @@ static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
   }
 }
 
-// `__tz_http_end(conn)`: the end of a body that streams.
 void tz_http_end(void *conn, TzMaker make) {
   TZ_ORDERED();
   (void)make;

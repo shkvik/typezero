@@ -17,10 +17,6 @@ namespace tz {
 
 ReadlineChecker::ReadlineChecker(Checker &checker) : checker_(checker) {}
 
-// createInterface({ input: process.stdin, output: process.stdout }): lines
-// of stdin, which `for await` gives one by one; questions are written to the
-// output, if there is one. The options are written in the call: input can
-// only be stdin.
 Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm::StringRef fn,
                                          llvm::SMLoc loc) {
   checker_.file_->usesAsync = true;
@@ -59,8 +55,6 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
     input = options.lookup("input");
     output = options.lookup("output");
     signal = options.lookup("signal");
-    // What concerns a terminal of readline's own (raw mode, history, a
-    // completer) tz leaves to the console, which edits the line.
     for (llvm::StringRef ignored : {"terminal", "crlfDelay", "historySize",
                                     "removeHistoryDuplicates", "tabSize", "escapeCodeTimeout"}) {
       if (Expr *value = options.lookup(ignored)) {
@@ -111,4 +105,4 @@ Expr *ReadlineChecker::checkReadlineCall(CallExpr *call, NodeModule module, llvm
   return call;
 }
 
-} // namespace tz
+}

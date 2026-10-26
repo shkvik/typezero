@@ -1,12 +1,3 @@
-// A part of node:stream, read after stream.tz as one module with it
-// (compiler/load/library_modules/): the functions of the writable side, destroy(),
-// finished() and addAbortSignal() (lib/internal/streams/writable.js, destroy.js, utils.js,
-// end-of-stream.js, add-abort-signal.js).
-
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/writable.js
-//===----------------------------------------------------------------------===//
-
 function resetBuffer(state: WritableState) {
   state.buffered = []
   state.bufferedIndex = 0
@@ -14,7 +5,6 @@ function resetBuffer(state: WritableState) {
   state.bits &= ~kBuffered
 }
 
-// node's _write() of Writable: the checks of write(), then writeOrBuffer().
 function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
                    cb: StreamCallback): boolean | Error {
   const state = writableStateOf(stream)
@@ -52,9 +42,6 @@ function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
   return writeOrBuffer(stream, state, value, enc, cb)
 }
 
-// If we're already writing something, then just put this in the queue, and
-// wait our turn. Otherwise, call _write. If we return false, then we need a
-// drain event, so set that flag.
 function writeOrBuffer(stream: Stream, state: WritableState, chunk: unknown, encoding: string,
                        callback: StreamCallback): boolean {
   const len = (state.bits & kObjectMode) != 0 ? 1 : lengthOf(chunk)
@@ -76,8 +63,6 @@ function writeOrBuffer(stream: Stream, state: WritableState, chunk: unknown, enc
   }
   const ret = stream.writableLength < stream.writableHighWaterMark || stream.writableLength == 0
   if (!ret) state.bits |= kNeedDrain
-  // Return false if errored or destroyed in order to break any synchronous
-  // while(stream.write(data)) loops.
   return ret && (state.bits & (kDestroyed | kErrored)) == 0
 }
 
@@ -104,11 +89,7 @@ function doWritev(stream: Stream, state: WritableState, len: int, chunks: Buffer
 function onwriteError(stream: Stream, state: WritableState, er: Error, cb: StreamCallback) {
   --state.pendingcb
   cb(er)
-  // Ensure callbacks are invoked even when autoDestroy is not enabled.
-  // Passing `er` here doesn't make sense since it's related to one specific
-  // write, not to the buffered writes.
   errorBuffer(stream, state)
-  // This can emit error, but error must always follow cb.
   errorOrDestroy(stream, er)
 }
 
@@ -129,8 +110,6 @@ function onwrite(stream: Stream, er: Error | undefined) {
       state.errored = er
       state.bits |= kErrored
     }
-    // In case of duplex streams we need to notify the readable side of the
-    // error.
     const r = stream._readableState
     if (r != undefined && r.errored == undefined) {
       r.errored = er
@@ -145,10 +124,6 @@ function onwrite(stream: Stream, er: Error | undefined) {
     if (isSync) {
       const needDrain = (state.bits & kNeedDrain) != 0 && stream.writableLength == 0
       const needTick = needDrain || (state.bits & kDestroyed) != 0 || cb != nop
-      // It is a common case that the callback passed to .write() is always
-      // the same. In that case, we do not schedule a new nextTick(), but
-      // rather just increase a counter, to improve performance and avoid
-      // memory allocations.
       const info = state.afterWriteTickInfo
       if (cb == nop) {
         if ((state.bits & kAfterWritePending) == 0 && needTick) {
@@ -201,7 +176,6 @@ function afterWrite(stream: Stream, state: WritableState, count: int, cb: Stream
   sync(stream)
 }
 
-// If there's something in the buffer waiting, then invoke callbacks.
 function errorBuffer(stream: Stream, state: WritableState) {
   if ((state.bits & kWriting) != 0) return
   if ((state.bits & kBuffered) != 0) {
@@ -218,7 +192,6 @@ function errorBuffer(stream: Stream, state: WritableState) {
   sync(stream)
 }
 
-// If there's something in the buffer waiting, then process it.
 function clearBuffer(stream: Stream, state: WritableState) {
   if ((state.bits & (kDestroyed | kBufferProcessing | kCorked | kBuffered | kConstructed)) !=
       (kBuffered | kConstructed))
@@ -270,8 +243,6 @@ function clearBuffer(stream: Stream, state: WritableState) {
 }
 
 function needFinish(stream: Stream, state: WritableState): boolean {
-  // State is ended && constructed but not destroyed, finished, writing,
-  // errorEmitted or closedEmitted.
   return (state.bits & (kEnding | kDestroyed | kConstructed | kFinished | kWriting |
     kErrorEmitted | kCloseEmitted | kErrored | kBuffered)) == (kEnding | kConstructed) &&
     stream.writableLength == 0
@@ -290,8 +261,6 @@ function onFinish(stream: Stream, state: WritableState, err: Error | undefined) 
     state.bits |= kPrefinished
     sync(stream)
     stream.emit("prefinish")
-    // Backwards compat. Don't check state.sync here. Some streams assume
-    // 'finish' will be emitted asynchronously relative to _final callback.
     state.pendingcb++
     process.nextTick(() => finish(stream, state))
   }
@@ -340,14 +309,10 @@ function finish(stream: Stream, state: WritableState) {
   sync(stream)
   stream.emit("finish")
   if ((state.bits & kAutoDestroy) != 0) {
-    // In case of duplex streams we need a way to detect if the readable side
-    // is ready for autoDestroy as well.
     const r = stream._readableState
     const autoDestroy =
       r == undefined ||
       ((r.bits & kAutoDestroy) != 0 &&
-        // We don't expect the readable to ever 'end' if readable is
-        // explicitly set to false.
         ((r.bits & kEndEmitted) != 0 || r.readable == false))
     if (autoDestroy) stream.destroy()
   }
@@ -360,10 +325,6 @@ function callFinishedCallbacks(state: WritableState, err: Error | undefined) {
   state.bits &= ~kOnFinished
   for (const cb of onfinishCallbacks) cb(err)
 }
-
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/destroy.js
-//===----------------------------------------------------------------------===//
 
 function checkError(stream: Stream, err: Error | undefined) {
   if (err == undefined) return
@@ -379,7 +340,6 @@ function checkError(stream: Stream, err: Error | undefined) {
   }
 }
 
-// destroy() of node.
 function destroyImpl(stream: Stream, err: Error | undefined, cb: StreamCallback | undefined) {
   const r = stream._readableState
   const w = stream._writableState
@@ -388,13 +348,10 @@ function destroyImpl(stream: Stream, err: Error | undefined, cb: StreamCallback 
     if (cb != undefined) cb()
     return
   }
-  // We set destroyed to true before firing error callbacks in order to make
-  // it re-entrance safe in case destroy() is called within callbacks
   checkError(stream, err)
   if (w != undefined) w.bits |= kDestroyed
   if (r != undefined) r.bits |= kDestroyed
   sync(stream)
-  // If still constructing then defer calling _destroy.
   const s = w ?? r
   if (s != undefined && (s.bits & kConstructed) == 0) {
     stream._onDestroy.push((er: Error | undefined) =>
@@ -404,7 +361,6 @@ function destroyImpl(stream: Stream, err: Error | undefined, cb: StreamCallback 
   }
 }
 
-// node's _destroy().
 function destroyNow(self: Stream, err: Error | undefined, cb: StreamCallback | undefined) {
   let called = false
   function onDestroy(error?: Error) {
@@ -458,9 +414,6 @@ function emitErrorNT(self: Stream, err: Error) {
 }
 
 function errorOrDestroy(stream: Stream, err: Error, isSync = false) {
-  // We have tests that rely on errors being emitted in the same tick, so
-  // changing this is semver major. For now when you opt-in to autoDestroy we
-  // allow us to fix this and the error will be emitted on the next tick.
   const r = stream._readableState
   const w = stream._writableState
   if ((w != undefined && (w.bits & kDestroyed) != 0) ||
@@ -507,9 +460,6 @@ function constructNT(stream: Stream) {
     const s = w ?? r
     if (r != undefined) r.bits |= kConstructed
     if (w != undefined) w.bits |= kConstructed
-    // What waits for the construction holds the stream: it goes, whichever
-    // way the construction ends, as node's listeners of kConstruct do with
-    // the stream.
     const constructed = stream._onConstruct
     stream._onConstruct = []
     if (s != undefined && (s.bits & kDestroyed) != 0) {
@@ -532,17 +482,12 @@ function constructNT(stream: Stream) {
   }
 }
 
-// destroyer() of node: destroys a stream the way it can be.
 function destroyer(stream: Stream, err: Error | undefined) {
   if (isDestroyed(stream)) return
   let error = err
   if (error == undefined && !isFinished(stream)) error = new AbortError()
   stream.destroy(error)
 }
-
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/utils.js
-//===----------------------------------------------------------------------===//
 
 function isDestroyed(stream: Stream): boolean {
   const state = stream._writableState ?? stream._readableState
@@ -616,7 +561,6 @@ function erroredOf(stream: Stream): Error | undefined {
   return stream._writableState?.errored ?? stream._readableState?.errored
 }
 
-// Stream.isDestroyed() and the others of node:stream.
 export function isErrored(stream: Stream): boolean {
   const r = stream._readableState
   const w = stream._writableState
@@ -628,10 +572,6 @@ export function isDisturbed(stream: Stream): boolean {
   return stream.readableDidRead || stream.readableAborted
 }
 
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/end-of-stream.js
-//===----------------------------------------------------------------------===//
-
 export interface FinishedOptions {
   error?: boolean
   readable?: boolean
@@ -640,10 +580,6 @@ export interface FinishedOptions {
   cleanup?: boolean
 }
 
-// What one finished() waits for, and its callback, which it drops once
-// called. Its listeners hold it and take the stream as `this`, so that the
-// stream does not hold itself through them: node leaves them on the stream
-// after the callback, and so does this code.
 class Eos {
   callback: StreamCallback
   willEmitClose: boolean
@@ -664,7 +600,6 @@ class Eos {
     this.closed = isClosed(stream)
   }
 
-  // The callback, once.
   call(err?: Error) {
     const callback = this.callback
     this.callback = nop
@@ -715,7 +650,6 @@ class Eos {
   }
 }
 
-// eos() of node; gives the function that removes its listeners.
 function eos(stream: Stream, options: FinishedOptions | undefined,
              callback: StreamCallback): () => void {
   const readable = options?.readable ?? isReadableNodeStream(stream)
@@ -783,15 +717,10 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
   return cleanup
 }
 
-// pipeline(), finished() and compose() of node:stream take streams and
-// functions of any types, which the compiler checks: each call becomes one
-// of streamPipeline(), streamFinished() or streamCompose() (see
-// compiler/library/stream/sema/sema_stream.cpp).
 export function pipeline() {}
 export function finished() {}
 export function compose() {}
 
-// finished() of node:stream/promises.
 export function finishedPromise(stream: Stream, options?: FinishedOptions): Promise<void> {
   const autoCleanup = options?.cleanup ?? false
   return new Promise<void>((resolve, reject) => {
@@ -803,10 +732,6 @@ export function finishedPromise(stream: Stream, options?: FinishedOptions): Prom
     })
   })
 }
-
-//===----------------------------------------------------------------------===//
-// lib/internal/streams/add-abort-signal.js
-//===----------------------------------------------------------------------===//
 
 function addAbortSignalNoValidate(signal: AbortSignal, stream: Stream) {
   const onAbort = () => {

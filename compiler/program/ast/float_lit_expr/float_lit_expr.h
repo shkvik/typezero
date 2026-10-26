@@ -10,7 +10,7 @@ public:
   static bool classof(const Expr *e) { return e->kind() == Kind::FloatLit; }
 
   double value;
-  llvm::StringRef text; // as in IntLitExpr
+  llvm::StringRef text;
 };
 
-} // namespace tz
+}

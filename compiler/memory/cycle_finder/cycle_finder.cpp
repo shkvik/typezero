@@ -123,15 +123,11 @@ void CycleFinder::refers(const Type *type, std::vector<unsigned> &out) {
     out.push_back(unknownNode_);
     break;
   case Type::Kind::Promise:
-    // A promise may be a member (promiseIsMember): it holds its value or its error, and an
-    // async function's frame whatever that holds, so it may hold anything.
     out.push_back(anyNode_);
     out.push_back(unknownNode_);
     out.push_back(fnNodeOf(anyFunction_));
     break;
   default:
-    // Iterators and timers are never members: a cycle through what they hold is not freed (see
-    // README).
     break;
   }
 }
@@ -175,7 +171,6 @@ void CycleFinder::buildGraph() {
       for (const Field &f : t->fields()) {
         edges(n, f.type, scan_.mutableFields.count(f.name) != 0);
       }
-      // What the methods of a literal capture lies in the object.
       if (const ClassDecl *cls = t->classDecl(); cls && cls->group) {
         for (const VarSymbol *var : cls->group->captures) {
           captureEdges(n, var);
@@ -199,9 +194,6 @@ void CycleFinder::buildGraph() {
       }
     }
   }
-  // What a value of a function type may hold: the environments of the closures of that type,
-  // the objects of the methods taken as values of it, and whatever a value of a type converted
-  // to it holds. Generic code sees every function as one type.
   for (const auto &[type, keys] : scan_.closuresOf) {
     for (const void *key : keys) {
       unsigned fn = fnNodeOf(type), env = graph.node(Kind::EnvNode, key);
@@ -244,10 +236,6 @@ void CycleFinder::buildGraph() {
     unsigned n = graph.node(Kind::TypeNode, t);
     graph.edge(anyNode_, n, false);
   }
-  // An object in an unknown is the reference itself; a function is in a box, which is a member
-  // when what it holds may be one (Lowering::boxValue): a listener in the Record of an emitter
-  // of node:events that captures the emitter is a cycle through it. Any other value is in a box
-  // no group has.
   for (const Type *type : scan_.toUnknown) {
     std::vector<unsigned> to;
     refers(type, to);
@@ -263,8 +251,6 @@ void CycleFinder::buildGraph() {
 }
 
 std::vector<bool> CycleFinder::cyclicNodes() const {
-  // The strongly connected components (Tarjan); one is cyclic if an edge inside it may be set
-  // late.
   size_t count = graph.nodes.size();
   std::vector<int> order(count, -1), low(count, 0), component(count, -1);
   std::vector<bool> onStack(count, false);
@@ -349,8 +335,6 @@ void CycleFinder::markCyclic(const std::vector<bool> &cyclic) {
 }
 
 void CycleFinder::markFunctions() {
-  // The function types whose values may hold a member: the environment of a cyclic closure, or
-  // a cyclic object whose method it is, through the types converted to them too.
   for (unsigned v = 0, count = unsigned(graph.nodes.size()); v < count; ++v) {
     if (graph.nodes[v].kind != Kind::FnNode) {
       continue;
@@ -376,10 +360,8 @@ void CycleFinder::markFunctions() {
     }
     auto *type = static_cast<const Type *>(graph.nodes[v].key);
     plan_.fnMayBeMember = plan_.fnMayBeMember || member;
-    // `resolve` of `new Promise` has its promise as its environment, which may be a member in a
-    // program with cycles (promiseIsMember).
     plan_.refMember[type] = member || plan_.hasCycles;
   }
 }
 
-} // namespace tz
+}

@@ -15,8 +15,6 @@ namespace tz {
 
 namespace {
 
-// The names neverthrow exports. Those after safeTry come with exceptions or
-// with async.
 const llvm::StringLiteral kNeverthrowNames[] = {"ok",
                                                 "err",
                                                 "Result",
@@ -43,7 +41,7 @@ llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::String
   return {};
 }
 
-} // namespace
+}
 
 ResultTypes::ResultTypes(Checker &checker) : checker_(checker) {}
 
@@ -114,18 +112,14 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
       return Type::never();
     }
 
-    return checker_.typeResolver().resolveTypeInner(
-        arg); // void and undefined are halves without a value
+    return checker_.typeResolver().resolveTypeInner(arg);
   };
   const Type *value = half(ref.args[0]), *error = half(ref.args[1]);
-  // An Ok is a Result that cannot be an Err, and an Err one that cannot be an
-  // Ok.
   if (name == "Ok") {
     error = Type::never();
   } else if (name == "Err") {
     value = Type::never();
   }
-  // A ResultAsync is a Promise of a Result: `await` gives the Result.
   if (name == "ResultAsync") {
     return Type::promise(Type::result(value, error));
   }
@@ -143,7 +137,6 @@ const Type *ResultTypes::unifyHalf(const Type *a, const Type *b) {
   if (a->isVoid() || b->isVoid()) {
     return nullptr;
   }
-  // Errors from different places may be of different types: `E | F`.
   const Type *common = LiteralTypes::unionUnify(a, b);
 
   return common && !common->isError() ? common : nullptr;
@@ -161,4 +154,4 @@ void ResultTypes::neverOperands(BinaryExpr *bin) {
   }
 }
 
-} // namespace tz
+}

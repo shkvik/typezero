@@ -10,4 +10,4 @@ int VersionCommand::run() const {
   return 0;
 }
 
-} // namespace tz
+}

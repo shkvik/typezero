@@ -16,8 +16,6 @@ static void appendUtf16(std::u16string &out, uint32_t cp) {
   }
 }
 
-// Decodes one UTF-8 sequence of the source text at `s[i]`, advancing `i`.
-// Malformed input becomes U+FFFD.
 static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
   unsigned char lead = static_cast<unsigned char>(s[i]);
   if (lead < 0x80) {
@@ -47,7 +45,6 @@ static uint32_t decodeUtf8(llvm::StringRef s, size_t &i) {
   return cp;
 }
 
-// Parses exactly `count` hex digits at `s[i]`, advancing `i`.
 static bool parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value) {
   value = 0;
   for (size_t n = 0; n < count; ++n, ++i) {
@@ -60,7 +57,6 @@ static bool parseHex(llvm::StringRef s, size_t &i, size_t count, uint32_t &value
   return true;
 }
 
-// Parses the code point after `\u`: either `XXXX` or `{X...}`.
 static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
   if (i < s.size() && s[i] == '{') {
     ++i;
@@ -82,8 +78,6 @@ static bool parseUnicodeEscape(llvm::StringRef s, size_t &i, uint32_t &cp) {
   return parseHex(s, i, 4, cp);
 }
 
-// Decodes literal text (without its delimiters). Templates keep raw line
-// breaks, normalized to "\n" as JavaScript requires.
 static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out,
                        Diagnostics &diags) {
   out.clear();
@@ -127,7 +121,7 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
     case '0':
       out += u'\0';
       break;
-    case '\r': // line continuation
+    case '\r':
       if (i < raw.size() && raw[i] == '\n') {
         ++i;
       }
@@ -149,8 +143,6 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
         diags.error(escapeLoc, "invalid '\\u' escape");
         return false;
       }
-      // `😀` naturally yields a surrogate pair, and a lone
-      // surrogate stays one code unit, exactly as in JavaScript.
       appendUtf16(out, cp);
       break;
     }
@@ -164,8 +156,6 @@ static bool decodeText(llvm::StringRef raw, bool isTemplate, std::u16string &out
   return true;
 }
 
-// The text of a template part without the leading '`' or '}' and the
-// trailing '`' or '${'.
 static llvm::StringRef templateText(const Token &tok) {
   llvm::StringRef raw = tok.text.drop_front();
   if (raw.ends_with("${")) {
@@ -178,7 +168,7 @@ static llvm::StringRef templateText(const Token &tok) {
   return raw;
 }
 
-} // namespace
+}
 
 bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &diags) {
   llvm::StringRef raw = tok.text.drop_front();
@@ -186,18 +176,18 @@ bool decodeStringLiteral(const Token &tok, std::u16string &out, Diagnostics &dia
     raw = raw.drop_back();
   }
 
-  return decodeText(raw, /*isTemplate=*/false, out, diags);
+  return decodeText(raw, false, out, diags);
 }
 
 bool decodeTemplatePart(const Token &tok, std::u16string &out, Diagnostics &diags) {
-  return decodeText(templateText(tok), /*isTemplate=*/true, out, diags);
+  return decodeText(templateText(tok), true, out, diags);
 }
 
 void decodeRegex(const Token &tok, std::u16string &pattern, std::u16string &flags) {
   llvm::StringRef text = tok.text.drop_front();
   size_t slash = text.rfind('/');
   if (slash == llvm::StringRef::npos) {
-    slash = text.size(); // unterminated, reported already
+    slash = text.size();
   }
   llvm::StringRef body = text.take_front(slash);
   llvm::StringRef suffix = text.drop_front(std::min(slash + 1, text.size()));
@@ -224,4 +214,4 @@ void decodeTemplateRaw(const Token &tok, std::u16string &out) {
   }
 }
 
-} // namespace tz
+}

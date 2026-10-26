@@ -19,10 +19,6 @@ namespace tz {
 
 namespace {
 
-// The kinds of their arguments: m a hash and c a cipher, written as a literal of the direct
-// layer; d bytes (a BufferSource or a secret KeyObject); o a KeyObject; b a boolean, i an int,
-// f a double, s a string. Their results: B an ArrayBuffer, U one or undefined (a failed job),
-// I an int, K a KeyObject or undefined.
 struct SubtleIntrinsic {
   llvm::StringLiteral name;
   CryptoFn fn;
@@ -45,7 +41,7 @@ const SubtleIntrinsic kSubtleIntrinsics[] = {
     {"__tz_subtle_generate", CryptoFn::SubtleGenerate, "iffs", 'K'},
 };
 
-} // namespace
+}
 
 WebCryptoChecker::WebCryptoChecker(Checker &checker) : checker_(checker) {}
 
@@ -69,14 +65,13 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name) {
     Expr *checked = nullptr;
     switch (intrinsic->params[i]) {
     case 'm':
-      checked = checker_.cryptoArgs().cryptoMd(arg, /*hmac=*/true);
+      checked = checker_.cryptoArgs().cryptoMd(arg, true);
       break;
     case 'c':
       checked = checker_.cryptoArgs().cryptoCipher(arg);
       break;
     case 'd':
-      checked = checker_.cryptoArgs().cryptoData(arg, "data", /*strings=*/false, /*keys=*/true,
-                                                 /*buffers=*/true);
+      checked = checker_.cryptoArgs().cryptoData(arg, "data", false, true, true);
       break;
     case 'o':
       checked = checker_.cryptoArgs().cryptoKeyObject(arg, "key");
@@ -94,7 +89,6 @@ Expr *WebCryptoChecker::checkSubtleIntrinsic(CallExpr *call, NameExpr *name) {
       checked = checker_.argumentChecker().checkArg(arg, Type::string());
       break;
     }
-    // The hash and the cipher are the direct layer's: written as literals.
     char kind = intrinsic->params[i];
     if (checked && (kind == 'm' || kind == 'c') && !isa<IntLitExpr>(checked)) {
       checker_.diags_.error(arg->loc(), "the hash or the cipher of '" + name->name +
@@ -128,7 +122,6 @@ bool WebCryptoChecker::isSubtleClass(const Type *type, llvm::StringRef name) con
 }
 
 Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
-  // The loader imports it for every file that says `crypto.subtle`.
   if (!checker_.scopes().lookup(kSubtleName).var) {
     checker_.diags_.error(member->loc(), "'crypto.subtle' is not available here");
     member->type = Type::error();
@@ -139,4 +132,4 @@ Expr *WebCryptoChecker::subtleObject(MemberExpr *member) {
   return checker_.exprChecker().checkExpr(name);
 }
 
-} // namespace tz
+}

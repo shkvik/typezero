@@ -1,22 +1,3 @@
-// Regular expressions: the parser and the compiler to the program regex.c
-// runs (see regex.h).
-//
-// tz builds this file into itself as C++ (with TZ_RE_FOR_COMPILER), to
-// compile the regex literals of a program while it compiles the program, and
-// the runtime has it for `new RegExp(s)`. So the code keeps to what C and
-// C++ share.
-//
-// The syntax is ECMAScript 2025's: all the flags, named groups (the same name
-// in different alternatives too), lookbehind, modifiers such as `(?i:...)`,
-// `\p{...}`, and with the v flag set operations and strings in classes. Without
-// u and v, the additions of Annex B hold, as in every browser and in node:
-// `]` and `{` alone are characters, `\c` that starts no escape is a
-// backslash, `\1` with fewer groups an octal escape and so on.
-//
-// The parser makes a tree, in which a character under /i is already the set
-// of the characters it matches; the compiler then walks the tree. Unicode
-// comes from regex_tables.h, which gen_regex_tables.mjs takes from Node.js.
-
 #include "runtime/library/regex/regex/regex.h"
 #include <stdlib.h>
 #include <string.h>
@@ -67,15 +48,8 @@ typedef struct {
 
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define MAX_CODE_POINT 0x10FFFFu
-// Patterns nest no deeper than this, so that the recursion of the parser
-// and the compiler stays bounded.
 #define MAX_DEPTH 500
-// V8's limit on the groups of one regex.
 #define MAX_CAPTURES 65535
-
-//===----------------------------------------------------------------------===//
-// Growing arrays of words
-//===----------------------------------------------------------------------===//
 
 typedef struct {
   uint32_t *data;
@@ -119,12 +93,6 @@ static void vec_copy(Vec *to, const Vec *from) {
   to->length = from->length;
 }
 
-//===----------------------------------------------------------------------===//
-// Sets of characters
-//===----------------------------------------------------------------------===//
-
-// Ranges [first, last] of code points (or code units), sorted and merged once
-// set_normalize ran.
 typedef struct {
   Vec r;
 } CharSet;
@@ -172,7 +140,6 @@ static void set_union(CharSet *a, const CharSet *b) {
   set_normalize(a);
 }
 
-// The characters from 0 to `max` that are not in `s`.
 static void set_complement(CharSet *s, uint32_t max) {
   set_normalize(s);
   Vec gaps = {NULL, 0, 0};
@@ -231,10 +198,6 @@ static void set_subtract(CharSet *a, const CharSet *b) {
   vec_free(&rest.r);
 }
 
-//===----------------------------------------------------------------------===//
-// Case-insensitive classes
-//===----------------------------------------------------------------------===//
-
 static const ReOrbit *find_orbit(const ReOrbit *orbits, size_t n, uint32_t c) {
   size_t lo = 0, hi = n;
   while (lo < hi) {
@@ -264,7 +227,6 @@ uint32_t tz_re_canonicalize(uint32_t c, int unicode) {
   if (!o) {
     return c;
   }
-  // The smallest of the class stands for it.
   uint32_t least = c;
   for (uint32_t m = o->next; m != c; m = find_orbit(orbits, n, m)->next) {
     if (m < least) {
@@ -275,7 +237,6 @@ uint32_t tz_re_canonicalize(uint32_t c, int unicode) {
   return least;
 }
 
-// Adds to `s` every character of the classes of its characters.
 static void set_close_over_case(CharSet *s, int unicode) {
   size_t n;
   const ReOrbit *orbits = orbits_for(unicode, &n);
@@ -302,8 +263,6 @@ static void set_close_over_case(CharSet *s, int unicode) {
   vec_free(&added.r);
 }
 
-// v with i: the class as the representatives of the classes of its
-// characters, the space set operations work in (MaybeSimpleCaseFolding).
 static void set_fold(CharSet *s) {
   size_t n;
   const ReOrbit *orbits = orbits_for(1, &n);
@@ -339,15 +298,10 @@ static void set_fold(CharSet *s) {
   set_normalize(s);
 }
 
-// v with i: all characters, as the representatives of their classes.
 static void set_all_folded(CharSet *s) {
   set_add(s, 0, MAX_CODE_POINT);
   set_fold(s);
 }
-
-//===----------------------------------------------------------------------===//
-// Unicode properties
-//===----------------------------------------------------------------------===//
 
 static void add_runs(CharSet *s, const ReRun *runs, size_t n, int (*wanted)(uint32_t, uint32_t),
                      uint32_t which) {
@@ -388,7 +342,6 @@ static int in_list(ReList list, uint32_t c) {
   return 0;
 }
 
-// The entry for `name` (ASCII) of `kind`, or NULL.
 static const ReName *find_property_name(const char *name, int kind) {
   size_t lo = 0, hi = COUNT(re_property_names);
   while (lo < hi) {
@@ -409,7 +362,6 @@ static const ReName *find_property_name(const char *name, int kind) {
   return NULL;
 }
 
-// `\p{name}` or `\p{name=value}` into `s`; 0 if there is no such property.
 static int property_set(CharSet *s, const char *name, const char *value) {
   const ReName *entry;
   if (!value) {
@@ -459,21 +411,17 @@ static int is_id_continue(uint32_t c) {
          in_list(re_binary_properties[RE_BINARY_ID_CONTINUE], c);
 }
 
-//===----------------------------------------------------------------------===//
-// The tree
-//===----------------------------------------------------------------------===//
-
 enum {
   N_EMPTY,
-  N_CHAR,    // c
-  N_SET,     // set: the characters it matches, case and negation applied
-  N_SEQ,     // kids, in order
-  N_ALT,     // kids, the alternatives
-  N_GROUP,   // kid; capture: its number, 0 for (?:...)
-  N_REPEAT,  // kid, min, max, greedy
-  N_ASSERT,  // c: one of A_*
-  N_LOOK,    // kid, look: RE_LOOK_*
-  N_BACKREF, // refs (captures), or name until names are resolved
+  N_CHAR,
+  N_SET,
+  N_SEQ,
+  N_ALT,
+  N_GROUP,
+  N_REPEAT,
+  N_ASSERT,
+  N_LOOK,
+  N_BACKREF,
 };
 
 enum { A_LINE_START, A_LINE_END, A_WORD_BOUNDARY, A_NOT_WORD_BOUNDARY };
@@ -481,7 +429,7 @@ enum { A_LINE_START, A_LINE_END, A_WORD_BOUNDARY, A_NOT_WORD_BOUNDARY };
 typedef struct Node Node;
 struct Node {
   int kind;
-  uint32_t flags; // the flags in effect here, with the modifiers of groups around
+  uint32_t flags;
   uint32_t c;
   CharSet set;
   Node **kids;
@@ -492,35 +440,33 @@ struct Node {
   int greedy;
   int look;
   Vec refs;
-  Vec name;                            // N_BACKREF by name, until resolved
-  size_t at;                           // where it is in the pattern, for errors
-  uint32_t first_capture, end_capture; // the groups inside: [first, end)
-  Node *next_node;                     // all nodes, for freeing
+  Vec name;
+  size_t at;
+  uint32_t first_capture, end_capture;
+  Node *next_node;
 };
 
 typedef struct {
   const uint16_t *p;
   size_t length, pos;
   uint32_t flags;
-  int unicode; // u or v: the pattern is code points
-  int sets;    // v
-  int strict;  // TZ_RE_STRICT
+  int unicode;
+  int sets;
+  int strict;
   const char *error;
   size_t error_at;
   int depth;
-  uint32_t captures;       // the groups opened so far
-  uint32_t total_captures; // all groups, counted before parsing
-  int has_names;           // the pattern names some group
-  Vec *names;              // by group: its name in UTF-16, or empty
-  // The alternatives around each group: pairs (disjunction, alternative),
-  // for the check of duplicate names.
+  uint32_t captures;
+  uint32_t total_captures;
+  int has_names;
+  Vec *names;
   Vec *paths;
   Vec path;
   uint32_t disjunctions;
   Node *nodes;
-  Node **backrefs; // the references by name, resolved at the end
+  Node **backrefs;
   size_t backref_count, backref_capacity;
-  Vec open; // the groups being parsed, by number
+  Vec open;
 } Parser;
 
 static Node *new_node(Parser *ps, int kind) {
@@ -561,10 +507,6 @@ static void free_nodes(Parser *ps) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// Reading the pattern
-//===----------------------------------------------------------------------===//
-
 static int fail(Parser *ps, const char *message) {
   if (!ps->error) {
     ps->error = message;
@@ -591,7 +533,6 @@ static uint32_t peek_unit(const Parser *ps) { return unit_at(ps, ps->pos); }
 static int is_lead(uint32_t u) { return u >= 0xD800 && u <= 0xDBFF; }
 static int is_trail(uint32_t u) { return u >= 0xDC00 && u <= 0xDFFF; }
 
-// The next character: a code point with u or v, a code unit without.
 static uint32_t peek_char(const Parser *ps, size_t *size) {
   uint32_t u = peek_unit(ps);
   *size = 1;
@@ -636,7 +577,6 @@ static int hex_value(uint32_t c) {
   return -1;
 }
 
-// `n` hex digits at the position; -1 (nothing consumed) if they are not there.
 static int64_t read_hex(Parser *ps, int n) {
   int64_t value = 0;
   for (int i = 0; i < n; ++i) {
@@ -660,8 +600,6 @@ static int is_line_terminator(uint32_t c) {
   return c == '\n' || c == '\r' || c == 0x2028 || c == 0x2029;
 }
 
-// After `\u`: XXXX, a surrogate pair \uXXXX\uXXXX, or {X...} with u or v (or
-// in a group name, `unicode`). -1 (nothing consumed) if not valid.
 static int64_t read_unicode_escape(Parser *ps, int unicode) {
   size_t start = ps->pos;
   if (unicode && accept_unit(ps, '{')) {
@@ -700,13 +638,6 @@ static int64_t read_unicode_escape(Parser *ps, int unicode) {
   return value;
 }
 
-//===----------------------------------------------------------------------===//
-// Groups and their names
-//===----------------------------------------------------------------------===//
-
-// The capture groups of the whole pattern, before parsing it: `\2` is a
-// reference only if there are two groups, also ones that come later, and
-// `\k` means a name only if some group has one (V8's ScanForCaptures).
 static void scan_for_captures(Parser *ps) {
   uint32_t count = 0;
   int class_depth = 0;
@@ -735,8 +666,6 @@ static void scan_for_captures(Parser *ps) {
   ps->total_captures = count;
 }
 
-// A RegExpIdentifierName, after `<`, up to and with `>`: its UTF-16 into
-// `name`. Its escapes are read with u even without the flag.
 static int parse_group_name(Parser *ps, Vec *name) {
   int first = 1;
   for (;;) {
@@ -757,7 +686,6 @@ static int parse_group_name(Parser *ps, Vec *name) {
       }
       c = (uint32_t)value;
     } else {
-      // A surrogate pair is one code point here even without u.
       uint32_t u = peek_unit(ps);
       if (is_lead(u) && is_trail(unit_at(ps, ps->pos + 1))) {
         c = 0x10000 + ((u - 0xD800) << 10) + (unit_at(ps, ps->pos + 1) - 0xDC00);
@@ -785,8 +713,6 @@ static int same_name(const Vec *a, const Vec *b) {
          (a->length == 0 || memcmp(a->data, b->data, a->length * sizeof(uint32_t)) == 0);
 }
 
-// Whether two groups, by the alternatives around them, can both take part in
-// one match: unless some `|` separates them.
 static int might_both_participate(const Vec *a, const Vec *b) {
   for (size_t i = 0; i + 1 < a->length && i + 1 < b->length; i += 2) {
     if (a->data[i] != b->data[i]) {
@@ -800,11 +726,6 @@ static int might_both_participate(const Vec *a, const Vec *b) {
   return 1;
 }
 
-//===----------------------------------------------------------------------===//
-// Escapes
-//===----------------------------------------------------------------------===//
-
-// \d \D \s \S \w \W into `s`; 0 if `c` is none of them.
 static int class_escape(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
   uint32_t lower = c | 0x20;
   if (lower != 'd' && lower != 's' && lower != 'w') {
@@ -825,8 +746,6 @@ static int class_escape(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
     set_add(s, 'A', 'Z');
     set_add(s, '_', '_');
     set_add(s, 'a', 'z');
-    // With u (or v) and i, the characters that fold into those are word
-    // characters too: ſ (s) and K (Kelvin, k).
     if (ps->unicode && (flags & TZ_RE_IGNORE_CASE)) {
       set_add(s, 0x017F, 0x017F);
       set_add(s, 0x212A, 0x212A);
@@ -835,7 +754,6 @@ static int class_escape(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
   set_normalize(s);
   if (c != lower) {
     if (ps->sets && (flags & TZ_RE_IGNORE_CASE)) {
-      // v with i: the complement among the folded characters.
       CharSet all = {{NULL, 0, 0}};
       set_all_folded(&all);
       set_fold(s);
@@ -852,7 +770,6 @@ static int class_escape(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
   return 1;
 }
 
-// After `\p` or `\P`: `{name}` or `{name=value}`, into `s`.
 static int property_escape(Parser *ps, int negated, uint32_t flags, CharSet *s) {
   if (!accept_unit(ps, '{')) {
     return fail(ps, "Invalid property name");
@@ -882,10 +799,9 @@ static int property_escape(Parser *ps, int negated, uint32_t flags, CharSet *s) 
     }
     ++ps->pos;
   }
-  ++ps->pos; // '}'
+  ++ps->pos;
   name[n] = 0;
   value[v] = 0;
-  // The properties of strings of the v flag: sets of emoji sequences.
   static const char *const of_strings[] = {"Basic_Emoji",
                                            "Emoji_Keycap_Sequence",
                                            "RGI_Emoji_Modifier_Sequence",
@@ -918,9 +834,6 @@ static int property_escape(Parser *ps, int negated, uint32_t flags, CharSet *s) 
   return 1;
 }
 
-// A CharacterEscape after `\` (the escapes that stand for one character):
-// the character, or -1 after an error. `in_class`: inside [ ], where \b is
-// backspace, and without u `\c` takes digits and `_` too.
 static int64_t character_escape(Parser *ps, int in_class) {
   size_t start = ps->pos;
   uint32_t c = next_char(ps);
@@ -951,8 +864,6 @@ static int64_t character_escape(Parser *ps, int in_class) {
       fail(ps, "Invalid Unicode escape");
       return -1;
     }
-    // Without u, `\c` that starts no escape is a backslash; the `c` is read
-    // again as itself.
     ps->pos = start;
     return '\\';
   }
@@ -964,7 +875,7 @@ static int64_t character_escape(Parser *ps, int in_class) {
       fail(ps, in_class ? "Invalid class escape" : "Invalid decimal escape");
       return -1;
     }
-    break; // a legacy octal escape, below
+    break;
   case 'x': {
     int64_t value = read_hex(ps, 2);
     if (value >= 0) {
@@ -990,7 +901,6 @@ static int64_t character_escape(Parser *ps, int in_class) {
   default:
     break;
   }
-  // Legacy octal escapes: up to three digits, at most \377.
   if (!ps->unicode && c >= '0' && c <= '7') {
     uint32_t value = c - '0';
     if (peek_unit(ps) >= '0' && peek_unit(ps) <= '7') {
@@ -1003,8 +913,6 @@ static int64_t character_escape(Parser *ps, int in_class) {
     }
     return value;
   }
-  // An identity escape: with u only the syntax characters and `/` (and `-`
-  // in a class); without, anything but a letter that starts an escape.
   if (ps->unicode) {
     if (is_syntax_char(c) || c == '/' || (in_class && c == '-')) {
       return c;
@@ -1028,11 +936,6 @@ static int64_t character_escape(Parser *ps, int in_class) {
   return c;
 }
 
-//===----------------------------------------------------------------------===//
-// Classes
-//===----------------------------------------------------------------------===//
-
-// One character as a set, case applied: under i, all of its class.
 static void char_set(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
   set_add(s, c, c);
   if ((flags & TZ_RE_IGNORE_CASE) && !ps->sets) {
@@ -1042,8 +945,6 @@ static void char_set(Parser *ps, uint32_t c, uint32_t flags, CharSet *s) {
   }
 }
 
-// A class atom without v: a character, or with `*is_set` a class escape such
-// as \d. Returns 0 after an error.
 static int class_atom(Parser *ps, uint32_t flags, uint32_t *c, CharSet *s, int *is_set) {
   *is_set = 0;
   if (at_end(ps)) {
@@ -1081,14 +982,13 @@ static int class_atom(Parser *ps, uint32_t flags, uint32_t *c, CharSet *s, int *
   return 1;
 }
 
-// `[...]` without v, after `[`: the set it matches.
 static Node *parse_class(Parser *ps) {
   Node *n = new_node(ps, N_SET);
   n->at = ps->pos - 1;
   uint32_t flags = ps->flags;
   int negated = accept_unit(ps, '^');
   CharSet *s = &n->set;
-  int after_lead = 0; // the last atom was a lead surrogate
+  int after_lead = 0;
   for (;;) {
     if (at_end(ps)) {
       return fail_node(ps, "Unterminated character class");
@@ -1103,7 +1003,6 @@ static Node *parse_class(Parser *ps) {
       vec_free(&atom.r);
       return NULL;
     }
-    // `[😀]` without u is a class of the two halves of the emoji.
     if (ps->strict && !ps->unicode && !a_set && after_lead && is_trail(a)) {
       vec_free(&atom.r);
       return fail_node(ps, "without the u flag, a class takes a character written with two "
@@ -1119,7 +1018,6 @@ static Node *parse_class(Parser *ps) {
         return NULL;
       }
       if (a_set || b_set) {
-        // `[\d-z]`: an error with u; without, the `-` is itself (Annex B).
         if (ps->unicode) {
           vec_free(&atom.r);
           vec_free(&other.r);
@@ -1162,10 +1060,9 @@ static Node *parse_class(Parser *ps) {
   return n;
 }
 
-// A class of the v flag: characters, and strings (sorted, with lengths).
 typedef struct {
   CharSet chars;
-  Vec *strings; // each a string of code points, of 0 or 2 or more of them
+  Vec *strings;
   size_t count, capacity;
 } ClassSet;
 
@@ -1243,7 +1140,6 @@ static void class_subtract(ClassSet *a, ClassSet *b) {
 
 static int parse_class_contents(Parser *ps, ClassSet *result);
 
-// `\q{abc|d}` after `\q`: strings, each case-folded under i.
 static int parse_class_strings(Parser *ps, ClassSet *c) {
   if (!accept_unit(ps, '{')) {
     return fail(ps, "Invalid escape");
@@ -1301,8 +1197,6 @@ static int is_set_syntax(uint32_t c) {
          c == '-' || c == '\\' || c == '|';
 }
 
-// A ClassSetOperand: a nested class, \q{...}, a class escape, or one
-// character (returned in `*single` with `*is_char` set, for ranges).
 static int parse_class_operand(Parser *ps, ClassSet *c, uint32_t *single, int *is_char) {
   *is_char = 0;
   uint32_t flags = ps->flags;
@@ -1359,8 +1253,6 @@ static int at_operator(const Parser *ps, uint32_t c) {
   return peek_unit(ps) == c && unit_at(ps, ps->pos + 1) == c;
 }
 
-// One operand into `c`; in a union also a range a-b (`range_ok`), and then
-// returns 2.
 static int parse_class_element(Parser *ps, ClassSet *c, int range_ok) {
   uint32_t a, b;
   int is_char, result = 1;
@@ -1400,9 +1292,6 @@ static int parse_class_element(Parser *ps, ClassSet *c, int range_ok) {
   return result;
 }
 
-// The contents of a class of the v flag after `[`, up to and with `]`:
-// a union (of operands and ranges), or a chain of && or of -- between
-// operands; mixing them needs nested classes.
 static int parse_class_contents(Parser *ps, ClassSet *result) {
   int negated = accept_unit(ps, '^');
   int fold = (ps->flags & TZ_RE_IGNORE_CASE) != 0;
@@ -1413,7 +1302,6 @@ static int parse_class_contents(Parser *ps, ClassSet *result) {
     ok = first != 0;
     uint32_t op = at_operator(ps, '&') ? '&' : at_operator(ps, '-') ? '-' : 0;
     if (ok && op) {
-      // An intersection or a subtraction, of operands only.
       if (first == 2) {
         ok = fail(ps, "Invalid set operation in character class");
       }
@@ -1488,8 +1376,6 @@ static int compare_strings_longest(const void *a, const void *b) {
   return x > y ? -1 : x < y;
 }
 
-// `[...]` with v, after `[`: a set, or the strings, longest first, then the
-// set, as alternatives.
 static Node *parse_class_set(Parser *ps) {
   size_t at = ps->pos - 1;
   ClassSet c = {{{NULL, 0, 0}}, NULL, 0, 0};
@@ -1532,13 +1418,8 @@ static Node *parse_class_set(Parser *ps) {
   return alt;
 }
 
-//===----------------------------------------------------------------------===//
-// Terms
-//===----------------------------------------------------------------------===//
-
 static Node *parse_disjunction(Parser *ps);
 
-// A character as a node: under i, the set of its class.
 static Node *char_node(Parser *ps, uint32_t c) {
   if (!(ps->flags & TZ_RE_IGNORE_CASE)) {
     Node *n = new_node(ps, N_CHAR);
@@ -1557,8 +1438,6 @@ static Node *char_node(Parser *ps, uint32_t c) {
   return n;
 }
 
-// `{n}`, `{n,}` or `{n,m}` at the position: 1 and the bounds, or 0 with
-// nothing consumed if it is not one.
 static int read_braces(Parser *ps, uint32_t *min, uint32_t *max) {
   size_t start = ps->pos;
   if (!accept_unit(ps, '{')) {
@@ -1602,7 +1481,6 @@ static int read_braces(Parser *ps, uint32_t *min, uint32_t *max) {
   return 1;
 }
 
-// A quantifier after an atom, if there is one.
 static Node *parse_quantifier(Parser *ps, Node *atom) {
   uint32_t min, max;
   size_t at = ps->pos;
@@ -1624,7 +1502,7 @@ static Node *parse_quantifier(Parser *ps, Node *atom) {
       if (ps->unicode) {
         return fail_node(ps, "Incomplete quantifier");
       }
-      return atom; // `{` as a character, read next (Annex B)
+      return atom;
     }
     if (min > max) {
       ps->pos = at;
@@ -1661,7 +1539,6 @@ static int is_quantifier_start(Parser *ps) {
   return braces;
 }
 
-// The flags of a modifier group `(?ims-ims:`, after `(?`; 0 if it is not one.
 static int parse_modifiers(Parser *ps, uint32_t *flags) {
   uint32_t add = 0, remove = 0;
   int dash = 0;
@@ -1704,13 +1581,10 @@ static int parse_modifiers(Parser *ps, uint32_t *flags) {
   return 1;
 }
 
-// `(` up to the matching `)`: a group, a lookaround, or a group with
-// modifiers.
 static Node *parse_group(Parser *ps, int *quantifiable) {
   size_t at = ps->pos - 1;
   *quantifiable = 1;
   if (!accept_unit(ps, '?')) {
-    // A capture group.
     uint32_t index = ++ps->captures;
     if (index > MAX_CAPTURES) {
       return fail_node(ps, "Too many captures");
@@ -1757,7 +1631,6 @@ static Node *parse_group(Parser *ps, int *quantifiable) {
     n->kid = kid;
     n->first_capture = first;
     n->end_capture = ps->captures + 1;
-    // Without u, a lookahead may be quantified (Annex B).
     *quantifiable = !ps->unicode && !(look & RE_LOOK_BEHIND);
     return n;
   }
@@ -1823,7 +1696,6 @@ static Node *parse_group(Parser *ps, int *quantifiable) {
   return n;
 }
 
-// `\` and what follows outside a class, after `\`.
 static Node *parse_atom_escape(Parser *ps) {
   size_t at = ps->pos - 1;
   if (at_end(ps)) {
@@ -1836,7 +1708,6 @@ static Node *parse_atom_escape(Parser *ps) {
     n->c = c == 'b' ? A_WORD_BOUNDARY : A_NOT_WORD_BOUNDARY;
     return n;
   }
-  // A backreference by number: to a group anywhere in the pattern.
   if (c >= '1' && c <= '9') {
     size_t start = ps->pos;
     uint64_t number = 0;
@@ -1845,9 +1716,6 @@ static Node *parse_atom_escape(Parser *ps) {
       ++ps->pos;
     }
     if (number <= ps->total_captures) {
-      // Inside the group it refers to, nothing can have been captured yet:
-      // V8 makes it nothing, which differs from an empty reference with u
-      // (see match_backref in regex.c), and so does tz.
       for (size_t i = 0; i < ps->open.length; ++i) {
         if (ps->open.data[i] == number) {
           return new_node(ps, N_EMPTY);
@@ -1862,8 +1730,6 @@ static Node *parse_atom_escape(Parser *ps) {
     if (ps->unicode) {
       return fail_node(ps, "Invalid escape");
     }
-    // Without u it is an octal escape or the digit itself (Annex B); in a
-    // literal, a reference to a group that is not there is surely a mistake.
     if (ps->strict) {
       ps->pos = at;
       return fail_node(ps, "there is no such group to refer to (JavaScript would read an octal "
@@ -1881,7 +1747,6 @@ static Node *parse_atom_escape(Parser *ps) {
       ps->error = "Invalid named reference";
       return NULL;
     }
-    // Inside a group of its name: nothing, as with numbers above.
     for (size_t i = 0; i < ps->open.length; ++i) {
       if (same_name(&ps->names[ps->open.data[i]], &n->name)) {
         n->kind = N_EMPTY;
@@ -1915,7 +1780,6 @@ static Node *parse_atom_escape(Parser *ps) {
     return set;
   }
   if ((c == 'p' || c == 'P') && !ps->unicode && ps->strict) {
-    // `\p{L}` without u is the text "p{L}": surely meant otherwise.
     return fail_node(ps, "'\\p' needs the u or v flag: without it, '\\p{L}' is the text 'p{L}'");
   }
   if ((c == 'p' || c == 'P') && ps->unicode) {
@@ -1936,8 +1800,6 @@ static Node *parse_atom_escape(Parser *ps) {
   return char_node(ps, (uint32_t)value);
 }
 
-// A term: an assertion, or an atom with an optional quantifier. NULL with
-// no error at the end of an alternative.
 static Node *parse_term(Parser *ps) {
   if (at_end(ps)) {
     return NULL;
@@ -2083,11 +1945,6 @@ static Node *parse_disjunction(Parser *ps) {
   return alt;
 }
 
-//===----------------------------------------------------------------------===//
-// What the tree says
-//===----------------------------------------------------------------------===//
-
-// Whether `n` can match the empty string.
 static int nullable(const Node *n) {
   switch (n->kind) {
   case N_CHAR:
@@ -2111,14 +1968,11 @@ static int nullable(const Node *n) {
     return nullable(n->kid);
   case N_REPEAT:
     return n->min == 0 || nullable(n->kid);
-  default: // assertions, lookarounds, backreferences
+  default:
     return 1;
   }
 }
 
-// The captures that hold a value whenever `n` matches, as bits in `set` (a
-// word per 32 captures). With `by_name`, a group sets all the groups of its
-// name: the name holds a value if every path sets one of them.
 static void mandatory(const Parser *ps, const Node *n, uint32_t *set, int by_name) {
   size_t words = (ps->captures + 1 + 31) / 32;
   switch (n->kind) {
@@ -2128,7 +1982,6 @@ static void mandatory(const Parser *ps, const Node *n, uint32_t *set, int by_nam
     }
     return;
   case N_ALT: {
-    // What every alternative sets.
     uint32_t *all = (uint32_t *)re_alloc(words * sizeof(uint32_t));
     uint32_t *one = (uint32_t *)re_alloc(words * sizeof(uint32_t));
     for (size_t w = 0; w < words; ++w) {
@@ -2176,8 +2029,6 @@ static void mandatory(const Parser *ps, const Node *n, uint32_t *set, int by_nam
   }
 }
 
-// The code units a match of `n` can start with, into `bits` (256) and
-// `*wide`; returns 0 if any may.
 static int first_units(const Node *n, uint32_t *bits, int *wide, int unicode) {
   switch (n->kind) {
   case N_CHAR: {
@@ -2208,7 +2059,7 @@ static int first_units(const Node *n, uint32_t *bits, int *wide, int unicode) {
     for (size_t i = 0; i < n->count; ++i) {
       const Node *kid = n->kids[i];
       if (kid->kind == N_ASSERT || kid->kind == N_LOOK) {
-        continue; // they match nothing; what follows still starts the match
+        continue;
       }
       if (!first_units(kid, bits, wide, unicode)) {
         return 0;
@@ -2237,8 +2088,6 @@ static int first_units(const Node *n, uint32_t *bits, int *wide, int unicode) {
   }
 }
 
-// Whether every match starts at the start of the input: `^` without m first
-// in each alternative.
 static int anchored(const Node *n) {
   switch (n->kind) {
   case N_ASSERT:
@@ -2259,10 +2108,6 @@ static int anchored(const Node *n) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The code
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   Vec code;
   uint32_t registers;
@@ -2274,8 +2119,6 @@ static void emit(Emitter *e, uint32_t word) { vec_push(&e->code, word); }
 
 static uint32_t here(const Emitter *e) { return (uint32_t)e->code.length; }
 
-// A character instruction for a set: RE_ALL, RE_ANY or RE_SET, forward or
-// back.
 static void emit_set(Emitter *e, const CharSet *s, int back) {
   uint32_t max = e->unicode ? MAX_CODE_POINT : 0xFFFF;
   size_t n = set_ranges(s);
@@ -2283,7 +2126,6 @@ static void emit_set(Emitter *e, const CharSet *s, int back) {
     emit(e, back ? RE_ALL_BACK : RE_ALL);
     return;
   }
-  // Everything but the line terminators: `.`.
   if (n == 4 && s->r.data[0] == 0 && s->r.data[1] == 9 && s->r.data[2] == 11 &&
       s->r.data[3] == 12 && s->r.data[4] == 14 && s->r.data[5] == 0x2027 &&
       s->r.data[6] == 0x202A && s->r.data[7] >= max) {
@@ -2320,13 +2162,10 @@ static void emit_set(Emitter *e, const CharSet *s, int back) {
   e->code.data[count_at] = wide;
 }
 
-// Whether `n` is one character: a quantifier over it needs no state.
 static int is_single(const Node *n) { return n->kind == N_CHAR || n->kind == N_SET; }
 
 static void emit_node(Emitter *e, const Node *n, int back);
 
-// A capture group: its start is kept in a register and the capture set when
-// the group ends, so that a reference to it from inside sees the old value.
 static void emit_group(Emitter *e, const Node *n, int back) {
   if (!n->capture) {
     emit_node(e, n->kid, back);
@@ -2371,7 +2210,6 @@ static void emit_repeat(Emitter *e, const Node *n, int back) {
     return;
   }
   int empty = nullable(kid);
-  // `x?`, `x*` and `x+` over x that cannot be empty need no counter.
   if (!empty && n->min <= 1 && (n->max == 1 || n->max == RE_INFINITY)) {
     if (n->min == 1) {
       emit_reset(e, n);
@@ -2390,12 +2228,9 @@ static void emit_repeat(Emitter *e, const Node *n, int back) {
       emit(e, RE_GOTO);
       emit(e, loop);
     }
-    // Greedy, the split tries the body first; lazy, the exit.
     e->code.data[exit_at] = here(e);
     return;
   }
-  // The general loop: a counter, and the position each iteration started at
-  // for the check that an optional one matched something.
   uint32_t counter = e->registers++;
   uint32_t position = e->registers++;
   emit(e, RE_SET_REGISTER);
@@ -2447,7 +2282,6 @@ static void emit_node(Emitter *e, const Node *n, int back) {
     }
     return;
   case N_ALT: {
-    // split L1; a; goto end; L1: split L2; b; goto end; L2: c; end:
     Vec ends = {NULL, 0, 0};
     for (size_t i = 0; i < n->count; ++i) {
       size_t split_at = 0;
@@ -2523,10 +2357,6 @@ static void emit_node(Emitter *e, const Node *n, int back) {
   }
 }
 
-//===----------------------------------------------------------------------===//
-// The program
-//===----------------------------------------------------------------------===//
-
 int tz_re_parse_flags(const uint16_t *text, size_t length, uint32_t *flags) {
   static const char letters[] = "dgimsuvy";
   uint32_t result = 0;
@@ -2561,8 +2391,6 @@ uint32_t tz_re_name(const uint32_t *program, uint32_t capture, uint32_t *start) 
   return program[at];
 }
 
-// `source`: the pattern with `/` outside classes and line terminators
-// escaped, as RegExp.prototype.source gives it; "(?:)" for an empty one.
 static void escape_source(const uint16_t *pattern, size_t length, Vec *out) {
   if (length == 0) {
     static const char empty[] = "(?:)";
@@ -2581,7 +2409,7 @@ static void escape_source(const uint16_t *pattern, size_t length, Vec *out) {
         vec_push(out, c);
         continue;
       }
-      out->length--; // `\` and a line break: the escape below covers it
+      out->length--;
     } else if (c == '[') {
       in_class = 1;
     } else if (c == ']') {
@@ -2610,8 +2438,6 @@ static void push_units(Vec *program, const uint32_t *units, size_t n) {
   }
 }
 
-// Resolves the references by name; with several groups of the name, it is
-// the one that holds a value.
 static int resolve_names(Parser *ps) {
   for (size_t i = 0; i < ps->backref_count; ++i) {
     Node *n = ps->backrefs[i];
@@ -2695,7 +2521,7 @@ uint32_t *tz_re_compile(const uint16_t *pattern, size_t length, uint32_t flags, 
     out.data[TZ_RE_H_MANDATORY] = (uint32_t)out.length;
     for (int by_name = 0; by_name < 2; ++by_name) {
       memset(bits, 0, words * sizeof(uint32_t));
-      bits[0] = 1; // the match itself
+      bits[0] = 1;
       mandatory(&ps, root, bits, by_name);
       for (size_t w = 0; w < words; ++w) {
         vec_push(&out, bits[w]);

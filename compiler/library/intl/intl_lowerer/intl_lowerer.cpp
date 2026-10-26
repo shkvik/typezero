@@ -47,14 +47,10 @@ int optionIndex(llvm::StringRef name) {
   return at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
 }
 
-} // namespace
+}
 
 IntlLowerer::IntlLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// TzIntlOptions (runtime/library/intl/intl/intl.h): { string locale, [N x
-// string] text, [N x double] number, i64 has_text, i64 has_number, i32
-// has_locale }. The strings are borrowed from the operands, which `held` keeps
-// until after the call.
 llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
                                           std::vector<Lowering::Operand> &held) {
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *i64 = lowering_.builder_.getInt64Ty(),
@@ -72,8 +68,6 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
         mask, lowering_.builder_.CreateShl(lowering_.builder_.CreateZExt(has, i64),
                                            lowering_.builder_.getInt64(bit)));
   };
-  // A value and whether it is there, of a `T | undefined` or a T; an atom
-  // (a string literal type) as its text.
   auto split = [&](llvm::Value *value,
                    const Type *type) -> std::pair<llvm::Value *, llvm::Value *> {
     const Type *inner = type->nonOptional();
@@ -110,18 +104,17 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
     if (options->type->isUndefined()) {
       lowering_.stmtLowerer().emitDiscarded(options);
     } else {
-      Lowering::Operand object = lowering_.refCounts().emitOperand(options, /*canBorrow=*/true);
+      Lowering::Operand object = lowering_.refCounts().emitOperand(options, true);
       held.push_back(object);
       for (const Field &field : object.type->fields()) {
         int index = optionIndex(field.name);
-        if (index < 0 || field.type->isUndefined()) { // undefined is not given
+        if (index < 0 || field.type->isUndefined()) {
           continue;
         }
         llvm::Value *loaded = lowering_.builder_.CreateLoad(
             lowering_.moduleBuilder().lower(field.type),
             lowering_.objectLayouts().fieldAddress(object.value, object.type, field.name),
             field.name);
-        // useGrouping of `string | boolean`: the part its tag says.
         if (const Type *u = field.type->nonOptional(); u->isTagged()) {
           llvm::Value *tag = lowering_.unionLayout().unionTag(loaded);
           llvm::Value *isText = lowering_.builder_.CreateICmpEQ(
@@ -179,7 +172,7 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
 
 Lowering::IntlNumber IntlLowerer::emitIntlNumber(Expr *arg) {
   Lowering::IntlNumber n;
-  n.operand = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+  n.operand = lowering_.refCounts().emitOperand(arg, true);
   llvm::Value *value = n.operand.value;
   const Type *type = n.operand.type;
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
@@ -204,9 +197,6 @@ std::vector<llvm::Value *> IntlLowerer::intlNumberArgs(const Lowering::IntlNumbe
   return {lowering_.builder_.getInt32(uint32_t(n.kind)), n.d, n.integer, n.meta};
 }
 
-// TzIntlShape: what an array of `type` holds, the layout of its objects with
-// the fields in their order, its size, and the offset of each field of
-// TZ_IF_*, -1 for those it has not.
 llvm::Constant *IntlLowerer::intlShape(const Type *type) {
   if (llvm::Constant *shape = intlShapes_.lookup(type)) {
     return shape;
@@ -235,16 +225,13 @@ llvm::Constant *IntlLowerer::intlShape(const Type *type) {
            lowering_.module_->getDataLayout().getTypeAllocSize(layout.type)),
        llvm::ConstantArray::get(offsetsTy, at)});
   auto *global =
-      new llvm::GlobalVariable(*lowering_.module_, value->getType(), /*isConstant=*/true,
+      new llvm::GlobalVariable(*lowering_.module_, value->getType(), true,
                                llvm::GlobalValue::PrivateLinkage, value, "tz.intl.shape");
   intlShapes_[type] = global;
 
   return global;
 }
 
-// The code of `nf.format`, `dtf.format` or `collator.compare` as a value of
-// `fnType`: it takes the object as its environment, calls the runtime and
-// releases its arguments, which it owns.
 llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
   llvm::Constant *&info = intlBound_[{kind, fnType}];
   if (info) {
@@ -313,8 +300,7 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
   lowering_.function_ = outer;
   lowering_.builder_.restoreIP(point);
   info = new llvm::GlobalVariable(
-      *lowering_.module_, lowering_.fnInfoTy_, /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, lowering_.fnInfoTy_, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(lowering_.fnInfoTy_,
                                 {code, lowering_.stringLowerer().stringLiteral(u"")}),
       "tz.fninfo.intl");
@@ -322,8 +308,6 @@ llvm::Constant *IntlLowerer::intlBoundInfo(IntlKind kind, const Type *fnType) {
   return info;
 }
 
-// The locales of getCanonicalLocales and supportedLocalesOf as an owned
-// array: none, one string, or the array itself.
 llvm::Value *IntlLowerer::emitLocaleArray(Expr *arg) {
   const Type *element = Type::string();
   if (arg && arg->type == Type::array(element)) {
@@ -345,4 +329,4 @@ llvm::Value *IntlLowerer::emitLocaleArray(Expr *arg) {
   return array;
 }
 
-} // namespace tz
+}

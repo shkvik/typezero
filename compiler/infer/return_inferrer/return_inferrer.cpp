@@ -33,7 +33,6 @@ bool ReturnInferrer::returnsValue(const Stmt *stmt) {
   }
   switch (stmt->kind()) {
   case Stmt::Kind::Return: {
-    // `return void f()` gives undefined, as a plain `return` does.
     const Expr *value = cast<ReturnStmt>(stmt)->value;
     auto *unary = llvm::dyn_cast_or_null<UnaryExpr>(value);
     return value && !(unary && unary->op == UnaryOp::Void);
@@ -68,20 +67,17 @@ const Type *ReturnInferrer::returnType(FuncSymbol *fn) {
   if (fn->ret) {
     return fn->ret;
   }
-  // Each copy of a template finds its own (see checkTemplateInstance).
   if (checker_.lateClasses().isTemplate(fn)) {
     return Type::unknown();
   }
   if (fn->inferring && checker_.suspended_.contains(fn)) {
-    // Code of another file, checked out of turn because this function
-    // needs it (see loadEarly), needs this function in turn.
     checker_.diags_.error(fn->loc, "cannot tell what " + quotedName(fn->name) +
                                        " returns: it uses a file that imports it back and calls it "
                                        "while loading; declare its return type, e.g. '): int'");
-    checker_.suspended_.erase(fn); // reported once
+    checker_.suspended_.erase(fn);
     return Type::error();
   }
-  if (fn->inferring) { // a call in a cycle being inferred: the type so far
+  if (fn->inferring) {
     return fn->assumed ? fn->assumed : Type::error();
   }
   inferReturnType(fn);
@@ -121,8 +117,6 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
   saved.branchDepth = checker_.branchDepth_;
   checker_.flow_ = Checker::Flow();
   if (NestedGroup *group = fn ? fn->group : nullptr) {
-    // A function declared in a block sees what is visible in the block,
-    // wherever the check started.
     checker_.scopes_.resize(group->scopeDepth);
     checker_.typeScopes_.resize(group->scopeDepth);
     checker_.functions_.resize(group->functionDepth);
@@ -134,7 +128,6 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
       checker_.blockNames_.pop_back();
     }
   } else if (!fn || !fn->isExpression) {
-    // A top-level function sees only the globals of its file.
     checker_.scopes_.resize(1);
     checker_.typeScopes_.resize(1);
     checker_.functions_.clear();
@@ -144,13 +137,8 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
     checker_.trial_ = false;
     if (Module *home = fn ? checker_.declModules_.lookup(fn) : nullptr) {
       checker_.moduleDeclarer().useModule(home);
-      // The variables its imports name that are declared by now: those of
-      // a file whose code is being checked, in an import cycle.
       checker_.importBinder().bindImports();
     }
-    // Its errors are its own, not those of an instance being checked; but
-    // those of the code of a class that a copy of a template made are the
-    // copy's (see checkLateClasses).
     checker_.checkingInstance_ = nullptr;
     checker_.diags_.setCapture(nullptr);
     if (Checker::Instance *owner = fn && fn->cls ? checker_.lateOwners_.lookup(fn->cls) : nullptr) {
@@ -158,10 +146,8 @@ Checker::BodyState ReturnInferrer::enterBody(const FunctionDecl *fn) {
       checker_.diags_.setCapture(&checker_.lateErrors_[owner]);
     }
   }
-  // The branches around the scopes it sees: a function's body is not one.
   checker_.scopeBranches_.resize(checker_.scopes_.size(), 0);
   checker_.branchDepth_ = checker_.scopeBranches_.empty() ? 0 : checker_.scopeBranches_.back();
-  // An arrow is checked where it is written.
   checker_.currentFunction_ = nullptr;
   checker_.targets_.clear();
   checker_.pendingLabels_.clear();
@@ -196,9 +182,6 @@ void ReturnInferrer::leaveBody(Checker::BodyState &saved) {
 }
 
 void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
-  // A method of an instance of a generic class returns what the method of
-  // the generic class returns, with the types of the instance; unless it
-  // makes a class, which each instance makes its own (see isTemplate).
   if (FunctionDecl *decl = fn->decl; decl && decl->generic && decl->cls && decl->cls->generic &&
                                      !checker_.lateClasses().hasClassExpr(decl->generic)) {
     const Type *ret = returnType(decl->generic->sym);
@@ -208,20 +191,17 @@ void ReturnInferrer::inferReturnType(FuncSymbol *fn) {
                   : Type::error();
     return;
   }
-  // A method that takes the type of the one it overrides.
   if (const Type *inherited = checker_.classLinks().inheritedReturnType(fn)) {
     fn->ret = inherited;
     return;
   }
   FunctionDecl *decl = fn->decl;
   Checker::BodyState saved = enterBody(decl);
-  // Real diagnostics, also when a trial in a cycle calls this function;
-  // unless this is a function inside a copy that the trial checks.
   bool muted = checker_.diags_.setMuted(decl->isClosure() && saved.trial);
   if (!decl->isClosure() && !checker_.topLevelDone_) {
-    checker_.early_ = fn; // top-level code calls it: globals declared later are not there yet
+    checker_.early_ = fn;
   } else if (decl->group && !decl->group->finished) {
-    checker_.early_ = fn; // the same for the variables declared later in its block
+    checker_.early_ = fn;
   }
 
   if (auto cycle = checker_.cycleOf_.find(fn); cycle != checker_.cycleOf_.end()) {
@@ -251,12 +231,10 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
   checker_.yields_ = outerYields;
   bool fallsOff = !ReturnChecker::alwaysReturns(decl->body);
   const Type *type =
-      decl->isGenerator ? checker_.generatorChecker().inferGeneratorType(fn, yields, returns,
-                                                                         fallsOff, /*report=*/true)
-      : decl->isAsync
-          ? checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, /*report=*/true)
-          : unifyReturns(fn, returns, fallsOff, /*report=*/true);
-  // The generator of safeTry also returns the errors of its `yield*`.
+      decl->isGenerator
+          ? checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, true)
+      : decl->isAsync ? checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, true)
+                      : unifyReturns(fn, returns, fallsOff, true);
   if (decl->safeTry && type && !type->isError()) {
     type = checker_.safeTryChecker().generatorResult(decl, type);
   }
@@ -265,9 +243,6 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
     checker_.asyncChecker().finishAsyncReturns(fn, returns);
     return;
   }
-  // Now every return converts its value to that type, and in a generator
-  // every yield to the type of the values it gives; in an async generator,
-  // what they await converts once it is there (see emitAsyncYield).
   bool async = decl->isAsync;
   const Type *returned = decl->isGenerator && (fn->ret->isIterator() || fn->ret->isAsyncIterator())
                              ? fn->ret->returned()
@@ -291,13 +266,6 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
   }
 }
 
-// Each function of the cycle is checked on a fresh copy of its body, with
-// diagnostics off; a call within the cycle returns the type found so far for
-// its callee, at first none (an error type that the other branch of `?:` or
-// `??` overrides). The types grow until they stop changing, which takes a few
-// rounds: a type only widens, from int to long to double, or to `T |
-// undefined`. The bodies themselves are checked afterwards like any other,
-// with the types found.
 void ReturnInferrer::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
   for (FuncSymbol *fn : cycle) {
     fn->inferring = true;
@@ -322,15 +290,15 @@ void ReturnInferrer::inferCycle(llvm::ArrayRef<FuncSymbol *> cycle) {
       bool fallsOff = !ReturnChecker::alwaysReturns(copy->body);
       const Type *found;
       if (fn->decl->isGenerator) {
-        found = checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff,
-                                                               /*report=*/false);
+        found =
+            checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, false);
       } else if (fn->decl->isAsync) {
-        found = checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, /*report=*/false);
+        found = checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, false);
       } else {
-        found = unifyReturns(fn, returns, fallsOff, /*report=*/false);
+        found = unifyReturns(fn, returns, fallsOff, false);
       }
       if (!found) {
-        continue; // nothing known yet
+        continue;
       }
       const Type *next = fn->assumed ? LiteralTypes::unionUnify(fn->assumed, found) : found;
       if (!next || next->isError()) {
@@ -421,17 +389,12 @@ const Type *ReturnInferrer::unifyReturns(const FuncSymbol *fn, llvm::ArrayRef<Re
   return type;
 }
 
-// The parameters whose type comes from a default value that is not a
-// literal: its type, found by checking it on a copy, in a scope with the
-// parameters before it.
 void ReturnInferrer::resolveParams(FuncSymbol *fn) {
   if (!fn->pendingParams) {
     return;
   }
   fn->pendingParams = false;
   FunctionDecl *decl = fn->decl;
-  // Those of a method of an instance of a generic class: of the method of
-  // the generic class, with the types of the instance.
   if (FunctionDecl *generic = decl->generic; generic && decl->cls && decl->cls->generic) {
     resolveParams(generic->sym);
     auto sub = [&](const Type *t) {
@@ -449,7 +412,6 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     return;
   }
   std::vector<const Type *> found(decl->params.size(), nullptr);
-  // Muted at first; if a value has an error, a second check reports it.
   for (bool report : {false, true}) {
     if (report && llvm::none_of(found, [](const Type *t) { return t && t->isError(); })) {
       break;
@@ -457,8 +419,6 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
     Checker::BodyState saved = enterBody(decl);
     bool muted = checker_.diags_.setMuted(!report);
     FunctionDecl *copy = freshCopy(decl);
-    // A method's default values see its `this` and the private members of
-    // its class.
     checker_.functions_.push_back(copy);
     if (copy->takesThis()) {
       checker_.classChecker().declareThis(copy);
@@ -473,8 +433,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
       if (!type) {
         type = found[i] = checker_.exprChecker().checkExpr(copy->params[i].defaultValue)->type;
       }
-      checker_.scopes().declareVar(copy->params[i].name, copy->params[i].loc, type,
-                                   /*isConst=*/false);
+      checker_.scopes().declareVar(copy->params[i].name, copy->params[i].loc, type, false);
     }
     checker_.popScope();
     checker_.functions_.pop_back();
@@ -495,7 +454,6 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
                                            param.label() + ": int | undefined = undefined'");
       type = Type::error();
     }
-    // An error in the value itself is reported when the body is checked.
     param.declaredType = type;
     fn->params[i] = Type::optional(type);
   }
@@ -503,7 +461,7 @@ void ReturnInferrer::resolveParams(FuncSymbol *fn) {
 
 FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   Lexer lexer(fn->source, checker_.diags_);
-  Parser parser(lexer, checker_.ctx_, checker_.diags_, /*library=*/fn->cls && fn->cls->library);
+  Parser parser(lexer, checker_.ctx_, checker_.diags_, fn->cls && fn->cls->library);
   FunctionDecl *copy = fn->isArrow || ((fn->isExpression || fn->lifted) && !fn->cls)
                            ? parser.parseFunctionExprCopy()
                        : fn->cls ? parser.parseMethodCopy()
@@ -525,8 +483,6 @@ FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   copy->group = fn->group;
   copy->var = fn->var;
   copy->creationSeq = fn->creationSeq;
-  // The parameters of an argument list in the place of the rest parameter
-  // (see expandArgumentList).
   if (!fn->listName.empty() && copy->params.size() > fn->listStart) {
     copy->params.resize(fn->listStart);
     copy->listName = fn->listName;
@@ -536,7 +492,6 @@ FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   for (size_t i = 0; i < copy->params.size() && i < fn->params.size(); ++i) {
     copy->params[i].declaredType = fn->params[i].declaredType;
   }
-  // The parameters an arrow takes without naming them (see Signature).
   for (size_t i = copy->params.size(); i < fn->params.size(); ++i) {
     copy->params.push_back(fn->params[i]);
   }
@@ -544,4 +499,4 @@ FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   return copy;
 }
 
-} // namespace tz
+}

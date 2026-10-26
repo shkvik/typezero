@@ -27,7 +27,6 @@ namespace tz {
 
 namespace {
 
-// The modules tz has, by the name after "node:".
 std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   if (path == "tz:io") {
     return NodeModule::TzIo;
@@ -77,7 +76,6 @@ std::optional<NodeModule> moduleOf(llvm::StringRef path) {
   return std::nullopt;
 }
 
-// Why a built-in module that tz does not have is not there.
 std::string missingModule(llvm::StringRef path) {
   std::string quoted = "'" + path.str() + "'";
   if (path.starts_with("tz:")) {
@@ -115,7 +113,6 @@ std::string missingModule(llvm::StringRef path) {
   return message;
 }
 
-// A typical name of each module, for hints.
 llvm::StringRef typicalName(NodeModule module) {
   switch (module) {
   case NodeModule::Fs:
@@ -162,7 +159,7 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 std::string builtinModuleProblem(llvm::StringRef path) {
   return moduleOf(path) ? std::string() : missingModule(path);
@@ -170,14 +167,13 @@ std::string builtinModuleProblem(llvm::StringRef path) {
 
 namespace {
 
-// `process.name`, of the global process.
 MemberExpr *processMember(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef name) {
   auto *process = ctx.make<NameExpr>(loc, "process");
 
   return ctx.make<MemberExpr>(loc, process, name);
 }
 
-} // namespace
+}
 
 BuiltinModuleChecker::BuiltinModuleChecker(Checker &checker) : checker_(checker) {}
 
@@ -185,7 +181,6 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
   Checker::ModuleState &here = checker_.state(module);
   std::optional<NodeModule> which = moduleOf(decl.path);
   if (!which) {
-    // Reported by the loader.
     for (const ModuleName &name : decl.names) {
       here.badImports.insert(name.as);
     }
@@ -210,8 +205,6 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
     }
   };
 
-  // `import fs from "node:fs"`: an error, with the names the file uses of it
-  // as the hint; its uses are checked as if they were imported.
   if (!decl.whole.empty()) {
     std::vector<llvm::StringRef> used;
     for (Stmt *item : module->file.items) {
@@ -258,12 +251,10 @@ void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl 
       continue;
     }
     Checker::NodeName n{*which, name.name};
-    // The namespaces of node:path: their functions take that style.
     if (isPathModule(*which) && (name.name == "posix" || name.name == "win32")) {
       n = Checker::NodeName{name.name == "posix" ? NodeModule::PathPosix : NodeModule::PathWin32,
                             {}};
     }
-    // `promises` of node:fs is node:fs/promises.
     if (*which == NodeModule::Fs && name.name == "promises") {
       n = Checker::NodeName{NodeModule::FsPromises, {}};
     }
@@ -281,11 +272,9 @@ const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) co
   if (found == names.end()) {
     return nullptr;
   }
-  // `import { Buffer } from "node:buffer"` names the global Buffer itself.
   if (found->second.module == NodeModule::Buffer && name == "Buffer") {
     return nullptr;
   }
-  // A name the code declares hides the import.
   Checker::ScopeEntry entry = checker_.scopes().lookup(name);
   if (entry.var || entry.func || entry.enumDecl || entry.cls) {
     return nullptr;
@@ -297,7 +286,6 @@ const Checker::NodeName *BuiltinModuleChecker::nodeName(llvm::StringRef name) co
 Expr *BuiltinModuleChecker::processAlias(Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
   const Checker::NodeName *n = name ? nodeName(name->name) : nullptr;
-  // Buffer of node:buffer is the global one.
   if (n && n->module == NodeModule::Buffer && n->name == "Buffer") {
     return checker_.ctx_.make<NameExpr>(name->loc(), "Buffer");
   }
@@ -390,7 +378,6 @@ Expr *BuiltinModuleChecker::checkNodeName(NameExpr *name) {
 }
 
 Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
-  // `constants.F_OK` and `fs.constants.F_OK`.
   auto isFs = [](const Checker::NodeName *n) {
     return n && (n->module == NodeModule::Fs || n->module == NodeModule::FsPromises);
   };
@@ -406,7 +393,6 @@ Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
     return isFs(n) && n->name.empty() && inner->name == "constants";
   };
   if (constantOf(member->object)) {
-    // As Node has them on Windows, which are those of POSIX too.
     static const std::pair<llvm::StringLiteral, int> constants[] = {{"F_OK", 0},
                                                                     {"R_OK", 4},
                                                                     {"W_OK", 2},
@@ -441,7 +427,7 @@ Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
     return nullptr;
   }
   if (!n->name.empty()) {
-    return nullptr; // a member of a function: reported where the name is checked
+    return nullptr;
   }
   std::string problem = exportProblem(n->module, member->name, moduleLabel(n->module));
   if (!problem.empty()) {
@@ -501,7 +487,7 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
       return checker_.timerChecker().checkSchedulerCall(call, member);
     }
     if (!n->name.empty()) {
-      return nullptr; // a method of what the name is: reported there
+      return nullptr;
     }
     std::string problem = exportProblem(n->module, member->name, moduleLabel(n->module));
     if (!problem.empty()) {
@@ -542,7 +528,6 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   case NodeModule::Buffer:
     break;
   case NodeModule::TzIo: {
-    // readLine(question?): the line, or undefined at the end of the input.
     if (checker_.callChecker().rejectSpread(call) ||
         !checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
       return call;
@@ -559,4 +544,4 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
   return nullptr;
 }
 
-} // namespace tz
+}

@@ -27,20 +27,17 @@ namespace tz {
 
 ModuleParser::ModuleParser(Parser &parser) : parser_(parser) {}
 
-// `import { a, b as c } from "./x"`. The other forms of JavaScript and
-// TypeScript are errors with a hint (docs/modules.md).
 Stmt *ModuleParser::parseImport(bool topLevel) {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'import'
+  parser_.cursor().advance();
   if (!topLevel) {
     parser_.cursor().report(loc, "'import' is allowed only at the top level of a file");
   }
   ImportDecl decl;
   decl.loc = loc;
   if (parser_.tok_.is(Tok::StringLiteral)) {
-    // `import "./x"`, for what the file does when it loads.
     std::string path;
-    parseFromPath(path, decl.pathLoc, /*from=*/false);
+    parseFromPath(path, decl.pathLoc, false);
     parser_.cursor().report(
         loc, "an import must name what it takes: importing a file only to run it is not "
              "supported; import the names you need, e.g. 'import { a } from \"" +
@@ -57,13 +54,10 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
         "'type'");
     parser_.cursor().advance();
   }
-  // The forms that do not name the exports they take: reported once the path
-  // is known, for the hint.
   enum class Form { Named, Namespace, Default } form = Form::Named;
   llvm::SMLoc formLoc = parser_.tok_.loc();
   llvm::StringRef defaultName;
   if (parser_.tok_.is(Tok::Star)) {
-    // `import * as geo from "./geometry"`
     form = Form::Namespace;
     parser_.cursor().advance();
     if (parser_.cursor().expect(Tok::KwAs, "after 'import *'")) {
@@ -74,7 +68,6 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     }
   } else if (parser_.tok_.is(Tok::Identifier) &&
              !(parser_.tok_.text == "from" && parser_.cursor().peek().is(Tok::StringLiteral))) {
-    // `import square from "./math"`, maybe followed by `, { ... }`.
     form = Form::Default;
     defaultName = parser_.tok_.text;
     parser_.cursor().advance();
@@ -90,7 +83,7 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     }
   }
   if (parser_.tok_.is(Tok::LBrace)) {
-    parseModuleNames(decl.names, /*import=*/true);
+    parseModuleNames(decl.names, true);
   } else if (form == Form::Named) {
     parser_.cursor().error(parser_.tok_.loc(),
                            llvm::Twine("expected '{' and the names to import, found ") +
@@ -113,7 +106,6 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   }
   parser_.cursor().expectSemicolon();
   if (form != Form::Named && isBuiltinModule(decl.path) && !defaultName.empty()) {
-    // Checker reports it with the names the file uses: `fs.readFileSync`.
     decl.whole = defaultName;
     decl.wholeLoc = formLoc;
     decl.wholeIsDefault = form == Form::Default;
@@ -130,13 +122,12 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
         formLoc, "default imports are not supported: there is no 'export default'; import by "
                  "name, e.g. 'import { " +
                      defaultName + " } from \"" + decl.path + "\"'");
-  } else if (decl.names.empty()) { // `import {} from "./x"`, to run the file
+  } else if (decl.names.empty()) {
     parser_.cursor().report(
         loc, "an import must name what it takes: importing a file only to run it is not "
              "supported; import the names you need, e.g. 'import { a } from \"" +
                  decl.path + "\"'");
   }
-  // The names in braces are imported even next to a form that is not.
   if (!decl.names.empty()) {
     parser_.imports_.push_back(std::move(decl));
   }
@@ -144,16 +135,13 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   return parser_.ctx_.make<EmptyStmt>(loc);
 }
 
-// `export` before a declaration, `export { a, b as c }`, `export { a } from
-// "./x"` and `export * from "./x"`.
 Stmt *ModuleParser::parseExport(bool topLevel) {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'export'
+  parser_.cursor().advance();
   if (!topLevel) {
     parser_.cursor().report(loc, "'export' is allowed only at the top level");
   }
   if (parser_.tok_.is(Tok::At)) {
-    // `export @Table("users") class User`
     std::vector<Decorator> decorators = parser_.classes().parseDecorators();
     Stmt *stmt = parser_.stmts().parseStatement(topLevel);
     if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
@@ -188,7 +176,6 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
              "declaration, e.g. 'export function f() {...}', and import it with 'import { f } "
              "from ...'");
     parser_.cursor().advance();
-    // What follows is still checked.
     if (parser_.tok_.is(Tok::KwFunction) && parser_.cursor().peek().is(Tok::Identifier)) {
       return parser_.stmts().parseStatement(topLevel);
     }
@@ -213,7 +200,6 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
   if (parser_.tok_.is(Tok::Star)) {
     parser_.cursor().advance();
     if (parser_.tok_.is(Tok::KwAs)) {
-      // `export * as geo from "./geometry"`
       llvm::SMLoc asLoc = parser_.tok_.loc();
       parser_.cursor().advance();
       parser_.cursor().expect(Tok::Identifier, "after 'export * as'");
@@ -247,7 +233,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
                                tokSpelling(parser_.tok_.kind));
     return parser_.ctx_.make<EmptyStmt>(loc);
   }
-  parseModuleNames(decl.names, /*import=*/false);
+  parseModuleNames(decl.names, false);
   if (!parser_.recovering_ && parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "from" &&
       !parseFromPath(decl.path, decl.pathLoc)) {
     return parser_.ctx_.make<EmptyStmt>(loc);
@@ -261,10 +247,9 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
 }
 
 void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import) {
-  parser_.cursor().advance(); // '{'
+  parser_.cursor().advance();
   const char *keyword = import ? "import" : "export";
   while (!parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof)) {
-    // `{ type T }`
     if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "type" &&
         parser_.cursor().peek().is(Tok::Identifier) && parser_.cursor().peek().text != "as") {
       parser_.cursor().report(parser_.tok_.loc(), llvm::Twine("'type' is not needed in an ") +
@@ -360,7 +345,7 @@ void ModuleParser::exportDeclared(const Stmt *stmt) {
     add(cls->name, cls->loc());
   } else if (auto *var = dyn_cast<VarDeclStmt>(stmt)) {
     for (const VarDeclarator &d : var->decls) {
-      if (!d.name.starts_with("%")) { // not a hidden variable of destructuring
+      if (!d.name.starts_with("%")) {
         add(d.name, d.loc);
       }
     }
@@ -370,4 +355,4 @@ void ModuleParser::exportDeclared(const Stmt *stmt) {
   }
 }
 
-} // namespace tz
+}

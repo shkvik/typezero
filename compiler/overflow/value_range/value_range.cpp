@@ -141,7 +141,6 @@ Num add(const Num &a, const Num &b) {
   }
   Num r = make(joint(plus(a.lo, b.lo, -kInf), a.low(), b.low()),
                joint(plus(a.hi, b.hi, kInf), a.high(), b.high()));
-  // A sum keeps the relation of its left side, `sum + i` that of sum.
   if (a.base) {
     r.base = a.base;
     r.offLo = plus(a.offLo, b.lo, -kInf);
@@ -225,7 +224,6 @@ Num divide(const Num &a, const Num &b, bool integer) {
     return Num();
   }
   Num r = mixed(lo, hi, a, b);
-  // By a positive integer, the quotient is no larger than the dividend.
   if (integer && b.lo >= 1) {
     r.loOrigin = a.loOrigin;
     r.loWhy = a.loWhy;
@@ -412,4 +410,4 @@ State deadState() {
   return s;
 }
 
-} // namespace tz
+}

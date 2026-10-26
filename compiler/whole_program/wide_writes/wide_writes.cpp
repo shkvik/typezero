@@ -20,7 +20,6 @@ namespace tz {
 
 namespace {
 
-// How deep inside a converted value a narrowed part may be.
 constexpr int kMaxDepth = 6;
 
 void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<Narrowing> &out,
@@ -37,8 +36,6 @@ void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<
     collectNarrowings(from->inner(), to->inner(), depth + 1, out, seen);
     return;
   }
-  // The objects of a union seen as a type they all are. Seen as one of its
-  // members, the value is that member: what narrowed it found it is.
   if (from->isUnion()) {
     if (llvm::is_contained(from->members(), to)) {
       return;
@@ -67,7 +64,7 @@ void collectNarrowings(const Type *from, const Type *to, int depth, std::vector<
   }
 }
 
-} // namespace
+}
 
 WideWrites::WideWrites(Checker &checker) : checker_(checker) {}
 
@@ -109,7 +106,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
   Flows flows(checker_.widenings_, narrowings, convertible);
   flows.walkProgram(file);
 
-  // The writes by the nodes they write to.
   std::vector<std::vector<std::pair<size_t, size_t>>> writesAt(flows.edges.size());
   for (size_t w = 0; w < flows.writes.size(); ++w) {
     for (size_t r = 0; r < flows.writes[w].target.size(); ++r) {
@@ -117,9 +113,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
     }
   }
 
-  // Whether the write breaks a value whose part at `depth` is narrowed as `n`
-  // says (at any depth with `depth` negative): a write to a read-only field,
-  // or of a value that is not of the narrow type.
   auto breaks = [](const Write &w, const Narrowing &n, int depth) {
     if ((depth >= 0 && n.depth != depth) || w.element != n.element) {
       return false;
@@ -130,9 +123,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
 
     return !n.narrow || !w.value || !TypeRelations::isImplicitlyConvertible(w.value, n.narrow);
   };
-  // Whether a write may change the part `n` is about: it writes through a
-  // type the part may be seen as (an Animal[] or an unknown[] of a Dog[],
-  // not a string[]).
   auto mayBe = [](const Write &w, const Narrowing &n) {
     const Type *through = w.through ? w.through->nonOptional() : nullptr;
     if (!through || !n.owner || mentionsParam(through) || through->isUnknown() ||
@@ -146,10 +136,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
 
     return TypeRelations::isImplicitlyConvertible(n.owner, through);
   };
-  // Whether a place of `type` may hold a value of `value`'s type `depth`
-  // levels inside what it holds (0: the value itself). Arrays, tuples, unions
-  // and dictionaries say what they hold; an object may be of a class further
-  // down its chain, with fields of its own.
   std::function<bool(const Type *, const Type *, int)> mayHold =
       [&](const Type *type, const Type *value, int depth) -> bool {
     if (!type) {
@@ -182,9 +168,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
 
     return true;
   };
-  // Whether a value of `type` may be a part of a value of `whole`'s type
-  // `depth` levels inside it: an element of an array, a field of an object
-  // of a class nothing extends (which has no fields but its own).
   std::function<bool(const Type *, const Type *, int)> mayBePart =
       [&](const Type *type, const Type *whole, int depth) -> bool {
     if (!type || !whole) {
@@ -225,7 +208,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
     if (conv.narrowings.empty() || !reported.insert(conv.loc.getPointer()).second) {
       continue;
     }
-    // Where the value goes, and how deep inside it each place is.
     std::set<std::tuple<int, int, int>> seen;
     std::vector<std::tuple<int, int, int>> todo{{conv.node, 0, 0}};
     const Write *found = nullptr;
@@ -237,9 +219,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
       if (off > kMaxDepth || off < -16 || md > 16 || !seen.insert({node, off, md}).second) {
         continue;
       }
-      // A variable that holds the converted value, holds it inside or is a
-      // part of it is of a type that may: a listener of Event is no place of
-      // a Dog[], nor a pair of strings a part of one.
       if (size_t(node) < flows.types.size()) {
         if (const Type *type = flows.types[size_t(node)];
             type && (off <= 0 ? !mayHold(type, conv.from, -off) && !mayHold(type, conv.to, -off)
@@ -247,7 +226,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
           continue;
         }
       }
-      // A place the check does not follow: any write may meet it (below).
       if (node == flows.unknown_) {
         unknown = true;
         continue;
@@ -259,8 +237,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
           continue;
         }
         int depth = target.off + off;
-        // The constructor of the class up the chain setting the fields of
-        // `this`: the class's own initializers set them after it.
         if (node == conv.initializes && depth == 0) {
           continue;
         }
@@ -279,9 +255,6 @@ void WideWrites::checkWidenings(SourceFile &file) {
         todo.push_back({e.to, off + e.off, std::max({e.md, md - e.off, 0})});
       }
     }
-    // What reached a place the check does not follow may meet any write of
-    // the program; the built-in modules (library/) write only to what they
-    // make, and what reaches them they follow.
     if (!found && unknown) {
       for (const Write &write : flows.writes) {
         if (checker_.libraryCalls().inLibrary(write.loc)) {
@@ -311,7 +284,6 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   if (from == to) {
     return true;
   }
-  // An optional object or array is the reference or none.
   if (to->isOptional()) {
     const Type *inner = to->inner();
     return (inner->isObject() || inner->isArray()) && sameReference(from->nonOptional(), inner);
@@ -322,7 +294,6 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   if (from->isArray() && to->isArray()) {
     return sameReference(from->inner(), to->inner());
   }
-  // Objects of a union, seen as a type each of them is.
   if (from->isUnion()) {
     return !from->isTagged() && llvm::all_of(from->members(), [&](const Type *m) {
       return m->isObject() && sameReference(m, to);
@@ -334,7 +305,6 @@ bool WideWrites::sameReference(const Type *from, const Type *to) {
   if (from->isSubtypeOf(to)) {
     return true;
   }
-  // The same fields, some of them read-only in one and not in the other.
   if (from->isClass() || to->isClass() || from->isTuple() != to->isTuple() ||
       from->fields().size() != to->fields().size() || !from->overloads().empty() ||
       !to->overloads().empty() || from->isBytes() || to->isBytes() || from->isRuntimeObject() ||
@@ -353,7 +323,6 @@ void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at
                                 const Type *value, const Type *through, bool element,
                                 llvm::StringRef field, const Type *narrow, const Type *owner,
                                 int depth) {
-  // "line 12", or "line 12 of shapes.tz" in another file.
   llvm::SourceMgr &sources = checker_.diags_.sourceMgr();
   unsigned id = sources.FindBufferContainingLoc(write);
   std::string line =
@@ -373,7 +342,6 @@ void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at
   };
   std::string what = value ? article(value) : std::string("a value");
   if (element) {
-    // An array of the narrow elements, the value itself or one in it.
     message += " puts " + what + " into " + (depth == 0 ? std::string("it") : "an array in it") +
                ", and an array of '" + narrow->name().str() + "' cannot hold one";
     if (depth == 0) {
@@ -393,4 +361,4 @@ void WideWrites::reportWidening(const Type *from, const Type *to, llvm::SMLoc at
   checker_.diags_.note(write, "the write, through '" + (through ? through : to)->name() + "'");
 }
 
-} // namespace tz
+}

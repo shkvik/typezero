@@ -46,7 +46,7 @@ void printChanges(const Lock &before, const Lock &after) {
   }
 }
 
-} // namespace
+}
 
 int UpdateCommand::run(llvm::ArrayRef<const char *> args) const {
   Manifest project;
@@ -80,4 +80,4 @@ int UpdateCommand::run(llvm::ArrayRef<const char *> args) const {
   return 0;
 }
 
-} // namespace tz::pkg
+}

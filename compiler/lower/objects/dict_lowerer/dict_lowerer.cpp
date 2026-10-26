@@ -29,7 +29,6 @@ namespace tz {
 
 namespace {
 
-// TzMap; must match runtime/core/map/map.h.
 enum MapField : unsigned {
   kMapRefCount,
   kMapLayout,
@@ -44,11 +43,10 @@ enum MapField : unsigned {
   kMapNextDead,
 };
 
-constexpr uint32_t kLayoutDict = 4096; // TZ_LAYOUT_DICT
+constexpr uint32_t kLayoutDict = 4096;
 
-constexpr uint32_t kMapEnv = 1; // TZ_MAP_ENV
+constexpr uint32_t kMapEnv = 1;
 
-// The offset of `live` in an entry.
 constexpr uint64_t kEntryLive = 4;
 
 std::u16string utf16(llvm::StringRef text) {
@@ -58,7 +56,7 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 DictLowerer::DictLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -94,14 +92,11 @@ const Lowering::DictLayout &DictLowerer::dictLayout(const Type *type) {
   llvm::Constant *drop = cast<llvm::Constant>(
       lowering_.module_->getOrInsertFunction("tz_map_drop", dropType).getCallee());
   llvm::Constant *null = llvm::ConstantPointerNull::get(ptr);
-  // Its number tells it from the other objects of a union (see plainTypeId).
-  uint32_t kind = type->isRecord() ? 0 : type->isMap() ? 1 : 2; // TZ_MAP_RECORD...
+  uint32_t kind = type->isRecord() ? 0 : type->isMap() ? 1 : 2;
   if (!mapDescTy_) {
     mapDescTy_ = llvm::StructType::create(
         lowering_.ctx_, {lowering_.layoutDescTy_, ptr, ptr, i32, i32, i32, i32}, "tz.maplayout");
   }
-  // TZ_LAYOUT_GROUP: the maps are members of groups
-  // (runtime/core/group/group.c).
   auto make = [&](bool member) {
     uint32_t flags = kLayoutDict | (member ? 0x80000000u : 0u);
     llvm::Constant *base = llvm::ConstantStruct::get(
@@ -116,7 +111,7 @@ const Lowering::DictLayout &DictLowerer::dictLayout(const Type *type) {
          lowering_.builder_.getInt32(kind), lowering_.builder_.getInt32(uint32_t(layout.size)),
          lowering_.builder_.getInt32(uint32_t(layout.keyOffset)),
          lowering_.builder_.getInt32(uint32_t(layout.valueOffset))});
-    auto *global = new llvm::GlobalVariable(*lowering_.module_, mapDescTy_, /*isConstant=*/true,
+    auto *global = new llvm::GlobalVariable(*lowering_.module_, mapDescTy_, true,
                                             llvm::GlobalValue::PrivateLinkage, init,
                                             "tz.layout." + type->name());
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
@@ -231,7 +226,6 @@ void DictLowerer::emitDictLoop(llvm::Value *slot, const Type *type, llvm::Value 
   llvm::BasicBlock *liveBlock = lowering_.functionFrame().newBlock("dict.live");
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("dict.end");
   lowering_.functionFrame().emitBlock(headBlock);
-  // Where the entries are, and how many, may change in the body.
   llvm::Value *map = lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), slot, "map");
   llvm::Value *index = lowering_.builder_.CreateLoad(i32, indexSlot, "position");
   llvm::Value *used = lowering_.builder_.CreateLoad(i32, dictField(map, kMapUsed), "used");
@@ -281,10 +275,9 @@ Lowering::Producer DictLowerer::dictProducer(llvm::Value *slot, const Type *type
       } else if (mode == Builtin::MapValues) {
         given = load(false);
       } else {
-        // A new [key, value] each time, as in JavaScript.
         bool set = mode == Builtin::SetEntries;
         const Type *tuple = Type::tuple({key, set ? key : value});
-        llvm::Value *k = load(true), *v = load(/*isKey=*/set);
+        llvm::Value *k = load(true), *v = load(set);
         given = lowering_.objectLayouts().allocObject(tuple, {0, 1});
         lowering_.builder_.CreateStore(k,
                                        lowering_.objectLayouts().fieldAddress(given, tuple, "0"));
@@ -301,8 +294,6 @@ Lowering::Producer DictLowerer::dictProducer(llvm::Value *slot, const Type *type
   return producer;
 }
 
-// `m.forEach(f)`: f(value, key, map) for each entry, or f(value, value,
-// set), as an iteration, which sees the entries the callback adds.
 llvm::Value *DictLowerer::emitDictForEach(CallExpr *call) {
   Expr *receiver = cast<MemberExpr>(call->callee)->object;
   const Type *type = receiver->type;
@@ -335,9 +326,6 @@ llvm::Value *DictLowerer::emitDictForEach(CallExpr *call) {
   return nullptr;
 }
 
-// `{ a: 1, [k]: v, ...r, ...o }` where a Record is expected: the keys in
-// order, each later one replacing the value of an earlier one but not its
-// place, as in JavaScript.
 llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
   const Type *type = lit->type;
   const Lowering::DictLayout &layout = dictLayout(type);
@@ -360,8 +348,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
     if (!prop.spread) {
       Lowering::Operand k{lowering_.stringLowerer().stringLiteral(utf16(prop.name)), false, string};
       if (prop.key) {
-        k = lowering_.refCounts().emitOperand(
-            prop.key, /*canBorrow=*/AssignLowerer::cannotAssign(prop.value));
+        k = lowering_.refCounts().emitOperand(prop.key, AssignLowerer::cannotAssign(prop.value));
         lowering_.throwLowerer().holdOperand(k, lowering_.mayThrow().exprThrows(prop.value));
       }
       llvm::Value *v = lowering_.exprLowerer().emitExpr(prop.value);
@@ -371,7 +358,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       continue;
     }
     const Type *source = prop.value->type;
-    Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, /*canBorrow=*/true);
+    Lowering::Operand from = lowering_.refCounts().emitOperand(prop.value, true);
     auto omitted = [&](llvm::Value *k) -> llvm::Value * {
       llvm::Value *skip = lowering_.builder_.getFalse();
       for (llvm::StringRef name : prop.omit) {
@@ -383,8 +370,6 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       return skip;
     };
     if (source->isRecord()) {
-      // Nothing runs while the entries are copied, so the source needs no
-      // count of its iteration.
       llvm::Value *slot = lowering_.functionFrame().spill(from.value, "spread");
       emitDictLoop(slot, source, nullptr, [&](llvm::Value *entry) {
         const Type *sourceValue = source->valueType();
@@ -402,7 +387,6 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
         lowering_.functionFrame().switchTo(nextBlock);
       });
     } else {
-      // The fields that hold a value, in the order of the type.
       for (const Field &f : source->fields()) {
         if (llvm::StringRef(f.name).starts_with("#") || llvm::is_contained(prop.omit, f.name)) {
           continue;
@@ -434,4 +418,4 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
   return lowering_.throwLowerer().take(held);
 }
 
-} // namespace tz
+}

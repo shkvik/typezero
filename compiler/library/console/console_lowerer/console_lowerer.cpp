@@ -28,12 +28,6 @@ namespace tz {
 
 ConsoleLowerer::ConsoleLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// console.log(a, b) prints its arguments separated by spaces, then a newline.
-// Strings print as they are; arrays and optionals the way Node.js shows them.
-// As in JavaScript, all arguments are evaluated before anything is printed:
-// `console.log(a.pop(), a)` shows the array without the popped element.
-// console.error prints the same way to stderr (see tz_err_begin in
-// runtime/core/output/output.c).
 void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   size_t count = call->args.size();
   std::vector<bool> laterCannotAssign(count, true);
@@ -48,7 +42,7 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   std::vector<Lowering::Operand> values;
   for (size_t i = 0; i < count; ++i) {
     if (call->args[i]->type->isUndefined()) {
-      lowering_.stmtLowerer().emitDiscarded(call->args[i]); // `void f()` still runs f
+      lowering_.stmtLowerer().emitDiscarded(call->args[i]);
       values.push_back({nullptr, false, call->args[i]->type});
     } else {
       values.push_back(lowering_.refCounts().emitOperand(call->args[i], laterCannotAssign[i]));
@@ -122,8 +116,6 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
       llvm_unreachable("Checker rejects other argument types");
     }
   };
-  // `console.log(...xs)` prints the elements as arguments of their own: a
-  // space goes before each value but the first printed.
   llvm::Value *first = nullptr;
   if (call->hasSpread()) {
     first =
@@ -151,7 +143,6 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   for (size_t i = 0; i < count; ++i) {
     const Lowering::Operand &value = values[i];
     if (call->spreads(i) && value.type->isArray()) {
-      // Each element, in a loop.
       const Type *element = value.type->inner();
       llvm::Value *length = lowering_.arrayLowerer().arrayLength(value.value);
       llvm::Value *indexSlot =
@@ -193,4 +184,4 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

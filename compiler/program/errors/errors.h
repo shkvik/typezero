@@ -24,4 +24,4 @@ private:
   unsigned errorCount_ = 0;
 };
 
-} // namespace tz
+}

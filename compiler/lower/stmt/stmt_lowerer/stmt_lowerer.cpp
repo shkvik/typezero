@@ -44,7 +44,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     emitVarDecl(cast<VarDeclStmt>(stmt));
     break;
   case Stmt::Kind::Function:
-    break; // emitted on its own
+    break;
   case Stmt::Kind::Expr:
     if (lowering_.tailStatements_.contains(stmt)) {
       lowering_.tailCallLowerer().emitTailJump(cast<CallExpr>(cast<ExprStmt>(stmt)->expr));
@@ -85,8 +85,6 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Enum:
     break;
   case Stmt::Kind::Class:
-    // The class of a class expression gets its static fields where the
-    // expression is.
     if (!cast<ClassDecl>(stmt)->expression) {
       lowering_.decoratorLowerer().emitClassDeclaration(cast<ClassDecl>(stmt));
     }
@@ -126,7 +124,7 @@ void StmtLowerer::storeReplacing(llvm::Value *address, llvm::Value *value, const
 
 void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
   for (VarDeclarator &d : decl->decls) {
-    if (d.alias) { // another name for a generic function
+    if (d.alias) {
       continue;
     }
     const VarSymbol *var = d.sym;
@@ -136,9 +134,7 @@ void StmtLowerer::emitVarDecl(VarDeclStmt *decl) {
                                   : lowering_.functionFrame().createLocal(var, d.name);
     llvm::Value *value =
         d.init ? lowering_.exprLowerer().emitExpr(d.init) : llvm::Constant::getNullValue(type);
-    // The slot may still hold a value from an earlier run of this declaration.
-    lowering_.storeLowerer().storeVar(var, address, value, /*replacing=*/true);
-    // A global that keeps its value for good: the groups in it are eternal.
+    lowering_.storeLowerer().storeVar(var, address, value, true);
     if (lowering_.isEternal(var)) {
       lowering_.publishLowerer().pinValue(value, var->type);
       if (!global) {
@@ -169,8 +165,6 @@ void StmtLowerer::emitIf(IfStmt *stmt) {
 }
 
 void StmtLowerer::emitReturn(ReturnStmt *stmt) {
-  // A generator emitted inline finishes, and one emitted as a coroutine
-  // gives what it returns to whoever resumed it.
   if (lowering_.inline_) {
     llvm::Value *value = stmt->value ? lowering_.exprLowerer().emitExpr(stmt->value) : nullptr;
     if (value && lowering_.inline_->returnSlot) {
@@ -193,21 +187,15 @@ void StmtLowerer::emitReturn(ReturnStmt *stmt) {
                                                     : nullptr);
     return;
   }
-  if (lowering_.async_) { // an async function fulfills its promise
+  if (lowering_.async_) {
     lowering_.asyncLowerer().emitAsyncReturnStmt(stmt);
     return;
   }
-  // Not out of a `try` with a `finally`, which must run first.
   if (stmt->value && lowering_.tailGroup_ && lowering_.tailCallLowerer().hasTailCall(stmt->value) &&
       !lowering_.tryLowerer().finallyBetween(~size_t(0))) {
     lowering_.tailCallLowerer().emitTailReturn(stmt->value);
     return;
   }
-  // In a function that recurses, the call a return gives (with numbers
-  // added to it) is left unchecked: what it threw stays in tz_thrown, and
-  // the caller checks. Then LLVM can turn `return f(n - 1) + f(n - 2)` into
-  // a loop over the second call, at the price of that frame in the stack
-  // of an error.
   const CallExpr *outer = lowering_.returnCall_;
   if (stmt->value && lowering_.currentFn_ && lowering_.recursive_.contains(lowering_.currentFn_) &&
       !lowering_.inline_ && !lowering_.coro_ &&
@@ -258,11 +246,9 @@ const CallExpr *StmtLowerer::returnedCall(const Expr *value) {
   }
 }
 
-// `return value`, or `return` without one (null).
 void StmtLowerer::emitReturnValue(Expr *expr) {
   llvm::Value *value = expr ? lowering_.exprLowerer().emitExpr(expr) : nullptr;
   if (value && lowering_.returnType_ && lowering_.returnType_->isVoid() && !expr->type->isVoid()) {
-    // A callback whose result is dropped (see FuncSymbol::discardsResult).
     lowering_.refCounts().releaseValue(value, expr->type);
     value = nullptr;
   }
@@ -271,7 +257,7 @@ void StmtLowerer::emitReturnValue(Expr *expr) {
 
 void StmtLowerer::emitDiscarded(Expr *expr) {
   if (auto *assign = dyn_cast<AssignExpr>(expr)) {
-    lowering_.assignLowerer().emitAssign(assign, /*needResult=*/false);
+    lowering_.assignLowerer().emitAssign(assign, false);
     return;
   }
   if (auto *seq = dyn_cast<SequenceExpr>(expr)) {
@@ -286,4 +272,4 @@ void StmtLowerer::emitDiscarded(Expr *expr) {
   }
 }
 
-} // namespace tz
+}

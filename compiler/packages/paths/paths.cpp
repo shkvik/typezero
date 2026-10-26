@@ -16,10 +16,10 @@ std::string canonical(llvm::StringRef dir) {
   if (fs::real_path(dir, real)) {
     real = dir;
     fs::make_absolute(real);
-    path::remove_dots(real, /*remove_dot_dot=*/true);
+    path::remove_dots(real, true);
   }
 
   return std::string(real);
 }
 
-} // namespace tz::pkg
+}

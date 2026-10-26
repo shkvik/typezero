@@ -38,4 +38,4 @@ const Type *writtenLiteral(const Expr *expr) {
   return nullptr;
 }
 
-} // namespace tz
+}

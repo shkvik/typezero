@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// node:readline.
 class ReadlineChecker {
 public:
   explicit ReadlineChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

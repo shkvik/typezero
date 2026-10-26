@@ -20,8 +20,6 @@ namespace tz {
 
 namespace {
 
-// The variable a condition tests, looking through the conversion of a
-// narrowed variable; null unless it is a Json (or a `Json | undefined`).
 const VarSymbol *jsonVariable(const Expr *expr) {
   if (auto *conv = dyn_cast<CastExpr>(expr); conv && conv->isImplicit()) {
     expr = conv->operand;
@@ -31,19 +29,17 @@ const VarSymbol *jsonVariable(const Expr *expr) {
   return name && name->var && name->var->type->nonOptional()->isJson() ? name->var : nullptr;
 }
 
-// The literal `null`: a name that no declaration has.
 bool nullName(const Expr *expr) {
   auto *name = dyn_cast<NameExpr>(expr);
 
   return name && name->name == "null" && !name->var && !name->func;
 }
 
-// `null` or `undefined` (also `void x`), which a Json compares equal to both.
 bool isNothing(const Expr *expr) {
   return nullName(expr) || (expr->type && expr->type->isUndefined());
 }
 
-} // namespace
+}
 
 JsonChecker::JsonChecker(Checker &checker) : checker_(checker) {}
 
@@ -72,8 +68,6 @@ Expr *JsonChecker::checkJsonMember(MemberExpr *member) {
   return member;
 }
 
-// A key is a string, or a number, which JavaScript turns into its text:
-// `j[1]` of an object reads "1".
 Expr *JsonChecker::checkJsonIndex(IndexExpr *index) {
   index->index = checker_.exprChecker().checkExpr(index->index);
   index->type = Type::optional(Type::json());
@@ -129,9 +123,6 @@ Expr *JsonChecker::reportJsonMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-// `{ phone: null, tags: ["a"] }` where a Json is expected: a Json object.
-// A value that is undefined leaves its key out, as JSON.stringify does, and
-// a key in brackets may be any string.
 Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
   const Type *json = Type::json();
   for (ObjectLitExpr::Property &prop : lit->props) {
@@ -169,7 +160,6 @@ Expr *JsonChecker::checkJsonObjectLit(ObjectLitExpr *lit) {
   return lit;
 }
 
-// `[1, "a", null]` where a Json is expected: a Json[], which becomes the Json.
 Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
   Expr *array = checker_.arrayLiteralChecker().checkArrayLit(lit, Type::array(Type::json()));
   if (array->type->isError()) {
@@ -179,8 +169,6 @@ Expr *JsonChecker::checkJsonArrayLit(ArrayLitExpr *lit) {
   return checker_.typeRelations().coerce(array, Type::json());
 }
 
-// `x == null` is true for null and undefined, as in JavaScript, and only a
-// Json holds null.
 Expr *JsonChecker::checkNullEquality(BinaryExpr *bin) {
   bool lhsNull = isNullName(bin->lhs), rhsNull = isNullName(bin->rhs);
   if (!lhsNull && !rhsNull) {
@@ -217,8 +205,6 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
     bin->rhs = checker_.typeRelations().convert(bin->rhs, json);
     return bin;
   }
-  // `j == "admin"`, `j.count == 3`: as `===`, true for a Json of that kind
-  // and value.
   Expr *&other = lhsJson ? bin->rhs : bin->lhs;
   const Type *type = other->type;
   if (type->isString() || type->isBool()) {
@@ -240,7 +226,6 @@ Expr *JsonChecker::checkJsonEquality(BinaryExpr *bin) {
 
 void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
                                Checker::Flow &whenFalse) const {
-  // `Array.isArray(x)`: x is a Json[].
   if (auto *call = dyn_cast<CallExpr>(cond); call && call->builtin == Builtin::ArrayIsArray) {
     if (const VarSymbol *var = jsonVariable(call->args[0])) {
       whenTrue.narrowed.push_back({var, Type::array(Type::json())});
@@ -257,14 +242,12 @@ void JsonChecker::addJsonFacts(const Expr *cond, Checker::Flow &whenTrue,
   Checker::Flow &equal = bin->op == BinaryOp::Eq ? whenTrue : whenFalse;
   Checker::Flow &different = bin->op == BinaryOp::Eq ? whenFalse : whenTrue;
   for (auto [side, other] : {std::pair{bin->lhs, bin->rhs}, std::pair{bin->rhs, bin->lhs}}) {
-    // `x != null`, `x != undefined`: neither, so not undefined.
     if (isNothing(other)) {
       if (const VarSymbol *var = jsonVariable(side); var && var->type->isOptional()) {
         different.defined.insert(var);
       }
       continue;
     }
-    // `typeof x == "string"`: a string, a number (a double) or a boolean.
     auto *typeOf = dyn_cast<UnaryExpr>(side);
     auto *text = dyn_cast<StringLitExpr>(other);
     if (!typeOf || typeOf->op != UnaryOp::TypeOf || !text) {
@@ -309,4 +292,4 @@ Expr *JsonChecker::checkArrayIsArray(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

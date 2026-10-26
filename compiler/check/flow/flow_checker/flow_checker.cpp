@@ -19,21 +19,16 @@ constexpr int64_t kIntMin = std::numeric_limits<int32_t>::min();
 
 constexpr int64_t kIntMax = std::numeric_limits<int32_t>::max();
 
-// x < y, or x <= y.
 void addLess(Facts &facts, const Linear &x, const Linear &y, bool orEqual) {
   facts.add(x.term, y.term, y.offset - x.offset + (orEqual ? 1 : 0));
 }
 
 bool isArrayLength(const Term &t) { return t.length && t.var->type->nonOptional()->isArray(); }
 
-} // namespace
+}
 
 FlowChecker::FlowChecker(Checker &checker) : checker_(checker) {}
 
-// Whether a call to a user function may change the value of `var`: a global
-// some function uses, a variable a closure uses (the closures checked so far
-// mark it captured), or one that a function declared in a block around here
-// assigns to (their bodies are checked at the end of the block).
 bool FlowChecker::changedByCalls(const VarSymbol *var) const {
   if (var->isConst) {
     return false;
@@ -79,8 +74,6 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
       result.narrowed.push_back(narrowed);
       continue;
     }
-    // Narrowed on both sides to different types: to either, as
-    // `typeof x == "string" || typeof x == "number"` narrows x.
     auto [var, type] = narrowed;
     auto other = llvm::find_if(b.narrowed, [&](const auto &n) { return n.first == var; });
     if (other == b.narrowed.end() || var->type->nonOptional()->isParam() || type->isParam() ||
@@ -92,7 +85,7 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
       continue;
     }
     if (var->type->isOptional() && either == var->type->inner()) {
-      continue; // just defined, which `defined` says
+      continue;
     }
     result.narrowed.push_back({var, either});
   }
@@ -129,10 +122,9 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
   if (type->isError()) {
     return;
   }
-  FieldFacts::forgetFieldsOf(checker_.flow_, var); // it holds another object now
+  FieldFacts::forgetFieldsOf(checker_.flow_, var);
   llvm::erase_if(checker_.flow_.narrowed,
                  [&](const auto &narrowed) { return narrowed.first == var; });
-  // A union holds the member assigned: after `s = circle`, s is a Circle.
   if (const Type *base = type->nonOptional();
       base->isUnion() && value->type && !value->type->isError() && value->type != type &&
       TypeRelations::isImplicitlyConvertible(value->type, base)) {
@@ -142,7 +134,6 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     setDefined(var, !value->type->isOptional() && !value->type->isUndefined());
   }
   if (type->isResult()) {
-    // `r = ok(1)` holds an Ok, as its type says.
     const Type *given = value->type;
     checker_.flow_.okResults.erase(var);
     checker_.flow_.errResults.erase(var);
@@ -156,7 +147,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
 
   if (type->isInt()) {
     std::optional<Linear> v = checker_.indexProofs().linear(value);
-    if (v && v->term == Term::of(var)) { // `i = i + k`
+    if (v && v->term == Term::of(var)) {
       incremented(var, v->offset);
       return;
     }
@@ -164,17 +155,15 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     if (v) {
       checker_.flow_.facts.addEqual(Term::of(var), v->term, v->offset);
     }
-    // `n = Math.min(a.length, b.length)` is at most each, and Math.max at
-    // least each: `for (let i = 0; i < n; i++) a[i] = b[i]`.
     if (auto *call = dyn_cast<CallExpr>(value);
         call && (call->builtin == Builtin::MathMin || call->builtin == Builtin::MathMax) &&
         !call->hasSpread()) {
       for (const Expr *arg : call->args) {
         if (std::optional<Linear> bound = checker_.indexProofs().linear(arg)) {
           if (call->builtin == Builtin::MathMin) {
-            addLess(checker_.flow_.facts, Linear{Term::of(var), 0}, *bound, /*orEqual=*/true);
+            addLess(checker_.flow_.facts, Linear{Term::of(var), 0}, *bound, true);
           } else {
-            addLess(checker_.flow_.facts, *bound, Linear{Term::of(var), 0}, /*orEqual=*/true);
+            addLess(checker_.flow_.facts, *bound, Linear{Term::of(var), 0}, true);
           }
         }
       }
@@ -182,7 +171,7 @@ void FlowChecker::assigned(const VarSymbol *var, const Expr *value) {
     return;
   }
 
-  checker_.flow_.facts.forget(var); // its length
+  checker_.flow_.facts.forget(var);
   const Type *base = type->nonOptional();
   if (!base->isString() && !base->isArray() && !base->isByteView() &&
       base->bytes() != Type::Bytes::ArrayBuffer) {
@@ -203,7 +192,6 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
     return;
   }
   Term t = Term::of(var);
-  // Wrapping around would break every fact, so shift them only if it cannot.
   bool safe = delta >= 0 ? checker_.flow_.facts.proves(t, Term::zero(), kIntMax - delta + 1)
                          : checker_.flow_.facts.proves(Term::zero(), t, delta - kIntMin + 1);
   if (safe) {
@@ -214,7 +202,6 @@ void FlowChecker::incremented(const VarSymbol *var, int64_t delta) {
 }
 
 void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
-  // The length of any array may change too: arrays are shared by reference.
   auto changed = [&](const Term &t) {
     return t.var && (isArrayLength(t) || changedByCalls(t.var));
   };
@@ -233,8 +220,6 @@ void FlowChecker::forgetCallEffects(Checker::Flow &flow) const {
       }
     }
   }
-  // A field of any object, since objects are shared by reference, that some
-  // code assigns to; or one reached from a variable a call may change.
   auto fieldChanged = [&](const Checker::FieldPath &path) {
     return changedByCalls(path.var) || llvm::any_of(path.names, [&](llvm::StringRef field) {
              return checker_.assignedFields_.contains(field);
@@ -248,7 +233,6 @@ void FlowChecker::calledFunction() { forgetCallEffects(checker_.flow_); }
 
 void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const VarSymbol *except) {
   type = type->nonOptional();
-  // Arrays of the same type may be the same array under another name.
   auto affected = [&](const Term &t) {
     return t.length && t.var != except && t.var->type->nonOptional() == type;
   };
@@ -257,4 +241,4 @@ void FlowChecker::arrayResized(const Type *type, bool grew, bool shrank, const V
   });
 }
 
-} // namespace tz
+}

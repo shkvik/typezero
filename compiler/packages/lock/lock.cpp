@@ -20,7 +20,7 @@ namespace {
 
 constexpr int kLockVersion = 1;
 
-} // namespace
+}
 
 bool readLock(llvm::StringRef file, Lock &out) {
   out = Lock();
@@ -112,4 +112,4 @@ std::string lockText(const Lock &lock) {
   return text;
 }
 
-} // namespace tz::pkg
+}

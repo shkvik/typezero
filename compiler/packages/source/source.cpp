@@ -21,7 +21,7 @@ bool isJsrNamePart(llvm::StringRef part) {
   });
 }
 
-} // namespace
+}
 
 std::string repositoryName(llvm::StringRef url) {
   llvm::StringRef name = url.rtrim("/");
@@ -66,7 +66,6 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
   if (rest.consume_front("jsr:")) {
     out.kind = Source::Kind::Jsr;
     rest.consume_front("/");
-    // "@scope/name" and then "@range".
     llvm::StringRef scope, name;
     if (rest.consume_front("@")) {
       std::tie(scope, rest) = rest.split('/');
@@ -93,8 +92,6 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
   if (rest.consume_front("github:") || rest.consume_front("git:")) {
     out.kind = Source::Kind::Git;
     bool github = spec.starts_with("github:");
-    // The ref follows the last '@' after the last '/': "git@host:a/b.git" has
-    // none, "git@host:a/b.git@v1" has "v1".
     size_t slash = rest.find_last_of('/');
     size_t at = rest.find_last_of('@');
     llvm::StringRef where = rest;
@@ -102,7 +99,6 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
       where = rest.substr(0, at);
       out.ref = rest.drop_front(at + 1).str();
     }
-    // Not an option of git.
     if (where.starts_with("-") || llvm::StringRef(out.ref).starts_with("-")) {
       error = "'" + spec.str() + "': an address or a tag of git does not start with '-'";
       return false;
@@ -120,7 +116,7 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
     } else if (where.starts_with("./") || where.starts_with("../")) {
       llvm::SmallString<256> full(baseDir);
       path::append(full, where);
-      path::remove_dots(full, /*remove_dot_dot=*/true);
+      path::remove_dots(full, true);
       out.url = path::convert_to_slash(full);
     } else {
       out.url = where.str();
@@ -172,4 +168,4 @@ bool parseSource(llvm::StringRef spec, llvm::StringRef baseDir, Source &out, std
   return false;
 }
 
-} // namespace tz::pkg
+}

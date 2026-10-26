@@ -1,21 +1,10 @@
-// The streams of node:fs and of process: fs.ReadStream and fs.WriteStream,
-// ported from lib/internal/fs/streams.js of Node 24 (docs/streams.md, step
-// 3), process.stdin as a Readable and process.stdout and process.stderr as
-// Writables. The calls of the system are the runtime's
-// (runtime/library/node/fs/fs.c), each a work for the pool of
-// runtime/core/io/io.c, as a call of node:fs with a callback is: `__tz_fsOpen`
-// and the others give a Promise, which the code waits for as node's callback is
-// called.
-
 import { AbortSignal } from "tz:web"
 import { Readable, Stream, StreamCallback, Writable, WriteChunk, streamFinished } from "node:stream"
 
-// node's ERR_OUT_OF_RANGE.
 class FsRangeError extends RangeError {
   code = "ERR_OUT_OF_RANGE"
 }
 
-// node's ERR_STREAM_DESTROYED.
 class FsStreamError extends Error {
   code: string
   constructor(code: string, message: string) {
@@ -58,8 +47,6 @@ export interface WriteStreamOptions {
   signal?: AbortSignal
 }
 
-// The descriptor of a stream, closed when it is destroyed (node's close()),
-// fsync'ed first when it flushes.
 function closeFd(fd: int | undefined, flush: boolean, err: Error | undefined,
                  cb: StreamCallback) {
   if (fd == undefined) {
@@ -81,8 +68,6 @@ function closeFd(fd: int | undefined, flush: boolean, err: Error | undefined,
   else closeIt(err)
 }
 
-// fs.ReadStream: a Readable of the bytes of a file, from `start` to `end`
-// (both included), in chunks of highWaterMark (64 KiB) at most.
 export class ReadStream<T = Buffer> extends Readable<T> {
   @__tz_hidden fd: int | undefined
   path: string
@@ -203,8 +188,6 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   }
 }
 
-// fs.WriteStream: a Writable of a file, from `start` on, or where the flags
-// say (the end, with "a").
 export class WriteStream extends Writable<Buffer> {
   @__tz_hidden fd: int | undefined
   path: string
@@ -258,8 +241,6 @@ export class WriteStream extends Writable<Buffer> {
     )
   }
 
-  // node's writeAll: the whole of `data`, from its byte `offset` on, in as
-  // many writes as the system takes.
   #writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: StreamCallback,
             retries: int) {
     const fd = this.fd
@@ -305,7 +286,6 @@ export class WriteStream extends Writable<Buffer> {
     if (pos != undefined) this.pos = pos + chunk.length
   }
 
-  // node's _writev: the chunks as one write.
   _writev(chunks: WriteChunk<Buffer>[], callback: StreamCallback): void {
     const all: Buffer[] = []
     for (const c of chunks) all.push(c.chunk)
@@ -336,9 +316,6 @@ export class WriteStream extends Writable<Buffer> {
   }
 }
 
-// fs.createReadStream(path, options) and createWriteStream(); the compiler
-// gives the encoding written in place of the options apart, and the chunk
-// type (compiler/library/stream/sema/sema_stream.cpp).
 export function createReadStream() {}
 export function createWriteStream() {}
 
@@ -376,12 +353,6 @@ export function streamWriteFile(path: string, options: WriteStreamOptions | unde
   })
 }
 
-//===----------------------------------------------------------------------===//
-// process.stdin, process.stdout and process.stderr
-//===----------------------------------------------------------------------===//
-
-// process.stdin: the bytes of stdin, from the buffer readLine and readline
-// read too. A read waits for the next chunk of input.
 class StdinStream extends Readable<Buffer> {
   @__tz_hidden fd = 0
   #reading = false
@@ -396,9 +367,6 @@ class StdinStream extends Readable<Buffer> {
   }
 }
 
-// process.stdout and process.stderr: what is written goes where
-// console.log prints, in the order written, at once, as node's
-// SyncWriteStream does for a file.
 class StdioStream extends Writable<Buffer> {
   constructor(readonly fd: int) {
     super({ emitClose: false, autoDestroy: false })
@@ -415,8 +383,6 @@ let stdinStream: StdinStream | undefined = undefined
 let stdoutStream: StdioStream | undefined = undefined
 let stderrStream: StdioStream | undefined = undefined
 
-// The streams of process (the compiler calls these): each made once, when
-// the program first uses it.
 export function processStdin(): Readable<Buffer> {
   const made = stdinStream
   if (made != undefined) return made

@@ -23,15 +23,13 @@ namespace tz {
 
 namespace {
 
-// An object type that only the drop function of its layout tells apart: an
-// object literal type, an interface, a tuple.
 bool isPlainObject(const Type *type) {
   return type->isObject() && !type->isClass() && !type->isAnyObject() && !type->isBytes() &&
          !type->isDate() && !type->isRegExp() && !type->isMatch() && !type->isIntl() &&
          !type->isCrypto() && !type->isRuntimeObject() && !type->isTimer() && type->bases().empty();
 }
 
-} // namespace
+}
 
 StreamLowerer::StreamLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -42,7 +40,6 @@ llvm::Value *StreamLowerer::emitChunkAs(llvm::Value *u, const Type *to, llvm::Ba
     lowering_.builder_.CreateCondBr(ok, next, fail);
     lowering_.functionFrame().switchTo(next);
   };
-  // Binary data is the object itself, of the kind its layout says.
   if (to->isBytes()) {
     llvm::Value *ok = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_lib_is_bytes", i32, {ptr, i32}),
@@ -51,8 +48,6 @@ llvm::Value *StreamLowerer::emitChunkAs(llvm::Value *u, const Type *to, llvm::Ba
     lowering_.refCounts().retainValue(u, to);
     return u;
   }
-  // Objects of one object type share the drop function of their layouts,
-  // whatever the order their fields were given in.
   if (isPlainObject(to)) {
     llvm::Value *layout = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_unknown_layout", ptr, {ptr}), {u}, "layout");
@@ -70,10 +65,8 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   switch (call->builtin) {
   case Builtin::LibChunk: {
-    // The library's types promise what the unknown holds; anything else is
-    // a fault of tz, which ends the program with what it is.
     const Type *to = call->type;
-    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
     if (to->isUnknown()) {
       lowering_.refCounts().retainValue(u.value, to);
       llvm::Value *value = u.value;
@@ -91,15 +84,13 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
         {u.value, lowering_.stringLowerer().utf8Constant(name),
          lowering_.builder_.getInt32(uint32_t(name.size()))});
     lowering_.builder_.CreateUnreachable();
-    lowering_.builder_.SetInsertPoint(here); // a block of the function already
+    lowering_.builder_.SetInsertPoint(here);
     lowering_.refCounts().dropOperand(u);
     return value;
   }
   case Builtin::LibIsChunk: {
-    // The type it tests for is that of the second argument, which Checker
-    // adds and which is not evaluated.
     const Type *wanted = call->args[1]->type;
-    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand u = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::BasicBlock *fail = lowering_.functionFrame().newBlock("chunk.not");
     llvm::BasicBlock *end = lowering_.functionFrame().newBlock("chunk.end");
     llvm::Value *value = emitChunkAs(u.value, wanted, fail);
@@ -117,14 +108,12 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     return phi;
   }
   case Builtin::LibOverrides: {
-    // The code at the method's slot in the table of the object's class is
-    // not the method the code knows.
     const FunctionDecl *method = call->method ? call->method->decl : nullptr;
-    Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *result = lowering_.builder_.getFalse();
     if (method && method->slot >= 0 && method->body) {
       result = lowering_.builder_.CreateICmpNE(
-          lowering_.inheritLowerer().vtableEntry(object.value, method->slot, /*info=*/false),
+          lowering_.inheritLowerer().vtableEntry(object.value, method->slot, false),
           lowering_.classDescriptors().methodCode(method), "overrides");
     }
     lowering_.refCounts().dropOperand(object);
@@ -135,8 +124,6 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   case Builtin::LibFsWrite:
   case Builtin::LibFsClose:
   case Builtin::LibStdinChunk: {
-    // A Promise that the runtime settles (runtime/library/node/fs/fs.c), as
-    // those of node:fs/promises are (codegen_async_io.cpp).
     llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *i64 = lowering_.builder_.getInt64Ty();
     llvm::Type *f64 = lowering_.builder_.getDoubleTy();
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
@@ -180,8 +167,6 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
     return promise;
   }
   case Builtin::LibStdWrite: {
-    // The bytes of the Buffer, where console.log writes
-    // (runtime/core/output/output.c).
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_lib_std_write",
@@ -195,4 +180,4 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

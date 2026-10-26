@@ -28,16 +28,12 @@ namespace tz {
 
 namespace {
 
-// A count no program reaches, as literals have (see codegen.cpp).
 constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
-// What a class is called in messages: its name, or what it extends.
 std::string className(const ClassDecl *cls) {
   return cls->name.empty() && cls->type ? cls->type->name().str() : cls->name.str();
 }
 
-// The constructors `new` of a class chooses from: its own, or those of the
-// nearest class up its chain that has any.
 std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c; c = c->parent) {
     if (!c->constructors.empty()) {
@@ -48,7 +44,7 @@ std::vector<FunctionDecl *> constructorsOf(const ClassDecl *cls) {
   return {};
 }
 
-} // namespace
+}
 
 ReflectLowerer::ReflectLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -61,21 +57,18 @@ llvm::Function *ReflectLowerer::classFromJsonFunction(const ClassDecl *cls) {
         "tz.fromJson.class." + lowering_.symbolPrefixes_.lookup(cls) + className(cls),
         lowering_.module_.get());
     lowering_.functionBuilder().setFunctionAttributes(fn);
-    pendingConverters_.push_back(cls); // its body comes once the program is emitted
+    pendingConverters_.push_back(cls);
   }
 
   return fn;
 }
 
-// (ptr json, ptr path) -> ptr: the object the constructor makes from the
-// keys of the Json named as its parameters, each checked as fromJson<T>
-// checks a field; then the public fields it may write that the Json has.
 void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
   lowering_.functionBuilder().beginFunction(fn, nullptr);
   lowering_.loc_ = cls->loc();
   lowering_.functionFrame().pushScope();
-  if (!lowering_.jsonPathTy_) { // runtime/library/json/json/json.c: TzJsonPath
+  if (!lowering_.jsonPathTy_) {
     lowering_.jsonPathTy_ =
         llvm::StructType::create(lowering_.ctx_, {ptr, ptr, i64, i64}, "tz.jsonpath");
   }
@@ -121,7 +114,6 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
          lowering_.stringLowerer().stringMeta(text)},
         key);
   };
-  // The arguments: the keys named as the parameters of the constructor.
   std::vector<FunctionDecl *> ctors = constructorsOf(cls);
   const FunctionDecl *ctor = ctors.empty() ? nullptr : ctors.front();
   const FuncSymbol *sym = ctor ? ctor->sym : nullptr;
@@ -142,7 +134,6 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
   Lowering::Held held = lowering_.throwLowerer().hold(object, cls->type, true);
   lowering_.classLowerer().emitConstruct(object, cls, sym, values);
   object = lowering_.throwLowerer().take(held);
-  // Then the other fields that code may write, if the Json has them.
   for (const Field &f : cls->type->fields()) {
     if (given.contains(f.name) || !llvm::is_contained(cls->jsonFields, f.name)) {
       continue;
@@ -178,20 +169,15 @@ llvm::Function *ReflectLowerer::constructFunction(const ClassDecl *cls) {
       "tz.construct." + lowering_.symbolPrefixes_.lookup(cls) + className(cls),
       lowering_.module_.get());
   lowering_.functionBuilder().setFunctionAttributes(fn);
-  constructFunctions_[cls] = fn; // its body comes once the program is emitted
+  constructFunctions_[cls] = fn;
 
   return fn;
 }
 
 void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init) {
-  // The bodies of the functions that make objects of classes from Json, which
-  // may need those of more classes.
   for (size_t i = 0; i < pendingConverters_.size(); ++i) {
     emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
   }
-  // A class is described only if the program looks up what the description
-  // holds: when every `new` and Reflect call is of classes known when
-  // compiling, none is.
   auto described = [&](const ClassDecl *cls) {
     return cls->isEmitted() && !cls->literal && !cls->builtin &&
            ((lowering_.reflectsNew_ && cls->reflectNew) ||
@@ -210,7 +196,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     classes.push_back(cls);
     count = std::max(count, cls->id + 1);
   }
-  // The description of each class.
   std::vector<const Type *> invoked;
   for (const ClassDecl *cls : classes) {
     llvm::Constant *construct = null;
@@ -221,9 +206,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     if (lowering_.reflectsJson_ && cls->reflectJson && !cls->isAbstract) {
       fromJson = classFromJsonFunction(cls);
     }
-    // Its methods, and those up its chain it does not override, by name: of
-    // several variants, the function that chooses one by the arguments
-    // (docs/overloads.md, section 6).
     std::vector<llvm::Constant *> methods;
     llvm::StringSet<> named;
     for (const ClassDecl *c = cls; c && lowering_.reflectsGet_ && cls->reflectMethods;
@@ -263,7 +245,7 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     if (!methods.empty()) {
       auto *type = llvm::ArrayType::get(reflectMethodTy(), methods.size());
       auto *global = new llvm::GlobalVariable(
-          *lowering_.module_, type, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+          *lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
           llvm::ConstantArray::get(type, methods), "tz.methods." + className(cls));
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       table = global;
@@ -273,8 +255,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
         lowering_.classInfoLowerer().classInfoType(),
         {construct, fromJson, table, lowering_.builder_.getInt32(uint32_t(methods.size()))}));
   }
-  // The bodies of the functions that make objects from unknowns, which the
-  // descriptions and Reflect.construct of classes known when compiling call.
   for (size_t i = 0; i < constructFunctions_.size(); ++i) {
     auto [cls, fn] = *(constructFunctions_.begin() + i);
     if (fn->empty()) {
@@ -286,7 +266,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
       emitClassFromJson(pendingConverters_[i], classConverters_.lookup(pendingConverters_[i]));
     }
   }
-  // The objects of the other classes point to no description.
   for (auto &[cls, global] : lowering_.classInfos_) {
     if (global && !llvm::is_contained(classes, cls)) {
       global->replaceAllUsesWith(null);
@@ -299,15 +278,13 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
     return;
   }
 
-  // The objects of the classes by number, and the invokers of the types of
-  // the functions that may reach Reflect.apply.
   std::vector<llvm::Constant *> byId(count, null);
   for (const ClassDecl *cls : classes) {
     byId[cls->id] = lowering_.unknownLowerer().classObject(cls);
   }
   auto *classesType = llvm::ArrayType::get(ptr, count);
   auto *classTable = new llvm::GlobalVariable(
-      *lowering_.module_, classesType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, classesType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(classesType, byId), "tz.reflect.classes");
   std::vector<llvm::Constant *> entries;
   if (usesApply_) {
@@ -326,9 +303,9 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
   llvm::Constant *invokers = null;
   if (!entries.empty()) {
     auto *type = llvm::ArrayType::get(entries.front()->getType(), entries.size());
-    invokers = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
-                                        llvm::GlobalValue::PrivateLinkage,
-                                        llvm::ConstantArray::get(type, entries), "tz.invokers");
+    invokers =
+        new llvm::GlobalVariable(*lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
+                                 llvm::ConstantArray::get(type, entries), "tz.invokers");
   }
   llvm::IRBuilder<> b(init->getNextNode());
   b.CreateCall(lowering_.unknownLowerer().unknownFunction(
@@ -337,7 +314,6 @@ void ReflectLowerer::finishReflection(SourceFile &file, llvm::Instruction *init)
 }
 
 llvm::StructType *ReflectLowerer::reflectMethodTy() {
-  // TzReflectMethod: { ptr name, i32 length, ptr type, ptr info }.
   if (!reflectMethodTy_) {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     reflectMethodTy_ = llvm::StructType::create(
@@ -347,12 +323,10 @@ llvm::StructType *ReflectLowerer::reflectMethodTy() {
   return reflectMethodTy_;
 }
 
-// The class first, then the arguments as unknowns, to the description of
-// the class the value is.
 llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
   lowering_.reflectsNew_ = true;
-  llvm::Value *cls = lowering_.exprLowerer().emitExpr(expr->callee); // a class is never counted
+  llvm::Value *cls = lowering_.exprLowerer().emitExpr(expr->callee);
   std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(expr->args);
   auto *arrayType = llvm::ArrayType::get(ptr, std::max<size_t>(values.size(), 1));
   llvm::Value *args = lowering_.functionFrame().createStackSlot(arrayType, "reflect.args");
@@ -410,7 +384,6 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
     llvm::Value *object;
     if (const ClassDecl *known = call->args[0]->type->classRef()) {
-      // A class known when compiling: its function, without its description.
       object = lowering_.builder_.CreateCall(
           lowering_.unknownLowerer().unknownFunction("tz_reflect_make", ptr, {ptr, ptr}),
           {constructFunction(known), values[1]}, "object");
@@ -426,7 +399,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
   }
   case Builtin::FromJsonClass: {
     llvm::Value *cls = lowering_.exprLowerer().emitExpr(call->args[0]);
-    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[1], /*canBorrow=*/true);
+    Lowering::Operand json = lowering_.refCounts().emitOperand(call->args[1], true);
     llvm::Value *object;
     if (const ClassDecl *known = call->args[0]->type->classRef()) {
       object = lowering_.builder_.CreateCall(
@@ -443,12 +416,8 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     return object;
   }
   case Builtin::ReflectMethod: {
-    // The object only says which class: its method, as the description
-    // would give it, is a function value without an environment, in a box
-    // that lives as long as the program, as the object of a class does.
-    Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand object = lowering_.refCounts().emitOperand(call->args[0], true);
     lowering_.refCounts().dropOperand(object);
-    // Of several variants, the function that chooses one.
     const FunctionDecl *method = call->method->decl;
     const ClassDecl *cls = call->args[0]->type->classDecl();
     std::vector<const FunctionDecl *> variants =
@@ -458,7 +427,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
         variants.size() > 1
             ? lowering_.reflectDispatchLowerer().reflectDispatchInfo(cls, variants, type)
             : lowering_.classInfoLowerer().reflectAdapterInfo(method, type);
-    lowering_.unknownFunctionTypes_.insert(type); // Reflect.apply may call it
+    lowering_.unknownFunctionTypes_.insert(type);
     llvm::GlobalVariable *&box = reflectBoxes_[info];
     if (!box) {
       llvm::Constant *init = llvm::ConstantStruct::getAnon(
@@ -467,7 +436,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
            lowering_.typeDescriptors().typeDescriptor(type),
            llvm::ConstantStruct::get(lowering_.fnTy_,
                                      {info, llvm::ConstantPointerNull::get(ptr)})});
-      box = new llvm::GlobalVariable(*lowering_.module_, init->getType(), /*isConstant=*/false,
+      box = new llvm::GlobalVariable(*lowering_.module_, init->getType(), false,
                                      llvm::GlobalValue::InternalLinkage, init,
                                      info->getName() + ".box");
     }
@@ -478,4 +447,4 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

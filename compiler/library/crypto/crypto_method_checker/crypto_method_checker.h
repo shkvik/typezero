@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// The methods of the objects of node:crypto: hashes, ciphers, keys, certificates.
 class CryptoMethodChecker {
 public:
   explicit CryptoMethodChecker(Checker &checker);
@@ -15,4 +14,4 @@ private:
   Checker &checker_;
 };
 
-} // namespace tz
+}

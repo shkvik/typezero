@@ -48,19 +48,16 @@ namespace tz {
 
 namespace {
 
-// A value held as a pointer, null for undefined in `T | undefined`: an
-// object, an iterator, a Json, a dictionary or a Promise.
 bool isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
          type->isPromise() || type->isUnknown() || type->isClassRef() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-} // namespace
+}
 
 ExprLowerer::ExprLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// A built-in that fails in it throws from where the expression is (loc_).
 llvm::Value *ExprLowerer::emitExpr(Expr *expr) {
   llvm::SMLoc outer = std::exchange(lowering_.loc_, expr->loc());
   lowering_.orderAt(expr->loc());
@@ -74,7 +71,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   switch (expr->kind()) {
   case Expr::Kind::IntLit: {
     auto *lit = cast<IntLitExpr>(expr);
-    const Type *type = UnionLayout::storedType(lit->type); // `0 | 1` holds an int
+    const Type *type = UnionLayout::storedType(lit->type);
     if (type->isFloat()) {
       return llvm::ConstantFP::get(lowering_.builder_.getDoubleTy(),
                                    static_cast<double>(lit->value));
@@ -92,14 +89,14 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   case Expr::Kind::BoolLit:
     return lowering_.builder_.getInt1(cast<BoolLitExpr>(expr)->value);
   case Expr::Kind::StringLit:
-    if (expr->type->isStringLiteral()) { // a literal type: its atom
+    if (expr->type->isStringLiteral()) {
       return lowering_.builder_.getInt32(expr->type->atom());
     }
     return lowering_.stringLowerer().stringLiteral(cast<StringLitExpr>(expr)->value);
   case Expr::Kind::RegexLit:
     return lowering_.regexLowerer().emitRegexLiteral(cast<RegexLitExpr>(expr));
   case Expr::Kind::Undefined:
-    return lowering_.builder_.getFalse(); // conversions and printing handle it
+    return lowering_.builder_.getFalse();
   case Expr::Kind::Template:
     return lowering_.stringLowerer().emitTemplate(cast<TemplateExpr>(expr));
   case Expr::Kind::ArrayLit:
@@ -108,18 +105,18 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     return lowering_.objectLowerer().emitObjectLiteral(cast<ObjectLitExpr>(expr));
   case Expr::Kind::Name: {
     auto *name = cast<NameExpr>(expr);
-    if (name->func) { // a top-level function as a value
+    if (name->func) {
       return lowering_.closureLowerer().makeFunctionValue(
           lowering_.closureLowerer().functionInfo(name->func->decl),
           llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()));
     }
-    if (!name->var && name->type->isJson()) { // `null`, which only a Json holds
+    if (!name->var && name->type->isJson()) {
       return lowering_.jsonLowerer().emitJsonNull();
     }
-    if (name->cls) { // a class as a value
+    if (name->cls) {
       return lowering_.unknownLowerer().classObject(name->cls);
     }
-    return lowering_.envLowerer().emitVarValue(name->var, /*borrow=*/false);
+    return lowering_.envLowerer().emitVarValue(name->var, false);
   }
   case Expr::Kind::Function:
     return lowering_.closureLowerer().emitFunctionExpr(cast<FunctionExpr>(expr));
@@ -136,7 +133,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     if (index->object->type->isString()) {
       return lowering_.stringLowerer().emitStringIndex(index);
     }
-    if (index->keyed) { // `o[k]` with a key of literals
+    if (index->keyed) {
       Lowering::Operand object = lowering_.refCounts().emitOperand(
           index->object, AssignLowerer::cannotAssign(index->index));
       llvm::Value *key = emitExpr(index->index);
@@ -159,7 +156,7 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   case Expr::Kind::Binary:
     return lowering_.binaryLowerer().emitBinary(cast<BinaryExpr>(expr));
   case Expr::Kind::Assign:
-    return lowering_.assignLowerer().emitAssign(cast<AssignExpr>(expr), /*needResult=*/true);
+    return lowering_.assignLowerer().emitAssign(cast<AssignExpr>(expr), true);
   case Expr::Kind::Update:
     return lowering_.assignLowerer().emitUpdate(cast<UpdateExpr>(expr));
   case Expr::Kind::Call:
@@ -189,14 +186,12 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     if (c->type->isFunction() && c->operand->type->isFunction()) {
       return lowering_.closureLowerer().emitFunctionAdapter(c);
     }
-    // The text of a value of a union, whatever member it holds.
     if (c->text) {
       llvm::Value *value = emitExpr(c->operand);
       llvm::Value *text = lowering_.arrayMethodLowerer().emitValueToString(value, c->operand->type);
       lowering_.refCounts().releaseValue(value, c->operand->type);
       return text;
     }
-    // A Json known to be a boolean is that boolean, not a truth to test.
     if (c->type->isBool() && !c->operand->type->isBool() &&
         !c->operand->type->nonOptional()->isJson() && !c->operand->type->isUnknown()) {
       return lowering_.truthLowerer().emitTruthOf(c->operand);
@@ -213,8 +208,6 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   case Expr::Kind::OptionalChain:
     return emitOptionalChain(cast<OptionalChainExpr>(expr));
   case Expr::Kind::Yield:
-    // In the generator of safeTry, which is no generator, `yield* r` takes
-    // the value of the Result r or returns its Err.
     if (lowering_.currentFn_ && lowering_.currentFn_->safeTry) {
       return lowering_.resultLowerer().emitSafeTryYield(cast<YieldExpr>(expr));
     }
@@ -225,8 +218,6 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   llvm_unreachable("unknown expression kind");
 }
 
-// `a?.b.c`: each link whose object is undefined jumps to the end, where the
-// chain is undefined.
 llvm::Value *ExprLowerer::emitOptionalChain(OptionalChainExpr *chain) {
   if (!chain->mayShortCircuit) {
     return emitExpr(chain->chain);
@@ -264,7 +255,6 @@ llvm::Value *ExprLowerer::emitChainLink(CastExpr *link) {
   }
   llvm::Value *value = emitExpr(link->operand);
   llvm::BasicBlock *valueBlock = lowering_.functionFrame().newBlock("chain.link");
-  // Undefined holds nothing to release.
   lowering_.builder_.CreateCondBr(lowering_.optionalLowerer().optionalHas(value, type), valueBlock,
                                   lowering_.chainEnds_.back());
   lowering_.functionFrame().switchTo(valueBlock);
@@ -304,25 +294,19 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
   if (from == to) {
     return value;
   }
-  // A string of a pattern (Type::stringPattern) is a string as it is.
   if (from->isString() && to->isString()) {
     return value;
   }
-  // A value that cannot exist, in code that never runs: the callback of
-  // mapErr on a Result that cannot be an Err.
   if (from->isNever()) {
     return llvm::Constant::getNullValue(lowering_.resultLowerer().lowerHalf(to));
   }
   if (from->isUnknown() || to->isUnknown()) {
     return lowering_.unknownLowerer().emitUnknownConversion(value, from, to);
   }
-  // A variable narrowed to never (every member of its union ruled out), in
-  // code that never runs.
   if (to->isNever()) {
     lowering_.refCounts().releaseValue(value, from);
     return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to));
   }
-  // A number or boolean literal type is a value of its base.
   from = UnionLayout::storedType(from);
   to = UnionLayout::storedType(to);
   if (from == to) {
@@ -377,7 +361,6 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
       lowering_.refCounts().releaseValue(value, from);
       return text;
     }
-    // Arrays and optionals: the runtime knows how to show any value.
     llvm::Value *result = lowering_.arrayMethodLowerer().emitValueToString(value, from);
     lowering_.refCounts().releaseValue(value, from);
     return result;
@@ -387,7 +370,7 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
     if (from->isUndefined()) {
       return lowering_.optionalLowerer().undefinedValue(to);
     }
-    if (from->isOptional()) { // numeric widening, which keeps zero zero, or an object
+    if (from->isOptional()) {
       return lowering_.optionalLowerer().makeOptional(
           emitConversion(lowering_.optionalLowerer().optionalValue(value, from), from->inner(),
                          to->inner()),
@@ -396,13 +379,10 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
     return lowering_.optionalLowerer().makeOptional(emitConversion(value, from, to->inner()),
                                                     lowering_.builder_.getTrue(), to);
   }
-  if (from->isOptional()) { // narrowed: known to hold a value
+  if (from->isOptional()) {
     return emitConversion(lowering_.optionalLowerer().optionalValue(value, from), from->inner(),
                           to);
   }
-  // An object seen through a type with read-only fields, or an iterator
-  // through one that drops what it returns; an array of objects as one of a
-  // type they are (`Dog[]` as `Animal[]`).
   if (isReference(from) || (from->isArray() && to->isArray())) {
     return value;
   }
@@ -418,12 +398,10 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
   if (from->isInteger() && to->isFloat()) {
     return lowering_.builder_.CreateSIToFP(value, target);
   }
-  // An operand of a bitwise operator: JavaScript's ToInt32. A double becomes a
-  // long only through Math functions (emitMathCall).
   if (from->isFloat() && to->isInt()) {
     return lowering_.builder_.CreateCall(lowering_.rt_.toInt32, {value});
   }
   llvm_unreachable("Checker rejects this conversion");
 }
 
-} // namespace tz
+}

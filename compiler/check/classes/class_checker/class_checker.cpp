@@ -38,19 +38,11 @@ void ClassChecker::checkClassStmt(ClassDecl *cls) {
                               cls->name + " = class { ... }'");
     return;
   }
-  // A class whose base is a value (`extends Mixin(Base)`) is made here,
-  // where that value is.
   if (cls->baseExpr && !cls->resolved) {
     checker_.lateClasses().makeLateClass(cls);
   }
-  // The static fields get their values when the declaration runs, in order;
-  // the class exists by then (`static instance = new C()`).
   checker_.lateClasses().checkStaticFields(cls);
   ClassDecl *outer = std::exchange(checker_.currentClass_, cls);
-  // Then the decorators, as TypeScript applies them right after the class:
-  // of a generic class once, for the generic class itself (with the types
-  // of the declaration, as TypeScript, which has one class), not for each
-  // instance.
   if (!cls->generic && hasDecorators(cls)) {
     checker_.decoratorChecker().decorateClass(cls);
   }
@@ -74,7 +66,6 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
     checker_.flow_ = Checker::Flow();
     checker_.functionChecker().checkFunctionBody(cls->init);
   }
-  // Without a constructor, the initializers must set every field.
   if (cls->constructors.empty()) {
     for (const ClassField &f : cls->fields) {
       if (f.isStatic || f.method || f.optional || f.init || f.definite || !f.resolved ||
@@ -102,7 +93,7 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
     }
   }
   for (FunctionDecl *fn : methods) {
-    if (checker_.lateClasses().isTemplate(fn->sym)) { // checked in its copies
+    if (checker_.lateClasses().isTemplate(fn->sym)) {
       continue;
     }
     if (!fn->sym->ret) {
@@ -116,8 +107,6 @@ void ClassChecker::checkClassBodies(ClassDecl *cls) {
   }
   checker_.inheritChecker().checkAbstract(cls);
   checker_.inheritChecker().checkImplements(cls);
-  // An override returns what the method it overrides returns, or, for an
-  // object, a type that is one (Dog for Animal): the same value in memory.
   for (FunctionDecl *fn : ClassLinks::ownMethods(cls)) {
     if (!fn->overrides) {
       continue;
@@ -152,7 +141,6 @@ VarSymbol *ClassChecker::declareThis(FunctionDecl *fn) {
   return self;
 }
 
-// `this.x` and `this.m()` in a constructor see the fields set so far.
 bool ClassChecker::isInitThis(const Expr *expr) const {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (conv->isImplicit()) {
@@ -201,7 +189,6 @@ void ClassChecker::checkFieldsSet(llvm::SMLoc loc) {
 
 Expr *ClassChecker::checkThis(NameExpr *name) {
   name->type = Type::error();
-  // An arrow sees the `this` of the function around it.
   FunctionDecl *method = nullptr;
   for (FunctionDecl *fn : llvm::reverse(checker_.functions_)) {
     if (fn->takesThis()) {
@@ -211,7 +198,6 @@ Expr *ClassChecker::checkThis(NameExpr *name) {
     if (fn->isArrow) {
       continue;
     }
-    // `function (this: unknown, ...)`: its parameter.
     if (fn->sym && fn->sym->hasThis && !fn->params.empty() && fn->params[0].sym) {
       VarSymbol *var = fn->params[0].sym;
       name->var = var;
@@ -251,7 +237,7 @@ Expr *ClassChecker::checkThis(NameExpr *name) {
   }
   VarSymbol *var = method->thisVar;
   if (!var) {
-    return name; // a copy whose body is not being checked
+    return name;
   }
   name->var = var;
   checker_.nestedFunctions().noteUse(var, name->loc());
@@ -259,7 +245,6 @@ Expr *ClassChecker::checkThis(NameExpr *name) {
   if (var != checker_.initThis_) {
     return name;
   }
-  // The rules while the constructor sets the fields.
   if (checker_.currentDecl() != checker_.initFn_) {
     if (!checker_.closureThisReady_) {
       checker_.diags_.error(name->loc(),
@@ -285,4 +270,4 @@ Expr *ClassChecker::checkThis(NameExpr *name) {
   return name;
 }
 
-} // namespace tz
+}

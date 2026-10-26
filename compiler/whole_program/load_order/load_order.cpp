@@ -12,7 +12,6 @@ namespace tz {
 
 namespace {
 
-// The function a callee or a callback names directly, if any.
 const FunctionDecl *directFunction(const Expr *expr) {
   while (auto *cast = dyn_cast<CastExpr>(expr)) {
     expr = cast->operand;
@@ -32,8 +31,6 @@ const FunctionDecl *directFunction(const Expr *expr) {
   return nullptr;
 }
 
-// The functions a call runs before it returns: the function it calls, and
-// the callbacks a built-in such as map or forEach calls.
 void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionDecl *> &called) {
   if (call->func && call->func->decl) {
     called.push_back(call->func->decl);
@@ -44,7 +41,7 @@ void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionD
     if (m.method) {
       called.push_back(m.method->decl);
     } else if (const FunctionDecl *fn = call->callee ? directFunction(call->callee) : nullptr) {
-      called.push_back(fn); // `(() => ...)()`
+      called.push_back(fn);
     }
   }
   if ((call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
@@ -57,8 +54,6 @@ void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionD
   }
 }
 
-// What `new C()` runs: the initializers of the fields and the constructor.
-// The call of the constructor stands for it.
 const CallExpr *constructorCall(const Expr *expr,
                                 llvm::SmallVectorImpl<const FunctionDecl *> &called) {
   auto *create = dyn_cast<NewExpr>(expr);
@@ -75,7 +70,6 @@ const CallExpr *constructorCall(const Expr *expr,
   return called.empty() ? nullptr : create->ctor;
 }
 
-// A function in messages: "'f'", or what a class runs.
 std::string calleeName(const FunctionDecl *fn) {
   if (!fn->cls) {
     return quotedName(fn->name);
@@ -87,17 +81,11 @@ std::string calleeName(const FunctionDecl *fn) {
   return "'" + fn->cls->name.str() + "." + fn->name.str() + "'";
 }
 
-} // namespace
+}
 
 LoadOrder::LoadOrder(Checker &checker) : checker_(checker) {}
 
-// What the code that runs at some point may read: of the globals it uses,
-// directly or through the functions it calls, the one set last. Functions
-// the code only creates run later, and do not count; neither do calls
-// through function values, which are not known here.
 void LoadOrder::checkLoadOrder(SourceFile &program) {
-  // When each global is set: the top-level declarations count up in the
-  // order the program runs them.
   llvm::DenseMap<const VarSymbol *, unsigned> setAt;
   llvm::DenseMap<const VarSymbol *, Module *> homes;
   unsigned count = 0;
@@ -131,7 +119,6 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
     }
   };
 
-  // The calls of top-level code, with the number of globals set by then.
   struct Site {
     const CallExpr *call;
     llvm::SmallVector<const FunctionDecl *, 2> called;
@@ -143,8 +130,6 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
   for (Module *module : program.modules) {
     auto visit = [&](const Expr *e) {
       if (auto *name = dyn_cast<NameExpr>(e)) {
-        // A global of a file that loads later, which Checker saw because that
-        // file was checked out of turn (see loadEarly).
         auto found = name->var ? setAt.find(name->var) : setAt.end();
         if (found == setAt.end() || found->second <= time) {
           return;
@@ -190,12 +175,12 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       }
       auto *decl = dyn_cast<VarDeclStmt>(item);
       if (!decl) {
-        visitExprs(item, visit, /*intoFunctions=*/false);
+        visitExprs(item, visit, false);
         continue;
       }
       for (const VarDeclarator &d : decl->decls) {
         if (d.init) {
-          visitExprs(d.init, visit, /*intoFunctions=*/false);
+          visitExprs(d.init, visit, false);
         }
         if (d.sym) {
           ++time;
@@ -204,7 +189,6 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
     }
   }
 
-  // What each function those calls reach does by itself.
   for (size_t i = 0; i < queue.size(); ++i) {
     const FunctionDecl *fn = queue[i];
     Effects own;
@@ -226,16 +210,15 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
     };
     for (const Param &param : fn->params) {
       if (param.defaultValue) {
-        visitExprs(param.defaultValue, visit, /*intoFunctions=*/false);
+        visitExprs(param.defaultValue, visit, false);
       }
     }
-    visitExprs(fn->body, visit, /*intoFunctions=*/false);
+    visitExprs(fn->body, visit, false);
     for (const FunctionDecl *callee : own.calls) {
       need(callee);
     }
     effects[fn] = std::move(own);
   }
-  // And with the functions they call, until nothing changes.
   for (bool changed = true; changed;) {
     changed = false;
     for (auto &entry : effects) {
@@ -274,9 +257,9 @@ void LoadOrder::checkLoadOrder(SourceFile &program) {
       }
       checker_.diags_.note(use.loc, "'" + var + "' is used here");
       checker_.diags_.note(use.var->loc, "'" + var + "' is declared here");
-      break; // one message for the call
+      break;
     }
   }
 }
 
-} // namespace tz
+}

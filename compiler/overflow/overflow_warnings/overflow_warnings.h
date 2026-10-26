@@ -4,7 +4,6 @@
 
 namespace tz {
 
-// Where to warn and what to suggest.
 class OverflowWarnings {
 public:
   explicit OverflowWarnings(OverflowCheck &check);
@@ -24,4 +23,4 @@ private:
   OverflowCheck &check_;
 };
 
-} // namespace tz
+}

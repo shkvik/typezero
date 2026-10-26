@@ -23,17 +23,10 @@ namespace tz {
 
 namespace {
 
-// A field that is a method (a method of a literal, or an arrow in a field of
-// a class): node prints it as `[Function: name]`. TZ_FIELD_METHOD in
-// runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kMethodField = 0xFFFFFFFFu;
 
-// The functions of a class that take `this`: its methods, constructors, the
-// initializers of its fields and its arrow methods. An abstract method has
-// no code.
 std::vector<FunctionDecl *> instanceMethods(const ClassDecl *cls) {
   std::vector<FunctionDecl *> methods;
-  // A generic method is emitted as its copies, which calls need.
   for (FunctionDecl *fn : cls->methods) {
     if (!fn->isStatic && !fn->isAbstract && fn->typeParams.empty()) {
       methods.push_back(fn);
@@ -53,7 +46,7 @@ std::vector<FunctionDecl *> instanceMethods(const ClassDecl *cls) {
   return methods;
 }
 
-} // namespace
+}
 
 ClassDescriptors::ClassDescriptors(Lowering &lowering) : lowering_(lowering) {}
 
@@ -63,8 +56,6 @@ llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
     auto *type = llvm::StructType::get(lowering_.ctx_, llvm::ArrayRef<llvm::Type *>(ptr));
     llvm::Constant *init = llvm::ConstantStruct::get(type, {drop});
-    // The parallel runtime reads the flags of any descriptor (publish.c): a
-    // whole layout, without fields.
     if (lowering_.parallel_) {
       llvm::Constant *null = llvm::ConstantPointerNull::get(ptr);
       type = lowering_.layoutDescTy_;
@@ -73,9 +64,9 @@ llvm::Constant *ClassDescriptors::dropDescriptor(llvm::Function *drop) {
           {drop, null, lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0), null,
            lowering_.builder_.getInt32(0), lowering_.builder_.getInt32(0)});
     }
-    auto *global = new llvm::GlobalVariable(*lowering_.module_, type, /*isConstant=*/true,
-                                            llvm::GlobalValue::PrivateLinkage, init,
-                                            drop->getName() + ".descriptor");
+    auto *global =
+        new llvm::GlobalVariable(*lowering_.module_, type, true, llvm::GlobalValue::PrivateLinkage,
+                                 init, drop->getName() + ".descriptor");
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     descriptor = global;
   }
@@ -92,7 +83,6 @@ llvm::Function *ClassDescriptors::methodCode(const FunctionDecl *fn) {
 }
 
 void ClassDescriptors::declareMethods(ClassDecl *cls) {
-  // An instance of a generic class by its type arguments: `tz.Box<int>.get`.
   const ClassDecl *named = cls->generic ? cls->generic : cls;
   std::string prefix = "tz." + lowering_.symbolPrefixes_.lookup(named) +
                        (cls->generic ? cls->type->name().str() : cls->name.str()) + ".";
@@ -101,7 +91,6 @@ void ClassDescriptors::declareMethods(ClassDecl *cls) {
     if (fn->variant) {
       name += "." + std::to_string(fn->variant);
     }
-    // A copy of a generic method, by its type arguments.
     if (fn->isInstance) {
       name += "<";
       for (size_t i = 0; i < fn->typeArgs.size(); ++i) {
@@ -127,11 +116,11 @@ void ClassDescriptors::emitMethods(ClassDecl *cls) {
     return;
   }
   for (FunctionDecl *fn : instanceMethods(cls)) {
-    if (fn->impl) { // a decorator may replace it
+    if (fn->impl) {
       lowering_.decoratorLowerer().emitDecoratedMethod(fn);
       continue;
     }
-    if (fn->isGenerator) { // `*items()`: its object is the environment
+    if (fn->isGenerator) {
       lowering_.generatorLowerer().emitGenerator(fn, lowering_.functions_.lookup(fn->sym));
       continue;
     }
@@ -160,12 +149,7 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   const Lowering::ObjectLayout &layout = lowering_.objectLayouts().objectLayout(type);
   const llvm::StructLayout *offsets =
       lowering_.module_->getDataLayout().getStructLayout(layout.type);
-  // The keys in the order node prints them: those of the classes up the
-  // chain first, as their constructors set them; then the fields as
-  // declared, a method of a literal or an arrow method where it is written;
-  // not the `#private` fields, which are no keys.
   std::vector<llvm::Constant *> entries;
-  // `shown` is the key it prints as, if not its name.
   auto field = [&](llvm::StringRef name, llvm::StringRef shown = {}) {
     unsigned i = ObjectLayouts::fieldIndex(type, name);
     uint64_t offset = offsets->getElementOffset(layout.elements[i]);
@@ -179,9 +163,6 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
          lowering_.builder_.getInt32(uint32_t(offset)),
          lowering_.typeDescriptors().typeDescriptor(type->fields()[i].type)}));
   };
-  // An emitter of node:events (library/events/events.tz) prints as node's: its
-  // private fields under node's names, those that are symbols in node last
-  // (TZ_LAYOUT_LIBRARY in runtime/core/tzrt/tzrt.h).
   bool emitter = false;
   for (const ClassDecl *c = cls; c && !emitter; c = c->parent) {
     emitter = c->library && c->name == "EventEmitterBase";
@@ -211,14 +192,12 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
     for (const ClassDecl *c = cls; c; c = c->parent) {
       chain.insert(chain.begin(), c);
     }
-    // A field declared again (or an arrow overridden) keeps its place.
     std::vector<std::pair<llvm::StringRef, const FunctionDecl *>> keys;
     if (emitter) {
       field("#events", "_events");
       field("#eventsCount", "_eventsCount");
       field("#maxListeners", "_maxListeners");
     }
-    // Nor a field marked `@__tz_hidden` (ClassField::hidden).
     for (const ClassDecl *c : chain) {
       for (const ClassField &f : c->fields) {
         if (f.isStatic || f.name.starts_with("#") || f.hidden) {
@@ -243,8 +222,6 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
       field("#shapeMode", "Symbol(shapeMode)");
       field("#capture", "Symbol(kCapture)");
     }
-    // Then the getters of a class of tz's library, which print as node's
-    // properties (codegen_library.cpp).
     if (cls->library) {
       lowering_.tzModulesLowerer().appendGetterKeys(chain, entries);
     }
@@ -254,13 +231,11 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   if (!entries.empty()) {
     auto *arrayType = llvm::ArrayType::get(lowering_.fieldDescTy_, entries.size());
     auto *global = new llvm::GlobalVariable(
-        *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(arrayType, entries), "tz.fields." + name);
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
   }
-  // An object of a class without a name shows the nearest name up its
-  // chain, as node shows it.
   llvm::StringRef shown = cls->name;
   for (const ClassDecl *c = cls; shown.empty() && c && c->expression; c = c->parent) {
     shown = c->parent ? c->parent->name : llvm::StringRef();
@@ -268,19 +243,15 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   llvm::Constant *className = shown.empty()
                                   ? llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())
                                   : lowering_.stringLowerer().utf8Constant(shown);
-  // An Error, and an object of a class derived from it, prints as Node
-  // prints errors (TZ_LAYOUT_ERROR in runtime/core/tzrt/tzrt.h).
   uint32_t flags = derivesFromError(cls) ? 512 : 0;
   if (library) {
-    flags |= 1073741824; // TZ_LAYOUT_LIBRARY
+    flags |= 1073741824;
   }
   llvm::Constant *base = llvm::ConstantStruct::get(
       lowering_.layoutDescTy_,
       {layout.drop, fields, lowering_.builder_.getInt32(uint32_t(entries.size())),
        lowering_.builder_.getInt32(flags), className,
        lowering_.builder_.getInt32(uint32_t(shown.size())), lowering_.builder_.getInt32(cls->id)});
-  // Then the tables of its interfaces, and its method table: the code and
-  // the info of the method at each slot (none for an abstract one).
   llvm::Constant *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   std::vector<llvm::Constant *> slots;
   for (FunctionDecl *fn : cls->vtable) {
@@ -293,7 +264,7 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   assert(lowering_.module_->getDataLayout().getStructLayout(descType)->getElementOffset(2) ==
          lowering_.kVtableOffset);
   auto *global = new llvm::GlobalVariable(
-      *lowering_.module_, descType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, descType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantStruct::get(descType, {base, lowering_.inheritLowerer().itablesOf(type),
                                            llvm::ConstantArray::get(slotsType, slots)}),
       "tz.layout." + name);
@@ -303,4 +274,4 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   return descriptor;
 }
 
-} // namespace tz
+}

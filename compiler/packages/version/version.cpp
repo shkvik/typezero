@@ -8,7 +8,7 @@ namespace {
 
 bool isNumeric(llvm::StringRef id) { return !id.empty() && llvm::all_of(id, llvm::isDigit); }
 
-} // namespace
+}
 
 bool Version::parse(llvm::StringRef text, Version &out) {
   Partial p;
@@ -30,7 +30,6 @@ int Version::compare(const Version &o) const {
   if (patch != o.patch) {
     return patch < o.patch ? -1 : 1;
   }
-  // A release is above its prereleases.
   if (pre.empty() || o.pre.empty()) {
     return pre.empty() == o.pre.empty() ? 0 : (pre.empty() ? 1 : -1);
   }
@@ -47,7 +46,7 @@ int Version::compare(const Version &o) const {
       return a < b ? -1 : 1;
     }
     if (an != bn) {
-      return an ? -1 : 1; // numbers come first
+      return an ? -1 : 1;
     }
 
     return a < b ? -1 : 1;
@@ -68,4 +67,4 @@ std::string Version::str() const {
   return s;
 }
 
-} // namespace tz::pkg
+}

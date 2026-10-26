@@ -36,11 +36,11 @@ UnionSlot unionSlot(const Type *type) {
   case Type::Kind::Object:
     return UnionSlot::Object;
   case Type::Kind::Dict:
-    return UnionSlot::Object; // its layout tells it apart
+    return UnionSlot::Object;
   case Type::Kind::Promise:
-    return UnionSlot::Object; // so does a Promise's
+    return UnionSlot::Object;
   case Type::Kind::ClassRef:
-    return UnionSlot::Object; // and a class's
+    return UnionSlot::Object;
   case Type::Kind::Array:
     return UnionSlot::Array;
   case Type::Kind::Function:
@@ -79,7 +79,6 @@ std::string unionProblem(const Type *type) {
       return "a Result cannot be part of a union: what it holds is told by its halves; make a "
              "half the union instead, e.g. 'Result<int, A | B>'";
     }
-    // Two members of slots that one check cannot tell apart.
     auto clash = [&](const Type *&seen, const char *why, const std::string &fix) -> std::string {
       if (!seen) {
         seen = m;
@@ -106,13 +105,11 @@ std::string unionProblem(const Type *type) {
     } else if (slot == UnionSlot::Iterator) {
       problem = clash(iterator, "both are iterators", "use one iterator type");
     } else if (m->isIntl()) {
-      // The runtime makes them, and they carry no number of their own.
       problem = clash(intl,
                       "both are objects of Intl, which carry nothing a check could tell "
                       "apart by",
                       "keep each in a variable of its own type");
     } else if (m->isCrypto()) {
-      // So are those of node:crypto.
       problem = clash(crypto,
                       "both are objects of node:crypto, which carry nothing a check "
                       "could tell apart by",
@@ -138,7 +135,6 @@ const Type *unionWithout(const Type *type, const Type *without) {
       type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
   std::vector<const Type *> rest;
   for (const Type *m : members) {
-    // boolean without true is false.
     if (m->isBool()) {
       bool noTrue = llvm::is_contained(removed, Type::boolLiteral(true));
       bool noFalse = llvm::is_contained(removed, Type::boolLiteral(false));
@@ -160,4 +156,4 @@ const Type *unionWithout(const Type *type, const Type *without) {
   return Type::unionOf(rest);
 }
 
-} // namespace tz
+}

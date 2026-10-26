@@ -33,7 +33,7 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
       return kExitError;
     }
   }
-  path::remove_dots(dir, /*remove_dot_dot=*/true);
+  path::remove_dots(dir, true);
   auto file = [&](llvm::StringRef name) {
     llvm::SmallString<256> result(dir);
     path::append(result, name);
@@ -61,8 +61,6 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
     created.push_back("main.tz");
   }
   if (!fs::exists(file(".gitignore"))) {
-    // What tz build makes. tz.lock belongs in git: it makes every build use
-    // the same sources.
     if (!writeText(file(".gitignore"), "*.exe\n*.ll\n/" + name + "\n")) {
       return kExitError;
     }
@@ -78,4 +76,4 @@ int InitCommand::run(llvm::ArrayRef<const char *> args) const {
   return 0;
 }
 
-} // namespace tz::pkg
+}

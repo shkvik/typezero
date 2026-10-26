@@ -29,7 +29,7 @@ bool splitJsrImport(llvm::StringRef specifier, std::string &package, std::string
   }
   size_t slash = rest.find('/');
   size_t end = slash == llvm::StringRef::npos ? slash : rest.find('/', slash + 1);
-  llvm::StringRef full = rest.substr(0, end); // "@std/path@^1"
+  llvm::StringRef full = rest.substr(0, end);
   package = full.substr(0, full.find('@', 1)).str();
   source = "jsr:" + full.str();
   subpath = end == llvm::StringRef::npos ? "" : rest.drop_front(end).str();
@@ -37,4 +37,4 @@ bool splitJsrImport(llvm::StringRef specifier, std::string &package, std::string
   return true;
 }
 
-} // namespace tz::pkg
+}

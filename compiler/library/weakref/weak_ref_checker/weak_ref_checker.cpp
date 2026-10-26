@@ -21,7 +21,7 @@ const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
     checker_.diags_.error(ref.loc, "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'");
     return Type::error();
   }
-  const Type *target = checker_.typeResolver().resolveType(ref.args[0], /*allowVoid=*/false);
+  const Type *target = checker_.typeResolver().resolveType(ref.args[0], false);
   if (target->isError()) {
     return target;
   }
@@ -29,10 +29,7 @@ const Type *WeakRefChecker::resolveWeakRefType(const TypeRef &ref) {
   return checkWeakTarget(target, ref.args[0].loc) ? Type::weakRef(target) : Type::error();
 }
 
-// Only an object can be referred to weakly, as in JavaScript; a value of
-// another type has no life of its own to end.
 bool WeakRefChecker::checkWeakTarget(const Type *target, llvm::SMLoc loc) {
-  // The objects the runtime makes and frees itself are not that yet.
   if (target->isRegExp() || target->isMatch() || target->isDate() || target->isDateFormat() ||
       target->isBytes() || target->isTimer()) {
     checker_.diags_.error(
@@ -72,11 +69,9 @@ Expr *WeakRefChecker::checkWeakRefNew(NewExpr *expr, const Type *expected) {
                           "'new WeakRef' takes the object it refers to, e.g. 'new WeakRef(node)'");
     return failed();
   }
-  // The object's type: as written, as the place wants it, or the
-  // argument's.
   const Type *target = nullptr;
   if (expr->typeArgs.size() == 1) {
-    target = checker_.typeResolver().resolveType(expr->typeArgs[0], /*allowVoid=*/false);
+    target = checker_.typeResolver().resolveType(expr->typeArgs[0], false);
   } else if (!expr->typeArgs.empty()) {
     checker_.diags_.error(loc, "'WeakRef' takes one type argument, the type of its object");
   } else if (expected && expected->nonOptional()->isWeakRef()) {
@@ -124,4 +119,4 @@ Expr *WeakRefChecker::checkWeakRefMethod(CallExpr *call, MemberExpr *member) {
   return call;
 }
 
-} // namespace tz
+}

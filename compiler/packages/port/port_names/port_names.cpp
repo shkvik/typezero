@@ -45,4 +45,4 @@ std::string derivedName(llvm::StringRef file, llvm::StringRef packageDir,
   return name;
 }
 
-} // namespace tz::pkg
+}

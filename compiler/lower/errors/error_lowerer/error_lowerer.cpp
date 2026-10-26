@@ -37,20 +37,10 @@ std::u16string utf16(llvm::StringRef text) {
   return std::u16string(units.begin(), units.end());
 }
 
-} // namespace
+}
 
 ErrorLowerer::ErrorLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// For inheritance (see sema_error.cpp): a class derived from Error calls this
-// constructor for `super(message, options)` with its object as `this`; its
-// descriptor needs TZ_LAYOUT_ERROR in its flags (as classDescriptor gives
-// Error's), and its instances the fields of Error at the offsets that
-// emitErrorSupport tells the runtime, which a subclass that keeps its
-// parent's fields first has. A value of type Error is released through the
-// descriptor of its object (releaseValue), so instances of subclasses are.
-//
-// constructor(message?: string, options?: { cause?: Error }): the message (or
-// ""), the cause and the name "Error"; the places come when it is thrown.
 void ErrorLowerer::emitErrorConstructor(FunctionDecl *fn) {
   lowering_.functionBuilder().beginFunction(lowering_.functions_.lookup(fn->sym), fn);
   const Type *type = fn->cls->type;
@@ -78,11 +68,7 @@ void ErrorLowerer::emitErrorConstructor(FunctionDecl *fn) {
   lowering_.refCounts().retainValue(cause, Type::optional(type));
   lowering_.builder_.CreateStore(cause,
                                  lowering_.objectLayouts().fieldAddress(self, type, "cause"));
-  // An Error may be a member of a group (codegen_cycles.cpp): the cause
-  // joins it, as a store of the program's would.
   lowering_.storeLowerer().groupStore(self, cause, Type::optional(type));
-  // The constructor owns its arguments. The options may be a literal of a
-  // type of its own, a member of a group: let go of through its descriptor.
   if (lowering_.memory().hasCycles) {
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {options});
   } else {
@@ -94,8 +80,6 @@ void ErrorLowerer::emitErrorConstructor(FunctionDecl *fn) {
   lowering_.function_ = nullptr;
 }
 
-// The class of a kind of error (an index of kErrorKinds): Error, or the
-// class of the kind that extends it.
 const ClassDecl *ErrorLowerer::errorKindClass(int kind) const {
   if (kind > 0) {
     for (const ClassDecl *child : lowering_.errorClass_->children) {
@@ -108,13 +92,10 @@ const ClassDecl *ErrorLowerer::errorKindClass(int kind) const {
   return lowering_.errorClass_;
 }
 
-// The descriptor of Error, and of each kind: the classes' own.
 llvm::Constant *ErrorLowerer::errorDescriptor(int kind) {
   return lowering_.classDescriptors().classDescriptor(errorKindClass(kind));
 }
 
-// (i32 kind, string message) -> Error: how the runtime makes the errors of
-// its own failures (TzErrorInfo::make), and the built-ins of the program.
 llvm::Function *ErrorLowerer::errorMaker() {
   if (errorMaker_) {
     return errorMaker_;
@@ -136,7 +117,7 @@ llvm::Function *ErrorLowerer::errorMaker() {
   }
   auto *tableType = llvm::ArrayType::get(ptr, count);
   auto *table = new llvm::GlobalVariable(
-      *lowering_.module_, tableType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, tableType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(tableType, descriptors), "tz.errors");
   llvm::Value *kind = errorMaker_->getArg(0);
   llvm::Value *descriptor =
@@ -161,14 +142,13 @@ llvm::Function *ErrorLowerer::errorMaker() {
   message = lowering_.builder_.CreateInsertValue(message, errorMaker_->getArg(2), 1);
   lowering_.builder_.CreateStore(message,
                                  lowering_.objectLayouts().fieldAddress(object, type, "message"));
-  // The name of the kind: a literal, one of a table like the descriptors.
   std::vector<llvm::Constant *> names;
   for (size_t k = 0; k < count; ++k) {
     names.push_back(lowering_.stringLowerer().stringLiteral(utf16(kErrorKinds[k])));
   }
   auto *namesType = llvm::ArrayType::get(lowering_.strTy_, count);
   auto *namesTable = new llvm::GlobalVariable(
-      *lowering_.module_, namesType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      *lowering_.module_, namesType, true, llvm::GlobalValue::PrivateLinkage,
       llvm::ConstantArray::get(namesType, names), "tz.error.names");
   llvm::Value *name = lowering_.builder_.CreateLoad(
       lowering_.strTy_, lowering_.builder_.CreateInBoundsGEP(
@@ -182,8 +162,6 @@ llvm::Function *ErrorLowerer::errorMaker() {
   return errorMaker_;
 }
 
-// What main tells the runtime first: how to make an Error, and where its
-// fields are (TzErrorInfo in runtime/core/error/error.h).
 void ErrorLowerer::emitErrorSupport() {
   if (!lowering_.errorClass_) {
     return;
@@ -201,15 +179,13 @@ void ErrorLowerer::emitErrorSupport() {
   llvm::Constant *init = llvm::ConstantStruct::get(
       infoType, {errorMaker(), lowering_.typeDescriptors().typeDescriptor(Type::longTy()),
                  offset("name"), offset("message"), offset("cause"), offset("#frames")});
-  auto *info = new llvm::GlobalVariable(*lowering_.module_, infoType, /*isConstant=*/true,
+  auto *info = new llvm::GlobalVariable(*lowering_.module_, infoType, true,
                                         llvm::GlobalValue::PrivateLinkage, init, "tz.error.info");
   lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
                                     "tz_error_init", lowering_.builder_.getVoidTy(), {ptr}),
                                 {info});
 }
 
-// `new Error(message, options)` and the kinds: the constructor of Error, and
-// the name of the kind.
 llvm::Value *ErrorLowerer::emitNewError(NewExpr *expr) {
   int kind = std::max(errorKindIndex(expr->cls->name), 0);
   const CallExpr *ctor = expr->ctor;
@@ -241,10 +217,9 @@ llvm::Value *ErrorLowerer::emitNewError(NewExpr *expr) {
   return object;
 }
 
-// `e.stack` and `e.toString()`.
 llvm::Value *ErrorLowerer::emitErrorBuiltin(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
-  Lowering::Operand error = lowering_.refCounts().emitOperand(member->object, /*canBorrow=*/true);
+  Lowering::Operand error = lowering_.refCounts().emitOperand(member->object, true);
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   const char *name = call->builtin == Builtin::ErrorStack ? "tz_error_stack" : "tz_error_to_string";
   llvm::Value *text = lowering_.stringLowerer().callReturningString(
@@ -255,4 +230,4 @@ llvm::Value *ErrorLowerer::emitErrorBuiltin(CallExpr *call) {
   return text;
 }
 
-} // namespace tz
+}

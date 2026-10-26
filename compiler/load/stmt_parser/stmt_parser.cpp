@@ -30,7 +30,6 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
   llvm::SMLoc loc = parser_.tok_.loc();
   switch (parser_.tok_.kind) {
   case Tok::At: {
-    // `@Table("users") class User`, also before `export`.
     std::vector<Decorator> decorators = parser_.classes().parseDecorators();
     Stmt *stmt = parseStatement(topLevel);
     if (auto *cls = dyn_cast<ClassDecl>(stmt)) {
@@ -50,7 +49,7 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
   case Tok::KwLet:
   case Tok::KwConst: {
     if (parser_.tok_.is(Tok::KwConst) && parser_.cursor().peek().is(Tok::KwEnum)) {
-      parser_.cursor().advance(); // `const enum` is an enum like any other
+      parser_.cursor().advance();
       return parser_.decls().parseEnum();
     }
     VarDeclStmt *decl = parser_.vars().parseVarDecl();
@@ -82,7 +81,6 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     parser_.cursor().advance();
     return parser_.ctx_.make<EmptyStmt>(loc);
   case Tok::Identifier:
-    // `import(...)` and `import.meta` are expressions (see parsePrimary).
     if (parser_.tok_.text == "import" && !parser_.cursor().peek().is(Tok::LParen) &&
         !parser_.cursor().peek().is(Tok::Dot)) {
       return parser_.modules().parseImport(topLevel);
@@ -90,8 +88,6 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     if (parser_.tok_.text == "export") {
       return parser_.modules().parseExport(topLevel);
     }
-    // TypeScript's namespaces and declarations without code. A name, a
-    // keyword or a string on the same line tells them from a variable.
     if ((parser_.tok_.text == "namespace" || parser_.tok_.text == "module" ||
          parser_.tok_.text == "declare") &&
         (parser_.cursor().peek().is(Tok::Identifier) || isKeyword(parser_.cursor().peek().kind) ||
@@ -115,11 +111,9 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     if (parser_.cursor().peek().is(Tok::Colon)) {
       llvm::StringRef label = parser_.tok_.text;
       parser_.cursor().advance();
-      parser_.cursor().advance(); // ':'
+      parser_.cursor().advance();
       return parser_.ctx_.make<LabeledStmt>(loc, label, parseStatement());
     }
-    // `type` declares an alias only when a name follows on the same line;
-    // otherwise it is an ordinary name. The same for `interface`.
     if (parser_.tok_.text == "type" && parser_.cursor().peek().is(Tok::Identifier) &&
         !parser_.cursor().peek().newlineBefore) {
       return parser_.decls().parseTypeAlias();
@@ -132,7 +126,6 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
         !parser_.cursor().peek().newlineBefore) {
       return parser_.classes().parseClass();
     }
-    // `throw` and `try` are reserved words: never a name.
     if (parser_.tok_.text == "throw") {
       return parseThrow();
     }
@@ -159,15 +152,13 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
       cls->isAbstract = true;
       return cls;
     }
-    // `async function f() {}`
     if (parser_.functions().asyncFunctionAhead()) {
       parser_.cursor().advance();
-      return parser_.functions().parseFunctionDecl(/*isAsync=*/true);
+      return parser_.functions().parseFunctionDecl(true);
     }
     [[fallthrough]];
   default: {
     Expr *expr = parser_.exprs().parseSequence();
-    // `[a, b] = [b, a]` and `({ a, b } = o)`
     if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
       if (isa<ArrayLitExpr>(assign->target) || isa<ObjectLitExpr>(assign->target)) {
         Stmt *stmt = parser_.patterns().assignPattern(
@@ -185,8 +176,6 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
 Stmt *StmtParser::skipDeclaration(llvm::SMLoc loc, const llvm::Twine &message) {
   parser_.cursor().report(loc, message);
   parser_.cursor().advance();
-  // To the end of the statement: past a body in braces, a `;`, or the end of
-  // the line.
   while (!parser_.tok_.is(Tok::Eof) && !parser_.tok_.is(Tok::RBrace)) {
     if (parser_.tok_.is(Tok::LBrace)) {
       parser_.cursor().advance();
@@ -222,10 +211,9 @@ Stmt *StmtParser::parseBreakOrContinue() {
   return parser_.ctx_.make<ContinueStmt>(loc, label);
 }
 
-// `switch (x) { case a: ... default: ... }`
 Stmt *StmtParser::parseSwitch() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'switch'
+  parser_.cursor().advance();
   parser_.cursor().expect(Tok::LParen, "after 'switch'");
   Expr *discriminant = parser_.exprs().parseSequence();
   parser_.cursor().expect(Tok::RParen, "after the value of 'switch'");
@@ -280,7 +268,7 @@ BlockStmt *StmtParser::parseBlock() {
 
 Stmt *StmtParser::parseIf() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'if'
+  parser_.cursor().advance();
   parser_.cursor().expect(Tok::LParen, "after 'if'");
   Expr *cond = parser_.exprs().parseSequence();
   parser_.cursor().expect(Tok::RParen, "after the condition");
@@ -295,7 +283,7 @@ Stmt *StmtParser::parseIf() {
 
 Stmt *StmtParser::parseWhile() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'while'
+  parser_.cursor().advance();
   parser_.cursor().expect(Tok::LParen, "after 'while'");
   Expr *cond = parser_.exprs().parseSequence();
   parser_.cursor().expect(Tok::RParen, "after the condition");
@@ -306,13 +294,12 @@ Stmt *StmtParser::parseWhile() {
 
 Stmt *StmtParser::parseDoWhile() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'do'
+  parser_.cursor().advance();
   Stmt *body = parseStatement();
   parser_.cursor().expect(Tok::KwWhile, "after the body of 'do'");
   parser_.cursor().expect(Tok::LParen, "after 'while'");
   Expr *cond = parser_.exprs().parseSequence();
   parser_.cursor().expect(Tok::RParen, "after the condition");
-  // A semicolon after `do ... while (...)` is always optional.
   parser_.cursor().accept(Tok::Semi);
 
   return parser_.ctx_.make<DoWhileStmt>(loc, body, cond);
@@ -321,7 +308,7 @@ Stmt *StmtParser::parseDoWhile() {
 Stmt *StmtParser::parseFor() {
   llvm::SMLoc forLoc = parser_.tok_.loc();
   auto *loop = parser_.ctx_.make<ForStmt>(forLoc);
-  parser_.cursor().advance(); // 'for'
+  parser_.cursor().advance();
   llvm::SMLoc awaitLoc;
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "await") {
     awaitLoc = parser_.tok_.loc();
@@ -329,8 +316,6 @@ Stmt *StmtParser::parseFor() {
   }
   parser_.cursor().expect(Tok::LParen, "after 'for'");
 
-  // In the initializer, as in JavaScript, `in` is not an operator: it
-  // belongs to `for (x in y)`.
   llvm::SaveAndRestore<bool> noIn(parser_.noIn_, true);
   if (parser_.tok_.is(Tok::KwLet) || parser_.tok_.is(Tok::KwConst) || parser_.tok_.is(Tok::KwVar)) {
     if (parser_.tok_.is(Tok::KwVar)) {
@@ -347,7 +332,6 @@ Stmt *StmtParser::parseFor() {
     }
     bool forIn = parser_.tok_.is(Tok::KwIn);
     if ((parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "of") || forIn) {
-      // `for (const k in o)` walks the keys of an object.
       if (forIn && pattern) {
         parser_.cursor().report(
             pattern->loc,
@@ -375,8 +359,6 @@ Stmt *StmtParser::parseFor() {
         }
         return forOf;
       }
-      // `for (const [a, b] of pairs) body` is
-      // `for (const %0 of pairs) { const a = %0[0], b = %0[1]; body }`.
       forOf->binding.name = parser_.ctx_.hiddenName();
       forOf->binding.loc = pattern->loc;
       forOf->binding.destructured = true;
@@ -440,9 +422,8 @@ Stmt *StmtParser::parseFor() {
 
 Stmt *StmtParser::parseReturn() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'return'
+  parser_.cursor().advance();
   Expr *value = nullptr;
-  // `return` followed by a line break returns nothing, as in JavaScript.
   if (!parser_.tok_.is(Tok::Semi) && !parser_.tok_.is(Tok::RBrace) && !parser_.tok_.is(Tok::Eof) &&
       !parser_.tok_.newlineBefore) {
     value = parser_.exprs().parseSequence();
@@ -452,10 +433,9 @@ Stmt *StmtParser::parseReturn() {
   return parser_.ctx_.make<ReturnStmt>(loc, value);
 }
 
-// `throw value`. As in JavaScript, the value must start on the same line.
 Stmt *StmtParser::parseThrow() {
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'throw'
+  parser_.cursor().advance();
   if (parser_.tok_.newlineBefore || parser_.tok_.is(Tok::Semi) || parser_.tok_.is(Tok::RBrace) ||
       parser_.tok_.is(Tok::Eof)) {
     parser_.cursor().error(
@@ -468,11 +448,9 @@ Stmt *StmtParser::parseThrow() {
   return parser_.ctx_.make<ThrowStmt>(loc, value);
 }
 
-// `try { ... } catch (e) { ... } finally { ... }`; `catch { ... }` without a
-// variable, and `catch (e: unknown)` as strict TypeScript writes it.
 Stmt *StmtParser::parseTry() {
   auto *stmt = parser_.ctx_.make<TryStmt>(parser_.tok_.loc());
-  parser_.cursor().advance(); // 'try'
+  parser_.cursor().advance();
   stmt->block = parseBlock();
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "catch") {
     parser_.cursor().advance();
@@ -503,4 +481,4 @@ Stmt *StmtParser::parseTry() {
   return stmt;
 }
 
-} // namespace tz
+}

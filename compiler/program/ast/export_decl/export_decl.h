@@ -6,15 +6,13 @@ namespace tz {
 
 struct Module;
 
-// `export { a, b as c }`, `export { a } from "./x"` or `export * from "./x"`.
-// `export` before a declaration is an export of the names it declares.
 struct ExportDecl {
   llvm::SMLoc loc;
   std::vector<ModuleName> names;
-  bool all = false; // `export *`
-  std::string path; // empty when the names are this file's own
+  bool all = false;
+  std::string path;
   llvm::SMLoc pathLoc;
-  Module *from = nullptr; // set by the loader
+  Module *from = nullptr;
 };
 
-} // namespace tz
+}

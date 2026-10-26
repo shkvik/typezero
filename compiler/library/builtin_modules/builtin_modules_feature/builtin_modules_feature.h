@@ -4,8 +4,6 @@
 
 namespace tz {
 
-// The built-in modules of node and tz: the functions they give by their imported names, and
-// the objects the runtime makes for them.
 class BuiltinModulesFeature : public Feature {
 public:
   llvm::StringRef name() const override { return "builtin_modules"; }
@@ -17,4 +15,4 @@ public:
   llvm::Value *lowerCall(Lowering &lowering, CallExpr *call) const override;
 };
 
-} // namespace tz
+}

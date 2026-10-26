@@ -29,10 +29,6 @@ namespace tz {
 
 namespace {
 
-// Whether one of `params` occurs inside an array, a function or an object in
-// `type`: a call of a generic function from its own body with such a type
-// argument needs a bigger instance each time. (`T | undefined` does not grow:
-// it is the same type again one level down.)
 bool grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {
   switch (type->kind()) {
   case Type::Kind::Param:
@@ -42,8 +38,6 @@ bool grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {
   case Type::Kind::Array:
   case Type::Kind::Promise:
     return grows(type->inner(), params, true);
-  // A Result is a value, but `Result<T, never>` is another type than T, one
-  // level bigger.
   case Type::Kind::Result:
     return grows(type->okType(), params, true) || grows(type->errType(), params, true);
   case Type::Kind::Function:
@@ -58,14 +52,10 @@ bool grows(const Type *type, llvm::ArrayRef<const Type *> params, bool inside) {
   }
 }
 
-// An argument whose type depends on the type expected for it: an arrow whose
-// parameters take their types from there, a generic function or a built-in
-// one passed by name.
 bool isContextSensitive(const Expr *arg) {
   if (auto *fe = dyn_cast<FunctionExpr>(arg)) {
     return llvm::any_of(fe->fn->params, [](const Param &p) { return !p.type; });
   }
-  // `[x => x + 1]`, `{ f: x => x }`: so are literals holding one.
   if (auto *lit = dyn_cast<ArrayLitExpr>(arg)) {
     return llvm::any_of(lit->elements,
                         [](const ArrayLitExpr::Element &e) { return isContextSensitive(e.expr); });
@@ -92,7 +82,7 @@ bool isContextSensitive(const Expr *arg) {
   return false;
 }
 
-} // namespace
+}
 
 TypeArgInferrer::TypeArgInferrer(Checker &checker) : checker_(checker) {}
 
@@ -101,7 +91,6 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
   llvm::ArrayRef<const Type *> params = generic->typeParams;
   bool ok = true;
   for (size_t k = 0; k < params.size(); ++k) {
-    // A default may use the type parameters before it, once they are known.
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
       const Type *fallback =
           checker_.typeParams().substitute(generic->typeDefaults[k], params, bound);
@@ -117,14 +106,12 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
       ok = false;
       continue;
     }
-    if (!bound[k] && quiet) { // an argument has an error already
+    if (!bound[k] && quiet) {
       bound[k] = Type::error();
       ok = false;
       continue;
     }
     if (!bound[k]) {
-      // tsc would make it `unknown`, which tz does not have.
-      // A list of the types of parameters is a tuple of them.
       std::string ints;
       for (size_t i = 0; i < params.size(); ++i) {
         ints += (i == 0 ? "" : ", ") + std::string(params[i]->isListParam() ? "[int]" : "int");
@@ -138,7 +125,6 @@ bool TypeArgInferrer::finishTypeArgs(FuncSymbol *generic, std::vector<const Type
       ok = false;
       continue;
     }
-    // `xs: Iterable<int>`: something iteration gives ints of.
     if (const Type *element = params[k]->iterated()) {
       const Type *wanted = checker_.typeParams().substitute(element, params, bound);
       const Type *given = checker_.iterableChecker().elementTypeOf(bound[k]);
@@ -180,10 +166,6 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
     return call;
   }
   call->func = generic;
-  // In generic code a call with type parameters is checked only; so is one
-  // whose callee's return type is still being found, and a method of a
-  // generic class itself, or of an instance that generic code uses (not a
-  // static one: the generic class has those).
   const ClassDecl *cls = generic->decl ? generic->decl->cls : nullptr;
   bool concrete = llvm::none_of(bound, [](const Type *t) { return mentionsParam(t); }) &&
                   (!cls || generic->decl->isStatic || cls->isEmitted());
@@ -192,7 +174,6 @@ Expr *TypeArgInferrer::checkGenericCall(CallExpr *call, FuncSymbol *generic, llv
     if (FuncSymbol *instance = checker_.genericInstantiator().instantiate(
             generic, bound, loc, checker_.genericInstantiator().exactClassArgs(call, generic))) {
       call->func = instance;
-      // A copy of a template has its own return type: the class it makes.
       if (copiesReturn) {
         call->type = instance->ret ? instance->ret : Type::error();
       }
@@ -225,8 +206,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
           generic->hasRest ? ~0u : static_cast<unsigned>(generic->params.size()))) {
     return false;
   }
-  // The parameter an argument goes to: the elements of a rest parameter, or
-  // the whole array for one spread there.
   auto paramOf = [&](size_t i) -> const Type * {
     if (!generic->hasRest || i < fixed) {
       return generic->params[i];
@@ -235,7 +214,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
 
     return call->spreads(i) || !rest->isArray() ? rest : rest->inner();
   };
-  // `...head: A`: the arguments from there on make the list A stands for.
   const Type *listRest = generic->hasRest && (generic->params.back()->isListParam() ||
                                               spreadsLists(generic->params.back()))
                              ? generic->params.back()
@@ -243,7 +221,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
 
   bound.assign(typeParams.size(), nullptr);
   std::vector<bool> checked(call->args.size(), false);
-  std::vector<size_t> literals; // checked once their types are known
+  std::vector<size_t> literals;
   bool ok = true;
   if (!typeArgs.empty()) {
     if (typeArgs.size() > typeParams.size()) {
@@ -254,7 +232,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       ok = false;
     }
     for (size_t k = 0; k < typeArgs.size() && k < typeParams.size(); ++k) {
-      bound[k] = checker_.typeResolver().resolveType(typeArgs[k], /*allowVoid=*/false);
+      bound[k] = checker_.typeResolver().resolveType(typeArgs[k], false);
     }
   } else {
     Inference inference(typeParams, checker_.aliasOrigins_, [this](const Type *t) {
@@ -273,8 +251,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
            {&inference.candidates[k], &inference.weakCandidates[k]}) {
         for (const Type *c : *list) {
           const Type *next = type ? TypeRelations::unify(type, c) : c;
-          // A literal that does not fit is checked against the type the
-          // other arguments give, and reported there.
           if (!next && strong && list == &inference.weakCandidates[k]) {
             continue;
           }
@@ -297,12 +273,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       bound[k] = type;
     };
 
-    // The arguments, except those whose types come from the type parameters:
-    // literals take them once they are known (`pair(1, 2.5)` makes T a double
-    // and 1 a double too), arrows after all the others.
     std::vector<size_t> sensitive;
-    // `ok` and `err` passed by name (`mapAll(xs, ok)`) are functions only
-    // where a function type is expected.
     auto makesResults = [&](const Expr *arg) {
       auto *name = dyn_cast<NameExpr>(arg);
       llvm::StringRef which =
@@ -324,7 +295,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
       } else if (auto *text = dyn_cast<StringLitExpr>(arg);
                  text && llvm::is_contained(typeParams, pattern) &&
                  checker_.utilityTypes().wantsLiteral(pattern)) {
-        // `get(user, "name")` with `K extends keyof T`: K = "name".
         const Type *literal = Type::stringLiteral(text->value);
         arg = checker_.exprChecker().checkExpr(arg, literal);
         checked[i] = true;
@@ -340,8 +310,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         inference.from(pattern, shape);
         inference.weak = false;
       } else if (isa<ArrayLitExpr>(arg) || isa<ObjectLitExpr>(arg)) {
-        // `{ title: t, tags: [] }`: checked with the type its parameter
-        // gets from the others, or else for the types it gives.
         sensitive.push_back(i);
       } else {
         arg = checker_.exprChecker().checkExpr(arg);
@@ -366,7 +334,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         settle(k);
       }
     }
-    // `[...A, ...B]` of an argument once A is known from another one.
     if (!inference.deferred.empty()) {
       inference.retry(bound);
       for (size_t k = 0; k < typeParams.size(); ++k) {
@@ -375,8 +342,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         }
       }
     }
-    // `const names: string[] = emptyList()`; the type expected also comes
-    // before literals: `const xs: double[] = listOf(1, 2)`.
     if (expected && llvm::is_contained(bound, nullptr) && ret && mentionsAnyOf(ret, typeParams)) {
       Inference fromExpected(typeParams, checker_.aliasOrigins_, nullptr);
       fromExpected.from(ret, expected);
@@ -394,8 +359,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     for (size_t k = 0; k < typeParams.size(); ++k) {
       settle(k);
     }
-    // Arrows: their parameters get the types known by now, and what they
-    // return gives the rest (`mapAll(xs, x => x * 2)`).
     for (size_t i : sensitive) {
       Expr *&arg = call->args[i];
       const Type *pattern = paramOf(i);
@@ -411,9 +374,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
         sig.voidResult = fn->ret()->isVoid();
         auto *name = dyn_cast<NameExpr>(arg);
         auto *fe = dyn_cast<FunctionExpr>(arg);
-        // The parameters it takes from here need the types known by now
-        // (`run(x => ...)` with nothing else giving T); a generic function
-        // passed by name reports what it misses itself.
         for (size_t p = 0;
              p < fn->params().size() && !(name && checker_.genericChecker().genericNamed(name));
              ++p) {
@@ -450,9 +410,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
           arg = checker_.exprChecker().checkExpr(arg);
         }
       } else {
-        // An object literal with arrows, `new ReadableStream({ start: c =>
-        // ... })`: what is still unknown takes its default, which the
-        // arrows then see.
         bool defaulted = false;
         for (size_t k = 0; k < typeParams.size() && mentionsAnyOf(partial, typeParams); ++k) {
           if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k] &&
@@ -482,16 +439,12 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     }
   }
 
-  // An argument with an error leaves a type parameter unknown; that error
-  // says enough, if there was one.
   bool argErrors = false;
   for (size_t i = 0; i < call->args.size(); ++i) {
     argErrors |= checked[i] && call->args[i]->type->isError();
   }
   argErrors &= checker_.diags_.errorsSeen() > errorsBefore;
-  ok = finishTypeArgs(generic, bound, loc, /*call=*/true, /*quiet=*/argErrors) && ok;
-  // `f(x: T)` calling `f([x])` from its own body: each instance needs a
-  // bigger one.
+  ok = finishTypeArgs(generic, bound, loc, true, argErrors) && ok;
   for (size_t k = 0; k < typeParams.size() && ok; ++k) {
     if (!grows(bound[k], typeParams, false)) {
       continue;
@@ -513,8 +466,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     return false;
   }
 
-  // The instances of generic classes that the types of the call name are
-  // first used here.
   llvm::SMLoc outerLoc = std::exchange(checker_.instanceLoc_, loc);
   std::vector<const Type *> params;
   for (const Type *p : generic->params) {
@@ -527,7 +478,6 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
   }
   call->type = ret ? checker_.typeParams().substitute(ret, typeParams, bound) : Type::error();
   checker_.instanceLoc_ = outerLoc;
-  // `...head: A` with A = [int, int]: two parameters, as the copy has.
   size_t minArgs = generic->minArgs;
   bool hasRest = generic->hasRest;
   std::vector<const Type *> flat;
@@ -576,7 +526,6 @@ bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Exp
     }
     bound[k] = type;
   }
-  // The defaults, quietly: a variant that does not fit is left out.
   for (size_t k = 0; k < typeParams.size(); ++k) {
     if (!bound[k] && k < generic->typeDefaults.size() && generic->typeDefaults[k]) {
       bound[k] = checker_.typeParams().substitute(generic->typeDefaults[k], typeParams, bound);
@@ -590,4 +539,4 @@ bool TypeArgInferrer::inferFromArguments(FuncSymbol *generic, llvm::ArrayRef<Exp
   return true;
 }
 
-} // namespace tz
+}

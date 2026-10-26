@@ -6,8 +6,6 @@ namespace tz {
 
 class Args;
 
-// `tz run`: the program built into a temporary executable and run with the arguments after the
-// file; tz exits with its code.
 class RunCommand {
 public:
   explicit RunCommand(const RuntimeFiles &runtime);
@@ -18,4 +16,4 @@ private:
   const RuntimeFiles &runtime_;
 };
 
-} // namespace tz
+}

@@ -74,7 +74,6 @@ Refs FlowExprs::exprRefs(Expr *e) {
       }
       append(out, p.spread ? copied(value) : holding(value));
     }
-    // The methods of the literal get it as `this`.
     if (lit->cls) {
       for (FunctionDecl *fn : lit->cls->methods) {
         flows_.flowStmts().function(fn);
@@ -95,7 +94,6 @@ Refs FlowExprs::exprRefs(Expr *e) {
   case Expr::Kind::Member: {
     auto *member = llvm::cast<MemberExpr>(e);
     Refs object = expr(member->object);
-    // A method as a value is bound to the object: its `this`.
     if (member->method) {
       flows_.flowCalls().passThis(object, member->method->decl);
       flows_.flowCalls().functionValue(member->method->decl);
@@ -164,9 +162,6 @@ Refs FlowExprs::exprRefs(Expr *e) {
       return out;
     }
     flows_.flowCalls().passArguments(ctor, target, args);
-    // The object is the `this` of its constructor. One of a class up the
-    // chain (the class has none of its own) sets the fields that the
-    // class's own initializers set after it.
     if (target->thisVar) {
       out.push_back({flows_.var(target->thisVar), 0, 0});
       if (n->cls && target->cls && target->cls != n->cls) {
@@ -216,7 +211,6 @@ Refs FlowExprs::exprRefs(Expr *e) {
     flows_.escape(expr(llvm::cast<YieldExpr>(e)->value));
     return {};
   case Expr::Kind::Await: {
-    // What the promise gives: what went to promises of its type.
     Expr *value = llvm::cast<AwaitExpr>(e)->value;
     Refs out = expr(value);
     if (int held = flows_.contents(value->type); held >= 0) {
@@ -229,4 +223,4 @@ Refs FlowExprs::exprRefs(Expr *e) {
   return {};
 }
 
-} // namespace tz
+}

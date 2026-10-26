@@ -1,23 +1,3 @@
-// decimal: exact decimal numbers of any length with the semantics of
-// BigNumber.js (docs/decimal.md), whose results programs are checked against.
-//
-// A value is two words (TzDec in decimal.h). The short form is a number that
-// fits in an int64 coefficient and a scale: `coef * 10^-scale`, the scale in
-// the low 32 bits of `meta`. It needs no memory, and prices and the like add,
-// subtract, multiply and compare with plain integer instructions: the TZ_HOT
-// fast paths below, which programs inline. The short form is not normalized:
-// 0.5 * 2 is 10 with scale 1, which prints and compares as 1.
-//
-// Anything longer is a TzDecObj: base 10^9 digits on the heap (TZ_DEC_HEAP,
-// reference counted like a string) or a constant the compiler emitted for a
-// long literal (TZ_DEC_LONG alone, not counted). A long value is normalized
-// (no trailing zero digits) and never fits the short form.
-//
-// The slow paths work on Dec, a sign, a natural number of base 10^9 digits
-// and a power of ten, and store results back in the shorter form. As in
-// BigNumber.js, a result whose leading digit is beyond 10^MAX_EXP is an
-// error (BigNumber.js gives Infinity) and one below 10^MIN_EXP is zero.
-
 #include "runtime/library/decimal/decimal/decimal.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -36,15 +16,10 @@
 #define BASE 1000000000u
 #define MAX_EXP 10000000
 #define MIN_EXP (-10000000)
-// The scale of a short value fits in 31 bits.
 #define SCALE_MAX 0x7fffffffu
-// What `/`, sqrt and toString(base) round to, as BigNumber.js by default.
 #define DECIMAL_PLACES 20
-// The limit of the arguments of toFixed and the like, as in BigNumber.js.
 #define ARG_MAX 1000000000
 
-// The rounding modes, numbered as in BigNumber.js; Lowering passes the number
-// for a mode written as a string.
 enum {
   ROUND_UP,
   ROUND_DOWN,
@@ -89,8 +64,6 @@ static inline uint32_t scale_of(uint64_t meta) { return (uint32_t)meta; }
 
 static inline uint64_t magnitude(int64_t v) { return v < 0 ? 0 - (uint64_t)v : (uint64_t)v; }
 
-// The errors throw (see tz_throw): the function goes on to give zero, and
-// the program checks for the error after calling it.
 TZ_COLD static void overflow(void) { tz_throw(TZ_RANGE_ERROR, "Maximum decimal size exceeded"); }
 
 TZ_COLD static void division_by_zero(void) { tz_throw(TZ_RANGE_ERROR, "Division by zero"); }
@@ -108,12 +81,6 @@ static int rounding_mode(int32_t rm) {
   return rm;
 }
 
-//===----------------------------------------------------------------------===//
-// Reference counting
-//===----------------------------------------------------------------------===//
-
-// Frees a long value whose count reached zero. Called by the inline release
-// code that the compiler emits.
 void tz_dec_free(void *obj) {
   tz_free(obj);
   --tz_live_decimals;
@@ -132,7 +99,6 @@ void tz_dec_release_value(TzDec v) {
 }
 
 #if TZ_PARALLEL
-// publish.c: a decimal other threads may reach.
 void tz_dec_publish(TzDec v) {
   if (!(v.meta & TZ_DEC_HEAP)) {
     return;
@@ -144,13 +110,9 @@ void tz_dec_publish(TzDec v) {
 }
 #endif
 
-//===----------------------------------------------------------------------===//
-// Natural numbers in base 10^9, the lowest digit first
-//===----------------------------------------------------------------------===//
-
 typedef struct {
   uint32_t *d;
-  uint32_t n, cap; // n == 0 is zero; d[n - 1] != 0 otherwise
+  uint32_t n, cap;
 } Nat;
 
 static void nat_init(Nat *x) {
@@ -167,8 +129,6 @@ static void nat_reserve(Nat *x, uint64_t cap) {
   if (cap <= x->cap) {
     return;
   }
-  // Far more than the exponent range lets a value have: no result that
-  // fits comes this far.
   if (cap > (UINT64_C(1) << 28)) {
     tz_panicf("RangeError: Maximum decimal size exceeded");
   }
@@ -227,7 +187,6 @@ static int nat_cmp(const Nat *a, const Nat *b) {
   return 0;
 }
 
-// r = a + b; r may be a or b.
 static void nat_add(Nat *r, const Nat *a, const Nat *b) {
   if (a->n < b->n) {
     const Nat *t = a;
@@ -248,7 +207,6 @@ static void nat_add(Nat *r, const Nat *a, const Nat *b) {
   }
 }
 
-// r = a - b for a >= b; r may be a or b.
 static void nat_sub(Nat *r, const Nat *a, const Nat *b) {
   uint32_t n = a->n, bn = b->n;
   nat_reserve(r, n);
@@ -262,7 +220,6 @@ static void nat_sub(Nat *r, const Nat *a, const Nat *b) {
   nat_trim(r);
 }
 
-// r = a * b; r must be neither a nor b.
 static void nat_mul(Nat *r, const Nat *a, const Nat *b) {
   if (!a->n || !b->n) {
     r->n = 0;
@@ -287,7 +244,6 @@ static void nat_mul(Nat *r, const Nat *a, const Nat *b) {
   nat_trim(r);
 }
 
-// x = x * m + add, for m <= BASE.
 static void nat_mul_add(Nat *x, uint32_t m, uint32_t add) {
   uint64_t carry = add;
   for (uint32_t i = 0; i < x->n; ++i) {
@@ -302,7 +258,6 @@ static void nat_mul_add(Nat *x, uint32_t m, uint32_t add) {
   nat_trim(x);
 }
 
-// q = a / m, returning a % m; q may be a.
 static uint32_t nat_div_small(Nat *q, const Nat *a, uint32_t m) {
   nat_reserve(q, a->n);
   uint64_t rest = 0;
@@ -326,19 +281,16 @@ static int digits_u32(uint32_t v) {
   return k;
 }
 
-// The number of decimal digits; 0 for zero.
 static uint64_t nat_digits(const Nat *a) {
   return a->n ? (uint64_t)(a->n - 1) * 9 + (uint64_t)digits_u32(a->d[a->n - 1]) : 0;
 }
 
-// The decimal digit at position p, counting from the lowest at 0.
 static uint32_t nat_digit(const Nat *a, uint64_t p) {
   uint64_t i = p / 9;
 
   return i < a->n ? a->d[i] / pow10_32[p % 9] % 10 : 0;
 }
 
-// Whether some digit below position p is not zero.
 static int nat_any_below(const Nat *a, uint64_t p) {
   uint64_t i = p / 9;
   uint64_t whole = i < a->n ? i : a->n;
@@ -367,7 +319,6 @@ static uint64_t nat_trailing_zeros(const Nat *a) {
   return zeros;
 }
 
-// r = a / 10^k, rounded down; r may be a.
 static void nat_drop_digits(Nat *r, const Nat *a, uint64_t k) {
   uint64_t limbs = k / 9;
   unsigned rest = (unsigned)(k % 9);
@@ -376,7 +327,7 @@ static void nat_drop_digits(Nat *r, const Nat *a, uint64_t k) {
     return;
   }
   uint32_t an = a->n, n = an - (uint32_t)limbs;
-  nat_reserve(r, an); // a no larger reserve, which keeps a->d valid when r == a
+  nat_reserve(r, an);
   if (rest == 0) {
     memmove(r->d, a->d + limbs, (size_t)n * sizeof(uint32_t));
   } else {
@@ -391,7 +342,6 @@ static void nat_drop_digits(Nat *r, const Nat *a, uint64_t k) {
   nat_trim(r);
 }
 
-// x = x mod 10^k
 static void nat_keep_digits(Nat *x, uint64_t k) {
   uint64_t limbs = k / 9;
   unsigned rest = (unsigned)(k % 9);
@@ -407,7 +357,6 @@ static void nat_keep_digits(Nat *x, uint64_t k) {
   nat_trim(x);
 }
 
-// r = a * 10^k; r may be a.
 static void nat_shift_digits(Nat *r, const Nat *a, uint64_t k) {
   nat_copy(r, a);
   if (!r->n || !k) {
@@ -426,8 +375,6 @@ static void nat_shift_digits(Nat *r, const Nat *a, uint64_t k) {
   }
 }
 
-// q = a / b and r = a % b for b != 0, by Knuth's algorithm D. q and r may be
-// NULL, and must not be a or b.
 static void nat_divmod(Nat *q, Nat *r, const Nat *a, const Nat *b) {
   if (nat_cmp(a, b) < 0) {
     if (q) {
@@ -449,8 +396,6 @@ static void nat_divmod(Nat *q, Nat *r, const Nat *a, const Nat *b) {
     return;
   }
   uint32_t n = b->n, m = a->n - b->n;
-  // Scaling both makes the top digit of the divisor at least BASE / 2, so
-  // that the estimated quotient digits are at most two too large.
   uint32_t f = BASE / (b->d[n - 1] + 1);
   Nat u, v;
   nat_init(&u);
@@ -478,7 +423,6 @@ static void nat_divmod(Nat *q, Nat *r, const Nat *a, const Nat *b) {
         break;
       }
     }
-    // u[j..j+n] -= qhat * v
     int64_t borrow = 0;
     uint64_t carry = 0;
     for (uint32_t i = 0; i < n; ++i) {
@@ -490,7 +434,6 @@ static void nat_divmod(Nat *q, Nat *r, const Nat *a, const Nat *b) {
     }
     int64_t t = (int64_t)u.d[j + n] - (int64_t)carry - borrow;
     if (t < 0) {
-      // qhat was one too large: add v back.
       u.d[j + n] = (uint32_t)(t + BASE);
       --qhat;
       uint32_t c = 0;
@@ -519,7 +462,6 @@ static void nat_divmod(Nat *q, Nat *r, const Nat *a, const Nat *b) {
   nat_free(&v);
 }
 
-// r = floor(sqrt(a)), by Newton's method from above.
 static void nat_isqrt(Nat *r, const Nat *a) {
   if (!a->n) {
     r->n = 0;
@@ -530,7 +472,7 @@ static void nat_isqrt(Nat *r, const Nat *a) {
   nat_init(&y);
   nat_init(&t);
   nat_set_u64(&x, 1);
-  nat_shift_digits(&x, &x, (nat_digits(a) + 1) / 2); // above sqrt(a)
+  nat_shift_digits(&x, &x, (nat_digits(a) + 1) / 2);
   for (;;) {
     nat_divmod(&t, NULL, a, &x);
     nat_add(&t, &t, &x);
@@ -546,11 +488,6 @@ static void nat_isqrt(Nat *r, const Nat *a) {
   nat_free(&t);
 }
 
-//===----------------------------------------------------------------------===//
-// Decimals of any length
-//===----------------------------------------------------------------------===//
-
-// (-1)^neg * c * 10^e; zero is never negative.
 typedef struct {
   Nat c;
   int64_t e;
@@ -585,7 +522,6 @@ static void dec_swap(Dec *a, Dec *b) {
   *b = t;
 }
 
-// Drops the trailing zero digits into the exponent.
 static void dec_normalize(Dec *x) {
   if (!x->c.n) {
     x->e = 0;
@@ -613,10 +549,8 @@ static void dec_load(Dec *x, int64_t coef, uint64_t meta) {
   dec_normalize(x);
 }
 
-// The exponent of the leading digit, which BigNumber.js calls `e`; 0 for zero.
 static int64_t dec_top(const Dec *x) { return x->c.n ? x->e + (int64_t)nat_digits(&x->c) - 1 : 0; }
 
-// Stores `x` as a value of the language, short if it fits; frees nothing.
 static void dec_store(TzDec *out, Dec *x) {
   dec_normalize(x);
   if (!x->c.n) {
@@ -667,7 +601,6 @@ static void dec_store_free(TzDec *out, Dec *x) {
   dec_free(x);
 }
 
-// The digits of x and y over the exponent of the one with more decimals.
 static int64_t dec_align(Nat *a, Nat *b, const Dec *x, const Dec *y) {
   int64_t e = x->e < y->e ? x->e : y->e;
   nat_shift_digits(a, &x->c, (uint64_t)(x->e - e));
@@ -706,7 +639,6 @@ static int dec_cmp(const Dec *x, const Dec *y) {
   return sx < 0 ? -c : c;
 }
 
-// r = x + y, or x - y with `negate`; r must be neither.
 static void dec_add(Dec *r, const Dec *x, const Dec *y, int negate) {
   int yneg = dec_is_zero(y) ? 0 : y->neg ^ negate;
   if (dec_is_zero(x)) {
@@ -742,15 +674,12 @@ static void dec_add(Dec *r, const Dec *x, const Dec *y, int negate) {
   nat_free(&b);
 }
 
-// r = x * y; r must be neither.
 static void dec_mul(Dec *r, const Dec *x, const Dec *y) {
   nat_mul(&r->c, &x->c, &y->c);
   r->e = x->e + y->e;
   r->neg = r->c.n ? x->neg ^ y->neg : 0;
 }
 
-// Whether a result whose dropped part is `half` (-1 below a half, 0 exactly
-// a half, 1 above) and not zero when `inexact` is rounded away from zero.
 static int round_away(int rm, int neg, int half, int inexact, int odd) {
   switch (rm) {
   case ROUND_UP:
@@ -770,18 +699,16 @@ static int round_away(int rm, int neg, int half, int inexact, int odd) {
   case ROUND_HALF_CEIL:
     return half > 0 || (half == 0 && !neg);
   default:
-    return half > 0 || (half == 0 && neg); // ROUND_HALF_FLOOR
+    return half > 0 || (half == 0 && neg);
   }
 }
 
-// Rounds x to dp decimal places (a negative dp rounds to tens, hundreds...).
-// Keeps the sign of a value that rounds to zero, for formatting.
 static void dec_round(Dec *x, int64_t dp, int rm) {
   int64_t target = -dp;
   if (!x->c.n || x->e >= target) {
     return;
   }
-  uint64_t k = (uint64_t)(target - x->e); // digits to drop
+  uint64_t k = (uint64_t)(target - x->e);
   uint32_t digit = nat_digit(&x->c, k - 1);
   int sticky = nat_any_below(&x->c, k - 1);
   nat_drop_digits(&x->c, &x->c, k);
@@ -793,7 +720,6 @@ static void dec_round(Dec *x, int64_t dp, int rm) {
   x->e = target;
 }
 
-// r = x / y rounded to dp decimal places; r must be neither.
 static void dec_div(Dec *r, const Dec *x, const Dec *y, int64_t dp, int rm) {
   if (dec_is_zero(y)) {
     division_by_zero();
@@ -804,7 +730,6 @@ static void dec_div(Dec *r, const Dec *x, const Dec *y, int64_t dp, int rm) {
     r->neg = 0;
     return;
   }
-  // q = x.c * 10^(x.e - y.e + dp) / y.c is the result in units of 10^-dp.
   int64_t shift = x->e - y->e + dp;
   Nat num, den, rest;
   nat_init(&num);
@@ -830,7 +755,6 @@ static void dec_div(Dec *r, const Dec *x, const Dec *y, int64_t dp, int rm) {
   nat_free(&rest);
 }
 
-// r = x % y with the sign of x, as JavaScript's % and BigNumber.js's mod.
 static void dec_rem(Dec *r, const Dec *x, const Dec *y) {
   if (dec_is_zero(y)) {
     division_by_zero();
@@ -849,7 +773,6 @@ static void dec_rem(Dec *r, const Dec *x, const Dec *y) {
   nat_free(&b);
 }
 
-// log10(|x|) for x != 0, roughly.
 static double dec_log10(const Dec *x) {
   double lead = 0;
   for (uint32_t i = x->c.n, k = 0; i-- > 0 && k < 3; ++k) {
@@ -860,7 +783,6 @@ static double dec_log10(const Dec *x) {
   return log10(lead) + 9.0 * (double)(x->c.n - used) + (double)x->e;
 }
 
-// r = x^n, exactly for n >= 0; for n < 0, 1 / x^-n rounded as `/` rounds.
 static void dec_pow(Dec *r, const Dec *x, int64_t n) {
   if (n == 0) {
     dec_set_u64(r, 1, 0, 0);
@@ -874,8 +796,6 @@ static void dec_pow(Dec *r, const Dec *x, int64_t n) {
     return;
   }
   uint64_t m = magnitude(n);
-  // The result's size, to stop before computing one that is out of range
-  // (or that 1 / x^m turns into a zero).
   double size = dec_log10(x) * (double)n;
   if (size > MAX_EXP + 2.0) {
     overflow();
@@ -918,11 +838,6 @@ static void dec_pow(Dec *r, const Dec *x, int64_t n) {
   dec_free(&t);
 }
 
-//===----------------------------------------------------------------------===//
-// Arithmetic of values
-//===----------------------------------------------------------------------===//
-
-// x * 10^k, if it fits in an int64.
 static int scale_up(int64_t *x, uint32_t k) {
   if (k >= 19) {
     return *x == 0;
@@ -934,8 +849,6 @@ static int scale_up(int64_t *x, uint32_t k) {
 TZ_NOINLINE void tz_dec_add_slow(TzDec *out, int64_t a, uint64_t am, int64_t b, uint64_t bm,
                                  int32_t negate) {
   if (is_short(am) && is_short(bm)) {
-    // Brought to one scale, short values add as integers unless the sum
-    // overflows.
     uint32_t sa = scale_of(am), sb = scale_of(bm);
     int64_t x = a, y = b, sum;
     int fits = sa < sb ? scale_up(&x, sb - sa) : scale_up(&y, sa - sb);
@@ -1031,13 +944,10 @@ void tz_dec_abs(TzDec *out, int64_t a, uint64_t am) {
   tz_dec_neg(out, a, am);
 }
 
-// -1, 0 or 1.
 TZ_NOINLINE int32_t tz_dec_cmp_slow(int64_t a, uint64_t am, int64_t b, uint64_t bm) {
   if (is_short(am) && is_short(bm)) {
     uint32_t sa = scale_of(am), sb = scale_of(bm);
     int64_t x = a, y = b;
-    // A value that does not fit in an int64 when scaled up is beyond any
-    // that does.
     if (sa < sb && !scale_up(&x, sb - sa)) {
       return a < 0 ? -1 : 1;
     }
@@ -1074,7 +984,6 @@ TZ_HOT int32_t tz_dec_equal(int64_t a, uint64_t am, int64_t b, uint64_t bm) {
   return tz_dec_cmp_slow(a, am, b, bm) == 0;
 }
 
-// The sign of a comparison function's result: -1, 0 or 1.
 TZ_HOT int32_t tz_dec_sign(int64_t a, uint64_t am) {
   if (is_short(am)) {
     return (a > 0) - (a < 0);
@@ -1083,7 +992,6 @@ TZ_HOT int32_t tz_dec_sign(int64_t a, uint64_t am) {
   return ((const TzDecObj *)(uintptr_t)a)->neg ? -1 : 1;
 }
 
-// x / y rounded to dp decimal places: `/` passes 20 and half-up.
 void tz_dec_div(TzDec *out, int64_t a, uint64_t am, int64_t b, uint64_t bm, int64_t dp,
                 int32_t rm) {
   if (dp < 0 || dp > ARG_MAX) {
@@ -1108,7 +1016,7 @@ void tz_dec_rem(TzDec *out, int64_t a, uint64_t am, int64_t b, uint64_t bm) {
     uint32_t sa = scale_of(am), sb = scale_of(bm);
     int64_t x = a, y = b;
     int fits = sa < sb ? scale_up(&x, sb - sa) : scale_up(&y, sa - sb);
-    if (fits && y != -1) { // INT64_MIN % -1 traps
+    if (fits && y != -1) {
       out->coef = x % y;
       out->meta = sa > sb ? sa : sb;
       return;
@@ -1136,11 +1044,6 @@ void tz_dec_pow(TzDec *out, int64_t a, uint64_t am, int64_t n) {
   dec_free(&x);
 }
 
-//===----------------------------------------------------------------------===//
-// Methods
-//===----------------------------------------------------------------------===//
-
-// round(dp, mode): BigNumber.js's decimalPlaces(dp, mode).
 void tz_dec_round(TzDec *out, int64_t a, uint64_t am, int64_t dp, int32_t rm) {
   if (dp < -ARG_MAX || dp > ARG_MAX) {
     out_of_range(dp);
@@ -1169,8 +1072,6 @@ void tz_dec_sqrt(TzDec *out, int64_t a, uint64_t am) {
     dec_store_free(out, &x);
     return;
   }
-  // With y = sqrt(x) * 10^20, the result is y rounded half up, which is
-  // floor((floor(2y) + 1) / 2), and floor(2y) = isqrt(floor(4x * 10^40)).
   Nat t, s;
   nat_init(&t);
   nat_init(&s);
@@ -1197,10 +1098,9 @@ int32_t tz_dec_is_integer(int64_t a, uint64_t am) {
     return scale == 0 || (scale < 19 ? a % (int64_t)pow10_64[scale] == 0 : a == 0);
   }
 
-  return ((const TzDecObj *)(uintptr_t)a)->exp >= 0; // normalized
+  return ((const TzDecObj *)(uintptr_t)a)->exp >= 0;
 }
 
-// decimalPlaces(): the number of digits after the point.
 int32_t tz_dec_decimal_places(int64_t a, uint64_t am) {
   Dec x;
   dec_init(&x);
@@ -1211,7 +1111,6 @@ int32_t tz_dec_decimal_places(int64_t a, uint64_t am) {
   return (int32_t)places;
 }
 
-// shiftedBy(k): x * 10^k.
 void tz_dec_shifted_by(TzDec *out, int64_t a, uint64_t am, int64_t k) {
   if (k < -9007199254740991LL || k > 9007199254740991LL) {
     out_of_range(k);
@@ -1221,7 +1120,6 @@ void tz_dec_shifted_by(TzDec *out, int64_t a, uint64_t am, int64_t k) {
   dec_init(&x);
   dec_load(&x, a, am);
   if (!dec_is_zero(&x)) {
-    // Out of range either way, and the exponent must not wrap around.
     if (k > 2 * (int64_t)MAX_EXP) {
       overflow();
       k = 0;
@@ -1232,8 +1130,6 @@ void tz_dec_shifted_by(TzDec *out, int64_t a, uint64_t am, int64_t k) {
   dec_store_free(out, &x);
 }
 
-// decimal.sum, decimal.max and decimal.min over `n` values: `acc` holds the
-// result so far (owned) and `*has` says whether there is one.
 enum { FOLD_SUM, FOLD_MAX, FOLD_MIN };
 
 void tz_dec_fold(TzDec *acc, int32_t *has, const TzDec *values, int64_t n, int32_t op) {
@@ -1269,11 +1165,6 @@ TZ_COLD void tz_dec_no_values(int32_t op) {
   tz_throw(TZ_RANGE_ERROR, "decimal.%s() of no values", op == FOLD_MAX ? "max" : "min");
 }
 
-//===----------------------------------------------------------------------===//
-// Text
-//===----------------------------------------------------------------------===//
-
-// A growable ASCII buffer.
 typedef struct {
   char *p;
   size_t n, cap;
@@ -1323,8 +1214,6 @@ static TzStr text_take(Text *t) {
   return s;
 }
 
-// The digits of |x| (normalized), most significant first, as BigNumber.js's
-// coeffToString gives them: "0" for zero.
 static void put_coefficient(Text *t, const Dec *x) {
   if (!x->c.n) {
     text_char(t, '0');
@@ -1340,8 +1229,6 @@ static void put_coefficient(Text *t, const Dec *x) {
   }
 }
 
-// toFixedPoint of BigNumber.js: the digits `s` (n of them) with the leading
-// one at 10^e, without an exponent.
 static void put_fixed_point(Text *t, const char *s, size_t n, int64_t e) {
   if (e < 0) {
     text_put(t, "0.", 2);
@@ -1357,7 +1244,6 @@ static void put_fixed_point(Text *t, const char *s, size_t n, int64_t e) {
   }
 }
 
-// toExponential of BigNumber.js: "1.25e+3".
 static void put_exponential(Text *t, const char *s, size_t n, int64_t e) {
   text_char(t, s[0]);
   if (n > 1) {
@@ -1369,7 +1255,6 @@ static void put_exponential(Text *t, const char *s, size_t n, int64_t e) {
   text_put(t, exp, (size_t)k);
 }
 
-// String(x): the plain digits with a point, never an exponent.
 static void put_plain(Text *t, Dec *x) {
   dec_normalize(x);
   Text digits;
@@ -1382,7 +1267,6 @@ static void put_plain(Text *t, Dec *x) {
   tz_free(digits.p);
 }
 
-// The text of a short value, if short enough for `out` (64 bytes).
 static size_t format_short(char *out, int64_t coef, uint32_t scale) {
   uint64_t mag = magnitude(coef);
   while (scale > 0 && mag % 10 == 0) {
@@ -1468,10 +1352,6 @@ void tz_buf_decimal(TzBuf *out, TzDec v) {
   tz_free(t.p);
 }
 
-// format() of BigNumber.js: toFixed (id 0), toExponential (id 1) and
-// toPrecision (id 2). With `has_i`, the value is rounded to i significant
-// digits first. As in BigNumber.js, a negative value that rounds to zero
-// keeps its minus sign: decimal("-0.001").toFixed(2) is "-0.00".
 static void format(Text *out, Dec *x, int has_i, int64_t i, int rm, int id) {
   dec_normalize(x);
   int negative = x->neg && x->c.n;
@@ -1576,8 +1456,6 @@ void tz_dec_to_precision(TzStr *out, int64_t a, uint64_t am, int64_t sd, int32_t
   *out = text_take(&t);
 }
 
-// toFormat(dp, mode): toFixed with the integer digits in groups of three,
-// as BigNumber.js's default FORMAT has it: "1,234,567.89".
 void tz_dec_to_format(TzStr *out, int64_t a, uint64_t am, int64_t dp, int32_t has_dp, int32_t rm) {
   if (has_dp && (dp < -ARG_MAX || dp > ARG_MAX)) {
     out_of_range(dp);
@@ -1613,8 +1491,6 @@ void tz_dec_to_format(TzStr *out, int64_t a, uint64_t am, int64_t dp, int32_t ha
 
 static const char alphabet[] = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-// toString(base), as BigNumber.js: a fraction is rounded half up to 20
-// digits of that base, where a rounding digit of at least base / 2 rounds up.
 void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
   if (base < 2 || base > 36) {
     tz_throw(TZ_RANGE_ERROR, "toString() radix must be between 2 and 36");
@@ -1631,7 +1507,6 @@ void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
     dec_free(&x);
     return;
   }
-  // The integer part, and the fraction as f / 10^k.
   Nat whole, fraction;
   nat_init(&whole);
   nat_init(&fraction);
@@ -1643,7 +1518,6 @@ void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
     nat_copy(&fraction, &x.c);
     nat_keep_digits(&fraction, k);
   }
-  // The fraction's digits in the base, one more than kept, to round.
   uint8_t frac[DECIMAL_PLACES + 1];
   int has_fraction = fraction.n != 0;
   if (has_fraction) {
@@ -1671,7 +1545,6 @@ void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
   while (places > 0 && frac[places - 1] == 0) {
     --places;
   }
-  // The integer digits, from the lowest.
   Text ints;
   text_init(&ints);
   if (!whole.n) {
@@ -1699,11 +1572,6 @@ void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
   *out = text_take(&t);
 }
 
-//===----------------------------------------------------------------------===//
-// toFraction
-//===----------------------------------------------------------------------===//
-
-// r = a + q * b
 static void dec_add_product(Dec *r, const Dec *a, const Dec *q, const Dec *b) {
   Dec p;
   dec_init(&p);
@@ -1712,9 +1580,6 @@ static void dec_add_product(Dec *r, const Dec *a, const Dec *q, const Dec *b) {
   dec_free(&p);
 }
 
-// toFraction(maxDenominator) of BigNumber.js: the fraction with the
-// smallest denominator up to the maximum (or the exact one) that is closest
-// to x, as an array [numerator, denominator].
 TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t mc, uint64_t mm,
                             int32_t has_max) {
   Dec x, md, d, n0, n1, d0, d1, d2, n, q, t, xn, xd;
@@ -1732,8 +1597,6 @@ TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t 
     }
   }
   int neg = x.neg;
-  // |x| = n / d exactly, with d a power of ten (below 1 for an integer that
-  // ends in zeros).
   uint64_t digits = x.c.n ? nat_digits(&x.c) : 1;
   int64_t e = (int64_t)digits - dec_top(&x) - 1;
   dec_set_u64(&d, 1, e, 0);
@@ -1755,32 +1618,29 @@ TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t 
   dec_set_u64(&d1, 0, 0, 0);
   for (;;) {
     if (dec_is_zero(&d)) {
-      break; // BigNumber.js divides by zero here, and the Infinity ends the loop
+      break;
     }
     dec_div(&q, &n, &d, 0, ROUND_DOWN);
     dec_add_product(&d2, &d0, &q, &d1);
     if (dec_cmp(&d2, &md) > 0) {
       break;
     }
-    dec_swap(&d0, &d1); // d0 = d1
-    dec_swap(&d1, &d2); // d1 = d2
+    dec_swap(&d0, &d1);
+    dec_swap(&d1, &d2);
     dec_add_product(&t, &n0, &q, &n1);
-    dec_swap(&n0, &n1); // n0 = n1
-    dec_swap(&n1, &t);  // n1 = n0 + q * n1
+    dec_swap(&n0, &n1);
+    dec_swap(&n1, &t);
     dec_mul(&t, &q, &d);
     dec_add(&d2, &n, &t, 1);
-    dec_swap(&n, &d);  // n = d
-    dec_swap(&d, &d2); // d = n - q * d
+    dec_swap(&n, &d);
+    dec_swap(&d, &d2);
   }
-  // d2 = floor((md - d0) / d1)
   dec_add(&t, &md, &d0, 1);
   dec_div(&d2, &t, &d1, 0, ROUND_DOWN);
   dec_add_product(&t, &n0, &d2, &n1);
   dec_swap(&n0, &t);
   dec_add_product(&t, &d0, &d2, &d1);
   dec_swap(&d0, &t);
-  // Which of n1 / d1 and n0 / d0 is closer to xn / xd: compare
-  // |n1 * xd - xn * d1| * d0 with |n0 * xd - xn * d0| * d1.
   Dec u, v, w;
   dec_init(&u);
   dec_init(&v);
@@ -1789,12 +1649,12 @@ TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t 
   dec_mul(&v, &xn, &d1);
   dec_add(&w, &u, &v, 1);
   w.neg = 0;
-  dec_mul(&u, &w, &d0); // left side
+  dec_mul(&u, &w, &d0);
   dec_mul(&v, &n0, &xd);
   dec_mul(&w, &xn, &d0);
   dec_add(&t, &v, &w, 1);
   t.neg = 0;
-  dec_mul(&v, &t, &d1); // right side
+  dec_mul(&v, &t, &d1);
   int first = dec_cmp(&u, &v) < 1;
   Dec *num = first ? &n1 : &n0, *den = first ? &d1 : &d0;
   num->neg = num->c.n ? neg : 0;
@@ -1812,12 +1672,6 @@ TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t 
   return result;
 }
 
-//===----------------------------------------------------------------------===//
-// Conversions
-//===----------------------------------------------------------------------===//
-
-// Reads "digits[.digits][e[+-]digits]" (a known-valid decimal string without
-// its sign), as BigNumber.js's parseValidString.
 static void parse_valid(Dec *x, const char *s, size_t n, int neg) {
   size_t mantissa = 0;
   while (mantissa < n && s[mantissa] != 'e' && s[mantissa] != 'E') {
@@ -1831,7 +1685,7 @@ static void parse_valid(Dec *x, const char *s, size_t n, int neg) {
       eneg = s[i++] == '-';
     }
     for (; i < n; ++i) {
-      if (exponent < INT64_C(1) << 40) { // far beyond the range either way
+      if (exponent < INT64_C(1) << 40) {
         exponent = exponent * 10 + (s[i] - '0');
       }
     }
@@ -1839,7 +1693,6 @@ static void parse_valid(Dec *x, const char *s, size_t n, int neg) {
       exponent = -exponent;
     }
   }
-  // The digits without the point, from the most significant.
   nat_reserve(&x->c, mantissa / 9 + 2);
   x->c.n = 0;
   int64_t point = -1;
@@ -1854,7 +1707,6 @@ static void parse_valid(Dec *x, const char *s, size_t n, int neg) {
   if (point < 0) {
     point = (int64_t)count;
   }
-  // Fill the limbs from the least significant digit.
   uint32_t limb = 0, scale = 1;
   for (size_t i = mantissa; i-- > 0;) {
     if (s[i] == '.') {
@@ -1881,7 +1733,6 @@ static void parse_valid(Dec *x, const char *s, size_t n, int neg) {
 
 static int ascii_digit(uint16_t c) { return c >= '0' && c <= '9'; }
 
-// BigNumber.js's isNumeric: /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i
 static int is_numeric(const uint16_t *s, size_t n) {
   size_t i = 0;
   if (i < n && s[i] == '-') {
@@ -1921,7 +1772,6 @@ static int is_numeric(const uint16_t *s, size_t n) {
   return i == n;
 }
 
-// `s`, known to be ASCII, as a char string in `t`.
 static void narrow(Text *t, const uint16_t *s, size_t n) {
   text_reserve(t, n);
   for (size_t i = 0; i < n; ++i) {
@@ -1930,7 +1780,6 @@ static void narrow(Text *t, const uint16_t *s, size_t n) {
 }
 
 TZ_COLD static void cannot_convert(const uint16_t *s, size_t n) {
-  // The text in the message as UTF-8, cut short if it is long.
   char text[200];
   size_t len = 0;
   for (size_t i = 0; i < n && len + 4 < 160; ++i) {
@@ -1966,10 +1815,6 @@ static int digit_in(uint16_t c, int base) {
   return v < base ? v : -1;
 }
 
-// "ff", "1010.1", "7_7" after 0x, 0b or 0o, as BigNumber.js's
-// parseBaseString: underscores only between digits, upper case letters only
-// in a string without lower case ones. A fraction is converted exactly and
-// rounded half up to 20 decimal places.
 static int parse_base(Dec *x, const uint16_t *s, size_t n, int base, int neg) {
   int upper = 0;
   for (size_t i = 0; i < n; ++i) {
@@ -2008,7 +1853,7 @@ static int parse_base(Dec *x, const uint16_t *s, size_t n, int base, int neg) {
     }
     if (c == '.' && (i == 0 || (!dot && previous_digit))) {
       if (i + 1 == n) {
-        break; // a trailing point is dropped
+        break;
       }
       dot = 1;
       previous_digit = 0;
@@ -2060,9 +1905,6 @@ static int equals_ascii(const uint16_t *s, size_t n, const char *word) {
   return 1;
 }
 
-// decimal(s), as `new BigNumber(s)`: an invalid string is a SyntaxError
-// (BigNumber.js throws too), and so are "NaN" and "Infinity", which no
-// decimal can hold.
 void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
   TzStr str = {obj, meta};
   TzBuf buf;
@@ -2079,7 +1921,6 @@ void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
     int neg = ascii.p[0] == '-';
     parse_valid(&x, ascii.p + neg, ascii.n - (size_t)neg, neg);
   } else {
-    // Without the whitespace around it and a leading plus.
     size_t i = 0, j = n;
     while (i < n && tz_is_js_space(s[i])) {
       ++i;
@@ -2103,7 +1944,6 @@ void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
       int base = (body[1] | 0x20) == 'x' ? 16 : (body[1] | 0x20) == 'b' ? 2 : 8;
       ok = parse_base(&x, body + 2, bn - 2, base, neg);
     } else {
-      // Underscores between digits are dropped.
       uint16_t *clean = (uint16_t *)tz_alloc((m ? m : 1) * sizeof(uint16_t));
       size_t k = 0;
       for (size_t p = 0; p < m; ++p) {
@@ -2128,8 +1968,6 @@ void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
   dec_store_free(out, &x);
 }
 
-// decimal(x) of a double: the shortest digits that read back as x, as
-// String(x) gives them (and BigNumber.js takes them).
 void tz_dec_from_f64(TzDec *out, double v) {
   if (isnan(v) || isinf(v)) {
     char text[32];
@@ -2141,7 +1979,7 @@ void tz_dec_from_f64(TzDec *out, double v) {
     return;
   }
   if (v == trunc(v) && fabs(v) < 9007199254740992.0) {
-    out->coef = (int64_t)v; // -0 is 0
+    out->coef = (int64_t)v;
     out->meta = 0;
     return;
   }
@@ -2154,10 +1992,8 @@ void tz_dec_from_f64(TzDec *out, double v) {
   dec_store_free(out, &x);
 }
 
-// Number(x): the double nearest to x, as Number(x.toString()) gives it.
 double tz_dec_to_f64(int64_t a, uint64_t am) {
   if (is_short(am) && scale_of(am) <= 22 && magnitude(a) <= (UINT64_C(1) << 53)) {
-    // Both exact, so the quotient is correctly rounded.
     static const double powers[23] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,
                                       1e8,  1e9,  1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
                                       1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
@@ -2183,7 +2019,6 @@ double tz_dec_to_f64(int64_t a, uint64_t am) {
   return v;
 }
 
-// A rounding mode given as a string at run time; literals Lowering maps itself.
 int32_t tz_dec_rounding_mode(void *obj, uint64_t meta) {
   static const char *const names[] = {"up",        "down",      "ceil",      "floor",     "half-up",
                                       "half-down", "half-even", "half-ceil", "half-floor"};

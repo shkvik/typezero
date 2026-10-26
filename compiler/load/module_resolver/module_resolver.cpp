@@ -25,9 +25,6 @@ namespace tz {
 
 namespace {
 
-// Why an import cannot name `file` (relative to `dir`), which `spec` names as
-// written, or "" when its extension is not one of TypeScript or JavaScript:
-// the files of tz end in .tz (docs/modules.md).
 std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringRef spec) {
   static const llvm::StringLiteral kForeign[] = {".ts",  ".js",  ".tsx", ".jsx",
                                                  ".mts", ".cts", ".mjs", ".cjs"};
@@ -50,18 +47,14 @@ std::string foreignFile(llvm::StringRef dir, llvm::StringRef file, llvm::StringR
   return message;
 }
 
-} // namespace
+}
 
 ModuleResolver::ModuleResolver(Loader &loader) : loader_(loader) {}
 
 Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc loc) {
-  // Built into tz (docs/io.md) or into the language (docs/errors.md): Checker
-  // binds the names they give.
   if (spec == "neverthrow") {
     return nullptr;
   }
-  // Built into tz and written in tz (library/, docs/events.md, docs/net.md);
-  // the modules of the globals only for the code there.
   if (spec == "node:events" || spec == "events") {
     return loader_.library().libraryModule("events.tz", "node:events", loc);
   }
@@ -71,7 +64,6 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (from->builtin && (spec == "tz:web" || spec == "tz:url" || spec == "tz:fetch")) {
     return loader_.library().libraryModule(spec.drop_front(3).str() + ".tz", spec, loc);
   }
-  // node:stream and the modules on it (docs/streams.md).
   if (spec == "node:stream" || spec == "stream") {
     return loader_.library().libraryModule("stream.tz", "node:stream", loc);
   }
@@ -109,7 +101,6 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
     return nullptr;
   }
 
-  // The files the path may name, in the order they are looked for.
   std::vector<std::string> candidates;
   llvm::StringRef last = path::filename(spec, path::Style::posix);
   llvm::StringRef ext = path::extension(spec, path::Style::posix);
@@ -159,8 +150,6 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
   std::string name, subpath;
   const unsigned *target = nullptr;
   if (spec.starts_with("jsr:")) {
-    // "jsr:@std/path@^1/join", as JSR writes the imports of the packages it
-    // publishes; tz.lock has made sure that the version fits.
     std::string source, inside;
     if (!pkg::splitJsrImport(spec, name, source, inside)) {
       loader_.diags_.error(loc, "'" + spec + "' does not name a JSR package: 'jsr:@scope/name@^1'");
@@ -207,8 +196,6 @@ Module *ModuleResolver::resolvePackage(Module *from, llvm::StringRef spec, llvm:
   const pkg::Package &package = loader_.packages_->packages[*target];
   int index = static_cast<int>(*target);
 
-  // What the package exports under that path, or, if it does not say, the
-  // file of the path.
   std::vector<std::string> candidates;
   if (!package.exports.empty()) {
     std::string listed;
@@ -254,7 +241,7 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
   for (const std::string &candidate : candidates) {
     llvm::SmallString<256> full(baseDir);
     path::append(full, candidate);
-    path::remove_dots(full, /*remove_dot_dot=*/true);
+    path::remove_dots(full, true);
     if (!fs::is_regular_file(full)) {
       continue;
     }
@@ -262,8 +249,6 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     if (fs::real_path(full, real)) {
       real = full;
     }
-    // On a system that ignores the case of names the file is found anyway;
-    // elsewhere it would not be.
     if (real.str() != full.str() && real.str().equals_insensitive(full)) {
       loader_.diags_.error(
           loc, "the file is named '" + loader_.relativeName(real) + "', but the import says '" +
@@ -284,7 +269,6 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
     std::string name = loader_.relativeName(real);
     std::string filePath = name;
     if (owner) {
-      // A file of a package is named after the package: "@std/path/join.tz".
       llvm::StringRef inside = real.str();
       bool within =
           inside.consume_front(owner->dir) && (inside.starts_with("/") || inside.starts_with("\\"));
@@ -315,8 +299,6 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
   }
 
   if (owner && byName) {
-    // What the package names (main, exports), a path inside it, or the files
-    // a package without a tz.json may start with.
     if (candidates.size() == 1) {
       loader_.diags_.error(loc, "cannot find '" + candidates[0] + "' in package " + owner->name +
                                     " (" + owner->dir + "), which '" + spec + "' names");
@@ -341,7 +323,6 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
       shown = shown.drop_front(2);
     }
     message += (i ? " or " : "") + shown.str();
-    // The same file of TypeScript, which only needs another name.
     llvm::SmallString<256> ts(baseDir);
     path::append(ts, shown.drop_back(3) + ".ts");
     if (typescript.empty() && fs::is_regular_file(ts)) {
@@ -357,4 +338,4 @@ Module *ModuleResolver::load(llvm::StringRef baseDir, const std::vector<std::str
   return nullptr;
 }
 
-} // namespace tz
+}

@@ -1,8 +1,3 @@
-// ChaCha20-Poly1305 of the direct layer (docs/crypto.md, section 3), as RFC 8439 puts it
-// together, over the assembly of OpenSSL for ChaCha20 and Poly1305: the key of Poly1305 is the
-// first block of the key stream, the data is ciphered from the second block on, and the tag
-// covers the AAD and the ciphertext, each padded to 16 bytes, and their lengths.
-
 #include "runtime/library/crypto/crypto/crypto.h"
 #include "runtime/core/error/error.h"
 #include <stddef.h>
@@ -17,11 +12,11 @@ void ChaCha20_ctr32(unsigned char *out, const unsigned char *inp, size_t len,
 typedef struct {
   unsigned int key[8];
   unsigned int counter[4];
-  uint8_t stream[64]; // the key stream of the partial block
-  unsigned int used;  // of it, 0 when there is none
+  uint8_t stream[64];
+  unsigned int used;
   POLY1305 poly;
   uint64_t aad_length, data_length;
-  int data; // the AAD is padded: data has started
+  int data;
 } Chacha;
 
 static unsigned int le32(const uint8_t *p) {
@@ -66,7 +61,6 @@ static int chacha_aad(TzCipher *c, const uint8_t *aad, size_t length, double pla
   return 1;
 }
 
-// The key stream over `length` bytes (chacha20_cipher of OpenSSL's provider).
 static void chacha_xor(Chacha *k, const uint8_t *in, size_t length, uint8_t *out) {
   if (k->used) {
     while (length > 0 && k->used < 64) {
@@ -87,7 +81,7 @@ static void chacha_xor(Chacha *k, const uint8_t *in, size_t length, uint8_t *out
       blocks = 1u << 28;
     }
     unsigned int counter = k->counter[0] + (unsigned int)blocks;
-    if (counter < blocks) { // the 32-bit counter wraps: stop there
+    if (counter < blocks) {
       blocks -= counter;
       counter = 0;
     }

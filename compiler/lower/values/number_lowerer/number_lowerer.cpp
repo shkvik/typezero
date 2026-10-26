@@ -24,7 +24,6 @@ namespace tz {
 
 NumberLowerer::NumberLowerer(Lowering &lowering) : lowering_(lowering) {}
 
-// RangeError if the double does not fit (NaN does not either).
 llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *to) {
   bool isInt = to->isInt();
   llvm::Type *f64 = lowering_.builder_.getDoubleTy();
@@ -68,7 +67,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       lowering_.stmtLowerer().emitDiscarded(call->args[0]);
       return nan;
     }
-    Lowering::Operand value = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand value = lowering_.refCounts().emitOperand(call->args[0], true);
     const Type *base = argType->nonOptional();
     llvm::Value *v =
         argType->isOptional() ? lowering_.builder_.CreateExtractValue(value.value, 0) : value.value;
@@ -81,7 +80,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                   lowering_.decimalLowerer().decimalFunction("tz_dec_to_f64", f64, {i64, i64}),
                   {lowering_.decimalLowerer().decimalCoef(v),
                    lowering_.decimalLowerer().decimalMeta(v)})
-            : v; // Checker made numbers doubles
+            : v;
     if (argType->isOptional()) {
       number = lowering_.builder_.CreateSelect(
           lowering_.builder_.CreateExtractValue(value.value, 1), number, nan);
@@ -96,7 +95,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
         call->args[0], call->args.size() == 1 || AssignLowerer::cannotAssign(call->args[1]));
     llvm::Value *result;
     if (isInt) {
-      // A radix of 0 means none, also when it is given.
       llvm::Value *radix = call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1])
                                                  : lowering_.builder_.getInt32(0);
       result = lowering_.builder_.CreateCall(
@@ -108,7 +106,6 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                                               lowering_.stringLowerer().stringMeta(str.value)});
     }
     lowering_.refCounts().dropOperand(str);
-    // parseInt where an int is expected: the number must fit, NaN does not.
     return call->type->isInteger() ? emitCheckedInteger(result, call->type) : result;
   }
   case Builtin::IsNaN:
@@ -120,7 +117,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
       return call->builtin == Builtin::IsNaN ? lowering_.builder_.getFalse()
                                              : lowering_.builder_.getTrue();
     }
-    if (argType->isInteger()) { // a long: only isSafeInteger can be false
+    if (argType->isInteger()) {
       if (call->builtin == Builtin::IsNaN) {
         return lowering_.builder_.getFalse();
       }
@@ -165,7 +162,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *text = lowering_.stringLowerer().callReturningString(
         units ? lowering_.rt_.strFromCharCodes : lowering_.rt_.strFromCodePoints,
         {array, lowering_.builder_.getInt64(values.size())});
-    lowering_.emitThrowCheckIf(!units); // a code point out of range
+    lowering_.emitThrowCheckIf(!units);
     return text;
   }
   case Builtin::UriEncodeComponent:
@@ -178,14 +175,14 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
                                ? "tz_uri_decode_component"
                                : "tz_uri_decode";
     llvm::Type *ptr = lowering_.builder_.getPtrTy();
-    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true);
+    Lowering::Operand text = lowering_.refCounts().emitOperand(call->args[0], true);
     llvm::Value *result = lowering_.stringLowerer().callReturningString(
         lowering_.processLowerer().processFunction(name, lowering_.builder_.getVoidTy(),
                                                    {ptr, ptr, lowering_.builder_.getInt64Ty()}),
         {lowering_.stringLowerer().stringObj(text.value),
          lowering_.stringLowerer().stringMeta(text.value)});
     lowering_.refCounts().dropOperand(text);
-    lowering_.throwLowerer().emitThrowCheck(); // URIError: URI malformed
+    lowering_.throwLowerer().emitThrowCheck();
     return result;
   }
   case Builtin::NumToFixed: {
@@ -194,7 +191,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
         hasArg ? lowering_.exprLowerer().emitExpr(call->args[0]) : lowering_.builder_.getInt64(0);
     llvm::Value *text =
         lowering_.stringLowerer().callReturningString(lowering_.rt_.numToFixed, {x, digits});
-    lowering_.emitThrowCheckIf(hasArg); // digits out of range
+    lowering_.emitThrowCheckIf(hasArg);
     return text;
   }
   case Builtin::NumToRadix: {
@@ -202,7 +199,7 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
     llvm::Value *radix = lowering_.exprLowerer().emitExpr(call->args[0]);
     llvm::Value *text =
         lowering_.stringLowerer().callReturningString(lowering_.rt_.numToRadix, {x, radix});
-    lowering_.throwLowerer().emitThrowCheck(); // a radix out of range
+    lowering_.throwLowerer().emitThrowCheck();
     return text;
   }
   default:
@@ -210,4 +207,4 @@ llvm::Value *NumberLowerer::emitNumberBuiltin(CallExpr *call) {
   }
 }
 
-} // namespace tz
+}

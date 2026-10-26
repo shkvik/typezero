@@ -28,14 +28,10 @@ namespace tz {
 
 ClassParser::ClassParser(Parser &parser) : parser_(parser) {}
 
-// `class Name<T> extends Base implements A, B { members }`. The text of a
-// generic class is kept, for Checker to parse a copy of it for each list of type
-// arguments.
 ClassDecl *ClassParser::parseClass(bool expression) {
   const char *start = parser_.tok_.text.data();
   llvm::SMLoc loc = parser_.tok_.loc();
-  parser_.cursor().advance(); // 'class'
-  // A class expression may have no name: `class extends Base { ... }`.
+  parser_.cursor().advance();
   bool named =
       parser_.tok_.is(Tok::Identifier) &&
       !(expression && (parser_.tok_.text == "extends" || parser_.tok_.text == "implements"));
@@ -43,16 +39,13 @@ ClassDecl *ClassParser::parseClass(bool expression) {
                                            named ? parser_.tok_.text : llvm::StringRef());
   cls->expression = expression;
   if (named) {
-    parser_.cursor().advance(); // the name
+    parser_.cursor().advance();
   }
   if (parser_.tok_.is(Tok::Less)) {
     cls->typeParams = parser_.functions().parseTypeParams();
   }
   if (parser_.tok_.is(Tok::Identifier) && parser_.tok_.text == "extends") {
     parser_.cursor().advance();
-    // `extends Base` and `extends Box<int>` name a class; `extends
-    // Mixin(Base)` and `extends ns.Base` are values (see ClassDecl::baseExpr),
-    // and so is a plain name in a class expression, usually a parameter.
     const Token &next = parser_.cursor().peek();
     bool value = !parser_.tok_.is(Tok::Identifier) || next.is(Tok::LParen) || next.is(Tok::Dot) ||
                  next.is(Tok::LBracket);
@@ -97,7 +90,6 @@ bool ClassParser::memberModifierAhead() {
   if (!parser_.tok_.is(Tok::Identifier) || !llvm::is_contained(modifiers, parser_.tok_.text)) {
     return false;
   }
-  // A member named like a modifier ends right after its name.
   const Token &next = parser_.cursor().peek();
   if (next.newlineBefore && !next.is(Tok::LBrace)) {
     return false;
@@ -153,8 +145,6 @@ std::vector<Decorator> ClassParser::parseDecorators() {
   return decorators;
 }
 
-// As TypeScript has them: a name or a chain of member names, which a call
-// may end, or any expression in parentheses.
 Expr *ClassParser::parseDecoratorExpr() {
   if (parser_.cursor().accept(Tok::LParen)) {
     Expr *expr = parser_.exprs().parseSequence();
@@ -229,7 +219,6 @@ void ClassParser::skipTypeParams() {
   } while (depth > 0);
 }
 
-// A field, a method or a constructor, with its modifiers.
 void ClassParser::parseClassMember(ClassDecl *cls) {
   if (parser_.cursor().accept(Tok::Semi)) {
     return;
@@ -274,16 +263,11 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
           at, "'declare' is not supported: a field gets its value in its declaration or in the "
               "constructor");
     } else if (word == "accessor") {
-      // An ordinary field: reading or writing a field never runs code
-      // (docs/decorators.md, section 1).
       accessor = true;
     } else {
-      isAsync = true; // `async m() {}`
+      isAsync = true;
     }
   }
-  // `get area() {}` and `set width(v) {}`: reading a field never runs code,
-  // but in a built-in module of tz written in tz, which has them as node's
-  // classes do (see FunctionDecl::accessor).
   FunctionDecl::Accessor accessorKind = FunctionDecl::Accessor::None;
   bool accessorAhead =
       parser_.tok_.is(Tok::Identifier) &&
@@ -324,7 +308,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     return;
   }
   const char *start = parser_.tok_.text.data();
-  bool generator = parser_.cursor().accept(Tok::Star); // `*items() { yield ... }`
+  bool generator = parser_.cursor().accept(Tok::Star);
   llvm::SMLoc nameLoc = parser_.tok_.loc();
   bool plainName = parser_.tok_.is(Tok::Identifier);
   llvm::StringRef name;
@@ -354,7 +338,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     if (accessor) {
       parser_.cursor().report(loc, "'accessor' goes before a field, not a method");
     }
-    // The class gets a constructor's parameters, and their decorators.
     if (!decorators.empty() && plainName && name == "constructor" && !isStatic) {
       parser_.cursor().report(decorators[0].loc,
                               "a decorator cannot decorate a constructor; decorate the class, "
@@ -399,8 +382,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
                                              cls->name +
                                              "' give it one; to give it one here, drop 'abstract'");
       }
-      // An empty body, which nothing runs: the method table holds what the
-      // classes that extend it give.
       fn->body = parser_.ctx_.make<BlockStmt>(nameLoc);
       cls->methods.push_back(fn);
       return;
@@ -419,8 +400,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     if (fn->returnType) {
       parser_.cursor().report(fn->returnType->loc, "a constructor cannot have a return type");
     }
-    // Parameter properties are fields too, which the constructor sets before
-    // anything else.
     std::vector<Stmt *> sets;
     size_t properties = 0;
     for (const ClassField &f : cls->fields) {
@@ -448,8 +427,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
                                                 parser_.ctx_.make<NameExpr>(param.loc, param.name));
       sets.push_back(parser_.ctx_.make<ExprStmt>(param.loc, set));
     }
-    // In a class that extends another, `this` exists only once `super(...)`
-    // has run: the fields are set right after it, as in JavaScript.
     auto at = fn->body->body.begin();
     if (cls->base) {
       for (auto it = fn->body->body.begin(); it != fn->body->body.end(); ++it) {
@@ -509,7 +486,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
 }
 
 void ClassParser::parseMethodRest(FunctionDecl *fn, const char *start) {
-  // `yield` belongs to the generator method whose body it is in.
   llvm::SaveAndRestore<bool> inGenerator(parser_.inGenerator_, fn->isGenerator);
   if (parser_.tok_.is(Tok::Less)) {
     fn->typeParams = parser_.functions().parseTypeParams();
@@ -534,4 +510,4 @@ bool ClassParser::symbolKeyAhead() {
          parser_.cursor().peek().text == "Symbol";
 }
 
-} // namespace tz
+}

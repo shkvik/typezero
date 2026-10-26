@@ -52,13 +52,11 @@ namespace tz {
 CallLowerer::CallLowerer(Lowering &lowering) : lowering_(lowering) {}
 
 llvm::Value *CallLowerer::emitCall(CallExpr *call) {
-  // A call of a built-in of a topic of the library: its code is the topic's.
   if (const Feature *feature = lowering_.features_->lowering(call->builtin)) {
     return feature->lowerCall(lowering_, call);
   }
   switch (call->builtin) {
   case Builtin::StringOf:
-    // Checker already converted the argument to a string.
     return call->args.empty() ? lowering_.stringLowerer().stringLiteral(u"")
                               : lowering_.exprLowerer().emitExpr(call->args[0]);
   case Builtin::NumberOf:
@@ -145,8 +143,6 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   if (!call->func) {
     return lowering_.closureLowerer().emitValueCall(call);
   }
-  // The callee takes ownership of its arguments. Parameters left out get
-  // undefined (and then their default values).
   const FuncSymbol *func = call->func;
   std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);
   for (size_t i = args.size(); i < func->params.size(); ++i) {
@@ -154,8 +150,6 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   }
   llvm::CallInst *result;
   if (func->decl->isClosure()) {
-    // A function declared in a block, or a constant arrow: its code is
-    // known, its environment comes from where it is called.
     args.insert(args.begin(), lowering_.closureLowerer().closureEnv(call));
     result =
         lowering_.builder_.CreateCall(lowering_.closureLowerer().closureCode(func->decl), args);
@@ -167,4 +161,4 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
   return result->getType()->isVoidTy() ? nullptr : result;
 }
 
-} // namespace tz
+}

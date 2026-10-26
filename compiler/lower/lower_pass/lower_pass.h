@@ -16,7 +16,6 @@ struct MemoryPlan;
 struct ParallelPlan;
 struct Program;
 
-// The checked program to verified LLVM IR, by the plans of ParallelPass and MemoryPass.
 class LowerPass {
 public:
   LowerPass(llvm::LLVMContext &context, const Target &target, llvm::StringRef moduleName,
@@ -32,4 +31,4 @@ private:
   const FeatureRegistry &features_;
 };
 
-} // namespace tz
+}

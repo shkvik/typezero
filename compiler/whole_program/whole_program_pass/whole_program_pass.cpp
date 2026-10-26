@@ -26,7 +26,6 @@ Errors WholeProgramPass::run(Program &program) const {
   checker.loadOrder().checkLoadOrder(file);
   checker.unused().findUnused(file);
   checker.reflectChecker().finishReflection();
-  // The globals without a type, file by file.
   for (Module *module : file.modules) {
     checker.moduleDeclarer().useModule(module);
     if (!checker.untyped_.empty()) {
@@ -34,8 +33,6 @@ Errors WholeProgramPass::run(Program &program) const {
     }
   }
   checker.popScope();
-  // Error and its kinds are classes of the program from here on, for Lowering,
-  // and so are the instances of generic classes, numbered with the others.
   for (ClassDecl *kind : checker.errorKinds_) {
     file.items.push_back(kind);
   }
@@ -47,7 +44,6 @@ Errors WholeProgramPass::run(Program &program) const {
       file.items.push_back(cls);
     }
   }
-  // Writes through a wider type, now that every write is known.
   if (!checker.diags_.hasErrors()) {
     checker.wideWrites().checkWidenings(file);
   }
@@ -55,4 +51,4 @@ Errors WholeProgramPass::run(Program &program) const {
   return program.diags->take();
 }
 
-} // namespace tz
+}

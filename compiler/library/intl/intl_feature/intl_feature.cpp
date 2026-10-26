@@ -10,7 +10,7 @@
 namespace tz {
 
 Expr *IntlFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type * /*expected*/) const {
+                                   const Type *) const {
   if (checker.callChecker().isGlobalName(member->object, "Intl")) {
     return checker.dateFormatChecker().checkIntlCall(call, member);
   }
@@ -29,7 +29,7 @@ llvm::ArrayRef<llvm::StringLiteral> IntlFeature::typeArgFreeGlobals() const {
 }
 
 Expr *IntlFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type * /*expected*/) const {
+                                   const Type *) const {
   const Type *receiver = member->object->type;
   if (!receiver->isIntl()) {
     return nullptr;
@@ -39,7 +39,7 @@ Expr *IntlFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr 
 }
 
 Expr *IntlFeature::checkValueMethodCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                        const Type * /*expected*/) const {
+                                        const Type *) const {
   const Type *receiver = member->object->type;
   if (receiver->isString() && (member->name == "localeCompare" || member->name == "normalize")) {
     return checker.intlMethodChecker().checkStringLocale(call, member);
@@ -57,4 +57,4 @@ llvm::Value *IntlFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.intlCallLowerer().emitIntlCall(call);
 }
 
-} // namespace tz
+}

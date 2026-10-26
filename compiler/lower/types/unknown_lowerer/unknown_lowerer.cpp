@@ -25,20 +25,15 @@ namespace tz {
 
 namespace {
 
-// What tz_unknown_kind gives, TZ_KIND_* of runtime/core/unknown/unknown.h: the texts
-// of typeof.
 const char16_t *const kKindNames[] = {u"undefined", u"number", u"string",
                                       u"boolean",   u"object", u"function"};
 
-// TZ_LAYOUT_CLASS and TZ_LAYOUT_BUILTIN of runtime/core/tzrt/tzrt.h.
 constexpr uint32_t kLayoutClass = 2097152;
 
 constexpr uint32_t kLayoutBuiltin = 4194304;
 
-// A count no program reaches, as literals have (see codegen.cpp).
 constexpr int64_t kStaticRefCount = int64_t(1) << 62;
 
-// Whether evaluating `expr` calls something, as `Mixin(Base)` does.
 bool hasCall(const Expr *expr) {
   if (!expr) {
     return false;
@@ -59,14 +54,13 @@ bool hasCall(const Expr *expr) {
   return false;
 }
 
-// A reference to an object of the language, which an unknown holds as it is.
 bool isObjectHeaded(const Type *type) {
   return type->isObject() || type->isIterator() || type->isDict() || type->isClassRef() ||
          type->isPromise() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
-} // namespace
+}
 
 UnknownLowerer::UnknownLowerer(Lowering &lowering) : lowering_(lowering) {}
 
@@ -81,12 +75,9 @@ llvm::FunctionCallee UnknownLowerer::unknownFunction(llvm::StringRef name, llvm:
 
 llvm::Value *UnknownLowerer::boxValue(llvm::Value *value, const Type *type) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  // Reflect.apply may call it (see finishReflection).
   if (type->isFunction()) {
     lowering_.unknownFunctionTypes_.insert(type);
   }
-  // A value that may hold a member of a group goes into a box that is one
-  // (runtime/core/unknown/unknown.c).
   const char *box =
       lowering_.memory().mayHoldMember(type) ? "tz_unknown_box_member" : "tz_unknown_box";
 
@@ -106,9 +97,6 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
     if (from->isUndefined()) {
       return llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     }
-    // A union or a literal type: what it holds, as tz_unknown_of finds it
-    // (a reference as it is, any other value in a box of its own type; a
-    // string literal as its string).
     if (from->nonOptional()->isUnion() || from->nonOptional()->isLiteral()) {
       return lowering_.builder_.CreateCall(unknownFunction("tz_unknown_of", ptr, {ptr, ptr}),
                                            {lowering_.typeDescriptors().typeDescriptor(from),
@@ -119,10 +107,9 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
       return boxValue(value, from);
     }
     const Type *inner = from->inner();
-    if (isObjectHeaded(inner)) { // null for undefined
+    if (isObjectHeaded(inner)) {
       return value;
     }
-    // A value in a box, or null for undefined.
     llvm::BasicBlock *boxBlock = lowering_.functionFrame().newBlock("unknown.box");
     llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("unknown.end");
     llvm::BasicBlock *entry = lowering_.builder_.GetInsertBlock();
@@ -139,7 +126,6 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
     phi->addIncoming(box, boxEnd);
     return phi;
   }
-  // What a check showed: the value in the box, or the reference itself.
   llvm::Value *result;
   if (to->isString()) {
     result = lowering_.stringLowerer().callReturningString(
@@ -155,7 +141,7 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
     result = lowering_.builder_.CreateCall(unknownFunction("tz_unknown_array", ptr, {ptr, ptr}),
                                            {value, lowering_.typeDescriptors().typeDescriptor(to)});
   } else {
-    return value; // an object, of a class or any
+    return value;
   }
   lowering_.refCounts().releaseValue(value, from);
 
@@ -163,7 +149,7 @@ llvm::Value *UnknownLowerer::emitUnknownConversion(llvm::Value *value, const Typ
 }
 
 llvm::Value *UnknownLowerer::emitUnknownTypeOf(Expr *operand) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, /*canBorrow=*/true);
+  Lowering::Operand value = lowering_.refCounts().emitOperand(operand, true);
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *kind = lowering_.builder_.CreateCall(
       unknownFunction("tz_unknown_kind", lowering_.builder_.getInt32Ty(), {ptr}), {value.value},
@@ -180,7 +166,7 @@ llvm::Value *UnknownLowerer::emitUnknownTypeOf(Expr *operand) {
 }
 
 llvm::Value *UnknownLowerer::emitUnknownIsArray(Expr *arg) {
-  Lowering::Operand value = lowering_.refCounts().emitOperand(arg, /*canBorrow=*/true);
+  Lowering::Operand value = lowering_.refCounts().emitOperand(arg, true);
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *array = lowering_.builder_.CreateCall(
       unknownFunction("tz_unknown_is_array", lowering_.builder_.getInt32Ty(), {ptr}),
@@ -190,9 +176,6 @@ llvm::Value *UnknownLowerer::emitUnknownIsArray(Expr *arg) {
   return lowering_.builder_.CreateICmpNE(array, lowering_.builder_.getInt32(0));
 }
 
-// { TzClass, the static fields }: the static fields of a class used as a
-// value live in its object, whose layout describes those that are keys, so
-// that it prints as node prints a class, `[class User] { count: 0 }`.
 llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
   if (llvm::Constant *found = classObjects_.lookup(cls)) {
     return found;
@@ -217,7 +200,6 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
                                : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
   auto *drop = cast<llvm::Function>(
       unknownFunction("tz_static_drop", lowering_.builder_.getVoidTy(), {ptr}).getCallee());
-  // The keys: the static fields but the `#private` ones, as node shows them.
   const llvm::StructLayout *offsets = lowering_.module_->getDataLayout().getStructLayout(type);
   std::vector<llvm::Constant *> keys;
   for (size_t i = 0; i < statics.size(); ++i) {
@@ -236,16 +218,12 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
   if (!keys.empty()) {
     auto *arrayType = llvm::ArrayType::get(lowering_.fieldDescTy_, keys.size());
     auto *global = new llvm::GlobalVariable(
-        *lowering_.module_, arrayType, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+        *lowering_.module_, arrayType, true, llvm::GlobalValue::PrivateLinkage,
         llvm::ConstantArray::get(arrayType, keys), "tz.classfields." + name);
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     fields = global;
   }
-  // Error and its kinds print as the functions they are in JavaScript; so
-  // does a class whose base is a call, `class A extends Mixin(B)`, as node
-  // tells a class by its text and gives up at a parenthesis in its head.
   uint32_t flags = kLayoutClass | (cls->builtin || hasCall(cls->baseExpr) ? kLayoutBuiltin : 0);
-  // Its number tells it from the other objects of a union (see plainTypeId).
   llvm::Constant *layoutInit = llvm::ConstantStruct::get(
       lowering_.layoutDescTy_,
       {drop, fields, lowering_.builder_.getInt32(uint32_t(keys.size())),
@@ -253,11 +231,10 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
        lowering_.builder_.getInt32(uint32_t(cls->name.size())),
        lowering_.builder_.getInt32(
            lowering_.unionLowerer().plainTypeId(Type::classRef(cls, cls->name)))});
-  auto *layout = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_,
-                                          /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
-                                          layoutInit, "tz.classlayout." + name);
+  auto *layout = new llvm::GlobalVariable(*lowering_.module_, lowering_.layoutDescTy_, true,
+                                          llvm::GlobalValue::PrivateLinkage, layoutInit,
+                                          "tz.classlayout." + name);
   layout->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-  // Counted as any object is, so not a constant.
   llvm::Constant *info = (cls->reflectNew || cls->reflectMethods) && !cls->builtin
                              ? lowering_.classInfoLowerer().classInfoGlobal(cls)
                              : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
@@ -270,9 +247,9 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
   for (size_t i = 6; i < elements.size(); ++i) {
     init.push_back(llvm::Constant::getNullValue(elements[i]));
   }
-  auto *object = new llvm::GlobalVariable(
-      *lowering_.module_, type, /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
-      llvm::ConstantStruct::get(type, init), "tz.class." + name);
+  auto *object =
+      new llvm::GlobalVariable(*lowering_.module_, type, false, llvm::GlobalValue::InternalLinkage,
+                               llvm::ConstantStruct::get(type, init), "tz.class." + name);
   classObjects_[cls] = object;
 
   return object;
@@ -296,8 +273,6 @@ llvm::Constant *UnknownLowerer::staticFieldAddress(const ClassDecl *cls, const V
                                        lowering_.builder_.getInt32(element)});
 }
 
-// The elements as String() makes them, an undefined one empty, and the
-// separator between them.
 llvm::Value *UnknownLowerer::emitTupleJoin(CallExpr *call) {
   auto *member = cast<MemberExpr>(call->callee);
   const Type *tuple = member->object->type;
@@ -308,7 +283,7 @@ llvm::Value *UnknownLowerer::emitTupleJoin(CallExpr *call) {
                                                    lowering_.mayThrow().exprThrows(call->args[0]));
   Lowering::Operand separator =
       hasSeparator
-          ? lowering_.refCounts().emitOperand(call->args[0], /*canBorrow=*/true)
+          ? lowering_.refCounts().emitOperand(call->args[0], true)
           : Lowering::Operand{lowering_.stringLowerer().stringLiteral(u","), false, Type::string()};
   lowering_.throwLowerer().takeOperand(object);
   std::vector<Lowering::Operand> parts;
@@ -353,4 +328,4 @@ llvm::Value *UnknownLowerer::emitTupleJoin(CallExpr *call) {
   return result;
 }
 
-} // namespace tz
+}

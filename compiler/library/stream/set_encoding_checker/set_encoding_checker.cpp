@@ -22,14 +22,12 @@ namespace tz {
 
 namespace {
 
-// How the code before a setEncoding() used the stream: it escaped there,
-// where code that sees its chunks as Buffers may get the strings.
 struct StreamEscape {
   llvm::SMLoc loc;
   std::string how;
 };
 
-} // namespace
+}
 
 SetEncodingChecker::SetEncodingChecker(Checker &checker) : checker_(checker) {}
 
@@ -45,8 +43,6 @@ const Type *SetEncodingChecker::streamViewOf(const Checker::FieldPath &path,
 }
 
 const Type *SetEncodingChecker::encodedStreamType(ClassDecl *cls, llvm::SMLoc loc) {
-  // The class of the program's own stream, if it is one, has its chunk
-  // types fixed: the view is the library's class it extends.
   for (ClassDecl *c = cls; c; c = c->parent) {
     if (!c->library || !c->generic || c->typeArgs.empty()) {
       continue;
@@ -92,7 +88,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
                           "'" + receiver->name() + "' has no setEncoding(): it is not readable");
     return call;
   }
-  // A stream of strings already: another encoding, the same type.
   if (chunks.readable->isString()) {
     return plainCall();
   }
@@ -103,8 +98,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
                               chunks.readable->name().str() + "; push strings into it instead");
     return call;
   }
-  // The stream must be known by a constant, or a read-only field of one,
-  // whose type changes from here on (docs/streams.md, section 2).
   std::optional<Checker::FieldPath> path;
   const Expr *object = member->object;
   while (auto *conv = dyn_cast<CastExpr>(object)) {
@@ -113,8 +106,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     }
     object = conv->operand;
   }
-  // process.stdin: a stream of the whole program, which the entry's
-  // top-level code may set the encoding of.
   bool stdinStream = false;
   if (auto *c = dyn_cast<CallExpr>(object); c && c->func && c->func->name == "processStdin") {
     if (!checker_.module_ || !checker_.module_->isEntry || !checker_.functions_.empty() ||
@@ -153,7 +144,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return reject("but '" + root->name.str() +
                   "' may hold another stream later; declare it with 'const'");
   }
-  // The fields on the way must be read-only.
   {
     const Type *at = root->type;
     for (llvm::StringRef field : path->names) {
@@ -164,8 +154,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
       at = f->type;
     }
   }
-  // In the block that declares it, not in an if or a loop: after a
-  // setEncoding() that may not run, the type of the chunks is not known.
   size_t declared = stdinStream ? 0 : checker_.scopes_.size();
   for (size_t i = checker_.scopes_.size(); i-- > 0 && !stdinStream;) {
     auto found = checker_.scopes_[i].find(root->name);
@@ -184,9 +172,7 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
                   "' is declared outside it, so the type would "
                   "depend on whether it runs");
   }
-  // What the code before did with the stream.
   std::vector<StreamEscape> escapes;
-  // Before the stream this call is on, which starts with its root.
   const Expr *base = member->object;
   for (;;) {
     if (auto *conv = dyn_cast<CastExpr>(base)) {
@@ -204,7 +190,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
 
     return at > start && at < here;
   };
-  // A use of the path: a name of the variable, or `root.f.g`.
   auto isPath = [&](const Expr *e) -> bool {
     while (auto *conv = dyn_cast<CastExpr>(e)) {
       if (!conv->isImplicit()) {
@@ -269,10 +254,9 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
   for (const Stmt *stmt : body) {
     visitExprs(stmt, classify);
   }
-  // The uses in functions written before: they may run after this.
   llvm::SmallPtrSet<const Expr *, 32> direct;
   for (const Stmt *stmt : body) {
-    visitExprs(stmt, [&](const Expr *e) { direct.insert(e); }, /*intoFunctions=*/false);
+    visitExprs(stmt, [&](const Expr *e) { direct.insert(e); }, false);
   }
   for (const Stmt *stmt : body) {
     visitExprs(stmt, [&](const Expr *e) {
@@ -308,7 +292,6 @@ Expr *SetEncodingChecker::checkSetEncoding(CallExpr *call, MemberExpr *member, C
     return call;
   }
   call->type = view;
-  // From this call on: the constant is not seen outside its block.
   checker_.streamViews_.push_back({*path, llvm::SMLoc::getFromPointer(here), view});
 
   return call;
@@ -341,7 +324,6 @@ Expr *SetEncodingChecker::checkStreamPipe(CallExpr *call, MemberExpr *member, Cl
                                            dest->type->name() + "' is not writable");
     return call;
   }
-  // A writable side whose type a round looks for gets these chunks.
   if (!checker_.chunkTypes().recordStreamChunk(to.writable, from.readable, dest->loc()) &&
       !checker_.openMaps_.count(from.readable) &&
       !checker_.streamPipeline().streamTakes(to.writable, from.readable)) {
@@ -361,4 +343,4 @@ Expr *SetEncodingChecker::checkStreamPipe(CallExpr *call, MemberExpr *member, Cl
   return call;
 }
 
-} // namespace tz
+}
