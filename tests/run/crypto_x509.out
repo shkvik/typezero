@@ -20,3 +20,4 @@ undefined admin@example.com 127.0.0.1
 undefined true false
 true false true
 1A2B3C4D5E
+ERR_OSSL_PEM_NO_START_LINE | error:0480006C:PEM routines::no start line

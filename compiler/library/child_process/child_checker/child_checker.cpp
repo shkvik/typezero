@@ -1,9 +1,9 @@
 #include "compiler/library/child_process/child_checker/child_checker.h"
-#include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -29,49 +29,9 @@ std::string utf8(const std::u16string &text) {
 
 const Type *bufferType() { return Type::bytesType(Type::Bytes::Buffer); }
 
-const Type *outputUnion() {
-  return Type::unionOf({Type::string(), bufferType(), Type::undefinedTy()});
-}
-
 }
 
 ChildChecker::ChildChecker(Checker &checker) : checker_(checker) {}
-
-void ChildChecker::declareExecSyncError() {
-  auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), "ExecSyncError");
-  cls->builtin = true;
-  cls->resolved = cls->declared = true;
-  cls->parent = checker_.errorClass_;
-  checker_.errorClass_->children.push_back(cls);
-  Type *type = Type::classType("ExecSyncError", cls);
-  cls->type = type;
-  const Type *s = Type::optional(Type::string());
-  const std::pair<llvm::StringRef, const Type *> own[] = {
-      {"errno", Type::optional(Type::intTy())},
-      {"code", s},
-      {"syscall", s},
-      {"path", s},
-      {"spawnargs", Type::optional(Type::array(Type::string()))},
-      {"status", Type::optional(Type::intTy())},
-      {"signal", s},
-      {"output", Type::array(outputUnion())},
-      {"pid", Type::intTy()},
-      {"stdout", outputUnion()},
-      {"stderr", outputUnion()}};
-  const Type *error = checker_.errorClass_->type;
-  std::vector<Field> fields(error->fields().begin(), error->fields().end());
-  for (const auto &[name, fieldType] : own) {
-    ClassField f;
-    f.name = name;
-    f.resolved = fieldType;
-    f.optional = fieldType->isOptional();
-    cls->fields.push_back(f);
-    fields.push_back({name.str(), fieldType, false});
-  }
-  type->defineFields(std::move(fields));
-  checker_.classBases().addBase(type, error);
-  checker_.execSyncErrorClass_ = cls;
-}
 
 Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();
@@ -358,22 +318,22 @@ Expr *ChildChecker::checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SML
   call->spread.clear();
 
   const Type *text = encoding == ChildBytes ? bufferType() : string;
+  const Type *failure = checker_.prelude().builtinType("ExecError", {text});
   auto output = [&](unsigned i) { return stdio[i] == ChildPipe ? text : Type::optional(text); };
   if (fn == "spawnSync") {
     call->builtin = Builtin::ChildSpawnSync;
     const Type *t = Type::object(
-        {{"error", Type::optional(checker_.systemErrorClass_->type), false},
-         {"status", Type::optional(Type::intTy()), false},
+        {{"status", Type::optional(Type::intTy()), false},
          {"signal", Type::optional(string), false},
          {"output", Type::array(Type::optional(text)), false},
          {"pid", Type::intTy(), false},
          {"stdout", output(1), false},
          {"stderr", output(2), false}},
         encoding == ChildBytes ? "SpawnSyncReturns<Buffer>" : "SpawnSyncReturns<string>");
-    call->type = t;
+    call->type = Type::result(t, failure);
   } else {
     call->builtin = exec ? Builtin::ChildExecSync : Builtin::ChildExecFileSync;
-    call->type = output(1);
+    call->type = Type::result(output(1), failure);
   }
 
   return call;

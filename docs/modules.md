@@ -167,7 +167,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   `@types/node` (node 24) и `tz.d.ts` ([editors/types](../editors/types/tz.d.ts)) —
   то, что в tz есть без импорта: `int`, `long`, `double`, `decimal` с методами, `Json`,
   `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` (свой, без
-  neverthrow), `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,
+  neverthrow), `SystemError`, `ExecError`, `Constructor`, `ConstructorArgs`,
   `MethodDescriptor`, `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и
   модули `"tz:io"` и `"tz:http"`. Тест `tests/cli/types.cmake` проверяет их TypeScript из
   VS Code на копиях программ с расширением `.ts`. После переделки ошибок и чисел (26 октября)

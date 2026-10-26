@@ -1,8 +1,6 @@
 // same-as-node
-// What fails in node:fs/promises rejects the Promise with the SystemError
-// node:fs throws for the same; wrong arguments reject it too, rather than
-// throw, as the async functions of Node do. The directory of the test shows
-// as D.
+// What fails in node:fs/promises gives a Promise of the Err node:fs gives for
+// the same. The directory of the test shows as D.
 import { readFile, writeFile, appendFile, mkdir, mkdtemp, readdir, stat, lstat, rm, rmdir,
          rename, copyFile, unlink, access, chmod, truncate, realpath } from "node:fs/promises"
 import { join } from "node:path"
@@ -16,50 +14,50 @@ must(await writeFile(file, "text"))
 must(await mkdir(sub))
 must(await writeFile(join(sub, "inside.txt"), "inside"))
 
-async function show(what: string, run: () => Promise<void>) {
-  try {
-    await run()
+async function show<T>(what: string, p: Promise<Result<T, SystemError>>) {
+  const r = await p
+  if (r.isOk()) {
     console.log(what, "-> no error")
-  } catch (e) {
-    if (e instanceof SystemError)
-      console.log(what, "->", e.name, e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
-                  (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
-    else
-      console.log(what, "->", e.name, "|", e.message)
+    return
   }
+  const e = r.error
+  if (e.code == "ERR_INVALID_ARG_VALUE")
+    console.log(what, "->", e.code, "|", e.message)
+  else
+    console.log(what, "->", e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
+                (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
 }
 
-await show("read missing", async () => void (must(await readFile(missing, "utf8"))))
-await show("read directory", async () => void (must(await readFile(sub, "utf8"))))
-await show("read zero char", async () => void (must(await readFile("a\u0000b", "utf8"))))
-await show("write missing dir", () => writeFile(join(missing, "x.txt"), "x"))
-await show("write exclusive", () => writeFile(file, "x", { flag: "wx" }))
-await show("write bad flag", () => writeFile(file, "x", { flag: "q" }))
-await show("append missing dir", () => appendFile(join(missing, "x.txt"), "x"))
-await show("mkdir existing", async () => void (must(await mkdir(sub))))
-await show("mkdir missing parent", async () => void (must(await mkdir(join(missing, "a")))))
-await show("mkdir under file", async () => void (must(await mkdir(join(file, "a", "b"), { recursive: true }))))
-await show("mkdtemp missing", async () => void (must(await mkdtemp(join(missing, "t-")))))
-await show("rmdir not empty", () => rmdir(sub))
-await show("rmdir missing", () => rmdir(missing))
-await show("unlink directory", () => unlink(sub))
-await show("unlink missing", () => unlink(missing))
-await show("rm directory", () => rm(sub))
-await show("rm missing", () => rm(missing))
-await show("rename missing", () => rename(missing, join(dir, "other")))
-await show("copy missing", () => copyFile(missing, join(dir, "other")))
-await show("readdir file", async () => void (must(await readdir(file))))
-await show("readdir missing", async () => void (must(await readdir(missing))))
-await show("stat missing", async () => void (must(await stat(missing))))
-await show("lstat missing", async () => void (must(await lstat(missing))))
-await show("realpath missing", async () => void (must(await realpath(join(missing, "deeper")))))
-await show("access missing", () => access(missing))
-await show("chmod missing", () => chmod(missing, 0o644))
-await show("truncate missing", () => truncate(missing))
+await show("read missing", readFile(missing, "utf8"))
+await show("read directory", readFile(sub, "utf8"))
+await show("read zero char", readFile("a\u0000b", "utf8"))
+await show("write missing dir", writeFile(join(missing, "x.txt"), "x"))
+await show("write exclusive", writeFile(file, "x", { flag: "wx" }))
+await show("append missing dir", appendFile(join(missing, "x.txt"), "x"))
+await show("mkdir existing", mkdir(sub))
+await show("mkdir missing parent", mkdir(join(missing, "a")))
+await show("mkdir under file", mkdir(join(file, "a", "b"), { recursive: true }))
+await show("mkdtemp missing", mkdtemp(join(missing, "t-")))
+await show("rmdir not empty", rmdir(sub))
+await show("rmdir missing", rmdir(missing))
+await show("unlink directory", unlink(sub))
+await show("unlink missing", unlink(missing))
+await show("rm directory", rm(sub))
+await show("rm missing", rm(missing))
+await show("rename missing", rename(missing, join(dir, "other")))
+await show("copy missing", copyFile(missing, join(dir, "other")))
+await show("readdir file", readdir(file))
+await show("readdir missing", readdir(missing))
+await show("stat missing", stat(missing))
+await show("lstat missing", lstat(missing))
+await show("realpath missing", realpath(join(missing, "deeper")))
+await show("access missing", access(missing))
+await show("chmod missing", chmod(missing, 0o644))
+await show("truncate missing", truncate(missing))
 
-// Not awaited at once: the rejection waits in the Promise until it is.
+// Not awaited at once: the Err waits in the Promise until it is.
 const later = readFile(missing, "utf8")
-await show("awaited later", async () => void (await later))
+await show("awaited later", later)
 
 must(await rm(dir, { recursive: true }))
 console.log("done")

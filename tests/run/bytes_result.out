@@ -1,6 +1,6 @@
 Ok { value: <Buffer ca fe> } Err { error: 'not hex: xyz' } at parseHex (bytes_result.tz:8)
 Ok { value: 6 }
-Ok { value: <Buffer 09 08 07> } Err { error: 'ENOENT' } at read (bytes_result.tz:22)
+Ok { value: <Buffer 09 08 07> } Err { error: 'ENOENT' } at read (bytes_result.tz:19)
 Ok { value: '090807' }
 negative
 none

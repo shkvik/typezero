@@ -66,8 +66,7 @@ enum { SHELL_NONE, SHELL_SYSTEM, SHELL_PATH };
 enum { STDIO_PIPE = 0, STDIO_IGNORE = 1, STDIO_INHERIT = 2 };
 
 typedef struct {
-  TzStr message, name;
-  void *error;
+  TzStr message;
   TzStr code, syscall, path;
   TzArray *spawnargs;
   TzStr signal;
@@ -412,8 +411,16 @@ static void buf_received(TzBuf *m, const TzBuf *value) {
   tz_buf_push(m, quote);
 }
 
-static void throw_null_bytes(const char *name, const TzBuf *key, const char *reason,
-                             const TzBuf *value) {
+static void fail_with(TzMaker make, const char *code, TzStr message) {
+  TzSpawnParts parts;
+  memset(&parts, 0, sizeof parts);
+  parts.message = message;
+  parts.code = ascii(code);
+  tz_failed = make(&parts);
+}
+
+static void fail_null_bytes(TzMaker make, const char *name, const TzBuf *key, const char *reason,
+                            const TzBuf *value) {
   TzBuf m;
   tz_buf_init(&m);
   tz_buf_ascii(&m, strchr(name, '.') ? "The property '" : "The argument '");
@@ -426,16 +433,21 @@ static void throw_null_bytes(const char *name, const TzBuf *key, const char *rea
   tz_buf_ascii(&m, "' ");
   tz_buf_ascii(&m, reason);
   buf_received(&m, value);
-  TzStr message = tz_buf_take(&m);
-  tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-  tz_str_release_value(message);
+  fail_with(make, "ERR_INVALID_ARG_VALUE", tz_buf_take(&m));
 }
 
-static void throw_out_of_range(const char *name, const char *must, double value) {
+static void fail_out_of_range(TzMaker make, const char *name, const char *must, double value) {
   char number[32];
   number[tz_format_f64(value, number)] = 0;
-  tz_throw(TZ_RANGE_ERROR, "The value of \"%s\" is out of range. It must be %s. Received %s", name,
-           must, number);
+  TzBuf m;
+  tz_buf_init(&m);
+  tz_buf_ascii(&m, "The value of \"");
+  tz_buf_ascii(&m, name);
+  tz_buf_ascii(&m, "\" is out of range. It must be ");
+  tz_buf_ascii(&m, must);
+  tz_buf_ascii(&m, ". Received ");
+  tz_buf_ascii(&m, number);
+  fail_with(make, "ERR_OUT_OF_RANGE", tz_buf_take(&m));
 }
 
 typedef struct {
@@ -518,6 +530,7 @@ typedef struct {
   int64_t timeout;
   double max_buffer;
   TzBytes *input;
+  TzMaker make_error;
 } Call;
 
 static void call_free(Call *c) {
@@ -586,7 +599,7 @@ static int collect_env(Call *c) {
       tz_buf_init(&value);
       tz_buf_str(&value, *(const TzStr *)(e + layout->value_offset));
       if (has_zero(name) || has_zero(&value)) {
-        throw_null_bytes("options.env", name, "must be a string without null bytes",
+        fail_null_bytes(c->make_error, "options.env", name, "must be a string without null bytes",
                          has_zero(name) ? name : &value);
         tz_buf_free(&value);
         list_free(&pairs);
@@ -679,15 +692,16 @@ static int collect_env(Call *c) {
   return 1;
 }
 
-static int prepare(Call *c, const TzSpawnRequest *req) {
+static int prepare(Call *c, const TzSpawnRequest *req, TzMaker make_error) {
   memset(c, 0, sizeof *c);
   c->req = req;
+  c->make_error = make_error;
   tz_buf_init(&c->file);
   tz_buf_init(&c->cwd);
   tz_buf_str(&c->file, req->file);
   int exec = req->mode == TZ_CHILD_EXEC;
   if (has_zero(&c->file)) {
-    throw_null_bytes(exec ? "command" : "file", NULL, "must be a string without null bytes",
+    fail_null_bytes(c->make_error, exec ? "command" : "file", NULL, "must be a string without null bytes",
                      &c->file);
     return 0;
   }
@@ -696,7 +710,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   if (req->has & HAS_ARGV0) {
     tz_buf_str(&argv0, req->argv0);
     if (has_zero(&argv0)) {
-      throw_null_bytes("options.argv0", NULL, "must be a string without null bytes", &argv0);
+      fail_null_bytes(c->make_error, "options.argv0", NULL, "must be a string without null bytes", &argv0);
       tz_buf_free(&argv0);
       return 0;
     }
@@ -706,9 +720,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     tz_buf_init(&m);
     tz_buf_ascii(&m, "The argument 'file' cannot be empty");
     buf_received(&m, &c->file);
-    TzStr message = tz_buf_take(&m);
-    tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-    tz_str_release_value(message);
+    fail_with(c->make_error, "ERR_INVALID_ARG_VALUE", tz_buf_take(&m));
     tz_buf_free(&argv0);
     return 0;
   }
@@ -720,7 +732,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     if (has_zero(arg)) {
       char name[32];
       snprintf(name, sizeof name, "args[%u]", i);
-      throw_null_bytes(name, NULL, "must be a string without null bytes", arg);
+      fail_null_bytes(c->make_error, name, NULL, "must be a string without null bytes", arg);
       list_free(&given);
       tz_buf_free(&argv0);
       return 0;
@@ -730,8 +742,8 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     c->has_cwd = 1;
     tz_buf_str(&c->cwd, req->cwd);
     if (has_zero(&c->cwd)) {
-      throw_null_bytes("options.cwd", NULL,
-                       "must be a string, Uint8Array, or URL without null bytes", &c->cwd);
+      fail_null_bytes(c->make_error, "options.cwd", NULL,
+                      "must be a string, Uint8Array, or URL without null bytes", &c->cwd);
       list_free(&given);
       tz_buf_free(&argv0);
       return 0;
@@ -749,7 +761,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   }
   if (shell != SHELL_NONE) {
     if (has_zero(&path)) {
-      throw_null_bytes("options.shell", NULL, "must be a string without null bytes", &path);
+      fail_null_bytes(c->make_error, "options.shell", NULL, "must be a string without null bytes", &path);
       tz_buf_free(&path);
       list_free(&given);
       tz_buf_free(&argv0);
@@ -809,7 +821,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   if (req->has & HAS_TIMEOUT) {
     double t = req->timeout;
     if (!(t >= 0 && isfinite(t) && t == floor(t))) {
-      throw_out_of_range("timeout", "an unsigned integer", t);
+      fail_out_of_range(c->make_error, "timeout", "an unsigned integer", t);
       return 0;
     }
     c->timeout = t > 1e15 ? (int64_t)1e15 : (int64_t)t;
@@ -817,7 +829,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
   c->max_buffer = 1024 * 1024;
   if (req->has & HAS_MAX_BUFFER) {
     if (!(req->max_buffer >= 0)) {
-      throw_out_of_range("options.maxBuffer", "a positive number", req->max_buffer);
+      fail_out_of_range(c->make_error, "options.maxBuffer", "a positive number", req->max_buffer);
       return 0;
     }
     c->max_buffer = req->max_buffer;
@@ -838,9 +850,7 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
       tz_buf_init(&m);
       tz_buf_ascii(&m, "Unknown signal: ");
       buf_take_units(&m, &name);
-      TzStr message = tz_buf_take(&m);
-      tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-      tz_str_release_value(message);
+      fail_with(c->make_error, "ERR_UNKNOWN_SIGNAL", tz_buf_take(&m));
       tz_buf_free(&name);
       return 0;
     }
@@ -848,7 +858,9 @@ static int prepare(Call *c, const TzSpawnRequest *req) {
     c->kill_signal = found;
   } else if (req->has & HAS_KILL_NUMBER) {
     if (!signal_name(req->kill_number)) {
-      tz_throw(TZ_TYPE_ERROR, "Unknown signal: %d", req->kill_number);
+      char text[48];
+      snprintf(text, sizeof text, "Unknown signal: %d", req->kill_number);
+      fail_with(c->make_error, "ERR_UNKNOWN_SIGNAL", ascii(text));
       return 0;
     }
     c->kill_signal = req->kill_number;
@@ -1934,20 +1946,6 @@ static TzStr errno_message(const Call *c, int error) {
   return tz_buf_take(&b);
 }
 
-static void *system_error(const Call *c, int error, TzMaker make) {
-  TzSystemErrorParts parts;
-  memset(&parts, 0, sizeof parts);
-  parts.message = errno_message(c, error);
-  parts.name = ascii("Error");
-  parts.errno_value = kErrors[error].number;
-  parts.code = ascii(kErrors[error].code);
-  parts.syscall = syscall_of(c);
-  parts.path.value = str_of_buf(&c->file);
-  parts.path.has = 1;
-
-  return make(&parts);
-}
-
 static void fill_output(const Call *c, const Outcome *o, TzSpawnParts *parts) {
   int32_t encoding = c->req->encoding;
   parts->text_mode = encoding > 0;
@@ -1977,8 +1975,7 @@ static void release_output(TzSpawnParts *parts, int from) {
   }
 }
 
-static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_error,
-                    TzMaker make) {
+static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make) {
   const TzSpawnRequest *req = c->req;
   int error = o->error != X_NONE ? o->error : o->pipe_error;
   TzSpawnParts parts;
@@ -1995,27 +1992,18 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
       parts.status = (int32_t)o->status;
     }
   }
-  if (req->mode == TZ_CHILD_SPAWN) {
-    if (error != X_NONE) {
-      parts.error = system_error(c, error, make_system_error);
-    }
+  if (req->mode == TZ_CHILD_SPAWN && error == X_NONE) {
     return make(&parts);
   }
 
-  if (!(req->has & HAS_STDIO) && o->started && parts.piped[2]) {
+  if (req->mode != TZ_CHILD_SPAWN && !(req->has & HAS_STDIO) && o->started && parts.piped[2]) {
     if (parts.text_mode) {
       tz_stderr_write(parts.text[2].obj, parts.text[2].meta);
     } else {
       tz_std_write_bytes(2, o->out[2].data, o->out[2].length);
     }
   }
-  if (error != X_NONE && !o->started) {
-    release_output(&parts, 0);
-    tz_str_release_value(parts.signal);
-    tz_thrown = system_error(c, error, make_system_error);
-    return NULL;
-  }
-  if (error == X_NONE && parts.has_status && parts.status == 0) {
+  if (req->mode != TZ_CHILD_SPAWN && error == X_NONE && parts.has_status && parts.status == 0) {
     out->text_mode = parts.text_mode;
     out->piped[1] = parts.piped[1];
     out->text[1] = parts.text[1];
@@ -2025,6 +2013,10 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
     parts.bytes[1] = NULL;
     release_output(&parts, 0);
     return NULL;
+  }
+  if (!o->started) {
+    release_output(&parts, 0);
+    parts.piped[1] = parts.piped[2] = 0;
   }
   TzBuf m;
   tz_buf_init(&m);
@@ -2043,6 +2035,7 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
       tz_arr_push_value(parts.spawnargs, &arg);
     }
   } else {
+    parts.code = ascii("exit");
     tz_buf_ascii(&m, "Command failed: ");
     if (req->mode == TZ_CHILD_EXEC) {
       tz_buf_str(&m, req->file);
@@ -2066,17 +2059,16 @@ static void *finish(Call *c, Outcome *o, TzSpawnParts *out, TzMaker make_system_
     }
   }
   parts.message = tz_buf_take(&m);
-  parts.name = ascii("Error");
-  tz_thrown = make(&parts);
+  tz_failed = c->make_error(&parts);
 
   return NULL;
 }
 
-void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_system_error,
+void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_error,
                    TzMaker make) {
   memset(out, 0, sizeof *out);
   Call c;
-  if (!prepare(&c, req)) {
+  if (!prepare(&c, req, make_error)) {
     call_free(&c);
     return NULL;
   }
@@ -2084,7 +2076,7 @@ void *tz_child_run(const TzSpawnRequest *req, TzSpawnParts *out, TzMaker make_sy
   memset(&o, 0, sizeof o);
   o.error = o.pipe_error = X_NONE;
   run(&c, &o);
-  void *result = finish(&c, &o, out, make_system_error, make);
+  void *result = finish(&c, &o, out, make);
   for (int i = 0; i < 3; ++i) {
     tz_free(o.out[i].data);
   }

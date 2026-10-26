@@ -26,6 +26,7 @@ void *tz_error_take(void);
 void tz_error_init(const TzErrorInfo *info);
 TZ_COLD void tz_throw(int32_t kind, const char *format, ...);
 TZ_COLD void tz_throw_str(int32_t kind, void *obj, uint64_t meta);
+TZ_COLD void tz_set_failed(void *error);
 void tz_buf_error_text(TzBuf *out, const void *error);
 int tz_buf_error_stack(TzBuf *out, const void *error);
 const void *tz_error_cause(const void *error);

@@ -17,8 +17,8 @@ console.log(createHash("sha3-384").update(text).digest("hex"))
 console.log(createHash("sha3-512").update(text).digest("hex"))
 console.log(createHash("shake128").update(text).digest("hex"))
 console.log(createHash("shake256").update(text).digest("hex"))
-console.log(createHash("shake128", { outputLength: 100 }).update(text).digest("hex"))
-console.log(createHash("shake256", { outputLength: 3 }).update(text).digest("hex"))
+console.log(must(createHash("shake128", { outputLength: 100 })).update(text).digest("hex"))
+console.log(must(createHash("shake256", { outputLength: 3 })).update(text).digest("hex"))
 console.log(createHash("ripemd160").update(text).digest("hex"))
 console.log(createHash("sm3").update(text).digest("hex"))
 console.log(createHash("md5-sha1").update(text).digest("hex"))
@@ -51,29 +51,30 @@ console.log(createHmac("sha3-256", "key").update(text).digest("hex"))
 console.log(createHmac("blake2b512", "key").update(text).digest("hex"))
 const mac = createHmac("sha1", "key")
 mac.update(text)
-console.log(mac.digest("hex"), JSON.stringify(mac.digest("hex")))
+console.log(mac.digest("hex"))
 
 // crypto.hash
 console.log(hash("sha1", text))
 console.log(hash("md5", text, "base64"))
 console.log(hash("sha256", Buffer.from(text), "buffer").length)
 
-// Errors as node throws them.
-try {
-  h.update("x")
-} catch (e) {
-  console.log(e.message)
-}
-try {
-  h.digest()
-} catch (e) {
-  console.log(e.message)
-}
-try {
-  createHash("sha256", { outputLength: 5 })
-} catch (e) {
-  console.log(e.message)
-}
+// digest() leaves the hash open, as in Python and Go: more can be added and
+// digested again (in node the second digest throws).
+const again = createHash("sha256").update("ab")
+console.log(again.digest("hex") == again.digest("hex"),
+            again.update("c").digest("hex") == createHash("sha256").update("abc").digest("hex"))
+console.log(h.update("x").digest("hex").length)
+const short = createHash("sha256", { outputLength: 5 })
+if (short.isErr())
+  console.log(short.error.code, "|", short.error.message)
 const names = getHashes()
 console.log(names.length, names.includes("sha256"), names.includes("md4"))
 console.log(names.join(","))
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

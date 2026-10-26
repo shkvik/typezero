@@ -104,9 +104,9 @@ void tz_fs_fsp_reject_thrown(FsRequest *r) {
   fsp_free(r);
 }
 
-int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta) {
+int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta, const char *syscall) {
   Path *p = r->paths == 0 ? &r->path : &r->dest;
-  if (!tz_fs_path_init(p, obj, meta)) {
+  if (!tz_fs_path_init(p, obj, meta, r->make, syscall)) {
     tz_fs_fsp_reject_thrown(r);
     return 0;
   }
@@ -334,7 +334,7 @@ void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *fl
     tz_fs_fsp_reject_thrown(r);
     return;
   }
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, "open")) {
     return;
   }
   tz_fs_fsp_queue(r, read_file_work, read_file_done);
@@ -370,7 +370,7 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
     tz_fs_fsp_reject_thrown(r);
     return NULL;
   }
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, "open")) {
     return NULL;
   }
   r->mode = mode;
@@ -437,7 +437,7 @@ static void access_work(TzWork *w) {
 
 void tz_fsp_access(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, "access")) {
     return;
   }
   r->mode = mode;
@@ -466,7 +466,7 @@ static void chmod_work(TzWork *w) {
 
 void tz_fsp_chmod(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, "chmod")) {
     return;
   }
   r->mode = mode;
@@ -500,7 +500,7 @@ static void truncate_work(TzWork *w) {
 void tz_fsp_truncate(TzPromise *p, void *path_obj, uint64_t path_meta, int64_t length,
                      TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, "open")) {
     return;
   }
   r->length = length;
@@ -532,7 +532,7 @@ static void stat_done(TzWork *w) {
 void tz_fsp_stat(TzPromise *p, void *path_obj, uint64_t path_meta, int32_t follow,
                  TzMaker make_stats, TzMaker make) {
   FsRequest *r = tz_fs_fsp_new(p, make);
-  if (!tz_fs_fsp_path(r, path_obj, path_meta)) {
+  if (!tz_fs_fsp_path(r, path_obj, path_meta, follow ? "stat" : "lstat")) {
     return;
   }
   r->follow = follow;

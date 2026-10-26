@@ -20,12 +20,9 @@ const bytes = must(await readFile(file))
 console.log(bytes, bytes.length, must(await readFile(file, "latin1")), must(await readFile(file, { encoding: "hex" })))
 must(await writeFile(file, "café", "latin1"))
 console.log(must(await readFile(file)), must(await readFile(file, "base64")))
-try {
-  must(await readFile(join(dir, "missing.txt")))
-} catch (e: unknown) {
-  if (e instanceof SystemError)
-    console.log("missing:", e.code, e.syscall)
-}
+const missing = await readFile(join(dir, "missing.txt"))
+if (missing.isErr())
+  console.log("missing:", missing.error.code, missing.error.syscall)
 const controller = new AbortController()
 controller.abort()
 try {

@@ -160,15 +160,13 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     return expr;
   }
   if (checker_.fsDeclarer().isRuntimeClass(cls)) {
-    std::string hint = cls == checker_.systemErrorClass_ || cls == checker_.execSyncErrorClass_
+    std::string hint = cls == checker_.systemErrorClass_
                            ? "; throw an Error, or an object of a class of your own that extends "
                              "Error"
                            : "";
-    checker_.diags_.error(
-        expr->loc(),
-        "'new " + cls->name + "' is not possible: only the functions of " +
-            std::string(cls == checker_.execSyncErrorClass_ ? "node:child_process" : "node:fs") +
-            " make " + cls->name + hint);
+    checker_.diags_.error(expr->loc(), "'new " + cls->name +
+                                           "' is not possible: only the functions of node:fs make " +
+                                           cls->name + hint);
     for (Expr *&arg : expr->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }

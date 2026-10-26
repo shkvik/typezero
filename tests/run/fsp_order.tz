@@ -42,8 +42,8 @@ await new Promise<void>((resolve) => setTimeout(resolve, 20))
 
 // Several at once: which the pool gives back first depends on the system,
 // and Promise.all keeps their order.
-const texts = await Promise.all([readFile(file, "utf8"), readFile(file, "utf8"), stat(dir)])
-log(`${texts[0]} ${texts[1]} ${texts[2].isDirectory()}`)
+const [first, second, info] = await Promise.all([readFile(file, "utf8"), readFile(file, "utf8"), stat(dir)])
+log(`${must(first)} ${must(second)} ${must(info).isDirectory()}`)
 
 must(await rm(dir, { recursive: true }))
 log("end")

@@ -50,12 +50,9 @@ const byMixed = new Map<Dir | number, string>([["up", "u"], [1, "one"]])
 console.log(byMixed, byMixed.get("up"), byMixed.get(1), mixed.includes("down"))
 
 function contents(path: string): string {
-  try {
-    return must(readFileSync(path, "utf8"))
-  } catch (e) {
-    if (e instanceof SystemError && e.code == "ENOENT") return `no file (${e.syscall})`
-    throw e
-  }
+  const text = readFileSync(path, "utf8")
+  if (text.isOk()) return text.value
+  return text.error.code == "ENOENT" ? `no file (${text.error.syscall})` : text.error.message
 }
 console.log(contents("./no/such/file.txt"))
 const st = must(statSync("./no/such/dir", { throwIfNoEntry: false }))

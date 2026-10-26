@@ -17,15 +17,14 @@ console.log(key.length, key.toString("hex").slice(0, 16))
 // 1. A sealed box of values of several types, opened again.
 type Point = { x: int; y: int }
 const point: Point = { x: 3, y: -4 }
-const back = open(key, seal(key, point))
-console.log(must(fromJson<Point>(back)), open(key, seal(key, ["a", "b"])), open(key, seal(key, 42.5)))
-const tampered = seal(key, "secret")
+const back = must(open(key, must(seal(key, point))))
+console.log(must(fromJson<Point>(back)), must(open(key, must(seal(key, ["a", "b"])))),
+            must(open(key, must(seal(key, 42.5)))))
+const tampered = must(seal(key, "secret"))
 if (tampered.length > 30) tampered[30] ^= 1
-try {
-  open(key, tampered)
-} catch (e) {
-  console.log("tampered:", e instanceof Error ? e.message : "?")
-}
+const opened = open(key, tampered)
+if (opened.isErr())
+  console.log("tampered:", opened.error.message)
 
 // 2. A vault in a directory, written and read in parallel.
 const dir = must(await mkdtemp(join(tmpdir(), "tz-crypto-mix-")))
@@ -34,7 +33,7 @@ const stored: string[] = []
 vault.on("stored", (name, hexLength) => stored.push(`${name}:${hexLength}`))
 await Promise.all([vault.put("a", { n: 1 }), vault.put("b", "two"), vault.put("c", [3, 3, 3])])
 console.log(stored.sort())
-const [a, b, c] = await Promise.all([vault.get("a"), vault.get("b"), vault.get("c")])
+const [a, b, c] = (await Promise.all([vault.get("a"), vault.get("b"), vault.get("c")])).map(r => must(r))
 console.log(a, b, c)
 
 // 3. Hashes of bytes in a DataView's buffer, through several views.

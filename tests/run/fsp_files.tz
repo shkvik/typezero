@@ -20,7 +20,7 @@ console.log(JSON.stringify(must(await readFile(notes, "utf8"))), (must(await rea
 must(await writeFile(notes, "заменён", "utf8"))
 console.log(must(await readFile(notes, { encoding: "utf8", flag: "r" })))
 must(await truncate(notes, 4))
-console.log(JSON.stringify(await promises.readFile(notes, "utf8")))
+console.log(JSON.stringify(must(await promises.readFile(notes, "utf8"))))
 
 // Directories, and what is in them: recursive readdir goes as Node's async
 // one does, deeper directories after the entries of their parent.

@@ -7,10 +7,6 @@
 
 namespace tz {
 
-void ChildProcessFeature::declare(Checker &checker) const {
-  checker.childChecker().declareExecSyncError();
-}
-
 std::optional<std::string> ChildProcessFeature::exportProblem(NodeModule module,
                                                               llvm::StringRef exportName,
                                                               llvm::StringRef path) const {

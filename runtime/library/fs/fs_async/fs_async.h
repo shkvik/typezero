@@ -62,7 +62,7 @@ FsRequest *tz_fs_fsp_new(TzPromise *p, TzMaker make);
 
 void tz_fs_fsp_reject_thrown(FsRequest *r);
 
-int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta);
+int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta, const char *syscall);
 
 void tz_fs_fsp_queue(FsRequest *r, void (*work)(TzWork *), void (*done)(TzWork *));
 

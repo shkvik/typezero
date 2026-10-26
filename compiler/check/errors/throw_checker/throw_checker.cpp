@@ -128,9 +128,6 @@ ClassDecl *ThrowChecker::errorKindClass(llvm::StringRef name) const {
   if (name == "SystemError") {
     return checker_.systemErrorClass_;
   }
-  if (name == "ExecSyncError") {
-    return checker_.execSyncErrorClass_;
-  }
   int kind = errorKindIndex(name);
 
   return kind >= 0 && size_t(kind) < checker_.errorKinds_.size()

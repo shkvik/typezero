@@ -201,7 +201,7 @@ static int is_directory(const Path *p) {
 TzArray *tz_fs_readdir(void *path_obj, uint64_t path_meta, int32_t recursive, const TzType *element,
                        TzMaker make_dirent, TzMaker make) {
   Path base;
-  if (!tz_fs_path_init(&base, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&base, path_obj, path_meta, make, "scandir")) {
     return NULL;
   }
   TzArray *result = tz_arr_new(element, 0, 16);
@@ -497,7 +497,7 @@ int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recu
   out->obj = NULL;
   out->meta = 0;
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "mkdir")) {
     return 0;
   }
   Raw first = {NULL, 0, 0};
@@ -526,7 +526,7 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
   out->obj = NULL;
   out->meta = 0;
   Path prefix;
-  if (!tz_fs_path_init(&prefix, prefix_obj, prefix_meta)) {
+  if (!tz_fs_path_init(&prefix, prefix_obj, prefix_meta, make, "mkdtemp")) {
     return;
   }
   for (int attempt = 0;; ++attempt) {
@@ -577,7 +577,7 @@ void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker m
 
 void tz_fs_rmdir(void *path_obj, uint64_t path_meta, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "rmdir")) {
     return;
   }
 #ifdef _WIN32
@@ -716,7 +716,7 @@ static int remove_tree(Raw *path, int *depth) {
 
 void tz_fs_unlink(void *path_obj, uint64_t path_meta, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "unlink")) {
     return;
   }
 #ifdef _WIN32
@@ -796,7 +796,7 @@ void tz_fs_throw_rm_directory(const Path *p, TzMaker make) {
 
 void tz_fs_rm(void *path_obj, uint64_t path_meta, int32_t recursive, int32_t force, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "rm")) {
     return;
   }
   Failure failure;

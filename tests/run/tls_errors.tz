@@ -14,15 +14,9 @@ const key = must(readFileSync(join(dir, "key.pem"), "utf8"))
 for (const name of ["expired", "future", "wrongname", "self", "other", "chain", "rooted", "localhost"]) {
   const cert = must(readFileSync(join(dir, `${name}.pem`), "utf8"))
   const server = serve({ port: 0, hostname: "127.0.0.1", tls: { cert, key } }, () => new Response("ok"))
-  try {
-    const res = await fetch(`https://localhost:${server.url.port}/`)
-    console.log(name, res.status, await res.text())
-  } catch (e) {
-    if (e instanceof TypeError) {
-      const cause = e.cause
-      console.log(name, e.message, cause instanceof SystemError ? cause.code : "?")
-    }
-  }
+  const res = await fetch(`https://localhost:${server.url.port}/`)
+  if (res.isOk()) console.log(name, res.value.status, must(await res.value.text()))
+  else console.log(name, res.error.message, res.error.code)
   await server.stop()
 }
 

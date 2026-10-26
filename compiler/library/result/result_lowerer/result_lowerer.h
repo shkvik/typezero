@@ -20,6 +20,8 @@ public:
   llvm::Value *callWithHalf(llvm::Value *fn, const Type *fnType, llvm::Value *half,
                             const Type *halfType);
   llvm::Value *catchFailure(llvm::Value *value, const Type *type, llvm::SMLoc loc);
+  llvm::Value *catchFailure(const Type *type, llvm::SMLoc loc,
+                            llvm::function_ref<llvm::Value *()> okValue);
   llvm::Function *failureMaker(const Type *errorType);
   llvm::Value *emitResultCall(CallExpr *call);
   llvm::Value *emitResultMethod(CallExpr *call);

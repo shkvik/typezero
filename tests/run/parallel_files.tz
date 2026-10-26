@@ -32,7 +32,7 @@ async function convert(name: string, i: int) {
 const all = await Promise.all(names.map((n, i) => convert(n, i)))
 console.log(all.join(" "))
 const back = await Promise.all(names.map((n) => readFile(n + ".out", "utf8")))
-console.log(back.join(" | "))
+console.log(back.map((r) => must(r)).join(" | "))
 must(await rm(dir, { recursive: true }))
 
 function must<T, E>(r: Result<T, E>): T {

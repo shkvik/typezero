@@ -14,7 +14,8 @@ type EventName = keyof Events
 type HandlerName = `on${Capitalize<EventName>}`
 type ArgsOf<K extends EventName> = Events[K]
 type First<T> = T extends [infer A, ...infer _Rest] ? A : never
-type Fetched = Awaited<ReturnType<typeof fetch>>
+type OkOf<R> = R extends Result<infer T, infer E> ? T : never
+type Fetched = OkOf<Awaited<ReturnType<typeof fetch>>>
 type StatusOf<T> = T extends { status: infer S } ? S : never
 type Handlers = { [K in EventName as `on${Capitalize<K>}`]: (id: First<ArgsOf<K>>) => void }
 

@@ -33,7 +33,7 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
       return new Response(`${total} bytes`)
     }
     case "/echo":
-      return new Response(await req.bytes(), {
+      return new Response(must(await req.bytes()), {
         headers: { "x-got": req.headers.get("x-sent") ?? "-", "content-type": "application/octet-stream" },
       })
     case "/cookies":
@@ -55,23 +55,23 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
 const base = `http://127.0.0.1:${server.port}`
 const port = (s: string) => s.replaceAll(String(server.port), "PORT")
 
-let r = await fetch(`${base}/hello?name=tz`)
-console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), await r.text())
-r = await fetch(`${base}/users`, {
+let r = must(await fetch(`${base}/hello?name=tz`))
+console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), must(await r.text()))
+r = must(await fetch(`${base}/users`, {
   method: "POST",
   body: JSON.stringify({ name: "Ann" }),
   headers: { "content-type": "application/json" },
-})
+}))
 console.log(r.status, await r.json())
-r = await fetch(`${base}/boom`)
-console.log(r.status, await r.text())
-r = await fetch(`${base}/missing`)
-console.log(r.status, r.statusText, r.ok, await r.text())
-r = await fetch(`${base}/stream`)
-console.log(r.status, await r.text())
-r = await fetch(`${base}/count`, { method: "POST", body: "hello world" })
-console.log(await r.text())
-r = await fetch(`${base}/count`, {
+r = must(await fetch(`${base}/boom`))
+console.log(r.status, must(await r.text()))
+r = must(await fetch(`${base}/missing`))
+console.log(r.status, r.statusText, r.ok, must(await r.text()))
+r = must(await fetch(`${base}/stream`))
+console.log(r.status, must(await r.text()))
+r = must(await fetch(`${base}/count`, { method: "POST", body: "hello world" }))
+console.log(must(await r.text()))
+r = must(await fetch(`${base}/count`, {
   method: "PUT",
   body: new ReadableStream({
     start: c => {
@@ -81,51 +81,46 @@ r = await fetch(`${base}/count`, {
     },
   }),
   duplex: "half",
-})
-console.log(await r.text())
-r = await fetch(`${base}/echo`, { method: "POST", body: new Uint8Array([1, 2, 255]), headers: { "x-sent": "yes" } })
-console.log(r.headers.get("x-got"), await r.bytes())
-r = await fetch(`${base}/cookies`)
-console.log(r.headers.getSetCookie(), await r.text())
+}))
+console.log(must(await r.text()))
+r = must(await fetch(`${base}/echo`, { method: "POST", body: new Uint8Array([1, 2, 255]), headers: { "x-sent": "yes" } }))
+console.log(r.headers.get("x-got"), must(await r.bytes()))
+r = must(await fetch(`${base}/cookies`))
+console.log(r.headers.getSetCookie(), must(await r.text()))
 
-r = await fetch(`${base}/redirect`, { method: "POST", body: "x" })
-console.log(r.status, r.redirected, port(r.url), await r.text())
-r = await fetch(`${base}/redirect`, { redirect: "manual" })
+r = must(await fetch(`${base}/redirect`, { method: "POST", body: "x" }))
+console.log(r.status, r.redirected, port(r.url), must(await r.text()))
+r = must(await fetch(`${base}/redirect`, { redirect: "manual" }))
 console.log(r.status, port(r.headers.get("location") ?? ""), r.redirected)
-await r.arrayBuffer()
+must(await r.arrayBuffer())
 for (const path of ["/redirect", "/loop"]) {
-  try {
-    await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
-  } catch (e) {
-    console.log(e.name, e.message, e.cause?.message)
-  }
+  const failed = await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
+  if (failed.isErr()) console.log(failed.error.code, failed.error.message, failed.error.cause)
 }
-r = await fetch(`${base}/empty`)
-console.log(r.status, r.body == undefined, JSON.stringify(await r.text()))
-r = await fetch(`${base}/hello`, { method: "HEAD" })
-console.log(r.status, JSON.stringify(await r.text()))
+r = must(await fetch(`${base}/empty`))
+console.log(r.status, r.body == undefined, JSON.stringify(must(await r.text())))
+r = must(await fetch(`${base}/hello`, { method: "HEAD" }))
+console.log(r.status, JSON.stringify(must(await r.text())))
 
 const names = ["a", "b", "c", "d", "e", "f"]
-console.log(await Promise.all(names.map(async n => (await fetch(`${base}/hello?name=${n}`)).text())))
+console.log(await Promise.all(names.map(async n => must(await must(await fetch(`${base}/hello?name=${n}`)).text()))))
 
 const controller = new AbortController()
 setTimeout(() => controller.abort(), 50)
-try {
-  await fetch(`${base}/slow`, { signal: controller.signal })
-} catch (e) {
-  console.log(e.name, e.message)
-}
-try {
-  await fetch(`${base}/slow`, { signal: AbortSignal.timeout(50) })
-} catch (e) {
-  console.log(e.name, e.message)
-}
+const aborted = await fetch(`${base}/slow`, { signal: controller.signal })
+if (aborted.isErr()) console.log(aborted.error.code, aborted.error.message)
+const late = await fetch(`${base}/slow`, { signal: AbortSignal.timeout(50) })
+if (late.isErr()) console.log(late.error.code, late.error.message)
 
 await server.stop()
 await server.finished
-try {
-  await fetch(`http://127.0.0.1:${server.port}/hello`)
-} catch (e) {
-  const cause = e.cause
-  console.log(e.name, e.message, cause instanceof SystemError ? cause.code : "?")
+const refused = await fetch(`http://127.0.0.1:${server.port}/hello`)
+if (refused.isErr()) console.log(refused.error.code, refused.error.message)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

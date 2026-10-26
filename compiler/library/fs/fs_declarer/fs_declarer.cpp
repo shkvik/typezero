@@ -101,7 +101,7 @@ Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {
 
 bool FsDeclarer::isRuntimeClass(const ClassDecl *cls) const {
   return cls && (cls == checker_.systemErrorClass_ || cls == checker_.statsClass_ ||
-                 cls == checker_.direntClass_ || cls == checker_.execSyncErrorClass_);
+                 cls == checker_.direntClass_);
 }
 
 Expr *FsDeclarer::checkFsClassMethod(CallExpr *call, MemberExpr *member, ClassDecl *cls) {

@@ -95,6 +95,9 @@ struct TzCipher {
   int32_t has_last;
   int32_t aad_set;
   int32_t quiet;
+  int32_t has_problem;
+  char problem_code[48];
+  char problem[208];
   _Alignas(16) uint8_t ctx[];
 };
 
@@ -136,6 +139,10 @@ typedef struct TzCryptoData {
 int tz_crypto_data(TzCryptoData *out, const TzType *type, const void *value, int32_t encoding,
                    const char *what);
 void tz_crypto_data_done(TzCryptoData *d);
+
+void tz_crypto_errors(TzMaker make);
+void tz_crypto_fail(int32_t kind, const char *code, const char *format, ...);
+void tz_openssl_throw(int32_t kind, const char *code, const char *otherwise);
 
 TzBytes *tz_crypto_buffer(const uint8_t *data, size_t length);
 void tz_crypto_text(TzStr *out, const uint8_t *data, size_t length, int32_t encoding);

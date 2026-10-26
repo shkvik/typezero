@@ -161,6 +161,11 @@ llvm::Value *ResultLowerer::callWithHalf(llvm::Value *fn, const Type *fnType, ll
 }
 
 llvm::Value *ResultLowerer::catchFailure(llvm::Value *value, const Type *type, llvm::SMLoc loc) {
+  return catchFailure(type, loc, [&] { return value; });
+}
+
+llvm::Value *ResultLowerer::catchFailure(const Type *type, llvm::SMLoc loc,
+                                         llvm::function_ref<llvm::Value *()> okValue) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   llvm::Value *slot = lowering_.throwLowerer().failedSlot();
   llvm::Value *failure = lowering_.builder_.CreateLoad(ptr, slot, "failure");
@@ -176,6 +181,7 @@ llvm::Value *ResultLowerer::catchFailure(llvm::Value *value, const Type *type, l
   BasicBlock *failEnd = lowering_.builder_.GetInsertBlock();
   lowering_.builder_.CreateBr(endBlock);
   lowering_.functionFrame().switchTo(okBlock);
+  llvm::Value *value = okValue();
   llvm::Value *done = makeResult(type, lowering_.builder_.getTrue(),
                                  type->okType()->isVoid() ? nullptr : value, nullptr);
   BasicBlock *okEnd = lowering_.builder_.GetInsertBlock();

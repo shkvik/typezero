@@ -12,103 +12,88 @@ const edPem = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIK5iQ7aYXCPh1AxM
 const xPem = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VuBCIEIIgYOiTyhiTTK0Ev2g3Pn360BhbIyWTj5S2iJjUP+Q9a\n-----END PRIVATE KEY-----\n"
 const x2Pem = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VuBCIEIAD8IftKz5rFI+J5KcYZ4IwQvEt/gwPl3bcDMIWQWCJ/\n-----END PRIVATE KEY-----\n"
 // Keys from PEM, and what they are.
-const rsa = createPrivateKey(rsaPem)
-const ec = createPrivateKey({ key: ecPem, format: "pem" })
-const ed = createPrivateKey(edPem)
-const x = createPrivateKey(xPem)
+const rsa = must(createPrivateKey(rsaPem))
+const ec = must(createPrivateKey({ key: ecPem, format: "pem" }))
+const ed = must(createPrivateKey(edPem))
+const x = must(createPrivateKey(xPem))
 for (const k of [rsa, ec, ed, x])
   console.log(k.type, k.asymmetricKeyType, k.symmetricKeySize)
-const rsaPub = createPublicKey(rsa)
-const edPub = createPublicKey(edPem)
-console.log(rsaPub.type, edPub.asymmetricKeyType, edPub.equals(createPublicKey(ed)), edPub.equals(rsa))
+const rsaPub = must(createPublicKey(rsa))
+const edPub = must(createPublicKey(edPem))
+console.log(rsaPub.type, edPub.asymmetricKeyType, edPub.equals(must(createPublicKey(ed))), edPub.equals(rsa))
 
 // Back to PEM, DER and JWK, and in again.
-console.log(rsa.export({ format: "pem", type: "pkcs8" }) == rsaPem)
-console.log(rsa.export({ format: "pem", type: "pkcs1" }))
-console.log(rsaPub.export({ format: "pem", type: "spki" }))
-console.log(rsaPub.export({ format: "pem", type: "pkcs1" }))
-console.log(ec.export({ format: "pem", type: "sec1" }))
-console.log(edPub.export({ format: "der", type: "spki" }).toString("hex"))
-console.log(JSON.stringify(rsa.export({ format: "jwk" })))
-console.log(JSON.stringify(ec.export({ format: "jwk" })))
-console.log(JSON.stringify(createPublicKey(ec).export({ format: "jwk" })))
-console.log(JSON.stringify(ed.export({ format: "jwk" })))
-console.log(JSON.stringify(x.export({ format: "jwk" })))
-const fromJwk = createPrivateKey({ key: ec.export({ format: "jwk" }), format: "jwk" })
-console.log(fromJwk.equals(ec), createPublicKey({ key: edPub.export({ format: "jwk" }), format: "jwk" }).equals(edPub))
-const der = rsa.export({ format: "der", type: "pkcs8" })
-console.log(createPrivateKey({ key: der, format: "der", type: "pkcs8" }).equals(rsa))
-const locked = rsa.export({ format: "pem", type: "pkcs8", cipher: "aes-256-cbc", passphrase: "secret" })
-console.log(locked.split("\n")[0], createPrivateKey({ key: locked, passphrase: "secret" }).equals(rsa))
-try {
-  createPrivateKey({ key: locked, passphrase: "wrong" })
-} catch (e) {
-  console.log(e.message)
-}
+console.log(must(rsa.export({ format: "pem", type: "pkcs8" })) == rsaPem)
+console.log(must(rsa.export({ format: "pem", type: "pkcs1" })))
+console.log(must(rsaPub.export({ format: "pem", type: "spki" })))
+console.log(must(rsaPub.export({ format: "pem", type: "pkcs1" })))
+console.log(must(ec.export({ format: "pem", type: "sec1" })))
+console.log(must(edPub.export({ format: "der", type: "spki" })).toString("hex"))
+console.log(JSON.stringify(must(rsa.export({ format: "jwk" }))))
+console.log(JSON.stringify(must(ec.export({ format: "jwk" }))))
+console.log(JSON.stringify(must(must(createPublicKey(ec)).export({ format: "jwk" }))))
+console.log(JSON.stringify(must(ed.export({ format: "jwk" }))))
+console.log(JSON.stringify(must(x.export({ format: "jwk" }))))
+const fromJwk = must(createPrivateKey({ key: must(ec.export({ format: "jwk" })), format: "jwk" }))
+console.log(fromJwk.equals(ec), must(createPublicKey({ key: must(edPub.export({ format: "jwk" })), format: "jwk" })).equals(edPub))
+const der = must(rsa.export({ format: "der", type: "pkcs8" }))
+console.log(must(createPrivateKey({ key: der, format: "der", type: "pkcs8" })).equals(rsa))
+const locked = must(rsa.export({ format: "pem", type: "pkcs8", cipher: "aes-256-cbc", passphrase: "secret" }))
+console.log(locked.split("\n")[0], must(createPrivateKey({ key: locked, passphrase: "secret" })).equals(rsa))
+show(createPrivateKey({ key: locked, passphrase: "wrong" }))
 
 // Signatures: Ed25519 and RSA with PKCS#1 v1.5 give the same bytes each time.
 const data = Buffer.from("message to sign")
-console.log(sign(undefined, data, ed).toString("hex"))
-console.log(sign("sha256", data, rsa).toString("base64"))
-console.log(sign("sha256", "message to sign", rsaPem).toString("base64"))
-console.log(verify(undefined, data, edPub, sign(undefined, data, ed)))
-console.log(verify("sha256", data, rsaPub, sign("sha256", data, rsa)), verify("sha256", data, rsaPub, Buffer.alloc(128)))
-const ecSig = sign("sha384", data, ec)
-console.log(verify("sha384", data, createPublicKey(ec), ecSig), verify("sha256", data, createPublicKey(ec), ecSig))
-const p1363 = sign("sha256", data, { key: ec, dsaEncoding: "ieee-p1363" })
-console.log(p1363.length, verify("sha256", data, { key: createPublicKey(ec), dsaEncoding: "ieee-p1363" }, p1363))
-const pss = sign("sha256", data, { key: rsa, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 })
-console.log(pss.length, verify("sha256", data, { key: rsaPub, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, pss))
+console.log(must(sign(undefined, data, ed)).toString("hex"))
+console.log(must(sign("sha256", data, rsa)).toString("base64"))
+console.log(must(sign("sha256", "message to sign", rsaPem)).toString("base64"))
+console.log(must(verify(undefined, data, edPub, must(sign(undefined, data, ed)))))
+console.log(must(verify("sha256", data, rsaPub, must(sign("sha256", data, rsa)))), must(verify("sha256", data, rsaPub, Buffer.alloc(128))))
+const ecSig = must(sign("sha384", data, ec))
+console.log(must(verify("sha384", data, must(createPublicKey(ec)), ecSig)), must(verify("sha256", data, must(createPublicKey(ec)), ecSig)))
+const p1363 = must(sign("sha256", data, { key: ec, dsaEncoding: "ieee-p1363" }))
+console.log(p1363.length, must(verify("sha256", data, { key: must(createPublicKey(ec)), dsaEncoding: "ieee-p1363" }, p1363)))
+const pss = must(sign("sha256", data, { key: rsa, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }))
+console.log(pss.length, must(verify("sha256", data, { key: rsaPub, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, pss)))
 const signer = createSign("SHA256")
 signer.update("message ").update("to sign")
-const signature = signer.sign(rsa, "hex")
-console.log(signature == sign("sha256", data, rsa).toString("hex"))
+const signature = must(signer.sign(rsa, "hex"))
+console.log(signature == must(sign("sha256", data, rsa)).toString("hex"))
 const verifier = createVerify("SHA256")
 verifier.update(data)
-console.log(verifier.verify(rsaPub, signature, "hex"))
-try {
-  sign("sha256", data, rsaPub)
-} catch (e) {
-  console.log(e.message)
-}
+console.log(must(verifier.verify(rsaPub, signature, "hex")))
+show(sign("sha256", data, rsaPub))
 
 // Generated keys: their kinds and encodings.
-const pair = generateKeyPairSync("ed25519")
+const pair = must(generateKeyPairSync("ed25519"))
 console.log(pair.publicKey.type, pair.privateKey.asymmetricKeyType)
-console.log(verify(undefined, data, pair.publicKey, sign(undefined, data, pair.privateKey)))
-const encoded = generateKeyPairSync("ec", {
+console.log(must(verify(undefined, data, pair.publicKey, must(sign(undefined, data, pair.privateKey)))))
+const encoded = must(generateKeyPairSync("ec", {
   namedCurve: "P-384",
   publicKeyEncoding: { type: "spki", format: "pem" },
   privateKeyEncoding: { type: "pkcs8", format: "der" },
-})
+}))
 console.log(encoded.publicKey.split("\n")[0], encoded.privateKey.length > 100)
-const rsaPair = generateKeyPairSync("rsa", { modulusLength: 1024, publicKeyEncoding: { type: "pkcs1", format: "pem" } })
+const rsaPair = must(generateKeyPairSync("rsa", { modulusLength: 1024, publicKeyEncoding: { type: "pkcs1", format: "pem" } }))
 console.log(rsaPair.publicKey.split("\n")[0], rsaPair.privateKey.type)
-const jwkPair = generateKeyPairSync("x25519", { publicKeyEncoding: { format: "jwk" }, privateKeyEncoding: { format: "jwk" } })
+const jwkPair = must(generateKeyPairSync("x25519", { publicKeyEncoding: { format: "jwk" }, privateKeyEncoding: { format: "jwk" } }))
 console.log(jwkPair.publicKey.kty, jwkPair.privateKey.crv)
 
 // Key exchange: X25519 and ECDH with keys fixed.
-const other = createPrivateKey(x2Pem)
-console.log(diffieHellman({ privateKey: x, publicKey: createPublicKey(other) }).toString("hex"))
+const other = must(createPrivateKey(x2Pem))
+console.log(must(diffieHellman({ privateKey: x, publicKey: must(createPublicKey(other)) })).toString("hex"))
 const alice = createECDH("prime256v1"), bob = createECDH("prime256v1")
-alice.setPrivateKey(Buffer.alloc(32, 1))
-bob.setPrivateKey(Buffer.alloc(32, 2))
-console.log(alice.getPublicKey("hex"))
-console.log(alice.getPublicKey("base64", "compressed"), alice.getPrivateKey("hex"))
-console.log(alice.computeSecret(bob.getPublicKey()).toString("hex"))
-console.log(bob.computeSecret(alice.getPublicKey("hex"), "hex", "hex"))
+must(alice.setPrivateKey(Buffer.alloc(32, 1)))
+must(bob.setPrivateKey(Buffer.alloc(32, 2)))
+console.log(must(alice.getPublicKey("hex")))
+console.log(must(alice.getPublicKey("base64", "compressed")), must(alice.getPrivateKey("hex")))
+console.log(must(alice.computeSecret(must(bob.getPublicKey()))).toString("hex"))
+console.log(must(bob.computeSecret(must(alice.getPublicKey("hex")), "hex", "hex")))
 const fresh = createECDH("secp256k1")
-console.log(fresh.generateKeys().length, fresh.getPublicKey(undefined, "compressed").length)
-try {
-  alice.computeSecret(Buffer.from("0400", "hex"))
-} catch (e) {
-  console.log(e.message)
-}
-try {
-  createECDH("nonsense")
-} catch (e) {
-  console.log(e.message)
-}
+console.log(fresh.generateKeys().length, must(fresh.getPublicKey(undefined, "compressed")).length)
+show(alice.computeSecret(Buffer.from("0400", "hex")))
+const curve: string = "nonsense"
+show(createECDH(curve))
 
 // KeyObject as a type.
 const k: KeyObject = rsaPub
@@ -116,3 +101,15 @@ console.log(k.type)
 
 // Last: node leaves an error of OpenSSL behind here for the next call to find.
 console.log(edPub.equals(rsaPub))
+
+function show<T>(r: Result<T, CryptoError>) {
+  console.log(r.isErr() ? `${r.error.code} | ${r.error.message}` : "no error")
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

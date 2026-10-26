@@ -39,13 +39,18 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
   auto present = [&](size_t i) { return i < args.size() && !isa<UndefinedExpr>(args[i]); };
   const Type *buffer = Type::bytesType(Type::Bytes::Buffer);
   Expr *self = member->object;
-  auto bytesOrText = [&](CryptoFn fn, std::vector<Expr *> fnArgs, size_t index) -> Expr * {
+  auto bytesOrText = [&](CryptoFn fn, std::vector<Expr *> fnArgs, size_t index,
+                         bool fallible) -> Expr * {
     Expr *encoding = checker_.cryptoArgs().cryptoEncoding(call, index, name, -1);
     if (!encoding) {
       return call;
     }
     auto *made = checker_.ctx_.make<CallExpr>(call->loc(), call->callee, std::vector<Expr *>{});
-    checker_.cryptoArgs().cryptoCall(made, fn, std::move(fnArgs), buffer);
+    if (fallible) {
+      checker_.cryptoArgs().cryptoResult(made, fn, std::move(fnArgs), buffer);
+    } else {
+      checker_.cryptoArgs().cryptoCall(made, fn, std::move(fnArgs), buffer);
+    }
 
     return checker_.cryptoArgs().cryptoText(made, encoding);
   };
@@ -92,11 +97,13 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       return call;
     }
     Expr *length = options.lookup("outputLength");
-    return checker_.cryptoArgs().cryptoCall(
-        call, CryptoFn::HashCopy,
-        {self, length ? checker_.cryptoArgs().cryptoNumber(length)
-                      : checker_.cryptoArgs().cryptoDouble(loc, -1)},
-        type);
+    if (length) {
+      return checker_.cryptoArgs().cryptoResult(
+          call, CryptoFn::HashCopy, {self, checker_.cryptoArgs().cryptoNumber(length)}, type);
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashCopy,
+                                            {self, checker_.cryptoArgs().cryptoDouble(loc, -1)},
+                                            type);
   }
   if (kind == Crypto::Sign && name == "sign") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
@@ -106,7 +113,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     if (!checker_.cryptoArgs().cryptoSignKey(args[0], name, true, signArgs)) {
       return call;
     }
-    return bytesOrText(CryptoFn::SignFinal, std::move(signArgs), 1);
+    return bytesOrText(CryptoFn::SignFinal, std::move(signArgs), 1, true);
   }
   if (kind == Crypto::Verify && name == "verify") {
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 3)) {
@@ -125,8 +132,8 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       encoding = checker_.cryptoArgs().cryptoInt(loc, 0);
     }
     verifyArgs.insert(verifyArgs.begin() + 2, {signature, encoding});
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::VerifyFinal, std::move(verifyArgs),
-                                            Type::boolTy());
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::VerifyFinal, std::move(verifyArgs),
+                                              Type::boolTy());
   }
   if (cipher && name == "update") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
@@ -140,13 +147,13 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
       encoding = checker_.cryptoArgs().cryptoInt(loc, 0);
     }
-    return bytesOrText(CryptoFn::CipherUpdate, {self, data, encoding}, 2);
+    return bytesOrText(CryptoFn::CipherUpdate, {self, data, encoding}, 2, false);
   }
   if (cipher && name == "final") {
     if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
       return call;
     }
-    return bytesOrText(CryptoFn::CipherFinal, {self}, 0);
+    return bytesOrText(CryptoFn::CipherFinal, {self}, 0, true);
   }
   if (cipher && name == "setAAD") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
@@ -172,7 +179,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
     if (!checker_.argumentChecker().checkArity(call, loc, 0, 0)) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::CipherGetAuthTag, {self}, buffer);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::CipherGetAuthTag, {self}, buffer);
   }
   if (kind == Crypto::Decipheriv && name == "setAuthTag") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
@@ -203,7 +210,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       return call;
     }
     if (!present(0)) {
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::KeyExportSecret, {self}, buffer);
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::KeyExportSecret, {self}, buffer);
     }
     llvm::StringMap<Expr *> options;
     if (!checker_.cryptoArgs().cryptoOptions(args[0], name,
@@ -218,10 +225,11 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       }
     }
     if (format == 2) {
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::KeyExportJwk, {self}, Type::json());
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::KeyExportJwk, {self},
+                                                Type::json());
     }
     if (format == 3) {
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::KeyExportSecret, {self}, buffer);
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::KeyExportSecret, {self}, buffer);
     }
     int has = 0;
     Expr *keyType = checker_.cryptoArgs().cryptoString(loc, ""),
@@ -248,7 +256,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
         return call;
       }
     }
-    return checker_.cryptoArgs().cryptoCall(
+    return checker_.cryptoArgs().cryptoResult(
         call, format == 0 ? CryptoFn::KeyExportPem : CryptoFn::KeyExportDer,
         {self, checker_.cryptoArgs().cryptoInt(loc, has), keyType, cipherName, passphrase},
         format == 0 ? Type::string() : buffer);
@@ -284,13 +292,13 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       }
       return bytesOrText(name == "generateKeys" ? CryptoFn::EcdhGenerateKeys
                                                 : CryptoFn::EcdhGetPublicKey,
-                         {self, f}, 0);
+                         {self, f}, 0, name == "getPublicKey");
     }
     if (name == "getPrivateKey") {
       if (!checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
         return call;
       }
-      return bytesOrText(CryptoFn::EcdhGetPrivateKey, {self}, 0);
+      return bytesOrText(CryptoFn::EcdhGetPrivateKey, {self}, 0, true);
     }
     if (name == "setPrivateKey") {
       if (!checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
@@ -304,8 +312,8 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
         encoding = checker_.cryptoArgs().cryptoInt(loc, 0);
       }
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::EcdhSetPrivateKey,
-                                              {self, key, encoding}, type);
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::EcdhSetPrivateKey,
+                                                {self, key, encoding}, Type::voidTy());
     }
     if (name == "computeSecret") {
       if (!checker_.argumentChecker().checkArity(call, loc, 1, 3)) {
@@ -319,7 +327,7 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
         encoding = checker_.cryptoArgs().cryptoInt(loc, 0);
       }
-      return bytesOrText(CryptoFn::EcdhComputeSecret, {self, key, encoding}, 2);
+      return bytesOrText(CryptoFn::EcdhComputeSecret, {self, key, encoding}, 2, true);
     }
   }
   if (kind == Crypto::X509) {
@@ -391,10 +399,13 @@ Expr *CryptoMethodChecker::checkCryptoMethod(CallExpr *call, MemberExpr *member)
       if (other->type->isError()) {
         return call;
       }
-      CryptoFn fn = name == "checkIssued"       ? CryptoFn::X509CheckIssued
-                    : name == "checkPrivateKey" ? CryptoFn::X509CheckPrivateKey
-                                                : CryptoFn::X509Verify;
-      return checker_.cryptoArgs().cryptoCall(call, fn, {self, other}, Type::boolTy());
+      if (name == "checkIssued") {
+        return checker_.cryptoArgs().cryptoCall(call, CryptoFn::X509CheckIssued, {self, other},
+                                                Type::boolTy());
+      }
+      return checker_.cryptoArgs().cryptoResult(
+          call, name == "checkPrivateKey" ? CryptoFn::X509CheckPrivateKey : CryptoFn::X509Verify,
+          {self, other}, Type::boolTy());
     }
   }
   static const llvm::StringLiteral streamMethods[] = {

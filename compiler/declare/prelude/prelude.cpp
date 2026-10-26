@@ -1,4 +1,5 @@
 #include "compiler/declare/prelude/prelude.h"
+#include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
@@ -27,6 +28,36 @@ type UriError = { code: "bad_uri"; message: string }
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
 type DateError = { code: "bad_date"; message: string; text: string }
+type CryptoError = { code: string; message: string }
+type FetchError = { code: string; message: string; cause?: string }
+type BodyError = {
+  code: "body_used" | "terminated" | "bad_form" | "body_failed" | "ABORT_ERR" | "TIMEOUT_ERR"
+  message: string
+  cause?: string
+}
+type SubtleError = {
+  code:
+    | "NotSupportedError"
+    | "DataError"
+    | "OperationError"
+    | "InvalidAccessError"
+    | "SyntaxError"
+    | "TypeError"
+    | "RangeError"
+  message: string
+}
+type ExecError<Out> = {
+  code: string
+  message: string
+  errno?: int
+  syscall?: string
+  path?: string
+  spawnargs?: string[]
+  status?: int
+  signal?: string
+  stdout?: Out
+  stderr?: Out
+}
 )";
 
 }
@@ -52,6 +83,13 @@ const Type *Prelude::builtinType(llvm::StringRef name) {
   assert(alias && "the prelude declares the type");
 
   return checker_.typeDeclarer().resolveAlias(alias);
+}
+
+const Type *Prelude::builtinType(llvm::StringRef name, std::vector<const Type *> args) {
+  TypeAliasDecl *alias = checker_.builtinAliases_.lookup(name);
+  assert(alias && "the prelude declares the type");
+
+  return checker_.aliasInstantiator().instantiateAlias(alias, std::move(args), alias->loc());
 }
 
 }

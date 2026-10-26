@@ -1,30 +1,30 @@
-unknown name NotSupportedError 9 Unrecognized algorithm name
+unknown name NotSupportedError Unrecognized algorithm name
 name case ok
-no usage InvalidAccessError 15 Unable to use this key to sign
-wrong key InvalidAccessError 15 The requested operation is not valid for the provided key
-cbc iv OperationError 0 algorithm.iv must contain exactly 16 bytes
-gcm short InvalidAccessError 15 The requested operation is not valid for the provided key
-not extractable InvalidAccessException 0 key is not extractable
-bad der DataError 0 Invalid keyData
-aes length DataError 0 Invalid key length
-jwk alg DataError 0 JWK "alg" does not match the requested algorithm
-jwk ext DataError 0 JWK "ext" Parameter and extractable mismatch
-jwk ops DataError 0 Key operations and usage mismatch
-jwk kty DataError 0 Invalid JWK "kty" Parameter
-jwk use DataError 0 Invalid JWK "use" Parameter
+no usage InvalidAccessError Unable to use this key to sign
+wrong key InvalidAccessError The requested operation is not valid for the provided key
+cbc iv OperationError algorithm.iv must contain exactly 16 bytes
+gcm short InvalidAccessError The requested operation is not valid for the provided key
+not extractable InvalidAccessError key is not extractable
+bad der DataError Invalid keyData
+aes length DataError Invalid key length
+jwk alg DataError JWK "alg" does not match the requested algorithm
+jwk ext DataError JWK "ext" Parameter and extractable mismatch
+jwk ops DataError Key operations and usage mismatch
+jwk kty DataError Invalid JWK "kty" Parameter
+jwk use DataError Invalid JWK "use" Parameter
 missing hash TypeError Failed to normalize algorithm: passed algorithm can not be converted to 'HmacImportParams' because 'hash' is required in 'HmacImportParams'.
 infinite TypeError Failed to normalize algorithm: 'length' of 'AesKeyGenParams' (passed algorithm) is not a finite number.
-derive usage InvalidAccessError 15 baseKey does not have deriveBits usage
-iterations OperationError 0 iterations cannot be zero
-public of ecdh InvalidAccessError 15 algorithm.public must be a public key
-export pbkdf2 NotSupportedError 9 PBKDF2 key export is not supported
-spki of secret NotSupportedError 9 Unable to export AES-GCM secret key using spki format
-ecdh too long OperationError 0 derived bit length is too small
-raw private NotSupportedError 9 Unable to export Ed25519 private key using raw format
-ed raw len DataError 0 Ed25519 raw keys must be exactly 32-bytes
+derive usage InvalidAccessError baseKey does not have deriveBits usage
+iterations OperationError iterations cannot be zero
+public of ecdh InvalidAccessError algorithm.public must be a public key
+export pbkdf2 NotSupportedError PBKDF2 key export is not supported
+spki of secret NotSupportedError Unable to export AES-GCM secret key using spki format
+ecdh too long OperationError derived bit length is too small
+raw private NotSupportedError Unable to export Ed25519 private key using raw format
+ed raw len DataError Ed25519 raw keys must be exactly 32-bytes
 ok ok
-ctr wraps OperationError 0 The operation failed for an operation-specific reason
+ctr wraps OperationError The operation failed for an operation-specific reason
 ctr fits ok
-no usages SyntaxError 12 Usages cannot be empty when importing a secret key.
-ecdh usage SyntaxError 12 Usages cannot be empty when creating a key.
-exponent OperationError 0 The publicExponent must be equivalent to an unsigned 32-bit value
+no usages SyntaxError Usages cannot be empty when importing a secret key.
+ecdh usage SyntaxError Usages cannot be empty when creating a key.
+exponent OperationError The publicExponent must be equivalent to an unsigned 32-bit value

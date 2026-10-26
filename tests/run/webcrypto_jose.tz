@@ -28,12 +28,20 @@ function getKeyAlgorithm(name: string): KeyAlgorithm | RsaHashedImportParams | R
 const enc = new TextEncoder()
 async function signJws(alg: string, secret: string, input: string) {
   const usage: KeyUsage = "sign"
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { hash: `SHA-${alg.slice(-3)}`, name: "HMAC" }, false, [usage])
-  return new Uint8Array(await crypto.subtle.sign(subtleAlgorithm(alg), key, enc.encode(input)))
+  const key = must(await crypto.subtle.importKey("raw", enc.encode(secret), { hash: `SHA-${alg.slice(-3)}`, name: "HMAC" }, false, [usage]))
+  return new Uint8Array(must(await crypto.subtle.sign(subtleAlgorithm(alg), key, enc.encode(input))))
 }
 const sig = await signJws("HS256", "secret", "header.payload")
 console.log(Buffer.from(sig).toString("base64url"))
-const k = await crypto.subtle.importKey("raw", enc.encode("secret"), getKeyAlgorithm("HS256"), false, ["sign"])
-console.log(Buffer.from(await crypto.subtle.sign(getKeyAlgorithm("HS256"), k, enc.encode("header.payload"))).toString("base64url"))
-const pair = await crypto.subtle.generateKey(subtleAlgorithm("ES256"), false, ["sign", "verify"])
+const k = must(await crypto.subtle.importKey("raw", enc.encode("secret"), getKeyAlgorithm("HS256"), false, ["sign"]))
+console.log(Buffer.from(must(await crypto.subtle.sign(getKeyAlgorithm("HS256"), k, enc.encode("header.payload")))).toString("base64url"))
+const pair = must(await crypto.subtle.generateKey(subtleAlgorithm("ES256"), false, ["sign", "verify"]))
 if (!(pair instanceof CryptoKey)) console.log(pair.privateKey.type, pair.publicKey.algorithm)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

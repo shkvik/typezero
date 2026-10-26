@@ -9,11 +9,11 @@ yes Uint8Array(3) [ 1, 2, 255 ]
 [ 'a=1', 'b=2' ] c
 200 true http://127.0.0.1:PORT/final final GET
 302 http://127.0.0.1:PORT/final false
-TypeError fetch failed unexpected redirect
-TypeError fetch failed redirect count exceeded
+fetch_failed fetch failed unexpected redirect
+fetch_failed fetch failed redirect count exceeded
 204 true ""
 200 ""
 [ 'hello a', 'hello b', 'hello c', 'hello d', 'hello e', 'hello f' ]
-AbortError This operation was aborted
-TimeoutError The operation was aborted due to timeout
-TypeError fetch failed ECONNREFUSED
+ABORT_ERR This operation was aborted
+TIMEOUT_ERR The operation was aborted due to timeout
+ECONNREFUSED fetch failed

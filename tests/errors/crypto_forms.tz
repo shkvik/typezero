@@ -2,7 +2,8 @@
 // and encodings not written in the call, arguments of the wrong kind, and what is not there yet.
 import {
   createHash, createCipheriv, createDecipheriv, randomBytes, randomInt, getRandomValues,
-  timingSafeEqual, generateKeyPairSync, createSecretKey, argon2Sync, sign, KeyObject,
+  timingSafeEqual, generateKeyPairSync, createSecretKey, argon2Sync, sign, KeyObject, createECDH,
+  X509Certificate,
   // expect-error: 'scrypt' of 'node:crypto' takes a callback, which tz does not have (docs/crypto.md, section 5); import 'scryptSync' and use what it returns
   scrypt,
   // expect-error: 'webcrypto' of 'node:crypto' is the global crypto of Web Crypto, which needs no import: use 'crypto.subtle'
@@ -34,11 +35,19 @@ getRandomValues(new Float64Array(4))
 // expect-error: the first argument is bytes (a Buffer, a typed array or a DataView, an ArrayBuffer); found 'string'
 timingSafeEqual("secret", Buffer.from("secret"))
 const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32), Buffer.alloc(12))
-// expect-error: property 'setAuthTag' does not exist on type 'Cipheriv'
-cipher.setAuthTag(Buffer.alloc(16))
+if (cipher.isOk()) {
+  // expect-error: property 'setAuthTag' does not exist on type 'Cipheriv'
+  cipher.value.setAuthTag(Buffer.alloc(16))
+}
 const decipher = createDecipheriv("aes-256-gcm", Buffer.alloc(32), Buffer.alloc(12))
-// expect-error: property 'getAuthTag' does not exist on type 'Decipheriv'
-decipher.getAuthTag()
+if (decipher.isOk()) {
+  // expect-error: property 'getAuthTag' does not exist on type 'Decipheriv'
+  decipher.value.getAuthTag()
+}
+// expect-error: unknown curve 'P-999'
+createECDH("P-999")
+// expect-error: 'new X509Certificate' may fail on the data it reads, and 'new' gives no Result; write 'X509Certificate.parse(pem)'
+const certificate = new X509Certificate("pem")
 // expect-error: 'rsa' keys need '{ modulusLength: 2048 }'
 generateKeyPairSync("rsa")
 // expect-error: unknown type of the key pair 'dh'
@@ -59,5 +68,8 @@ const made = new KeyObject()
 const hasher = createHash("sha256")
 // expect-error: 'write' of Hash is not supported yet: in node it is a stream too, and tz has no streams yet (docs/streams.md); use 'update(data)' and 'digest()'
 hasher.write("x")
-// expect-error: 'pipe' of Cipheriv is not supported yet
-createCipheriv("aes-128-gcm", Buffer.alloc(16), Buffer.alloc(12)).pipe(hasher)
+const piped = createCipheriv("aes-128-gcm", Buffer.alloc(16), Buffer.alloc(12))
+if (piped.isOk()) {
+  // expect-error: 'pipe' of Cipheriv is not supported yet
+  piped.value.pipe(hasher)
+}

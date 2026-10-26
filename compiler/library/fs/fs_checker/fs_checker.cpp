@@ -166,6 +166,28 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
 
     return false;
   };
+  auto openFlag = [&](Expr *flag, llvm::StringRef fallback) -> Expr * {
+    if (!flag) {
+      return stringLit(fallback);
+    }
+    static constexpr llvm::StringLiteral flags[] = {
+        "r",  "rs",  "sr",  "r+", "rs+", "sr+", "w",  "wx",  "xw",  "w+",  "wx+",
+        "xw+", "a",  "ax",  "xa", "as",  "sa",  "a+", "ax+", "xa+", "as+", "sa+"};
+    auto *lit = dyn_cast<StringLitExpr>(flag);
+    if (lit && llvm::is_contained(flags, llvm::StringRef(utf8(lit->value)))) {
+      lit->type = string;
+      return lit;
+    }
+    checker_.exprChecker().checkExpr(flag);
+    std::string known = "'r', 'r+', 'w', 'wx', 'w+', 'wx+', 'a', 'ax', 'a+', 'ax+', and with 's' "
+                        "for synchronous writes 'rs', 'rs+', 'as', 'as+'";
+    checker_.diags_.error(flag->loc(),
+                          lit ? "'" + utf8(lit->value) + "' is not a flag of '" + fn +
+                                    "'; the flags are " + known
+                              : "the flag of '" + fn + "' is written as a literal: " + known);
+
+    return nullptr;
+  };
   llvm::StringMap<Expr *> options;
   auto encodingOrOptions = [&](size_t index, llvm::ArrayRef<llvm::StringRef> allowed) {
     if (index >= call->args.size()) {
@@ -211,8 +233,11 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         !(number = checkEncoding(encoding, fn, true))) {
       return call;
     }
-    Expr *flag = options.lookup("flag");
-    call->args = {file, flag ? checker_.argumentChecker().checkArg(flag, string) : stringLit("r")};
+    Expr *flag = openFlag(options.lookup("flag"), "r");
+    if (!flag) {
+      return call;
+    }
+    call->args = {file, flag};
     if (checker_.fsAsync_) {
       call->args.push_back(
           checker_.runtimeObjectChecker().signalOption(options.lookup("signal"), loc));
@@ -261,11 +286,12 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
         return call;
       }
     }
-    Expr *flag = options.lookup("flag");
+    Expr *flag = openFlag(options.lookup("flag"), op == "writeFileSync" ? "w" : "a");
+    if (!flag) {
+      return call;
+    }
     Expr *mode = options.lookup("mode");
-    call->args = {file, data,
-                  flag ? checker_.argumentChecker().checkArg(flag, string)
-                       : stringLit(op == "writeFileSync" ? "w" : "a"),
+    call->args = {file, data, flag,
                   mode ? checker_.argumentChecker().checkArg(mode, Type::intTy()) : intLit(0666)};
     if (!bytes) {
       call->args.push_back(number ? number : intLit(0));

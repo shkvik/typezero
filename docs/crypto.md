@@ -131,4 +131,8 @@ OpenSSL быстрее Go. В node те же функции идут через 
 5. **Замеры** (сделано) в `bench` против Go и node.
 6. **Без исключений** ([errors.md](errors.md), шаг 2): `Result` у `node:crypto` и
    `crypto.subtle` (134 `throw` в `library/crypto/webcrypto.tz`), литеральные типы для имён
-   алгоритмов и длин ключей.
+   алгоритмов и длин ключей. `node:crypto` сделан 26 октября: `Result<T, CryptoError>` с кодами
+   node у того, что зависит от данных и у имён из переменных; `X509Certificate.parse`; хеш не
+   закрывается после `digest()`; ошибки порядка у шифра отдаёт `final()`. Числа вне диапазона —
+   с шагом 4 errors.md (доказательства). `crypto.subtle` отдаёт `Promise<Result<T, SubtleError>>`
+   (`code` — имя `DOMException` node); внутри `webcrypto.tz` пока исключения, их уберёт шаг 5.

@@ -89,9 +89,7 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
       checker_.diags_.error(
           ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
-                       "': only the functions of " +
-                       (parent == checker_.execSyncErrorClass_ ? "node:child_process" : "node:fs") +
-                       " make its objects" + (derivesFromError(parent) ? "; extend Error" : ""));
+                       "': only the functions of node:fs make its objects" + (derivesFromError(parent) ? "; extend Error" : ""));
     } else if (parent && parent->baseExpr && !parent->resolved) {
       checker_.diags_.error(ref.loc,
                             "class '" + cls->name + "' cannot extend '" + parent->name +

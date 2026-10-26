@@ -23,7 +23,6 @@
 #include <openssl/x509.h>
 #include <string.h>
 
-void tz_openssl_throw(int32_t kind, const char *otherwise);
 const TzMd *tz_openssl_md(void *obj, uint64_t meta, int32_t caller);
 EVP_MD *tz_openssl_md_of(const TzMd *md);
 
@@ -238,7 +237,7 @@ static const char *jwk_curve(const char *crv) {
 static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
   char kty[16], crv[16];
   if (!jwk || jwk->kind != TZ_JSON_OBJECT || !jwk_string(jwk, "kty", kty, sizeof kty)) {
-    tz_throw(TZ_TYPE_ERROR, "The \"key.kty\" property must be of type string.");
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_TYPE", "The \"key.kty\" property must be of type string.");
     return NULL;
   }
   EVP_PKEY *pkey = NULL;
@@ -252,7 +251,7 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
                                           : NULL;
     }
     if (!type) {
-      tz_throw(TZ_TYPE_ERROR, "The property 'key.crv' must be one of: 'Ed25519', 'Ed448', "
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'key.crv' must be one of: 'Ed25519', 'Ed448', "
                               "'X25519', 'X448'.");
       return NULL;
     }
@@ -265,7 +264,7 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
     release_bytes(d);
     release_bytes(x);
     if (!pkey) {
-      tz_throw(TZ_TYPE_ERROR, "Invalid JWK %s key", crv);
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_JWK", "Invalid JWK %s key", crv);
     }
     return pkey;
   }
@@ -295,13 +294,13 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
       BN_clear_free(bn[i]);
     }
     if (!pkey) {
-      tz_throw(TZ_TYPE_ERROR, "Invalid JWK RSA key");
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_JWK", "Invalid JWK RSA key");
     }
   } else if (strcmp(kty, "EC") == 0) {
     const char *group = jwk_string(jwk, "crv", crv, sizeof crv) ? jwk_curve(crv) : NULL;
     if (!group) {
       OSSL_PARAM_BLD_free(bld);
-      tz_throw(TZ_TYPE_ERROR, "The property 'key.crv' must be one of: 'P-256', 'secp256k1', "
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'key.crv' must be one of: 'P-256', 'secp256k1', "
                               "'P-384', 'P-521'.");
       return NULL;
     }
@@ -328,11 +327,10 @@ static EVP_PKEY *from_jwk(const TzJson *jwk, int private_key) {
     release_bytes(d);
     BN_clear_free(priv);
     if (!pkey) {
-      tz_throw(TZ_TYPE_ERROR, "Invalid JWK EC key");
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_JWK", "Invalid JWK EC key");
     }
   } else {
-    tz_throw(TZ_TYPE_ERROR,
-             "The property 'key.kty' must be one of: 'RSA', 'EC', 'OKP'. "
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'key.kty' must be one of: 'RSA', 'EC', 'OKP'. "
              "Received '%s'",
              kty);
   }
@@ -347,8 +345,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
   const TzKey *given = key_object(kt, kv);
   if (given) {
     if (private_key || given->type == TZ_KEY_SECRET) {
-      tz_throw(TZ_TYPE_ERROR,
-               "The \"key\" argument must be of type string or an instance of "
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_TYPE", "The \"key\" argument must be of type string or an instance of "
                "ArrayBuffer, Buffer, TypedArray, or DataView. Received an instance "
                "of %s",
                given->layout->name);
@@ -410,7 +407,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
   tz_crypto_data_done(&passphrase);
   tz_crypto_data_done(&d);
   if (!pkey) {
-    tz_openssl_throw(TZ_ERROR, "Failed to read asymmetric key");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to read asymmetric key");
     return NULL;
   }
   ERR_clear_error();
@@ -421,7 +418,7 @@ TzKey *tz_openssl_create_key(int32_t private_key, const TzType *kt, const void *
 TzKey *tz_openssl_public_of(const TzKey *key) {
   EVP_PKEY *pub = public_half((const EVP_PKEY *)key->pkey);
   if (!pub) {
-    tz_openssl_throw(TZ_ERROR, "Failed to get the public key");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to get the public key");
     return NULL;
   }
 
@@ -436,12 +433,12 @@ static unsigned char *encode(const TzKey *key, const char *output, const char *t
   int id = EVP_PKEY_get_base_id(pkey);
   const char *structure = NULL;
   if (!type[0]) {
-    tz_throw(TZ_TYPE_ERROR, "The property 'options.type' is invalid. Received undefined");
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'options.type' is invalid. Received undefined");
     return NULL;
   }
   if (strcmp(type, "pkcs1") == 0) {
     if (id != EVP_PKEY_RSA) {
-      tz_throw(TZ_ERROR, "The selected key encoding pkcs1 can only be used for RSA keys.");
+      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS", "The selected key encoding pkcs1 can only be used for RSA keys.");
       return NULL;
     }
     structure = "type-specific";
@@ -451,16 +448,16 @@ static unsigned char *encode(const TzKey *key, const char *output, const char *t
     structure = cipher[0] ? "EncryptedPrivateKeyInfo" : "PrivateKeyInfo";
   } else if (private_key && strcmp(type, "sec1") == 0) {
     if (id != EVP_PKEY_EC) {
-      tz_throw(TZ_ERROR, "The selected key encoding sec1 can only be used for EC keys.");
+      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS", "The selected key encoding sec1 can only be used for EC keys.");
       return NULL;
     }
     structure = "type-specific";
   } else {
-    tz_throw(TZ_TYPE_ERROR, "The property 'options.type' is invalid. Received '%s'", type);
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'options.type' is invalid. Received '%s'", type);
     return NULL;
   }
   if (cipher[0] && !private_key) {
-    tz_throw(TZ_TYPE_ERROR, "The property 'options.cipher' is invalid. Received '%s'", cipher);
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'options.cipher' is invalid. Received '%s'", cipher);
     return NULL;
   }
   int selection = private_key ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY;
@@ -476,7 +473,7 @@ static unsigned char *encode(const TzKey *key, const char *output, const char *t
   }
   OSSL_ENCODER_CTX_free(ctx);
   if (!ok) {
-    tz_openssl_throw(TZ_ERROR, "Failed to encode the key");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to encode the key");
     OPENSSL_free(data);
     return NULL;
   }
@@ -569,7 +566,7 @@ static TzJson *export_jwk(const TzKey *key) {
                                                         : NULL;
     if (!crv) {
       tz_json_release(jwk);
-      tz_throw(TZ_ERROR, "Unsupported JWK EC curve: %s.", group);
+      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_JWK_UNSUPPORTED_CURVE", "Unsupported JWK EC curve: %s.", group);
       return NULL;
     }
     int size = (EVP_PKEY_get_bits(pkey) + 7) / 8;
@@ -606,7 +603,7 @@ static TzJson *export_jwk(const TzKey *key) {
                                             : NULL;
   if (!crv) {
     tz_json_release(jwk);
-    tz_throw(TZ_ERROR, "Unsupported JWK key type");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK key type");
     return NULL;
   }
   uint8_t raw[64];
@@ -630,7 +627,7 @@ static EVP_PKEY *signing_key(const TzType *kt, const void *kv, int private_key, 
   const TzKey *key = key_object(kt, kv);
   if (key) {
     if (key->type == TZ_KEY_SECRET || (private_key && key->type != TZ_KEY_PRIVATE)) {
-      tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected %s.",
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected %s.",
                key->type == TZ_KEY_SECRET ? "secret" : "public",
                private_key ? "private" : "public");
       return NULL;
@@ -743,7 +740,7 @@ static TzBytes *sign_with(EVP_PKEY *pkey, const char *md_name, const EVP_MD *md,
   }
   if (!ok) {
     OPENSSL_free(sig);
-    tz_openssl_throw(TZ_ERROR, "Signing failed");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Signing failed");
     return NULL;
   }
   TzBytes *b;
@@ -866,7 +863,7 @@ TzHash *tz_openssl_sign_new(void *obj, uint64_t meta, int32_t verify) {
 
 static int sign_digest(TzHash *h, uint8_t *out) {
   if (h->done) {
-    tz_throw(TZ_ERROR, "Not initialised");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Not initialised");
     return 0;
   }
   h->md->ops->final(h->ctx, out, h->md->size);
@@ -888,7 +885,7 @@ TzBytes *tz_openssl_sign_final(TzHash *h, const TzType *kt, const void *kv, int3
   int id = EVP_PKEY_get_base_id(pkey);
   uint8_t digest[64];
   if (id == EVP_PKEY_ED25519 || id == EVP_PKEY_ED448) {
-    tz_throw(TZ_ERROR, "Unsupported crypto operation");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_UNSUPPORTED_OPERATION", "Unsupported crypto operation");
   } else if (sign_digest(h, digest)) {
     sig = sign_with(pkey, NULL, tz_openssl_md_of(h->md), digest, h->md->size, &o, 1);
   }
@@ -959,7 +956,7 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
       }
     }
     if (type < 0) {
-      tz_throw(TZ_TYPE_ERROR, "The argument 'type' must be a supported key type. Received '%s'",
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The argument 'type' must be a supported key type. Received '%s'",
                name);
       return NULL;
     }
@@ -990,7 +987,7 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
     int nid = curve_nid(curve);
     if (nid == NID_undef) {
       EVP_PKEY_CTX_free(ctx);
-      tz_throw(TZ_TYPE_ERROR, "Invalid EC curve name");
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_CURVE", "Invalid EC curve name");
       return NULL;
     }
     ok = EVP_PKEY_CTX_set_group_name(ctx, OBJ_nid2sn(nid)) > 0;
@@ -1001,7 +998,7 @@ TzKey *tz_openssl_generate_key_pair(int32_t type, void *name_obj, uint64_t name_
   }
   EVP_PKEY_CTX_free(ctx);
   if (!ok) {
-    tz_openssl_throw(TZ_ERROR, "Key generation job failed");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Key generation job failed");
     return NULL;
   }
 
@@ -1032,7 +1029,7 @@ Ecdh *tz_openssl_ecdh_new(void *obj, uint64_t meta) {
   EC_GROUP *group = nid == NID_undef ? NULL : EC_GROUP_new_by_curve_name(nid);
   if (!group) {
     ERR_clear_error();
-    tz_throw(TZ_TYPE_ERROR, "Invalid EC curve name");
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_CURVE", "Invalid EC curve name");
     return NULL;
   }
   Ecdh *e = (Ecdh *)tz_obj_alloc(sizeof(Ecdh));
@@ -1088,7 +1085,7 @@ TzBytes *tz_openssl_ecdh_get_public_key(Ecdh *e, int32_t format) {
   uint8_t point[256];
   size_t n = public_point(e, format, point);
   if (!n) {
-    tz_throw(TZ_ERROR, "Failed to get ECDH public key");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to get ECDH public key");
     return NULL;
   }
 
@@ -1098,7 +1095,7 @@ TzBytes *tz_openssl_ecdh_get_public_key(Ecdh *e, int32_t format) {
 TzBytes *tz_openssl_ecdh_generate_keys(Ecdh *e, int32_t format) {
   EVP_PKEY *key = EVP_PKEY_Q_keygen(NULL, NULL, "EC", OBJ_nid2sn(e->nid));
   if (!key) {
-    tz_openssl_throw(TZ_ERROR, "Failed to generate key");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to generate key");
     return NULL;
   }
   EVP_PKEY_free(e->key);
@@ -1110,7 +1107,7 @@ TzBytes *tz_openssl_ecdh_generate_keys(Ecdh *e, int32_t format) {
 TzBytes *tz_openssl_ecdh_get_private_key(Ecdh *e) {
   BIGNUM *priv = NULL;
   if (!e->key || !EVP_PKEY_get_bn_param(e->key, OSSL_PKEY_PARAM_PRIV_KEY, &priv)) {
-    tz_throw(TZ_ERROR, "Failed to get ECDH private key");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to get ECDH private key");
     return NULL;
   }
   int n = BN_num_bytes(priv);
@@ -1140,7 +1137,7 @@ void tz_openssl_ecdh_set_private_key(Ecdh *e, const TzType *kt, const void *kv, 
   BN_clear_free(priv);
   if (!key) {
     ERR_clear_error();
-    tz_throw(TZ_RANGE_ERROR, "Private key is not valid for specified curve.");
+    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_CRYPTO_INVALID_KEYTYPE", "Private key is not valid for specified curve.");
     return;
   }
   EVP_PKEY_free(e->key);
@@ -1163,7 +1160,7 @@ static TzBytes *derive(EVP_PKEY *mine, EVP_PKEY *theirs) {
   }
   EVP_PKEY_CTX_free(ctx);
   if (!b) {
-    tz_openssl_throw(TZ_ERROR, "Failed to compute the shared secret");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to compute the shared secret");
   }
 
   return b;
@@ -1182,12 +1179,12 @@ TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *k
   EC_POINT_free(point);
   ERR_clear_error();
   if (!theirs) {
-    tz_throw(TZ_ERROR, "Public key is not valid for specified curve");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Public key is not valid for specified curve");
     return NULL;
   }
   TzBytes *secret = NULL;
   if (!e->key) {
-    tz_throw(TZ_ERROR, "Failed to compute ECDH key");
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to compute ECDH key");
   } else {
     secret = derive(e->key, theirs);
   }
@@ -1198,19 +1195,19 @@ TzBytes *tz_openssl_ecdh_compute_secret(Ecdh *e, const TzType *kt, const void *k
 
 TzBytes *tz_openssl_diffie_hellman(const TzKey *priv, const TzKey *pub) {
   if (priv->type != TZ_KEY_PRIVATE) {
-    tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected private.",
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected private.",
              priv->type == TZ_KEY_SECRET ? "secret" : "public");
     return NULL;
   }
   if (pub->type == TZ_KEY_SECRET) {
-    tz_throw(TZ_TYPE_ERROR, "Invalid key object type secret, expected public.");
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type secret, expected public.");
     return NULL;
   }
   const EVP_PKEY *a = (const EVP_PKEY *)priv->pkey, *b = (const EVP_PKEY *)pub->pkey;
   int id = EVP_PKEY_get_base_id(a);
   if (id != EVP_PKEY_get_base_id(b) ||
       (id != EVP_PKEY_DH && id != EVP_PKEY_EC && id != EVP_PKEY_X25519 && id != EVP_PKEY_X448)) {
-    tz_throw(TZ_ERROR, "Incompatible key types for Diffie-Hellman: %s and %s", key_type_name(a),
+    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INCOMPATIBLE_KEY", "Incompatible key types for Diffie-Hellman: %s and %s", key_type_name(a),
              key_type_name(b));
     return NULL;
   }

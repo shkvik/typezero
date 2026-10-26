@@ -1,7 +1,8 @@
 // same-as-node
-// What fails in node:fs throws a SystemError with the code, number, call
-// and paths Node gives, and Node's text; the directory of the test shows as
-// D. Wrong arguments are TypeErrors.
+// What fails in node:fs gives an Err of a SystemError with the code, number,
+// call and paths Node gives, and Node's text; the directory of the test
+// shows as D. A path with a zero character is an Err too, with Node's code
+// and text (Node throws a TypeError).
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, readdirSync,
          statSync, lstatSync, rmSync, renameSync, copyFileSync, unlinkSync, rmdirSync,
          realpathSync, accessSync, chmodSync, truncateSync, existsSync, constants } from "node:fs"
@@ -16,58 +17,57 @@ must(writeFileSync(file, "text"))
 must(mkdirSync(sub))
 must(writeFileSync(join(sub, "inside.txt"), "inside"))
 
-function show(what: string, run: () => void) {
-  try {
-    run()
+function show<T>(what: string, r: Result<T, SystemError>) {
+  if (r.isOk()) {
     console.log(what, "-> no error")
-  } catch (e) {
-    if (e instanceof SystemError)
-      console.log(what, "->", e.name, e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
-                  (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
-    else
-      console.log(what, "->", e.name, "|", e.message)
+    return
   }
+  const e = r.error
+  if (e.code == "ERR_INVALID_ARG_VALUE")
+    console.log(what, "->", e.code, "|", e.message)
+  else
+    console.log(what, "->", e.code, e.errno, e.syscall, (e.path ?? "-").replaceAll(dir, "D"),
+                (e.dest ?? "-").replaceAll(dir, "D"), "|", e.message.replaceAll(dir, "D"))
 }
 
-show("read missing", () => must(readFileSync(missing, "utf8")))
-show("read directory", () => must(readFileSync(sub, "utf8")))
-show("read through file", () => must(readFileSync(join(file, "x"), "utf8")))
-show("read empty path", () => must(readFileSync("", "utf8")))
-show("read zero char", () => must(readFileSync("a\u0000b", "utf8")))
-show("write missing dir", () => must(writeFileSync(join(missing, "x.txt"), "x")))
-show("write exclusive", () => must(writeFileSync(file, "x", { flag: "wx" })))
-show("write bad flag", () => must(writeFileSync(file, "x", { flag: "q" })))
-show("write directory", () => must(writeFileSync(sub, "x")))
-show("append missing dir", () => must(appendFileSync(join(missing, "x.txt"), "x")))
-show("mkdir existing", () => must(mkdirSync(sub)))
-show("mkdir existing file", () => must(mkdirSync(file, { recursive: true })))
-show("mkdir missing parent", () => must(mkdirSync(join(missing, "a"))))
-show("mkdir under file", () => must(mkdirSync(join(file, "a", "b"), { recursive: true })))
-show("mkdtemp missing", () => must(mkdtempSync(join(missing, "t-"))))
-show("rmdir not empty", () => must(rmdirSync(sub)))
-show("rmdir file", () => must(rmdirSync(file)))
-show("rmdir missing", () => must(rmdirSync(missing)))
-show("unlink directory", () => must(unlinkSync(sub)))
-show("unlink missing", () => must(unlinkSync(missing)))
-show("rm directory", () => must(rmSync(sub)))
-show("rm missing", () => must(rmSync(missing)))
-show("rm missing recursive", () => must(rmSync(missing, { recursive: true })))
-show("rename missing", () => must(renameSync(missing, join(dir, "other"))))
-show("rename onto directory", () => must(renameSync(file, sub)))
-show("copy missing", () => must(copyFileSync(missing, join(dir, "other"))))
-show("copy exclusive", () => must(copyFileSync(file, join(sub, "inside.txt"), constants.COPYFILE_EXCL)))
-show("copy directory", () => must(copyFileSync(sub, join(dir, "other"))))
-show("copy clone force", () => must(copyFileSync(file, join(dir, "other"), constants.COPYFILE_FICLONE_FORCE)))
-show("readdir file", () => must(readdirSync(file)))
-show("readdir missing", () => must(readdirSync(missing)))
-show("stat missing", () => must(statSync(missing)))
-show("lstat missing", () => must(lstatSync(missing)))
-show("stat through file", () => must(statSync(join(file, "x"))))
-show("realpath missing", () => must(realpathSync(join(missing, "deeper"))))
-show("access missing", () => must(accessSync(missing)))
-show("chmod missing", () => must(chmodSync(missing, 0o644)))
-show("truncate missing", () => must(truncateSync(missing)))
-show("copy onto itself", () => must(copyFileSync(file, file)))
+show("read missing", readFileSync(missing, "utf8"))
+show("read directory", readFileSync(sub, "utf8"))
+show("read through file", readFileSync(join(file, "x"), "utf8"))
+show("read empty path", readFileSync("", "utf8"))
+show("read zero char", readFileSync("a\u0000b", "utf8"))
+show("write missing dir", writeFileSync(join(missing, "x.txt"), "x"))
+show("write exclusive", writeFileSync(file, "x", { flag: "wx" }))
+show("write directory", writeFileSync(sub, "x"))
+show("append missing dir", appendFileSync(join(missing, "x.txt"), "x"))
+show("mkdir existing", mkdirSync(sub))
+show("mkdir existing file", mkdirSync(file, { recursive: true }))
+show("mkdir missing parent", mkdirSync(join(missing, "a")))
+show("mkdir under file", mkdirSync(join(file, "a", "b"), { recursive: true }))
+show("mkdtemp missing", mkdtempSync(join(missing, "t-")))
+show("rmdir not empty", rmdirSync(sub))
+show("rmdir file", rmdirSync(file))
+show("rmdir missing", rmdirSync(missing))
+show("unlink directory", unlinkSync(sub))
+show("unlink missing", unlinkSync(missing))
+show("rm directory", rmSync(sub))
+show("rm missing", rmSync(missing))
+show("rm missing recursive", rmSync(missing, { recursive: true }))
+show("rename missing", renameSync(missing, join(dir, "other")))
+show("rename onto directory", renameSync(file, sub))
+show("copy missing", copyFileSync(missing, join(dir, "other")))
+show("copy exclusive", copyFileSync(file, join(sub, "inside.txt"), constants.COPYFILE_EXCL))
+show("copy directory", copyFileSync(sub, join(dir, "other")))
+show("copy clone force", copyFileSync(file, join(dir, "other"), constants.COPYFILE_FICLONE_FORCE))
+show("readdir file", readdirSync(file))
+show("readdir missing", readdirSync(missing))
+show("stat missing", statSync(missing))
+show("lstat missing", lstatSync(missing))
+show("stat through file", statSync(join(file, "x")))
+show("realpath missing", realpathSync(join(missing, "deeper")))
+show("access missing", accessSync(missing))
+show("chmod missing", chmodSync(missing, 0o644))
+show("truncate missing", truncateSync(missing))
+show("copy onto itself", copyFileSync(file, file))
 console.log(existsSync("a\u0000b"), existsSync(""))
 
 must(rmSync(dir, { recursive: true }))

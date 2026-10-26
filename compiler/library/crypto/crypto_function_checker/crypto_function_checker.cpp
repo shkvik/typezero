@@ -60,7 +60,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
   if (llvm::is_contained(kClasses, fn)) {
     checker_.diags_.error(
         loc, "'" + fn + "' of 'node:crypto' is a class, not a function" +
-                 (fn == "X509Certificate" ? "; make one with 'new X509Certificate(pem)'" : ""));
+                 (fn == "X509Certificate" ? "; make one with 'X509Certificate.parse(pem)'" : ""));
     return loosely();
   }
   if (fn == "constants") {
@@ -90,10 +90,13 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     Expr *length = options.lookup("outputLength");
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashNew,
-                                            {md, length
-                                                     ? checker_.cryptoArgs().cryptoNumber(length)
-                                                     : checker_.cryptoArgs().cryptoDouble(loc, -1)},
+    std::vector<Expr *> hashArgs = {md, length ? checker_.cryptoArgs().cryptoNumber(length)
+                                               : checker_.cryptoArgs().cryptoDouble(loc, -1)};
+    if (!isa<IntLitExpr>(md) || length) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashNew, std::move(hashArgs),
+                                                Type::cryptoType(Crypto::Hash));
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashNew, std::move(hashArgs),
                                             Type::cryptoType(Crypto::Hash));
   }
   if (fn == "createHmac") {
@@ -105,8 +108,12 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || key->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HmacNew,
-                                            {md, key, checker_.cryptoArgs().cryptoInt(loc, 0)},
+    std::vector<Expr *> hmacArgs = {md, key, checker_.cryptoArgs().cryptoInt(loc, 0)};
+    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(key->type)) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HmacNew, std::move(hmacArgs),
+                                                Type::cryptoType(Crypto::Hmac));
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HmacNew, std::move(hmacArgs),
                                             Type::cryptoType(Crypto::Hmac));
   }
   if (fn == "hash") {
@@ -119,8 +126,15 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || data->type->isError() || !encoding) {
       return call;
     }
+    bool named = isa<IntLitExpr>(md);
     if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnce, {md, data}, buffer);
+      return named ? checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnce, {md, data}, buffer)
+                   : checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnce, {md, data},
+                                                        buffer);
+    }
+    if (!named) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::HashOnceText,
+                                                {md, data, encoding}, Type::string());
     }
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnceText, {md, data, encoding},
                                             Type::string());
@@ -229,6 +243,10 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || password->type->isError() || salt->type->isError()) {
       return call;
     }
+    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(password->type)) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Pbkdf2,
+                                                {password, salt, iterations, keylen, md}, buffer);
+    }
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Pbkdf2,
                                             {password, salt, iterations, keylen, md}, buffer);
   }
@@ -243,6 +261,11 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *keylen = checker_.cryptoArgs().cryptoNumber(args[4]);
     if (!md || key->type->isError() || salt->type->isError() || info->type->isError()) {
       return call;
+    }
+    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(key->type)) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Hkdf,
+                                                {md, key, salt, info, keylen},
+                                                Type::bytesType(Type::Bytes::ArrayBuffer));
     }
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
                                             Type::bytesType(Type::Bytes::ArrayBuffer));
@@ -357,7 +380,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     bool decrypt = fn == "createDecipheriv";
-    return checker_.cryptoArgs().cryptoCall(
+    return checker_.cryptoArgs().cryptoResult(
         call, CryptoFn::CipherNew,
         {cipher, key, iv,
          tag ? checker_.cryptoArgs().cryptoNumber(tag)
@@ -445,12 +468,12 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (key->type->isError() || passphrase->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::CreateKey,
-                                            {checker_.cryptoArgs().cryptoBool(loc, priv), key,
-                                             encoding, checker_.cryptoArgs().cryptoInt(loc, format),
-                                             checker_.cryptoArgs().cryptoInt(loc, has), type,
-                                             passphrase},
-                                            keyObject);
+    return checker_.cryptoArgs().cryptoResult(
+        call, CryptoFn::CreateKey,
+        {checker_.cryptoArgs().cryptoBool(loc, priv), key, encoding,
+         checker_.cryptoArgs().cryptoInt(loc, format), checker_.cryptoArgs().cryptoInt(loc, has),
+         type, passphrase},
+        keyObject);
   }
   if (fn == "generateKeyPairSync") {
     return checker_.keyPairChecker().checkGenerateKeyPair(call, loc);
@@ -502,31 +525,47 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (data->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, verify ? CryptoFn::Verify : CryptoFn::Sign,
-                                            std::move(signArgs), verify ? Type::boolTy() : buffer);
+    return checker_.cryptoArgs().cryptoResult(call, verify ? CryptoFn::Verify : CryptoFn::Sign,
+                                              std::move(signArgs),
+                                              verify ? Type::boolTy() : buffer);
   }
   if (fn == "createSign" || fn == "createVerify") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
     Expr *name = args[0];
-    if (literalOf(name) && !checker_.cryptoArgs().cryptoMd(name, true)) {
+    bool literal = literalOf(name).has_value();
+    if (literal && !checker_.cryptoArgs().cryptoMd(name, true)) {
       return call;
     }
     bool verify = fn == "createVerify";
-    return checker_.cryptoArgs().cryptoCall(
-        call, CryptoFn::SignNew,
-        {checker_.argumentChecker().checkArg(name, Type::string()),
-         checker_.cryptoArgs().cryptoBool(loc, verify)},
-        Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign));
+    std::vector<Expr *> signArgs = {checker_.argumentChecker().checkArg(name, Type::string()),
+                                    checker_.cryptoArgs().cryptoBool(loc, verify)};
+    const Type *made = Type::cryptoType(verify ? Crypto::Verify : Crypto::Sign);
+    if (!literal) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::SignNew, std::move(signArgs),
+                                                made);
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::SignNew, std::move(signArgs), made);
   }
   if (fn == "createECDH") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1)) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(
-        call, CryptoFn::EcdhNew, {checker_.argumentChecker().checkArg(args[0], Type::string())},
-        Type::cryptoType(Crypto::Ecdh));
+    std::optional<std::string> curve = literalOf(args[0]);
+    if (curve && !llvm::is_contained(kCurveNames, *curve)) {
+      checker_.diags_.error(args[0]->loc(), "unknown curve '" + *curve +
+                                                "'; node has those getCurves() lists, e.g. "
+                                                "'prime256v1', 'secp384r1', 'secp256k1'");
+      return loosely();
+    }
+    Expr *name = checker_.argumentChecker().checkArg(args[0], Type::string());
+    if (!curve) {
+      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::EcdhNew, {name},
+                                                Type::cryptoType(Crypto::Ecdh));
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::EcdhNew, {name},
+                                            Type::cryptoType(Crypto::Ecdh));
   }
   if (fn == "diffieHellman") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 1) ||
@@ -542,7 +581,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (priv->type->isError() || pub->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::DiffieHellman, {priv, pub}, buffer);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::DiffieHellman, {priv, pub},
+                                              buffer);
   }
   checker_.diags_.error(loc, cryptoExportProblem(fn, "node:crypto"));
 

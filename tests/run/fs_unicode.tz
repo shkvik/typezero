@@ -18,11 +18,9 @@ for (const name of names)
               JSON.stringify(must(readFileSync(join(folder, name), "utf8"))))
 must(renameSync(join(folder, "файл.txt"), join(folder, "переименован.txt")))
 console.log(existsSync(join(folder, "файл.txt")), must(readFileSync(join(folder, "переименован.txt"), "utf8")))
-try {
-  must(readFileSync(join(folder, "нет такого.txt"), "utf8"))
-} catch (e) {
-  console.log(e.message.replaceAll(dir, "D"))
-}
+const missing = readFileSync(join(folder, "нет такого.txt"), "utf8")
+if (missing.isErr())
+  console.log(missing.error.message.replaceAll(dir, "D"))
 must(rmSync(dir, { recursive: true }))
 console.log(existsSync(dir))
 

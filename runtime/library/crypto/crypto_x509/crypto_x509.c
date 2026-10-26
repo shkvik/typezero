@@ -17,7 +17,6 @@
 #include <string.h>
 #include <time.h>
 
-void tz_openssl_throw(int32_t kind, const char *otherwise);
 
 typedef struct {
   int64_t rc;
@@ -41,16 +40,16 @@ Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   BIO *bio = BIO_new_mem_buf(d.data, (int)d.length);
   X509 *cert = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
   if (!cert) {
-    ERR_clear_error();
     const unsigned char *p = d.data;
     cert = d2i_X509(NULL, &p, (long)d.length);
   }
   BIO_free(bio);
   tz_crypto_data_done(&d);
   if (!cert) {
-    tz_openssl_throw(TZ_ERROR, "Failed to parse the certificate");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to parse the certificate");
     return NULL;
   }
+  ERR_clear_error();
   Certificate *c = (Certificate *)tz_obj_alloc(sizeof(Certificate));
   c->rc = 1;
   c->layout = &certificate_layout;
@@ -238,7 +237,7 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key);
 TzKey *tz_openssl_x509_public_key(const Certificate *c) {
   EVP_PKEY *pkey = X509_get_pubkey(c->cert);
   if (!pkey) {
-    tz_openssl_throw(TZ_ERROR, "Failed to get the public key");
+    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to get the public key");
     return NULL;
   }
 
@@ -321,7 +320,7 @@ int32_t tz_openssl_x509_check_issued(const Certificate *c, const Certificate *is
 
 int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PRIVATE) {
-    tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected private.",
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected private.",
              key->type == TZ_KEY_SECRET ? "secret" : "public");
     return 0;
   }
@@ -333,7 +332,7 @@ int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key
 
 int32_t tz_openssl_x509_verify(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PUBLIC) {
-    tz_throw(TZ_TYPE_ERROR, "Invalid key object type %s, expected public.",
+    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected public.",
              key->type == TZ_KEY_SECRET ? "secret" : "private");
     return 0;
   }

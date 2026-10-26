@@ -28,7 +28,15 @@ app.get("/", c => c.text("Hello"))
 app.get("/async", async c => c.text(`async ${c.req.method}`))
 const server = serve({ port: 0, hostname: "127.0.0.1" }, app.fetch)
 for (const path of ["/", "/async", "/nope"]) {
-  const r = await fetch(`http://127.0.0.1:${server.port}${path}`)
-  console.log(r.status, await r.text())
+  const r = must(await fetch(`http://127.0.0.1:${server.port}${path}`))
+  console.log(r.status, must(await r.text()))
 }
 await server.stop()
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

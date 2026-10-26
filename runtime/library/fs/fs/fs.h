@@ -79,7 +79,7 @@ typedef struct {
 
 void tz_fs_path_free(Path *p);
 
-int tz_fs_path_init(Path *p, void *obj, uint64_t meta);
+int tz_fs_path_init(Path *p, void *obj, uint64_t meta, TzMaker make, const char *syscall);
 
 void tz_fs_path_of_units(Path *p, const uint16_t *units, size_t n);
 

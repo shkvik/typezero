@@ -380,7 +380,7 @@ function_names/     FunctionNames: что упоминают функции (←
 metadata_writers/   MetadataWriters: кто пишет метаданные (← findMetadataWriters)
 ```
 
-Классы тем (`SystemError`, `Stats`, `ExecSyncError`, `Hash`…) объявляет крючок `declare` их темы,
+Классы тем (`SystemError`, `Stats`, `Hash`…) объявляет крючок `declare` их темы,
 а не `Prelude`.
 
 ### `infer/` ← `Sema::findCycles`, `sema_infer.cpp` (478)
@@ -603,7 +603,7 @@ library/
 | `fs` | `FsFeature`, `FsDeclarer` (`Stats`, `Dirent`, `SystemError`), `FsChecker`, `FsPromisesChecker`, `ReadlineChecker`, `FsLowerer` | `fs` (4390 → `fs_sync`, `fs_async`, `fs_errors`, `stdin`) | | `sema_node.cpp` (часть), `sema_async_io.cpp`, `codegen_node.cpp`, `codegen_async_io.cpp` |
 | `path` | `PathFeature`, `PathChecker`, `PathLowerer`, `path_exports` | `path` | | `sema_node.cpp` (часть) |
 | `os` | `OsFeature`, `OsChecker`, `OsLowerer`, `os_exports` | `os` | | `sema_node.cpp` (часть) |
-| `child_process` | `ChildProcessFeature`, `ExecSyncErrorDeclarer`, `ChildChecker`, `ChildLowerer` | `child` | | `sema_child.cpp`, `codegen_child.cpp` |
+| `child_process` | `ChildProcessFeature`, `ChildChecker`, `ChildLowerer` | `child` | | `sema_child.cpp`, `codegen_child.cpp` |
 | `events` | `EventsFeature`, `EventMapInference`, `EmitterChecker`, `EventTargetChecker`, `EventsLowerer` | `signal` | `events.tz`, `web.tz` | `sema_events.cpp` (1362), `codegen_events.cpp` |
 | `stream` | `StreamFeature`, `StreamChecker`, `ChunkTypes`, `StreamLowerer` | `stream` | `stream.tz` (3989 → `readable`, `writable`, `duplex`, `pipeline`), `stream_consumers.tz`, `stream_promises.tz`, `string_decoder.tz`, `fs_stream.tz` | `sema_stream.cpp` (1453), `codegen_stream.cpp` |
 | `net` | `NetFeature` | `net` | | — |

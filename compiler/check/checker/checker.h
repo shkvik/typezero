@@ -638,7 +638,6 @@ private:
   ClassDecl *systemErrorClass_ = nullptr;
   ClassDecl *statsClass_ = nullptr;
   ClassDecl *direntClass_ = nullptr;
-  ClassDecl *execSyncErrorClass_ = nullptr;
   MemberExpr *pendingSetter_ = nullptr;
   llvm::DenseMap<const VarSymbol *, std::string> constPrefixes_;
 

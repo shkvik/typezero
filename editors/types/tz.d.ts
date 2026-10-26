@@ -152,20 +152,20 @@ declare class SystemError extends Error {
   dest?: string
 }
 
-// What execSync and execFileSync of node:child_process throw when the program
-// ran and failed (docs/process.md).
-declare class ExecSyncError extends Error {
+// The error of execSync, execFileSync and spawnSync of node:child_process
+// (docs/process.md): the program could not start, ran too long or printed
+// too much (the code of the system), or ended badly (the code "exit").
+type ExecError<Out> = {
+  code: string
+  message: string
   errno?: int
-  code?: string
   syscall?: string
   path?: string
   spawnargs?: string[]
   status?: int
   signal?: string
-  output: (string | Buffer | undefined)[]
-  pid: int
-  stdout: string | Buffer | undefined
-  stderr: string | Buffer | undefined
+  stdout?: Out
+  stderr?: Out
 }
 
 // Decorators and reflection (docs/decorators.md). A class whose objects are
@@ -233,6 +233,92 @@ declare const Result: {
   combineWithAllErrors<R extends readonly Result<unknown, unknown>[]>(
     results: readonly [...R],
   ): Result<ResultValues<R>, ResultError<R[number]>[]>
+}
+
+// node:fs, node:fs/promises and node:child_process give a Result where node
+// throws (docs/io.md, section 5; docs/process.md): these names of the
+// modules hide the ones of @types/node.
+declare module "node:fs" {
+  import type { Dirent, Stats } from "fs"
+  type Path = string | Buffer | URL
+  type File = Path | number
+  type Data = string | NodeJS.ArrayBufferView
+  type Flag =
+    | "r" | "rs" | "sr" | "r+" | "rs+" | "sr+"
+    | "w" | "wx" | "xw" | "w+" | "wx+" | "xw+"
+    | "a" | "ax" | "xa" | "as" | "sa" | "a+" | "ax+" | "xa+" | "as+" | "sa+"
+  type Done<T> = Result<T, SystemError>
+  export function readFileSync(path: File, options?: { encoding?: undefined; flag?: Flag }): Done<Buffer>
+  export function readFileSync(path: File, options: BufferEncoding | { encoding: BufferEncoding; flag?: Flag }): Done<string>
+  export function writeFileSync(file: File, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number }): Done<void>
+  export function appendFileSync(file: File, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number }): Done<void>
+  export function accessSync(path: Path, mode?: number): Done<void>
+  export function chmodSync(path: Path, mode: number | string): Done<void>
+  export function truncateSync(path: Path, len?: number): Done<void>
+  export function statSync(path: Path, options: { throwIfNoEntry: false }): Done<Stats | undefined>
+  export function statSync(path: Path, options?: { throwIfNoEntry?: true }): Done<Stats>
+  export function lstatSync(path: Path, options: { throwIfNoEntry: false }): Done<Stats | undefined>
+  export function lstatSync(path: Path, options?: { throwIfNoEntry?: true }): Done<Stats>
+  export function readdirSync(path: Path, options: { withFileTypes: true; recursive?: boolean }): Done<Dirent[]>
+  export function readdirSync(path: Path, options?: "utf8" | { encoding?: "utf8"; withFileTypes?: false; recursive?: boolean }): Done<string[]>
+  export function mkdirSync(path: Path, options: { recursive: true; mode?: number }): Done<string | undefined>
+  export function mkdirSync(path: Path, options?: number | { recursive?: false; mode?: number }): Done<void>
+  export function mkdtempSync(prefix: string, options?: "utf8" | { encoding?: "utf8" }): Done<string>
+  export function rmdirSync(path: Path): Done<void>
+  export function unlinkSync(path: Path): Done<void>
+  export function rmSync(path: Path, options?: { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number }): Done<void>
+  export function renameSync(oldPath: Path, newPath: Path): Done<void>
+  export function copyFileSync(src: Path, dest: Path, mode?: number): Done<void>
+  export function realpathSync(path: Path, options?: "utf8" | { encoding?: "utf8" }): Done<string>
+  export const promises: typeof import("node:fs/promises")
+}
+
+declare module "node:child_process" {
+  import type { ExecFileSyncOptions, ExecSyncOptions, SpawnSyncOptions, SpawnSyncReturns } from "child_process"
+  type Text = { encoding: BufferEncoding }
+  type Bytes = { encoding?: "buffer" }
+  type Ran<T> = Omit<SpawnSyncReturns<T>, "error">
+  export function execSync(command: string, options: ExecSyncOptions & Text): Result<string, ExecError<string>>
+  export function execSync(command: string, options?: ExecSyncOptions & Bytes): Result<Buffer, ExecError<Buffer>>
+  export function execFileSync(file: string, options: ExecFileSyncOptions & Text): Result<string, ExecError<string>>
+  export function execFileSync(file: string, args: readonly string[], options: ExecFileSyncOptions & Text): Result<string, ExecError<string>>
+  export function execFileSync(file: string, options?: ExecFileSyncOptions & Bytes): Result<Buffer, ExecError<Buffer>>
+  export function execFileSync(file: string, args?: readonly string[], options?: ExecFileSyncOptions & Bytes): Result<Buffer, ExecError<Buffer>>
+  export function spawnSync(command: string, options: SpawnSyncOptions & Text): Result<Ran<string>, ExecError<string>>
+  export function spawnSync(command: string, args: readonly string[], options: SpawnSyncOptions & Text): Result<Ran<string>, ExecError<string>>
+  export function spawnSync(command: string, options?: SpawnSyncOptions & Bytes): Result<Ran<Buffer>, ExecError<Buffer>>
+  export function spawnSync(command: string, args?: readonly string[], options?: SpawnSyncOptions & Bytes): Result<Ran<Buffer>, ExecError<Buffer>>
+}
+
+declare module "node:fs/promises" {
+  import type { Dirent, Stats } from "fs"
+  type Path = string | Buffer | URL
+  type Data = string | NodeJS.ArrayBufferView
+  type Flag =
+    | "r" | "rs" | "sr" | "r+" | "rs+" | "sr+"
+    | "w" | "wx" | "xw" | "w+" | "wx+" | "xw+"
+    | "a" | "ax" | "xa" | "as" | "sa" | "a+" | "ax+" | "xa+" | "as+" | "sa+"
+  type Done<T> = Promise<Result<T, SystemError>>
+  export function readFile(path: Path, options?: { encoding?: undefined; flag?: Flag; signal?: AbortSignal }): Done<Buffer>
+  export function readFile(path: Path, options: BufferEncoding | { encoding: BufferEncoding; flag?: Flag; signal?: AbortSignal }): Done<string>
+  export function writeFile(file: Path, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number; signal?: AbortSignal }): Done<void>
+  export function appendFile(file: Path, data: Data, options?: BufferEncoding | { encoding?: BufferEncoding; flag?: Flag; mode?: number }): Done<void>
+  export function access(path: Path, mode?: number): Done<void>
+  export function chmod(path: Path, mode: number | string): Done<void>
+  export function truncate(path: Path, len?: number): Done<void>
+  export function stat(path: Path): Done<Stats>
+  export function lstat(path: Path): Done<Stats>
+  export function readdir(path: Path, options: { withFileTypes: true; recursive?: boolean }): Done<Dirent[]>
+  export function readdir(path: Path, options?: "utf8" | { encoding?: "utf8"; withFileTypes?: false; recursive?: boolean }): Done<string[]>
+  export function mkdir(path: Path, options: { recursive: true; mode?: number }): Done<string | undefined>
+  export function mkdir(path: Path, options?: number | { recursive?: false; mode?: number }): Done<void>
+  export function mkdtemp(prefix: string, options?: "utf8" | { encoding?: "utf8" }): Done<string>
+  export function rmdir(path: Path): Done<void>
+  export function unlink(path: Path): Done<void>
+  export function rm(path: Path, options?: { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number }): Done<void>
+  export function rename(oldPath: Path, newPath: Path): Done<void>
+  export function copyFile(src: Path, dest: Path, mode?: number): Done<void>
+  export function realpath(path: Path, options?: "utf8" | { encoding?: "utf8" }): Done<string>
 }
 
 // Input line by line (docs/io.md, section 4).

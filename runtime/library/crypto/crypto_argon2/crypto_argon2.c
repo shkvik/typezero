@@ -248,8 +248,7 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
            : strcmp(name, "argon2id") == 0 ? 2
                                            : -1;
     if (type < 0) {
-      tz_throw(TZ_TYPE_ERROR,
-               "The argument 'algorithm' must be one of: 'argon2d', 'argon2i', "
+      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The argument 'algorithm' must be one of: 'argon2d', 'argon2i', "
                "'argon2id'. Received '%s'",
                name);
       return NULL;
@@ -271,8 +270,7 @@ TzBytes *tz_crypto_argon2(int32_t type, void *name_obj, uint64_t name_meta, cons
     goto done;
   }
   if (nonce.length < 8) {
-    tz_throw(TZ_RANGE_ERROR,
-             "The value of \"parameters.nonce.byteLength\" is out of range. It "
+    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"parameters.nonce.byteLength\" is out of range. It "
              "must be >= 8 && <= 4294967295. Received %zu",
              nonce.length);
     goto done;

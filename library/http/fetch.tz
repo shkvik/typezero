@@ -1,5 +1,5 @@
 import { URL, URLSearchParams, __formText, __percentDecode } from "tz:url"
-import { AbortController, AbortSignal } from "tz:web"
+import { AbortController, AbortSignal, DOMException } from "tz:web"
 
 function __tz_net_connect(host: string, port: int, signal: AbortSignal | undefined): Promise<object>
 function __tz_net_close(conn: object): void
@@ -1087,24 +1087,42 @@ export class Request {
     return r
   }
 
-  async text(): Promise<string> {
-    return this.#body.consumeText()
+  async text(): Promise<Result<string, BodyError>> {
+    try {
+      return ok(await this.#body.consumeText())
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async json(): Promise<Result<Json, JsonError>> {
-    return JSON.parse(await this.#body.consumeText())
+  async json(): Promise<Result<Json, BodyError | JsonError>> {
+    const text = await this.text()
+    if (text.isErr()) return text
+    return JSON.parse(text.value)
   }
 
-  async bytes(): Promise<Uint8Array> {
-    return this.#body.consume()
+  async bytes(): Promise<Result<Uint8Array, BodyError>> {
+    try {
+      return ok(await this.#body.consume())
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async arrayBuffer(): Promise<ArrayBuffer> {
-    return (await this.#body.consume()).slice().buffer
+  async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
+    try {
+      return ok((await this.#body.consume()).slice().buffer)
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async formData(): Promise<FormData> {
-    return parseFormData(this.#headers.get("content-type"), await this.#body.consume())
+  async formData(): Promise<Result<FormData, BodyError>> {
+    try {
+      return ok(parseFormData(this.#headers.get("content-type"), await this.#body.consume()))
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 }
 
@@ -1237,24 +1255,42 @@ export class Response {
     return r
   }
 
-  async text(): Promise<string> {
-    return this.#body.consumeText()
+  async text(): Promise<Result<string, BodyError>> {
+    try {
+      return ok(await this.#body.consumeText())
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async json(): Promise<Result<Json, JsonError>> {
-    return JSON.parse(await this.#body.consumeText())
+  async json(): Promise<Result<Json, BodyError | JsonError>> {
+    const text = await this.text()
+    if (text.isErr()) return text
+    return JSON.parse(text.value)
   }
 
-  async bytes(): Promise<Uint8Array> {
-    return this.#body.consume()
+  async bytes(): Promise<Result<Uint8Array, BodyError>> {
+    try {
+      return ok(await this.#body.consume())
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async arrayBuffer(): Promise<ArrayBuffer> {
-    return (await this.#body.consume()).slice().buffer
+  async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
+    try {
+      return ok((await this.#body.consume()).slice().buffer)
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 
-  async formData(): Promise<FormData> {
-    return parseFormData(this.#headers.get("content-type"), await this.#body.consume())
+  async formData(): Promise<Result<FormData, BodyError>> {
+    try {
+      return ok(parseFormData(this.#headers.get("content-type"), await this.#body.consume()))
+    } catch (e) {
+      return err(bodyErrorOf(e))
+    }
   }
 }
 
@@ -1437,7 +1473,41 @@ function dataResponse(url: URL): Response {
   return r
 }
 
-export async function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+export async function fetch(input: string | URL | Request,
+                            init?: RequestInit): Promise<Result<Response, FetchError>> {
+  try {
+    return ok(await fetchOrThrow(input, init))
+  } catch (e) {
+    return err(fetchErrorOf(e))
+  }
+}
+
+function fetchErrorOf(e: Error): FetchError {
+  if (e instanceof DOMException)
+    return { code: e.name == "TimeoutError" ? "TIMEOUT_ERR" : "ABORT_ERR", message: e.message }
+  const cause = e.cause
+  if (e.message != "fetch failed")
+    return cause == undefined ? { code: "bad_request", message: e.message }
+                              : { code: "bad_request", message: e.message, cause: cause.message }
+  if (cause instanceof SystemError)
+    return { code: cause.code, message: e.message, cause: cause.message }
+  if (cause != undefined) return { code: "fetch_failed", message: e.message, cause: cause.message }
+  return { code: "fetch_failed", message: e.message }
+}
+
+function bodyErrorOf(e: Error): BodyError {
+  if (e instanceof DOMException)
+    return { code: e.name == "TimeoutError" ? "TIMEOUT_ERR" : "ABORT_ERR", message: e.message }
+  const message = e.message
+  const cause = e.cause
+  if (message.startsWith("Body is unusable")) return { code: "body_used", message }
+  if (message == "terminated")
+    return cause == undefined ? { code: "terminated", message } : { code: "terminated", message, cause: cause.message }
+  if (message.startsWith("Failed to parse body as FormData")) return { code: "bad_form", message }
+  return { code: "body_failed", message }
+}
+
+async function fetchOrThrow(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const request = new Request(input, init)
   const signal = request.__signalIfAny()
   signal?.throwIfAborted()
@@ -1470,7 +1540,7 @@ export async function fetch(input: string | URL | Request, init?: RequestInit): 
     } catch (e) {
       throw fetchFailed(e)
     }
-    await response.arrayBuffer()
+    await response.__bodyOf().consume()
     if (((status == 301 || status == 302) && method == "POST") ||
         (status == 303 && method != "GET" && method != "HEAD")) {
       method = "GET"

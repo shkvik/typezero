@@ -139,8 +139,9 @@ void tz_fss_open(TzPromise *p, void *path_obj, uint64_t path_meta, void *flag_ob
                  uint64_t flag_meta, int32_t mode, TzMaker make) {
   FdRequest *r = fd_new(p, make);
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags) ||
-      !tz_fs_path_init(&r->path, path_obj, path_meta)) {
-    void *error = tz_thrown;
+      !tz_fs_path_init(&r->path, path_obj, path_meta, make, "open")) {
+    void *error = tz_failed ? tz_failed : tz_thrown;
+    tz_failed = NULL;
     tz_thrown = NULL;
     tz_promise_reject(r->promise, error);
     fd_free(r);

@@ -1,24 +1,23 @@
-TypeError | The argument 'file' must be a string without null bytes. Received 'a\x00b'
-TypeError | The argument 'args[1]' must be a string without null bytes. Received 'a\x00'
-TypeError | The argument 'file' cannot be empty. Received ''
-TypeError | The argument 'file' cannot be empty. Received ''
-TypeError | The argument 'command' must be a string without null bytes. Received 'echo \x00'
-TypeError | The property 'options.cwd' must be a string, Uint8Array, or URL without null bytes. Received 'a\x00'
-TypeError | The property 'options.env['A']' must be a string without null bytes. Received 'a\x00'
-TypeError | The property 'options.argv0' must be a string without null bytes. Received 'a\x00'
-TypeError | The property 'options.shell' must be a string without null bytes. Received 'a\x00'
-RangeError | The value of "timeout" is out of range. It must be an unsigned integer. Received -1
-RangeError | The value of "timeout" is out of range. It must be an unsigned integer. Received 1.5
-RangeError | The value of "options.maxBuffer" is out of range. It must be a positive number. Received -1
-TypeError | Unknown signal: SIGFOO
-TypeError | Unknown signal: 99
-5
-no error
-found
-ENOENT
-9
-0
-spawnSync cmd ENOENT
-Error | spawnSync echo hi ENOENT
-"no shell"
-ENOTSUP spawnSync cmd ENOTSUP
+ERR_INVALID_ARG_VALUE | The argument 'file' must be a string without null bytes. Received 'a\x00b'
+ERR_INVALID_ARG_VALUE | The argument 'args[1]' must be a string without null bytes. Received 'a\x00'
+ERR_INVALID_ARG_VALUE | The argument 'file' cannot be empty. Received ''
+ERR_INVALID_ARG_VALUE | The argument 'file' cannot be empty. Received ''
+ERR_INVALID_ARG_VALUE | The argument 'command' must be a string without null bytes. Received 'echo \x00'
+ERR_INVALID_ARG_VALUE | The property 'options.cwd' must be a string, Uint8Array, or URL without null bytes. Received 'a\x00'
+ERR_INVALID_ARG_VALUE | The property 'options.env['A']' must be a string without null bytes. Received 'a\x00'
+ERR_INVALID_ARG_VALUE | The property 'options.argv0' must be a string without null bytes. Received 'a\x00'
+ERR_INVALID_ARG_VALUE | The property 'options.shell' must be a string without null bytes. Received 'a\x00'
+ERR_OUT_OF_RANGE | The value of "timeout" is out of range. It must be an unsigned integer. Received -1
+ERR_OUT_OF_RANGE | The value of "timeout" is out of range. It must be an unsigned integer. Received 1.5
+ERR_OUT_OF_RANGE | The value of "options.maxBuffer" is out of range. It must be a positive number. Received -1
+ERR_UNKNOWN_SIGNAL | Unknown signal: SIGFOO
+ERR_UNKNOWN_SIGNAL | Unknown signal: 99
+Ok { value: 5 }
+Ok { value: 'found' }
+ENOENT | spawnSync cmd ENOENT
+Ok { value: 9 }
+Ok { value: 0 }
+ENOENT | spawnSync cmd ENOENT
+ENOENT | spawnSync echo hi ENOENT
+Ok { value: '"no shell"' }
+ENOTSUP | spawnSync cmd ENOTSUP

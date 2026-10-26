@@ -58,20 +58,8 @@ if (picked.isOk()) {
 
 // 5. The errors of node:fs.
 function read(path: string): string {
-  try {
-    return must(readFileSync(path, "utf8"))
-  } catch (e) {
-    if (e instanceof SystemError && e.code == "ENOENT") return `none: ${e.syscall}`
-    if (e instanceof SystemError) return `other: ${e.code}`
-    throw e
-  }
+  const text = readFileSync(path, "utf8")
+  if (text.isOk()) return text.value
+  return text.error.code == "ENOENT" ? `none: ${text.error.syscall}` : `other: ${text.error.code}`
 }
 console.log(read("./no/such/file"), read("."))
-
-function must<T, E>(r: Result<T, E>): T {
-  if (r.isErr()) {
-    console.log(r.error)
-    process.exit(1)
-  }
-  return r.value
-}

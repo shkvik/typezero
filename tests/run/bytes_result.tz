@@ -16,11 +16,7 @@ const file = join(dir, "a.bin")
 must(writeFileSync(file, new Uint8Array([9, 8, 7])))
 async function read(path: string): Promise<Result<Buffer, string>> {
   await undefined
-  try {
-    return ok(must(readFileSync(path)))
-  } catch (e) {
-    return err(e instanceof SystemError ? e.code : e.message)
-  }
+  return readFileSync(path).mapErr(e => e.code)
 }
 console.log(await read(file), await read(join(dir, "missing.bin")))
 console.log((await read(file)).map(b => b.toString("hex")))

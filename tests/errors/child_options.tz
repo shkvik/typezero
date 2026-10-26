@@ -33,9 +33,5 @@ const options = { cwd: "." }
 spawnSync("git", [], options)
 // expect-error: the options of 'execFileSync' come after its arguments
 execFileSync("git", { cwd: "." }, ["status"])
-// expect-error: 'new ExecSyncError' is not possible: only the functions of node:child_process make ExecSyncError
-const e = new ExecSyncError()
-// expect-error: class 'MyError' cannot extend 'ExecSyncError': only the functions of node:child_process make its objects; extend Error
-class MyError extends ExecSyncError {}
 // expect-error: type 'string | undefined' is not assignable to type 'string'
-const out: string = execSync("dir", { encoding: "utf8", stdio: "inherit" })
+const out: string = execSync("dir", { encoding: "utf8", stdio: "inherit" }).unwrapOr("")

@@ -1,5 +1,5 @@
 #include "compiler/library/child_process/child_lowerer/child_lowerer.h"
-#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
@@ -53,8 +53,6 @@ enum RequestField : unsigned {
 
 enum PartsField : unsigned {
   PtMessage,
-  PtName,
-  PtError,
   PtCode,
   PtSyscall,
   PtPath,
@@ -100,8 +98,8 @@ llvm::StructType *ChildLowerer::spawnPartsType() {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
 
   return llvm::StructType::get(
-      lowering_.ctx_, {lowering_.strTy_, lowering_.strTy_, ptr, lowering_.strTy_, lowering_.strTy_,
-                       lowering_.strTy_, ptr, lowering_.strTy_,
+      lowering_.ctx_, {lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, ptr,
+                       lowering_.strTy_,
                        llvm::ArrayType::get(lowering_.strTy_, 3), llvm::ArrayType::get(ptr, 3), i32,
                        i32, i32, i32, i32, i32, i32, llvm::ArrayType::get(i32, 3)});
 }
@@ -164,7 +162,7 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
   const ClassDecl *cls = type->classDecl();
   maker = llvm::Function::Create(
       llvm::FunctionType::get(ptr, {ptr}, false), llvm::GlobalValue::InternalLinkage,
-      cls ? "tz.make." + cls->name.str() : "tz.make.SpawnSyncReturns", lowering_.module_.get());
+      cls ? "tz.make." + cls->name.str() : "tz.make.spawn", lowering_.module_.get());
   lowering_.functionBuilder().setFunctionAttributes(maker);
   llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
   llvm::Function *outer = std::exchange(lowering_.function_, maker);
@@ -192,27 +190,27 @@ llvm::Function *ChildLowerer::spawnMaker(const Type *type) {
   for (const Field &f : type->fields()) {
     llvm::StringRef name = f.name;
     const Type *t = f.type;
+    auto maybe = [&](unsigned part, unsigned has) {
+      return t->isOptional() ? lowering_.optionalLowerer().makeOptional(load(part), flag(has), t)
+                             : load(part);
+    };
     llvm::Value *value;
     if (name == "message") {
       value = load(PtMessage);
-    } else if (name == "name") {
-      value = load(PtName);
-    } else if (name == "error") {
-      value = load(PtError);
-    } else if (name == "errno") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtErrno), flag(PtHasCode), t);
     } else if (name == "code") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtCode), flag(PtHasCode), t);
+      value = load(PtCode);
+    } else if (name == "errno") {
+      value = maybe(PtErrno, PtHasCode);
     } else if (name == "syscall") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtSyscall), flag(PtHasCode), t);
+      value = maybe(PtSyscall, PtHasCode);
     } else if (name == "path") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtPath), flag(PtHasCode), t);
+      value = maybe(PtPath, PtHasCode);
     } else if (name == "spawnargs") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtSpawnargs), flag(PtHasCode), t);
+      value = maybe(PtSpawnargs, PtHasCode);
     } else if (name == "status") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtStatus), flag(PtHasStatus), t);
+      value = maybe(PtStatus, PtHasStatus);
     } else if (name == "signal") {
-      value = lowering_.optionalLowerer().makeOptional(load(PtSignal), flag(PtHasSignal), t);
+      value = maybe(PtSignal, PtHasSignal);
     } else if (name == "pid") {
       value = load(PtPid);
     } else if (name == "stdout" || name == "stderr") {
@@ -333,32 +331,23 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
   }
   set(RqEncoding, lowering_.builder_.getInt32(literal(ChildEncoding)));
 
-  const Type *made = call->type;
-  if (call->builtin != Builtin::ChildSpawnSync) {
-    made = nullptr;
-    for (const ClassDecl *child : lowering_.errorClass_->children) {
-      if (child->builtin && child->name == "ExecSyncError") {
-        made = child->type;
-      }
-    }
-    if (!made) {
-      llvm_unreachable("Checker declares ExecSyncError");
-    }
+  bool spawn = call->builtin == Builtin::ChildSpawnSync;
+  const Type *value = call->type->okType();
+  llvm::Value *resultMaker = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+  if (spawn) {
+    resultMaker = spawnMaker(value);
   }
   llvm::AllocaInst *parts =
       lowering_.functionFrame().createStackSlot(spawnPartsType(), "spawn.parts");
   llvm::Value *result = lowering_.builder_.CreateCall(
       lowering_.processLowerer().processFunction("tz_child_run", ptr, {ptr, ptr, ptr, ptr}),
-      {request, parts, lowering_.fsLowerer().systemErrorMaker(), spawnMaker(made)});
+      {request, parts, spawnMaker(call->type->errType()), resultMaker});
   for (size_t i = 0; i < values.size(); ++i) {
     lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
   }
-  lowering_.throwLowerer().emitThrowCheck();
-  if (call->builtin == Builtin::ChildSpawnSync) {
-    return result;
-  }
 
-  return spawnStream(parts, 1, call->type, false);
+  return lowering_.resultLowerer().catchFailure(
+      spawn ? result : spawnStream(parts, 1, value, false), call->type, call->loc());
 }
 
 }

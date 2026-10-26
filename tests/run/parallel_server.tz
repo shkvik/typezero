@@ -32,7 +32,7 @@ for (let i = 0; i < 600; i++)
 const answers: { path: string, text: string }[] = []
 for (let round = 0; round < 4; round++) {
   const some = await Promise.all(paths.slice(round * 150, round * 150 + 150).map(async (path) => {
-    const text = await (await fetch(base + path)).text()
+    const text = must(await (must(await fetch(base + path))).text())
     return { path, text }
   }))
   answers.push(...some)
@@ -54,3 +54,11 @@ console.log(`echoes right: ${echoes} of 200`)
 console.log(`later answers right: ${laters} of 200`)
 await server.stop()
 console.log("stopped")
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

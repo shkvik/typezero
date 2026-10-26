@@ -44,14 +44,14 @@ await subtle.generateKey({ name: "AES-GCM" }, true, ["encrypt"])
 await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["verify"])
 // expect-error: 'Ed448' is an algorithm node 24 has as an experiment, which tz has not yet
 await subtle.generateKey("Ed448", true, ["sign"])
-const aes = await subtle.generateKey({ name: "AES-GCM", length: 128 }, true, ["encrypt"])
+const aes = must(await subtle.generateKey({ name: "AES-GCM", length: 128 }, true, ["encrypt"]))
 // expect-error: the tag of AES-GCM is 32, 64, 96, 104, 112, 120 or 128 bits long
 await subtle.encrypt({ name: "AES-GCM", iv: raw, tagLength: 100 }, aes, raw)
 // expect-error: the algorithm 'AES-CBC' of encrypt needs 'iv' (AesCbcParams); add it, e.g. 'iv: new Uint8Array(16)'
 await subtle.encrypt({ name: "AES-CBC" }, aes, raw)
 // expect-error: 'HMAC' is no algorithm of encrypt; it encrypts with 'AES-CBC', 'AES-CTR', 'AES-GCM' or 'RSA-OAEP'
 await subtle.encrypt("HMAC", aes, raw)
-const pbkdf2 = await subtle.importKey("raw", raw, "PBKDF2", false, ["deriveKey"])
+const pbkdf2 = must(await subtle.importKey("raw", raw, "PBKDF2", false, ["deriveKey"]))
 // expect-error: deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, not 'ECDSA'
 await subtle.deriveKey({ name: "PBKDF2", salt: raw, iterations: 1, hash: "SHA-256" }, pbkdf2, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"])
 // expect-error: the algorithm 'PBKDF2' of deriveBits needs 'iterations' (Pbkdf2Params)
@@ -62,7 +62,7 @@ await subtle.wrapKey("raw", aes, aes, "AES-KX")
 // expect-error: the algorithm 'HMAC' of importKey needs 'hash' (HmacImportParams)
 const algorithm = { name: "HMAC" }
 await subtle.importKey("raw", raw, algorithm, false, ["sign"])
-const key = await subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"])
+const key = must(await subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]))
 // expect-error: property 'handle' does not exist on type 'CryptoKey'; it has 'type', 'extractable', 'algorithm' and 'usages'
 console.log(key.handle)
 // expect-error: a CryptoKey is made by crypto.subtle: importKey, generateKey, deriveKey or unwrapKey
@@ -71,3 +71,8 @@ new CryptoKey()
 new SubtleCrypto()
 // expect-error: 'globalThis.process' is not supported: tz has only 'globalThis.crypto'; write 'process'
 console.log(globalThis.process)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) process.exit(1)
+  return r.value
+}

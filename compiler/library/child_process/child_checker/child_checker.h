@@ -9,7 +9,6 @@ public:
   explicit ChildChecker(Checker &checker);
 
   Expr *checkChildCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
-  void declareExecSyncError();
 
 private:
   Checker &checker_;

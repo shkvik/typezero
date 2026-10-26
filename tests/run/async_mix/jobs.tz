@@ -49,7 +49,10 @@ export class Folder implements Source {
   constructor(public dir: string) {}
   async read(key: string) {
     await undefined
-    return must(readFileSync(join(this.dir, key), "utf8"))
+    const text = readFileSync(join(this.dir, key), "utf8")
+    if (text.isErr())
+      throw text.error
+    return text.value
   }
   write(key: string, text: string) {
     must(writeFileSync(join(this.dir, key), text))

@@ -10,7 +10,8 @@ function resulting(f) {
     try {
       return ok(await f(...args));
     } catch (e) {
-      if (typeof e?.code === "string" && typeof e?.syscall === "string")
+      if (typeof e?.code === "string" &&
+          (typeof e?.syscall === "string" || e.code === "ERR_INVALID_ARG_VALUE"))
         return err(e);
       throw e;
     }

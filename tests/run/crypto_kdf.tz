@@ -80,8 +80,16 @@ try {
   console.log(e.name, e.message)
 }
 const secret = createSecretKey(Buffer.from("secret"))
-console.log(secret.type, secret.symmetricKeySize, secret.asymmetricKeyType, secret.export().toString())
-console.log(JSON.stringify(secret.export({ format: "jwk" })))
+console.log(secret.type, secret.symmetricKeySize, secret.asymmetricKeyType, must(secret.export()).toString())
+console.log(JSON.stringify(must(secret.export({ format: "jwk" }))))
 console.log(secret.equals(createSecretKey(Buffer.from("secret"))), secret.equals(createSecretKey(Buffer.from("other"))))
 const generated = generateKeySync("hmac", { length: 64 })
-console.log(generated.type, generated.symmetricKeySize, generateKeySync("aes", { length: 256 }).export().length)
+console.log(generated.type, generated.symmetricKeySize, must(generateKeySync("aes", { length: 256 }).export()).length)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

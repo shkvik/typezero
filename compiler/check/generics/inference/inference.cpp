@@ -90,7 +90,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
     return;
   case Type::Kind::Result:
     if (actual->isResult()) {
-      from(pattern->okType(), actual->okType());
+      fromHeld(pattern->okType(), actual->okType());
       from(pattern->errType(), actual->errType());
     }
     return;
@@ -138,7 +138,7 @@ void Inference::from(const Type *pattern, const Type *actual) {
     return;
   case Type::Kind::Promise:
     if (actual->isPromise()) {
-      from(pattern->promised(), actual->promised());
+      fromHeld(pattern->promised(), actual->promised());
     }
     return;
   case Type::Kind::ClassRef:
@@ -224,6 +224,14 @@ void Inference::from(const Type *pattern, const Type *actual) {
   default:
     return;
   }
+}
+
+void Inference::fromHeld(const Type *pattern, const Type *actual) {
+  if (auto at = llvm::find(params, pattern); at != params.end() && actual->isVoid()) {
+    (weak ? weakCandidates : candidates)[size_t(at - params.begin())].push_back(actual);
+    return;
+  }
+  from(pattern, actual);
 }
 
 void Inference::matchList(const Type *pattern, const Type *actual,

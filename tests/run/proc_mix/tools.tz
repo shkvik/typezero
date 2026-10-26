@@ -1,6 +1,6 @@
 // What main.tz runs programs with: a class whose decorated method runs this
-// program again and records it, an async generator of the lines a child
-// prints, and a generic function that turns a throw into a Result.
+// program again and records it, and an async generator of the lines a child
+// prints.
 import { execFileSync } from "node:child_process"
 
 export const ran: string[] = []
@@ -19,22 +19,14 @@ export class Runner {
     this.self = self
   }
   @Logged
-  text(what: string, arg: string): string {
+  text(what: string, arg: string): Result<string, ExecError<string>> {
     return execFileSync(process.execPath, [...this.self, what, arg], { encoding: "utf8", stdio: "pipe" })
   }
   async *lines(what: string, arg: string) {
-    for (const line of this.text(what, arg).split("\n")) {
+    for (const line of this.text(what, arg).unwrapOr("").split("\n")) {
       await undefined
       if (line != "")
         yield line
     }
-  }
-}
-
-export function attempt<T>(f: () => T): Result<T, Error> {
-  try {
-    return ok(f())
-  } catch (e) {
-    return err(e)
   }
 }

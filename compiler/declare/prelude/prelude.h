@@ -10,6 +10,7 @@ public:
 
   void declarePrelude();
   const Type *builtinType(llvm::StringRef name);
+  const Type *builtinType(llvm::StringRef name, std::vector<const Type *> args);
 
 private:
   Checker &checker_;

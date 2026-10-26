@@ -19,6 +19,11 @@ readFileSync(file, options)
 readFileSync(file, { encodings: "utf8" })
 // expect-error: 'writeFileSync' writes a string or bytes (a Uint8Array or a Buffer); found 'int'; convert it first, e.g. 'String(x)'
 writeFileSync(file, 42)
+// expect-error: 'q' is not a flag of 'writeFileSync'; the flags are 'r', 'r+', 'w', 'wx'
+writeFileSync(file, "x", { flag: "q" })
+const flag = "wx"
+// expect-error: the flag of 'readFileSync' is written as a literal: 'r', 'r+'
+readFileSync(file, { flag })
 const types = true
 // expect-error: the option 'withFileTypes' of 'readdirSync' is written as a literal, true or false
 readdirSync(".", { withFileTypes: types })

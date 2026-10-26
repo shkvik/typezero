@@ -23,6 +23,8 @@ struct Inference {
 
   void from(const Type *pattern, const Type *actual);
 
+  void fromHeld(const Type *pattern, const Type *actual);
+
   void matchList(const Type *pattern, const Type *actual, const std::vector<const Type *> *bound);
 
   void retry(const std::vector<const Type *> &bound);

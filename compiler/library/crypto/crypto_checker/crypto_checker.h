@@ -10,6 +10,8 @@ public:
 
   Expr *checkCryptoMember(MemberExpr *member);
   Expr *checkCryptoNew(NewExpr *expr, llvm::StringRef cls);
+  Expr *checkX509Parse(CallExpr *call, MemberExpr *member);
+  bool isX509Class(Expr *object) const;
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
   Expr *cryptoConstant(MemberExpr *member);

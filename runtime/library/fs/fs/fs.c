@@ -253,7 +253,7 @@ void tz_fs_path_free(Path *p) {
 #endif
 }
 
-int tz_fs_path_init(Path *p, void *obj, uint64_t meta) {
+int tz_fs_path_init(Path *p, void *obj, uint64_t meta, TzMaker make, const char *syscall) {
   tz_buf_init(&p->given);
   tz_buf_str(&p->given, (TzStr){obj, meta});
   for (size_t i = 0; i < p->given.length; ++i) {
@@ -272,9 +272,19 @@ int tz_fs_path_init(Path *p, void *obj, uint64_t meta) {
       }
     }
     tz_buf_push(&m, '\'');
-    TzStr message = tz_buf_take(&m);
-    tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-    tz_str_release_value(message);
+    TzSystemErrorParts parts;
+    memset(&parts, 0, sizeof parts);
+    parts.message = tz_buf_take(&m);
+    parts.name = tz_fs_ascii("TypeError");
+#ifdef _WIN32
+    parts.errno_value = tz_fs_errors[E_EINVAL].windows;
+#else
+    parts.errno_value = tz_fs_errno_failure(EINVAL).number;
+#endif
+    parts.code = tz_fs_ascii("ERR_INVALID_ARG_VALUE");
+    parts.syscall = tz_fs_ascii(syscall);
+    parts.path = tz_fs_opt_of(&p->given);
+    tz_fs_throw_parts(make, &parts);
     tz_buf_free(&p->given);
 
     return 0;

@@ -1,15 +1,15 @@
-bad port TypeError: fetch failed (bad port)
-ftp TypeError: fetch failed (not implemented... yet...)
-no url TypeError: Failed to parse URL from not a url (Invalid URL)
-credentials TypeError: Request cannot be constructed from a URL that includes credentials: http://user:pw@localhost/ 
-no host TypeError: fetch failed [ENOTFOUND] (getaddrinfo ENOTFOUND no-such-host.invalid)
+bad port fetch_failed: fetch failed (bad port)
+ftp fetch_failed: fetch failed (not implemented... yet...)
+no url bad_request: Failed to parse URL from not a url (Invalid URL)
+credentials bad_request: Request cannot be constructed from a URL that includes credentials: http://user:pw@localhost/ 
+no host ENOTFOUND: fetch failed (getaddrinfo ENOTFOUND no-such-host.invalid)
 data 200 hello world
 base64 200 hi
-get with body TypeError: Request with GET/HEAD method cannot have body. 
-no duplex TypeError: RequestInit: duplex option is required when sending a body. 
+get with body bad_request: Request with GET/HEAD method cannot have body. 
+no duplex bad_request: RequestInit: duplex option is required when sending a body. 
 small body 200 10 bytes
 large body 413 
 large stream 413 
-corrupt gzip TypeError: terminated (incorrect header check)
+corrupt gzip terminated: terminated (incorrect header check)
 4 bytes true
-TypeError Body is unusable: Body has already been read
+body_used Body is unusable: Body has already been read

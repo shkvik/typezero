@@ -30,7 +30,8 @@ const r = spawnSync("git", ["status"], { encoding: "utf8" })        // { status,
   ExecError>`. `Err` — если программа не запустилась (`{ code: "ENOENT" }` и другие, как у
   [io.md](io.md)) или вышла с кодом ≠ 0: тогда в ошибке `code: "exit"`, `status`, `stdout`,
   `stderr`. `spawnSync` код выхода ошибкой не считает и возвращает `status`; `Err` у него —
-  только если запустить не вышло.
+  если запустить не вышло или программу убили за таймаут или `maxBuffer`. Тип ошибки —
+  `ExecError<Out>`, где `Out` — `string` или `Buffer`, как у вывода.
 - **Опции — как в node:** `cwd`, `env`, `input`, `stdio` (`"pipe"`, `"inherit"`, `"ignore"`),
   `timeout`, `killSignal`, `maxBuffer` (1 МБ, сверх — ошибка `ENOBUFS`), `shell`, `windowsHide`.
 - Перед запуском с `stdio: "inherit"` tz сбрасывает свой буфер stdout ([io.md](io.md)), чтобы
@@ -82,5 +83,8 @@ README.
 2. **Асинхронные функции** — после `EventEmitter` ([events.md](events.md)) и потоков node
    ([streams.md](streams.md), шаг 3). Событие `error` у `ChildProcess` — по правилу
    [events.md](events.md), раздел 4.
-3. **Без исключений** ([errors.md](errors.md), шаг 2): `Result` у `execSync`, `execFileSync`,
-   `spawnSync`; `ExecError` — тип объекта с меткой вместо `ExecSyncError`.
+3. **Без исключений** (сделано 26 октября, [errors.md](errors.md), шаг 2): `Result` у
+   `execSync`, `execFileSync`, `spawnSync`; `ExecError` — тип объекта с меткой вместо
+   `ExecSyncError`. Таймаут и `maxBuffer` у `spawnSync` — тоже `Err` (программа запустилась, но
+   её убили); неверные значения опций — `Err` с кодами node (`ERR_INVALID_ARG_VALUE`,
+   `ERR_OUT_OF_RANGE`, `ERR_UNKNOWN_SIGNAL`).

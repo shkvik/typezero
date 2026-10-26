@@ -26,12 +26,17 @@ console.log(server.url.href.replaceAll(String(server.port), "PORT"))
 const slow = fetch(`http://127.0.0.1:${server.port}/slow`)
 await started.promise
 controller.abort()
-const r = await slow
-console.log(r.status, await r.text())
+const r = must(await slow)
+console.log(r.status, must(await r.text()))
 await server.finished
 console.log("finished")
-try {
-  await fetch(`http://127.0.0.1:${server.port}/`)
-} catch (e) {
-  console.log(e.message)
+const after = await fetch(`http://127.0.0.1:${server.port}/`)
+if (after.isErr()) console.log(after.error.message)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

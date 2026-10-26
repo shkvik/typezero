@@ -8,8 +8,9 @@ console.log(r)
 const q = new Request("http://example.com/x", { method: "POST", body: "hi" })
 console.log(q)
 console.log(new ReadableStream())
-console.log(await q.text(), q.bodyUsed)
-try { await q.text() } catch (e) { console.log(e.name, e.message) }
+console.log(must(await q.text()), q.bodyUsed)
+const again = await q.text()
+if (again.isErr()) console.log(again.error.code, again.error.message)
 const j = Response.json({ a: [1, 2] }, { status: 202 })
 console.log(j.status, j.headers.get("content-type"), await j.json())
 const red = Response.redirect("http://x.com/a", 307)
@@ -23,17 +24,25 @@ try { new Request("http://x", { method: "GET", body: "x" }) } catch (err) { cons
 try { new Request("/relative") } catch (err) { console.log(err.name, err.message) }
 const c = new Response("clone me")
 const c2 = c.clone()
-console.log(await c.text(), await c2.text())
+console.log(must(await c.text()), must(await c2.text()))
 const s = new Response(new ReadableStream({ start: ctl => { ctl.enqueue(new TextEncoder().encode("st")); ctl.close() } }))
 const s2 = s.clone()
-console.log(await s.text(), await s2.text())
+console.log(must(await s.text()), must(await s2.text()))
 console.log(new Request("http://h/", { method: "post" }).method)
 const form = new URLSearchParams({ a: "1", b: "two words" })
 const fr = new Response(form)
-console.log(fr.headers.get("content-type"), await fr.text())
-const fd = await new Response("a=1&b=2", { headers: { "content-type": "application/x-www-form-urlencoded" } }).formData()
+console.log(fr.headers.get("content-type"), must(await fr.text()))
+const fd = must(await new Response("a=1&b=2", { headers: { "content-type": "application/x-www-form-urlencoded" } }).formData())
 console.log(fd.get("a"), fd.getAll("b"), fd.has("c"))
-const ab = await new Response("abc").arrayBuffer()
+const ab = must(await new Response("abc").arrayBuffer())
 console.log(ab.byteLength)
-const b = await new Response(new Uint8Array([1, 2, 3])).bytes()
+const b = must(await new Response(new Uint8Array([1, 2, 3])).bytes())
 console.log(b)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

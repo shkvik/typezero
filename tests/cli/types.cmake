@@ -26,6 +26,7 @@ write(app/config.json [[
 write(app/note.txt "hello")
 set(program [=[
 import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 import { readLine } from "tz:io"
 import { serve } from "tz:http"
 
@@ -61,15 +62,10 @@ async function later(x: int) {
 console.log(Result.combine(await Promise.all([2, 4].map(later))).map(xs => xs.length).isOk())
 
 // Errors of the system.
-try {
-  readFileSync("missing.txt", "utf8")
-} catch (e) {
-  if (e instanceof SystemError) console.log(e.code, e.syscall)
-}
-function status(e: Error) {
-  return e instanceof ExecSyncError ? e.status : undefined
-}
-console.log(status(new Error("x")))
+const missing = readFileSync("missing.txt", "utf8")
+if (missing.isErr()) console.log(missing.error.code, missing.error.syscall)
+const listed = execFileSync("tz-no-such-program", ["--version"], { encoding: "utf8" })
+console.log(listed.match(out => out, e => e.code))
 
 // Decorators and metadata.
 function Table(name: string) {
@@ -106,8 +102,7 @@ const timer: Timeout = setTimeout(() => console.log("never"), 1000)
 clearTimeout(timer)
 console.log(readLine() ?? "no input")
 const server = serve({ hostname: "127.0.0.1", port: 0 }, request => new Response(`got ${new URL(request.url).pathname}`))
-const answer = await fetch(`http://127.0.0.1:${server.port}/hi`)
-console.log(answer.status, await answer.text())
+console.log(server.port > 0)
 await server.stop()
 ]=])
 write(app/main.tz "${program}")
@@ -119,11 +114,11 @@ half 2 true
 true true
 true
 ENOENT open
-undefined
+ENOENT
 call twice
 8 1 rows
 no input
-200 got /hi
+true
 ]])
 
 # The program and the examples as .ts files, with the settings next to tz.

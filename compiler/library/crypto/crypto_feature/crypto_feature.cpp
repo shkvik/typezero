@@ -14,6 +14,9 @@ namespace tz {
 
 Expr *CryptoFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
                                      const Type *) const {
+  if (checker.cryptoChecker().isX509Class(member->object)) {
+    return checker.cryptoChecker().checkX509Parse(call, member);
+  }
   if (!checker.callChecker().isGlobalName(member->object, "crypto")) {
     return nullptr;
   }

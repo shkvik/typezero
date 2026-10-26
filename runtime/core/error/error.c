@@ -103,6 +103,8 @@ void tz_throw(int32_t kind, const char *format, ...) {
   tz_str_release_value(message);
 }
 
+void tz_set_failed(void *error) { tz_failed = error; }
+
 TZ_COLD void tz_throw_stack_overflow(void) {
   tz_throw(TZ_RANGE_ERROR, "Maximum call stack size exceeded");
 }

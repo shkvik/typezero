@@ -24,13 +24,13 @@ const server = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, as
 const base = `http://127.0.0.1:${server.port}`
 
 // 1. A signed response, checked by the client.
-const hello = await fetch(`${base}/hello?name=tz`)
-const text = await hello.text()
+const hello = must(await fetch(`${base}/hello?name=tz`))
+const text = must(await hello.text())
 const signature = hello.headers.get("x-signature") ?? ""
 console.log(hello.status, text, verified(text, signature), verified(text + "!", signature))
 
 // 2. A body streamed by an async generator, read in pieces.
-const counted = await fetch(`${base}/count`)
+const counted = must(await fetch(`${base}/count`))
 const decoder = new TextDecoder()
 let received = ""
 const body = counted.body
@@ -39,21 +39,24 @@ console.log(received)
 
 // 3. A fetch whose body an AbortController aborts while it comes.
 const cancel = new AbortController()
-const slow = await fetch(`${base}/slow`, { signal: cancel.signal })
+const slow = must(await fetch(`${base}/slow`, { signal: cancel.signal }))
 setTimeout(() => cancel.abort(), 50)
-try {
-  console.log("not aborted", await slow.text())
-} catch (e) {
-  console.log(slow.status, "aborted:", e instanceof Error ? e.name : "?")
-}
+const slowText = await slow.text()
+if (slowText.isOk()) console.log("not aborted", slowText.value)
+else console.log(slow.status, "aborted:", slowText.error.code)
 
 // 4. Not found, and the server stopped by its signal.
-console.log((await fetch(`${base}/nope`)).status, handlers.served)
+console.log((must(await fetch(`${base}/nope`))).status, handlers.served)
 stop.abort()
 await server.finished
 console.log(log.join(", "))
-try {
-  await fetch(`${base}/hello`)
-} catch (e) {
-  console.log("after stop:", e instanceof Error ? e.message : "?")
+const after = await fetch(`${base}/hello`)
+if (after.isErr()) console.log("after stop:", after.error.message)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
 }

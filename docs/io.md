@@ -202,3 +202,8 @@ function readConfig() {
    (`Promise<Result>`), `node:readline` отдают `Result<T, SystemError>`; `SystemError` — тип
    объекта вместо класса; убрать заглушку `SystemError` для node; коды выхода без «не пойманного
    исключения»; ресурсы (`FileHandle`) закрываются сами ([errors.md](errors.md), раздел 6).
+   Сделано 26 октября: `node:fs` и `node:fs/promises` (путь с нулевым символом — тоже `Err`, с
+   кодом node `ERR_INVALID_ARG_VALUE`; неверный `flag` — ошибка компиляции), объявления для
+   редактора. Осталось: `node:readline` и отмена через `signal` — с шагом 3 errors.md (там уходят
+   отказы `Promise`); `SystemError` — тип объекта, когда его перестанут бросать `child_process` и
+   сеть (тот же шаг 2 errors.md).

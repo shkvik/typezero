@@ -37,7 +37,6 @@ Errors WholeProgramPass::run(Program &program) const {
     file.items.push_back(kind);
   }
   file.items.push_back(checker.systemErrorClass_);
-  file.items.push_back(checker.execSyncErrorClass_);
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {
     if ((cls->generic || (cls->expression && cls->type)) && cls->isEmitted()) {

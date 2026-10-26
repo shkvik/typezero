@@ -41,7 +41,7 @@ static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag
     return 0;
   }
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "open")) {
     return 0;
   }
   int ok = 0;
@@ -132,7 +132,7 @@ static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, 
     return;
   }
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "open")) {
     return;
   }
   File f = tz_fs_open_file(&p, flags, mode, make);
@@ -230,7 +230,7 @@ int32_t tz_fs_exists(void *path_obj, uint64_t path_meta) {
 
 void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "access")) {
     return;
   }
 #ifdef _WIN32
@@ -251,7 +251,7 @@ void tz_fs_access(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make
 
 void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "chmod")) {
     return;
   }
 #ifdef _WIN32
@@ -275,7 +275,7 @@ void tz_fs_chmod(void *path_obj, uint64_t path_meta, int32_t mode, TzMaker make)
 
 void tz_fs_truncate(void *path_obj, uint64_t path_meta, int64_t length, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "open")) {
     return;
   }
   OpenFlags flags = {1, 1, 0, 0, 0, 0};
@@ -392,7 +392,7 @@ int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st) {
 void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t throw_if_missing,
                  TzMaker make_stats, TzMaker make) {
   Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&p, path_obj, path_meta, make, follow ? "stat" : "lstat")) {
     return NULL;
   }
   TzStatsParts st;
@@ -426,10 +426,10 @@ void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t thr
 void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                   TzMaker make) {
   Path from, to;
-  if (!tz_fs_path_init(&from, from_obj, from_meta)) {
+  if (!tz_fs_path_init(&from, from_obj, from_meta, make, "rename")) {
     return;
   }
-  if (!tz_fs_path_init(&to, to_obj, to_meta)) {
+  if (!tz_fs_path_init(&to, to_obj, to_meta, make, "rename")) {
     tz_fs_path_free(&from);
     return;
   }
@@ -449,10 +449,10 @@ void tz_fs_rename(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_
 void tz_fs_copy_file(void *from_obj, uint64_t from_meta, void *to_obj, uint64_t to_meta,
                      int32_t mode, TzMaker make) {
   Path from, to;
-  if (!tz_fs_path_init(&from, from_obj, from_meta)) {
+  if (!tz_fs_path_init(&from, from_obj, from_meta, make, "copyfile")) {
     return;
   }
-  if (!tz_fs_path_init(&to, to_obj, to_meta)) {
+  if (!tz_fs_path_init(&to, to_obj, to_meta, make, "copyfile")) {
     tz_fs_path_free(&from);
     return;
   }
@@ -570,7 +570,7 @@ void tz_fs_realpath(TzStr *out, void *path_obj, uint64_t path_meta, TzMaker make
   out->obj = NULL;
   out->meta = 0;
   Path given;
-  if (!tz_fs_path_init(&given, path_obj, path_meta)) {
+  if (!tz_fs_path_init(&given, path_obj, path_meta, make, "realpath")) {
     return;
   }
 #ifdef _WIN32

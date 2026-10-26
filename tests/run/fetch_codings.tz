@@ -13,13 +13,21 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, req => {
   return new Response(body, { headers: { "content-encoding": coding == "raw" ? "deflate" : coding } })
 })
 for (const coding of ["gzip", "deflate", "raw", "br"]) {
-  const r = await fetch(`http://127.0.0.1:${server.port}/${coding}`)
-  const text = await r.text()
+  const r = must(await fetch(`http://127.0.0.1:${server.port}/${coding}`))
+  const text = must(await r.text())
   console.log(coding, r.headers.get("content-encoding"), text.length, text.slice(0, 25))
 }
-const r = await fetch(`http://127.0.0.1:${server.port}/br`)
+const r = must(await fetch(`http://127.0.0.1:${server.port}/br`))
 let total = 0
 const body = r.body
 if (body != undefined) for await (const chunk of body) total += chunk.length
 console.log("streamed", total)
 await server.stop()
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

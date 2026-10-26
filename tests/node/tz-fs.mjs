@@ -2,6 +2,7 @@
 // functions that fail with an error of the system give a Result in tz
 // (docs/io.md, section 5), and here too.
 import * as fs from "node:fs";
+import * as resultPromises from "./tz-fs-promises.mjs";
 
 export * from "node:fs";
 
@@ -10,7 +11,8 @@ function resulting(f) {
     try {
       return ok(f(...args));
     } catch (e) {
-      if (typeof e?.code === "string" && typeof e?.syscall === "string")
+      if (typeof e?.code === "string" &&
+          (typeof e?.syscall === "string" || e.code === "ERR_INVALID_ARG_VALUE"))
         return err(e);
       throw e;
     }
@@ -34,3 +36,4 @@ export const rmSync = resulting(fs.rmSync);
 export const renameSync = resulting(fs.renameSync);
 export const copyFileSync = resulting(fs.copyFileSync);
 export const realpathSync = resulting(fs.realpathSync);
+export const promises = { ...fs.promises, ...resultPromises };

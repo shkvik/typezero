@@ -1,5 +1,5 @@
 3 <Buffer 6f 75 74> <Buffer 65 72 72> 3 true
-true true true
+true true
 0 привет мир true
 6869 true
 2
@@ -17,8 +17,8 @@ true
 a true
 inherited
 after true 0
-spawnSync tz-no-such-program ENOENT ENOENT -4058 spawnSync tz-no-such-program tz-no-such-program true
-true true 0
+spawnSync tz-no-such-program ENOENT ENOENT -4058 spawnSync tz-no-such-program tz-no-such-program [ 'a', 'b' ]
+true true true
 ETIMEDOUT true true SIGTERM true
 ETIMEDOUT SIGKILL
 ENOBUFS -4060 SIGTERM true

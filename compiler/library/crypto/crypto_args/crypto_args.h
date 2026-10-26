@@ -9,6 +9,9 @@ public:
   explicit CryptoArgs(Checker &checker);
 
   Expr *cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
+  Expr *cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args, const Type *type);
+  const Type *cryptoError();
+  bool holdsKeyObject(const Type *type) const;
   Expr *cryptoInt(llvm::SMLoc loc, int64_t value);
   Expr *cryptoDouble(llvm::SMLoc loc, double value);
   Expr *cryptoBool(llvm::SMLoc loc, bool value);

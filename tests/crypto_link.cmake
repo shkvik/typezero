@@ -12,13 +12,14 @@ file(WRITE ${DIR}/direct.tz
 file(WRITE ${DIR}/full.tz
      "import { createHash } from \"node:crypto\"\n"
      "const name: string = process.argv[2] ?? \"sha256\"\n"
-     "console.log(createHash(name).update(\"abc\").digest(\"hex\"))\n")
+     "console.log(createHash(name).map(h => h.update(\"abc\").digest(\"hex\")).unwrapOr(\"no such hash\"))\n")
 # Web Crypto (library/crypto/webcrypto.tz): HMAC with its algorithm in a constant, as hono signs
 # cookies, needs only the direct layer; an ECDSA key, all of OpenSSL.
 file(WRITE ${DIR}/subtle_direct.tz
      "const algorithm = { name: \"HMAC\", hash: \"SHA-256\" }\n"
      "const key = await crypto.subtle.importKey(\"raw\", new Uint8Array(8), algorithm, false, [\"sign\"])\n"
-     "console.log((await crypto.subtle.sign(algorithm.name, key, new Uint8Array(1))).byteLength)\n")
+     "if (key.isErr()) process.exit(1)\n"
+     "console.log((await crypto.subtle.sign(algorithm.name, key.value, new Uint8Array(1))).map(b => b.byteLength).unwrapOr(0))\n")
 # fetch of a URL known to be http:// gets no TLS; one of https://, all of OpenSSL and libssl
 # (docs/net.md, section 4). Neither runs: they are only built.
 file(WRITE ${DIR}/fetch_http.tz
@@ -29,7 +30,7 @@ file(WRITE ${DIR}/fetch_https.tz
      "console.log(res.status)\n")
 file(WRITE ${DIR}/subtle_full.tz
      "const pair = await crypto.subtle.generateKey({ name: \"ECDSA\", namedCurve: \"P-256\" }, false, [\"sign\"])\n"
-     "console.log(pair.privateKey.type)\n")
+     "console.log(pair.map(p => p.privateKey.type).unwrapOr(\"none\"))\n")
 
 function(fail message)
   message(FATAL_ERROR "${message}")

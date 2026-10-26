@@ -197,22 +197,50 @@ Expr *CryptoChecker::checkCryptoNew(NewExpr *expr, llvm::StringRef cls) {
     }
     return expr;
   }
-  if (expr->args.size() != 1) {
-    checker_.diags_.error(expr->loc(), "'new X509Certificate' takes the certificate, PEM or DER");
-    for (Expr *&arg : expr->args) {
+  checker_.diags_.error(expr->loc(),
+                        "'new X509Certificate' may fail on the data it reads, and 'new' gives no "
+                        "Result; write 'X509Certificate.parse(pem)', which gives a "
+                        "Result<X509Certificate, CryptoError>");
+  for (Expr *&arg : expr->args) {
+    arg = checker_.exprChecker().checkExpr(arg);
+  }
+
+  return expr;
+}
+
+Expr *CryptoChecker::checkX509Parse(CallExpr *call, MemberExpr *member) {
+  call->type = Type::error();
+  if (member->name != "parse") {
+    checker_.diags_.error(member->loc(), "'X509Certificate." + member->name +
+                                             "' does not exist; read a certificate with "
+                                             "'X509Certificate.parse(pem)'");
+    for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
-    return expr;
+    return call;
   }
-  Expr *data = checker_.cryptoArgs().cryptoData(expr->args[0], "certificate", true, false, true);
+  if (call->args.size() != 1) {
+    checker_.diags_.error(call->loc(), "'X509Certificate.parse' takes the certificate, PEM or DER");
+    for (Expr *&arg : call->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return call;
+  }
+  Expr *data = checker_.cryptoArgs().cryptoData(call->args[0], "certificate", true, false, true);
   if (data->type->isError()) {
-    return expr;
+    return call;
   }
-  auto *callee = checker_.ctx_.make<NameExpr>(expr->loc(), "X509Certificate");
-  auto *call = checker_.ctx_.make<CallExpr>(expr->loc(), callee, std::vector<Expr *>{});
 
-  return checker_.cryptoArgs().cryptoCall(call, CryptoFn::X509New, {data},
-                                          Type::cryptoType(Crypto::X509));
+  return checker_.cryptoArgs().cryptoResult(call, CryptoFn::X509New, {data},
+                                            Type::cryptoType(Crypto::X509));
+}
+
+bool CryptoChecker::isX509Class(Expr *object) const {
+  auto *name = dyn_cast<NameExpr>(object);
+  const Checker::NodeName *n =
+      name ? checker_.builtinModuleChecker().nodeName(name->name) : nullptr;
+
+  return n && n->module == NodeModule::Crypto && n->name == "X509Certificate";
 }
 
 Expr *CryptoChecker::checkWebCryptoCall(CallExpr *call, MemberExpr *member) {

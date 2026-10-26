@@ -12,6 +12,8 @@ public:
   llvm::Value *emitCryptoKeyPair(CallExpr *call);
 
 private:
+  void useErrors(const Type *errorType);
+
   Lowering &lowering_;
 };
 

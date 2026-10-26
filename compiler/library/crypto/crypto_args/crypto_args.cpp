@@ -2,6 +2,7 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_check_helpers/crypto_check_helpers.h"
@@ -65,6 +66,19 @@ Expr *CryptoArgs::cryptoCall(CallExpr *call, CryptoFn fn, std::vector<Expr *> ar
   call->type = type;
 
   return call;
+}
+
+Expr *CryptoArgs::cryptoResult(CallExpr *call, CryptoFn fn, std::vector<Expr *> args,
+                               const Type *type) {
+  return cryptoCall(call, fn, std::move(args), Type::result(type, cryptoError()));
+}
+
+const Type *CryptoArgs::cryptoError() { return checker_.prelude().builtinType("CryptoError"); }
+
+bool CryptoArgs::holdsKeyObject(const Type *type) const {
+  auto key = [](const Type *t) { return t->crypto() == Crypto::KeyObject; };
+
+  return key(type) || (type->isUnion() && llvm::any_of(type->members(), key));
 }
 
 Expr *CryptoArgs::cryptoInt(llvm::SMLoc loc, int64_t value) {
@@ -159,6 +173,13 @@ Expr *CryptoArgs::cryptoEncoding(CallExpr *call, size_t index, llvm::StringRef f
 Expr *CryptoArgs::cryptoText(Expr *made, Expr *encoding) {
   if (int64_t(cast<IntLitExpr>(encoding)->value) < 0) {
     return made;
+  }
+  if (made->type->isResult()) {
+    auto *crypto = cast<CallExpr>(made);
+    crypto->args.push_back(encoding);
+    crypto->type = Type::result(Type::string(), made->type->errType());
+
+    return crypto;
   }
   auto *member = checker_.ctx_.make<MemberExpr>(made->loc(), made, "toString");
 
