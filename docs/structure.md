@@ -158,7 +158,7 @@ library/             по теме на папку; stream/stream.tz и его �
   значения по порядку (`b >= Builtin::ArrForEach && b <= Builtin::ArrSortWith`): заменить их на
   списки операций тем — отдельный шаг со своей проверкой.
 - **`Checker` и `Lowering` держат общее состояние прохода** — поля, которые нужны многим классам
-  (`checker.h` — 1461 строка, `lowering.h` — 964), а не только ссылки.
+  (`checker.h` — 1172 строки, `lowering.h` — 771), а не только ссылки.
 - **Крючки тем** — те, что понадобились: `prepare`, `declare`, `checkAnyCall`, `checkStaticCall`,
   `checkMethodCall`, `methodReceiver`, `checkClassMethodCall`, `checkValueMethodCall`,
   `checkFunctionCall`, `checkLibraryCall`, `lowers` и `lowerCall`; для встроенных модулей —
@@ -171,8 +171,8 @@ library/             по теме на папку; stream/stream.tz и его �
 - **`node:stream` — части одного модуля.** `stream.tz` разрезан на пять файлов, но загрузчик
   читает их как один модуль (`kModuleParts` в `compiler/load/library_modules/`): у них одна область
   видимости, как у одного файла, а компилятор узнаёт классы `node:stream` по модулю.
-- **Классы больше ~400 строк** ещё есть: `Type` (`type.cpp`, 1229 — его фабрики),
-  `FilePort` (883) и десяток файлов по 500–600 строк; функции по 200–450 строк — большие `switch`
+- **Классы больше ~400 строк** ещё есть: `Type` (`type.cpp`, 1180 — его фабрики),
+  `FilePort` (848) и десяток файлов по 500–600 строк; функции по 200–450 строк — большие `switch`
   по `Builtin`, которые уйдут вместе с ним.
 - **Конвейер** чуть другой, чем в разделе «Конвейер»: `checkProgram` отдаёт `Errors`, а круги
   карт событий повторяют проходы от загрузки до `WholeProgramPass`.
