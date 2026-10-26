@@ -16,6 +16,7 @@ public:
                        llvm::function_ref<void(llvm::Value *, const Type *, llvm::Value *)> onFail);
   void emitReflectMismatch(llvm::StringRef what, llvm::Value *index, const Type *expected,
                            llvm::Value *got);
+  void emitReflectFail(llvm::StringRef code, const std::string &message);
 
 private:
   Lowering &lowering_;

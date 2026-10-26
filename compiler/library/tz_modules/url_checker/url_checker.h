@@ -9,11 +9,13 @@ public:
   explicit UrlChecker(Checker &checker);
 
   void checkUrlNew(NewExpr *expr);
+  void checkHrefSet(const Expr *value);
   static bool validUrlText(llvm::StringRef text, bool relative);
-
-private:
+  static std::optional<std::string> literalText(const Expr *expr);
+  static const Expr *unconverted(const Expr *expr);
   bool knownAbsolute(const Expr *expr) const;
 
+private:
   Checker &checker_;
 };
 

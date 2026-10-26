@@ -56,6 +56,7 @@
 #include "compiler/library/result/result_method_checker/result_method_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/library/stream/stream_pipeline/stream_pipeline.h"
+#include "compiler/library/tz_modules/http_checker/http_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
@@ -215,7 +216,9 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
     }
     if (receiver->isClass()) {
-      return checker_.methodCallChecker().checkMethodCall(call, member, expected);
+      Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
+      checker_.httpChecker().checkHeadersCall(call, member);
+      return checked;
     }
     rejectTypeArgs();
     if (receiver->isTuple()) {

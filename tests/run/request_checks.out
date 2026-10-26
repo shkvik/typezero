@@ -1,0 +1,24 @@
+"bad name" false (none)
+"" false (none)
+"ü" false (none)
+"x-ok" true w
+"ab"
+"cSet-Cookie: x=1"
+"nulhere"
+"spaces"
+http://x.com/b
+GET yes [] 1
+CONNECT CONNECT bad_request: 'CONNECT' HTTP method is unsupported.
+bad method bad method bad_request: 'bad method' is not a valid HTTP method.
+GET GET bad_request: Request with GET/HEAD method cannot have body.
+post POST POST yes [x]
+Request cannot be constructed from a URL that includes credentials: http://user:pw@127.0.0.1:9/
+RequestInit: duplex option is required when sending a body.
+POST yes [twice?] true
+Request.constructor: Cannot construct a Request with a Request object that has already been used.
+once
+Request.constructor: Cannot construct a Request with a Request object that has already been used.
+body
+true body_used
+http://b.com/y
+http://b.com/y

@@ -139,6 +139,26 @@ const Type *LiteralTypes::numberLiteralFor(const Type *expected, double value, b
   return nullptr;
 }
 
+std::optional<std::pair<int64_t, int64_t>> LiteralTypes::intRange(const Type *type) {
+  if (!type->isUnion()) {
+    return std::nullopt;
+  }
+  int64_t lo = INT64_MAX, hi = INT64_MIN;
+  for (const Type *m : type->members()) {
+    if (!m->isLiteral() || !m->literalBase()->isInt()) {
+      return std::nullopt;
+    }
+    int64_t value = int64_t(m->literalNumber());
+    lo = std::min(lo, value);
+    hi = std::max(hi, value);
+  }
+  if (hi - lo + 1 != int64_t(type->members().size())) {
+    return std::nullopt;
+  }
+
+  return std::pair(lo, hi);
+}
+
 const Type *LiteralTypes::numberMemberOf(const Type *expected, bool fraction) {
   if (!expected) {
     return nullptr;

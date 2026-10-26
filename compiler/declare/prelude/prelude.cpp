@@ -23,12 +23,27 @@ type Readonly<T> = { readonly [K in keyof T]: T[K] }
 type Pick<T, K extends keyof T> = { [P in K]: T[P] }
 type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
-type JsonError = { code: "bad_json" | "bad_field"; message: string; path: string }
+type JsonError = { code: "bad_json" | "bad_field" | "bad_class"; message: string; path: string }
 type UriError = { code: "bad_uri"; message: string }
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
 type DateError = { code: "bad_date"; message: string; text: string }
+type LocaleError = { code: "bad_locale"; message: string; tag: string }
 type CryptoError = { code: string; message: string }
+type RedirectStatus = 301 | 302 | 303 | 307 | 308
+type ReflectError = {
+  code:
+    | "bad_argument"
+    | "bad_arity"
+    | "bad_this"
+    | "no_variant"
+    | "several_variants"
+    | "not_function"
+    | "not_class"
+    | "not_reflected"
+    | "abstract"
+  message: string
+}
 type FetchError = { code: string; message: string; cause?: string }
 type BodyError = {
   code: "body_used" | "terminated" | "bad_form" | "body_failed" | "ABORT_ERR" | "TIMEOUT_ERR"
@@ -65,7 +80,13 @@ type ExecError<Out> = {
 Prelude::Prelude(Checker &checker) : checker_(checker) {}
 
 void Prelude::declarePrelude() {
-  std::unique_ptr<llvm::MemoryBuffer> buffer = llvm::MemoryBuffer::getMemBuffer(kPrelude, "<tz>");
+  std::string source = kPrelude.str() + "type HttpStatus =";
+  for (int status = 200; status <= 599; ++status) {
+    source += (status == 200 ? " " : " | ") + std::to_string(status);
+  }
+  source += "\n";
+  std::unique_ptr<llvm::MemoryBuffer> buffer =
+      llvm::MemoryBuffer::getMemBufferCopy(source, "<tz>");
   llvm::StringRef text = buffer->getBuffer();
   checker_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
   Lexer lexer(text, checker_.diags_);

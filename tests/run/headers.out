@@ -11,8 +11,3 @@ accept=*/*
 set-cookie=a=1
 set-cookie=b=2
 */* Headers {}
-TypeError Headers.append: "bad name" is an invalid header name.
-TypeError Headers.append: "" is an invalid header name.
-TypeError Headers.append: "ü" is an invalid header name.
-TypeError Headers.set: "a
-b" is an invalid header value.

@@ -157,22 +157,16 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(made);
   }
-  auto throwText = [&](const std::string &message) {
-    llvm::Value *text =
-        lowering_.stringLowerer().stringLiteral(std::u16string(message.begin(), message.end()));
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_throw_str", lowering_.builder_.getVoidTy(),
-                                                   {i32, ptr, lowering_.builder_.getInt64Ty()}),
-        {lowering_.builder_.getInt32(1), lowering_.stringLowerer().stringObj(text),
-         lowering_.stringLowerer().stringMeta(text)});
-    fail();
-  };
   if (none) {
     lowering_.functionFrame().switchTo(none);
-    throwText(what + ": no constructor of " + className(cls) + " takes these arguments");
+    lowering_.reflectArgsLowerer().emitReflectFail(
+        "no_variant", what + ": no constructor of " + className(cls) + " takes these arguments");
+    fail();
     lowering_.functionFrame().switchTo(several);
-    throwText(what + ": the arguments fit several constructors of " + className(cls) +
-              " equally well");
+    lowering_.reflectArgsLowerer().emitReflectFail(
+        "several_variants",
+        what + ": the arguments fit several constructors of " + className(cls) + " equally well");
+    fail();
   }
   lowering_.functionFrame().startDeadBlock();
   lowering_.functionFrame().popScope();
@@ -233,16 +227,9 @@ llvm::Constant *ClassInfoLowerer::reflectAdapterInfo(const FunctionDecl *fn, con
       lowering_.builder_.getInt32(last - cls->id));
   lowering_.builder_.CreateCondBr(matches, callBlock, failBlock);
   lowering_.builder_.SetInsertPoint(failBlock);
-  std::string message = className(cls) + "." + fn->name.str() +
-                        " was called with a 'this' that is not an instance of " + className(cls);
-  llvm::Value *text =
-      lowering_.stringLowerer().stringLiteral(std::u16string(message.begin(), message.end()));
-  lowering_.builder_.CreateCall(
-      lowering_.unknownLowerer().unknownFunction(
-          "tz_throw_str", lowering_.builder_.getVoidTy(),
-          {lowering_.builder_.getInt32Ty(), ptr, lowering_.builder_.getInt64Ty()}),
-      {lowering_.builder_.getInt32(1), lowering_.stringLowerer().stringObj(text),
-       lowering_.stringLowerer().stringMeta(text)});
+  lowering_.reflectArgsLowerer().emitReflectFail(
+      "bad_this", className(cls) + "." + fn->name.str() +
+                      " was called with a 'this' that is not an instance of " + className(cls));
   for (size_t i = 1; i < params.size(); ++i) {
     lowering_.refCounts().releaseValue(adapter->getArg(unsigned(i + 1)), params[i]);
   }

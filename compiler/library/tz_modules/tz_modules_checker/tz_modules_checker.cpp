@@ -3,6 +3,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
+#include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -148,8 +149,14 @@ Expr *TzModulesChecker::checkSetterCall(AssignExpr *assign) {
   auto *call =
       checker_.ctx_.make<CallExpr>(assign->loc(), member, std::vector<Expr *>{assign->value});
   accessorCalls_.insert(call);
+  Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, nullptr);
+  const ClassDecl *cls = member->object->type->nonOptional()->classDecl();
+  if (cls && cls->library && cls->name == "URL" && member->name == "href" &&
+      !call->args.empty()) {
+    checker_.urlChecker().checkHrefSet(call->args[0]);
+  }
 
-  return checker_.methodCallChecker().checkMethodCall(call, member, nullptr);
+  return checked;
 }
 
 std::string TzModulesChecker::knownPrefix(const Expr *expr) const {

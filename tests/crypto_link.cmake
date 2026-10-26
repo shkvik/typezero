@@ -24,10 +24,10 @@ file(WRITE ${DIR}/subtle_direct.tz
 # (docs/net.md, section 4). Neither runs: they are only built.
 file(WRITE ${DIR}/fetch_http.tz
      "const res = await fetch(\"http://localhost:1/\")\n"
-     "console.log(res.status)\n")
+     "console.log(res.map(r => r.status).unwrapOr(0))\n")
 file(WRITE ${DIR}/fetch_https.tz
      "const res = await fetch(\"https://localhost:1/\")\n"
-     "console.log(res.status)\n")
+     "console.log(res.map(r => r.status).unwrapOr(0))\n")
 file(WRITE ${DIR}/subtle_full.tz
      "const pair = await crypto.subtle.generateKey({ name: \"ECDSA\", namedCurve: \"P-256\" }, false, [\"sign\"])\n"
      "console.log(pair.map(p => p.privateKey.type).unwrapOr(\"none\"))\n")

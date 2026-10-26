@@ -9,6 +9,7 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/core/unknown/unknown.h"
 #include "runtime/library/json/json/json.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -112,12 +113,61 @@ static void describe(const void *u, char *out, size_t size) {
   snprintf(out, size, "%s", kind >= 0 && kind <= 5 ? names[kind] : "a value");
 }
 
+TZ_THREAD_LOCAL TzMaker tz_reflect_maker;
+
+void tz_reflect_errors(TzMaker make) { tz_reflect_maker = make; }
+
+typedef struct {
+  const char *code;
+  TzStr message;
+} FailureParts;
+
+void tz_reflect_fail_str(const char *code, uint32_t code_length, void *message_obj,
+                         uint64_t message_meta) {
+  if (!tz_reflect_maker) {
+    tz_throw_str(TZ_TYPE_ERROR, message_obj, message_meta);
+    return;
+  }
+  char text[32];
+  snprintf(text, sizeof text, "%.*s", (int)code_length, code);
+  FailureParts parts;
+  parts.code = text;
+  parts.message = (TzStr){message_obj, message_meta};
+  tz_str_retain_value(parts.message);
+  tz_set_failed(tz_reflect_maker(&parts));
+}
+
+TZ_COLD static void reflect_fail(const char *code, const char *format, ...) {
+  char text[512];
+  va_list args;
+  va_start(args, format);
+  int length = vsnprintf(text, sizeof text, format, args);
+  va_end(args);
+  if (length < 0) {
+    length = 0;
+  }
+  if ((size_t)length >= sizeof text) {
+    length = (int)sizeof text - 1;
+  }
+  if (!tz_reflect_maker) {
+    tz_throw(TZ_TYPE_ERROR, "%s", text);
+    return;
+  }
+  TzBuf buf;
+  tz_buf_init(&buf);
+  tz_buf_utf8(&buf, text, (size_t)length);
+  FailureParts parts;
+  parts.code = code;
+  parts.message = tz_buf_take(&buf);
+  tz_set_failed(tz_reflect_maker(&parts));
+}
+
 void tz_reflect_mismatch(const char *what, uint32_t what_length, int32_t index,
                          const char *expected, uint32_t expected_length, const void *got) {
   char given[160];
   describe(got, given, sizeof given);
-  tz_throw(TZ_TYPE_ERROR, "%.*s: argument %d: expected %.*s, got %s", (int)what_length, what,
-           (int)index + 1, (int)expected_length, expected, given);
+  reflect_fail("bad_argument", "%.*s: argument %d: expected %.*s, got %s", (int)what_length, what,
+               (int)index + 1, (int)expected_length, expected, given);
 }
 
 void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32_t max,
@@ -130,7 +180,7 @@ void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32
   } else {
     snprintf(takes, sizeof takes, "%d to %d arguments", (int)min, (int)max);
   }
-  tz_throw(TZ_TYPE_ERROR, "%.*s: expected %s, got %u", (int)what_length, what, takes, count);
+  reflect_fail("bad_arity", "%.*s: expected %s, got %u", (int)what_length, what, takes, count);
 }
 
 void tz_class_name(TzStr *out, const TzClass *cls) {
@@ -168,7 +218,7 @@ static const TzClass *as_class(const void *u) {
   }
   char given[160];
   describe(u, given, sizeof given);
-  tz_throw(TZ_TYPE_ERROR, "%s is not a constructor", given);
+  reflect_fail("not_class", "%s is not a constructor", given);
 
   return NULL;
 }
@@ -176,13 +226,13 @@ static const TzClass *as_class(const void *u) {
 void *tz_reflect_new(const TzClass *cls, void *const *args, uint32_t count) {
   const TzLayout *layout = cls->layout;
   if (!cls->info) {
-    tz_throw(TZ_TYPE_ERROR, "%.*s of JavaScript cannot be made through reflection",
-             (int)layout->name_length, layout->name);
+    reflect_fail("not_reflected", "%.*s of JavaScript cannot be made through reflection",
+                 (int)layout->name_length, layout->name);
     return NULL;
   }
   if (!cls->info->construct) {
-    tz_throw(TZ_TYPE_ERROR, "class %.*s is abstract and cannot be made", (int)layout->name_length,
-             layout->name);
+    reflect_fail("abstract", "class %.*s is abstract and cannot be made",
+                 (int)layout->name_length, layout->name);
     return NULL;
   }
 
@@ -247,7 +297,6 @@ static const TzClassInfo *info_of(const TzInstance *object) {
 void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta) {
   TzStr key = {key_obj, key_meta};
   if (!target || as_box(target)) {
-    tz_throw(TZ_TYPE_ERROR, "Reflect.get called on non-object");
     return NULL;
   }
   const TzInstance *object = (const TzInstance *)target;
@@ -288,8 +337,8 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
   if (!box || box->type->kind != TZ_T_FUNCTION) {
     char given[160];
     describe(f, given, sizeof given);
-    tz_throw(TZ_TYPE_ERROR, "Function.prototype.apply was called on %s, which is not a function",
-             given);
+    reflect_fail("not_function",
+                 "Function.prototype.apply was called on %s, which is not a function", given);
     return NULL;
   }
   TzInvoker invoke = NULL;
@@ -299,7 +348,7 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
     }
   }
   if (!invoke) {
-    tz_throw(TZ_TYPE_ERROR, "Reflect.apply cannot call this function");
+    reflect_fail("not_function", "Reflect.apply cannot call this function");
     return NULL;
   }
   void *small[8];
@@ -317,8 +366,13 @@ void *tz_reflect_apply(const void *f, void *self, const TzArray *args) {
 void *tz_reflect_from_json(const TzClass *cls, const TzJson *json) {
   const TzLayout *layout = cls->layout;
   if (!cls->info || !cls->info->from_json) {
-    tz_throw(TZ_TYPE_ERROR, "class %.*s cannot be made from JSON", (int)layout->name_length,
-             layout->name);
+    TzBuf message;
+    tz_buf_init(&message);
+    char text[200];
+    int length = snprintf(text, sizeof text, "class %.*s cannot be made from JSON",
+                          (int)layout->name_length, layout->name);
+    tz_buf_utf8(&message, text, length < 0 ? 0 : (size_t)length);
+    tz_json_fail("bad_class", &message, NULL);
     return NULL;
   }
 

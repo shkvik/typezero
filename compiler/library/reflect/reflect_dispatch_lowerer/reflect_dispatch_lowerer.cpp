@@ -64,14 +64,8 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     lowering_.refCounts().releaseValue(array, list);
     lowering_.refCounts().releaseValue(self, unknown);
   };
-  auto fail = [&](const std::string &message) {
-    llvm::Value *text =
-        lowering_.stringLowerer().stringLiteral(std::u16string(message.begin(), message.end()));
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction("tz_throw_str", lowering_.builder_.getVoidTy(),
-                                                   {i32, ptr, lowering_.builder_.getInt64Ty()}),
-        {lowering_.builder_.getInt32(1), lowering_.stringLowerer().stringObj(text),
-         lowering_.stringLowerer().stringMeta(text)});
+  auto fail = [&](llvm::StringRef code, const std::string &message) {
+    lowering_.reflectArgsLowerer().emitReflectFail(code, message);
     release();
     lowering_.builder_.CreateRet(null);
   };
@@ -96,8 +90,8 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
   lowering_.builder_.CreateCondBr(lowering_.unknownCastLowerer().classIdIn(id, {top}), okBlock,
                                   wrongBlock);
   lowering_.functionFrame().switchTo(wrongBlock);
-  fail(className(top) + "." + name.str() + " was called with a 'this' that is not an instance of " +
-       className(top));
+  fail("bad_this", className(top) + "." + name.str() +
+                       " was called with a 'this' that is not an instance of " + className(top));
   lowering_.functionFrame().switchTo(okBlock);
   llvm::Value *count =
       lowering_.builder_.CreateTrunc(lowering_.arrayLowerer().arrayLength(array), i32, "count");
@@ -121,8 +115,9 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     std::vector<llvm::Value *> values{self};
     lowering_.reflectArgsLowerer().emitReflectArgs(args, count, sym->minArgs, params, rest, values,
                                                    [&](llvm::Value *, const Type *, llvm::Value *) {
-                                                     fail("Reflect.apply: no variant of " + what +
-                                                          " takes these arguments");
+                                                     fail("no_variant",
+                                                          "Reflect.apply: no variant of " + what +
+                                                              " takes these arguments");
                                                    });
     llvm::Value *result =
         lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(variants[v]), values);
@@ -144,9 +139,10 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
     lowering_.builder_.CreateRet(value);
   }
   lowering_.functionFrame().switchTo(noneBlock);
-  fail("Reflect.apply: no variant of " + what + " takes these arguments");
+  fail("no_variant", "Reflect.apply: no variant of " + what + " takes these arguments");
   lowering_.functionFrame().switchTo(severalBlock);
-  fail("Reflect.apply: the arguments fit several variants of " + what + " equally well");
+  fail("several_variants",
+       "Reflect.apply: the arguments fit several variants of " + what + " equally well");
   lowering_.function_ = outer;
 
   return found;

@@ -1,0 +1,41 @@
+// The arguments of Response are checked by their types, as constructors
+// cannot fail: a status is an HttpStatus (200 to 599), which a literal
+// fits by itself and a value of the program after a check; a response
+// with status 204, 205 or 304 has no body; a statusText cannot break the
+// head of the response; Response.redirect takes a parsed URL and a status
+// of redirect.
+const code = process.argv.length + 300
+// expect-error: type '700' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599
+new Response("x", { status: 700 })
+// expect-error: type 'int' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(code))'
+new Response("x", { status: code })
+// expect-error: a response with status 204 has no body; write 'new Response(undefined, { status: 204 })'
+new Response("x", { status: 204 })
+// expect-error: a response with status 304 has no body; write 'new Response(undefined, { status: 304 })'
+new Response(new Uint8Array(2), { status: 304 })
+// expect-error: a statusText holds only tabs, spaces and visible characters up to U+00FF: no line breaks, no other control characters
+new Response("x", { status: 200, statusText: "a\r\nSet-Cookie: x" })
+// expect-error: type '300' is not assignable to type 'RedirectStatus | undefined'
+Response.redirect(new URL("http://x/"), 300)
+// expect-error: type 'string' is not assignable to type 'URL'
+Response.redirect("http://x/", 301)
+// expect-error: type 'int' is not assignable to type 'HttpStatus', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(code))'
+const s: HttpStatus = code
+// expect-error: type '99' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599
+const init: ResponseInit = { status: 99 }
+function reply(n: int) {
+  // expect-error: type 'int' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(n))'
+  return new Response(undefined, { status: n })
+}
+function later(n: int) {
+  if (n >= 200) {
+    // expect-error: type 'int' is not assignable to type 'HttpStatus', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(n))'
+    const status: HttpStatus = n
+    return status
+  }
+  return 200
+}
+type Small = 1 | 2 | 3
+// expect-error: type 'int' is not assignable to type '1 | 2 | 3', which holds 1 to 3; the value may be outside: check it first, e.g. 'if (code >= 1 && code <= 3)'
+const small: Small = code
+console.log(s, init, reply(1), later(1), small)

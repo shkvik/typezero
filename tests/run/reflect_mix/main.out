@@ -1,7 +1,7 @@
 User, Note
 true false x
-TypeError: new Note: expected 1 argument, got 2
-TypeError: new User: expected 2 arguments, got 1
+bad_arity new Note: expected 1 argument, got 2
+bad_arity new User: expected 2 arguments, got 1
 false true y
 function OKOKOK
 hi, bob

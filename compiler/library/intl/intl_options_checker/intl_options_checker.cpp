@@ -1,5 +1,7 @@
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "runtime/library/intl/intl/intl.h"
@@ -119,6 +121,42 @@ std::optional<std::string> knownText(const Expr *value, const Type *type) {
   }
 
   return std::nullopt;
+}
+
+std::vector<std::string> literalTexts(const Type *type, bool &open) {
+  std::vector<std::string> texts;
+  type = type->nonOptional();
+  llvm::ArrayRef<const Type *> members =
+      type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+  for (const Type *m : members) {
+    if (m->isStringLiteral()) {
+      texts.push_back(utf8(m->literalText()));
+    } else if (!m->isBool() && !(m->isLiteral() && m->literalBase()->isBool())) {
+      open = true;
+    }
+  }
+
+  return texts;
+}
+
+std::string orList(llvm::ArrayRef<std::string> values) {
+  std::string out;
+  for (size_t i = 0; i < values.size(); ++i) {
+    out += (i == 0 ? "'" : i + 1 == values.size() ? " or '" : ", '") + values[i] + "'";
+  }
+
+  return out;
+}
+
+const Expr *unconverted(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    expr = conv->operand;
+  }
+
+  return expr;
 }
 
 bool isStringLike(const Type *type) {
@@ -264,6 +302,33 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                              valueList(found->values));
       continue;
     }
+    if (!textOf(field.name) && !found->values.empty() && found->kind != 'n' &&
+        found->kind != 'b') {
+      bool open = false;
+      std::vector<std::string> texts = literalTexts(value, open);
+      auto wrong = llvm::find_if(texts, [&](const std::string &t) {
+        return !llvm::is_contained(found->values, t) && !(found->kind == 'g' && t.empty());
+      });
+      if (wrong != texts.end()) {
+        report(field.name, "'" + *wrong + "' is not a value of the option '" + field.name +
+                               "', and JavaScript would throw a RangeError; it is " +
+                               valueList(found->values));
+      } else if (open) {
+        std::vector<std::string> first(found->values.begin(),
+                                       found->values.begin() +
+                                           std::min<size_t>(2, found->values.size()));
+        std::string example;
+        for (const std::string &v : first) {
+          example += (example.empty() ? "" : " || ") + std::string("x == \"") + v + "\"";
+        }
+        report(field.name, "the option '" + field.name + "' is " + valueList(found->values) +
+                               ", and a string known only when the program runs may be another, "
+                               "which JavaScript would throw a RangeError for; compare it with "
+                               "them first, e.g. 'if (" +
+                               example + ")'");
+      }
+      continue;
+    }
   }
   if (!ok) {
     return false;
@@ -289,13 +354,18 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                        (llvm::StringRef(name) == "collation" ? "phonebk" : "latn") + "'");
     }
   }
-  if (std::optional<std::string> style = textOf("style"); style && kind == IntlKind::NumberFormat) {
-    if (*style == "currency" && !type->field("currency")) {
+  if (const Field *style = type->field("style"); style && kind == IntlKind::NumberFormat) {
+    bool open = false;
+    std::vector<std::string> styles = literalTexts(style->type, open);
+    if (std::optional<std::string> text = textOf("style")) {
+      styles = {*text};
+    }
+    if (llvm::is_contained(styles, "currency") && !type->field("currency")) {
       report("style", "style 'currency' needs the option 'currency', e.g. '{ style: "
                       "\"currency\", currency: \"RUB\" }', which JavaScript would throw a "
                       "TypeError without");
     }
-    if (*style == "unit" && !type->field("unit")) {
+    if (llvm::is_contained(styles, "unit") && !type->field("unit")) {
       report("style", "style 'unit' needs the option 'unit', e.g. '{ style: \"unit\", unit: "
                       "\"kilometer\" }', which JavaScript would throw a TypeError without");
     }
@@ -309,29 +379,114 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     int min, max;
   } ranges[] = {{"minimumIntegerDigits", 1, 21},     {"minimumFractionDigits", 0, 100},
                 {"maximumFractionDigits", 0, 100},   {"minimumSignificantDigits", 1, 21},
-                {"maximumSignificantDigits", 1, 21}, {"roundingIncrement", 1, 5000}};
-  for (const auto &range : ranges) {
-    if (std::optional<double> n = numberOf(range.name);
-        n && !(*n >= range.min && *n <= range.max)) {
-      report(range.name, std::string(range.name) + " is from " + std::to_string(range.min) +
-                             " to " + std::to_string(range.max) +
-                             ", and JavaScript would throw a RangeError");
+                {"maximumSignificantDigits", 1, 21}};
+  auto constantOf = [&](llvm::StringRef name) -> std::optional<double> {
+    if (std::optional<double> n = numberOf(name)) {
+      return n;
     }
+    const Field *field = type->field(name);
+    const Type *t = field ? field->type->nonOptional() : nullptr;
+    if (t && t->isLiteral() && t->literalBase()->isNumeric()) {
+      return t->literalNumber();
+    }
+
+    return std::nullopt;
+  };
+  auto valueExpr = [&](llvm::StringRef name) -> const Expr * {
+    Expr *value = valueOf(name);
+
+    return value ? unconverted(value) : nullptr;
+  };
+  for (const auto &range : ranges) {
+    if (!type->field(range.name)) {
+      continue;
+    }
+    if (std::optional<double> n = constantOf(range.name)) {
+      if (!(*n >= range.min && *n <= range.max)) {
+        report(range.name, std::string(range.name) + " is from " + std::to_string(range.min) +
+                               " to " + std::to_string(range.max) +
+                               ", and JavaScript would throw a RangeError");
+      }
+      continue;
+    }
+    const Expr *value = valueExpr(range.name);
+    if (value && value->type->isInt() &&
+        checker_.byteProofs().provesFits(value, range.min, range.max)) {
+      continue;
+    }
+    std::string lo = std::to_string(range.min), hi = std::to_string(range.max);
+    report(range.name, std::string(range.name) + " is from " + lo + " to " + hi +
+                           ", and a number known only when the program runs may be outside, "
+                           "which JavaScript would throw a RangeError for; give an int and "
+                           "check it first, e.g. 'if (n >= " +
+                           lo + " && n <= " + hi + ")'");
   }
+  auto notAbove = [&](llvm::StringRef low, llvm::StringRef high) {
+    std::optional<double> a = constantOf(low), b = constantOf(high);
+    if (a && b) {
+      return std::floor(*a) <= std::floor(*b);
+    }
+    const Expr *x = valueExpr(low), *y = valueExpr(high);
+    std::optional<Linear> lx = x ? checker_.indexProofs().linear(x) : std::nullopt;
+    std::optional<Linear> ly = y ? checker_.indexProofs().linear(y) : std::nullopt;
+    if (!lx && a && *a == std::floor(*a)) {
+      lx = Linear{Term::zero(), int64_t(*a)};
+    }
+    if (!ly && b && *b == std::floor(*b)) {
+      ly = Linear{Term::zero(), int64_t(*b)};
+    }
+    if (!lx || !ly) {
+      return false;
+    }
+    if (lx->term == ly->term) {
+      return lx->offset <= ly->offset;
+    }
+
+    return checker_.flow_.facts.proves(lx->term, ly->term, ly->offset - lx->offset + 1);
+  };
   for (const char *pair : {"FractionDigits", "SignificantDigits"}) {
     std::string min = std::string("minimum") + pair, max = std::string("maximum") + pair;
-    std::optional<double> low = numberOf(min), high = numberOf(max);
-    if (low && high && std::floor(*low) > std::floor(*high)) {
-      report(max, min + " is above " + max + ", and JavaScript would throw a RangeError");
+    if (!type->field(min) || !type->field(max) || notAbove(min, max)) {
+      continue;
     }
+    std::optional<double> low = constantOf(min), high = constantOf(max);
+    report(max, low && high ? min + " is above " + max + ", and JavaScript would throw a RangeError"
+                            : min + " may be above " + max +
+                                  ", which JavaScript would throw a RangeError for; check it "
+                                  "first, e.g. 'if (low <= high)'");
   }
-  if (std::optional<double> n = numberOf("roundingIncrement")) {
+  if (type->field("roundingIncrement")) {
     static const int increments[] = {1,   2,   5,   10,   20,   25,   50,  100,
                                      200, 250, 500, 1000, 2000, 2500, 5000};
-    if (!llvm::is_contained(increments, *n)) {
-      report("roundingIncrement", "roundingIncrement is one of 1, 2, 5, 10, 20, 25, 50, 100, "
-                                  "200, 250, 500, 1000, 2000, 2500 and 5000, and JavaScript "
-                                  "would throw a RangeError");
+    std::optional<double> n = constantOf("roundingIncrement");
+    bool known = n.has_value();
+    if (!n) {
+      const Type *t = type->field("roundingIncrement")->type->nonOptional();
+      known = t->isUnion() && llvm::all_of(t->members(), [&](const Type *m) {
+                return m->isLiteral() && llvm::is_contained(increments, m->literalNumber());
+              });
+    }
+    if (known && n != 1.0 && (!n || llvm::is_contained(increments, *n))) {
+      if (type->field("minimumSignificantDigits") || type->field("maximumSignificantDigits")) {
+        report("roundingIncrement",
+               "roundingIncrement rounds to fraction digits, and with significant digits "
+               "JavaScript would throw a TypeError");
+      } else if (!type->field("minimumFractionDigits") || !type->field("maximumFractionDigits") ||
+                 !notAbove("minimumFractionDigits", "maximumFractionDigits") ||
+                 !notAbove("maximumFractionDigits", "minimumFractionDigits")) {
+        report("roundingIncrement",
+               "roundingIncrement needs minimumFractionDigits and maximumFractionDigits, and the "
+               "same, e.g. '{ roundingIncrement: 5, minimumFractionDigits: 0, "
+               "maximumFractionDigits: 0 }', or JavaScript may throw a RangeError");
+      }
+    }
+    if (!known || (n && !llvm::is_contained(increments, *n))) {
+      report("roundingIncrement",
+             std::string("roundingIncrement is one of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, "
+                         "500, 1000, 2000, 2500 and 5000, and ") +
+                 (n ? "JavaScript would throw a RangeError"
+                    : "a number known only when the program runs may be another, which "
+                      "JavaScript would throw a RangeError for; compare it with them first"));
     }
   }
 

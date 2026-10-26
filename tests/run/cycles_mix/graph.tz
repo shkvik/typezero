@@ -66,7 +66,7 @@ export class Server {
     this.controller.signal.addEventListener("abort", () => {
       for (const c of [...this.conns]) c.close("shutdown")
     })
-    for (const [path, cls] of routes) this.handlers.set(path, Reflect.construct(cls, [this]))
+    for (const [path, cls] of routes) this.handlers.set(path, new cls(this))
   }
   accept(id: int): Conn {
     const c = new Conn(this, id)

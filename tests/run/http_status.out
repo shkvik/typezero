@@ -1,0 +1,20 @@
+200 200 true body
+404 404 false body
+99 500 false no status 99
+700 500 false no status 700
+503 503 false body
+[ 200, 404, 500, 500, 503 ]
+204 "" true
+205 "" true
+304 "" true
+200 "dropped" false
+204 304 200
+"linebreak é \tend"
+301 http://example.com/next?a=1
+302 http://example.com/next?a=1
+303 http://example.com/next?a=1
+307 http://example.com/next?a=1
+308 http://example.com/next?a=1
+302
+201 202 false { text: 'made' }
+409 410 true { text: 'again' }

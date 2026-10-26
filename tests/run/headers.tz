@@ -1,8 +1,8 @@
 // same-as-node
 // Headers: from a record, pairs or other Headers; names without case,
 // values without the spaces around them; get joins the values of a name,
-// set-cookie apart; iteration sorted by name; invalid names and values;
-// how they print.
+// set-cookie apart; iteration sorted by name; how they print. Invalid
+// names and values are in request_checks.tz.
 const h = new Headers({ "Content-Type": "text/plain", "X-A": "1" })
 h.append("x-a", "2")
 console.log(h)
@@ -15,15 +15,3 @@ console.log(cookies.get("set-cookie"), cookies.getSetCookie(), cookies.get("acce
 console.log([...cookies.keys()], [...cookies.values()], [...cookies.entries()])
 cookies.forEach((value, name) => console.log(`${name}=${value}`))
 console.log(new Headers(cookies).get("accept"), new Headers())
-for (const bad of ["bad name", "", "ü"]) {
-  try {
-    new Headers().append(bad, "v")
-  } catch (e) {
-    console.log(e.name, e.message)
-  }
-}
-try {
-  new Headers().set("x", "a\nb")
-} catch (e) {
-  console.log(e.name, e.message)
-}

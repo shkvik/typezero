@@ -13,6 +13,7 @@ public:
   const FunctionDecl *heldReflectMethod(const Expr *f);
   Expr *directReflectApply(CallExpr *call, const FunctionDecl *fn);
   Expr *checkReflectCall(CallExpr *call, MemberExpr *member, const Type *expected);
+  static bool reflectAccepts(const Type *arg, const Type *param);
 
 private:
   Checker &checker_;

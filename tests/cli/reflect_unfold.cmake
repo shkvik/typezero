@@ -18,28 +18,28 @@ class Container {
   get<T extends object>(cls: Constructor<T>): T {
     return new cls()
   }
-  make<T extends object>(cls: Constructor<T>): T {
+  make<T extends object>(cls: Constructor<T>) {
     return Reflect.construct(cls, [])
   }
 }
 function call<T extends object>(obj: T, who: string): unknown {
   const greet = Reflect.get(obj, "greet")
   if (typeof greet != "function") return undefined
-  return Reflect.apply(greet, obj, [who])
+  return Reflect.apply(greet, obj, [who]).unwrapOr(undefined)
 }
 const container = new Container()
 ]])
 write(known.tz "${classes}
 const a = container.get(UserService)
 const b = container.make(UserService)
-console.log(call(a, \"ann\"), call(b, \"bob\"), Reflect.get(b, \"name\"))
+if (b.isOk()) console.log(call(a, \"ann\"), call(b.value, \"bob\"), Reflect.get(b.value, \"name\"))
 ")
 write(runtime.tz "${classes}
 const kinds: Constructor[] = [UserService]
 for (const kind of kinds) {
   const a = container.get(kind)
   const b = container.make(kind)
-  console.log(call(a, \"ann\"), call(b, \"bob\"), Reflect.get(b, \"name\"))
+  if (b.isOk()) console.log(call(a, \"ann\"), call(b.value, \"bob\"), Reflect.get(b.value, \"name\"))
 }
 ")
 set(expected "users: hello ann users: hello bob users\n")

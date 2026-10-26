@@ -1,8 +1,10 @@
 // same-as-node
 // Request and Response without the network: bodies of text, bytes, a
 // stream, a form; text, json, bytes, arrayBuffer and formData once;
-// clone; Response.json, redirect and error; the checks of the
-// constructors; how they print.
+// clone; Response.json, redirect and error; how they print. The arguments
+// of Request and Response are checked at compile time
+// (errors/http_status.tz, errors/http_request.tz), and what only the
+// running program knows is in request_checks.tz.
 const r = new Response("hello", { status: 201, headers: { "x-y": "z" } })
 console.log(r)
 const q = new Request("http://example.com/x", { method: "POST", body: "hi" })
@@ -13,15 +15,10 @@ const again = await q.text()
 if (again.isErr()) console.log(again.error.code, again.error.message)
 const j = Response.json({ a: [1, 2] }, { status: 202 })
 console.log(j.status, j.headers.get("content-type"), await j.json())
-const red = Response.redirect("http://x.com/a", 307)
+const red = Response.redirect(new URL("http://x.com/a"), 307)
 console.log(red.status, red.headers.get("location"))
-try { red.headers.set("a", "b") } catch (e) { console.log(e.name, e.message) }
 const e = Response.error()
 console.log(e.status, e.type, e.ok)
-try { new Response("x", { status: 99 }) } catch (err) { console.log(err.name, err.message) }
-try { new Response("x", { status: 204 }) } catch (err) { console.log(err.name, err.message) }
-try { new Request("http://x", { method: "GET", body: "x" }) } catch (err) { console.log(err.name, err.message) }
-try { new Request("/relative") } catch (err) { console.log(err.name, err.message) }
 const c = new Response("clone me")
 const c2 = c.clone()
 console.log(must(await c.text()), must(await c2.text()))

@@ -1,0 +1,36 @@
+function __tz_intl_locale_tag(tag: string): string
+function __tz_intl_locale_part(tag: string, part: int): string
+
+export class Locale {
+  readonly baseName: string
+  readonly language: string
+  readonly script: string | undefined
+  readonly region: string | undefined
+  #tag: string
+
+  constructor(tag: string) {
+    const canonical = __tz_intl_locale_tag(tag)
+    this.#tag = canonical == "" ? tag : canonical
+    this.baseName = __tz_intl_locale_part(this.#tag, 0)
+    this.language = __tz_intl_locale_part(this.#tag, 1)
+    const script = __tz_intl_locale_part(this.#tag, 2)
+    this.script = script == "" ? undefined : script
+    const region = __tz_intl_locale_part(this.#tag, 3)
+    this.region = region == "" ? undefined : region
+  }
+
+  static parse(tag: string): Result<Locale, LocaleError> {
+    if (__tz_intl_locale_tag(tag) == "")
+      return err({ code: "bad_locale", message: "Incorrect locale information provided", tag })
+    return ok(new Locale(tag))
+  }
+
+  maximize(): Locale {
+    const longer = __tz_intl_locale_part(this.#tag, 4)
+    return new Locale(longer == "" ? this.#tag : longer)
+  }
+
+  toString(): string {
+    return this.#tag
+  }
+}

@@ -46,6 +46,54 @@ void classesIn(const Type *type, llvm::SmallPtrSetImpl<ClassDecl *> &out) {
   }
 }
 
+void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out,
+                    llvm::SmallPtrSetImpl<const Type *> &seen) {
+  if (!type || !seen.insert(type).second) {
+    return;
+  }
+  if (type->isConstructor()) {
+    out.push_back(type->constructed());
+    return;
+  }
+  if (type->isOptional() || type->isArray() || type->isPromise()) {
+    constructorsIn(type->inner(), out, seen);
+    return;
+  }
+  if (type->isResult()) {
+    constructorsIn(type->okType(), out, seen);
+    constructorsIn(type->errType(), out, seen);
+    return;
+  }
+  if (type->isDict()) {
+    constructorsIn(type->keyType(), out, seen);
+    constructorsIn(type->valueType(), out, seen);
+    return;
+  }
+  if (type->isFunction()) {
+    for (const Type *param : type->params()) {
+      constructorsIn(param, out, seen);
+    }
+    constructorsIn(type->ret(), out, seen);
+    return;
+  }
+  if (type->isIterator() || type->isAsyncIterator()) {
+    constructorsIn(type->yielded(), out, seen);
+    return;
+  }
+  for (const Type *m : type->members()) {
+    constructorsIn(m, out, seen);
+  }
+  if (type->isObject() && !type->isClass()) {
+    for (const Field &f : type->fields()) {
+      constructorsIn(f.type, out, seen);
+    }
+  }
+}
+
+bool instanceOf(const Type *made, const Type *of) {
+  return made == of || of->isAnyObject() || made->isSubtypeOf(of);
+}
+
 Expr *stripImplicit(Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
@@ -85,6 +133,25 @@ void ReflectChecker::noteReflectedConversion(const Type *from, const Type *to,
   }
 }
 
+void ReflectChecker::noteConstructorFlow(const Type *from, const Type *to) {
+  llvm::SmallVector<const Type *, 4> sources, targets;
+  llvm::SmallPtrSet<const Type *, 16> seenFrom, seenTo;
+  constructorsIn(to, targets, seenTo);
+  if (targets.empty()) {
+    return;
+  }
+  constructorsIn(from, sources, seenFrom);
+  for (const Type *x : sources) {
+    for (const Type *y : targets) {
+      if (x != y && instanceOf(x, y)) {
+        checker_.constructorWidenings_[x].insert(y);
+      } else if (x != y && instanceOf(y, x)) {
+        checker_.constructorWidenings_[y].insert(x);
+      }
+    }
+  }
+}
+
 void ReflectChecker::finishReflection() {
   for (const auto &entry : checker_.constructorCasts_) {
     entry.second->reflectNew = true;
@@ -121,6 +188,115 @@ void ReflectChecker::finishReflection() {
     for (ClassDecl *cls : checker_.classes_) {
       if (cls->reflectNew && !cls->isAbstract && classJsonProblem(cls).empty()) {
         cls->reflectJson = true;
+      }
+    }
+  }
+  checkReflectNews();
+}
+
+const Type *ReflectChecker::reflectError() { return checker_.prelude().builtinType("ReflectError"); }
+
+Expr *ReflectChecker::okOf(Expr *value) {
+  if (value->type->isError()) {
+    return value;
+  }
+  auto *call = checker_.ctx_.make<CallExpr>(
+      value->loc(), checker_.ctx_.make<NameExpr>(value->loc(), "ok"), std::vector<Expr *>{value});
+  call->builtin = Builtin::ResultOk;
+  call->type = Type::result(value->type, reflectError());
+
+  return call;
+}
+
+std::string ReflectChecker::constructProblem(ClassDecl *cls, llvm::ArrayRef<const Type *> args) {
+  if (cls->isAbstract) {
+    return "it is abstract";
+  }
+  std::vector<FunctionDecl *> ctors = ClassLinks::constructorsOf(cls);
+  if (ctors.empty()) {
+    return args.empty() ? "" : "its constructor takes no arguments";
+  }
+  size_t fitting = 0;
+  std::string takes;
+  for (FunctionDecl *ctor : ctors) {
+    FuncSymbol *sym = ctor->sym;
+    if (!sym) {
+      return "its constructor is unknown";
+    }
+    checker_.returnInferrer().resolveParams(sym);
+    std::string shown;
+    for (const Type *param : sym->params) {
+      shown += (shown.empty() ? "" : ", ") + (param ? param->name().str() : "?");
+    }
+    takes += (takes.empty() ? "(" : " or (") + shown + ")";
+    size_t fixed = sym->hasRest ? sym->params.size() - 1 : sym->params.size();
+    bool fits = args.size() >= sym->minArgs && (sym->hasRest || args.size() <= fixed);
+    for (size_t i = 0; i < args.size() && fits; ++i) {
+      const Type *param = i < fixed ? sym->params[i] : sym->params.back()->inner();
+      fits = param && ReflectCallChecker::reflectAccepts(args[i], param);
+    }
+    fitting += fits;
+  }
+  if (fitting == 1) {
+    return "";
+  }
+
+  return fitting == 0 ? "its constructor takes " + takes
+                      : "the arguments may fit several of its constructors";
+}
+
+void ReflectChecker::checkReflectNews() {
+  if (checker_.reflectNews_.empty()) {
+    return;
+  }
+  llvm::DenseMap<const Type *, llvm::SmallPtrSet<const Type *, 8>> reach;
+  auto reachable = [&](const Type *start) -> const llvm::SmallPtrSet<const Type *, 8> & {
+    auto [it, fresh] = reach.try_emplace(start);
+    if (fresh) {
+      std::vector<const Type *> work{start};
+      it->second.insert(start);
+      while (!work.empty()) {
+        const Type *at = work.back();
+        work.pop_back();
+        auto next = checker_.constructorWidenings_.find(at);
+        if (next == checker_.constructorWidenings_.end()) {
+          continue;
+        }
+        for (const Type *to : next->second) {
+          if (it->second.insert(to).second) {
+            work.push_back(to);
+          }
+        }
+      }
+    }
+    return it->second;
+  };
+  std::vector<std::pair<ClassDecl *, const Type *>> entries;
+  for (const auto &[cast, cls] : checker_.constructorCasts_) {
+    const Type *target = cast->type ? cast->type->nonOptional() : nullptr;
+    if (target && target->isConstructor()) {
+      entries.push_back({cls, target->constructed()});
+    }
+  }
+  for (const auto &[expr, args] : checker_.reflectNews_) {
+    const Type *made = expr->type;
+    if (!made || made->isError()) {
+      continue;
+    }
+    llvm::SmallPtrSet<ClassDecl *, 8> checked;
+    for (const auto &[cls, entry] : entries) {
+      if (!cls->type || !reachable(entry).contains(made) || !checked.insert(cls).second) {
+        continue;
+      }
+      std::string problem = cls->builtin ? "it is a class of JavaScript, which only "
+                                           "Reflect.construct tries to make"
+                                         : constructProblem(cls, args);
+      if (!problem.empty()) {
+        checker_.diags_.error(
+            expr->loc(), "'new' of a class known only when the program runs may fail: '" +
+                             cls->type->name().str() + "' can be here, and " + problem +
+                             "; write 'Reflect.construct(cls, [...])', which gives a Result");
+        break;
       }
     }
   }
@@ -319,7 +495,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     checker_.flowChecker().calledFunction();
     if (held && !f->type->isError() && !self->type->isError() && !call->args[2]->type->isError()) {
       if (Expr *direct = checker_.reflectCallChecker().directReflectApply(call, held)) {
-        return direct;
+        return okOf(direct);
       }
     }
     if (!onlyChecked()) {
@@ -327,7 +503,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
       reflectGetAny_ = true;
     }
     call->builtin = Builtin::ReflectApply;
-    call->type = Type::unknown();
+    call->type = Type::result(Type::unknown(), reflectError());
     return call;
   }
   if (call->args.size() == 3) {
@@ -366,7 +542,10 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
     auto *create =
         checker_.ctx_.make<NewExpr>(call->loc(), "", std::vector<TypeRef>(), std::move(args));
     create->callee = checker_.ctx_.make<NameExpr>(name->loc(), name->name);
-    return checker_.classValueChecker().checkValueNew(create, expected);
+    const Type *wanted = expected && expected->nonOptional()->isResult()
+                             ? expected->nonOptional()->okType()
+                             : nullptr;
+    return okOf(checker_.classValueChecker().checkValueNew(create, wanted));
   }
   bool known = false;
   if (const ClassDecl *made = type->classRef()) {
@@ -386,7 +565,7 @@ Expr *ReflectChecker::checkReflection(CallExpr *call, MemberExpr *member, const 
   checker_.flowChecker().calledFunction();
   checker_.reflectionUsed_ |= !known && !onlyChecked();
   call->builtin = Builtin::ReflectConstruct;
-  call->type = ClassValueChecker::constructedBy(cls->type);
+  call->type = Type::result(ClassValueChecker::constructedBy(cls->type), reflectError());
 
   return call;
 }

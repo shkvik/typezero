@@ -1,0 +1,36 @@
+// `new` of a class known only when the program runs cannot fail, as no
+// constructor can: it compiles when every class that can be there takes
+// the arguments (the classes that become a value of this Constructor type),
+// else Reflect.construct gives a Result (docs/decorators.md, section 6).
+class Point {
+  constructor(public x: int, public y: int) {}
+}
+class Label {
+  constructor(public text: string) {}
+}
+abstract class Shape {}
+class Square extends Shape {
+  constructor(public side: double) {
+    super()
+  }
+}
+const kinds: Constructor[] = [Point, Label]
+for (const kind of kinds) {
+  // expect-error: 'new' of a class known only when the program runs may fail: 'Label' can be here, and its constructor takes (string); write 'Reflect.construct(cls, [...])', which gives a Result
+  console.log(new kind(1, 2))
+}
+const points: Constructor<Point>[] = [Point]
+for (const kind of points) console.log(new kind(1, 2))
+const shapes: Constructor<Shape>[] = [Square, Shape]
+for (const kind of shapes) {
+  // expect-error: 'new' of a class known only when the program runs may fail: 'Shape' can be here, and it is abstract
+  console.log(new kind(2.5))
+}
+const any: unknown = 3
+for (const kind of points) {
+  // expect-error: 'new' of a class known only when the program runs may fail: 'Point' can be here, and its constructor takes (int, int)
+  console.log(new kind(any, 2))
+}
+const made = Reflect.construct(Point, [1, 2])
+// expect-error: property 'x' does not exist on type 'Result<Point, ReflectError>'
+console.log(made.x)

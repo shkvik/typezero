@@ -1,7 +1,8 @@
 // What reflection checks when the program runs (docs/decorators.md, section
 // 6), where JavaScript goes on with what it got: each argument against the
-// parameter it goes to, how many there are, the `this` of a method; a value
-// that does not fit is a TypeError that says which and why.
+// parameter it goes to, how many there are, the `this` of a method. A value
+// that does not fit is an Err of a ReflectError that says which and why;
+// `new` of a class value is checked when compiling (errors/reflect_new.tz).
 
 class Point {
   constructor(public x: int, public y: int) {}
@@ -31,39 +32,35 @@ class Square extends Shape {
   }
 }
 
-function attempt(what: string, run: () => unknown) {
-  try {
-    console.log(what, run())
-  } catch (e) {
-    console.log(what, String(e))
-  }
+function show<T>(what: string, r: Result<T, ReflectError>) {
+  if (r.isOk()) console.log(what, r.value)
+  else console.log(what, `${r.error.code}: ${r.error.message}`)
 }
 
 const kind: Constructor = Point
 const labelKind: Constructor<Label> = Label
 const p = new Point(1, 2)
-attempt("new", () => new kind(3, 4))
-attempt("new", () => new kind(1, 2.5))
-attempt("new", () => new kind(1))
-attempt("new", () => new kind(1, 2, 3))
-attempt("new", () => new kind("1", 2))
-attempt("new", () => new labelKind("here", p))
-attempt("new", () => new labelKind("here", new Label("x", new Point(0, 0))))
+console.log("new", new kind(3, 4))
+show("construct", Reflect.construct(kind, [1, 2.5]))
+show("construct", Reflect.construct(kind, [1]))
+show("construct", Reflect.construct(kind, [1, 2, 3]))
+show("construct", Reflect.construct(kind, ["1", 2]))
+console.log("new", new labelKind("here", p))
+show("construct", Reflect.construct(labelKind, ["here", new Label("x", new Point(0, 0))]))
 const move = Reflect.get(p, "move")
-attempt("apply", () => Reflect.apply(move, p, [3]))
-attempt("apply", () => Reflect.apply(move, p, [3, 4]))
-attempt("apply", () => Reflect.apply(move, p, []))
-attempt("apply", () => Reflect.apply(move, p, [true]))
-attempt("apply", () => Reflect.apply(move, new Label("l", p), [1]))
-attempt("apply", () => Reflect.apply(Reflect.get(p, "scale"), p, [2, 0.5, 3]))
-attempt("apply", () => Reflect.apply(Reflect.get(p, "scale"), p, [2, "x"]))
+show("apply", Reflect.apply(move, p, [3]))
+show("apply", Reflect.apply(move, p, [3, 4]))
+show("apply", Reflect.apply(move, p, []))
+show("apply", Reflect.apply(move, p, [true]))
+show("apply", Reflect.apply(move, new Label("l", p), [1]))
+show("apply", Reflect.apply(Reflect.get(p, "scale"), p, [2, 0.5, 3]))
+show("apply", Reflect.apply(Reflect.get(p, "scale"), p, [2, "x"]))
 const five: unknown = 5
-attempt("apply", () => Reflect.apply(five, p, []))
-attempt("apply", () => Reflect.apply(Reflect.get(p, "x"), p, []))
+show("apply", Reflect.apply(five, p, []))
+show("apply", Reflect.apply(Reflect.get(p, "x"), p, []))
 const shapes: Constructor<Shape>[] = [Square, Shape]
-attempt("construct", () => Reflect.construct(shapes[0]!, [3]).area())
-attempt("construct", () => Reflect.construct(shapes[1]!, []))
-attempt("get", () => Reflect.get(p, "x"))
+for (const shape of shapes) show("construct", Reflect.construct(shape, [3]).map(s => s.area()))
+console.log("get", Reflect.get(p, "x"))
 const nothing: unknown = undefined
-attempt("get", () => Reflect.get(nothing, "x"))
-attempt("get", () => Reflect.get(Point, "name"))
+console.log("get", Reflect.get(nothing, "x"), Reflect.get(five, "x"))
+console.log("get", Reflect.get(Point, "name"))

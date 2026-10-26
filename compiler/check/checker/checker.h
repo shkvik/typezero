@@ -38,6 +38,7 @@ enum class NodeModule {
 std::string cryptoExportProblem(llvm::StringRef name, llvm::StringRef path);
 
 inline constexpr llvm::StringLiteral kSubtleName = "__tz_subtle";
+inline constexpr llvm::StringLiteral kIntlLocaleName = "__tz_IntlLocale";
 
 std::string builtinModuleProblem(llvm::StringRef path);
 
@@ -247,6 +248,7 @@ class StreamSources;
 class StreamPipeline;
 class TzModulesChecker;
 class UrlChecker;
+class HttpChecker;
 class WeakRefChecker;
 
 class Checker {
@@ -441,6 +443,8 @@ private:
   };
   llvm::SmallPtrSet<const CallExpr *, 4> severalVariants_;
   llvm::DenseMap<const CastExpr *, ClassDecl *> constructorCasts_;
+  std::vector<std::pair<const NewExpr *, std::vector<const Type *>>> reflectNews_;
+  llvm::DenseMap<const Type *, llvm::SmallPtrSet<const Type *, 4>> constructorWidenings_;
   ClassDecl *declaringClass_ = nullptr;
   std::vector<ClassDecl *> lateClasses_;
   size_t lateChecked_ = 0;
@@ -803,6 +807,7 @@ public:
   StreamPipeline &streamPipeline() const { return *streamPipelinePart_; }
   TzModulesChecker &tzModulesChecker() const { return *tzModulesCheckerPart_; }
   UrlChecker &urlChecker() const { return *urlCheckerPart_; }
+  HttpChecker &httpChecker() const { return *httpCheckerPart_; }
   WeakRefChecker &weakRefChecker() const { return *weakRefCheckerPart_; }
 
 private:
@@ -968,6 +973,7 @@ private:
   friend class StreamPipeline;
   friend class TzModulesChecker;
   friend class UrlChecker;
+  friend class HttpChecker;
   friend class WeakRefChecker;
   std::unique_ptr<Scopes> scopesPart_;
   std::unique_ptr<TypeResolver> typeResolverPart_;
@@ -1126,6 +1132,7 @@ private:
   std::unique_ptr<StreamPipeline> streamPipelinePart_;
   std::unique_ptr<TzModulesChecker> tzModulesCheckerPart_;
   std::unique_ptr<UrlChecker> urlCheckerPart_;
+  std::unique_ptr<HttpChecker> httpCheckerPart_;
   std::unique_ptr<WeakRefChecker> weakRefCheckerPart_;
 };
 

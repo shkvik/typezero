@@ -7,3 +7,5 @@ on off on Light { state: 'on' }
 11 [ 0, 1, 0, 0 ] true
 -1 0 1
 up down left slow
+[ 'down', undefined, 'right' ] [ 10, 0, 1 ]
+[ 0, 1, undefined ]

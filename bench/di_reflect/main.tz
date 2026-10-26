@@ -11,21 +11,23 @@ class Handler {
   }
 }
 
-function make<T extends object>(cls: Constructor<T>): T {
+function make<T extends object>(cls: Constructor<T>) {
   return Reflect.construct(cls, [])
 }
 
 function invoke<T extends object>(obj: T, n: int): unknown {
   const method = Reflect.get(obj, "handle")
   if (typeof method != "function") return undefined
-  return Reflect.apply(method, obj, [n])
+  return Reflect.apply(method, obj, [n]).unwrapOr(undefined)
 }
 
 const kinds: Constructor[] = [Handler]
 let sum = 0.0
 for (const kind of kinds) {
   for (let i = 0; i < 5000000; i++) {
-    const h = make(kind)
+    const made = make(kind)
+    if (made.isErr()) break
+    const h = made.value
     invoke(h, i & 7)
     const r = invoke(h, 1)
     if (typeof r == "number") sum += r

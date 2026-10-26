@@ -499,7 +499,6 @@ int32_t tz_dn_of(TzStr *out, TzDisplayNames *d, void *code_obj, uint64_t code_me
   if (!tz_intl_ascii(given, code, sizeof code) || !code[0] ||
       !checked_code(icu, type, code, id, sizeof id) ||
       (strcmp(type, "dateTimeField") == 0 && (field = date_field(code)) < 0)) {
-    tz_throw(TZ_RANGE_ERROR, "invalid_argument");
     return 0;
   }
   TzUChar name[256];

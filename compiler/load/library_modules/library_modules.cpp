@@ -47,6 +47,7 @@ constexpr LibraryGlobal kLibraryGlobals[] = {
     {"ReadableStreamDefaultController", "fetch.tz", "tz:fetch"},
     {"FormData", "fetch.tz", "tz:fetch"},
     {"fetch", "fetch.tz", "tz:fetch"},
+    {"isHttpStatus", "fetch.tz", "tz:fetch"},
     {"RequestInit", "fetch.tz", "tz:fetch"},
     {"ResponseInit", "fetch.tz", "tz:fetch"},
     {"HeadersInit", "fetch.tz", "tz:fetch"},
@@ -183,6 +184,7 @@ Module *LibraryModules::libraryModule(llvm::StringRef file, llvm::StringRef name
 void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) {
   llvm::StringMap<const char *> mentions;
   const char *subtle = nullptr;
+  const char *locale = nullptr;
   bool muted = loader_.diags_.setMuted(true);
   Lexer lexer(text, loader_.diags_);
   bool property = false;
@@ -198,12 +200,16 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
         before[0].is(Tok::Identifier) && before[0].text == "crypto") {
       subtle = token.text.data();
     }
+    if (!locale && token.is(Tok::Identifier) && token.text == "Locale" &&
+        before[1].is(Tok::Dot) && before[0].is(Tok::Identifier) && before[0].text == "Intl") {
+      locale = token.text.data();
+    }
     property = token.is(Tok::Dot) || token.is(Tok::QuestionDot);
     before[0] = before[1];
     before[1] = token;
   }
   loader_.diags_.setMuted(muted);
-  if (mentions.empty() && !subtle) {
+  if (mentions.empty() && !subtle && !locale) {
     return;
   }
   llvm::StringSet<> own;
@@ -262,6 +268,12 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(subtle);
     if (ImportDecl *decl = importOf("webcrypto.tz", "tz:webcrypto", loc)) {
       decl->names.push_back({"subtle", loc, kSubtleName, loc});
+    }
+  }
+  if (locale && module->path.find("locale.tz") == std::string::npos) {
+    llvm::SMLoc loc = llvm::SMLoc::getFromPointer(locale);
+    if (ImportDecl *decl = importOf("locale.tz", "tz:locale", loc)) {
+      decl->names.push_back({"Locale", loc, kIntlLocaleName, loc});
     }
   }
   for (ImportDecl &decl : imports) {

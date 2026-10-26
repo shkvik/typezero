@@ -585,6 +585,112 @@ void tz_intl_push_value_parts(TzArray *parts, const TzIntlShape *shape, const vo
   }
 }
 
+static int locale_tag(const TzIcu *icu, TzStr given, char *tag, int32_t size) {
+  char id[160], canonical[160];
+  if (!icu || !parse_tag(icu, given, id, sizeof id)) {
+    return 0;
+  }
+  canonical_id(icu, id, canonical, sizeof canonical);
+  TzUErrorCode status = 0;
+  int32_t n = icu->uloc_toLanguageTag(canonical, tag, size - 1, 1, &status);
+  if (TZ_U_FAILURE(status) || n <= 0) {
+    return 0;
+  }
+  tag[n] = 0;
+
+  return 1;
+}
+
+void tz_intl_locale_tag(TzStr *out, void *tag_obj, uint64_t tag_meta, TzMaker make) {
+  (void)make;
+  char tag[160];
+  TzStr given = {tag_obj, tag_meta};
+  *out = locale_tag(tz_icu(), given, tag, sizeof tag) ? tz_str_from_ascii(tag, strlen(tag))
+                                                      : tz_str_from_ascii("", 0);
+}
+
+static size_t subtag(const char *tag, size_t at, size_t *length) {
+  size_t end = at;
+  while (tag[end] && tag[end] != '-') {
+    ++end;
+  }
+  *length = end - at;
+
+  return tag[end] ? end + 1 : end;
+}
+
+void tz_intl_locale_part(TzStr *out, void *tag_obj, uint64_t tag_meta, int32_t part,
+                         TzMaker make) {
+  (void)make;
+  const TzIcu *icu = tz_icu();
+  *out = tz_str_from_ascii("", 0);
+  char tag[160], id[160], base[160], text[160];
+  TzStr given = {tag_obj, tag_meta};
+  int32_t parsed = 0;
+  TzUErrorCode status = 0;
+  if (!icu || !tz_intl_ascii(given, tag, sizeof tag)) {
+    return;
+  }
+  int32_t n = icu->uloc_forLanguageTag(tag, id, (int32_t)sizeof id - 1, &parsed, &status);
+  if (TZ_U_FAILURE(status) || n <= 0) {
+    return;
+  }
+  id[n] = 0;
+  if (part == 4) {
+    status = 0;
+    n = icu->uloc_addLikelySubtags(id, base, (int32_t)sizeof base - 1, &status);
+    if (TZ_U_FAILURE(status) || n <= 0) {
+      return;
+    }
+    base[n] = 0;
+    status = 0;
+    n = icu->uloc_toLanguageTag(base, text, (int32_t)sizeof text - 1, 1, &status);
+    if (!TZ_U_FAILURE(status) && n > 0) {
+      *out = tz_str_from_ascii(text, (size_t)n);
+    }
+    return;
+  }
+  status = 0;
+  n = icu->uloc_getBaseName(id, base, (int32_t)sizeof base - 1, &status);
+  if (TZ_U_FAILURE(status) || n <= 0) {
+    return;
+  }
+  base[n] = 0;
+  status = 0;
+  n = icu->uloc_toLanguageTag(base, text, (int32_t)sizeof text - 1, 1, &status);
+  if (TZ_U_FAILURE(status) || n <= 0) {
+    return;
+  }
+  text[n] = 0;
+  if (part == 0) {
+    *out = tz_str_from_ascii(text, (size_t)n);
+    return;
+  }
+  size_t length = 0, at = subtag(text, 0, &length);
+  if (part == 1) {
+    *out = tz_str_from_ascii(text, length);
+    return;
+  }
+  while (text[at]) {
+    size_t from = at;
+    at = subtag(text, at, &length);
+    int alpha = 1, digits = 1;
+    for (size_t i = 0; i < length; ++i) {
+      char c = text[from + i];
+      alpha &= (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+      digits &= c >= '0' && c <= '9';
+    }
+    if (part == 2 && length == 4 && alpha) {
+      *out = tz_str_from_ascii(text + from, length);
+      return;
+    }
+    if (part == 3 && ((length == 2 && alpha) || (length == 3 && digits))) {
+      *out = tz_str_from_ascii(text + from, length);
+      return;
+    }
+  }
+}
+
 static int canonical_list(const TzIcu *icu, const TzArray *locales, TzArray *out) {
   for (uint32_t i = 0; i < locales->length; ++i) {
     TzStr s = ((const TzStr *)locales->data)[i];

@@ -84,6 +84,13 @@ class Err {
 }
 
 globalThis.ok = (value) => new Ok(value);
+
+// Reflect.apply and Reflect.construct give a Result in tz (docs/decorators.md,
+// section 6); the tests compared with node call them only where they work.
+const reflectApply = Reflect.apply;
+const reflectConstruct = Reflect.construct;
+Reflect.apply = (f, self, args) => new Ok(reflectApply(f, self, args));
+Reflect.construct = (cls, args) => new Ok(reflectConstruct(cls, args));
 globalThis.err = (error) => new Err(error);
 globalThis.Result = {
   combine(results) {

@@ -51,12 +51,17 @@ function normalizeValue(value: string): string {
   return value.slice(start, end)
 }
 
-function isValidValue(value: string): boolean {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i)
-    if (c == 0 || c == 0x0a || c == 0x0d) return false
+function headerValue(value: string): string {
+  const v = normalizeValue(value)
+  let kept = ""
+  let from = 0
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c != 0 && c != 0x0a && c != 0x0d) continue
+    kept += v.slice(from, i)
+    from = i + 1
   }
-  return true
+  return from == 0 ? v : kept + v.slice(from)
 }
 
 export type HeadersInit = Headers | [string, string][] | Record<string, string>
@@ -64,7 +69,6 @@ export type HeadersInit = Headers | [string, string][] | Record<string, string>
 export class Headers {
   #list: string[] = []
   #shown: string[] | undefined = undefined
-  #immutable = false
 
   constructor(init?: HeadersInit) {
     if (init == undefined) return
@@ -79,10 +83,9 @@ export class Headers {
     }
   }
 
-  static __fromWire(flat: string[], immutable: boolean): Headers {
+  static __fromWire(flat: string[]): Headers {
     const h = new Headers()
     h.#list = flat
-    h.#immutable = immutable
     return h
   }
 
@@ -90,20 +93,8 @@ export class Headers {
     return this.#list
   }
 
-  __freeze() {
-    this.#immutable = true
-  }
-
   __add(name: string, value: string) {
     this.#push(name, name, value)
-  }
-
-  #check(method: string, name: string, value?: string) {
-    if (!isToken(name))
-      throw new TypeError(`Headers.${method}: "${name}" is an invalid header name.`)
-    if (value != undefined && !isValidValue(value))
-      throw new TypeError(`Headers.${method}: "${value}" is an invalid header value.`)
-    if (this.#immutable && method != "get" && method != "has") throw new TypeError("immutable")
   }
 
   #push(name: string, lower: string, value: string) {
@@ -133,13 +124,12 @@ export class Headers {
   }
 
   append(name: string, value: string) {
-    const v = normalizeValue(value)
-    this.#check("append", name, v)
-    this.#push(name, name.toLowerCase(), v)
+    if (!isToken(name)) return
+    this.#push(name, name.toLowerCase(), headerValue(value))
   }
 
   delete(name: string) {
-    this.#check("delete", name)
+    if (!isToken(name)) return
     const lower = name.toLowerCase()
     if (this.#list.includes(lower)) this.#keep(i => this.#list[i] != lower)
   }
@@ -153,8 +143,6 @@ export class Headers {
         const v = list[i + 1] ?? ""
         out = out == undefined ? v : out + ", " + v
       }
-    if (out == undefined && !isToken(name))
-      throw new TypeError(`Headers.get: "${name}" is an invalid header name.`)
     return out
   }
 
@@ -166,7 +154,7 @@ export class Headers {
   }
 
   has(name: string): boolean {
-    this.#check("has", name)
+    if (!isToken(name)) return false
     const list = this.#list
     const lower = name.toLowerCase()
     for (let i = 0; i < list.length; i += 2) if (list[i] == lower) return true
@@ -174,8 +162,8 @@ export class Headers {
   }
 
   set(name: string, value: string) {
-    const v = normalizeValue(value)
-    this.#check("set", name, v)
+    if (!isToken(name)) return
+    const v = headerValue(value)
     const lower = name.toLowerCase()
     const list = this.#list
     let at = -1
@@ -662,6 +650,18 @@ class Body {
     return b
   }
 
+  moved(): Body {
+    const b = new Body()
+    b.kind = this.kind
+    b.text = this.text
+    b.bytes = this.bytes
+    b.stream = this.stream
+    b.wire = this.wire
+    b.type = this.type
+    this.used = true
+    return b
+  }
+
   get usedOrDisturbed(): boolean {
     const stream = this.stream
     return this.used || (stream != undefined && stream.__state().disturbed)
@@ -735,8 +735,11 @@ class Body {
   }
 
   copy(): Body {
-    if (this.usedOrDisturbed) throw new TypeError("Response.clone: Body has already been consumed.")
     const b = new Body()
+    if (this.usedOrDisturbed) {
+      b.used = true
+      return b
+    }
     b.kind = this.kind
     b.text = this.text
     b.bytes = this.bytes
@@ -912,14 +915,23 @@ export interface RequestInit {
   mode?: string
   referrer?: string
   referrerPolicy?: string
-  duplex?: string
+  duplex?: "half"
+}
+
+function badRequest(message: string): FetchError {
+  return { code: "bad_request", message }
+}
+
+function methodProblem(method: string): string | undefined {
+  if (!isToken(method)) return `'${method}' is not a valid HTTP method.`
+  const upper = method.toUpperCase()
+  if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK")
+    return `'${method}' HTTP method is unsupported.`
+  return undefined
 }
 
 function normalizeMethod(method: string): string {
-  if (!isToken(method)) throw new TypeError(`'${method}' is not a valid HTTP method.`)
   const upper = method.toUpperCase()
-  if (upper == "CONNECT" || upper == "TRACE" || upper == "TRACK")
-    throw new TypeError(`'${method}' HTTP method is unsupported.`)
   if (upper == "DELETE" || upper == "GET" || upper == "HEAD" || upper == "OPTIONS" ||
       upper == "POST" || upper == "PUT" || upper == "PATCH")
     return upper == "PATCH" ? method : upper
@@ -934,6 +946,7 @@ export class Request {
   #redirect: RequestRedirect = "follow"
   #signal: AbortSignal | undefined = undefined
   #keepalive = false
+  #problem: FetchError | undefined = undefined
 
   constructor(input: string | URL | Request, init?: RequestInit) {
     if (input instanceof Request) {
@@ -942,41 +955,50 @@ export class Request {
       this.#headers = new Headers(input.#headers)
       this.#redirect = input.#redirect
       this.#signal = input.#signal
+      this.#problem = input.#problem
       const given = init?.body
       this.#body = given != undefined ? Body.of(given) : input.#body
       if (given == undefined && input.#body.kind != BODY_NONE) {
         if (input.#body.usedOrDisturbed)
-          throw new TypeError("Request.constructor: Cannot construct a Request with a Request " +
-                              "object that has already been used.")
-        input.#body.used = true
+          this.#problem ??= badRequest("Request.constructor: Cannot construct a Request with " +
+                                       "a Request object that has already been used.")
+        else this.#body = input.#body.moved()
       }
     } else {
       const text = typeof input == "string" ? input : input.href
-      let parsed: URL
-      try {
-        parsed = new URL(text)
-      } catch (e) {
-        throw new TypeError("Failed to parse URL from " + text, { cause: e })
+      const parsed = URL.parse(text)
+      if (parsed.isErr()) {
+        this.#url = text
+        this.#problem = { code: "bad_request", message: "Failed to parse URL from " + text,
+                          cause: parsed.error.message }
+      } else {
+        const url = parsed.value
+        if (url.username != "" || url.password != "")
+          this.#problem = badRequest("Request cannot be constructed from a URL that includes " +
+                                     "credentials: " + text)
+        this.#url = url.href
       }
-      if (parsed.username != "" || parsed.password != "")
-        throw new TypeError("Request cannot be constructed from a URL that includes credentials: " +
-                            text)
-      this.#url = parsed.href
       this.#headers = new Headers()
       this.#body = Body.of(undefined)
     }
     if (init != undefined) {
-      if (init.method != undefined) this.#method = normalizeMethod(init.method)
+      const method = init.method
+      if (method != undefined) {
+        const problem = methodProblem(method)
+        if (problem != undefined) this.#problem ??= badRequest(problem)
+        this.#method = normalizeMethod(method)
+      }
       if (init.headers != undefined) this.#headers = new Headers(init.headers)
       if (init.redirect != undefined) this.#redirect = init.redirect
       if (init.signal != undefined) this.#signal = init.signal
       if (init.keepalive != undefined) this.#keepalive = init.keepalive
       if (init.body != undefined) {
         if (this.#method == "GET" || this.#method == "HEAD")
-          throw new TypeError("Request with GET/HEAD method cannot have body.")
+          this.#problem ??= badRequest("Request with GET/HEAD method cannot have body.")
         this.#body = Body.of(init.body)
         if (this.#body.kind == BODY_STREAM && init.duplex != "half")
-          throw new TypeError("RequestInit: duplex option is required when sending a body.")
+          this.#problem ??= badRequest("RequestInit: duplex option is required when sending " +
+                                       "a body.")
       }
     }
     const type = this.#body.type
@@ -988,7 +1010,7 @@ export class Request {
                       base: string, hasBody: boolean): Request {
     const r = new Request("http://localhost/")
     r.#method = method
-    r.#headers = Headers.__fromWire(flat, false)
+    r.#headers = Headers.__fromWire(flat)
     const host = r.#headers.get("host")
     const scheme = base.startsWith("https:") ? "https://" : "http://"
     r.#url = target.startsWith("/") ? (host != undefined ? scheme + host : base) + target
@@ -1079,10 +1101,15 @@ export class Request {
     return this.#signal
   }
 
+  __problem(): FetchError | undefined {
+    return this.#problem
+  }
+
   clone(): Request {
     const init: RequestInit = { method: this.#method, headers: this.#headers, redirect: this.#redirect }
     const r = new Request(this.#url, init)
     r.#signal = this.#signal
+    r.#problem = this.#problem
     r.#body = this.#body.copy()
     return r
   }
@@ -1127,9 +1154,25 @@ export class Request {
 }
 
 export interface ResponseInit {
-  status?: int
+  status?: HttpStatus
   statusText?: string
   headers?: HeadersInit
+}
+
+export function isHttpStatus(code: int) {
+  return code >= 200 && code <= 599
+}
+
+function reasonPhrase(text: string): string {
+  let kept = ""
+  let from = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    if (c == 0x09 || (c >= 0x20 && c <= 0x7e) || (c >= 0x80 && c <= 0xff)) continue
+    kept += text.slice(from, i)
+    from = i + 1
+  }
+  return from == 0 ? text : kept + text.slice(from)
 }
 
 export class Response {
@@ -1142,20 +1185,11 @@ export class Response {
   #redirected = false
 
   constructor(body?: BodyInit, init?: ResponseInit) {
-    const status = init?.status ?? 200
-    if (status < 200 || status > 599)
-      throw new RangeError("init[\"status\"] must be in the range of 200 to 599, inclusive.")
+    const status: int = init?.status ?? 200
     this.#status = status
-    const statusText = init?.statusText ?? ""
-    for (let i = 0; i < statusText.length; i++) {
-      const c = statusText.charCodeAt(i)
-      if (c == 0x0a || c == 0x0d || c > 0xff) throw new TypeError("Invalid statusText")
-    }
-    this.#statusText = statusText
+    this.#statusText = reasonPhrase(init?.statusText ?? "")
     this.#headers = new Headers(init?.headers)
-    this.#body = Body.of(body)
-    if (body != undefined && (status == 101 || status == 204 || status == 205 || status == 304))
-      throw new TypeError(`Response constructor: Invalid response status code ${status}`)
+    this.#body = Body.of(status == 204 || status == 205 || status == 304 ? undefined : body)
     const type = this.#body.type
     if (type != undefined && !this.#headers.has("content-type"))
       this.#headers.__add("content-type", type)
@@ -1167,13 +1201,9 @@ export class Response {
     return r
   }
 
-  static redirect(url: string | URL, status = 302): Response {
-    const target = new URL(typeof url == "string" ? url : url.href)
-    if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308)
-      throw new RangeError(`Invalid status code ${status}`)
+  static redirect(url: URL, status: RedirectStatus = 302): Response {
     const r = new Response(undefined, { status })
-    r.#headers.set("location", target.href)
-    r.#headers.__freeze()
+    r.#headers.set("location", url.href)
     return r
   }
 
@@ -1181,7 +1211,6 @@ export class Response {
     const r = new Response(undefined, { status: 200 })
     r.#status = 0
     r.#type = "error"
-    r.#headers.__freeze()
     return r
   }
 
@@ -1190,7 +1219,7 @@ export class Response {
     const r = new Response(undefined)
     r.#status = status
     r.#statusText = statusText
-    r.#headers = Headers.__fromWire(flat, true)
+    r.#headers = Headers.__fromWire(flat)
     r.#body = body
     r.#type = "basic"
     r.#url = url
@@ -1244,7 +1273,7 @@ export class Response {
   }
 
   clone(): Response {
-    const r = new Response(undefined, { status: this.#status == 0 ? 200 : this.#status })
+    const r = new Response(undefined)
     r.#status = this.#status
     r.#statusText = this.#statusText
     r.#headers = new Headers(this.#headers)
@@ -1437,7 +1466,7 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
       throw fetchFailed(e)
     }
     const responseFlat = __tz_http_headers(c)
-    const responseHeaders = Headers.__fromWire(responseFlat, true)
+    const responseHeaders = Headers.__fromWire(responseFlat)
     let responseBody: Body
     if (__tz_http_has_body(c)) {
       const wire = new Wire(c, signal)
@@ -1476,7 +1505,10 @@ function dataResponse(url: URL): Response {
 export async function fetch(input: string | URL | Request,
                             init?: RequestInit): Promise<Result<Response, FetchError>> {
   try {
-    return ok(await fetchOrThrow(input, init))
+    const request = new Request(input, init)
+    const problem = request.__problem()
+    if (problem != undefined) return err(problem)
+    return ok(await fetchOrThrow(request))
   } catch (e) {
     return err(fetchErrorOf(e))
   }
@@ -1507,8 +1539,7 @@ function bodyErrorOf(e: Error): BodyError {
   return { code: "body_failed", message }
 }
 
-async function fetchOrThrow(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const request = new Request(input, init)
+async function fetchOrThrow(request: Request): Promise<Response> {
   const signal = request.__signalIfAny()
   signal?.throwIfAborted()
   let url = new URL(request.url)

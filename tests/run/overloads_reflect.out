@@ -10,9 +10,9 @@ add(2) Vec { x: 21, y: 21 }
 add(2.5) Vec { x: 3.5, y: 3.5 }
   add(2) was called
 add(2.0) Vec { x: 3, y: 3 }
-add('s') TypeError: Reflect.apply: no variant of Vec.add takes these arguments
-add() TypeError: Reflect.apply: no variant of Vec.add takes these arguments
-label(1, 2) TypeError: Reflect.apply: the arguments fit several variants of Vec.label equally well
+add('s') no_variant: Reflect.apply: no variant of Vec.add takes these arguments
+add() no_variant: Reflect.apply: no variant of Vec.add takes these arguments
+label(1, 2) several_variants: Reflect.apply: the arguments fit several variants of Vec.label equally well
 label(1, 2.5) int, double: 1 2.5
 label(1.5, 2) double, int: 1.5 2
 pet(Dog) dog rex
@@ -21,20 +21,20 @@ sum(1, 2) ints 2
 sum(1.5, 2) two doubles 3.5
 sum(1, 2, 3) ints 3
 sum() ints 0
-this TypeError: Vec.add was called with a 'this' that is not an instance of Vec
+this bad_this: Vec.add was called with a 'this' that is not an instance of Vec
 known add(3) Vec { x: 31, y: 31 }
   add(3.5) was called
 known add(3.5) Vec { x: 4.5, y: 4.5 }
 new(1, 2) Vec { x: 1, y: 2 }
 new(Vec) Vec { x: 3, y: 4 }
 new(5) Vec { x: 5, y: -5 }
-new(5.5) TypeError: new Vec: no constructor of Vec takes these arguments
-new('x') TypeError: new Vec: no constructor of Vec takes these arguments
+construct(5.5) no_variant: new Vec: no constructor of Vec takes these arguments
+construct('x') no_variant: new Vec: no constructor of Vec takes these arguments
 construct([7]) Vec { x: 7, y: -7 }
 construct Vec Vec { x: 2, y: 3 }
 Vec3 add('abc') Vec { x: 4, y: 2 }
 Vec3 add(1) Vec { x: 11, y: 12 }
-Vec add('abc') TypeError: Reflect.apply: no variant of Vec.add takes these arguments
+Vec add('abc') no_variant: Reflect.apply: no variant of Vec.add takes these arguments
 pair(1, 2) two
 pair(1) rest 0
 pair(1, 2, 3) rest 2

@@ -1,8 +1,10 @@
 // same-as-node --experimental-transform-types
 // Reflection (docs/decorators.md, section 6): a class known only when the
-// program runs makes objects with `new` and Reflect.construct; Reflect.get
-// reads a field or a method by its name, and Reflect.apply calls what it
-// gave. The exe describes the classes that reflection reaches.
+// program runs makes objects with `new` (when every class that can be there
+// takes the arguments) and Reflect.construct; Reflect.get reads a field or a
+// method by its name, and Reflect.apply calls what it gave. Reflect.apply
+// and Reflect.construct give a Result. The exe describes the classes that
+// reflection reaches.
 
 class Account {
   balance = 0
@@ -35,26 +37,35 @@ function handle(path: string): unknown {
   const controller = new route.cls("web")
   const method = Reflect.get(controller, route.method)
   if (typeof method != "function") return "500"
-  return Reflect.apply(method, controller, route.args)
+  return Reflect.apply(method, controller, route.args).unwrapOr("failed")
 }
 console.log(handle("/deposit"), handle("/summary"), handle("/missing"), handle("/nope"))
 
 // Fields by name, and what is not there.
-const saver = Reflect.construct(Savings, ["ann", 10])
+const saver = must(Reflect.construct(Savings, ["ann", 10]))
 saver.deposit(5)
 console.log(saver, Reflect.get(saver, "balance"), Reflect.get(saver, "owner"))
 console.log(Reflect.get(saver, "limit"), Reflect.get(saver, "nothing"))
 const summary = Reflect.get(saver, "summary")
-console.log(summary, typeof summary, Reflect.apply(summary, saver, []))
+console.log(summary, typeof summary, must(Reflect.apply(summary, saver, [])))
 // A method of a class applies to an object of a class that extends it.
 const deposit = Reflect.get(new Account("x"), "deposit")
-console.log(Reflect.apply(deposit, saver, [7]), saver.balance)
+console.log(must(Reflect.apply(deposit, saver, [7])), saver.balance)
 
 // A function in an unknown, and a class in a variable of `Constructor`.
 const double: unknown = (n: int) => n * 2
-console.log(Reflect.apply(double, undefined, [21]))
+console.log(must(Reflect.apply(double, undefined, [21])))
 const kinds: Constructor<Account>[] = [Account, Savings]
 for (const kind of kinds) {
-  const made = Reflect.construct(kind, ["bob"])
+  const made = must(Reflect.construct(kind, ["bob"]))
   console.log(made.summary(), made instanceof Savings, kind.name)
 }
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}
+

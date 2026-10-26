@@ -192,6 +192,9 @@ const Type *TypeDeclarer::resolveAlias(TypeAliasDecl *alias) {
   if (!alias->resolved) {
     alias->resolved = type;
   }
+  if (checker_.builtinAliases_.lookup(alias->name) == alias) {
+    Type::nameUnion(alias->resolved, alias->name);
+  }
 
   return alias->resolved;
 }

@@ -334,6 +334,225 @@ static void connection_tokens(const uint8_t *v, size_t n, Framing *f) {
   }
 }
 
+static int is_digit(uint8_t c) { return c >= '0' && c <= '9'; }
+
+static int hex_value(uint8_t c) {
+  if (is_digit(c)) {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  if (c >= 'A' && c <= 'F') {
+    return c - 'A' + 10;
+  }
+  return -1;
+}
+
+static int ipv4_number(const uint8_t *s, size_t n, uint64_t *out) {
+  if (n == 0) {
+    return 0;
+  }
+  int radix = 10;
+  if (n >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    radix = 16;
+    s += 2;
+    n -= 2;
+  } else if (n >= 2 && s[0] == '0') {
+    radix = 8;
+    s += 1;
+    n -= 1;
+  }
+  uint64_t value = 0;
+  for (size_t i = 0; i < n; ++i) {
+    int digit = hex_value(s[i]);
+    if (digit < 0 || digit >= radix) {
+      return 0;
+    }
+    value = value > (UINT64_C(1) << 40) ? value : value * (uint64_t)radix + (uint64_t)digit;
+  }
+  *out = value;
+  return 1;
+}
+
+static size_t last_label(const uint8_t *s, size_t n, size_t *start) {
+  if (n > 0 && s[n - 1] == '.') {
+    --n;
+  }
+  size_t from = n;
+  while (from > 0 && s[from - 1] != '.') {
+    --from;
+  }
+  *start = from;
+  return n;
+}
+
+static int ends_in_number(const uint8_t *s, size_t n) {
+  size_t start;
+  n = last_label(s, n, &start);
+  const uint8_t *last = s + start;
+  size_t length = n - start;
+  int digits = length > 0;
+  for (size_t i = 0; i < length; ++i) {
+    digits &= is_digit(last[i]);
+  }
+  uint64_t value;
+  return digits || ipv4_number(last, length, &value);
+}
+
+static int ipv4_ok(const uint8_t *s, size_t n) {
+  size_t start;
+  n = last_label(s, n, &start);
+  uint64_t numbers[4];
+  size_t count = 0, from = 0;
+  for (size_t i = 0; i <= n; ++i) {
+    if (i < n && s[i] != '.') {
+      continue;
+    }
+    if (count == 4 || !ipv4_number(s + from, i - from, &numbers[count])) {
+      return 0;
+    }
+    ++count;
+    from = i + 1;
+  }
+  for (size_t i = 0; i + 1 < count; ++i) {
+    if (numbers[i] > 255) {
+      return 0;
+    }
+  }
+  return numbers[count - 1] < (UINT64_C(1) << (8 * (5 - count)));
+}
+
+static int ipv6_ok(const uint8_t *s, size_t n) {
+  size_t at = 0;
+  int piece = 0, compressed = 0;
+  if (n > 0 && s[0] == ':') {
+    if (n < 2 || s[1] != ':') {
+      return 0;
+    }
+    at = 2;
+    compressed = 1;
+    ++piece;
+  }
+  while (at < n) {
+    if (piece == 8) {
+      return 0;
+    }
+    if (s[at] == ':') {
+      if (compressed) {
+        return 0;
+      }
+      ++at;
+      ++piece;
+      compressed = 1;
+      continue;
+    }
+    size_t length = 0;
+    while (length < 4 && at < n && hex_value(s[at]) >= 0) {
+      ++at;
+      ++length;
+    }
+    if (at < n && s[at] == '.') {
+      if (length == 0 || piece > 6) {
+        return 0;
+      }
+      at -= length;
+      int seen = 0;
+      while (at < n) {
+        if (seen > 0) {
+          if (s[at] != '.' || seen >= 4) {
+            return 0;
+          }
+          ++at;
+        }
+        if (at >= n || !is_digit(s[at])) {
+          return 0;
+        }
+        int number = -1;
+        while (at < n && is_digit(s[at])) {
+          if (number == 0) {
+            return 0;
+          }
+          number = number < 0 ? s[at] - '0' : number * 10 + (s[at] - '0');
+          if (number > 255) {
+            return 0;
+          }
+          ++at;
+        }
+        ++seen;
+        if (seen == 2 || seen == 4) {
+          ++piece;
+        }
+      }
+      return seen == 4 && (compressed || piece == 8);
+    }
+    if (at < n && s[at] == ':') {
+      ++at;
+      if (at >= n) {
+        return 0;
+      }
+    } else if (at < n) {
+      return 0;
+    }
+    ++piece;
+  }
+  return compressed || piece == 8;
+}
+
+static int host_ok(const uint8_t *s, size_t n) {
+  size_t host_end;
+  if (n > 0 && s[0] == '[') {
+    host_end = 1;
+    while (host_end < n && s[host_end] != ']') {
+      ++host_end;
+    }
+    if (host_end >= n || !ipv6_ok(s + 1, host_end - 1)) {
+      return 0;
+    }
+    ++host_end;
+  } else {
+    host_end = 0;
+    while (host_end < n && s[host_end] != ':') {
+      uint8_t c = s[host_end];
+      if (c <= 0x20 || c >= 0x7F || strchr("#%/<>?@[\\]^|", c)) {
+        return 0;
+      }
+      ++host_end;
+    }
+    if (host_end == 0 || (ends_in_number(s, host_end) && !ipv4_ok(s, host_end))) {
+      return 0;
+    }
+  }
+  if (host_end == n) {
+    return 1;
+  }
+  if (s[host_end] != ':') {
+    return 0;
+  }
+  uint32_t port = 0;
+  for (size_t i = host_end + 1; i < n; ++i) {
+    if (!is_digit(s[i])) {
+      return 0;
+    }
+    port = port > 65535 ? port : port * 10 + (uint32_t)(s[i] - '0');
+  }
+  return port <= 65535;
+}
+
+static int target_ok(const uint8_t *s, size_t n) {
+  size_t skip = n >= 7 && memcmp(s, "http://", 7) == 0    ? 7
+                : n >= 8 && memcmp(s, "https://", 8) == 0 ? 8
+                                                          : 0;
+  if (skip == 0) {
+    return 1;
+  }
+  size_t end = skip;
+  while (end < n && s[end] != '/' && s[end] != '?' && s[end] != '#' && s[end] != '\\') {
+    ++end;
+  }
+  return host_ok(s + skip, end - skip);
+}
+
 static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, Framing *f,
                         int server) {
   memset(f, 0, sizeof *f);
@@ -401,6 +620,10 @@ static int parse_fields(const uint8_t *s, size_t at, size_t end, TzArray **out, 
       connection_tokens(s + v, ve - v, f);
     } else if (equals_lower(name, name_length, "host")) {
       ++f->hosts;
+      if (server && !host_ok(s + v, ve - v)) {
+        ok = 0;
+        break;
+      }
     } else if (server && equals_lower(name, name_length, "expect")) {
       if (equals_lower(s + v, ve - v, "100-continue")) {
         f->expect_continue = 1;
@@ -661,7 +884,8 @@ static int read_request(NetConn *c) {
     ++i;
   }
   size_t target_end = i;
-  if (target_end == target || i >= line || s[i] != ' ') {
+  if (target_end == target || i >= line || s[i] != ' ' ||
+      !target_ok(s + target, target_end - target)) {
     refuse(c, 400);
     return -1;
   }

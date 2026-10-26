@@ -54,7 +54,9 @@ Expr *stripImplicit(Expr *expr) {
   return expr;
 }
 
-bool reflectAccepts(const Type *arg, const Type *param) {
+}
+
+bool ReflectCallChecker::reflectAccepts(const Type *arg, const Type *param) {
   if (param->isUnknown()) {
     return true;
   }
@@ -109,8 +111,6 @@ bool reflectAccepts(const Type *arg, const Type *param) {
   default:
     return false;
   }
-}
-
 }
 
 ReflectCallChecker::ReflectCallChecker(Checker &checker) : checker_(checker) {}

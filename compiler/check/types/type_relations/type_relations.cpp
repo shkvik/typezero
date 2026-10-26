@@ -8,6 +8,7 @@
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/unknown_checker/unknown_checker.h"
+#include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
@@ -272,6 +273,7 @@ Expr *TypeRelations::convert(Expr *expr, const Type *to) {
   if (reflects) {
     checker_.reflectChecker().noteReflectedConversion(expr->type, to, cast);
   }
+  checker_.reflectChecker().noteConstructorFlow(expr->type, to);
 
   return cast;
 }
@@ -313,10 +315,33 @@ Expr *TypeRelations::coerce(Expr *expr, const Type *to, llvm::StringRef what) {
     }
   }
 
+  std::optional<std::pair<int64_t, int64_t>> range = LiteralTypes::intRange(to->nonOptional());
+  if (range && from->isInt() &&
+      checker_.byteProofs().provesFits(expr, range->first, range->second)) {
+    return convert(expr, to);
+  }
+
   std::string message =
       ("type '" + from->name() + "' is not assignable to type '" + to->name() + "'").str();
   if (!what.empty()) {
     message += (" of " + what).str();
+  }
+  if (range && (from->isInt() || (from->isLiteral() && from->literalBase()->isInt()))) {
+    std::string lo = std::to_string(range->first), hi = std::to_string(range->second);
+    message += ", which holds " + lo + " to " + hi;
+    if (from->isInt()) {
+      std::string text = "x";
+      if (auto *name = dyn_cast<NameExpr>(expr)) {
+        text = name->name.str();
+      }
+      message += "; the value may be outside: check it first, e.g. 'if (" +
+                 (to->nonOptional()->name() == "HttpStatus"
+                      ? "isHttpStatus(" + text + ")"
+                      : text + " >= " + lo + " && " + text + " <= " + hi) +
+                 ")'";
+    }
+    checker_.diags_.error(expr->loc(), message);
+    return expr;
   }
   const Type *fromObject = from->nonOptional(), *toObject = to->nonOptional();
   while (fromObject->isArray() && toObject->isArray()) {

@@ -233,6 +233,7 @@ public:
   static const Type *result(const Type *ok, const Type *err);
   static Type *classType(llvm::StringRef name, const ClassDecl *decl);
   void rename(std::string name) { name_ = std::move(name); }
+  static void nameUnion(const Type *type, llvm::StringRef name);
   static void swapClasses(Type *a, Type *b);
   void forgetFields() {
     fields_.clear();

@@ -20,8 +20,9 @@ class Container {
       throw new Error(`${cls.name} is not injectable`)
     const deps = Reflect.getMetadata("design:paramtypes", cls) ?? []
     const made = Reflect.construct(cls, deps.map(dep => this.resolve(dep)))
-    this.instances.set(cls, made)
-    return made
+    if (made.isErr()) throw new Error(made.error.message)
+    this.instances.set(cls, made.value)
+    return made.value
   }
 }
 
@@ -66,7 +67,9 @@ try {
 
 // The router of section 6: a method decorator records its class and name;
 // a request makes a controller of a class known only when the program runs,
-// takes the method by its name and calls it.
+// takes the method by its name and calls it. The classes there are of the
+// container too, whose constructors take arguments, so 'new route.cls()'
+// could fail and does not compile: Reflect.construct gives a Result.
 type Route = { path: string; cls: Constructor; method: string }
 const routes: Route[] = []
 function Get(path: string) {
@@ -78,10 +81,11 @@ function Get(path: string) {
 function handle(path: string): unknown {
   const route = routes.find(r => r.path == path)
   if (route == undefined) return "404"
-  const controller = new route.cls()
-  const method = Reflect.get(controller, route.method)
+  const controller = Reflect.construct(route.cls, [])
+  if (controller.isErr()) return "500"
+  const method = Reflect.get(controller.value, route.method)
   if (typeof method != "function") return "500"
-  return Reflect.apply(method, controller, [])
+  return Reflect.apply(method, controller.value, []).unwrapOr("500")
 }
 
 class UsersController {

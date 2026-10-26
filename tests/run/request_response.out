@@ -28,15 +28,10 @@ Request {
 }
 ReadableStream { locked: false, state: 'readable', supportsBYOB: false }
 hi true
-TypeError Body is unusable: Body has already been read
+body_used Body is unusable: Body has already been read
 202 application/json Ok { value: { a: [ 1, 2 ] } }
 307 http://x.com/a
-TypeError immutable
 0 error false
-RangeError init["status"] must be in the range of 200 to 599, inclusive.
-TypeError Response constructor: Invalid response status code 204
-TypeError Request with GET/HEAD method cannot have body.
-TypeError Failed to parse URL from /relative
 clone me clone me
 st st
 POST

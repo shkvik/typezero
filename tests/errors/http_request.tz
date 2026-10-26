@@ -1,0 +1,42 @@
+// What a Request and Headers show at compile time, as their constructors
+// cannot fail: the URL of a request (a literal is checked, a text of the
+// running program is parsed first), its method, a body with GET or HEAD,
+// a stream without 'duplex', the names and values of headers; 'href' of a
+// URL is set only from what is known to be a URL.
+const text = process.argv[1] ?? ""
+// expect-error: '/relative' is not a valid URL
+new Request("/relative")
+// expect-error: 'new Request' of a text known only when the program runs may fail, and 'new' gives no Result; parse the text with 'URL.parse(text)' and pass the URL, or give the text to fetch, which gives a Result
+new Request(text)
+// expect-error: a request cannot go to a URL with a user name or a password in it, as in node: send them in a header, e.g. 'authorization'
+new Request("http://user:pw@example.com/")
+// expect-error: 'bad method' is not a valid HTTP method
+new Request("http://example.com/", { method: "bad method" })
+// expect-error: fetch does not make requests with method 'TRACE'
+new Request("http://example.com/", { method: "TRACE" })
+// expect-error: a GET request has no body; give the method, e.g. 'method: "POST"'
+new Request("http://example.com/", { method: "get", body: "x" })
+// expect-error: a GET request has no body (a request without 'method' is a GET); give the method, e.g. 'method: "POST"'
+new Request("http://example.com/", { body: "x" })
+// expect-error: a request with a stream for its body needs 'duplex: "half"', as in node
+new Request("http://example.com/", { method: "POST", body: new ReadableStream<Uint8Array>() })
+// expect-error: type '"full"' is not assignable to type '"half" | undefined' of field 'duplex'
+new Request("http://example.com/", { method: "POST", body: "x", duplex: "full" })
+// expect-error: 'bad name' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
+new Request("http://example.com/", { headers: { "bad name": "x" } })
+// expect-error: the value of a header cannot hold a line break or NUL
+new Response("x", { headers: [["x-a", "a\r\nb"]] })
+const h = new Headers({ "x-a": "1" })
+// expect-error: 'x a' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
+h.set("x a", "1")
+// expect-error: the value of a header cannot hold a line break or NUL
+h.append("x-b", "1\n2")
+// expect-error: 'ü' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
+h.get("ü")
+const u = new URL("http://example.com/")
+// expect-error: setting 'href' to a text known only when the program runs may fail, and an assignment gives no Result; parse the text with 'URL.parse(text)' and keep the URL it gives
+u.href = text
+// expect-error: 'nope' is not a valid URL
+u.href = "nope"
+u.href = "http://example.org/"
+console.log(h, u)

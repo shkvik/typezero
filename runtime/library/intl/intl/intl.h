@@ -121,6 +121,9 @@ const TzIcu *tz_intl_icu(void);
 TZ_COLD TZ_NORETURN void tz_intl_no_icu(void);
 
 int tz_intl_ascii(TzStr s, char *out, size_t size);
+void tz_intl_locale_tag(TzStr *out, void *tag_obj, uint64_t tag_meta, TzMaker make);
+void tz_intl_locale_part(TzStr *out, void *tag_obj, uint64_t tag_meta, int32_t part,
+                         TzMaker make);
 void tz_intl_copy(char *out, size_t size, const char *text);
 const TzUChar *tz_intl_utf16(TzStr *s, TzUChar *buffer, int32_t capacity, TzUChar **heap,
                              int32_t *length);

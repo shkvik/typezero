@@ -5,6 +5,7 @@
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
+#include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
@@ -78,6 +79,21 @@ llvm::Value *UnionLowerer::emitUnionConversion(llvm::Value *value, const Type *f
   if (UnionLayout::isAtomType(from) && (to->isString() || to->isJson())) {
     return lowering_.exprLowerer().emitConversion(lowering_.unionLayout().atomString(value),
                                                   Type::string(), to);
+  }
+  if (from->isString() && UnionLayout::isAtomType(to)) {
+    std::vector<const Type *> literals =
+        to->isStringLiteral() ? std::vector<const Type *>{to}
+                              : std::vector<const Type *>(to->members().begin(),
+                                                          to->members().end());
+    llvm::Value *atom = lowering_.builder_.getInt32(literals.front()->atom());
+    for (const Type *literal : llvm::ArrayRef<const Type *>(literals).drop_front()) {
+      llvm::Value *same = lowering_.equalityLowerer().emitValuesEqual(
+          value, lowering_.stringLowerer().stringLiteral(literal->literalText()), Type::string());
+      atom = lowering_.builder_.CreateSelect(same, lowering_.builder_.getInt32(literal->atom()),
+                                             atom);
+    }
+    lowering_.refCounts().releaseString(value);
+    return atom;
   }
   if (from->isJson() && to->isTagged()) {
     llvm::Value *kind = lowering_.builder_.CreateCall(

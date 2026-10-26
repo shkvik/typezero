@@ -344,6 +344,13 @@ llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
   return object;
 }
 
+void ReflectLowerer::useErrors(const Type *errorType) {
+  lowering_.builder_.CreateCall(
+      lowering_.unknownLowerer().unknownFunction("tz_reflect_errors", lowering_.builder_.getVoidTy(),
+                                                 {lowering_.builder_.getPtrTy()}),
+      {lowering_.resultLowerer().failureMaker(errorType)});
+}
+
 llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
   switch (call->builtin) {
@@ -370,6 +377,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
   case Builtin::ReflectApply: {
     usesApply_ = true;
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    useErrors(call->type->errType());
     llvm::Value *result = lowering_.builder_.CreateCall(
         lowering_.unknownLowerer().unknownFunction("tz_reflect_apply", ptr, {ptr, ptr, ptr}),
         {values[0], values[1], values[2]}, "result");
@@ -377,10 +385,11 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }
     lowering_.throwLowerer().emitThrowCheck();
-    return result;
+    return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
   }
   case Builtin::ReflectConstruct: {
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
+    useErrors(call->type->errType());
     llvm::Value *object;
     if (const ClassDecl *known = call->args[0]->type->classRef()) {
       object = lowering_.builder_.CreateCall(
@@ -394,7 +403,7 @@ llvm::Value *ReflectLowerer::emitReflectCall(CallExpr *call) {
     }
     lowering_.refCounts().releaseValue(values[1], call->args[1]->type);
     lowering_.throwLowerer().emitThrowCheck();
-    return object;
+    return lowering_.resultLowerer().catchFailure(object, call->type, call->loc());
   }
   case Builtin::FromJsonClass: {
     lowering_.jsonLowerer().useErrors(call->type->errType());

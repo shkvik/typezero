@@ -238,7 +238,8 @@ tz run                   # без файла — "main" из tz.json
   `Map`, `new k()`, `x instanceof k`; class-выражения, примеси (`function Mixin<B extends
   Constructor>(Base: B) { return class extends Base { ... } }`), `ConstructorArgs`,
   `InstanceType<typeof K>`. Отражение: `Reflect.get`, `Reflect.apply`, `Reflect.construct` с
-  проверкой при выполнении; `fromJson(User, j)` делает объект класса через его конструктор.
+  проверкой при выполнении (`Result<T, ReflectError>`); `fromJson(User, j)` делает объект
+  класса через его конструктор.
 - Исключения (см. «Исключения»): `throw`, `try` / `catch` / `finally` (и `catch` без переменной),
   `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`, `new Error(message, { cause })`,
   `e.message`, `e.name`, `e.cause`, `e.stack`, `e.toString()` и `` `${e}` ``, `instanceof` для
@@ -664,8 +665,8 @@ console.log(c, inc == c.inc)   // Counter { step: 2, count: 2 } true
   `Reflect.get(obj, "add")` даёт функцию, которая выбирает вариант при вызове (`2` — `add(k:
   int)`, `2.5` — `add(k: double)`, объект `Dog` — `pet(d: Dog)`, а не `pet(a: Animal)`), так же
   `new cls(...)` и `Reflect.construct` выбирают конструктор; ни одного подходящего или два
-  одинаково хороших — `TypeError` (`the arguments fit several variants of Vec.label equally
-  well`).
+  одинаково хороших — `Err` (`several_variants: Reflect.apply: the arguments fit several
+  variants of Vec.label equally well`).
 
 ```ts
 class Vec {
@@ -952,9 +953,10 @@ function Timestamped<B extends Constructor>(Base: B) {
 const TimedUser = Timestamped(User)
 new TimedUser("ann").stamp                        // 100, int
 
-const controller = new route.cls()                // route.cls: Constructor
+const controller = new route.cls()                // route.cls: Constructor; так можно, если
+                                                  // каждый класс, что может тут быть, берёт ()
 const method = Reflect.get(controller, route.method)
-if (typeof method == "function") Reflect.apply(method, controller, [])
+if (typeof method == "function") Reflect.apply(method, controller, [])   // Result<unknown, …>
 const order = fromJson(Order, JSON.parse(text))   // через конструктор Order
 ```
 
@@ -990,14 +992,22 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   какое-нибудь class-выражение программы, поэтому вызывается через таблицу методов. Объявление с
   вызовом в `extends` (`class Moderator extends Timestamped(User) {}`) делается там, где
   выполняется.
-- **Отражение** — для классов, известных только при выполнении. `new k(...)` и
-  `Reflect.construct(k, args)` проверяют аргументы по конструктору (у нескольких вариантов — по
-  тому, который подходит лучше, см. «Перегрузка» в «Классах»); `Reflect.get(obj, name)` даёт
-  поле как `unknown`, метод — как функцию `(this: unknown, ...)`, которая проверяет свой `this`
-  (у метода с вариантами — функцию, которая выбирает вариант при вызове), а чего нет —
+- **Отражение** — для классов, известных только при выполнении. `Reflect.construct(k, args)`
+  проверяет аргументы по конструктору (у нескольких вариантов — по тому, который подходит лучше,
+  см. «Перегрузка» в «Классах»); `Reflect.get(obj, name)` даёт поле как `unknown`, метод — как
+  функцию `(this: unknown, ...)`, которая проверяет свой `this` (у метода с вариантами —
+  функцию, которая выбирает вариант при вызове), а чего нет (и у того, что не объект) —
   `undefined`; `Reflect.apply(f, thisArg, args)` вызывает функцию из `unknown`, проверяя
-  аргументы по её параметрам. Не тот аргумент, не столько аргументов, не тот `this`,
-  абстрактный класс — `TypeError` с объяснением: `new Point: argument 2: expected int, got 2.5`.
+  аргументы по её параметрам. `Reflect.apply` и `Reflect.construct` отдают `Result<T,
+  ReflectError>`: не тот аргумент, не столько аргументов, не тот `this`, абстрактный класс —
+  `Err` с `code` (`"bad_argument"`, `"bad_arity"`, `"bad_this"`, `"abstract"`, `"no_variant"`,
+  …) и объяснением: `new Point: argument 2: expected int, got 2.5`.
+- **`new k(...)` не может не получиться**, как любой конструктор. Компилятор знает, какие классы
+  становятся значениями этого `Constructor<T>` (и какие значения `Constructor<A>` где-то
+  становятся `Constructor<T>`), и `new k(...)` компилируется, только если каждый из них берёт эти
+  аргументы; иначе ошибка с подсказкой `Reflect.construct`. Так `new route.cls()` у маршрутов,
+  где одни контроллеры с пустыми конструкторами, — можно, а `new cls()` DI-контейнера, через
+  который идут и сервисы с параметрами, — нет.
   Аргументы — массив любых значений. Описание класса попадает в exe, только если программа
   ищет в нём (`new` класса из значения, `Reflect.get` метода по имени из строки, `fromJson` у
   `Constructor`), и только у классов, до которых это доходит: тех, что стали `Constructor`, и
@@ -1011,7 +1021,7 @@ const order = fromJson(Order, JSON.parse(text))   // через конструк
   описания класса (метод с этим именем не объявляет ни один наследник), а `Reflect.apply` этой
   функции (из константы или прямо из `Reflect.get`) — прямой вызов `obj.greet(...)`, если `this`
   — объект этого класса, а аргументы — литерал массива, который проверки пропустили бы
-  (`int` в `double`, объект класса-наследника); иначе проверки остаются, с теми же `TypeError`.
+  (`int` в `double`, объект класса-наследника); иначе проверки остаются, с теми же `Err`.
   `Reflect.construct(User, args)` с аргументами, известными только при выполнении, проверяет их
   функцией класса, тоже без описания. Так `container.get(UserService)` у `get<T>(cls:
   Constructor<T>)` с `new cls()` или `Reflect.construct` делает объект напрямую, и в exe нет
@@ -1150,7 +1160,10 @@ function show(x: string | int) {
   `if (r.ok)` у меток `true` и `false`), `x == "up"`, `typeof x == "string"`, `"radius" in s`,
   `x instanceof Dog`, `Array.isArray(x)`, в обеих ветках, у переменных и у полей
   (`slot.shape.kind == "circle"` — потом `slot.shape.r`). `||` объединяет: после
-  `typeof j == "string" || typeof j == "number"` у `Json` тип `string | double`. Присваивание тоже
+  `typeof j == "string" || typeof j == "number"` у `Json` тип `string | double`. Строка и целое
+  сужаются сравнением с литералом: после `if (s == "decimal" || s == "percent")` у переменной
+  типа `string` тип `"decimal" | "percent"`, после `if (code == 204)` у `int` — `204`; так
+  значение из программы попадает туда, где ждут литеральный тип. Присваивание тоже
   сужает: после `let s: Shape = { kind: "circle", r: 1 }` у `s` есть `s.r`, пока ей не присвоят
   другое. Факт о поле забывается по тем же правилам, что «поле не `undefined`» (см. «Объекты»).
 - **Поле, которое есть у всех членов**, читается через объединение: одна загрузка, если у всех оно
@@ -1320,8 +1333,11 @@ const text = parseIntSafe("42")
   (`RegexError`), `URL.parse` (`UrlError`), `Date.parse` (`DateError`), функции `node:fs`
   (`SystemError`) и `node:fs/promises` (`Promise<Result>`), `execSync`, `execFileSync` и
   `spawnSync` (`ExecError`), `node:crypto` там, где важны данные (`CryptoError`), и
-  `crypto.subtle` (`Promise<Result>` с `SubtleError`). Ошибки — объекты с меткой `code`,
-  их типы встроены. `Err` из кода библиотеки получает место вызова в программе.
+  `crypto.subtle` (`Promise<Result>` с `SubtleError`), `Reflect.apply` и `Reflect.construct`
+  (`ReflectError`). Ошибки — объекты с меткой `code`, их типы встроены. `Err` из кода
+  библиотеки получает место вызова в программе. Конструкторы не бросают: что может не
+  получиться, проверяет тип аргумента (`HttpStatus`) или проверка при сборке (`new URL`,
+  `new Request`, `new k()` класса-значения), а разбор текста — статический `parse`.
 - **Лишний `await` — ошибка:** `return await x` и `async () => await x` ничего не меняют,
   async-функция и так дождётся `Promise`, который возвращает. Пока в языке есть `try`, внутри
   `try` и `catch` так писать можно: там `await` ловит отказ.
@@ -2783,7 +2799,9 @@ await server.stop()
   smuggling): строки только с CRLF, имя заголовка — токен прямо перед двоеточием, без перенесённых
   строк и управляющих символов в значениях, один `Content-Length` (или тот же повторённый) и
   никогда вместе с `Transfer-Encoding`, который кончается на `chunked`, `Host` в каждом запросе
-  HTTP/1.1. Голова — до 16 КБ (`maxHeaderSize` node). Нарушения — `400`, слишком большая голова —
+  HTTP/1.1, и в нём (как и в цели вида `http://хост/путь`) — хост по правилам URL: ASCII, без
+  `@`, `%` и пробелов, IPv4 и IPv6 правильные, порт до 65535. Поэтому `req.url` всегда
+  разбирается, и `new URL(req.url)` не может не получиться. Голова — до 16 КБ (`maxHeaderSize` node). Нарушения — `400`, слишком большая голова —
   `431`, другое кодирование тела — `501`, версия не 1.x — `505`, и соединение закрывается.
   `Expect: 100-continue` получает `100 Continue`, когда обработчик начинает читать тело; тело,
   которое он не прочитал, пропускается перед следующим запросом.
@@ -2801,14 +2819,35 @@ await server.stop()
   `"bad_request"` для запроса, который нельзя сделать (плохой адрес, тело у GET), `"ABORT_ERR"` и
   `"TIMEOUT_ERR"` для отмены; `message` и `cause` — тексты node (`fetch failed`, `connect
   ECONNREFUSED 127.0.0.1:3000`).
-- **`Request` и `Response`** — как в node, включая проверки конструкторов и тексты ошибок: `text()`,
+- **`Request` и `Response`** — как в node: `text()`,
   `json()`, `bytes()`, `arrayBuffer()`, `formData()` дают `Promise<Result<T, BodyError>>` (`json()` —
   `BodyError | JsonError`): тело уже прочитано (`"body_used"`), связь оборвалась или сжатие
   испорчено (`"terminated"`), отмена; читаются один раз, тело как поток — `body`
   (`for await (const chunk of req.body)`), `bodyUsed`, `clone()`, `Response.json`, `redirect`,
   `error`; `status`, `statusText`, `ok`, `headers`, `redirected`, `url`, `type`.
+- **`new Response` не может не получиться** — его аргументы проверяют типы
+  ([errors.md](docs/errors.md), раздел 7). `status` — `HttpStatus` (200 … 599): литерал подходит
+  сам (`{ status: 700 }` — ошибка компиляции), а значение программы — после проверки, которая это
+  доказывает: `if (isHttpStatus(code))` или `if (code >= 200 && code <= 599)`; так же с полем и
+  переменной типа `HttpStatus`. У статусов 204, 205 и 304 тела нет: литерал с телом — ошибка
+  компиляции, а статус из переменной просто оставляет ответ без тела (node бросает `TypeError`).
+  `statusText` с переводом строки или символом выше U+00FF — ошибка компиляции у литерала, а в
+  строке из переменной такие символы выбрасываются. `Response.redirect(url, status)` берёт
+  разобранный `URL` и `RedirectStatus` (`301 | 302 | 303 | 307 | 308`, по умолчанию 302).
+- **`new Request` тоже не может не получиться.** Адрес — литерал (проверяется при сборке), `URL`,
+  `url.href` или `req.url`; строку из переменной сначала разбирает `URL.parse`, или её отдают
+  прямо `fetch`, который вернёт `Result`. Литерал метода, `GET` или `HEAD` с телом, поток без
+  `duplex: "half"` (тип поля — `"half"`), адрес с логином — ошибки компиляции. Если то же
+  выясняется только при работе (метод из переменной, `URL` с логином, запрос из уже прочитанного
+  запроса), запрос создаётся, а `fetch` с ним отдаёт `Err` с `code: "bad_request"` и текстом node.
+  `fetch(request)` забирает тело запроса: второй `fetch` того же запроса — `Err`, как в node.
 - **`Headers`** — без учёта регистра, значения без пробелов по краям, `get` склеивает значения
-  через `, `, кроме `set-cookie` (`getSetCookie()`), перебор по алфавиту. **`ReadableStream`** —
+  через `, `, кроме `set-cookie` (`getSetCookie()`), перебор по алфавиту. Имя или значение
+  литералом проверяется при сборке; заголовок с неверным именем из переменной не добавляется
+  (`has` — `false`), а перевод строки и NUL из значения выбрасываются — ничего не бросается, и
+  подставить свой заголовок через значение нельзя. Заголовки можно менять всегда, и у ответа
+  `fetch`, и у `Response.redirect` (в node — `TypeError: immutable`). `clone()` прочитанного
+  тела не бросает: у копии тело тоже прочитано. **`ReadableStream`** —
   `start` / `pull` / `cancel` (обычные и async), `getReader()`, `read()`, `releaseLock()`,
   `cancel()`, `locked`, `for await` (выход из цикла отменяет поток). **`FormData`** — поля-строки
   (файлов пока нет), разбор `application/x-www-form-urlencoded` и `multipart/form-data`.
@@ -2822,7 +2861,8 @@ await server.stop()
   { code: "bad_url"; message: string; input: string }`. `new URL(text)` с переменной — ошибка
   компиляции с подсказкой `URL.parse`. В `new URL` можно передать литерал (он проверяется при
   сборке: схема, хост особых схем, порт до 65535), готовый `URL`, `url.href` и `req.url` запроса;
-  относительный литерал — только с таким же основанием: `new URL("/path", req.url)`.
+  относительный литерал — только с таким же основанием: `new URL("/path", req.url)`. То же у
+  `url.href = text`: строку из переменной сначала разбирает `URL.parse`.
 - Печать — как в node: `Response { status: 200, ... }`, `Headers { 'content-type': '...' }`,
   `URLSearchParams { 'a' => '1' }`, `URL { href: ..., ... }`. Свойства этих классов — геттеры и
   сеттеры, как в JS: у классов программы их нет, а у встроенных модулей tz, написанных на tz, есть

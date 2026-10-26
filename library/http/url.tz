@@ -971,7 +971,7 @@ export class URL {
   }
   set href(value: string) {
     const record = parseUrl(value, undefined)
-    if (record == undefined) throw new InvalidUrlError(value)
+    if (record == undefined) return
     this.#record = record
     this.#queryVersion++
   }

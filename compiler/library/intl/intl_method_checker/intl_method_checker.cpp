@@ -50,6 +50,39 @@ const Type *relativePartType() {
                       "Intl.RelativeTimeFormatPart");
 }
 
+std::string closedArgProblem(const Expr *arg, llvm::ArrayRef<llvm::StringLiteral> allowed,
+                             llvm::StringRef what) {
+  while (auto *conv = llvm::dyn_cast<CastExpr>(arg)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    arg = conv->operand;
+  }
+  const Type *type = arg->type ? arg->type->nonOptional() : nullptr;
+  if (!type || type->isError()) {
+    return "";
+  }
+  llvm::ArrayRef<const Type *> members =
+      type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+  for (const Type *m : members) {
+    if (!m->isStringLiteral()) {
+      return "a string known only when the program runs may be no " + what.str() +
+             ", which JavaScript would throw a RangeError for; compare it with them first, "
+             "e.g. 'if (x == \"" +
+             allowed[0].str() + "\" || x == \"" + allowed[1].str() + "\")'";
+    }
+    std::string text;
+    for (char16_t c : m->literalText()) {
+      text.push_back(char(c));
+    }
+    if (!llvm::is_contained(allowed, text)) {
+      return "'" + text + "' is no " + what.str() + ", and JavaScript would throw a RangeError";
+    }
+  }
+
+  return "";
+}
+
 }
 
 IntlMethodChecker::IntlMethodChecker(Checker &checker) : checker_(checker) {}
@@ -162,6 +195,10 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
                 "' is not a unit of Intl.RelativeTimeFormat, and JavaScript would throw "
                 "a RangeError; the units are year, quarter, month, week, day, hour, "
                 "minute and second, also in the plural");
+      } else if (std::string problem =
+                     unit ? "" : closedArgProblem(call->args[1], units, "unit of time");
+                 !problem.empty()) {
+        checker_.diags_.error(call->args[1]->loc(), problem);
       }
       return name == "format" ? done(Builtin::RtfFormat, Type::string())
                               : done(Builtin::RtfFormatToParts, Type::array(relativePartType()));
@@ -254,6 +291,10 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
                               "'" + utf8(*form) +
                                   "' is not a normalization form, and JavaScript would throw a "
                                   "RangeError; it is 'NFC', 'NFD', 'NFKC' or 'NFKD'");
+      } else if (std::string problem =
+                     form ? "" : closedArgProblem(call->args[0], forms, "normalization form");
+                 !problem.empty()) {
+        checker_.diags_.error(call->args[0]->loc(), problem);
       }
     }
     call->builtin = Builtin::StrNormalize;

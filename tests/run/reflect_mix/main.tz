@@ -1,6 +1,6 @@
 // Classes as values, reflection and decorators with the rest of the language,
-// across files: a decorated registry of classes, `new` of a class known only
-// when the program runs, Reflect.get / apply / construct and fromJson(cls, j)
+// across files: a decorated registry of classes, Reflect.construct of a class
+// known only when the program runs, Reflect.get / apply and fromJson(cls, j)
 // in a generic class; decorated async methods and async generators; a mixin
 // over an EventEmitter subclass whose event map comes from the emits, and
 // decorated methods of one; and classes of the library (EventTarget,
@@ -25,26 +25,26 @@ class Note {
   }
 }
 
-// 1. The registry the decorator filled, and `new` of what it holds: the
-// arguments are checked against the constructor of each.
+// 1. The registry the decorator filled, and Reflect.construct of what it
+// holds: the arguments are checked against the constructor of each.
 console.log(registered.map((cls) => cls.name).join(", "))
 const argLists: unknown[][] = [["x", 1], ["y"]]
 for (const args of argLists)
   for (const cls of registered) {
-    try {
-      const made = Reflect.construct(cls, args)
-      console.log(made instanceof User, made instanceof Note, Reflect.get(made, "name") ?? Reflect.get(made, "text"))
-    } catch (e) {
-      console.log(String(e))
+    const made = Reflect.construct(cls, args)
+    if (made.isErr()) console.log(made.error.code, made.error.message)
+    else {
+      const it = made.value
+      console.log(it instanceof User, it instanceof Note, Reflect.get(it, "name") ?? Reflect.get(it, "text"))
     }
   }
 
 // 2. Reflection by names, as a router would call a method.
 const note = new Note("ok")
 const shout = Reflect.get(note, "shout")
-console.log(typeof shout, Reflect.apply(shout, note, [3]))
+console.log(typeof shout, Reflect.apply(shout, note, [3]).unwrapOr("-"))
 const greet = Reflect.get(new User("ann", 30), "greet")
-console.log(Reflect.apply(greet, new User("bob", 40), []))
+console.log(Reflect.apply(greet, new User("bob", 40), []).unwrapOr("-"))
 
 // 3. A generic class over a class value, fromJson through its constructor and
 // an async generator; decorated async methods and async generators.
@@ -83,14 +83,15 @@ for await (const [n] of on(bus, "data")) {
 // 5. Classes of the library as values.
 const kinds: Constructor[] = [EventTarget, AbortController, User]
 console.log(kinds.map((k) => k.name).join(" "))
-const controller = Reflect.construct(AbortController, [])
-if (controller instanceof AbortController) {
+const made = Reflect.construct(AbortController, [])
+if (made.isOk()) {
+  const controller = made.value
   controller.signal.addEventListener("abort", () => console.log("aborted", Reflect.get(controller.signal, "aborted")))
   controller.abort()
 }
 const TargetKind = kinds[0]
 if (TargetKind != undefined) {
-  const target = new TargetKind()
+  const target = Reflect.construct(TargetKind, []).unwrapOr(undefined)
   if (target instanceof EventTarget) {
     // The listener knows its target from the event: one that held it would
     // make a cycle with it.
@@ -107,7 +108,7 @@ class Ticker extends EventEmitter {
   }
 }
 const TickerKind = registered[registered.length - 1]
-const ticker = TickerKind == undefined ? undefined : Reflect.construct(TickerKind, [])
+const ticker = TickerKind == undefined ? undefined : Reflect.construct(TickerKind, []).unwrapOr(undefined)
 if (ticker instanceof Ticker) {
   ticker.on("tick", (count) => console.log(`tick with ${count} classes`))
   ticker.tick()
@@ -133,4 +134,4 @@ server.on("closed", () => console.log("closed"))
 server.listen(80).listen(81)
 await server.stop()
 const listen = Reflect.get(server, "listen")
-console.log(Reflect.apply(listen, server, [82]) == server, calls.slice(2))
+console.log(Reflect.apply(listen, server, [82]).unwrapOr(undefined) == server, calls.slice(2))

@@ -18,7 +18,7 @@ const server = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, as
   if (name == undefined) return new Response("not found", { status: 404 })
   await undefined
   const method = Reflect.get(handlers, name)
-  const result = Reflect.apply(method, handlers, [req])
+  const result = Reflect.apply(method, handlers, [req]).unwrapOr(undefined)
   return result instanceof Response ? result : new Response("bad handler", { status: 500 })
 })
 const base = `http://127.0.0.1:${server.port}`

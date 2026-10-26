@@ -9,7 +9,15 @@ namespace tz {
 
 namespace {
 
-const Expr *unconverted(const Expr *expr) {
+bool isLibraryClass(const Type *type, llvm::StringRef name) {
+  const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
+
+  return cls && cls->library && cls->name == name;
+}
+
+}
+
+const Expr *UrlChecker::unconverted(const Expr *expr) {
   while (auto *conv = dyn_cast<CastExpr>(expr)) {
     if (!conv->isImplicit()) {
       break;
@@ -20,7 +28,7 @@ const Expr *unconverted(const Expr *expr) {
   return expr;
 }
 
-std::optional<std::string> literalText(const Expr *expr) {
+std::optional<std::string> UrlChecker::literalText(const Expr *expr) {
   std::u16string units;
   if (auto *lit = dyn_cast<StringLitExpr>(expr)) {
     units = lit->value;
@@ -38,11 +46,7 @@ std::optional<std::string> literalText(const Expr *expr) {
   return text;
 }
 
-bool isLibraryClass(const Type *type, llvm::StringRef name) {
-  const ClassDecl *cls = type ? type->nonOptional()->classDecl() : nullptr;
-
-  return cls && cls->library && cls->name == name;
-}
+namespace {
 
 bool validHost(llvm::StringRef host) {
   if (host.empty()) {
@@ -169,6 +173,25 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
                           "'new' gives no Result; write 'URL.parse(text" +
                               std::string(args.size() > 1 ? ", base" : "") +
                               ")', which gives a Result<URL, UrlError>");
+  }
+}
+
+void UrlChecker::checkHrefSet(const Expr *value) {
+  if (checker_.libraryCalls().inLibrary(value->loc()) || value->type->isError()) {
+    return;
+  }
+  const Expr *input = unconverted(value);
+  if (std::optional<std::string> text = literalText(input)) {
+    if (!validUrlText(*text, false)) {
+      checker_.diags_.error(input->loc(), "'" + *text + "' is not a valid URL");
+    }
+    return;
+  }
+  if (!knownAbsolute(input)) {
+    checker_.diags_.error(input->loc(),
+                          "setting 'href' to a text known only when the program runs may fail, "
+                          "and an assignment gives no Result; parse the text with "
+                          "'URL.parse(text)' and keep the URL it gives");
   }
 }
 

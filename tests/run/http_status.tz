@@ -1,0 +1,67 @@
+// A status of a response is an HttpStatus: a literal fits by itself, a
+// value of the program after a check that proves it is within 200 to 599
+// (isHttpStatus or the comparisons themselves, `code == 204` too). Statuses 204, 205 and 304
+// have no body: given by a value, the body is left out. A statusText
+// keeps only what the head of a response can hold. Response.redirect
+// takes a parsed URL and a RedirectStatus.
+const statuses = [200, 404, 99, 700, 503]
+
+function answer(code: int, text: string) {
+  if (!isHttpStatus(code)) return new Response(`no status ${code}`, { status: 500 })
+  return new Response(text, { status: code })
+}
+
+for (const code of statuses) {
+  const r = answer(code, "body")
+  console.log(code, r.status, r.ok, must(await r.text()))
+}
+
+function bounded(code: int) {
+  if (code < 200 || code > 599) return 500
+  const status: HttpStatus = code
+  return status
+}
+console.log(statuses.map(bounded))
+
+const empty = [204, 205, 304, 200]
+for (const code of empty) {
+  if (isHttpStatus(code)) {
+    const r = new Response("dropped", { status: code })
+    console.log(code, JSON.stringify(must(await r.text())), r.body == undefined)
+  }
+}
+
+function bodyless(code: int) {
+  if (code == 204 || code == 304) return new Response(undefined, { status: code })
+  return new Response("x", { status: 200 })
+}
+console.log(bodyless(204).status, bodyless(304).status, bodyless(1).status)
+
+const shown = new Response("x", { statusText: `line\r\nbreak\u0001 é ${"ж"}\tend` })
+console.log(JSON.stringify(shown.statusText))
+
+const target = must(URL.parse("/next?a=1", "http://example.com/base/"))
+const redirects: RedirectStatus[] = [301, 302, 303, 307, 308]
+for (const status of redirects) {
+  const r = Response.redirect(target, status)
+  console.log(r.status, r.headers.get("location"))
+}
+console.log(Response.redirect(target).status)
+
+interface Reply {
+  status: HttpStatus
+  text: string
+}
+const replies: Reply[] = [{ status: 201, text: "made" }, { status: 409, text: "again" }]
+for (const reply of replies) {
+  const r = Response.json({ text: reply.text }, { status: reply.status })
+  console.log(r.status, reply.status + 1, reply.status >= 400, must(await r.json()))
+}
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

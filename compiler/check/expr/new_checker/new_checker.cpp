@@ -18,6 +18,7 @@
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
+#include "compiler/library/tz_modules/http_checker/http_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
@@ -82,6 +83,10 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
   }
   if (!expr->member.empty()) {
     Checker::ScopeEntry intl = checker_.scopes().lookup("Intl");
+    if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls &&
+        expr->member == "Locale") {
+      return checker_.intlChecker().checkLocaleNew(expr, expected);
+    }
     if (expr->name == "Intl" && !intl.var && !intl.func && !intl.cls) {
       return expr->member == "DateTimeFormat"
                  ? checker_.dateFormatChecker().checkDateFormatNew(expr->loc(), expr->args)
@@ -111,6 +116,15 @@ Expr *NewChecker::checkNew(NewExpr *expr, const Type *expected) {
         expr, ClassValueChecker::finalClass(cls), expected);
     if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library && cls->name == "URL") {
       checker_.urlChecker().checkUrlNew(made);
+    }
+    if (auto *made = dyn_cast<NewExpr>(checked); made && cls->library) {
+      if (cls->name == "Response") {
+        checker_.httpChecker().checkResponseNew(made);
+      } else if (cls->name == "Request") {
+        checker_.httpChecker().checkRequestNew(made);
+      } else if (cls->name == "Headers") {
+        checker_.httpChecker().checkHeadersNew(made);
+      }
     }
     return checked;
   }

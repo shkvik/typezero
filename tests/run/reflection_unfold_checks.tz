@@ -1,8 +1,8 @@
 // Reflection of a class known when compiling keeps the checks the compiler
-// cannot prove, with the same TypeErrors as through the description
+// cannot prove, with the same Errs as through the description
 // (docs/decorators.md, plan step 5): an argument of another type, too many
 // arguments, a `this` of another class, arguments known only when the
-// program runs. What it proves becomes the call itself.
+// program runs. What it proves becomes the call itself, still in an Ok.
 
 class Point {
   x: int
@@ -25,35 +25,32 @@ class Other {
   }
 }
 
-function attempt(what: string, f: () => unknown) {
-  try {
-    console.log(what, f())
-  } catch (e) {
-    console.log(what, String(e))
-  }
+function attempt<T>(what: string, r: Result<T, ReflectError>) {
+  if (r.isOk()) console.log(what, r.value)
+  else console.log(what, `${r.error.code}: ${r.error.message}`)
 }
 
 const p = new Point(1, 2)
 const scale = Reflect.get(p, "scale")
 const describe = Reflect.get(p, "describe")
-attempt("proved", () => Reflect.apply(scale, p, [3]))
-attempt("optional left out", () => Reflect.apply(describe, p, []))
-attempt("optional given", () => Reflect.apply(describe, p, ["at"]))
-attempt("optional undefined", () => Reflect.apply(describe, p, [undefined]))
-attempt("fraction", () => Reflect.apply(scale, p, [2.5]))
-attempt("string", () => Reflect.apply(scale, p, ["2"]))
-attempt("too many", () => Reflect.apply(scale, p, [1, 2]))
-attempt("too few", () => Reflect.apply(scale, p, []))
-attempt("other this", () => Reflect.apply(scale, new Other(), [2]))
+attempt("proved", Reflect.apply(scale, p, [3]))
+attempt("optional left out", Reflect.apply(describe, p, []))
+attempt("optional given", Reflect.apply(describe, p, ["at"]))
+attempt("optional undefined", Reflect.apply(describe, p, [undefined]))
+attempt("fraction", Reflect.apply(scale, p, [2.5]))
+attempt("string", Reflect.apply(scale, p, ["2"]))
+attempt("too many", Reflect.apply(scale, p, [1, 2]))
+attempt("too few", Reflect.apply(scale, p, []))
+attempt("other this", Reflect.apply(scale, new Other(), [2]))
 const k: unknown = 4
-attempt("unknown argument", () => Reflect.apply(scale, p, [k]))
+attempt("unknown argument", Reflect.apply(scale, p, [k]))
 const n = 2.0
-attempt("double argument", () => Reflect.apply(scale, p, [n]))
+attempt("double argument", Reflect.apply(scale, p, [n]))
 
 // Reflect.construct of the class with arguments known only when it runs.
-function make(args: unknown[]): Point {
+function make(args: unknown[]) {
   return Reflect.construct(Point, args)
 }
-attempt("construct", () => make([5, 6]))
-attempt("construct fraction", () => make([5, 6.5]))
-attempt("construct arity", () => make([5]))
+attempt("construct", make([5, 6]))
+attempt("construct fraction", make([5, 6.5]))
+attempt("construct arity", make([5]))

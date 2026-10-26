@@ -152,13 +152,18 @@ Expr *ClassValueChecker::checkValueNew(NewExpr *expr, const Type *expected) {
                                        "arguments");
   }
   expr->reflect = true;
+  std::vector<const Type *> argTypes;
   for (Expr *&arg : expr->args) {
     arg = checker_.exprChecker().checkExpr(arg);
+    argTypes.push_back(arg->type);
     if (arg->type->isVoid()) {
       checker_.diags_.error(arg->loc(), "an expression of type 'void' has no value to pass");
     } else {
       arg = checker_.typeRelations().convert(arg, Type::unknown());
     }
+  }
+  if (!checker_.reflectChecker().onlyChecked()) {
+    checker_.reflectNews_.push_back({expr, std::move(argTypes)});
   }
   checker_.flowChecker().calledFunction();
   checker_.reflectionUsed_ |= !checker_.reflectChecker().onlyChecked();

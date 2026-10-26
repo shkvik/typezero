@@ -324,6 +324,11 @@ void UnionNarrowing::addUnionFacts(const Expr *cond, Checker::Flow &whenTrue,
         narrowTargetTo(equal, *target, literal);
         narrowTargetTo(different, *target, Type::boolLiteral(literal->literalNumber() == 0));
       }
+    } else if (const VarSymbol *var = readVariable(side);
+               var && var->type && literal->literalBase() == var->type->nonOptional() &&
+               (literal->isStringLiteral() || literal->literalBase()->isInt()) &&
+               checker_.literalTypes().typeIn(equal, var) == var->type) {
+      narrowVariable(equal, var, literal);
     }
   }
 }

@@ -211,6 +211,19 @@ void ReflectArgsLowerer::emitReflectMismatch(llvm::StringRef what, llvm::Value *
        lowering_.builder_.getInt32(uint32_t(name.size())), got});
 }
 
+void ReflectArgsLowerer::emitReflectFail(llvm::StringRef code, const std::string &message) {
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
+  llvm::Value *text =
+      lowering_.stringLowerer().stringLiteral(std::u16string(message.begin(), message.end()));
+  lowering_.builder_.CreateCall(
+      lowering_.unknownLowerer().unknownFunction("tz_reflect_fail_str",
+                                                 lowering_.builder_.getVoidTy(),
+                                                 {ptr, i32, ptr, lowering_.builder_.getInt64Ty()}),
+      {lowering_.stringLowerer().utf8Constant(code),
+       lowering_.builder_.getInt32(uint32_t(code.size())), lowering_.stringLowerer().stringObj(text),
+       lowering_.stringLowerer().stringMeta(text)});
+}
+
 void ReflectArgsLowerer::emitReflectArgs(
     llvm::Value *args, llvm::Value *count, size_t min, llvm::ArrayRef<const Type *> params,
     const Type *rest, std::vector<llvm::Value *> &values,

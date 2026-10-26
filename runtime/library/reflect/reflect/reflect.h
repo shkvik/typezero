@@ -37,6 +37,9 @@ void *tz_reflect_get(const void *target, void *key_obj, uint64_t key_meta);
 void *tz_reflect_apply(const void *f, void *self, const TzArray *args);
 void tz_class_name(TzStr *out, const TzClass *cls);
 void *tz_reflect_from_json(const TzClass *cls, const TzJson *json);
+void tz_reflect_errors(TzMaker make);
+TZ_COLD void tz_reflect_fail_str(const char *code, uint32_t code_length, void *message_obj,
+                                 uint64_t message_meta);
 TZ_COLD void tz_reflect_mismatch(const char *what, uint32_t what_length, int32_t index,
                                  const char *expected, uint32_t expected_length, const void *got);
 TZ_COLD void tz_reflect_arity(const char *what, uint32_t what_length, int32_t min, int32_t max,

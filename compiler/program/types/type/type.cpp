@@ -715,6 +715,12 @@ Type *Type::declareUnion(llvm::StringRef name) {
   return type.get();
 }
 
+void Type::nameUnion(const Type *type, llvm::StringRef name) {
+  if (type->isUnion()) {
+    const_cast<Type *>(type)->name_ = name.str();
+  }
+}
+
 void Type::defineMembers(const Type *of) {
   params_.assign(of->params_.begin(), of->params_.end());
   slots_ = of->slots_;

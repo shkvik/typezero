@@ -62,3 +62,17 @@ function go(d: Dir = "up", note?: "fast" | "slow") {
   return `${d}${note ? " " + note : ""}`
 }
 console.log(go(), go("down"), go("left", "slow"))
+
+// A string or an int of the program becomes a literal type after it is
+// compared with the literals: in each branch it is the one it equals.
+function parseDir(text: string): Dir | undefined {
+  if (text == "up" || text == "down") return text
+  if (text == "left" || text == "right") return text
+  return undefined
+}
+const typed = ["down", "sideways", "right"].map(parseDir)
+console.log(typed, typed.map(d => (d == undefined ? 0 : step(d))))
+function bitOf(n: int): Bit | undefined {
+  return n == 0 || n == 1 ? n : undefined
+}
+console.log([0, 1, 2].map(bitOf))

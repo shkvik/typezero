@@ -15,6 +15,7 @@ public:
   llvm::Function *classFromJsonFunction(const ClassDecl *cls);
   void emitClassFromJson(const ClassDecl *cls, llvm::Function *fn);
   void finishReflection(SourceFile &file, llvm::Instruction *init);
+  void useErrors(const Type *errorType);
 
 private:
   Lowering &lowering_;

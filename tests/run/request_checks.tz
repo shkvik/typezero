@@ -1,0 +1,78 @@
+// What Headers, Request and fetch do with what only the running program
+// knows, as constructors cannot fail: a header with an invalid name is
+// left out, line breaks and NULs leave a value; headers can always be
+// changed; a request that node's constructor would refuse is made, and
+// fetch gives its Err; a clone of a used body is used too. What a literal
+// shows is checked at compile time (errors/http_request.tz).
+import { serve } from "tz:http"
+
+const names = ["bad name", "", "ü", "x-ok"]
+const h = new Headers()
+for (const name of names) {
+  h.append(name, "v")
+  h.set(name, "w")
+  console.log(JSON.stringify(name), h.has(name), h.get(name) ?? "(none)")
+  h.delete(name)
+}
+const broken = ["a\nb", "c\r\nSet-Cookie: x=1", "nul\u0000here", "  spaces  "]
+for (const value of broken) {
+  h.set("x-value", value)
+  console.log(JSON.stringify(h.get("x-value")))
+}
+const red = Response.redirect(new URL("http://x.com/a"), 307)
+red.headers.set("location", "http://x.com/b")
+console.log(red.headers.get("location"))
+
+const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+  req.headers.set("x-seen", "yes")
+  const body = await req.text()
+  return new Response(`${req.method} ${req.headers.get("x-seen")} [${body.unwrapOr("-")}]`)
+})
+const base = server.url
+const res = must(await fetch(base))
+res.headers.set("x-mine", "1")
+console.log(must(await res.text()), res.headers.get("x-mine"))
+
+const methods = ["CONNECT", "bad method", "GET", "post"]
+for (const method of methods) {
+  const r = new Request(base, { method, body: "x" })
+  const sent = await fetch(r)
+  console.log(method, r.method,
+              sent.isOk() ? must(await sent.value.text()) : `${sent.error.code}: ${sent.error.message}`)
+}
+const withUser = must(URL.parse("http://user:pw@127.0.0.1:9/"))
+const r2 = await fetch(new Request(withUser))
+console.log(r2.isErr() ? r2.error.message : "sent")
+const streamBody: BodyInit = new ReadableStream<Uint8Array>({ start: c => { c.close() } })
+const r3 = await fetch(new Request(base, { method: "POST", body: streamBody }))
+console.log(r3.isErr() ? r3.error.message : "sent")
+const posted = new Request(base, { method: "POST", body: "twice?" })
+console.log(must(await must(await fetch(posted)).text()), posted.bodyUsed)
+const r4 = await fetch(posted)
+console.log(r4.isErr() ? r4.error.message : "sent")
+const used = new Request(base, { method: "POST", body: "once" })
+console.log(must(await used.text()))
+const r5 = await fetch(new Request(used))
+console.log(r5.isErr() ? r5.error.message : "sent")
+
+const read = new Response("body")
+console.log(must(await read.text()))
+const copy = read.clone()
+const text = await copy.text()
+console.log(copy.bodyUsed, text.isErr() ? text.error.code : text.value)
+const u = new URL("http://a.com/x")
+const href = ["http://b.com/y", "not a url"]
+for (const next of href) {
+  const parsed = URL.parse(next)
+  if (parsed.isOk()) u.href = parsed.value.href
+  console.log(u.href)
+}
+await server.stop()
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}

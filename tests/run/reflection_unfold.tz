@@ -6,8 +6,9 @@
 // and Reflect.apply of that method are the `new`, the read and the call
 // themselves, without the description of the class and without the checks
 // the compiler proved (tests/cli/reflect_unfold.cmake shows the description
-// gone from the IR). The same functions with classes known only when the
-// program runs go through the descriptions, with the same results.
+// gone from the IR); Reflect.apply and Reflect.construct still give a
+// Result. The same functions with classes known only when the program runs
+// go through the descriptions, with the same results.
 
 class Logger {
   lines: string[] = []
@@ -46,7 +47,7 @@ class Container {
     this.made++
     return new cls()
   }
-  build<T extends object>(cls: Constructor<T>, args: unknown[]): T {
+  build<T extends object>(cls: Constructor<T>, args: unknown[]) {
     this.made++
     return Reflect.construct(cls, args)
   }
@@ -55,7 +56,7 @@ class Container {
 function greetVia<T extends object>(obj: T, who: string): unknown {
   const greet = Reflect.get(obj, "greet")
   if (typeof greet != "function") return "no greet"
-  return Reflect.apply(greet, obj, [who, 2])
+  return Reflect.apply(greet, obj, [who, 2]).unwrapOr("failed")
 }
 
 function nameOf<T extends object>(obj: T): unknown {
@@ -70,16 +71,16 @@ console.log(greetVia(users, "bob"), nameOf(users))
 // At the place of the call too: the object and the name are known.
 const logger = c.get(Logger)
 const log = Reflect.get(logger, "log")
-if (typeof log == "function") console.log(Reflect.apply(log, logger, ["first"]))
-console.log(Reflect.apply(Reflect.get(logger, "log"), logger, ["second"]), logger.lines)
-console.log(Reflect.apply(Reflect.get(users, "rename"), users, ["staff"]), users.name)
+if (typeof log == "function") console.log(must(Reflect.apply(log, logger, ["first"])))
+console.log(must(Reflect.apply(Reflect.get(logger, "log"), logger, ["second"])), logger.lines)
+console.log(must(Reflect.apply(Reflect.get(users, "rename"), users, ["staff"])), users.name)
 console.log(Reflect.get(c.get(UserService), "name"), Reflect.get(logger, "missing"))
 
 // Arguments known only when the program runs: the function of the class
 // checks them, as the description would.
-const p = c.build(Point, [3, 4])
+const p = must(c.build(Point, [3, 4]))
 console.log(p, p.sum(), Reflect.get(p, "x"), c.made)
-console.log(Reflect.construct(Point, [5, 6]).sum())
+console.log(must(Reflect.construct(Point, [5, 6])).sum())
 
 // The same functions with classes known only when the program runs.
 const kinds: Constructor[] = [UserService, Logger]
@@ -88,4 +89,12 @@ for (const kind of kinds) {
   console.log(greetVia(made, "cy"), nameOf(made), made instanceof UserService)
 }
 const points: Constructor<Point>[] = [Point]
-for (const kind of points) console.log(c.build(kind, [7, 8]).sum(), c.made)
+for (const kind of points) console.log(must(c.build(kind, [7, 8])).sum(), c.made)
+
+function must<T, E>(r: Result<T, E>): T {
+  if (r.isErr()) {
+    console.log(r.error)
+    process.exit(1)
+  }
+  return r.value
+}
