@@ -507,7 +507,7 @@ inline bool isOsBuiltin(Builtin builtin) {
   return builtin >= Builtin::OsString && builtin <= Builtin::OsUserInfo;
 }
 
-inline bool isFsBuiltin(Builtin builtin) {
+inline bool isFsModuleBuiltin(Builtin builtin) {
   return builtin >= Builtin::ReadLine && builtin <= Builtin::RlClose;
 }
 

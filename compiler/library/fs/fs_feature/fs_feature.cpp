@@ -61,7 +61,7 @@ Expr *FsFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {
   return checker.fsChecker().checkFsConstant(member);
 }
 
-bool FsFeature::lowers(Builtin builtin) const { return isFsBuiltin(builtin); }
+bool FsFeature::lowers(Builtin builtin) const { return isFsModuleBuiltin(builtin); }
 
 llvm::Value *FsFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
   return lowering.fsLowerer().emitFsCall(call);

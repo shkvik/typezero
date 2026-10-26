@@ -161,7 +161,12 @@ library/             по теме на папку; stream/stream.tz и его �
   (`checker.h` — 1461 строка, `lowering.h` — 964), а не только ссылки.
 - **Крючки тем** — те, что понадобились: `prepare`, `declare`, `checkAnyCall`, `checkStaticCall`,
   `checkMethodCall`, `methodReceiver`, `checkClassMethodCall`, `checkValueMethodCall`,
-  `checkFunctionCall`, `checkLibraryCall`, `lowers` и `lowerCall`. Свойства, операторы, литералы,
+  `checkFunctionCall`, `checkLibraryCall`, `lowers` и `lowerCall`; для встроенных модулей —
+  `exportProblem` (есть ли такое имя у модуля), `checkModuleCall` (вызов `join` из `node:path`),
+  `checkModuleValue` (`sep`, `EOL`) и `checkModuleMember` (`constants.F_OK`).
+  `builtin_modules` знает только имена модулей `node:*` и `tz:io` и привязывает импорты, а что
+  делает модуль, решает его тема: `path`, `os`, `fs` (`fs`, `fs/promises`, `readline`, `tz:io`),
+  `child_process`, `crypto`, `process`, `bytes` (`node:buffer`). Свойства, операторы, литералы,
   рантайм и библиотеки тем пока в ядре.
 - **`node:stream` — части одного модуля.** `stream.tz` разрезан на пять файлов, но загрузчик
   читает их как один модуль (`kModuleParts` в `compiler/load/library_modules/`): у них одна область
@@ -596,8 +601,8 @@ library/
 | `bytes` | `BytesFeature`, `TypedArrayChecker`, `BufferChecker`, `ByteProofs`, `BytesLowerer` | `bytes`, `buffer`, `encodings`, `cjk` | | `sema_bytes.cpp` (1970), `codegen_bytes.cpp` |
 | `process` | `ProcessFeature`, `ProcessChecker`, `ProcessLowerer` | `process` | | `sema_process.cpp`, `codegen_process.cpp` |
 | `fs` | `FsFeature`, `FsDeclarer` (`Stats`, `Dirent`, `SystemError`), `FsChecker`, `FsPromisesChecker`, `ReadlineChecker`, `FsLowerer` | `fs` (4390 → `fs_sync`, `fs_async`, `fs_errors`, `stdin`) | | `sema_node.cpp` (часть), `sema_async_io.cpp`, `codegen_node.cpp`, `codegen_async_io.cpp` |
-| `path` | `PathFeature`, `PathChecker` | `path` | | `sema_node.cpp` (часть) |
-| `os` | `OsFeature`, `OsChecker` | `os` | | `sema_node.cpp` (часть) |
+| `path` | `PathFeature`, `PathChecker`, `PathLowerer`, `path_exports` | `path` | | `sema_node.cpp` (часть) |
+| `os` | `OsFeature`, `OsChecker`, `OsLowerer`, `os_exports` | `os` | | `sema_node.cpp` (часть) |
 | `child_process` | `ChildProcessFeature`, `ExecSyncErrorDeclarer`, `ChildChecker`, `ChildLowerer` | `child` | | `sema_child.cpp`, `codegen_child.cpp` |
 | `events` | `EventsFeature`, `EventMapInference`, `EmitterChecker`, `EventTargetChecker`, `EventsLowerer` | `signal` | `events.tz`, `web.tz` | `sema_events.cpp` (1362), `codegen_events.cpp` |
 | `stream` | `StreamFeature`, `StreamChecker`, `ChunkTypes`, `StreamLowerer` | `stream` | `stream.tz` (3989 → `readable`, `writable`, `duplex`, `pipeline`), `stream_consumers.tz`, `stream_promises.tz`, `string_decoder.tz`, `fs_stream.tz` | `sema_stream.cpp` (1453), `codegen_stream.cpp` |
@@ -699,8 +704,12 @@ cli/
 9. **Уборка** — сделано: `sema.h` и `codegen.h` ушли, пустых папок нет, `tzrt.h` и большие файлы
    рантайма разрезаны; `enum Builtin` остался (см. «Сейчас»).
 
-## Открытые вопросы
+## Решённые вопросы
 
-1. **Тема из одного класса.** У `os` и `path` по одному классу, и по правилу «класс — в своей
-   папке» он лежит папкой внутри папки темы: `compiler/library/os/os_checker/os_checker.h`. Можно
-   сделать исключение и класть такой класс прямо в папку темы: `compiler/library/os/os_checker.h`.
+1. **Комментарии** — их нет, см. «Правила кода».
+2. **Остановка после каждого прохода** — нет: ошибки проходов копятся, см. «Правила кода».
+3. **Тема из одного класса** — таких тем нет. У `os` и `path` был один класс, потому что остальное
+   лежало в чужой теме `builtin_modules`; теперь у каждой своя `Feature`, проверка, IR и список
+   экспортов, а модули `node:*` подключаются крючками `exportProblem`, `checkModuleCall`,
+   `checkModuleValue` и `checkModuleMember`. Правило «класс — в своей папке» остаётся без
+   исключений.

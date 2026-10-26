@@ -1,5 +1,6 @@
 #include "compiler/library/fs/fs_exports/fs_exports.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Twine.h"
 
 namespace tz {
 
