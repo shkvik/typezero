@@ -2,10 +2,8 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -40,6 +38,18 @@ const Type *userInfoType() {
 }
 
 OsChecker::OsChecker(Checker &checker) : checker_(checker) {}
+
+Expr *OsChecker::checkOsValue(llvm::StringRef name, Expr *expr) {
+  if (name == "EOL") {
+    return stringLiteral(checker_.ctx_, expr->loc(), targetIsWindows() ? "\r\n" : "\n");
+  }
+  if (name == "devNull") {
+    return stringLiteral(checker_.ctx_, expr->loc(),
+                         targetIsWindows() ? "\\\\.\\nul" : "/dev/null");
+  }
+
+  return nullptr;
+}
 
 Expr *OsChecker::checkOsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc) {
   call->type = Type::error();

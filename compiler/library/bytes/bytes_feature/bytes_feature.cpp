@@ -1,5 +1,6 @@
 #include "compiler/library/bytes/bytes_feature/bytes_feature.h"
 #include "compiler/check/checker/checker.h"
+#include "compiler/library/bytes/buffer_exports/buffer_exports.h"
 #include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
@@ -20,6 +21,16 @@ Expr *BytesFeature::checkMethodCall(Checker &checker, CallExpr *call, MemberExpr
   }
 
   return checker.bytesChecker().checkBytesMethod(call, member, expected);
+}
+
+std::optional<std::string> BytesFeature::exportProblem(NodeModule module,
+                                                       llvm::StringRef exportName,
+                                                       llvm::StringRef path) const {
+  if (module != NodeModule::Buffer) {
+    return std::nullopt;
+  }
+
+  return bufferExportProblem(exportName, path);
 }
 
 bool BytesFeature::lowers(Builtin builtin) const { return isBytesBuiltin(builtin); }

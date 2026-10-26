@@ -11,6 +11,8 @@
 #include "compiler/library/intl/intl_feature/intl_feature.h"
 #include "compiler/library/json/json_feature/json_feature.h"
 #include "compiler/library/math/math_feature/math_feature.h"
+#include "compiler/library/os/os_feature/os_feature.h"
+#include "compiler/library/path/path_feature/path_feature.h"
 #include "compiler/library/process/process_feature/process_feature.h"
 #include "compiler/library/reflect/reflect_feature/reflect_feature.h"
 #include "compiler/library/regex/regex_feature/regex_feature.h"
@@ -37,6 +39,8 @@ FeatureRegistry::FeatureRegistry() {
   features_.push_back(std::make_unique<CryptoFeature>());
   features_.push_back(std::make_unique<WeakRefFeature>());
   features_.push_back(std::make_unique<BytesFeature>());
+  features_.push_back(std::make_unique<PathFeature>());
+  features_.push_back(std::make_unique<OsFeature>());
   features_.push_back(std::make_unique<FsFeature>());
   features_.push_back(std::make_unique<ChildProcessFeature>());
   features_.push_back(std::make_unique<EventsFeature>());

@@ -1,5 +1,5 @@
 #include "compiler/library/child_process/child_lowerer/child_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
@@ -349,7 +349,7 @@ llvm::Value *ChildLowerer::emitChildBuiltin(CallExpr *call) {
       lowering_.functionFrame().createStackSlot(spawnPartsType(), "spawn.parts");
   llvm::Value *result = lowering_.builder_.CreateCall(
       lowering_.processLowerer().processFunction("tz_child_run", ptr, {ptr, ptr, ptr, ptr}),
-      {request, parts, lowering_.builtinModuleLowerer().systemErrorMaker(), spawnMaker(made)});
+      {request, parts, lowering_.fsLowerer().systemErrorMaker(), spawnMaker(made)});
   for (size_t i = 0; i < values.size(); ++i) {
     lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
   }

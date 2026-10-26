@@ -110,7 +110,10 @@ class IntlCallLowerer;
 class JsonLowerer;
 class FromJsonLowerer;
 class FsPromisesLowerer;
-class BuiltinModuleLowerer;
+class FsLowerer;
+class PathLowerer;
+class OsLowerer;
+class ObjectMaker;
 class ProcessLowerer;
 class UnknownCastLowerer;
 class ReflectArgsLowerer;
@@ -551,7 +554,10 @@ public:
   JsonLowerer &jsonLowerer() const { return *jsonLowererPart_; }
   FromJsonLowerer &fromJsonLowerer() const { return *fromJsonLowererPart_; }
   FsPromisesLowerer &fsPromisesLowerer() const { return *fsPromisesLowererPart_; }
-  BuiltinModuleLowerer &builtinModuleLowerer() const { return *builtinModuleLowererPart_; }
+  FsLowerer &fsLowerer() const { return *fsLowererPart_; }
+  PathLowerer &pathLowerer() const { return *pathLowererPart_; }
+  OsLowerer &osLowerer() const { return *osLowererPart_; }
+  ObjectMaker &objectMaker() const { return *objectMakerPart_; }
   ProcessLowerer &processLowerer() const { return *processLowererPart_; }
   UnknownCastLowerer &unknownCastLowerer() const { return *unknownCastLowererPart_; }
   ReflectArgsLowerer &reflectArgsLowerer() const { return *reflectArgsLowererPart_; }
@@ -650,7 +656,10 @@ private:
   friend class JsonLowerer;
   friend class FromJsonLowerer;
   friend class FsPromisesLowerer;
-  friend class BuiltinModuleLowerer;
+  friend class FsLowerer;
+  friend class PathLowerer;
+  friend class OsLowerer;
+  friend class ObjectMaker;
   friend class ProcessLowerer;
   friend class UnknownCastLowerer;
   friend class ReflectArgsLowerer;
@@ -741,7 +750,10 @@ private:
   std::unique_ptr<JsonLowerer> jsonLowererPart_;
   std::unique_ptr<FromJsonLowerer> fromJsonLowererPart_;
   std::unique_ptr<FsPromisesLowerer> fsPromisesLowererPart_;
-  std::unique_ptr<BuiltinModuleLowerer> builtinModuleLowererPart_;
+  std::unique_ptr<FsLowerer> fsLowererPart_;
+  std::unique_ptr<PathLowerer> pathLowererPart_;
+  std::unique_ptr<OsLowerer> osLowererPart_;
+  std::unique_ptr<ObjectMaker> objectMakerPart_;
   std::unique_ptr<ProcessLowerer> processLowererPart_;
   std::unique_ptr<UnknownCastLowerer> unknownCastLowererPart_;
   std::unique_ptr<ReflectArgsLowerer> reflectArgsLowererPart_;

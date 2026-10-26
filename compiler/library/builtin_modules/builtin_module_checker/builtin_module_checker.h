@@ -17,6 +17,8 @@ public:
   Expr *nodeValue(const Checker::NodeName &n, Expr *expr);
 
 private:
+  std::string exportProblem(NodeModule module, llvm::StringRef name, llvm::StringRef path) const;
+
   Checker &checker_;
 };
 

@@ -1,5 +1,4 @@
 #include "compiler/lower/lowering/lowering.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
 #include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
 #include "compiler/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
@@ -8,12 +7,15 @@
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
 #include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
 #include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
+#include "compiler/library/os/os_lowerer/os_lowerer.h"
+#include "compiler/library/path/path_lowerer/path_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
 #include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
@@ -74,6 +76,7 @@
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
 #include "compiler/lower/objects/dict_method_lowerer/dict_method_lowerer.h"
 #include "compiler/lower/objects/object_lowerer/object_lowerer.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
@@ -187,7 +190,10 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   jsonLowererPart_ = std::make_unique<JsonLowerer>(*this);
   fromJsonLowererPart_ = std::make_unique<FromJsonLowerer>(*this);
   fsPromisesLowererPart_ = std::make_unique<FsPromisesLowerer>(*this);
-  builtinModuleLowererPart_ = std::make_unique<BuiltinModuleLowerer>(*this);
+  fsLowererPart_ = std::make_unique<FsLowerer>(*this);
+  pathLowererPart_ = std::make_unique<PathLowerer>(*this);
+  osLowererPart_ = std::make_unique<OsLowerer>(*this);
+  objectMakerPart_ = std::make_unique<ObjectMaker>(*this);
   processLowererPart_ = std::make_unique<ProcessLowerer>(*this);
   unknownCastLowererPart_ = std::make_unique<UnknownCastLowerer>(*this);
   reflectArgsLowererPart_ = std::make_unique<ReflectArgsLowerer>(*this);

@@ -1,5 +1,5 @@
 #include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
@@ -134,7 +134,7 @@ llvm::Value *StreamLowerer::emitStreamBuiltin(CallExpr *call) {
       args.insert(args.begin(), promise);
       if (maker) {
         params.push_back(ptr);
-        args.push_back(lowering_.builtinModuleLowerer().systemErrorMaker());
+        args.push_back(lowering_.fsLowerer().systemErrorMaker());
       }
       lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction(name, voidTy, params), args);

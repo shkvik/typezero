@@ -1,5 +1,4 @@
 #include "compiler/lower/expr/call_lowerer/call_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
 #include "compiler/library/bytes/bytes_call_lowerer/bytes_call_lowerer.h"
 #include "compiler/library/child_process/child_lowerer/child_lowerer.h"
 #include "compiler/library/console/console_lowerer/console_lowerer.h"

@@ -13,6 +13,8 @@ public:
   Expr *checkWebCryptoCall(CallExpr *call, MemberExpr *member);
   Expr *checkWebCryptoMember(MemberExpr *member);
   Expr *cryptoConstant(MemberExpr *member);
+  Expr *checkCryptoValue(llvm::StringRef name, Expr *expr);
+  Expr *checkCryptoModuleMember(MemberExpr *member);
   const Type *cryptoTypeNamed(llvm::StringRef name) const;
 
 private:

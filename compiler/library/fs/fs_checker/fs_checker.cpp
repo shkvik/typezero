@@ -3,9 +3,10 @@
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
+#include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
+#include "compiler/library/fs/fs_exports/fs_exports.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/TargetParser/Host.h"
@@ -473,9 +474,74 @@ Expr *FsChecker::checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc
     call->type = Type::voidTy();
     return call;
   }
-  checker_.diags_.error(loc, exportProblem(NodeModule::Fs, fn, "node:fs"));
+  checker_.diags_.error(loc, fsExportProblem(fn, "node:fs"));
 
   return loosely();
+}
+
+Expr *FsChecker::checkTzIoCall(CallExpr *call, llvm::SMLoc loc) {
+  if (checker_.callChecker().rejectSpread(call) ||
+      !checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
+    return call;
+  }
+  if (!call->args.empty()) {
+    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
+  }
+  call->builtin = Builtin::ReadLine;
+  call->type = Type::optional(Type::string());
+
+  return call;
+}
+
+Expr *FsChecker::checkFsValue(llvm::StringRef name, Expr *expr) {
+  if (name != "constants") {
+    return nullptr;
+  }
+  checker_.diags_.error(expr->loc(),
+                        "'constants' of 'node:fs' is used as 'constants.F_OK' and the like");
+
+  return expr;
+}
+
+Expr *FsChecker::checkFsConstant(MemberExpr *member) {
+  auto isFs = [](const Checker::NodeName *n) {
+    return n && (n->module == NodeModule::Fs || n->module == NodeModule::FsPromises);
+  };
+  auto constantOf = [&](const Expr *object) {
+    if (auto *name = dyn_cast<NameExpr>(object)) {
+      const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(name->name);
+      return isFs(n) && n->name == "constants";
+    }
+    auto *inner = dyn_cast<MemberExpr>(object);
+    auto *name = inner ? dyn_cast<NameExpr>(inner->object) : nullptr;
+    const Checker::NodeName *n =
+        name ? checker_.builtinModuleChecker().nodeName(name->name) : nullptr;
+
+    return isFs(n) && n->name.empty() && inner->name == "constants";
+  };
+  if (!constantOf(member->object)) {
+    return nullptr;
+  }
+  static const std::pair<llvm::StringLiteral, int> constants[] = {{"F_OK", 0},
+                                                                  {"R_OK", 4},
+                                                                  {"W_OK", 2},
+                                                                  {"X_OK", 1},
+                                                                  {"COPYFILE_EXCL", 1},
+                                                                  {"COPYFILE_FICLONE", 2},
+                                                                  {"COPYFILE_FICLONE_FORCE", 4}};
+  for (const auto &[name, value] : constants) {
+    if (name == member->name) {
+      auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value));
+      lit->type = Type::intTy();
+      return lit;
+    }
+  }
+  checker_.diags_.error(member->loc(), "'constants." + member->name +
+                                           "' of 'node:fs' is not supported yet; tz has F_OK, "
+                                           "R_OK, W_OK, X_OK and the COPYFILE_ ones");
+  member->type = Type::error();
+
+  return member;
 }
 
 }

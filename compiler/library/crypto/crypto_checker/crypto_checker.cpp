@@ -20,6 +20,33 @@ namespace tz {
 
 CryptoChecker::CryptoChecker(Checker &checker) : checker_(checker) {}
 
+Expr *CryptoChecker::checkCryptoValue(llvm::StringRef name, Expr *expr) {
+  if (name == "constants") {
+    checker_.diags_.error(expr->loc(), "'constants' of 'node:crypto' is used as "
+                                       "'constants.RSA_PKCS1_PSS_PADDING' and the like");
+    return expr;
+  }
+  if (cryptoTypeNamed(name)) {
+    checker_.diags_.error(expr->loc(), "'" + name +
+                                           "' of 'node:crypto' is a type: its objects come from "
+                                           "the functions of 'node:crypto'");
+    return expr;
+  }
+
+  return nullptr;
+}
+
+Expr *CryptoChecker::checkCryptoModuleMember(MemberExpr *member) {
+  auto *object = dyn_cast<NameExpr>(member->object);
+  const Checker::NodeName *n =
+      object ? checker_.builtinModuleChecker().nodeName(object->name) : nullptr;
+  if (!n || n->module != NodeModule::Crypto || n->name != "constants") {
+    return nullptr;
+  }
+
+  return cryptoConstant(member);
+}
+
 const Type *CryptoChecker::cryptoTypeNamed(llvm::StringRef name) const {
   const Checker::NodeName *n = checker_.builtinModuleChecker().nodeName(name);
   if (!n || n->module != NodeModule::Crypto) {

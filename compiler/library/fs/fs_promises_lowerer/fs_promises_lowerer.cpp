@@ -1,5 +1,5 @@
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
@@ -35,7 +35,7 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     params.insert(params.begin(), ptr);
     args.insert(args.begin(), promise);
     params.push_back(ptr);
-    args.push_back(lowering_.builtinModuleLowerer().systemErrorMaker());
+    args.push_back(lowering_.fsLowerer().systemErrorMaker());
     lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(name, voidTy, params),
                                   args);
   };
@@ -64,14 +64,13 @@ llvm::Value *FsPromisesLowerer::emitFsPromise(CallExpr *call) {
     break;
   case Builtin::FspStat:
     run("tz_fsp_stat", {ptr, i64, i32, ptr},
-        {obj(0), meta(0), flag(1), lowering_.builtinModuleLowerer().objectMaker(value)});
+        {obj(0), meta(0), flag(1), lowering_.fsLowerer().objectMaker(value)});
     break;
   case Builtin::FspReaddir: {
     const Type *element = value->inner();
     llvm::Value *dirent =
-        element->isClass()
-            ? static_cast<llvm::Value *>(lowering_.builtinModuleLowerer().objectMaker(element))
-            : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+        element->isClass() ? static_cast<llvm::Value *>(lowering_.fsLowerer().objectMaker(element))
+                           : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     run("tz_fsp_readdir", {ptr, i64, i32, ptr, ptr},
         {obj(0), meta(0), flag(1), lowering_.typeDescriptors().typeDescriptor(element), dirent});
     break;

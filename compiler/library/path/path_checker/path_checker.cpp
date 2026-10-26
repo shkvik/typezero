@@ -6,9 +6,6 @@
 #include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -18,8 +15,6 @@ using llvm::isa;
 namespace tz {
 
 namespace {
-
-bool targetIsWindows() { return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows(); }
 
 const Type *parsedPathType() {
   const Type *s = Type::string();
@@ -46,6 +41,24 @@ const Type *formatInputType() {
 }
 
 PathChecker::PathChecker(Checker &checker) : checker_(checker) {}
+
+Expr *PathChecker::checkPathValue(NodeModule module, llvm::StringRef name, Expr *expr) {
+  bool win32 = module == NodeModule::PathWin32 || (module == NodeModule::Path && targetIsWindows());
+  if (name == "sep") {
+    return stringLiteral(checker_.ctx_, expr->loc(), win32 ? "\\" : "/");
+  }
+  if (name == "delimiter") {
+    return stringLiteral(checker_.ctx_, expr->loc(), win32 ? ";" : ":");
+  }
+  if (name == "posix" || name == "win32") {
+    checker_.diags_.error(expr->loc(), "'" + name + "' of '" + moduleLabel(module) +
+                                           "' is used through its functions, e.g. '" + name +
+                                           ".join(a, b)'");
+    return expr;
+  }
+
+  return nullptr;
+}
 
 Expr *PathChecker::checkPathCall(CallExpr *call, NodeModule module, llvm::StringRef fn,
                                  llvm::SMLoc loc) {

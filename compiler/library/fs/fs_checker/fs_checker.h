@@ -9,6 +9,9 @@ public:
   explicit FsChecker(Checker &checker);
 
   Expr *checkFsCall(CallExpr *call, llvm::StringRef fn, llvm::SMLoc loc);
+  Expr *checkTzIoCall(CallExpr *call, llvm::SMLoc loc);
+  Expr *checkFsValue(llvm::StringRef name, Expr *expr);
+  Expr *checkFsConstant(MemberExpr *member);
   bool nodeOptions(CallExpr *call, size_t index, llvm::StringRef fn,
                    llvm::ArrayRef<llvm::StringRef> allowed, llvm::StringMap<Expr *> &options);
   Expr *checkEncoding(Expr *encoding, llvm::StringRef fn, bool any);

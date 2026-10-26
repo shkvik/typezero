@@ -1,9 +1,9 @@
 #include "compiler/library/builtin_modules/builtin_modules_feature/builtin_modules_feature.h"
+#include "compiler/check/async/timer_checker/timer_checker.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
-#include "compiler/lower/lowering/lowering.h"
+#include "compiler/library/builtin_modules/timers_exports/timers_exports.h"
 
 namespace tz {
 
@@ -22,10 +22,24 @@ Expr *BuiltinModulesFeature::checkMethodCall(Checker &checker, CallExpr *call, M
   return checker.runtimeObjectChecker().checkRuntimeMethod(call, member, expected);
 }
 
-bool BuiltinModulesFeature::lowers(Builtin builtin) const { return isNodeBuiltin(builtin); }
+std::optional<std::string> BuiltinModulesFeature::exportProblem(NodeModule module,
+                                                                llvm::StringRef exportName,
+                                                                llvm::StringRef path) const {
+  if (module != NodeModule::TimersPromises) {
+    return std::nullopt;
+  }
 
-llvm::Value *BuiltinModulesFeature::lowerCall(Lowering &lowering, CallExpr *call) const {
-  return lowering.builtinModuleLowerer().emitNodeBuiltin(call);
+  return timersExportProblem(exportName, path);
+}
+
+Expr *BuiltinModulesFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
+                                             llvm::StringRef fn, llvm::SMLoc loc,
+                                             const Type *expected) const {
+  if (module != NodeModule::TimersPromises) {
+    return nullptr;
+  }
+
+  return checker.timerChecker().checkTimersPromisesCall(call, fn, loc, expected);
 }
 
 }

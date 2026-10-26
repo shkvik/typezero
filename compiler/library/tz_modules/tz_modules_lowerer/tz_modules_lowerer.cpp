@@ -1,5 +1,5 @@
 #include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
@@ -71,7 +71,7 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     }
   }
   params.push_back(ptr);
-  args.push_back(lowering_.builtinModuleLowerer().systemErrorMaker());
+  args.push_back(lowering_.fsLowerer().systemErrorMaker());
   llvm::StringRef name = fn->name;
   name.consume_front("__");
   llvm::Value *result;

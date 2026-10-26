@@ -2,6 +2,7 @@
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/library/crypto/crypto_checker/crypto_checker.h"
+#include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
 #include "compiler/library/crypto/crypto_lowerer/crypto_lowerer.h"
 #include "compiler/library/crypto/crypto_method_checker/crypto_method_checker.h"
 #include "compiler/library/crypto/subtle_call_checker/subtle_call_checker.h"
@@ -39,6 +40,38 @@ Expr *CryptoFeature::checkClassMethodCall(Checker &checker, CallExpr *call, Memb
   }
 
   return checker.subtleCallChecker().checkSubtleCall(call, member, expected);
+}
+
+std::optional<std::string> CryptoFeature::exportProblem(NodeModule module,
+                                                        llvm::StringRef exportName,
+                                                        llvm::StringRef path) const {
+  if (module != NodeModule::Crypto) {
+    return std::nullopt;
+  }
+
+  return cryptoExportProblem(exportName, path);
+}
+
+Expr *CryptoFeature::checkModuleCall(Checker &checker, CallExpr *call, NodeModule module,
+                                     llvm::StringRef fn, llvm::SMLoc loc, const Type *) const {
+  if (module != NodeModule::Crypto) {
+    return nullptr;
+  }
+
+  return checker.cryptoFunctionChecker().checkCryptoCall(call, fn, loc);
+}
+
+Expr *CryptoFeature::checkModuleValue(Checker &checker, NodeModule module,
+                                      llvm::StringRef exportName, Expr *expr) const {
+  if (module != NodeModule::Crypto) {
+    return nullptr;
+  }
+
+  return checker.cryptoChecker().checkCryptoValue(exportName, expr);
+}
+
+Expr *CryptoFeature::checkModuleMember(Checker &checker, MemberExpr *member) const {
+  return checker.cryptoChecker().checkCryptoModuleMember(member);
 }
 
 bool CryptoFeature::lowers(Builtin builtin) const { return isCryptoBuiltin(builtin); }

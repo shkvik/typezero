@@ -1,22 +1,10 @@
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/check/async/timer_checker/timer_checker.h"
-#include "compiler/check/expr/argument_checker/argument_checker.h"
-#include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/scopes/scopes.h"
 #include "compiler/library/builtin_modules/node_check_helpers/node_check_helpers.h"
-#include "compiler/library/child_process/child_checker/child_checker.h"
-#include "compiler/library/crypto/crypto_checker/crypto_checker.h"
-#include "compiler/library/crypto/crypto_function_checker/crypto_function_checker.h"
-#include "compiler/library/fs/fs_checker/fs_checker.h"
-#include "compiler/library/fs/fs_promises_checker/fs_promises_checker.h"
-#include "compiler/library/fs/readline_checker/readline_checker.h"
-#include "compiler/library/os/os_checker/os_checker.h"
-#include "compiler/library/path/path_checker/path_checker.h"
+#include "compiler/library/feature_registry/feature_registry.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -150,15 +138,6 @@ bool isPathModule(NodeModule module) {
          module == NodeModule::PathWin32;
 }
 
-bool targetIsWindows() { return llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSWindows(); }
-
-std::u16string utf16(llvm::StringRef text) {
-  llvm::SmallVector<llvm::UTF16, 32> units;
-  llvm::convertUTF8ToUTF16String(text, units);
-
-  return std::u16string(units.begin(), units.end());
-}
-
 }
 
 std::string builtinModuleProblem(llvm::StringRef path) {
@@ -176,6 +155,17 @@ MemberExpr *processMember(AstContext &ctx, llvm::SMLoc loc, llvm::StringRef name
 }
 
 BuiltinModuleChecker::BuiltinModuleChecker(Checker &checker) : checker_(checker) {}
+
+std::string BuiltinModuleChecker::exportProblem(NodeModule module, llvm::StringRef name,
+                                                llvm::StringRef path) const {
+  for (const Feature *feature : checker_.features_->all()) {
+    if (std::optional<std::string> problem = feature->exportProblem(module, name, path)) {
+      return *problem;
+    }
+  }
+
+  return "";
+}
 
 void BuiltinModuleChecker::importBuiltinModule(Module *module, const ImportDecl &decl) {
   Checker::ModuleState &here = checker_.state(module);
@@ -310,51 +300,10 @@ Expr *BuiltinModuleChecker::nodeValue(const Checker::NodeName &n, Expr *expr) {
                                                       : typicalName(n.module).str() + "(...)'"));
     return expr;
   }
-  auto literal = [&](llvm::StringRef text) {
-    auto *lit = checker_.ctx_.make<StringLitExpr>(expr->loc(), utf16(text));
-    lit->type = Type::string();
-
-    return lit;
-  };
-  bool win32 =
-      n.module == NodeModule::PathWin32 || (n.module == NodeModule::Path && targetIsWindows());
-  if (isPathModule(n.module)) {
-    if (n.name == "sep") {
-      return literal(win32 ? "\\" : "/");
+  for (const Feature *feature : checker_.features_->all()) {
+    if (Expr *value = feature->checkModuleValue(checker_, n.module, n.name, expr)) {
+      return value;
     }
-    if (n.name == "delimiter") {
-      return literal(win32 ? ";" : ":");
-    }
-    if (n.name == "posix" || n.name == "win32") {
-      checker_.diags_.error(expr->loc(), "'" + n.name + "' of '" + label +
-                                             "' is used through its functions, e.g. '" + n.name +
-                                             ".join(a, b)'");
-      return expr;
-    }
-  }
-  if (n.module == NodeModule::Os) {
-    if (n.name == "EOL") {
-      return literal(targetIsWindows() ? "\r\n" : "\n");
-    }
-    if (n.name == "devNull") {
-      return literal(targetIsWindows() ? "\\\\.\\nul" : "/dev/null");
-    }
-  }
-  if ((n.module == NodeModule::Fs || n.module == NodeModule::FsPromises) && n.name == "constants") {
-    checker_.diags_.error(expr->loc(),
-                          "'constants' of 'node:fs' is used as 'constants.F_OK' and the like");
-    return expr;
-  }
-  if (n.module == NodeModule::Crypto && n.name == "constants") {
-    checker_.diags_.error(expr->loc(), "'constants' of 'node:crypto' is used as "
-                                       "'constants.RSA_PKCS1_PSS_PADDING' and the like");
-    return expr;
-  }
-  if (n.module == NodeModule::Crypto && checker_.cryptoChecker().cryptoTypeNamed(n.name)) {
-    checker_.diags_.error(expr->loc(), "'" + n.name +
-                                           "' of 'node:crypto' is a type: its objects come from "
-                                           "the functions of 'node:crypto'");
-    return expr;
   }
   checker_.diags_.error(expr->loc(),
                         "'" + n.name + "' of '" + label +
@@ -378,49 +327,15 @@ Expr *BuiltinModuleChecker::checkNodeName(NameExpr *name) {
 }
 
 Expr *BuiltinModuleChecker::checkNodeMember(MemberExpr *member) {
-  auto isFs = [](const Checker::NodeName *n) {
-    return n && (n->module == NodeModule::Fs || n->module == NodeModule::FsPromises);
-  };
-  auto constantOf = [&](const Expr *object) {
-    if (auto *name = dyn_cast<NameExpr>(object)) {
-      const Checker::NodeName *n = nodeName(name->name);
-      return isFs(n) && n->name == "constants";
+  for (const Feature *feature : checker_.features_->all()) {
+    if (Expr *checked = feature->checkModuleMember(checker_, member)) {
+      return checked;
     }
-    auto *inner = dyn_cast<MemberExpr>(object);
-    auto *name = inner ? dyn_cast<NameExpr>(inner->object) : nullptr;
-    const Checker::NodeName *n = name ? nodeName(name->name) : nullptr;
-
-    return isFs(n) && n->name.empty() && inner->name == "constants";
-  };
-  if (constantOf(member->object)) {
-    static const std::pair<llvm::StringLiteral, int> constants[] = {{"F_OK", 0},
-                                                                    {"R_OK", 4},
-                                                                    {"W_OK", 2},
-                                                                    {"X_OK", 1},
-                                                                    {"COPYFILE_EXCL", 1},
-                                                                    {"COPYFILE_FICLONE", 2},
-                                                                    {"COPYFILE_FICLONE_FORCE", 4}};
-    for (const auto &[name, value] : constants) {
-      if (name == member->name) {
-        auto *lit = checker_.ctx_.make<IntLitExpr>(member->loc(), uint64_t(value));
-        lit->type = Type::intTy();
-        return lit;
-      }
-    }
-    checker_.diags_.error(member->loc(),
-                          "'constants." + member->name +
-                              "' of 'node:fs' is not supported yet; tz has F_OK, R_OK, "
-                              "W_OK, X_OK and the COPYFILE_ ones");
-    member->type = Type::error();
-    return member;
   }
   auto *object = dyn_cast<NameExpr>(member->object);
   const Checker::NodeName *n = object ? nodeName(object->name) : nullptr;
   if (!n) {
     return nullptr;
-  }
-  if (n->module == NodeModule::Crypto && n->name == "constants") {
-    return checker_.cryptoChecker().cryptoConstant(member);
   }
   if (n->module == NodeModule::Process || (n->module == NodeModule::Buffer && !n->name.empty())) {
     member->object = processAlias(object);
@@ -504,41 +419,11 @@ Expr *BuiltinModuleChecker::checkNodeCall(CallExpr *call, const Type *expected) 
     return nullptr;
   }
 
-  switch (target.module) {
-  case NodeModule::Path:
-  case NodeModule::PathPosix:
-  case NodeModule::PathWin32:
-    return checker_.pathChecker().checkPathCall(call, target.module, target.name, loc);
-  case NodeModule::Os:
-    return checker_.osChecker().checkOsCall(call, target.name, loc);
-  case NodeModule::Fs:
-    return checker_.fsChecker().checkFsCall(call, target.name, loc);
-  case NodeModule::FsPromises:
-    return checker_.fsPromisesChecker().checkFsPromisesCall(call, target.name, loc);
-  case NodeModule::TimersPromises:
-    return checker_.timerChecker().checkTimersPromisesCall(call, target.name, loc, expected);
-  case NodeModule::Readline:
-  case NodeModule::ReadlinePromises:
-    return checker_.readlineChecker().checkReadlineCall(call, target.module, target.name, loc);
-  case NodeModule::ChildProcess:
-    return checker_.childChecker().checkChildCall(call, target.name, loc);
-  case NodeModule::Crypto:
-    return checker_.cryptoFunctionChecker().checkCryptoCall(call, target.name, loc);
-  case NodeModule::Process:
-  case NodeModule::Buffer:
-    break;
-  case NodeModule::TzIo: {
-    if (checker_.callChecker().rejectSpread(call) ||
-        !checker_.argumentChecker().checkArity(call, loc, 0, 1)) {
-      return call;
+  for (const Feature *feature : checker_.features_->all()) {
+    if (Expr *checked =
+            feature->checkModuleCall(checker_, call, target.module, target.name, loc, expected)) {
+      return checked;
     }
-    if (!call->args.empty()) {
-      call->args[0] = checker_.argumentChecker().checkArg(call->args[0], Type::string());
-    }
-    call->builtin = Builtin::ReadLine;
-    call->type = Type::optional(Type::string());
-    return call;
-  }
   }
 
   return nullptr;

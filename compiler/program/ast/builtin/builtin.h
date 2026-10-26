@@ -499,8 +499,16 @@ inline bool isDictIterator(Builtin builtin) {
   return builtin >= Builtin::MapKeys && builtin <= Builtin::SetEntries;
 }
 
-inline bool isNodeBuiltin(Builtin builtin) {
-  return builtin >= Builtin::PathJoin && builtin <= Builtin::RlClose;
+inline bool isPathBuiltin(Builtin builtin) {
+  return builtin >= Builtin::PathJoin && builtin <= Builtin::PathToNamespacedPath;
+}
+
+inline bool isOsBuiltin(Builtin builtin) {
+  return builtin >= Builtin::OsString && builtin <= Builtin::OsUserInfo;
+}
+
+inline bool isFsBuiltin(Builtin builtin) {
+  return builtin >= Builtin::ReadLine && builtin <= Builtin::RlClose;
 }
 
 inline bool isFspBuiltin(Builtin builtin) {

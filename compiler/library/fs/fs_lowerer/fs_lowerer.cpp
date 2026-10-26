@@ -1,139 +1,46 @@
-#include "compiler/library/builtin_modules/builtin_module_lowerer/builtin_module_lowerer.h"
+#include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
-#include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
-#include "compiler/lower/memory/group_lowerer/group_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <vector>
 
-using llvm::BasicBlock;
 using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
 namespace {
 
-struct MakerFields {
-  const char *cls;
-  std::vector<llvm::StringRef> fields;
-};
-
-const std::vector<MakerFields> &makerFields() {
+const std::vector<MakerFields> &fsObjects() {
   static const std::vector<MakerFields> table = {
       {"SystemError", {"message", "name", "errno", "code", "syscall", "path", "dest"}},
       {"Stats",
        {"dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks", "atimeMs",
         "mtimeMs", "ctimeMs", "birthtimeMs"}},
       {"Dirent", {"name", "parentPath", "#type"}},
-      {nullptr, {"root", "dir", "base", "ext", "name"}},
-      {nullptr, {"model", "speed", "times"}},
-      {nullptr, {"user", "nice", "sys", "idle", "irq"}},
-      {nullptr, {"uid", "gid", "username", "homedir", "shell"}},
   };
 
   return table;
 }
 
-const std::vector<llvm::StringRef> &makerOrder(const Type *type) {
-  for (const MakerFields &entry : makerFields()) {
-    if (const ClassDecl *cls = type->classDecl()) {
-      if (entry.cls && cls->name == entry.cls) {
-        return entry.fields;
-      }
-      continue;
-    }
-    if (entry.cls || type->fields().size() != entry.fields.size()) {
-      continue;
-    }
-    if (llvm::all_of(entry.fields, [&](llvm::StringRef f) { return type->field(f) != nullptr; })) {
-      return entry.fields;
-    }
-  }
-  llvm_unreachable("no maker for this type");
 }
 
-bool isNestedPart(const Type *type) { return type->isObject() && !type->isClass(); }
+FsLowerer::FsLowerer(Lowering &lowering) : lowering_(lowering) {}
 
+llvm::Function *FsLowerer::objectMaker(const Type *type) {
+  return lowering_.objectMaker().maker(type, fsObjects());
 }
 
-BuiltinModuleLowerer::BuiltinModuleLowerer(Lowering &lowering) : lowering_(lowering) {}
-
-llvm::StructType *BuiltinModuleLowerer::makerParts(const Type *type) {
-  std::vector<llvm::Type *> elements;
-  for (llvm::StringRef name : makerOrder(type)) {
-    const Type *field = type->field(name)->type;
-    elements.push_back(isNestedPart(field) ? makerParts(field)
-                                           : lowering_.moduleBuilder().lower(field));
-  }
-
-  return llvm::StructType::get(lowering_.ctx_, elements);
-}
-
-llvm::Function *BuiltinModuleLowerer::objectMaker(const Type *type) {
-  llvm::Function *&maker = objectMakers_[type];
-  if (maker) {
-    return maker;
-  }
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  const ClassDecl *cls = type->classDecl();
-  std::string name = cls                             ? cls->name.str()
-                     : type->name().starts_with("{") ? "object"
-                                                     : type->name().str();
-  maker = llvm::Function::Create(llvm::FunctionType::get(ptr, {ptr}, false),
-                                 llvm::GlobalValue::InternalLinkage, "tz.make." + name,
-                                 lowering_.module_.get());
-  lowering_.functionBuilder().setFunctionAttributes(maker);
-  llvm::IRBuilderBase::InsertPoint point = lowering_.builder_.saveIP();
-  llvm::Function *outer = std::exchange(lowering_.function_, maker);
-  lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", maker));
-
-  const std::vector<llvm::StringRef> &order = makerOrder(type);
-  llvm::Value *object;
-  if (cls) {
-    object = lowering_.classLowerer().allocInstance(cls);
-  } else {
-    std::vector<unsigned> keys;
-    for (llvm::StringRef field : order) {
-      keys.push_back(ObjectLayouts::fieldIndex(type, field));
-    }
-    object = lowering_.objectLayouts().allocObject(type, keys);
-  }
-  llvm::StructType *parts = makerParts(type);
-  for (size_t i = 0; i < order.size(); ++i) {
-    const Type *field = type->field(order[i])->type;
-    llvm::Value *address = lowering_.builder_.CreateStructGEP(parts, maker->getArg(0), unsigned(i));
-    llvm::Value *value = isNestedPart(field)
-                             ? static_cast<llvm::Value *>(
-                                   lowering_.builder_.CreateCall(objectMaker(field), {address}))
-                             : lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(field),
-                                                             address, order[i]);
-    lowering_.builder_.CreateStore(
-        value, lowering_.objectLayouts().fieldAddress(object, type, order[i], true));
-  }
-  lowering_.groupLowerer().adoptFields(object, type);
-  lowering_.builder_.CreateRet(object);
-  lowering_.function_ = outer;
-  lowering_.builder_.restoreIP(point);
-
-  return maker;
-}
-
-llvm::Function *BuiltinModuleLowerer::systemErrorMaker() {
+llvm::Function *FsLowerer::systemErrorMaker() {
   for (const ClassDecl *child : lowering_.errorClass_->children) {
     if (child->builtin && child->name == "SystemError") {
       return objectMaker(child->type);
@@ -142,7 +49,7 @@ llvm::Function *BuiltinModuleLowerer::systemErrorMaker() {
   llvm_unreachable("Checker declares SystemError");
 }
 
-llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
+llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   if (isFspBuiltin(call->builtin)) {
     return lowering_.fsPromisesLowerer().emitFsPromise(call);
   }
@@ -224,103 +131,6 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
 
   llvm::Value *result = nullptr;
   switch (call->builtin) {
-  case Builtin::PathJoin:
-  case Builtin::PathResolve:
-    result = lowering_.stringLowerer().callReturningString(
-        fn(call->builtin == Builtin::PathJoin ? "tz_path_join" : "tz_path_resolve", voidTy,
-           {ptr, ptr, i32}),
-        {values[1], values[0]});
-    break;
-  case Builtin::PathNormalize:
-  case Builtin::PathDirname:
-  case Builtin::PathExtname:
-  case Builtin::PathToNamespacedPath: {
-    const char *name = call->builtin == Builtin::PathNormalize ? "tz_path_normalize"
-                       : call->builtin == Builtin::PathDirname ? "tz_path_dirname"
-                       : call->builtin == Builtin::PathExtname ? "tz_path_extname"
-                                                               : "tz_path_to_namespaced";
-    result = lowering_.stringLowerer().callReturningString(fn(name, voidTy, {ptr, ptr, i64, i32}),
-                                                           {obj(1), meta(1), values[0]});
-    break;
-  }
-  case Builtin::PathIsAbsolute:
-    result = lowering_.builder_.CreateICmpNE(
-        lowering_.builder_.CreateCall(fn("tz_path_is_absolute", i32, {ptr, i64, i32}),
-                                      {obj(1), meta(1), values[0]}),
-        lowering_.builder_.getInt32(0));
-    break;
-  case Builtin::PathBasename: {
-    bool suffix = values.size() > 2;
-    llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
-    result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_basename", voidTy, {ptr, ptr, i64, ptr, i64, i32, i32}),
-        {obj(1), meta(1), suffix ? obj(2) : null, suffix ? meta(2) : lowering_.builder_.getInt64(0),
-         lowering_.builder_.getInt32(suffix ? 1 : 0), values[0]});
-    break;
-  }
-  case Builtin::PathRelative:
-    result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_relative", voidTy, {ptr, ptr, i64, ptr, i64, i32}),
-        {obj(1), meta(1), obj(2), meta(2), values[0]});
-    break;
-  case Builtin::PathParse:
-    result = lowering_.builder_.CreateCall(fn("tz_path_parse", ptr, {ptr, i64, i32, ptr}),
-                                           {obj(1), meta(1), values[0], objectMaker(call->type)});
-    break;
-  case Builtin::PathFormat: {
-    const Type *object = call->args[1]->type;
-    const Type *optional = Type::optional(Type::string());
-    llvm::Type *part = lowering_.moduleBuilder().lower(optional);
-    auto *partsType = llvm::ArrayType::get(part, 5);
-    llvm::AllocaInst *parts = lowering_.functionFrame().createStackSlot(partsType, "format.parts");
-    static const llvm::StringLiteral names[] = {"root", "dir", "base", "ext", "name"};
-    for (unsigned i = 0; i < 5; ++i) {
-      const Field *field = object->field(names[i]);
-      llvm::Value *value;
-      if (!field) {
-        value = lowering_.optionalLowerer().undefinedValue(optional);
-      } else {
-        value = lowering_.builder_.CreateLoad(
-            lowering_.moduleBuilder().lower(field->type),
-            lowering_.objectLayouts().fieldAddress(values[1], object, names[i]));
-        if (!field->type->isOptional()) {
-          value = lowering_.optionalLowerer().makeOptional(value, lowering_.builder_.getTrue(),
-                                                           optional);
-        }
-      }
-      lowering_.builder_.CreateStore(
-          value, lowering_.builder_.CreateConstInBoundsGEP2_32(partsType, parts, 0, i));
-    }
-    result = lowering_.stringLowerer().callReturningString(
-        fn("tz_path_format", voidTy, {ptr, ptr, i32}), {parts, values[0]});
-    break;
-  }
-  case Builtin::OsString:
-    result = lowering_.stringLowerer().callReturningString(fn("tz_os_string", voidTy, {ptr, i32}),
-                                                           {values[0]});
-    break;
-  case Builtin::OsNumber:
-    result = lowering_.builder_.CreateCall(fn("tz_os_number", f64, {i32}), {values[0]});
-    break;
-  case Builtin::OsAvailableParallelism:
-    result = lowering_.builder_.CreateCall(fn("tz_os_available_parallelism", i32, {}));
-    break;
-  case Builtin::OsCpus: {
-    const Type *element = call->type->inner();
-    result = lowering_.builder_.CreateCall(
-        fn("tz_os_cpus", ptr, {ptr, ptr}),
-        {lowering_.typeDescriptors().typeDescriptor(element), objectMaker(element)});
-    break;
-  }
-  case Builtin::OsLoadavg:
-    result = lowering_.builder_.CreateCall(
-        fn("tz_os_loadavg", ptr, {ptr}),
-        {lowering_.typeDescriptors().typeDescriptor(Type::doubleTy())});
-    break;
-  case Builtin::OsUserInfo:
-    result =
-        lowering_.builder_.CreateCall(fn("tz_os_user_info", ptr, {ptr}), {objectMaker(call->type)});
-    break;
   case Builtin::ReadLine: {
     bool question = !values.empty();
     llvm::AllocaInst *out = lowering_.functionFrame().createStackSlot(lowering_.strTy_, "line");
@@ -413,7 +223,7 @@ llvm::Value *BuiltinModuleLowerer::emitNodeBuiltin(CallExpr *call) {
            {obj(0), meta(0), obj(1), meta(1), values[2]});
     return nullptr;
   default:
-    llvm_unreachable("not a built-in of a module");
+    llvm_unreachable("not a built-in of node:fs");
   }
   release();
 
