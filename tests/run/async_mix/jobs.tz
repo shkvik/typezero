@@ -1,9 +1,8 @@
 // The tasks main.tz runs: async methods up a class chain and through an
 // interface, a generic cache of promises in a Map, values that may be
-// promises, and ResultAsync over node:fs.
+// promises, and a Promise of a Result over node:fs.
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ResultAsync } from "neverthrow"
 
 export function later<T>(value: T, ms: number): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
@@ -99,7 +98,10 @@ export function quick(n: int): int | Promise<int> {
   return n % 2 == 0 ? n * 10 : later(n * 100, 1)
 }
 
-export function readText(source: Source, key: string): ResultAsync<string, string> {
-  return ResultAsync.fromPromise(source.read(key), e =>
-    e instanceof SystemError ? `${e.code} ${e.syscall}` : e.message)
+export async function readText(source: Source, key: string): Promise<Result<string, string>> {
+  try {
+    return ok(await source.read(key))
+  } catch (e) {
+    return err(e instanceof SystemError ? `${e.code} ${e.syscall}` : e.message)
+  }
 }

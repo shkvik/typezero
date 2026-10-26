@@ -1,19 +1,19 @@
-true Ok { value: { name: 'ANN', tags: [ 'ann', 'ann!' ] } } false Err { error: "no user named ''" }
+true Ok { value: { name: 'ANN', tags: [ 'ann', 'ann!' ] } } false Err { error: "no user named ''" } at find (result_memory.tz:11)
 bob, bob!
 nobody
-CY Err { error: 'replaced' }
+CY Err { error: 'replaced' } at result_memory.tz:32
 {
-  primary: Err { error: "no user named ''" },
-  backup: Err { error: "no user named ''" }
+  primary: Err { error: "no user named ''" } at find (result_memory.tz:11),
+  backup: Err { error: "no user named ''" } at find (result_memory.tz:11)
 }
 Ok { value: { name: 'GUS', tags: [ 'gus', 'gus!' ] } } 2 [
   Ok { value: { name: 'FAY', tags: [Array] } },
-  Err { error: "no user named ''" },
+  Err { error: "no user named ''" } at find (result_memory.tz:11),
   Ok { value: { name: 'HAL', tags: [Array] } }
 ]
 Ok { value: [ 'IDA', 'IDA', 'IDA' ] }
 1
 Ok { value: 'hello, kim' }
 [ true, false ]
-Err { error: 'LOU has too many tags' }
-Err { error: 'max is taken' }
+Err { error: 'LOU has too many tags' } at result_memory.tz:62
+Err { error: 'max is taken' } at result_memory.tz:65

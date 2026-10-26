@@ -189,6 +189,7 @@ void ThrowChecker::checkTry(TryStmt *stmt) {
   Checker::LoopScan guardedScan = checker_.loopScanner().scanLoop(guarded, {});
   Checker::Flow inGuarded = withoutChanges(checker_.flow_, guardedScan);
 
+  ++checker_.tryDepth_;
   checker_.stmtChecker().checkStmt(stmt->block);
   Checker::Flow normal = checker_.flow_;
   if (stmt->handler) {
@@ -215,6 +216,7 @@ void ThrowChecker::checkTry(TryStmt *stmt) {
     checker_.popScope();
     normal = FlowChecker::join(normal, checker_.flow_);
   }
+  --checker_.tryDepth_;
   if (!stmt->finalizer) {
     checker_.flow_ = normal;
     return;

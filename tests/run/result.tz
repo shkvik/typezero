@@ -1,5 +1,6 @@
-// Result of neverthrow, built in: ok/err, the types they get, narrowing with
-// isOk() and isErr(), and printing as node prints neverthrow's Ok and Err.
+// Result, built in (docs/errors.md, sections 1-3): ok/err, the types they
+// get, narrowing with isOk() and isErr(), the early return of an Err, and
+// printing, where an Err shows the place of its err().
 
 function parseIntSafe(s: string): Result<int, string> {
   if (s.length == 0) return err("пусто")
@@ -51,7 +52,7 @@ function always(n: int): Ok<int, string> {
 }
 console.log(always(3).value)
 
-// Printing, as node prints instances of neverthrow's classes.
+// Printing: an Err adds the function and the line of its err().
 console.log([ok(1), err(2)])
 console.log({ result: ok({ name: "Bob", age: 3 }), other: err("x") })
 console.log(ok(ok(ok(ok(1)))))
@@ -60,3 +61,15 @@ console.log(ok("a".repeat(56)))
 console.log(err("a".repeat(56)))
 console.log(ok({ a: "x".repeat(40), b: "y".repeat(40) }))
 console.log(typeof ok(1))
+
+// After `if (r.isErr())` r holds no value, so it returns from a function whose
+// value has another type, and keeps the place where it was made.
+function doubled(s: string) {
+  const r = parseIntSafe(s)
+  if (r.isErr()) {
+    return r
+  }
+  return ok(`${r.value * 2}`)
+}
+console.log(doubled("4"), doubled(""))
+console.log(doubled("x").mapErr((e) => e.length))

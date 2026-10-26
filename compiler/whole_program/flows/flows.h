@@ -113,7 +113,6 @@ private:
   std::set<const VarSymbol *> runtimeFunctions_;
   std::set<const VarSymbol *> runtimeRejects_;
   std::vector<bool> plain_;
-  bool resultOfErrors_ = false;
 
 public:
   ~Flows();

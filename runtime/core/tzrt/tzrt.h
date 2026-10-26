@@ -57,8 +57,13 @@ typedef struct TzType {
 typedef struct TzResultType {
   TzType base;
   const TzType *error;
-  uint32_t value_offset, error_offset, ok_offset;
+  uint32_t value_offset, error_offset, ok_offset, site_offset;
 } TzResultType;
+
+typedef struct TzErrSite {
+  const char *text;
+  uint32_t length;
+} TzErrSite;
 
 #define TZ_UNION_SLOTS 12
 typedef struct TzUnionType {

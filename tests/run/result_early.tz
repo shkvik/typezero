@@ -1,0 +1,77 @@
+// The early return of an Err (docs/errors.md, section 3): after
+// `if (r.isErr())` r holds no value, so it returns from a function whose value
+// has another type, with the place where the Err was made.
+function parse(s: string): Result<int, string> {
+  if (s.length == 0) return err("empty")
+  const n = parseInt(s)
+  return isNaN(n) ? err(`not a number: ${s}`) : ok(n | 0)
+}
+
+function sum(a: string, b: string): Result<int, string> {
+  const x = parse(a)
+  if (x.isErr()) return x
+  const y = parse(b)
+  if (y.isErr()) return y
+  return ok(x.value + y.value)
+}
+console.log(sum("1", "2"), sum("", "2"), sum("1", "x"))
+
+// Without a declared type the returns make one. The strings it holds are
+// released whichever way it returns.
+function product(a: string, b: string) {
+  const label = `${a} * ${b}`
+  const x = parse(a).mapErr((e) => `${label}: ${e}`)
+  if (x.isErr()) return x
+  const y = parse(b).mapErr((e) => `${label}: ${e}`)
+  if (y.isErr()) {
+    return y
+  }
+  return ok(`${label} = ${x.value * y.value}`)
+}
+console.log(product("6", "7"), product("6", ""))
+
+// In a loop: the first Err ends it.
+function steps(texts: string[]) {
+  let total = 0
+  for (const s of texts) {
+    const n = parse(s)
+    if (n.isErr()) return n
+    total += n.value
+    console.log("total", total)
+  }
+  return ok(total)
+}
+console.log(steps(["5", "6", "y", "7"]), steps(["1", "2"]))
+
+// Result.combine: the values, or the first Err; combineWithAllErrors: the
+// values, or every error.
+console.log(Result.combine([parse("1"), parse("2"), parse("3")]))
+console.log(Result.combine([parse("1"), parse(""), parse("x")]))
+console.log(Result.combineWithAllErrors([parse("1"), parse(""), parse("x")]))
+console.log(Result.combineWithAllErrors(["4", "5"].map(parse)))
+const none: Result<string, int>[] = []
+console.log(Result.combine(none), Result.combineWithAllErrors(none))
+const words: Result<string, int>[] = [ok("a"), ok("b")]
+console.log(Result.combine(words).map((w) => w.join("")))
+
+// Results with values of different types give a tuple.
+function named(s: string): Result<string, string> {
+  return s.trim() == "" ? err("no name") : ok(s.trim())
+}
+console.log(Result.combine([named(" Ann "), parse("30")]), Result.combine([named(""), parse("")]))
+console.log(Result.combineWithAllErrors([named(""), parse("1"), parse("")]))
+const pair = Result.combine([named("Bo"), parse("41")])
+if (pair.isOk()) {
+  const [who, years] = pair.value
+  console.log(who, years + 1)
+}
+
+// A recursive function's type is found through its returns.
+function depth(n: int): Result<string, int> {
+  if (n == 0) return ok("bottom")
+  if (n < 0) return err(n)
+  const below = depth(n - 1)
+  if (below.isErr()) return below
+  return ok(`${n}/${below.value}`)
+}
+console.log(depth(3), depth(-2))

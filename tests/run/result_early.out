@@ -1,0 +1,17 @@
+Ok { value: 3 } Err { error: 'empty' } at parse (result_early.tz:5) Err { error: 'not a number: x' } at parse (result_early.tz:7)
+Ok { value: '6 * 7 = 42' } Err { error: '6 * : empty' } at parse (result_early.tz:5)
+total 5
+total 11
+total 1
+total 3
+Err { error: 'not a number: y' } at parse (result_early.tz:7) Ok { value: 3 }
+Ok { value: [ 1, 2, 3 ] }
+Err { error: 'empty' } at parse (result_early.tz:5)
+Err { error: [ 'empty', 'not a number: x' ] } at result_early.tz:50
+Ok { value: [ 4, 5 ] }
+Ok { value: [] } Ok { value: [] }
+Ok { value: 'ab' }
+Ok { value: [ 'Ann', 30 ] } Err { error: 'no name' } at named (result_early.tz:59)
+Err { error: [ 'no name', 'empty' ] } at result_early.tz:62
+Bo 42
+Ok { value: '3/2/1/bottom' } Err { error: -2 } at depth (result_early.tz:72)

@@ -1,0 +1,7 @@
+Ok { value: 1 } Err { error: '0 is not positive' } at check (result_names.tz:4) [
+  Err { error: 1 } at result_names.tz:6,
+  Err { error: -1 } at result_names.tz:6
+]
+always
+report: disk full Err { error: 18 } at check (result_names.tz:4)
+yes no

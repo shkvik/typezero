@@ -1,5 +1,5 @@
 Ok { value: 2026-10-23T10:00:00.000Z } 2026
-Err { error: 'not a date: someday' } 0
+Err { error: 'not a date: someday' } at parseDate (date_values.tz:6) 0
 Ok { value: [ 2026-10-23T10:00:00.000Z ] }
 2026-07-01T00:00:00.000Z undefined
 [ 2026-01-05T00:00:00.000Z, 2026-07-01T00:00:00.000Z ]

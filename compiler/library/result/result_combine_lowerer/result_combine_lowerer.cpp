@@ -1,4 +1,5 @@
 #include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
+#include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -81,7 +82,8 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
   } else {
     lowering_.refCounts().releaseValue(values, Type::array(valueType));
     lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                       resultType, lowering_.builder_.getFalse(), nullptr, error),
+                                       resultType, lowering_.builder_.getFalse(), nullptr, error,
+                                       lowering_.resultLowerer().resultSite(result, element)),
                                    resultSlot);
     lowering_.builder_.CreateBr(doneBlock);
   }
@@ -101,8 +103,9 @@ llvm::Value *ResultCombineLowerer::emitCombine(CallExpr *call) {
         lowering_.arrayLowerer().arrayLength(errors), lowering_.builder_.getInt64(0));
     llvm::Value *okResult = lowering_.resultLowerer().makeResult(
         resultType, lowering_.builder_.getTrue(), values, nullptr);
-    llvm::Value *errResult = lowering_.resultLowerer().makeResult(
-        resultType, lowering_.builder_.getFalse(), nullptr, errors);
+    llvm::Value *errResult =
+        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
+                                             errors, lowering_.errSites().site(call->loc()));
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("combine.failed");
     llvm::BasicBlock *passBlock = lowering_.functionFrame().newBlock("combine.passed");
     lowering_.builder_.CreateCondBr(failed, failBlock, passBlock);
@@ -161,9 +164,11 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
           lowering_.refCounts().releaseValue(results[j], types[j]);
         }
       }
-      lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                         resultType, lowering_.builder_.getFalse(), nullptr, error),
-                                     resultSlot);
+      lowering_.builder_.CreateStore(
+          lowering_.resultLowerer().makeResult(
+              resultType, lowering_.builder_.getFalse(), nullptr, error,
+              lowering_.resultLowerer().resultSite(results[i], types[i])),
+          resultSlot);
       lowering_.builder_.CreateBr(doneBlock);
       lowering_.functionFrame().switchTo(nextBlock);
       continue;
@@ -202,9 +207,10 @@ llvm::Value *ResultCombineLowerer::emitCombineTuple(CallExpr *call) {
       lowering_.refCounts().releaseValue(
           lowering_.resultLowerer().resultHalf(results[i], types[i], false), types[i]->okType());
     }
-    lowering_.builder_.CreateStore(lowering_.resultLowerer().makeResult(
-                                       resultType, lowering_.builder_.getFalse(), nullptr, errors),
-                                   resultSlot);
+    lowering_.builder_.CreateStore(
+        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
+                                             errors, lowering_.errSites().site(call->loc())),
+        resultSlot);
     lowering_.builder_.CreateBr(doneBlock);
     lowering_.functionFrame().switchTo(passBlock);
     lowering_.refCounts().releaseValue(errors, resultType->errType());

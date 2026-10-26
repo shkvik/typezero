@@ -18,7 +18,7 @@ alpha
 caught ENOENT open true
 ENOENT
 Ok { value: 'alpha' }
-Err { error: 'no a.txt' }
+Err { error: 'no a.txt' } at readText (jobs.tz:105)
 5 letters
 Dear Ann, you owe 12.50.
 PLAIN never ran

@@ -254,12 +254,11 @@ bool AssignLowerer::cannotAssign(const Expr *expr) {
     auto *call = cast<CallExpr>(expr);
     if (call->builtin == Builtin::None ||
         (call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
-        isResultCallback(call->builtin) || call->builtin == Builtin::SafeTry ||
-        call->builtin == Builtin::PromiseNew || call->builtin == Builtin::ResultAsyncMap ||
-        call->builtin == Builtin::ResultAsyncAndThen || call->builtin == Builtin::IterNext ||
-        call->builtin == Builtin::ArrayFrom || isIteratorSink(call->builtin) ||
-        call->builtin == Builtin::StrReplaceRegexFn || call->builtin == Builtin::MapForEach ||
-        call->builtin == Builtin::DictGroupBy || call->builtin == Builtin::DictNew ||
+        isResultCallback(call->builtin) || call->builtin == Builtin::PromiseNew ||
+        call->builtin == Builtin::IterNext || call->builtin == Builtin::ArrayFrom ||
+        isIteratorSink(call->builtin) || call->builtin == Builtin::StrReplaceRegexFn ||
+        call->builtin == Builtin::MapForEach || call->builtin == Builtin::DictGroupBy ||
+        call->builtin == Builtin::DictNew ||
         (call->builtin == Builtin::BytesFromArray && call->args[0]->type->isIterator())) {
       return false;
     }

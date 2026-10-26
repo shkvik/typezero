@@ -16,11 +16,11 @@ console.log(results)
 for (const r of results)
   console.log(r.match(n => `ok ${n}`, e => (e == "empty" ? "nothing" : `failed: ${e}`)))
 function both(a: string, b: string) {
-  return safeTry(function* () {
-    const x = yield* parseCount(a)
-    const y = yield* checkRange(x)
-    return ok(x + y)
-  })
+  const x = parseCount(a)
+  if (x.isErr()) return x
+  const y = checkRange(x.value)
+  if (y.isErr()) return y
+  return ok(x.value + y.value)
 }
 console.log(both("7", "1"), both("", "1"), both("700", "1"))
 const either = parseCount("3").unwrapOr("none")

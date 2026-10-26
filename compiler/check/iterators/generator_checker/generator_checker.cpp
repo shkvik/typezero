@@ -9,7 +9,6 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
-#include "compiler/library/result/safe_try_checker/safe_try_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -260,9 +259,6 @@ bool GeneratorChecker::checkSendsNothing(const Type *iterator, llvm::SMLoc loc,
 Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
   yield->type = Type::error();
   FuncSymbol *fn = checker_.currentFunction_;
-  if (fn && fn->decl && fn->decl->safeTry) {
-    return checker_.safeTryChecker().checkSafeTryYield(yield);
-  }
   if (!fn || !fn->decl || !fn->decl->isGenerator) {
     if (yield->value) {
       yield->value = checker_.exprChecker().checkExpr(yield->value);
@@ -342,13 +338,7 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
     const Type *type = yield->value->type;
     const Type *element = iteratedType(type);
     if (!element) {
-      if (type->isResult()) {
-        checker_.diags_.error(
-            yield->value->loc(),
-            "'yield*' of a Result takes its value only in the generator given to "
-            "safeTry, 'safeTry(function* () { ... })'; this generator gives values, "
-            "and 'yield*' needs an array, a string or an iterator here");
-      } else if (!type->isError()) {
+      if (!type->isError()) {
         checker_.diags_.error(yield->value->loc(),
                               "'yield*' needs an array, a string or an iterator, found '" +
                                   type->name() + "'");
@@ -373,8 +363,10 @@ Expr *GeneratorChecker::checkYield(YieldExpr *yield) {
 
   if (yield->delegate) {
     const Type *type = yield->value->type;
-    yield->type = !async && type->isIterator() && !type->returned()->isVoid() ? type->returned()
-                                                                              : Type::undefinedTy();
+    yield->type = type->isError() ? Type::error()
+                  : !async && type->isIterator() && !type->returned()->isVoid()
+                      ? type->returned()
+                      : Type::undefinedTy();
   } else if (async) {
     yield->type = Type::undefinedTy();
   } else if (!sent->isVoid()) {

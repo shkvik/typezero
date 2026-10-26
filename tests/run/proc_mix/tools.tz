@@ -32,5 +32,9 @@ export class Runner {
 }
 
 export function attempt<T>(f: () => T): Result<T, Error> {
-  return Result.fromThrowable(f)()
+  try {
+    return ok(f())
+  } catch (e) {
+    return err(e)
+  }
 }

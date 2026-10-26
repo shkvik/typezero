@@ -1,8 +1,8 @@
 // Generators and iterators together with the rest of the language: a
 // generator and generator methods from another file, iterators of class
 // instances, of decimals and of Results, helper chains in generic functions,
-// iterators as generic values and in fields, and safeTry, whose `yield* r`
-// takes the value of a Result, next to real generators.
+// iterators as generic values and in fields, and a generator of Results whose
+// first Err returns from a loop.
 import { Cart, Item, parseLines } from "./shop"
 
 function firstN<T>(xs: T[], n: int) {
@@ -59,16 +59,16 @@ const ticker = {
 }
 console.log([...ticker.run(3)], ticker.ticks)
 
-// safeTry: `yield* r` takes the value of a Result; a real generator inside
-// it gives values.
+// Results that a generator gives: the first Err returns from the loop.
 function sumQuantities(lines: string[]) {
-  return safeTry(function* () {
-    function* quantities() {
-      for (const r of parseLines(lines)) yield r.map(item => item.qty)
-    }
-    let sum = 0
-    for (const q of quantities()) sum += yield* q
-    return ok(sum)
-  })
+  function* quantities() {
+    for (const r of parseLines(lines)) yield r.map(item => item.qty)
+  }
+  let sum = 0
+  for (const q of quantities()) {
+    if (q.isErr()) return q
+    sum += q.value
+  }
+  return ok(sum)
 }
 console.log(sumQuantities(["a;1;2", "b;1;3"]), sumQuantities(["a;1;2", "?"]))

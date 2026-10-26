@@ -6,7 +6,7 @@
 #include "compiler/check/functions/callback_checker/callback_checker.h"
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
+#include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -56,32 +56,6 @@ Expr *ResultMethodChecker::checkResultMethod(CallExpr *call, MemberExpr *member,
     }
   };
   if (checker_.callChecker().rejectSpread(call)) {
-    return call;
-  }
-  if (name == "_unsafeUnwrap" || name == "_unsafeUnwrapErr") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
-      return call;
-    }
-    bool unwrapErr = name == "_unsafeUnwrapErr";
-    call->builtin = unwrapErr ? Builtin::ResultUnsafeUnwrapErr : Builtin::ResultUnsafeUnwrap;
-    call->type = halfParam(unwrapErr ? error : value);
-    return call;
-  }
-  if (name == "asyncMap" || name == "asyncAndThen") {
-    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member, name);
-  }
-  if (name == "asyncAndThrough") {
-    checker_.diags_.error(member->loc(),
-                          "'asyncAndThrough' is not supported yet; use 'asyncAndThen', "
-                          "which gives the Result its function gives");
-    checkArgsLoosely();
-    return call;
-  }
-  if (name == "safeUnwrap") {
-    checker_.diags_.error(member->loc(),
-                          "'safeUnwrap()' is needed only after 'yield*' in safeTry, where "
-                          "'yield* r' does the same");
-    checkArgsLoosely();
     return call;
   }
   struct Method {

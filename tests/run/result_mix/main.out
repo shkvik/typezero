@@ -4,18 +4,18 @@ Ok { value: { id: 1 } } Ok { value: { label: 'x', tags: [ 'a' ] } }
 0.3
 Ok { value: 0.3 } Ok { value: true }
 only fallback
-[ Ok { value: 'a' }, Ok { value: 'b' } ] [ Err { error: 1 } ]
+[ Ok { value: 'a' }, Ok { value: 'b' } ] [ Err { error: 1 } at main.tz:54 ]
 Ok { value: { first: 'tea', second: 2 } }
-Err { error: 'empty name' }
+Err { error: 'empty name' } at parseName (orders.tz:14)
 Ok { value: 3.375 }
 Ok { value: [ 'jam', 3 ] }
 Ok { value: { name: 'tea', price: 4.2, qty: 3 } }
 Ok { value: { name: 'cake', price: 12.5, qty: 2 } }
-Err { error: 'empty name' }
-Err { error: "bad price '1.2.3'" }
-Err { error: "bad quantity 'x'" }
-Err { error: "expected 3 fields in 'bread;2.10'" }
+Err { error: 'empty name' } at parseName (orders.tz:14)
+Err { error: "bad price '1.2.3'" } at parsePrice (orders.tz:24)
+Err { error: "bad quantity 'x'" } at parseQty (orders.tz:30)
+Err { error: "expected 3 fields in 'bread;2.10'" } at parseOrder (main.tz:31)
 total 37.6
-Ok { value: 12.4 } Err { error: 'over by 7.6' }
+Ok { value: 12.4 } Err { error: 'over by 7.6' } at checkBudget (main.tz:43)
 true -4
 3 x tea, 2 x cake

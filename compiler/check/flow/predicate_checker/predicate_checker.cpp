@@ -121,7 +121,7 @@ bool PredicateChecker::looksBoolean(const Expr *expr) {
 void PredicateChecker::beginPredicate(FunctionDecl *fn) {
   const FuncSymbol *sym = fn->sym;
   bool boolean = !sym->ret || sym->ret->isBool() || sym->asserts;
-  if (!boolean || fn->isGenerator || fn->isConstructor || fn->safeTry) {
+  if (!boolean || fn->isGenerator || fn->isConstructor) {
     checker_.predicateBuilds_.push_back({nullptr, fn, Checker::Flow(), Checker::Flow()});
     return;
   }

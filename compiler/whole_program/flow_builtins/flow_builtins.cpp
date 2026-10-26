@@ -92,11 +92,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
   case Builtin::PromiseAny:
     flows_.flow(holding({{flows_.thrown_, 0, 0}}), flows_.fieldNode("errors"));
     break;
-  case Builtin::ResultFromThrowable:
-  case Builtin::ResultAsyncFromPromise:
-  case Builtin::ResultAsyncFromThrowable:
-    flows_.resultOfErrors_ = true;
-    break;
   default:
     break;
   }

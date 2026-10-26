@@ -1,4 +1,7 @@
-Ok { value: Map(2) { 'a' => 1, 'b' => 2 } } Err { error: "bad part 'b'" }
-Map(2) { 'x' => Ok { value: 1 }, 'y' => Err { error: 'no' } }
+Ok { value: Map(2) { 'a' => 1, 'b' => 2 } } Err { error: "bad part 'b'" } at parse (dict_result.tz:7)
+Map(2) {
+  'x' => Ok { value: 1 },
+  'y' => Err { error: 'no' } at dict_result.tz:13
+}
 x value 1
 y error no

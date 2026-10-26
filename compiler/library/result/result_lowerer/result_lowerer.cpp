@@ -1,5 +1,5 @@
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/library/result/from_throwable_lowerer/from_throwable_lowerer.h"
+#include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -8,7 +8,6 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
-#include "llvm/IR/MDBuilder.h"
 #include <functional>
 
 using llvm::BasicBlock;
@@ -52,9 +51,10 @@ Lowering::ResultLayout ResultLowerer::resultLayout(const Type *type) {
   layout.value = errorFirst ? 1 : 0;
   layout.error = errorFirst ? 0 : 1;
   layout.ok = 2;
-  layout.type =
-      llvm::StructType::get(lowering_.ctx_, {errorFirst ? error : value, errorFirst ? value : error,
-                                             lowering_.builder_.getInt1Ty()});
+  layout.site = 3;
+  layout.type = llvm::StructType::get(
+      lowering_.ctx_, {errorFirst ? error : value, errorFirst ? value : error,
+                       lowering_.builder_.getInt1Ty(), lowering_.errSites().type()});
   resultLayouts_[type] = layout;
 
   return layout;
@@ -70,7 +70,8 @@ llvm::Constant *ResultLowerer::resultDescriptor(const Type *type) {
   const llvm::DataLayout &data = lowering_.module_->getDataLayout();
   const llvm::StructLayout *offsets = data.getStructLayout(layout.type);
   llvm::Type *i32 = lowering_.builder_.getInt32Ty(), *ptr = lowering_.builder_.getPtrTy();
-  auto *descriptorType = llvm::StructType::get(lowering_.ctx_, {i32, i32, ptr, ptr, i32, i32, i32});
+  auto *descriptorType =
+      llvm::StructType::get(lowering_.ctx_, {i32, i32, ptr, ptr, i32, i32, i32, i32});
   auto offset = [&](unsigned element) {
     return lowering_.builder_.getInt32(static_cast<uint32_t>(offsets->getElementOffset(element)));
   };
@@ -80,7 +81,7 @@ llvm::Constant *ResultLowerer::resultDescriptor(const Type *type) {
        lowering_.builder_.getInt32(static_cast<uint32_t>(data.getTypeAllocSize(layout.type))),
        lowering_.typeDescriptors().typeDescriptor(type->okType()),
        lowering_.typeDescriptors().typeDescriptor(type->errType()), offset(layout.value),
-       offset(layout.error), offset(layout.ok)});
+       offset(layout.error), offset(layout.ok), offset(layout.site)});
   auto *global =
       new llvm::GlobalVariable(*lowering_.module_, descriptorType, true,
                                llvm::GlobalValue::PrivateLinkage, init, "tz.type." + type->name());
@@ -101,22 +102,27 @@ llvm::Value *ResultLowerer::resultHalf(llvm::Value *result, const Type *type, bo
                                                error ? "error" : "value");
 }
 
+llvm::Value *ResultLowerer::resultSite(llvm::Value *result, const Type *type) {
+  return lowering_.builder_.CreateExtractValue(result, resultLayout(type).site, "site");
+}
+
 llvm::Value *ResultLowerer::makeResult(const Type *type, llvm::Value *ok, llvm::Value *value,
-                                       llvm::Value *error) {
+                                       llvm::Value *error, llvm::Value *site) {
   Lowering::ResultLayout layout = resultLayout(type);
-  llvm::Value *elements[3];
+  llvm::Value *elements[4];
   elements[layout.value] =
       value ? value : llvm::Constant::getNullValue(layout.type->getElementType(layout.value));
   elements[layout.error] =
       error ? error : llvm::Constant::getNullValue(layout.type->getElementType(layout.error));
+  elements[layout.site] = site ? site : lowering_.errSites().none();
   elements[layout.ok] = ok;
   if (llvm::all_of(elements, [](llvm::Value *v) { return isa<llvm::Constant>(v); })) {
-    return llvm::ConstantStruct::get(layout.type, {cast<llvm::Constant>(elements[0]),
-                                                   cast<llvm::Constant>(elements[1]),
-                                                   cast<llvm::Constant>(elements[2])});
+    return llvm::ConstantStruct::get(
+        layout.type, {cast<llvm::Constant>(elements[0]), cast<llvm::Constant>(elements[1]),
+                      cast<llvm::Constant>(elements[2]), cast<llvm::Constant>(elements[3])});
   }
   llvm::Value *result = llvm::UndefValue::get(layout.type);
-  for (unsigned i = 0; i < 3; ++i) {
+  for (unsigned i = 0; i < 4; ++i) {
     result = lowering_.builder_.CreateInsertValue(result, elements[i], i);
   }
 
@@ -164,24 +170,12 @@ llvm::Value *ResultLowerer::emitResultCall(CallExpr *call) {
       half = nullptr;
     }
     return makeResult(type, lowering_.builder_.getInt1(isOk), isOk ? half : nullptr,
-                      isOk ? nullptr : half);
-  }
-  case Builtin::SafeTry: {
-    const Type *fnType = call->args[0]->type;
-    llvm::Value *fn = lowering_.exprLowerer().emitExpr(call->args[0]);
-    llvm::Value *result = lowering_.closureLowerer().callFunctionValue(fn, fnType, {});
-    lowering_.refCounts().releaseValue(fn, fnType);
-    lowering_.emitThrowCheckIf(lowering_.typeThrows(fnType));
-    return result;
+                      isOk ? nullptr : half,
+                      isOk ? nullptr : lowering_.errSites().site(call->loc()));
   }
   case Builtin::ResultCombine:
   case Builtin::ResultCombineWithAllErrors:
     return lowering_.resultCombineLowerer().emitCombine(call);
-  case Builtin::ResultFromThrowable:
-    return lowering_.fromThrowableLowerer().emitFromThrowable(call);
-  case Builtin::ResultUnsafeUnwrap:
-  case Builtin::ResultUnsafeUnwrapErr:
-    return lowering_.fromThrowableLowerer().emitUnsafeUnwrap(call);
   default:
     return emitResultMethod(call);
   }
@@ -219,6 +213,7 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
   }
   llvm::Value *value = resultHalf(result, type, false);
   llvm::Value *error = resultHalf(result, type, true);
+  llvm::Value *site = resultSite(result, type);
   auto drop = [&](llvm::Value *returned, size_t i) {
     if (returned && !fnType(i)->ret()->isVoid()) {
       lowering_.refCounts().releaseValue(returned, fnType(i)->ret());
@@ -236,7 +231,7 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     };
     onErr = [&] {
       return makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                        convertHalf(error, errorType, resultType->errType()));
+                        convertHalf(error, errorType, resultType->errType()), site);
     };
     break;
   case Builtin::ResultMapErr:
@@ -248,7 +243,7 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
       llvm::Value *mapped = callWithHalf(args[0], fnType(0), error, errorType);
 
       return makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                        resultType->errType()->isVoid() ? nullptr : mapped);
+                        resultType->errType()->isVoid() ? nullptr : mapped, site);
     };
     break;
   case Builtin::ResultAndThen:
@@ -258,7 +253,7 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     };
     onErr = [&] {
       return makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                        convertHalf(error, errorType, resultType->errType()));
+                        convertHalf(error, errorType, resultType->errType()), site);
     };
     break;
   case Builtin::ResultOrElse:
@@ -330,7 +325,8 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
 
         return makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
                           convertHalf(resultHalf(through, passed, true), passed->errType(),
-                                      resultType->errType()));
+                                      resultType->errType()),
+                          resultSite(through, passed));
       };
       if (passed->errType()->isNever()) {
         return pass();
@@ -419,35 +415,6 @@ llvm::Value *ResultLowerer::emitResultMember(MemberExpr *member) {
   }
 
   return value;
-}
-
-llvm::Value *ResultLowerer::emitSafeTryYield(YieldExpr *yield) {
-  const Type *type = yield->value->type;
-  llvm::Value *result = lowering_.exprLowerer().emitExpr(yield->value);
-  if (!type->errType()->isNever()) {
-    llvm::BasicBlock *errBlock = lowering_.functionFrame().newBlock("yield.err");
-    llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("yield.ok");
-    lowering_.builder_.CreateCondBr(resultIsOk(result, type), okBlock, errBlock,
-                                    llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-    lowering_.functionFrame().switchTo(errBlock);
-    const Type *err = Type::result(Type::never(), type->errType());
-    llvm::Value *returned = lowering_.exprLowerer().emitConversion(
-        makeResult(err, lowering_.builder_.getFalse(), nullptr, resultHalf(result, type, true)),
-        err, lowering_.returnType_);
-    lowering_.functionFrame().emitCleanups(0);
-    lowering_.builder_.CreateRet(returned);
-    lowering_.functionFrame().switchTo(okBlock);
-  }
-  if (type->okType()->isNever()) {
-    lowering_.builder_.CreateUnreachable();
-    lowering_.functionFrame().startDeadBlock();
-    return llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(yield->type));
-  }
-  if (type->okType()->isVoid()) {
-    return lowering_.builder_.getFalse();
-  }
-
-  return resultHalf(result, type, false);
 }
 
 }

@@ -96,8 +96,7 @@ void CycleExprs::expr(const Expr *expr) {
     for (const Expr *arg : call->args) {
       this->expr(arg);
     }
-    if (isPromiseBuiltin(call->builtin) || (call->builtin >= Builtin::ResultAsyncFromPromise &&
-                                            call->builtin <= Builtin::ResultAsyncTeeDone)) {
+    if (isPromiseBuiltin(call->builtin)) {
       for (const Expr *arg : call->args) {
         if (arg->type && arg->type->nonOptional()->isFunction()) {
           scanner_.reactionCallbacks.insert(arg->type->nonOptional());

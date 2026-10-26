@@ -40,10 +40,9 @@ console.log(Array.from("a1b22".matchAll(/\d+/g), m => m[0].length))
 const settings = ["mode = fast", "level=3", "bad line"].map(parseSetting)
 console.log(settings, Result.combine(settings.slice(0, 2)).map(all => all.length))
 function upperValue(line: string) {
-  return safeTry(function* () {
-    const setting = yield* parseSetting(line)
-    return ok(setting.value.toUpperCase())
-  })
+  const setting = parseSetting(line)
+  if (setting.isErr()) return setting
+  return ok(setting.value.value.toUpperCase())
 }
 console.log(upperValue(" name = ann "), upperValue("?"))
 

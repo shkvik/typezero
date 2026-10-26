@@ -69,7 +69,7 @@ bool AliasAnalysis::isAllocation(const Expr *e) const {
       }
     }
     const FunctionDecl *fn = c->func ? c->func->decl : c->method ? c->method->decl : nullptr;
-    return fn && fn->isGenerator && !fn->safeTry;
+    return fn && fn->isGenerator;
   }
 
   return false;

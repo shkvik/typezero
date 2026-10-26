@@ -208,9 +208,6 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
   case Expr::Kind::OptionalChain:
     return emitOptionalChain(cast<OptionalChainExpr>(expr));
   case Expr::Kind::Yield:
-    if (lowering_.currentFn_ && lowering_.currentFn_->safeTry) {
-      return lowering_.resultLowerer().emitSafeTryYield(cast<YieldExpr>(expr));
-    }
     return lowering_.inlineGeneratorLowerer().emitYield(cast<YieldExpr>(expr));
   case Expr::Kind::Await:
     return lowering_.asyncLowerer().emitAwait(cast<AwaitExpr>(expr));
@@ -331,7 +328,8 @@ llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, c
             lowering_.resultLowerer().resultHalf(value, from, false), from->okType(), to->okType()),
         lowering_.resultLowerer().convertHalf(
             lowering_.resultLowerer().resultHalf(value, from, true), from->errType(),
-            to->errType()));
+            to->errType()),
+        lowering_.resultLowerer().resultSite(value, from));
   }
 
   if (to->isString()) {

@@ -4,7 +4,6 @@
 // throw; finally with Result and iterators; e.stack through several files.
 import { AppError, AtMost, LimitError, ParseError, Pattern, Positive, Rule, Validator } from "./errors.tz"
 import { Entry, loadConfig, ownerName, parseLine } from "./parse.tz"
-import { err, ok, Result } from "neverthrow"
 
 // The stack with each path cut to the name of its file.
 function show(stack: string) {
@@ -130,10 +129,13 @@ for (const text of ['{"limit": 7, "rules": []}', "{}"]) {
   const r = safeLoad(text)
   console.log(r.isOk() ? `limit ${r.value}` : `err ${r.error.code} ${r.error.cause instanceof TypeError}`)
 }
-const parse = Result.fromThrowable(
-  (line: string) => parseLine(line, 0, ":", "g").amount,
-  (e) => (e instanceof ParseError ? e.line : -1),
-)
+function parse(line: string) {
+  try {
+    return ok(parseLine(line, 0, ":", "g").amount)
+  } catch (e) {
+    return err(e instanceof ParseError ? e.line : -1)
+  }
+}
 console.log(parse("k: 9").isOk(), parse("k: ?").isErr())
 console.log(log.slice(-2).join("; "))
 

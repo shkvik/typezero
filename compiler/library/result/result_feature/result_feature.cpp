@@ -1,6 +1,5 @@
 #include "compiler/library/result/result_feature/result_feature.h"
 #include "compiler/check/checker/checker.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/result/result_method_checker/result_method_checker.h"
@@ -9,11 +8,7 @@
 namespace tz {
 
 Expr *ResultFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                     const Type *expected) const {
-  if (Expr *checked = checker.resultAsyncChecker().checkResultAsyncStatic(call, member, expected)) {
-    return checked;
-  }
-
+                                     const Type *) const {
   return checker.resultChecker().checkResultStatic(call, member);
 }
 

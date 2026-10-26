@@ -1407,6 +1407,11 @@ static void format_result(Ctx *ctx, TzBuf *out, const TzResultType *type, const 
     tz_buf_push(out, '}');
   }
   tz_buf_free(&entry);
+  const TzErrSite *site = *(const TzErrSite *const *)(value + type->site_offset);
+  if (!ok && site) {
+    tz_buf_ascii(out, " at ");
+    tz_buf_utf8(out, site->text, site->length);
+  }
 }
 
 static void format_json_key(TzBuf *entry, TzStr key) {

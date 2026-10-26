@@ -14,7 +14,8 @@ public:
   Expr *checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const Type *expected);
   void checkDiscarded(const Expr *expr, bool callback = false, llvm::SMLoc at = {});
   void addResultFacts(const Expr *cond, Checker::Flow &whenTrue, Checker::Flow &whenFalse) const;
-  Expr *checkFromThrowable(CallExpr *call, llvm::SMLoc loc);
+  Expr *reject(CallExpr *call, llvm::SMLoc loc, const std::string &why);
+  void checkArgsLoosely(CallExpr *call);
 
 private:
   Checker &checker_;

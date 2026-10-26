@@ -34,33 +34,6 @@ const void *tz_error_cause(const void *error) {
   return *(void *const *)((const char *)error + tz_error_info.cause_offset);
 }
 
-static void buf_utf8(TzBuf *out, const char *text, size_t n) {
-  const unsigned char *s = (const unsigned char *)text;
-  for (size_t i = 0; i < n;) {
-    uint32_t c = s[i];
-    size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 0;
-    if (len == 0 || i + len > n) {
-      tz_buf_push(out, 0xFFFD);
-      ++i;
-      continue;
-    }
-    if (len > 1) {
-      c &= 0x3Fu >> (len - 1);
-      for (size_t k = 1; k < len; ++k) {
-        c = (c << 6) | (s[i + k] & 0x3Fu);
-      }
-    }
-    i += len;
-    if (c >= 0x10000) {
-      c -= 0x10000;
-      tz_buf_push(out, (uint16_t)(0xD800 + (c >> 10)));
-      tz_buf_push(out, (uint16_t)(0xDC00 + (c & 0x3FF)));
-    } else {
-      tz_buf_push(out, (uint16_t)c);
-    }
-  }
-}
-
 static void buf_u32(TzBuf *out, uint32_t value) {
   char text[16];
   int n = snprintf(text, sizeof text, "%u", value);
@@ -124,7 +97,7 @@ void tz_throw(int32_t kind, const char *format, ...) {
   }
   TzBuf buf;
   tz_buf_init(&buf);
-  buf_utf8(&buf, text, (size_t)len);
+  tz_buf_utf8(&buf, text, (size_t)len);
   TzStr message = tz_buf_take(&buf);
   tz_throw_str(kind, message.obj, message.meta);
   tz_str_release_value(message);
@@ -162,10 +135,10 @@ int tz_buf_error_stack(TzBuf *out, const void *error) {
       tz_buf_ascii(out, "async ");
       named = 0;
     } else if (named) {
-      buf_utf8(out, frame->function, frame->function_length);
+      tz_buf_utf8(out, frame->function, frame->function_length);
       tz_buf_ascii(out, " (");
     }
-    buf_utf8(out, frame->file, frame->file_length);
+    tz_buf_utf8(out, frame->file, frame->file_length);
     tz_buf_push(out, ':');
     buf_u32(out, frame->line);
     tz_buf_push(out, ':');

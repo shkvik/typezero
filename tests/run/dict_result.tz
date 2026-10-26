@@ -1,6 +1,5 @@
 // Results that hold dictionaries, and dictionaries of Results.
 // A Result that holds one, and a dictionary of Results.
-import { ok, err, Result } from "neverthrow"
 function parse(text: string): Result<Map<string, int>, string> {
   const m = new Map<string, int>()
   for (const part of text.split(",")) {

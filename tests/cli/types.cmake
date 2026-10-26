@@ -26,7 +26,6 @@ write(app/config.json [[
 write(app/note.txt "hello")
 set(program [=[
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { readLine } from "tz:io"
 import { serve } from "tz:http"
 
@@ -50,16 +49,16 @@ function half(x: int): Result<int, string> {
   return x % 2 == 0 ? ok(x / 2 | 0) : err(`${x} is odd`)
 }
 console.log(half(4).match(v => `half ${v}`, e => e), half(3).isErr())
-const read = Result.fromThrowable((file: string) => readFileSync(file, "utf8"))
-console.log(read(join("no", "file")).mapErr(e => e.message.length > 0).isErr())
-const both = safeTry(function* () {
-  const a = yield* half(8)
-  const b = yield* half(a)
-  return ok(a + b)
-})
-console.log(both.isOk())
-const later = await ResultAsync.fromPromise(Promise.resolve(5), e => e.message)
-console.log(later.isOk(), (await okAsync(1)).isOk())
+function quarter(x: int) {
+  const h = half(x)
+  if (h.isErr()) return h
+  return half(h.value)
+}
+console.log(quarter(8).isOk(), quarter(6).mapErr(e => e.length).isErr())
+async function later(x: int) {
+  return half(x)
+}
+console.log(Result.combine(await Promise.all([2, 4].map(later))).map(xs => xs.length).isOk())
 
 // Errors of the system.
 try {
@@ -117,9 +116,8 @@ tz(run main.tz IN app STDOUT [[
 59.98 1048576
 8080 [ 'a' ] 2 8080 5
 half 2 true
-true
-true
 true true
+true
 ENOENT open
 undefined
 call twice

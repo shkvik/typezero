@@ -118,7 +118,6 @@ class AsyncChecker;
 class PromiseChecker;
 class PromiseStaticChecker;
 class TimerChecker;
-class ResultAsyncChecker;
 class MathChecker;
 class GlobalFunctionChecker;
 class NumberMethods;
@@ -239,7 +238,6 @@ class StringRegexChecker;
 class MatchChecker;
 class ResultTypes;
 class ResultChecker;
-class SafeTryChecker;
 class ResultMethodChecker;
 class ChunkTypes;
 class StreamNewChecker;
@@ -508,7 +506,6 @@ private:
     llvm::StringMap<Import> imports;
     llvm::StringSet<> badImports;
     llvm::SmallPtrSet<const VarSymbol *, 4> importedVars;
-    llvm::StringMap<llvm::StringRef> neverthrow;
     llvm::StringMap<NodeName> nodeNames;
     llvm::StringMap<Export> exports;
     bool exportsDone = false, exportsBusy = false;
@@ -523,6 +520,7 @@ private:
   std::vector<llvm::StringMap<ScopeEntry>> scopes_;
   std::vector<llvm::StringMap<Stmt *>> typeScopes_;
   FuncSymbol *currentFunction_ = nullptr;
+  unsigned tryDepth_ = 0;
   std::vector<JumpTarget> targets_;
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
@@ -674,7 +672,6 @@ public:
   PromiseChecker &promiseChecker() const { return *promiseCheckerPart_; }
   PromiseStaticChecker &promiseStaticChecker() const { return *promiseStaticCheckerPart_; }
   TimerChecker &timerChecker() const { return *timerCheckerPart_; }
-  ResultAsyncChecker &resultAsyncChecker() const { return *resultAsyncCheckerPart_; }
   MathChecker &mathChecker() const { return *mathCheckerPart_; }
   GlobalFunctionChecker &globalFunctionChecker() const { return *globalFunctionCheckerPart_; }
   NumberMethods &numberMethods() const { return *numberMethodsPart_; }
@@ -797,7 +794,6 @@ public:
   MatchChecker &matchChecker() const { return *matchCheckerPart_; }
   ResultTypes &resultTypes() const { return *resultTypesPart_; }
   ResultChecker &resultChecker() const { return *resultCheckerPart_; }
-  SafeTryChecker &safeTryChecker() const { return *safeTryCheckerPart_; }
   ResultMethodChecker &resultMethodChecker() const { return *resultMethodCheckerPart_; }
   ChunkTypes &chunkTypes() const { return *chunkTypesPart_; }
   StreamNewChecker &streamNewChecker() const { return *streamNewCheckerPart_; }
@@ -842,7 +838,6 @@ private:
   friend class PromiseChecker;
   friend class PromiseStaticChecker;
   friend class TimerChecker;
-  friend class ResultAsyncChecker;
   friend class MathChecker;
   friend class GlobalFunctionChecker;
   friend class NumberMethods;
@@ -963,7 +958,6 @@ private:
   friend class MatchChecker;
   friend class ResultTypes;
   friend class ResultChecker;
-  friend class SafeTryChecker;
   friend class ResultMethodChecker;
   friend class ChunkTypes;
   friend class StreamNewChecker;
@@ -1001,7 +995,6 @@ private:
   std::unique_ptr<PromiseChecker> promiseCheckerPart_;
   std::unique_ptr<PromiseStaticChecker> promiseStaticCheckerPart_;
   std::unique_ptr<TimerChecker> timerCheckerPart_;
-  std::unique_ptr<ResultAsyncChecker> resultAsyncCheckerPart_;
   std::unique_ptr<MathChecker> mathCheckerPart_;
   std::unique_ptr<GlobalFunctionChecker> globalFunctionCheckerPart_;
   std::unique_ptr<NumberMethods> numberMethodsPart_;
@@ -1122,7 +1115,6 @@ private:
   std::unique_ptr<MatchChecker> matchCheckerPart_;
   std::unique_ptr<ResultTypes> resultTypesPart_;
   std::unique_ptr<ResultChecker> resultCheckerPart_;
-  std::unique_ptr<SafeTryChecker> safeTryCheckerPart_;
   std::unique_ptr<ResultMethodChecker> resultMethodCheckerPart_;
   std::unique_ptr<ChunkTypes> chunkTypesPart_;
   std::unique_ptr<StreamNewChecker> streamNewCheckerPart_;

@@ -647,13 +647,13 @@ class HmacHandle extends KeyHandle {
     void algorithm
     switch (this.hash) {
       case "SHA-1":
-        return await __tz_subtle_hmac("sha1", this.key, data)
+        return __tz_subtle_hmac("sha1", this.key, data)
       case "SHA-384":
-        return await __tz_subtle_hmac("sha384", this.key, data)
+        return __tz_subtle_hmac("sha384", this.key, data)
       case "SHA-512":
-        return await __tz_subtle_hmac("sha512", this.key, data)
+        return __tz_subtle_hmac("sha512", this.key, data)
     }
-    return await __tz_subtle_hmac("sha256", this.key, data)
+    return __tz_subtle_hmac("sha256", this.key, data)
   }
 
   async verify(algorithm: Algorithm, signature: BufferSource, data: BufferSource): Promise<boolean> {
@@ -867,13 +867,13 @@ class KdfHandle extends KeyHandle {
       if (iterations > 2147483647 || length / 8 > 2147483647) throw failed()
       switch (hash) {
         case "SHA-1":
-          return await __tz_subtle_pbkdf2("sha1", this.key, salt, iterations, length / 8)
+          return __tz_subtle_pbkdf2("sha1", this.key, salt, iterations, length / 8)
         case "SHA-384":
-          return await __tz_subtle_pbkdf2("sha384", this.key, salt, iterations, length / 8)
+          return __tz_subtle_pbkdf2("sha384", this.key, salt, iterations, length / 8)
         case "SHA-512":
-          return await __tz_subtle_pbkdf2("sha512", this.key, salt, iterations, length / 8)
+          return __tz_subtle_pbkdf2("sha512", this.key, salt, iterations, length / 8)
       }
-      return await __tz_subtle_pbkdf2("sha256", this.key, salt, iterations, length / 8)
+      return __tz_subtle_pbkdf2("sha256", this.key, salt, iterations, length / 8)
     }
     const info = algorithm.info ?? kNoBytes
     if (bytesOf(info).length > 1024) throw failed()
@@ -1904,7 +1904,7 @@ async function subtleDeriveKeyHmac(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await deriveKeyWith(
+  return deriveKeyWith(
     algorithm,
     baseKey,
     derivedKeyAlgorithm,
@@ -1921,7 +1921,7 @@ async function subtleDeriveKeyAes(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await deriveKeyWith(
+  return deriveKeyWith(
     algorithm,
     baseKey,
     derivedKeyAlgorithm,
@@ -1938,7 +1938,7 @@ async function subtleDeriveKeyKdf(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await deriveKeyWith(
+  return deriveKeyWith(
     algorithm,
     baseKey,
     derivedKeyAlgorithm,
@@ -1957,7 +1957,7 @@ async function subtleUnwrapHmac(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,
@@ -1978,7 +1978,7 @@ async function subtleUnwrapAes(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,
@@ -1999,7 +1999,7 @@ async function subtleUnwrapKdf(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,
@@ -2020,7 +2020,7 @@ async function subtleUnwrapEc(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,
@@ -2041,7 +2041,7 @@ async function subtleUnwrapRsa(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,
@@ -2062,7 +2062,7 @@ async function subtleUnwrapOkp(
   extractable: boolean,
   keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
-  return await unwrapWith(
+  return unwrapWith(
     format,
     wrappedKey,
     unwrappingKey,

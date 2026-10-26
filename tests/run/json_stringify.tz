@@ -1,7 +1,7 @@
 // JSON.stringify of the values of the language, as JavaScript writes the same
 // objects: undefined fields and functions are left out (null in an array),
-// a decimal is a string (docs/decimal.md), a Result is the object of
-// neverthrow's class Ok or Err, a tuple an array.
+// a decimal is a string (docs/decimal.md), a Result an object with its value
+// or its error, a tuple an array.
 class Point {
   #secret = 1
   constructor(public x: double, public y: double) {}

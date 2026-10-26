@@ -109,38 +109,22 @@ Expr *NameChecker::checkName(NameExpr *name) {
       {"RegExp", "new RegExp(pattern)"},
       {"JSON", "JSON.parse(text)"}};
   auto object = llvm::find_if(objects, [&](const auto &o) { return o.first == name->name; });
-  llvm::StringRef neverthrow =
-      entry.enumDecl ? llvm::StringRef() : checker_.resultTypes().neverthrowName(name->name);
-  if (neverthrow == "ok" || neverthrow == "err") {
+  llvm::StringRef result =
+      entry.enumDecl ? llvm::StringRef() : checker_.resultTypes().resultName(name->name);
+  if (result == "ok" || result == "err") {
     checker_.diags_.error(name->loc(), "'" + name->name +
                                            "' can be used as a value only where a function "
                                            "type is expected, e.g. 'xs.map(" +
                                            name->name + ")'");
-  } else if (neverthrow == "Result") {
+  } else if (result == "Result") {
     checker_.diags_.error(name->loc(), "'" + name->name +
                                            "' can only be used through its functions, e.g. '" +
                                            name->name + ".combine(results)'");
-  } else if (neverthrow == "Ok" || neverthrow == "Err") {
-    checker_.diags_.error(name->loc(), "'" + name->name +
-                                           "' can be used only as a type; make a Result with '" +
-                                           (neverthrow == "Ok" ? "ok(value)" : "err(error)") +
-                                           "', and test one with '" +
-                                           (neverthrow == "Ok" ? "isOk()" : "isErr()") + "'");
-  } else if (neverthrow == "fromThrowable") {
-    checker_.diags_.error(name->loc(),
-                          "'" + name->name + "' can only be called: '" + name->name + "(f)'");
-  } else if (neverthrow == "safeTry") {
-    checker_.diags_.error(name->loc(),
-                          "'" + name->name +
-                              "' is not supported yet; call it: 'safeTry(function* () { ... "
-                              "})'");
-  } else if (neverthrow == "ResultAsync") {
-    checker_.diags_.error(name->loc(), "'" + name->name +
-                                           "' can only be used through its functions, e.g. '" +
-                                           name->name + ".fromPromise(p, toError)'");
-  } else if (!neverthrow.empty()) {
-    checker_.diags_.error(name->loc(),
-                          "'" + name->name + "' can only be called: '" + name->name + "(...)'");
+  } else if (result == "Ok" || result == "Err") {
+    checker_.diags_.error(
+        name->loc(), "'" + name->name + "' can be used only as a type; make a Result with '" +
+                         (result == "Ok" ? "ok(value)" : "err(error)") + "', and test one with '" +
+                         (result == "Ok" ? "isOk()" : "isErr()") + "'");
   } else if (name->name == "this") {
     checker_.diags_.error(
         name->loc(), "'this' exists only in the methods of classes, which are not supported yet");

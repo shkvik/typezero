@@ -7,7 +7,6 @@ finally callback
 await 1
 queueMicrotask
 t2
-viaAwait
 all
 race
 allSettled

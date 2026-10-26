@@ -170,6 +170,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   fn->checked = true;
   FuncSymbol *outer = checker_.currentFunction_;
   checker_.currentFunction_ = sym;
+  unsigned outerTry = std::exchange(checker_.tryDepth_, 0);
   checker_.functions_.push_back(fn);
   unsigned errors = checker_.diags_.errorCount();
   ClassDecl *outerClass = checker_.currentClass_;
@@ -278,6 +279,7 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.popScope();
   checker_.functions_.pop_back();
   checker_.currentFunction_ = outer;
+  checker_.tryDepth_ = outerTry;
   checker_.currentClass_ = outerClass;
   checker_.initFn_ = outerInit;
   checker_.initThis_ = outerThis;

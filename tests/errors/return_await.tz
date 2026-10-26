@@ -1,0 +1,20 @@
+// `return await x` and `async () => await x` change nothing: an async
+// function waits for the Promise it returns (docs/errors.md, section 4).
+async function get(n: int) {
+  return n > 0 ? ok(n) : err("not positive")
+}
+async function again(n: int) {
+  // expect-error: 'return await' changes nothing: an async function waits for the Promise it returns; write 'return' without 'await'
+  return await get(n)
+}
+// expect-error: 'await' here changes nothing: an async function waits for the Promise it returns; leave out 'await'
+const g = async (n: int) => await get(n)
+
+async function direct(n: int) {
+  return get(n)
+}
+async function value(n: int) {
+  return (await get(n)).isOk()
+}
+const h = async (n: int) => get(n)
+console.log(await again(1), await g(2), await direct(3), await value(4), await h(5))

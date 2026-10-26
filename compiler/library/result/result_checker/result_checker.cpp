@@ -5,9 +5,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/functions/closure_checker/closure_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
-#include "compiler/library/result/safe_try_checker/safe_try_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -57,17 +55,7 @@ static std::string noUnion(const Type *a, const Type *b) {
 ResultChecker::ResultChecker(Checker &checker) : checker_(checker) {}
 
 Expr *ResultChecker::checkResultCall(CallExpr *call, NameExpr *name, const Type *expected) {
-  llvm::StringRef which = checker_.resultTypes().neverthrowName(name->name);
-  if (which == "safeTry") {
-    return checker_.safeTryChecker().checkSafeTry(call, expected);
-  }
-  if (which == "fromThrowable") {
-    return checkFromThrowable(call, name->loc());
-  }
-  if (which == "okAsync" || which == "errAsync" || which == "fromPromise" ||
-      which == "fromSafePromise" || which == "fromAsyncThrowable") {
-    return checker_.resultAsyncChecker().checkResultAsyncCall(call, name, which, expected);
-  }
+  llvm::StringRef which = checker_.resultTypes().resultName(name->name);
   if (which != "ok" && which != "err") {
     return nullptr;
   }
@@ -109,27 +97,40 @@ Expr *ResultChecker::checkOkErr(CallExpr *call, NameExpr *name, bool isOk, const
   return call;
 }
 
+void ResultChecker::checkArgsLoosely(CallExpr *call) {
+  for (Expr *&arg : call->args) {
+    auto *fe = dyn_cast<FunctionExpr>(arg);
+    if (!fe) {
+      arg = checker_.exprChecker().checkExpr(arg);
+      continue;
+    }
+    Checker::Signature loose;
+    loose.params.assign(fe->fn->params.size(), Type::error());
+    loose.pad = false;
+    arg = checker_.closureChecker().checkFunctionExpr(fe, &loose);
+  }
+}
+
+Expr *ResultChecker::reject(CallExpr *call, llvm::SMLoc loc, const std::string &why) {
+  checker_.diags_.error(loc, why);
+  checkArgsLoosely(call);
+  call->type = Type::error();
+
+  return call;
+}
+
 Expr *ResultChecker::checkResultStatic(CallExpr *call, MemberExpr *member) {
   auto *name = dyn_cast<NameExpr>(member->object);
   if (!name || call->optional || member->optional ||
-      checker_.resultTypes().neverthrowName(name->name) != "Result") {
+      checker_.resultTypes().resultName(name->name) != "Result") {
     return nullptr;
   }
   llvm::StringRef method = member->name;
-  auto checkArgsLoosely = [&] {
-    for (Expr *&arg : call->args) {
-      arg = checker_.exprChecker().checkExpr(arg);
-    }
-  };
-  if (method == "fromThrowable") {
-    return checkFromThrowable(call, member->loc());
-  }
   if (method != "combine" && method != "combineWithAllErrors") {
-    checker_.diags_.error(member->loc(), "'" + name->name + "." + method +
-                                             "' does not exist; Result has 'combine' and "
-                                             "'combineWithAllErrors'");
-    checkArgsLoosely();
-    return call;
+    return reject(call, member->loc(),
+                  "'" + name->name.str() + "." + method.str() +
+                      "' does not exist; Result has 'combine' and "
+                      "'combineWithAllErrors'");
   }
   if (checker_.callChecker().rejectSpread(call) ||
       !checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
@@ -325,72 +326,6 @@ void ResultChecker::addResultFacts(const Expr *cond, Checker::Flow &whenTrue,
   ok.errResults.erase(name->var);
   err.errResults.insert(name->var);
   err.okResults.erase(name->var);
-}
-
-Expr *ResultChecker::checkFromThrowable(CallExpr *call, llvm::SMLoc loc) {
-  call->type = Type::error();
-  if (checker_.callChecker().rejectSpread(call) ||
-      !checker_.argumentChecker().checkArity(call, loc, 1, 2)) {
-    return call;
-  }
-  Expr *&fn = call->args[0];
-  fn = checker_.exprChecker().checkExpr(fn);
-  if (call->args.size() > 1 && !isa<FunctionExpr>(call->args[1])) {
-    call->args[1] = checker_.exprChecker().checkExpr(call->args[1]);
-  }
-  const Type *fnType = fn->type;
-  if (fnType->isError()) {
-    return call;
-  }
-  if (!fnType->isFunction()) {
-    checker_.diags_.error(fn->loc(),
-                          "'fromThrowable' takes a function, found '" + fnType->name() + "'");
-    return call;
-  }
-  if (fnType->ret()->isPromise()) {
-    checker_.diags_.error(fn->loc(),
-                          "'fromThrowable' of a function that gives a Promise would give an Ok "
-                          "with the Promise, as the function's errors reject the Promise; use "
-                          "'ResultAsync.fromThrowable(f)', which gives a ResultAsync");
-    return call;
-  }
-  const Type *errType = checker_.errorClass_->type;
-  if (call->args.size() > 1) {
-    Checker::Signature sig;
-    sig.params = {checker_.errorClass_->type};
-    sig.minArgs = 1;
-    Expr *&toError = call->args[1];
-    if (auto *fe = dyn_cast<FunctionExpr>(toError)) {
-      toError = checker_.closureChecker().checkFunctionExpr(fe, &sig);
-    }
-    const Type *toType = toError->type;
-    if (toType->isError()) {
-      return call;
-    }
-    bool takesError =
-        toType->isFunction() && toType->minArgs() <= 1 &&
-        (toType->params().empty() || toType->params()[0] == checker_.errorClass_->type ||
-         toType->params()[0] == Type::optional(checker_.errorClass_->type));
-    if (!takesError) {
-      checker_.diags_.error(toError->loc(),
-                            "the second argument of 'fromThrowable' turns the Error into "
-                            "the error of the Result: a function that takes an Error, e.g. "
-                            "'(e) => e.message'");
-      return call;
-    }
-    errType = toError->type->ret();
-    if (errType->isVoid()) {
-      checker_.diags_.error(toError->loc(),
-                            "the function that turns the Error into the error of the "
-                            "Result must return it");
-      return call;
-    }
-  }
-  call->builtin = Builtin::ResultFromThrowable;
-  call->type = Type::function(fnType->params(), fnType->minArgs(), fnType->hasRest(),
-                              Type::result(fnType->ret(), errType));
-
-  return call;
 }
 
 }

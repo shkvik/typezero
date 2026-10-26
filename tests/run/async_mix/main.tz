@@ -4,8 +4,8 @@
 // in a Map, values that may be promises (unions with a Promise), Promise.race
 // and allSettled over promises of different values, awaits inside loops over
 // dictionaries, process.env and node:fs inside async functions with their
-// SystemError rejections, ResultAsync, regex replacements worked out by
-// async code, narrowing across await, and node's order of the queues; with
+// SystemError rejections, a Promise of a Result, regex replacements worked out
+// by async code, narrowing across await, and node's order of the queues; with
 // nothing left over at the end.
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -85,7 +85,7 @@ const message = await folder.read("missing.txt").catch(e => e instanceof SystemE
 console.log(message)
 for (const s of sources)
   console.log(await readText(s, "a.txt"))
-console.log(await readText(folder, "a.txt").map(t => t.length).match(n => `${n} letters`, e => e))
+console.log((await readText(folder, "a.txt")).map(t => t.length).match(n => `${n} letters`, e => e))
 rmSync(dir, { recursive: true })
 
 // 6. Replacements worked out by async code first, then a regex with a

@@ -229,20 +229,6 @@ bool knownBuiltin(Builtin b) {
   case Builtin::TimerUnref:
   case Builtin::TimerHasRef:
   case Builtin::TimerRefresh:
-  case Builtin::ResultAsyncFromPromise:
-  case Builtin::ResultAsyncFromSafePromise:
-  case Builtin::ResultAsyncFromThrowable:
-  case Builtin::ResultAsyncMap:
-  case Builtin::ResultAsyncMapErr:
-  case Builtin::ResultAsyncAndThen:
-  case Builtin::ResultAsyncOrElse:
-  case Builtin::ResultAsyncMatch:
-  case Builtin::ResultAsyncUnwrapOr:
-  case Builtin::ResultAsyncAndTee:
-  case Builtin::ResultAsyncOrTee:
-  case Builtin::ResultAsyncWrapOk:
-  case Builtin::ResultAsyncWrapErr:
-  case Builtin::ResultAsyncTeeDone:
   case Builtin::TimersSetTimeout:
   case Builtin::TimersSetImmediate:
   case Builtin::TimersSetInterval:

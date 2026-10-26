@@ -177,7 +177,6 @@ enum class Builtin {
   DecToFraction,
   ResultOk,
   ResultErr,
-  SafeTry,
   ResultCombine,
   ResultCombineWithAllErrors,
   ResultIsOk,
@@ -191,9 +190,6 @@ enum class Builtin {
   ResultAndTee,
   ResultOrTee,
   ResultAndThrough,
-  ResultFromThrowable,
-  ResultUnsafeUnwrap,
-  ResultUnsafeUnwrapErr,
   ErrorStack,
   ErrorToString,
   RegExpNew,
@@ -375,20 +371,6 @@ enum class Builtin {
   TimerUnref,
   TimerHasRef,
   TimerRefresh,
-  ResultAsyncFromPromise,
-  ResultAsyncFromSafePromise,
-  ResultAsyncFromThrowable,
-  ResultAsyncMap,
-  ResultAsyncMapErr,
-  ResultAsyncAndThen,
-  ResultAsyncOrElse,
-  ResultAsyncMatch,
-  ResultAsyncUnwrapOr,
-  ResultAsyncAndTee,
-  ResultAsyncOrTee,
-  ResultAsyncWrapOk,
-  ResultAsyncWrapErr,
-  ResultAsyncTeeDone,
   TimersSetTimeout,
   TimersSetImmediate,
   TimersSetInterval,
@@ -558,10 +540,6 @@ inline bool isAsyncBuiltin(Builtin builtin) {
   return builtin >= Builtin::PromiseNew && builtin <= Builtin::TimersSetInterval;
 }
 
-inline bool isResultAsyncMethod(Builtin builtin) {
-  return builtin >= Builtin::ResultAsyncMap && builtin <= Builtin::ResultAsyncOrTee;
-}
-
 inline bool isJsonBuiltin(Builtin builtin) {
   return builtin >= Builtin::JsonParse && builtin <= Builtin::ArrayIsArray;
 }
@@ -587,7 +565,7 @@ inline bool isDecimalBuiltin(Builtin builtin) {
 }
 
 inline bool isResultBuiltin(Builtin builtin) {
-  return builtin >= Builtin::ResultOk && builtin <= Builtin::ResultUnsafeUnwrapErr;
+  return builtin >= Builtin::ResultOk && builtin <= Builtin::ResultAndThrough;
 }
 
 inline bool isResultCallback(Builtin builtin) {

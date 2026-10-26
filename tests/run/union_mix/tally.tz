@@ -1,6 +1,5 @@
 // Dictionaries of unions: counts by kind in a Record with literal keys, a Map
 // with keys of a union, and values of unions with dates and dictionaries.
-import { err, ok, Result } from "neverthrow"
 import { Figure, Kind } from "./shapes.tz"
 
 export function byKind(figures: Figure[]): Record<Kind, int> {

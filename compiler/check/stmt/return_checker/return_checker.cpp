@@ -197,6 +197,15 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     }
     return;
   }
+  if (fn->decl && fn->decl->isAsync && !fn->decl->isGenerator && ret->value &&
+      isa<AwaitExpr>(ret->value) && checker_.tryDepth_ == 0) {
+    checker_.diags_.error(ret->value->loc(),
+                          fn->decl->concise
+                              ? "'await' here changes nothing: an async function waits for the "
+                                "Promise it returns; leave out 'await'"
+                              : "'return await' changes nothing: an async function waits for the "
+                                "Promise it returns; write 'return' without 'await'");
+  }
   const Type *returned = fn->ret && fn->decl && fn->decl->isGenerator &&
                                  (fn->ret->isIterator() || fn->ret->isAsyncIterator())
                              ? fn->ret->returned()

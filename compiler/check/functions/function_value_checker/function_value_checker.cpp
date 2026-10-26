@@ -89,7 +89,7 @@ FunctionExpr *FunctionValueChecker::builtinFunctionValue(Expr *arg,
         maxArgs = count;
       }
     }
-    if (llvm::StringRef result = checker_.resultTypes().neverthrowName(n->name);
+    if (llvm::StringRef result = checker_.resultTypes().resultName(n->name);
         result == "ok" || result == "err") {
       name = n->name;
       maxArgs = 1;

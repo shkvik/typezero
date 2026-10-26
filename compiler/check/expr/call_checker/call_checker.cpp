@@ -52,7 +52,6 @@
 #include "compiler/library/reflect/reflect_call_checker/reflect_call_checker.h"
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/result/result_method_checker/result_method_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"

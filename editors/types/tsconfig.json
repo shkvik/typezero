@@ -25,9 +25,6 @@
     "skipLibCheck": true,
     // @types/node, and what tz has built in (tz.d.ts) as @types/tz.
     "typeRoots": ["./node_modules/@types"],
-    "types": ["node", "tz"],
-    "paths": {
-      "neverthrow": ["./node_modules/neverthrow/index.d.ts"]
-    }
+    "types": ["node", "tz"]
   }
 }

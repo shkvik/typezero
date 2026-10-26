@@ -1,14 +1,14 @@
 [
   Ok { value: 42 },
-  Err { error: 'empty' },
-  Err { error: 'not a number' },
-  Err { error: 'too big: 500' }
+  Err { error: 'empty' } at parseCount (union_typed.tz:7),
+  Err { error: 'not a number' } at parseCount (union_typed.tz:9),
+  Err { error: 'too big: 500' } at checkRange (union_typed.tz:12)
 ]
 ok 42
 nothing
 failed: not a number
 failed: too big: 500
-Ok { value: 14 } Err { error: 'empty' } Err { error: 'too big: 700' }
+Ok { value: 14 } Err { error: 'empty' } at parseCount (union_typed.tz:7) Err { error: 'too big: 700' } at checkRange (union_typed.tz:12)
 3 number
 39.98 free
 5 0

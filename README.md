@@ -260,13 +260,12 @@ tz run                   # без файла — "main" из tz.json
   node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки
   `TypeError: fetch failed` с причиной. `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
   `Request`, `Response`, `ReadableStream`, `FormData` — глобальные, как в node; https — на OpenSSL.
-- Ошибки как значения: `Result<T, E>` из neverthrow встроен (см. «Result»): `ok(v)`, `err(e)`,
-  `isOk()` / `isErr()` с сужением, `value`, `error`, `map`, `mapErr`, `andThen`, `orElse`,
-  `match`, `unwrapOr`, `andTee`, `orTee`, `andThrough`, `Result.combine`,
-  `Result.combineWithAllErrors`, `safeTry` с `yield*`, `Result.fromThrowable`,
-  `_unsafeUnwrap` / `_unsafeUnwrapErr`; `ResultAsync` с `okAsync`, `errAsync`, `fromPromise`,
-  `fromSafePromise`, `fromAsyncThrowable` и теми же методами, `asyncMap` и `asyncAndThen` у
-  `Result`. Забытый `Result` и `==` между ними — ошибки компиляции.
+- Ошибки как значения: встроенный `Result<T, E>` (см. «Result»): `ok(v)`, `err(e)`,
+  `isOk()` / `isErr()` с сужением, ранний выход `if (r.isErr()) return r`, `value`, `error`,
+  `map`, `mapErr`, `andThen`, `orElse`, `match`, `unwrapOr`, `andTee`, `orTee`, `andThrough`,
+  `Result.combine`, `Result.combineWithAllErrors`; `Err` помнит, где его создали. Асинхронная
+  ошибка — `Promise<Result<T, E>>`. Забытый `Result`, `==` между ними и лишний `return await` —
+  ошибки компиляции.
 - `console.log` с любыми из этих типов (и `console.log(...xs)` — элементы массива как отдельные
   аргументы); массивы, объекты, кортежи, словари и итераторы
   (`Object [Generator] {}`) печатаются ровно как в Node.js
@@ -1234,11 +1233,10 @@ function assertCircle(s: Shape): asserts s is Circle { if (s.kind != "circle") t
 Отличия от BigNumber.js — в «Чем отличается от TypeScript».
 ## Result
 
-[neverthrow](https://github.com/supermacro/neverthrow) встроен: ошибку можно вернуть как
-значение `Result<T, E>` — `Ok` со значением или `Err` с ошибкой. Имена `ok`, `err`, `Result`,
-`Ok`, `Err`, `safeTry` есть без импорта; `import { ok, err, Result } from "neverthrow"` из готового
-кода разрешён и указывает на них же (и с переименованием: `import { err as fail }`). Свои
-переменные и функции с этими именами их перекрывают.
+Ошибку возвращают как значение `Result<T, E>` — `Ok` со значением или `Err` с ошибкой
+([errors.md](docs/errors.md)). Имена `ok`, `err`, `Result`, `Ok`, `Err` встроены, импорт не
+нужен; свои переменные и функции с этими именами их перекрывают. `import` и `export` из
+`"neverthrow"` — ошибка с подсказкой: с neverthrow tz больше не совместим.
 
 ```ts
 function parseIntSafe(s: string): Result<int, string> {
@@ -1252,11 +1250,12 @@ const text = parseIntSafe("42")
   .match(n => `получилось ${n}`, e => `ошибка: ${e}`)   // "получилось 84"
 ```
 
-- **Значение, а не объект.** `Result` — это обе половины и флаг, без выделения памяти: половина,
-  которой нет, — ноль, как `undefined` в `T | undefined`. `Result<int, string>` занимает 24
-  байта (половины лежат по выравниванию), `ok(1)` — константа. Методы — ветвление по флагу, а
-  стрелки в них встраиваются: цепочка `parse(n).map(...).andThen(...).match(...)` в цикле
-  становится обычными сравнениями (LLVM даже векторизует такой цикл).
+- **Значение, а не объект.** `Result` — это обе половины, флаг и место, где создан `Err`, без
+  выделения памяти: половина, которой нет, — ноль, как `undefined` в `T | undefined`.
+  `Result<int, string>` занимает 32 байта (половины лежат по выравниванию), `ok(1)` — константа.
+  Методы — ветвление по флагу, а стрелки в них встраиваются: цепочка
+  `parse(n).map(...).andThen(...).match(...)` в цикле становится обычными сравнениями (LLVM даже
+  векторизует такой цикл).
 - **Типы.** `ok(v)` знает только своё значение: там, где больше ничего не известно, это
   `Result<int, never>` — `Err` у него быть не может, и `ok(1).value` читается без проверки. Где
   ждут `Result` (тип переменной, параметра, возврата), `ok(1)` сразу получает этот тип:
@@ -1270,26 +1269,33 @@ const text = parseIntSafe("42")
 - **Сужение.** После `if (r.isOk())` (и после `if (r.isErr()) return ...`) у переменной `r` можно
   читать `r.value`, в другой ветке — `r.error`; без проверки это ошибка компиляции, как в TS.
   Присваивание переменной и вызовы, которые могут её изменить, сужение снимают.
-- **Методы** — как в neverthrow: `map`, `mapErr`, `andThen`, `orElse`, `match`, `unwrapOr`,
-  `andTee`, `orTee`, `andThrough`, `isOk`, `isErr`. Ошибки разных типов из `andThen`, `yield*` в
-  `safeTry`, `Result.combine` и разных `return` дают объединение: `Result<int, ParseError>` и
-  `andThen` с `Result<int, string>` — `Result<int, ParseError | string>`; так же значения
-  `orElse`, `match` и `unwrapOr`. Ошибка с подсказкой `mapErr` — только там, где объединения быть
-  не может (`int[] | string[]`). Функция для половины, которой у `Result` быть не может, не
-  вызывается и не компилируется.
-- **`safeTry`** — ранний выход при ошибке, без генераторов: генератор вызывается один раз как
-  обычная функция, а `yield* r` — это «если `r` — `Err`, вернуть его из генератора, иначе взять
-  значение» (старая запись `yield* r.safeUnwrap()` — то же). Тип результата — из `return`
-  генератора и ошибок его `yield*`. `yield*` можно писать там, где до него в той же инструкции не
-  вычислено ничего, что держит ссылку: в начале инструкции и инициализатора, в арифметике, в
-  аргументах после чисел и литералов, в `ok(...)`; `"a" + (yield* r)` или `[x, yield* r]` —
-  ошибка с подсказкой `const x = yield* r`.
+- **Ранний выход** — только `if`:
+  ```ts
+  function doubled(s: string) {
+    const r = parseIntSafe(s)
+    if (r.isErr()) return r            // Result<never, string>
+    return ok(`${r.value * 2}`)
+  }                                    // Result<string, string>
+  ```
+  После проверки в `r` нет значения, поэтому его можно вернуть из функции, у которой значение
+  другого типа, и место ошибки сохраняется. Короткой записи (`safeTry` с `yield*`, `?`, `try`)
+  нет.
+- **Методы:** `map`, `mapErr`, `andThen`, `orElse`, `match`, `unwrapOr`, `andTee`, `orTee`,
+  `andThrough`, `isOk`, `isErr`. Ошибки разных типов из `andThen`, `Result.combine` и разных
+  `return` дают объединение: `Result<int, ParseError>` и `andThen` с `Result<int, string>` —
+  `Result<int, ParseError | string>`; так же значения `orElse`, `match` и `unwrapOr`. Ошибка с
+  подсказкой `mapErr` — только там, где объединения быть не может (`int[] | string[]`). Функция
+  для половины, которой у `Result` быть не может, не вызывается и не компилируется.
 - **`Result.combine(results)`** — `Ok` с массивом значений или первый `Err`;
   **`Result.combineWithAllErrors`** — `Ok` или `Err` с массивом всех ошибок. Список `Result` со
-  значениями разных типов даёт кортеж, как в neverthrow:
-  `Result.combine([parseName(s), parseAge(s)])` — `Result<[string, int], E>`.
-- **Печать** — как node печатает объекты классов neverthrow: `Ok { value: 84 }`,
-  `Err { error: 'пусто' }`, в массивах и объектах тоже, глубже двух уровней — `[Ok]`.
+  значениями разных типов даёт кортеж: `Result.combine([parseName(s), parseAge(s)])` —
+  `Result<[string, int], E>`.
+- **Печать:** `Ok { value: 84 }`, `Err { error: 'пусто' } at parseIntSafe (main.tz:2)` — у `Err`
+  функция и строка его `err(...)`, путь от папки главного файла; в массивах и объектах тоже,
+  глубже двух уровней — `[Ok]`. Методы, которые передают `Err` дальше (`map`, `mapErr`,
+  `andThen`, преобразование в другой `Result`, `Result.combine`), место сохраняют;
+  `combineWithAllErrors` ставит место своего вызова. Указатель на место — 8 байт в `Err`, сами
+  строки лежат в exe.
 - **Забытый `Result` — ошибка компиляции**: `save("x")` (и `store.save("x")`) отдельной
   инструкцией, стрелка в `forEach`, которая возвращает `Result`, функция или метод, переданные в
   `forEach` по имени (`names.forEach(store.save)`), `xs.map(x => save(x))`, результат которого
@@ -1297,29 +1303,18 @@ const text = parseIntSafe("42")
   выбрасывает его явно.
 - **В обобщённых функциях** `Result<T, E>` — такой же тип, как другие:
   `function wrap<T>(x: T) { return ok(x) }`, `valueOr<T, E>(r: Result<T, E>, d: T)`,
-  `type Parsed<T> = Result<T, string>`, `safeTry` внутри. Типы выводятся и из `Result`: у
+  `type Parsed<T> = Result<T, string>`, ранний выход внутри. Типы выводятся и из `Result`: у
   `valueOr(ok(1), 0)` `E` — `never`, как в TS; `mapAll(xs, ok)` делает `Result` из каждого
   элемента. Копия — по представлению половин: `Result<User, E>` и `Result<Post, E>` — одна копия.
   Забытый `Result`, `==` между ними и превращение в строку в копии для `T = Result<...>` — ошибка
   у вызова, которому она нужна.
-- **`Result.fromThrowable(f, toError?)`** (и `fromThrowable` без `Result.`) делает из функции,
-  которая бросает, функцию с теми же параметрами, которая возвращает `Result`: `Ok` с тем, что
-  вернула `f`, или `Err` с её исключением — самим `Error` или тем, что из него сделала `toError`
-  (`(e) => e.message`). `f` и `toError` вычисляются один раз. **`_unsafeUnwrap()`** и
-  **`_unsafeUnwrapErr()`** дают половину или бросают `Error` с текстом neverthrow
-  (`` Called `_unsafeUnwrap` on an Err ``).
-- **`ResultAsync<T, E>`** — это `Promise<Result<T, E>>` (см. «Async»): его ждут через `await` или
-  `then`, а забытый — ошибка, как любой `Promise`. Есть `okAsync(v)`, `errAsync(e)`,
-  `fromPromise(p, toError)`, `fromSafePromise(p)`, `fromAsyncThrowable(f, toError?)` (и с
-  `ResultAsync.`: `fromPromise`, `fromSafePromise`, `fromThrowable`), методы `map`, `mapErr`,
-  `andThen`, `orElse`, `match`, `unwrapOr`, `andTee`, `orTee` — их функция может вернуть и
-  значение, и `Promise` (у `andThen` и `orElse` — `Result` или `ResultAsync`), — и `asyncMap` /
-  `asyncAndThen` у `Result`, которые вызывают функцию сразу. Каждый шаг занимает столько же
-  оборотов очереди микрозадач, сколько код neverthrow 8 (`map` — async-функция внутри `then`,
-  `andThen` — просто `then`), поэтому всё, что выполняется между шагами, печатается в том же
-  порядке: [result_async_order.tz](tests/run/result_async_order.tz) сверен с neverthrow в node.
-  `ResultAsync.combine` и `andThrough` у `ResultAsync` — ошибки с подсказкой (`Promise.all` и
-  `Result.combine`; `andThen`).
+- **Async.** Операция, которая может не получиться, — `Promise<Result<T, E>>` (см. «Async»):
+  сначала `await`, потом методы — `(await getUser(id)).map(...)`; `getUser(id).map(...)` —
+  ошибка с этой подсказкой. Несколько сразу — `Result.combine(await Promise.all(ps))`. Отдельного
+  `ResultAsync` нет.
+- **Лишний `await` — ошибка:** `return await x` и `async () => await x` ничего не меняют,
+  async-функция и так дождётся `Promise`, который возвращает. Пока в языке есть `try`, внутри
+  `try` и `catch` так писать можно: там `await` ловит отказ.
 
 ## Регулярные выражения
 
@@ -2198,8 +2193,8 @@ import { area, Rect } from "./geometry"   // типы импортируются
   `import "./x"` (ради побочных действий), `import type` и `{ type T }`, `import x = require()`,
   `export =`, `namespace`, `declare module` / `declare global` / `declare`, `/// <reference>`,
   `require`, `module.exports`, динамический `import()`, `import.meta`. Пакеты (`"zod"`) — см.
-  «Пакеты»; `"neverthrow"` встроен (см. «Result»), встроенные модули node и tz — см. «Встроенные
-  модули».
+  «Пакеты»; `import` из `"neverthrow"` — ошибка, `Result` встроен (см. «Result»); встроенные
+  модули node и tz — см. «Встроенные модули».
 
 ## Пакеты
 
@@ -2342,8 +2337,8 @@ const u = JSON.parse<User>(text)   // TypeError: age: expected int, got 30.5
   in JSON at position 13 (line 3 column 3)`. Второй аргумент (reviver) — ошибка компиляции.
 - **`JSON.stringify(x, null, space)`** пишет любое значение: `Json`, объекты и экземпляры классов
   (поля в порядке печати, без `#private`, методов и функций), массивы, кортежи (как массивы),
-  `decimal` — строкой (`"19.99"`, как BigNumber.js), `Result` — как объект класса neverthrow
-  (`{"value":1}`, `{"error":"x"}`), `Record` — объектом, `Map`, `Set`, итератор и регулярка —
+  `decimal` — строкой (`"19.99"`, как BigNumber.js), `Result` — объектом со значением или
+  ошибкой (`{"value":1}`, `{"error":"x"}`), `Record` — объектом, `Map`, `Set`, итератор и регулярка —
   `{}`, совпадение регулярки — массив его
   групп (`["12","1",null]`, без `index` и `groups`, как в node), дата — ISO-текстом, как её
   `toJSON()` (неправильная — `null`); поле с `undefined` пропускается, в массиве `undefined` и
@@ -2416,10 +2411,7 @@ LLVM, в котором живут его переменные и состоян
 его создали, а метод-генератор — свой объект: `for (const x of cart.lines())` и `cart.lines()`,
 сохранённый в переменной, видят `this`, даже если на объект больше ничто не ссылается.
 
-Генератор, который передают в `safeTry`, — не генератор: он выполняется один раз, сразу, а
-`yield* r` в нём берёт значение `Result` (см. «Result»). В обычном генераторе `yield*` перебирает
-массив, строку или итератор, и `yield* r` с `Result` — ошибка с подсказкой; генераторы внутри
-`safeTry` и `safeTry` внутри генераторов работают.
+`yield*` перебирает массив, строку или итератор; `yield* r` с `Result` — ошибка.
 
 **Ленивые цепочки.** Цепочка методов итератора, которую потребляют там же, где она написана
 (`toArray`, `reduce`, `some`, `for...of`...), — один цикл: каждое значение проходит все шаги до
@@ -3415,8 +3407,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   `indexOf`, проверить как условие (`if (r)` — всегда правда, подсказка `r.isOk()`) и превратить в
   строку: в JS это объекты, и `ok(1) == ok(1)` — `false`. Забытый `Result` — ошибка (в JS для
   этого ставят правило линтера). `r.value` без проверки `isOk()` — ошибка, как в tsc.
-- В генераторе, переданном в `safeTry`, нет `yield x` (он не отдаёт значений), а `yield* r`
-  берёт значение `Result`; в остальных генераторах `yield* r` с `Result` — ошибка.
+- `yield* r` с `Result` — ошибка: `Result` не перебирают.
 - Async (см. «Async»): `resolve` у `new Promise` берёт значение, а не другой `Promise` (его
   возвращают из async-функции или колбэка `then`), `reject` и `Promise.reject` — только `Error`, а
   `Promise.reject(e)` — `Promise<never>`. `Promise<T>` не превращается в `Promise<U>`, даже если
@@ -3576,13 +3567,13 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/emit` | `EmitPass`: объектный файл; `--emit-llvm` (`ir_writer/`) |
 | `compiler/link` | `LinkPass`: встроенный LLD (`linker/`); какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses/`, `licenses_pass/`) |
 | `compiler/packages` | проекты и пакеты, по классу на папку: `tz.json` (`manifest/`), `tz.lock` (`lock/`), выбор версий и граф пакетов (`resolver/`, `package_graph/`), semver (`version/`, `range/`), кэш, JSR и git (`jsr_client/`, `git_client/`, `package_cache/`), HTTP через WinHTTP (`http_client/`), JSON с позициями для ошибок и правок (`json_parser/`), импорты файла без парсера (`scanner/`), `tz port` (`port/`) |
-| `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json`, `JSON`, `embedJson`, `fromJson`, `JSON.parse<T>`. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result`, `safeTry`, `ResultAsync`. `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz и их `__tz_*`. `weakref`: `WeakRef` |
+| `compiler/library` | C++-часть тем библиотеки: крючки темы (`feature/`), список тем (`feature_registry/`), и по папке на тему, в каждой `<тема>_feature/` и классы проверки и IR. `bytes`: байтовые массивы, `Buffer`, `TextEncoder` / `TextDecoder`, `embedBytes` и доказательства, что значение влезает в элемент; вызовы по группам (`*_calls/`). `child_process`: `spawnSync`, `execFileSync` и `execSync`. `crypto`: `node:crypto`, имена алгоритмов и выбор слоя OpenSSL, `crypto.subtle`. `date`: даты и `Intl.DateTimeFormat`; разборщик дат рантайма, собранный и в `tz` (`date_syntax/`). `decimal`: литералы, операторы и методы. `events`: карты событий, эмиттеры и `EventTarget`, `once()`. `builtin_modules`: имена модулей `node:*` и `tz:io`, привязка импортов, `node:timers/promises` и объекты, которые делает рантайм; что делает модуль, решает его тема через крючки `exportProblem`, `checkModuleCall`, `checkModuleValue` и `checkModuleMember`. `fs`: `node:fs`, `node:fs/promises`, `node:readline` и `tz:io`. `path`: `node:path`. `os`: `node:os`. `intl`: `Intl`, `toLocaleString`, `localeCompare` и `normalize`. `json`: `Json`, `JSON`, `embedJson`, `fromJson`, `JSON.parse<T>`. `console`, `math`, `process`. `reflect`: отражение и метаданные. `regex`: литералы, методы, машинный код литералов (`regex_native_lowerer/`, `matcher_*/`), компилятор регулярок рантайма, собранный и в `tz` (`regex_syntax/`). `result`: `Result` и место создания `Err` (`err_sites/`). `stream`: типы кусков `Readable<T>` и остальных классов `node:stream`. `tz_modules`: встроенные модули на tz и их `__tz_*`. `weakref`: `WeakRef` |
 | `runtime/core` | рантайм языка, у каждого модуля свой заголовок: общее — `TZ_HOT`, дескрипторы типов, раскладки (`tzrt`); вывод в stdout и stderr, форматирование чисел, граница стека, сбой рантайма (`output`); аллокатор, куча на каждый поток (`alloc`); потоки программы, пул, очередь node и куски, которые идут заранее (`parallel`); общие объекты и атомарные счётчики (`publish`); исключение в полёте, места стека ошибки, текст `e.stack` (`error`); строки (`string`); массивы (`array`); разбор чисел и `toFixed` (`number`); окружения замыканий (`closure`); `Object.keys` / `values` / `entries` (`object`); регистр букв по таблицам Unicode, которые [gen_unicode_tables.mjs](runtime/core/unicode/gen_unicode_tables.mjs) берёт из самого Node.js (`unicode`); `Promise`, очередь микрозадач, таймеры и цикл событий, как в node (`async`); пул потоков и ожидание ввода-вывода — IOCP в Windows (`io`); хеш-таблица словарей (`map`); коробки `unknown` (`unknown`); группы объектов в циклах, `WeakRef` и отладочный режим памяти (`group`) |
 | `runtime/library` | C-часть тем, по папке на модуль. `console`: `console.log` для массивов, объектов, `Result`, итераторов, `Json` и объединений как в Node (`inspect`). `math`: `Math`. `decimal`: точные десятичные числа. `json`: значения `Json` (`json`, `json_values`), `JSON.parse` как в V8 (`json_parse`), `JSON.stringify` любого значения (`json_stringify`) и проверки `JSON.parse<T>` (`json_typed`). `regex`: разбор и компиляция в программу (`regex_compile`, общий с `tz`) с таблицами Unicode от [gen_regex_tables.mjs](runtime/library/regex/regex_compile/gen_regex_tables.mjs), интерпретатор, методы и то, что зовёт машинный код регулярок (`regex`). `date`: поля, установка полей и строки (`date`), разбор строк, как в V8 (`date_parse`, общий с `tz`), местный пояс (`date_zone`) и языки (`date_format`). `intl`: ICU системы, которую `icu` загружает при первом обращении; языки, опции и части `formatToParts` (`intl`), числа и `PluralRules` (`intl_number`), `Collator`, `normalize` и `Segmenter` (`intl_text`), `RelativeTimeFormat`, `ListFormat` и `DisplayNames` (`intl_names`). `process`: аргументы, переменные окружения, код выхода и часы. `path`: `node:path` в обоих стилях. `fs`: общее функций файлов (`fs`), ошибки ОС `SystemError` как в libuv (`fs_errors`), синхронные функции файлов и папок (`fs_sync`, `fs_dirs`), `node:fs/promises` (`fs_async`, `fs_async_dirs`), stdin и `readLine` (`stdin`), `node:readline` (`readline`), чтение и запись кусками для потоков файлов (`fs_stream`). `os`: `node:os`. `events`: сторона рантайма у `AbortSignal`: отменённые ожидания на своих местах среди слушателей (`signal`). `stream`: что просит `node:stream`: проверка куска, байты в stdout и stderr. `child_process`: подготовка вызова как в node, запуск как в libuv (кавычки аргументов, поиск в `PATH`, окружение, каналы с overlapped I/O, таймаут), в Linux — `posix_spawn` (`child`). `bytes`: `ArrayBuffer`, типизированные массивы и их методы (`bytes`); `Buffer`, кодировки node, `TextEncoder` / `TextDecoder` (`buffer`) с таблицами однобайтовых кодировок, которые [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у node (`encodings`), и многобайтовые кодировки (`cjk`). `reflect`: записи метаданных (`meta`); `Reflect.get`, `apply`, `construct`, `new` класса, известного при выполнении, и проверки `unknown` (`reflect`). `net`: сокеты TCP на порту завершения цикла (AcceptEx, ConnectEx, WSARecv, WSASend) и поиск имён. `http`: HTTP/1.1: разбор голов и тел, ответы и запросы одной записью (`http`); распаковка тел `fetch` — inflate из zlib и декодер brotli из `third_party` (`decompress`). `tz_modules`: что просят встроенные модули на tz через `__tz_*` (`library`). Отдельно, в `tzcrypto.lib`: `crypto` — `node:crypto` поверх OpenSSL: общее без OpenSSL — объекты, HMAC, PBKDF2, HKDF, случайные числа, секретные ключи (`crypto`), хеши (`crypto_md`), AES (`crypto_aes`) и ChaCha20-Poly1305 (`crypto_chacha`), scrypt (`crypto_scrypt`) и Argon2 (`crypto_argon2`) прямого слоя, по объекту на алгоритм, и полный слой: имена из переменных и списки (`crypto_evp`), ключи, подписи и обмен ключами (`crypto_keys`), сертификаты (`crypto_x509`); Web Crypto (`crypto_subtle*`); `tls` — TLS соединений `net` для https: OpenSSL в памяти между сокетом и HTTP, проверка сервера как в node и корневые сертификаты Mozilla, которые [gen_tls_roots.mjs](runtime/library/tls/tls/gen_tls_roots.mjs) берёт у node |
 | `library` | встроенные модули, написанные на tz, которые лежат рядом с `tz.exe` в `lib`. `events`: `node:events` (`events.tz`) и глобальные `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `DOMException` (`web.tz`). `http`: `tz:http` (`http.tz`), глобальные `URL` и `URLSearchParams` (`url.tz`), `fetch`, `Headers`, `Request`, `Response`, `ReadableStream`, `FormData` (`fetch.tz`). `stream`: `node:stream` (`stream.tz` и его части `stream_readable.tz`, `stream_writable.tz`, `stream_duplex.tz`, `stream_pipeline.tz`, которые загрузчик читает как один модуль), `node:stream/promises` (`stream_promises.tz`), `node:stream/consumers` (`stream_consumers.tz`), `node:string_decoder` (`string_decoder.tz`), потоки файлов `createReadStream` / `createWriteStream` и `process.stdin` / `stdout` / `stderr` (`fs_stream.tz`). `crypto`: Web Crypto (`webcrypto.tz`). Глобальные получает сам файл, который их называет. Их код проверяется и компилируется вместе с программой; функции без тела `__tz_*` — функции рантайма, `__tz_listener<F>`, `__tz_as<C>`, `__tz_chunk<T>` и другие с типом — компилятора |
 | `editors/types` | встроенные имена tz для TypeScript (`tz.d.ts`) и настройки tsc для программ tz (`tsconfig.json`) — для будущего плагина tsserver; лежат рядом с `tz.exe` в `types` |
 | `editors/vscode` | расширение VS Code: подсветка и форматирование файлов `.tz` ([README](editors/vscode/README.md)) |
-| `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node`, undici-types и объявления neverthrow для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |
+| `third_party` | рецепт сборки OpenSSL ([openssl](third_party/openssl)) и тексты лицензий, которые печатает `tz licenses` ([licenses](third_party/licenses)); inflate из zlib и декодер brotli как есть, для `fetch` (лицензии — рядом с ними); `@types/node` и undici-types для редактора ([types](third_party/types/README.md)); Prettier — форматтер расширения VS Code ([prettier](third_party/prettier/README.md)) |
 | `tests` | `run/*.tz` с ожидаемым выводом в `*.out`; `errors/*.tz` с `// expect-error:`; программы из нескольких файлов — каталоги с `main.tz`; `cli/*.cmake` — команды tz; `packages` — пакеты, адаптированные для tz |
 | `bench` | одни и те же программы на typezero и Go и скрипт сравнения; сервер «Hello, World!» на tz, Go и node и нагрузка на него (`http.ps1`) |
 | `docs` | принятые решения, которые ещё не реализованы или реализованы не до конца: объекты и классы ([objects.md](docs/objects.md)), generics ([generics.md](docs/generics.md)), ошибки и `Result` без исключений ([errors.md](docs/errors.md)), числа ([numbers.md](docs/numbers.md)), модули и JSON ([modules.md](docs/modules.md)), ввод-вывод ([io.md](docs/io.md)), async ([async.md](docs/async.md)), итераторы и генераторы ([iterators.md](docs/iterators.md)), декораторы ([decorators.md](docs/decorators.md)), мелочи языка ([small.md](docs/small.md)), точные десятичные `decimal` ([decimal.md](docs/decimal.md)), регулярные выражения ([regex.md](docs/regex.md)), даты ([date.md](docs/date.md)), пакеты ([packages.md](docs/packages.md)), байтовые массивы ([bytes.md](docs/bytes.md)), сеть ([net.md](docs/net.md)), криптография ([crypto.md](docs/crypto.md)), запуск процессов ([process.md](docs/process.md)), события ([events.md](docs/events.md)), потоки ([streams.md](docs/streams.md)), перегрузка методов ([overloads.md](docs/overloads.md)), проверки и сужение, JSON в свои типы ([narrowing.md](docs/narrowing.md)), языки `Intl` ([intl.md](docs/intl.md)) |

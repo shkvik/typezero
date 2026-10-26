@@ -380,11 +380,12 @@ class Port {
 Шаги 1–4 прежнего плана (Result, исключения, паники → исключения, ResultAsync) сделаны
 24 октября; переделка опирается на них.
 
-1. **Result без neverthrow.** Убрать `safeTry`, `yield*` над `Result`, `safeUnwrap`,
-   `_unsafeUnwrap`, `fromThrowable`, `fromPromise`, `import` из `"neverthrow"`; `ResultAsync`
-   заменить на `Promise<Result>`, убрать методы у `Promise`, `okAsync`, `errAsync`,
-   `asyncMap`, `asyncAndThen`. `return r` для сужённого `Err`. Место создания в `Err` и печать.
-   Ошибка на лишний `return await`. Переписать тесты (8 файлов с `safeTry`, 7 с `ResultAsync`).
+1. **Result без neverthrow** (сделано 26 октября). Убраны `safeTry`, `yield*` над `Result`,
+   `safeUnwrap`, `_unsafeUnwrap`, `fromThrowable`, `fromPromise`; `import` из `"neverthrow"` —
+   ошибка с подсказкой. `ResultAsync` заменён на `Promise<Result>`, убраны методы у `Promise`
+   (подсказка `(await p).map(...)`), `okAsync`, `errAsync`, `asyncMap`, `asyncAndThen`.
+   `return r` для сужённого `Err`. Место создания в `Err` и печать. Ошибка на лишний
+   `return await` (внутри `try` пока разрешён — до шага 5). Тесты переписаны.
 2. **Библиотека на `Result`.** Всё, что сейчас бросает, отдаёт `Result` (раздел 7): `node:fs`,
    `JSON`, `RegExp`, `URL`, `child_process`, `crypto`, `Date`, разбор чисел. Ошибки библиотеки —
    объекты с меткой. Проверки аргументов — типами параметров (`HttpStatus`, литеральные типы,

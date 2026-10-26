@@ -1,7 +1,6 @@
 #include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
-#include "compiler/library/result/result_async_lowerer/result_async_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
@@ -35,18 +34,6 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   case Builtin::PromiseCatch:
   case Builtin::PromiseFinally:
     return lowering_.reactionLowerer().emitPromiseReaction(call);
-  case Builtin::ResultAsyncFromPromise:
-  case Builtin::ResultAsyncFromSafePromise:
-  case Builtin::ResultAsyncFromThrowable:
-  case Builtin::ResultAsyncMap:
-  case Builtin::ResultAsyncMapErr:
-  case Builtin::ResultAsyncAndThen:
-  case Builtin::ResultAsyncOrElse:
-  case Builtin::ResultAsyncMatch:
-  case Builtin::ResultAsyncUnwrapOr:
-  case Builtin::ResultAsyncAndTee:
-  case Builtin::ResultAsyncOrTee:
-    return lowering_.resultAsyncLowerer().emitResultAsync(call);
   case Builtin::SetTimeout:
   case Builtin::SetInterval: {
     std::vector<llvm::Value *> args = lowering_.throwLowerer().emitHeldValues(call->args);

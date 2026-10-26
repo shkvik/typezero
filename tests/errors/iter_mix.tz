@@ -1,12 +1,11 @@
-// Generator methods, and `yield*` of a Result outside the generator of
-// safeTry.
+// Generator methods, and `yield*` of a Result, which is not iterable.
 class Box {
   // A field before `*name()` needs a ';', as in JavaScript: `[] * values()`
   // would go on.
   items: int[] = [];
   *values() {
     yield* this.items
-    // expect-error: 'yield*' of a Result takes its value only in the generator given to safeTry
+    // expect-error: 'yield*' needs an array, a string or an iterator, found 'Result<
     yield* ok(1)
   }
   // expect-error: a generator returns an iterator: declare its type as 'Generator<int[]>'

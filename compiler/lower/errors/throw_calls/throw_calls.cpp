@@ -139,13 +139,11 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   if (member) {
     scanner_.expr(member->object, caught);
   }
-  bool ofResult = (builtin == Builtin::ResultAsyncMap || builtin == Builtin::ResultAsyncAndThen) &&
-                  member && member->object->type && member->object->type->isResult();
   bool callbacks = (builtin >= Builtin::ArrForEach && builtin <= Builtin::ArrSortWith) ||
                    isResultCallback(builtin) || isIteratorSink(builtin) ||
                    (isIteratorStage(builtin) && c->fused) ||
                    builtin == Builtin::StrReplaceRegexFn || builtin == Builtin::MapForEach ||
-                   builtin == Builtin::DictGroupBy || ofResult;
+                   builtin == Builtin::DictGroupBy;
   for (size_t i = 0; i < c->args.size(); ++i) {
     const Expr *arg = c->args[i];
     bool function = arg->type && arg->type->nonOptional()->isFunction();
@@ -174,16 +172,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::IterNext:
     resumes(caught);
     break;
-  case Builtin::SafeTry:
-    if (!c->args.empty()) {
-      if (auto *fe = llvm::dyn_cast<FunctionExpr>(c->args[0])) {
-        callee(fe->fn, caught, nullptr);
-      }
-    }
-    break;
-  case Builtin::ResultFromThrowable:
-    scanner_.out_.fromThrowables.push_back({c->type, c->args.size() > 1 ? c->args[1] : nullptr});
-    break;
   case Builtin::ParseInt:
   case Builtin::ParseFloat:
     if (c->type && c->type->isInteger()) {
@@ -198,8 +186,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
   case Builtin::UriEncode:
   case Builtin::UriDecodeComponent:
   case Builtin::UriDecode:
-  case Builtin::ResultUnsafeUnwrap:
-  case Builtin::ResultUnsafeUnwrapErr:
     intrinsic(caught);
     break;
   case Builtin::NumToFixed:

@@ -1,0 +1,21 @@
+// Result, Ok, Err, ok and err are built in, with no import. The program's own
+// names hide them, as any declaration hides an outer one.
+function check(n: int): Result<int, string> {
+  return n > 0 ? ok(n) : err(`${n} is not positive`)
+}
+console.log(check(1), check(0), [1, -1].map(err))
+
+function known(): Ok<string, string> {
+  return ok("always")
+}
+console.log(known().value)
+
+// A parameter named err, as in callbacks of node.
+function report(err: string) {
+  return `report: ${err}`
+}
+console.log(report("disk full"), check(-2).mapErr((err) => err.length))
+function answer(ok: boolean) {
+  return ok ? "yes" : "no"
+}
+console.log(answer(true), answer(false))

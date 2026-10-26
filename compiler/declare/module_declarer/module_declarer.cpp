@@ -141,9 +141,8 @@ const llvm::StringMap<Checker::Export> &ModuleDeclarer::exportsOf(Module *module
 
   for (const ExportDecl &decl : module->file.exports) {
     if (decl.path == "neverthrow") {
-      checker_.diags_.error(decl.pathLoc,
-                            "neverthrow need not be re-exported: its names are built in, and "
-                            "every file has them");
+      checker_.diags_.error(decl.pathLoc, "Result, ok and err are built in: remove the export from "
+                                          "'neverthrow'");
       continue;
     }
     if (isBuiltinModule(decl.path)) {

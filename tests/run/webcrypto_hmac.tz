@@ -24,7 +24,7 @@ console.log(await crypto.subtle.verify("HMAC", key, sig.slice(1), enc.encode("me
 // The algorithm in a constant, and its name for sign, as hono signs cookies.
 const algorithm = { name: "HMAC", hash: "SHA-256" }
 const getCryptoKey = async (secret: string): Promise<CryptoKey> =>
-  await crypto.subtle.importKey("raw", enc.encode(secret), algorithm, false, ["sign", "verify"])
+  crypto.subtle.importKey("raw", enc.encode(secret), algorithm, false, ["sign", "verify"])
 const makeSignature = async (value: string, secret: string) => {
   const signature = await crypto.subtle.sign(algorithm.name, await getCryptoKey(secret), enc.encode(value))
   return Buffer.from(signature).toString("base64")

@@ -126,7 +126,7 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
     }
     if (ref.name == "Array") {
       checker_.diags_.error(ref.loc, "'Array' needs an element type, e.g. 'Array<int>' or 'int[]'");
-    } else if (llvm::StringRef result = checker_.resultTypes().neverthrowTypeName(ref.name);
+    } else if (llvm::StringRef result = checker_.resultTypes().resultTypeName(ref.name);
                !result.empty()) {
       checker_.diags_.error(ref.loc, "'" + ref.name +
                                          "' needs the types of its value and its error, e.g. '" +
@@ -167,8 +167,7 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       }
       return bytes;
     }
-    if (llvm::StringRef result = checker_.resultTypes().neverthrowTypeName(ref.name);
-        !result.empty()) {
+    if (llvm::StringRef result = checker_.resultTypes().resultTypeName(ref.name); !result.empty()) {
       return checker_.resultTypes().resolveResultType(ref, result);
     }
     if (ref.name == "Array" || ref.name == "ReadonlyArray") {

@@ -18,7 +18,10 @@ void ImportBinder::resolveImports(Module *module) {
   Checker::ModuleState &here = checker_.state(module);
   for (const ImportDecl &decl : module->file.imports) {
     if (decl.path == "neverthrow") {
-      checker_.resultTypes().importNeverthrow(module, decl);
+      checker_.resultTypes().rejectNeverthrowImport(decl);
+      for (const ModuleName &name : decl.names) {
+        here.badImports.insert(name.as);
+      }
       continue;
     }
     if (isBuiltinModule(decl.path) && !decl.from) {

@@ -34,7 +34,6 @@ struct FunctionDecl : Stmt {
   bool isGenerator = false;
   bool isAsync = false;
   bool awaitsAhead = false;
-  bool safeTry = false;
   bool lifted = false;
   llvm::StringRef ownName;
   bool concise = false;

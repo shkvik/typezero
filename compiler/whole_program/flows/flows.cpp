@@ -107,9 +107,6 @@ void Flows::walkProgram(SourceFile &file) {
       edges[size_t(returned(fn))].push_back({call.result, 0, 0});
     }
   }
-  if (resultOfErrors_) {
-    escape({{thrown_, 0, 0}});
-  }
 }
 
 int Flows::node(NodeKind kind, const void *key, llvm::StringRef name) {

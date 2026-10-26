@@ -404,7 +404,7 @@ export class ReadableStreamDefaultReader<R> {
     const read = Promise.withResolvers<ReadableStreamReadResult<R>>()
     s.reads.push(read)
     pullIfNeeded(s)
-    return await read.promise
+    return read.promise
   }
 
   releaseLock() {
@@ -721,7 +721,7 @@ class Body {
     const bytes = this.bytes
     if (bytes != undefined) return bytes
     const wire = this.wire
-    if (wire != undefined) return await wire.all()
+    if (wire != undefined) return wire.all()
     return new Uint8Array(0)
   }
 
@@ -1088,7 +1088,7 @@ export class Request {
   }
 
   async text(): Promise<string> {
-    return await this.#body.consumeText()
+    return this.#body.consumeText()
   }
 
   async json(): Promise<Json> {
@@ -1096,7 +1096,7 @@ export class Request {
   }
 
   async bytes(): Promise<Uint8Array> {
-    return await this.#body.consume()
+    return this.#body.consume()
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
@@ -1238,7 +1238,7 @@ export class Response {
   }
 
   async text(): Promise<string> {
-    return await this.#body.consumeText()
+    return this.#body.consumeText()
   }
 
   async json(): Promise<Json> {
@@ -1246,7 +1246,7 @@ export class Response {
   }
 
   async bytes(): Promise<Uint8Array> {
-    return await this.#body.consume()
+    return this.#body.consume()
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {

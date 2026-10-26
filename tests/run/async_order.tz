@@ -11,15 +11,11 @@ async function plain() {
 async function viaPromise() {
   return Promise.resolve(1) // follows the Promise: two more turns
 }
-async function viaAwait() {
-  return await Promise.resolve(1)
-}
 const p = Promise.resolve(0)
 void p.then(() => log("t1")).then(() => log("t2")).then(() => log("t3")).then(() => log("t4"))
   .then(() => log("t5")).then(() => log("t6"))
 void plain().then(() => log("plain"))
 void viaPromise().then(() => log("viaPromise"))
-void viaAwait().then(() => log("viaAwait"))
 void new Promise<int>(resolve => resolve(1)).then(() => log("new Promise"))
 void Promise.resolve(1).finally(() => log("finally callback")).then(() => log("finally"))
 void Promise.all([1, 2]).then(() => log("all"))

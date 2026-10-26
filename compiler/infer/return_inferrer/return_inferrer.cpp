@@ -14,7 +14,6 @@
 #include "compiler/declare/import_binder/import_binder.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/instances/late_classes/late_classes.h"
-#include "compiler/library/result/safe_try_checker/safe_try_checker.h"
 #include "compiler/load/lexer/lexer.h"
 #include "compiler/load/parser/parser.h"
 
@@ -235,9 +234,6 @@ void ReturnInferrer::checkAndInfer(FunctionDecl *decl) {
           ? checker_.generatorChecker().inferGeneratorType(fn, yields, returns, fallsOff, true)
       : decl->isAsync ? checker_.asyncChecker().inferAsyncType(fn, returns, fallsOff, true)
                       : unifyReturns(fn, returns, fallsOff, true);
-  if (decl->safeTry && type && !type->isError()) {
-    type = checker_.safeTryChecker().generatorResult(decl, type);
-  }
   fn->ret = type ? type : Type::error();
   if (decl->isAsync && !decl->isGenerator) {
     checker_.asyncChecker().finishAsyncReturns(fn, returns);

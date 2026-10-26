@@ -52,8 +52,3 @@ async function get, line 53
       parallel
     in the top-level code:
       parallel
-  after await at line 55
-    in the tasks of get at line 58:
-      parallel
-    in the top-level code:
-      parallel

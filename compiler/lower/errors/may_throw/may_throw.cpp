@@ -114,14 +114,11 @@ void MayThrow::analyzeThrows(SourceFile &file) {
   }
 
   llvm::DenseMap<const Type *, std::vector<const FunctionDecl *>> valuesOf;
-  std::vector<std::pair<const Type *, const Expr *>> fromThrowables;
   std::vector<std::pair<const Type *, const Type *>> adapters;
   auto collect = [&](const ThrowSummary &summary) {
     for (const auto &[type, fn] : summary.values) {
       valuesOf[type].push_back(fn);
     }
-    fromThrowables.insert(fromThrowables.end(), summary.fromThrowables.begin(),
-                          summary.fromThrowables.end());
     adapters.insert(adapters.end(), summary.adapters.begin(), summary.adapters.end());
   };
   collect(topLevel);
@@ -246,17 +243,6 @@ void MayThrow::analyzeThrows(SourceFile &file) {
       if (!lowering_.throwingTypes_.contains(type) &&
           llvm::any_of(fns,
                        [&](const FunctionDecl *fn) { return lowering_.throwing_.contains(fn); })) {
-        lowering_.throwingTypes_.insert(type);
-        changed = true;
-      }
-    }
-    for (const auto &[type, toError] : fromThrowables) {
-      if (!toError || lowering_.throwingTypes_.contains(type)) {
-        continue;
-      }
-      auto *fe = dyn_cast<FunctionExpr>(toError);
-      bool throws = fe ? lowering_.throwing_.contains(fe->fn) : lowering_.typeThrows(toError->type);
-      if (throws) {
         lowering_.throwingTypes_.insert(type);
         changed = true;
       }

@@ -7,28 +7,28 @@ andTee 42
 Ok { value: 42 }
 Ok { value: 42 }
 false true
-Err { error: 'empty' } Err { error: 'EMPTY' }
-Err { error: 'empty' }
+Err { error: 'empty' } at parse (result_methods.tz:4) Err { error: 'EMPTY' } at parse (result_methods.tz:4)
+Err { error: 'empty' } at parse (result_methods.tz:4)
 Ok { value: 0 }
 err empty -1
 orTee empty
-Err { error: 'empty' }
-Err { error: 'empty' }
+Err { error: 'empty' } at parse (result_methods.tz:4)
+Err { error: 'empty' } at parse (result_methods.tz:4)
 true false
 Ok { value: 14 } Ok { value: 7 }
-Err { error: 'small' }
+Err { error: 'small' } at result_methods.tz:13
 Ok { value: 7 }
 ok 7 7
 andTee 7
 Ok { value: 7 }
-Err { error: 'seven' }
+Err { error: 'seven' } at result_methods.tz:19
 3
 Ok { value: 1.5 }
 Ok { value: 30 }
-Ok { value: undefined } Err { error: 'no path' }
-Ok { value: 'saved' } Err { error: 'failed: no path' }
+Ok { value: undefined } Err { error: 'no path' } at save (result_methods.tz:30)
+Ok { value: 'saved' } Err { error: 'failed: no path' } at save (result_methods.tz:30)
 saved b.txt
-Ok { value: '<42>' } Err { error: 'too big' }
+Ok { value: '<42>' } Err { error: 'too big' } at check (result_methods.tz:47)
 Ok { value: { x: 2, y: 1 } } { x: 0, y: 0 }
 [ Ok { value: 1 }, Ok { value: 2 } ] [ Ok { value: 1 }, Ok { value: 2 } ]
 63

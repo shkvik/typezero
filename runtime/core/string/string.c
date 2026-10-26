@@ -1498,6 +1498,33 @@ void tz_buf_bytes(TzBuf *b, const uint8_t *units8, size_t length) {
   b->length += length;
 }
 
+void tz_buf_utf8(TzBuf *out, const char *text, size_t n) {
+  const unsigned char *s = (const unsigned char *)text;
+  for (size_t i = 0; i < n;) {
+    uint32_t c = s[i];
+    size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 0;
+    if (len == 0 || i + len > n) {
+      tz_buf_push(out, 0xFFFD);
+      ++i;
+      continue;
+    }
+    if (len > 1) {
+      c &= 0x3Fu >> (len - 1);
+      for (size_t k = 1; k < len; ++k) {
+        c = (c << 6) | (s[i + k] & 0x3Fu);
+      }
+    }
+    i += len;
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      tz_buf_push(out, (uint16_t)(0xD800 + (c >> 10)));
+      tz_buf_push(out, (uint16_t)(0xDC00 + (c & 0x3FF)));
+    } else {
+      tz_buf_push(out, (uint16_t)c);
+    }
+  }
+}
+
 void tz_buf_units(TzBuf *b, const uint16_t *units16, size_t length) {
   buf_reserve(b, length);
   if (length) {

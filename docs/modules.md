@@ -164,16 +164,16 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   ошибки показывает `tz build`. Их даст свой языковой сервер или плагин tsserver, который
   отдаёт файлы `.tz` проверке TypeScript.
 - **Для плагина всё готово** рядом с tz, в `types/`: настройки tsc для программ tz,
-  `@types/node` (node 24), объявления neverthrow и `tz.d.ts` ([editors/types](../editors/types/tz.d.ts)) —
+  `@types/node` (node 24) и `tz.d.ts` ([editors/types](../editors/types/tz.d.ts)) —
   то, что в tz есть без импорта: `int`, `long`, `double`, `decimal` с методами, `Json`,
-  `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` и остальное из
-  neverthrow, `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,
+  `JSON.parse<T>`, `fromJson`, `embedJson`, `embedText`, `embedBytes`, `Result` (свой, без
+  neverthrow), `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,
   `MethodDescriptor`, `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и
   модули `"tz:io"` и `"tz:http"`. Тест `tests/cli/types.cmake` проверяет их TypeScript из
   VS Code на копиях программ с расширением `.ts`. После переделки ошибок и чисел (26 октября)
   объявления надо обновить: числа из [numbers.md](numbers.md) (`int8` … `uint64`, `Bit`,
-  `Bit.Wrap32`, методы `toInt32()` и другие, без `long`), свой `Result` без neverthrow и
-  `safeTry`, `node:fs` и остальное с `Result` вместо исключений, `SystemError` — тип объекта.
+  `Bit.Wrap32`, методы `toInt32()` и другие, без `long`), `node:fs` и остальное с `Result`
+  вместо исключений, `SystemError` — тип объекта. `Result` уже свой (26 октября).
 - **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`), импорты как в tz, DOM
   нет, `strict` без `noImplicitAny` (tz выводит типы параметров из вызовов), декораторы как в tz
   (`experimentalDecorators`). Где tz знает больше, объявление мягче: для tsc целые типы и
@@ -201,9 +201,9 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 4. **Редактор** (сделано 25 октября). Файлы `.tz`: загрузчик, `tz init`, пакеты и `tz port`,
    ошибки с подсказкой на `.ts` и `.js`, все тесты и примеры. Расширение VS Code с подсветкой и
    форматированием Prettier'ом ([editors/vscode](../editors/vscode/README.md)). `tz.d.ts` и настройки tsc рядом с tz,
-   `@types/node`, undici-types и neverthrow в [third_party/types](../third_party/types/README.md),
+   `@types/node` и undici-types в [third_party/types](../third_party/types/README.md),
    тест `tests/cli/types.cmake` — для будущего плагина tsserver; его самого нет.
 5. **Поправки 26 октября** ([errors.md](errors.md), шаги 1–2; [numbers.md](numbers.md)):
-   `JSON.parse`, `JSON.parse<T>` и `fromJson` отдают `Result`; `import` из `"neverthrow"` —
-   ошибка с подсказкой «встроено»; обновить `tz.d.ts` и убрать объявления neverthrow из
-   `third_party/types`.
+   `JSON.parse`, `JSON.parse<T>` и `fromJson` отдают `Result`; обновить `tz.d.ts` под числа и
+   библиотеку на `Result`. Сделано 26 октября: `import` из `"neverthrow"` — ошибка с подсказкой
+   «встроено», свой `Result` в `tz.d.ts`, объявления neverthrow убраны из `third_party/types`.

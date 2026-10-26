@@ -52,7 +52,7 @@ const server = serve({ hostname: "127.0.0.1", port: 0, signal: controller.signal
 
 async function get(path: string) {
   const res = await fetch(`http://127.0.0.1:${server.port}${path}`)
-  return await res.text()
+  return res.text()
 }
 
 const texts = await Promise.all(["/a", "/b", "/c"].map(get))

@@ -277,7 +277,7 @@ bool TypeArgInferrer::bindGenericCall(CallExpr *call, FuncSymbol *generic, llvm:
     auto makesResults = [&](const Expr *arg) {
       auto *name = dyn_cast<NameExpr>(arg);
       llvm::StringRef which =
-          name ? checker_.resultTypes().neverthrowName(name->name) : llvm::StringRef();
+          name ? checker_.resultTypes().resultName(name->name) : llvm::StringRef();
 
       return which == "ok" || which == "err";
     };

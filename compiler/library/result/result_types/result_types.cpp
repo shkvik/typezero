@@ -15,21 +15,9 @@ namespace tz {
 
 namespace {
 
-const llvm::StringLiteral kNeverthrowNames[] = {"ok",
-                                                "err",
-                                                "Result",
-                                                "Ok",
-                                                "Err",
-                                                "safeTry",
-                                                "fromThrowable",
-                                                "fromAsyncThrowable",
-                                                "ResultAsync",
-                                                "okAsync",
-                                                "errAsync",
-                                                "fromPromise",
-                                                "fromSafePromise"};
+const llvm::StringLiteral kResultNames[] = {"ok", "err", "Result", "Ok", "Err"};
 
-const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err", "ResultAsync"};
+const llvm::StringLiteral kResultTypes[] = {"Result", "Ok", "Err"};
 
 llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::StringRef name) {
   for (llvm::StringLiteral n : names) {
@@ -45,59 +33,26 @@ llvm::StringRef findName(llvm::ArrayRef<llvm::StringLiteral> names, llvm::String
 
 ResultTypes::ResultTypes(Checker &checker) : checker_(checker) {}
 
-llvm::StringRef ResultTypes::neverthrowName(llvm::StringRef name) const {
+llvm::StringRef ResultTypes::resultName(llvm::StringRef name) const {
   Checker::ScopeEntry entry = checker_.scopes().lookup(name);
   if (entry.var || entry.func || entry.enumDecl || entry.cls) {
     return {};
   }
-  if (checker_.module_) {
-    const llvm::StringMap<llvm::StringRef> &imported =
-        checker_.moduleStates_[checker_.module_->order].neverthrow;
-    if (auto found = imported.find(name); found != imported.end()) {
-      return found->second;
-    }
-  }
 
-  return findName(kNeverthrowNames, name);
+  return findName(kResultNames, name);
 }
 
-llvm::StringRef ResultTypes::neverthrowTypeName(llvm::StringRef name) const {
+llvm::StringRef ResultTypes::resultTypeName(llvm::StringRef name) const {
   if (checker_.typeDeclarer().lookupType(name)) {
     return {};
-  }
-  if (checker_.module_) {
-    const llvm::StringMap<llvm::StringRef> &imported =
-        checker_.moduleStates_[checker_.module_->order].neverthrow;
-    if (auto found = imported.find(name); found != imported.end()) {
-      return findName(kResultTypes, found->second);
-    }
   }
 
   return findName(kResultTypes, name);
 }
 
-void ResultTypes::importNeverthrow(Module *module, const ImportDecl &decl) {
-  Checker::ModuleState &here = checker_.state(module);
-  for (const ModuleName &name : decl.names) {
-    llvm::StringRef known = findName(kNeverthrowNames, name.name);
-    if (known.empty()) {
-      checker_.diags_.error(name.loc, "'neverthrow' has no export named '" + name.name + "'");
-      continue;
-    }
-    if (auto own = here.declared.find(name.as); own != here.declared.end()) {
-      checker_.diags_.error(
-          name.asLoc, "import '" + name.as + "' conflicts with the declaration of '" + name.as +
-                          "' in this file; import it under another name, e.g. "
-                          "'import { " +
-                          name.name + " as " + name.name + "2 } from \"neverthrow\"'");
-      checker_.diags_.note(own->second, "'" + name.as + "' is declared here");
-      continue;
-    }
-    auto [it, inserted] = here.neverthrow.try_emplace(name.as, known);
-    if (!inserted) {
-      checker_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
-    }
-  }
+void ResultTypes::rejectNeverthrowImport(const ImportDecl &decl) {
+  checker_.diags_.error(decl.pathLoc,
+                        "Result, ok and err are built in: remove the import from 'neverthrow'");
 }
 
 const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef name) {
@@ -120,10 +75,6 @@ const Type *ResultTypes::resolveResultType(const TypeRef &ref, llvm::StringRef n
   } else if (name == "Err") {
     value = Type::never();
   }
-  if (name == "ResultAsync") {
-    return Type::promise(Type::result(value, error));
-  }
-
   return Type::result(value, error);
 }
 

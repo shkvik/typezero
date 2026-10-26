@@ -10,7 +10,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
+#include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -163,16 +163,24 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   const Type *type = member->object->type;
   const Type *value = type->promised();
   llvm::StringRef name = member->name;
-  static const llvm::StringLiteral resultMethods[] = {
-      "map", "mapErr", "andThen", "orElse", "match", "unwrapOr", "andTee", "orTee", "andThrough"};
-  if (value->isResult() && llvm::is_contained(resultMethods, name)) {
-    return checker_.resultAsyncChecker().checkResultAsyncMethod(call, member, name);
-  }
+  static const llvm::StringLiteral resultMethods[] = {"isOk",    "isErr",  "map",       "mapErr",
+                                                      "andThen", "orElse", "match",     "unwrapOr",
+                                                      "andTee",  "orTee",  "andThrough"};
   auto checkArgsLoosely = [&] {
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
+  if (value->isResult() && llvm::is_contained(resultMethods, name)) {
+    auto *object = dyn_cast<NameExpr>(member->object);
+    std::string promise = object ? object->name.str() : "p";
+    return checker_.resultChecker().reject(
+        call, member->loc(),
+        "'" + name.str() +
+            "' is a method of Result, not of Promise; await the Promise first: "
+            "'(await " +
+            promise + ")." + name.str() + "(...)'");
+  }
   if (checker_.callChecker().rejectSpread(call)) {
     return call;
   }

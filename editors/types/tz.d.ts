@@ -5,7 +5,7 @@
 //
 // It lies next to tz as types/node_modules/@types/tz/index.d.ts, and
 // types/tsconfig.json (editors/types/tsconfig.json) brings it in together with
-// @types/node and neverthrow: for a plugin of tsserver that would give the
+// @types/node: for a plugin of tsserver that would give the
 // .tz files of the editor to TypeScript's checker. There is none yet;
 // tests/cli/types.cmake checks these declarations on .ts copies of programs.
 //
@@ -181,25 +181,45 @@ declare namespace Reflect {
   }
 }
 
-// Result of neverthrow (docs/errors.md, section 4): built in, no import
-// needed; `import { ok } from "neverthrow"` works too.
-type Result<T, E> = import("neverthrow").Result<T, E>
-type Ok<T, E> = import("neverthrow").Ok<T, E>
-type Err<T, E> = import("neverthrow").Err<T, E>
-type ResultAsync<T, E> = import("neverthrow").ResultAsync<T, E>
-declare const Result: typeof import("neverthrow").Result
-declare const Ok: typeof import("neverthrow").Ok
-declare const Err: typeof import("neverthrow").Err
-declare const ResultAsync: typeof import("neverthrow").ResultAsync
-declare const ok: typeof import("neverthrow").ok
-declare const err: typeof import("neverthrow").err
-declare const safeTry: typeof import("neverthrow").safeTry
-declare const fromThrowable: typeof import("neverthrow").fromThrowable
-declare const fromAsyncThrowable: typeof import("neverthrow").fromAsyncThrowable
-declare const okAsync: typeof import("neverthrow").okAsync
-declare const errAsync: typeof import("neverthrow").errAsync
-declare const fromPromise: typeof import("neverthrow").fromPromise
-declare const fromSafePromise: typeof import("neverthrow").fromSafePromise
+// Result (docs/errors.md, section 1): built in, no import.
+interface ResultMethods<T, E> {
+  isOk(): this is Ok<T, E>
+  isErr(): this is Err<T, E>
+  map<U>(f: (value: T) => U): Result<U, E>
+  mapErr<F>(f: (error: E) => F): Result<T, F>
+  andThen<U, F>(f: (value: T) => Result<U, F>): Result<U, E | F>
+  orElse<U, F>(f: (error: E) => Result<U, F>): Result<T | U, F>
+  match<A, B = A>(ok: (value: T) => A, err: (error: E) => B): A | B
+  unwrapOr<U>(fallback: U): T | U
+  andTee(f: (value: T) => unknown): Result<T, E>
+  orTee(f: (error: E) => unknown): Result<T, E>
+  andThrough<F>(f: (value: T) => Result<unknown, F>): Result<T, E | F>
+}
+interface Ok<T, E> extends ResultMethods<T, E> {
+  readonly value: T
+}
+interface Err<T, E> extends ResultMethods<T, E> {
+  readonly error: E
+}
+type Result<T, E> = Ok<T, E> | Err<T, E>
+type ResultValue<R> = R extends Ok<infer T, unknown> | Err<infer T, unknown> ? T : never
+type ResultError<R> = R extends Ok<unknown, infer E> | Err<unknown, infer E> ? E : never
+type ResultValues<R extends readonly Result<unknown, unknown>[]> = {
+  -readonly [K in keyof R]: ResultValue<R[K]>
+}
+declare function ok<T, E = never>(value: T): Ok<T, E>
+declare function ok<T extends void = void, E = never>(value: void): Ok<void, E>
+declare function err<T = never, E extends string = string>(error: E): Err<T, E>
+declare function err<T = never, E = unknown>(error: E): Err<T, E>
+declare function err<T = never, E extends void = void>(error: void): Err<T, void>
+declare const Result: {
+  combine<R extends readonly Result<unknown, unknown>[]>(
+    results: readonly [...R],
+  ): Result<ResultValues<R>, ResultError<R[number]>>
+  combineWithAllErrors<R extends readonly Result<unknown, unknown>[]>(
+    results: readonly [...R],
+  ): Result<ResultValues<R>, ResultError<R[number]>[]>
+}
 
 // Input line by line (docs/io.md, section 4).
 declare module "tz:io" {

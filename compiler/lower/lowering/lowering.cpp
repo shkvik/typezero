@@ -23,9 +23,7 @@
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
-#include "compiler/library/result/from_throwable_lowerer/from_throwable_lowerer.h"
-#include "compiler/library/result/result_async_handler/result_async_handler.h"
-#include "compiler/library/result/result_async_lowerer/result_async_lowerer.h"
+#include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/stream/stream_lowerer/stream_lowerer.h"
@@ -140,8 +138,6 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   asyncLowererPart_ = std::make_unique<AsyncLowerer>(*this);
   promiseCombineLowererPart_ = std::make_unique<PromiseCombineLowerer>(*this);
   reactionLowererPart_ = std::make_unique<ReactionLowerer>(*this);
-  resultAsyncHandlerPart_ = std::make_unique<ResultAsyncHandler>(*this);
-  resultAsyncLowererPart_ = std::make_unique<ResultAsyncLowerer>(*this);
   asyncBuiltinLowererPart_ = std::make_unique<AsyncBuiltinLowerer>(*this);
   asyncGeneratorLowererPart_ = std::make_unique<AsyncGeneratorLowerer>(*this);
   mathLowererPart_ = std::make_unique<MathLowerer>(*this);
@@ -172,7 +168,6 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   unwindLowererPart_ = std::make_unique<UnwindLowerer>(*this);
   tryLowererPart_ = std::make_unique<TryLowerer>(*this);
   errorLowererPart_ = std::make_unique<ErrorLowerer>(*this);
-  fromThrowableLowererPart_ = std::make_unique<FromThrowableLowerer>(*this);
   unionLayoutPart_ = std::make_unique<UnionLayout>(*this);
   unionLowererPart_ = std::make_unique<UnionLowerer>(*this);
   unionMemberLowererPart_ = std::make_unique<UnionMemberLowerer>(*this);
@@ -204,6 +199,7 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   regexNativeLowererPart_ = std::make_unique<RegexNativeLowerer>(*this);
   resultLowererPart_ = std::make_unique<ResultLowerer>(*this);
   resultCombineLowererPart_ = std::make_unique<ResultCombineLowerer>(*this);
+  errSitesPart_ = std::make_unique<ErrSites>(*this);
   streamLowererPart_ = std::make_unique<StreamLowerer>(*this);
   tzModulesLowererPart_ = std::make_unique<TzModulesLowerer>(*this);
   module_->setDataLayout(layout);

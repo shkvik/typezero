@@ -9,9 +9,9 @@ Ann Object [RegExp String Iterator] {}
 [
   Ok { value: { key: 'mode', value: 'fast' } },
   Ok { value: { key: 'level', value: '3' } },
-  Err { error: "not a setting: 'bad line'" }
+  Err { error: "not a setting: 'bad line'" } at parseSetting (patterns.tz:21)
 ] Ok { value: 2 }
-Ok { value: 'ANN' } Err { error: "not a setting: '?'" }
+Ok { value: 'ANN' } Err { error: "not a setting: '?'" } at parseSetting (patterns.tz:21)
 { value: /(?<y>\d{4})-(?<m>\d{2})/ } {
   value: [
     '2024-05',

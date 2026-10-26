@@ -1,12 +1,12 @@
 [
   Ok { value: Item { name: 'tea', price: 4.2, qty: 3 } },
-  Err { error: "bad line 'cake;12.5'" },
+  Err { error: "bad line 'cake;12.5'" } at parseLines (shop.tz:11),
   Ok { value: Item { name: 'jam', price: 1.1, qty: 2 } }
 ]
 [ '3 x tea', '2 x jam', '1 x milk' ] [ 1, 2, 4, 8 ]
 total 15.79 [ '12.60', '2.20', '0.99' ]
 Ok { value: 2 }
-Err { error: "bad line 'oops'" }
+Err { error: "bad line 'oops'" } at parseLines (shop.tz:11)
 [
   Item { name: 'tea', price: 4.2, qty: 3 },
   Item { name: 'jam', price: 1.1, qty: 2 }
@@ -15,4 +15,4 @@ Err { error: "bad line 'oops'" }
 { value: Object [Generator] {} } { value: '3 x tea', done: false }
 { value: 1, done: false } { value: 2, done: false } 5 Reader { source: Object [Generator] {} }
 [ 1, 2, 3 ] 3
-Ok { value: 5 } Err { error: "bad line '?'" }
+Ok { value: 5 } Err { error: "bad line '?'" } at parseLines (shop.tz:11)

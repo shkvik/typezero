@@ -60,8 +60,6 @@ class PromiseLowerer;
 class AsyncLowerer;
 class PromiseCombineLowerer;
 class ReactionLowerer;
-class ResultAsyncHandler;
-class ResultAsyncLowerer;
 class AsyncBuiltinLowerer;
 class AsyncGeneratorLowerer;
 class MathLowerer;
@@ -92,7 +90,6 @@ class ThrowLowerer;
 class UnwindLowerer;
 class TryLowerer;
 class ErrorLowerer;
-class FromThrowableLowerer;
 class UnionLayout;
 class UnionLowerer;
 class UnionMemberLowerer;
@@ -124,6 +121,7 @@ class RegexLowerer;
 class RegexNativeLowerer;
 class ResultLowerer;
 class ResultCombineLowerer;
+class ErrSites;
 class StreamLowerer;
 class TzModulesLowerer;
 
@@ -185,7 +183,7 @@ private:
   bool hasSubtypes(const Type *type) const { return withSubtypes_.contains(type); }
   struct ResultLayout {
     llvm::StructType *type = nullptr;
-    unsigned value = 0, error = 0, ok = 0;
+    unsigned value = 0, error = 0, ok = 0, site = 0;
   };
   struct TailGroup {
     std::vector<FunctionDecl *> members;
@@ -504,8 +502,6 @@ public:
   AsyncLowerer &asyncLowerer() const { return *asyncLowererPart_; }
   PromiseCombineLowerer &promiseCombineLowerer() const { return *promiseCombineLowererPart_; }
   ReactionLowerer &reactionLowerer() const { return *reactionLowererPart_; }
-  ResultAsyncHandler &resultAsyncHandler() const { return *resultAsyncHandlerPart_; }
-  ResultAsyncLowerer &resultAsyncLowerer() const { return *resultAsyncLowererPart_; }
   AsyncBuiltinLowerer &asyncBuiltinLowerer() const { return *asyncBuiltinLowererPart_; }
   AsyncGeneratorLowerer &asyncGeneratorLowerer() const { return *asyncGeneratorLowererPart_; }
   MathLowerer &mathLowerer() const { return *mathLowererPart_; }
@@ -536,7 +532,6 @@ public:
   UnwindLowerer &unwindLowerer() const { return *unwindLowererPart_; }
   TryLowerer &tryLowerer() const { return *tryLowererPart_; }
   ErrorLowerer &errorLowerer() const { return *errorLowererPart_; }
-  FromThrowableLowerer &fromThrowableLowerer() const { return *fromThrowableLowererPart_; }
   UnionLayout &unionLayout() const { return *unionLayoutPart_; }
   UnionLowerer &unionLowerer() const { return *unionLowererPart_; }
   UnionMemberLowerer &unionMemberLowerer() const { return *unionMemberLowererPart_; }
@@ -568,6 +563,7 @@ public:
   RegexNativeLowerer &regexNativeLowerer() const { return *regexNativeLowererPart_; }
   ResultLowerer &resultLowerer() const { return *resultLowererPart_; }
   ResultCombineLowerer &resultCombineLowerer() const { return *resultCombineLowererPart_; }
+  ErrSites &errSites() const { return *errSitesPart_; }
   StreamLowerer &streamLowerer() const { return *streamLowererPart_; }
   TzModulesLowerer &tzModulesLowerer() const { return *tzModulesLowererPart_; }
 
@@ -600,8 +596,6 @@ private:
   friend class AsyncLowerer;
   friend class PromiseCombineLowerer;
   friend class ReactionLowerer;
-  friend class ResultAsyncHandler;
-  friend class ResultAsyncLowerer;
   friend class AsyncBuiltinLowerer;
   friend class AsyncGeneratorLowerer;
   friend class MathLowerer;
@@ -632,7 +626,6 @@ private:
   friend class UnwindLowerer;
   friend class TryLowerer;
   friend class ErrorLowerer;
-  friend class FromThrowableLowerer;
   friend class UnionLayout;
   friend class UnionLowerer;
   friend class UnionMemberLowerer;
@@ -670,6 +663,7 @@ private:
   friend class RegexNativeLowerer;
   friend class ResultLowerer;
   friend class ResultCombineLowerer;
+  friend class ErrSites;
   friend class StreamLowerer;
   friend class TzModulesLowerer;
   std::unique_ptr<ModuleBuilder> moduleBuilderPart_;
@@ -700,8 +694,6 @@ private:
   std::unique_ptr<AsyncLowerer> asyncLowererPart_;
   std::unique_ptr<PromiseCombineLowerer> promiseCombineLowererPart_;
   std::unique_ptr<ReactionLowerer> reactionLowererPart_;
-  std::unique_ptr<ResultAsyncHandler> resultAsyncHandlerPart_;
-  std::unique_ptr<ResultAsyncLowerer> resultAsyncLowererPart_;
   std::unique_ptr<AsyncBuiltinLowerer> asyncBuiltinLowererPart_;
   std::unique_ptr<AsyncGeneratorLowerer> asyncGeneratorLowererPart_;
   std::unique_ptr<MathLowerer> mathLowererPart_;
@@ -732,7 +724,6 @@ private:
   std::unique_ptr<UnwindLowerer> unwindLowererPart_;
   std::unique_ptr<TryLowerer> tryLowererPart_;
   std::unique_ptr<ErrorLowerer> errorLowererPart_;
-  std::unique_ptr<FromThrowableLowerer> fromThrowableLowererPart_;
   std::unique_ptr<UnionLayout> unionLayoutPart_;
   std::unique_ptr<UnionLowerer> unionLowererPart_;
   std::unique_ptr<UnionMemberLowerer> unionMemberLowererPart_;
@@ -764,6 +755,7 @@ private:
   std::unique_ptr<RegexNativeLowerer> regexNativeLowererPart_;
   std::unique_ptr<ResultLowerer> resultLowererPart_;
   std::unique_ptr<ResultCombineLowerer> resultCombineLowererPart_;
+  std::unique_ptr<ErrSites> errSitesPart_;
   std::unique_ptr<StreamLowerer> streamLowererPart_;
   std::unique_ptr<TzModulesLowerer> tzModulesLowererPart_;
 };

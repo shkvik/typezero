@@ -42,12 +42,3 @@ const t: TypeError = new RangeError("r")
 // expect-error: 'instanceof' tests an object, found 'string'
 const s = "x" instanceof TypeError
 
-// Result.fromThrowable takes a function, and one that turns the Error into
-// the error of the Result.
-// expect-error: 'fromThrowable' takes a function, found 'int'
-const g = Result.fromThrowable(5)
-// expect-error: parameter 'x' is declared as 'int', but the function gets 'Error' here
-const h = Result.fromThrowable(() => 1, (x: int) => x)
-const r = ok(1)
-// expect-error: expected 0 arguments, but got 1
-const v = r._unsafeUnwrap({ withStackTrace: true })

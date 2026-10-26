@@ -21,7 +21,6 @@ struct ThrowSummary {
   std::vector<std::pair<const FunctionDecl *, const CallExpr *>> allCalls;
   std::vector<const Type *> allValueCalls;
   std::vector<std::pair<const Type *, const FunctionDecl *>> values;
-  std::vector<std::pair<const Type *, const Expr *>> fromThrowables;
   std::vector<std::pair<const Type *, const Type *>> adapters;
   std::vector<const FunctionDecl *> nested;
 };

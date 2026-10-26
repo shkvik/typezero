@@ -1,8 +1,8 @@
 // Result together with the rest of the language: generic functions over
 // Results (ok of a type parameter, type arguments inferred from Results,
-// `ok` passed to a generic function, safeTry in a generic function, one copy
-// for all object types), decimal values in both halves, objects and tuples
-// in Results, and Results from another file.
+// `ok` passed to a generic function, early returns in a generic function, one
+// copy for all object types), decimal values in both halves, objects and
+// tuples in Results, and Results from another file.
 import { Order, Parsed, parseName, parsePrice, parseQty } from "./orders"
 
 function wrap<T>(x: T) {
@@ -21,11 +21,9 @@ function mapAll<T, U>(xs: T[], f: (x: T) => U): U[] {
 }
 
 function pairUp<A, B>(a: Parsed<A>, b: Parsed<B>) {
-  return safeTry(function* () {
-    const first = yield* a
-    const second = yield* b
-    return ok({ first, second })
-  })
+  if (a.isErr()) return a
+  if (b.isErr()) return b
+  return ok({ first: a.value, second: b.value })
 }
 
 function parseOrder(line: string): Parsed<Order> {

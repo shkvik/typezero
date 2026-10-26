@@ -45,7 +45,7 @@ void calledFunctions(const CallExpr *call, llvm::SmallVectorImpl<const FunctionD
     }
   }
   if ((call->builtin >= Builtin::ArrForEach && call->builtin <= Builtin::ArrSortWith) ||
-      isResultCallback(call->builtin) || call->builtin == Builtin::SafeTry) {
+      isResultCallback(call->builtin)) {
     for (const Expr *arg : call->args) {
       if (const FunctionDecl *fn = directFunction(arg)) {
         called.push_back(fn);

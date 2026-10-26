@@ -143,11 +143,9 @@
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/regex/regex_checker/regex_checker.h"
 #include "compiler/library/regex/string_regex_checker/string_regex_checker.h"
-#include "compiler/library/result/result_async_checker/result_async_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/result/result_method_checker/result_method_checker.h"
 #include "compiler/library/result/result_types/result_types.h"
-#include "compiler/library/result/safe_try_checker/safe_try_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/library/stream/stream_checker/stream_checker.h"
@@ -237,7 +235,6 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   promiseCheckerPart_ = std::make_unique<PromiseChecker>(*this);
   promiseStaticCheckerPart_ = std::make_unique<PromiseStaticChecker>(*this);
   timerCheckerPart_ = std::make_unique<TimerChecker>(*this);
-  resultAsyncCheckerPart_ = std::make_unique<ResultAsyncChecker>(*this);
   mathCheckerPart_ = std::make_unique<MathChecker>(*this);
   globalFunctionCheckerPart_ = std::make_unique<GlobalFunctionChecker>(*this);
   numberMethodsPart_ = std::make_unique<NumberMethods>(*this);
@@ -358,7 +355,6 @@ Checker::Checker(AstContext &ctx, Diagnostics &diags) : ctx_(ctx), diags_(diags)
   matchCheckerPart_ = std::make_unique<MatchChecker>(*this);
   resultTypesPart_ = std::make_unique<ResultTypes>(*this);
   resultCheckerPart_ = std::make_unique<ResultChecker>(*this);
-  safeTryCheckerPart_ = std::make_unique<SafeTryChecker>(*this);
   resultMethodCheckerPart_ = std::make_unique<ResultMethodChecker>(*this);
   chunkTypesPart_ = std::make_unique<ChunkTypes>(*this);
   streamNewCheckerPart_ = std::make_unique<StreamNewChecker>(*this);

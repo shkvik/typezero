@@ -1,0 +1,11 @@
+// The methods of Result are not on a Promise of one: await it first
+// (docs/errors.md, section 4).
+async function get(n: int) {
+  return n > 0 ? ok(n) : err("not positive")
+}
+// expect-error: 'map' is a method of Result, not of Promise; await the Promise first: '(await p).map(...)'
+const mapped = get(1).map((x) => x + 1)
+const pending = get(2)
+// expect-error: 'isOk' is a method of Result, not of Promise; await the Promise first: '(await pending).isOk(...)'
+console.log(pending.isOk())
+console.log((await pending).isOk(), (await get(3)).map((x) => x + 1))

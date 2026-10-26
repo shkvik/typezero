@@ -369,7 +369,7 @@ export async function once<A extends unknown[], R extends unknown[]>(
 ): Promise<A> {
   const signal = options?.signal
   if (signal != undefined && signal.aborted) throw new AbortError(errorOf(signal.reason))
-  return await new Promise<A>((resolve, reject) => {
+  return new Promise<A>((resolve, reject) => {
     function errorListener(...err: R) {
       emitter.removeListener(name, resolver)
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
@@ -556,7 +556,7 @@ async function onceTarget(
 ): Promise<[Event]> {
   const signal = options?.signal
   if (signal != undefined && signal.aborted) throw new AbortError(errorOf(signal.reason))
-  return await new Promise<[Event]>((resolve, reject) => {
+  return new Promise<[Event]>((resolve, reject) => {
     function resolver(event: Event) {
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
       resolve([event])

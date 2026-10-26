@@ -1,19 +1,19 @@
-Ok { value: 42 } Err { error: 'пусто' } Err { error: 'не число' }
+Ok { value: 42 } Err { error: 'пусто' } at parseIntSafe (result.tz:6) Err { error: 'не число' } at parseIntSafe (result.tz:8)
 получилось 84
-Ok { value: 'a' } Err { error: 'blank' }
+Ok { value: 'a' } Err { error: 'blank' } at trimmed (result.tz:19)
 Ok { value: 0.5 }
-1 e Ok { value: undefined } Err { error: undefined }
+1 e Ok { value: undefined } Err { error: undefined } at result.tz:28
 Ok { value: 0 }
-Err { error: 'broken' }
+Err { error: 'broken' } at result.tz:32
 число 42 ошибка: пусто
 big 7
 21
 8
 3
-[ Ok { value: 1 }, Err { error: 2 } ]
+[ Ok { value: 1 }, Err { error: 2 } at result.tz:56 ]
 {
   result: Ok { value: { name: 'Bob', age: 3 } },
-  other: Err { error: 'x' }
+  other: Err { error: 'x' } at result.tz:57
 }
 Ok { value: Ok { value: Ok { value: [Ok] } } }
 Ok { value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
@@ -22,7 +22,7 @@ Ok {
 }
 Err {
   error: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-}
+} at result.tz:61
 Ok {
   value: {
     a: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
@@ -30,3 +30,5 @@ Ok {
   }
 }
 object
+Ok { value: '8' } Err { error: 'пусто' } at parseIntSafe (result.tz:6)
+Err { error: 8 } at parseIntSafe (result.tz:8)

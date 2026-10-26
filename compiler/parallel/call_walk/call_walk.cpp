@@ -48,19 +48,7 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
   case Builtin::QueueMicrotask:
   case Builtin::NextTick:
   case Builtin::RlQuestionCallback:
-  case Builtin::ResultAsyncMap:
-  case Builtin::ResultAsyncMapErr:
-  case Builtin::ResultAsyncAndThen:
-  case Builtin::ResultAsyncOrElse:
-  case Builtin::ResultAsyncMatch:
-  case Builtin::ResultAsyncUnwrapOr:
-  case Builtin::ResultAsyncAndTee:
-  case Builtin::ResultAsyncOrTee:
-  case Builtin::ResultAsyncFromPromise:
     return CallKind::Later;
-  case Builtin::ResultFromThrowable:
-  case Builtin::ResultAsyncFromThrowable:
-    return std::nullopt;
   default:
     break;
   }
@@ -85,7 +73,6 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
   case Builtin::MapForEach:
   case Builtin::DictGroupBy:
   case Builtin::StrReplaceRegexFn:
-  case Builtin::SafeTry:
   case Builtin::PromiseNew:
     return CallKind::Inline;
   default:
@@ -96,7 +83,6 @@ std::optional<CallKind> callbackKind(Builtin builtin) {
 bool callsOnce(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseNew:
-  case Builtin::SafeTry:
     return true;
   default:
     return isResultCallback(builtin);
@@ -375,11 +361,6 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
       }
       continue;
     }
-    if ((b == Builtin::ResultFromThrowable || b == Builtin::ResultAsyncFromThrowable) && fn &&
-        functionRef(arg, {}, c->type)) {
-      analysis_.exprWalk().expr(arg);
-      continue;
-    }
     analysis_.exprWalk().expr(arg, i == 0 ? inner : Use());
   }
   if (mayThrow(b)) {
@@ -419,8 +400,7 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
   if (kind == CallKind::Later) {
     rec.interval |= b == Builtin::SetInterval;
     rec.handled |= b == Builtin::PromiseThen || b == Builtin::PromiseCatch ||
-                   b == Builtin::PromiseFinally || isResultAsyncMethod(b) ||
-                   b == Builtin::RlQuestionCallback;
+                   b == Builtin::PromiseFinally || b == Builtin::RlQuestionCallback;
   }
   if (kind == CallKind::Inline && !callsOnce(b)) {
     rec.repeated = true;

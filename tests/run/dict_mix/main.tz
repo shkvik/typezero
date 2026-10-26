@@ -7,7 +7,6 @@
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { extname, join } from "node:path"
 import { tmpdir } from "node:os"
-import { err, ok, Result } from "neverthrow"
 import { Inventory, Ledger, Priced, Shop } from "./stock.tz"
 
 // 1. Classes up a chain and an interface.
