@@ -67,7 +67,10 @@ hono, valibot, remeda, ts-pattern, стандартная библиотека D
   | hono | HTTP во встроенной библиотеке |
   | date-fns | `Date` ([date.md](date.md)) |
 
-  neverthrow уже встроен в язык ([errors.md](errors.md)).
+  neverthrow больше не нужен: `Result`, `ok`, `err` встроены в язык, но без `safeTry`,
+  `ResultAsync` и `fromThrowable` — с neverthrow tz не совместим ([errors.md](errors.md)).
+  Перенесённые пакеты, которые бросают исключения (zod, hono, uuid…), при переносе
+  переписываются на `Result` ([errors.md](errors.md), шаг 2).
 
 ## 3. Откуда брать
 

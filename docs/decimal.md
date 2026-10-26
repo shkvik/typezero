@@ -1,7 +1,9 @@
 # Точные десятичные числа: `decimal`
 
-Решения, принятые 23 октября 2026 года. Шаги 1 и 2 плана сделаны 24 октября, `JSON.stringify` —
-вместе с JSON; ошибки при выполнении — исключения.
+Решения, принятые 23 октября 2026 года, и поправки 26 октября: целое становится `decimal` только
+явно, разбор строки отдаёт `Result`, деление на ноль и корень из отрицательного доказываются при
+сборке, как у других чисел ([numbers.md](numbers.md), [errors.md](errors.md)). Шаги 1 и 2 плана
+сделаны 24 октября, `JSON.stringify` — вместе с JSON.
 
 ## Коротко
 
@@ -10,7 +12,8 @@
   `0.1 + 0.2` должно быть `0.3`.
 - Литерал, который стоит там, где ждут `decimal`, читается из текста программы — точно.
 - `NaN` и `Infinity` нет; общей настройки точности на всю программу нет.
-- `bigint` нет: `10n` и `BigInt(x)` — ошибка с подсказкой `long` или `decimal`.
+- `bigint` нет: `10n` и `BigInt(x)` — ошибка с подсказкой `int` или `decimal`.
+- Любое изменение типа — явно, как у всех чисел: `price * qty.toDecimal()`.
 
 ## 1. Как выглядит
 
@@ -35,16 +38,22 @@ if (total.gt(50)) console.log(total.toString())
 
 ```ts
 const big: decimal = 123456789012345678901234567890   // точно (number в node: 1.2345678901234568e+29)
-const sum = price * qty                // qty: int — int и long становятся decimal сами, без потерь
-const parsed = decimal("0.1")          // из строки; "abc" → SyntaxError, как BigInt("abc")
-const bad = price * rate               // rate: double — ошибка → price * decimal(rate)
+const sum = price * qty                // qty: int — ошибка: int в decimal только явно
+const sum2 = price * qty.toDecimal()   // ок: из целого — без потерь
+const times3 = price * 3               // ок: литерал подстраивается сам
+const parsed = decimal(text)           // из строки: Result<decimal, …> — "abc" → Err
+const bad = price * rate               // rate: double — ошибка → price * rate.toDecimal()
 decimal(0.1)                           // 0.1 — кратчайшая запись, как в BigNumber.js
 decimal(0.1 + 0.2)                     // 0.30000000000000004: ошибка уже в double
 Number(total)                          // decimal → double
 ```
 
-- **`double` → `decimal` только явно**: `double` уже неточный, и молча переносить его
-  неточность в точный тип нельзя. Значение — кратчайшая запись числа, как у `String(x)` в JS.
+- **Любое изменение типа — явно** ([numbers.md](numbers.md), раздел 3): `x.toDecimal()` или
+  `decimal(x)`, хотя из целого перевод ничего не теряет. Литерал подстраивается сам.
+- **`double` → `decimal`**: значение — кратчайшая запись числа, как у `String(x)` в JS;
+  неточность `double` переносится как есть (`decimal(0.1 + 0.2)`).
+- **Из строки** — `decimal(text)` отдаёт `Result`: `Err` на мусор. Строка-литерал
+  (`decimal("0.1")`) проверяется при сборке и даёт просто `decimal`.
 - **Печать** — `console.log`, `String(x)`, шаблон — без степени: `decimal(2) ** 100` печатается
   как `1267650600228229401496703205376` (BigNumber.js: `1.267650600228229401496703205376e+30`).
   `console.log(price)` печатает `19.99`, а не внутренности объекта, как node с BigNumber.js.
@@ -99,21 +108,20 @@ decimal("0.30") == decimal("0.3")                   // true
 
 | Что | tz | BigNumber.js |
 |---|---|---|
-| `x / n` при `n = 0` | `RangeError`, как `1n / 0n` в JS | `Infinity` или `NaN` |
-| `x / 0` — константа | ошибка компиляции, как у `int` | `Infinity` |
-| `decimal(NaN)`, `decimal(Infinity)` | `RangeError`, как `BigInt(NaN)` | `NaN`, `Infinity` |
-| `decimal("abc")` | `SyntaxError`, как `BigInt("abc")` | исключение |
-| `sqrt()` отрицательного | `RangeError` | `NaN` |
+| `x / n`, `x % n` | ошибка компиляции, если не доказано `n ≠ 0`, — как у целых | `Infinity` или `NaN` при `n = 0` |
+| `decimal(d)` из `double` | всегда число: `NaN` и `Infinity` у `double` в tz нет | `NaN`, `Infinity` |
+| `decimal(text)` с мусором | `Err` | исключение |
+| `sqrt()` | ошибка компиляции, если не доказано `x ≥ 0` | `NaN` |
 
 ## 7. `bigint`
 
-`10n`, `BigInt(5)`, `typeof x == "bigint"` — ошибка с подсказкой: целые до 9.2·10¹⁸ — `long`,
+`10n`, `BigInt(5)`, `typeof x == "bigint"` — ошибка с подсказкой: целые до 9.2·10¹⁸ — `int`,
 длиннее — `decimal` (`decimal(2) ** 100` считается точно).
 
 ## 8. Как устроен
 
-Значение, как строка: неизменяемое, с подсчётом ссылок. Число до 18 цифр хранится как целое
-`long` плюс «сколько знаков после точки», без кучи: сложение и умножение — обычные целые
+Значение, как строка: неизменяемое, с подсчётом ссылок. Число до 18 цифр хранится как 64-битное
+целое плюс «сколько знаков после точки», без кучи: сложение и умножение — обычные целые
 операции, при переполнении — переход к длинной форме. Длиннее — цифры в куче. BigNumber.js на
 каждую операцию создаёт объект и массив.
 
@@ -131,3 +139,6 @@ decimal("0.30") == decimal("0.3")                   // true
 2. **Методы** (сделано). `div` с режимами, `round`, `toFixed`, `toFormat`, `toString(base)`,
    `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`, `shiftedBy`,
    `toFraction`, `decimal.max` / `min` / `sum`; `JSON.stringify` строкой.
+3. **Поправки 26 октября** (с [numbers.md](numbers.md), шаг 2, и [errors.md](errors.md),
+   шаг 2): целое в `decimal` только явно (`toDecimal()`), `decimal(text)` — `Result`, деление
+   и `sqrt` — с доказательством вместо `RangeError`.

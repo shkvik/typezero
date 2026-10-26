@@ -1,6 +1,7 @@
 # Декораторы
 
-Решения, принятые 23 октября 2026 года. Все шаги плана сделаны 24–25 октября.
+Решения, принятые 23 октября 2026 года. Все шаги плана сделаны 24–25 октября. Поправка
+26 октября: ошибки отражения — `Result`, а не `TypeError` (раздел 6, [errors.md](errors.md)).
 
 ## Коротко
 
@@ -165,13 +166,13 @@ function Get(path: string) {
   return (cls: Constructor, method: string) => { routes.push({ path, cls, method }) }
 }
 
-function handle(path: string): unknown {
+function handle(path: string) {
   const route = routes.find(r => r.path == path)
-  if (route == undefined) return "404"
+  if (route == undefined) return err("404")
   const controller = new route.cls()                 // класс известен только во время работы
   const method = Reflect.get(controller, route.method)  // метод по имени из строки
-  if (typeof method != "function") return "500"
-  return Reflect.apply(method, controller, [])
+  if (typeof method != "function") return err("500")
+  return Reflect.apply(method, controller, [])       // Result<unknown, ReflectError>
 }
 ```
 
@@ -184,7 +185,8 @@ function handle(path: string): unknown {
   `Reflect.construct(cls, args)` — аргументы проверяются по параметрам;
 - список полей класса с типами — чтобы превратить JSON (`Json`, [modules.md](modules.md)) в
   объект нужного класса с проверкой каждого поля;
-- не тот аргумент, нет метода, поле не того типа — `TypeError` с понятным текстом.
+- не тот аргумент, нет метода, поле не того типа — `Err` с понятным текстом:
+  `Reflect.apply` и `Reflect.construct` отдают `Result` ([errors.md](errors.md)).
 
 Описание попадает в exe только для классов, до которых отражение реально доходит (в примере —
 `UsersController`, он попал в `routes` через `@Get`). Остальные классы ничего не платят.

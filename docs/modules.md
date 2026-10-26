@@ -2,7 +2,9 @@
 
 Решения, принятые 23 октября 2026 года. Шаги 1–3 плана сделаны 24 октября (`embedBytes` — вместе с
 байтами), шаг 4 — 25 октября. 25 октября решено, что файлы tz называются `.tz` (раздел 2);
-подробности — в конце, в разделе «План реализации».
+26 октября — что разбор JSON отдаёт `Result` ([errors.md](errors.md)), а числа из `Json`
+переводят явными методами ([numbers.md](numbers.md)); подробности — в конце, в разделе «План
+реализации».
 
 ## Коротко
 
@@ -128,10 +130,12 @@ const page = embedText("./page.html")       // string
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 ```
 
-- `JSON.parse(text)` возвращает `Json` (в TS — `any`, а `any` у нас нет). Синтаксическая
-  ошибка — исключение `SyntaxError`.
+- `JSON.parse(text)` возвращает `Result<Json, JsonError>` (в TS — `any`, а `any` у нас нет).
+  Синтаксическая ошибка — `Err` с местом в тексте.
 - Числа в `Json` — `double` (JSON не различает целые и дробные, а объединение `int | double`
-  запрещено); в `int` переводит программист (`port | 0`).
+  запрещено); в `int` переводят явно: `Math.trunc(port).toInt()` с доказательством, что влезает
+  ([numbers.md](numbers.md)), — или сразу `JSON.parse<Config>` с полем `port: int`: тогда
+  целое и диапазон проверяет сгенерированный разбор.
 - **`null` бывает только в значениях `Json`.** `{"phone": null}` даёт `j["phone"] == null`,
   а отсутствующий ключ — `undefined`; `JSON.stringify(j)` выдаёт исходный текст без потерь. Во
   всём остальном языке «ничего» одно — `undefined`: `let x: string | null` — ошибка с
@@ -139,8 +143,9 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 - `JSON.stringify` своего объекта пропускает поля со значением `undefined`, как JS. Нужен
   `null` в выводе — собрать `Json` явно: `const patch: Json = { phone: null }`.
 - **Перевод `Json` в свои типы пишет компилятор:** `JSON.parse<Config>(text)` или
-  `fromJson<Config>(j)` проверяет каждое поле и строит объект, ошибка — `TypeError` с путём до
-  поля ([narrowing.md](narrowing.md), раздел 3). Руками тоже можно — проверками и сужением.
+  `fromJson<Config>(j)` проверяет каждое поле и строит объект; результат — `Result`, `Err` с
+  путём до поля ([narrowing.md](narrowing.md), раздел 3). Руками тоже можно — проверками и
+  сужением.
 
 ## 6. Редактор
 
@@ -165,12 +170,14 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
   neverthrow, `SystemError`, `ExecSyncError`, `Constructor`, `ConstructorArgs`,
   `MethodDescriptor`, `Reflect.defineMetadata` и `getMetadata`, `Timeout`, типы Web Crypto, — и
   модули `"tz:io"` и `"tz:http"`. Тест `tests/cli/types.cmake` проверяет их TypeScript из
-  VS Code на копиях программ с расширением `.ts`.
+  VS Code на копиях программ с расширением `.ts`. После переделки ошибок и чисел (26 октября)
+  объявления надо обновить: числа из [numbers.md](numbers.md) (`int8` … `uint64`, `Bit`,
+  `Bit.Wrap32`, методы `toInt32()` и другие, без `long`), свой `Result` без neverthrow и
+  `safeTry`, `node:fs` и остальное с `Result` вместо исключений, `SystemError` — тип объекта.
 - **Настройки tsc.** Каждый файл — модуль (`moduleDetection: "force"`), импорты как в tz, DOM
-  нет, `strict` без `noImplicitAny` (tz выводит типы параметров из вызовов), `e` в `catch` —
-  `Error`, декораторы как в tz (`experimentalDecorators`). Где tz знает больше, объявление
-  мягче: для tsc `int`, `long` и `decimal` — `number`, значение метаданных — `any`, как в пакете
-  reflect-metadata.
+  нет, `strict` без `noImplicitAny` (tz выводит типы параметров из вызовов), декораторы как в tz
+  (`experimentalDecorators`). Где tz знает больше, объявление мягче: для tsc целые типы и
+  `decimal` — `number`, значение метаданных — `any`, как в пакете reflect-metadata.
 - **Замер** на 332 программах `tests/run`, пока они были `.ts` и tsc их проверял: с его
   настройками по умолчанию ошибки были в 302 программах, всего 3813; с настройками и
   объявлениями tz — в 69 программах, 299 ошибок. Остались места, где tsc строже tz: перегрузки с
@@ -196,3 +203,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
    форматированием Prettier'ом ([editors/vscode](../editors/vscode/README.md)). `tz.d.ts` и настройки tsc рядом с tz,
    `@types/node`, undici-types и neverthrow в [third_party/types](../third_party/types/README.md),
    тест `tests/cli/types.cmake` — для будущего плагина tsserver; его самого нет.
+5. **Поправки 26 октября** ([errors.md](errors.md), шаги 1–2; [numbers.md](numbers.md)):
+   `JSON.parse`, `JSON.parse<T>` и `fromJson` отдают `Result`; `import` из `"neverthrow"` —
+   ошибка с подсказкой «встроено»; обновить `tz.d.ts` и убрать объявления neverthrow из
+   `third_party/types`.

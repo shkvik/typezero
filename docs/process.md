@@ -1,7 +1,8 @@
 # Запуск процессов
 
-Решения, принятые 24 октября 2026 года. Шаг 1 плана сделан 24 октября; что осталось — в конце,
-в разделе «План реализации».
+Решения, принятые 24 октября 2026 года, и поправка 26 октября: ошибки запуска и ненулевой код
+выхода — `Result`, а не исключение ([errors.md](errors.md)). Шаг 1 плана сделан 24 октября; что
+осталось — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -18,15 +19,18 @@
 ```ts
 import { execFileSync, execSync, spawnSync } from "node:child_process"
 
-execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })  // "a1b2c3…\n"
+execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })  // Result: Ok("a1b2c3…\n")
 execSync("git rev-parse HEAD", { encoding: "utf8" })               // то же, через оболочку
 const r = spawnSync("git", ["status"], { encoding: "utf8" })        // { status, stdout, stderr, … }
 ```
 
 - **Тип результата — по `encoding`:** с `encoding: "utf8"` — `string`, без него — `Buffer`
   ([bytes.md](bytes.md)), как в node.
-- **Код выхода ≠ 0:** `execSync` и `execFileSync` бросают `Error` с `status`, `stdout`,
-  `stderr`; `spawnSync` не бросает, а возвращает `status`.
+- **Ошибки — `Result`:** `execSync` и `execFileSync` отдают `Result<string | Buffer,
+  ExecError>`. `Err` — если программа не запустилась (`{ code: "ENOENT" }` и другие, как у
+  [io.md](io.md)) или вышла с кодом ≠ 0: тогда в ошибке `code: "exit"`, `status`, `stdout`,
+  `stderr`. `spawnSync` код выхода ошибкой не считает и возвращает `status`; `Err` у него —
+  только если запустить не вышло.
 - **Опции — как в node:** `cwd`, `env`, `input`, `stdio` (`"pipe"`, `"inherit"`, `"ignore"`),
   `timeout`, `killSignal`, `maxBuffer` (1 МБ, сверх — ошибка `ENOBUFS`), `shell`, `windowsHide`.
 - Перед запуском с `stdio: "inherit"` tz сбрасывает свой буфер stdout ([io.md](io.md)), чтобы
@@ -76,4 +80,7 @@ README.
    кавычек — как в node) и в Linux (статический exe). Нужны `Buffer` ([bytes.md](bytes.md),
    шаг 2) и исключения ([errors.md](errors.md), шаг 2).
 2. **Асинхронные функции** — после `EventEmitter` ([events.md](events.md)) и потоков node
-   ([streams.md](streams.md), шаг 3).
+   ([streams.md](streams.md), шаг 3). Событие `error` у `ChildProcess` — по правилу
+   [events.md](events.md), раздел 4.
+3. **Без исключений** ([errors.md](errors.md), шаг 2): `Result` у `execSync`, `execFileSync`,
+   `spawnSync`; `ExecError` — тип объекта с меткой вместо `ExecSyncError`.

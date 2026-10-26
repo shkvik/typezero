@@ -1,7 +1,8 @@
 # Async
 
-Решения, принятые 21 и 23 октября 2026 года. Шаги 1–4 плана сделаны 24–25 октября; что осталось — в
-конце, в разделе «План реализации».
+Решения, принятые 21 и 23 октября 2026 года, и поправки 26 октября: `Promise` не отклоняется,
+асинхронная ошибка — `Promise<Result<T, E>>` ([errors.md](errors.md), раздел 4). Шаги 1–4 плана
+сделаны 24–25 октября; что осталось — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -12,7 +13,9 @@
 - Куски кода, которые трогают одни и те же изменяемые данные, идут по очереди в порядке node,
   остальные — параллельно. Компилятор показывает, что и почему идёт по очереди.
 - `Promise`, которого никто не ждёт, — ошибка компиляции; «запустить и не ждать» — `void f()`.
-- `Promise`, таймеры, отмена, ошибки — как в node.
+  Задача, которую не ждут, разбирает свои ошибки сама.
+- `Promise` и таймеры — как в node, но `Promise` никогда не отклоняется: ошибка лежит в
+  `Result` внутри.
 - Общие объекты (`shared`) и `Mutex` отложены.
 
 ## 1. Как это устроено в node
@@ -142,22 +145,41 @@ names.forEach(async n => { await save(n) })
 Так же, как забытый `Result` ([errors.md](errors.md)). В node такой `Promise` выполняется сам по
 себе, а если бросит — программа падает.
 
+`void` над `Promise<Result<...>>` — тоже ошибка: `Err` пропал бы молча. Задача, которую не ждут,
+разбирает ошибку сама, и колбэк с `Result` нельзя передать туда, где ждут `() => void`
+(слушатель, таймер, `forEach`) — [errors.md](errors.md), раздел 4:
+
+```ts
+void save("Ann")                     // ошибка, если save возвращает Promise<Result<...>>
+
+async function saveOrLog(name: string) {
+  const r = await save(name)
+  if (r.isErr()) console.error(r.error)
+}
+void saveOrLog("Ann")                // ок: Promise<void>
+```
+
 ## 7. Как в node
 
 - Async-функция при вызове выполняется сразу, до первого `await`.
-- `Promise`: `new Promise((resolve, reject) => ...)`, `then` / `catch` / `finally`,
-  `Promise.all` / `allSettled` / `race` / `any` / `resolve` / `reject` / `withResolvers`.
-  `reject` принимает только `Error`, как `throw` ([errors.md](errors.md)). Объекты со своим
-  методом `then` `await` не разворачивает — только настоящий `Promise`: tz не вызывает код
-  программиста неявно.
+- `Promise`: `new Promise((resolve) => ...)`, `then`, `Promise.all` / `race` / `resolve` /
+  `withResolvers`. Объекты со своим методом `then` `await` не разворачивает — только настоящий
+  `Promise`: tz не вызывает код программиста неявно.
+- **`Promise` не отклоняется** ([errors.md](errors.md), раздел 4). Операция, которая может не
+  получиться, отдаёт `Promise<Result<T, E>>`; методов `Result` у `Promise` нет — сначала `await`.
+  Уходят `reject` (у `new Promise` и `withResolvers`), `.catch`, `.finally`, `Promise.reject`,
+  `allSettled`, `any`. Несколько сразу: `Promise.all` отдаёт каждый `Result` отдельно,
+  `Result.combine(await Promise.all(ps))` — все значения или первая ошибка.
+- Лишний `return await x` в `async`-функции — ошибка: `async`-функция и так дождётся `Promise`.
 - Таймеры: `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `setImmediate`;
   `await setTimeout(100)` из `"node:timers/promises"` — пауза.
 - `await` на верхнем уровне модуля — как в ES-модулях. Программа завершается, когда не осталось
   задач, таймеров и ожидающего ввода-вывода.
-- Не пойманная ошибка в задаче (и в запущенной через `void`) — сообщение, стек, код выхода 1.
+- Не пойманных ошибок в задачах нет: `Result` нельзя выбросить (раздел 6).
 - Отмена — `AbortController` / `AbortSignal`: сигнал передают явно (`timers/promises`,
-  `fs/promises`, сеть), задача проверяет `signal.aborted` или ловит `AbortError`.
-  `Promise.race` не отменяет проигравших.
+  `fs/promises`, сеть). Операция с сигналом отдаёт `Err` с `{ code: "ABORT_ERR" }`; задача
+  проверяет `signal.aborted`, `signal.throwIfAborted()` нет — вместо него
+  `if (signal.aborted) return err(signal.reason)`. `Promise.race` не отменяет проигравших.
 - `node:worker_threads` нет: параллельность и так есть.
 
 ## 8. Рантайм
@@ -223,7 +245,6 @@ names.forEach(async n => { await save(n) })
 - **`Mutex` / `Semaphore`** — атомарность через `await`. Пока — как в JS: между `await` другие
   задачи могут вмешаться. Обсуждали встроенный API пакета async-mutex.
 - `Atomics` — с байтовыми массивами. `for await` и async-генераторы — с итераторами.
-  `ResultAsync` — [errors.md](errors.md), шаг 4.
 
 ## План реализации
 
@@ -251,3 +272,7 @@ async-программ без зависимости от времени сра�
 5. **Подсказки в редакторе** — вместе с языковым сервером; профиль ожиданий при выполнении.
 6. **Позже:** проверки при выполнении (замки на объектах и ключах `Map`), общие объекты и
    `Mutex` — после решений по ним.
+7. **Без отказов** ([errors.md](errors.md), шаг 3): убрать `reject`, `.catch`, `.finally`,
+   `Promise.reject`, `allSettled`, `any`, путь «не пойманная ошибка в задаче», `ResultAsync` и
+   методы `Result` у `Promise`; ошибка на `void` над `Promise<Result>` и на колбэк с `Result`
+   там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`.

@@ -1,7 +1,8 @@
 # Сеть
 
-Решения, принятые 24 октября 2026 года. Шаги 1–4 плана сделаны 24–25 октября; что осталось — в
-конце, в разделе «План реализации».
+Решения, принятые 24 октября 2026 года, и поправки 26 октября: ошибки сети — `Result`,
+обработчик `serve` разбирает ошибки сам ([errors.md](errors.md), раздел 4). Шаги 1–4 плана
+сделаны 24–25 октября; что осталось — в конце, в разделе «План реализации».
 
 ## Коротко
 
@@ -23,8 +24,9 @@ import { serve } from "tz:http"
 const server = serve({ port: 3000 }, async req => {
   const url = new URL(req.url)
   if (req.method == "POST" && url.pathname == "/users") {
-    const user = await req.json()                      // Json
-    return Response.json({ id: 1, user }, { status: 201 })
+    const user = await req.json()                      // Result<Json, BodyError | JsonError>
+    if (user.isErr()) return new Response("плохой JSON", { status: 400 })
+    return Response.json({ id: 1, user: user.value }, { status: 201 })
   }
   return new Response("Not found", { status: 404 })
 })
@@ -42,8 +44,17 @@ serve({ port: 3000 }, app.fetch)
   для https, `maxBodySize` (по умолчанию 128 МБ, как в Bun).
 - **`server.stop()`** — перестать принимать соединения и дождаться запросов, которые уже идут.
   `server.port` — порт, если передан `port: 0`.
-- **Исключение в обработчике** — ответ `500 Internal Server Error`, ошибка с трассой — в stderr;
-  сервер работает дальше.
+- **Обработчик возвращает только `Response`** и ошибки разбирает сам: плохой JSON — 400,
+  повтор — 409, упавшая база — 500. Особой обработки `Result` у `serve` нет: автоматический 500
+  на любой `Err` отвечал бы 500 и на ошибки клиента ([errors.md](errors.md), раздел 4). Падать
+  обработчику нечему: исключений нет, а переполнение стека и нехватка памяти фатальны для всего
+  процесса.
+- **Аргументы `Response` проверяются типами:** `status` — `HttpStatus` (200 … 599), литерал
+  подходит сам, переменную проверяют `isHttpStatus(code)`; статусы 101, 204, 205, 304 — без тела
+  (перегрузка конструктора). `Response.redirect` берёт уже разобранный `URL` и статус
+  `301 | 302 | 303 | 307 | 308` ([errors.md](errors.md), раздел 7).
+- **Поля вместо геттеров:** `res.status`, `res.statusText` — `readonly`-поля; то, что
+  меняется (`bodyUsed`), — методы ([objects.md](objects.md), раздел 6).
 - **Параллельно.** Каждый запрос — async-задача, обработчики идут на всех ядрах. Общие данные
   (счётчик на уровне модуля, кэш в `Map`) — по очереди, как в [async.md](async.md); код
   остаётся таким же, как для node.
@@ -53,19 +64,24 @@ serve({ port: 3000 }, app.fetch)
 ## 2. Клиент: `fetch`
 
 ```ts
-const r = await fetch("https://api.github.com/repos/denoland/deno", {
-  signal: AbortSignal.timeout(5000),
-})
-if (!r.ok) throw new Error(`GitHub: ${r.status}`)
-const repo = await r.json()                            // Json
+async function repo(name: string) {
+  const r = await fetch(`https://api.github.com/repos/${name}`, {
+    signal: AbortSignal.timeout(5000),
+  })                                                   // Result<Response, FetchError>
+  if (r.isErr()) return r
+  if (!r.value.ok) return err({ code: "http_status", status: r.value.status })
+  return r.value.json()                                // Promise<Result<Json, …>>
+}
 ```
 
 - `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `FormData`, `AbortController`,
   `AbortSignal.timeout` — как в JS. `json()` возвращает `Json` ([modules.md](modules.md)).
 - Распаковка gzip, deflate и brotli, переходы по редиректам (до 20), соединения с keep-alive
   держатся в пуле — как в node.
-- **Ошибки — как в node:** `TypeError("fetch failed")`, причина в `cause` — `SystemError` с
-  `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT` ([io.md](io.md)) или ошибка сертификата.
+- **Ошибки — `Result`:** `fetch` отдаёт `Promise<Result<Response, FetchError>>`. `FetchError` —
+  объект с меткой `code`: `ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT` ([io.md](io.md)), ошибка
+  сертификата, `ABORT_ERR` при отмене; `message` — как в node. Чтение тела (`text()`, `json()`,
+  `bytes()`) — тоже `Promise<Result>`: обрыв связи, тело уже прочитано, плохой JSON.
 
 ## 3. Тела запросов и ответов
 
@@ -139,3 +155,7 @@ tz должен быть не ниже Go: параллельные обрабо
 4. **TLS** (сделано) — OpenSSL в рантайме (в exe — только при https, [crypto.md](crypto.md)), корневые
    сертификаты, `NODE_EXTRA_CA_CERTS`, `serve` с `tls`; замер размера.
 5. **Позже** — раздел 7.
+6. **Без исключений** ([errors.md](errors.md), шаг 2): `fetch` и чтение тел — `Result`;
+   обработчик `serve` возвращает только `Response`, убрать «500 на исключение»; `HttpStatus`,
+   перегрузки конструктора `Response`, `redirect(url: URL, …)`; геттеры `Request` / `Response`
+   / `Headers` — в `readonly`-поля и методы. Переписать `library/http/*.tz`.

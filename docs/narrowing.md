@@ -1,6 +1,7 @@
 # Проверки, сужение и JSON в свои типы
 
-Решения, принятые 24 октября 2026 года. Шаги 1–3 плана сделаны 24 октября; что осталось — в
+Решения, принятые 24 октября 2026 года, и поправки 26 октября: `asserts` убран, перевод JSON
+отдаёт `Result` ([errors.md](errors.md)). Шаги 1–3 плана сделаны 24 октября; что осталось — в
 конце, в разделе «План реализации».
 
 ## Коротко
@@ -23,15 +24,16 @@ function validIndex(a: int[], k: int) { return k >= 0 && k < a.length }
 if (validIndex(arr, i)) arr[i] += 1         // индекс доказан: int, запись можно
 
 function isSmall(x: int) { return x >= 0 && x < 1000 }
-if (isSmall(n)) total = n * 1000            // нет предупреждения о переполнении
+if (isSmall(n)) total = n * 1000            // переполнение доказано: n < 1000
 
-if (!hasEmail(p)) throw new Error("нет почты")
+if (!hasEmail(p)) return err("no_email")
 send(p.email)                               // после выхода по false — тоже string
 ```
 
 - **Что переносится:** тип (объединения, `undefined`), поля объекта (`p.email`), пределы чисел
-  — для индексов ([README](../README.md)), переполнения `int` ([small.md](small.md), раздел 6)
-  и записи в байтовые массивы ([bytes.md](bytes.md)), — длины массивов и строк. Для ветки
+  — для индексов ([README](../README.md)), переполнения и деления ([numbers.md](numbers.md),
+  раздел 2), записи в байтовые массивы ([bytes.md](bytes.md)) и проверки аргументов вроде
+  `isHttpStatus` ([errors.md](errors.md), раздел 7), — длины массивов и строк. Для ветки
   `true` и для ветки `false`.
 - Через модули и пакеты — тоже: программа компилируется целиком.
 - **Факт о поле живёт, пока объект не мог измениться.** Присваивание полю, вызов функции,
@@ -42,7 +44,7 @@ send(p.email)                               // после выхода по fals
   сужения просто не будет. Неверного сужения не бывает.
 - Как в TS 5.5: `[1, undefined, 3].filter(x => x != undefined)` — `int[]`.
 
-## 2. `x is T` и `asserts`
+## 2. `x is T`
 
 ```ts
 function isCircle(s: Shape): s is Circle { return s.kind == "circle" }     // ок
@@ -57,8 +59,10 @@ function isUser(x: unknown): x is User {
 
 - В каждом `return`, который может дать `true`, `x` уже должен быть доказанно `T` — теми же
   проверками, что сужают тип в `if`: метка объединения, `typeof`, `instanceof`, `!= undefined`,
-  `Array.isArray`, другая функция-условие. `asserts x is T` — то же при выходе из функции без
-  исключения. `this is T` у методов — так же.
+  `Array.isArray`, другая функция-условие. `this is T` у методов — так же.
+- **`asserts x is T` нет** (убран 26 октября): такая функция сужает тип тем, что при `false` не
+  возвращается, а бросает. Исключений нет, бросать нечем — ошибка с подсказкой написать
+  `x is T` и `if (!isT(x)) return err(...)`.
 - **Проверка полей не доказывает тип объекта.** Тип `User` в tz — не «любой объект, у
   которого есть `name`», а объект именно этого типа с раскладкой полей в памяти
   ([objects.md](objects.md)). А значение из JSON — вообще не объект `User`, а `Json`: его
@@ -70,22 +74,23 @@ function isUser(x: unknown): x is User {
 ```ts
 type User = { name: string; age: int; address: { city: string }; phone?: string }
 
-const user = JSON.parse<User>(text)        // текст → User
-const same = fromJson<User>(j)             // уже разобранный Json → User
-// TypeError: address.city: ждали string, пришло number
+const user = JSON.parse<User>(text)        // текст → Result<User, JsonError>
+const same = fromJson<User>(j)             // уже разобранный Json → Result<User, JsonError>
+// Err { error: { code: 'bad_field', path: 'address.city', message: 'ждали string, пришло number' } }
 ```
 
 - Компилятор знает устройство `User` и сам пишет перевод: проверяет каждое поле и строит
   объект. Так делают Go (`json.Unmarshal` в структуру), C# (`JsonSerializer.Deserialize<T>`),
   Rust (serde). В tz это возможно, потому что generics компилируются копией под каждый тип
   ([generics.md](generics.md)): копия для `User` знает его при работе.
-- **Ошибка** — `TypeError` с путём до поля: `address.city`, `items[3].price`.
+- **Ошибка** — `Err` с путём до поля: `address.city`, `items[3].price`.
 - **Правила:**
   - лишние поля в JSON пропускаются;
   - нет обязательного поля — ошибка; необязательное (`phone?`) — `undefined`, и `null` тоже
     даёт `undefined`;
-  - `int` и `long` — только целое в их пределах; `double` — любое число; `decimal` — точно, из
-    текста числа ([decimal.md](decimal.md)); `boolean`, `string` — как есть;
+  - целые (`int`, `int32`, `uint8`…) — только целое в пределах типа ([numbers.md](numbers.md));
+    `double` — любое число; `decimal` — точно, из текста числа ([decimal.md](decimal.md));
+    `boolean`, `string` — как есть;
   - массивы, вложенные объекты, словари (`Record<string, T>`) — да;
   - объединения — по метке (`kind`) или по `typeof`; если вариант не определить — ошибка
     компиляции у `JSON.parse<T>`;
@@ -109,3 +114,6 @@ const same = fromJson<User>(j)             // уже разобранный Json
 3. **`JSON.parse<T>` и `fromJson<T>`** (сделано) — после `Json` ([modules.md](modules.md), шаг 3),
    исключений ([errors.md](errors.md), шаг 2) и generics ([generics.md](generics.md),
    шаг 1); объединения и словари — с шагами 6 и 7 [objects.md](objects.md).
+4. **Поправки 26 октября** ([errors.md](errors.md), шаг 2): `Result` у `JSON.parse<T>` и
+   `fromJson<T>` вместо `TypeError`, ошибка на `asserts`, проверки типа целых по
+   [numbers.md](numbers.md).

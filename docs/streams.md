@@ -1,13 +1,18 @@
 # Потоки node
 
-Решения, принятые 24 октября 2026 года. Шаги 1–3 плана сделаны 24–25 октября (из шага 3 — без
-асинхронных функций `node:child_process`); что осталось — в конце, в разделе «План реализации».
+Решения, принятые 24 октября 2026 года, и поправки 26 октября: ошибки потоков — `Result`, без
+исключений, `pipe()` убран (раздел 3, [errors.md](errors.md), раздел 5). Шаги 1–3 плана сделаны
+24–25 октября (из шага 3 — без асинхронных функций `node:child_process`); что осталось — в конце,
+в разделе «План реализации».
 
 ## Коротко
 
-- `node:stream` — как в node: `Readable`, `Writable`, `Duplex`, `Transform`, `pipe`,
-  `pipeline`, `for await`. Код — перенос `lib/internal/streams` из node, как события
+- `node:stream` — как в node: `Readable`, `Writable`, `Duplex`, `Transform`, `pipeline`,
+  `for await`. Код — перенос `lib/internal/streams` из node, как события
   ([events.md](events.md)).
+- Ошибка потока приходит туда, где компилятор заставит её разобрать: каждый элемент `for await`
+  — `Result`, `pipeline`, `finished` и `end()` отдают `Promise<Result<...>>`, а подписка на
+  `data` требует подписки на `error`. `pipe()` нет.
 - Тип кусков известен при компиляции: `Readable<T>`. По умолчанию — `Buffer`, с кодировкой —
   `string`, в `objectMode` — то, что кладут в поток.
 - `setEncoding` меняет тип кусков у той же переменной дальше по коду. Если поток уже передан
@@ -27,9 +32,13 @@
 | `Transform` | посередине меняет | сжатие, шифрование, разбор строк |
 
 ```ts
-for await (const chunk of createReadStream("big.log")) { … }
-await pipeline(createReadStream("a.log"), createGzip(), createWriteStream("a.log.gz"))
-const out = await text(child.stdout)            // node:stream/consumers
+for await (const item of createReadStream("big.log")) {
+  if (item.isErr()) return item                 // нет файла, нет прав, диск отвалился
+  use(item.value)
+}
+const r = await pipeline(createReadStream("a.log"), createGzip(), createWriteStream("a.log.gz"))
+// r: Result<void, SystemError | ZlibError> — первая ошибка любого из потоков
+const out = await text(child.stdout)            // node:stream/consumers, Result<string, …>
 ```
 
 ## 2. Тип кусков: `Readable<T>`
@@ -59,20 +68,37 @@ child.stdout.on("data", s => s.length)          // s: string
   создании.
 - `Writable<T>` — так же: что можно писать. `write("текст")` в поток байтов — можно, как в
   node (строка кодируется в UTF-8).
-- События описаны: `on("data", chunk => …)` — `chunk: T`, `on("error", e => …)` — `e: Error`.
+- События описаны: `on("data", chunk => …)` — `chunk: T`, `on("error", e => …)` — `e` —
+  объект ошибки с меткой (`SystemError`, `ZlibError` — типы объектов, не классы).
 
-## 3. Как в node
+## 3. Ошибки
 
-- Всё API: `Readable`, `Writable`, `Duplex`, `Transform`, `PassThrough`, `pipe`, `pipeline` и
+В node ошибка потока — событие `error`, а без слушателя `error` процесс падает. У нас
+исключений и падений нет ([errors.md](errors.md), раздел 5), поэтому:
+
+- **Всё, что ждёт поток, отдаёт `Result`:** каждый элемент `for await` — `Result<T, E>` (как
+  `lines()` в Rust: ошибку не пропустить); `pipeline`, `finished`, `once`, `text` / `json` /
+  `buffer` из `node:stream/consumers` — `Promise<Result<...>>`. Слушатель `error` там не нужен.
+- **Запись:** `write()` копит и запоминает первую ошибку, `end()` отдаёт её —
+  `await w.end()` даёт `Result<void, SystemError>`; забытый `Result` — ошибка компиляции.
+- **Подписка на события** (`on("data")`, `on("end")`) у потока, который может испустить
+  `error`, требует подписки на `error` в той же функции на каждом пути — иначе ошибка
+  компиляции с подсказкой: `on("error", …)` или `for await`.
+- **`pipe()` нет** — ошибка с подсказкой `pipeline`: `pipe` не передаёт ошибку дальше, источник
+  падает, а приёмник остаётся открытым.
+- **`stream.destroy(e)`** остаётся: ошибка уходит в `Result` у `for await`, `end` и `finished`.
+
+## 4. Как в node
+
+- Всё API: `Readable`, `Writable`, `Duplex`, `Transform`, `PassThrough`, `pipeline` и
   `finished` (и из `node:stream/promises`), `Readable.from`, `compose`, `for await`,
   `node:stream/consumers` (`text`, `json`, `buffer`, `arrayBuffer`), `node:string_decoder`.
+  Кроме `pipe` и того, что про ошибки (раздел 3).
 - «Не успеваю»: `write()` вернул `false` — ждать `drain`; буфер `highWaterMark` — как в node.
-- **`pipe` не передаёт ошибку дальше** — как в node: источник упал, а приёмник остался
-  открытым. `pipeline` передаёт ошибку и закрывает всё — его и советуем, но `pipe` не ломаем.
 - Web-потоки (`ReadableStream`, `WritableStream`) — для `fetch` и `serve` ([net.md](net.md));
   переходы `Readable.toWeb()`, `Readable.fromWeb()`, `Writable.toWeb()` — как в node.
 
-## 4. Скорость
+## 5. Скорость
 
 Перенесённый код node компилируется в машинный код, поэтому быстрее, чем в node. Позже: когда
 компилятор видит `pipeline` из файла в сокет, данные идут без копирования через память
@@ -93,3 +119,6 @@ child.stdout.on("data", s => s.length)          // s: string
    `process.stdin`, асинхронные функции `node:child_process` ([process.md](process.md)).
 4. **Web-потоки и переходы** между ними; `node:http` ([net.md](net.md), раздел 7).
 5. **Позже** — `sendfile` / `TransmitFile` для `pipeline` из файла в сокет.
+6. **Ошибки без исключений** (раздел 3; [errors.md](errors.md), шаг 3): `Result` у элементов
+   `for await`, у `pipeline`, `finished`, `end()` и `node:stream/consumers`; правило подписки на
+   `error`; убрать `pipe()`; переписать перенесённый код node в `library/stream/*.tz`.

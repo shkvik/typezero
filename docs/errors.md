@@ -288,13 +288,21 @@ new Response("x", { status: code })            // ок: после провер�
 
 **Что отдаёт `Result`** — всё, что приходит снаружи или из данных:
 - `node:fs` и остальной ввод-вывод, `fetch`, `execFileSync`;
-- `JSON.parse<T>`, `new RegExp(source)` (литералы `/…/` проверяются при сборке),
+- `JSON.parse<T>`, `RegExp.parse(source)` (литералы `/…/` и `new RegExp("…")` проверяются при
+  сборке; `new RegExp(s)` с переменной — ошибка с подсказкой `RegExp.parse`),
   `URL.parse(text)` (`new URL(text)` — ошибка с подсказкой `URL.parse`), `decodeURIComponent`,
   `atob`;
 - `parseInt`, `parseFloat`, `Number(string)`, унарный `+` от строки — вместо `NaN`;
-- `new Date(string)`, `Date.parse` — `Date` всегда правильная, геттеры возвращают `int`;
-- `createHash(name)`, `Intl` с языком или опциями из переменной (литералы проверяются при
-  сборке);
+- `Date.parse(text)` — `Date` всегда правильная, геттеры возвращают `int`; `new Date(text)` со
+  строкой из переменной — ошибка с подсказкой `Date.parse` ([date.md](date.md), раздел 4);
+- `createHash(name)` с именем из переменной, `Intl.Locale.parse(tag)` для языка из переменной
+  (конструкторы `Intl` берут готовый `Intl.Locale`; литералы проверяются при сборке).
+
+**Конструктор `Result` не возвращает.** Там, где разбор может не получиться, есть статическая
+функция с `Result`: `URL.parse`, `Date.parse`, `RegExp.parse`, `Intl.Locale.parse`, `decimal(s)`.
+`new` с литералом проверяется при сборке; с переменной — ошибка с подсказкой взять `parse`.
+
+**Ещё отдаёт `Result`:**
 - `JSON.stringify` — только если тип может содержать цикл; для дерева по типу — просто `string`.
 
 ## 8. Числа
@@ -378,6 +386,11 @@ new Response("x", { status: code })            // ок: после провер�
    ошибки вместо предупреждений о переполнении, биты и `Bit.Wrap32`, без `NaN` и
    `Infinity`.
 7. **Ресурсы закрываются сами** (раздел 6).
-8. **Документы:** переписать [async.md](async.md), [streams.md](streams.md),
-   [events.md](events.md), [io.md](io.md), [net.md](net.md), [date.md](date.md),
-   [small.md](small.md), [bytes.md](bytes.md), [decimal.md](decimal.md) под эти решения.
+8. **Документы** (сделано 26 октября): под эти решения переписаны [async.md](async.md),
+   [streams.md](streams.md), [events.md](events.md), [io.md](io.md), [net.md](net.md),
+   [date.md](date.md), [small.md](small.md), [bytes.md](bytes.md), [decimal.md](decimal.md),
+   [generics.md](generics.md), [overloads.md](overloads.md), [iterators.md](iterators.md),
+   [modules.md](modules.md), [process.md](process.md), [regex.md](regex.md),
+   [narrowing.md](narrowing.md), [crypto.md](crypto.md), [intl.md](intl.md),
+   [decorators.md](decorators.md), [packages.md](packages.md), [objects.md](objects.md). В
+   каждом — пометка о поправках 26 октября и шаг плана с работой по ним.
