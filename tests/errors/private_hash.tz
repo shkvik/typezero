@@ -1,0 +1,12 @@
+// There are no '#' names in tz: a private member is 'private x', one system
+// with 'protected' and 'public' (docs/objects.md, section 6). The parser
+// names the member and goes on.
+class Counter {
+  // expect-error: there is no '#count' in tz: a private member is 'private count'
+  #count = 0
+  inc() {
+    this.#count++
+    return this.#count
+  }
+}
+console.log(new Counter().inc())

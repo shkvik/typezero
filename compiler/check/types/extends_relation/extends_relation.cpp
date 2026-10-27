@@ -303,11 +303,6 @@ bool ExtendsRelation::extendsObject(const Type *type, const Type *pattern,
       if (std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, f.name, false);
           !methods.empty() && methods.back()->sym && methods.back()->typeParams.empty()) {
         own = checker_.returnInferrer().functionType(methods.back()->sym);
-        if (methods.back()->accessor == FunctionDecl::Accessor::Getter) {
-          own = own->ret();
-        } else if (methods.back()->accessor == FunctionDecl::Accessor::Setter) {
-          own = nullptr;
-        }
       }
     }
     if (!own) {

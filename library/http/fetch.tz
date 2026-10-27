@@ -71,15 +71,15 @@ function headerValue(value: string): string {
 export type HeadersInit = Headers | [string, string][] | Record<string, string>
 
 export class Headers {
-  #list: string[] = []
-  #shown: string[] | undefined = undefined
+  private list: string[] = []
+  private shown: string[] | undefined = undefined
 
   constructor(init?: HeadersInit) {
     if (init == undefined) return
     if (init instanceof Headers) {
-      this.#list = [...init.#list]
-      const shown = init.#shown
-      if (shown != undefined) this.#shown = [...shown]
+      this.list = [...init.list]
+      const shown = init.shown
+      if (shown != undefined) this.shown = [...shown]
     } else if (Array.isArray(init)) {
       for (const pair of init) this.append(pair[0], pair[1])
     } else {
@@ -89,57 +89,57 @@ export class Headers {
 
   static __fromWire(flat: string[]): Headers {
     const h = new Headers()
-    h.#list = flat
+    h.list = flat
     return h
   }
 
   __flat(): string[] {
-    return this.#list
+    return this.list
   }
 
   __add(name: string, value: string) {
-    this.#push(name, name, value)
+    this.push(name, name, value)
   }
 
-  #push(name: string, lower: string, value: string) {
-    let shown = this.#shown
+  private push(name: string, lower: string, value: string) {
+    let shown = this.shown
     if (shown == undefined && name != lower) {
       shown = []
-      for (let i = 0; i < this.#list.length; i += 2) shown.push(this.#list[i] ?? "")
-      this.#shown = shown
+      for (let i = 0; i < this.list.length; i += 2) shown.push(this.list[i] ?? "")
+      this.shown = shown
     }
     shown?.push(name)
-    this.#list.push(lower)
-    this.#list.push(value)
+    this.list.push(lower)
+    this.list.push(value)
   }
 
-  #keep(keep: (i: int) => boolean) {
+  private keep(keep: (i: int) => boolean) {
     const list: string[] = []
-    const shown = this.#shown
+    const shown = this.shown
     const kept: string[] = []
-    for (let i = 0; i + 1 < this.#list.length; i += 2) {
+    for (let i = 0; i + 1 < this.list.length; i += 2) {
       if (!keep(i)) continue
-      list.push(this.#list[i] ?? "")
-      list.push(this.#list[i + 1] ?? "")
+      list.push(this.list[i] ?? "")
+      list.push(this.list[i + 1] ?? "")
       if (shown != undefined) kept.push(shown[i >> 1] ?? "")
     }
-    this.#list = list
-    if (shown != undefined) this.#shown = kept
+    this.list = list
+    if (shown != undefined) this.shown = kept
   }
 
   append(name: string, value: string) {
     if (!isToken(name)) return
-    this.#push(name, name.toLowerCase(), headerValue(value))
+    this.push(name, name.toLowerCase(), headerValue(value))
   }
 
   delete(name: string) {
     if (!isToken(name)) return
     const lower = name.toLowerCase()
-    if (this.#list.includes(lower)) this.#keep(i => this.#list[i] != lower)
+    if (this.list.includes(lower)) this.keep(i => this.list[i] != lower)
   }
 
   get(name: string): string | undefined {
-    const list = this.#list
+    const list = this.list
     const lower = isLower(name) ? name : name.toLowerCase()
     let out: string | undefined = undefined
     for (let i = 0; i + 1 < list.length; i += 2)
@@ -152,14 +152,14 @@ export class Headers {
 
   getSetCookie(): string[] {
     const out: string[] = []
-    for (let i = 0; i + 1 < this.#list.length; i += 2)
-      if (this.#list[i] == "set-cookie") out.push(this.#list[i + 1] ?? "")
+    for (let i = 0; i + 1 < this.list.length; i += 2)
+      if (this.list[i] == "set-cookie") out.push(this.list[i + 1] ?? "")
     return out
   }
 
   has(name: string): boolean {
     if (!isToken(name)) return false
-    const list = this.#list
+    const list = this.list
     const lower = name.toLowerCase()
     for (let i = 0; i < list.length; i += 2) if (list[i] == lower) return true
     return false
@@ -169,22 +169,22 @@ export class Headers {
     if (!isToken(name)) return
     const v = headerValue(value)
     const lower = name.toLowerCase()
-    const list = this.#list
+    const list = this.list
     let at = -1
     for (let i = 0; i < list.length && at < 0; i += 2) if (list[i] == lower) at = i
     if (at < 0) {
-      this.#push(name, lower, v)
+      this.push(name, lower, v)
       return
     }
     const valueAt = at + 1
     if (valueAt >= 0 && valueAt < list.length) list[valueAt] = v
-    this.#keep(i => i <= at || this.#list[i] != lower)
+    this.keep(i => i <= at || this.list[i] != lower)
   }
 
-  #sorted(): [string, string][] {
+  private sorted(): [string, string][] {
     const names: string[] = []
-    for (let i = 0; i < this.#list.length; i += 2) {
-      const name = this.#list[i] ?? ""
+    for (let i = 0; i < this.list.length; i += 2) {
+      const name = this.list[i] ?? ""
       if (!names.includes(name)) names.push(name)
     }
     names.sort()
@@ -200,31 +200,31 @@ export class Headers {
   }
 
   forEach(callback: (value: string, key: string, parent: Headers) => void) {
-    for (const [name, value] of this.#sorted()) callback(value, name, this)
+    for (const [name, value] of this.sorted()) callback(value, name, this)
   }
 
   *entries(): IterableIterator<[string, string]> {
-    for (const pair of this.#sorted()) yield pair
+    for (const pair of this.sorted()) yield pair
   }
 
   *keys(): IterableIterator<string> {
-    for (const pair of this.#sorted()) yield pair[0]
+    for (const pair of this.sorted()) yield pair[0]
   }
 
   *values(): IterableIterator<string> {
-    for (const pair of this.#sorted()) yield pair[1]
+    for (const pair of this.sorted()) yield pair[1]
   }
 
   *[Symbol.iterator](): IterableIterator<[string, string]> {
-    for (const pair of this.#sorted()) yield pair
+    for (const pair of this.sorted()) yield pair
   }
 
-  get __tz_keys(): [string, string][] {
+  __tz_keys(): [string, string][] {
     const out: [string, string][] = []
     const seen: string[] = []
-    const shown = this.#shown
-    for (let i = 0; i < this.#list.length; i += 2) {
-      const name = this.#list[i] ?? ""
+    const shown = this.shown
+    for (let i = 0; i < this.list.length; i += 2) {
+      const name = this.list[i] ?? ""
       if (seen.includes(name)) continue
       seen.push(name)
       out.push([shown != undefined ? shown[i >> 1] ?? name : name, this.get(name) ?? ""])
@@ -327,18 +327,18 @@ function afterPull<R>(s: StreamState<R>) {
 }
 
 export class ReadableStreamDefaultController<R> {
-  #s: StreamState<R>
+  private s: StreamState<R>
 
   constructor(state: StreamState<R>) {
-    this.#s = state
+    this.s = state
   }
 
-  get desiredSize(): double {
-    return this.#s.state == "readable" ? desiredSize(this.#s) : 0
+  desiredSize(): double {
+    return this.s.state == "readable" ? desiredSize(this.s) : 0
   }
 
   enqueue(chunk: R) {
-    const s = this.#s
+    const s = this.s
     if (s.state != "readable" || s.closeRequested) return
     const read = s.reads.shift()
     if (read != undefined) read(ok({ done: false, value: chunk }))
@@ -347,34 +347,37 @@ export class ReadableStreamDefaultController<R> {
   }
 
   close() {
-    const s = this.#s
+    const s = this.s
     if (s.state != "readable" || s.closeRequested) return
     s.closeRequested = true
     if (s.queue.length == 0) closeStream(s)
   }
 
   error(e: StreamError) {
-    errorStream(this.#s, e)
+    errorStream(this.s, e)
   }
 }
 
 export class ReadableStreamDefaultReader<R> {
-  #s: StreamState<R> | undefined = undefined
-  #problem: StreamError | undefined = undefined
+  private stream: ReadableStream<R>
+  private s: StreamState<R> | undefined = undefined
+  private problem: StreamError | undefined = undefined
 
   constructor(stream: ReadableStream<R>) {
+    this.stream = stream
     const s = stream.__state()
     if (s.locked) {
-      this.#problem = invalidState("Invalid state: ReadableStream is locked")
+      this.problem = invalidState("Invalid state: ReadableStream is locked")
       return
     }
     s.locked = true
-    this.#s = s
+    stream.locked = true
+    this.s = s
   }
 
   async read(): Promise<ReadResult<R>> {
-    const s = this.#s
-    if (s == undefined) return err(this.#problem ?? invalidState("Reader is released"))
+    const s = this.s
+    if (s == undefined) return err(this.problem ?? invalidState("Reader is released"))
     s.disturbed = true
     if (s.queue.length > 0) {
       const chunk = s.queue.shift()
@@ -392,17 +395,18 @@ export class ReadableStreamDefaultReader<R> {
   }
 
   releaseLock() {
-    const s = this.#s
+    const s = this.s
     if (s == undefined) return
     s.locked = false
-    this.#s = undefined
+    this.stream.locked = false
+    this.s = undefined
     const reads = s.reads
     s.reads = []
     for (const r of reads) r(err(invalidState("Reader was released")))
   }
 
   async cancel(reason?: StreamError): Promise<void> {
-    const s = this.#s
+    const s = this.s
     if (s != undefined) await cancelStream(s, reason)
   }
 }
@@ -419,44 +423,56 @@ async function cancelStream<R>(s: StreamState<R>, reason: StreamError | undefine
   }
 }
 
+function startedState<R>(source: UnderlyingSource<R> | undefined,
+                         strategy: QueuingStrategy | undefined): StreamState<R> {
+  const s = new StreamState<R>()
+  s.source = source
+  s.highWaterMark = strategy?.highWaterMark ?? (source?.type == "bytes" ? 0 : 1)
+  s.bytes = source?.type == "bytes"
+  const start = source?.start
+  let started: Promise<void> | undefined = undefined
+  if (start != undefined) started = start(new ReadableStreamDefaultController<R>(s))
+  if (started == undefined) {
+    queueMicrotask(() => {
+      s.started = true
+      pullIfNeeded(s)
+    })
+  } else {
+    void started.then(() => {
+      s.started = true
+      pullIfNeeded(s)
+    })
+  }
+  return s
+}
+
 export class ReadableStream<R = Uint8Array> {
-  #s = new StreamState<R>()
+  readonly locked = false
+  private s: StreamState<R> | undefined = undefined
 
   constructor(source?: UnderlyingSource<R>, strategy?: QueuingStrategy) {
-    const s = this.#s
-    s.source = source
-    s.highWaterMark = strategy?.highWaterMark ?? (source?.type == "bytes" ? 0 : 1)
-    s.bytes = source?.type == "bytes"
-    const start = source?.start
-    let started: Promise<void> | undefined = undefined
-    if (start != undefined) started = start(new ReadableStreamDefaultController<R>(s))
-    if (started == undefined) {
-      queueMicrotask(() => {
-        s.started = true
-        pullIfNeeded(s)
-      })
-    } else {
-      void started.then(() => {
-        s.started = true
-        pullIfNeeded(s)
-      })
-    }
+    if (source != undefined || strategy != undefined) this.s = startedState(source, strategy)
+  }
+
+  static __adopt<T>(state: StreamState<T>): ReadableStream<T> {
+    const stream = new ReadableStream<T>()
+    stream.s = state
+    return stream
+  }
+
+  protected open(): StreamState<R> {
+    const s = new StreamState<R>()
+    s.started = true
+    return s
   }
 
   __state(): StreamState<R> {
-    return this.#s
-  }
-
-  get locked(): boolean {
-    return this.#s.locked
-  }
-
-  get state(): string {
-    return this.#s.state
-  }
-
-  get supportsBYOB(): boolean {
-    return this.#s.bytes
+    let s = this.s
+    if (s == undefined) {
+      s = this.open()
+      this.s = s
+    }
+    return s
   }
 
   getReader(): ReadableStreamDefaultReader<R> {
@@ -464,8 +480,9 @@ export class ReadableStream<R = Uint8Array> {
   }
 
   async cancel(reason?: StreamError): Promise<void> {
-    if (this.#s.locked) return
-    await cancelStream(this.#s, reason)
+    const s = this.__state()
+    if (s.locked) return
+    await cancelStream(s, reason)
   }
 
   async *values(): AsyncGenerator<Result<R, StreamError>, void, void> {
@@ -541,7 +558,7 @@ class Wire {
     this.signal = signal
   }
 
-  #decode(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
+  private decodeChunk(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
     const data = decode(chunk, last)
     if (data.isErr()) {
       this.finished = true
@@ -551,14 +568,14 @@ class Wire {
     return ok(data.value)
   }
 
-  #failed(e: SystemError): BodyError {
+  private failed(e: SystemError): BodyError {
     this.finished = true
     const signal = this.signal
     if (signal != undefined && signal.aborted) return abortedBody(signal)
     return { code: "terminated", message: "terminated", cause: e.message }
   }
 
-  #finish() {
+  private finish() {
     this.finished = true
     if (this.origin != "") giveBack(this.origin, this.conn)
   }
@@ -566,22 +583,22 @@ class Wire {
   async next(): Promise<Result<Uint8Array | undefined, BodyError>> {
     while (!this.finished) {
       const read = await __tz_http_read(this.conn, this.signal)
-      if (read.isErr()) return err(this.#failed(read.error))
+      if (read.isErr()) return err(this.failed(read.error))
       const chunk = read.value
       const decode = this.decode
       if (chunk == undefined) {
         let rest: Uint8Array | undefined = undefined
         if (decode != undefined) {
-          const last = this.#decode(decode, new Uint8Array(0), true)
+          const last = this.decodeChunk(decode, new Uint8Array(0), true)
           if (last.isErr()) return last
           rest = last.value
         }
-        this.#finish()
+        this.finish()
         return ok(rest != undefined && rest.length > 0 ? rest : undefined)
       }
       let data = chunk
       if (decode != undefined) {
-        const decoded = this.#decode(decode, chunk, false)
+        const decoded = this.decodeChunk(decode, chunk, false)
         if (decoded.isErr()) return decoded
         data = decoded.value
       }
@@ -592,15 +609,15 @@ class Wire {
 
   async all(): Promise<Result<Uint8Array, BodyError>> {
     const bytes = await __tz_http_read_all(this.conn, this.signal)
-    if (bytes.isErr()) return err(this.#failed(bytes.error))
+    if (bytes.isErr()) return err(this.failed(bytes.error))
     const decode = this.decode
     let data = bytes.value
     if (decode != undefined) {
-      const decoded = this.#decode(decode, bytes.value, true)
+      const decoded = this.decodeChunk(decode, bytes.value, true)
       if (decoded.isErr()) return decoded
       data = decoded.value
     }
-    this.#finish()
+    this.finish()
     return ok(data)
   }
 }
@@ -676,6 +693,7 @@ class Body {
   wire: Wire | undefined = undefined
   used = false
   type: string | undefined = undefined
+  opened: StreamState<Uint8Array> | undefined = undefined
 
   static of(init: BodyInit | undefined): Body {
     const b = new Body()
@@ -725,24 +743,49 @@ class Body {
     return b
   }
 
-  get usedOrDisturbed(): boolean {
+  private touched(): StreamState<Uint8Array> | undefined {
     const stream = this.stream
-    return this.used || (stream != undefined && stream.__state().disturbed)
+    return stream != undefined ? stream.__state() : this.opened
+  }
+
+  usedOrDisturbed(): boolean {
+    const s = this.touched()
+    return this.used || (s != undefined && s.disturbed)
   }
 
   isNull(): boolean {
     return this.kind == BODY_NONE
   }
 
-  asStream(): ReadableStream<Uint8Array> | undefined {
-    const existing = this.stream
-    if (existing != undefined) return existing
+  view(): ReadableStream<Uint8Array> | undefined {
     if (this.kind == BODY_NONE) return undefined
-    let stream: ReadableStream<Uint8Array>
+    const stream = this.stream
+    return stream != undefined ? stream : new BodyStream(this)
+  }
+
+  asStream(): ReadableStream<Uint8Array> | undefined {
+    const stream = this.stream
+    if (stream != undefined) return stream
+    const s = this.state()
+    return s != undefined ? ReadableStream.__adopt(s) : undefined
+  }
+
+  state(): StreamState<Uint8Array> | undefined {
+    const stream = this.stream
+    if (stream != undefined) return stream.__state()
+    const opened = this.opened
+    if (opened != undefined) return opened
+    if (this.kind == BODY_NONE) return undefined
+    let made: StreamState<Uint8Array>
     const maybeWire = this.wire
-    if (maybeWire != undefined) {
+    if (this.used) {
+      made = new StreamState<Uint8Array>()
+      made.started = true
+      made.disturbed = true
+      made.state = "closed"
+    } else if (maybeWire != undefined) {
       const wire: Wire = maybeWire
-      stream = new ReadableStream<Uint8Array>({
+      made = startedState<Uint8Array>({
         type: "bytes",
         pull: async c => {
           const chunk = await wire.next()
@@ -757,27 +800,28 @@ class Body {
             else c.enqueue(value)
           }
         },
-      })
+      }, undefined)
     } else {
       const bytes = this.kind == BODY_TEXT ? new TextEncoder().encode(this.text) : this.bytes
-      stream = new ReadableStream<Uint8Array>({
+      made = startedState<Uint8Array>({
         type: "bytes",
         start: c => {
           if (bytes != undefined && bytes.length > 0) c.enqueue(bytes)
           c.close()
         },
-      })
+      }, undefined)
     }
-    this.stream = stream
-    return stream
+    this.opened = made
+    return made
   }
 
   async consume(): Promise<Result<Uint8Array, BodyError>> {
-    if (this.usedOrDisturbed) return err(bodyUsed())
+    if (this.usedOrDisturbed()) return err(bodyUsed())
+    const touched = this.touched()
+    if (touched != undefined && touched.locked) return err(bodyUsed())
     this.used = true
-    const stream = this.stream
+    const stream = touched != undefined ? this.asStream() : undefined
     if (stream != undefined) {
-      if (stream.locked) return err(bodyUsed())
       const parts: Uint8Array[] = []
       const reader = stream.getReader()
       for (;;) {
@@ -802,7 +846,7 @@ class Body {
   }
 
   async consumeText(): Promise<Result<string, BodyError>> {
-    if (this.kind == BODY_TEXT && this.stream == undefined) {
+    if (this.kind == BODY_TEXT && this.touched() == undefined) {
       if (this.used) return err(bodyUsed())
       this.used = true
       return ok(this.text)
@@ -814,7 +858,7 @@ class Body {
 
   copy(): Body {
     const b = new Body()
-    if (this.usedOrDisturbed) {
+    if (this.usedOrDisturbed()) {
       b.used = true
       return b
     }
@@ -831,9 +875,23 @@ class Body {
         b.stream = right
         this.kind = BODY_STREAM
         this.wire = undefined
+        this.opened = undefined
       }
     }
     return b
+  }
+}
+
+class BodyStream extends ReadableStream<Uint8Array> {
+  private body: Body
+
+  constructor(body: Body) {
+    super()
+    this.body = body
+  }
+
+  protected override open(): StreamState<Uint8Array> {
+    return this.body.state() ?? new StreamState<Uint8Array>()
   }
 }
 
@@ -891,68 +949,68 @@ function tee(source: ReadableStream<Uint8Array>):
 }
 
 export class FormData {
-  #entries: [string, string][] = []
+  private list: [string, string][] = []
 
   append(name: string, value: string) {
-    this.#entries.push([name, value])
+    this.list.push([name, value])
   }
 
   delete(name: string) {
-    this.#entries = this.#entries.filter(e => e[0] != name)
+    this.list = this.list.filter(e => e[0] != name)
   }
 
   get(name: string): string | undefined {
-    for (const [n, v] of this.#entries) if (n == name) return v
+    for (const [n, v] of this.list) if (n == name) return v
     return undefined
   }
 
   getAll(name: string): string[] {
     const out: string[] = []
-    for (const [n, v] of this.#entries) if (n == name) out.push(v)
+    for (const [n, v] of this.list) if (n == name) out.push(v)
     return out
   }
 
   has(name: string): boolean {
-    return this.#entries.some(e => e[0] == name)
+    return this.list.some(e => e[0] == name)
   }
 
   set(name: string, value: string) {
-    const at = this.#entries.findIndex(e => e[0] == name)
+    const at = this.list.findIndex(e => e[0] == name)
     if (at < 0) {
-      this.#entries.push([name, value])
+      this.list.push([name, value])
       return
     }
-    this.#entries = this.#entries.filter((e, i) => e[0] != name || i == at)
-    const kept = this.#entries.findIndex(e => e[0] == name)
-    const entries = this.#entries
+    this.list = this.list.filter((e, i) => e[0] != name || i == at)
+    const kept = this.list.findIndex(e => e[0] == name)
+    const entries = this.list
     if (kept >= 0 && kept < entries.length) entries[kept] = [name, value]
   }
 
   forEach(callback: (value: string, key: string, parent: FormData) => void) {
-    for (const [name, value] of [...this.#entries]) callback(value, name, this)
+    for (const [name, value] of [...this.list]) callback(value, name, this)
   }
 
   *entries(): IterableIterator<[string, string]> {
-    for (const e of [...this.#entries]) yield [e[0], e[1]]
+    for (const e of [...this.list]) yield [e[0], e[1]]
   }
 
   *keys(): IterableIterator<string> {
-    for (const e of [...this.#entries]) yield e[0]
+    for (const e of [...this.list]) yield e[0]
   }
 
   *values(): IterableIterator<string> {
-    for (const e of [...this.#entries]) yield e[1]
+    for (const e of [...this.list]) yield e[1]
   }
 
   *[Symbol.iterator](): IterableIterator<[string, string]> {
-    for (const e of [...this.#entries]) yield [e[0], e[1]]
+    for (const e of [...this.list]) yield [e[0], e[1]]
   }
 
   __multipart(boundary: string): string {
     const escape = (s: string) =>
       s.replaceAll("\"", "%22").replaceAll("\n", "%0A").replaceAll("\r", "%0D")
     let out = ""
-    for (const [name, value] of this.#entries)
+    for (const [name, value] of this.list)
       out += `--${boundary}\r\nContent-Disposition: form-data; name="${escape(name)}"\r\n\r\n` +
              `${value.replaceAll(/\r(?!\n)|(?<!\r)\n/g, "\r\n")}\r\n`
     return out + `--${boundary}--\r\n`
@@ -1034,183 +1092,133 @@ function normalizeMethod(method: string): string {
 }
 
 export class Request {
-  #method = "GET"
-  #url: string
-  #headers: Headers
-  #body: Body
-  #redirect: RequestRedirect = "follow"
-  #signal: AbortSignal | undefined = undefined
-  #keepalive = false
-  #problem: FetchError | undefined = undefined
+  readonly method: string = "GET"
+  readonly url: string
+  readonly headers: Headers
+  readonly destination = ""
+  readonly referrer = "about:client"
+  readonly referrerPolicy = ""
+  readonly mode = "cors"
+  readonly credentials = "same-origin"
+  readonly cache = "default"
+  readonly redirect: RequestRedirect = "follow"
+  readonly integrity = ""
+  readonly keepalive: boolean = false
+  readonly isReloadNavigation = false
+  readonly isHistoryNavigation = false
+  readonly signal: AbortSignal
+  readonly body: ReadableStream<Uint8Array> | undefined
+  private data: Body
+  private given: AbortSignal | undefined = undefined
+  private problem: FetchError | undefined = undefined
 
   constructor(input: string | URL | Request, init?: RequestInit) {
     if (input instanceof Request) {
-      this.#method = input.#method
-      this.#url = input.#url
-      this.#headers = new Headers(input.#headers)
-      this.#redirect = input.#redirect
-      this.#signal = input.#signal
-      this.#problem = input.#problem
+      this.method = input.method
+      this.url = input.url
+      this.headers = new Headers(input.headers)
+      this.redirect = input.redirect
+      this.given = input.given
+      this.problem = input.problem
       const given = init?.body
-      this.#body = given != undefined ? Body.of(given) : input.#body
-      if (given == undefined && input.#body.kind != BODY_NONE) {
-        if (input.#body.usedOrDisturbed)
-          this.#problem ??= badRequest("Request.constructor: Cannot construct a Request with " +
-                                       "a Request object that has already been used.")
-        else this.#body = input.#body.moved()
+      this.data = given != undefined ? Body.of(given) : input.data
+      if (given == undefined && input.data.kind != BODY_NONE) {
+        if (input.data.usedOrDisturbed())
+          this.problem ??= badRequest("Request.constructor: Cannot construct a Request with " +
+                                      "a Request object that has already been used.")
+        else this.data = input.data.moved()
       }
     } else {
       const text = typeof input == "string" ? input : input.href
       const parsed = URL.parse(text)
       if (parsed.isErr()) {
-        this.#url = text
-        this.#problem = { code: "bad_request", message: "Failed to parse URL from " + text,
-                          cause: parsed.error.message }
+        this.url = text
+        this.problem = { code: "bad_request", message: "Failed to parse URL from " + text,
+                         cause: parsed.error.message }
       } else {
         const url = parsed.value
         if (url.username != "" || url.password != "")
-          this.#problem = badRequest("Request cannot be constructed from a URL that includes " +
-                                     "credentials: " + text)
-        this.#url = url.href
+          this.problem = badRequest("Request cannot be constructed from a URL that includes " +
+                                    "credentials: " + text)
+        this.url = url.href
       }
-      this.#headers = new Headers()
-      this.#body = Body.of(undefined)
+      this.headers = new Headers()
+      this.data = Body.of(undefined)
     }
     if (init != undefined) {
       const method = init.method
       if (method != undefined) {
         const problem = methodProblem(method)
-        if (problem != undefined) this.#problem ??= badRequest(problem)
-        this.#method = normalizeMethod(method)
+        if (problem != undefined) this.problem ??= badRequest(problem)
+        this.method = normalizeMethod(method)
       }
-      if (init.headers != undefined) this.#headers = new Headers(init.headers)
-      if (init.redirect != undefined) this.#redirect = init.redirect
-      if (init.signal != undefined) this.#signal = init.signal
-      if (init.keepalive != undefined) this.#keepalive = init.keepalive
+      if (init.headers != undefined) this.headers = new Headers(init.headers)
+      if (init.redirect != undefined) this.redirect = init.redirect
+      if (init.signal != undefined) this.given = init.signal
+      if (init.keepalive != undefined) this.keepalive = init.keepalive
       if (init.body != undefined) {
-        if (this.#method == "GET" || this.#method == "HEAD")
-          this.#problem ??= badRequest("Request with GET/HEAD method cannot have body.")
-        this.#body = Body.of(init.body)
-        if (this.#body.kind == BODY_STREAM && init.duplex != "half")
-          this.#problem ??= badRequest("RequestInit: duplex option is required when sending " +
-                                       "a body.")
+        if (this.method == "GET" || this.method == "HEAD")
+          this.problem ??= badRequest("Request with GET/HEAD method cannot have body.")
+        this.data = Body.of(init.body)
+        if (this.data.kind == BODY_STREAM && init.duplex != "half")
+          this.problem ??= badRequest("RequestInit: duplex option is required when sending " +
+                                      "a body.")
       }
     }
-    const type = this.#body.type
-    if (type != undefined && !this.#headers.has("content-type"))
-      this.#headers.__add("content-type", type)
+    this.signal = this.given ?? new AbortSignal()
+    this.body = this.data.view()
+    const type = this.data.type
+    if (type != undefined && !this.headers.has("content-type"))
+      this.headers.__add("content-type", type)
   }
 
   static __fromServer(conn: object, method: string, target: string, flat: string[],
                       base: string, hasBody: boolean): Request {
     const r = new Request("http://localhost/")
-    r.#method = method
-    r.#headers = Headers.__fromWire(flat)
-    const host = r.#headers.get("host")
+    r.method = method
+    r.headers = Headers.__fromWire(flat)
+    const host = r.headers.get("host")
     const scheme = base.startsWith("https:") ? "https://" : "http://"
-    r.#url = target.startsWith("/") ? (host != undefined ? scheme + host : base) + target
-           : target.startsWith("http://") || target.startsWith("https://") ? target
-           : base + "/" + target
-    if (hasBody) r.#body = Body.ofWire(new Wire(conn, undefined))
+    r.url = target.startsWith("/") ? (host != undefined ? scheme + host : base) + target
+          : target.startsWith("http://") || target.startsWith("https://") ? target
+          : base + "/" + target
+    if (hasBody) {
+      r.data = Body.ofWire(new Wire(conn, undefined))
+      r.body = r.data.view()
+    }
     return r
   }
 
-  get method(): string {
-    return this.#method
-  }
-
-  get url(): string {
-    return this.#url
-  }
-
-  get headers(): Headers {
-    return this.#headers
-  }
-
-  get destination(): string {
-    return ""
-  }
-
-  get referrer(): string {
-    return "about:client"
-  }
-
-  get referrerPolicy(): string {
-    return ""
-  }
-
-  get mode(): string {
-    return "cors"
-  }
-
-  get credentials(): string {
-    return "same-origin"
-  }
-
-  get cache(): string {
-    return "default"
-  }
-
-  get redirect(): RequestRedirect {
-    return this.#redirect
-  }
-
-  get integrity(): string {
-    return ""
-  }
-
-  get keepalive(): boolean {
-    return this.#keepalive
-  }
-
-  get isReloadNavigation(): boolean {
-    return false
-  }
-
-  get isHistoryNavigation(): boolean {
-    return false
-  }
-
-  get signal(): AbortSignal {
-    let signal = this.#signal
-    if (signal == undefined) {
-      signal = new AbortController().signal
-      this.#signal = signal
-    }
-    return signal
-  }
-
-  @__tz_hidden get body(): ReadableStream<Uint8Array> | undefined {
-    return this.#body.asStream()
-  }
-
-  @__tz_hidden get bodyUsed(): boolean {
-    return this.#body.usedOrDisturbed
+  bodyUsed(): boolean {
+    return this.data.usedOrDisturbed()
   }
 
   __bodyOf(): Body {
-    return this.#body
+    return this.data
   }
 
   __signalIfAny(): AbortSignal | undefined {
-    return this.#signal
+    return this.given
   }
 
   __problem(): FetchError | undefined {
-    return this.#problem
+    return this.problem
   }
 
   clone(): Request {
-    const init: RequestInit = { method: this.#method, headers: this.#headers, redirect: this.#redirect }
-    const r = new Request(this.#url, init)
-    r.#signal = this.#signal
-    r.#problem = this.#problem
-    r.#body = this.#body.copy()
+    const init: RequestInit = { method: this.method, headers: this.headers, redirect: this.redirect }
+    const r = new Request(this.url, init)
+    r.given = this.given
+    r.signal = this.signal
+    r.problem = this.problem
+    r.data = this.data.copy()
+    r.body = r.data.view()
+    this.body = this.data.view()
     return r
   }
 
   async text(): Promise<Result<string, BodyError>> {
-    return this.#body.consumeText()
+    return this.data.consumeText()
   }
 
   async json(): Promise<Result<Json, BodyError | JsonError>> {
@@ -1220,19 +1228,19 @@ export class Request {
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
-    return this.#body.consume()
+    return this.data.consume()
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
-    const bytes = await this.#body.consume()
+    const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return ok(bytes.value.slice().buffer)
   }
 
   async formData(): Promise<Result<FormData, BodyError>> {
-    const bytes = await this.#body.consume()
+    const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
-    return parseFormData(this.#headers.get("content-type"), bytes.value)
+    return parseFormData(this.headers.get("content-type"), bytes.value)
   }
 }
 
@@ -1259,116 +1267,94 @@ function reasonPhrase(text: string): string {
 }
 
 export class Response {
-  #status = 200
-  #statusText = ""
-  #headers: Headers
-  #body: Body
-  #type = "default"
-  #url = ""
-  #redirected = false
+  readonly status: int = 200
+  readonly statusText: string = ""
+  readonly headers: Headers
+  readonly body: ReadableStream<Uint8Array> | undefined
+  readonly ok: boolean = true
+  readonly redirected: boolean = false
+  readonly type: string = "default"
+  readonly url: string = ""
+  private data: Body
 
   constructor(body?: BodyInit, init?: ResponseInit) {
     const status: int = init?.status ?? 200
-    this.#status = status
-    this.#statusText = reasonPhrase(init?.statusText ?? "")
-    this.#headers = new Headers(init?.headers)
-    this.#body = Body.of(status == 204 || status == 205 || status == 304 ? undefined : body)
-    const type = this.#body.type
-    if (type != undefined && !this.#headers.has("content-type"))
-      this.#headers.__add("content-type", type)
+    this.status = status
+    this.ok = status >= 200 && status <= 299
+    this.statusText = reasonPhrase(init?.statusText ?? "")
+    this.headers = new Headers(init?.headers)
+    this.data = Body.of(status == 204 || status == 205 || status == 304 ? undefined : body)
+    this.body = this.data.view()
+    const type = this.data.type
+    if (type != undefined && !this.headers.has("content-type"))
+      this.headers.__add("content-type", type)
   }
 
   static json<T>(data: T, init?: ResponseInit): Response {
     const r = new Response(JSON.stringify(data), init)
-    r.#headers.set("content-type", "application/json")
+    r.headers.set("content-type", "application/json")
     return r
   }
 
   static redirect(url: URL, status: RedirectStatus = 302): Response {
     const r = new Response(undefined, { status })
-    r.#headers.set("location", url.href)
+    r.headers.set("location", url.href)
     return r
   }
 
   static error(): Response {
     const r = new Response(undefined, { status: 200 })
-    r.#status = 0
-    r.#type = "error"
+    r.status = 0
+    r.ok = false
+    r.type = "error"
     return r
   }
 
   static __fromWire(status: int, statusText: string, flat: string[], body: Body, url: string,
                     redirected: boolean): Response {
     const r = new Response(undefined)
-    r.#status = status
-    r.#statusText = statusText
-    r.#headers = Headers.__fromWire(flat)
-    r.#body = body
-    r.#type = "basic"
-    r.#url = url
-    r.#redirected = redirected
+    r.status = status
+    r.ok = status >= 200 && status <= 299
+    r.statusText = statusText
+    r.headers = Headers.__fromWire(flat)
+    r.data = body
+    r.body = body.view()
+    r.type = "basic"
+    r.url = url
+    r.redirected = redirected
     return r
   }
 
-  get status(): int {
-    return this.#status
-  }
-
-  get statusText(): string {
-    return this.#statusText
-  }
-
-  get headers(): Headers {
-    return this.#headers
-  }
-
-  get body(): ReadableStream<Uint8Array> | undefined {
-    return this.#body.asStream()
-  }
-
-  get bodyUsed(): boolean {
-    return this.#body.usedOrDisturbed
-  }
-
-  get ok(): boolean {
-    return this.#status >= 200 && this.#status <= 299
-  }
-
-  get redirected(): boolean {
-    return this.#redirected
-  }
-
-  get type(): string {
-    return this.#type
-  }
-
-  get url(): string {
-    return this.#url
+  bodyUsed(): boolean {
+    return this.data.usedOrDisturbed()
   }
 
   __bodyOf(): Body {
-    return this.#body
+    return this.data
   }
 
   __setUrl(url: string, redirected: boolean) {
-    this.#url = url
-    this.#redirected = redirected
+    this.url = url
+    this.redirected = redirected
   }
 
   clone(): Response {
     const r = new Response(undefined)
-    r.#status = this.#status
-    r.#statusText = this.#statusText
-    r.#headers = new Headers(this.#headers)
-    r.#body = this.#body.copy()
-    r.#type = this.#type
-    r.#url = this.#url
-    r.#redirected = this.#redirected
+    r.status = this.status
+    r.ok = this.ok
+    r.statusText = this.statusText
+    r.headers = new Headers(this.headers)
+    r.data = this.data.copy()
+    r.body = r.data.view()
+    this.body = this.data.view()
+    r.type = this.type
+    r.url = this.url
+    r.redirected = this.redirected
     return r
   }
 
   async text(): Promise<Result<string, BodyError>> {
-    return this.#body.consumeText()
+    return this.data.consumeText()
   }
 
   async json(): Promise<Result<Json, BodyError | JsonError>> {
@@ -1378,19 +1364,19 @@ export class Response {
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
-    return this.#body.consume()
+    return this.data.consume()
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
-    const bytes = await this.#body.consume()
+    const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
     return ok(bytes.value.slice().buffer)
   }
 
   async formData(): Promise<Result<FormData, BodyError>> {
-    const bytes = await this.#body.consume()
+    const bytes = await this.data.consume()
     if (bytes.isErr()) return bytes
-    return parseFormData(this.#headers.get("content-type"), bytes.value)
+    return parseFormData(this.headers.get("content-type"), bytes.value)
   }
 }
 
@@ -1615,7 +1601,7 @@ async function fetchRequest(request: Request): Promise<Result<Response, FetchErr
   const headers = new Headers(request.headers)
   let body = request.__bodyOf()
   if (body.kind != BODY_NONE) {
-    if (body.usedOrDisturbed)
+    if (body.usedOrDisturbed())
       return err({ code: "bad_request", message: "Body is unusable: Body has already been read" })
     body.used = true
   }

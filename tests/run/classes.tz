@@ -32,7 +32,7 @@ class User {
   readonly id: int
   tags: string[] = []
   visits = 0
-  #password = "secret"
+  private password = "secret"
   private notes = "none"
   static count = 0
   static readonly prefix = "user-"
@@ -48,7 +48,7 @@ class User {
     return `${User.prefix}${this.id} ${this.name} <${this.email}>`
   }
   checkPassword(text: string) {
-    return text == this.#password
+    return text == this.password
   }
   visit() {
     this.visits++
@@ -113,7 +113,7 @@ for (const pt of points) pt.moveBy(1, 0)
 console.log(points.map(pt => pt.x))
 
 // Destructuring and spread read the fields; a spread gives a plain object
-// without the `#private` fields.
+// with every field, the private ones too.
 const { x, y } = q
 console.log(x, y, { ...q })
 

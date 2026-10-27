@@ -6,17 +6,17 @@ const enc = new TextEncoder()
 const hex = (b: ArrayBuffer) => Buffer.from(b).toString("hex")
 
 const pw = must(await subtle.importKey("raw", enc.encode("password"), "PBKDF2", false, ["deriveBits", "deriveKey"]))
-console.log(pw)
+console.log(shown(pw))
 console.log("pbkdf2", hex(must(await subtle.deriveBits({ name: "PBKDF2", salt: enc.encode("salt"), iterations: 1000, hash: "SHA-256" }, pw, 256))))
 console.log("pbkdf2 sha1", hex(must(await subtle.deriveBits({ name: "PBKDF2", salt: enc.encode("salt"), iterations: 2, hash: "SHA-1" }, pw, 160))))
 const aes = must(await subtle.deriveKey({ name: "PBKDF2", salt: enc.encode("salt"), iterations: 1000, hash: "SHA-512" }, pw, { name: "AES-CBC", length: 256 }, true, ["encrypt"]))
-console.log(aes, hex(must(await subtle.exportKey("raw", aes))))
+console.log(shown(aes), hex(must(await subtle.exportKey("raw", aes))))
 const ikm = must(await subtle.importKey("raw", new Uint8Array(22).fill(0x0b), "HKDF", false, ["deriveBits", "deriveKey"]))
 const salt = Buffer.from("000102030405060708090a0b0c", "hex")
 const info = Buffer.from("f0f1f2f3f4f5f6f7f8f9", "hex")
 console.log("hkdf", hex(must(await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, ikm, 336))))
 const mac = must(await subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info }, ikm, { name: "HMAC", hash: "SHA-256" }, true, ["sign"]))
-console.log(mac, hex(must(await subtle.exportKey("raw", mac))))
+console.log(shown(mac), hex(must(await subtle.exportKey("raw", mac))))
 const mac2 = must(await subtle.deriveKey({ name: "HKDF", hash: "SHA-384", salt, info }, ikm, { name: "HMAC", hash: "SHA-1", length: 128 }, false, ["verify"]))
 console.log(mac2.algorithm)
 show(await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, ikm))
@@ -25,11 +25,11 @@ show(await subtle.deriveBits({ name: "HKDF", hash: "SHA-1", salt, info }, ikm, 2
 
 // Generated keys.
 const g1 = must(await subtle.generateKey({ name: "HMAC", hash: "SHA-384" }, true, ["sign", "verify", "sign"]))
-console.log(g1, (must(await subtle.exportKey("raw", g1))).byteLength)
+console.log(shown(g1), (must(await subtle.exportKey("raw", g1))).byteLength)
 const g2 = must(await subtle.generateKey({ name: "AES-GCM", length: 192 }, false, ["decrypt", "encrypt"]))
-console.log(g2)
+console.log(shown(g2))
 const g3 = must(await subtle.generateKey({ name: "ECDSA", namedCurve: "P-384" }, true, ["sign", "verify"]))
-console.log(g3.publicKey, g3.privateKey.usages, (must(await subtle.exportKey("raw", g3.publicKey))).byteLength)
+console.log(shown(g3.publicKey), g3.privateKey.usages, (must(await subtle.exportKey("raw", g3.publicKey))).byteLength)
 const s3 = must(await subtle.sign({ name: "ECDSA", hash: "SHA-512" }, g3.privateKey, enc.encode("x")))
 console.log(s3.byteLength, must(await subtle.verify({ name: "ECDSA", hash: "SHA-512" }, g3.publicKey, s3, enc.encode("x"))))
 const g4 = must(await subtle.generateKey({ name: "RSA-OAEP", modulusLength: 1024, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-1" }, true, ["encrypt", "decrypt"]))
@@ -53,4 +53,10 @@ function must<T, E>(r: Result<T, E>): T {
 
 function show<T>(r: Result<T, SubtleError>) {
   if (r.isErr()) console.log(r.error.code, r.error.message)
+}
+
+// A key as node prints its fields; a CryptoKey itself prints every field,
+// its handle too (library_print.tz).
+function shown(k: CryptoKey) {
+  return { type: k.type, extractable: k.extractable, algorithm: k.algorithm, usages: k.usages }
 }

@@ -291,13 +291,6 @@ void DecoratorChecker::decorate(ClassDecl *cls, ClassField *field, FunctionDecl 
             "the methods that implement it");
     return;
   }
-  if (memberName.starts_with("#")) {
-    checker_.diags_.error(
-        at, "a decorator cannot decorate a '#private' member, whose name is no key of "
-            "the class; make it 'private " +
-                memberName.drop_front(1) + "'");
-    return;
-  }
 
   auto isMetadata = [&](const Expr *expr) {
     auto *call = dyn_cast<CallExpr>(expr);

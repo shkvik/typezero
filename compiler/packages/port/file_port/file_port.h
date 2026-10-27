@@ -33,6 +33,7 @@ private:
     edits_.push_back({begin, end, std::move(text), kind, std::move(note)});
   }
   bool apply();
+  void privateName(size_t i);
 
   void modules();
   void exportDefault(size_t i);

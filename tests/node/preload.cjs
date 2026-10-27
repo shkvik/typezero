@@ -420,6 +420,41 @@ for (const proto of [Response.prototype, Request.prototype]) {
     return text.isErr() ? text : JSON.parse(text.value);
   };
 }
+// A value that changes is a method in tz (docs/objects.md, section 6): for
+// test code the getter gives a function, for node's own code the value.
+function asMethod(proto, name) {
+  const get = Object.getOwnPropertyDescriptor(proto, name).get;
+  Object.defineProperty(proto, name, {
+    configurable: true,
+    get() {
+      return fromNode() ? get.call(this) : () => get.call(this);
+    },
+  });
+}
+asMethod(Response.prototype, "bodyUsed");
+asMethod(Request.prototype, "bodyUsed");
+asMethod(ReadableStreamDefaultController.prototype, "desiredSize");
+// The parts of a URL change through its methods in tz; the ones that can
+// refuse a value give a Result.
+for (const name of ["pathname", "search", "hash", "username", "password"]) {
+  URL.prototype["set" + name[0].toUpperCase() + name.slice(1)] = function (value) {
+    this[name] = value;
+  };
+}
+for (const name of ["href", "protocol", "host", "hostname", "port"]) {
+  URL.prototype["set" + name[0].toUpperCase() + name.slice(1)] = function (value) {
+    const before = this.href;
+    try {
+      this[name] = value;
+    } catch (e) {
+      return new Err({ code: "bad_url", message: "Invalid URL", input: value });
+    }
+    const wanted = name === "protocol" ? value.replace(/:$/, "") + ":" : value;
+    if (this.href === before && this[name] !== wanted)
+      return new Err({ code: "bad_url", message: "Invalid " + name, input: value });
+    return new Ok(undefined);
+  };
+}
 
 const tzIo = pathToFileURL(join(__dirname, "tz-io.mjs")).href;
 const tzHttp = pathToFileURL(join(__dirname, "tz-http.mjs")).href;

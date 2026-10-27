@@ -232,7 +232,11 @@ Token Lexer::next() {
     return make(Tok::At, start, nl);
   case '#':
     if (isIdentStart(peek())) {
-      return lexIdentifier(start, nl);
+      Token tok = lexIdentifier(start + 1, nl);
+      tok.kind = Tok::Identifier;
+      tok.hash = true;
+
+      return tok;
     }
     break;
   default:

@@ -9,7 +9,7 @@ public:
   explicit TzModulesLowerer(Lowering &lowering);
 
   void emitExternal(FunctionDecl *fn);
-  void appendGetterKeys(llvm::ArrayRef<const ClassDecl *> chain,
+  void appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
                         std::vector<llvm::Constant *> &entries);
   llvm::Value *emitResultAdapter(CastExpr *cast);
 

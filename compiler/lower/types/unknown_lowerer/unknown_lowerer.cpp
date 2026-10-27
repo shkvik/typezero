@@ -202,9 +202,6 @@ llvm::Constant *UnknownLowerer::classObject(const ClassDecl *cls) {
   std::vector<llvm::Constant *> keys;
   for (size_t i = 0; i < statics.size(); ++i) {
     llvm::StringRef key = statics[i]->name;
-    if (key.starts_with("#")) {
-      continue;
-    }
     keys.push_back(llvm::ConstantStruct::get(
         lowering_.fieldDescTy_,
         {lowering_.stringLowerer().utf8Constant(key),

@@ -3,9 +3,9 @@
 // a decimal is a string (docs/decimal.md), a Result an object with its value
 // or its error, a tuple an array.
 class Point {
-  #secret = 1
+  private secret = 1
   constructor(public x: double, public y: double) {}
-  length() { return Math.hypot(this.x, this.y) + this.#secret.toDouble() }
+  length() { return Math.hypot(this.x, this.y) + this.secret.toDouble() }
 }
 type Item = { name: string; price?: double; tags: string[] }
 const items: Item[] = [{ name: "a", tags: [] }, { name: "b", price: 2.5, tags: ["x"] }]

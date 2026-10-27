@@ -49,7 +49,8 @@ FsDeclarer::FsDeclarer(Checker &checker) : checker_(checker) {}
 
 void FsDeclarer::declareFsClasses() {
   auto declare = [&](llvm::StringRef name,
-                     llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields) {
+                     llvm::ArrayRef<std::pair<llvm::StringRef, const Type *>> fields,
+                     size_t privateFrom) {
     auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), name);
     cls->builtin = true;
     cls->resolved = cls->declared = true;
@@ -61,7 +62,7 @@ void FsDeclarer::declareFsClasses() {
       ClassField f;
       f.name = fieldName;
       f.resolved = fieldType;
-      f.access = fieldName.starts_with("#") ? Access::Private : Access::Public;
+      f.access = cls->fields.size() < privateFrom ? Access::Public : Access::Private;
       cls->fields.push_back(f);
       typeFields.push_back({fieldName.str(), fieldType, false});
     }
@@ -70,23 +71,26 @@ void FsDeclarer::declareFsClasses() {
     return cls;
   };
   const Type *d = Type::doubleTy(), *i = Type::intTy();
-  checker_.statsClass_ = declare("Stats", {{"dev", i},
-                                           {"mode", i},
-                                           {"nlink", i},
-                                           {"uid", i},
-                                           {"gid", i},
-                                           {"rdev", i},
-                                           {"blksize", i},
-                                           {"ino", i},
-                                           {"size", i},
-                                           {"blocks", i},
-                                           {"atimeMs", d},
-                                           {"mtimeMs", d},
-                                           {"ctimeMs", d},
-                                           {"birthtimeMs", d}});
-  checker_.direntClass_ =
-      declare("Dirent",
-              {{"name", Type::string()}, {"parentPath", Type::string()}, {"#type", Type::intTy()}});
+  checker_.statsClass_ = declare("Stats",
+                                 {{"dev", i},
+                                  {"mode", i},
+                                  {"nlink", i},
+                                  {"uid", i},
+                                  {"gid", i},
+                                  {"rdev", i},
+                                  {"blksize", i},
+                                  {"ino", i},
+                                  {"size", i},
+                                  {"blocks", i},
+                                  {"atimeMs", d},
+                                  {"mtimeMs", d},
+                                  {"ctimeMs", d},
+                                  {"birthtimeMs", d}},
+                                 14);
+  checker_.direntClass_ = declare(
+      "Dirent",
+      {{"name", Type::string()}, {"parentPath", Type::string()}, {"Symbol(type)", Type::intTy()}},
+      2);
 }
 
 Expr *FsDeclarer::checkStatsDate(MemberExpr *member, ClassDecl *cls) {

@@ -405,14 +405,14 @@ class ComposedDuplex<W, R> extends Duplex<W, R> {
   }
 
 
-  @__tz_hidden _head: Stream | undefined = undefined
-  @__tz_hidden _tail: Stream | undefined = undefined
-  @__tz_hidden _ondrain: StreamCallback | undefined = undefined
-  @__tz_hidden _onfinish: StreamCallback | undefined = undefined
-  @__tz_hidden _onreadable: (() => void) | undefined = undefined
-  @__tz_hidden _onclose: StreamCallback | undefined = undefined
-  @__tz_hidden _closing = true
-  @__tz_hidden _composeListeners: (() => void)[] = []
+  _head: Stream | undefined = undefined
+  _tail: Stream | undefined = undefined
+  _ondrain: StreamCallback | undefined = undefined
+  _onfinish: StreamCallback | undefined = undefined
+  _onreadable: (() => void) | undefined = undefined
+  _onclose: StreamCallback | undefined = undefined
+  _closing = true
+  _composeListeners: (() => void)[] = []
 
   _write(chunk: W, encoding: string, callback: StreamCallback): void {
     const head = this._head

@@ -1,8 +1,8 @@
-AbortController { signal: AbortSignal { aborted: false } } false undefined
+false undefined
 onabort abort true true 2
 listener abort true
 AbortError This operation was aborted 20
-[ AbortController { signal: AbortSignal { aborted: true } } ] AbortSignal { aborted: true }
+1 true
 aborted stop
 true AbortError
 Error 23 0

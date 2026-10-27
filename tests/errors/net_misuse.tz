@@ -12,9 +12,9 @@ serve({ port: 80 }, req => "text")
 // expect-error: cannot find name '__tz_net_close'
 const close = __tz_net_close
 const u = new URL("http://x")
-// expect-error: cannot assign to 'origin' because it is a read-only property of 'URL'
+// expect-error: cannot assign to 'origin' because it is a read-only field of 'URL'
 u.origin = "y"
-// expect-error: 'href' is a property, not a method: read it without '()'
+// expect-error: field 'href' is not a function; it has type 'string'
 u.href()
-// expect-error: 'port' of 'URL' is assigned only with '=': write 'o.port = o.port + value'
+// expect-error: cannot assign to 'port' because it is a read-only field of 'URL'; change it with 'setPort(...)'
 u.port += "1"

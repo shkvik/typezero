@@ -28,8 +28,6 @@ class Wrong {
   }
   // expect-error: a decorator cannot decorate an 'accessor' field: in tz it is an ordinary field
   @Column accessor size = 1
-  // expect-error: a decorator cannot decorate a '#private' member, whose name is no key of the class; make it 'private secret'
-  @Column #secret = 1
 }
 
 // expect-error: 'Column' cannot decorate a class: it takes 2 arguments, and a decorator of a class gets 1, the class

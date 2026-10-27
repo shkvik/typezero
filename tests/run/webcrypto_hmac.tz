@@ -14,7 +14,7 @@ void Promise.resolve().then(() => console.log("a microtask first"))
 console.log(must(await pending).byteLength, "then the job of the pool")
 
 const key = must(await crypto.subtle.importKey("raw", enc.encode("secret"), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]))
-console.log(key)
+console.log(shown(key))
 const sig = must(await crypto.subtle.sign("HMAC", key, enc.encode("message")))
 console.log(hex(sig))
 console.log(must(await crypto.subtle.verify("HMAC", key, sig, enc.encode("message"))))
@@ -43,7 +43,7 @@ const k4 = must(await crypto.subtle.importKey("jwk", jwk4, { name: "HMAC", hash:
 console.log(k4.algorithm, k4.usages)
 
 const g = must(await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-384" }, true, ["sign", "verify", "sign"]))
-console.log(g, (must(await crypto.subtle.exportKey("raw", g))).byteLength)
+console.log(shown(g), (must(await crypto.subtle.exportKey("raw", g))).byteLength)
 const g2 = must(await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-1", length: 64 }, true, ["verify"]))
 console.log(g2.algorithm, (must(await crypto.subtle.exportKey("jwk", g2))).alg)
 const mac = must(await crypto.subtle.sign("HMAC", g, enc.encode("data")))
@@ -55,4 +55,10 @@ function must<T, E>(r: Result<T, E>): T {
     process.exit(1)
   }
   return r.value
+}
+
+// A key as node prints its fields; a CryptoKey itself prints every field,
+// its handle too (library_print.tz).
+function shown(k: CryptoKey) {
+  return { type: k.type, extractable: k.extractable, algorithm: k.algorithm, usages: k.usages }
 }

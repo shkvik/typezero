@@ -59,25 +59,25 @@ Registry.next = () => 0
 
 // Private and protected members are for the class itself.
 class Vault {
-  #code = 1234
+  private code = 1234
   private owner = "Ann"
   protected level = 2
   readonly opened: int = 0
   private constructor() {}
   static open() {
     const v = new Vault()
-    console.log(v.#code + v.level)
+    console.log(v.code + v.level)
     return v
   }
   check(other: Vault) {
-    return other.#code == this.#code && other.owner == this.owner
+    return other.code == this.code && other.owner == this.owner
   }
 }
 // expect-error: 'constructor' is private in class 'Vault'
 const vault = new Vault()
 const opened = Vault.open()
-// expect-error: '#code' is private in class 'Vault'
-console.log(opened.#code)
+// expect-error: 'code' is private in class 'Vault'
+console.log(opened.code)
 // expect-error: 'owner' is private in class 'Vault'
 console.log(opened.owner)
 // expect-error: 'level' is protected in class 'Vault'; only 'Vault' and the classes that extend it can use it

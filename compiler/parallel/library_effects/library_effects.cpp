@@ -97,7 +97,7 @@ void LibraryEffects::libraryCall(const CallExpr *c, const FunctionDecl *decl, co
     }
   }
   if (self && !superCtor) {
-    libraryState(cls, name, self, decl->accessor != FunctionDecl::Accessor::Getter, at);
+    libraryState(cls, name, self, true, at);
   }
   if (isEmitterClass(cls) && name == "emit") {
     dispatch(c, CallKind::Inline, EmitterListeners, use);
@@ -239,31 +239,6 @@ void LibraryEffects::libraryState(llvm::StringRef cls, llvm::StringRef name,
     return;
   }
   analysis_.codeWalk().touch(LocKind::Field, *self, analysis_.state_, write, at);
-}
-
-bool LibraryEffects::librarySetter(const MemberExpr *m, const Expr *value) {
-  const Type *type = m->object->type ? m->object->type->nonOptional() : nullptr;
-  const ClassDecl *cls = type ? type->classDecl() : nullptr;
-  if (!cls || !cls->library) {
-    return false;
-  }
-  bool setter = false;
-  for (const ClassDecl *k = cls; k && !setter; k = k->parent) {
-    for (const FunctionDecl *fn : k->methods) {
-      setter |= fn->name == m->name && fn->accessor == FunctionDecl::Accessor::Setter;
-    }
-  }
-  if (!setter) {
-    return false;
-  }
-  if (llvm::StringRef(m->name).starts_with("on") && value && value->type &&
-      value->type->nonOptional()->isFunction()) {
-    listen(value, TargetListeners);
-  }
-  libraryState(libraryClassName(cls), m->name, analysis_.aliasAnalysis().receiverRef(m->object),
-               true, m->loc());
-
-  return true;
 }
 
 }

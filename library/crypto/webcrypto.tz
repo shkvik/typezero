@@ -109,7 +109,7 @@ export class CryptoKey {
   readonly extractable: boolean
   readonly algorithm: Algorithm
   readonly usages: KeyUsage[]
-  @__tz_hidden readonly handle: KeyHandle
+  readonly handle: KeyHandle
 
   constructor(handle: KeyHandle, algorithm: Algorithm, extractable: boolean) {
     this.handle = handle
@@ -857,17 +857,17 @@ class AesHandle extends KeyHandle {
       const tag = (algorithm.tagLength ?? 128) / 8
       if (decrypt && tag > bytesOf(data).length.toDouble())
         return err(operationError("The provided data is too small."))
-      result = await this.#gcm(algorithm, data, decrypt, Math.trunc(tag).toInt())
+      result = await this.gcm(algorithm, data, decrypt, Math.trunc(tag).toInt())
     } else if (this.name == "AES-CBC") {
-      result = await this.#cbc(algorithm, data, decrypt)
+      result = await this.cbc(algorithm, data, decrypt)
     } else {
-      result = await this.#ctr(algorithm, data, decrypt)
+      result = await this.ctr(algorithm, data, decrypt)
     }
     if (result == undefined) return err(failed())
     return ok(result)
   }
 
-  #gcm(algorithm: Algorithm, data: BufferSource, decrypt: boolean, tag: int) {
+  private gcm(algorithm: Algorithm, data: BufferSource, decrypt: boolean, tag: int) {
     const iv = algorithm.iv ?? kNoBytes
     const aad = algorithm.additionalData ?? kNoBytes
     if (this.bits == 128) return __tz_subtle_aes("aes-128-gcm", this.key, decrypt, iv, aad, tag, 0, data)
@@ -875,7 +875,7 @@ class AesHandle extends KeyHandle {
     return __tz_subtle_aes("aes-256-gcm", this.key, decrypt, iv, aad, tag, 0, data)
   }
 
-  #cbc(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
+  private cbc(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
     const iv = algorithm.iv ?? kNoBytes
     if (this.bits == 128)
       return __tz_subtle_aes("aes-128-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
@@ -884,7 +884,7 @@ class AesHandle extends KeyHandle {
     return __tz_subtle_aes("aes-256-cbc", this.key, decrypt, iv, kNoBytes, 0, 0, data)
   }
 
-  #ctr(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
+  private ctr(algorithm: Algorithm, data: BufferSource, decrypt: boolean) {
     const counter = algorithm.counter ?? kNoBytes
     const bits = Math.trunc(algorithm.length ?? 128).toInt()
     if (this.bits == 128)
@@ -1269,7 +1269,7 @@ class RsaHandle extends KeyHandle {
   async sign(algorithm: Algorithm, data: BufferSource): Promise<Result<ArrayBuffer, SubtleError>> {
     if (this.type != "private") return err(invalidAccess("Key must be a private key"))
     const pss = this.name == "RSA-PSS"
-    const salt = pss ? this.#saltLength(algorithm) : 0
+    const salt = pss ? this.saltLength(algorithm) : 0
     if (salt < 0) return err(failed())
     const result = await __tz_subtle_sign(this.key, pss ? 1 : 0, opensslHash(this.hash), salt, data)
     if (result == undefined) return err(failed())
@@ -1280,7 +1280,7 @@ class RsaHandle extends KeyHandle {
                data: BufferSource): Promise<Result<boolean, SubtleError>> {
     if (this.type != "public") return err(invalidAccess("Key must be a public key"))
     const pss = this.name == "RSA-PSS"
-    const salt = pss ? this.#saltLength(algorithm) : 0
+    const salt = pss ? this.saltLength(algorithm) : 0
     if (salt < 0) return err(failed())
     const hash = opensslHash(this.hash)
     const verdict = await __tz_subtle_verify(this.key, pss ? 1 : 0, hash, salt, signature, data)
@@ -1288,7 +1288,7 @@ class RsaHandle extends KeyHandle {
     return ok(verdict == 1)
   }
 
-  #saltLength(algorithm: Algorithm): int {
+  private saltLength(algorithm: Algorithm): int {
     const salt = algorithm.saltLength ?? 0
     const most = Math.ceil((this.modulusLength - 1) / 8) - digestBytes(this.hash).toDouble() - 2
     if (salt > most) return -1

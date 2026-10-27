@@ -82,7 +82,7 @@ function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefin
 }
 
 export class ReadStream<T = Buffer> extends Readable<T> {
-  @__tz_hidden fd: int | undefined
+  fd: int | undefined
   path: string
   flags: string
   mode: int
@@ -90,13 +90,13 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   end: double | undefined
   pos: double | undefined
   bytesRead = 0
-  @__tz_hidden pending: boolean
-  @__tz_hidden autoClose: boolean
-  @__tz_hidden _performingIO = false
-  @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
-  @__tz_hidden _invalid: StreamError | undefined = undefined
-  @__tz_hidden _file = new OpenFile()
-  @__tz_hidden _closer: object
+  pending: boolean
+  autoClose: boolean
+  _performingIO = false
+  _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
+  _invalid: StreamError | undefined = undefined
+  _file = new OpenFile()
+  _closer: object
 
   constructor(path: string, options?: ReadStreamOptions) {
     super({
@@ -171,12 +171,12 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     const buf = Buffer.allocUnsafeSlow(n)
     this._performingIO = true
     void __tz_fsRead(fd, buf, 0, n, pos ?? -1).then((read) => {
-      if (read.isErr()) this.#afterRead(streamFailure(read.error), 0, buf)
-      else this.#afterRead(undefined, read.value, buf)
+      if (read.isErr()) this.afterRead(streamFailure(read.error), 0, buf)
+      else this.afterRead(undefined, read.value, buf)
     })
   }
 
-  #afterRead(er: StreamError | undefined, bytesRead: int, buf: Buffer) {
+  private afterRead(er: StreamError | undefined, bytesRead: int, buf: Buffer) {
     this._performingIO = false
     if (this.destroyed) {
       const done = this._ioDone
@@ -220,7 +220,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
 }
 
 export class WriteStream extends Writable<Buffer> {
-  @__tz_hidden fd: int | undefined
+  fd: int | undefined
   path: string
   flags: string
   mode: int
@@ -228,13 +228,13 @@ export class WriteStream extends Writable<Buffer> {
   pos: double | undefined
   bytesWritten = 0
   flush: boolean
-  @__tz_hidden pending: boolean
-  @__tz_hidden autoClose: boolean
-  @__tz_hidden _performingIO = false
-  @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
-  @__tz_hidden _invalid: StreamError | undefined = undefined
-  @__tz_hidden _file = new OpenFile()
-  @__tz_hidden _closer: object
+  pending: boolean
+  autoClose: boolean
+  _performingIO = false
+  _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
+  _invalid: StreamError | undefined = undefined
+  _file = new OpenFile()
+  _closer: object
 
   constructor(path: string, options?: WriteStreamOptions) {
     super({
@@ -284,7 +284,7 @@ export class WriteStream extends Writable<Buffer> {
     })
   }
 
-  #writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: StreamCallback,
+  private writeAll(data: Buffer, offset: int, size: int, pos: double | undefined, cb: StreamCallback,
             retries: int) {
     const fd = this.fd
     if (fd == undefined) {
@@ -306,7 +306,7 @@ export class WriteStream extends Writable<Buffer> {
       const left = size - bytesWritten
       if (tries > 5) cb(failure("ERR_SYSTEM_ERROR", "write failed"))
       else if (left != 0)
-        this.#writeAll(data, offset + bytesWritten, left,
+        this.writeAll(data, offset + bytesWritten, left,
                        pos != undefined ? pos + bytesWritten.toDouble() : undefined, cb, tries)
       else cb()
     })
@@ -315,7 +315,7 @@ export class WriteStream extends Writable<Buffer> {
   _write(chunk: Buffer, encoding: string, callback: StreamCallback): void {
     void encoding
     this._performingIO = true
-    this.#writeAll(chunk, 0, chunk.length, this.pos, (er?: StreamError) => {
+    this.writeAll(chunk, 0, chunk.length, this.pos, (er?: StreamError) => {
       this._performingIO = false
       if (this.destroyed) {
         callback(er)
@@ -399,14 +399,14 @@ export function streamWriteFile(path: string, options: WriteStreamOptions | unde
 }
 
 class StdinStream extends Readable<Buffer> {
-  @__tz_hidden fd = 0
-  #reading = false
+  fd = 0
+  private reading = false
 
   _read(size: int): void {
-    if (this.#reading) return
-    this.#reading = true
+    if (this.reading) return
+    this.reading = true
     void __tz_stdinChunk(size).then((chunk: Buffer | undefined) => {
-      this.#reading = false
+      this.reading = false
       this._pushChunk(chunk)
     })
   }

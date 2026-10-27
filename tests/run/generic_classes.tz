@@ -114,10 +114,10 @@ for (const v of values) {
 
 // Private members are the class's, whatever the types of the instance.
 class Wallet<T> {
-  #coins: T[] = []
-  add(x: T) { this.#coins.push(x) }
-  merge(other: Wallet<T>) { for (const x of other.#coins) this.#coins.push(x) }
-  count() { return this.#coins.length }
+  private coins: T[] = []
+  add(x: T) { this.coins.push(x) }
+  merge(other: Wallet<T>) { for (const x of other.coins) this.coins.push(x) }
+  count() { return this.coins.length }
 }
 const w1 = new Wallet<int>(), w2 = new Wallet<int>()
 w1.add(1)

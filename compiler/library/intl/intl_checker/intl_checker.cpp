@@ -355,7 +355,7 @@ bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
   }
   if (ClassDecl *locale = checker_.libraryClass("Locale");
       locale && !type->isOptional() && ClassDeclarer::classOf(type) == locale) {
-    auto *tag = checker_.ctx_.make<MemberExpr>(arg->loc(), arg, "#tag");
+    auto *tag = checker_.ctx_.make<MemberExpr>(arg->loc(), arg, "tag");
     tag->type = Type::string();
     arg = tag;
     return true;

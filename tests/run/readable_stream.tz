@@ -2,7 +2,8 @@
 // ReadableStream, as the bodies of fetch have it: made with start and
 // pull, sync or async; read with getReader() and with for await, where each
 // chunk comes in a Result and an error of the source is an Err (docs/errors.md,
-// step 5); cancel; how it prints.
+// step 5); cancel; `locked`, a field that a reader changes. How a stream prints
+// is in library_print.tz.
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
@@ -16,7 +17,7 @@ const pulled = new ReadableStream<string>({
     else c.enqueue(word)
   },
 })
-console.log(pulled, pulled.locked)
+console.log(pulled.locked)
 const reader = pulled.getReader()
 console.log(pulled.locked)
 for (;;) {
@@ -67,4 +68,4 @@ for await (const n of endless) {
 console.log("cancelled:", cancelled)
 const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason?.message ?? "" } })
 await other.cancel({ code: "enough", message: "enough" })
-console.log("cancelled:", cancelled, other)
+console.log("cancelled:", cancelled, other.locked)

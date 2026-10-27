@@ -2,16 +2,17 @@
 // AbortController and AbortSignal on EventTarget, globals as in node
 // (docs/events.md, section 4): abort() with the default reason, a
 // DOMException, or one of its own; onabort before the listeners;
-// AbortSignal.abort(), timeout() and any(); how they print.
+// AbortSignal.abort(), timeout() and any() (how they print is in
+// library_print.tz).
 const ac = new AbortController()
-console.log(ac, ac.signal.aborted, ac.signal.reason)
+console.log(ac.signal.aborted, ac.signal.reason)
 ac.signal.onabort = (ev) => console.log("onabort", ev.type, ev.isTrusted, ev.target == ac.signal, ev.eventPhase)
 ac.signal.addEventListener("abort", (ev) => console.log("listener", ev.type, ev.target == ac.signal))
 ac.abort()
 ac.abort() // once only
 const reason = ac.signal.reason
 if (reason instanceof DOMException) console.log(reason.name, reason.message, reason.code)
-console.log([ac], ac.signal)
+console.log([ac].length, ac.signal.aborted)
 
 const own = new AbortController()
 own.abort("stop")

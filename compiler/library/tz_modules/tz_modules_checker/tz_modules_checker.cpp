@@ -1,9 +1,7 @@
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
-#include "compiler/check/classes/method_call_checker/method_call_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
-#include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::cast;
@@ -92,76 +90,6 @@ Expr *TzModulesChecker::adaptResult(Expr *expr, const Type *to) {
   return cast;
 }
 
-FunctionDecl *TzModulesChecker::accessorOf(ClassDecl *cls, llvm::StringRef name,
-                                           FunctionDecl::Accessor kind) {
-  for (const ClassDecl *c = cls; c; c = c->parent) {
-    for (FunctionDecl *fn : c->methods) {
-      if (fn->name == name && !fn->isStatic && fn->accessor == kind) {
-        return fn;
-      }
-    }
-  }
-
-  return nullptr;
-}
-
-Expr *TzModulesChecker::checkAccessorRead(MemberExpr *member, ClassDecl *cls,
-                                          const Type *expected) {
-  if (!accessorOf(cls, member->name, FunctionDecl::Accessor::Getter)) {
-    if (accessorOf(cls, member->name, FunctionDecl::Accessor::Setter)) {
-      checker_.diags_.error(member->loc(),
-                            "'" + member->name + "' of '" + cls->name + "' can only be assigned");
-      member->type = Type::error();
-      return member;
-    }
-    return nullptr;
-  }
-  auto *call = checker_.ctx_.make<CallExpr>(member->loc(), member, std::vector<Expr *>());
-  accessorCalls_.insert(call);
-
-  return checker_.methodCallChecker().checkMethodCall(call, member, expected);
-}
-
-const Type *TzModulesChecker::checkAccessorTarget(MemberExpr *member, ClassDecl *cls,
-                                                  bool compound) {
-  FunctionDecl *setter = accessorOf(cls, member->name, FunctionDecl::Accessor::Setter);
-  if (!setter) {
-    if (!accessorOf(cls, member->name, FunctionDecl::Accessor::Getter)) {
-      return nullptr;
-    }
-    checker_.diags_.error(member->loc(), "cannot assign to '" + member->name +
-                                             "' because it is a "
-                                             "read-only property of '" +
-                                             cls->name + "'");
-    return Type::error();
-  }
-  if (compound) {
-    checker_.diags_.error(member->loc(), "'" + member->name + "' of '" + cls->name +
-                                             "' is assigned only with '=': write 'o." +
-                                             member->name + " = o." + member->name + " + value'");
-    return Type::error();
-  }
-  checker_.pendingSetter_ = member;
-  checker_.returnInferrer().resolveParams(setter->sym);
-
-  return setter->sym->params.empty() ? Type::error() : setter->sym->params[0];
-}
-
-Expr *TzModulesChecker::checkSetterCall(AssignExpr *assign) {
-  MemberExpr *member = std::exchange(checker_.pendingSetter_, nullptr);
-  auto *call =
-      checker_.ctx_.make<CallExpr>(assign->loc(), member, std::vector<Expr *>{assign->value});
-  accessorCalls_.insert(call);
-  Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, nullptr);
-  const ClassDecl *cls = member->object->type->nonOptional()->classDecl();
-  if (cls && cls->library && cls->name == "URL" && member->name == "href" &&
-      !call->args.empty()) {
-    checker_.urlChecker().checkHrefSet(call->args[0]);
-  }
-
-  return checked;
-}
-
 std::string TzModulesChecker::knownPrefix(const Expr *expr) const {
   while (auto *cast = dyn_cast<CastExpr>(expr)) {
     expr = cast->operand;
@@ -237,19 +165,6 @@ void TzModulesChecker::noteHttpsValue(const FunctionDecl *fn, llvm::SMLoc loc) {
        fn == checker_.libFunctions_.lookup("serve"))) {
     checker_.file_->usesTls = true;
   }
-}
-
-bool TzModulesChecker::rejectAccessorCall(CallExpr *call, MemberExpr *member, FuncSymbol *sym) {
-  if (!sym || !sym->decl || sym->decl->accessor == FunctionDecl::Accessor::None ||
-      accessorCalls_.contains(call)) {
-    return false;
-  }
-  checker_.diags_.error(member->loc(), "'" + member->name + "' is a property, not a method: " +
-                                           (sym->decl->accessor == FunctionDecl::Accessor::Getter
-                                                ? "read it without '()'"
-                                                : "assign to it"));
-
-  return true;
 }
 
 }

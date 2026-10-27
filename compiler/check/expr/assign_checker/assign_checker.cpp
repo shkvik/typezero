@@ -166,9 +166,6 @@ Expr *AssignChecker::checkAssign(AssignExpr *assign) {
   }
 
   const Type *type = checker_.targetChecker().checkAssignTarget(assign->target, compound);
-  if (checker_.pendingSetter_) {
-    return checker_.tzModulesChecker().checkSetterCall(assign);
-  }
   assign->type = type;
   auto *index = dyn_cast<IndexExpr>(assign->target);
   auto *member = dyn_cast<MemberExpr>(assign->target);

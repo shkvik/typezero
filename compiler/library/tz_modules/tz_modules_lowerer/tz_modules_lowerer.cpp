@@ -151,13 +151,13 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
   return lowering_.closureLowerer().makeFunctionValue(info, box);
 }
 
-void TzModulesLowerer::appendGetterKeys(llvm::ArrayRef<const ClassDecl *> chain,
+void TzModulesLowerer::appendPrintHooks(llvm::ArrayRef<const ClassDecl *> chain,
                                         std::vector<llvm::Constant *> &entries) {
   std::vector<const FunctionDecl *> getters;
   for (const ClassDecl *c : chain) {
     for (const FunctionDecl *fn : c->methods) {
-      if (fn->accessor != FunctionDecl::Accessor::Getter || fn->isStatic ||
-          fn->access != Access::Public || fn->name.starts_with("#") || fn->hiddenGetter) {
+      if (fn->isStatic || !fn->params.empty() ||
+          (fn->name != "__tz_entries" && fn->name != "__tz_keys")) {
         continue;
       }
       auto it = llvm::find_if(getters, [&](const FunctionDecl *g) { return g->name == fn->name; });

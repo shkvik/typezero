@@ -7,6 +7,7 @@ include(${SOURCE}/../cli.cmake)
 tz(port ${SOURCE}/port/autofix -o lib STDOUT [[
 ported autofix 1.0.0 into lib (4 files)
 changed:
+    4  '#x' became 'private x'
     5  '+' with a string became a template literal
     5  '===' and '!==' became '==' and '!='
     3  'export default' became a named export
@@ -70,6 +71,15 @@ export function plural(unit: string, n: number) {
 export function short(unit: string) {
   return unit.slice(0, 1)
 }
+
+export class Tally {
+  private count = 0
+  private static made = 0
+  add() {
+    Tally.made++
+    return ++this.count
+  }
+}
 ]])
 expect_match(lib/src/options.tz "
 export type Raw = Json
@@ -84,12 +94,15 @@ endif()
 tz(init app)
 tz(add ../lib IN app STDOUT "added autofix: file:../lib\n")
 write(app/main.tz [[
-import { greet, count, find, loud, levels } from "autofix"
+import { greet, count, find, loud, levels, Tally } from "autofix"
 console.log(greet("tz"))
 console.log(greet("tz", { level: "loud" }))
 console.log(greet("tz", { level: "quiet" }))
 console.log(loud("x"), count(2, "file"), count(1, "dir"))
 console.log(find(["a", "b"], "b"), find([], "c"), levels.length)
+const tally = new Tally()
+tally.add()
+console.log(tally.add())
 ]])
 tz(run IN app STDOUT [[
 hello, tz!
@@ -97,11 +110,13 @@ HELLO, TZ!
 (hello, tz)
 HELLO, X! 2 files (f) 1 dir (d)
 b undefined 3
+2
 ]])
 
 tz(port ${SOURCE}/port/manual STDOUT [[
 ported @x/manual 0.1.0 into manual (4 files)
 changed:
+    3  '#x' became 'private x'
     1  '===' and '!==' became '==' and '!='
     1  'any' became 'unknown'
     1  'export default' became a named export
@@ -173,6 +188,7 @@ tz(port own --in-place EXIT 1 STDERR
 tz(port own --in-place --entry units.ts STDOUT [[
 ported own into own (1 file)
 changed:
+    4  '#x' became 'private x'
     1  '+' with a string became a template literal
     1  '===' and '!==' became '==' and '!='
 then 'tz build own/units.tz' reports what else tz does not accept

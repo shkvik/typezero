@@ -132,6 +132,22 @@ type UriError = { code: "bad_uri"; message: string }
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
 
+// The parts of a URL are fields that only its methods change (docs/objects.md,
+// section 6); @types/node still lets the fields be assigned. A value that the
+// URL can refuse gives a Result; tz checks a literal when it builds the program.
+interface URL {
+  setHref(value: string): Result<void, UrlError>
+  setProtocol(value: string): Result<void, UrlError>
+  setHost(value: string): Result<void, UrlError>
+  setHostname(value: string): Result<void, UrlError>
+  setPort(value: string): Result<void, UrlError>
+  setUsername(value: string): void
+  setPassword(value: string): void
+  setPathname(value: string): void
+  setSearch(value: string): void
+  setHash(value: string): void
+}
+
 interface RegExpConstructor {
   parse(source: string, flags?: string): Result<RegExp, RegexError>
 }

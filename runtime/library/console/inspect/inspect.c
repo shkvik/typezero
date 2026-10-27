@@ -919,8 +919,8 @@ static int named(const TzLayout *layout, const char *name) {
 }
 
 static int shows_undefined(const TzLayout *layout, const TzField *field) {
-  return (layout->flags & TZ_LAYOUT_LIBRARY) && field->name_length == 13 &&
-         memcmp(field->name, "_maxListeners", 13) == 0;
+  return (layout->flags & TZ_LAYOUT_LIBRARY) && field->name_length == 12 &&
+         memcmp(field->name, "maxListeners", 12) == 0;
 }
 
 static const TzField *entries_getter(const TzLayout *layout, int *arrows) {
@@ -1135,8 +1135,10 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   uint32_t shown = 0;
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
-    shown += groups || field->offset == TZ_FIELD_METHOD || field->offset == TZ_FIELD_GETTER ||
-             field->type->kind != TZ_T_OPTIONAL ||
+    if (field->offset == TZ_FIELD_GETTER) {
+      continue;
+    }
+    shown += groups || field->offset == TZ_FIELD_METHOD || field->type->kind != TZ_T_OPTIONAL ||
              tz_optional_has(field->type, fields + field->offset) || shows_undefined(layout, field);
   }
   if (shown == 0 && is_class) {
@@ -1170,27 +1172,10 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   ctx->seen[ctx->seen_count++] = object;
   ctx->current_depth = recurse_times;
 
-  int custom = 0;
-  for (uint32_t i = 0; i < layout->count && !custom; ++i) {
-    custom = layout->fields[i].offset == TZ_FIELD_GETTER;
-  }
-  int outer_indentation = ctx->indentation;
-  if (custom) {
-    ctx->indentation = 0;
-  }
   Entries output = {NULL, 0, 0};
   for (uint32_t i = 0; i < layout->count; ++i) {
     const TzField *field = &layout->fields[i];
     if (field->offset == TZ_FIELD_GETTER) {
-      const TzGetterType *getter = (const TzGetterType *)field->type;
-      _Alignas(16) char got[64];
-      getter->get(object, got);
-      TzBuf *entry = entries_add(&output);
-      format_key(entry, field);
-      ctx->indentation += 2;
-      format_value(ctx, entry, getter->result, got, recurse_times);
-      ctx->indentation -= 2;
-      tz_value_release(getter->result, got);
       continue;
     }
     const void *value = fields + field->offset;
@@ -1219,13 +1204,7 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   --ctx->seen_count;
   char base[32];
   circular_base(ctx, object, base);
-  if (custom) {
-    class_prefix(out, layout);
-    reduce_to_single_string(ctx, out, &output, recurse_times, NULL, NULL, open, '}', base);
-    ctx->indentation = outer_indentation;
-  } else {
-    reduce_to_single_string(ctx, out, &output, recurse_times, NULL, layout, open, '}', base);
-  }
+  reduce_to_single_string(ctx, out, &output, recurse_times, NULL, layout, open, '}', base);
   entries_free(&output);
 }
 

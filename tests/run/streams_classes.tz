@@ -7,16 +7,16 @@ import { Duplex, Readable, Transform, Writable } from "node:stream"
 import { finished, pipeline } from "node:stream/promises"
 
 class Counter extends Readable {
-  #n = 0
+  private n = 0
   limit: int
   constructor(limit: int) {
     super()
     this.limit = limit
   }
   _read() {
-    this.#n++
-    if (this.#n > this.limit) this.push(undefined)
-    else this.push(`${this.#n}\n`)
+    this.n++
+    if (this.n > this.limit) this.push(undefined)
+    else this.push(`${this.n}\n`)
   }
 }
 

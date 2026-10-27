@@ -34,9 +34,21 @@ h.append("x-b", "1\n2")
 // expect-error: 'ü' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces
 h.get("ü")
 const u = new URL("http://example.com/")
-// expect-error: setting 'href' to a text known only when the program runs may fail, and an assignment gives no Result; parse the text with 'URL.parse(text)' and keep the URL it gives
-u.href = text
-// expect-error: 'nope' is not a valid URL
-u.href = "nope"
+// expect-error: cannot assign to 'href' because it is a read-only field of 'URL'; change it with 'setHref(...)'
 u.href = "http://example.org/"
-console.log(h, u)
+// expect-error: the Result is not used
+u.setHref(text)
+// expect-error: 'nope' is not a valid URL
+u.setHref("nope")
+u.setHref("http://example.org/")
+// expect-error: 'x81' is not a port: a port is digits from 0 to 65535, or '' for none
+u.setPort("x81")
+// expect-error: 'a b' is not a host
+u.setHostname("a b")
+// expect-error: 'a b:80' is not a host, with an optional port
+u.setHost("a b:80")
+// expect-error: '1http' is not a protocol: a protocol is a letter, then letters, digits and +-., e.g. 'https:'
+u.setProtocol("1http")
+u.setPort("8080")
+u.setProtocol("https:")
+console.log(h, u.href)

@@ -59,6 +59,7 @@
 #include "compiler/library/tz_modules/http_checker/http_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
+#include "compiler/library/tz_modules/url_checker/url_checker.h"
 #include "compiler/library/weakref/weak_ref_checker/weak_ref_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -226,6 +227,7 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
         call->type = Type::error();
         return call;
       }
+      checker_.urlChecker().checkUrlSetter(member, call);
       Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
       checker_.httpChecker().checkHeadersCall(call, member);
       return checked;

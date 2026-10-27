@@ -29,7 +29,6 @@ struct ClassField {
   FunctionDecl *method = nullptr;
   std::vector<Decorator> decorators;
   bool accessor = false;
-  bool hidden = false;
 };
 
 }

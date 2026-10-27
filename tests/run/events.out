@@ -1,24 +1,9 @@
-EventEmitter {
-  _events: [Object: null prototype] {},
-  _eventsCount: 0,
-  _maxListeners: undefined,
-  Symbol(shapeMode): false,
-  Symbol(kCapture): false
-}
+[] 0
 user ann
 count 2 x
 true true
 1 [ 'user', 'count' ]
-EventEmitter {
-  _events: [Object: null prototype] {
-    user: [Function (anonymous)],
-    count: [Function (anonymous)]
-  },
-  _eventsCount: 2,
-  _maxListeners: undefined,
-  Symbol(shapeMode): false,
-  Symbol(kCapture): false
-}
+1
 true true
 [
   'new removeListener function',
@@ -40,13 +25,7 @@ true true
   'rm x function',
   'rm newListener function',
   'rm x function'
-] [] EventEmitter {
-  _events: [Object: null prototype] {},
-  _eventsCount: 0,
-  _maxListeners: undefined,
-  Symbol(shapeMode): false,
-  Symbol(kCapture): false
-}
+] []
 [ 'first a', '1 a 1', 'once a 2', '1 b 2', 'late b' ]
 3 3 3
 false 0
@@ -62,17 +41,7 @@ handled now handled
 true
 listening on 8080
 closed
-Server {
-  _events: [Object: null prototype] {
-    listening: [Function (anonymous)],
-    close: [Function (anonymous)]
-  },
-  _eventsCount: 2,
-  _maxListeners: undefined,
-  port: 8080,
-  Symbol(shapeMode): false,
-  Symbol(kCapture): false
-} 1 true
+8080 1 true
 3 [ 'listening' ] 10
 sport about sport
 true
@@ -80,26 +49,5 @@ news about news
 true
 false
 [ 'news', 'sport' ] 1
-[ '2', '10', 'b', 'a' ] [ '_events', '_eventsCount', '_maxListeners' ] {"_events":{},"_eventsCount":1}
-[
-  Server {
-    _events: [Object: null prototype] { listening: [Function (anonymous)] },
-    _eventsCount: 1,
-    _maxListeners: 3,
-    port: 8080,
-    Symbol(shapeMode): false,
-    Symbol(kCapture): false
-  }
-] {
-  deep: {
-    emitter: Server {
-      _events: [Object: null prototype],
-      _eventsCount: 1,
-      _maxListeners: 3,
-      port: 8080,
-      Symbol(shapeMode): false,
-      Symbol(kCapture): false
-    }
-  }
-}
+[ '2', '10', 'b', 'a' ]
 20 20

@@ -136,8 +136,7 @@ llvm::Value *LibraryCallLowerer::nativeSignal(llvm::Value *signal, const Type *t
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(signal), loadBlock, endBlock);
   lowering_.functionFrame().switchTo(loadBlock);
   llvm::Value *native = lowering_.builder_.CreateLoad(
-      ptr, lowering_.objectLayouts().fieldAddress(signal, type->nonOptional(), "#native"),
-      "native");
+      ptr, lowering_.objectLayouts().fieldAddress(signal, type->nonOptional(), "native"), "native");
   if (retain) {
     lowering_.refCounts().retainValue(native, Type::runtimeObject(Type::Runtime::AbortSignal));
   }

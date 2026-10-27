@@ -111,13 +111,10 @@ const Type *ArgListChecker::memberType(const Type *object, const Type *key) {
         return nullptr;
       }
       const Field *field = object->field(utf8(name->literalText()));
-      const Type *got = field ? field->type
-                              : checker_.utilityTypes().getterType(ClassDeclarer::classOf(object),
-                                                                   utf8(name->literalText()));
-      if (!got) {
+      if (!field) {
         return nullptr;
       }
-      types.push_back(got);
+      types.push_back(field->type);
     }
     return types.empty() ? nullptr : Type::unionOf(types);
   }

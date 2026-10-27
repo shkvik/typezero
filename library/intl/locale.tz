@@ -6,16 +6,16 @@ export class Locale {
   readonly language: string
   readonly script: string | undefined
   readonly region: string | undefined
-  #tag: string
+  private tag: string
 
   constructor(tag: string) {
     const canonical = __tz_intl_locale_tag(tag)
-    this.#tag = canonical == "" ? tag : canonical
-    this.baseName = __tz_intl_locale_part(this.#tag, 0)
-    this.language = __tz_intl_locale_part(this.#tag, 1)
-    const script = __tz_intl_locale_part(this.#tag, 2)
+    this.tag = canonical == "" ? tag : canonical
+    this.baseName = __tz_intl_locale_part(this.tag, 0)
+    this.language = __tz_intl_locale_part(this.tag, 1)
+    const script = __tz_intl_locale_part(this.tag, 2)
     this.script = script == "" ? undefined : script
-    const region = __tz_intl_locale_part(this.#tag, 3)
+    const region = __tz_intl_locale_part(this.tag, 3)
     this.region = region == "" ? undefined : region
   }
 
@@ -28,11 +28,11 @@ export class Locale {
   }
 
   maximize(): Locale {
-    const longer = __tz_intl_locale_part(this.#tag, 4)
-    return new Locale(longer == "" ? this.#tag : longer)
+    const longer = __tz_intl_locale_part(this.tag, 4)
+    return new Locale(longer == "" ? this.tag : longer)
   }
 
   toString(): string {
-    return this.#tag
+    return this.tag
   }
 }

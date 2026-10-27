@@ -28,7 +28,7 @@ export class StringDecoder {
   readonly lastChar = Buffer.alloc(4)
   lastNeed: int = 0
   lastTotal: int = 0
-  @__tz_hidden buffered: int = 0
+  buffered: int = 0
 
   constructor(encoding?: BufferEncoding) {
     this.encoding = normalizeEncoding(encoding)
@@ -37,35 +37,35 @@ export class StringDecoder {
   write(buf: Buffer | Uint8Array | string): string {
     if (typeof buf == "string") return buf
     const data = buf instanceof Buffer ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.length)
-    return this.#decode(data)
+    return this.decode(data)
   }
 
   end(buf?: Buffer | Uint8Array | string): string {
     const ret = buf == undefined ? "" : this.write(buf)
-    if (this.buffered > 0) return ret + this.#flush()
+    if (this.buffered > 0) return ret + this.flush()
     return ret
   }
 
   text(buf: Buffer, offset: int): string {
-    this.#setState(0, 0)
+    this.setState(0, 0)
     return this.write(buf.subarray(offset))
   }
 
-  #setState(buffered: int, missing: int) {
+  private setState(buffered: int, missing: int) {
     this.buffered = buffered
     this.lastNeed = missing
     this.lastTotal = buffered + missing
   }
 
-  #make(data: Buffer, start: int, end: int): string {
+  private make(data: Buffer, start: int, end: int): string {
     return data.toString(this.encoding, start, end)
   }
 
-  #decode(data: Buffer): string {
+  private decode(data: Buffer): string {
     const encoding = this.encoding
     if (encoding != "utf8" && encoding != "utf16le" && encoding != "base64" &&
         encoding != "base64url")
-      return this.#make(data, 0, data.length)
+      return this.make(data, 0, data.length)
     let start = 0
     let nread = data.length
     let prepend: string | undefined = undefined
@@ -74,7 +74,7 @@ export class StringDecoder {
         for (let i = 0; i < nread && i < this.lastNeed; i++) {
           if (((data[start + i] ?? 0) & 0xc0) != 0x80) {
             data.copy(this.lastChar, this.buffered, start, start + i)
-            this.#setState(this.buffered + i, 0)
+            this.setState(this.buffered + i, 0)
             start += i
             nread -= i
             break
@@ -85,10 +85,10 @@ export class StringDecoder {
       data.copy(this.lastChar, this.buffered, start, start + found)
       start += found
       nread -= found
-      this.#setState(this.buffered + found, this.lastNeed - found)
+      this.setState(this.buffered + found, this.lastNeed - found)
       if (this.lastNeed == 0) {
         prepend = this.lastChar.toString(encoding, 0, this.buffered)
-        this.#setState(0, 0)
+        this.setState(0, 0)
       }
     }
     let body: string
@@ -143,18 +143,18 @@ export class StringDecoder {
         nread -= buffered
         data.copy(this.lastChar, 0, start + nread, start + nread + buffered)
       }
-      this.#setState(buffered, missing)
-      body = nread > 0 ? this.#make(data, start, start + nread) : ""
+      this.setState(buffered, missing)
+      body = nread > 0 ? this.make(data, start, start + nread) : ""
     }
     return prepend == undefined ? body : prepend + body
   }
 
-  #flush(): string {
+  private flush(): string {
     if (this.encoding == "utf16le" && this.buffered % 2 == 1)
-      this.#setState(this.buffered - 1, this.lastNeed - 1)
+      this.setState(this.buffered - 1, this.lastNeed - 1)
     if (this.buffered == 0) return ""
     const ret = this.lastChar.toString(this.encoding, 0, this.buffered)
-    this.#setState(0, 0)
+    this.setState(0, 0)
     return ret
   }
 }

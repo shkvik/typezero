@@ -61,7 +61,7 @@ await attempt("corrupt gzip", `${base}/gzip`)
 const once = await fetch(base, { method: "POST", body: "once" })
 if (once.isOk()) {
   const r = once.value
-  console.log((await r.text()).unwrapOr("-"), r.bodyUsed)
+  console.log((await r.text()).unwrapOr("-"), r.bodyUsed())
   const again = await r.text()
   if (again.isErr()) console.log(again.error.code, again.error.message)
 }

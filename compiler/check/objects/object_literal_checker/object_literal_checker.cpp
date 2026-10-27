@@ -308,11 +308,6 @@ Expr *ObjectLiteralChecker::checkSpreadLit(ObjectLitExpr *lit, const Type *targe
     prop.omitKeys.clear();
     if (ClassDecl *cls = ClassDeclarer::classOf(type)) {
       checker_.classDeclarer().completeClass(cls);
-      for (const Field &f : type->fields()) {
-        if (llvm::StringRef(f.name).starts_with("#")) {
-          prop.omit.push_back(checker_.ctx_.keepName(f.name));
-        }
-      }
       if (hasMethodFields(cls)) {
         checker_.diags_.error(prop.value->loc(),
                               "an object with methods cannot be spread into an object "

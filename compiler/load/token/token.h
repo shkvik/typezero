@@ -112,6 +112,7 @@ struct Token {
   Tok kind = Tok::Eof;
   llvm::StringRef text;
   bool newlineBefore = false;
+  bool hash = false;
 
   bool is(Tok k) const { return kind == k; }
   llvm::SMLoc loc() const { return llvm::SMLoc::getFromPointer(text.data()); }

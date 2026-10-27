@@ -1,16 +1,21 @@
 // same-as-node
 // Request and Response without the network: bodies of text, bytes, a
 // stream, a form; text, json, bytes, arrayBuffer and formData once;
-// clone; Response.json, redirect and error; how they print. The arguments
+// clone; Response.json, redirect and error; their fields, read as in node,
+// and bodyUsed(), a method since it changes (how they print is in
+// library_print.tz). The arguments
 // of Request and Response are checked at compile time
 // (errors/http_status.tz, errors/http_request.tz), and what only the
 // running program knows is in request_checks.tz.
 const r = new Response("hello", { status: 201, headers: { "x-y": "z" } })
-console.log(r)
+console.log(r.status, r.statusText, r.headers, r.body != undefined, r.bodyUsed(), r.ok,
+            r.redirected, r.type, r.url)
 const q = new Request("http://example.com/x", { method: "POST", body: "hi" })
-console.log(q)
-console.log(new ReadableStream())
-console.log(must(await q.text()), q.bodyUsed)
+console.log(q.method, q.url, q.headers, q.destination, q.referrer, q.referrerPolicy, q.mode,
+            q.credentials, q.cache, q.redirect, q.integrity, q.keepalive, q.isReloadNavigation,
+            q.isHistoryNavigation, q.signal.aborted, q.body != undefined)
+console.log(new ReadableStream().locked)
+console.log(must(await q.text()), q.bodyUsed())
 const again = await q.text()
 if (again.isErr()) console.log(again.error.code, again.error.message)
 const j = Response.json({ a: [1, 2] }, { status: 202 })

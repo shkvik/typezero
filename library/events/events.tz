@@ -6,13 +6,13 @@ function __tz_lib_inspect(value: unknown): string
 function __tz_lib_pid(): int
 
 class OnceWrapper {
-  #fired = false
+  private wasFired = false
   constructor(readonly listener: unknown) {}
   fired() {
-    return this.#fired
+    return this.wasFired
   }
   markFired() {
-    this.#fired = true
+    this.wasFired = true
   }
 }
 
@@ -34,19 +34,20 @@ const kThis = 2
 const kUnknownArg = 3
 
 class ListenerList {
-  #emitting = 0
   constructor(public items: unknown[]) {}
+  private emitting = 0
+  warned = false
   begin() {
-    this.#emitting++
+    this.emitting++
     return this.items
   }
   done(items: unknown[]) {
-    if (items == this.items) this.#emitting--
+    if (items == this.items) this.emitting--
   }
   changing() {
-    if (this.#emitting > 0) {
+    if (this.emitting > 0) {
       this.items = [...this.items]
-      this.#emitting = 0
+      this.emitting = 0
     }
     return this.items
   }
@@ -57,59 +58,58 @@ function aborted(): AbortError {
 }
 
 export class EventEmitterBase {
-  #events: Record<string, unknown> = __tz_lib_bare({})
-  #eventsCount = 0
-  #maxListeners: double | undefined = undefined
-  #shapeMode = false
-  #capture = false
-  #warned = new Set<string>()
+  private events: Record<string, unknown> = __tz_lib_bare({})
+  private eventsCount = 0
+  private maxListeners: double | undefined = undefined
+  private shapeMode = false
+  private capture = false
 
   setMaxListeners(n: double) {
-    this.#maxListeners = validNumber(n, 0)
+    this.maxListeners = validNumber(n, 0)
     return this
   }
 
   getMaxListeners() {
-    return this.#maxListeners ?? EventEmitter.defaultMaxListeners
+    return this.maxListeners ?? EventEmitter.defaultMaxListeners
   }
 
   emit<A extends unknown[]>(type: string, ...args: A): boolean {
-    const events = this.#events
+    const events = this.events
     const handler = events[type]
     if (handler == undefined) return false
     if (handler instanceof ListenerList) {
       const listeners = handler.begin()
-      for (const listener of listeners) this.#run(type, listener, ...args)
+      for (const listener of listeners) this.run(type, listener, ...args)
       handler.done(listeners)
     } else {
-      this.#run(type, handler, ...args)
+      this.run(type, handler, ...args)
     }
     return true
   }
 
   emitWithUnknown<A extends unknown[]>(type: string, boxed: unknown, ...args: A): boolean {
-    const handler = this.#events[type]
+    const handler = this.events[type]
     if (handler == undefined) return false
     if (handler instanceof ListenerList) {
       const listeners = handler.begin()
-      for (const listener of listeners) this.#runWithUnknown(type, listener, boxed, ...args)
+      for (const listener of listeners) this.runWithUnknown(type, listener, boxed, ...args)
       handler.done(listeners)
     } else {
-      this.#runWithUnknown(type, handler, boxed, ...args)
+      this.runWithUnknown(type, handler, boxed, ...args)
     }
     return true
   }
 
-  #runWithUnknown<A extends unknown[]>(type: string, listener: unknown, boxed: unknown,
+  private runWithUnknown<A extends unknown[]>(type: string, listener: unknown, boxed: unknown,
                                        ...args: A) {
     if (listener instanceof UnknownArgListener) {
       __tz_listener<(arg: unknown) => void>(listener.listener)(boxed)
       return
     }
-    this.#run(type, listener, ...args)
+    this.run(type, listener, ...args)
   }
 
-  #run<A extends unknown[]>(type: string, listener: unknown, ...args: A) {
+  private run<A extends unknown[]>(type: string, listener: unknown, ...args: A) {
     let fn = listener
     if (fn instanceof OnceWrapper) {
       if (fn.fired()) return
@@ -133,30 +133,32 @@ export class EventEmitterBase {
     __tz_listener<(...args: A) => void>(fn)(...args)
   }
 
-  #addListener(type: string, listener: unknown, prepend: boolean) {
-    let events = this.#events
+  private insertListener(type: string, listener: unknown, prepend: boolean) {
+    let events = this.events
     if (events["newListener"] != undefined) {
       this.emit("newListener", type, original(listener))
-      events = this.#events
+      events = this.events
     }
     const existing = events[type]
     if (existing == undefined) {
       events[type] = listener
-      ++this.#eventsCount
+      ++this.eventsCount
       return this
     }
-    let list: unknown[]
+    let holder: ListenerList
     if (existing instanceof ListenerList) {
-      list = existing.changing()
+      holder = existing
+      const list = existing.changing()
       if (prepend) list.unshift(listener)
       else list.push(listener)
     } else {
-      list = prepend ? [listener, existing] : [existing, listener]
-      events[type] = new ListenerList(list)
+      holder = new ListenerList(prepend ? [listener, existing] : [existing, listener])
+      events[type] = holder
     }
+    const list = holder.items
     const m = this.getMaxListeners()
-    if (m > 0 && list.length.toDouble() > m && !this.#warned.has(type)) {
-      this.#warned.add(type)
+    if (m > 0 && list.length.toDouble() > m && !holder.warned) {
+      holder.warned = true
       emitWarning(
         "MaxListenersExceededWarning",
         `Possible EventEmitter memory leak detected. ${list.length} ${type} listeners added to ` +
@@ -168,15 +170,15 @@ export class EventEmitterBase {
   }
 
   addListener(type: string, listener: unknown, kind: int = kPlain) {
-    return this.#addListener(type, wrap(listener, kind), false)
+    return this.insertListener(type, wrap(listener, kind), false)
   }
 
   on(type: string, listener: unknown, kind: int = kPlain) {
-    return this.#addListener(type, wrap(listener, kind), false)
+    return this.insertListener(type, wrap(listener, kind), false)
   }
 
   prependListener(type: string, listener: unknown, kind: int = kPlain) {
-    return this.#addListener(type, wrap(listener, kind), true)
+    return this.insertListener(type, wrap(listener, kind), true)
   }
 
   once(type: string, listener: unknown, kind: int = kPlain) {
@@ -190,16 +192,15 @@ export class EventEmitterBase {
   }
 
   removeListener(type: string, listener: unknown) {
-    const events = this.#events
+    const events = this.events
     const kept = events[type]
     if (kept == undefined) return this
     if (!(kept instanceof ListenerList)) {
       const list = kept
       if (!same(list, listener)) return this
-      this.#eventsCount -= 1
-      if (this.#eventsCount == 0) this.#events = __tz_lib_bare({})
+      this.eventsCount -= 1
+      if (this.eventsCount == 0) this.events = __tz_lib_bare({})
       else delete events[type]
-      this.#warned.delete(type)
       if (events["removeListener"] != undefined)
         this.emit("removeListener", type, original(list))
       return this
@@ -215,10 +216,7 @@ export class EventEmitterBase {
     if (position < 0) return this
     if (position == 0) list.shift()
     else list.splice(position, 1)
-    if (list.length == 1) {
-      events[type] = list[0]
-      this.#warned.delete(type)
-    }
+    if (list.length == 1) events[type] = list[0]
     if (events["removeListener"] != undefined) this.emit("removeListener", type, listener)
     return this
   }
@@ -228,18 +226,16 @@ export class EventEmitterBase {
   }
 
   removeAllListeners(type?: string) {
-    const events = this.#events
+    const events = this.events
     if (events["removeListener"] == undefined) {
       if (type == undefined) {
-        this.#events = __tz_lib_bare({})
-        this.#eventsCount = 0
-        this.#warned.clear()
+        this.events = __tz_lib_bare({})
+        this.eventsCount = 0
       } else if (events[type] != undefined) {
-        if (--this.#eventsCount == 0) this.#events = __tz_lib_bare({})
+        if (--this.eventsCount == 0) this.events = __tz_lib_bare({})
         else delete events[type]
-        this.#warned.delete(type)
       }
-      this.#shapeMode = false
+      this.shapeMode = false
       return this
     }
     if (type == undefined) {
@@ -248,10 +244,9 @@ export class EventEmitterBase {
         this.removeAllListeners(key)
       }
       this.removeAllListeners("removeListener")
-      this.#events = __tz_lib_bare({})
-      this.#eventsCount = 0
-      this.#warned.clear()
-      this.#shapeMode = false
+      this.events = __tz_lib_bare({})
+      this.eventsCount = 0
+      this.shapeMode = false
       return this
     }
     const listeners = events[type]
@@ -264,28 +259,28 @@ export class EventEmitterBase {
     return this
   }
 
-  #listeners(type: string, raw: boolean): unknown[] {
-    const evlistener = this.#events[type]
+  private listeners(type: string, raw: boolean): unknown[] {
+    const evlistener = this.events[type]
     if (evlistener == undefined) return []
     if (!(evlistener instanceof ListenerList)) return [raw ? evlistener : original(evlistener)]
     return raw ? [...evlistener.items] : evlistener.items.map((l) => original(l))
   }
 
-  #listenersOf<A extends unknown[]>(type: string, raw: boolean): ((...args: A) => void)[] {
+  private listenersOf<A extends unknown[]>(type: string, raw: boolean): ((...args: A) => void)[] {
     const out: ((...args: A) => void)[] = []
-    for (const listener of this.#listeners(type, raw)) out.push(this.#callable<A>(type, listener))
+    for (const listener of this.listeners(type, raw)) out.push(this.callable<A>(type, listener))
     return out
   }
 
-  #callable<A extends unknown[]>(type: string, listener: unknown): (...args: A) => void {
+  private callable<A extends unknown[]>(type: string, listener: unknown): (...args: A) => void {
     if (listener instanceof OnceWrapper || listener instanceof AsyncListener ||
         listener instanceof ThisListener || listener instanceof UnknownArgListener)
-      return (...args: A) => this.#run(type, listener, ...args)
+      return (...args: A) => this.run(type, listener, ...args)
     return __tz_listener<(...args: A) => void>(listener)
   }
 
   listenerCount(type: string, listener?: unknown): int {
-    const evlistener = this.#events[type]
+    const evlistener = this.events[type]
     if (evlistener == undefined) return 0
     if (!(evlistener instanceof ListenerList)) {
       if (listener != undefined) return same(evlistener, listener) ? 1 : 0
@@ -300,7 +295,7 @@ export class EventEmitterBase {
   }
 
   eventNames(): string[] {
-    return this.#eventsCount > 0 ? ownKeys(this.#events) : []
+    return this.eventsCount > 0 ? ownKeys(this.events) : []
   }
 }
 
@@ -417,76 +412,76 @@ function onResult<A extends unknown[], E>(
 }
 
 class EventQueue<A extends unknown[], F> {
-  #events: A[] = []
-  #error: F | undefined = undefined
-  #finished = false
-  #wake: (() => void) | undefined = undefined
+  private events: A[] = []
+  private error: F | undefined = undefined
+  private finished = false
+  private wake: (() => void) | undefined = undefined
 
   push(args: A) {
-    if (this.#finished) return
-    this.#events.push(args)
-    this.#poke()
+    if (this.finished) return
+    this.events.push(args)
+    this.poke()
   }
 
   fail(error: F) {
-    if (this.#finished) return
-    this.#error = error
-    this.#finished = true
-    this.#poke()
+    if (this.finished) return
+    this.error = error
+    this.finished = true
+    this.poke()
   }
 
   finish() {
-    this.#finished = true
-    this.#poke()
+    this.finished = true
+    this.poke()
   }
 
-  #poke() {
-    const wake = this.#wake
-    this.#wake = undefined
+  private poke() {
+    const wake = this.wake
+    this.wake = undefined
     if (wake != undefined) wake()
   }
 
-  #stopper(stop: () => void) {
+  private stopper(stop: () => void) {
     return __tz_defer(() => {
-      this.#finished = true
-      this.#wake = undefined
+      this.finished = true
+      this.wake = undefined
       stop()
     })
   }
 
   async *items(stop: () => void) {
-    const stopper = this.#stopper(stop)
+    const stopper = this.stopper(stop)
     while (true) {
-      const next = this.#events.shift()
+      const next = this.events.shift()
       if (next != undefined) {
         yield next
         continue
       }
-      if (this.#finished) return
+      if (this.finished) return
       await new Promise<void>((resolve) => {
-        this.#wake = resolve
+        this.wake = resolve
       })
     }
   }
 
   async *results(stop: () => void) {
-    const stopper = this.#stopper(stop)
+    const stopper = this.stopper(stop)
     while (true) {
-      const next = this.#events.shift()
+      const next = this.events.shift()
       if (next != undefined) {
         const item: Result<A, F> = ok(next)
         yield item
         continue
       }
-      const error = this.#error
+      const error = this.error
       if (error != undefined) {
         const item: Result<A, F> = err(error)
         yield item
         return
       }
-      if (this.#finished) return
+      if (this.finished) return
       await new Promise<void>((resolve) => {
-        this.#wake = resolve
+        this.wake = resolve
       })
     }
   }

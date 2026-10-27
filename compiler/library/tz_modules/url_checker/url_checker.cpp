@@ -132,13 +132,6 @@ bool UrlChecker::knownAbsolute(const Expr *expr) const {
     return (member->name == "url" && isLibraryClass(object, "Request")) ||
            (member->name == "href" && isLibraryClass(object, "URL"));
   }
-  if (auto *call = dyn_cast<CallExpr>(expr); call && call->method && call->method->decl) {
-    const FunctionDecl *getter = call->method->decl;
-    const ClassDecl *cls = getter->cls;
-    return getter->accessor == FunctionDecl::Accessor::Getter && cls && cls->library &&
-           ((getter->name == "url" && cls->name == "Request") ||
-            (getter->name == "href" && cls->name == "URL"));
-  }
 
   return false;
 }
@@ -176,23 +169,66 @@ void UrlChecker::checkUrlNew(NewExpr *expr) {
   }
 }
 
-void UrlChecker::checkHrefSet(const Expr *value) {
-  if (checker_.libraryCalls().inLibrary(value->loc()) || value->type->isError()) {
+void UrlChecker::checkUrlSetter(MemberExpr *member, const CallExpr *call) {
+  if (call->args.size() != 1 || !isLibraryClass(member->object->type, "URL") ||
+      checker_.libraryCalls().inLibrary(member->loc())) {
     return;
   }
-  const Expr *input = unconverted(value);
-  if (std::optional<std::string> text = literalText(input)) {
-    if (!validUrlText(*text, false)) {
-      checker_.diags_.error(input->loc(), "'" + *text + "' is not a valid URL");
+  llvm::StringRef name = member->name;
+  if (name != "setHref" && name != "setProtocol" && name != "setHost" && name != "setHostname" &&
+      name != "setPort") {
+    return;
+  }
+  const Expr *input = call->args[0];
+  std::optional<std::string> text = literalText(input);
+  if (!text) {
+    return;
+  }
+  llvm::StringRef value = *text;
+  std::string problem;
+  if (name == "setHref") {
+    if (!validUrlText(value, false)) {
+      problem = "'" + *text + "' is not a valid URL";
     }
+  } else if (name == "setProtocol") {
+    llvm::StringRef scheme = value;
+    scheme.consume_back(":");
+    bool good = !scheme.empty() && llvm::isAlpha(scheme[0]) && llvm::all_of(scheme, [](char c) {
+      return llvm::isAlnum(c) || c == '+' || c == '-' || c == '.';
+    });
+    if (!good) {
+      problem = "'" + *text +
+                "' is not a protocol: a protocol is a letter, then letters, digits "
+                "and +-., e.g. 'https:'";
+    }
+  } else if (name == "setPort") {
+    unsigned long long number = 0;
+    if (!value.empty() &&
+        (!llvm::all_of(value, llvm::isDigit) || value.getAsInteger(10, number) || number > 65535)) {
+      problem = "'" + *text + "' is not a port: a port is digits from 0 to 65535, or '' for none";
+    }
+  } else {
+    llvm::StringRef host = value, port;
+    if (name == "setHost" && !value.starts_with("[")) {
+      std::tie(host, port) = value.split(':');
+    } else if (name == "setHost") {
+      size_t close = value.find(']');
+      host = value.take_front(close == llvm::StringRef::npos ? value.size() : close + 1);
+      port = value.drop_front(host.size());
+      port.consume_front(":");
+    }
+    unsigned long long number = 0;
+    if (!validHost(host) || !llvm::all_of(port, llvm::isDigit) ||
+        (!port.empty() && (port.getAsInteger(10, number) || number > 65535))) {
+      problem = "'" + *text + "' is not a host" +
+                std::string(name == "setHost" ? ", with an optional port" : "");
+    }
+  }
+  if (!problem.empty()) {
+    checker_.diags_.error(input->loc(), problem);
     return;
   }
-  if (!knownAbsolute(input)) {
-    checker_.diags_.error(input->loc(),
-                          "setting 'href' to a text known only when the program runs may fail, "
-                          "and an assignment gives no Result; parse the text with "
-                          "'URL.parse(text)' and keep the URL it gives");
-  }
+  member->name = checker_.ctx_.keepName("__tz_" + name.str());
 }
 
 }

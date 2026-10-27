@@ -26,7 +26,7 @@ const std::vector<MakerFields> &fsObjects() {
       {"Stats",
        {"dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks", "atimeMs",
         "mtimeMs", "ctimeMs", "birthtimeMs"}},
-      {"Dirent", {"name", "parentPath", "#type"}},
+      {"Dirent", {"name", "parentPath", "Symbol(type)"}},
   };
 
   return table;
@@ -73,7 +73,7 @@ llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
     Lowering::Operand object = lowering_.refCounts().emitOperand(member->object, true);
     const Type *type = object.type;
     bool stats = type->field("mode") != nullptr;
-    llvm::StringRef field = stats ? "mode" : "#type";
+    llvm::StringRef field = stats ? "mode" : "Symbol(type)";
     llvm::Value *bits = lowering_.builder_.CreateLoad(
         i64, lowering_.objectLayouts().fieldAddress(object.value, type, field));
     lowering_.refCounts().dropOperand(object);

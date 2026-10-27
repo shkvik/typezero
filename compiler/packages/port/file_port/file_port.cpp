@@ -448,6 +448,10 @@ void FilePort::tokens() {
       }
       break;
     case Tok::Identifier:
+      if (t.hash) {
+        privateName(i);
+        break;
+      }
       if (afterDot(i)) {
         break;
       }
@@ -577,6 +581,26 @@ size_t FilePort::operand(size_t i) const {
   }
 
   return end;
+}
+
+void FilePort::privateName(size_t i) {
+  const char *kind = "'#x' became 'private x'";
+  size_t first = i;
+  while (first > 0 && (isName(first - 1, "static") || isName(first - 1, "readonly") ||
+                       isName(first - 1, "async") || isName(first - 1, "override"))) {
+    --first;
+  }
+  bool declared =
+      !afterDot(i) && (first == 0 || toks_[first].newlineBefore || is(first - 1, Tok::LBrace) ||
+                       is(first - 1, Tok::RBrace) || is(first - 1, Tok::Semi));
+  if (!declared) {
+    add(at(i) - 1, at(i), "", kind);
+  } else if (first == i) {
+    add(at(i) - 1, at(i), "private ", kind);
+  } else {
+    add(at(first), at(first), "private ", kind);
+    add(at(i) - 1, at(i), "", nullptr);
+  }
 }
 
 bool FilePort::chainMayStart(size_t i) const {

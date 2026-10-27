@@ -12,13 +12,13 @@ class Context {
   text(s: string) { return new Response(s) }
 }
 class App {
-  #routes = new Map<string, (c: Context) => Response | Promise<Response>>()
+  private routes = new Map<string, (c: Context) => Response | Promise<Response>>()
   get(path: string, handler: (c: Context) => Response | Promise<Response>) {
-    this.#routes.set(path, handler)
+    this.routes.set(path, handler)
     return this
   }
   fetch = (request: Request, env?: unknown, ctx?: unknown): Response | Promise<Response> => {
-    const handler = this.#routes.get(new URL(request.url).pathname)
+    const handler = this.routes.get(new URL(request.url).pathname)
     if (handler == undefined) return new Response("404 Not Found", { status: 404 })
     return handler(new Context(request))
   }

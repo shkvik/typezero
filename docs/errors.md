@@ -386,11 +386,11 @@ class Port {
    (подсказка `(await p).map(...)`), `okAsync`, `errAsync`, `asyncMap`, `asyncAndThen`.
    `return r` для сужённого `Err`. Место создания в `Err` и печать. Ошибка на лишний
    `return await` (внутри `try` пока разрешён — до шага 5). Тесты переписаны.
-2. **Библиотека на `Result`.** Всё, что сейчас бросает, отдаёт `Result` (раздел 7): `node:fs`,
+2. **Библиотека на `Result`** (сделано 26–27 октября). Всё, что сейчас бросает, отдаёт `Result` (раздел 7): `node:fs`,
    `JSON`, `RegExp`, `URL`, `child_process`, `crypto`, `Date`, разбор чисел. Ошибки библиотеки —
    объекты с меткой. Проверки аргументов — типами параметров (`HttpStatus`, литеральные типы,
    перегрузки). Переписать `library/*.tz`: 227 `throw`.
-3. **`Promise` без отказа и события.** Убрать `reject`, `.catch`, `.finally`, `Promise.reject`,
+3. **`Promise` без отказа и события** (сделано 27 октября). Убрать `reject`, `.catch`, `.finally`, `Promise.reject`,
    `allSettled`, `any`. Правило подписки на `'error'`; `for await`, `pipeline`, `finished`,
    `once`, `end` — `Result`; `pipe()` и `uncaughtException` — ошибки. `Result` не приводится
    к `void`: `void` над `Promise<Result>` и колбэк с `Result` там, где ждут `void`, — ошибки.

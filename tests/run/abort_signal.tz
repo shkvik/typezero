@@ -1,7 +1,8 @@
 // same-as-node
 // AbortController and AbortSignal: abort() with a reason or without (an
 // AbortError then), the listener `onabort` in the order it came,
-// AbortSignal.abort(), timeout() and any(), and how they print.
+// AbortSignal.abort(), timeout() and any() (how they print is in
+// library_print.tz).
 // throwIfAborted() is gone: nothing is thrown in tz, `aborted` says it.
 const log = (s: string) => console.log(s)
 // The reason is any value: here a string, or the DOMException abort() makes.
@@ -9,11 +10,11 @@ const message = (r: unknown) => (typeof r == "string" ? r : r instanceof DOMExce
 const named = (r: unknown) => (r instanceof DOMException ? r.name : "-")
 const controller = new AbortController()
 const signal = controller.signal
-console.log(controller, signal.aborted, signal.reason)
+console.log(controller.signal == signal, signal.aborted, signal.reason)
 signal.onabort = () => log(`onabort: ${message(signal.reason)}`)
 controller.abort("stop")
 controller.abort("again") // nothing more happens
-console.log(signal, signal.aborted, message(signal.reason))
+console.log(signal.aborted, message(signal.reason))
 
 // Without a reason: a DOMException named AbortError.
 const plain = new AbortController()

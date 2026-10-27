@@ -7,7 +7,7 @@ function __tz_lib_order(): double
 export class DOMException {
   readonly message: string
   readonly name: string
-  @__tz_hidden readonly code: int
+  readonly code: int
   constructor(message = "", name = "Error") {
     this.message = message
     this.name = name
@@ -44,17 +44,17 @@ export class Event {
   defaultPrevented = false
   readonly cancelable: boolean
   readonly timeStamp: double
-  @__tz_hidden readonly bubbles: boolean
-  @__tz_hidden readonly composed: boolean
-  @__tz_hidden isTrusted = false
-  @__tz_hidden target: EventTarget | undefined = undefined
-  @__tz_hidden currentTarget: EventTarget | undefined = undefined
-  @__tz_hidden srcElement: EventTarget | undefined = undefined
-  @__tz_hidden eventPhase = 0
-  @__tz_hidden returnValue = true
-  @__tz_hidden cancelBubble = false
-  #dispatching = false
-  #stopImmediate = false
+  readonly bubbles: boolean
+  readonly composed: boolean
+  isTrusted = false
+  target: EventTarget | undefined = undefined
+  currentTarget: EventTarget | undefined = undefined
+  srcElement: EventTarget | undefined = undefined
+  eventPhase = 0
+  returnValue = true
+  cancelBubble = false
+  private inDispatch = false
+  private stopImmediate = false
 
   constructor(type: string, options?: EventInit) {
     this.type = type
@@ -76,20 +76,20 @@ export class Event {
 
   stopImmediatePropagation() {
     this.cancelBubble = true
-    this.#stopImmediate = true
+    this.stopImmediate = true
   }
 
   composedPath(): EventTarget[] {
     const target = this.currentTarget
-    return this.#dispatching && target != undefined ? [target] : []
+    return this.inDispatch && target != undefined ? [target] : []
   }
 
   dispatching(): boolean {
-    return this.#dispatching
+    return this.inDispatch
   }
 
   beginDispatch(target: EventTarget) {
-    this.#dispatching = true
+    this.inDispatch = true
     this.target = target
     this.srcElement = target
     this.currentTarget = target
@@ -97,13 +97,13 @@ export class Event {
   }
 
   endDispatch() {
-    this.#dispatching = false
+    this.inDispatch = false
     this.currentTarget = undefined
     this.eventPhase = Event.NONE
   }
 
   stoppedImmediately() {
-    return this.#stopImmediate
+    return this.stopImmediate
   }
 }
 
@@ -150,7 +150,7 @@ class Listener {
 }
 
 export class EventTarget {
-  #events = new Map<string, Listener>()
+  private events = new Map<string, Listener>()
 
   addFunctionListener<E extends Event>(
     type: string,
@@ -161,7 +161,7 @@ export class EventTarget {
       const wanted = __tz_as<E>(event)
       if (wanted != undefined) listener(wanted)
     }
-    this.#add(type, callback, listener, options)
+    this.add(type, callback, listener, options)
   }
 
   addObjectListener(
@@ -169,10 +169,10 @@ export class EventTarget {
     listener: EventListenerObject,
     options?: AddEventListenerOptions,
   ) {
-    this.#add(type, (event: Event) => listener.handleEvent(event), listener, options)
+    this.add(type, (event: Event) => listener.handleEvent(event), listener, options)
   }
 
-  #add(
+  private add(
     type: string,
     callback: (event: Event) => void,
     original: unknown,
@@ -181,10 +181,10 @@ export class EventTarget {
     const signal = options?.signal
     if (signal != undefined && signal.aborted) return
     const capture = options?.capture ?? false
-    let root = this.#events.get(type)
+    let root = this.events.get(type)
     if (root == undefined) {
       root = new Listener(noListener, undefined, false, false)
-      this.#events.set(type, root)
+      this.events.set(type, root)
     }
     let last = root
     for (let at = root.next; at != undefined; at = at.next) {
@@ -203,7 +203,7 @@ export class EventTarget {
   }
 
   removeListenerOf(type: string, original: unknown, capture: boolean) {
-    const root = this.#events.get(type)
+    const root = this.events.get(type)
     if (root == undefined) return
     let previous = root
     for (let at = root.next; at != undefined; at = at.next) {
@@ -224,7 +224,7 @@ export class EventTarget {
   dispatchEvent(event: Event): boolean {
     if (event.dispatching()) return false
     event.beginDispatch(this)
-    const root = this.#events.get(event.type)
+    const root = this.events.get(event.type)
     let handler = root?.next
     while (handler != undefined) {
       const next: Listener | undefined = handler.next
@@ -244,7 +244,7 @@ export class EventTarget {
 
   listenersOf(type: string): unknown[] {
     const out: unknown[] = []
-    const root = this.#events.get(type)
+    const root = this.events.get(type)
     for (let at = root?.next; at != undefined; at = at.next) out.push(at.original)
     return out
   }
@@ -252,45 +252,45 @@ export class EventTarget {
 
 export class AbortSignal extends EventTarget {
   aborted = false
-  @__tz_hidden reason: unknown = undefined
-  @__tz_hidden onabort: ((event: Event) => void) | undefined = undefined
-  #native: object = __tz_signal_new()
-  #dependants: AbortSignal[] = []
-  #onabortListens = false
+  reason: unknown = undefined
+  onabort: ((event: Event) => void) | undefined = undefined
+  private native: object = __tz_signal_new()
+  private dependants: AbortSignal[] = []
+  private onabortListens = false
 
   protected runtimeListeners(type: string, order: double) {
-    if (type == "abort") __tz_lib_signal_run(this.#native, order)
+    if (type == "abort") __tz_lib_signal_run(this.native, order)
   }
 
   setOnabort(handler: ((event: Event) => void) | undefined) {
     this.onabort = handler
-    if (this.#onabortListens) return
-    this.#onabortListens = true
+    if (this.onabortListens) return
+    this.onabortListens = true
     this.addFunctionListener<Event>("abort", runOnabort)
   }
 
   abortWith(reason: unknown) {
     if (this.aborted) return
     const followers: AbortSignal[] = []
-    this.#markAborted(reason, followers)
-    this.#runAbort()
-    for (const follower of followers) follower.#runAbort()
+    this.markAborted(reason, followers)
+    this.runAbort()
+    for (const follower of followers) follower.runAbort()
   }
 
-  #markAborted(reason: unknown, followers: AbortSignal[]) {
+  private markAborted(reason: unknown, followers: AbortSignal[]) {
     this.aborted = true
     this.reason = reason
-    __tz_lib_signal_abort(this.#native, reason)
-    const dependants = this.#dependants
-    this.#dependants = []
+    __tz_lib_signal_abort(this.native, reason)
+    const dependants = this.dependants
+    this.dependants = []
     for (const signal of dependants)
       if (!signal.aborted) {
         followers.push(signal)
-        signal.#markAborted(reason, followers)
+        signal.markAborted(reason, followers)
       }
   }
 
-  #runAbort() {
+  private runAbort() {
     const event = new Event("abort")
     event.isTrusted = true
     this.dispatchEvent(event)
@@ -298,7 +298,7 @@ export class AbortSignal extends EventTarget {
 
   static abort(reason?: unknown): AbortSignal {
     const signal = new AbortSignal()
-    signal.#markAborted(reason ?? new DOMException("This operation was aborted", "AbortError"), [])
+    signal.markAborted(reason ?? new DOMException("This operation was aborted", "AbortError"), [])
     return signal
   }
 
@@ -314,11 +314,11 @@ export class AbortSignal extends EventTarget {
     const result = new AbortSignal()
     for (const signal of signals)
       if (signal.aborted) {
-        result.#markAborted(signal.reason, [])
+        result.markAborted(signal.reason, [])
         return result
       }
     for (const signal of signals)
-      if (!signal.#dependants.includes(result)) signal.#dependants.push(result)
+      if (!signal.dependants.includes(result)) signal.dependants.push(result)
     return result
   }
 }

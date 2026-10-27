@@ -69,9 +69,6 @@ struct FunctionDecl : Stmt {
   size_t listStart = 0;
   const Type *listType = nullptr;
   bool external = false;
-  enum class Accessor { None, Getter, Setter };
-  Accessor accessor = Accessor::None;
-  bool hiddenGetter = false;
 };
 
 }

@@ -87,7 +87,7 @@ const Type *TypeOperators::keysOf(const Type *type) {
   }
   std::vector<const Type *> keys;
   for (const Field &f : type->fields()) {
-    if (llvm::StringRef(f.name).starts_with("#") || llvm::StringRef(f.name).starts_with("%")) {
+    if (llvm::StringRef(f.name).starts_with("%")) {
       continue;
     }
     if (const ClassField *field = cls ? ClassBases::findField(cls, f.name) : nullptr;
@@ -95,18 +95,6 @@ const Type *TypeOperators::keysOf(const Type *type) {
       continue;
     }
     keys.push_back(Type::stringLiteral(utf16(f.name)));
-  }
-  for (const ClassDecl *k = cls; k; k = k->parent) {
-    for (const FunctionDecl *fn : k->methods) {
-      if (fn->accessor == FunctionDecl::Accessor::Getter && !fn->isStatic &&
-          fn->access == Access::Public && !llvm::StringRef(fn->name).starts_with("#") &&
-          !type->field(fn->name)) {
-        const Type *key = Type::stringLiteral(utf16(fn->name));
-        if (!llvm::is_contained(keys, key)) {
-          keys.push_back(key);
-        }
-      }
-    }
   }
 
   return keys.empty() ? Type::never() : Type::unionOf(keys);
@@ -349,11 +337,6 @@ const Type *TypeOperators::resolveTypeOp(const TypeRef &ref) {
       if (ClassDecl *cls = field ? nullptr : ClassDeclarer::classOf(type)) {
         checker_.classDeclarer().completeClass(cls);
         std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, ref.names[i], false);
-        if (!methods.empty() && methods.back()->sym &&
-            methods.back()->accessor == FunctionDecl::Accessor::Getter) {
-          type = checker_.returnInferrer().functionType(methods.back()->sym)->ret();
-          continue;
-        }
         if (methods.size() == 1 && methods[0]->sym && methods[0]->typeParams.empty()) {
           type = checker_.returnInferrer().functionType(methods[0]->sym);
           continue;

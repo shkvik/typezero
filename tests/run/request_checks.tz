@@ -52,7 +52,7 @@ const streamBody: BodyInit = new ReadableStream<Uint8Array>({ start: c => { c.cl
 const r3 = await fetch(new Request(base, { method: "POST", body: streamBody }))
 console.log(r3.isErr() ? r3.error.message : "sent")
 const posted = new Request(base, { method: "POST", body: "twice?" })
-console.log(must(await must(await fetch(posted)).text()), posted.bodyUsed)
+console.log(must(await must(await fetch(posted)).text()), posted.bodyUsed())
 const r4 = await fetch(posted)
 console.log(r4.isErr() ? r4.error.message : "sent")
 const used = new Request(base, { method: "POST", body: "once" })
@@ -64,13 +64,13 @@ const read = new Response("body")
 console.log(must(await read.text()))
 const copy = read.clone()
 const text = await copy.text()
-console.log(copy.bodyUsed, text.isErr() ? text.error.code : text.value)
+console.log(copy.bodyUsed(), text.isErr() ? text.error.code : text.value)
 const u = new URL("http://a.com/x")
 const href = ["http://b.com/y", "not a url"]
 for (const next of href) {
   const parsed = URL.parse(next)
-  if (parsed.isOk()) u.href = parsed.value.href
-  console.log(u.href)
+  if (parsed.isOk() && u.setHref(parsed.value.href).isOk()) console.log(u.href)
+  else console.log("kept", u.href)
 }
 await server.stop()
 

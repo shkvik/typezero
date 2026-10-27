@@ -137,9 +137,8 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
     if (checker_.eventMaps().isEmitterClass(cls)) {
       checker_.diags_.error(arg->loc(),
                             "'Object." + fn +
-                                "' of an emitter is not supported: its keys are "
-                                "node's _events, _eventsCount and _maxListeners; read the fields "
-                                "of its class by name");
+                                "' of an emitter is not supported: its fields are the "
+                                "listeners it keeps; read the fields of its class by name");
       return call;
     }
     if (hasMethodFields(cls)) {
@@ -167,9 +166,6 @@ Expr *ObjectChecker::checkObjectCall(CallExpr *call, MemberExpr *member, const T
   }
   for (auto [t0, field] : fields) {
     const Field &f = *field;
-    if (t0->isClass() && llvm::StringRef(f.name).starts_with("#")) {
-      continue;
-    }
     const Type *t = f.type->nonOptional();
     const Type *both = element ? Type::unionOf({element, t}) : t;
     if (std::string problem = unionProblem(both); !problem.empty()) {

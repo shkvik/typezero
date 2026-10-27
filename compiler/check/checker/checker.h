@@ -654,7 +654,6 @@ private:
   llvm::DenseMap<const FunctionDecl *, std::tuple<unsigned, int64_t, int64_t>> elementCallbacks_;
   ClassDecl *statsClass_ = nullptr;
   ClassDecl *direntClass_ = nullptr;
-  MemberExpr *pendingSetter_ = nullptr;
   llvm::DenseMap<const VarSymbol *, std::string> constPrefixes_;
 
 public:

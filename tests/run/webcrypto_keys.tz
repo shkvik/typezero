@@ -23,7 +23,7 @@ const data = enc.encode("the data")
 // ECDSA
 const ecPriv = must(await subtle.importKey("pkcs8", ecPkcs8, { name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]))
 const ecPub = must(await subtle.importKey("spki", ecSpki, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"]))
-console.log(ecPriv, ecPub.algorithm)
+console.log(shown(ecPriv), ecPub.algorithm)
 const ecSig = must(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, ecPriv, data))
 console.log("ecdsa", ecSig.byteLength, must(await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, ecPub, ecSig, data)))
 console.log("ecdsa other hash", must(await subtle.verify({ name: "ECDSA", hash: "SHA-384" }, ecPub, ecSig, data)))
@@ -45,7 +45,7 @@ console.log(hex(must(await subtle.exportKey("raw", edPub))))
 // RSA
 const rsaPriv = must(await subtle.importKey("pkcs8", rsaPkcs8, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, true, ["sign"]))
 const rsaPub = must(await subtle.importKey("spki", rsaSpki, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, true, ["verify"]))
-console.log(rsaPub)
+console.log(shown(rsaPub))
 const rsaSig = must(await subtle.sign("RSASSA-PKCS1-v1_5", rsaPriv, data))
 console.log("pkcs1", hex(rsaSig))
 console.log(must(await subtle.verify("RSASSA-PKCS1-v1_5", rsaPub, rsaSig, data)))
@@ -77,7 +77,7 @@ const xaPub = must(await subtle.importKey("spki", xSpki, "X25519", false, []))
 console.log("x25519", hex(must(await subtle.deriveBits({ name: "X25519", public: xaPub }, xb, 256))))
 console.log(must(await subtle.exportKey("jwk", xbPub)))
 const derived = must(await subtle.deriveKey({ name: "ECDH", public: bPub }, a, { name: "AES-GCM", length: 128 }, true, ["encrypt"]))
-console.log(derived, hex(must(await subtle.exportKey("raw", derived))))
+console.log(shown(derived), hex(must(await subtle.exportKey("raw", derived))))
 
 // Generated keys of each family, through JWK and back.
 const spki = async (k: CryptoKey) => must(await subtle.exportKey("spki", k))
@@ -124,4 +124,10 @@ function must<T, E>(r: Result<T, E>): T {
 
 function show<T>(r: Result<T, SubtleError>) {
   if (r.isErr()) console.log(r.error.code, r.error.message)
+}
+
+// A key as node prints its fields; a CryptoKey itself prints every field,
+// its handle too (library_print.tz).
+function shown(k: CryptoKey) {
+  return { type: k.type, extractable: k.extractable, algorithm: k.algorithm, usages: k.usages }
 }

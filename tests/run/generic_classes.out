@@ -16,7 +16,7 @@ Cell { value: 5 } Cell { value: 'x' } Cell { value: [ 1 ] } Cell { value: Cell {
 box 5
 stack 2
 string 4
-3 Wallet {}
+3 Wallet { coins: [ 1, 2, 3 ] }
 bad
 square: 4.0
 circle: 3.1

@@ -930,9 +930,37 @@ function parseUrl(input: string, base: UrlRecord | undefined): UrlRecord | undef
   return basicParse(input, base, url) ? url : undefined
 }
 
+function originOf(r: UrlRecord): string {
+  if (r.scheme == "blob") {
+    const inner = parseUrl(r.pathText(), undefined)
+    return inner != undefined && (inner.scheme == "http" || inner.scheme == "https")
+      ? originOf(inner)
+      : "null"
+  }
+  if (r.scheme == "http" || r.scheme == "https" || r.scheme == "ws" || r.scheme == "wss" ||
+      r.scheme == "ftp")
+    return r.scheme + "://" + (r.host ?? "") + (r.port != -1 ? ":" + String(r.port) : "")
+  return "null"
+}
+
+function refused(what: string, input: string): Result<void, UrlError> {
+  return err({ code: "bad_url", message: what, input })
+}
+
 export class URL {
-  #record: UrlRecord
-  #queryVersion = 0
+  readonly href: string = ""
+  readonly origin: string = ""
+  readonly protocol: string = ""
+  readonly username: string = ""
+  readonly password: string = ""
+  readonly host: string = ""
+  readonly hostname: string = ""
+  readonly port: string = ""
+  readonly pathname: string = ""
+  readonly search: string = ""
+  readonly searchParams = new URLSearchParams()
+  readonly hash: string = ""
+  private record: UrlRecord
 
   constructor(input: string | URL, base?: string | URL) {
     const text = typeof input == "string" ? input : input.href
@@ -944,7 +972,9 @@ export class URL {
     }
     const record = parseUrl(text, parsedBase)
     if (record == undefined) __tz_panic("TypeError: Invalid URL: " + text)
-    this.#record = record
+    this.record = record
+    this.searchParams.__attach(this)
+    this.changed(true)
   }
 
   static canParse(input: string, base?: string): boolean {
@@ -963,135 +993,141 @@ export class URL {
     return ok(new URL(input, baseText))
   }
 
-  get href(): string {
-    return this.#record.serialize()
+  private changed(query: boolean) {
+    const r = this.record
+    this.href = r.serialize()
+    this.origin = originOf(r)
+    this.protocol = r.scheme + ":"
+    this.username = r.username
+    this.password = r.password
+    const host = r.host
+    this.hostname = host ?? ""
+    this.port = r.port == -1 ? "" : String(r.port)
+    this.host = host == undefined ? "" : r.port == -1 ? host : host + ":" + String(r.port)
+    this.pathname = r.pathText()
+    const search = r.query
+    this.search = search == undefined || search == "" ? "" : "?" + search
+    const fragment = r.fragment
+    this.hash = fragment == undefined || fragment == "" ? "" : "#" + fragment
+    if (query) this.searchParams.__reload(search)
   }
-  set href(value: string) {
+
+  setHref(value: string): Result<void, UrlError> {
     const record = parseUrl(value, undefined)
-    if (record == undefined) return
-    this.#record = record
-    this.#queryVersion++
+    if (record == undefined) return refused("Invalid URL", value)
+    this.record = record
+    this.changed(true)
+    return ok(undefined)
   }
 
-  get origin(): string {
-    const r = this.#record
-    if (r.scheme == "blob") {
-      const inner = parseUrl(r.pathText(), undefined)
-      return inner != undefined && (inner.scheme == "http" || inner.scheme == "https")
-        ? new URL(inner.serialize()).origin
-        : "null"
-    }
-    if (r.scheme == "http" || r.scheme == "https" || r.scheme == "ws" || r.scheme == "wss" ||
-        r.scheme == "ftp")
-      return r.scheme + "://" + (r.host ?? "") + (r.port != -1 ? ":" + String(r.port) : "")
-    return "null"
+  setProtocol(value: string): Result<void, UrlError> {
+    const copy = this.record.copy()
+    basicParse(value + ":", undefined, copy, SCHEME_START)
+    const wanted = value.endsWith(":") ? value.slice(0, -1) : value
+    if (copy.scheme != wanted.toLowerCase()) return refused("Invalid protocol for this URL", value)
+    this.record = copy
+    this.changed(false)
+    return ok(undefined)
   }
 
-  get protocol(): string {
-    return this.#record.scheme + ":"
-  }
-  set protocol(value: string) {
-    basicParse(value + ":", undefined, this.#record, SCHEME_START)
-  }
-
-  get username(): string {
-    return this.#record.username
-  }
-  set username(value: string) {
-    const r = this.#record
+  setUsername(value: string) {
+    const r = this.record
     if (r.host == undefined || r.host == "" || r.scheme == "file") return
     r.username = percentEncodeString(value, USERINFO_SET)
+    this.changed(false)
   }
 
-  get password(): string {
-    return this.#record.password
-  }
-  set password(value: string) {
-    const r = this.#record
+  setPassword(value: string) {
+    const r = this.record
     if (r.host == undefined || r.host == "" || r.scheme == "file") return
     r.password = percentEncodeString(value, USERINFO_SET)
+    this.changed(false)
   }
 
-  get host(): string {
-    const r = this.#record
-    if (r.host == undefined) return ""
-    return r.port == -1 ? r.host : r.host + ":" + String(r.port)
-  }
-  set host(value: string) {
-    const r = this.#record
-    if (r.opaquePath != undefined) return
-    const copy = r.copy()
-    if (basicParse(value, undefined, copy, HOST)) this.#record = copy
+  setHost(value: string): Result<void, UrlError> {
+    if (this.record.opaquePath != undefined) return refused("This URL cannot have a host", value)
+    const copy = this.record.copy()
+    if (!basicParse(value, undefined, copy, HOST)) return refused("Invalid host", value)
+    this.record = copy
+    this.changed(false)
+    return ok(undefined)
   }
 
-  get hostname(): string {
-    return this.#record.host ?? ""
-  }
-  set hostname(value: string) {
-    const r = this.#record
-    if (r.opaquePath != undefined) return
-    const copy = r.copy()
-    if (basicParse(value, undefined, copy, HOSTNAME)) this.#record = copy
+  setHostname(value: string): Result<void, UrlError> {
+    if (this.record.opaquePath != undefined) return refused("This URL cannot have a host", value)
+    const copy = this.record.copy()
+    if (!basicParse(value, undefined, copy, HOSTNAME)) return refused("Invalid host", value)
+    this.record = copy
+    this.changed(false)
+    return ok(undefined)
   }
 
-  get port(): string {
-    const port = this.#record.port
-    return port == -1 ? "" : String(port)
-  }
-  set port(value: string) {
-    const r = this.#record
-    if (r.host == undefined || r.host == "" || r.scheme == "file") return
+  setPort(value: string): Result<void, UrlError> {
+    const r = this.record
+    if (r.host == undefined || r.host == "" || r.scheme == "file")
+      return refused("This URL cannot have a port", value)
     if (value == "") {
       r.port = -1
-      return
+      this.changed(false)
+      return ok(undefined)
     }
     const copy = r.copy()
-    if (basicParse(value, undefined, copy, PORT)) this.#record = copy
+    if (!basicParse(value, undefined, copy, PORT)) return refused("Invalid port", value)
+    this.record = copy
+    this.changed(false)
+    return ok(undefined)
   }
 
-  get pathname(): string {
-    return this.#record.pathText()
-  }
-  set pathname(value: string) {
-    const r = this.#record
+  setPathname(value: string) {
+    const r = this.record
     if (r.opaquePath != undefined) return
     r.path = []
     basicParse(value, undefined, r, PATH_START)
+    this.changed(false)
   }
 
-  get search(): string {
-    const query = this.#record.query
-    return query == undefined || query == "" ? "" : "?" + query
-  }
-  set search(value: string) {
-    const r = this.#record
-    this.#queryVersion++
+  setSearch(value: string) {
+    const r = this.record
     if (value == "") {
       r.query = undefined
-      return
+    } else {
+      const input = value.startsWith("?") ? value.slice(1) : value
+      r.query = ""
+      basicParse(input, undefined, r, QUERY)
     }
-    const input = value.startsWith("?") ? value.slice(1) : value
-    r.query = ""
-    basicParse(input, undefined, r, QUERY)
+    this.changed(true)
   }
 
-  get searchParams(): URLSearchParams {
-    return URLSearchParams.__view(this)
-  }
-
-  get hash(): string {
-    const fragment = this.#record.fragment
-    return fragment == undefined || fragment == "" ? "" : "#" + fragment
-  }
-  set hash(value: string) {
-    const r = this.#record
+  setHash(value: string) {
+    const r = this.record
     if (value == "") {
       r.fragment = undefined
-      return
+    } else {
+      const input = value.startsWith("#") ? value.slice(1) : value
+      r.fragment = ""
+      basicParse(input, undefined, r, FRAGMENT)
     }
-    const input = value.startsWith("#") ? value.slice(1) : value
-    r.fragment = ""
-    basicParse(input, undefined, r, FRAGMENT)
+    this.changed(false)
+  }
+
+  __tz_setHref(value: string) {
+    if (this.setHref(value).isErr()) return
+  }
+
+  __tz_setProtocol(value: string) {
+    if (this.setProtocol(value).isErr()) return
+  }
+
+  __tz_setHost(value: string) {
+    if (this.setHost(value).isErr()) return
+  }
+
+  __tz_setHostname(value: string) {
+    if (this.setHostname(value).isErr()) return
+  }
+
+  __tz_setPort(value: string) {
+    if (this.setPort(value).isErr()) return
   }
 
   toString(): string {
@@ -1102,15 +1138,9 @@ export class URL {
     return this.href
   }
 
-  __query(): string | undefined {
-    return this.#record.query
-  }
-  __queryVersion(): int {
-    return this.#queryVersion
-  }
-  __setQuery(query: string | undefined) {
-    this.#record.query = query
-    this.#queryVersion++
+  __applyQuery(query: string | undefined) {
+    this.record.query = query
+    this.changed(false)
   }
 }
 
@@ -1127,6 +1157,18 @@ function parseForm(input: string): [string, string][] {
   return out
 }
 
+function formCount(input: string): int {
+  let count = 0
+  let from = 0
+  while (from <= input.length) {
+    let to = input.indexOf("&", from)
+    if (to < 0) to = input.length
+    if (to > from) count++
+    from = to + 1
+  }
+  return count
+}
+
 function serializeForm(list: [string, string][]): string {
   let out = ""
   for (const [name, value] of list) {
@@ -1141,84 +1183,85 @@ export type URLSearchParamsInit = string | [string, string][] | Record<string, s
   URLSearchParams
 
 export class URLSearchParams {
-  #list: [string, string][] = []
-  #url: URL | undefined = undefined
-  #version = -1
+  readonly size: int = 0
+  private list: [string, string][] = []
+  private raw: string | undefined = undefined
+  private url: URL | undefined = undefined
 
   constructor(init?: URLSearchParamsInit) {
     if (init == undefined) return
     if (typeof init == "string") {
-      this.#list = parseForm(init.startsWith("?") ? init.slice(1) : init)
+      this.list = parseForm(init.startsWith("?") ? init.slice(1) : init)
     } else if (init instanceof URLSearchParams) {
-      this.#list = [...init.#pairs()]
+      this.list = [...init.pairs()]
     } else if (Array.isArray(init)) {
-      for (const pair of init) this.#list.push([pair[0], pair[1]])
+      for (const pair of init) this.list.push([pair[0], pair[1]])
     } else {
-      for (const [name, value] of Object.entries(init)) this.#list.push([name, value])
+      for (const [name, value] of Object.entries(init)) this.list.push([name, value])
     }
+    this.size = this.list.length
   }
 
-  static __view(url: URL): URLSearchParams {
-    const params = new URLSearchParams()
-    params.#url = url
-    return params
+  __attach(url: URL) {
+    this.url = url
   }
 
-  #pairs(): [string, string][] {
-    const url = this.#url
-    if (url != undefined && url.__queryVersion() != this.#version) {
-      this.#list = parseForm(url.__query() ?? "")
-      this.#version = url.__queryVersion()
+  __reload(query: string | undefined) {
+    const raw = query ?? ""
+    this.raw = raw
+    this.size = formCount(raw)
+  }
+
+  private pairs(): [string, string][] {
+    const raw = this.raw
+    if (raw != undefined) {
+      this.list = parseForm(raw)
+      this.raw = undefined
     }
-    return this.#list
+    return this.list
   }
 
-  #update() {
-    const url = this.#url
+  private update() {
+    this.size = this.list.length
+    const url = this.url
     if (url == undefined) return
-    const query = serializeForm(this.#list)
-    url.__setQuery(query == "" ? undefined : query)
-    this.#version = url.__queryVersion()
+    const query = serializeForm(this.list)
+    url.__applyQuery(query == "" ? undefined : query)
   }
 
-  get size(): int {
-    return this.#pairs().length
-  }
-
-  get __tz_entries(): [string, string][] {
-    return [...this.#pairs()]
+  __tz_entries(): [string, string][] {
+    return [...this.pairs()]
   }
 
   append(name: string, value: string) {
-    this.#pairs().push([name, value])
-    this.#update()
+    this.pairs().push([name, value])
+    this.update()
   }
 
   delete(name: string, value?: string) {
-    this.#list = this.#pairs().filter(p => p[0] != name || (value != undefined && p[1] != value))
-    this.#update()
+    this.list = this.pairs().filter(p => p[0] != name || (value != undefined && p[1] != value))
+    this.update()
   }
 
   get(name: string): string | undefined {
-    for (const [n, v] of this.#pairs()) if (n == name) return v
+    for (const [n, v] of this.pairs()) if (n == name) return v
     return undefined
   }
 
   getAll(name: string): string[] {
     const out: string[] = []
-    for (const [n, v] of this.#pairs()) if (n == name) out.push(v)
+    for (const [n, v] of this.pairs()) if (n == name) out.push(v)
     return out
   }
 
   has(name: string, value?: string): boolean {
-    return this.#pairs().some(p => p[0] == name && (value == undefined || p[1] == value))
+    return this.pairs().some(p => p[0] == name && (value == undefined || p[1] == value))
   }
 
   set(name: string, value: string) {
-    const list = this.#pairs()
     const out: [string, string][] = []
     let found = false
-    for (const pair of list) {
+    for (const pair of this.pairs()) {
       if (pair[0] != name) {
         out.push(pair)
       } else if (!found) {
@@ -1227,39 +1270,39 @@ export class URLSearchParams {
       }
     }
     if (!found) out.push([name, value])
-    this.#list = out
-    this.#update()
+    this.list = out
+    this.update()
   }
 
   sort() {
-    const list = this.#pairs().map((p, i): [[string, string], int] => [p, i])
+    const list = this.pairs().map((p, i): [[string, string], int] => [p, i])
     list.sort((a, b) => a[0][0] < b[0][0] ? -1 : a[0][0] > b[0][0] ? 1 : a[1] - b[1])
-    this.#list = list.map(e => e[0])
-    this.#update()
+    this.list = list.map(e => e[0])
+    this.update()
   }
 
   toString(): string {
-    return serializeForm(this.#pairs())
+    return serializeForm(this.pairs())
   }
 
   forEach(callback: (value: string, key: string, parent: URLSearchParams) => void) {
-    for (const [name, value] of [...this.#pairs()]) callback(value, name, this)
+    for (const [name, value] of [...this.pairs()]) callback(value, name, this)
   }
 
   *keys(): IterableIterator<string> {
-    for (const [name] of [...this.#pairs()]) yield name
+    for (const [name] of [...this.pairs()]) yield name
   }
 
   *values(): IterableIterator<string> {
-    for (const [, value] of [...this.#pairs()]) yield value
+    for (const [, value] of [...this.pairs()]) yield value
   }
 
   *entries(): IterableIterator<[string, string]> {
-    for (const pair of [...this.#pairs()]) yield [pair[0], pair[1]]
+    for (const pair of [...this.pairs()]) yield [pair[0], pair[1]]
   }
 
   *[Symbol.iterator](): IterableIterator<[string, string]> {
-    for (const pair of [...this.#pairs()]) yield [pair[0], pair[1]]
+    for (const pair of [...this.pairs()]) yield [pair[0], pair[1]]
   }
 }
 

@@ -11,9 +11,15 @@ User {
   id: 1,
   tags: [],
   visits: 2,
+  password: 'secret',
   notes: 'visited 2 times'
 }
-2 [ 'name', 'email', 'id', 'tags', 'visits', 'notes' ]
+2 [
+  'name',   'email',
+  'id',     'tags',
+  'visits', 'password',
+  'notes'
+]
 12.5 Ann Account { owner: 'Ann', balance: 12.5, history: [ 10, 2.5 ] }
 Account { owner: 'Bob', balance: 100, history: [] }
 object true false

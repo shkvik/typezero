@@ -7,10 +7,10 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 7b11c1133330cd161071bf23a0c9b6ce5320a8f3a0f83620035a72be46df4104
 a microtask first
 32 then the job of the pool
-CryptoKey {
+{
   type: 'secret',
   extractable: false,
-  algorithm: { name: 'HMAC', length: 48, hash: [Object] },
+  algorithm: { name: 'HMAC', length: 48, hash: { name: 'SHA-256' } },
   usages: [ 'sign', 'verify' ]
 }
 8b5f48702995c1598c573db1e21866a9b825d4a794d169d7060a03605796360b
@@ -24,10 +24,10 @@ false
 6b
 { name: 'HMAC', length: 48, hash: { name: 'SHA-256' } } true
 { name: 'HMAC', length: 24, hash: { name: 'SHA-1' } } [ 'verify' ]
-CryptoKey {
+{
   type: 'secret',
   extractable: true,
-  algorithm: { name: 'HMAC', length: 1024, hash: [Object] },
+  algorithm: { name: 'HMAC', length: 1024, hash: { name: 'SHA-384' } },
   usages: [ 'sign', 'verify' ]
 } 128
 { name: 'HMAC', length: 64, hash: { name: 'SHA-1' } } HS1

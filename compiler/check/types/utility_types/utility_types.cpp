@@ -31,20 +31,6 @@ llvm::ArrayRef<const Type *> membersOf(const Type *&type) {
 
 UtilityTypes::UtilityTypes(Checker &checker) : checker_(checker) {}
 
-const Type *UtilityTypes::getterType(ClassDecl *cls, llvm::StringRef name) {
-  if (!cls || name.starts_with("#")) {
-    return nullptr;
-  }
-  std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  for (FunctionDecl *fn : methods) {
-    if (fn->accessor == FunctionDecl::Accessor::Getter && fn->sym && fn->access == Access::Public) {
-      return checker_.returnInferrer().functionType(fn->sym)->ret();
-    }
-  }
-
-  return nullptr;
-}
-
 const Type *UtilityTypes::importedValueType(Module *from, llvm::StringRef name) {
   for (Stmt *item : from->file.items) {
     if (auto *fn = dyn_cast<FunctionDecl>(item); fn && fn->name == name) {

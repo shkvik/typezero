@@ -46,17 +46,7 @@ http://me:s3cret@other.org:8080/new%20path?a=1#end
 https://me:s3cret@other.org/new%20path?a=1#end true
 https://me:s3cret@example.com:9000/new%20path?q=1%202#end
 http://reset.com/ http://reset.com/ http://reset.com/ {"u":"http://reset.com/"}
-URL {
-  href: 'https://user:pw@example.com:8080/a/b?x=1&y=2#frag',
-  origin: 'https://example.com:8080',
-  protocol: 'https:',
-  username: 'user',
-  password: 'pw',
-  host: 'example.com:8080',
-  hostname: 'example.com',
-  port: '8080',
-  pathname: '/a/b',
-  search: '?x=1&y=2',
-  searchParams: URLSearchParams { 'x' => '1', 'y' => '2' },
-  hash: '#frag'
-}
+port 81 reset.com:81
+bad_url x81 reset.com:81
+port  reset.com
+bad_url mailto:a@b.c

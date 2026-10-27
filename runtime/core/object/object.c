@@ -8,8 +8,8 @@ static int holds_value(const TzField *field, const TzInstance *object) {
   if (tz_field_is_symbol(object->layout, field)) {
     return 0;
   }
-  if ((object->layout->flags & TZ_LAYOUT_LIBRARY) && field->name_length == 13 &&
-      memcmp(field->name, "_maxListeners", 13) == 0) {
+  if ((object->layout->flags & TZ_LAYOUT_LIBRARY) && field->name_length == 12 &&
+      memcmp(field->name, "maxListeners", 12) == 0) {
     return 1;
   }
   if (field->offset == TZ_FIELD_GETTER) {

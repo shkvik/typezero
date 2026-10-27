@@ -21,7 +21,6 @@ public:
   void dispatch(const CallExpr *c, CallKind kind, Channel channel, const Use &use);
   void libraryState(llvm::StringRef cls, llvm::StringRef name, std::optional<Ref> self, bool write,
                     llvm::SMLoc at);
-  bool librarySetter(const MemberExpr *m, const Expr *value);
 
 private:
   Analysis &analysis_;

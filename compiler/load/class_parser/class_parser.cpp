@@ -268,18 +268,13 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
       isAsync = true;
     }
   }
-  FunctionDecl::Accessor accessorKind = FunctionDecl::Accessor::None;
   bool accessorAhead =
       parser_.tok_.is(Tok::Identifier) &&
       (parser_.tok_.text == "get" || parser_.tok_.text == "set") &&
       !parser_.cursor().peek().newlineBefore &&
       (parser_.cursor().peek().is(Tok::Identifier) || isKeyword(parser_.cursor().peek().kind) ||
        parser_.cursor().peek().is(Tok::StringLiteral));
-  if (accessorAhead && parser_.library_) {
-    accessorKind = parser_.tok_.text == "get" ? FunctionDecl::Accessor::Getter
-                                              : FunctionDecl::Accessor::Setter;
-    parser_.cursor().advance();
-  } else if (accessorAhead) {
+  if (accessorAhead) {
     bool getter = parser_.tok_.text == "get";
     parser_.cursor().advance();
     std::string name = parser_.tok_.text.str();
@@ -311,11 +306,14 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   bool generator = parser_.cursor().accept(Tok::Star);
   llvm::SMLoc nameLoc = parser_.tok_.loc();
   bool plainName = parser_.tok_.is(Tok::Identifier);
+  bool hash = parser_.tok_.hash;
   llvm::StringRef name;
   if (!parser_.objectTypes().parseFieldName(name)) {
     return;
   }
-  if (name.starts_with("#")) {
+  if (hash) {
+    parser_.cursor().report(nameLoc, "there is no '#" + name +
+                                         "' in tz: a private member is 'private " + name + "'");
     access = Access::Private;
   }
 
@@ -323,18 +321,6 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
     auto *fn = parser_.ctx_.make<FunctionDecl>(nameLoc, name);
     fn->cls = cls;
     fn->isStatic = isStatic;
-    fn->accessor = accessorKind;
-    if (accessorKind != FunctionDecl::Accessor::None) {
-      llvm::erase_if(decorators, [&](const Decorator &d) {
-        auto *name = dyn_cast<NameExpr>(d.expr);
-        if (!name || name->name != "__tz_hidden") {
-          return false;
-        }
-        fn->hiddenGetter = true;
-
-        return true;
-      });
-    }
     if (accessor) {
       parser_.cursor().report(loc, "'accessor' goes before a field, not a method");
     }

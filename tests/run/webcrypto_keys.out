@@ -1,4 +1,4 @@
-CryptoKey {
+{
   type: 'private',
   extractable: true,
   algorithm: { name: 'ECDSA', namedCurve: 'P-256' },
@@ -37,14 +37,14 @@ true false
   kty: 'OKP'
 }
 42d9c57c2eb0bd86d5013616ae9b851900b29934ee2f17ab07e630a48c084c35
-CryptoKey {
+{
   type: 'public',
   extractable: true,
   algorithm: {
     name: 'RSASSA-PKCS1-v1_5',
     modulusLength: 1024,
-    publicExponent: [Uint8Array],
-    hash: [Object]
+    publicExponent: Uint8Array(3) [ 1, 0, 1 ],
+    hash: { name: 'SHA-256' }
   },
   usages: [ 'verify' ]
 }
@@ -73,7 +73,7 @@ x25519 8251c3a6f68ddb62bcf1c24775e994a3d5230def5f1825b1df5ab7b24de54817
   x: 'Z0GXO3a0-XVZOzvI1WR7eLpDrChf77y6LuMUJaaWtzI',
   kty: 'OKP'
 }
-CryptoKey {
+{
   type: 'secret',
   extractable: true,
   algorithm: { name: 'AES-GCM', length: 128 },

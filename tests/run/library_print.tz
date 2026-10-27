@@ -1,0 +1,29 @@
+// Objects of the library print every field, the private ones too
+// (docs/objects.md, section 6): the printing is for debugging, and debugging
+// needs the whole state. Node hides some of them; the tests that compare with
+// node read the fields by name instead.
+import { EventEmitter } from "node:events"
+
+const u = new URL("https://user:pw@example.com:8080/a/b?x=1&y=2#frag")
+console.log(u)
+console.log(new Response("hello", { status: 201, headers: { "x-y": "z" } }))
+console.log(new Request("http://example.com/x", { method: "POST", body: "hi" }))
+console.log(new ReadableStream(), new Headers({ "x-a": "1" }), new URLSearchParams("a=1&b=2"))
+
+const controller = new AbortController()
+console.log(controller)
+controller.abort("stop")
+console.log(controller.signal)
+console.log(new EventTarget())
+
+const bus = new EventEmitter<{ user: [name: string]; count: [n: int] }>()
+console.log(bus)
+bus.on("user", (name) => console.log("user", name))
+bus.on("count", (n) => console.log("count", n))
+bus.emit("user", "ann")
+bus.emit("count", 1)
+console.log(bus, Object.keys(bus), JSON.stringify(bus).unwrapOr(""))
+console.log([bus], { deep: { emitter: bus } })
+
+const key = await crypto.subtle.importKey("raw", new Uint8Array(16), "AES-GCM", false, ["encrypt"])
+if (key.isOk()) console.log(key.value)

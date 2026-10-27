@@ -21,4 +21,4 @@ Request.constructor: Cannot construct a Request with a Request object that has a
 body
 true body_used
 http://b.com/y
-http://b.com/y
+kept http://b.com/y

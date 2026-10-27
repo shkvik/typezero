@@ -379,7 +379,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
       });
     } else {
       for (const Field &f : source->fields()) {
-        if (llvm::StringRef(f.name).starts_with("#") || llvm::is_contained(prop.omit, f.name)) {
+        if (llvm::is_contained(prop.omit, f.name)) {
           continue;
         }
         llvm::Value *v = lowering_.builder_.CreateLoad(

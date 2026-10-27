@@ -11,12 +11,12 @@ const enc = new TextEncoder()
 const hex = (b: ArrayBuffer) => Buffer.from(b).toString("hex")
 
 class Cache<K, V> {
-  #items = new Map<K, V>()
+  private items = new Map<K, V>()
   async get(key: K, make: () => Promise<V>): Promise<V> {
-    const have = this.#items.get(key)
+    const have = this.items.get(key)
     if (have != undefined) return have
     const made = await make()
-    this.#items.set(key, made)
+    this.items.set(key, made)
     return made
   }
 }

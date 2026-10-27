@@ -14,6 +14,7 @@
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -93,13 +94,6 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
     return member;
   }
   std::vector<FunctionDecl *> methods = ClassDeclarer::methodsNamed(cls, name, false);
-  if (llvm::any_of(methods, [](const FunctionDecl *fn) {
-        return fn->accessor != FunctionDecl::Accessor::None;
-      })) {
-    if (Expr *read = checker_.tzModulesChecker().checkAccessorRead(member, cls, expected)) {
-      return read;
-    }
-  }
   if (methods.empty()) {
     if (!ClassDeclarer::methodsNamed(cls, name, true).empty() ||
         llvm::any_of(cls->fields,
@@ -166,12 +160,6 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
                               "Ms' when it is read; keep the date in a variable of its own");
     return Type::error();
   }
-  if (!field) {
-    if (const Type *accessor =
-            checker_.tzModulesChecker().checkAccessorTarget(member, cls, compound)) {
-      return accessor;
-    }
-  }
   if (!field || field->method) {
     if (field || !ClassDeclarer::methodsNamed(cls, name, false).empty()) {
       checker_.diags_.error(member->loc(),
@@ -193,10 +181,18 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
     checker_.diags_.error(member->loc(), "field '" + name + "' is read before it is set");
     return Type::error();
   }
-  if (field->readonly && !(viaThis && owner == checker_.initFn_->cls)) {
+  bool library = owner && owner->library && checker_.libraryCalls().inLibrary(member->loc());
+  if (field->readonly && !library && !(viaThis && owner == checker_.initFn_->cls)) {
+    std::string setter = "set" + std::string(1, llvm::toUpper(name[0])) + name.drop_front().str();
+    std::string why = "; only its constructor can set it";
+    if (owner && owner->library) {
+      why = ClassDeclarer::methodsNamed(cls, setter, false).empty()
+                ? std::string()
+                : "; change it with '" + setter + "(...)'";
+    }
     checker_.diags_.error(member->loc(), "cannot assign to '" + name +
                                              "' because it is a read-only field of '" +
-                                             type->name() + "'; only its constructor can set it");
+                                             type->name() + "'" + why);
   }
   if (!field->resolved) {
     if (viaThis && checker_.initFn_ == cls->init && owner == cls && !compound) {

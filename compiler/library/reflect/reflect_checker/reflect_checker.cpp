@@ -194,7 +194,9 @@ void ReflectChecker::finishReflection() {
   checkReflectNews();
 }
 
-const Type *ReflectChecker::reflectError() { return checker_.prelude().builtinType("ReflectError"); }
+const Type *ReflectChecker::reflectError() {
+  return checker_.prelude().builtinType("ReflectError");
+}
 
 Expr *ReflectChecker::okOf(Expr *value) {
   if (value->type->isError()) {
@@ -292,10 +294,10 @@ void ReflectChecker::checkReflectNews() {
                                            "Reflect.construct tries to make"
                                          : constructProblem(cls, args);
       if (!problem.empty()) {
-        checker_.diags_.error(
-            expr->loc(), "'new' of a class known only when the program runs may fail: '" +
-                             cls->type->name().str() + "' can be here, and " + problem +
-                             "; write 'Reflect.construct(cls, [...])', which gives a Result");
+        checker_.diags_.error(expr->loc(),
+                              "'new' of a class known only when the program runs may fail: '" +
+                                  cls->type->name().str() + "' can be here, and " + problem +
+                                  "; write 'Reflect.construct(cls, [...])', which gives a Result");
         break;
       }
     }
@@ -359,7 +361,7 @@ std::string ReflectChecker::classJsonProblem(const ClassDecl *cls) {
       const ClassDecl *owner = nullptr;
       const ClassField *field = ClassBases::findField(cls, f.name, &owner);
       if (!field || field->isStatic || field->method || f.readonly ||
-          field->access != Access::Public || f.name[0] == '#') {
+          field->access != Access::Public) {
         continue;
       }
       if (JsonTypeChecker::jsonProblem(f.type, [&](const ClassDecl *inner) {

@@ -22,10 +22,10 @@ url.searchParams.append("c", "3 4")
 console.log(url.href, url.search)
 url.searchParams.delete("a")
 console.log(url.href, url.searchParams.get("b"), url.searchParams.size)
-url.search = "?z=9"
+url.setSearch("?z=9")
 console.log(url.searchParams.get("z"), url.searchParams.has("b"), url.href)
 const view = url.searchParams
-url.search = "?w=1"
+url.setSearch("?w=1")
 console.log(view.get("w"), view.toString())
 url.searchParams.set("w", "")
 console.log(url.href)

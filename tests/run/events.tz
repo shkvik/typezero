@@ -2,20 +2,20 @@
 // node:events (docs/events.md): EventEmitter with an event map, ported from
 // node's lib/events.js. The order listeners run in, once() and the prepend
 // methods, off(), removeAllListeners(), newListener and removeListener, the
-// 'error' event, listener counts, classes that extend EventEmitter, and how
-// an emitter prints.
+// 'error' event, listener counts, classes that extend EventEmitter (how an
+// emitter prints is in library_print.tz).
 import { EventEmitter } from "node:events"
 
 interface User {
   name: string
 }
 const bus = new EventEmitter<{ user: [user: User]; count: [n: int, label: string] }>()
-console.log(bus)
+console.log(bus.eventNames(), bus.listenerCount("user"))
 bus.on("user", (u) => console.log("user", u.name))
 bus.on("count", (n, label) => console.log("count", n + 1, label))
 console.log(bus.emit("user", { name: "ann" }), bus.emit("count", 1, "x"))
 console.log(bus.listenerCount("user"), bus.eventNames())
-console.log(bus)
+console.log(bus.listeners("count").length)
 
 // on, once, prependListener; newListener before a listener is added, and
 // removeListener after one goes, also the listener of once() as it fires.
@@ -32,7 +32,7 @@ console.log(e.emit("x"), e.emit("x"))
 e.off("x", a)
 console.log(order, e.eventNames(), e.listenerCount("x"))
 e.removeAllListeners()
-console.log(order.slice(-6), e.eventNames(), e)
+console.log(order.slice(-6), e.eventNames())
 
 // A listener added while the event is emitted runs from the next emit on.
 const f = new EventEmitter<Events>()
@@ -108,7 +108,7 @@ class Server extends EventEmitter<{ listening: [port: double]; close: [] }> {
 const s = new Server()
 s.on("listening", (p) => console.log("listening on", p)).on("close", () => console.log("closed"))
 s.listen(8080).emit("close")
-console.log(s, s.listenerCount("close"), s instanceof EventEmitter)
+console.log(s.port, s.listenerCount("close"), s instanceof EventEmitter)
 s.setMaxListeners(3).removeAllListeners("close")
 console.log(s.getMaxListeners(), s.eventNames(), EventEmitter.defaultMaxListeners)
 
@@ -127,7 +127,6 @@ n.on("b", () => {})
 n.on("10", () => {})
 n.on("a", () => {})
 n.on("2", () => {})
-console.log(n.eventNames(), Object.keys(t), JSON.stringify(t).unwrapOr(""))
-console.log([s], { deep: { emitter: s } })
+console.log(n.eventNames())
 EventEmitter.defaultMaxListeners = 20
 console.log(t.getMaxListeners(), new EventEmitter<{ y: [] }>().getMaxListeners())

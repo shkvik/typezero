@@ -39,7 +39,7 @@ const inner = must(await subtle.importKey("raw", Buffer.from("001122334455667788
 const wrapped = must(await subtle.wrapKey("raw", inner, kek, "AES-KW"))
 console.log("kw", hex(wrapped))
 const back = must(await subtle.unwrapKey("raw", wrapped, kek, "AES-KW", "AES-GCM", true, ["decrypt"]))
-console.log(back, hex(must(await subtle.exportKey("raw", back))))
+console.log(shown(back), hex(must(await subtle.exportKey("raw", back))))
 const wrappedJwk = must(await subtle.wrapKey("jwk", inner, kek, { name: "AES-KW" }))
 console.log("kw jwk", wrappedJwk.byteLength)
 const backJwk = must(await subtle.unwrapKey("jwk", wrappedJwk, kek, "AES-KW", { name: "AES-GCM" }, false, ["encrypt"]))
@@ -55,7 +55,7 @@ console.log(fromGcm.algorithm)
 const any = must(await subtle.encrypt({ name: "AES-CBC", iv: new DataView(new ArrayBuffer(16)) }, cbcKey, new Uint32Array([1, 2, 3])))
 console.log("cbc of u32", hex(any), hex(must(await subtle.decrypt({ name: "AES-CBC", iv: new ArrayBuffer(16) }, cbcKey, any))))
 const g = must(await subtle.generateKey({ name: "AES-CTR", length: 128 }, true, ["encrypt", "decrypt"]))
-console.log(g, (must(await subtle.exportKey("raw", g))).byteLength, must(await subtle.exportKey("jwk", inner)))
+console.log(shown(g), (must(await subtle.exportKey("raw", g))).byteLength, must(await subtle.exportKey("jwk", inner)))
 
 function must<T, E>(r: Result<T, E>): T {
   if (r.isErr()) {
@@ -67,4 +67,10 @@ function must<T, E>(r: Result<T, E>): T {
 
 function show<T>(r: Result<T, SubtleError>) {
   if (r.isErr()) console.log(r.error.code, r.error.message)
+}
+
+// A key as node prints its fields; a CryptoKey itself prints every field,
+// its handle too (library_print.tz).
+function shown(k: CryptoKey) {
+  return { type: k.type, extractable: k.extractable, algorithm: k.algorithm, usages: k.usages }
 }

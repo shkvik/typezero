@@ -1,4 +1,4 @@
-ReadableStream { locked: false, state: 'readable', supportsBYOB: false } false
+false
 true
 read alpha
 read beta
@@ -8,4 +8,4 @@ one two
 failed source failed
 first 7
 cancelled: no reason
-cancelled: enough ReadableStream { locked: false, state: 'closed', supportsBYOB: false }
+cancelled: enough false

@@ -239,6 +239,14 @@ void ExprWalk::fieldAccess(const Expr *object, llvm::StringRef name, bool write,
   if (!field) {
     return;
   }
+  for (const ClassDecl *k = type->classDecl(); k; k = k->parent) {
+    if (k->library &&
+        llvm::any_of(k->fields, [&](const ClassField &f) { return f.name == name; })) {
+      analysis_.libraryEffects().libraryState(
+          libraryClassName(k), name, analysis_.aliasAnalysis().receiverRef(object), write, at);
+      return;
+    }
+  }
   if (!write && (field->readonly || (field->type && field->type->isLiteral()))) {
     return;
   }
@@ -365,9 +373,7 @@ void ExprWalk::assign(const AssignExpr *a) {
       fieldAccess(m->object, m->name, false, m->loc());
     }
     value();
-    if (!analysis_.libraryEffects().librarySetter(m, a->value)) {
-      fieldAccess(m->object, m->name, true, m->loc());
-    }
+    fieldAccess(m->object, m->name, true, m->loc());
     return;
   }
   if (auto *ix = dyn_cast<IndexExpr>(target)) {

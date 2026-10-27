@@ -163,8 +163,8 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   for (const ClassDecl *c = cls; c && !emitter; c = c->parent) {
     emitter = c->library && c->name == "EventEmitterBase";
   }
-  bool library =
-      emitter || (cls->library && (cls->name == "OnceWrapper" || cls->name == "AsyncListener" ||
+  bool library = emitter || cls->builtin ||
+                 (cls->library && (cls->name == "OnceWrapper" || cls->name == "AsyncListener" ||
                                    cls->name == "ThisListener" || cls->name == "ListenerList" ||
                                    cls->name == "CryptoKey"));
   auto method = [&](llvm::StringRef name, const FunctionDecl *fn) {
@@ -189,14 +189,12 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
       chain.insert(chain.begin(), c);
     }
     std::vector<std::pair<llvm::StringRef, const FunctionDecl *>> keys;
-    if (emitter) {
-      field("#events", "_events");
-      field("#eventsCount", "_eventsCount");
-      field("#maxListeners", "_maxListeners");
-    }
+    auto symbol = [&](llvm::StringRef name) {
+      return emitter && (name == "shapeMode" || name == "capture");
+    };
     for (const ClassDecl *c : chain) {
       for (const ClassField &f : c->fields) {
-        if (f.isStatic || f.name.starts_with("#") || f.hidden) {
+        if (f.isStatic || symbol(f.name)) {
           continue;
         }
         auto it = llvm::find_if(keys, [&](const auto &key) { return key.first == f.name; });
@@ -215,11 +213,11 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
       }
     }
     if (emitter) {
-      field("#shapeMode", "Symbol(shapeMode)");
-      field("#capture", "Symbol(kCapture)");
+      field("shapeMode", "Symbol(shapeMode)");
+      field("capture", "Symbol(kCapture)");
     }
     if (cls->library) {
-      lowering_.tzModulesLowerer().appendGetterKeys(chain, entries);
+      lowering_.tzModulesLowerer().appendPrintHooks(chain, entries);
     }
   }
   std::string name = cls->name.empty() ? "object" : cls->name.str();

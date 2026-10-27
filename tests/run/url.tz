@@ -2,7 +2,7 @@
 // URL of the WHATWG URL Standard, a global as in node: parsing (special
 // and other schemes, hosts as names, IPv4 in any of its forms and IPv6,
 // paths with . and .., percent-encoding), relative URLs against a base,
-// canParse and parse, the setters, and how a URL prints.
+// canParse and parse, the set methods (how a URL prints is in library_print.tz).
 const inputs = [
   "https://user:pw@example.com:8080/a/b?x=1&y=2#frag",
   "http://EXAMPLE.com:80/./a/../b/%2e%2E/c",
@@ -51,21 +51,30 @@ if (baseUrl.isOk())
 const bad = URL.parse("not a url")
 if (bad.isErr()) console.log(bad.error.code, bad.error.message, bad.error.input)
 
-// The setters.
+// The parts change through methods; a literal is checked when the program is
+// built, a text from a variable gives a Result.
 const u = new URL("http://h/p?a=1#top")
-u.pathname = "/new path"
-u.hash = "end"
-u.port = "8080"
-u.hostname = "other.org"
-u.username = "me"
-u.password = "s3cret"
+u.setPathname("/new path")
+u.setHash("end")
+u.setPort("8080")
+u.setHostname("other.org")
+u.setUsername("me")
+u.setPassword("s3cret")
 console.log(u.href)
-u.protocol = "https"
-u.port = "443"
+u.setProtocol("https")
+u.setPort("443")
 console.log(u.href, u.port == "")
-u.host = "example.com:9000"
-u.search = "q=1 2"
+u.setHost("example.com:9000")
+u.setSearch("q=1 2")
 console.log(u.href)
-u.href = "http://reset.com/"
+u.setHref("http://reset.com/")
 console.log(u.href, u.toString(), u.toJSON(), JSON.stringify({ u: u.toJSON() }))
-console.log(new URL("https://user:pw@example.com:8080/a/b?x=1&y=2#frag"))
+for (const port of ["81", "x81", ""]) {
+  const set = u.setPort(port)
+  console.log(set.isOk() ? "port " + u.port : set.error.code + " " + set.error.input, u.host)
+}
+const mail = new URL("mailto:a@b.c")
+for (const host of ["example.com"]) {
+  const refused = mail.setHost(host)
+  console.log(refused.isErr() ? refused.error.code : "set", mail.href)
+}

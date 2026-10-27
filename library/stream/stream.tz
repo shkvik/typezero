@@ -196,38 +196,38 @@ interface SideOptions {
 }
 
 export class Stream extends EventEmitterBase {
-  @__tz_hidden _readableState: ReadableState | undefined = undefined
-  @__tz_hidden _writableState: WritableState | undefined = undefined
-  @__tz_hidden allowHalfOpen = true
-  @__tz_hidden destroyed = false
-  @__tz_hidden closed = false
-  @__tz_hidden errored: StreamError | undefined = undefined
-  @__tz_hidden readable = false
-  @__tz_hidden readableAborted = false
-  @__tz_hidden readableDidRead = false
-  @__tz_hidden readableEncoding: string | undefined = undefined
-  @__tz_hidden readableEnded = false
-  @__tz_hidden readableFlowing: boolean | undefined = undefined
-  @__tz_hidden readableHighWaterMark: int = 0
-  @__tz_hidden readableLength: int = 0
-  @__tz_hidden readableObjectMode = false
-  @__tz_hidden writable = false
-  @__tz_hidden writableAborted = false
-  @__tz_hidden writableCorked: int = 0
-  @__tz_hidden writableEnded = false
-  @__tz_hidden writableFinished = false
-  @__tz_hidden writableHighWaterMark: int = 0
-  @__tz_hidden writableLength: int = 0
-  @__tz_hidden writableNeedDrain = false
-  @__tz_hidden writableObjectMode = false
-  @__tz_hidden _onConstruct: (() => void)[] = []
-  @__tz_hidden _onDestroy: ((err: StreamError | undefined) => void)[] = []
-  @__tz_hidden _hasConstruct = false
-  @__tz_hidden _hasWritev = false
-  @__tz_hidden _hasFinal = false
-  @__tz_hidden _hasFlush = false
-  @__tz_hidden _isTransform = false
-  @__tz_hidden _transformCallback: StreamCallback | undefined = undefined
+  _readableState: ReadableState | undefined = undefined
+  _writableState: WritableState | undefined = undefined
+  allowHalfOpen = true
+  destroyed = false
+  closed = false
+  errored: StreamError | undefined = undefined
+  readable = false
+  readableAborted = false
+  readableDidRead = false
+  readableEncoding: string | undefined = undefined
+  readableEnded = false
+  readableFlowing: boolean | undefined = undefined
+  readableHighWaterMark: int = 0
+  readableLength: int = 0
+  readableObjectMode = false
+  writable = false
+  writableAborted = false
+  writableCorked: int = 0
+  writableEnded = false
+  writableFinished = false
+  writableHighWaterMark: int = 0
+  writableLength: int = 0
+  writableNeedDrain = false
+  writableObjectMode = false
+  _onConstruct: (() => void)[] = []
+  _onDestroy: ((err: StreamError | undefined) => void)[] = []
+  _hasConstruct = false
+  _hasWritev = false
+  _hasFinal = false
+  _hasFlush = false
+  _isTransform = false
+  _transformCallback: StreamCallback | undefined = undefined
 
   constructor() {
     super()

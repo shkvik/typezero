@@ -520,7 +520,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
     }
     call->args.push_back(flag(kind == EmitterMethod::RawListeners));
     std::vector<bool> given(call->args.size(), true);
-    callLibraryMethod(call, member, cls, "#listenersOf", {args}, &given, super);
+    callLibraryMethod(call, member, cls, "listenersOf", {args}, &given, super);
     call->type = Type::array(EventMaps::listenerType(args, Type::voidTy()));
     return call;
   }

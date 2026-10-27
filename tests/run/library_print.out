@@ -1,0 +1,161 @@
+URL {
+  href: 'https://user:pw@example.com:8080/a/b?x=1&y=2#frag',
+  origin: 'https://example.com:8080',
+  protocol: 'https:',
+  username: 'user',
+  password: 'pw',
+  host: 'example.com:8080',
+  hostname: 'example.com',
+  port: '8080',
+  pathname: '/a/b',
+  search: '?x=1&y=2',
+  searchParams: URLSearchParams { 'x' => '1', 'y' => '2' },
+  hash: '#frag',
+  record: UrlRecord {
+    scheme: 'https',
+    username: 'user',
+    password: 'pw',
+    host: 'example.com',
+    port: 8080,
+    path: [ 'a', 'b' ],
+    query: 'x=1&y=2',
+    fragment: 'frag'
+  }
+}
+Response {
+  status: 201,
+  statusText: '',
+  headers: Headers { 'x-y': 'z', 'content-type': 'text/plain;charset=UTF-8' },
+  body: BodyStream {
+    locked: false,
+    body: Body {
+      kind: 1,
+      text: 'hello',
+      used: false,
+      type: 'text/plain;charset=UTF-8'
+    }
+  },
+  ok: true,
+  redirected: false,
+  type: 'default',
+  url: '',
+  data: Body {
+    kind: 1,
+    text: 'hello',
+    used: false,
+    type: 'text/plain;charset=UTF-8'
+  }
+}
+Request {
+  method: 'POST',
+  url: 'http://example.com/x',
+  headers: Headers { 'content-type': 'text/plain;charset=UTF-8' },
+  destination: '',
+  referrer: 'about:client',
+  referrerPolicy: '',
+  mode: 'cors',
+  credentials: 'same-origin',
+  cache: 'default',
+  redirect: 'follow',
+  integrity: '',
+  keepalive: false,
+  isReloadNavigation: false,
+  isHistoryNavigation: false,
+  signal: AbortSignal {
+    events: Map(0) {},
+    aborted: false,
+    reason: undefined,
+    native: AbortSignal {},
+    dependants: [],
+    onabortListens: false
+  },
+  body: BodyStream {
+    locked: false,
+    body: Body {
+      kind: 1,
+      text: 'hi',
+      used: false,
+      type: 'text/plain;charset=UTF-8'
+    }
+  },
+  data: Body {
+    kind: 1,
+    text: 'hi',
+    used: false,
+    type: 'text/plain;charset=UTF-8'
+  }
+}
+ReadableStream { locked: false } Headers { 'x-a': '1' } URLSearchParams { 'a' => '1', 'b' => '2' }
+AbortController {
+  signal: AbortSignal {
+    events: Map(0) {},
+    aborted: false,
+    reason: undefined,
+    native: AbortSignal {},
+    dependants: [],
+    onabortListens: false
+  }
+}
+AbortSignal {
+  events: Map(0) {},
+  aborted: true,
+  reason: 'stop',
+  native: AbortSignal {},
+  dependants: [],
+  onabortListens: false
+}
+EventTarget { events: Map(0) {} }
+EventEmitter {
+  events: [Object: null prototype] {},
+  eventsCount: 0,
+  maxListeners: undefined,
+  Symbol(shapeMode): false,
+  Symbol(kCapture): false
+}
+user ann
+count 1
+EventEmitter {
+  events: [Object: null prototype] {
+    user: [Function (anonymous)],
+    count: [Function (anonymous)]
+  },
+  eventsCount: 2,
+  maxListeners: undefined,
+  Symbol(shapeMode): false,
+  Symbol(kCapture): false
+} [ 'events', 'eventsCount', 'maxListeners' ] {"events":{},"eventsCount":2}
+[
+  EventEmitter {
+    events: [Object: null prototype] {
+      user: [Function (anonymous)],
+      count: [Function (anonymous)]
+    },
+    eventsCount: 2,
+    maxListeners: undefined,
+    Symbol(shapeMode): false,
+    Symbol(kCapture): false
+  }
+] {
+  deep: {
+    emitter: EventEmitter {
+      events: [Object: null prototype],
+      eventsCount: 2,
+      maxListeners: undefined,
+      Symbol(shapeMode): false,
+      Symbol(kCapture): false
+    }
+  }
+}
+CryptoKey {
+  type: 'secret',
+  extractable: false,
+  algorithm: { name: 'AES-GCM', length: 128 },
+  usages: [ 'encrypt' ],
+  handle: AesHandle {
+    key: SecretKeyObject {},
+    type: 'secret',
+    name: 'AES-GCM',
+    usages: [Array],
+    bits: 128
+  }
+}

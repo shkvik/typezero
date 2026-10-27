@@ -91,7 +91,7 @@ bool RecordLiteralChecker::checkRecordSpread(ObjectLitExpr::Property &prop, cons
       checker_.classDeclarer().completeClass(cls);
     }
     for (const Field &f : type->fields()) {
-      if (llvm::StringRef(f.name).starts_with("#") || llvm::is_contained(prop.omit, f.name)) {
+      if (llvm::is_contained(prop.omit, f.name)) {
         continue;
       }
       const Type *t = f.type->isOptional() && !value->isOptional() ? f.type->inner() : f.type;
@@ -156,7 +156,7 @@ Expr *RecordLiteralChecker::recordFromSpreads(ObjectLitExpr *lit) {
       meet(type->valueType(), prop.value->loc());
     } else if (type->isObject()) {
       for (const Field &f : type->fields()) {
-        if (!llvm::StringRef(f.name).starts_with("#") && !llvm::is_contained(prop.omit, f.name)) {
+        if (!llvm::is_contained(prop.omit, f.name)) {
           meet(f.type->isOptional() ? f.type->inner() : f.type, prop.value->loc());
         }
       }

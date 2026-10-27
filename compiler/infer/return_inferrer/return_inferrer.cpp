@@ -474,8 +474,6 @@ FunctionDecl *ReturnInferrer::freshCopy(const FunctionDecl *fn) {
   copy->cls = fn->cls;
   copy->isStatic = fn->isStatic;
   copy->isConstructor = fn->isConstructor;
-  copy->accessor = fn->accessor;
-  copy->hiddenGetter = fn->hiddenGetter;
   copy->access = fn->access;
   copy->sym = fn->sym;
   copy->name = fn->name;

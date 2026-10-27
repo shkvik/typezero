@@ -102,7 +102,7 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
   std::vector<const Type *> bound;
   FuncSymbol *sym = checker_.overloadResolver().chooseVariant(methods, call->args, call->spread,
                                                               member->loc(), checked, &bound);
-  if (!sym || checker_.tzModulesChecker().rejectAccessorCall(call, member, sym)) {
+  if (!sym) {
     return call;
   }
   checker_.returnInferrer().resolveParams(sym);

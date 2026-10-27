@@ -1,2 +1,2 @@
 Circle { r: 3 } 4 28.274
-4 true Square { side: 2 }
+4 true Square { side: 2, id: 0 }

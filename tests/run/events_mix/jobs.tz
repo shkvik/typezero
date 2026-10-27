@@ -5,25 +5,25 @@ import { EventEmitter } from "node:events"
 import { readFile } from "node:fs/promises"
 
 export class Jobs extends EventEmitter {
-  #controller = new AbortController()
+  private controller = new AbortController()
   started = 0
 
   async read(name: string, path: string) {
     this.started++
     this.emit("start", name)
-    const text = await readFile(path, { encoding: "utf8", signal: this.#controller.signal })
+    const text = await readFile(path, { encoding: "utf8", signal: this.controller.signal })
     if (text.isOk()) this.emit("done", name, text.value.trim().length)
     else this.emit("failed", name, text.error.code)
   }
 
   // Cancels what is being read, as node's AbortController does.
   cancel(why: string) {
-    this.#controller.abort(why)
-    this.#controller = new AbortController()
+    this.controller.abort(why)
+    this.controller = new AbortController()
   }
 
   currentSignal() {
-    return this.#controller.signal
+    return this.controller.signal
   }
 }
 

@@ -46,17 +46,6 @@ void LibraryCalls::prepareLibraries(SourceFile &program) {
       }
       cls->library = true;
       checker_.libClasses_[cls->name] = cls;
-      for (ClassField &f : cls->fields) {
-        llvm::erase_if(f.decorators, [&](const Decorator &d) {
-          auto *name = dyn_cast<NameExpr>(d.expr);
-          if (!name || name->name != "__tz_hidden") {
-            return false;
-          }
-          f.hidden = true;
-
-          return true;
-        });
-      }
     }
   }
 }
