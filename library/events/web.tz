@@ -4,10 +4,12 @@ function __tz_lib_signal_abort(native: object, reason: unknown): void
 function __tz_lib_signal_run(native: object, order: double): void
 function __tz_lib_order(): double
 
-export class DOMException extends Error {
+export class DOMException {
+  readonly message: string
+  readonly name: string
   @__tz_hidden readonly code: int
   constructor(message = "", name = "Error") {
-    super(message)
+    this.message = message
     this.name = name
     this.code = legacyCode(name)
   }
@@ -82,9 +84,11 @@ export class Event {
     return this.#dispatching && target != undefined ? [target] : []
   }
 
+  dispatching(): boolean {
+    return this.#dispatching
+  }
+
   beginDispatch(target: EventTarget) {
-    if (this.#dispatching)
-      throw new EventRecursionError(`The event "${this.type}" is already being dispatched`)
     this.#dispatching = true
     this.target = target
     this.srcElement = target
@@ -101,10 +105,6 @@ export class Event {
   stoppedImmediately() {
     return this.#stopImmediate
   }
-}
-
-class EventRecursionError extends Error {
-  code = "ERR_EVENT_RECURSION"
 }
 
 interface CustomEventInit<T> {
@@ -159,11 +159,7 @@ export class EventTarget {
   ) {
     const callback = (event: Event) => {
       const wanted = __tz_as<E>(event)
-      if (wanted == undefined)
-        throw new TypeError(
-          `the listener of "${type}" takes another kind of event than '${__tz_lib_class_name(event)}'`,
-        )
-      listener(wanted)
+      if (wanted != undefined) listener(wanted)
     }
     this.#add(type, callback, listener, options)
   }
@@ -226,6 +222,7 @@ export class EventTarget {
   }
 
   dispatchEvent(event: Event): boolean {
+    if (event.dispatching()) return false
     event.beginDispatch(this)
     const root = this.#events.get(event.type)
     let handler = root?.next
@@ -237,13 +234,7 @@ export class EventTarget {
         continue
       }
       if (handler.once) this.removeListenerOf(event.type, handler.original, handler.capture)
-      try {
-        handler.callback(event)
-      } catch (err) {
-        process.nextTick(() => {
-          throw err
-        })
-      }
+      handler.callback(event)
       handler = next
     }
     this.runtimeListeners(event.type, Infinity)
@@ -276,10 +267,6 @@ export class AbortSignal extends EventTarget {
     if (this.#onabortListens) return
     this.#onabortListens = true
     this.addFunctionListener<Event>("abort", runOnabort)
-  }
-
-  throwIfAborted() {
-    if (this.aborted) throw this.reason
   }
 
   abortWith(reason: unknown) {

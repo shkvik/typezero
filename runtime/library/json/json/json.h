@@ -74,7 +74,6 @@ TzJson *tz_json_retained(TzJson *j);
 void tz_json_publish(TzJson *root);
 #endif
 
-void tz_json_throw(int32_t kind, TzBuf *text);
 void tz_json_errors(TzMaker make);
 void tz_json_fail(const char *code, TzBuf *message, TzBuf *path);
 

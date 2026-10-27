@@ -13,7 +13,7 @@ const log: string[] = []
 stop.signal.onabort = () => log.push("onabort of the program")
 stop.signal.addEventListener("abort", () => log.push("listener of the program"))
 
-const server = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, async req => {
+const started = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, async req => {
   const name = routes.get(new URL(req.url).pathname)
   if (name == undefined) return new Response("not found", { status: 404 })
   await undefined
@@ -21,6 +21,11 @@ const server = serve({ port: 0, hostname: "127.0.0.1", signal: stop.signal }, as
   const result = Reflect.apply(method, handlers, [req]).unwrapOr(undefined)
   return result instanceof Response ? result : new Response("bad handler", { status: 500 })
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 const base = `http://127.0.0.1:${server.port}`
 
 // 1. A signed response, checked by the client.
@@ -34,7 +39,7 @@ const counted = must(await fetch(`${base}/count`))
 const decoder = new TextDecoder()
 let received = ""
 const body = counted.body
-if (body != undefined) for await (const chunk of body) received += decoder.decode(chunk)
+if (body != undefined) for await (const chunk of body) if (chunk.isOk()) received += decoder.decode(chunk.value)
 console.log(received)
 
 // 3. A fetch whose body an AbortController aborts while it comes.

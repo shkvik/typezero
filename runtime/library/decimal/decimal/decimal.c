@@ -65,12 +65,12 @@ static inline uint32_t scale_of(uint64_t meta) { return (uint32_t)meta; }
 
 static inline uint64_t magnitude(int64_t v) { return v < 0 ? 0 - (uint64_t)v : (uint64_t)v; }
 
-TZ_COLD static void overflow(void) { tz_throw(TZ_RANGE_ERROR, "Maximum decimal size exceeded"); }
+TZ_COLD TZ_NORETURN static void overflow(void) { tz_panicf("Maximum decimal size exceeded"); }
 
-TZ_COLD static void division_by_zero(void) { tz_throw(TZ_RANGE_ERROR, "Division by zero"); }
+TZ_COLD TZ_NORETURN static void division_by_zero(void) { tz_panicf("Division by zero"); }
 
-TZ_COLD static void out_of_range(int64_t value) {
-  tz_throw(TZ_RANGE_ERROR, "Argument out of range: %lld", (long long)value);
+TZ_COLD TZ_NORETURN static void out_of_range(int64_t value) {
+  tz_panicf("internal error: a decimal argument out of range: %lld", (long long)value);
 }
 
 static int rounding_mode(int32_t rm) {
@@ -1064,11 +1064,10 @@ void tz_dec_sqrt(TzDec *out, int64_t a, uint64_t am) {
   Dec x;
   dec_init(&x);
   dec_load(&x, a, am);
-  if (x.neg) {
-    tz_throw(TZ_RANGE_ERROR, "Square root of a negative decimal");
-    x.c.n = 0;
-    x.neg = 0;
+  if (x.neg && x.c.n) {
+    tz_panicf("Square root of a negative decimal");
   }
+  x.neg = 0;
   if (dec_is_zero(&x)) {
     dec_store_free(out, &x);
     return;
@@ -1490,8 +1489,7 @@ static const char alphabet[] = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 void tz_dec_to_string_base(TzStr *out, int64_t a, uint64_t am, int64_t base) {
   if (base < 2 || base > 36) {
-    tz_throw(TZ_RANGE_ERROR, "toString() radix must be between 2 and 36");
-    base = 10;
+    tz_panicf("internal error: toString() with the radix %lld", (long long)base);
   }
   Dec x;
   dec_init(&x);
@@ -1587,10 +1585,11 @@ TzArray *tz_dec_to_fraction(const TzType *type, int64_t a, uint64_t am, int64_t 
   dec_load(&x, a, am);
   if (has_max) {
     dec_load(&md, mc, mm);
-    if (md.e < 0 || md.neg || dec_is_zero(&md)) {
-      tz_throw(TZ_RANGE_ERROR, md.e < 0 ? "toFraction() maximum denominator is not an integer"
-                                        : "toFraction() maximum denominator must be at least 1");
-      has_max = 0;
+    if (md.e < 0) {
+      dec_round(&md, 0, ROUND_FLOOR);
+    }
+    if (md.neg || dec_is_zero(&md)) {
+      dec_set_u64(&md, 1, 0, 0);
     }
   }
   int neg = x.neg;
@@ -1806,10 +1805,10 @@ static void convert_message(char *message, size_t size, const uint16_t *s, size_
   snprintf(message, size, "Cannot convert %s%s to a decimal", text, len + 4 >= 160 ? "..." : "");
 }
 
-TZ_COLD static void cannot_convert(const uint16_t *s, size_t n) {
+TZ_COLD TZ_NORETURN static void cannot_convert(const uint16_t *s, size_t n) {
   char message[256];
   convert_message(message, sizeof message, s, n);
-  tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+  tz_panicf("internal error: %s", message);
 }
 
 typedef struct {
@@ -2001,8 +2000,7 @@ void tz_dec_from_f64(TzDec *out, double v) {
   if (isnan(v) || isinf(v)) {
     char text[32];
     text[tz_format_f64(v, text)] = 0;
-    tz_throw(TZ_RANGE_ERROR,
-             "The number %s cannot be converted to a decimal because it is not finite", text);
+    tz_panicf("The number %s cannot be converted to a decimal because it is not finite", text);
     out->coef = 0;
     out->meta = 0;
     return;
@@ -2075,12 +2073,5 @@ int32_t tz_dec_rounding_mode(void *obj, uint64_t meta) {
     text_char(&t, buf.data[i] < 0x80 && buf.data[i] >= 0x20 ? (char)buf.data[i] : '?');
   }
   text_char(&t, 0);
-  tz_throw(TZ_RANGE_ERROR,
-           "unknown rounding mode '%s'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', "
-           "'half-down', 'half-even', 'half-ceil' and 'half-floor'",
-           t.p);
-  tz_free(t.p);
-  tz_buf_free(&buf);
-
-  return ROUND_HALF_UP;
+  tz_panicf("internal error: the rounding mode '%s'", t.p);
 }

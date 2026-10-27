@@ -42,4 +42,4 @@ if (typeof title == "string") {
 // {}, a decimal as a string, a Result as its one property.
 console.log(JSON.stringify({ re: /a+/g, match: "xaay".match(/(a)(b)?/), it: [1].values() }))
 console.log(JSON.stringify({ sum: decimal(0.1) + 0.2, results: [ok(1), err("no")] }))
-console.log(JSON.stringify(store, null, 1))
+console.log(JSON.stringify(store, null, 1).unwrapOr(""))

@@ -2202,11 +2202,7 @@ static const int8_t kHexDigits[256] = URI_EACH256(URI_HEX);
 TZ_THREAD_LOCAL TzMaker tz_uri_fail;
 
 static void uri_malformed(TzStr *out) {
-  if (tz_uri_fail) {
-    tz_fail_ascii(tz_uri_fail, "bad_uri", "URI malformed");
-  } else {
-    tz_throw(TZ_URI_ERROR, "URI malformed");
-  }
+  tz_fail_ascii(tz_uri_fail, "bad_uri", "URI malformed");
   *out = kEmpty;
 }
 

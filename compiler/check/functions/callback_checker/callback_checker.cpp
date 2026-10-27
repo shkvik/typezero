@@ -11,6 +11,7 @@
 #include "compiler/check/generics/generic_checker/generic_checker.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/decimal/decimal_checker/decimal_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -320,6 +321,22 @@ Expr *CallbackChecker::checkCallbackMethod(CallExpr *call, MemberExpr *member,
   bool isBoolean = checker_.callChecker().isGlobalName(call->args[0], "Boolean");
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && kind != Sort) {
     checker_.indexCallbacks_[fe->fn] = kind == Reduce ? 2 : 1;
+    if (auto *lit = dyn_cast<ArrayLitExpr>(member->object); lit && element->isInt()) {
+      std::optional<int64_t> lo, hi;
+      for (const ArrayLitExpr::Element &e : lit->elements) {
+        std::optional<int64_t> c =
+            e.spread || e.hole ? std::nullopt : checker_.constantFolder().intConstant(e.expr);
+        if (!c) {
+          lo.reset();
+          break;
+        }
+        lo = lo ? std::min(*lo, *c) : *c;
+        hi = hi ? std::max(*hi, *c) : *c;
+      }
+      if (lo) {
+        checker_.elementCallbacks_[fe->fn] = {kind == Reduce ? 1u : 0u, *lo, *hi};
+      }
+    }
   }
   if (auto *fe = dyn_cast<FunctionExpr>(call->args[0]); fe && typed) {
     Checker::ByteCallback info;

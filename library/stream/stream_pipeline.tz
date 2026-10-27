@@ -90,13 +90,13 @@ export function streamVoidSinkStage<A>(
 }
 
 class PipelineState {
-  error: Error | undefined = undefined
+  error: StreamError | undefined = undefined
   value: unknown = undefined
-  destroys: ((err: Error | undefined) => void)[] = []
+  destroys: ((err: StreamError | undefined) => void)[] = []
   lastStreamCleanup: (() => void)[] = []
   finishCount: int = 0
   readonly ac = new AbortController()
-  constructor(public callback: ((err: Error | undefined, value: unknown) => void) | undefined) {}
+  constructor(public callback: ((err: StreamError | undefined, value: unknown) => void) | undefined) {}
 }
 
 class PipelineDestroyer {
@@ -110,10 +110,10 @@ function pipelineDestroyer(stream: Stream, reading: boolean, writing: boolean,
     void this
     d.finished = true
   }, kThisListener)
-  const cleanup = eos(stream, { readable: reading, writable: writing }, (err?: Error) => {
+  const cleanup = eos(stream, { readable: reading, writable: writing }, (err?: StreamError) => {
     d.finished = err == undefined
   })
-  ps.destroys.push((err: Error | undefined) => {
+  ps.destroys.push((err: StreamError | undefined) => {
     if (d.finished) return
     d.finished = true
     destroyer(stream, err ?? streamDestroyed("pipe"))
@@ -121,7 +121,7 @@ function pipelineDestroyer(stream: Stream, reading: boolean, writing: boolean,
   return cleanup
 }
 
-function finishImpl(ps: PipelineState, err: Error | undefined, final: boolean) {
+function finishImpl(ps: PipelineState, err: StreamError | undefined, final: boolean) {
   if (err != undefined && (ps.error == undefined || codeOf(ps.error) == "ERR_STREAM_PREMATURE_CLOSE"))
     ps.error = err
   if (ps.error == undefined && !final) return
@@ -144,7 +144,7 @@ function finishImpl(ps: PipelineState, err: Error | undefined, final: boolean) {
   }
 }
 
-function pipelineFinish(ps: PipelineState, err?: Error) {
+function pipelineFinish(ps: PipelineState, err?: StreamError) {
   finishImpl(ps, err, --ps.finishCount == 0)
 }
 
@@ -154,9 +154,9 @@ function readableChunks(stream: Stream): AsyncGenerator<unknown> {
 
 async function pumpToNode(iterable: AsyncGenerator<unknown>, writable: Stream, ps: PipelineState,
                           end: boolean) {
-  let error: Error | undefined = undefined
+  let error: StreamError | undefined = undefined
   let onresolve: (() => void) | undefined = undefined
-  const resume = (err?: Error) => {
+  const resume = (err?: StreamError) => {
     if (err != undefined) error = err
     const callback = onresolve
     if (callback != undefined) {
@@ -216,25 +216,25 @@ function pipelinePipe(src: Stream, dst: Stream, ps: PipelineState, end: boolean)
   } else {
     pipelineFinish(ps)
   }
-  eos(src, { readable: true, writable: false }, (err?: Error) => {
+  eos(src, { readable: true, writable: false }, (err?: StreamError) => {
     const rState = src._readableState
     if (err != undefined && codeOf(err) == "ERR_STREAM_PREMATURE_CLOSE" && rState != undefined &&
         (rState.bits & kEnded) != 0 && rState.errored == undefined &&
         (rState.bits & kErrorEmitted) == 0) {
       const finishFn = () => pipelineFinish(ps)
       src.once("end", finishFn)
-      src.once("error", (e: Error) => pipelineFinish(ps, e))
+      src.once("error", (e: StreamError) => pipelineFinish(ps, e))
     } else {
       pipelineFinish(ps, err)
     }
   })
-  return eos(dst, { readable: false, writable: true }, (err?: Error) => pipelineFinish(ps, err))
+  return eos(dst, { readable: false, writable: true }, (err?: StreamError) => pipelineFinish(ps, err))
 }
 
 function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end: boolean,
                       outerSignal: AbortSignal | undefined): Stream | undefined {
   if (stages.length < 2)
-    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+    throw failure("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
   const signal = ps.ac.signal
   const abort = () => finishImpl(ps, new AbortError(undefined, errorOf(outerSignal?.reason)), false)
   let onOuterAbort: ((event: Event) => void) | undefined = undefined
@@ -258,13 +258,13 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
     if (stage instanceof Stream) {
       const stream = stage
       if (next instanceof Stream && (next.closed || next.destroyed))
-        throw new StreamError("ERR_STREAM_UNABLE_TO_PIPE",
+        throw failure("ERR_STREAM_UNABLE_TO_PIPE",
                               "Cannot pipe to a closed or destroyed stream")
       if (stageEnd) {
         const cleanup = pipelineDestroyer(stream, reading, writing, ps)
         if (isReadable(stream) && isLastStream) ps.lastStreamCleanup.push(cleanup)
       }
-      const onError = function (this: Stream, err: Error) {
+      const onError = function (this: Stream, err: StreamError) {
         void this
         if (err.name != "AbortError" && codeOf(err) != "ERR_STREAM_PREMATURE_CLOSE")
           finishImpl(ps, err, false)
@@ -285,7 +285,7 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
         retIterable = undefined
         retStream = stream
       } else {
-        throw new StreamTypeError(
+        throw failure(
           "ERR_INVALID_ARG_TYPE",
           'The "val" argument must be an instance of Readable, Iterable, or AsyncIterable.',
         )
@@ -295,13 +295,13 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
     if (i == 0) {
       const source = stage.source
       if (source == undefined)
-        throw new StreamTypeError("ERR_INVALID_ARG_TYPE", "the first stage is no source")
+        throw failure("ERR_INVALID_ARG_TYPE", "the first stage is no source")
       retIterable = source(signal)
       continue
     }
     const input = retIterable ?? (retStream != undefined ? readableChunks(retStream) : undefined)
     if (input == undefined)
-      throw new StreamTypeError("ERR_INVALID_ARG_TYPE", "a stage has nothing before it")
+      throw failure("ERR_INVALID_ARG_TYPE", "a stage has nothing before it")
     retStream = undefined
     const transform = stage.transform
     if (transform != undefined && reading) {
@@ -319,7 +319,7 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
           if (stageEnd) pt._endWith(false, undefined, undefined, undefined)
           process.nextTick(() => pipelineFinish(ps))
         },
-        (err: Error) => {
+        (err: StreamError) => {
           pt.destroy(err)
           process.nextTick(() => pipelineFinish(ps, err))
         },
@@ -339,7 +339,7 @@ function pipelineImpl(stages: (Stream | PipelineStage)[], ps: PipelineState, end
 
 export function streamPipeline<S extends Stream>(stages: (Stream | PipelineStage)[], last: S,
                                                  callback: StreamCallback): S {
-  const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+  const ps = new PipelineState((err: StreamError | undefined, value: unknown) => {
     void value
     callback(err)
   })
@@ -351,20 +351,20 @@ export function streamPipeline<S extends Stream>(stages: (Stream | PipelineStage
 
 export function streamPipelineToStage(stages: (Stream | PipelineStage)[],
                                       callback: StreamCallback): Stream {
-  const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+  const ps = new PipelineState((err: StreamError | undefined, value: unknown) => {
     void value
     callback(err)
   })
   const last = pipelineImpl(stages, ps, true, undefined)
-  if (last == undefined) throw new StreamTypeError("ERR_INVALID_RETURN_VALUE", "no stream")
+  if (last == undefined) throw failure("ERR_INVALID_RETURN_VALUE", "no stream")
   return last
 }
 
 export function streamPipelinePromise(stages: (Stream | PipelineStage)[],
                                       options?: { signal?: AbortSignal; end?: boolean }):
-    Promise<Result<void, Error>> {
-  return new Promise<Result<void, Error>>((resolve) => {
-    const ps = new PipelineState((error: Error | undefined, value: unknown) => {
+    Promise<Result<void, StreamError>> {
+  return new Promise<Result<void, StreamError>>((resolve) => {
+    const ps = new PipelineState((error: StreamError | undefined, value: unknown) => {
       void value
       if (error != undefined) resolve(err(error))
       else resolve(ok())
@@ -375,9 +375,9 @@ export function streamPipelinePromise(stages: (Stream | PipelineStage)[],
 
 export function streamPipelineValue<V>(stages: (Stream | PipelineStage)[],
                                        options?: { signal?: AbortSignal; end?: boolean }):
-    Promise<Result<V, Error>> {
-  return new Promise<Result<V, Error>>((resolve) => {
-    const ps = new PipelineState((error: Error | undefined, value: unknown) => {
+    Promise<Result<V, StreamError>> {
+  return new Promise<Result<V, StreamError>>((resolve) => {
+    const ps = new PipelineState((error: StreamError | undefined, value: unknown) => {
       if (error != undefined) resolve(err(error))
       else resolve(ok(__tz_chunk<V>(value)))
     })
@@ -390,7 +390,7 @@ export function streamFinished(stream: Stream, options: FinishedOptions | undefi
   return eos(stream, options, callback)
 }
 
-export function destroy(stream: Stream, error?: Error) {
+export function destroy(stream: Stream, error?: StreamError) {
   destroyer(stream, error)
 }
 
@@ -449,7 +449,7 @@ class ComposedDuplex<W, R> extends Duplex<W, R> {
     }
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     let err = error
     if (err == undefined && this._closing) err = new AbortError()
     this._onreadable = undefined
@@ -467,17 +467,17 @@ class ComposedDuplex<W, R> extends Duplex<W, R> {
 
 export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
   if (streams.length == 0)
-    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+    throw failure("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
   for (let n = 0; n < streams.length; ++n) {
     const stream = streams[n]
     if (stream == undefined) continue
     if (n < streams.length - 1 && !isReadable(stream))
-      throw new StreamTypeError(
+      throw failure(
         "ERR_INVALID_ARG_VALUE",
         `The argument 'streams[${n}]' must be readable. Received ${__tz_lib_class_name(stream)}`,
       )
     if (n > 0 && !isWritable(stream))
-      throw new StreamTypeError(
+      throw failure(
         "ERR_INVALID_ARG_VALUE",
         `The argument 'streams[${n}]' must be writable. Received ${__tz_lib_class_name(stream)}`,
       )
@@ -485,7 +485,7 @@ export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
   const first = streams[0]
   const lastOne = streams[streams.length - 1]
   if (first == undefined || lastOne == undefined)
-    throw new StreamTypeError("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
+    throw failure("ERR_MISSING_ARGS", 'The "streams" argument must be specified')
   const head = first
   const tail = lastOne
   const writable = isWritable(head)
@@ -499,7 +499,7 @@ export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
   const d = new ComposedDuplex<W, R>(sides)
   d._head = head
   d._tail = tail
-  const onfinished = (err?: Error) => {
+  const onfinished = (err?: StreamError) => {
     const cb = d._onclose
     d._closing = false
     d._onclose = undefined
@@ -512,7 +512,7 @@ export function streamCompose<W, R>(streams: Stream[]): Duplex<W, R> {
   } else {
     const stages: (Stream | PipelineStage)[] = []
     for (const stream of streams) stages.push(stream)
-    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+    const ps = new PipelineState((err: StreamError | undefined, value: unknown) => {
       void value
       onfinished(err)
     })

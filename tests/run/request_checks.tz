@@ -23,11 +23,16 @@ const red = Response.redirect(new URL("http://x.com/a"), 307)
 red.headers.set("location", "http://x.com/b")
 console.log(red.headers.get("location"))
 
-const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
   req.headers.set("x-seen", "yes")
   const body = await req.text()
   return new Response(`${req.method} ${req.headers.get("x-seen")} [${body.unwrapOr("-")}]`)
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 const base = server.url
 const res = must(await fetch(base))
 res.headers.set("x-mine", "1")

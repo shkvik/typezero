@@ -325,6 +325,7 @@ private:
   std::vector<FunctionDecl *> pendingClosures_;
   bool comparesFunctions_ = false;
   bool usesTls_ = false;
+  const Type *systemError_ = nullptr;
   llvm::DenseMap<const FunctionDecl *, TailGroup *> tailGroupOf_;
   TailGroup *tailGroup_ = nullptr;
   llvm::DenseSet<const Stmt *> tailStatements_;

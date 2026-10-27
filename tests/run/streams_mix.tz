@@ -72,12 +72,17 @@ const joined = chain(createReadStream(file), upper, (err) => {
 console.log(JSON.stringify(must(await text(joined))))
 
 // A server that sends the file as it reads it.
-const server = serve({ port: 0, hostname: "127.0.0.1" }, async () => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, async () => {
   const body = (await text(createReadStream(file, "utf8"))).unwrapOr("")
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body))
   const hash = digest.map(d => Buffer.from(d).toString("hex")).unwrapOr("-")
   return new Response(body, { headers: { "x-digest": hash } })
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 const res = must(await fetch(new URL("/", server.url)))
 console.log(JSON.stringify(must(await res.text())), res.headers.get("x-digest")?.slice(0, 16))
 await server.stop()

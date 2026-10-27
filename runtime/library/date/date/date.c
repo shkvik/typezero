@@ -1,4 +1,5 @@
 #include "runtime/library/date/date/date.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/string/string.h"
@@ -262,9 +263,7 @@ static int iso_text(char *out, size_t size, double t) {
 
 void tz_date_iso(TzStr *out, double t) {
   if (isnan(t)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid time value");
-    *out = ascii("", 0);
-    return;
+    tz_panicf("Invalid time value");
   }
   char text[40];
   *out = ascii(text, iso_text(text, sizeof text, t));

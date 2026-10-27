@@ -193,7 +193,7 @@ llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::V
   lowering_.builder_.CreateCondBr(isZero, throwBlock, okBlock,
                                   llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(throwBlock);
-  lowering_.throwLowerer().emitThrowNew(2, "Division by zero");
+  lowering_.throwLowerer().emitPanic("Division by zero");
 
   lowering_.functionFrame().switchTo(okBlock);
   llvm::Value *isMinusOne =

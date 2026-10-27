@@ -102,8 +102,10 @@ const timer: Timeout = setTimeout(() => console.log("never"), 1000)
 clearTimeout(timer)
 console.log(readLine() ?? "no input")
 const server = serve({ hostname: "127.0.0.1", port: 0 }, request => new Response(`got ${new URL(request.url).pathname}`))
-console.log(server.port > 0)
-await server.stop()
+if (server.isOk()) {
+  console.log(server.value.port > 0)
+  await server.value.stop()
+}
 ]=])
 write(app/main.tz "${program}")
 tz(run main.tz IN app STDOUT [[

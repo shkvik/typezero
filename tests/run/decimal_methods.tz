@@ -4,7 +4,9 @@
 function num(text: string): decimal {
   return decimal(text).unwrapOr(0)
 }
-const modes: string[] = [
+type Mode = "up" | "down" | "ceil" | "floor" | "half-up" | "half-down" | "half-even" |
+  "half-ceil" | "half-floor"
+const modes: Mode[] = [
   "up", "down", "ceil", "floor", "half-up", "half-down", "half-even", "half-ceil",
   "half-floor"
 ]
@@ -35,7 +37,7 @@ const F: string[] = [
   "0.000123456", "-0.001", "1e21", "1.5e-10", "123456789012345678901234567890.123",
   "999.995", "0.1", "100", "12345678", "-0.0000001", "9.99999"
 ]
-const SM: string[] = ["half-up", "half-even", "down", "up", "floor"]
+const SM: Mode[] = ["half-up", "half-even", "down", "up", "floor"]
 for (const a of F) {
   const x = num(a)
   console.log(x.toFixed(), x.toFormat(), x.toExponential(), x.toPrecision())

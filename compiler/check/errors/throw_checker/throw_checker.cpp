@@ -97,37 +97,9 @@ void ThrowChecker::declareErrorClass() {
     checker_.classBases().addBase(kindType, type);
     checker_.errorKinds_.push_back(kind);
   }
-
-  auto *system = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), "SystemError");
-  system->builtin = true;
-  system->resolved = system->declared = true;
-  system->parent = cls;
-  cls->children.push_back(system);
-  Type *systemType = Type::classType("SystemError", system);
-  system->type = systemType;
-  const std::pair<llvm::StringRef, const Type *> own[] = {{"errno", Type::intTy()},
-                                                          {"code", Type::string()},
-                                                          {"syscall", Type::string()},
-                                                          {"path", Type::optional(Type::string())},
-                                                          {"dest", Type::optional(Type::string())}};
-  std::vector<Field> systemFields(type->fields().begin(), type->fields().end());
-  for (const auto &[name, fieldType] : own) {
-    ClassField f;
-    f.name = name;
-    f.resolved = fieldType;
-    f.optional = fieldType->isOptional();
-    system->fields.push_back(f);
-    systemFields.push_back({name.str(), fieldType, false});
-  }
-  systemType->defineFields(std::move(systemFields));
-  checker_.classBases().addBase(systemType, type);
-  checker_.systemErrorClass_ = system;
 }
 
 ClassDecl *ThrowChecker::errorKindClass(llvm::StringRef name) const {
-  if (name == "SystemError") {
-    return checker_.systemErrorClass_;
-  }
   int kind = errorKindIndex(name);
 
   return kind >= 0 && size_t(kind) < checker_.errorKinds_.size()

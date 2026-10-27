@@ -1,25 +1,29 @@
 import { URL, URLSearchParams, __formText, __percentDecode } from "tz:url"
 import { AbortController, AbortSignal, DOMException } from "tz:web"
 
-function __tz_net_connect(host: string, port: int, signal: AbortSignal | undefined): Promise<object>
+function __tz_net_connect(host: string, port: int,
+                          signal: AbortSignal | undefined): Promise<Result<object, SystemError>>
 function __tz_net_close(conn: object): void
-function __tz_tls_connect(conn: object, host: string, signal: AbortSignal | undefined): Promise<void>
+function __tz_tls_connect(conn: object, host: string,
+                          signal: AbortSignal | undefined): Promise<Result<void, SystemError>>
 function __tz_http_request(conn: object, method: string, target: string, headers: string[],
                            text: string, bytes: Uint8Array | undefined, flags: int): void
-function __tz_http_response(conn: object, signal: AbortSignal | undefined): Promise<int>
+function __tz_http_response(conn: object,
+                            signal: AbortSignal | undefined): Promise<Result<int, SystemError>>
 function __tz_http_status_text(conn: object): string
 function __tz_http_headers(conn: object): string[]
 function __tz_http_has_body(conn: object): boolean
-function __tz_http_read(conn: object,
-                        signal: AbortSignal | undefined): Promise<Uint8Array | undefined>
-function __tz_http_read_all(conn: object, signal: AbortSignal | undefined): Promise<Uint8Array>
+function __tz_http_read(conn: object, signal: AbortSignal | undefined):
+  Promise<Result<Uint8Array | undefined, SystemError>>
+function __tz_http_read_all(conn: object, signal: AbortSignal | undefined):
+  Promise<Result<Uint8Array, SystemError>>
 function __tz_http_reusable(conn: object): boolean
-function __tz_http_write(conn: object, chunk: Uint8Array): Promise<void>
+function __tz_http_write(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>
 function __tz_http_end(conn: object): void
 function __tz_http_reason(status: int): string
 function __tz_zlib_new(kind: int): object
-function __tz_zlib_push(decoder: object, chunk: Uint8Array): Uint8Array
-function __tz_zlib_end(decoder: object): Uint8Array
+function __tz_zlib_push(decoder: object, chunk: Uint8Array): Result<Uint8Array, SystemError>
+function __tz_zlib_end(decoder: object): Result<Uint8Array, SystemError>
 
 export const SEND_STREAM = 1
 export const SEND_CLOSE = 2
@@ -239,10 +243,12 @@ function isLower(s: string): boolean {
 
 export type ReadableStreamReadResult<R> = { done: false; value: R } | { done: true; value?: R }
 
+type ReadResult<R> = Result<ReadableStreamReadResult<R>, StreamError>
+
 class StreamState<R> {
   queue: R[] = []
   state = "readable"
-  error: Error | undefined = undefined
+  error: StreamError | undefined = undefined
   source: UnderlyingSource<R> | undefined = undefined
   started = false
   pulling = false
@@ -252,24 +258,22 @@ class StreamState<R> {
   disturbed = false
   bytes = false
   highWaterMark: double = 1
-  reads: PromiseWithResolvers<ReadableStreamReadResult<R>>[] = []
-}
-
-interface PromiseWithResolvers<T> {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (reason: Error) => void
+  reads: ((result: ReadResult<R>) => void)[] = []
 }
 
 export interface UnderlyingSource<R> {
   start?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
   pull?: (controller: ReadableStreamDefaultController<R>) => Promise<void> | undefined
-  cancel?: (reason: Error | undefined) => Promise<void> | undefined
+  cancel?: (reason: StreamError | undefined) => Promise<void> | undefined
   type?: string
 }
 
 export interface QueuingStrategy {
   highWaterMark?: double
+}
+
+function invalidState(message: string): StreamError {
+  return { code: "ERR_INVALID_STATE", message }
 }
 
 function closeStream<R>(s: StreamState<R>) {
@@ -278,10 +282,10 @@ function closeStream<R>(s: StreamState<R>) {
   s.source = undefined
   const reads = s.reads
   s.reads = []
-  for (const r of reads) r.resolve({ done: true })
+  for (const r of reads) r(ok({ done: true }))
 }
 
-function errorStream<R>(s: StreamState<R>, e: Error) {
+function errorStream<R>(s: StreamState<R>, e: StreamError) {
   if (s.state != "readable") return
   s.state = "errored"
   s.error = e
@@ -289,7 +293,7 @@ function errorStream<R>(s: StreamState<R>, e: Error) {
   s.source = undefined
   const reads = s.reads
   s.reads = []
-  for (const r of reads) r.reject(e)
+  for (const r of reads) r(err(e))
 }
 
 function desiredSize<R>(s: StreamState<R>): double {
@@ -306,22 +310,12 @@ function pullIfNeeded<R>(s: StreamState<R>) {
     return
   }
   s.pulling = true
-  let pulled: Promise<void> | undefined = undefined
-  try {
-    pulled = pull(new ReadableStreamDefaultController<R>(s))
-  } catch (e) {
-    s.pulling = false
-    errorStream(s, e)
-    return
-  }
+  const pulled = pull(new ReadableStreamDefaultController<R>(s))
   if (pulled == undefined) {
     afterPull(s)
     return
   }
-  void pulled.then(() => afterPull(s), (e: Error) => {
-    s.pulling = false
-    errorStream(s, e)
-  })
+  void pulled.then(() => afterPull(s))
 }
 
 function afterPull<R>(s: StreamState<R>) {
@@ -345,52 +339,54 @@ export class ReadableStreamDefaultController<R> {
 
   enqueue(chunk: R) {
     const s = this.#s
-    if (s.state != "readable" || s.closeRequested)
-      throw new TypeError("Invalid state: Controller is already closed")
+    if (s.state != "readable" || s.closeRequested) return
     const read = s.reads.shift()
-    if (read != undefined) read.resolve({ done: false, value: chunk })
+    if (read != undefined) read(ok({ done: false, value: chunk }))
     else s.queue.push(chunk)
     pullIfNeeded(s)
   }
 
   close() {
     const s = this.#s
-    if (s.state != "readable" || s.closeRequested)
-      throw new TypeError("Invalid state: Controller is already closed")
+    if (s.state != "readable" || s.closeRequested) return
     s.closeRequested = true
     if (s.queue.length == 0) closeStream(s)
   }
 
-  error(e: Error) {
+  error(e: StreamError) {
     errorStream(this.#s, e)
   }
 }
 
 export class ReadableStreamDefaultReader<R> {
-  #s: StreamState<R> | undefined
+  #s: StreamState<R> | undefined = undefined
+  #problem: StreamError | undefined = undefined
 
   constructor(stream: ReadableStream<R>) {
     const s = stream.__state()
-    if (s.locked) throw new TypeError("Invalid state: ReadableStream is locked")
+    if (s.locked) {
+      this.#problem = invalidState("Invalid state: ReadableStream is locked")
+      return
+    }
     s.locked = true
     this.#s = s
   }
 
-  async read(): Promise<ReadableStreamReadResult<R>> {
+  async read(): Promise<ReadResult<R>> {
     const s = this.#s
-    if (s == undefined) throw new TypeError("Reader is released")
+    if (s == undefined) return err(this.#problem ?? invalidState("Reader is released"))
     s.disturbed = true
     if (s.queue.length > 0) {
       const chunk = s.queue.shift()
       if (s.closeRequested && s.queue.length == 0) closeStream(s)
       else pullIfNeeded(s)
-      if (chunk != undefined) return { done: false, value: chunk }
+      if (chunk != undefined) return ok({ done: false, value: chunk })
     }
-    if (s.state == "closed") return { done: true }
+    if (s.state == "closed") return ok({ done: true })
     const error = s.error
-    if (s.state == "errored" && error != undefined) throw error
-    const read = Promise.withResolvers<ReadableStreamReadResult<R>>()
-    s.reads.push(read)
+    if (s.state == "errored" && error != undefined) return err(error)
+    const read = Promise.withResolvers<ReadResult<R>>()
+    s.reads.push(read.resolve)
     pullIfNeeded(s)
     return read.promise
   }
@@ -402,16 +398,16 @@ export class ReadableStreamDefaultReader<R> {
     this.#s = undefined
     const reads = s.reads
     s.reads = []
-    for (const r of reads) r.reject(new TypeError("Reader was released"))
+    for (const r of reads) r(err(invalidState("Reader was released")))
   }
 
-  async cancel(reason?: Error): Promise<void> {
+  async cancel(reason?: StreamError): Promise<void> {
     const s = this.#s
     if (s != undefined) await cancelStream(s, reason)
   }
 }
 
-async function cancelStream<R>(s: StreamState<R>, reason: Error | undefined): Promise<void> {
+async function cancelStream<R>(s: StreamState<R>, reason: StreamError | undefined): Promise<void> {
   s.disturbed = true
   if (s.state != "readable") return
   const cancel = s.source?.cancel
@@ -443,7 +439,7 @@ export class ReadableStream<R = Uint8Array> {
       void started.then(() => {
         s.started = true
         pullIfNeeded(s)
-      }, (e: Error) => errorStream(s, e))
+      })
     }
   }
 
@@ -467,22 +463,30 @@ export class ReadableStream<R = Uint8Array> {
     return new ReadableStreamDefaultReader<R>(this)
   }
 
-  async cancel(reason?: Error): Promise<void> {
-    if (this.#s.locked) throw new TypeError("Invalid state: ReadableStream is locked")
+  async cancel(reason?: StreamError): Promise<void> {
+    if (this.#s.locked) return
     await cancelStream(this.#s, reason)
   }
 
-  async *values(): AsyncGenerator<R, void, void> {
+  async *values(): AsyncGenerator<Result<R, StreamError>, void, void> {
     const reader = this.getReader()
     let finished = false
     try {
       for (;;) {
         const r = await reader.read()
-        if (r.done) {
+        if (r.isErr()) {
+          finished = true
+          const failed: Result<R, StreamError> = err(r.error)
+          yield failed
+          return
+        }
+        const step = r.value
+        if (step.done) {
           finished = true
           return
         }
-        yield r.value
+        const item: Result<R, StreamError> = ok(step.value)
+        yield item
       }
     } finally {
       if (!finished) await reader.cancel()
@@ -490,7 +494,7 @@ export class ReadableStream<R = Uint8Array> {
     }
   }
 
-  async *[Symbol.asyncIterator](): AsyncGenerator<R, void, void> {
+  async *[Symbol.asyncIterator](): AsyncGenerator<Result<R, StreamError>, void, void> {
     yield* this.values()
   }
 }
@@ -508,7 +512,20 @@ const CODING_BR = 3
 export type BodyInit = string | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array> |
   URLSearchParams | FormData
 
-type Decode = (chunk: Uint8Array, last: boolean) => Uint8Array
+type Decode = (chunk: Uint8Array, last: boolean) => Result<Uint8Array, SystemError>
+
+function abortedReason(signal: AbortSignal): { timeout: boolean; message: string } {
+  const reason = signal.reason
+  if (reason instanceof DOMException)
+    return { timeout: reason.name == "TimeoutError", message: reason.message }
+  return { timeout: false, message: "This operation was aborted" }
+}
+
+function abortedBody(signal: AbortSignal): BodyError {
+  const why = abortedReason(signal)
+  return why.timeout ? { code: "TIMEOUT_ERR", message: why.message }
+                     : { code: "ABORT_ERR", message: why.message }
+}
 
 class Wire {
   conn: object
@@ -522,16 +539,21 @@ class Wire {
     this.signal = signal
   }
 
-  #decode(decode: Decode, chunk: Uint8Array, last: boolean): Uint8Array {
-    let data: Uint8Array
-    try {
-      data = decode(chunk, last)
-    } catch (e) {
+  #decode(decode: Decode, chunk: Uint8Array, last: boolean): Result<Uint8Array, BodyError> {
+    const data = decode(chunk, last)
+    if (data.isErr()) {
       this.finished = true
       __tz_net_close(this.conn)
-      throw new TypeError("terminated", { cause: e })
+      return err({ code: "terminated", message: "terminated", cause: data.error.message })
     }
-    return data
+    return ok(data.value)
+  }
+
+  #failed(e: SystemError): BodyError {
+    this.finished = true
+    const signal = this.signal
+    if (signal != undefined && signal.aborted) return abortedBody(signal)
+    return { code: "terminated", message: "terminated", cause: e.message }
   }
 
   #finish() {
@@ -539,28 +561,45 @@ class Wire {
     if (this.origin != "") giveBack(this.origin, this.conn)
   }
 
-  async next(): Promise<Uint8Array | undefined> {
+  async next(): Promise<Result<Uint8Array | undefined, BodyError>> {
     while (!this.finished) {
-      const chunk = await __tz_http_read(this.conn, this.signal)
-      if (chunk == undefined) {
-        const decode = this.decode
-        const rest = decode != undefined ? this.#decode(decode, new Uint8Array(0), true) : undefined
-        this.#finish()
-        return rest != undefined && rest.length > 0 ? rest : undefined
-      }
+      const read = await __tz_http_read(this.conn, this.signal)
+      if (read.isErr()) return err(this.#failed(read.error))
+      const chunk = read.value
       const decode = this.decode
-      const data = decode != undefined ? this.#decode(decode, chunk, false) : chunk
-      if (data.length > 0) return data
+      if (chunk == undefined) {
+        let rest: Uint8Array | undefined = undefined
+        if (decode != undefined) {
+          const last = this.#decode(decode, new Uint8Array(0), true)
+          if (last.isErr()) return last
+          rest = last.value
+        }
+        this.#finish()
+        return ok(rest != undefined && rest.length > 0 ? rest : undefined)
+      }
+      let data = chunk
+      if (decode != undefined) {
+        const decoded = this.#decode(decode, chunk, false)
+        if (decoded.isErr()) return decoded
+        data = decoded.value
+      }
+      if (data.length > 0) return ok(data)
     }
-    return undefined
+    return ok(undefined)
   }
 
-  async all(): Promise<Uint8Array> {
+  async all(): Promise<Result<Uint8Array, BodyError>> {
     const bytes = await __tz_http_read_all(this.conn, this.signal)
+    if (bytes.isErr()) return err(this.#failed(bytes.error))
     const decode = this.decode
-    const data = decode != undefined ? this.#decode(decode, bytes, true) : bytes
+    let data = bytes.value
+    if (decode != undefined) {
+      const decoded = this.#decode(decode, bytes.value, true)
+      if (decoded.isErr()) return decoded
+      data = decoded.value
+    }
     this.#finish()
-    return data
+    return ok(data)
   }
 }
 
@@ -585,9 +624,16 @@ function decoding(encoding: string | undefined): Decode | undefined {
     let data = chunk
     for (const d of decoders) {
       const out = __tz_zlib_push(d, data)
-      data = last ? concat([out, __tz_zlib_end(d)]) : out
+      if (out.isErr()) return out
+      if (last) {
+        const end = __tz_zlib_end(d)
+        if (end.isErr()) return end
+        data = concat([out.value, end.value])
+      } else {
+        data = out.value
+      }
     }
-    return data
+    return ok(data)
   }
 }
 
@@ -603,6 +649,21 @@ function decodersOf(encoding: string | undefined): object[] | undefined {
     else return undefined
   }
   return out
+}
+
+function bodyUsed(): BodyError {
+  return { code: "body_used", message: "Body is unusable: Body has already been read" }
+}
+
+function bodyFailed(e: StreamError): BodyError {
+  const cause = e.cause
+  if (e.code == "terminated")
+    return cause == undefined ? { code: "terminated", message: e.message }
+                              : { code: "terminated", message: e.message, cause }
+  if (e.code == "ABORT_ERR") return { code: "ABORT_ERR", message: e.message }
+  if (e.code == "TIMEOUT_ERR") return { code: "TIMEOUT_ERR", message: e.message }
+  return cause == undefined ? { code: "body_failed", message: e.message }
+                            : { code: "body_failed", message: e.message, cause }
 }
 
 class Body {
@@ -683,8 +744,16 @@ class Body {
         type: "bytes",
         pull: async c => {
           const chunk = await wire.next()
-          if (chunk == undefined) c.close()
-          else c.enqueue(chunk)
+          if (chunk.isErr()) {
+            const e = chunk.error
+            const cause = e.cause
+            c.error(cause == undefined ? { code: e.code, message: e.message }
+                                       : { code: e.code, message: e.message, cause })
+          } else {
+            const value = chunk.value
+            if (value == undefined) c.close()
+            else c.enqueue(value)
+          }
         },
       })
     } else {
@@ -701,37 +770,44 @@ class Body {
     return stream
   }
 
-  async consume(): Promise<Uint8Array> {
-    if (this.usedOrDisturbed) throw new TypeError("Body is unusable: Body has already been read")
+  async consume(): Promise<Result<Uint8Array, BodyError>> {
+    if (this.usedOrDisturbed) return err(bodyUsed())
     this.used = true
     const stream = this.stream
     if (stream != undefined) {
-      if (stream.locked) throw new TypeError("Body is unusable: Body has already been read")
+      if (stream.locked) return err(bodyUsed())
       const parts: Uint8Array[] = []
       const reader = stream.getReader()
       for (;;) {
         const r = await reader.read()
-        if (r.done) break
-        parts.push(r.value)
+        if (r.isErr()) {
+          reader.releaseLock()
+          return err(bodyFailed(r.error))
+        }
+        const step = r.value
+        if (step.done) break
+        parts.push(step.value)
       }
       reader.releaseLock()
-      return concat(parts)
+      return ok(concat(parts))
     }
-    if (this.kind == BODY_TEXT) return new TextEncoder().encode(this.text)
+    if (this.kind == BODY_TEXT) return ok(new TextEncoder().encode(this.text))
     const bytes = this.bytes
-    if (bytes != undefined) return bytes
+    if (bytes != undefined) return ok(bytes)
     const wire = this.wire
     if (wire != undefined) return wire.all()
-    return new Uint8Array(0)
+    return ok(new Uint8Array(0))
   }
 
-  async consumeText(): Promise<string> {
+  async consumeText(): Promise<Result<string, BodyError>> {
     if (this.kind == BODY_TEXT && this.stream == undefined) {
-      if (this.used) throw new TypeError("Body is unusable: Body has already been read")
+      if (this.used) return err(bodyUsed())
       this.used = true
-      return this.text
+      return ok(this.text)
     }
-    return new TextDecoder().decode(await this.consume())
+    const bytes = await this.consume()
+    if (bytes.isErr()) return bytes
+    return ok(new TextDecoder().decode(bytes.value))
   }
 
   copy(): Body {
@@ -759,38 +835,51 @@ class Body {
   }
 }
 
+class TeeState {
+  buffers: Uint8Array[][] = [[], []]
+  done = false
+  failure: StreamError | undefined = undefined
+  reading: Promise<void> | undefined = undefined
+}
+
 function tee(source: ReadableStream<Uint8Array>):
     [ReadableStream<Uint8Array>, ReadableStream<Uint8Array>] {
   const reader = source.getReader()
-  const buffers: Uint8Array[][] = [[], []]
-  let done = false
-  let reading: Promise<void> | undefined = undefined
+  const state = new TeeState()
   const readMore = async () => {
     const r = await reader.read()
-    reading = undefined
-    if (r.done) {
-      done = true
+    state.reading = undefined
+    if (r.isErr()) {
+      state.failure = r.error
+      state.done = true
       return
     }
-    buffers[0]?.push(r.value)
-    buffers[1]?.push(r.value)
+    const step = r.value
+    if (step.done) {
+      state.done = true
+      return
+    }
+    state.buffers[0]?.push(step.value)
+    state.buffers[1]?.push(step.value)
   }
   const branch = (i: int) => new ReadableStream<Uint8Array>({
     pull: async c => {
       for (;;) {
-        const next = (buffers[i] ?? []).shift()
+        const next = (state.buffers[i] ?? []).shift()
         if (next != undefined) {
           c.enqueue(next)
           return
         }
-        if (done) {
-          c.close()
+        if (state.done) {
+          const failure = state.failure
+          if (failure != undefined) c.error(failure)
+          else c.close()
           return
         }
-        let pending = reading
+        let pending = state.reading
         if (pending == undefined) {
           pending = readMore()
-          reading = pending
+          state.reading = pending
         }
         await pending
       }
@@ -868,18 +957,22 @@ export class FormData {
   }
 }
 
-function parseFormData(type: string | undefined, bytes: Uint8Array): FormData {
+function badForm(): BodyError {
+  return { code: "bad_form", message: "Failed to parse body as FormData." }
+}
+
+function parseFormData(type: string | undefined, bytes: Uint8Array): Result<FormData, BodyError> {
   const form = new FormData()
   const contentType = (type ?? "").toLowerCase()
   if (contentType.startsWith("application/x-www-form-urlencoded")) {
     for (const [name, value] of new URLSearchParams(new TextDecoder().decode(bytes)))
       form.append(name, value)
-    return form
+    return ok(form)
   }
   if (contentType.startsWith("multipart/form-data")) {
     const m = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(type ?? "")
     const boundary = m == undefined ? "" : m[1] ?? m[2] ?? ""
-    if (boundary == "") throw new TypeError("Failed to parse body as FormData.")
+    if (boundary == "") return err(badForm())
     const text = new TextDecoder().decode(bytes)
     const parts = text.split("--" + boundary)
     for (const part of parts.slice(1)) {
@@ -895,9 +988,9 @@ function parseFormData(type: string | undefined, bytes: Uint8Array): FormData {
         .replaceAll("%0D", "\r")
       form.append(field, body)
     }
-    return form
+    return ok(form)
   }
-  throw new TypeError("Failed to parse body as FormData.")
+  return err(badForm())
 }
 
 export type RequestRedirect = "follow" | "error" | "manual"
@@ -1115,11 +1208,7 @@ export class Request {
   }
 
   async text(): Promise<Result<string, BodyError>> {
-    try {
-      return ok(await this.#body.consumeText())
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    return this.#body.consumeText()
   }
 
   async json(): Promise<Result<Json, BodyError | JsonError>> {
@@ -1129,27 +1218,19 @@ export class Request {
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
-    try {
-      return ok(await this.#body.consume())
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    return this.#body.consume()
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
-    try {
-      return ok((await this.#body.consume()).slice().buffer)
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    const bytes = await this.#body.consume()
+    if (bytes.isErr()) return bytes
+    return ok(bytes.value.slice().buffer)
   }
 
   async formData(): Promise<Result<FormData, BodyError>> {
-    try {
-      return ok(parseFormData(this.#headers.get("content-type"), await this.#body.consume()))
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    const bytes = await this.#body.consume()
+    if (bytes.isErr()) return bytes
+    return parseFormData(this.#headers.get("content-type"), bytes.value)
   }
 }
 
@@ -1285,11 +1366,7 @@ export class Response {
   }
 
   async text(): Promise<Result<string, BodyError>> {
-    try {
-      return ok(await this.#body.consumeText())
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    return this.#body.consumeText()
   }
 
   async json(): Promise<Result<Json, BodyError | JsonError>> {
@@ -1299,27 +1376,19 @@ export class Response {
   }
 
   async bytes(): Promise<Result<Uint8Array, BodyError>> {
-    try {
-      return ok(await this.#body.consume())
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    return this.#body.consume()
   }
 
   async arrayBuffer(): Promise<Result<ArrayBuffer, BodyError>> {
-    try {
-      return ok((await this.#body.consume()).slice().buffer)
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    const bytes = await this.#body.consume()
+    if (bytes.isErr()) return bytes
+    return ok(bytes.value.slice().buffer)
   }
 
   async formData(): Promise<Result<FormData, BodyError>> {
-    try {
-      return ok(parseFormData(this.#headers.get("content-type"), await this.#body.consume()))
-    } catch (e) {
-      return err(bodyErrorOf(e))
-    }
+    const bytes = await this.#body.consume()
+    if (bytes.isErr()) return bytes
+    return parseFormData(this.#headers.get("content-type"), bytes.value)
   }
 }
 
@@ -1367,8 +1436,18 @@ const BAD_PORTS = new Set<int>([
   6669, 6679, 6697, 10080,
 ])
 
-function fetchFailed(cause: Error): TypeError {
-  return new TypeError("fetch failed", { cause })
+function failed(cause: string): FetchError {
+  return { code: "fetch_failed", message: "fetch failed", cause }
+}
+
+function abortedFetch(signal: AbortSignal): FetchError {
+  const why = abortedReason(signal)
+  return { code: why.timeout ? "TIMEOUT_ERR" : "ABORT_ERR", message: why.message }
+}
+
+function fetchFailed(e: SystemError, signal: AbortSignal | undefined): FetchError {
+  if (signal != undefined && signal.aborted) return abortedFetch(signal)
+  return { code: e.errno == -1 ? "fetch_failed" : e.code, message: "fetch failed", cause: e.message }
 }
 
 function requestHeaders(url: URL, headers: Headers, body: Body): string[] {
@@ -1393,8 +1472,31 @@ function requestHeaders(url: URL, headers: Headers, body: Body): string[] {
   return out
 }
 
+async function sendBody(c: object, stream: ReadableStream<Uint8Array>,
+                        signal: AbortSignal | undefined): Promise<FetchError | undefined> {
+  const reader = stream.getReader()
+  for (;;) {
+    const r = await reader.read()
+    if (r.isErr()) {
+      reader.releaseLock()
+      if (signal != undefined && signal.aborted) return abortedFetch(signal)
+      return failed(r.error.message)
+    }
+    const step = r.value
+    if (step.done) break
+    const wrote = await __tz_http_write(c, step.value)
+    if (wrote.isErr()) {
+      reader.releaseLock()
+      return fetchFailed(wrote.error, signal)
+    }
+  }
+  reader.releaseLock()
+  return undefined
+}
+
 async function send(url: URL, method: string, headers: Headers, body: Body,
-                    signal: AbortSignal | undefined, redirected: boolean): Promise<Response> {
+                    signal: AbortSignal | undefined,
+                    redirected: boolean): Promise<Result<Response, FetchError>> {
   const hostname = url.hostname
   const host = hostname.startsWith("[") ? hostname.slice(1, hostname.length - 1) : hostname
   const https = url.protocol == "https:"
@@ -1422,19 +1524,14 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
     if (conn != undefined) {
       c = conn
     } else {
-      try {
-        c = await __tz_net_connect(host, port, signal)
-      } catch (e) {
-        signal?.throwIfAborted()
-        throw fetchFailed(e)
-      }
+      const connected = await __tz_net_connect(host, port, signal)
+      if (connected.isErr()) return err(fetchFailed(connected.error, signal))
+      c = connected.value
       if (https) {
-        try {
-          await __tz_tls_connect(c, host, signal)
-        } catch (e) {
+        const secured = await __tz_tls_connect(c, host, signal)
+        if (secured.isErr()) {
           __tz_net_close(c)
-          signal?.throwIfAborted()
-          throw fetchFailed(e)
+          return err(fetchFailed(secured.error, signal))
         }
       }
     }
@@ -1442,28 +1539,24 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
     if (flags == SEND_STREAM) {
       const stream = body.asStream()
       if (stream != undefined) {
-        try {
-          for await (const chunk of stream) await __tz_http_write(c, chunk)
-        } catch (e) {
+        const problem = await sendBody(c, stream, signal)
+        if (problem != undefined) {
           __tz_net_close(c)
-          signal?.throwIfAborted()
-          throw fetchFailed(e)
+          return err(problem)
         }
       }
       __tz_http_end(c)
     }
-    let status: int
-    try {
-      status = await __tz_http_response(c, signal)
-    } catch (e) {
+    const status = await __tz_http_response(c, signal)
+    if (status.isErr()) {
       __tz_net_close(c)
-      signal?.throwIfAborted()
+      if (signal != undefined && signal.aborted) return err(abortedFetch(signal))
       if (reused && flags != SEND_STREAM) {
         conn = undefined
         reused = false
         continue
       }
-      throw fetchFailed(e)
+      return err(fetchFailed(status.error, signal))
     }
     const responseFlat = __tz_http_headers(c)
     const responseHeaders = Headers.__fromWire(responseFlat)
@@ -1480,15 +1573,15 @@ async function send(url: URL, method: string, headers: Headers, body: Body,
     let shown = url.href
     const hash = shown.indexOf("#")
     if (hash >= 0) shown = shown.slice(0, hash)
-    return Response.__fromWire(status, __tz_http_status_text(c), responseFlat, responseBody,
-                               shown, redirected)
+    return ok(Response.__fromWire(status.value, __tz_http_status_text(c), responseFlat,
+                                  responseBody, shown, redirected))
   }
 }
 
-function dataResponse(url: URL): Response {
+function dataResponse(url: URL): Result<Response, FetchError> {
   const text = url.href.slice(5)
   const comma = text.indexOf(",")
-  if (comma < 0) throw fetchFailed(new TypeError("invalid data: URL"))
+  if (comma < 0) return err(failed("invalid data: URL"))
   let type = text.slice(0, comma)
   const data = text.slice(comma + 1)
   const base64 = /;base64$/i.test(type)
@@ -1499,79 +1592,51 @@ function dataResponse(url: URL): Response {
     headers: { "content-type": type == "" ? "text/plain;charset=US-ASCII" : type },
   })
   r.__setUrl(url.href, false)
-  return r
+  return ok(r)
 }
 
 export async function fetch(input: string | URL | Request,
                             init?: RequestInit): Promise<Result<Response, FetchError>> {
-  try {
-    const request = new Request(input, init)
-    const problem = request.__problem()
-    if (problem != undefined) return err(problem)
-    return ok(await fetchOrThrow(request))
-  } catch (e) {
-    return err(fetchErrorOf(e))
-  }
+  const request = new Request(input, init)
+  const problem = request.__problem()
+  if (problem != undefined) return err(problem)
+  return fetchRequest(request)
 }
 
-function fetchErrorOf(e: Error): FetchError {
-  if (e instanceof DOMException)
-    return { code: e.name == "TimeoutError" ? "TIMEOUT_ERR" : "ABORT_ERR", message: e.message }
-  const cause = e.cause
-  if (e.message != "fetch failed")
-    return cause == undefined ? { code: "bad_request", message: e.message }
-                              : { code: "bad_request", message: e.message, cause: cause.message }
-  if (cause instanceof SystemError)
-    return { code: cause.code, message: e.message, cause: cause.message }
-  if (cause != undefined) return { code: "fetch_failed", message: e.message, cause: cause.message }
-  return { code: "fetch_failed", message: e.message }
-}
-
-function bodyErrorOf(e: Error): BodyError {
-  if (e instanceof DOMException)
-    return { code: e.name == "TimeoutError" ? "TIMEOUT_ERR" : "ABORT_ERR", message: e.message }
-  const message = e.message
-  const cause = e.cause
-  if (message.startsWith("Body is unusable")) return { code: "body_used", message }
-  if (message == "terminated")
-    return cause == undefined ? { code: "terminated", message } : { code: "terminated", message, cause: cause.message }
-  if (message.startsWith("Failed to parse body as FormData")) return { code: "bad_form", message }
-  return { code: "body_failed", message }
-}
-
-async function fetchOrThrow(request: Request): Promise<Response> {
+async function fetchRequest(request: Request): Promise<Result<Response, FetchError>> {
   const signal = request.__signalIfAny()
-  signal?.throwIfAborted()
-  let url = new URL(request.url)
+  if (signal != undefined && signal.aborted) return err(abortedFetch(signal))
+  const first = URL.parse(request.url)
+  if (first.isErr()) return err(failed(first.error.message))
+  let url = first.value
   let method = request.method
   const headers = new Headers(request.headers)
   let body = request.__bodyOf()
   if (body.kind != BODY_NONE) {
-    if (body.usedOrDisturbed) throw new TypeError("Body is unusable: Body has already been read")
+    if (body.usedOrDisturbed)
+      return err({ code: "bad_request", message: "Body is unusable: Body has already been read" })
     body.used = true
   }
   let redirects = 0
   for (;;) {
     if (url.protocol == "data:") return dataResponse(url)
     if (url.protocol != "http:" && url.protocol != "https:")
-      throw fetchFailed(new Error("not implemented... yet..."))
-    if (url.port != "" && BAD_PORTS.has(parseInt(url.port) | 0))
-      throw fetchFailed(new Error("bad port"))
-    const response = await send(url, method, headers, body, signal, redirects > 0)
+      return err(failed("not implemented... yet..."))
+    if (url.port != "" && BAD_PORTS.has(parseInt(url.port) | 0)) return err(failed("bad port"))
+    const sent = await send(url, method, headers, body, signal, redirects > 0)
+    if (sent.isErr()) return sent
+    const response = sent.value
     const status = response.status
     const location = response.headers.get("location")
     const redirect = status == 301 || status == 302 || status == 303 || status == 307 ||
                      status == 308
-    if (!redirect || location == undefined || request.redirect == "manual") return response
-    if (request.redirect == "error") throw fetchFailed(new Error("unexpected redirect"))
-    if (++redirects > 20) throw fetchFailed(new Error("redirect count exceeded"))
-    let next: URL
-    try {
-      next = new URL(location, url)
-    } catch (e) {
-      throw fetchFailed(e)
-    }
-    await response.__bodyOf().consume()
+    if (!redirect || location == undefined || request.redirect == "manual") return ok(response)
+    if (request.redirect == "error") return err(failed("unexpected redirect"))
+    if (++redirects > 20) return err(failed("redirect count exceeded"))
+    const next = URL.parse(location, url)
+    if (next.isErr()) return err(failed(next.error.message))
+    const drained = await response.__bodyOf().consume()
+    if (drained.isErr()) return err(failed(drained.error.message))
     if (((status == 301 || status == 302) && method == "POST") ||
         (status == 303 && method != "GET" && method != "HEAD")) {
       method = "GET"
@@ -1580,14 +1645,14 @@ async function fetchOrThrow(request: Request): Promise<Response> {
                           "content-type", "content-length"])
         headers.delete(name)
     } else if (body.kind == BODY_STREAM || body.kind == BODY_WIRE) {
-      throw fetchFailed(new Error("cannot follow a redirect with a body that streams"))
+      return err(failed("cannot follow a redirect with a body that streams"))
     }
-    if (next.origin != url.origin) {
+    if (next.value.origin != url.origin) {
       headers.delete("authorization")
       headers.delete("cookie")
       headers.delete("proxy-authorization")
     }
-    url = next
+    url = next.value
   }
 }
 

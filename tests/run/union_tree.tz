@@ -20,4 +20,4 @@ function count(n: Node): int {
   return total
 }
 const root: Node = { kind: "branch", children: [{ kind: "leaf", value: "a" }, { kind: "branch", children: [{ kind: "leaf", value: "b" }] }] }
-console.log(count(root), JSON.stringify(root))
+console.log(count(root), JSON.stringify(root).unwrapOr(""))

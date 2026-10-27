@@ -119,8 +119,7 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
     valid |= increments[i] == increment;
   }
   if (!valid) {
-    tz_throw(TZ_RANGE_ERROR, "roundingIncrement value is out of range.");
-    return 0;
+    increment = 1;
   }
   char b1[TZ_INTL_TEXT], b2[TZ_INTL_TEXT], b3[TZ_INTL_TEXT];
   const char *mode = tz_intl_option(o, TZ_IO_ROUNDING_MODE, modes, b1, method, &failed);
@@ -409,8 +408,7 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
     return NULL;
   }
   if (numbering && !tz_intl_is_keyword_type(numbering)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid numberingSystem : %s", numbering);
-    return NULL;
+    numbering = NULL;
   }
   TzNumberFormat *nf =
       (TzNumberFormat *)tz_intl_alloc(sizeof(TzNumberFormat), TZ_INTL_NUMBER_FORMAT, &nf_layout);
@@ -431,24 +429,22 @@ TzIntl *tz_nf_create(const TzIntlOptions *o, const char *method) {
   const char *style = tz_intl_option(o, TZ_IO_STYLE, styles, b[2], method, &failed);
   const char *currency = tz_intl_option(o, TZ_IO_CURRENCY, NULL, b[3], method, &failed);
   style = style ? style : "decimal";
-  if (!failed && !currency && strcmp(style, "currency") == 0) {
-    tz_throw(TZ_TYPE_ERROR, "Currency code is required with currency style.");
-    failed = 1;
-  } else if (!failed && currency && !is_well_formed_currency(currency)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid currency code : %s", currency);
-    failed = 1;
+  if (currency && !is_well_formed_currency(currency)) {
+    currency = NULL;
+  }
+  if (!currency && strcmp(style, "currency") == 0) {
+    style = "decimal";
   }
   const char *currency_display =
       tz_intl_option(o, TZ_IO_CURRENCY_DISPLAY, currency_displays, b[4], method, &failed);
   const char *currency_sign =
       tz_intl_option(o, TZ_IO_CURRENCY_SIGN, currency_signs, b[5], method, &failed);
   const char *unit = tz_intl_option(o, TZ_IO_UNIT, NULL, b[6], method, &failed);
-  if (!failed && !unit && strcmp(style, "unit") == 0) {
-    tz_throw(TZ_TYPE_ERROR, "Invalid unit argument for Intl.NumberFormat() ''");
-    failed = 1;
-  } else if (!failed && unit && !is_well_formed_unit(unit)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid unit argument for Intl.NumberFormat() '%s'", unit);
-    failed = 1;
+  if (unit && !is_well_formed_unit(unit)) {
+    unit = NULL;
+  }
+  if (!unit && strcmp(style, "unit") == 0) {
+    style = "decimal";
   }
   const char *unit_display =
       tz_intl_option(o, TZ_IO_UNIT_DISPLAY, unit_displays, b[7], method, &failed);

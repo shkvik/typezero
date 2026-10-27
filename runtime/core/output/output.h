@@ -10,6 +10,7 @@ size_t tz_format_f64(double value, char *out);
 
 TZ_COLD TZ_NORETURN void tz_panic(const char *message, int64_t len);
 TZ_COLD TZ_NORETURN void tz_panicf(const char *format, ...);
+TZ_COLD TZ_NORETURN void tz_panic_str(void *obj, uint64_t meta);
 
 void tz_thread_stack_init(void);
 

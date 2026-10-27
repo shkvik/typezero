@@ -162,8 +162,7 @@ int tz_intl_resolve_locale(const TzIcu *icu, int has_locale, TzStr locale, char 
   if (has_locale) {
     char id[160];
     if (!parse_tag(icu, locale, id, sizeof id)) {
-      tz_throw(TZ_RANGE_ERROR, "Incorrect locale information provided");
-      return 0;
+      tz_panicf("internal error: a language tag that is not one");
     }
     canonical_id(icu, id, requested, 160);
   } else {
@@ -264,10 +263,8 @@ const char *tz_intl_option(const TzIntlOptions *o, int index, const char *const 
       found = strcmp(allowed[i], out) == 0;
     }
     if (!found) {
-      tz_throw(TZ_RANGE_ERROR, "Value %s out of range for %s options property %s", ok ? out : "?",
-               method, option_names[index]);
-      *failed = 1;
-      return NULL;
+      tz_panicf("internal error: the value %s of the option %s of %s", ok ? out : "?",
+                option_names[index], method);
     }
   }
 
@@ -280,11 +277,10 @@ int32_t tz_intl_number_option(const TzIntlOptions *o, int index, int32_t min, in
     return fallback;
   }
   double v = o->number[index];
-  if (isnan(v) || v < min || v > max) {
-    tz_throw(TZ_RANGE_ERROR, "%s value is out of range.", option_names[index]);
-    *failed = 1;
+  if (isnan(v)) {
     return fallback;
   }
+  v = v < min ? min : v > max ? max : v;
 
   return (int32_t)floor(v);
 }
@@ -696,15 +692,13 @@ static int canonical_list(const TzIcu *icu, const TzArray *locales, TzArray *out
     TzStr s = ((const TzStr *)locales->data)[i];
     char id[160], canonical[160], tag[160];
     if (!parse_tag(icu, s, id, sizeof id)) {
-      tz_throw(TZ_RANGE_ERROR, "Incorrect locale information provided");
-      return 0;
+      tz_panicf("internal error: a language tag that is not one");
     }
     canonical_id(icu, id, canonical, sizeof canonical);
     TzUErrorCode status = 0;
     int32_t n = icu->uloc_toLanguageTag(canonical, tag, (int32_t)sizeof tag - 1, 1, &status);
     if (TZ_U_FAILURE(status) || n <= 0) {
-      tz_throw(TZ_RANGE_ERROR, "Incorrect locale information provided");
-      return 0;
+      tz_panicf("internal error: a language tag that is not one");
     }
     tag[n] = 0;
     int seen = 0;

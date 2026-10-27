@@ -5,15 +5,15 @@ import {
 import { URL } from "tz:url"
 import { AbortSignal, Event } from "tz:web"
 
-function __tz_net_listen(host: string, port: int, maxBody: double): object
+function __tz_net_listen(host: string, port: int, maxBody: double): Result<object, SystemError>
 function __tz_tls_listen(host: string, port: int, maxBody: double, cert: string,
-                         key: string): object
+                         key: string): Result<object, SystemError>
 function __tz_net_listener_port(listener: object): int
 function __tz_net_accept(listener: object): Promise<object | undefined>
 function __tz_net_close_listener(listener: object): void
 function __tz_net_close(conn: object): void
 function __tz_net_sweep(listener: object, idle: double): int
-function __tz_http_next(conn: object): Promise<int>
+function __tz_http_next(conn: object): Promise<Result<int, SystemError>>
 function __tz_http_method(conn: object): string
 function __tz_http_target(conn: object): string
 function __tz_http_headers(conn: object): string[]
@@ -22,7 +22,7 @@ function __tz_http_keep_alive(conn: object): boolean
 function __tz_http_end_after(conn: object): void
 function __tz_http_respond(conn: object, status: int, statusText: string, headers: string[],
                            text: string, bytes: Uint8Array | undefined, flags: int): void
-function __tz_http_write(conn: object, chunk: Uint8Array): Promise<void>
+function __tz_http_write(conn: object, chunk: Uint8Array): Promise<Result<void, SystemError>>
 function __tz_http_end(conn: object): void
 
 export interface ServeAddress {
@@ -130,32 +130,22 @@ export class Server {
 
   async #serve(conn: object) {
     this.#open++
-    try {
-      for (;;) {
-        const got = await __tz_ahead(__tz_http_next(conn))
-        if (got == 0) break
-        const request = __serverRequest(conn, __tz_http_method(conn), __tz_http_target(conn),
-                                        __tz_http_headers(conn), this.#base,
-                                        __tz_http_has_body(conn))
-        let response: Response
-        try {
-          const answer = this.#handler(request)
-          response = answer instanceof Response ? answer : await __tz_ahead(answer)
-        } catch (e) {
-          console.error(e)
-          response = new Response("Internal Server Error", { status: 500 })
-        }
-        const head = request.method == "HEAD"
-        if (!respond(conn, response, head)) await respondStreaming(conn, response, head)
-        if (!__tz_http_keep_alive(conn)) break
-      }
-    } catch (e) {
-    } finally {
-      __tz_order()
-      __tz_net_close(conn)
-      this.#open--
-      if (this.#stopping && this.#open == 0) this.#resolveFinished()
+    for (;;) {
+      const got = await __tz_ahead(__tz_http_next(conn))
+      if (got.isErr() || got.value == 0) break
+      const request = __serverRequest(conn, __tz_http_method(conn), __tz_http_target(conn),
+                                      __tz_http_headers(conn), this.#base,
+                                      __tz_http_has_body(conn))
+      const answer = this.#handler(request)
+      const response = answer instanceof Response ? answer : await __tz_ahead(answer)
+      const head = request.method == "HEAD"
+      if (!respond(conn, response, head)) await respondStreaming(conn, response, head)
+      if (!__tz_http_keep_alive(conn)) break
     }
+    __tz_order()
+    __tz_net_close(conn)
+    this.#open--
+    if (this.#stopping && this.#open == 0) this.#resolveFinished()
   }
 }
 
@@ -177,20 +167,17 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
   if (stream != undefined && !head) {
     const reader = stream.getReader()
     for (;;) {
-      let chunk: Uint8Array
-      try {
-        const r = await reader.read()
-        if (r.done) break
-        chunk = r.value
-      } catch (e) {
-        console.error(e)
+      const r = await reader.read()
+      if (r.isErr()) {
+        console.error(r.error)
         __tz_http_end_after(conn)
         __tz_net_close(conn)
         return
       }
-      try {
-        await __tz_http_write(conn, chunk)
-      } catch (e) {
+      const step = r.value
+      if (step.done) break
+      const wrote = await __tz_http_write(conn, step.value)
+      if (wrote.isErr()) {
         await reader.cancel()
         __tz_http_end_after(conn)
         return
@@ -200,14 +187,15 @@ async function respondStreaming(conn: object, response: Response, head: boolean)
   __tz_http_end(conn)
 }
 
-export function serve(options: ServeOptions, handler: Handler): Server {
+export function serve(options: ServeOptions, handler: Handler): Result<Server, SystemError> {
   const hostname = options.hostname ?? "0.0.0.0"
   const port = options.port ?? 8000
   const maxBody = options.maxBodySize ?? 128 * 1024 * 1024
   const tls = options.tls
   const listener = tls == undefined ? __tz_net_listen(hostname, port, maxBody)
                                     : __tz_tls_listen(hostname, port, maxBody, tls.cert, tls.key)
-  const server = new Server(listener, hostname, handler, tls == undefined ? "http" : "https")
+  if (listener.isErr()) return listener
+  const server = new Server(listener.value, hostname, handler, tls == undefined ? "http" : "https")
   server.__start()
   const signal = options.signal
   if (signal != undefined) {
@@ -217,5 +205,5 @@ export function serve(options: ServeOptions, handler: Handler): Server {
     }, { once: true })
   }
   options.onListen?.({ hostname, port: server.port })
-  return server
+  return ok(server)
 }

@@ -14,6 +14,7 @@
 #include "compiler/check/stmt/jump_checker/jump_checker.h"
 #include "compiler/check/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
@@ -226,6 +227,25 @@ void LoopChecker::checkForOf(ForOfStmt *stmt) {
   checker_.pushScope();
   stmt->binding.sym =
       checker_.scopes().declareVar(stmt->binding.name, stmt->binding.loc, element, stmt->isConst);
+  if (auto *lit = dyn_cast<ArrayLitExpr>(stmt->iterable);
+      lit && element->isInt() && stmt->binding.sym && !stmt->binding.destructured &&
+      !lit->elements.empty()) {
+    std::optional<int64_t> lo, hi;
+    for (const ArrayLitExpr::Element &e : lit->elements) {
+      std::optional<int64_t> c =
+          e.spread || e.hole ? std::nullopt : checker_.constantFolder().intConstant(e.expr);
+      if (!c) {
+        lo.reset();
+        break;
+      }
+      lo = lo ? std::min(*lo, *c) : *c;
+      hi = hi ? std::max(*hi, *c) : *c;
+    }
+    if (lo) {
+      checker_.flow_.facts.add(Term::zero(), Term::of(stmt->binding.sym), 1 - *lo);
+      checker_.flow_.facts.add(Term::of(stmt->binding.sym), Term::zero(), *hi + 1);
+    }
+  }
   checkLoopBody(stmt->body);
   checker_.popScope();
   checker_.flow_ = head;

@@ -11,15 +11,15 @@ Thu Oct 29 2026 09:00:00 GMT+0000 | Mon Oct 26 2026 09:00:00 GMT+0000 | Sun Oct 
 release 2026-10-29T09:00:00.000Z
 9 after
 ok 2026-10-27T00:00:00.000Z
-err RangeError: late by 12 h, due 2026-10-25T21:00:00.000Z
-err TypeError: not a date: 'someday'
+err late: late by 12 h, due 2026-10-25T21:00:00.000Z
+err not_a_date: not a date: 'someday'
 first sunday 2026-11-01
-Mon,Tue,Wed,Thu,Fri days done, days done
+Mon,Tue,Wed,Thu,Fri days done
 {"title":"standup","at":"2026-10-26T09:00:00.000Z","minutes":15} {"title":"release","at":"2026-10-29T09:00:00.000Z"}
 {"when":"2026-10-26T09:00:00.000Z","never":null,"list":["2026-10-29T09:00:00.000Z"]}
 x true
-true Invalid time value null Invalid Date
-RangeError late by 1.5 h 5400000
+null Invalid Date
+late late by 1.5 h 5400000
 6 PM
-RangeError: Invalid time zone specified: Nowhere/Land
+9 AM
 Meeting { title: 'printed', at: 2026-10-26T09:00:00.000Z, minutes: 5 }

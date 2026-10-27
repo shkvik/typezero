@@ -93,9 +93,9 @@ values.push(null) // the same array
 console.log(array)
 
 // JSON.stringify of a Json.
-console.log(JSON.stringify(user))
-console.log(JSON.stringify(patch, null, 2))
-console.log(JSON.stringify(parse('[-0, 1e400, 0.1, 1e21, "\\u00e9\\ud800", "tab\\tq\\""]')))
+console.log(JSON.stringify(user).unwrapOr(""))
+console.log(JSON.stringify(patch, null, 2).unwrapOr(""))
+console.log(JSON.stringify(parse('[-0, 1e400, 0.1, 1e21, "\\u00e9\\ud800", "tab\\tq\\""]')).unwrapOr(""))
 
 // Destructuring reads keys and elements.
 const { name: who, address: { city }, nothing } = user

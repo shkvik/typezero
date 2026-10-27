@@ -165,7 +165,7 @@ static void *broken_error(NetConn *c) {
     return net_system_error(c->http.make, c->error, "read", NULL, 0);
   }
 
-  return net_error(TZ_ERROR, "other side closed", NULL);
+  return net_failure("UND_ERR_SOCKET", "other side closed");
 }
 
 static void input(NetConn *c);
@@ -176,7 +176,7 @@ static void abort_wait(TzAbortListener *l) {
   conn_lock(c);
   TzSignal *signal = h->signal;
   h->signal = NULL;
-  void *reason = tz_signal_reason(signal);
+  void *reason = net_aborted();
   tz_instance_release((TzInstance *)signal);
   h->wait_kind = WAIT_NONE;
   if (h->waiting) {
@@ -199,7 +199,7 @@ static int begin_wait(NetConn *c, TzPromise *p, int kind, void *signal, TzMaker 
   if (signal) {
     if (tz_signal_aborted(signal)) {
       h->wait_kind = WAIT_NONE;
-      net_reject(&h->waiting, tz_signal_reason(signal));
+      net_reject(&h->waiting, net_aborted());
       h->keep_alive = 0;
       net_abort(c);
       return 0;
@@ -944,7 +944,7 @@ static int read_response(NetConn *c) {
     ptrdiff_t end = head_end(c);
     if (end < 0) {
       if (c->in_end - c->in_start > HTTP_MAX_HEAD) {
-        settle_error(c, net_error(TZ_ERROR, "the head of the response is too large", NULL));
+        settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the head of the response is too large"));
         net_abort(c);
         return -1;
       }
@@ -967,14 +967,14 @@ static int read_response(NetConn *c) {
       }
     }
     if (version <= 0 || status < 100 || status > 999 || (line > at + 12 && s[at + 12] != ' ')) {
-      settle_error(c, net_error(TZ_ERROR, "the response is not HTTP/1.1", NULL));
+      settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the response is not HTTP/1.1"));
       net_abort(c);
       return -1;
     }
     TzArray *headers = NULL;
     Framing f;
     if (!parse_fields(s, line + 2, (size_t)end, &headers, &f, 0)) {
-      settle_error(c, net_error(TZ_ERROR, "the response has a malformed header", NULL));
+      settle_error(c, net_failure("ERR_HTTP_RESPONSE", "the response has a malformed header"));
       net_abort(c);
       return -1;
     }
@@ -989,10 +989,8 @@ static int read_response(NetConn *c) {
       if (tz_rc_dec(&headers->rc)) {
         tz_arr_free(headers);
       }
-      settle_error(c, net_error(TZ_ERROR,
-                                "the response has both Content-Length and "
-                                "Transfer-Encoding",
-                                NULL));
+      settle_error(c, net_failure("ERR_HTTP_RESPONSE",
+                                  "the response has both Content-Length and Transfer-Encoding"));
       net_abort(c);
       return -1;
     }
@@ -1163,15 +1161,15 @@ static int take_body(NetConn *c, const uint8_t **data, size_t *length) {
 
 static void *body_error(NetConn *c) {
   if (c->server) {
-    return net_error(TZ_TYPE_ERROR, "the body of the request is malformed or was cut off", NULL);
+    return net_failure("ERR_HTTP_BODY", "the body of the request is malformed or was cut off");
   }
-  void *cause = broken_error(c);
 
-  return net_error(TZ_TYPE_ERROR, "terminated", cause);
+  return broken_error(c);
 }
 
 static void *too_large(void) {
-  return net_error(TZ_RANGE_ERROR, "the body of the request is larger than maxBodySize", NULL);
+  return net_failure("ERR_HTTP_BODY_TOO_LARGE",
+                     "the body of the request is larger than maxBodySize");
 }
 
 static void send_continue(NetConn *c) {
@@ -1760,8 +1758,8 @@ static void write_chunk(TzPromise *p, NetConn *c, void *bytes, TzMaker make) {
   const TzBytes *data = (const TzBytes *)bytes;
   size_t length = (size_t)tz_bytes_byte_length(data);
   if (c->closed || c->error || c->http.refused) {
-    void *error = net_error(TZ_ERROR, "the connection is closed", NULL);
-    tz_promise_reject(p, error);
+    tz_net_make = make;
+    tz_promise_fail(p, net_failure("ERR_SOCKET_CLOSED", "the connection is closed"));
     return;
   }
   if (length) {

@@ -117,7 +117,9 @@ llvm::Value *TextCodecCalls::emit() {
         lowering_.objectLayouts().fieldAddress(object, type, "written"));
     return object;
   }
-  case Builtin::TextDecoderNew: {
+  case Builtin::TextDecoderNew:
+  case Builtin::TextDecoderParse: {
+    bool parsing = call->builtin == Builtin::TextDecoderParse;
     bool resolved = constantOf(call->args[0]) != 0;
     Lowering::Operand label{nullptr, false, nullptr};
     if (!resolved) {
@@ -162,9 +164,11 @@ llvm::Value *TextCodecCalls::emit() {
       } else if (which == kTextCjk) {
         table = cjkEncodingOf(*lowering_.module_, name);
       }
-      return lowering_.builder_.CreateCall(
+      llvm::Value *made = lowering_.builder_.CreateCall(
           fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
           {lowering_.builder_.getInt32(uint32_t(which)), table, fatal, ignore}, "decoder");
+      return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc())
+                     : made;
     }
     std::vector<llvm::Constant *> tables, cjk;
     for (const EncodingTable &t : kEncodingTables) {
@@ -182,16 +186,18 @@ llvm::Value *TextCodecCalls::emit() {
     };
     llvm::Value *all = list(tables, "tz.encodings"), *allCjk = list(cjk, "tz.encodings.cjk");
     lowering_.throwLowerer().takeOperand(label);
+    llvm::Value *maker = parsing ? static_cast<llvm::Value *>(lowering_.resultLowerer().failureMaker(
+                                       call->type->errType()))
+                                 : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     llvm::Value *made = lowering_.builder_.CreateCall(
-        fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32}),
+        fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32, ptr}),
         {lowering_.stringLowerer().stringObj(label.value),
          lowering_.stringLowerer().stringMeta(label.value), all,
          lowering_.builder_.getInt32(uint32_t(tables.size())), allCjk,
-         lowering_.builder_.getInt32(uint32_t(cjk.size())), fatal, ignore},
+         lowering_.builder_.getInt32(uint32_t(cjk.size())), fatal, ignore, maker},
         "decoder");
     lowering_.refCounts().dropOperand(label);
-    lowering_.throwLowerer().emitThrowCheck();
-    return made;
+    return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc()) : made;
   }
   case Builtin::TextDecode: {
     Lowering::Operand self = receiver(0);

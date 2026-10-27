@@ -4,6 +4,8 @@
 // throws a TypeError, even without `fatal`, at some broken sequences of gbk
 // cut by `{ stream: true }`. Each line says what node gives.
 
+type Label = "gbk" | "gb18030" | "big5" | "euc-jp" | "iso-2022-jp" | "shift_jis" | "euc-kr" | "utf-8" |
+  "utf-16le" | "utf-16be" | "windows-1251"
 const digits = "0123456789abcdef"
 function hex(s: string): string {
   const out: string[] = []
@@ -18,7 +20,7 @@ function hex(s: string): string {
   }
   return out.join(" ")
 }
-function show(name: string, bytes: int[], node: string) {
+function show(name: Label, bytes: int[], node: string) {
   const text = new TextDecoder(name).decode(Uint8Array.from(bytes, x => x & 0xff))
   console.log(name, hex(text), `(node: ${node})`)
 }

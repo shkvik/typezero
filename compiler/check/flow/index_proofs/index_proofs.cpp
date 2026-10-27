@@ -357,6 +357,32 @@ bool IndexProofs::requireBetween(const Expr *expr, int64_t lo, std::optional<int
   return false;
 }
 
+bool IndexProofs::provesLess(const Expr *a, const Expr *b) const {
+  std::optional<Linear> la = linear(a), lb = linear(b);
+  if (!la || !lb) {
+    return false;
+  }
+  if (la->term.isZero() && lb->term.isZero()) {
+    return la->offset < lb->offset;
+  }
+
+  return checker_.flow_.facts.proves(la->term, lb->term, lb->offset - la->offset);
+}
+
+bool IndexProofs::requireLess(const Expr *a, const Expr *b, llvm::StringRef what) {
+  if (!a->type || !b->type || a->type->isError() || b->type->isError() || provesLess(a, b) ||
+      exempt(b->loc())) {
+    return true;
+  }
+  std::string left = valueText(a), right = valueText(b);
+  checker_.diags_.error(b->loc(), "cannot prove that " + what.str() +
+                                      ", and JavaScript would throw a RangeError; check it "
+                                      "first, e.g. 'if (" +
+                                      left + " < " + right + ")'");
+
+  return false;
+}
+
 bool IndexProofs::provesLinearUpTo(Linear value, const Expr *object, int64_t less) const {
   std::optional<Linear> length = lengthOf(object);
   const Expr *owner = object;
@@ -514,6 +540,15 @@ bool IndexProofs::provesSumUpTo(std::optional<Linear> a, std::optional<Linear> b
 }
 
 void IndexProofs::addIndexCallbackFacts(const FunctionDecl *fn) {
+  auto element = checker_.elementCallbacks_.find(fn);
+  if (element != checker_.elementCallbacks_.end()) {
+    auto [param, lo, hi] = element->second;
+    const VarSymbol *value = param < fn->params.size() ? fn->params[param].sym : nullptr;
+    if (value && value->type->isInt()) {
+      checker_.flow_.facts.add(Term::zero(), Term::of(value), 1 - lo);
+      checker_.flow_.facts.add(Term::of(value), Term::zero(), hi + 1);
+    }
+  }
   auto it = checker_.indexCallbacks_.find(fn);
   if (it == checker_.indexCallbacks_.end() || it->second >= fn->params.size()) {
     return;

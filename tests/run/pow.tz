@@ -1,5 +1,5 @@
-// expect-exit: 1
-// expect-stderr: RangeError: Division by zero
+// expect-exit: 2
+// expect-stderr: panic: Division by zero
 // `**` of integers stays an integer, like `*`: it wraps around on overflow,
 // and a negative power loses its fraction, like `/` (JavaScript would give
 // 2147483648 and 0.5).

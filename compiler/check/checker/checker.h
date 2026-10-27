@@ -652,9 +652,9 @@ private:
   llvm::SmallPtrSet<const FuncSymbol *, 4> suspended_;
   llvm::DenseMap<const FunctionDecl *, ByteCallback> byteCallbacks_;
   llvm::DenseMap<const FunctionDecl *, unsigned> indexCallbacks_;
+  llvm::DenseMap<const FunctionDecl *, std::tuple<unsigned, int64_t, int64_t>> elementCallbacks_;
   ClassDecl *errorClass_ = nullptr;
   std::vector<ClassDecl *> errorKinds_;
-  ClassDecl *systemErrorClass_ = nullptr;
   ClassDecl *statsClass_ = nullptr;
   ClassDecl *direntClass_ = nullptr;
   MemberExpr *pendingSetter_ = nullptr;

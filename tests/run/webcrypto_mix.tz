@@ -37,11 +37,16 @@ function names(all: Animal[]) {
 }
 const dogs: Dog[] = [new Dog("Rex"), new Dog("Ace")]
 
-const server = serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, async (req) => {
   const body = new URL(req.url).pathname == "/dogs" ? names(dogs) : "nothing"
   const sig = must(await crypto.subtle.sign("HMAC", await hmac("server key"), enc.encode(body)))
   return new Response(body, { headers: { "x-signature": hex(sig) } })
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 
 class Checks extends EventEmitter<{ checked: [path: string, ok: boolean] }> {}
 const checks = new Checks()

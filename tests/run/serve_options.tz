@@ -7,7 +7,7 @@ import { serve } from "tz:http"
 const controller = new AbortController()
 const started = Promise.withResolvers<void>()
 let listened = ""
-const server = serve({
+const listening = serve({
   port: 0,
   hostname: "127.0.0.1",
   signal: controller.signal,
@@ -21,6 +21,11 @@ const server = serve({
   }
   return new Response("done")
 })
+if (listening.isErr()) {
+  console.log("cannot listen:", listening.error.message)
+  process.exit(1)
+}
+const server = listening.value
 console.log(listened, server.hostname, server.port > 0)
 console.log(server.url.href.replaceAll(String(server.port), "PORT"))
 const slow = fetch(`http://127.0.0.1:${server.port}/slow`)

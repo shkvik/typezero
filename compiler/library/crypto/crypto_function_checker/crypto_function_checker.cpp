@@ -2,6 +2,10 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/crypto/crypto_args/crypto_args.h"
@@ -139,13 +143,25 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     return checker_.cryptoArgs().cryptoCall(call, CryptoFn::HashOnceText, {md, data, encoding},
                                             Type::string());
   }
+  auto proven = [&](Expr *arg, int64_t lo, std::optional<int64_t> hi,
+                    llvm::StringRef what) -> Expr * {
+    Expr *e = checker_.exprChecker().checkExpr(arg, Type::intTy());
+    if (e->type->isError() || !(checker_.indexProofs().requireBetween(e, lo, hi, what) ||
+                                checker_.indexProofs().exempt(e->loc()))) {
+      return nullptr;
+    }
+    return e->type->isFloat() ? e : checker_.typeRelations().convert(e, Type::doubleTy());
+  };
   if (fn == "randomBytes") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, 2) ||
         checker_.cryptoArgs().rejectCryptoCallback(call, 1, fn, "'const bytes = randomBytes(n)'")) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomBytes,
-                                            {checker_.cryptoArgs().cryptoNumber(args[0])}, buffer);
+    Expr *size = proven(args[0], 0, 2147483647, "the size");
+    if (!size) {
+      return call;
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomBytes, {size}, buffer);
   }
   if (fn == "randomUUID") {
     if (!checker_.argumentChecker().checkArity(call, loc, 0, 1) ||
@@ -173,14 +189,23 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     Expr *min = args.size() == 2 ? checker_.exprChecker().checkExpr(args[0], Type::intTy())
                                  : checker_.cryptoArgs().cryptoInt(loc, 0);
     Expr *max = checker_.exprChecker().checkExpr(args.back(), Type::intTy());
-    if (min->type->isInt() && max->type->isInt()) {
-      return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max},
-                                              Type::intTy());
+    if (min->type->isError() || max->type->isError()) {
+      return call;
     }
-    return checker_.cryptoArgs().cryptoCall(
-        call, CryptoFn::RandomInt,
-        {checker_.cryptoArgs().cryptoNumber(min), checker_.cryptoArgs().cryptoNumber(max)},
-        Type::doubleTy());
+    for (Expr *bound : {min, max}) {
+      if (!bound->type->isInt()) {
+        checker_.diags_.error(bound->loc(), "'randomInt' takes whole numbers ('int'), found '" +
+                                                bound->type->name() + "'");
+        return call;
+      }
+    }
+    if (!checker_.indexProofs().requireLess(
+            min, max, args.size() == 2 ? "the maximum is greater than the minimum"
+                                       : "the maximum is greater than 0")) {
+      return call;
+    }
+    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::RandomInt32, {min, max},
+                                            Type::intTy());
   }
   if (fn == "randomFillSync" || fn == "getRandomValues") {
     if (!checker_.argumentChecker().checkArity(call, loc, 1, fn == "randomFillSync" ? 3 : 1)) {
@@ -211,10 +236,38 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
       return call;
     }
     int has = (present(1) ? 1 : 0) | (present(2) ? 2 : 0);
-    Expr *offset = present(1) ? checker_.cryptoArgs().cryptoNumber(args[1])
-                              : checker_.cryptoArgs().cryptoDouble(loc, 0);
-    Expr *size = present(2) ? checker_.cryptoArgs().cryptoNumber(args[2])
-                            : checker_.cryptoArgs().cryptoDouble(loc, 0);
+    Expr *offset = checker_.cryptoArgs().cryptoDouble(loc, 0);
+    Expr *size = checker_.cryptoArgs().cryptoDouble(loc, 0);
+    if (present(1)) {
+      Expr *at = checker_.exprChecker().checkExpr(args[1], Type::intTy());
+      bool library = checker_.indexProofs().exempt(at->loc());
+      if (at->type->isError() ||
+          !(library || (checker_.indexProofs().requireBetween(at, 0, {}, "the offset") &&
+                        checker_.indexProofs().requireUpTo(at, target, 0, "the offset")))) {
+        return call;
+      }
+      Expr *count = nullptr;
+      if (present(2)) {
+        count = checker_.exprChecker().checkExpr(args[2], Type::intTy());
+        if (count->type->isError() ||
+            !(library || checker_.indexProofs().requireBetween(count, 0, {}, "the size"))) {
+          return call;
+        }
+        if (!checker_.indexProofs().provesSumUpTo(checker_.indexProofs().linear(at),
+                                                   checker_.indexProofs().linear(count), target) &&
+            !checker_.indexProofs().exempt(count->loc())) {
+          checker_.diags_.error(count->loc(),
+                                "cannot prove that the offset and the size fit in the bytes, "
+                                "and JavaScript would throw a RangeError; check it first, e.g. "
+                                "'if (" +
+                                    valueText(count) + " <= buf.length - " + valueText(at) + ")'");
+          return call;
+        }
+        size = count->type->isFloat() ? count
+                                      : checker_.typeRelations().convert(count, Type::doubleTy());
+      }
+      offset = at->type->isFloat() ? at : checker_.typeRelations().convert(at, Type::doubleTy());
+    }
     return checker_.cryptoArgs().cryptoCall(
         call, CryptoFn::RandomFill,
         {target, offset, size, checker_.cryptoArgs().cryptoInt(loc, has)}, type);
@@ -243,12 +296,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || password->type->isError() || salt->type->isError()) {
       return call;
     }
-    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(password->type)) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Pbkdf2,
-                                                {password, salt, iterations, keylen, md}, buffer);
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Pbkdf2,
-                                            {password, salt, iterations, keylen, md}, buffer);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Pbkdf2,
+                                              {password, salt, iterations, keylen, md}, buffer);
   }
   if (fn == "hkdfSync") {
     if (!checker_.argumentChecker().checkArity(call, loc, 5, 5)) {
@@ -262,13 +311,8 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (!md || key->type->isError() || salt->type->isError() || info->type->isError()) {
       return call;
     }
-    if (!isa<IntLitExpr>(md) || checker_.cryptoArgs().holdsKeyObject(key->type)) {
-      return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Hkdf,
-                                                {md, key, salt, info, keylen},
-                                                Type::bytesType(Type::Bytes::ArrayBuffer));
-    }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
-                                            Type::bytesType(Type::Bytes::ArrayBuffer));
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Hkdf, {md, key, salt, info, keylen},
+                                              Type::bytesType(Type::Bytes::ArrayBuffer));
   }
   if (fn == "scryptSync") {
     if (!checker_.argumentChecker().checkArity(call, loc, 3, 4)) {
@@ -298,12 +342,12 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
     if (password->type->isError() || salt->type->isError()) {
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::Scrypt,
-                                            {password, salt, keylen, values[0], values[1],
-                                             values[2],
-                                             maxmem ? checker_.cryptoArgs().cryptoNumber(maxmem)
-                                                    : checker_.cryptoArgs().cryptoDouble(loc, 0)},
-                                            buffer);
+    return checker_.cryptoArgs().cryptoResult(call, CryptoFn::Scrypt,
+                                              {password, salt, keylen, values[0], values[1],
+                                               values[2],
+                                               maxmem ? checker_.cryptoArgs().cryptoNumber(maxmem)
+                                                      : checker_.cryptoArgs().cryptoDouble(loc, 0)},
+                                              buffer);
   }
   if (fn == "argon2Sync") {
     if (!checker_.argumentChecker().checkArity(call, loc, 2, 2)) {
@@ -356,7 +400,7 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
         return call;
       }
     }
-    return checker_.cryptoArgs().cryptoCall(
+    return checker_.cryptoArgs().cryptoResult(
         call, CryptoFn::Argon2,
         {type, name, message, nonce, parallelism, tagLength, memory, passes, secret, data}, buffer);
   }
@@ -492,10 +536,26 @@ Expr *CryptoFunctionChecker::checkCryptoCall(CallExpr *call, llvm::StringRef fn,
                             "length: 256 }'");
       return call;
     }
-    return checker_.cryptoArgs().cryptoCall(call, CryptoFn::GenerateSecretKey,
-                                            {checker_.cryptoArgs().cryptoBool(loc, which == 1),
-                                             checker_.cryptoArgs().cryptoNumber(options["length"])},
-                                            keyObject);
+    Expr *bits = checker_.exprChecker().checkExpr(options["length"], Type::intTy());
+    if (bits->type->isError()) {
+      return call;
+    }
+    if (which == 1) {
+      std::optional<int64_t> known = checker_.constantFolder().intConstant(bits);
+      if (!known || (*known != 128 && *known != 192 && *known != 256)) {
+        checker_.diags_.error(bits->loc(), "the length of an AES key is 128, 192 or 256, written "
+                                           "as a number; JavaScript throws a TypeError otherwise");
+        return call;
+      }
+    } else if (!checker_.indexProofs().requireBetween(bits, 8, {}, "the length of the key") &&
+               !checker_.indexProofs().exempt(bits->loc())) {
+      return call;
+    }
+    return checker_.cryptoArgs().cryptoCall(
+        call, CryptoFn::GenerateSecretKey,
+        {checker_.cryptoArgs().cryptoBool(loc, which == 1),
+         bits->type->isFloat() ? bits : checker_.typeRelations().convert(bits, Type::doubleTy())},
+        keyObject);
   }
   if (fn == "sign" || fn == "verify") {
     bool verify = fn == "verify";

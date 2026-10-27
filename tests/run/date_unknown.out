@@ -1,31 +1,16 @@
-iso 2026-10-23T10:00Z 2026-10-23T10:00:00.000Z
-iso not a date true false RangeError: Invalid time value
-json 2026-10-23T10:00Z {"at":"2026-10-23T10:00:00.000Z"}
-json not a date {"at":null}
-format 2026-10-23T10:00Z 10 AM
-format not a date true false RangeError: Invalid time value
-parts 2026-10-23T10:00Z 10 AM
-parts not a date true false RangeError: Invalid time value
-1792749600000
+2026-10-23T10:00:00.000Z
 { code: 'bad_date', message: 'Invalid Date', text: 'not a date' }
-zone Asia/Bishkek 6 AM
-zone Mars/Base true false RangeError: Invalid time zone specified: Mars/Base
-locale zone Asia/Bishkek 1/1/1970, 6:00:00 AM
-locale zone Mars/Base true false RangeError: Invalid time zone specified: Mars/Base
-month long January
-month huge true false RangeError: Value huge out of range for Date.prototype.toLocaleDateString options property month
-calendar gregory 1/1/1970
-calendar not a calendar! true false RangeError: Invalid calendar : not a calendar!
-digits 2 23
-digits 7 true false RangeError: fractionalSecondDigits value is out of range.
-tag de-DE 1.1.1970
-tag en_US Incorrect locale information provided
+Asia/Bishkek 6 AM
+Asia/Bishkek 1/1/1970, 6:00:00 AM
+Mars/Base 12 AM
+Mars/Base 1/1/1970, 12:00:00 AM
+January
+huge is no width of a month
+gregory 1/1/1970
+not a calendar! 1/1/1970
+1/1/70
+1/1/70
+1/1/1970
+de-DE 1.1.1970
+en_US Incorrect locale information provided
 Invalid Date Invalid Date [null]
-set 1767229200000
-locale 1/1/2026, 12:00:00 AM
-new 1/1/2026
-format 1/1/1970
-set true false RangeError: too many: 3
-locale false true TypeError: no zone 3
-new false true TypeError: no zone 3
-format true false RangeError: too many: 3

@@ -105,6 +105,9 @@ Expr *BufferStaticChecker::checkBytesStatic(CallExpr *call, MemberExpr *member) 
   if (type->isBuffer() && name != "of") {
     return checkBufferStatic(call, member);
   }
+  if (type->bytes() == Bytes::TextDecoder && name == "parse") {
+    return checker_.bytesNewChecker().checkTextDecoderParse(call, member);
+  }
   if (!type->isTypedArray()) {
     checkArgsLoosely();
     checker_.diags_.error(member->loc(), "'" + object->name + "." + name + "' does not exist");

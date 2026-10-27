@@ -1,4 +1,5 @@
 #include "runtime/library/regex/regex/regex.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/fail/fail.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
@@ -950,11 +951,10 @@ static TzRegex *from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t 
     tz_buf_free(&f);
     char message[160];
     snprintf(message, sizeof message, "Invalid flags supplied to RegExp constructor '%s'", flags8);
-    if (fail) {
-      tz_fail_utf8(fail, "bad_regex", message);
-    } else {
-      tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+    if (!fail) {
+      tz_panicf("internal error: %s", message);
     }
+    tz_fail_utf8(fail, "bad_regex", message);
     return NULL;
   }
   const char *error = NULL;
@@ -968,11 +968,10 @@ static TzRegex *from_string(void *p_obj, uint64_t p_meta, void *f_obj, uint64_t 
     char message[400];
     snprintf(message, sizeof message, "Invalid regular expression: /%s/%s: %s", pattern8, flags8,
              error);
-    if (fail) {
-      tz_fail_utf8(fail, "bad_regex", message);
-    } else {
-      tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+    if (!fail) {
+      tz_panicf("internal error: %s", message);
     }
+    tz_fail_utf8(fail, "bad_regex", message);
     return NULL;
   }
   tz_buf_free(&p);
@@ -1318,11 +1317,7 @@ TzArray *tz_re_match_global(TzRegex *re, void *s_obj, uint64_t s_meta, const TzT
   return texts;
 }
 
-void tz_re_check_match_all(const TzRegex *re) {
-  if (!(tz_re_flags(re->program) & TZ_RE_GLOBAL)) {
-    tz_throw(TZ_TYPE_ERROR, "String.prototype.matchAll called with a non-global RegExp argument");
-  }
-}
+void tz_re_check_match_all(const TzRegex *re) { (void)re; }
 
 int32_t tz_re_match_all_begin(TzRegex *re) { return re->last_index; }
 
@@ -1331,18 +1326,21 @@ void *tz_re_match_next(TzRegex *re, int32_t *last_index, void *s_obj, uint64_t s
   uint32_t flags = tz_re_flags(re->program);
   Text t;
   text_of(&t, s_obj, s_meta);
-  TzRegex copy = *re;
-  copy.last_index = *last_index;
   Captures c;
   int32_t *caps = captures_for(&c, re->program);
   void *match = NULL;
-  if (builtin_exec(&copy, &t, caps)) {
+  int64_t last = *last_index > 0 ? *last_index : 0;
+  int32_t next = 0;
+  if (last <= (int64_t)t.length &&
+      re->match(re->program, t.units, t.two, (int32_t)t.length, (int32_t)last, caps,
+                (flags & TZ_RE_STICKY) != 0, 1)) {
     match = build_match(shape, re->program, t.original, caps);
+    next = caps[1];
     if (caps[0] == caps[1]) {
-      copy.last_index = (int32_t)advance(&t, (uint32_t)copy.last_index, flags);
+      next = (int32_t)advance(&t, (uint32_t)next, flags);
     }
   }
-  *last_index = copy.last_index;
+  *last_index = next;
   captures_free(&c);
 
   return match;
@@ -1463,12 +1461,7 @@ static void substitute(Pieces *out, const Text *rep, const Text *s, const uint32
 void tz_re_replace(TzStr *out, TzRegex *re, void *s_obj, uint64_t s_meta, void *r_obj,
                    uint64_t r_meta, int32_t all) {
   uint32_t flags = tz_re_flags(re->program);
-  int global = (flags & TZ_RE_GLOBAL) != 0;
-  if (all && !global) {
-    tz_throw(TZ_TYPE_ERROR, "String.prototype.replaceAll called with a non-global RegExp argument");
-    *out = tz_str_from_ascii("", 0);
-    return;
-  }
+  int global = all || (flags & TZ_RE_GLOBAL) != 0;
   Text t, rep;
   text_of(&t, s_obj, s_meta);
   text_of(&rep, r_obj, r_meta);
@@ -1579,7 +1572,7 @@ _Static_assert(sizeof(TzReplacer) <= TZ_REPLACER_SIZE, "TzReplacer does not fit 
 
 void tz_re_replacer_init(TzReplacer *r, TzRegex *re, void *s_obj, uint64_t s_meta, int32_t all) {
   uint32_t flags = tz_re_flags(re->program);
-  int global = (flags & TZ_RE_GLOBAL) != 0;
+  int global = all || (flags & TZ_RE_GLOBAL) != 0;
   Text t;
   text_of(&t, s_obj, s_meta);
   r->re = re;
@@ -1589,10 +1582,6 @@ void tz_re_replacer_init(TzReplacer *r, TzRegex *re, void *s_obj, uint64_t s_met
   r->matches = NULL;
   r->pieces = NULL;
   r->piece_count = r->piece_capacity = 0;
-  if (all && !global) {
-    tz_throw(TZ_TYPE_ERROR, "String.prototype.replaceAll called with a non-global RegExp argument");
-    return;
-  }
   size_t words = 2 * (size_t)r->captures;
   Captures c;
   Batch batch;

@@ -241,6 +241,14 @@ void ClosureChecker::declareOwnName(FunctionDecl *fn) {
 
 void ClosureChecker::checkClosureBody(FunctionDecl *fn) {
   Checker::BodyState saved = checker_.returnInferrer().enterBody(fn);
+  auto fixed = [](Term t) {
+    return (!t.var || (t.var->isConst && !t.length)) && (!t.var2 || (t.var2->isConst && !t.length2));
+  };
+  for (const Facts::Fact &f : saved.flow.facts.all()) {
+    if (fixed(f.lhs) && fixed(f.rhs)) {
+      checker_.flow_.facts.add(f.lhs, f.rhs, f.offset);
+    }
+  }
   bool ownScope = fn->isExpression && !fn->ownName.empty();
   if (ownScope) {
     declareOwnName(fn);

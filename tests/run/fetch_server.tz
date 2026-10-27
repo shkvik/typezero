@@ -7,7 +7,7 @@
 import { serve } from "tz:http"
 
 const enc = new TextEncoder()
-const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
   const url = new URL(req.url)
   switch (url.pathname) {
     case "/hello":
@@ -29,7 +29,7 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
     case "/count": {
       let total = 0
       const body = req.body
-      if (body != undefined) for await (const chunk of body) total += chunk.length
+      if (body != undefined) for await (const chunk of body) total += chunk.isOk() ? chunk.value.length : 0
       return new Response(`${total} bytes`)
     }
     case "/echo":
@@ -52,6 +52,11 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, async req => {
   }
   return new Response("not found", { status: 404, statusText: "Nope" })
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 const base = `http://127.0.0.1:${server.port}`
 const port = (s: string) => s.replaceAll(String(server.port), "PORT")
 

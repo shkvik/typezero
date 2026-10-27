@@ -66,7 +66,6 @@ static void *tls_error(TzMaker make, const char *code, const char *message, int3
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
   parts.message = net_utf8(message);
-  parts.name = ascii("Error");
   parts.errno_value = number;
   parts.code = ascii(code);
   parts.syscall = ascii("");
@@ -611,20 +610,25 @@ static int select_alpn(SSL *ssl, const unsigned char **out, unsigned char *out_l
   return status == OPENSSL_NPN_NEGOTIATED ? SSL_TLSEXT_ERR_OK : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
-static void throw_openssl(const char *otherwise) {
+static void fail_openssl(TzMaker make, const char *code, const char *otherwise) {
   unsigned long error = ERR_peek_error();
   ERR_clear_error();
-  if (!error) {
-    tz_throw(TZ_ERROR, "%s", otherwise);
-    return;
-  }
   char text[256];
-  ERR_error_string_n(error, text, sizeof text);
-  tz_throw(TZ_ERROR, "%s", text);
+  if (error) {
+    ERR_error_string_n(error, text, sizeof text);
+  } else {
+    snprintf(text, sizeof text, "%s", otherwise);
+  }
+  TzSystemErrorParts parts;
+  memset(&parts, 0, sizeof parts);
+  parts.message = net_utf8(text);
+  parts.code = net_utf8(code);
+  parts.syscall = net_utf8("listen");
+  tz_set_failed(make(&parts));
 }
 
 static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj,
-                               uint64_t key_meta) {
+                               uint64_t key_meta, TzMaker make) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
   configure(ctx);
   SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
@@ -646,7 +650,7 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
   BIO_free(bio);
   tz_instance_release((TzInstance *)cert);
   if (!ok) {
-    throw_openssl("the certificate of tls cannot be read");
+    fail_openssl(make, "ERR_TLS_CERT", "the certificate of tls cannot be read");
     SSL_CTX_free(ctx);
     return NULL;
   }
@@ -658,7 +662,7 @@ static SSL_CTX *server_context(void *cert_obj, uint64_t cert_meta, void *key_obj
   BIO_free(bio);
   tz_instance_release((TzInstance *)key);
   if (!ok) {
-    throw_openssl("the key of tls cannot be read");
+    fail_openssl(make, "ERR_TLS_KEY", "the key of tls cannot be read");
     SSL_CTX_free(ctx);
     return NULL;
   }
@@ -954,7 +958,7 @@ static void abort_handshake(TzAbortListener *l) {
   Tls *t = CONTAINING_RECORD(l, Tls, abort);
   TzSignal *signal = t->signal;
   t->signal = NULL;
-  void *reason = tz_signal_reason(signal);
+  void *reason = net_aborted();
   tz_instance_release((TzInstance *)signal);
   if (t->promise) {
     net_reject(&t->promise, reason);
@@ -985,7 +989,7 @@ void tz_tls_connect(TzPromise *p, void *conn, void *host_obj, uint64_t host_meta
   c->on_input = handshake_input;
   if (signal) {
     if (tz_signal_aborted(signal)) {
-      net_reject(&t->promise, tz_signal_reason(signal));
+      net_reject(&t->promise, net_aborted());
       net_abort(c);
       return;
     }
@@ -1008,7 +1012,7 @@ static void release_context(void *tls) { SSL_CTX_free((SSL_CTX *)tls); }
 void *tz_tls_listen(void *host_obj, uint64_t host_meta, int32_t port, double max_body,
                     void *cert_obj, uint64_t cert_meta, void *key_obj, uint64_t key_meta,
                     TzMaker make) {
-  SSL_CTX *ctx = server_context(cert_obj, cert_meta, key_obj, key_meta);
+  SSL_CTX *ctx = server_context(cert_obj, cert_meta, key_obj, key_meta, make);
   if (!ctx) {
     return NULL;
   }

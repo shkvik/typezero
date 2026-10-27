@@ -38,7 +38,7 @@ function readableAddChunkUnshiftValue(stream: Stream, state: ReadableState,
   if ((state.bits & kEndEmitted) != 0)
     errorOrDestroy(
       stream,
-      new StreamError("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event"),
+      failure("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event"),
     )
   else if ((state.bits & (kDestroyed | kErrored)) != 0) return false
   else addChunk(stream, state, chunk, true)
@@ -79,7 +79,7 @@ function readableAddChunkPushByteMode(stream: Stream, state: ReadableState, chun
     return canPushMore(stream, state)
   }
   if ((state.bits & kEnded) != 0) {
-    errorOrDestroy(stream, new StreamError("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
+    errorOrDestroy(stream, failure("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
     return false
   }
   if ((state.bits & (kDestroyed | kErrored)) != 0) return false
@@ -105,7 +105,7 @@ function readableAddChunkPushObjectMode(stream: Stream, state: ReadableState, ch
     return false
   }
   if ((state.bits & kEnded) != 0) {
-    errorOrDestroy(stream, new StreamError("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
+    errorOrDestroy(stream, failure("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF"))
     return false
   }
   if ((state.bits & (kDestroyed | kErrored)) != 0) return false
@@ -157,7 +157,7 @@ function addChunk(stream: Stream, state: ReadableState, chunk: unknown, addToFro
 const kMaxHwm = 0x40000000
 function computeNewHighWaterMark(size: int): int {
   if (size > kMaxHwm)
-    throw new StreamRangeError(
+    throw failure(
       "ERR_OUT_OF_RANGE",
       `The value of "size" is out of range. It must be <= 1GiB. Received ${size}`,
     )
@@ -555,7 +555,7 @@ function pipe(src: Stream, dest: Stream, end: boolean) {
       dest.destroy(error)
     }
   }
-  function onerror(er: Error) {
+  function onerror(er: StreamError) {
     unpipe()
     dest.removeListener("error", onerror)
     if (dest.listenerCount("error") == 0) {

@@ -5,8 +5,7 @@ read beta
 read gamma
 false
 one two
-caught source failed
+failed source failed
 first 7
 cancelled: no reason
 cancelled: enough ReadableStream { locked: false, state: 'closed', supportsBYOB: false }
-TypeError Invalid state: ReadableStream is locked

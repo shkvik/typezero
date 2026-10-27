@@ -1,23 +1,21 @@
-// same-as-node
-// The errors JavaScript throws when the program runs, with node's messages,
-// which are still exceptions here: unknown encodings and a string that is
-// not hex; and the Err of a fatal TextDecoder at bytes it cannot decode.
-// Lengths and offsets are proven when the program is built instead
-// (tests/errors/proofs.tz).
-function attempt(what: string, f: () => void) {
-  try {
-    f()
-    console.log(what, "ok")
-  } catch (e) {
-    console.log(what, e.name, e.message)
-  }
+// What JavaScript throws for at bytes, and what tz does instead (docs/bytes.md,
+// docs/errors.md, step 5): an encoding known only when the program runs is
+// checked first, a label for TextDecoder is parsed into a Result, a fill text
+// that encodes to no bytes fills zeros (node throws a TypeError), and a fatal
+// TextDecoder gives an Err at bytes it cannot decode. Lengths and offsets are
+// proven when the program is built (tests/errors/proofs.tz).
+const four = Buffer.alloc(4, 1)
+const names = ["hex", "nope", "base64"]
+for (const name of names) {
+  if (name == "hex" || name == "base64") console.log(name, four.toString(name))
+  else console.log(name, "is no encoding")
 }
-const four = Buffer.alloc(4)
-const encodings = ["hex", "nope", "x-mac-cyrillic", "utf-17"]
-attempt("encoding", () => console.log(four.toString(encodings[1] ?? "")))
-attempt("fill", () => console.log(four.fill("zz", "hex")))
-attempt("label", () => console.log(new TextDecoder(encodings[3] ?? "")))
-attempt("label old", () => console.log(new TextDecoder(encodings[2] ?? "").decode(new Uint8Array([0xc0, 0x80]))))
+console.log(four.fill("zz", "hex"), Buffer.alloc(3, 7).fill("", "utf8"))
+for (const label of ["utf-17", "x-mac-cyrillic", " UTF-8 "]) {
+  const decoder = TextDecoder.parse(label)
+  if (decoder.isErr()) console.log(label, decoder.error.code, decoder.error.message)
+  else console.log(label, decoder.value.encoding, decoder.value.decode(new Uint8Array([0xc0, 0x80])))
+}
 const decoded = [
   new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0x41, 0xff])),
   new TextDecoder("utf-16le", { fatal: true }).decode(new Uint8Array([0, 0xd8])),
@@ -25,3 +23,5 @@ const decoded = [
   new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0x41, 0x42])),
 ]
 for (const text of decoded) console.log("fatal", text.isOk() ? text.value : `${text.error.code} ${text.error.message}`)
+const fatal = TextDecoder.parse("latin1", { fatal: true })
+if (fatal.isOk()) console.log(fatal.value.fatal, fatal.value.decode(new Uint8Array([0x41])).unwrapOr("?"))

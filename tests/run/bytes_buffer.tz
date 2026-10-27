@@ -1,7 +1,8 @@
 // same-as-node
 // Buffer as node has it, with its encodings, and TextEncoder / TextDecoder.
 const s = "héllo€😀"
-for (const enc of ["utf8", "latin1", "ascii", "utf16le", "hex", "base64", "base64url", "binary", "ucs2"]) {
+const encodings: BufferEncoding[] = ["utf8", "latin1", "ascii", "utf16le", "hex", "base64", "base64url", "binary", "ucs2"]
+for (const enc of encodings) {
   const b = Buffer.from(s, enc)
   console.log(enc, b, JSON.stringify(b.toString(enc)), b.toString("hex"))
 }
@@ -33,5 +34,8 @@ console.log(JSON.stringify(Buffer.from("hi")), Buffer.from("he"), Buffer.alloc(0
 console.log(new TextEncoder(), new TextDecoder(), new TextDecoder("utf-16le", { fatal: true }))
 const broken = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0xff]))
 console.log(broken.isErr() ? `${broken.error.code} ${broken.error.message}` : broken.value)
-const label = ["foo", "KOI8-R"][1]
-console.log(new TextDecoder(label).decode(new Uint8Array([0xc1, 0xe1])), new TextDecoder("windows-1251").decode(new Uint8Array([0xcf, 0xf0, 0xe8, 0x98])))
+for (const label of ["foo", "KOI8-R"]) {
+  const decoder = TextDecoder.parse(label)
+  console.log(decoder.isOk() ? decoder.value.decode(new Uint8Array([0xc1, 0xe1])) : `${decoder.error.code}: ${decoder.error.message}`)
+}
+console.log(new TextDecoder("windows-1251").decode(new Uint8Array([0xcf, 0xf0, 0xe8, 0x98])))

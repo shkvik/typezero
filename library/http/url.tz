@@ -928,15 +928,6 @@ function parseUrl(input: string, base: UrlRecord | undefined): UrlRecord | undef
   return basicParse(input, base, url) ? url : undefined
 }
 
-export class InvalidUrlError extends TypeError {
-  readonly code = "ERR_INVALID_URL"
-  readonly input: string
-  constructor(input: string) {
-    super("Invalid URL")
-    this.input = input
-  }
-}
-
 export class URL {
   #record: UrlRecord
   #queryVersion = 0
@@ -947,10 +938,10 @@ export class URL {
     if (base != undefined) {
       const baseText = typeof base == "string" ? base : base.href
       parsedBase = parseUrl(baseText, undefined)
-      if (parsedBase == undefined) throw new InvalidUrlError(text)
+      if (parsedBase == undefined) __tz_panic("TypeError: Invalid URL: " + baseText)
     }
     const record = parseUrl(text, parsedBase)
-    if (record == undefined) throw new InvalidUrlError(text)
+    if (record == undefined) __tz_panic("TypeError: Invalid URL: " + text)
     this.#record = record
   }
 

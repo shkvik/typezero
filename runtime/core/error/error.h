@@ -34,7 +34,7 @@ int tz_error_base_field(const TzField *field);
 int tz_error_named(const void *error);
 
 typedef struct {
-  TzStr message, name;
+  TzStr message;
   int32_t errno_value;
   TzStr code, syscall;
   TzOptStr path, dest;

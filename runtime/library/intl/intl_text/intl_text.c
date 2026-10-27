@@ -1,4 +1,5 @@
 #include "runtime/library/intl/intl/intl.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
@@ -116,8 +117,7 @@ TzIntl *tz_collator_create(const TzIntlOptions *o, const char *method) {
     return NULL;
   }
   if (collation && !tz_intl_is_keyword_type(collation)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid collation : %s", collation);
-    return NULL;
+    collation = NULL;
   }
   int numeric = tz_intl_bool_option(o, TZ_IO_NUMERIC);
   const char *case_first = tz_intl_option(o, TZ_IO_CASE_FIRST, case_firsts, b[3], method, &failed);
@@ -293,9 +293,7 @@ void tz_str_normalize(TzStr *out, void *obj, uint64_t meta, int32_t has_form, vo
       }
     }
     if (form < 0) {
-      tz_throw(TZ_RANGE_ERROR, "The normalization form should be one of NFC, NFD, NFKC, NFKD.");
-      *out = tz_str_from_ascii("", 0);
-      return;
+      tz_panicf("internal error: a normalization form that is not one");
     }
   }
   uint32_t n;

@@ -180,7 +180,8 @@ typedef struct NetError {
 const NetError *net_error_of(int32_t error);
 void *net_system_error(TzMaker make, int32_t error, const char *syscall, const char *where,
                        int with_text);
-void *net_error(int32_t kind, const char *message, void *cause);
+void *net_failure(const char *code, const char *message);
+void *net_aborted(void);
 TzStr net_utf8(const char *text);
 
 void net_fulfill(TzPromise **p, const void *value, size_t size);

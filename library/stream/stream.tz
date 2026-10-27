@@ -2,43 +2,15 @@ import { EventEmitterBase } from "node:events"
 import { AbortController, AbortSignal, Event } from "tz:web"
 import { StringDecoder, normalizeEncoding } from "node:string_decoder"
 
-class StreamError extends Error {
-  code: string
-  constructor(code: string, message: string) {
-    super(message)
-    this.code = code
-  }
-}
-
-class StreamTypeError extends TypeError {
-  code: string
-  constructor(code: string, message: string) {
-    super(message)
-    this.code = code
-  }
-}
-
-class StreamRangeError extends RangeError {
-  code: string
-  constructor(code: string, message: string) {
-    super(message)
-    this.code = code
-  }
+function failure(code: string, message: string): StreamError {
+  return { code, message }
 }
 
 function __tz_lib_class_name(object: object): string
 function __tz_lib_inspect(value: unknown): string
 
-export class AbortError extends Error {
-  code = "ABORT_ERR"
-  constructor(message = "The operation was aborted", cause?: Error) {
-    super(message, { cause })
-    this.name = "AbortError"
-  }
-}
-
-function errorOf(reason: unknown): Error | undefined {
-  return reason instanceof Error ? reason : undefined
+export function abortError(): StreamError {
+  return { code: "ABORT_ERR", message: "The operation was aborted" }
 }
 
 function received(value: unknown): string {
@@ -51,7 +23,7 @@ function received(value: unknown): string {
 }
 
 function invalidChunk(value: unknown) {
-  return new StreamTypeError(
+  return failure(
     "ERR_INVALID_ARG_TYPE",
     'The "chunk" argument must be of type string or an instance of Buffer, TypedArray, or ' +
       `DataView. ${received(value)}`,
@@ -59,61 +31,34 @@ function invalidChunk(value: unknown) {
 }
 
 function methodNotImplemented(method: string) {
-  return new StreamError("ERR_METHOD_NOT_IMPLEMENTED", `The ${method} method is not implemented`)
+  return failure("ERR_METHOD_NOT_IMPLEMENTED", `The ${method} method is not implemented`)
 }
 
 function streamDestroyed(method: string) {
-  return new StreamError(
+  return failure(
     "ERR_STREAM_DESTROYED",
     `Cannot call ${method} after a stream was destroyed`,
   )
 }
 
 function multipleCallback() {
-  return new StreamError("ERR_MULTIPLE_CALLBACK", "Callback called multiple times")
+  return failure("ERR_MULTIPLE_CALLBACK", "Callback called multiple times")
 }
 
 function prematureClose() {
-  return new StreamError("ERR_STREAM_PREMATURE_CLOSE", "Premature close")
-}
-
-function unknownEncoding(encoding: string) {
-  return new StreamTypeError("ERR_UNKNOWN_ENCODING", `Unknown encoding: ${encoding}`)
+  return failure("ERR_STREAM_PREMATURE_CLOSE", "Premature close")
 }
 
 function nullValues() {
-  return new StreamTypeError("ERR_STREAM_NULL_VALUES", "May not write null values to stream")
+  return failure("ERR_STREAM_NULL_VALUES", "May not write null values to stream")
 }
 
-function aggregateTwoErrors(inner: Error | undefined, outer: Error | undefined) {
-  if (inner != undefined && outer != undefined && inner != outer) {
-    const errors = inner instanceof AggregateStreamError ? [...inner.errors, outer] : [inner, outer]
-    const err = new AggregateStreamError(errors, inner.message)
-    return err
-  }
+function aggregateTwoErrors(inner: StreamError | undefined, outer: StreamError | undefined) {
   return inner ?? outer
 }
 
-class AggregateStreamError extends Error {
-  code: string | undefined = undefined
-  constructor(
-    readonly errors: Error[],
-    message: string,
-  ) {
-    super(message)
-    this.name = "AggregateError"
-    const first = errors[0]
-    if (first instanceof StreamError || first instanceof StreamTypeError) this.code = first.code
-  }
-}
-
-function codeOf(err: Error | undefined): string {
-  if (err instanceof StreamError || err instanceof StreamTypeError ||
-      err instanceof StreamRangeError)
-    return err.code
-  if (err instanceof AbortError) return err.code
-  if (err instanceof AggregateStreamError) return err.code ?? ""
-  return ""
+function codeOf(err: StreamError | undefined): string {
+  return err?.code ?? ""
 }
 
 const kObjectMode = 1 << 0
@@ -166,11 +111,11 @@ const kWEnded = 1 << 30
 const kThisListener = 2
 const kUnknownArgListener = 3
 
-export type StreamCallback = (error?: Error) => void
+export type StreamCallback = (error?: StreamError) => void
 
-export type TransformCallback = (error?: Error, data?: unknown) => void
+export type TransformCallback = (error?: StreamError, data?: unknown) => void
 
-function nop(_error?: Error) {}
+function nop(_error?: StreamError) {}
 
 class ReadableState {
   bits: int
@@ -182,7 +127,7 @@ class ReadableState {
   decoder: StringDecoder | undefined = undefined
   encoding: string | undefined = undefined
   defaultEncoding = "utf8"
-  errored: Error | undefined = undefined
+  errored: StreamError | undefined = undefined
   readable: boolean | undefined = undefined
   synced: int = -1
   constructor(bits: int) {
@@ -210,7 +155,7 @@ class WritableState {
   writecb: StreamCallback = nop
   afterWriteTickInfo: AfterWriteTick | undefined = undefined
   onFinished: StreamCallback[] = []
-  errored: Error | undefined = undefined
+  errored: StreamError | undefined = undefined
   defaultEncoding = "utf8"
   writable: boolean | undefined = undefined
   synced: int = -1
@@ -227,24 +172,14 @@ export function getDefaultHighWaterMark(objectMode: boolean): int {
 }
 
 export function setDefaultHighWaterMark(objectMode: boolean, value: int) {
-  if (value < 0)
-    throw new StreamRangeError(
-      "ERR_OUT_OF_RANGE",
-      `The value of "value" is out of range. It must be >= 0 && <= 9007199254740991. Received ${value}`,
-    )
-  if (objectMode) defaultHighWaterMarkObjectMode = value
-  else defaultHighWaterMarkBytes = value
+  const kept = value < 0 ? 0 : value
+  if (objectMode) defaultHighWaterMarkObjectMode = kept
+  else defaultHighWaterMarkBytes = kept
 }
 
 function getHighWaterMark(hwm: double | undefined, name: string, objectMode: boolean): int {
-  if (hwm != undefined) {
-    if (!Number.isInteger(hwm) || hwm < 0)
-      throw new StreamTypeError(
-        "ERR_INVALID_ARG_VALUE",
-        `The property '${name}' is invalid. Received ${hwm}`,
-      )
-    return Math.floor(hwm) | 0
-  }
+  void name
+  if (hwm != undefined) return hwm > 0 ? Math.floor(hwm) | 0 : 0
   return getDefaultHighWaterMark(objectMode)
 }
 
@@ -253,8 +188,8 @@ interface SideOptions {
   sideHighWaterMark?: double
   objectMode?: boolean
   sideObjectMode?: boolean
-  encoding?: string
-  defaultEncoding?: string
+  encoding?: BufferEncoding
+  defaultEncoding?: BufferEncoding
   decodeStrings?: boolean
   emitClose?: boolean
   autoDestroy?: boolean
@@ -266,7 +201,7 @@ export class Stream extends EventEmitterBase {
   @__tz_hidden allowHalfOpen = true
   @__tz_hidden destroyed = false
   @__tz_hidden closed = false
-  @__tz_hidden errored: Error | undefined = undefined
+  @__tz_hidden errored: StreamError | undefined = undefined
   @__tz_hidden readable = false
   @__tz_hidden readableAborted = false
   @__tz_hidden readableDidRead = false
@@ -286,7 +221,7 @@ export class Stream extends EventEmitterBase {
   @__tz_hidden writableNeedDrain = false
   @__tz_hidden writableObjectMode = false
   @__tz_hidden _onConstruct: (() => void)[] = []
-  @__tz_hidden _onDestroy: ((err: Error | undefined) => void)[] = []
+  @__tz_hidden _onDestroy: ((err: StreamError | undefined) => void)[] = []
   @__tz_hidden _hasConstruct = false
   @__tz_hidden _hasWritev = false
   @__tz_hidden _hasFinal = false
@@ -312,10 +247,7 @@ export class Stream extends EventEmitterBase {
     if (options.emitClose == false) state.bits &= ~kEmitClose
     if (options.autoDestroy == false) state.bits &= ~kAutoDestroy
     const defaultEncoding = options.defaultEncoding
-    if (defaultEncoding != undefined) {
-      if (!Buffer.isEncoding(defaultEncoding)) throw unknownEncoding(defaultEncoding)
-      state.defaultEncoding = normalizeEncoding(defaultEncoding)
-    }
+    if (defaultEncoding != undefined) state.defaultEncoding = normalizeEncoding(defaultEncoding)
     const encoding = options.encoding
     if (encoding != undefined && encoding != "") {
       state.decoder = new StringDecoder(encoding)
@@ -342,10 +274,7 @@ export class Stream extends EventEmitterBase {
     if (options.emitClose == false) state.bits &= ~kEmitClose
     if (options.autoDestroy == false) state.bits &= ~kAutoDestroy
     const defaultEncoding = options.defaultEncoding
-    if (defaultEncoding != undefined) {
-      if (!Buffer.isEncoding(defaultEncoding)) throw unknownEncoding(defaultEncoding)
-      state.defaultEncoding = normalizeEncoding(defaultEncoding)
-    }
+    if (defaultEncoding != undefined) state.defaultEncoding = normalizeEncoding(defaultEncoding)
     resetBuffer(state)
     this._writableState = state
     this.writableObjectMode = objectMode
@@ -370,27 +299,25 @@ export class Stream extends EventEmitterBase {
 
   _read(size: int): void {
     void size
-    throw methodNotImplemented("_read()")
+    errorOrDestroy(this, methodNotImplemented("_read()"))
   }
 
   _writeChunk(chunk: unknown, encoding: string, callback: StreamCallback): void {
     void chunk
     void encoding
-    void callback
-    throw methodNotImplemented("_write()")
+    callback(methodNotImplemented("_write()"))
   }
 
   _writevChunks(chunks: BufferedWrite[], callback: StreamCallback): void {
     void chunks
-    void callback
-    throw methodNotImplemented("_writev()")
+    callback(methodNotImplemented("_writev()"))
   }
 
   _final(callback: StreamCallback): void {
     callback()
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     callback(error)
   }
 
@@ -479,7 +406,7 @@ export class Stream extends EventEmitterBase {
     return (state.bits & kPaused) != 0 || (state.bits & (kHasFlowing | kFlowing)) == kHasFlowing
   }
 
-  setEncoding(encoding?: string) {
+  setEncoding(encoding?: BufferEncoding) {
     const state = readableStateOf(this)
     const decoder = new StringDecoder(encoding)
     state.decoder = decoder
@@ -507,7 +434,7 @@ export class Stream extends EventEmitterBase {
 
   pipe<D extends Stream>(dest: D, options?: { end?: boolean }): D {
     if (this._readableState == undefined) {
-      errorOrDestroy(this, new StreamError("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable"))
+      errorOrDestroy(this, failure("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable"))
       return dest
     }
     pipe(this, dest, options?.end ?? true)
@@ -558,13 +485,14 @@ export class Stream extends EventEmitterBase {
     return this
   }
 
-  _writeAny(chunk: unknown, encoding: string | undefined, cb: StreamCallback): boolean | Error {
+  _writeAny(chunk: unknown, encoding: string | undefined,
+            cb: StreamCallback): boolean | StreamError {
     const ret = writeImpl(this, chunk, encoding, cb)
     sync(this)
     return ret
   }
 
-  _onwrite(er?: Error): void {
+  _onwrite(er?: StreamError): void {
     onwrite(this, er)
   }
 
@@ -588,20 +516,18 @@ export class Stream extends EventEmitterBase {
     sync(this)
   }
 
-  setDefaultEncoding(encoding: string) {
-    const lower = encoding.toLowerCase()
-    if (!Buffer.isEncoding(lower)) throw unknownEncoding(lower)
-    writableStateOf(this).defaultEncoding = normalizeEncoding(lower)
+  setDefaultEncoding(encoding: BufferEncoding) {
+    writableStateOf(this).defaultEncoding = normalizeEncoding(encoding)
     return this
   }
 
   _endWith(hasChunk: boolean, chunk: unknown, encoding: string | undefined,
            cb: StreamCallback | undefined) {
     const state = writableStateOf(this)
-    let err: Error | undefined = undefined
+    let err: StreamError | undefined = undefined
     if (hasChunk) {
       const ret = writeImpl(this, chunk, encoding, nop)
-      if (ret instanceof Error) err = ret
+      if (typeof ret != "boolean") err = ret
     }
     if ((state.bits & kCorked) != 0) {
       this.writableCorked = 1
@@ -614,7 +540,7 @@ export class Stream extends EventEmitterBase {
       finishMaybe(this, state, true)
       state.bits |= kWEnded
     } else if ((state.bits & kFinished) != 0) {
-      err = new StreamError(
+      err = failure(
         "ERR_STREAM_ALREADY_FINISHED",
         "Cannot call end after a stream was finished",
       )
@@ -641,16 +567,16 @@ export class Stream extends EventEmitterBase {
   }
 
   _endResult(hasChunk: boolean, chunk: unknown, encoding: string | undefined):
-      Promise<Result<void, Error>> {
-    return new Promise<Result<void, Error>>((resolve) => {
-      this._endWith(hasChunk, chunk, encoding, (error?: Error) => {
+      Promise<Result<void, StreamError>> {
+    return new Promise<Result<void, StreamError>>((resolve) => {
+      this._endWith(hasChunk, chunk, encoding, (error?: StreamError) => {
         if (error != undefined) resolve(err(error))
         else resolve(ok())
       })
     })
   }
 
-  destroy(error?: Error, callback?: StreamCallback) {
+  destroy(error?: StreamError, callback?: StreamCallback) {
     const w = this._writableState
     if (w != undefined && (w.bits & (kBuffered | kOnFinished)) != 0 &&
         (w.bits & kDestroyed) == 0) {
@@ -689,13 +615,13 @@ export class Stream extends EventEmitterBase {
 
 function readableStateOf(stream: Stream): ReadableState {
   const state = stream._readableState
-  if (state == undefined) throw new StreamTypeError("ERR_INVALID_THIS", "the stream is not readable")
+  if (state == undefined) __tz_panic("internal error: the stream is not readable")
   return state
 }
 
 function writableStateOf(stream: Stream): WritableState {
   const state = stream._writableState
-  if (state == undefined) throw new StreamTypeError("ERR_INVALID_THIS", "the stream is not writable")
+  if (state == undefined) __tz_panic("internal error: the stream is not writable")
   return state
 }
 

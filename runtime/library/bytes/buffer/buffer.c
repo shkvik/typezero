@@ -82,14 +82,7 @@ int32_t tz_buffer_encoding(void *obj, uint64_t meta) {
 int32_t tz_buffer_encoding_checked(void *obj, uint64_t meta) {
   int32_t encoding = tz_buffer_encoding(obj, meta);
   if (encoding < 0) {
-    TzStr s = {obj, meta};
-    TzBuf text;
-    tz_buf_init(&text);
-    tz_buf_ascii(&text, "Unknown encoding: ");
-    tz_buf_str(&text, s);
-    TzStr message = tz_buf_take(&text);
-    tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-    tz_str_release_value(message);
+    tz_panicf("internal error: an encoding Buffer does not know");
   }
 
   return encoding;
@@ -866,24 +859,8 @@ static void fill_with(TzBytes *b, const uint8_t *bytes, int64_t n, int64_t offse
 
 void tz_buffer_fill_string(TzBytes *b, void *obj, uint64_t meta, int64_t offset, int64_t end,
                            int32_t has, int32_t encoding) {
-  TzStr s = {obj, meta};
   int64_t n;
   uint8_t *bytes = bytes_of_string(obj, meta, encoding, &n);
-  uint32_t length;
-  int two;
-  tz_str_units(&s, &length, &two);
-  if (n == 0 && length > 0) {
-    tz_free(bytes);
-    TzBuf text;
-    tz_buf_init(&text);
-    tz_buf_ascii(&text, "The argument 'value' is invalid. Received '");
-    tz_buf_str(&text, s);
-    tz_buf_push(&text, '\'');
-    TzStr message = tz_buf_take(&text);
-    tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-    tz_str_release_value(message);
-    return;
-  }
   fill_with(b, bytes, n, offset, end, has);
   tz_free(bytes);
 }
@@ -1055,7 +1032,7 @@ static int is_space(uint32_t c) {
 
 void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const *tables,
                           int32_t count, const TzCjkEncoding *const *cjk, int32_t cjk_count,
-                          int32_t fatal, int32_t ignore_bom) {
+                          int32_t fatal, int32_t ignore_bom, TzMaker fail) {
   Units u;
   units_of(&u, obj, meta);
   uint32_t start = 0, end = u.length;
@@ -1099,15 +1076,16 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
       }
     }
   }
+  if (!fail) {
+    tz_panicf("internal error: an encoding TextDecoder does not know");
+  }
   TzStr s = {obj, meta};
   TzBuf text;
   tz_buf_init(&text);
   tz_buf_ascii(&text, "The \"");
   tz_buf_str(&text, s);
   tz_buf_ascii(&text, "\" encoding is not supported");
-  TzStr message = tz_buf_take(&text);
-  tz_throw_str(TZ_RANGE_ERROR, message.obj, message.meta);
-  tz_str_release_value(message);
+  tz_fail(fail, "ERR_ENCODING_NOT_SUPPORTED", tz_buf_take(&text));
 
   return NULL;
 }

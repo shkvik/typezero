@@ -147,7 +147,7 @@ n.on("b", () => {})
 n.on("10", () => {})
 n.on("a", () => {})
 n.on("2", () => {})
-console.log(n.eventNames(), Object.keys(t), JSON.stringify(t))
+console.log(n.eventNames(), Object.keys(t), JSON.stringify(t).unwrapOr(""))
 console.log([s], { deep: { emitter: s } })
 EventEmitter.defaultMaxListeners = 20
 console.log(t.getMaxListeners(), new EventEmitter<{ y: [] }>().getMaxListeners())

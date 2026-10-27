@@ -1,4 +1,5 @@
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
@@ -299,8 +300,24 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     checker_.errorListenedMaps_.insert(events);
   }
   std::string variant = errors || abortable ? fn.str() + "Result" : fn.str();
+  const Type *abortError = checker_.prelude().builtinType("AbortError");
+  const Type *errorValue = abortError;
+  if (errors) {
+    if (!errors->isTuple() || errors->fields().size() != 1) {
+      checker_.diags_.error(call->args[1]->loc(),
+                            "'" + fn.str() +
+                                "' gives the error of the emitter as the Err, so its 'error' "
+                                "event carries one value; this one carries '" +
+                                errors->name().str() + "'");
+      return call;
+    }
+    errorValue = errors->fields().front().type;
+  }
+  if (variant == "on" || variant == "once") {
+    return callLibraryFunction(call, variant, {args, Type::tuple({})}, given, loc);
+  }
 
-  return callLibraryFunction(call, variant, {args, errors ? errors : Type::tuple({})}, given, loc);
+  return callLibraryFunction(call, variant, {args, errorValue}, given, loc);
 }
 
 Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {

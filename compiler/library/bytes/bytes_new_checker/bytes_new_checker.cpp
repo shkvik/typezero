@@ -5,7 +5,9 @@
 #include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/iterators/generator_checker/generator_checker.h"
 #include "compiler/check/iterators/iterator_methods/iterator_methods.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "runtime/library/bytes/encodings/encodings.h"
@@ -86,6 +88,23 @@ bool mayBeFatal(const Expr *options) {
 }
 
 BytesNewChecker::BytesNewChecker(Checker &checker) : checker_(checker) {}
+
+Expr *BytesNewChecker::checkTextDecoderParse(CallExpr *call, MemberExpr *member) {
+  auto *expr = checker_.ctx_.make<NewExpr>(call->loc(), "TextDecoder", std::vector<TypeRef>{},
+                                           call->args);
+  parsing_ = true;
+  Expr *made = checkBytesNew(expr, Type::bytesType(Bytes::TextDecoder));
+  parsing_ = false;
+  auto *result = dyn_cast<CallExpr>(made);
+  if (!result || result->builtin != Builtin::TextDecoderNew) {
+    return made;
+  }
+  result->callee = member;
+  result->builtin = Builtin::TextDecoderParse;
+  result->type = Type::result(result->type, checker_.prelude().builtinType("EncodingError"));
+
+  return result;
+}
 
 Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
   llvm::SMLoc loc = expr->loc();
@@ -183,6 +202,31 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
         call->args[0] = checker_.argumentChecker().checkArg(label, Type::string());
         resolved->value = 0;
         checked[1] = call->args[0];
+        if (!parsing_ && !call->args[0]->type->isError() &&
+            !checker_.indexProofs().exempt(label->loc())) {
+          std::optional<std::vector<std::string>> labels =
+              checker_.literalTypes().knownTexts(call->args[0]);
+          if (!labels) {
+            checker_.diags_.error(label->loc(),
+                                  "a label known only when the program runs may name no "
+                                  "encoding, which JavaScript would throw a RangeError for; "
+                                  "parse it with 'TextDecoder.parse(label)', which gives a "
+                                  "Result, or check it first, e.g. 'if (label == \"utf-8\" || "
+                                  "label == \"windows-1251\")'");
+            return call;
+          }
+          for (const std::string &each : *labels) {
+            std::string lower = llvm::StringRef(each).trim(" \t\n\f\r").lower();
+            if (!tz_encoding_name(lower.c_str())) {
+              checker_.diags_.error(label->loc(),
+                                    "'" + each +
+                                        "' is not an encoding TextDecoder knows (JavaScript "
+                                        "throws a RangeError); e.g. 'utf-8', 'utf-16le', "
+                                        "'windows-1251', 'latin1'");
+              return call;
+            }
+          }
+        }
       }
     } else if (!call->args.empty()) {
       call->args[0] = checker_.exprChecker().checkExpr(call->args[0]);

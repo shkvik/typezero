@@ -1,4 +1,5 @@
 #include "compiler/library/stream/chunk_types/chunk_types.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/check/classes/class_bases/class_bases.h"
 #include "compiler/check/generics/alias_instantiator/alias_instantiator.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
@@ -95,7 +96,7 @@ std::optional<std::vector<const Type *>> ChunkTypes::streamHookParams(const Func
   } else if (name == "_final" || name == "_construct") {
     params = {callback};
   } else if (name == "_destroy") {
-    params = {Type::optional(checker_.errorClass_->type), callback};
+    params = {Type::optional(checker_.prelude().builtinType("StreamError")), callback};
   } else if (name == "_flush" && transform) {
     params = {alias("TransformCallback")};
   } else if (name == "_transform" && transform) {

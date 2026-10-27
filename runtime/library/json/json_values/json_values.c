@@ -168,20 +168,6 @@ const char *tz_json_kind_name(const TzJson *j) {
   }
 }
 
-static void read_error(const TzJson *j, TzStr key, const char *verb) {
-  TzBuf b;
-  tz_buf_init(&b);
-  tz_buf_ascii(&b, "Cannot ");
-  tz_buf_ascii(&b, verb);
-  tz_buf_ascii(&b, " properties of ");
-  tz_buf_ascii(&b, tz_json_kind_name(j));
-  tz_buf_ascii(&b, " (");
-  tz_buf_ascii(&b, verb[0] == 'r' ? "reading '" : "setting '");
-  tz_buf_str(&b, key);
-  tz_buf_ascii(&b, "')");
-  tz_json_throw(TZ_TYPE_ERROR, &b);
-}
-
 static TzJson *element_of(const TzJson *j, uint32_t i) {
   if (j->kind == TZ_JSON_ARRAY) {
     const TzArray *a = j->u.array;
@@ -201,7 +187,6 @@ static TzJson *element_of(const TzJson *j, uint32_t i) {
 TzJson *tz_json_get(const TzJson *j, void *key_obj, uint64_t key_meta) {
   TzStr key = {key_obj, key_meta};
   if (!j || j->kind == TZ_JSON_NULL) {
-    read_error(j, key, "read");
     return NULL;
   }
   switch (j->kind) {
@@ -251,20 +236,12 @@ TzJson *tz_json_get_index(const TzJson *j, double index) {
 
 static void set_element(const TzJson *j, int64_t i, TzJson *value) {
   TzArray *a = j->u.array;
-  if (!value || i > a->length) {
-    tz_json_release(value);
-    TzBuf b;
-    tz_buf_init(&b);
-    char text[160];
-    int n = value ? snprintf(text, sizeof text,
-                             "Cannot set element %lld of a Json array of length %u: that would "
-                             "leave holes; use push() on it as Json[]",
-                             (long long)i, a->length)
-                  : snprintf(text, sizeof text,
-                             "Cannot set element %lld of a Json array to undefined", (long long)i);
-    tz_buf_ascii_n(&b, text, (size_t)n);
-    tz_json_throw(TZ_TYPE_ERROR, &b);
-    return;
+  if (!value) {
+    value = tz_json_null();
+  }
+  while (i > a->length) {
+    TzJson *hole = tz_json_null();
+    tz_arr_push_value(a, &hole);
   }
   if (i == a->length) {
     tz_arr_push_value(a, &value);
@@ -292,31 +269,6 @@ void tz_json_set(const TzJson *j, void *key_obj, uint64_t key_meta, TzJson *valu
     return;
   }
   tz_json_release(value);
-  if (!j || j->kind == TZ_JSON_NULL) {
-    read_error(j, key, "set");
-    return;
-  }
-  TzBuf b;
-  tz_buf_init(&b);
-  tz_buf_ascii(&b, "Cannot create property '");
-  tz_buf_str(&b, key);
-  tz_buf_ascii(&b, "' on ");
-  if (j->kind == TZ_JSON_ARRAY) {
-    tz_buf_ascii(&b, "a Json array, which only has elements");
-  } else {
-    tz_buf_ascii(&b, tz_json_kind_name(j));
-    tz_buf_ascii(&b, " '");
-    if (j->kind == TZ_JSON_STRING) {
-      tz_buf_str(&b, j->u.string);
-    } else if (j->kind == TZ_JSON_BOOL) {
-      tz_buf_ascii(&b, j->u.boolean ? "true" : "false");
-    } else {
-      char text[32];
-      tz_buf_ascii_n(&b, text, tz_format_f64(j->u.number.value, text));
-    }
-    tz_buf_push(&b, '\'');
-  }
-  tz_json_throw(TZ_TYPE_ERROR, &b);
 }
 
 void tz_json_set_index(const TzJson *j, double index, TzJson *value) {
@@ -332,11 +284,7 @@ void tz_json_set_index(const TzJson *j, double index, TzJson *value) {
 
 static int64_t key_count(const TzJson *j) {
   if (!j || j->kind == TZ_JSON_NULL) {
-    TzBuf b;
-    tz_buf_init(&b);
-    tz_buf_ascii(&b, "Cannot convert undefined or null to object");
-    tz_json_throw(TZ_TYPE_ERROR, &b);
-    return -1;
+    return 0;
   }
   switch (j->kind) {
   case TZ_JSON_OBJECT:
@@ -379,7 +327,7 @@ TzArray *tz_json_keys(const TzJson *j, const TzType *string_type) {
   if (count < 0) {
     return NULL;
   }
-  uint32_t *order = j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
+  uint32_t *order = j && j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
   TzArray *keys = tz_arr_new(string_type, 0, count);
   for (uint32_t k = 0; k < count; ++k) {
     TzStr key;
@@ -404,7 +352,7 @@ TzArray *tz_json_values(const TzJson *j) {
   if (count < 0) {
     return NULL;
   }
-  uint32_t *order = j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
+  uint32_t *order = j && j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
   TzArray *values = tz_arr_new(&tz_json_type, 0, count);
   for (uint32_t k = 0; k < count; ++k) {
     TzJson *value;
@@ -422,7 +370,7 @@ TzArray *tz_json_entries(const TzJson *j, const TzType *tuple_type, const TzLayo
   if (count < 0) {
     return NULL;
   }
-  uint32_t *order = j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
+  uint32_t *order = j && j->kind == TZ_JSON_OBJECT ? tz_json_key_order(j) : NULL;
   TzArray *entries = tz_arr_new(tuple_type, 0, count);
   const TzField *key = &tuple_layout->fields[0], *value = &tuple_layout->fields[1];
   for (uint32_t k = 0; k < count; ++k) {

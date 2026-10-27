@@ -198,6 +198,9 @@ function unknownDigest(f) {
   };
 }
 
-export const pbkdf2Sync = unknownDigest(crypto.pbkdf2Sync);
-export const hkdfSync = unknownDigest(crypto.hkdfSync);
+export const pbkdf2Sync = resulting(crypto.pbkdf2Sync);
+export const hkdfSync = resulting(crypto.hkdfSync);
+export const scryptSync = resulting(crypto.scryptSync);
+export const argon2Sync = resulting(crypto.argon2Sync);
+export const timingSafeEqual = (a, b) => a.byteLength === b.byteLength && crypto.timingSafeEqual(a, b);
 export const hash = unknownDigest(crypto.hash);

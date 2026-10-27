@@ -11,7 +11,7 @@ import { tmpdir } from "node:os"
 import { Vault, keyFrom, open, seal } from "./vault.tz"
 
 const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
-const key = keyFrom("correct horse", salt)
+const key = must(keyFrom("correct horse", salt))
 console.log(key.length, key.toString("hex").slice(0, 16))
 
 // 1. A sealed box of values of several types, opened again.

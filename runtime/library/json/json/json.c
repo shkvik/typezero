@@ -1,4 +1,5 @@
 #include "runtime/library/json/json/json.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/error/error.h"
@@ -174,12 +175,6 @@ TZ_HOT void tz_json_release_value(TzJson *j) {
   }
 }
 
-void tz_json_throw(int32_t kind, TzBuf *text) {
-  TzStr message = tz_buf_take(text);
-  tz_throw_str(kind, message.obj, message.meta);
-  tz_str_release_value(message);
-}
-
 TzMaker tz_json_error_maker;
 
 void tz_json_errors(TzMaker make) { tz_json_error_maker = make; }
@@ -191,12 +186,11 @@ typedef struct {
 } ErrorParts;
 
 void tz_json_fail(const char *code, TzBuf *message, TzBuf *path) {
+  if (!tz_json_error_maker && strcmp(code, "circular") == 0) {
+    tz_panicf("TypeError: Converting circular structure to JSON");
+  }
   if (!tz_json_error_maker) {
-    if (path) {
-      tz_buf_free(path);
-    }
-    tz_json_throw(strcmp(code, "bad_json") == 0 ? TZ_SYNTAX_ERROR : TZ_TYPE_ERROR, message);
-    return;
+    tz_panicf("internal error: a Json error with nothing to take it (%s)", code);
   }
   ErrorParts parts;
   parts.code = code;

@@ -38,10 +38,10 @@ llvm::Value *NumberLowerer::emitCheckedInteger(llvm::Value *value, const Type *t
                                   llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
   lowering_.functionFrame().switchTo(badBlock);
   lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                    "tz_throw_does_not_fit", lowering_.builder_.getVoidTy(),
+                                    "tz_panic_does_not_fit", lowering_.builder_.getVoidTy(),
                                     {f64, lowering_.builder_.getInt32Ty()}),
                                 {value, lowering_.builder_.getInt32(isInt ? 32 : 64)});
-  lowering_.throwLowerer().emitRuntimeThrow();
+  lowering_.builder_.CreateUnreachable();
   lowering_.functionFrame().switchTo(okBlock);
 
   return lowering_.builder_.CreateFPToSI(value, lowering_.moduleBuilder().lower(to));

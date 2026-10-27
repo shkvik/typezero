@@ -11,8 +11,9 @@
 // - Result, ok and err (docs/errors.md, section 1): Ok and Err print as tz
 //   prints them, except that tz adds where an Err was made.
 // - JSON.parse, decodeURIComponent, decodeURI, URL.parse and Date.parse,
-//   which give a Result in tz, and RegExp.parse and Intl.Locale.parse, which
-//   only tz has; decode of a TextDecoder with fatal, which gives a Result too.
+//   which give a Result in tz, and RegExp.parse, Intl.Locale.parse and
+//   TextDecoder.parse, which only tz has; decode of a TextDecoder with fatal,
+//   which gives a Result too.
 // - "node:fs" and "node:fs/promises" whose functions give a Result
 //   (tz-fs.mjs, tz-fs-promises.mjs), and "node:child_process" whose
 //   execSync, execFileSync and spawnSync give one (tz-child-process.mjs), and
@@ -93,6 +94,15 @@ class Err {
 
 globalThis.ok = (value) => new Ok(value);
 
+// JSON.stringify of a value whose type may hold itself (Json, a tree of
+// classes) gives a Result in tz (docs/errors.md, section 7); a string here
+// answers as an Ok, so a test reads it both ways with unwrapOr and isOk.
+Object.defineProperties(String.prototype, {
+  isOk: { value() { return true; }, configurable: true },
+  isErr: { value() { return false; }, configurable: true },
+  unwrapOr: { value() { return String(this); }, configurable: true },
+});
+
 // Reflect.apply and Reflect.construct give a Result in tz (docs/decorators.md,
 // section 6); the tests compared with node call them only where they work.
 const reflectApply = Reflect.apply;
@@ -161,6 +171,13 @@ globalThis.TextDecoder = class TextDecoder extends globalThis.TextDecoder {
       return new Err({ code: e.code, message: e.message });
     }
   }
+  static parse(label, options) {
+    try {
+      return new Ok(new TextDecoder(label, options));
+    } catch (e) {
+      return new Err({ code: e.code, message: e.message });
+    }
+  }
 };
 Intl.Locale.parse = (tag) => {
   try {
@@ -202,6 +219,24 @@ Intl.Locale.parse = (tag) => {
   stream.Readable.prototype.iterator = function (options) {
     const chunks = iterator.call(this, options);
     return fromTest() ? results(chunks) : chunks;
+  };
+  // The same for a web ReadableStream (the body of fetch): each chunk in a
+  // Result, and so is what read() of its reader gives.
+  const web = globalThis.ReadableStream.prototype;
+  const values = web.values;
+  web[Symbol.asyncIterator] = web.values = function (options) {
+    const chunks = values.call(this, options);
+    return fromTest() ? results(chunks) : chunks;
+  };
+  const readerProto = Object.getPrototypeOf(new globalThis.ReadableStream().getReader());
+  const read = readerProto.read;
+  readerProto.read = async function () {
+    if (!fromTest()) return read.call(this);
+    try {
+      return new Ok(await read.call(this));
+    } catch (e) {
+      return new Err(e);
+    }
   };
 }
 

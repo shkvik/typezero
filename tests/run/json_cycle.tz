@@ -1,0 +1,28 @@
+// JSON.stringify gives a Result when the type of the value may hold itself
+// (docs/errors.md, section 7): Json, a class with a field of its own kind, a
+// tree; an Err with the code "circular" when the value does hold itself
+// (JavaScript throws a TypeError). A type that is a tree by itself gives a
+// string.
+class Node {
+  next: Node | undefined = undefined
+  constructor(public name: string) {}
+}
+const a = new Node("a")
+const b = new Node("b")
+a.next = b
+console.log(JSON.stringify(a))
+b.next = a
+const looped = JSON.stringify(a)
+if (looped.isErr()) console.log(looped.error.code, looped.error.message)
+b.next = undefined
+const j = JSON.parse('{"list": [1, 2]}').unwrapOr(null)
+console.log(JSON.stringify(j).unwrapOr("?"))
+j.self = j
+console.log(JSON.stringify(j).match((t) => t, (e) => e.code))
+j.self = null
+console.log(JSON.stringify(j).unwrapOr("?"))
+class Point {
+  constructor(public x: int, public y: int) {}
+}
+const flat: string = JSON.stringify({ at: new Point(1, 2), tags: ["x"] })
+console.log(flat)

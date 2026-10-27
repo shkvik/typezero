@@ -406,15 +406,38 @@ Expr *DecimalChecker::checkDecimalStatic(CallExpr *call, MemberExpr *member) {
 
 Expr *DecimalChecker::checkRoundingMode(Expr *arg) {
   arg = checker_.argumentChecker().checkArg(arg, Type::string());
-  if (auto *lit = dyn_cast<StringLitExpr>(arg); lit && decimalRoundingMode(lit->value) < 0) {
-    checker_.diags_.error(arg->loc(), "unknown rounding mode '" + utf8(lit->value) +
-                                          "'; the modes are " + kRoundingModes);
+  if (arg->type->isError()) {
+    return arg;
+  }
+  if (auto *lit = dyn_cast<StringLitExpr>(arg)) {
+    if (decimalRoundingMode(lit->value) < 0) {
+      checker_.diags_.error(arg->loc(), "unknown rounding mode '" + utf8(lit->value) +
+                                            "'; the modes are " + kRoundingModes);
+    }
+    return arg;
+  }
+  std::optional<std::vector<std::string>> modes = checker_.literalTypes().knownTexts(arg);
+  if (!modes) {
+    checker_.diags_.error(arg->loc(), std::string("a rounding mode known only when the program "
+                                                  "runs may be no mode; check it first, e.g. "
+                                                  "'if (mode == \"up\" || mode == \"down\")'; the "
+                                                  "modes are ") +
+                                          kRoundingModes);
+    return arg;
+  }
+  for (const std::string &mode : *modes) {
+    std::u16string text(mode.begin(), mode.end());
+    if (decimalRoundingMode(text) < 0) {
+      checker_.diags_.error(arg->loc(), "unknown rounding mode '" + mode + "'; the modes are " +
+                                            kRoundingModes);
+      break;
+    }
   }
 
   return arg;
 }
 
-Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what) {
+Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what, int64_t lo, int64_t hi) {
   arg = checker_.exprChecker().checkExpr(arg, Type::longTy());
   const Type *type = arg->type;
   if (type->isError()) {
@@ -429,6 +452,7 @@ Expr *DecimalChecker::checkDecimalCount(Expr *arg, const char *what) {
     checker_.diags_.error(arg->loc(), message);
     return arg;
   }
+  checker_.indexProofs().requireBetween(arg, lo, hi, what);
 
   return checker_.typeRelations().convert(arg, Type::longTy());
 }
@@ -499,17 +523,21 @@ Expr *DecimalChecker::checkDecimalMethod(CallExpr *call, MemberExpr *member) {
     case 'd':
       arg = checker_.argumentChecker().checkArg(arg, decimal);
       break;
-    case 'p':
-      arg = checkDecimalCount(arg, "the number of decimal places");
+    case 'p': {
+      bool positive = method->builtin == Builtin::DecDiv ||
+                      method->builtin == Builtin::DecToExponential;
+      arg = checkDecimalCount(arg, "the number of decimal places", positive ? 0 : -1000000000,
+                              1000000000);
       break;
+    }
     case 's':
-      arg = checkDecimalCount(arg, "the number of significant digits");
+      arg = checkDecimalCount(arg, "the number of significant digits", 1, 1000000000);
       break;
     case 'b':
-      arg = checkDecimalCount(arg, "the base");
+      arg = checkDecimalCount(arg, "the base", 2, 36);
       break;
     case 'k':
-      arg = checkDecimalCount(arg, "the power of ten");
+      arg = checkDecimalCount(arg, "the power of ten", -9007199254740991, 9007199254740991);
       break;
     default:
       arg = checkRoundingMode(arg);

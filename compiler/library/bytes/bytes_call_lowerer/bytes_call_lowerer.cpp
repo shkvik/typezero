@@ -41,8 +41,6 @@ bool bytesMayThrow(const CallExpr *call) {
   case Builtin::BufferAllocFill:
   case Builtin::BufferFill:
     return true;
-  case Builtin::TextDecoderNew:
-    return constantOf(call->args[0]) == 0;
   case Builtin::BufferFromString:
     return !isConstant(call->args[1]);
   case Builtin::BufferByteLength:
@@ -115,6 +113,7 @@ llvm::Value *BytesCallLowerer::emitBytesCall(CallExpr *call) {
   case Builtin::TextEncode:
   case Builtin::TextEncodeInto:
   case Builtin::TextDecoderNew:
+  case Builtin::TextDecoderParse:
   case Builtin::TextDecode:
   case Builtin::TextDecoderInfo:
     return TextCodecCalls(lowering_, call).emit();

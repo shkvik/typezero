@@ -150,6 +150,9 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
         } else {
           unsigned index =
               unsigned(llvm::find(kOptionNames, field.name) - std::begin(kOptionNames));
+          if (!type->isString()) {
+            value = lowering_.exprLowerer().emitConversion(value, type, Type::string());
+          }
           lowering_.builder_.CreateStore(
               value,
               lowering_.builder_.CreateConstGEP2_32(

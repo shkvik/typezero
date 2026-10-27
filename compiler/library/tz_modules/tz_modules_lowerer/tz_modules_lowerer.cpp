@@ -1,6 +1,7 @@
 #include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
@@ -48,6 +49,8 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
     args.push_back(text);
   } else if (ret->isBool()) {
     cret = i32;
+  } else if (ret->isResult()) {
+    cret = lowering_.moduleBuilder().lower(ret->okType());
   } else if (!ret->isVoid()) {
     cret = lowering_.moduleBuilder().lower(ret);
   }
@@ -95,6 +98,8 @@ void TzModulesLowerer::emitExternal(FunctionDecl *fn) {
   } else if (ret->isBool()) {
     lowering_.builder_.CreateRet(
         lowering_.builder_.CreateICmpNE(result, lowering_.builder_.getInt32(0)));
+  } else if (ret->isResult()) {
+    lowering_.builder_.CreateRet(lowering_.resultLowerer().catchFailure(result, ret, fn->loc()));
   } else if (ret->isVoid()) {
     lowering_.builder_.CreateRetVoid();
   } else {

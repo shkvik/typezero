@@ -1,16 +1,15 @@
-// same-as-node
-// matchAll and replaceAll with a regex without g, known only when the program
-// runs, throw the TypeError of node.
-// expect-exit: 1
-// expect-stderr: TypeError: String.prototype.matchAll called with a non-global RegExp argument
+// matchAll and replaceAll with a regex without g that only the running program
+// knows: JavaScript throws a TypeError, tz takes them for what their names
+// say and finds every match (docs/errors.md, step 5). With a regex literal
+// the missing g is a compile error (tests/errors/regex.tz).
 function count(re: RegExp, text: string): int {
   return [...text.matchAll(re)].length
 }
 console.log(count(/a/g, "banana"))
-// The iterator of matchAll checks the flag when it is made, before any match
-// is asked for, as in JavaScript.
-function matchesOf(re: RegExp, text: string) {
-  return text.matchAll(re)
+function made(flags: string): RegExp {
+  return RegExp.parse("a", flags).unwrapOr(/x/g)
 }
-const matches = matchesOf(new RegExp("a"), "banana")
-console.log("not reached", matches)
+const plain = made("")
+console.log(count(plain, "banana"), count(made("y"), "aab"), plain.lastIndex)
+console.log("banana".replaceAll(plain, "o"), "banana".replaceAll(plain, (m: string) => m.toUpperCase()))
+console.log("banana".replace(plain, "o"), plain.exec("banana")?.index, plain.test("cat"))

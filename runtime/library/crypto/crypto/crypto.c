@@ -92,6 +92,7 @@ typedef struct {
 } FailureParts;
 
 void tz_crypto_fail(int32_t kind, const char *code, const char *format, ...) {
+  (void)kind;
   char text[512];
   va_list args;
   va_start(args, format);
@@ -113,8 +114,7 @@ void tz_crypto_fail(int32_t kind, const char *code, const char *format, ...) {
     return;
   }
   if (!tz_crypto_maker) {
-    tz_throw(kind, "%s", text);
-    return;
+    tz_panicf("internal error: %s", text);
   }
   TzBuf buf;
   tz_buf_init(&buf);
@@ -700,12 +700,7 @@ void tz_crypto_random_fill(TzInstance *view, double offset, double size, int32_t
 }
 
 void tz_crypto_get_random_values(TzBytes *view) {
-  int64_t length = tz_bytes_byte_length(view);
-  if (length > 65536) {
-    tz_crypto_fail(TZ_ERROR, "ERR_OUT_OF_RANGE", "The requested length exceeds 65,536 bytes");
-    return;
-  }
-  tz_crypto_random(view->data, (size_t)length);
+  tz_crypto_random(view->data, (size_t)tz_bytes_byte_length(view));
 }
 
 static double random_below(double range) {
@@ -794,9 +789,7 @@ int32_t tz_crypto_timing_safe_equal(const TzType *at, const void *av, const TzTy
     return 0;
   }
   int32_t equal = 0;
-  if (a.length != b.length) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH", "Input buffers must have the same byte length");
-  } else {
+  if (a.length == b.length) {
     volatile uint8_t diff = 0;
     for (size_t i = 0; i < a.length; ++i) {
       diff |= a.data[i] ^ b.data[i];

@@ -100,7 +100,7 @@ typedef struct {
   int read, write, append, create, truncate, exclusive;
 } OpenFlags;
 
-int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f);
+int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f, TzMaker make);
 
 #ifdef _WIN32
 typedef HANDLE File;

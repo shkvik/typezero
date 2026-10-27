@@ -330,7 +330,7 @@ void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *fl
   if (!fsp_signal(r, signal)) {
     return;
   }
-  if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags)) {
+  if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
     tz_fs_fsp_reject_thrown(r);
     return;
   }
@@ -366,7 +366,7 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
   if (!fsp_signal(r, signal)) {
     return NULL;
   }
-  if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags)) {
+  if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
     tz_fs_fsp_reject_thrown(r);
     return NULL;
   }

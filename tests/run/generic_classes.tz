@@ -168,7 +168,7 @@ class TreeNode<T> {
 const root = new TreeNode("root")
 root.add("a").add("b")
 root.add("c")
-console.log(root.count(), JSON.stringify(root))
+console.log(root.count(), JSON.stringify(root).unwrapOr(""))
 const byName = new Map<string, Pair<int, int>>()
 byName.set("k", new Pair(1, 2))
 console.log(byName)

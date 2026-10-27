@@ -7,6 +7,7 @@
 #include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/buffer_static_checker/buffer_static_checker.h"
 #include "compiler/library/json/json_checker/json_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/library/json/json_type_checker/json_type_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -38,6 +39,44 @@ struct JsonProblem {
   std::string message;
   size_t offset = 0;
 };
+
+bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
+  type = type->nonOptional();
+  if (type->isParam() || type->isAnyObject()) {
+    return false;
+  }
+  if (type->isJson() || (type->isBase() && !type->classDecl()) || type->isUnknown() ||
+      llvm::is_contained(open, type)) {
+    return true;
+  }
+  open.push_back(type);
+  bool may = false;
+  auto fieldsHold = [&](const Type *t) {
+    return llvm::any_of(t->fields(), [&](const Field &f) { return mayHoldItself(f.type, open); });
+  };
+  if (const ClassDecl *cls = type->classDecl()) {
+    std::vector<const ClassDecl *> family{cls};
+    for (size_t i = 0; i < family.size() && !may; ++i) {
+      if (family[i]->type) {
+        may = fieldsHold(family[i]->type);
+      }
+      family.insert(family.end(), family[i]->children.begin(), family[i]->children.end());
+    }
+  } else if (type->isArray()) {
+    may = mayHoldItself(type->inner(), open);
+  } else if (type->isResult()) {
+    may = mayHoldItself(type->okType(), open) || mayHoldItself(type->errType(), open);
+  } else if (type->isDict()) {
+    may = mayHoldItself(type->valueType(), open);
+  } else if (type->isObject()) {
+    may = fieldsHold(type);
+  } else if (type->isUnion()) {
+    may = llvm::any_of(type->members(), [&](const Type *m) { return mayHoldItself(m, open); });
+  }
+  open.pop_back();
+
+  return may;
+}
 
 JsonProblem checkJsonText(llvm::StringRef s) {
   size_t i = 0, n = s.size();
@@ -351,6 +390,10 @@ Expr *JsonStaticChecker::checkJsonStatic(CallExpr *call, MemberExpr *member) {
   call->builtin = Builtin::JsonStringify;
   call->type =
       mayStringifyToUndefined(value->type) ? Type::optional(Type::string()) : Type::string();
+  std::vector<const Type *> open;
+  if (!checker_.libraryCalls().inLibrary(call->loc()) && mayHoldItself(value->type, open)) {
+    call->type = Type::result(call->type, checker_.prelude().builtinType("JsonError"));
+  }
 
   return call;
 }

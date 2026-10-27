@@ -4,6 +4,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/expr/member_checker/member_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/bytes/buffer_checker/buffer_checker.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
@@ -396,8 +397,30 @@ Expr *BytesChecker::checkBufferEncoding(Expr *arg) {
     lit->type = Type::intTy();
     return lit;
   }
+  arg = checker_.argumentChecker().checkArg(arg, Type::string());
+  if (arg->type->isError() || checker_.indexProofs().exempt(arg->loc())) {
+    return arg;
+  }
+  std::optional<std::vector<std::string>> names = checker_.literalTypes().knownTexts(arg);
+  if (!names) {
+    checker_.diags_.error(arg->loc(),
+                          "an encoding known only when the program runs may be one Buffer does "
+                          "not know, which node would throw a TypeError for; check it first, "
+                          "e.g. 'if (enc == \"hex\" || enc == \"base64\")', or give it the type "
+                          "'BufferEncoding'");
+    return arg;
+  }
+  for (const std::string &name : *names) {
+    if (!encodingNamed(name)) {
+      checker_.diags_.error(arg->loc(),
+                            "unknown encoding '" + name +
+                                "' (node throws a TypeError); Buffer knows utf8, utf16le, "
+                                "latin1, ascii, base64, base64url and hex");
+      break;
+    }
+  }
 
-  return checker_.argumentChecker().checkArg(arg, Type::string());
+  return arg;
 }
 
 Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const Type *expected) {

@@ -1,11 +1,7 @@
-callback RangeError: stop at c3
-3 1a 2b
-replaceAll TypeError: String.prototype.replaceAll called with a non-global RegExp argument
-replaceAll g f00
-matchAll TypeError: String.prototype.matchAll called with a non-global RegExp argument
-matchAll g 2
+1a 2b c3 4d
+4 1a 2b
 one,two ottff
-30 closed
+30 10,20
 Привет|мир|Это|тест|ёж|и|Ель true _ривет, мир! _то тест: ёж и _ль.
 [ 'Привет', 'мир', 'Это тест', 'ёж и Ель', '' ] 8 ет,ест,ёж,Ель
 ann@example.com true

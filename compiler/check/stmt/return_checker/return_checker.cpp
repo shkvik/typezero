@@ -292,7 +292,7 @@ bool ReturnChecker::isExit(const Stmt *stmt) {
   auto *s = dyn_cast<ExprStmt>(stmt);
   auto *call = s ? dyn_cast<CallExpr>(s->expr) : nullptr;
 
-  return call && call->builtin == Builtin::ProcessExit;
+  return call && (call->builtin == Builtin::ProcessExit || call->builtin == Builtin::LibPanic);
 }
 
 bool ReturnChecker::alwaysReturns(const Stmt *stmt, llvm::ArrayRef<llvm::StringRef> labels) {

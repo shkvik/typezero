@@ -123,7 +123,7 @@ static void narrow_text(const TzUChar *units, int32_t length, char *out, size_t 
   out[n] = 0;
 }
 
-static const char *option(const TzDateOptions *o, int index, char *out, int kind, int *failed) {
+static const char *option(const TzDateOptions *o, int index, char *out, int kind) {
   if (!(o->present & (1u << index))) {
     return NULL;
   }
@@ -137,10 +137,8 @@ static const char *option(const TzDateOptions *o, int index, char *out, int kind
       found = strcmp(allowed[index][i], out) == 0;
     }
     if (!found) {
-      tz_throw(TZ_RANGE_ERROR, "Value %s out of range for %s options property %s", ok ? out : "?",
-               method_name(kind), option_names[index]);
-      *failed = 1;
-      return NULL;
+      tz_panicf("internal error: the value %s of the option %s of %s", ok ? out : "?",
+                option_names[index], method_name(kind));
     }
   }
 
@@ -351,17 +349,6 @@ static void resolve_parts(Resolved *r, const TzUChar *pattern, int32_t length) {
   r->fractional = digits;
 }
 
-static Resolved *refuse(Resolved *r, void *generator, int32_t kind, const char *format,
-                        const char *value) {
-  if (generator) {
-    tz_icu()->udatpg_close(generator);
-  }
-  tz_free(r);
-  tz_throw(kind, format, value);
-
-  return NULL;
-}
-
 static Resolved *create(const TzDateOptions *o, int kind) {
   const TzIcu *icu = tz_icu();
   if (!icu) {
@@ -391,27 +378,18 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   r->hour12 = -1;
   char buffers[TZ_DTO_COUNT][TEXT];
   const char *values[TZ_DTO_COUNT];
-  int failed = 0;
-  for (int i = 0; i < TZ_DTO_COUNT && !failed; ++i) {
-    values[i] = option(o, i, buffers[i], kind, &failed);
-  }
-  if (failed) {
-    tz_free(r);
-    return NULL;
+  for (int i = 0; i < TZ_DTO_COUNT; ++i) {
+    values[i] = option(o, i, buffers[i], kind);
   }
   if (values[TZ_DTO_CALENDAR] && !tz_intl_is_keyword_type(values[TZ_DTO_CALENDAR])) {
-    return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid calendar : %s", values[TZ_DTO_CALENDAR]);
+    values[TZ_DTO_CALENDAR] = NULL;
   }
   if (values[TZ_DTO_NUMBERING_SYSTEM] &&
       !tz_intl_is_keyword_type(values[TZ_DTO_NUMBERING_SYSTEM])) {
-    return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid numberingSystem : %s",
-                  values[TZ_DTO_NUMBERING_SYSTEM]);
+    values[TZ_DTO_NUMBERING_SYSTEM] = NULL;
   }
   int fractional = 0;
-  if (!isnan(o->fractional)) {
-    if (!(o->fractional >= 1 && o->fractional <= 3)) {
-      return refuse(r, NULL, TZ_RANGE_ERROR, "fractionalSecondDigits value is out of range.%s", "");
-    }
+  if (o->fractional >= 1 && o->fractional <= 3) {
     fractional = (int)floor(o->fractional);
   }
 
@@ -484,13 +462,8 @@ static Resolved *create(const TzDateOptions *o, int kind) {
 
   TzUChar zone[TEXT];
   int32_t zone_length = 0;
-  if (values[TZ_DTO_TIME_ZONE]) {
-    if (!resolve_zone(icu, values[TZ_DTO_TIME_ZONE], r->values[TZ_DTO_TIME_ZONE], zone,
-                      &zone_length)) {
-      return refuse(r, NULL, TZ_RANGE_ERROR, "Invalid time zone specified: %s",
-                    values[TZ_DTO_TIME_ZONE]);
-    }
-  } else {
+  if (!values[TZ_DTO_TIME_ZONE] || !resolve_zone(icu, values[TZ_DTO_TIME_ZONE],
+                                                 r->values[TZ_DTO_TIME_ZONE], zone, &zone_length)) {
     zone_length = tz_date_zone_id(zone, TEXT);
     narrow_text(zone, zone_length, r->values[TZ_DTO_TIME_ZONE], TEXT);
   }
@@ -541,23 +514,21 @@ static Resolved *create(const TzDateOptions *o, int kind) {
   }
 
   const char *date_style = values[TZ_DTO_DATE_STYLE], *time_style = values[TZ_DTO_TIME_STYLE];
-  int explicit_parts = fractional > 0;
-  for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_TIME_ZONE_NAME; ++i) {
-    explicit_parts |= values[i] != NULL;
+  if (kind == TZ_DATE_LOCALE_DATE) {
+    time_style = values[TZ_DTO_TIME_STYLE] = NULL;
+  } else if (kind == TZ_DATE_LOCALE_TIME) {
+    date_style = values[TZ_DTO_DATE_STYLE] = NULL;
+  }
+  if (date_style || time_style) {
+    fractional = 0;
+    for (int i = TZ_DTO_WEEKDAY; i <= TZ_DTO_TIME_ZONE_NAME; ++i) {
+      values[i] = NULL;
+    }
   }
   TzUChar pattern[256];
   int32_t pattern_length = -1;
   void *format = NULL;
   if (date_style || time_style) {
-    if (explicit_parts) {
-      return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "option");
-    }
-    if (kind == TZ_DATE_LOCALE_DATE && time_style) {
-      return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "timeStyle");
-    }
-    if (kind == TZ_DATE_LOCALE_TIME && date_style) {
-      return refuse(r, generator, TZ_TYPE_ERROR, "Invalid option : %s", "dateStyle");
-    }
     status = 0;
     format = icu->udat_open(style_of(time_style), style_of(date_style), locale, zone, zone_length,
                             NULL, -1, &status);
@@ -890,7 +861,7 @@ void tz_dtf_drop(void *object) {
   tz_obj_free(f);
 }
 
-TZ_COLD static void invalid_time(void) { tz_throw(TZ_RANGE_ERROR, "Invalid time value"); }
+TZ_COLD TZ_NORETURN static void invalid_time(void) { tz_panicf("Invalid time value"); }
 
 void tz_dtf_format(TzStr *out, TzDateFormat *f, double t) {
   if (isnan(t)) {

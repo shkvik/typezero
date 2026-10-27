@@ -175,9 +175,8 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(in), givenBlock, noneBlock);
   if (!resultType->isOptional()) {
     lowering_.functionFrame().switchTo(noneBlock);
-    lowering_.throwLowerer().emitThrowNew(1,
-                                          "next() resumed a 'yield' that needs a value of type '" +
-                                              resultType->name().str() + "' without one");
+    lowering_.throwLowerer().emitPanic("next() resumed a 'yield' that needs a value of type '" +
+                                       resultType->name().str() + "' without one");
   }
   lowering_.functionFrame().switchTo(givenBlock);
   llvm::Value *sent =
@@ -285,7 +284,7 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
           lowering_.builder_.getInt32(0)),
       runningBlock, goBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(runningBlock);
-  lowering_.throwLowerer().emitThrowNew(1, "Generator is already running");
+  lowering_.throwLowerer().emitPanic("Generator is already running");
   lowering_.functionFrame().switchTo(goBlock);
   llvm::Value *null = llvm::ConstantPointerNull::get(ptr);
   lowering_.builder_.CreateStore(

@@ -6,7 +6,7 @@ function resetBuffer(state: WritableState) {
 }
 
 function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
-                   cb: StreamCallback): boolean | Error {
+                   cb: StreamCallback): boolean | StreamError {
   const state = writableStateOf(stream)
   let value = chunk
   let enc = encoding ?? ""
@@ -28,9 +28,9 @@ function writeImpl(stream: Stream, chunk: unknown, encoding: string | undefined,
       throw invalidChunk(chunk)
     }
   }
-  let err: Error | undefined = undefined
+  let err: StreamError | undefined = undefined
   if ((state.bits & kEnding) != 0)
-    err = new StreamError("ERR_STREAM_WRITE_AFTER_END", "write after end")
+    err = failure("ERR_STREAM_WRITE_AFTER_END", "write after end")
   else if ((state.bits & kDestroyed) != 0) err = streamDestroyed("write")
   if (err != undefined) {
     const failed = err
@@ -86,14 +86,14 @@ function doWritev(stream: Stream, state: WritableState, len: int, chunks: Buffer
   state.bits &= ~kWSync
 }
 
-function onwriteError(stream: Stream, state: WritableState, er: Error, cb: StreamCallback) {
+function onwriteError(stream: Stream, state: WritableState, er: StreamError, cb: StreamCallback) {
   --state.pendingcb
   cb(er)
   errorBuffer(stream, state)
   errorOrDestroy(stream, er)
 }
 
-function onwrite(stream: Stream, er: Error | undefined) {
+function onwrite(stream: Stream, er: StreamError | undefined) {
   const state = writableStateOf(stream)
   if ((state.bits & kExpectWriteCb) == 0) {
     errorOrDestroy(stream, multipleCallback())
@@ -208,7 +208,7 @@ function clearBuffer(stream: Stream, state: WritableState) {
     const start = i
     const callback: StreamCallback = (state.bits & kAllNoop) != 0
       ? nop
-      : (err?: Error) => {
+      : (err?: StreamError) => {
           for (let n = start; n < buffered.length; ++n) {
             const entry = buffered[n]
             if (entry != undefined) entry.callback(err)
@@ -248,7 +248,7 @@ function needFinish(stream: Stream, state: WritableState): boolean {
     stream.writableLength == 0
 }
 
-function onFinish(stream: Stream, state: WritableState, err: Error | undefined) {
+function onFinish(stream: Stream, state: WritableState, err: StreamError | undefined) {
   if ((state.bits & kPrefinished) != 0) {
     errorOrDestroy(stream, err ?? multipleCallback())
     return
@@ -272,7 +272,7 @@ function prefinish(stream: Stream, state: WritableState) {
     state.bits |= kFinalCalled | kWSync
     state.pendingcb++
     try {
-      stream._final((err?: Error) => onFinish(stream, state, err))
+      stream._final((err?: StreamError) => onFinish(stream, state, err))
     } catch (err) {
       onFinish(stream, state, err)
     }
@@ -318,7 +318,7 @@ function finish(stream: Stream, state: WritableState) {
   }
 }
 
-function callFinishedCallbacks(state: WritableState, err: Error | undefined) {
+function callFinishedCallbacks(state: WritableState, err: StreamError | undefined) {
   if ((state.bits & kOnFinished) == 0) return
   const onfinishCallbacks = state.onFinished
   state.onFinished = []
@@ -326,7 +326,7 @@ function callFinishedCallbacks(state: WritableState, err: Error | undefined) {
   for (const cb of onfinishCallbacks) cb(err)
 }
 
-function checkError(stream: Stream, err: Error | undefined) {
+function checkError(stream: Stream, err: StreamError | undefined) {
   if (err == undefined) return
   const w = stream._writableState
   const r = stream._readableState
@@ -340,7 +340,7 @@ function checkError(stream: Stream, err: Error | undefined) {
   }
 }
 
-function destroyImpl(stream: Stream, err: Error | undefined, cb: StreamCallback | undefined) {
+function destroyImpl(stream: Stream, err: StreamError | undefined, cb: StreamCallback | undefined) {
   const r = stream._readableState
   const w = stream._writableState
   if ((w != undefined && (w.bits & kDestroyed) != 0) ||
@@ -354,16 +354,16 @@ function destroyImpl(stream: Stream, err: Error | undefined, cb: StreamCallback 
   sync(stream)
   const s = w ?? r
   if (s != undefined && (s.bits & kConstructed) == 0) {
-    stream._onDestroy.push((er: Error | undefined) =>
+    stream._onDestroy.push((er: StreamError | undefined) =>
       destroyNow(stream, aggregateTwoErrors(er, err), cb))
   } else {
     destroyNow(stream, err, cb)
   }
 }
 
-function destroyNow(self: Stream, err: Error | undefined, cb: StreamCallback | undefined) {
+function destroyNow(self: Stream, err: StreamError | undefined, cb: StreamCallback | undefined) {
   let called = false
-  function onDestroy(error?: Error) {
+  function onDestroy(error?: StreamError) {
     if (called) return
     called = true
     checkError(self, error)
@@ -401,7 +401,7 @@ function emitCloseNT(self: Stream) {
     self.emit("close")
 }
 
-function emitErrorNT(self: Stream, err: Error) {
+function emitErrorNT(self: Stream, err: StreamError) {
   const r = self._readableState
   const w = self._writableState
   if ((w != undefined && (w.bits & kErrorEmitted) != 0) ||
@@ -413,7 +413,7 @@ function emitErrorNT(self: Stream, err: Error) {
   self.emit("error", err)
 }
 
-function errorOrDestroy(stream: Stream, err: Error, isSync = false) {
+function errorOrDestroy(stream: Stream, err: StreamError, isSync = false) {
   const r = stream._readableState
   const w = stream._writableState
   if ((w != undefined && (w.bits & kDestroyed) != 0) ||
@@ -449,7 +449,7 @@ function construct(stream: Stream, cb: () => void) {
 
 function constructNT(stream: Stream) {
   let called = false
-  function onConstruct(err?: Error) {
+  function onConstruct(err?: StreamError) {
     if (called) {
       errorOrDestroy(stream, err ?? multipleCallback())
       return
@@ -474,7 +474,7 @@ function constructNT(stream: Stream) {
     sync(stream)
   }
   try {
-    stream._construct((err?: Error) => {
+    stream._construct((err?: StreamError) => {
       process.nextTick(() => onConstruct(err))
     })
   } catch (err) {
@@ -482,7 +482,7 @@ function constructNT(stream: Stream) {
   }
 }
 
-function destroyer(stream: Stream, err: Error | undefined) {
+function destroyer(stream: Stream, err: StreamError | undefined) {
   if (isDestroyed(stream)) return
   let error = err
   if (error == undefined && !isFinished(stream)) error = new AbortError()
@@ -557,7 +557,7 @@ function willEmitClose(stream: Stream): boolean {
     (state.bits & kEmitClose) != 0 && (state.bits & kClosed) == 0
 }
 
-function erroredOf(stream: Stream): Error | undefined {
+function erroredOf(stream: Stream): StreamError | undefined {
   return stream._writableState?.errored ?? stream._readableState?.errored
 }
 
@@ -600,7 +600,7 @@ class Eos {
     this.closed = isClosed(stream)
   }
 
-  call(err?: Error) {
+  call(err?: StreamError) {
     const callback = this.callback
     this.callback = nop
     callback(err)
@@ -663,7 +663,7 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
   const onend = function (this: Stream) {
     e.endEvent(this)
   }
-  const onerror = function (this: Stream, err: Error) {
+  const onerror = function (this: Stream, err: StreamError) {
     void this
     e.call(err)
   }
@@ -708,7 +708,7 @@ function eos(stream: Stream, options: FinishedOptions | undefined,
       const onAbort = (_event: Event) => abort()
       signal.addFunctionListener<Event>("abort", onAbort, { once: true })
       const originalCallback = e.callback
-      e.callback = (err?: Error) => {
+      e.callback = (err?: StreamError) => {
         signal.removeListenerOf("abort", onAbort, false)
         originalCallback(err)
       }
@@ -722,11 +722,11 @@ export function finished() {}
 export function compose() {}
 
 export function finishedPromise(stream: Stream, options?: FinishedOptions):
-    Promise<Result<void, Error>> {
+    Promise<Result<void, StreamError>> {
   const autoCleanup = options?.cleanup ?? false
-  return new Promise<Result<void, Error>>((resolve) => {
+  return new Promise<Result<void, StreamError>>((resolve) => {
     let cleanup: () => void = () => {}
-    cleanup = eos(stream, options, (error?: Error) => {
+    cleanup = eos(stream, options, (error?: StreamError) => {
       if (autoCleanup) cleanup()
       if (error != undefined) resolve(err(error))
       else resolve(ok())

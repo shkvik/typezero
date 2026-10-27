@@ -74,7 +74,7 @@ const style = d.toLocaleDateString("en", { timeStyle: "short" })
 const mixed = d.toLocaleString("en", { dateStyle: "short", hour: "numeric" })
 // expect-error: the option 'hour12' is a boolean, found 'string'
 const hour12 = d.toLocaleString("en", { hour12: "yes" })
-// expect-error: fractionalSecondDigits is from 1 to 3
+// expect-error: fractionalSecondDigits must be from 1 to 3, found 4
 const digits = new Intl.DateTimeFormat("ru", { fractionalSecondDigits: 4 })
 // expect-error: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which toLocaleTimeString takes
 const numbers = d.toLocaleTimeString(process.argv[1] ?? "ru")
@@ -89,3 +89,15 @@ const maybe: Date | undefined = undefined
 const defined = maybe instanceof Date
 // expect-error: a 'string' is never a 'Date', so 'instanceof Date' is always false
 const never = "x" instanceof Date
+
+// Options from variables: a value of a list must be known when the program is
+// built (a literal, a narrowed string, a literal type).
+const width = process.argv[2] ?? "long"
+// expect-error: the option 'month' known only when the program runs may be no value of it, which JavaScript would throw a RangeError for; check it first, e.g. 'if (width == "2-digit" || width == "numeric")'
+const byWidth = d.toLocaleDateString("en", { month: width })
+if (width == "long" || width == "short") console.log(d.toLocaleDateString("en", { month: width }))
+const given: Intl.DateTimeFormatOptions = { month: "long", fractionalSecondDigits: 2 }
+console.log(d.toLocaleString("en", given))
+const count = process.argv.length
+// expect-error: cannot prove that fractionalSecondDigits is from 1 to 3
+const someDigits = d.toLocaleTimeString("en", { fractionalSecondDigits: count })

@@ -1,7 +1,7 @@
 import { Stream, streamChunks } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
 
-export async function text(stream: Stream): Promise<Result<string, Error>> {
+export async function text(stream: Stream): Promise<Result<string, StreamError>> {
   const dec = new StringDecoder("utf8")
   let str = ""
   try {
@@ -16,7 +16,7 @@ export async function text(stream: Stream): Promise<Result<string, Error>> {
   return ok(str)
 }
 
-export async function json(stream: Stream): Promise<Result<Json, Error | JsonError>> {
+export async function json(stream: Stream): Promise<Result<Json, StreamError | JsonError>> {
   const content = await text(stream)
   if (content.isErr()) return err(content.error)
   const parsed = JSON.parse(content.value)
@@ -24,7 +24,7 @@ export async function json(stream: Stream): Promise<Result<Json, Error | JsonErr
   return ok(parsed.value)
 }
 
-export async function buffer(stream: Stream): Promise<Result<Buffer, Error>> {
+export async function buffer(stream: Stream): Promise<Result<Buffer, StreamError>> {
   const chunks: Buffer[] = []
   try {
     for await (const chunk of streamChunks(stream)) {
@@ -37,7 +37,7 @@ export async function buffer(stream: Stream): Promise<Result<Buffer, Error>> {
   return ok(Buffer.concat(chunks))
 }
 
-export async function arrayBuffer(stream: Stream): Promise<Result<ArrayBuffer, Error>> {
+export async function arrayBuffer(stream: Stream): Promise<Result<ArrayBuffer, StreamError>> {
   const all = await buffer(stream)
   if (all.isErr()) return err(all.error)
   const copy = new Uint8Array(all.value.length)

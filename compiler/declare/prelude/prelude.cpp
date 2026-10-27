@@ -23,13 +23,47 @@ type Readonly<T> = { readonly [K in keyof T]: T[K] }
 type Pick<T, K extends keyof T> = { [P in K]: T[P] }
 type Omit<T, K extends keyof T> = { [P in Exclude<keyof T, K>]: T[P] }
 type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T
-type JsonError = { code: "bad_json" | "bad_field" | "bad_class"; message: string; path: string }
+type JsonError = {
+  code: "bad_json" | "bad_field" | "bad_class" | "circular"
+  message: string
+  path: string
+}
+type BufferEncoding =
+  | "ascii"
+  | "utf8"
+  | "utf-8"
+  | "utf16le"
+  | "utf-16le"
+  | "ucs2"
+  | "ucs-2"
+  | "base64"
+  | "base64url"
+  | "latin1"
+  | "binary"
+  | "hex"
 type UriError = { code: "bad_uri"; message: string }
+type StreamError = {
+  code: string
+  message: string
+  errno?: int
+  syscall?: string
+  path?: string
+  cause?: string
+}
+type SystemError = {
+  code: string
+  message: string
+  errno: int
+  syscall: string
+  path?: string
+  dest?: string
+}
 type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
 type DateError = { code: "bad_date"; message: string; text: string }
 type LocaleError = { code: "bad_locale"; message: string; tag: string }
 type DecodeError = { code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
+type EncodingError = { code: "ERR_ENCODING_NOT_SUPPORTED"; message: string }
 type DecimalError = { code: "bad_decimal"; message: string; text: string }
 type AbortError = { code: "ABORT_ERR"; message: string }
 type CryptoError = { code: string; message: string }

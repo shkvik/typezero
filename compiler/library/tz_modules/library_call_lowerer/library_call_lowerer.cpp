@@ -6,6 +6,7 @@
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 
 using llvm::BasicBlock;
 using llvm::cast;
@@ -78,6 +79,19 @@ llvm::Value *LibraryCallLowerer::emitLibBuiltin(CallExpr *call) {
     return lowering_.streamLowerer().emitStreamBuiltin(call);
   case Builtin::LibAhead:
     return lowering_.exprLowerer().emitExpr(call->args[0]);
+  case Builtin::LibPanic: {
+    llvm::Value *text = lowering_.exprLowerer().emitExpr(call->args[0]);
+    llvm::FunctionCallee panic = lowering_.processLowerer().processFunction(
+        "tz_panic_str", lowering_.builder_.getVoidTy(), {ptr, lowering_.builder_.getInt64Ty()});
+    cast<llvm::Function>(panic.getCallee())->addFnAttr(llvm::Attribute::NoReturn);
+    lowering_.builder_
+        .CreateCall(panic, {lowering_.stringLowerer().stringObj(text),
+                            lowering_.stringLowerer().stringMeta(text)})
+        ->setDoesNotReturn();
+    lowering_.builder_.CreateUnreachable();
+    lowering_.functionFrame().startDeadBlock();
+    return nullptr;
+  }
   case Builtin::LibOrder:
     if (lowering_.parallel_) {
       lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(

@@ -1,3 +1,4 @@
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/whole_program/whole_program_pass/whole_program_pass.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/classes/class_links/class_links.h"
@@ -38,7 +39,7 @@ Errors WholeProgramPass::run(Program &program) const {
   for (ClassDecl *kind : checker.errorKinds_) {
     file.items.push_back(kind);
   }
-  file.items.push_back(checker.systemErrorClass_);
+  file.systemError = checker.prelude().builtinType("SystemError");
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {
     if ((cls->generic || (cls->expression && cls->type)) && cls->isEmitted()) {

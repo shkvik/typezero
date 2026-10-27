@@ -115,21 +115,9 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
         lowering_.builder_.getInt32(last - cls->id));
     lowering_.builder_.CreateCondBr(matches, callBlock, failBlock);
     lowering_.builder_.SetInsertPoint(failBlock);
-    std::string message = cls->name.str() + "." + fn->name.str() +
-                          " was called with a 'this' that is not an instance of " + cls->name.str();
-    llvm::Value *text =
-        lowering_.stringLowerer().stringLiteral(std::u16string(message.begin(), message.end()));
-    lowering_.builder_.CreateCall(
-        lowering_.unknownLowerer().unknownFunction(
-            "tz_throw_str", lowering_.builder_.getVoidTy(),
-            {lowering_.builder_.getInt32Ty(), ptr, lowering_.builder_.getInt64Ty()}),
-        {lowering_.builder_.getInt32(1), lowering_.stringLowerer().stringObj(text),
-         lowering_.stringLowerer().stringMeta(text)});
-    for (size_t i = 1; i < implType->params().size(); ++i) {
-      lowering_.refCounts().releaseValue(adapter->getArg(unsigned(i + 1)), implType->params()[i]);
-    }
-    finish(ret->isVoid() ? nullptr
-                         : llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(ret)));
+    lowering_.throwLowerer().emitPanic("TypeError: " + cls->name.str() + "." + fn->name.str() +
+                                       " was called with a 'this' that is not an instance of " +
+                                       cls->name.str());
     lowering_.builder_.SetInsertPoint(callBlock);
   }
   std::vector<llvm::Value *> args;

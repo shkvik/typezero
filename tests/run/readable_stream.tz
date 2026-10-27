@@ -1,7 +1,8 @@
 // same-as-node
 // ReadableStream, as the bodies of fetch have it: made with start and
-// pull, sync or async; read with getReader() and with for await; cancel,
-// an error of the source, locked; how it prints.
+// pull, sync or async; read with getReader() and with for await, where each
+// chunk comes in a Result and an error of the source is an Err (docs/errors.md,
+// step 5); cancel; how it prints.
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
@@ -20,8 +21,10 @@ const reader = pulled.getReader()
 console.log(pulled.locked)
 for (;;) {
   const r = await reader.read()
-  if (r.done) break
-  console.log("read", r.value)
+  if (r.isErr()) break
+  const step = r.value
+  if (step.done) break
+  console.log("read", step.value)
 }
 reader.releaseLock()
 console.log(pulled.locked)
@@ -34,19 +37,18 @@ const bytes = new ReadableStream({
   },
 })
 let text = ""
-for await (const chunk of bytes) text += dec.decode(chunk)
+for await (const chunk of bytes) if (chunk.isOk()) text += dec.decode(chunk.value)
 console.log(text)
 
 const failing = new ReadableStream<int>({
   start: c => {
     c.enqueue(1)
-    c.error(new Error("source failed"))
+    c.error({ code: "source", message: "source failed" })
   },
 })
-try {
-  for await (const n of failing) console.log("got", n)
-} catch (e) {
-  console.log("caught", e.message)
+for await (const n of failing) {
+  if (n.isOk()) console.log("got", n.value)
+  else console.log("failed", n.error.message)
 }
 
 let cancelled = ""
@@ -59,17 +61,10 @@ const endless = new ReadableStream<int>({
   },
 })
 for await (const n of endless) {
-  console.log("first", n)
+  console.log("first", n.isOk() ? n.value : 0)
   break
 }
 console.log("cancelled:", cancelled)
 const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason?.message ?? "" } })
-await other.cancel(new Error("enough"))
+await other.cancel({ code: "enough", message: "enough" })
 console.log("cancelled:", cancelled, other)
-try {
-  const r = new ReadableStream()
-  r.getReader()
-  r.getReader()
-} catch (e) {
-  console.log(e.name, e.message)
-}

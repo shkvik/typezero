@@ -90,7 +90,7 @@ static uint8_t *room(Decoder *d, size_t *available) {
   return d->out + d->length;
 }
 
-static void fail(const char *message) { tz_thrown = net_error(TZ_ERROR, message, NULL); }
+static void fail(const char *message) { tz_failed = net_failure("Z_DATA_ERROR", message); }
 
 static int start_zlib(Decoder *d, const uint8_t *data, size_t length) {
   if (d->kind == CODING_DEFLATE && length >= 2) {
@@ -180,7 +180,7 @@ static TzBytes *take(Decoder *d) {
 }
 
 void *tz_zlib_push(void *decoder, void *chunk, TzMaker make) {
-  (void)make;
+  tz_net_make = make;
   Decoder *d = (Decoder *)decoder;
   const TzBytes *b = (const TzBytes *)chunk;
   if (!feed(d, b->data, (size_t)tz_bytes_byte_length(b))) {
@@ -191,7 +191,7 @@ void *tz_zlib_push(void *decoder, void *chunk, TzMaker make) {
 }
 
 void *tz_zlib_end(void *decoder, TzMaker make) {
-  (void)make;
+  tz_net_make = make;
   Decoder *d = (Decoder *)decoder;
   if (!d->ended && (d->started || d->kind == CODING_BR)) {
     fail("unexpected end of file");

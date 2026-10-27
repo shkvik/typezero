@@ -368,6 +368,7 @@ declare module "tz:http" {
 
   // Starts a server on `hostname` (0.0.0.0) and `port` (8000; 0 for any free
   // one, which server.port then tells), answering each request with
-  // `handler`; of https with `tls`.
-  export function serve(options: ServeOptions, handler: Handler): Server
+  // `handler`; of https with `tls`. A port that is taken, a host that is not
+  // found or a certificate that cannot be read give an Err.
+  export function serve(options: ServeOptions, handler: Handler): Result<Server, SystemError>
 }

@@ -37,4 +37,6 @@ bc 99 hi ok
 {"type":"Buffer","data":[104,105]} <Buffer 68 65> <Buffer > <Buffer 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ... 10 more bytes>
 { encoding: 'utf-8' } TextDecoder { encoding: 'utf-8', fatal: false, ignoreBOM: false } TextDecoder { encoding: 'utf-16le', fatal: true, ignoreBOM: false }
 ERR_ENCODING_INVALID_ENCODED_DATA The encoded data was not valid for encoding utf-8
-аА При
+ERR_ENCODING_NOT_SUPPORTED: The "foo" encoding is not supported
+аА
+При

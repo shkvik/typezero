@@ -444,16 +444,14 @@ TZ_HOT int32_t tz_to_int32(double x) {
   return tz_to_int32_slow(x);
 }
 
-TZ_COLD void tz_throw_does_not_fit(double x, int32_t bits) {
+TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, int32_t bits) {
   char text[32];
   text[tz_format_f64(x, text)] = 0;
-  tz_throw(TZ_RANGE_ERROR, "%s does not fit in %s", text, bits == 32 ? "int" : "long");
+  tz_panicf("%s does not fit in %s", text, bits == 32 ? "int" : "long");
 }
 
 TZ_COLD int32_t tz_checked_int32_of_long(int64_t x) {
-  tz_throw(TZ_RANGE_ERROR, "%lld does not fit in int", (long long)x);
-
-  return 0;
+  tz_panicf("%lld does not fit in int", (long long)x);
 }
 
 void tz_debugger(void) {
@@ -470,6 +468,19 @@ TZ_NORETURN void tz_panic(const char *message, int64_t len) {
   stream_write(&tz_err_stream, message, (size_t)len);
   stream_write(&tz_err_stream, "\n", 1);
   exit(2);
+}
+
+TZ_NORETURN void tz_panic_str(void *obj, uint64_t meta) {
+  TzBuf units;
+  tz_buf_init(&units);
+  tz_buf_str(&units, (TzStr){obj, meta});
+  char text[512];
+  size_t n = 0;
+  for (size_t i = 0; i < units.length && n + 1 < sizeof text; ++i) {
+    text[n++] = units.data[i] < 0x80 ? (char)units.data[i] : '?';
+  }
+  tz_buf_free(&units);
+  tz_panic(text, (int64_t)n);
 }
 
 TZ_NORETURN void tz_panicf(const char *format, ...) {

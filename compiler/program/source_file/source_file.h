@@ -21,6 +21,7 @@ struct SourceFile {
   bool topLevelAwait = false;
   bool comparesFunctions = false;
   bool usesTls = false;
+  const Type *systemError = nullptr;
   llvm::SmallPtrSet<const FunctionDecl *, 8> unusedFunctions;
   std::vector<FunctionDecl *> instances;
   std::vector<const Type *> subtypes;

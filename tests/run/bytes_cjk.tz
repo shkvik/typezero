@@ -7,6 +7,8 @@
 // here: node decodes some bytes of big5, euc-jp, shift_jis and euc-kr as ICU
 // does, not as the standard (tests/run/bytes_cjk_whatwg.tz).
 
+type Label = "gbk" | "gb18030" | "big5" | "euc-jp" | "iso-2022-jp" | "shift_jis" | "euc-kr" | "utf-8" |
+  "utf-16le" | "utf-16be" | "windows-1251"
 const digits = "0123456789abcdef"
 function hex(s: string): string {
   const out: string[] = []
@@ -21,7 +23,7 @@ function hex(s: string): string {
   }
   return out.join(" ")
 }
-function show(name: string, bytes: Uint8Array) {
+function show(name: Label, bytes: Uint8Array) {
   const text = new TextDecoder(name).decode(bytes)
   console.log(name, JSON.stringify(text), hex(text))
 }
@@ -52,7 +54,7 @@ show("shift_jis", new Uint8Array([0x93, 0x20, 0xff, 0xa0, 0x93]))
 show("euc-kr", new Uint8Array([0xc7, 0x20, 0xc7, 0xff, 0xff, 0xc7]))
 
 // A fatal decoder gives an Err at the first broken sequence.
-const broken = [
+const broken: { name: Label; bad: int }[] = [
   { name: "gbk", bad: 0xd6 },
   { name: "big5", bad: 0xa4 },
   { name: "euc-jp", bad: 0xc6 },
@@ -68,7 +70,7 @@ for (const { name, bad } of broken) {
 }
 
 // A stream: each chunk gives the characters it ends.
-function chunks(name: string, parts: int[][]) {
+function chunks(name: Label, parts: int[][]) {
   const decoder = new TextDecoder(name)
   const out: string[] = []
   for (const part of parts) out.push(decoder.decode(Uint8Array.from(part, x => x & 0xff), { stream: true }))
@@ -95,10 +97,11 @@ const again = new TextDecoder("utf-8")
 console.log(again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x61]), { stream: true }), again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x62])), again.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x63])))
 console.log(JSON.stringify(new TextDecoder("utf-8", { ignoreBOM: true }).decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x64]))))
 
-// Labels known only when the program runs: the program holds every table.
+// Labels known only when the program runs (TextDecoder.parse): the program
+// holds every table.
 const labels = ["GB2312", " gbk ", "x-gbk", "gb18030", "big5-hkscs", "EUC-JP", "csISO2022JP", "x-sjis", "ks_c_5601-1987", "windows-1252"]
 for (const label of labels) {
-  const decoder = new TextDecoder(label)
-  console.log(JSON.stringify(label), decoder.encoding, hex(decoder.decode(new Uint8Array([0xb0, 0xa1, 0x41]))))
+  const decoder = TextDecoder.parse(label)
+  if (decoder.isOk()) console.log(JSON.stringify(label), decoder.value.encoding, hex(decoder.value.decode(new Uint8Array([0xb0, 0xa1, 0x41]))))
 }
 console.log(new TextDecoder("SHIFT_JIS"))

@@ -498,6 +498,15 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
                                          "embedded");
   }
   case Builtin::JsonStringify: {
+    bool fallible = call->type->isResult();
+    const Type *textType = fallible ? call->type->okType() : call->type;
+    if (fallible) {
+      useErrors(call->type->errType());
+    } else {
+      lowering_.builder_.CreateCall(
+          jsonFunction("tz_json_errors", lowering_.builder_.getVoidTy(), {ptr}),
+          {llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
+    }
     Expr *value = call->args[0];
     bool hasSpace = call->args.size() == 2;
     Lowering::Operand operand = lowering_.refCounts().emitOperand(
@@ -527,13 +536,19 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
          spaceObj, spaceMeta});
     lowering_.refCounts().dropOperand(space);
     lowering_.refCounts().dropOperand(operand);
-    lowering_.emitThrowCheckIf(stringifyMayThrow(value->type));
-    llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
-    if (!call->type->isOptional()) {
-      return text;
+    auto written = [&]() -> llvm::Value * {
+      llvm::Value *text = lowering_.builder_.CreateLoad(lowering_.strTy_, out);
+      if (!textType->isOptional()) {
+        return text;
+      }
+      return lowering_.optionalLowerer().makeOptional(
+          text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)),
+          textType);
+    };
+    if (!fallible) {
+      return written();
     }
-    return lowering_.optionalLowerer().makeOptional(
-        text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)), call->type);
+    return lowering_.resultLowerer().catchFailure(call->type, call->loc(), written);
   }
   case Builtin::ArrayIsArray: {
     Expr *arg = call->args[0];

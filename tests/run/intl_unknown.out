@@ -1,8 +1,9 @@
-RangeError: Invalid currency code : US
-RangeError: Invalid unit argument for Intl.NumberFormat() 'parsec'
-RangeError: Value need to be finite number for Intl.RelativeTimeFormat.prototype.format()
-RangeError: Invalid unit argument for Intl.NumberFormat() ''
-RangeError: Invalid numberingSystem : a
+1.5
+€1.50
+2
+in 3 days
+decimal
+12
 latn
 en
 en-u-nu-arab
@@ -13,7 +14,8 @@ auto
 always
 min2
 05
-RangeError: Invalid collation : x
+default
+default
 1
 1.00 US dollars
 0

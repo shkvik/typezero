@@ -125,8 +125,17 @@ typedef struct {
 void tz_reflect_fail_str(const char *code, uint32_t code_length, void *message_obj,
                          uint64_t message_meta) {
   if (!tz_reflect_maker) {
-    tz_throw_str(TZ_TYPE_ERROR, message_obj, message_meta);
-    return;
+    TzBuf units;
+    tz_buf_init(&units);
+    tz_buf_str(&units, (TzStr){message_obj, message_meta});
+    char text[512];
+    size_t n = 0;
+    for (size_t i = 0; i < units.length && n + 1 < sizeof text; ++i) {
+      text[n++] = units.data[i] < 0x80 ? (char)units.data[i] : '?';
+    }
+    text[n] = 0;
+    tz_buf_free(&units);
+    tz_panicf("TypeError: %s", text);
   }
   char text[32];
   snprintf(text, sizeof text, "%.*s", (int)code_length, code);
@@ -150,8 +159,7 @@ TZ_COLD static void reflect_fail(const char *code, const char *format, ...) {
     length = (int)sizeof text - 1;
   }
   if (!tz_reflect_maker) {
-    tz_throw(TZ_TYPE_ERROR, "%s", text);
-    return;
+    tz_panicf("TypeError: %s", text);
   }
   TzBuf buf;
   tz_buf_init(&buf);

@@ -1,4 +1,5 @@
 #include "runtime/library/intl/intl/intl.h"
+#include "runtime/core/output/output.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
@@ -81,8 +82,7 @@ TzIntl *tz_rtf_create(const TzIntlOptions *o) {
     return NULL;
   }
   if (numbering && !tz_intl_is_keyword_type(numbering)) {
-    tz_throw(TZ_RANGE_ERROR, "Invalid numberingSystem : %s", numbering);
-    return NULL;
+    numbering = NULL;
   }
   const char *style = tz_intl_option(o, TZ_IO_STYLE, widths, b[2], method, &failed);
   const char *numeric = tz_intl_option(o, TZ_IO_NUMERIC, numerics, b[3], method, &failed);
@@ -170,14 +170,10 @@ static void *rtf_result(TzRelativeTimeFormat *f, double value, void *unit_obj, u
   TzStr unit = {unit_obj, unit_meta};
   int which = rtf_unit(unit, singular);
   if (which < 0) {
-    char text[64];
-    tz_throw(TZ_RANGE_ERROR, "Invalid unit argument for %s '%s'", method,
-             tz_intl_ascii(unit, text, sizeof text) ? text : "?");
-    return NULL;
+    tz_panicf("internal error: a unit %s does not know", method);
   }
   if (!isfinite(value)) {
-    tz_throw(TZ_RANGE_ERROR, "Value need to be finite number for %s", method);
-    return NULL;
+    tz_panicf("Value need to be finite number for %s", method);
   }
   const TzIcu *icu = tz_icu();
   TzUErrorCode status = 0;
@@ -360,8 +356,7 @@ TzIntl *tz_dn_create(const TzIntlOptions *o) {
   const char *style = tz_intl_option(o, TZ_IO_STYLE, widths, b[1], method, &failed);
   const char *type = tz_intl_option(o, TZ_IO_TYPE, types, b[2], method, &failed);
   if (!failed && !type) {
-    tz_throw(TZ_TYPE_ERROR, "invalid_argument");
-    failed = 1;
+    tz_panicf("internal error: Intl.DisplayNames without a type");
   }
   const char *fallback = tz_intl_option(o, TZ_IO_FALLBACK, fallbacks, b[3], method, &failed);
   const char *display = tz_intl_option(o, TZ_IO_LANGUAGE_DISPLAY, displays, b[4], method, &failed);

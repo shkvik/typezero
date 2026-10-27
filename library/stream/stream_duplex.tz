@@ -2,7 +2,7 @@ export type StreamEvents<T> = {
   close: []
   data: [chunk: T]
   end: []
-  error: [err: Error]
+  error: [err: StreamError]
   pause: []
   readable: []
   resume: []
@@ -29,7 +29,7 @@ export interface ReadableOptions<T> {
   autoDestroy?: boolean
   signal?: AbortSignal
   read?: (this: Readable<T>, size: int) => void
-  destroy?: (this: Readable<T>, error: Error | undefined, callback: StreamCallback) => void
+  destroy?: (this: Readable<T>, error: StreamError | undefined, callback: StreamCallback) => void
   construct?: (this: Readable<T>, callback: StreamCallback) => void
 }
 
@@ -41,7 +41,7 @@ function chunkEncoding(kind: int, objectMode: boolean, encoding: string | undefi
 export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
   #readOption: ((this: Readable<T>, size: int) => void) | undefined
   #destroyOption:
-    | ((this: Readable<T>, error: Error | undefined, callback: StreamCallback) => void)
+    | ((this: Readable<T>, error: StreamError | undefined, callback: StreamCallback) => void)
     | undefined
   #constructOption: ((this: Readable<T>, callback: StreamCallback) => void) | undefined
 
@@ -72,7 +72,7 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     read.call(this, size)
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     const destroy = this.#destroyOption
     if (destroy == undefined) callback(error)
     else destroy.call(this, error, callback)
@@ -97,23 +97,23 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     return chunk == undefined ? undefined : __tz_chunk<T>(chunk)
   }
 
-  [Symbol.asyncIterator](): AsyncGenerator<Result<T, Error>> {
+  [Symbol.asyncIterator](): AsyncGenerator<Result<T, StreamError>> {
     return resultChunks<T>(createAsyncIterator<T>(this, true))
   }
 
-  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<Result<T, Error>> {
+  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<Result<T, StreamError>> {
     return resultChunks<T>(createAsyncIterator<T>(this, options?.destroyOnReturn ?? true))
   }
 }
 
-async function* resultChunks<T>(source: AsyncGenerator<T>): AsyncGenerator<Result<T, Error>> {
+async function* resultChunks<T>(source: AsyncGenerator<T>): AsyncGenerator<Result<T, StreamError>> {
   try {
     for await (const chunk of source) {
-      const item: Result<T, Error> = ok(chunk)
+      const item: Result<T, StreamError> = ok(chunk)
       yield item
     }
   } catch (e) {
-    const item: Result<T, Error> = err(e)
+    const item: Result<T, StreamError> = err(e)
     yield item
   }
 }
@@ -121,7 +121,7 @@ async function* resultChunks<T>(source: AsyncGenerator<T>): AsyncGenerator<Resul
 class IteratorWait {
   callback: () => void = noWait
   ended = false
-  error: Error | undefined = undefined
+  error: StreamError | undefined = undefined
 
   wake() {
     const callback = this.callback
@@ -140,7 +140,7 @@ async function* createAsyncIterator<T>(stream: Stream, destroyOnReturn: boolean)
     wait.wake()
   }
   stream.on("readable", next, kThisListener)
-  const cleanup = eos(stream, { writable: false }, (err?: Error) => {
+  const cleanup = eos(stream, { writable: false }, (err?: StreamError) => {
     if (err != undefined) wait.error = aggregateTwoErrors(wait.error, err)
     else wait.ended = true
     wait.wake()
@@ -193,7 +193,7 @@ export interface WritableOptions<T> {
   write?: (this: Writable<T>, chunk: T, encoding: string, callback: StreamCallback) => void
   writev?: (this: Writable<T>, chunks: WriteChunk<T>[], callback: StreamCallback) => void
   final?: (this: Writable<T>, callback: StreamCallback) => void
-  destroy?: (this: Writable<T>, error: Error | undefined, callback: StreamCallback) => void
+  destroy?: (this: Writable<T>, error: StreamError | undefined, callback: StreamCallback) => void
   construct?: (this: Writable<T>, callback: StreamCallback) => void
 }
 
@@ -216,7 +216,7 @@ export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     | undefined
   #finalOption: ((this: Writable<T>, callback: StreamCallback) => void) | undefined
   #destroyOption:
-    | ((this: Writable<T>, error: Error | undefined, callback: StreamCallback) => void)
+    | ((this: Writable<T>, error: StreamError | undefined, callback: StreamCallback) => void)
     | undefined
   #constructOption: ((this: Writable<T>, callback: StreamCallback) => void) | undefined
 
@@ -271,7 +271,7 @@ export class Writable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     else final.call(this, callback)
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     const destroy = this.#destroyOption
     if (destroy == undefined) callback(error)
     else destroy.call(this, error, callback)
@@ -304,7 +304,7 @@ export interface DuplexOptions<W, R> {
   write?: (this: Duplex<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
   writev?: (this: Duplex<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
   final?: (this: Duplex<W, R>, callback: StreamCallback) => void
-  destroy?: (this: Duplex<W, R>, error: Error | undefined, callback: StreamCallback) => void
+  destroy?: (this: Duplex<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
   construct?: (this: Duplex<W, R>, callback: StreamCallback) => void
 }
 
@@ -340,7 +340,7 @@ export class Duplex<W = Buffer, R = W> extends Readable<R> {
     | undefined
   @__tz_hidden _duplexFinal: ((this: Duplex<W, R>, callback: StreamCallback) => void) | undefined
   @__tz_hidden _duplexDestroy:
-    | ((this: Duplex<W, R>, error: Error | undefined, callback: StreamCallback) => void)
+    | ((this: Duplex<W, R>, error: StreamError | undefined, callback: StreamCallback) => void)
     | undefined
   @__tz_hidden _duplexConstruct:
     | ((this: Duplex<W, R>, callback: StreamCallback) => void)
@@ -464,7 +464,7 @@ export class Duplex<W = Buffer, R = W> extends Readable<R> {
     else final.call(this, callback)
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     const destroy = this._duplexDestroy
     if (destroy == undefined) callback(error)
     else destroy.call(this, error, callback)
@@ -497,7 +497,7 @@ export interface TransformOptions<W, R> {
   write?: (this: Transform<W, R>, chunk: W, encoding: string, callback: StreamCallback) => void
   writev?: (this: Transform<W, R>, chunks: WriteChunk<W>[], callback: StreamCallback) => void
   final?: (this: Transform<W, R>, callback: StreamCallback) => void
-  destroy?: (this: Transform<W, R>, error: Error | undefined, callback: StreamCallback) => void
+  destroy?: (this: Transform<W, R>, error: StreamError | undefined, callback: StreamCallback) => void
   construct?: (this: Transform<W, R>, callback: StreamCallback) => void
   transform?: (this: Transform<W, R>, chunk: W, encoding: string,
                callback: TransformCallback) => void
@@ -544,7 +544,7 @@ export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
     | ((this: Transform<W, R>, callback: StreamCallback) => void)
     | undefined
   @__tz_hidden _transformDestroy:
-    | ((this: Transform<W, R>, error: Error | undefined, callback: StreamCallback) => void)
+    | ((this: Transform<W, R>, error: StreamError | undefined, callback: StreamCallback) => void)
     | undefined
   @__tz_hidden _transformConstruct:
     | ((this: Transform<W, R>, callback: StreamCallback) => void)
@@ -613,7 +613,7 @@ export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
     transformFinal(this, callback)
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     const destroy = this._transformDestroy
     if (destroy == undefined) callback(error)
     else destroy.call(this, error, callback)
@@ -644,7 +644,7 @@ export class Transform<W = Buffer, R = W> extends Duplex<W, R> {
 
 function transformFinal(stream: Stream, cb: StreamCallback | undefined) {
   if (stream._hasFlush && !stream.destroyed) {
-    stream._flush((er?: Error, data?: unknown) => {
+    stream._flush((er?: StreamError, data?: unknown) => {
       if (er != undefined) {
         if (cb != undefined) cb(er)
         else stream.destroy(er)
@@ -669,7 +669,7 @@ function transformWrite<W, R>(stream: Transform<W, R>, chunk: W, encoding: strin
   const rState = readableStateOf(stream)
   const wState = writableStateOf(stream)
   const length = stream.readableLength
-  stream._transform(chunk, encoding, (err?: Error, val?: unknown) => {
+  stream._transform(chunk, encoding, (err?: StreamError, val?: unknown) => {
     if (err != undefined) {
       callback(err)
       return
@@ -830,7 +830,7 @@ class FromAsyncIterator<U> extends Readable<U> {
     }
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
     this.#resume()
     process.nextTick(() => callback(error))
   }

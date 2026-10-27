@@ -61,6 +61,9 @@ void TzModulesChecker::checkExternal(FunctionDecl *fn) {
     checker_.file_->usesAsync = true;
     ret = ret->promised();
   }
+  if (ret->isResult()) {
+    ret = ret->okType();
+  }
   if (!ret->isVoid() && !ret->isError() && !isExternalValue(ret)) {
     checker_.diags_.error(fn->loc(),
                           "an intrinsic cannot give a value of type '" + sym->ret->name() + "'");

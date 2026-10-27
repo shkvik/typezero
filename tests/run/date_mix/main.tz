@@ -1,9 +1,9 @@
 // env: TZ=UTC
 // Dates with the rest of the language, across files: fields of classes up a
 // chain and of interfaces, generic code, Result, generators and iterator
-// helpers, sorting with a comparison, join(), JSON.stringify, and the
-// errors dates throw.
-import { Dated, Event, LateError, Meeting, checkDue, parseWhen } from "./events.tz"
+// helpers, sorting with a comparison, join(), JSON.stringify, and errors
+// that carry dates.
+import { Dated, Event, Meeting, checkDue, parseWhen } from "./events.tz"
 
 const base = Date.UTC(2026, 9, 26, 9, 0)
 const events: Event[] = [
@@ -42,27 +42,23 @@ console.log(first.getUTCHours(), second)
 
 // 4. Result: a date, or the error that says why there is none.
 function due(text: string): Result<Date, string> {
-  try {
-    return ok(checkDue(parseWhen(text), new Date(base)))
-  } catch (e) {
-    if (e instanceof LateError) return err(`${e.name}: ${e.message}, due ${e.due.toISOString()}`)
-    return err(`${e.name}: ${e.message}`)
-  }
+  const when = parseWhen(text)
+  if (when.isErr()) return err(`${when.error.code}: ${when.error.message}`)
+  const checked = checkDue(when.value, new Date(base))
+  if (checked.isErr()) return err(`${checked.error.code}: ${checked.error.message}, due ${checked.error.due.toISOString()}`)
+  return ok(checked.value)
 }
 for (const text of ["2026-10-27T00:00Z", "2026-10-25T21:00Z", "someday"]) {
   const r = due(text)
   console.log(r.isOk() ? `ok ${r.value.toISOString()}` : `err ${r.error}`)
 }
 
-// 5. Generators and iterator helpers give dates, and close with finally.
+// 5. Generators and iterator helpers give dates.
 const log: string[] = []
 function* days(from: Date, count: int): Generator<Date> {
-  try {
-    // A day in milliseconds is a long: 25 of them no longer fit in an int.
-    for (let i: long = 0; i < count; i++) yield new Date(from.getTime() + i * 86400000)
-  } finally {
-    log.push("days done")
-  }
+  // A day in milliseconds is a long: 25 of them no longer fit in an int.
+  for (let i: long = 0; i < count; i++) yield new Date(from.getTime() + i * 86400000)
+  log.push("days done")
 }
 for (const d of days(new Date(base), 30)) {
   if (d.getUTCDay() == 0) {
@@ -84,28 +80,18 @@ const saved = JSON.stringify({ title: "x", at: new Date(base) })
 const back = must(JSON.parse<{ title: string; at: string }>(saved))
 console.log(back.title, Date.parse(back.at).unwrapOr(0) == base)
 
-// 7. What dates throw, caught.
+// 7. What JavaScript throws for: an invalid date prints as one, lateness is
+// an Err with the dates, a zone nobody knows is left out.
 const bad = parseWhenLoosely("nope")
 function parseWhenLoosely(text: string): Date {
   return new Date(Date.parse(text).unwrapOr(NaN))
 }
-try {
-  console.log(bad.toISOString())
-} catch (e) {
-  console.log(e instanceof RangeError, e.message, bad.toJSON() ?? "null", `${bad}`)
-}
-try {
-  checkDue(new Date(base), new Date(base + 5400000))
-} catch (e) {
-  if (e instanceof LateError) console.log(e.name, e.message, e.now.getTime() - e.due.getTime())
-}
+console.log(bad.toJSON() ?? "null", `${bad}`)
+const late = checkDue(new Date(base), new Date(base + 5400000))
+if (late.isErr()) console.log(late.error.code, late.error.message, late.error.now.getTime() - late.error.due.getTime())
 const zones = ["Asia/Tokyo", "Nowhere/Land"]
 for (const timeZone of zones) {
-  try {
-    console.log(new Date(base).toLocaleTimeString("en-US", { timeZone, hour: "numeric" }))
-  } catch (e) {
-    console.log(`${e}`)
-  }
+  console.log(new Date(base).toLocaleTimeString("en-US", { timeZone, hour: "numeric" }))
 }
 console.log(new Meeting("printed", new Date(base), 5))
 

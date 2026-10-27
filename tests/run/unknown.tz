@@ -76,8 +76,8 @@ const objects: object[] = [p, { y: 2 }]
 console.log(objects)
 
 // JSON.stringify writes what it holds.
-console.log(JSON.stringify(values), JSON.stringify(maybe), JSON.stringify(none))
-console.log(JSON.stringify(settings, null, 2))
+console.log(JSON.stringify(values).unwrapOr(""), JSON.stringify(maybe).unwrapOr(""))
+console.log(JSON.stringify(settings, null, 2).unwrapOr(""))
 
 // Searching an unknown[] compares what the elements hold, as '===' does.
 const mixed: unknown[] = [1, "a", true, undefined]

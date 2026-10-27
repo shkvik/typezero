@@ -17,6 +17,7 @@ public:
   void emitThrowCheckWith(llvm::function_ref<void()> release);
   void emitThrow(llvm::Value *error, llvm::SMLoc loc);
   void emitThrowNew(int kind, llvm::StringRef message);
+  void emitPanic(llvm::StringRef message);
   void emitRuntimeThrow();
   void emitThrowStmt(ThrowStmt *stmt);
   void emitStackCheck(llvm::SMLoc loc);

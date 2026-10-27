@@ -7,11 +7,16 @@ import { serve } from "tz:http"
 const data: Record<string, string> = {
   gzip: "H4sIAAAAAAAACstIzcnJ11FIzs8tKEotLk5NUSjPL8pJUVTIGJUYrhIAPdXVhPQBAAA=", deflate: "eJzLSM3JyddRSM7PLShKLS5OTVEozy/KSVFUyBiVGK4SAM1Stlk=", raw: "y0jNycnXUUjOzy0oSi0uTk1RKM8vyklRVMgYlRiuEgA=", br: "G/MBIIxUtb8GGWt7EyE5SCeUpYWEsrTmtRS4EgM=",
 }
-const server = serve({ port: 0, hostname: "127.0.0.1" }, req => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, req => {
   const coding = new URL(req.url).pathname.slice(1)
   const body = Buffer.from(data[coding] ?? "", "base64")
   return new Response(body, { headers: { "content-encoding": coding == "raw" ? "deflate" : coding } })
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 for (const coding of ["gzip", "deflate", "raw", "br"]) {
   const r = must(await fetch(`http://127.0.0.1:${server.port}/${coding}`))
   const text = must(await r.text())
@@ -20,7 +25,7 @@ for (const coding of ["gzip", "deflate", "raw", "br"]) {
 const r = must(await fetch(`http://127.0.0.1:${server.port}/br`))
 let total = 0
 const body = r.body
-if (body != undefined) for await (const chunk of body) total += chunk.length
+if (body != undefined) for await (const chunk of body) total += chunk.isOk() ? chunk.value.length : 0
 console.log("streamed", total)
 await server.stop()
 

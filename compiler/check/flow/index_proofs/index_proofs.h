@@ -19,6 +19,8 @@ public:
   bool exempt(llvm::SMLoc loc, const Expr *object = nullptr) const;
   bool requireBetween(const Expr *expr, int64_t lo, std::optional<int64_t> hi,
                       llvm::StringRef what);
+  bool provesLess(const Expr *a, const Expr *b) const;
+  bool requireLess(const Expr *a, const Expr *b, llvm::StringRef what);
   bool provesLinearUpTo(Linear value, const Expr *object, int64_t less) const;
   bool provesUpTo(const Expr *value, const Expr *object, int64_t less) const;
   bool requireUpTo(const Expr *value, const Expr *object, int64_t less, llvm::StringRef what);

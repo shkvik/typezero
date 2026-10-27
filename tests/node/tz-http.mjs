@@ -1,7 +1,8 @@
 // "tz:http" for the tests that run under Node too (see preload.cjs): serve
 // as tz has it (docs/net.md, section 1), over node:http, or node:https with
 // `tls: { cert, key }`, so that a test with a server and its client prints
-// the same under both.
+// the same under both. It gives a Result, as in tz: a port that is taken is
+// an Err there.
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import net from "node:net";
@@ -62,7 +63,7 @@ export function serve(options, handler) {
   const family = net.isIP(hostname);
   if (family) {
     const handle = net._createServerHandle(hostname, options.port ?? 8000, family);
-    if (typeof handle === "number") throw new Error(`listen failed (${handle})`);
+    if (typeof handle === "number") return err({ code: "listen", message: `listen failed (${handle})` });
     server.listen(handle);
   } else {
     server.listen(options.port ?? 8000, hostname);
@@ -81,7 +82,7 @@ export function serve(options, handler) {
     else options.signal.onabort = () => void stop();
   }
   options.onListen?.({ hostname, port });
-  return {
+  return ok({
     port,
     hostname,
     get url() {
@@ -90,5 +91,5 @@ export function serve(options, handler) {
     },
     finished,
     stop,
-  };
+  });
 }

@@ -437,7 +437,6 @@ static void question_failed(TzPromise *p, TzMaker make, TzSignal *signal) {
     TzSystemErrorParts parts;
     memset(&parts, 0, sizeof parts);
     parts.message = tz_fs_ascii("readline was closed");
-    parts.name = tz_fs_ascii("Error");
     parts.code = tz_fs_ascii("ERR_USE_AFTER_CLOSE");
     parts.syscall = tz_fs_ascii("");
     tz_fs_throw_parts(make, &parts);

@@ -1,77 +1,36 @@
-// same-as-node
 // env: TZ=UTC
-// What dates throw when the program runs, caught: toISOString(), format()
-// and formatToParts() of an invalid date (toJSON gives null), and a time
-// zone, a value of an option, a calendar or fractionalSecondDigits that only
-// the running program shows to be wrong. A text that is no date is an Err of
-// Date.parse, and a language that is none an Err of Intl.Locale.parse.
-function attempt(what: string, f: () => string) {
-  try {
-    console.log(what, f())
-  } catch (e) {
-    console.log(what, e instanceof RangeError, e instanceof TypeError, `${e}`)
-  }
-}
+// What dates do where JavaScript throws (docs/errors.md, step 5): a text that
+// is no date is an Err of Date.parse, a language that is none an Err of
+// Intl.Locale.parse; a time zone or a calendar that only the running program
+// shows to be unknown is left out (the zone of the computer, the gregorian
+// calendar); a value of an option with a list is checked when the program is
+// built (tests/errors/date.tz). An invalid date still prints as one until
+// numbers are proven (docs/numbers.md); toISOString() of it is fatal
+// (tests/run/date_invalid.tz).
 const texts = ["2026-10-23T10:00Z", "not a date"]
-function dateOf(text: string) {
-  return new Date(Date.parse(text).unwrapOr(NaN))
-}
-for (const text of texts) attempt(`iso ${text}`, () => dateOf(text).toISOString())
-for (const text of texts) attempt(`json ${text}`, () => JSON.stringify({ at: dateOf(text) }))
-const format = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: "numeric" })
-for (const text of texts) attempt(`format ${text}`, () => format.format(dateOf(text)))
-for (const text of texts)
-  attempt(`parts ${text}`, () => format.formatToParts(dateOf(text)).map((p) => p.value).join(""))
 for (const text of texts) {
   const ms = Date.parse(text)
-  console.log(ms.isOk() ? ms.value : ms.error)
+  console.log(ms.isOk() ? new Date(ms.value).toISOString() : ms.error)
 }
 const zones = ["Asia/Bishkek", "Mars/Base"]
-for (const timeZone of zones)
-  attempt(`zone ${timeZone}`, () =>
-    new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric" }).format(0),
-  )
-for (const timeZone of zones)
-  attempt(`locale zone ${timeZone}`, () => new Date(0).toLocaleString("en-US", { timeZone }))
+for (const timeZone of zones) {
+  console.log(timeZone, new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric" }).format(0))
+  console.log(timeZone, new Date(0).toLocaleString("en-US", { timeZone }))
+}
 const months = ["long", "huge"]
-for (const month of months)
-  attempt(`month ${month}`, () =>
-    new Date(0).toLocaleDateString("en-US", { month, timeZone: "UTC" }),
-  )
+for (const month of months) {
+  if (month == "long" || month == "short") console.log(new Date(0).toLocaleDateString("en-US", { month, timeZone: "UTC" }))
+  else console.log(month, "is no width of a month")
+}
 const calendars = ["gregory", "not a calendar!"]
 for (const calendar of calendars)
-  attempt(`calendar ${calendar}`, () =>
-    new Intl.DateTimeFormat("en-US", { calendar, timeZone: "UTC" }).format(0),
-  )
-const digits: int[] = [2, 7]
-for (const fractionalSecondDigits of digits)
-  attempt(`digits ${fractionalSecondDigits}`, () =>
-    new Date(1234).toLocaleTimeString("en-US", { fractionalSecondDigits, timeZone: "UTC" }),
-  )
-const tags = ["de-DE", "en_US"]
-for (const tag of tags) {
+  console.log(calendar, new Intl.DateTimeFormat("en-US", { calendar, timeZone: "UTC" }).format(0))
+const options: Intl.DateTimeFormatOptions[] = [{ dateStyle: "short" }, { dateStyle: "short", hour: "numeric" }]
+for (const o of options) console.log(new Date(0).toLocaleString("en-US", { ...o, timeZone: "UTC" }))
+const timed: Intl.DateTimeFormatOptions = { timeStyle: "short", timeZone: "UTC" }
+console.log(new Date(0).toLocaleDateString("en-US", timed))
+for (const tag of ["de-DE", "en_US"]) {
   const locale = Intl.Locale.parse(tag)
-  attempt(`tag ${tag}`, () =>
-    locale.isOk() ? new Date(0).toLocaleDateString(locale.value, { timeZone: "UTC" }) : locale.error.message,
-  )
+  console.log(tag, locale.isOk() ? new Date(0).toLocaleDateString(locale.value, { timeZone: "UTC" }) : locale.error.message)
 }
 console.log(new Date(NaN).toLocaleString(), String(new Date(NaN)), JSON.stringify([new Date(NaN)]))
-
-// An argument that throws: the date, the formatter and the language already
-// evaluated are released on the way out.
-function hours(n: int): int {
-  if (n > 2) throw new RangeError(`too many: ${n}`)
-  return n
-}
-function zone(n: int): string {
-  if (n > 2) throw new TypeError(`no zone ${n}`)
-  return "UTC"
-}
-const start = () => new Date(Date.UTC(2026, 0, 1))
-const utc = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" })
-for (const n of [1, 3]) {
-  attempt("set", () => `${start().setUTCHours(hours(n))}`)
-  attempt("locale", () => start().toLocaleString(n > 0 ? "en-US" : "en-GB", { timeZone: zone(n) }))
-  attempt("new", () => new Intl.DateTimeFormat("en-US", { timeZone: zone(n) }).format(start()))
-  attempt("format", () => utc.format(new Date(hours(n))))
-}

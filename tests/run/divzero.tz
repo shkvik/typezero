@@ -1,7 +1,8 @@
-// expect-exit: 1
-// expect-stderr: RangeError: Division by zero
-// Division by zero is checked at run time, also where the divisor is only
-// known to be zero after inlining and unrolling.
+// expect-exit: 2
+// expect-stderr: panic: Division by zero
+// Division by zero is checked at run time and fatal for now, also where the
+// divisor is only known to be zero after inlining and unrolling; proofs of
+// the divisor come with the numbers (docs/numbers.md).
 function divide(a: int, b: int): int {
   return a / b
 }

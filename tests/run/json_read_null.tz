@@ -1,8 +1,13 @@
-// same-as-node
-// Reading a key of undefined or null throws the TypeError of JavaScript;
-// `?.` gives undefined instead.
-// expect-exit: 1
-// expect-stderr: TypeError: Cannot read properties of undefined (reading 'name')
-const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null}').unwrapOr(null)
+// Json without exceptions (docs/errors.md, step 5): reading a key of undefined
+// or null gives undefined (JavaScript throws a TypeError), and so do the keys
+// of null; writing a key there is left out; an element written past the end
+// of a Json array fills the gap with null, which is what JSON.stringify
+// writes for the holes JavaScript would leave.
+const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null, "list": [1]}').unwrapOr(null)
 console.log(j.users[0].name, j.users[1]?.name, j.owner?.name)
-console.log(j.users[1].name)
+console.log(j.users[1].name, j.owner.name, j.owner.name.first, Object.keys(j.owner), Object.values(j.nothing))
+j.owner.name = "Bob"
+j.users[0].name.first = "A"
+j.list[3] = 4
+j.list[1] = undefined
+console.log(j.owner, j.users, JSON.stringify(j.list).unwrapOr(""))

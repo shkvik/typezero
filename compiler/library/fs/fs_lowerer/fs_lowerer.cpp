@@ -23,7 +23,7 @@ namespace {
 
 const std::vector<MakerFields> &fsObjects() {
   static const std::vector<MakerFields> table = {
-      {"SystemError", {"message", "name", "errno", "code", "syscall", "path", "dest"}},
+      {nullptr, {"message", "errno", "code", "syscall", "path", "dest"}},
       {"Stats",
        {"dev", "mode", "nlink", "uid", "gid", "rdev", "blksize", "ino", "size", "blocks", "atimeMs",
         "mtimeMs", "ctimeMs", "birthtimeMs"}},
@@ -41,14 +41,7 @@ llvm::Function *FsLowerer::objectMaker(const Type *type) {
   return lowering_.objectMaker().maker(type, fsObjects());
 }
 
-llvm::Function *FsLowerer::systemErrorMaker() {
-  for (const ClassDecl *child : lowering_.errorClass_->children) {
-    if (child->builtin && child->name == "SystemError") {
-      return objectMaker(child->type);
-    }
-  }
-  llvm_unreachable("Checker declares SystemError");
-}
+llvm::Function *FsLowerer::systemErrorMaker() { return objectMaker(lowering_.systemError_); }
 
 llvm::Value *FsLowerer::emitFsCall(CallExpr *call) {
   if (isFspBuiltin(call->builtin)) {

@@ -1,3 +1,4 @@
+#include "runtime/core/output/output.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include <math.h>
@@ -18,12 +19,12 @@ TZ_HOT double tz_math_pow(double x, double y) {
   return pow(x, y);
 }
 
-TZ_COLD void tz_throw_zero_power(void) { tz_throw(TZ_RANGE_ERROR, "Division by zero"); }
+TZ_COLD TZ_NORETURN void tz_panic_zero_power(void) { tz_panicf("Division by zero"); }
 
 TZ_HOT int64_t tz_math_pow_long(int64_t base, int64_t exponent) {
   if (exponent < 0) {
     if (base == 0) {
-      tz_throw_zero_power();
+      tz_panic_zero_power();
       return 0;
     }
     if (base == 1 || base == -1) {

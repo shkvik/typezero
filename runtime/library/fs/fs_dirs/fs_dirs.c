@@ -786,7 +786,6 @@ void tz_fs_throw_rm_directory(const Path *p, TzMaker make) {
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
   parts.message = tz_buf_take(&m);
-  parts.name = tz_fs_ascii("SystemError");
   parts.errno_value = 21;
   parts.code = tz_fs_ascii("ERR_FS_EISDIR");
   parts.syscall = tz_fs_ascii("rm");

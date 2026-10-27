@@ -66,6 +66,7 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     }
   }
   lowering_.usesTls_ = file.usesTls;
+  lowering_.systemError_ = file.systemError;
   lowering_.subtypes_ = file.subtypes;
   lowering_.usesAsync_ = file.usesAsync;
   lowering_.esModule_ = file.topLevelAwait;

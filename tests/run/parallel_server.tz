@@ -13,7 +13,7 @@ async function later(path: string): Promise<Response> {
   return new Response(`later ${length}`)
 }
 
-const server = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
+const started = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
   const path = new URL(request.url).pathname
   if (path == "/count") {
     hits++
@@ -22,6 +22,11 @@ const server = serve({ port: 0, hostname: "127.0.0.1" }, (request: Request) => {
   if (path.startsWith("/later/")) return later(path)
   return new Response(`echo ${path}`)
 })
+if (started.isErr()) {
+  console.log("cannot listen:", started.error.message)
+  process.exit(1)
+}
+const server = started.value
 
 const base = `http://127.0.0.1:${server.port}`
 const paths: string[] = []

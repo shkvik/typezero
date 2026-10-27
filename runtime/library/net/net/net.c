@@ -179,7 +179,6 @@ void *net_system_error(TzMaker make, int32_t error, const char *syscall, const c
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
   parts.message = ascii(message);
-  parts.name = ascii("Error");
   parts.errno_value = e->number;
   parts.code = ascii(e->code);
   parts.syscall = ascii(syscall);
@@ -187,15 +186,18 @@ void *net_system_error(TzMaker make, int32_t error, const char *syscall, const c
   return make(&parts);
 }
 
-void *net_error(int32_t kind, const char *message, void *cause) {
-  TzStr text = net_utf8(message);
-  void *error = tz_error_info.make(kind, text.obj, text.meta);
-  if (cause) {
-    *(void **)((char *)error + tz_error_info.cause_offset) = cause;
-  }
+void *net_failure(const char *code, const char *message) {
+  TzSystemErrorParts parts;
+  memset(&parts, 0, sizeof parts);
+  parts.message = net_utf8(message);
+  parts.errno_value = -1;
+  parts.code = ascii(code);
+  parts.syscall = ascii("");
 
-  return error;
+  return tz_net_make(&parts);
 }
+
+void *net_aborted(void) { return net_failure("ABORT_ERR", "This operation was aborted"); }
 
 TzStr net_utf8(const char *message) {
   TzBuf b;
@@ -226,17 +228,14 @@ TzStr net_utf8(const char *message) {
 void net_fulfill(TzPromise **p, const void *value, size_t size) {
   TzPromise *promise = *p;
   *p = NULL;
-  if (size) {
-    memcpy((char *)promise + TZ_PROMISE_VALUE, value, size);
-  }
-  tz_promise_fulfill(promise);
+  tz_promise_succeed(promise, value, size);
   tz_obj_release((TzObject *)promise);
 }
 
 void net_reject(TzPromise **p, void *error) {
   TzPromise *promise = *p;
   *p = NULL;
-  tz_promise_reject(promise, error);
+  tz_promise_fail(promise, error);
   tz_obj_release((TzObject *)promise);
 }
 
@@ -262,16 +261,15 @@ double net_now(void) {
 
 void tz_net_no_tls(TzPromise *p, TzMaker make) {
   TZ_ORDERED();
-  (void)make;
-  void *error = net_error(TZ_ERROR,
-                          "this program has no TLS for https: tz links it only into programs "
-                          "whose fetch may reach https://, and this one names only http:// URLs; "
-                          "write the URL with https:// (docs/net.md, section 4)",
-                          NULL);
+  tz_net_make = make;
+  void *error = net_failure("ERR_NO_TLS",
+                            "this program has no TLS for https: tz links it only into programs "
+                            "whose fetch may reach https://, and this one names only http:// "
+                            "URLs; write the URL with https:// (docs/net.md, section 4)");
   if (p) {
-    tz_promise_reject(p, error);
+    tz_promise_fail(p, error);
   } else {
-    tz_thrown = error;
+    tz_failed = error;
   }
 }
 
@@ -927,7 +925,13 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   tz_net_make = make;
   char host[256];
   if (!ascii_of(host_obj, host_meta, host, sizeof host)) {
-    tz_throw(TZ_TYPE_ERROR, "the hostname to listen on must be ASCII");
+    TzSystemErrorParts parts;
+    memset(&parts, 0, sizeof parts);
+    parts.message = ascii("the hostname to listen on must be ASCII");
+    parts.errno_value = net_error_of(NET_NOT_FOUND)->number;
+    parts.code = ascii("ERR_INVALID_ARG_VALUE");
+    parts.syscall = ascii("listen");
+    tz_failed = make(&parts);
     return NULL;
   }
   SOCKADDR_STORAGE address;
@@ -941,7 +945,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
     MultiByteToWideChar(CP_UTF8, 0, host, -1, wide, 256);
     int rc = GetAddrInfoW(wide, NULL, &hints, &found);
     if (rc != 0 || !found) {
-      tz_thrown = net_system_error(make, NET_NOT_FOUND, "getaddrinfo", host, 0);
+      tz_failed = net_system_error(make, NET_NOT_FOUND, "getaddrinfo", host, 0);
       return NULL;
     }
     ADDRINFOW *pick = found;
@@ -964,7 +968,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
   SOCKET s = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
                         WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
   if (s == INVALID_SOCKET) {
-    tz_thrown = net_system_error(make, WSAGetLastError(), "listen", where, 1);
+    tz_failed = net_system_error(make, WSAGetLastError(), "listen", where, 1);
     return NULL;
   }
   if (family == AF_INET6) {
@@ -977,7 +981,7 @@ void *tz_net_listen(void *host_obj, uint64_t host_meta, int32_t port, double max
       !attach(s)) {
     int error = WSAGetLastError();
     closesocket(s);
-    tz_thrown = net_system_error(make, error, "listen", where, 1);
+    tz_failed = net_system_error(make, error, "listen", where, 1);
     return NULL;
   }
   load_extensions(s);
@@ -1361,7 +1365,7 @@ static void CALLBACK found_names(DWORD error, DWORD bytes, LPWSAOVERLAPPED overl
 
 static void abort_connect(TzAbortListener *l) {
   Connect *r = CONTAINING_RECORD(l, Connect, abort);
-  net_reject(&r->promise, tz_signal_reason(r->signal));
+  net_reject(&r->promise, net_aborted());
   r->done = 1;
   if (r->looking && r->cancel) {
     GetAddrInfoExCancel(&r->cancel);
@@ -1383,13 +1387,13 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
   r->make = make;
   r->port = port;
   if (!ascii_of(host_obj, host_meta, r->host, sizeof r->host)) {
-    net_reject(&r->promise, net_error(TZ_TYPE_ERROR, "the host name must be ASCII", NULL));
+    net_reject(&r->promise, net_failure("ERR_INVALID_ARG_VALUE", "the host name must be ASCII"));
     connect_free(r);
     return;
   }
   if (signal) {
     if (tz_signal_aborted(signal)) {
-      net_reject(&r->promise, tz_signal_reason(signal));
+      net_reject(&r->promise, net_aborted());
       connect_free(r);
       return;
     }
@@ -1433,8 +1437,8 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
 
 #else
 
-static void unsupported(void) {
-  tz_throw(TZ_ERROR, "networking is not supported on this system yet (docs/net.md, step 1)");
+TZ_NORETURN static void unsupported(void) {
+  tz_panicf("networking is not supported on this system yet (docs/net.md, step 1)");
 }
 
 void net_read(NetConn *c) { (void)c; }
@@ -1499,9 +1503,6 @@ void tz_net_accept(TzPromise *p, void *listener, TzMaker make) {
   (void)listener;
   (void)make;
   unsupported();
-  void *error = tz_thrown;
-  tz_thrown = NULL;
-  tz_promise_reject(p, error);
 }
 void tz_net_close_listener(void *listener, TzMaker make) {
   TZ_ORDERED();
@@ -1525,9 +1526,6 @@ void tz_net_connect(TzPromise *p, void *host_obj, uint64_t host_meta, int32_t po
   (void)signal;
   (void)make;
   unsupported();
-  void *error = tz_thrown;
-  tz_thrown = NULL;
-  tz_promise_reject(p, error);
 }
 
 #endif

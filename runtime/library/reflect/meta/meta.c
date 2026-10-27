@@ -92,8 +92,6 @@ void tz_meta_define(const void *key, void *key_obj, uint64_t key_meta, void *val
     }
     if (reserved) {
       tz_instance_release((TzInstance *)value);
-      tz_throw(TZ_TYPE_ERROR, "the records 'design:*' are what the compiler writes for decorated "
-                              "members; write a key of your own");
       return;
     }
   }

@@ -330,7 +330,6 @@ void tz_fs_abort_failure(TzMaker make) {
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
   parts.message = tz_fs_ascii("The operation was aborted");
-  parts.name = tz_fs_ascii("AbortError");
   parts.code = tz_fs_ascii("ABORT_ERR");
   parts.syscall = tz_fs_ascii("");
   tz_fs_throw_parts(make, &parts);
@@ -359,7 +358,6 @@ void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzB
   TzSystemErrorParts parts;
   memset(&parts, 0, sizeof parts);
   parts.message = tz_buf_take(&m);
-  parts.name = tz_fs_ascii("Error");
   parts.errno_value = f.number;
   parts.code = tz_fs_ascii(e->code);
   parts.syscall = tz_fs_ascii(syscall);

@@ -11,11 +11,12 @@ string(RANDOM LENGTH 4 ALPHABET 0123456789 suffix)
 math(EXPR port "20000 + ${suffix}")
 write(server.tz "import { serve } from \"tz:http\"
 const stop = new AbortController()
-serve({ port: ${port}, hostname: \"127.0.0.1\", signal: stop.signal }, req => {
+const started = serve({ port: ${port}, hostname: \"127.0.0.1\", signal: stop.signal }, req => {
   const url = URL.parse(req.url)
   if (url.isOk() && url.value.pathname == \"/stop\") stop.abort()
   return new Response(`\${req.url} \${url.isOk()}`)
 })
+if (started.isErr()) process.exit(1)
 ")
 write(client.mjs [[
 import net from "node:net";

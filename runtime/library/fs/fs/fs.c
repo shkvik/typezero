@@ -275,7 +275,6 @@ int tz_fs_path_init(Path *p, void *obj, uint64_t meta, TzMaker make, const char 
     TzSystemErrorParts parts;
     memset(&parts, 0, sizeof parts);
     parts.message = tz_buf_take(&m);
-    parts.name = tz_fs_ascii("TypeError");
 #ifdef _WIN32
     parts.errno_value = tz_fs_errors[E_EINVAL].windows;
 #else
@@ -354,7 +353,7 @@ static int parse_flags(const TzBuf *flag, OpenFlags *f) {
   return 0;
 }
 
-int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f) {
+int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f, TzMaker make) {
   TzBuf flag;
   tz_buf_init(&flag);
   tz_buf_str(&flag, (TzStr){obj, meta});
@@ -365,9 +364,17 @@ int tz_fs_flags_of(void *obj, uint64_t meta, OpenFlags *f) {
     tz_buf_ascii(&m, "The argument 'flags' is invalid. Received '");
     tz_buf_units(&m, flag.data, flag.length);
     tz_buf_push(&m, '\'');
-    TzStr message = tz_buf_take(&m);
-    tz_throw_str(TZ_TYPE_ERROR, message.obj, message.meta);
-    tz_str_release_value(message);
+    TzSystemErrorParts parts;
+    memset(&parts, 0, sizeof parts);
+    parts.message = tz_buf_take(&m);
+#ifdef _WIN32
+    parts.errno_value = tz_fs_errors[E_EINVAL].windows;
+#else
+    parts.errno_value = tz_fs_errno_failure(EINVAL).number;
+#endif
+    parts.code = tz_fs_ascii("ERR_INVALID_ARG_VALUE");
+    parts.syscall = tz_fs_ascii("open");
+    tz_fs_throw_parts(make, &parts);
   }
   tz_buf_free(&flag);
 

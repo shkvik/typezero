@@ -22,7 +22,7 @@ public:
   Expr *checkDecimalStatic(CallExpr *call, MemberExpr *member);
   Expr *checkDecimalMethod(CallExpr *call, MemberExpr *member);
   Expr *checkRoundingMode(Expr *arg);
-  Expr *checkDecimalCount(Expr *arg, const char *what);
+  Expr *checkDecimalCount(Expr *arg, const char *what, int64_t lo, int64_t hi);
   void reportBigInt(llvm::SMLoc loc, llvm::StringRef what);
 
 private:

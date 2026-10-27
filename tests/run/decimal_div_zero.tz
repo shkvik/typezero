@@ -1,7 +1,8 @@
-// A decimal divided by zero throws a RangeError, as `1n / 0n` does in
-// JavaScript (BigNumber.js gives Infinity: a decimal has none).
-// expect-exit: 1
-// expect-stderr: RangeError: Division by zero
+// A decimal divided by zero is fatal for now (JavaScript throws a RangeError
+// for `1n / 0n`, BigNumber.js gives Infinity: a decimal has none); proofs of
+// the divisor come with the numbers (docs/numbers.md).
+// expect-exit: 2
+// expect-stderr: panic: Division by zero
 const prices: decimal[] = [10, 0]
 let total: decimal = 0
 for (const p of prices) {

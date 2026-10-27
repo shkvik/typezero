@@ -53,7 +53,7 @@ function sum(t: Tree): int {
   for (const c of t.children) s += sum(c)
   return s
 }
-console.log(sum(tree), JSON.stringify(tree))
+console.log(sum(tree), JSON.stringify(tree).unwrapOr(""))
 
 function must<T>(r: Result<T, JsonError>): T {
   if (r.isErr()) {

@@ -1,0 +1,81 @@
+// What JavaScript throws for when the program runs and tz checks when it is
+// built instead (docs/errors.md, step 5): an encoding or a label of a decoder
+// that only the running program knows, the arguments of the random functions
+// and of decimal methods, a rounding mode from a variable; and what became a
+// Result: serve, the key derivations, JSON.stringify of a value whose type
+// may hold itself.
+import { randomBytes, randomFillSync, randomInt, pbkdf2Sync, generateKeySync } from "node:crypto"
+import { serve } from "tz:http"
+
+function encodings(enc: string, label: string, known: BufferEncoding) {
+  const b = Buffer.from("hi")
+  // expect-error: an encoding known only when the program runs may be one Buffer does not know
+  console.log(b.toString(enc))
+  console.log(b.toString(known))
+  if (enc == "hex" || enc == "base64") console.log(b.toString(enc))
+  // expect-error: unknown encoding 'utf9'
+  if (enc == "hex" || enc == "utf9") console.log(b.toString(enc))
+  // expect-error: parse it with 'TextDecoder.parse(label)', which gives a Result
+  console.log(new TextDecoder(label))
+  if (label == "koi8-r") console.log(new TextDecoder(label))
+  const parsed = TextDecoder.parse(label)
+  console.log(parsed.isOk())
+  // expect-error: 'koi9' is not an encoding TextDecoder knows
+  console.log(TextDecoder.parse("koi9"))
+}
+
+function random(n: int, low: int, high: int, x: double) {
+  // expect-error: cannot prove that the size is from 0 to 2147483647
+  console.log(randomBytes(n))
+  if (n >= 0) console.log(randomBytes(n))
+  // expect-error: cannot prove that the maximum is greater than the minimum
+  console.log(randomInt(low, high))
+  if (low < high) console.log(randomInt(low, high))
+  // expect-error: cannot prove that the maximum is greater than 0
+  console.log(randomInt(n))
+  // expect-error: 'randomInt' takes whole numbers ('int'), found 'double'
+  console.log(randomInt(x))
+  const buf = Buffer.alloc(8)
+  // expect-error: cannot prove that the size is not negative
+  console.log(randomFillSync(buf, 2, n))
+  // expect-error: cannot prove that the offset and the size fit in the bytes
+  if (n >= 0) console.log(randomFillSync(buf, 2, n))
+  if (n >= 0 && n <= 6) console.log(randomFillSync(buf, 2, n))
+  // expect-error: the length of an AES key is 128, 192 or 256
+  console.log(generateKeySync("aes", { length: n }))
+  // expect-error: cannot prove that the length of the key is at least 8
+  console.log(generateKeySync("hmac", { length: n }))
+  // expect-error: property 'length' does not exist on type 'Result<Buffer, CryptoError>'
+  console.log(pbkdf2Sync("pw", "salt", 1, 16, "sha256").length)
+}
+
+function decimals(places: int, mode: string, base: int) {
+  const d: decimal = 1
+  // expect-error: cannot prove that the number of decimal places is from -1000000000 to 1000000000
+  console.log(d.round(places))
+  // expect-error: a rounding mode known only when the program runs may be no mode
+  console.log(d.round(2, mode))
+  if (mode == "up" || mode == "down") console.log(d.round(2, mode))
+  // expect-error: cannot prove that the base is from 2 to 36
+  console.log(d.toString(base))
+  for (const b of [2, 16, 36]) console.log(d.toString(b), [8, 10].map((k) => d.toString(k)))
+}
+
+class Node {
+  next: Node | undefined = undefined
+}
+class Point {
+  x = 1
+  y = 2
+}
+function json(j: Json) {
+  // expect-error: type 'Result<string, JsonError>' is not assignable to type 'string'
+  const text: string = JSON.stringify(j)
+  // expect-error: type 'Result<string, JsonError>' is not assignable to type 'string'
+  const chain: string = JSON.stringify(new Node())
+  const point: string = JSON.stringify(new Point())
+  console.log(text, chain, point)
+}
+
+// expect-error: the Result is not used
+serve({ port: 0 }, () => new Response("x"))

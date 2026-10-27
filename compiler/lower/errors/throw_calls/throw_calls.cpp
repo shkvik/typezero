@@ -185,11 +185,6 @@ void ThrowCalls::call(const CallExpr *c, bool caught) {
       intrinsic(caught);
     }
     break;
-  case Builtin::JsonStringify:
-    if (!c->args.empty() && c->args[0]->type && stringifyMayThrow(c->args[0]->type)) {
-      intrinsic(caught);
-    }
-    break;
   case Builtin::DateToISOString:
     intrinsic(caught);
     break;

@@ -30,20 +30,20 @@ export class Meeting extends Event {
   }
 }
 
-export class LateError extends RangeError {
-  constructor(public due: Date, public now: Date) {
-    super(`late by ${(now.getTime() - due.getTime()) / 3600000} h`)
-  }
-}
+// An error with dates in it: a value of a type with a tag, not a class.
+export type Late = { code: "late"; message: string; due: Date; now: Date }
 
-export function checkDue(due: Date, now: Date): Date {
-  if (now > due) throw new LateError(due, now)
-  return due
+export function checkDue(due: Date, now: Date): Result<Date, Late> {
+  if (now > due) {
+    const hours = (now.getTime() - due.getTime()) / 3600000
+    return err({ code: "late", message: `late by ${hours} h`, due, now })
+  }
+  return ok(due)
 }
 
 // The moment a text names, or an error that says which text.
-export function parseWhen(text: string): Date {
+export function parseWhen(text: string) {
   const ms = Date.parse(text)
-  if (ms.isErr()) throw new TypeError(`not a date: '${text}'`)
-  return new Date(ms.value)
+  if (ms.isErr()) return err({ code: "not_a_date", message: `not a date: '${text}'` })
+  return ok(new Date(ms.value))
 }

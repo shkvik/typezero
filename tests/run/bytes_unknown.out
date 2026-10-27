@@ -1,9 +1,12 @@
-encoding TypeError Unknown encoding: nope
-fill TypeError The argument 'value' is invalid. Received 'zz'
-label RangeError The "utf-17" encoding is not supported
-јА
-label old ok
+hex 01010101
+nope is no encoding
+base64 AQEBAQ==
+<Buffer 00 00 00 00> <Buffer 00 00 00>
+utf-17 ERR_ENCODING_NOT_SUPPORTED The "utf-17" encoding is not supported
+x-mac-cyrillic x-mac-cyrillic јА
+ UTF-8  utf-8 ��
 fatal ERR_ENCODING_INVALID_ENCODED_DATA The encoded data was not valid for encoding utf-8
 fatal ERR_ENCODING_INVALID_ENCODED_DATA The encoded data was not valid for encoding utf-16le
 fatal ERR_ENCODING_INVALID_ENCODED_DATA The encoded data was not valid for encoding windows-1253
 fatal AB
+true A

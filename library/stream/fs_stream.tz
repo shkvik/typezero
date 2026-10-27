@@ -5,7 +5,7 @@ class FsRangeError extends RangeError {
   code = "ERR_OUT_OF_RANGE"
 }
 
-class FsStreamError extends Error {
+class FsStreamError extends StreamError {
   code: string
   constructor(code: string, message: string) {
     super(message)
@@ -47,23 +47,23 @@ export interface WriteStreamOptions {
   signal?: AbortSignal
 }
 
-function closeFd(fd: int | undefined, flush: boolean, err: Error | undefined,
+function closeFd(fd: int | undefined, flush: boolean, err: StreamError | undefined,
                  cb: StreamCallback) {
   if (fd == undefined) {
     cb(err)
     return
   }
   const open = fd
-  const closeIt = (error: Error | undefined) => {
+  const closeIt = (error: StreamError | undefined) => {
     __tz_fsClose(open, false).then(
       () => cb(error),
-      (er: Error) => cb(er),
+      (er: StreamError) => cb(er),
     )
   }
   if (flush)
     __tz_fsClose(open, true).then(
       () => closeIt(err),
-      (er: Error) => closeIt(err ?? er),
+      (er: StreamError) => closeIt(err ?? er),
     )
   else closeIt(err)
 }
@@ -80,7 +80,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
   @__tz_hidden pending: boolean
   @__tz_hidden autoClose: boolean
   @__tz_hidden _performingIO = false
-  @__tz_hidden _ioDone: ((error: Error | undefined) => void) | undefined = undefined
+  @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
 
   constructor(path: string, options?: ReadStreamOptions) {
     super({
@@ -125,7 +125,7 @@ export class ReadStream<T = Buffer> extends Readable<T> {
         this.emit("open", fd)
         this.emit("ready")
       },
-      (er: Error) => callback(er),
+      (er: StreamError) => callback(er),
     )
   }
 
@@ -142,11 +142,11 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     this._performingIO = true
     __tz_fsRead(fd, buf, 0, n, pos ?? -1).then(
       (bytesRead: int) => this.#afterRead(undefined, bytesRead, buf),
-      (er: Error) => this.#afterRead(er, 0, buf),
+      (er: StreamError) => this.#afterRead(er, 0, buf),
     )
   }
 
-  #afterRead(er: Error | undefined, bytesRead: int, buf: Buffer) {
+  #afterRead(er: StreamError | undefined, bytesRead: int, buf: Buffer) {
     this._performingIO = false
     if (this.destroyed) {
       const done = this._ioDone
@@ -172,13 +172,13 @@ export class ReadStream<T = Buffer> extends Readable<T> {
     }
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
-    const finish = (er: Error | undefined) => {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
+    const finish = (er: StreamError | undefined) => {
       const fd = this.fd
       this.fd = undefined
       closeFd(fd, false, er, callback)
     }
-    if (this._performingIO) this._ioDone = (er: Error | undefined) => finish(error ?? er)
+    if (this._performingIO) this._ioDone = (er: StreamError | undefined) => finish(error ?? er)
     else finish(error)
   }
 
@@ -200,7 +200,7 @@ export class WriteStream extends Writable<Buffer> {
   @__tz_hidden pending: boolean
   @__tz_hidden autoClose: boolean
   @__tz_hidden _performingIO = false
-  @__tz_hidden _ioDone: ((error: Error | undefined) => void) | undefined = undefined
+  @__tz_hidden _ioDone: ((error: StreamError | undefined) => void) | undefined = undefined
 
   constructor(path: string, options?: WriteStreamOptions) {
     super({
@@ -237,7 +237,7 @@ export class WriteStream extends Writable<Buffer> {
         this.emit("open", fd)
         this.emit("ready")
       },
-      (er: Error) => callback(er),
+      (er: StreamError) => callback(er),
     )
   }
 
@@ -264,14 +264,14 @@ export class WriteStream extends Writable<Buffer> {
                          pos != undefined ? pos + bytesWritten : undefined, cb, tries)
         else cb()
       },
-      (er: Error) => cb(er),
+      (er: StreamError) => cb(er),
     )
   }
 
   _write(chunk: Buffer, encoding: string, callback: StreamCallback): void {
     void encoding
     this._performingIO = true
-    this.#writeAll(chunk, 0, chunk.length, this.pos, (er?: Error) => {
+    this.#writeAll(chunk, 0, chunk.length, this.pos, (er?: StreamError) => {
       this._performingIO = false
       if (this.destroyed) {
         callback(er)
@@ -292,13 +292,13 @@ export class WriteStream extends Writable<Buffer> {
     this._write(Buffer.concat(all), "buffer", callback)
   }
 
-  _destroy(error: Error | undefined, callback: StreamCallback): void {
-    const finish = (er: Error | undefined) => {
+  _destroy(error: StreamError | undefined, callback: StreamCallback): void {
+    const finish = (er: StreamError | undefined) => {
       const fd = this.fd
       this.fd = undefined
       closeFd(fd, this.flush, er, callback)
     }
-    if (this._performingIO) this._ioDone = (er: Error | undefined) => finish(error ?? er)
+    if (this._performingIO) this._ioDone = (er: StreamError | undefined) => finish(error ?? er)
     else finish(error)
   }
 

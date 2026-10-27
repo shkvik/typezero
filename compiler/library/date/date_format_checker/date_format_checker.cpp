@@ -2,8 +2,11 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/index_proofs/index_proofs.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
@@ -68,6 +71,34 @@ const DateOption kOptions[TZ_DTO_COUNT] = {
     {"dateStyle", {"full", "long", "medium", "short"}},
     {"timeStyle", {"full", "long", "medium", "short"}},
 };
+
+std::optional<std::vector<std::string>> textsOf(const Type *type) {
+  llvm::ArrayRef<const Type *> members =
+      type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+  std::vector<std::string> texts;
+  for (const Type *m : members) {
+    if (!m->isStringLiteral()) {
+      return std::nullopt;
+    }
+    texts.push_back(utf8(m->literalText()));
+  }
+
+  return texts;
+}
+
+std::optional<std::vector<double>> numbersOf(const Type *type) {
+  llvm::ArrayRef<const Type *> members =
+      type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+  std::vector<double> numbers;
+  for (const Type *m : members) {
+    if (!m->isLiteral() || !m->literalBase()->isNumeric()) {
+      return std::nullopt;
+    }
+    numbers.push_back(m->literalNumber());
+  }
+
+  return numbers;
+}
 
 const char *methodName(int kind) {
   switch (kind) {
@@ -139,7 +170,9 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
     if (field.name == "hour12") {
       wanted = Type::boolTy();
     } else if (field.name == "fractionalSecondDigits") {
-      wanted = value->isNumeric() ? value : Type::intTy();
+      wanted = value->isNumeric() || numbersOf(value) ? value : Type::intTy();
+    } else if (found != std::end(kOptions) && textsOf(value)) {
+      wanted = value;
     } else if (found == std::end(kOptions)) {
       checker_.diags_.error(options->loc(),
                             "'" + field.name + "' is not an option of " + methodName(kind) +
@@ -184,39 +217,73 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
                           "TypeError for; use either the styles or the parts");
     ok = false;
   }
-  if (literal) {
+  auto propOf = [&](llvm::StringRef name) -> const Expr * {
+    if (!literal) {
+      return nullptr;
+    }
     for (const ObjectLitExpr::Property &prop : literal->props) {
-      if (prop.spread) {
+      if (!prop.spread && prop.name == name && prop.value) {
+        return prop.value;
+      }
+    }
+    return nullptr;
+  };
+  bool exempt = checker_.indexProofs().exempt(options->loc());
+  for (const Field &field : type->fields()) {
+    const Expr *given = propOf(field.name);
+    llvm::SMLoc at = given ? given->loc() : options->loc();
+    if (field.name == "fractionalSecondDigits") {
+      if (given) {
+        ok &= checker_.indexProofs().requireBetween(given, 1, 3, "fractionalSecondDigits");
         continue;
       }
-      auto found =
-          llvm::find_if(kOptions, [&](const DateOption &o) { return o.name == prop.name; });
-      std::optional<std::u16string> text = prop.value ? literalText(prop.value) : std::nullopt;
-      if (found != std::end(kOptions) && text && !found->values.empty() &&
-          !llvm::is_contained(found->values, utf8(*text))) {
-        std::string values;
-        for (size_t i = 0; i < found->values.size(); ++i) {
-          values += (i == 0                          ? "'"
-                     : i + 1 == found->values.size() ? " or '"
-                                                     : ", '") +
-                    found->values[i].str() + "'";
-        }
-        checker_.diags_.error(prop.value->loc(),
-                              "'" + utf8(*text) + "' is not a value of the option '" + prop.name +
-                                  "', and JavaScript would throw a "
-                                  "RangeError; it is " +
-                                  values);
+      std::optional<std::vector<double>> digits = numbersOf(field.type->nonOptional());
+      if (!exempt && (!digits || llvm::any_of(*digits, [](double d) { return d < 1 || d > 3; }))) {
+        checker_.diags_.error(at, "fractionalSecondDigits known only when the program runs may "
+                                  "be out of 1 to 3, which JavaScript would throw a RangeError "
+                                  "for; give it the type '1 | 2 | 3'");
         ok = false;
       }
-      if (prop.name == "fractionalSecondDigits" && prop.value) {
-        if (std::optional<int64_t> digits = checker_.constantFolder().intConstant(prop.value);
-            digits && (*digits < 1 || *digits > 3)) {
-          checker_.diags_.error(prop.value->loc(),
-                                "fractionalSecondDigits is from 1 to 3, and JavaScript "
-                                "would throw a RangeError");
-          ok = false;
-        }
+      continue;
+    }
+    auto found =
+        llvm::find_if(kOptions, [&](const DateOption &o) { return o.name == field.name; });
+    if (found == std::end(kOptions) || found->values.empty() || exempt) {
+      continue;
+    }
+    std::optional<std::vector<std::string>> texts =
+        given ? checker_.literalTypes().knownTexts(given) : std::nullopt;
+    if (!texts) {
+      texts = textsOf(field.type->nonOptional());
+    }
+    if (!texts) {
+      std::string name = given ? valueText(given) : "value";
+      checker_.diags_.error(at, "the option '" + field.name +
+                                    "' known only when the program runs may be no value of it, "
+                                    "which JavaScript would throw a RangeError for; check it "
+                                    "first, e.g. 'if (" +
+                                    name + " == \"" + found->values[0].str() + "\" || " + name +
+                                    " == \"" + found->values[1].str() + "\")'");
+      ok = false;
+      continue;
+    }
+    for (const std::string &text : *texts) {
+      if (llvm::is_contained(found->values, text)) {
+        continue;
       }
+      std::string values;
+      for (size_t i = 0; i < found->values.size(); ++i) {
+        values += (i == 0                          ? "'"
+                   : i + 1 == found->values.size() ? " or '"
+                                                   : ", '") +
+                  found->values[i].str() + "'";
+      }
+      checker_.diags_.error(at, "'" + text + "' is not a value of the option '" + field.name +
+                                    "', and JavaScript would throw a "
+                                    "RangeError; it is " +
+                                    values);
+      ok = false;
+      break;
     }
   }
 
@@ -226,10 +293,22 @@ bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
 const Type *DateFormatChecker::dateOptionsType() {
   std::vector<Field> fields;
   for (const DateOption &option : kOptions) {
-    fields.push_back({option.name.str(), Type::optional(Type::string()), false});
+    const Type *value = Type::string();
+    if (!option.values.empty()) {
+      std::vector<const Type *> literals;
+      for (llvm::StringLiteral text : option.values) {
+        literals.push_back(Type::stringLiteral(std::u16string(text.begin(), text.end())));
+      }
+      value = Type::unionOf(literals);
+    }
+    fields.push_back({option.name.str(), Type::optional(value), false});
   }
   fields.push_back({"hour12", Type::optional(Type::boolTy()), false});
-  fields.push_back({"fractionalSecondDigits", Type::optional(Type::intTy()), false});
+  fields.push_back({"fractionalSecondDigits",
+                    Type::optional(Type::unionOf({Type::numberLiteral(1, Type::intTy()),
+                                                  Type::numberLiteral(2, Type::intTy()),
+                                                  Type::numberLiteral(3, Type::intTy())})),
+                    false});
 
   return Type::object(std::move(fields), "Intl.DateTimeFormatOptions");
 }

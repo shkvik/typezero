@@ -52,25 +52,8 @@ class ListenerList {
   }
 }
 
-class UnhandledError extends Error {
-  code = "ERR_UNHANDLED_ERROR"
-  context: unknown
-  constructor(context: unknown) {
-    super(`Unhandled error. (${__tz_lib_inspect(context)})`)
-    this.context = context
-  }
-}
-
-class AbortError extends Error {
-  code = "ABORT_ERR"
-  constructor(cause: Error | undefined) {
-    super("The operation was aborted", { cause })
-    this.name = "AbortError"
-  }
-}
-
-class OutOfRangeError extends RangeError {
-  code = "ERR_OUT_OF_RANGE"
+function aborted(): AbortError {
+  return { code: "ABORT_ERR", message: "The operation was aborted" }
 }
 
 export class EventEmitterBase {
@@ -82,8 +65,7 @@ export class EventEmitterBase {
   #warned = new Set<string>()
 
   setMaxListeners(n: double) {
-    validateNumber(n, "setMaxListeners", 0)
-    this.#maxListeners = n
+    this.#maxListeners = validNumber(n, 0)
     return this
   }
 
@@ -92,23 +74,13 @@ export class EventEmitterBase {
   }
 
   emit<A extends unknown[]>(type: string, ...args: A): boolean {
-    let doError = type == "error"
     const events = this.#events
-    doError &&= events["error"] == undefined
-    if (doError) {
-      const er = firstArg(...args)
-      if (er instanceof Error) throw er
-      throw new UnhandledError(er)
-    }
     const handler = events[type]
     if (handler == undefined) return false
     if (handler instanceof ListenerList) {
       const listeners = handler.begin()
-      try {
-        for (const listener of listeners) this.#run(type, listener, ...args)
-      } finally {
-        handler.done(listeners)
-      }
+      for (const listener of listeners) this.#run(type, listener, ...args)
+      handler.done(listeners)
     } else {
       this.#run(type, handler, ...args)
     }
@@ -120,11 +92,8 @@ export class EventEmitterBase {
     if (handler == undefined) return false
     if (handler instanceof ListenerList) {
       const listeners = handler.begin()
-      try {
-        for (const listener of listeners) this.#runWithUnknown(type, listener, boxed, ...args)
-      } finally {
-        handler.done(listeners)
-      }
+      for (const listener of listeners) this.#runWithUnknown(type, listener, boxed, ...args)
+      handler.done(listeners)
     } else {
       this.#runWithUnknown(type, handler, boxed, ...args)
     }
@@ -355,21 +324,22 @@ export function once<A extends unknown[], R extends unknown[]>(
   })
 }
 
-function onceResult<A extends unknown[], R extends unknown[]>(
+function onceResult<A extends unknown[], E>(
   emitter: EventEmitterBase,
   name: string,
   options?: { signal?: AbortSignal },
   errors = false,
-): Promise<Result<A, Error>> {
+): Promise<Result<A, E | AbortError>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted)
-    return Promise.resolve(err(new AbortError(errorOf(signal.reason))))
-  return new Promise<Result<A, Error>>((resolve) => {
-    function errorListener(...failure: R) {
+  if (signal != undefined && signal.aborted) {
+    const failed: Result<A, E | AbortError> = err(aborted())
+    return Promise.resolve(failed)
+  }
+  return new Promise<Result<A, E | AbortError>>((resolve) => {
+    function errorListener(error: E) {
       emitter.removeListener(name, resolver)
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
-      const er = firstArg(...failure)
-      resolve(err(er instanceof Error ? er : new UnhandledError(er)))
+      resolve(err(error))
     }
     function resolver(...args: A) {
       if (errors) emitter.removeListener("error", errorListener)
@@ -379,7 +349,7 @@ function onceResult<A extends unknown[], R extends unknown[]>(
     function abortListener(_event: Event) {
       emitter.removeListener(name, resolver)
       emitter.removeListener("error", errorListener)
-      resolve(err(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined)))
+      resolve(err(aborted()))
     }
     emitter.once(name, resolver)
     if (errors && name != "error") emitter.once("error", errorListener)
@@ -395,7 +365,7 @@ export function on<A extends unknown[], R extends unknown[]>(
   errors = false,
 ) {
   void errors
-  const queue = new EventQueue<A>()
+  const queue = new EventQueue<A, AbortError>()
   const close = options?.close ?? []
   function eventHandler(...args: A) {
     queue.push(args)
@@ -411,29 +381,28 @@ export function on<A extends unknown[], R extends unknown[]>(
   })
 }
 
-function onResult<A extends unknown[], R extends unknown[]>(
+function onResult<A extends unknown[], E>(
   emitter: EventEmitterBase,
   name: string,
   options?: { signal?: AbortSignal; close?: string[] },
   errors = false,
 ) {
   const signal = options?.signal
-  const queue = new EventQueue<A>()
+  const queue = new EventQueue<A, E | AbortError>()
   const close = options?.close ?? []
   function eventHandler(...args: A) {
     queue.push(args)
   }
-  function errorHandler(...failure: R) {
-    const er = firstArg(...failure)
-    queue.fail(er instanceof Error ? er : new UnhandledError(er))
+  function errorHandler(error: E) {
+    queue.fail(error)
   }
   function closeHandler() {
     queue.finish()
   }
   function abortListener(_event: Event) {
-    queue.fail(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined))
+    queue.fail(aborted())
   }
-  if (signal != undefined && signal.aborted) queue.fail(new AbortError(errorOf(signal.reason)))
+  if (signal != undefined && signal.aborted) queue.fail(aborted())
   emitter.on(name, eventHandler)
   if (errors && name != "error") emitter.on("error", errorHandler)
   for (const closeName of close) emitter.on(closeName, closeHandler)
@@ -447,9 +416,9 @@ function onResult<A extends unknown[], R extends unknown[]>(
   })
 }
 
-class EventQueue<A extends unknown[]> {
+class EventQueue<A extends unknown[], F> {
   #events: A[] = []
-  #error: Error | undefined = undefined
+  #error: F | undefined = undefined
   #finished = false
   #wake: (() => void) | undefined = undefined
 
@@ -459,7 +428,7 @@ class EventQueue<A extends unknown[]> {
     this.#poke()
   }
 
-  fail(error: Error) {
+  fail(error: F) {
     if (this.#finished) return
     this.#error = error
     this.#finished = true
@@ -502,13 +471,13 @@ class EventQueue<A extends unknown[]> {
       while (true) {
         const next = this.#events.shift()
         if (next != undefined) {
-          const item: Result<A, Error> = ok(next)
+          const item: Result<A, F> = ok(next)
           yield item
           continue
         }
         const error = this.#error
         if (error != undefined) {
-          const item: Result<A, Error> = err(error)
+          const item: Result<A, F> = err(error)
           yield item
           return
         }
@@ -537,9 +506,9 @@ export function setMaxListeners(
   n: double = EventEmitter.defaultMaxListeners,
   ...targets: EventEmitterBase[]
 ) {
-  validateNumber(n, "setMaxListeners", 0)
-  if (targets.length == 0) EventEmitter.defaultMaxListeners = n
-  else for (const target of targets) target.setMaxListeners(n)
+  const checked = validNumber(n, 0)
+  if (targets.length == 0) EventEmitter.defaultMaxListeners = checked
+  else for (const target of targets) target.setMaxListeners(checked)
 }
 
 function wrap(listener: unknown, kind: int): unknown {
@@ -565,10 +534,6 @@ function firstArg(...args: unknown[]): unknown {
   return args.length > 0 ? args[0] : undefined
 }
 
-function errorOf(reason: unknown): Error | undefined {
-  return reason instanceof Error ? reason : undefined
-}
-
 function ownKeys(events: Record<string, unknown>): string[] {
   const keys = Object.keys(events)
   const indices = keys.filter((k) => isArrayIndex(k))
@@ -581,11 +546,8 @@ function isArrayIndex(key: string) {
   return /^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 4294967295
 }
 
-function validateNumber(value: double, name: string, min: double) {
-  if (Number.isNaN(value) || value < min)
-    throw new OutOfRangeError(
-      `The value of "${name}" is out of range. It must be >= ${min}. Received ${value}`,
-    )
+function validNumber(value: double, min: double): double {
+  return Number.isNaN(value) || value < min ? min : value
 }
 
 function emitWarning(name: string, message: string) {
@@ -610,18 +572,20 @@ function onceTargetResult(
   target: EventTarget,
   name: string,
   options?: { signal?: AbortSignal },
-): Promise<Result<[Event], Error>> {
+): Promise<Result<[Event], AbortError>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted)
-    return Promise.resolve(err(new AbortError(errorOf(signal.reason))))
-  return new Promise<Result<[Event], Error>>((resolve) => {
+  if (signal != undefined && signal.aborted) {
+    const failed: Result<[Event], AbortError> = err(aborted())
+    return Promise.resolve(failed)
+  }
+  return new Promise<Result<[Event], AbortError>>((resolve) => {
     function resolver(event: Event) {
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
       resolve(ok([event]))
     }
     function abortListener(_event: Event) {
       target.removeListenerOf(name, resolver, false)
-      resolve(err(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined)))
+      resolve(err(aborted()))
     }
     target.addFunctionListener<Event>(name, resolver, { once: true })
     if (signal != undefined)

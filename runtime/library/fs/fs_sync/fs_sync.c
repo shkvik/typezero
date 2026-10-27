@@ -37,7 +37,7 @@
 static int read_path(Bytes *data, void *path_obj, uint64_t path_meta, void *flag_obj,
                      uint64_t flag_meta, TzMaker make) {
   OpenFlags flags;
-  if (!tz_fs_flags_of(flag_obj, flag_meta, &flags)) {
+  if (!tz_fs_flags_of(flag_obj, flag_meta, &flags, make)) {
     return 0;
   }
   Path p;
@@ -128,7 +128,7 @@ TzBytes *tz_fs_read_fd_bytes(int32_t fd, TzMaker make) {
 static void write_path(void *path_obj, uint64_t path_meta, const uint8_t *data, size_t length,
                        void *flag_obj, uint64_t flag_meta, int32_t mode, TzMaker make) {
   OpenFlags flags;
-  if (!tz_fs_flags_of(flag_obj, flag_meta, &flags)) {
+  if (!tz_fs_flags_of(flag_obj, flag_meta, &flags, make)) {
     return;
   }
   Path p;
