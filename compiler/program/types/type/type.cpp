@@ -1026,7 +1026,8 @@ const Type *Type::bytesType(Bytes kind) {
                                       "ArrayBuffer",
                                       "DataView",
                                       "TextEncoder",
-                                      "TextDecoder"};
+                                      "TextDecoder",
+                                      "FatalTextDecoder"};
   static Type *types[std::size(names)] = {};
   Type *&type = types[size_t(kind)];
   if (!type) {

@@ -2,13 +2,16 @@
 // stdin and stdout of node:process, by the names it gives them: the same
 // streams as process.stdin and process.stdout.
 import { stdin, stdout as out } from "node:process"
-import { Readable } from "node:stream"
+import { Readable, pipeline } from "node:stream"
 
 const chunks: string[] = []
 stdin.setEncoding("utf8")
+stdin.on("error", (e) => console.log(`stdin error ${e.message}`))
 stdin.on("data", (s) => chunks.push(s))
 stdin.on("end", () => {
   const text = chunks.join("")
   console.log("lines", text.split("\n").length - 1, stdin == process.stdin)
-  Readable.from(["piped ", "to ", "stdout\n"]).pipe(out)
+  pipeline(Readable.from(["piped ", "to ", "stdout\n"]), out, (err) => {
+    if (err != undefined) console.log(`pipeline error ${err.message}`)
+  })
 })

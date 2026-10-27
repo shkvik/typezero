@@ -1,4 +1,5 @@
 #include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/conditional_types/conditional_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/union_check_helpers/union_check_helpers.h"
@@ -34,6 +35,26 @@ const Type *literalPart(const Type *expected, UnionSlot slot) {
   const Type *part = expected->nonOptional()->slotPart(slot);
 
   return part && isLiteralSet(part) ? part : nullptr;
+}
+
+std::string utf8Text(const std::u16string &text) {
+  std::string out;
+  llvm::convertUTF16ToUTF8String(
+      llvm::ArrayRef<llvm::UTF16>(reinterpret_cast<const llvm::UTF16 *>(text.data()), text.size()),
+      out);
+
+  return out;
+}
+
+std::optional<std::u16string> writtenText(const Expr *e) {
+  if (auto *lit = dyn_cast<StringLitExpr>(e)) {
+    return lit->value;
+  }
+  if (auto *tmpl = dyn_cast<TemplateExpr>(e); tmpl && tmpl->exprs.empty()) {
+    return tmpl->quasis[0];
+  }
+
+  return std::nullopt;
 }
 
 }
@@ -243,6 +264,60 @@ const Type *LiteralTypes::typeIn(const Checker::Flow &flow, const VarSymbol *var
   }
 
   return var->type;
+}
+
+std::optional<std::vector<std::string>> LiteralTypes::knownTexts(const Expr *arg) {
+  auto typeTexts = [](const Type *type) -> std::optional<std::vector<std::string>> {
+    if (!type) {
+      return std::nullopt;
+    }
+    type = type->nonOptional();
+    llvm::ArrayRef<const Type *> members =
+        type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
+    std::vector<std::string> texts;
+    for (const Type *m : members) {
+      if (!m->isStringLiteral()) {
+        return std::nullopt;
+      }
+      texts.push_back(utf8Text(m->literalText()));
+    }
+    return texts;
+  };
+  const Expr *e = arg;
+  while (true) {
+    if (std::optional<std::vector<std::string>> texts = typeTexts(e->type)) {
+      return texts;
+    }
+    auto *conv = dyn_cast<CastExpr>(e);
+    if (!conv || !conv->isImplicit()) {
+      break;
+    }
+    e = conv->operand;
+  }
+  if (auto *name = dyn_cast<NameExpr>(e)) {
+    if (VarSymbol *var = checker_.scopes().lookup(name->name).var) {
+      if (std::optional<std::vector<std::string>> texts = typeTexts(typeIn(checker_.flow_, var))) {
+        return texts;
+      }
+      if (const Expr *lit = checker_.constLiterals_.lookup(var)) {
+        e = lit;
+      }
+    }
+  }
+  if (auto *choice = dyn_cast<ConditionalExpr>(e)) {
+    std::optional<std::vector<std::string>> a = knownTexts(choice->thenExpr);
+    std::optional<std::vector<std::string>> b = knownTexts(choice->elseExpr);
+    if (!a || !b) {
+      return std::nullopt;
+    }
+    a->insert(a->end(), b->begin(), b->end());
+    return a;
+  }
+  if (std::optional<std::u16string> text = writtenText(e)) {
+    return std::vector<std::string>{utf8Text(*text)};
+  }
+
+  return typeTexts(e->type);
 }
 
 }

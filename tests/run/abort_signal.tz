@@ -1,8 +1,8 @@
 // same-as-node
 // AbortController and AbortSignal: abort() with a reason or without (an
 // AbortError then), the listener `onabort` in the order it came,
-// throwIfAborted(), AbortSignal.abort(), timeout() and any(), and how they
-// print.
+// AbortSignal.abort(), timeout() and any(), and how they print.
+// throwIfAborted() is gone: nothing is thrown in tz, `aborted` says it.
 const log = (s: string) => console.log(s)
 // The reason is any value; these show an Error by its message and name.
 const message = (r: unknown) => (r instanceof Error ? r.message : "-")
@@ -11,15 +11,9 @@ const controller = new AbortController()
 const signal = controller.signal
 console.log(controller, signal.aborted, signal.reason)
 signal.onabort = () => log(`onabort: ${message(signal.reason)}`)
-signal.throwIfAborted()
 controller.abort(new Error("stop"))
 controller.abort(new Error("again")) // nothing more happens
 console.log(signal, signal.aborted, message(signal.reason))
-try {
-  signal.throwIfAborted()
-} catch (e) {
-  log(`thrown: ${e.message}`)
-}
 
 // Without a reason: an Error named AbortError.
 const plain = new AbortController()

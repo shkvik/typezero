@@ -15,7 +15,6 @@ fromCodePoint -> RangeError: Invalid code point -1
 toFixed -> RangeError: toFixed() digits argument must be between 0 and 100
 decimal / -> RangeError: Division by zero
 decimal % -> RangeError: Division by zero
-decimal parse -> SyntaxError: Cannot convert 12abc to a decimal
 decimal NaN -> RangeError: The number NaN cannot be converted to a decimal because it is not finite
 decimal sqrt -> RangeError: Square root of a negative decimal
 decimal size -> RangeError: Maximum decimal size exceeded

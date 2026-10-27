@@ -10,15 +10,14 @@ three 5
 460
 7 number
 true
-fulfilled 1 TWO rejected no none
+1 TWO
 b2 a1 c3
 { ann: 6, bob: 10 }
 hello, tz unset
 alpha
 caught ENOENT open true
-ENOENT
 Ok { value: 'alpha' }
-Err { error: 'no a.txt' } at readText (jobs.tz:108)
+Err { error: 'no a.txt' } at readText (jobs.tz:109)
 5 letters
 Dear Ann, you owe 12.50.
 PLAIN never ran

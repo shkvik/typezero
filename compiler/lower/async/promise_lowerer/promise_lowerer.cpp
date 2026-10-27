@@ -307,10 +307,12 @@ llvm::Value *PromiseLowerer::emitPromiseStatic(CallExpr *call) {
     const Type *promiseType = type->field("promise")->type;
     const Type *value = promiseType->promised();
     llvm::Value *promise = newPromise(value);
-    llvm::Value *object = lowering_.objectLayouts().allocObject(type, {0, 1, 2});
+    bool rejects = type->field("reject") != nullptr;
+    llvm::Value *object = rejects ? lowering_.objectLayouts().allocObject(type, {0, 1, 2})
+                                  : lowering_.objectLayouts().allocObject(type, {0, 1});
     lowering_.builder_.CreateStore(promise,
                                    lowering_.objectLayouts().fieldAddress(object, type, "promise"));
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < (rejects ? 2 : 1); ++i) {
       lowering_.builder_.CreateCall(lowering_.objRetainFn_, {promise});
       lowering_.builder_.CreateStore(
           lowering_.closureLowerer().makeFunctionValue(

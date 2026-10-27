@@ -1,7 +1,8 @@
 // same-as-node
 // on() of node:events in 'for await': the events that come before the loop waits
-// wait in a queue; an event named in 'close', an 'error' event and an abort
-// end it, and 'break' too; each removes the listeners. once() with a timeout.
+// wait in a queue, each in a Result; an event named in 'close' ends it, an
+// 'error' event and an abort end it after an Err, and 'break' too; each removes
+// the listeners. once() with a timeout.
 import { EventEmitter, on, once } from "node:events"
 const log = (s: string) => console.log(s)
 const bus = new EventEmitter<{ data: [n: int, label: string]; end: []; error: [err: Error] }>()
@@ -12,8 +13,11 @@ setTimeout(() => {
   bus.emit("data", 3, "three")
   bus.emit("end")
 }, 5)
-for await (const [n, label] of it)
+for await (const event of it) {
+  if (event.isErr()) break
+  const [n, label] = event.value
   log(`${n} ${label}`)
+}
 log(`listeners after: ${bus.listenerCount("data")} ${bus.listenerCount("end")}`)
 
 // an error ends it, after the events before it
@@ -22,17 +26,16 @@ setTimeout(() => {
   bus.emit("data", 4, "four")
   bus.emit("error", new Error("boom"))
 }, 5)
-try {
-  for await (const [n] of errs) log(`got ${n}`)
-} catch (e) {
-  log(`caught ${e instanceof Error ? e.message : "?"}`)
+for await (const event of errs) {
+  if (event.isErr()) log(`error ${event.error.message}`)
+  else log(`got ${event.value[0]}`)
 }
 log(`listeners after error: ${bus.listenerCount("data")} ${bus.listenerCount("error")}`)
 
 // break removes the listeners
 setTimeout(() => bus.emit("data", 5, "five"), 5)
-for await (const [n] of on(bus, "data")) {
-  log(`first ${n}`)
+for await (const event of on(bus, "data")) {
+  if (event.isOk()) log(`first ${event.value[0]}`)
   break
 }
 log(`listeners after break: ${bus.listenerCount("data")}`)
@@ -40,16 +43,15 @@ log(`listeners after break: ${bus.listenerCount("data")}`)
 // a signal ends it with an AbortError
 const ac = new AbortController()
 setTimeout(() => ac.abort(), 5)
-try {
-  for await (const [n] of on(bus, "data", { signal: ac.signal })) log(`never ${n}`)
-} catch (e) {
-  log(`aborted: ${e instanceof Error ? e.name : "?"}`)
+for await (const event of on(bus, "data", { signal: ac.signal })) {
+  if (event.isErr()) log(`aborted: ${event.error.name}`)
+  else log(`never ${event.value[0]}`)
 }
 // once with a timeout signal
 const alive = setTimeout(() => log("kept alive"), 50)
-try {
-  await once(bus, "end", { signal: AbortSignal.timeout(5) })
-} catch (e) {
-  log(`once: ${e instanceof Error ? e.name : "?"} ${e instanceof Error && e.cause instanceof Error ? e.cause.name : "-"}`)
+const ended = await once(bus, "end", { signal: AbortSignal.timeout(5) })
+if (ended.isErr()) {
+  const cause = ended.error.cause
+  log(`once: ${ended.error.name} ${cause instanceof Error ? cause.name : "-"}`)
 }
 clearTimeout(alive)

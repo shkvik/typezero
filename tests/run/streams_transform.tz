@@ -15,6 +15,7 @@ const upper = new Transform({
     callback()
   },
 })
+upper.on("error", (e) => log(`upper error ${e.message}`))
 upper.on("data", (chunk) => log(`data ${chunk.toString()}`))
 upper.on("end", () => log("end"))
 upper.on("finish", () => log("finish"))
@@ -24,7 +25,7 @@ upper.on("close", () => {
 })
 upper.write("hello")
 upper.write(" world")
-upper.end()
+const upperEnded = upper.end()
 
 const split = new Transform<string, string>({
   decodeStrings: false,
@@ -34,15 +35,18 @@ const split = new Transform<string, string>({
     callback()
   },
 })
+split.on("error", (e) => log(`split error ${e.message}`))
 split.on("data", (word) => log(`word ${word} ${typeof word}`))
-split.end("a bb ccc")
+const splitEnded = split.end("a bb ccc")
 
 const pt = new PassThrough({ highWaterMark: 2 })
 log(`pt write ${pt.write("abc")}`)
+pt.on("error", (e) => log(`pt error ${e.message}`))
 pt.on("drain", () => log("pt drain"))
 pt.on("data", (c) => log(`pt data ${c.toString()}`))
-pt.end()
+const ptEnded = pt.end()
 pt.on("end", () => {
   log("pt end")
   pt.removeAllListeners()
 })
+log(`ended ${(await upperEnded).isOk()} ${(await splitEnded).isOk()} ${(await ptEnded).isOk()}`)

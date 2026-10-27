@@ -64,4 +64,4 @@ const chained = find("lou")
 console.log(chained)
 const kept = find("max").andThrough(u => (u.name == "MAX" ? err("max is taken") : ok(0)))
 console.log(kept)
-void find("ned") // dropped on purpose
+if (find("ned").isErr()) console.log("no ned") // only checked, then released

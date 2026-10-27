@@ -97,12 +97,24 @@ export class Readable<T = Buffer> extends StreamEmitter<StreamEvents<T>> {
     return chunk == undefined ? undefined : __tz_chunk<T>(chunk)
   }
 
-  [Symbol.asyncIterator](): AsyncGenerator<T> {
-    return createAsyncIterator<T>(this, true)
+  [Symbol.asyncIterator](): AsyncGenerator<Result<T, Error>> {
+    return resultChunks<T>(createAsyncIterator<T>(this, true))
   }
 
-  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<T> {
-    return createAsyncIterator<T>(this, options?.destroyOnReturn ?? true)
+  iterator(options?: { destroyOnReturn?: boolean }): AsyncGenerator<Result<T, Error>> {
+    return resultChunks<T>(createAsyncIterator<T>(this, options?.destroyOnReturn ?? true))
+  }
+}
+
+async function* resultChunks<T>(source: AsyncGenerator<T>): AsyncGenerator<Result<T, Error>> {
+  try {
+    for await (const chunk of source) {
+      const item: Result<T, Error> = ok(chunk)
+      yield item
+    }
+  } catch (e) {
+    const item: Result<T, Error> = err(e)
+    yield item
   }
 }
 

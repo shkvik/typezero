@@ -10,6 +10,7 @@
 #include "compiler/check/types/destination/destination.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -182,6 +183,7 @@ void ReturnChecker::checkReturn(ReturnStmt *ret) {
     return;
   }
 
+  checker_.emitterChecker().reportUnlistenedErrors();
   const FuncSymbol *fn = checker_.currentFunction_;
   if (fn->decl && fn->decl->isConstructor) {
     if (ret->value) {

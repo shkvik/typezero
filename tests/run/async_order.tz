@@ -17,11 +17,8 @@ void p.then(() => log("t1")).then(() => log("t2")).then(() => log("t3")).then(()
 void plain().then(() => log("plain"))
 void viaPromise().then(() => log("viaPromise"))
 void new Promise<int>(resolve => resolve(1)).then(() => log("new Promise"))
-void Promise.resolve(1).finally(() => log("finally callback")).then(() => log("finally"))
 void Promise.all([1, 2]).then(() => log("all"))
 void Promise.race([1, 2]).then(() => log("race"))
-void Promise.allSettled([1]).then(() => log("allSettled"))
-void Promise.any([1]).then(() => log("any"))
 void (async () => {
   await undefined
   log("await 1")

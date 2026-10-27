@@ -1,10 +1,12 @@
 final 4
 destroy true
-"1\n2\n3\ndone\n" true
+true "1\n2\n3\ndone\n" true
 line "one" utf8
 line "two" utf8
+lines true true
 size 100
 data xxx
+sized true
 echo ping
 echo pong
-end
+end true true

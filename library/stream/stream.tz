@@ -294,8 +294,8 @@ export class Stream extends EventEmitterBase {
   @__tz_hidden _isTransform = false
   @__tz_hidden _transformCallback: StreamCallback | undefined = undefined
 
-  constructor(options?: { captureRejections?: boolean }) {
-    super(options)
+  constructor() {
+    super()
   }
 
   _initReadable(options: SideOptions, isDuplex: boolean) {
@@ -638,6 +638,16 @@ export class Stream extends EventEmitterBase {
     }
     sync(this)
     return this
+  }
+
+  _endResult(hasChunk: boolean, chunk: unknown, encoding: string | undefined):
+      Promise<Result<void, Error>> {
+    return new Promise<Result<void, Error>>((resolve) => {
+      this._endWith(hasChunk, chunk, encoding, (error?: Error) => {
+        if (error != undefined) resolve(err(error))
+        else resolve(ok())
+      })
+    })
   }
 
   destroy(error?: Error, callback?: StreamCallback) {

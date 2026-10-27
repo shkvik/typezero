@@ -1,34 +1,17 @@
 // same-as-node
-// Promises with unions: Promise.race and any over promises of different
-// values give their union, allSettled a tuple of results of each value, as
-// in TypeScript; `await` of a union (or of `T | undefined`) waits for the
-// Promise it may hold, or a turn of the queue for the other values.
+// Promises with unions: Promise.race over promises of different values
+// gives their union, as in TypeScript; `await` of a union (or of
+// `T | undefined`) waits for the Promise it may hold, or a turn of the queue
+// for the other values.
 function later<T>(value: T, ms: number): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms))
 }
-async function failInt(m: string): Promise<int> {
-  throw new Error(m)
-}
-async function failString(m: string): Promise<string> {
-  throw new Error(m)
-}
-
-// Promise.race, any and allSettled.
+// Promise.race and all.
 const raced = await Promise.race([later(1, 20), later("two", 5)])
 console.log(raced, typeof raced)
-console.log(await Promise.any([later(3, 1), later("four", 30)]))
-console.log(await Promise.any([failString("a"), later(12, 2)]))
+console.log(await Promise.race([later(3, 1), later("four", 30)]))
 console.log(await Promise.race([later(["x", "y"], 3), later({ k: 1 }, 1)]))
 console.log(await Promise.race([7, later("eight", 1)]))
-const settled = await Promise.allSettled([later(5, 1), later("six", 2)])
-console.log(settled)
-const [five, six] = settled
-if (five.status == "fulfilled")
-  console.log((five.value ?? 0) + 1)
-if (six.status == "fulfilled")
-  console.log(six.value?.toUpperCase())
-const three = await Promise.allSettled([later(true, 1), later("x", 1), failInt("no")])
-console.log(three.length, three[2].status, three[2].reason?.message, three[0].value)
 const pair = await Promise.all([later(9, 1), later("ten", 2)])
 console.log(pair)
 console.log(await new Promise(resolve => resolve(pair.length > 1 ? 11 : "eleven")))

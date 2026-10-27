@@ -8,6 +8,7 @@
 #include "runtime/core/string/string.h"
 #include "runtime/core/tzrt/tzrt.h"
 #include "runtime/core/unicode/unicode.h"
+#include "runtime/library/decimal/decimal_text/decimal_text.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1779,7 +1780,7 @@ static void narrow(Text *t, const uint16_t *s, size_t n) {
   }
 }
 
-TZ_COLD static void cannot_convert(const uint16_t *s, size_t n) {
+static void convert_message(char *message, size_t size, const uint16_t *s, size_t n) {
   char text[200];
   size_t len = 0;
   for (size_t i = 0; i < n && len + 4 < 160; ++i) {
@@ -1806,7 +1807,33 @@ TZ_COLD static void cannot_convert(const uint16_t *s, size_t n) {
     }
   }
   text[len] = 0;
-  tz_throw(TZ_SYNTAX_ERROR, "Cannot convert %s%s to a decimal", text, len + 4 >= 160 ? "..." : "");
+  snprintf(message, size, "Cannot convert %s%s to a decimal", text, len + 4 >= 160 ? "..." : "");
+}
+
+TZ_COLD static void cannot_convert(const uint16_t *s, size_t n) {
+  char message[256];
+  convert_message(message, sizeof message, s, n);
+  tz_throw(TZ_SYNTAX_ERROR, "%s", message);
+}
+
+typedef struct {
+  const char *code;
+  TzStr message;
+  TzStr text;
+} DecimalFailure;
+
+TZ_COLD static void not_decimal(TzMaker make, TzStr given, const uint16_t *s, size_t n) {
+  char message[256];
+  convert_message(message, sizeof message, s, n);
+  TzBuf text;
+  tz_buf_init(&text);
+  tz_buf_utf8(&text, message, strlen(message));
+  DecimalFailure parts;
+  parts.code = "bad_decimal";
+  parts.message = tz_buf_take(&text);
+  tz_str_retain_value(given);
+  parts.text = given;
+  tz_failed = make(&parts);
 }
 
 static int digit_in(uint16_t c, int base) {
@@ -1905,7 +1932,7 @@ static int equals_ascii(const uint16_t *s, size_t n, const char *word) {
   return 1;
 }
 
-void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
+void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta, TzMaker make) {
   TzStr str = {obj, meta};
   TzBuf buf;
   tz_buf_init(&buf);
@@ -1914,6 +1941,12 @@ void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta) {
   size_t n = buf.length;
   Dec x;
   dec_init(&x);
+  if (make && !tz_decimal_text_ok(s, n)) {
+    not_decimal(make, str, s, n);
+    tz_buf_free(&buf);
+    dec_store_free(out, &x);
+    return;
+  }
   Text ascii;
   text_init(&ascii);
   if (is_numeric(s, n)) {

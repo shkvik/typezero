@@ -43,7 +43,7 @@
 ```ts
 d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })
                                           // "23 октября 2026 г."
-d.toLocaleDateString(lang)                // язык из переменной
+d.toLocaleDateString(locale)              // язык из данных: Intl.Locale из Intl.Locale.parse
 d.toLocaleString()                        // язык системы: "23.10.2026, 00:00:00"
 ```
 

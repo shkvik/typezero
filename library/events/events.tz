@@ -78,12 +78,8 @@ export class EventEmitterBase {
   #eventsCount = 0
   #maxListeners: double | undefined = undefined
   #shapeMode = false
-  #capture: boolean
+  #capture = false
   #warned = new Set<string>()
-
-  constructor(options?: { captureRejections?: boolean }) {
-    this.#capture = options?.captureRejections ?? false
-  }
 
   setMaxListeners(n: double) {
     validateNumber(n, "setMaxListeners", 0)
@@ -154,7 +150,7 @@ export class EventEmitterBase {
     }
     if (fn instanceof AsyncListener) {
       const promise = __tz_listener<(...args: A) => Promise<void>>(fn.listener)(...args)
-      this.#addCatch(promise)
+      void promise
       return
     }
     if (fn instanceof ThisListener) {
@@ -166,24 +162,6 @@ export class EventEmitterBase {
       return
     }
     __tz_listener<(...args: A) => void>(fn)(...args)
-  }
-
-  #addCatch(promise: Promise<void>) {
-    if (!this.#capture) {
-      void promise
-      return
-    }
-    void promise.catch((err) => process.nextTick(() => this.#rejection(err)))
-  }
-
-  #rejection(err: Error) {
-    const prev = this.#capture
-    try {
-      this.#capture = false
-      this.emit("error", err)
-    } finally {
-      this.#capture = prev
-    }
   }
 
   #addListener(type: string, listener: unknown, prepend: boolean) {
@@ -361,30 +339,47 @@ export class EventEmitter<Events> extends EventEmitterBase {
   static defaultMaxListeners: double = 10
 }
 
-export async function once<A extends unknown[], R extends unknown[]>(
+export function once<A extends unknown[], R extends unknown[]>(
   emitter: EventEmitterBase,
   name: string,
   options?: { signal?: AbortSignal },
   errors = false,
 ): Promise<A> {
+  void options
+  void errors
+  return new Promise<A>((resolve) => {
+    function resolver(...args: A) {
+      resolve(args)
+    }
+    emitter.once(name, resolver)
+  })
+}
+
+function onceResult<A extends unknown[], R extends unknown[]>(
+  emitter: EventEmitterBase,
+  name: string,
+  options?: { signal?: AbortSignal },
+  errors = false,
+): Promise<Result<A, Error>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted) throw new AbortError(errorOf(signal.reason))
-  return new Promise<A>((resolve, reject) => {
-    function errorListener(...err: R) {
+  if (signal != undefined && signal.aborted)
+    return Promise.resolve(err(new AbortError(errorOf(signal.reason))))
+  return new Promise<Result<A, Error>>((resolve) => {
+    function errorListener(...failure: R) {
       emitter.removeListener(name, resolver)
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
-      const er = firstArg(...err)
-      reject(er instanceof Error ? er : new UnhandledError(er))
+      const er = firstArg(...failure)
+      resolve(err(er instanceof Error ? er : new UnhandledError(er)))
     }
     function resolver(...args: A) {
       if (errors) emitter.removeListener("error", errorListener)
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
-      resolve(args)
+      resolve(ok(args))
     }
     function abortListener(_event: Event) {
       emitter.removeListener(name, resolver)
       emitter.removeListener("error", errorListener)
-      reject(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined))
+      resolve(err(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined)))
     }
     emitter.once(name, resolver)
     if (errors && name != "error") emitter.once("error", errorListener)
@@ -399,15 +394,37 @@ export function on<A extends unknown[], R extends unknown[]>(
   options?: { signal?: AbortSignal; close?: string[] },
   errors = false,
 ) {
-  const signal = options?.signal
-  if (signal != undefined && signal.aborted) throw new AbortError(errorOf(signal.reason))
+  void errors
   const queue = new EventQueue<A>()
   const close = options?.close ?? []
   function eventHandler(...args: A) {
     queue.push(args)
   }
-  function errorHandler(...err: R) {
-    const er = firstArg(...err)
+  function closeHandler() {
+    queue.finish()
+  }
+  emitter.on(name, eventHandler)
+  for (const closeName of close) emitter.on(closeName, closeHandler)
+  return queue.items(() => {
+    emitter.removeListener(name, eventHandler)
+    for (const closeName of close) emitter.removeListener(closeName, closeHandler)
+  })
+}
+
+function onResult<A extends unknown[], R extends unknown[]>(
+  emitter: EventEmitterBase,
+  name: string,
+  options?: { signal?: AbortSignal; close?: string[] },
+  errors = false,
+) {
+  const signal = options?.signal
+  const queue = new EventQueue<A>()
+  const close = options?.close ?? []
+  function eventHandler(...args: A) {
+    queue.push(args)
+  }
+  function errorHandler(...failure: R) {
+    const er = firstArg(...failure)
     queue.fail(er instanceof Error ? er : new UnhandledError(er))
   }
   function closeHandler() {
@@ -416,12 +433,13 @@ export function on<A extends unknown[], R extends unknown[]>(
   function abortListener(_event: Event) {
     queue.fail(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined))
   }
+  if (signal != undefined && signal.aborted) queue.fail(new AbortError(errorOf(signal.reason)))
   emitter.on(name, eventHandler)
   if (errors && name != "error") emitter.on("error", errorHandler)
   for (const closeName of close) emitter.on(closeName, closeHandler)
   if (signal != undefined)
     signal.addFunctionListener<Event>("abort", abortListener, { once: true })
-  return queue.items(() => {
+  return queue.results(() => {
     emitter.removeListener(name, eventHandler)
     emitter.removeListener("error", errorHandler)
     for (const closeName of close) emitter.removeListener(closeName, closeHandler)
@@ -467,8 +485,33 @@ class EventQueue<A extends unknown[]> {
           yield next
           continue
         }
+        if (this.#finished) return
+        await new Promise<void>((resolve) => {
+          this.#wake = resolve
+        })
+      }
+    } finally {
+      this.#finished = true
+      this.#wake = undefined
+      stop()
+    }
+  }
+
+  async *results(stop: () => void) {
+    try {
+      while (true) {
+        const next = this.#events.shift()
+        if (next != undefined) {
+          const item: Result<A, Error> = ok(next)
+          yield item
+          continue
+        }
         const error = this.#error
-        if (error != undefined) throw error
+        if (error != undefined) {
+          const item: Result<A, Error> = err(error)
+          yield item
+          return
+        }
         if (this.#finished) return
         await new Promise<void>((resolve) => {
           this.#wake = resolve
@@ -549,21 +592,36 @@ function emitWarning(name: string, message: string) {
   process.nextTick(() => console.error(`(node:${__tz_lib_pid()}) ${name}: ${message}`))
 }
 
-async function onceTarget(
+function onceTarget(
   target: EventTarget,
   name: string,
   options?: { signal?: AbortSignal },
 ): Promise<[Event]> {
+  void options
+  return new Promise<[Event]>((resolve) => {
+    function resolver(event: Event) {
+      resolve([event])
+    }
+    target.addFunctionListener<Event>(name, resolver, { once: true })
+  })
+}
+
+function onceTargetResult(
+  target: EventTarget,
+  name: string,
+  options?: { signal?: AbortSignal },
+): Promise<Result<[Event], Error>> {
   const signal = options?.signal
-  if (signal != undefined && signal.aborted) throw new AbortError(errorOf(signal.reason))
-  return new Promise<[Event]>((resolve, reject) => {
+  if (signal != undefined && signal.aborted)
+    return Promise.resolve(err(new AbortError(errorOf(signal.reason))))
+  return new Promise<Result<[Event], Error>>((resolve) => {
     function resolver(event: Event) {
       if (signal != undefined) signal.removeListenerOf("abort", abortListener, false)
-      resolve([event])
+      resolve(ok([event]))
     }
     function abortListener(_event: Event) {
       target.removeListenerOf(name, resolver, false)
-      reject(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined))
+      resolve(err(new AbortError(signal != undefined ? errorOf(signal.reason) : undefined)))
     }
     target.addFunctionListener<Event>(name, resolver, { once: true })
     if (signal != undefined)

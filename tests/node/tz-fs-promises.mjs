@@ -11,7 +11,8 @@ function resulting(f) {
       return ok(await f(...args));
     } catch (e) {
       if (typeof e?.code === "string" &&
-          (typeof e?.syscall === "string" || e.code === "ERR_INVALID_ARG_VALUE"))
+          (typeof e?.syscall === "string" || e.code === "ERR_INVALID_ARG_VALUE" ||
+           e.code === "ABORT_ERR"))
         return err(e);
       throw e;
     }

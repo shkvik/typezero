@@ -1,0 +1,21 @@
+// What tz does where JavaScript throws for values that only the running
+// program has and that no list in the code can check (docs/intl.md): options
+// from a variable that do not go together are made to (the maximum of digits
+// rises to the minimum, roundingIncrement takes equal fraction digits and is
+// left out with significant digits), and DisplayNames.of a code that is none
+// gives undefined.
+const options: Intl.NumberFormatOptions[] = [
+  { minimumFractionDigits: 3, maximumFractionDigits: 1 },
+  { minimumSignificantDigits: 5, maximumSignificantDigits: 2 },
+  { roundingIncrement: 5 },
+  { roundingIncrement: 5, minimumFractionDigits: 1, maximumFractionDigits: 2 },
+  { roundingIncrement: 5, maximumSignificantDigits: 2 },
+  { roundingIncrement: 50, minimumFractionDigits: 2, maximumFractionDigits: 2 },
+]
+for (const o of options) {
+  const format = new Intl.NumberFormat("en", o)
+  const r = format.resolvedOptions()
+  console.log(format.format(12.3456), r.minimumFractionDigits, r.maximumFractionDigits, r.minimumSignificantDigits, r.maximumSignificantDigits, r.roundingIncrement)
+}
+const regions = new Intl.DisplayNames("en", { type: "region" })
+for (const code of ["FR", "12345", "a"]) console.log(regions.of(code) ?? "undefined")

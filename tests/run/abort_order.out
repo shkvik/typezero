@@ -9,10 +9,10 @@ any listener true true
 any of any listener
 listener micro (before)
 listener micro (after)
-rejected AbortError AbortError
+aborted ABORT_ERR The operation was aborted
 listener sync
 after abort
-rejected 2 AbortError
+aborted 2 ABORT_ERR
 listener micro 3
-rejected 3 AbortError
-stopped anyway: AbortError
+aborted 3 ABORT_ERR
+stopped anyway: ABORT_ERR

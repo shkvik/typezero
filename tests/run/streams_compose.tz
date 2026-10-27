@@ -7,13 +7,13 @@ import { finished } from "node:stream/promises"
 const log = (s: string) => console.log(s)
 function sinkInto(w: Writable, text: string) {
   w.write(text)
-  w.end()
+  return w.end()
 }
 const pt = new PassThrough()
 pt.on("data", (c) => log(`pt ${c.toString()}`))
-sinkInto(pt, "into a duplex")
-await finished(pt)
-log(`pt finished ${pt.writableFinished} ${pt.readableEnded}`)
+const sank = sinkInto(pt, "into a duplex")
+const ptDone = await finished(pt)
+log(`pt finished ${ptDone.isOk()} ${pt.writableFinished} ${pt.readableEnded} ${(await sank).isOk()}`)
 
 const upper = new Transform({
   transform(chunk, enc, cb) {
@@ -28,9 +28,9 @@ const exclaim = new Transform({
 const both = compose(upper, exclaim)
 both.on("data", (c) => log(`composed ${c.toString()}`))
 both.write("hey")
-both.end()
-await finished(both)
-log("composed done")
+const bothEnded = both.end()
+const bothDone = await finished(both)
+log(`composed done ${bothDone.isOk()} ${(await bothEnded).isOk()}`)
 
 const ac = new AbortController()
 const slow = new Readable({ read() {} })
@@ -54,5 +54,6 @@ const c = new Writable({
   },
 })
 c.write("x")
-c.end()
+const cEnded = c.end()
 finishedCb(c, (err) => log(`c finished ${err == undefined}`))
+log(`c ended ${(await cEnded).isOk()}`)

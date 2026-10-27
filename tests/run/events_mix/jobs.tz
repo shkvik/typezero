@@ -11,12 +11,9 @@ export class Jobs extends EventEmitter {
   async read(name: string, path: string) {
     this.started++
     this.emit("start", name)
-    try {
-      const text = must(await readFile(path, { encoding: "utf8", signal: this.#controller.signal }))
-      this.emit("done", name, text.trim().length)
-    } catch (e) {
-      if (e instanceof Error) this.emit("failed", name, e.name)
-    }
+    const text = await readFile(path, { encoding: "utf8", signal: this.#controller.signal })
+    if (text.isOk()) this.emit("done", name, text.value.trim().length)
+    else this.emit("failed", name, text.error.code)
   }
 
   // Cancels what is being read, as node's AbortController does.

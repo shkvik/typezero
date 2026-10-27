@@ -62,7 +62,6 @@ caught bad
 TypeError no listener
 handled now handled
 true
-Unhandled error. ('boom')
 listening on 8080
 closed
 Server {

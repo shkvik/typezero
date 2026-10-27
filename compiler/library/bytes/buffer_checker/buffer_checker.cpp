@@ -4,6 +4,7 @@
 #include "compiler/check/expr/member_checker/member_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 #include "compiler/library/bytes/bytes_checker/bytes_checker.h"
@@ -329,7 +330,8 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
     call->type = Type::object({{"read", Type::intTy(), false}, {"written", Type::intTy(), false}});
     return call;
   }
-  if (type->bytes() == Bytes::TextDecoder && name == "decode") {
+  if ((type->bytes() == Bytes::TextDecoder || type->bytes() == Bytes::FatalTextDecoder) &&
+      name == "decode") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 2)) {
       return call;
     }
@@ -351,7 +353,9 @@ Expr *BufferChecker::checkTextMethod(CallExpr *call, MemberExpr *member) {
       call->args[1] = checker_.typeRelations().coerce(given, options, "the options of 'decode'");
     }
     call->builtin = Builtin::TextDecode;
-    call->type = Type::string();
+    call->type = type->bytes() == Bytes::FatalTextDecoder
+                     ? Type::result(Type::string(), checker_.prelude().builtinType("DecodeError"))
+                     : Type::string();
     return call;
   }
   for (Expr *&arg : call->args) {

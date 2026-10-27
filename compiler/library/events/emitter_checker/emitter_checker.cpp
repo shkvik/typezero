@@ -4,10 +4,12 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/flow/field_facts/field_facts.h"
 #include "compiler/check/generics/generic_class_instantiator/generic_class_instantiator.h"
 #include "compiler/check/generics/generic_instantiator/generic_instantiator.h"
 #include "compiler/check/generics/type_params/type_params.h"
 #include "compiler/check/objects/keyed_field_checker/keyed_field_checker.h"
+#include "compiler/check/scopes/scopes.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
@@ -71,6 +73,29 @@ EmitterMethod emitterMethod(llvm::StringRef name) {
   return EmitterMethod::None;
 }
 
+std::string chainText(const Expr *expr) {
+  if (auto *name = dyn_cast<NameExpr>(expr)) {
+    return name->name.str();
+  }
+  if (auto *call = dyn_cast<CallExpr>(expr); call && isa<NameExpr>(call->callee)) {
+    llvm::StringRef fn = cast<NameExpr>(call->callee)->name;
+    auto *fd = call->args.size() == 1 ? dyn_cast<IntLitExpr>(call->args[0]) : nullptr;
+    if (fn == "processStdin" && call->args.empty()) {
+      return "process.stdin";
+    }
+    if (fn == "processStdout" && fd) {
+      return fd->value == 2 ? "process.stderr" : "process.stdout";
+    }
+    return "";
+  }
+  if (auto *member = dyn_cast<MemberExpr>(expr); member && !member->optional) {
+    std::string object = chainText(member->object);
+    return object.empty() ? "" : object + "." + member->name.str();
+  }
+
+  return "";
+}
+
 bool isServiceEvent(llvm::StringRef name) {
   return name == "newListener" || name == "removeListener";
 }
@@ -92,6 +117,125 @@ std::string shortPlace(const std::string &place) {
 }
 
 EmitterChecker::EmitterChecker(Checker &checker) : checker_(checker) {}
+
+void EmitterChecker::noteListener(MemberExpr *member, const Type *events, llvm::StringRef event) {
+  if (event == "error") {
+    checker_.errorListenedMaps_.insert(events);
+  }
+  if (events->isRecord() || (event != "error" && !events->field("error"))) {
+    return;
+  }
+  const Expr *root = member->object;
+  while (true) {
+    while (auto *conv = dyn_cast<CastExpr>(root)) {
+      if (!conv->isImplicit()) {
+        break;
+      }
+      root = conv->operand;
+    }
+    auto *inner = dyn_cast<CallExpr>(root);
+    auto *chained = inner ? dyn_cast<MemberExpr>(inner->callee) : nullptr;
+    if (!chained || emitterMethod(chained->name) != EmitterMethod::Listen) {
+      break;
+    }
+    root = chained->object;
+  }
+  Checker::EmitterKey key = keyOf(root);
+  Checker::Flow &flow = checker_.flow_;
+  if (event == "error") {
+    if (!llvm::is_contained(flow.errorListened, key)) {
+      flow.errorListened.push_back(key);
+    }
+    llvm::erase_if(flow.errorPending, [&](const auto &p) { return p.first == key; });
+    return;
+  }
+  if (!llvm::is_contained(flow.errorListened, key) &&
+      llvm::none_of(flow.errorPending, [&](const auto &p) { return p.first == key; })) {
+    flow.errorPending.push_back({key, member->loc()});
+  }
+}
+
+Checker::EmitterKey EmitterChecker::keyOf(const Expr *root) const {
+  while (auto *conv = dyn_cast<CastExpr>(root)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    root = conv->operand;
+  }
+  Checker::EmitterKey key;
+  if (auto *name = dyn_cast<NameExpr>(root)) {
+    const VarSymbol *var = name->var ? name->var : checker_.scopes().lookup(name->name).var;
+    if (var) {
+      key.path.var = var;
+      return key;
+    }
+  }
+  if (std::optional<Checker::FieldPath> path = checker_.fieldFacts().fieldPath(root)) {
+    key.path = *path;
+  } else if (std::string text = chainText(root); !text.empty()) {
+    key.text = text;
+  } else {
+    key.root = root;
+  }
+
+  return key;
+}
+
+void EmitterChecker::noteErrorsHandled(const Expr *emitter) {
+  if (emitter->type) {
+    if (const Type *events = checker_.eventMaps().eventMapOf(emitter->type)) {
+      checker_.errorListenedMaps_.insert(events);
+    }
+  }
+  Checker::EmitterKey key = keyOf(emitter);
+  Checker::Flow &flow = checker_.flow_;
+  if (!llvm::is_contained(flow.errorListened, key)) {
+    flow.errorListened.push_back(key);
+  }
+  llvm::erase_if(flow.errorPending, [&](const auto &p) { return p.first == key; });
+}
+
+std::string EmitterChecker::emitterName(const Checker::EmitterKey &key) const {
+  if (!key.text.empty()) {
+    return "'" + key.text + "'";
+  }
+  if (!key.path.var) {
+    return "this emitter";
+  }
+  std::string name = key.path.var->name.str();
+  for (llvm::StringRef part : key.path.names) {
+    name += "." + part.str();
+  }
+
+  return "'" + name + "'";
+}
+
+void EmitterChecker::reportUnlistenedErrors() {
+  for (const auto &[key, loc] : checker_.flow_.errorPending) {
+    if (!checker_.reportedErrorSubscriptions_.insert(loc.getPointer()).second) {
+      continue;
+    }
+    std::string name = emitterName(key);
+    std::string shown = key.path.var || !key.text.empty() ? name.substr(1, name.size() - 2) : "s";
+    checker_.diags_.error(loc, name +
+                                   " may emit 'error', and nothing listens for it on every path "
+                                   "here, so the error would be lost (node would end the "
+                                   "program); listen in this function: '" +
+                                   shown + ".on(\"error\", (e) => ...)'");
+  }
+  checker_.flow_.errorPending.clear();
+}
+
+void EmitterChecker::checkErrorListeners() {
+  for (const auto &[events, loc] : checker_.errorEmits_) {
+    if (!checker_.errorListenedMaps_.contains(events)) {
+      checker_.diags_.error(loc, "'error' is emitted here, but nothing in the program listens for "
+                                 "'error' on this emitter, so the error would be lost (node "
+                                 "would end the program); listen for it, e.g. "
+                                 "'bus.on(\"error\", (e) => ...)'");
+    }
+  }
+}
 
 Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const Type *expected) {
   auto checkArgsLoosely = [&] {
@@ -131,28 +275,6 @@ Expr *EmitterChecker::checkEmitterNew(NewExpr *expr, ClassDecl *generic, const T
     return checkArgsLoosely();
   }
   expr->typeArgs.clear();
-  if (!expr->args.empty()) {
-    if (auto *options = dyn_cast<ObjectLitExpr>(expr->args[0])) {
-      for (const ObjectLitExpr::Property &prop : options->props) {
-        auto *off = dyn_cast<BoolLitExpr>(prop.value);
-        if (prop.name != "captureRejections" || (off && !off->value)) {
-          continue;
-        }
-        const Type *error = events->isRecord() ? events->valueType()
-                            : events->isObject() && events->field("error")
-                                ? events->field("error")->type
-                                : nullptr;
-        const Type *wanted = Type::tuple({checker_.errorClass_->type});
-        if (error && error != wanted && !mentionsParam(error)) {
-          checker_.diags_.error(prop.loc,
-                                "an emitter that captures rejections emits 'error' with the Error "
-                                "of a rejected async listener, but its event map gives 'error' '" +
-                                    error->name() + "'; give it '[err: Error]'");
-        }
-      }
-    }
-  }
-
   return checker_.methodCallChecker().checkClassNew(expr, inst, expected);
 }
 
@@ -335,6 +457,9 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       checkArgsLoosely(1);
       return call;
     }
+    if (event == "error") {
+      checker_.errorEmits_.push_back({events, member->loc()});
+    }
     std::vector<bool> given(call->args.size(), false);
     given[0] = true;
     if (!first.empty()) {
@@ -373,6 +498,7 @@ Expr *EmitterChecker::checkEmitterCall(CallExpr *call, MemberExpr *member, Class
       return call;
     }
     if (kind == EmitterMethod::Listen) {
+      noteListener(member, events, event);
       call->args.push_back(checker_.exprChecker().checkExpr(
           checker_.ctx_.make<IntLitExpr>(call->loc(), uint64_t(listener)), Type::intTy()));
     } else {
@@ -452,10 +578,6 @@ std::string EmitterChecker::libraryExportHint(llvm::StringRef name) {
   }
   if (name == "defaultMaxListeners") {
     return "; it is 'EventEmitter.defaultMaxListeners'";
-  }
-  if (name == "captureRejections") {
-    return "; capture the rejections of each emitter: 'new EventEmitter({ captureRejections: true "
-           "})'";
   }
   if (name == "addAbortListener") {
     return " yet; listen to the signal: 'signal.addEventListener(\"abort\", listener, { once: "

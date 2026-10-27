@@ -200,7 +200,7 @@ void tz_json_expect_decimal(TzDec *out, const TzJson *j, const TzJsonPath *path)
   } else {
     tz_str_from_f64(&text, j->u.number.value == 0 ? 0 : j->u.number.value);
   }
-  tz_dec_from_string(out, text.obj, text.meta);
+  tz_dec_from_string(out, text.obj, text.meta, NULL);
   tz_str_release_value(text);
 }
 

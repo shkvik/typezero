@@ -8,6 +8,7 @@ src pause
 pipeline error bad e1=true e2=true
 finished c ok
 pipeline done true
+a ended true
 dst drain
 src resume
 write part2;
@@ -25,5 +26,6 @@ src resume
 write part5;
 src pause
 src end
-dst finish part1;part2;part3;part4;part5;
 dst unpipe
+dst finish part1;part2;part3;part4;part5;
+src to dst true

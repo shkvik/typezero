@@ -5,6 +5,7 @@
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/date/date_checker/date_checker.h"
+#include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/stream/stream_sources/stream_sources.h"
 #include "llvm/Support/ConvertUTF.h"
 
@@ -147,6 +148,14 @@ Expr *ProcessChecker::checkProcessCall(CallExpr *call, MemberExpr *member) {
   }
   static const llvm::StringLiteral properties[] = {"argv",     "env",    "exitCode", "execPath",
                                                    "platform", "stdout", "stderr"};
+  auto *event = call->args.empty() ? nullptr : dyn_cast<StringLitExpr>(call->args[0]);
+  if (event && (event->value == u"uncaughtException" || event->value == u"unhandledRejection") &&
+      (name == "on" || name == "once" || name == "addListener" || name == "prependListener")) {
+    return checker_.resultChecker().reject(
+        call, call->args[0]->loc(),
+        "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result "
+        "that the code which gets it handles (docs/errors.md, section 4)");
+  }
   if (llvm::is_contained(properties, name)) {
     checker_.diags_.error(member->loc(), "'process." + name + "' is not a function");
   } else {

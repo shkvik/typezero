@@ -1,6 +1,12 @@
-// decimal(s) of a string that is not a number throws a SyntaxError, as
-// BigInt("12abc") does (BigNumber.js throws too).
-// expect-exit: 1
-// expect-stderr: SyntaxError: Cannot convert 12abc to a decimal
-const inputs: string[] = ["1.5", " -2e3 ", "0x1F", "12abc"]
-for (const s of inputs) console.log(decimal(s))
+// decimal(s) of a string known only when the program runs gives a Result:
+// an Err with the text for one that is not a number (BigNumber.js throws, as
+// BigInt("12abc") does). A literal is checked when the program is built and
+// gives a decimal.
+const inputs: string[] = ["1.5", " -2e3 ", "0x1F", "12abc", "", "NaN", "1_000"]
+for (const s of inputs) {
+  const parsed = decimal(s)
+  if (parsed.isOk()) console.log(parsed.value)
+  else console.log(parsed.error.code, parsed.error.message, JSON.stringify(parsed.error.text))
+}
+const known: decimal = decimal("2.50") + decimal(" 1e2 ")
+console.log(known)

@@ -1,7 +1,7 @@
 // same-as-node
 // The errors JavaScript throws when the program runs, with node's messages:
 // lengths and offsets known only then, reads out of range, unknown
-// encodings, bytes a fatal TextDecoder cannot decode.
+// encodings; and the Err of a fatal TextDecoder at bytes it cannot decode.
 function attempt(what: string, f: () => void) {
   try {
     f()
@@ -52,6 +52,10 @@ attempt("encoding", () => console.log(four.toString(encodings[1] ?? "")))
 attempt("fill", () => console.log(four.fill("zz", "hex")))
 attempt("label", () => console.log(new TextDecoder(encodings[3] ?? "")))
 attempt("label old", () => console.log(new TextDecoder(encodings[2] ?? "").decode(new Uint8Array([0xc0, 0x80]))))
-attempt("fatal", () => console.log(new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0x41, 0xff]))))
-attempt("fatal 16", () => console.log(new TextDecoder("utf-16le", { fatal: true }).decode(new Uint8Array([0, 0xd8]))))
-attempt("fatal 1253", () => console.log(new TextDecoder("windows-1253", { fatal: true }).decode(new Uint8Array([0xaa]))))
+const decoded = [
+  new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0x41, 0xff])),
+  new TextDecoder("utf-16le", { fatal: true }).decode(new Uint8Array([0, 0xd8])),
+  new TextDecoder("windows-1253", { fatal: true }).decode(new Uint8Array([0xaa])),
+  new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0x41, 0x42])),
+]
+for (const text of decoded) console.log("fatal", text.isOk() ? text.value : `${text.error.code} ${text.error.message}`)

@@ -33,18 +33,18 @@ const sink = new Writable<string>({
     callback()
   },
 })
-await pipeline(users, toLine, sink)
-log(`lines ${JSON.stringify(lines)}`)
+const piped = await pipeline(users, toLine, sink)
+log(`lines ${piped.isOk()} ${JSON.stringify(lines)}`)
 
 const r2 = Readable.from(["a", "b", "c"])
-log(`text ${await text(r2)}`)
+log(`text ${(await text(r2)).unwrapOr("?")}`)
 const r3 = Readable.from([Buffer.from('{"x": [1, 2'), Buffer.from("]}")])
 const j = (await json(r3)).unwrapOr(null)
 log(`json ${JSON.stringify(j)}`)
 const r4 = Readable.from(["héllo", " wörld"])
-const b = await buffer(r4)
+const b = (await buffer(r4)).unwrapOr(Buffer.alloc(0))
 log(`buffer ${b.length} ${b.toString("hex")}`)
-await pipeline(
+const sunk = await pipeline(
   Readable.from(["x", "y"]),
   async function* (source) {
     for await (const chunk of source) yield chunk.toUpperCase()
@@ -53,7 +53,7 @@ await pipeline(
     for await (const chunk of source) log(`sink ${chunk}`)
   },
 )
-log("done")
+log(`done ${sunk.isOk()}`)
 
 // The chunk types found from the program: what read() pushes, what
 // transform() gives its callback, what write() is declared to take.
@@ -88,6 +88,6 @@ const totals = new Writable({
   },
 })
 points.on("data", (p) => log(`point ${p.x},${p.y}`))
-points.pipe(sum)
-sum.pipe(totals)
 totals.on("finish", () => log("finish"))
+const summed = await pipeline(points, sum, totals)
+log(`summed ${summed.isOk()}`)

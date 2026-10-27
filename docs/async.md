@@ -275,4 +275,10 @@ async-программ без зависимости от времени сра�
 7. **Без отказов** ([errors.md](errors.md), шаг 3): убрать `reject`, `.catch`, `.finally`,
    `Promise.reject`, `allSettled`, `any`, путь «не пойманная ошибка в задаче», `ResultAsync` и
    методы `Result` у `Promise`; ошибка на `void` над `Promise<Result>` и на колбэк с `Result`
-   там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`.
+   там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`. Сделано 27 октября в коде программы: ошибки с подсказками на `reject`, `.catch`,
+   `.finally`, второй аргумент `then`, `Promise.reject`, `allSettled`, `any`, `void` над
+   `Promise<Result>` и `process.on("uncaughtException")`; `withResolvers` без `reject`; ожидания
+   с `signal` (`node:timers/promises`, `node:fs/promises`, `question`) отдают `Result`. Осталось:
+   отказы внутри библиотеки на tz (`once`/`on` событий, `pipeline`/`finished` потоков — с
+   [events.md](events.md), шаг 6, и [streams.md](streams.md), шаг 6) и путь «не пойманная ошибка
+   в задаче» — вместе с исключениями ([errors.md](errors.md), шаг 5).

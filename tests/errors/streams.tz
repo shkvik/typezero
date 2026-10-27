@@ -1,17 +1,20 @@
 // The chunk types of node:stream (docs/streams.md, section 2): setEncoding()
 // on a stream that went elsewhere before, or where its type would depend on
-// a branch; chunks of another type in push(), write() and pipe(); an
-// object-mode stream whose type nothing tells.
+// a branch; chunks of another type in push(), write() and pipeline(); an
+// object-mode stream whose type nothing tells; pipe(), which does not pass
+// an error on.
 import { PassThrough, Readable, Writable, compose, pipeline } from "node:stream"
 import { createReadStream } from "node:fs"
 class User {
   constructor(public name: string) {}
 }
 function use(r: Readable) {
+  r.on("error", (e) => console.log(e.message))
   r.on("end", () => {})
 }
 const a = createReadStream("a.txt")
 a.on("data", (b) => console.log(b.length))
+a.on("error", (e) => console.log(e.message))
 // expect-error: setEncoding() on a stream that is used elsewhere already, which sees its chunks as Buffers, but strings would come: it got listeners (on()) before this
 a.setEncoding("utf8")
 const b = createReadStream("b.txt")
@@ -39,7 +42,7 @@ bytes.push(42)
 const strings = new Writable<string>({ decodeStrings: false, write(c, e, cb) { cb() } })
 // expect-error: 'write' of a stream of string takes a string, but this is 'Buffer'
 strings.write(Buffer.from("x"))
-// expect-error: pipe() writes chunks of User to 'PassThrough<Buffer, Buffer>', which takes Buffer
+// expect-error: 'pipe' is not supported: it does not pass an error on, so the source stops and the destination stays open; join the streams with 'await pipeline(source, destination)', which gives a Result
 objects.pipe(new PassThrough())
 // expect-error: cannot infer the type of the chunks of this object-mode Readable: no code of the program pushes into it
 const nothing = new Readable({ objectMode: true, read() {} })

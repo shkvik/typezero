@@ -124,8 +124,8 @@ static int fsp_signal(FsRequest *r, void *signal) {
   if (!tz_signal_aborted(signal)) {
     return 1;
   }
-  tz_promise_reject(r->promise, tz_abort_error(signal));
-  fsp_free(r);
+  tz_fs_abort_failure(r->make);
+  tz_fs_fsp_reject_thrown(r);
 
   return 0;
 }
@@ -156,8 +156,8 @@ void tz_fs_fsp_fail_system(FsRequest *r, int error, const char *syscall, int sho
 
 int tz_fs_fsp_succeeded(FsRequest *r) {
   if (r->signal && tz_signal_aborted(r->signal)) {
-    tz_promise_reject(r->promise, tz_abort_error(r->signal));
-    fsp_free(r);
+    tz_fs_abort_failure(r->make);
+    tz_fs_fsp_reject_thrown(r);
     return 0;
   }
   if (!r->failed) {

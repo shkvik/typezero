@@ -11,11 +11,19 @@
 // - Result, ok and err (docs/errors.md, section 1): Ok and Err print as tz
 //   prints them, except that tz adds where an Err was made.
 // - JSON.parse, decodeURIComponent, decodeURI, URL.parse and Date.parse,
-//   which give a Result in tz, and RegExp.parse, which only tz has.
+//   which give a Result in tz, and RegExp.parse and Intl.Locale.parse, which
+//   only tz has; decode of a TextDecoder with fatal, which gives a Result too.
 // - "node:fs" and "node:fs/promises" whose functions give a Result
 //   (tz-fs.mjs, tz-fs-promises.mjs), and "node:child_process" whose
 //   execSync, execFileSync and spawnSync give one (tz-child-process.mjs), and
-//   "node:crypto" with a Result where the data may be wrong (tz-crypto.mjs).
+//   "node:crypto" with a Result where the data may be wrong (tz-crypto.mjs),
+//   "node:timers/promises" whose waits with a signal give one
+//   (tz-timers-promises.mjs), "node:readline/promises" whose question()
+//   gives one (tz-readline-promises.mjs), "node:events" whose once() and
+//   on() give one (tz-events.mjs), and "node:stream/consumers" and
+//   "node:stream/promises" (tz-stream-consumers.mjs, tz-stream-promises.mjs).
+// - end() of writable streams and `for await` over readable ones, which give
+//   Results in tz.
 // - The module "tz:io", with readLine (tz-io.mjs next to this file).
 // - The module "tz:http", with serve over node:http (tz-http.mjs).
 // - NODE_OPTIONS with this file, for the tests that run themselves again as
@@ -144,6 +152,58 @@ RegExp.parse = (pattern, flags) => {
     return new Err({ code: "bad_regex", message: e.message });
   }
 };
+globalThis.TextDecoder = class TextDecoder extends globalThis.TextDecoder {
+  decode(input, options) {
+    if (!this.fatal) return super.decode(input, options);
+    try {
+      return new Ok(super.decode(input, options));
+    } catch (e) {
+      return new Err({ code: e.code, message: e.message });
+    }
+  }
+};
+Intl.Locale.parse = (tag) => {
+  try {
+    return new Ok(new Intl.Locale(tag));
+  } catch (e) {
+    return new Err({ code: "bad_locale", message: e.message, tag });
+  }
+};
+
+// Streams in tz (docs/streams.md, section 3): end() of a writable gives a
+// Promise of a Result, which says when the stream finished and whether it
+// failed, and `for await` over a readable gives each chunk in a Result, an
+// Err at the end when the stream fails. Node's own code iterates readables
+// too, so only an iteration the test itself starts gets Results.
+{
+  const stream = require("node:stream");
+  for (const proto of [stream.Writable.prototype, stream.Duplex.prototype]) {
+    const end = proto.end;
+    proto.end = function (...args) {
+      return new Promise((resolve) => {
+        end.call(this, ...args, (e) => resolve(e ? new Err(e) : new Ok(undefined)));
+      });
+    };
+  }
+  const iterate = stream.Readable.prototype[Symbol.asyncIterator];
+  const iterator = stream.Readable.prototype.iterator;
+  async function* results(chunks) {
+    try {
+      for await (const chunk of chunks) yield new Ok(chunk);
+    } catch (e) {
+      yield new Err(e);
+    }
+  }
+  const fromTest = () => !(new Error().stack.split("\n")[3] ?? "").includes("node:");
+  stream.Readable.prototype[Symbol.asyncIterator] = function () {
+    const chunks = iterate.call(this);
+    return fromTest() ? results(chunks) : chunks;
+  };
+  stream.Readable.prototype.iterator = function (options) {
+    const chunks = iterator.call(this, options);
+    return fromTest() ? results(chunks) : chunks;
+  };
+}
 
 // crypto.subtle gives a Promise of a Result in tz, with the name of the
 // DOMException (or TypeError) node rejects with as the code.
@@ -216,6 +276,11 @@ const tzFs = pathToFileURL(join(__dirname, "tz-fs.mjs")).href;
 const tzFsPromises = pathToFileURL(join(__dirname, "tz-fs-promises.mjs")).href;
 const tzChildProcess = pathToFileURL(join(__dirname, "tz-child-process.mjs")).href;
 const tzCrypto = pathToFileURL(join(__dirname, "tz-crypto.mjs")).href;
+const tzTimers = pathToFileURL(join(__dirname, "tz-timers-promises.mjs")).href;
+const tzReadline = pathToFileURL(join(__dirname, "tz-readline-promises.mjs")).href;
+const tzEvents = pathToFileURL(join(__dirname, "tz-events.mjs")).href;
+const tzConsumers = pathToFileURL(join(__dirname, "tz-stream-consumers.mjs")).href;
+const tzStreamPromises = pathToFileURL(join(__dirname, "tz-stream-promises.mjs")).href;
 const here = pathToFileURL(__dirname).href + "/";
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -228,6 +293,16 @@ registerHooks({
       return { url: tzChildProcess, shortCircuit: true };
     if (!own && (specifier === "node:crypto" || specifier === "crypto"))
       return { url: tzCrypto, shortCircuit: true };
+    if (!own && (specifier === "node:timers/promises" || specifier === "timers/promises"))
+      return { url: tzTimers, shortCircuit: true };
+    if (!own && (specifier === "node:readline/promises" || specifier === "readline/promises"))
+      return { url: tzReadline, shortCircuit: true };
+    if (!own && (specifier === "node:events" || specifier === "events"))
+      return { url: tzEvents, shortCircuit: true };
+    if (!own && (specifier === "node:stream/consumers" || specifier === "stream/consumers"))
+      return { url: tzConsumers, shortCircuit: true };
+    if (!own && (specifier === "node:stream/promises" || specifier === "stream/promises"))
+      return { url: tzStreamPromises, shortCircuit: true };
     if (specifier === "tz:io")
       return { url: tzIo, shortCircuit: true };
     if (specifier === "tz:http")

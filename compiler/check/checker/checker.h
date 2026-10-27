@@ -271,6 +271,14 @@ private:
       return var == other.var && names == other.names;
     }
   };
+  struct EmitterKey {
+    FieldPath path;
+    std::string text;
+    const Expr *root = nullptr;
+    bool operator==(const EmitterKey &other) const {
+      return path == other.path && text == other.text && root == other.root;
+    }
+  };
   struct Flow {
     Facts facts;
     llvm::SmallPtrSet<const VarSymbol *, 4> defined;
@@ -279,6 +287,8 @@ private:
     std::vector<std::pair<const VarSymbol *, const Type *>> narrowed;
     llvm::SmallPtrSet<const VarSymbol *, 2> okResults, errResults;
     std::vector<llvm::StringRef> setFields;
+    std::vector<EmitterKey> errorListened;
+    std::vector<std::pair<EmitterKey, llvm::SMLoc>> errorPending;
     bool beforeSuper = false;
     bool unreachable = false;
   };
@@ -530,6 +540,9 @@ private:
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels_;
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars_;
   Flow flow_;
+  std::vector<std::pair<const Type *, llvm::SMLoc>> errorEmits_;
+  llvm::SmallPtrSet<const Type *, 4> errorListenedMaps_;
+  llvm::DenseSet<const void *> reportedErrorSubscriptions_;
   llvm::StringSet<> namesInFunctions_;
   llvm::StringSet<> assignedFields_;
   llvm::ArrayRef<Stmt *> block_;

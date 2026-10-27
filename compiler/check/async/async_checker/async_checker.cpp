@@ -334,7 +334,12 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
     return;
   }
   std::string text = statementText(at);
-  if (text.empty()) {
+  if (expr->type && expr->type->isPromise() && Checker::holdsResults(expr->type->promised())) {
+    checker_.diags_.error(expr->loc(),
+                          "the Promise is not awaited, and the Result it gives would go "
+                          "unchecked; await it and handle the Result, e.g. 'const r = await " +
+                              (text.empty() ? std::string("p") : text) + "'");
+  } else if (text.empty()) {
     checker_.diags_.error(expr->loc(),
                           "the Promise is not awaited, so nothing waits for it and an error in "
                           "it would end the program later; write 'await' before it, or "

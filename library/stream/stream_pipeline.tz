@@ -362,12 +362,12 @@ export function streamPipelineToStage(stages: (Stream | PipelineStage)[],
 
 export function streamPipelinePromise(stages: (Stream | PipelineStage)[],
                                       options?: { signal?: AbortSignal; end?: boolean }):
-    Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
+    Promise<Result<void, Error>> {
+  return new Promise<Result<void, Error>>((resolve) => {
+    const ps = new PipelineState((error: Error | undefined, value: unknown) => {
       void value
-      if (err != undefined) reject(err)
-      else resolve()
+      if (error != undefined) resolve(err(error))
+      else resolve(ok())
     })
     pipelineImpl(stages, ps, options?.end ?? true, options?.signal)
   })
@@ -375,11 +375,11 @@ export function streamPipelinePromise(stages: (Stream | PipelineStage)[],
 
 export function streamPipelineValue<V>(stages: (Stream | PipelineStage)[],
                                        options?: { signal?: AbortSignal; end?: boolean }):
-    Promise<V> {
-  return new Promise<V>((resolve, reject) => {
-    const ps = new PipelineState((err: Error | undefined, value: unknown) => {
-      if (err != undefined) reject(err)
-      else resolve(__tz_chunk<V>(value))
+    Promise<Result<V, Error>> {
+  return new Promise<Result<V, Error>>((resolve) => {
+    const ps = new PipelineState((error: Error | undefined, value: unknown) => {
+      if (error != undefined) resolve(err(error))
+      else resolve(ok(__tz_chunk<V>(value)))
     })
     pipelineImpl(stages, ps, options?.end ?? true, options?.signal)
   })

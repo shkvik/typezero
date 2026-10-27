@@ -8,6 +8,8 @@
 #include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/check/types/type_resolver/type_resolver.h"
+#include "compiler/library/result/result_checker/result_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -191,6 +193,22 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     call->type = Type::promise(type);
     return call;
   }
+  bool library = checker_.libraryCalls().inLibrary(member->loc());
+  if (!library && (name == "reject" || name == "allSettled" || name == "any")) {
+    return checker_.resultChecker().reject(
+        call, member->loc(),
+        name == "reject"
+            ? std::string("a Promise is not rejected in tz: an operation that may fail gives a "
+                          "Promise<Result<T, E>>; give the error in the value, "
+                          "'Promise.resolve(err(e))'")
+        : name == "allSettled"
+            ? std::string("'Promise.allSettled' is not needed: a Promise is not rejected, so "
+                          "'Promise.all' gives every value; with Results inside, "
+                          "'Result.combine(await Promise.all(ps))' gives all the values or the "
+                          "first Err")
+            : std::string("'Promise.any' is not needed: a Promise is not rejected, so the first "
+                          "to settle gives the first value, 'Promise.race(ps)'"));
+  }
   if (name == "reject") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
@@ -230,9 +248,12 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (value->isError()) {
       return call;
     }
-    call->type = Type::object({{"promise", Type::promise(value), false},
-                               {"resolve", PromiseChecker::resolverType(value), false},
-                               {"reject", checker_.promiseChecker().rejecterType(), false}});
+    std::vector<Field> fields = {{"promise", Type::promise(value), false},
+                                 {"resolve", PromiseChecker::resolverType(value), false}};
+    if (library) {
+      fields.push_back({"reject", checker_.promiseChecker().rejecterType(), false});
+    }
+    call->type = Type::object(std::move(fields));
     return call;
   }
   static const std::pair<llvm::StringLiteral, Builtin> lists[] = {
@@ -314,11 +335,9 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     }
     return call;
   }
-  checker_.diags_.error(member->loc(),
-                        "'Promise." + name +
-                            "' is not supported; the functions of Promise "
-                            "are 'resolve', 'reject', 'all', 'allSettled', 'race', 'any' and "
-                            "'withResolvers'");
+  checker_.diags_.error(member->loc(), "'Promise." + name +
+                                           "' is not supported; the functions of Promise "
+                                           "are 'resolve', 'all', 'race' and 'withResolvers'");
   checkArgsLoosely();
 
   return call;

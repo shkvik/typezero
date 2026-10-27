@@ -12,6 +12,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
 #include "compiler/library/date/date_checker/date_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -126,10 +127,25 @@ Expr *UnaryChecker::checkUnary(UnaryExpr *unary, const Type *expected, bool wrap
     unary->operand = checker_.exprChecker().checkExpr(unary->operand);
     unary->type = Type::string();
     break;
-  case UnaryOp::Void:
+  case UnaryOp::Void: {
     unary->operand = checker_.exprChecker().checkExpr(unary->operand);
     unary->type = Type::undefinedTy();
+    const Type *dropped = unary->operand->type;
+    bool promised = dropped->isPromise();
+    if (promised) {
+      dropped = dropped->promised();
+    }
+    if (Checker::holdsResults(dropped) && !checker_.libraryCalls().inLibrary(unary->loc())) {
+      checker_.diags_.error(
+          unary->loc(),
+          promised ? std::string("'void' drops the Result that the Promise gives, so an error in "
+                                 "it would go unchecked; let the task handle it, e.g. an async "
+                                 "function that checks 'if (r.isErr()) ...'")
+                   : std::string("'void' drops the Result, so an error in it would go unchecked; "
+                                 "handle it, e.g. with '.match(...)'"));
+    }
     break;
+  }
   case UnaryOp::Delete:
     return checkDelete(unary);
   case UnaryOp::NonNull: {

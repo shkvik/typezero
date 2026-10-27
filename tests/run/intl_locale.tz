@@ -1,0 +1,33 @@
+// same-as-node
+// Intl.Locale (docs/intl.md): a language the program knows only when it runs
+// is parsed by Intl.Locale.parse, which gives a Result, and the classes of
+// Intl and the toLocale* methods take the Intl.Locale it holds.
+const en = new Intl.Locale("en-latn-us")
+console.log(en.toString(), en.baseName, en.language, en.script, en.region)
+const ru = new Intl.Locale("ru")
+console.log(ru.toString(), ru.script, ru.region, ru.maximize().toString(), ru.maximize().script)
+console.log(new Intl.Locale("de-u-co-phonebk").baseName, new Intl.Locale("zh-hant").maximize().region)
+
+function show(tag: string) {
+  const parsed = Intl.Locale.parse(tag)
+  if (parsed.isErr()) {
+    console.log(`${parsed.error.code}: ${parsed.error.message} (${parsed.error.tag})`)
+    return
+  }
+  const locale: Intl.Locale = parsed.value
+  console.log(locale.toString(), (1234567.5).toLocaleString(locale), new Intl.NumberFormat(locale, { style: "percent" }).format(0.25))
+  const day = new Date(Date.UTC(2026, 9, 27))
+  console.log(day.toLocaleDateString(locale, { timeZone: "UTC", month: "long", day: "numeric" }), new Intl.DateTimeFormat(locale, { timeZone: "UTC", weekday: "long" }).format(day))
+  console.log(["b", "a", "ä"].sort(new Intl.Collator(locale).compare), "b".localeCompare("a", locale))
+  console.log(new Intl.PluralRules(locale).select(2), new Intl.ListFormat(locale).format(["x", "y", "z"]))
+  console.log(new Intl.RelativeTimeFormat(locale).format(-1, "day"), new Intl.DisplayNames(locale, { type: "region" }).of("JP"))
+  console.log(Intl.NumberFormat.supportedLocalesOf(locale), Intl.getCanonicalLocales(locale))
+}
+
+for (const tag of ["de-DE", "EN-gb", "not a tag", "zh-Hant-TW", "sr-Latn", "en_US", ""]) show(tag)
+
+const lang = "fr"
+const fallback = process.argv.length > 99 ? "pt-BR" : "es"
+console.log((1.5).toLocaleString(lang), (2.5).toLocaleString(fallback), Intl.getCanonicalLocales(["EN-us", "ru"]))
+const name = process.argv.length > 99 ? "x" : "it"
+if (name == "it") console.log(new Intl.NumberFormat(name).format(1234567.5))

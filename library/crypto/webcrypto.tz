@@ -1552,14 +1552,9 @@ async function wrappedBytes(format: KeyFormat, key: CryptoKey, kw: boolean): Pro
 
 function unwrappedData(format: KeyFormat, bytes: ArrayBuffer): BufferSource | JsonWebKey {
   if (format != "jwk") return bytes
-  let text = ""
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-  } catch (err) {
-    void err
-    throw dataError("Invalid wrapped JWK key")
-  }
-  const json = JSON.parse(text)
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+  if (text.isErr()) throw dataError("Invalid wrapped JWK key")
+  const json = JSON.parse(text.value)
   if (json.isErr()) throw dataError("Invalid wrapped JWK key")
   const jwk = fromJson<JsonWebKey>(json.value)
   if (jwk.isErr()) throw dataError("Invalid wrapped JWK key")

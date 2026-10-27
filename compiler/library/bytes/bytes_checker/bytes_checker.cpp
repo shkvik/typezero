@@ -42,6 +42,7 @@ const std::pair<llvm::StringLiteral, Bytes> kNames[] = {
     {"DataView", Bytes::DataView},
     {"TextEncoder", Bytes::TextEncoder},
     {"TextDecoder", Bytes::TextDecoder},
+    {"FatalTextDecoder", Bytes::FatalTextDecoder},
 };
 
 std::string utf8(const std::u16string &text) {
@@ -237,6 +238,7 @@ Expr *BytesChecker::checkBytesMember(MemberExpr *member) {
     }
     break;
   case Bytes::TextDecoder:
+  case Bytes::FatalTextDecoder:
     if (name == "encoding") {
       return read(Builtin::TextDecoderInfo, Type::string(), {intLit(0)});
     }
@@ -435,6 +437,7 @@ Expr *BytesChecker::checkBytesMethod(CallExpr *call, MemberExpr *member, const T
     return checker_.typedArrayChecker().checkDataViewMethod(call, member);
   case Bytes::TextEncoder:
   case Bytes::TextDecoder:
+  case Bytes::FatalTextDecoder:
     return checker_.bufferChecker().checkTextMethod(call, member);
   default:
     break;

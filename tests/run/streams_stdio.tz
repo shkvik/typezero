@@ -1,9 +1,12 @@
 // same-as-node
 // process.stdin as a Readable, with setEncoding(), and process.stdout as a
-// Writable: what is piped and written comes in order with console.log.
+// Writable: what goes through pipeline() and is written comes in order with
+// console.log.
 import { Transform } from "node:stream"
+import { pipeline } from "node:stream/promises"
 process.stdin.setEncoding("utf8")
 let text = ""
+process.stdin.on("error", (e) => console.log(`stdin error ${e.message}`))
 process.stdin.on("data", (s) => {
   text += s
 })
@@ -14,9 +17,13 @@ process.stdin.on("end", () => {
       cb(undefined, chunk.toString().toUpperCase())
     },
   })
-  upper.pipe(process.stdout)
+  void pipeline(upper, process.stdout, { end: false }).then((r) => {
+    if (r.isErr()) console.log(`pipeline error ${r.error.message}`)
+  })
   upper.write("piped ")
-  upper.end("to stdout\n")
+  void upper.end("to stdout\n").then((r) => {
+    if (r.isErr()) console.log(`end error ${r.error.message}`)
+  })
   upper.on("end", () => {
     process.stdout.write(Buffer.from("bytes\n"))
     console.log("after bytes")

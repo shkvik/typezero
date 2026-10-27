@@ -18,10 +18,20 @@ names.forEach(n => save(n))
 names.map(n => save(n))
 // expect-error: the Promise is not awaited
 Promise.resolve(1).then(x => x + 1)
-// Handled: catch(), then() with a second function, finally() after them.
-save("x").catch(e => console.log(e.message))
-save("y").then(() => {}, e => console.log(e.message))
-save("z").catch(e => console.log(e.message)).finally(() => console.log("done"))
+// A Promise is not rejected (docs/errors.md, section 4): no catch(), no
+// second function of then(), no finally(), no Promise.reject, allSettled, any.
+// expect-error: a Promise is not rejected in tz, so it has no 'catch'
+void save("x").catch(e => console.log(e.message))
+// expect-error: 'then' takes one function: a Promise is not rejected in tz
+void save("y").then(() => {}, e => console.log(e.message))
+// expect-error: a Promise is not rejected in tz, so it has no 'finally': 'then' runs every time
+void save("z").finally(() => console.log("done"))
+// expect-error: a Promise is not rejected in tz: an operation that may fail gives a Promise<Result<T, E>>; give the error in the value, 'Promise.resolve(err(e))'
+void Promise.reject(new Error("no"))
+// expect-error: 'Promise.allSettled' is not needed: a Promise is not rejected, so 'Promise.all' gives every value
+void Promise.allSettled([save("a")])
+// expect-error: 'Promise.any' is not needed: a Promise is not rejected, so the first to settle gives the first value, 'Promise.race(ps)'
+void Promise.any([save("b")])
 void save("dropped on purpose")
 
 function plain() {
@@ -50,9 +60,35 @@ async function mismatch(): Promise<string> {
 }
 // expect-error: cannot tell the type of the Promise's value from what is given to 'resolve'
 const unknownValue = new Promise(resolve => resolve(undefined))
-// expect-error: type 'string' is not assignable to type 'Error'
-const rejected = new Promise<int>((resolve, reject) => reject("no"))
+// expect-error: a Promise is not rejected in tz, so its function gets only 'resolve'
+const rejected = new Promise<int>((resolve, reject) => resolve(1))
+const { promise, resolve } = Promise.withResolvers<int>()
+// expect-error: property 'reject' does not exist
+const { reject } = Promise.withResolvers<int>()
 // expect-error: arguments for the callback are not supported
 setTimeout(save, 10, "x")
-// expect-error: a Promise has 'then', 'catch' and 'finally'
+// expect-error: a Promise has 'then', and its value is read with 'await'
 p.done()
+
+// A task that nobody waits for handles its errors itself (docs/errors.md,
+// section 4): 'void' cannot drop a Result.
+function check(): Result<int, string> {
+  return process.argv.length > 9 ? err("no") : ok(1)
+}
+async function track(): Promise<Result<int, string>> {
+  await undefined
+  return check()
+}
+// expect-error: 'void' drops the Result that the Promise gives, so an error in it would go unchecked
+void track()
+// expect-error: the Promise is not awaited, and the Result it gives would go unchecked; await it and handle the Result, e.g. 'const r = await track()'
+track()
+// expect-error: 'void' drops the Result, so an error in it would go unchecked
+void check()
+async function trackQuietly() {
+  const r = await track()
+  if (r.isErr()) console.log(r.error)
+}
+void trackQuietly()
+// expect-error: there is nothing to catch: nothing is thrown or rejected in tz
+process.on("uncaughtException", (e) => console.log(e))

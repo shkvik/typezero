@@ -19,7 +19,7 @@ calendar not a calendar! true false RangeError: Invalid calendar : not a calenda
 digits 2 23
 digits 7 true false RangeError: fractionalSecondDigits value is out of range.
 tag de-DE 1.1.1970
-tag en_US true false RangeError: Incorrect locale information provided
+tag en_US Incorrect locale information provided
 Invalid Date Invalid Date [null]
 set 1767229200000
 locale 1/1/2026, 12:00:00 AM

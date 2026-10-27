@@ -18,17 +18,17 @@ iso-2022-jp "����(XA" fffd fffd fffd fffd 28 58 41
 iso-2022-jp "�A�" fffd 41 fffd
 shift_jis "� ���" fffd 20 fffd fffd fffd
 euc-kr "� ���" fffd 20 fffd fffd fffd
-TypeError: The encoded data was not valid for encoding gbk
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding gbk
 B
-TypeError: The encoded data was not valid for encoding big5
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding big5
 B
-TypeError: The encoded data was not valid for encoding euc-jp
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding euc-jp
 B
-TypeError: The encoded data was not valid for encoding iso-2022-jp
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding iso-2022-jp
 B
-TypeError: The encoded data was not valid for encoding shift_jis
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding shift_jis
 B
-TypeError: The encoded data was not valid for encoding euc-kr
+true ERR_ENCODING_INVALID_ENCODED_DATA: The encoded data was not valid for encoding euc-kr
 B
 gbk ["","中","","文",""]
 gb18030 ["","","","","😀",""]

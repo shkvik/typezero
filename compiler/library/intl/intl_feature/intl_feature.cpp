@@ -10,13 +10,14 @@
 namespace tz {
 
 Expr *IntlFeature::checkStaticCall(Checker &checker, CallExpr *call, MemberExpr *member,
-                                   const Type *) const {
+                                   const Type *expected) const {
   if (checker.callChecker().isGlobalName(member->object, "Intl")) {
     return checker.dateFormatChecker().checkIntlCall(call, member);
   }
   if (auto *inner = llvm::dyn_cast<MemberExpr>(member->object);
       inner && checker.callChecker().isGlobalName(inner->object, "Intl")) {
-    return checker.intlChecker().checkIntlStatic(call, member);
+    return inner->name == "Locale" ? checker.intlChecker().checkLocaleStatic(call, member, expected)
+                                   : checker.intlChecker().checkIntlStatic(call, member);
   }
 
   return nullptr;

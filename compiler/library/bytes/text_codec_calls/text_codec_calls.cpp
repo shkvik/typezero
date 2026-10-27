@@ -2,6 +2,7 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
@@ -220,15 +221,20 @@ llvm::Value *TextCodecCalls::emit() {
       lowering_.refCounts().dropOperand(options);
     }
     lowering_.throwLowerer().takeOperand(self);
+    bool checked = call->type->isResult();
+    llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
+    if (checked) {
+      make = lowering_.resultLowerer().failureMaker(call->type->errType());
+    }
     llvm::Value *text = lowering_.stringLowerer().callReturningString(
-        fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64, i32}),
-        {self.value, data, length, stream});
+        fn("tz_text_decode", voidTy, {ptr, ptr, ptr, i64, i32, ptr}),
+        {self.value, data, length, stream, make});
     if (input.value) {
       lowering_.refCounts().dropOperand(input);
     }
     lowering_.refCounts().dropOperand(self);
-    lowering_.throwLowerer().emitThrowCheck();
-    return text;
+
+    return checked ? lowering_.resultLowerer().catchFailure(text, call->type, call->loc()) : text;
   }
   case Builtin::TextDecoderInfo: {
     Lowering::Operand self = receiver(0);

@@ -3,7 +3,7 @@ onabort abort true true 2
 listener abort true
 AbortError This operation was aborted 20 true
 [ AbortController { signal: AbortSignal { aborted: true } } ] AbortSignal { aborted: true }
-thrown RangeError stop
+aborted RangeError stop
 true AbortError
 Error 23 0
 either second

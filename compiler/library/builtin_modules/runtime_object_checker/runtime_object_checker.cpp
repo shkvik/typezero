@@ -120,7 +120,8 @@ Expr *RuntimeObjectChecker::checkRuntimeMethod(CallExpr *call, MemberExpr *membe
         }
         call->args = {query, signalOption(options.lookup("signal"), member->loc())};
         call->builtin = Builtin::RlQuestion;
-        call->type = Type::promise(Type::string());
+        call->type =
+            Type::promise(Type::result(Type::string(), checker_.fsChecker().systemError()));
         return call;
       }
       if (call->args.size() < 2) {

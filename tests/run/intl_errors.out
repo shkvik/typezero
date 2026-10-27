@@ -1,20 +1,6 @@
-TypeError: Currency code is required with currency style.
 RangeError: Invalid currency code : US
 RangeError: Invalid unit argument for Intl.NumberFormat() 'parsec'
-RangeError: maximumFractionDigits value is out of range.
-RangeError: maximumFractionDigits value is out of range.
-RangeError: Value bogus out of range for Intl.NumberFormat options property style
-RangeError: The normalization form should be one of NFC, NFD, NFKC, NFKD.
-RangeError: Invalid unit argument for Intl.RelativeTimeFormat.prototype.format() 'decade'
 RangeError: Value need to be finite number for Intl.RelativeTimeFormat.prototype.format()
-RangeError: invalid_argument
-RangeError: Incorrect locale information provided
-RangeError: roundingIncrement value is out of range.
-RangeError: maximumFractionDigits value is out of range.
-TypeError: RoundingType is not fractionDigits
-RangeError: Incorrect locale information provided
-RangeError: Value x out of range for Intl.PluralRules options property type
-RangeError: Value line out of range for Intl.Segmenter options property granularity
 RangeError: Invalid unit argument for Intl.NumberFormat() ''
 RangeError: Invalid numberingSystem : a
 latn
@@ -23,37 +9,17 @@ en-u-nu-arab
 en-u-nu-arab
 en
 ๑๒
-RangeError: Value x out of range for Intl.NumberFormat options property useGrouping
 auto
 always
 min2
-RangeError: maximumFractionDigits value is out of range.
-10
-RangeError: minimumIntegerDigits value is out of range.
 05
-RangeError: maximumSignificantDigits value is out of range.
-RangeError: Value bogus out of range for Number.prototype.toLocaleString options property style
-RangeError: Incorrect locale information provided
-RangeError: Value x out of range for String.prototype.localeCompare options property sensitivity
-RangeError: Value x out of range for Intl.Collator options property usage
-RangeError: Value x out of range for Intl.Collator options property caseFirst
 RangeError: Invalid collation : x
-RangeError: Value x out of range for Intl.RelativeTimeFormat options property style
-RangeError: Value x out of range for Intl.RelativeTimeFormat options property numeric
-RangeError: Value x out of range for Intl.ListFormat options property type
-RangeError: Value x out of range for Intl.ListFormat options property style
-RangeError: Value x out of range for Intl.DisplayNames options property type
-RangeError: Value x out of range for Intl.DisplayNames options property style
-RangeError: Value x out of range for Intl.DisplayNames options property fallback
-RangeError: Value x out of range for Intl.NumberFormat.supportedLocalesOf options property localeMatcher
 1
 1.00 US dollars
 0
 XYZ 1.00
 1 liter per kilometer
 ($1.00)
-RangeError: Value x out of range for Intl.NumberFormat options property roundingMode
-RangeError: Value x out of range for Intl.NumberFormat options property roundingPriority
-50 %
-RangeError: Incorrect locale information provided
-50 %
+50 % ru
+bad_locale: Incorrect locale information provided (en_GB)
+50 % de

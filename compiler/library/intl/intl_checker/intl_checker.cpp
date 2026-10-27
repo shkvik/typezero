@@ -2,6 +2,12 @@
 #include "compiler/check/expr/argument_checker/argument_checker.h"
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
+#include "compiler/check/expr/new_checker/new_checker.h"
+#include "compiler/check/scopes/scopes.h"
+#include "compiler/check/top_level_checker/top_level_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
+#include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
@@ -64,6 +70,46 @@ const Type *relativePartType() {
                        {"value", Type::string(), false},
                        {"unit", Type::optional(Type::string()), false}},
                       "Intl.RelativeTimeFormatPart");
+}
+
+const Expr *unconverted(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      break;
+    }
+    expr = conv->operand;
+  }
+
+  return expr;
+}
+
+bool isStringLike(const Type *type) {
+  return type->isString() || type->isStringLiteral() ||
+         (type->isUnion() &&
+          llvm::all_of(type->members(), [](const Type *m) { return m->isStringLiteral(); }));
+}
+
+const Type *numberOptionType(llvm::StringRef name) {
+  std::vector<int64_t> values;
+  if (name == "roundingIncrement") {
+    values = {1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000};
+  } else {
+    int64_t lo = name.ends_with("FractionDigits") ? 0 : 1;
+    int64_t hi = name.ends_with("FractionDigits") ? 100 : 21;
+    for (int64_t v = lo; v <= hi; ++v) {
+      values.push_back(v);
+    }
+  }
+  std::vector<const Type *> members;
+  for (int64_t v : values) {
+    members.push_back(Type::numberLiteral(double(v), Type::intTy()));
+  }
+  const Type *type = Type::unionOf(members);
+  if (name != "roundingIncrement") {
+    Type::nameUnion(type, std::to_string(values.front()) + ".." + std::to_string(values.back()));
+  }
+
+  return type;
 }
 
 }
@@ -202,6 +248,19 @@ const Type *IntlChecker::intlTypeNamed(llvm::StringRef name) {
                          : option.kind == 'n' ? Type::doubleTy()
                          : option.kind == 'b' ? Type::boolTy()
                                               : Type::unionOf({Type::string(), Type::boolTy()});
+      if (option.kind == 'n') {
+        type = numberOptionType(option.name);
+      }
+      if ((option.kind == 's' || option.kind == 'g') && !option.values.empty()) {
+        std::vector<const Type *> members;
+        for (llvm::StringLiteral value : option.values) {
+          members.push_back(Type::stringLiteral(utf16(value)));
+        }
+        if (option.kind == 'g') {
+          members.push_back(Type::boolTy());
+        }
+        type = Type::unionOf(members);
+      }
       fields.push_back({option.name.str(), Type::optional(type), false});
     }
     return Type::object(std::move(fields), "Intl." + service.name.str() + "Options");
@@ -223,11 +282,10 @@ Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vect
   };
   const IntlService *service = serviceNamed(name);
   if (!service) {
-    checker_.diags_.error(loc,
-                          "'Intl." + name +
-                              "' is not supported yet; Intl has DateTimeFormat, NumberFormat, "
-                              "Collator, PluralRules, RelativeTimeFormat, ListFormat, DisplayNames "
-                              "and Segmenter");
+    checker_.diags_.error(loc, "'Intl." + name +
+                                   "' is not supported yet; Intl has DateTimeFormat, NumberFormat, "
+                                   "Collator, PluralRules, RelativeTimeFormat, ListFormat, "
+                                   "DisplayNames, Segmenter and Locale");
     return failed();
   }
   if (!withNew && !service->callable) {
@@ -259,36 +317,152 @@ Expr *IntlChecker::checkIntlNew(llvm::SMLoc loc, llvm::StringRef name, std::vect
                                                Type::intl(service->kind));
 }
 
-Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
-  std::vector<std::optional<std::u16string>> tags;
-  if (auto *array = dyn_cast<ArrayLitExpr>(arg)) {
-    for (const ArrayLitExpr::Element &e : array->elements) {
-      tags.push_back(e.spread ? std::nullopt : literalText(e.expr));
-    }
-  } else {
-    tags.push_back(literalText(arg));
+bool IntlChecker::checkTags(const Expr *arg, llvm::StringRef what, bool constructor) {
+  std::optional<std::vector<std::string>> tags = checker_.literalTypes().knownTexts(arg);
+  if (!tags) {
+    checker_.diags_.error(
+        arg->loc(),
+        constructor
+            ? std::string("a language known only when the program runs may be no language "
+                          "tag, which JavaScript would throw a RangeError for; parse it with "
+                          "'Intl.Locale.parse(tag)', which gives a Result")
+            : "a language known only when the program runs may be no language tag, which "
+              "JavaScript would throw a RangeError for; parse it first: "
+              "'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which " +
+                  what.str() + " takes");
+    return false;
   }
-  arg = checker_.exprChecker().checkExpr(arg, Type::array(Type::string()));
+  for (const std::string &tag : *tags) {
+    if (!isLanguageTag(tag)) {
+      checker_.diags_.error(arg->loc(),
+                            "'" + tag +
+                                "' is not a language tag, and JavaScript would throw a "
+                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool IntlChecker::checkLocaleArg(Expr *&arg, llvm::StringRef what) {
+  const Type *type = arg->type;
+  if (type->isError()) {
+    return false;
+  }
+  if (type->isUndefined()) {
+    return true;
+  }
+  if (ClassDecl *locale = checker_.libraryClass("Locale");
+      locale && !type->isOptional() && ClassDeclarer::classOf(type) == locale) {
+    auto *tag = checker_.ctx_.make<MemberExpr>(arg->loc(), arg, "#tag");
+    tag->type = Type::string();
+    arg = tag;
+    return true;
+  }
+  if (!isStringLike(type->nonOptional())) {
+    std::string message = what.str() +
+                          " takes the language as a string, e.g. \"ru-RU\", or an Intl.Locale, "
+                          "found '" +
+                          type->name().str() + "'";
+    if (type->isArray()) {
+      message += "; pass one language";
+    }
+    checker_.diags_.error(arg->loc(), message);
+    return false;
+  }
+  if (!checkTags(arg, what, false)) {
+    return false;
+  }
+  if (!type->nonOptional()->isString()) {
+    arg = checker_.typeRelations().convert(arg, type->isOptional() ? Type::optional(Type::string())
+                                                                   : Type::string());
+  }
+
+  return true;
+}
+
+Expr *IntlChecker::checkLocaleList(Expr *arg, llvm::StringRef what) {
+  bool array = isa<ArrayLitExpr>(arg);
+  arg = checker_.exprChecker().checkExpr(arg, array ? Type::array(Type::string()) : nullptr);
   const Type *type = arg->type;
   if (type->isError()) {
     return arg;
   }
-  if (type != Type::string() && type != Type::array(Type::string()) && !type->isUndefined()) {
+  if (!type->isArray()) {
+    checkLocaleArg(arg, what);
+    return arg;
+  }
+  if (type != Type::array(Type::string())) {
     checker_.diags_.error(arg->loc(), what.str() +
                                           " takes a language or an array of them, found '" +
                                           type->name().str() + "'");
     return arg;
   }
-  for (const std::optional<std::u16string> &tag : tags) {
-    if (tag && !isLanguageTag(utf8(*tag))) {
-      checker_.diags_.error(arg->loc(),
-                            "'" + utf8(*tag) +
-                                "' is not a language tag, and JavaScript would throw a "
-                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
+  auto *list = dyn_cast<ArrayLitExpr>(unconverted(arg));
+  if (!list) {
+    checker_.diags_.error(arg->loc(),
+                          "languages known only when the program runs may be no language tags, "
+                          "which JavaScript would throw a RangeError for; parse each with "
+                          "'Intl.Locale.parse(tag)', which gives a Result, and pass them to " +
+                              what.str() + " one by one");
+    return arg;
+  }
+  for (const ArrayLitExpr::Element &e : list->elements) {
+    if (e.spread) {
+      checker_.diags_.error(e.expr->loc(),
+                            what.str() + " takes the languages written in the array, not spread");
+      return arg;
+    }
+    if (!checkTags(e.expr, what, false)) {
+      return arg;
     }
   }
 
   return arg;
+}
+
+Expr *IntlChecker::checkLocaleNew(NewExpr *expr, const Type *expected) {
+  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls) {
+    checker_.diags_.error(expr->loc(), "'Intl.Locale' is not available here");
+    for (Expr *&arg : expr->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return expr;
+  }
+  if (expr->args.size() == 2) {
+    checker_.diags_.error(expr->args[1]->loc(),
+                          "the options of Intl.Locale are not supported; write them into the "
+                          "tag, e.g. 'new Intl.Locale(\"th-TH-u-ca-buddhist\")'");
+    for (Expr *&arg : expr->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return expr;
+  }
+  expr->name = kIntlLocaleName;
+  expr->member = "";
+  Expr *checked = checker_.newChecker().checkNew(expr, expected);
+  auto *made = dyn_cast<NewExpr>(checked);
+  std::vector<Expr *> *args = made ? (made->ctor ? &made->ctor->args : &made->args) : nullptr;
+  if (args && args->size() == 1 && args->front()->type && !args->front()->type->isError()) {
+    checkTags(args->front(), "Intl.Locale", true);
+  }
+
+  return checked;
+}
+
+Expr *IntlChecker::checkLocaleStatic(CallExpr *call, MemberExpr *member, const Type *expected) {
+  if (!checker_.topLevelChecker().lookupValue(kIntlLocaleName).cls) {
+    checker_.diags_.error(member->loc(), "'Intl.Locale' is not available here");
+    call->type = Type::error();
+    for (Expr *&arg : call->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return call;
+  }
+  member->object = checker_.ctx_.make<NameExpr>(member->object->loc(), kIntlLocaleName);
+
+  return checker_.callChecker().checkCall(call, expected);
 }
 
 Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
@@ -309,6 +483,15 @@ Expr *IntlChecker::checkIntlFunction(CallExpr *call, MemberExpr *member) {
   }
   if (member->name == "supportedValuesOf") {
     checker_.diags_.error(member->loc(), "'Intl.supportedValuesOf' is not supported yet");
+    for (Expr *&arg : call->args) {
+      arg = checker_.exprChecker().checkExpr(arg);
+    }
+    return call;
+  }
+  if (member->name == "Locale") {
+    checker_.diags_.error(member->loc(), "'Intl.Locale' is made with 'new': 'new Intl.Locale(tag)' "
+                                         "or 'Intl.Locale.parse(tag)', and JavaScript would throw "
+                                         "a TypeError without it");
     for (Expr *&arg : call->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }

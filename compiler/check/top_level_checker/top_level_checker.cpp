@@ -4,6 +4,7 @@
 #include "compiler/declare/import_binder/import_binder.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
 
@@ -44,6 +45,7 @@ void TopLevelChecker::checkTopLevel(Module *module, llvm::StringRef until) {
   }
   if (here.next == items.size()) {
     here.loaded = true;
+    checker_.emitterChecker().reportUnlistenedErrors();
   } else {
     here.flow = checker_.flow_;
   }

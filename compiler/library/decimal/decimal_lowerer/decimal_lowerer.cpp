@@ -1,5 +1,6 @@
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/decimal/decimal_literal/decimal_literal.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
@@ -8,6 +9,7 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
@@ -358,11 +360,20 @@ llvm::Value *DecimalLowerer::emitDecimalCall(CallExpr *call) {
       lowering_.throwLowerer().emitThrowCheck();
       return result;
     }
+    static const std::vector<MakerFields> orders = {{nullptr, {"code", "message", "text"}}};
+    bool checked = call->type->isResult();
+    llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
+    if (checked) {
+      make = lowering_.objectMaker().maker(call->type->errType(), orders);
+    }
     Lowering::Operand text = lowering_.refCounts().emitOperand(arg, true);
-    llvm::Value *result = callReturningDecimal("tz_dec_from_string",
-                                               {lowering_.stringLowerer().stringObj(text.value),
-                                                lowering_.stringLowerer().stringMeta(text.value)});
+    llvm::Value *result = callReturningDecimal(
+        "tz_dec_from_string", {lowering_.stringLowerer().stringObj(text.value),
+                               lowering_.stringLowerer().stringMeta(text.value), make});
     lowering_.refCounts().dropOperand(text);
+    if (checked) {
+      return lowering_.resultLowerer().catchFailure(result, call->type, call->loc());
+    }
     lowering_.throwLowerer().emitThrowCheck();
     return result;
   }

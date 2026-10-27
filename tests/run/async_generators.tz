@@ -33,8 +33,12 @@ for await (const s of names()) log(`name ${s}`)
 
 // Over an array: each element awaited, a promise too.
 for await (const v of [1, Promise.resolve(2), 3]) log(`v ${v}`)
+async function rejected(): Promise<int> {
+  await undefined
+  throw new Error("rejected")
+}
 try {
-  for await (const v of [Promise.resolve(1), Promise.reject(new Error("rejected"))]) log(`w ${v}`)
+  for await (const v of [Promise.resolve(1), rejected()]) log(`w ${v}`)
 } catch (e) {
   log(`caught ${e.message}`)
 }

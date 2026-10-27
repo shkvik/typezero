@@ -246,6 +246,16 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
   }
   std::vector<bool> given(call->args.size(), false);
   given[0] = given[1] = true;
+  bool abortable = false;
+  if (call->args.size() > 2) {
+    if (auto *options = dyn_cast<ObjectLitExpr>(call->args[2])) {
+      abortable = llvm::any_of(options->props, [](const ObjectLitExpr::Property &p) {
+        return p.spread || p.name == "signal";
+      });
+    } else {
+      abortable = !isa<UndefinedExpr>(call->args[2]);
+    }
+  }
   if (ClassDecl *target = checker_.libraryClass("EventTarget");
       target && ClassDeclarer::classOf(type) && ClassDeclarer::classOf(type)->derivesFrom(target)) {
     if (fn == "on") {
@@ -259,7 +269,7 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
     }
     call->args[1] = checker_.argumentChecker().checkArg(call->args[1], Type::string());
 
-    return callLibraryFunction(call, "onceTarget", {}, given, loc);
+    return callLibraryFunction(call, abortable ? "onceTargetResult" : "onceTarget", {}, given, loc);
   }
   const Type *events = checker_.eventMaps().eventMapOf(type);
   if (!events) {
@@ -285,8 +295,12 @@ Expr *EventTargetChecker::checkEventsFunction(CallExpr *call, llvm::StringRef fn
       checker_.ctx_.make<BoolLitExpr>(call->loc(), errors != nullptr)));
   given.resize(call->args.size(), false);
   given.back() = true;
+  if (errors) {
+    checker_.errorListenedMaps_.insert(events);
+  }
+  std::string variant = errors || abortable ? fn.str() + "Result" : fn.str();
 
-  return callLibraryFunction(call, fn, {args, errors ? errors : Type::tuple({})}, given, loc);
+  return callLibraryFunction(call, variant, {args, errors ? errors : Type::tuple({})}, given, loc);
 }
 
 Expr *EventTargetChecker::checkLibraryCall(CallExpr *call, NameExpr *name, FuncSymbol *func) {

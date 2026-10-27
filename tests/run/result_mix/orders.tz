@@ -14,7 +14,7 @@ export function parseName(s: string): Parsed<string> {
   return name.length == 0 ? err("empty name") : ok(name)
 }
 
-// Digits with at most one point: decimal("1.2.3") would be a SyntaxError.
+// Digits with at most one point (decimal() takes "1e3" and "0x1f" too).
 export function parsePrice(s: string): Parsed<decimal> {
   let points = 0
   for (const c of s) {
@@ -22,7 +22,7 @@ export function parsePrice(s: string): Parsed<decimal> {
     else if (c < "0" || c > "9") return err(`bad price '${s}'`)
   }
   if (s.length == 0 || points > 1) return err(`bad price '${s}'`)
-  return ok(decimal(s))
+  return decimal(s).mapErr(() => `bad price '${s}'`)
 }
 
 export function parseQty(s: string): Parsed<int> {

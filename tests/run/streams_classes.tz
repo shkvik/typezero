@@ -47,8 +47,8 @@ class Collect extends Writable {
 }
 
 const sink = new Collect()
-await pipeline(new Counter(3), new Upper(), sink)
-console.log(JSON.stringify(sink.parts.join("")), sink.destroyed)
+const piped = await pipeline(new Counter(3), new Upper(), sink)
+console.log(piped.isOk(), JSON.stringify(sink.parts.join("")), sink.destroyed)
 
 // A class of strings: _write() gets them as they were written.
 class Lines extends Writable<string> {
@@ -62,8 +62,8 @@ class Lines extends Writable<string> {
 }
 const lines = new Lines()
 lines.write("one")
-lines.end("two")
-await finished(lines)
+const linesEnded = await lines.end("two")
+console.log("lines", linesEnded.isOk(), (await finished(lines)).isOk())
 
 // _read(size: number), as the types of node have it: the highWaterMark.
 class Sized extends Readable {
@@ -80,7 +80,7 @@ class Sized extends Readable {
 }
 const sized = new Sized({ highWaterMark: 100 })
 sized.on("data", (b) => console.log("data", b.toString()))
-await finished(sized)
+console.log("sized", (await finished(sized)).isOk())
 
 // A Duplex that gives back what is written to it.
 class Echo extends Duplex {
@@ -97,6 +97,6 @@ class Echo extends Duplex {
 const echo = new Echo()
 echo.on("data", (b) => console.log("echo", b.toString()))
 echo.write("ping")
-echo.end("pong")
-await finished(echo)
-console.log("end")
+const echoEnded = echo.end("pong")
+const echoDone = await finished(echo)
+console.log("end", echoDone.isOk(), (await echoEnded).isOk())

@@ -3,7 +3,7 @@
 3 three
 listeners after: 0 0
 got 4
-caught boom
+error boom
 listeners after error: 0 0
 first 5
 listeners after break: 0

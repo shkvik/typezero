@@ -6,6 +6,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
+#include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
@@ -205,7 +206,11 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     return checker_.setEncodingChecker().checkSetEncoding(call, member, cls);
   }
   if (name == "pipe") {
-    return checker_.setEncodingChecker().checkStreamPipe(call, member, cls);
+    return checker_.resultChecker().reject(
+        call, member->loc(),
+        "'pipe' is not supported: it does not pass an error on, so the source stops and the "
+        "destination stays open; join the streams with 'await pipeline(source, destination)', "
+        "which gives a Result");
   }
   Checker::StreamChunks chunks = checker_.chunkTypes().streamChunksOf(cls);
   bool reading = name == "push" || name == "unshift";
@@ -250,7 +255,9 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         checker_.chunkTypes().recordStreamChunk(chunk, call->args[i]->type, call->args[i]->loc());
       }
     }
-    call->type = name == "end" ? receiver : Type::boolTy();
+    call->type = name == "end"
+                     ? Type::promise(Type::result(Type::voidTy(), checker_.errorClass_->type))
+                     : Type::boolTy();
     return call;
   }
   if (reading) {
@@ -291,27 +298,24 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
     }
     Expr *chunkArg = nullptr;
     Expr *encoding = nullptr;
-    Expr *cb = nullptr;
     size_t count = call->args.size();
-    if (count >= 1 && isCallback(call->args[0])) {
-      cb = call->args[0];
-      if (count > 1) {
-        checker_.diags_.error(call->args[1]->loc(),
-                              "end(callback) takes nothing after the callback");
-        checkArgsLoosely(1);
-        return call;
+    for (size_t i = 0; i < count; ++i) {
+      if (isCallback(call->args[i])) {
+        return checker_.resultChecker().reject(
+            call, call->args[i]->loc(),
+            "end() takes no callback: it gives a Promise of a Result, which says when the "
+            "stream finished and whether it failed; 'const r = await w.end()'");
       }
-    } else if (count >= 1) {
+    }
+    if (count >= 1) {
       chunkArg = call->args[0];
-      if (count == 2) {
-        if (isCallback(call->args[1])) {
-          cb = call->args[1];
-        } else {
-          encoding = call->args[1];
-        }
-      } else if (count == 3) {
+      if (count >= 2) {
         encoding = call->args[1];
-        cb = call->args[2];
+      }
+      if (count == 3) {
+        checker_.diags_.error(call->args[2]->loc(), "end() takes a chunk and its encoding");
+        checkArgsLoosely(2);
+        return call;
       }
     }
     args.push_back(checker_.exprChecker().checkExpr(
@@ -320,9 +324,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         chunkArg ? streamChunkArg(chunkArg, chunk, false, true, name, checked.contains(chunkArg))
                  : undefinedOf(Type::unknown()));
     args.push_back(encoding ? checkedAs(encoding, encodingType) : undefinedOf(encodingType));
-    args.push_back(cb ? checkedAs(cb, Type::optional(callback))
-                      : undefinedOf(Type::optional(callback)));
-    impl = "_endWith";
+    impl = "_endResult";
   }
   for (Expr *arg : args) {
     if (arg->type->isError()) {
@@ -333,9 +335,6 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
   member->name = impl;
   std::vector<bool> given(call->args.size(), true);
   checker_.emitterChecker().callLibraryMethod(call, member, cls, impl, {}, &given, false);
-  if (impl == "_endWith" && !call->type->isError()) {
-    call->type = receiver;
-  }
 
   return call;
 }

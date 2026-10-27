@@ -1,7 +1,6 @@
 AbortController { signal: AbortSignal { aborted: false } } false undefined
 onabort: stop
 AbortSignal { aborted: true } true stop
-thrown: stop
 AbortError: This operation was aborted
 true AbortError
 why

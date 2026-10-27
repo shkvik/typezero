@@ -77,6 +77,7 @@ TzOptStr tz_fs_opt_of(const TzBuf *text);
 TzStr tz_fs_ascii(const char *text);
 
 void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts);
+void tz_fs_abort_failure(TzMaker make);
 
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest);

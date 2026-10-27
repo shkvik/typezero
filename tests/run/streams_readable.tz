@@ -2,7 +2,7 @@
 // paused mode with 'readable' and read(), unshift(), pause() and resume(),
 // in node's order of events and calls of _read(). undefined ends a stream,
 // as null does in node (tz has no null): the expected output is node's with
-// push(null).
+// push(null). Who listens to a stream listens for 'error' too.
 import { Readable } from "node:stream"
 const log = (s: string) => console.log(s)
 
@@ -16,6 +16,7 @@ const r = new Readable({
     else this.push(undefined)
   },
 })
+r.on("error", (e) => log(`error ${e.message}`))
 r.on("data", (chunk) => log(`data ${chunk.toString()}`))
 r.on("end", () => log("end"))
 r.on("pause", () => log("pause"))
@@ -37,6 +38,7 @@ r.on("close", () => {
       else setTimeout(() => this.push(next), 1)
     },
   })
+  p.on("error", (e) => log(`p error ${e.message}`))
   p.on("readable", () => {
     log(`readable len=${p.readableLength}`)
     let chunk: Buffer | undefined
@@ -64,6 +66,7 @@ function more() {
   const all = s.read()
   log(`all ${all?.toString()}`)
   s.push(undefined)
+  s.on("error", (e) => log(`s error ${e.message}`))
   s.on("end", () => log("s end"))
   s.resume()
   log(`paused ${s.isPaused()}`)

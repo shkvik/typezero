@@ -10,9 +10,9 @@ export class Scanner {
     return [...text.matchAll(this.words)].map(m => m[0])
   }
 
-  // The numbers of the text as exact decimals, one at a time.
+  // The numbers of the text as exact decimals, one at a time (each is a number).
   *numbersOf(text: string) {
-    for (const m of text.matchAll(Scanner.numbers)) yield decimal(m[0])
+    for (const m of text.matchAll(Scanner.numbers)) yield decimal(m[0]).unwrapOr(0)
   }
 }
 

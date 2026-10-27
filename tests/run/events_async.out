@@ -2,15 +2,3 @@ true [] 2
 saved ann
 [ 'ann', 'ann' ]
 1
-emitted EventEmitter {
-  _events: [Object: null prototype] {
-    job: [AsyncFunction (anonymous)],
-    error: [Function (anonymous)]
-  },
-  _eventsCount: 2,
-  _maxListeners: undefined,
-  Symbol(shapeMode): false,
-  Symbol(kCapture): true
-}
-job 7
-error event: job 7 failed

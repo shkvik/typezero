@@ -20,7 +20,7 @@ r.destroy(new Error("again"))
 const w = new Writable({ write(c, e, cb) { cb() } })
 w.on("close", () => log("w close"))
 w.on("error", (e) => log(`w error ${e.message}`))
-w.end()
+const wEnded = w.end()
 w.write("late", (err) => log(`late cb ${err?.message}`))
 
 const d = new Duplex({
@@ -35,16 +35,18 @@ const d = new Duplex({
     cb()
   },
 })
+d.on("error", (e) => log(`duplex error ${e.message}`))
 d.on("data", (c) => log(`duplex data ${c.toString()}`))
 d.on("end", () => log("duplex end"))
 d.on("finish", () => log("duplex finish"))
 d.on("close", () => log("duplex close"))
 d.write("abc")
-d.end()
+const dEnded = d.end()
 
 const p = new PassThrough()
 p.on("error", (e) => log(`p error ${e.message}`))
 p.push("x")
 p.push(undefined)
 p.push("after eof")
+log(`w ended ${(await wEnded).isOk()}, duplex ended ${(await dEnded).isOk()}`)
 

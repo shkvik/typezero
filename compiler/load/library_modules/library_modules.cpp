@@ -200,8 +200,8 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
         before[0].is(Tok::Identifier) && before[0].text == "crypto") {
       subtle = token.text.data();
     }
-    if (!locale && token.is(Tok::Identifier) && token.text == "Locale" &&
-        before[1].is(Tok::Dot) && before[0].is(Tok::Identifier) && before[0].text == "Intl") {
+    if (!locale && token.is(Tok::Identifier) && token.text == "Locale" && before[1].is(Tok::Dot) &&
+        before[0].is(Tok::Identifier) && before[0].text == "Intl") {
       locale = token.text.data();
     }
     property = token.is(Tok::Dot) || token.is(Tok::QuestionDot);
@@ -270,7 +270,7 @@ void LibraryModules::importLibraryGlobals(Module *module, llvm::StringRef text) 
       decl->names.push_back({"subtle", loc, kSubtleName, loc});
     }
   }
-  if (locale && module->path.find("locale.tz") == std::string::npos) {
+  if (locale && module->name != "tz:locale") {
     llvm::SMLoc loc = llvm::SMLoc::getFromPointer(locale);
     if (ImportDecl *decl = importOf("locale.tz", "tz:locale", loc)) {
       decl->names.push_back({"Locale", loc, kIntlLocaleName, loc});

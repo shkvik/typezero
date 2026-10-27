@@ -1,7 +1,8 @@
 // What JavaScript's Intl rejects when the program runs, written in the code
 // (docs/intl.md): a locale that is no language tag, a value that is not one
 // of the option, a currency or a unit that is not one, missing options,
-// digits out of range; and what tz does not have.
+// digits out of range; and what tz does not have. Values the program knows
+// only when it runs: tests/errors/intl_values.tz.
 
 // expect-error: 'en_US' is not a language tag, and JavaScript would throw a RangeError
 const a = new Intl.NumberFormat("en_US")
@@ -70,7 +71,13 @@ const dd = new Intl.DisplayNames("en", { style: "long" })
 const ee = Intl.getCanonicalLocales(["en", "en_GB"])
 // expect-error: 'Intl.NumberFormat.foo' is not supported; of the classes of Intl, only 'supportedLocalesOf' is
 const ff = Intl.NumberFormat.foo("en")
-// expect-error: 'Intl.Locale' is not supported yet
-const gg = new Intl.Locale("en")
+// expect-error: 'en_US' is not a language tag
+const gg = new Intl.Locale("en_US")
+// expect-error: 'Intl.Locale' is made with 'new'
+const gh = Intl.Locale("en")
+// expect-error: the options of Intl.Locale are not supported; write them into the tag
+const gi = new Intl.Locale("en", { region: "US" })
+// expect-error: Intl.NumberFormat takes the language as a string, e.g. "ru-RU", or an Intl.Locale, found 'int'
+const gj = new Intl.NumberFormat(5)
 // expect-error: cannot find type 'Intl.Bogus'
 const hh: Intl.Bogus = 1

@@ -2,17 +2,8 @@ Promise { 1 } Promise { <pending> }
 [ 1, 'later', 3 ]
 [ 10, 20, 30 ]
 [ 1, 'two', true ]
-fulfilled 1 undefined
-rejected undefined x
-[
-  { status: 'fulfilled', value: 'a' },
-  { status: 'fulfilled', value: 'b' }
-]
 race 2
-any 7
-AggregateError All promises were rejected
-all: one fails
-[] []
+[] 0
 42
 6!
 Promise { [ 1, 2 ] } [ 1, 2 ] { p: Promise { [ 1, 2 ] } }

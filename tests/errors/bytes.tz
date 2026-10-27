@@ -108,6 +108,14 @@ function traps(u: Uint8Array, b: Buffer, buffer: ArrayBuffer, x: int) {
   console.log(new TextDecoder("gbk").decode(u, { stream: "yes" }))
   // expect-error: 'decode' takes a typed array, a DataView or an ArrayBuffer, found 'string'
   console.log(new TextDecoder("shift_jis").decode("text"))
+  // expect-error: type 'Result<string, DecodeError>' is not assignable to type 'string'
+  const strict: string = new TextDecoder("utf-8", { fatal: true }).decode(u)
+  // expect-error: type 'FatalTextDecoder' is not assignable to type 'TextDecoder'
+  const decoder: TextDecoder = new TextDecoder("utf-8", { fatal: x > 1 })
+  // expect-error: a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: true })'
+  console.log(new FatalTextDecoder())
+  const loose: string = new TextDecoder("utf-8", { fatal: false }).decode(u)
+  const checked: FatalTextDecoder = new TextDecoder("utf-8", { fatal: true })
   // expect-error: 'SharedArrayBuffer' is not supported yet
   const shared: SharedArrayBuffer | undefined = undefined
   // expect-error: JSON has no binary data

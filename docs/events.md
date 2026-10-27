@@ -139,4 +139,5 @@ README.
 6. **`error` без исключений** (раздел 4; [errors.md](errors.md), шаг 3): правило подписки на
    `error` по путям, ошибка на `error` без слушателя у своего объекта, ошибка на слушатель с
    `Result`, `Result` у `once()` и `on()`, убрать `captureRejections`, `uncaughtException` и
-   `unhandledRejection`. Переписать `library/events/*.tz`.
+   `unhandledRejection`. Переписать `library/events/*.tz`. Сделано 27 октября; тип ошибки у
+   `once()` и `on()` пока `Error` (класс) — объектом с меткой он станет с шагом 5 errors.md.

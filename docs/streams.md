@@ -121,4 +121,7 @@ child.stdout.on("data", s => s.length)          // s: string
 5. **Позже** — `sendfile` / `TransmitFile` для `pipeline` из файла в сокет.
 6. **Ошибки без исключений** (раздел 3; [errors.md](errors.md), шаг 3): `Result` у элементов
    `for await`, у `pipeline`, `finished`, `end()` и `node:stream/consumers`; правило подписки на
-   `error`; убрать `pipe()`; переписать перенесённый код node в `library/stream/*.tz`.
+   `error`; убрать `pipe()`; переписать перенесённый код node в `library/stream/*.tz`. Сделано
+   27 октября снаружи: что видит программа, — `Result`, `pipe()` и колбэк `end()` — ошибки;
+   внутри перенесённый код node ещё бросает и ловит (уйдёт с шагом 5 errors.md), тип ошибки —
+   `Error`.

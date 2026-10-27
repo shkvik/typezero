@@ -56,3 +56,11 @@ new Intl.PluralRules("ru-RU").select(5)                     // "many" — «5 я
 2. **Числа** (сделано) — `toLocaleString`, `Intl.NumberFormat`.
 3. **Строки** (сделано) — `localeCompare`, `Intl.Collator`, `normalize`, `Intl.Segmenter`.
 4. **Остальное** (сделано, кроме `selectRange` и `formatRange`) — `PluralRules`, `RelativeTimeFormat`, `ListFormat`, `DisplayNames`.
+5. **Язык из данных и опции из переменных** ([errors.md](errors.md), шаг 2; сделано 27 октября) —
+   `Intl.Locale` (`new` с литералом, `Intl.Locale.parse` с `Result`, `baseName`, `language`,
+   `script`, `region`, `maximize`, `toString`); строка языка, известная только при выполнении, —
+   ошибка с подсказкой `Intl.Locale.parse`; опции со списком значений — литеральные типы
+   (`Intl.NumberFormatOptions` их так и описывает), цифры — целые в границах. Опции из
+   переменной, которые не сходятся между собой, рантайм сводит без исключения. Осталось на шаг 5
+   errors.md: значения без списка из данных (валюта, единица, `numberingSystem`, `collation`)
+   ещё бросают `RangeError`.

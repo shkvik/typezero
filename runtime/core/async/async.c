@@ -3,6 +3,7 @@
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
+#include "runtime/core/fail/fail.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/io/io.h"
 #include "runtime/core/output/output.h"
@@ -1372,6 +1373,7 @@ typedef struct Wait {
   TzPromise *inner;
   TzTimer *timer;
   TzSignal *signal;
+  TzMaker make;
   int32_t immediate, done;
   struct Wait *prev, *next;
 } Wait;
@@ -1397,6 +1399,18 @@ static void drop_pending_value(TzPromise *p) {
   }
   tz_value_release(type, value_of(p));
   memset(value_of(p), 0, type->size);
+}
+
+static void settle_aborted(TzPromise *p, TzSignal *signal, TzMaker make) {
+  drop_pending_value(p);
+  if (!make) {
+    tz_promise_reject(p, tz_abort_error(signal));
+    return;
+  }
+  TzFailParts parts;
+  parts.code = "ABORT_ERR";
+  parts.message = tz_str_from_ascii("The operation was aborted", 25);
+  tz_promise_fail(p, make(&parts));
 }
 
 static void wait_drop(void *object) {
@@ -1441,8 +1455,7 @@ static void wait_aborted(TzAbortListener *l) {
   } else {
     tz_timer_clear(w->timer);
   }
-  drop_pending_value(w->inner);
-  tz_promise_reject(w->inner, tz_abort_error(w->signal));
+  settle_aborted(w->inner, w->signal, w->make);
   tz_obj_release(&w->base);
 }
 
@@ -1453,11 +1466,11 @@ static void wait_finally(TzReactor *r, TzPromise *source) {
   tz_promise_finally(w->promise, source, NULL);
 }
 
-void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *signal, int32_t ref) {
+void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *signal, int32_t ref,
+                    TzMaker make) {
   TZ_ORDERED();
   if (signal && signal->aborted) {
-    drop_pending_value(p);
-    tz_promise_reject(p, tz_abort_error(signal));
+    settle_aborted(p, signal, make);
     return;
   }
   Wait *w = (Wait *)tz_obj_alloc(sizeof(Wait));
@@ -1466,6 +1479,7 @@ void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *sig
   w->base.desc = &wait_desc;
   w->promise = p;
   retain(p);
+  w->make = make;
   w->immediate = immediate;
   if (signal) {
     w->inner = tz_promise_new(p->layout);
@@ -1747,7 +1761,6 @@ typedef struct {
   double delay;
   int64_t fired;
   int32_t done;
-  int32_t aborted;
   int32_t started, ref;
   uint8_t value[];
 } Interval;
@@ -1836,14 +1849,12 @@ static void interval_aborted(TzAbortListener *l) {
   if (it->done) {
     return;
   }
-  it->aborted = it->waiting == NULL;
-  interval_stop(it, tz_abort_error(it->signal));
+  interval_stop(it, NULL);
 }
 
 static void interval_start(Interval *it) {
   it->started = 1;
   if (it->signal && it->signal->aborted) {
-    it->aborted = 1;
     it->done = 1;
     return;
   }
@@ -1865,11 +1876,6 @@ static void interval_next(void *object, TzPromise *p) {
   Interval *it = (Interval *)object;
   if (!it->started) {
     interval_start(it);
-  }
-  if (it->aborted) {
-    it->aborted = 0;
-    tz_promise_reject(p, tz_abort_error(it->signal));
-    return;
   }
   if (it->done) {
     fulfill_done(p);

@@ -11,6 +11,7 @@
 #include "compiler/check/types/type_resolver/type_resolver.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/result/result_checker/result_checker.h"
+#include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -146,6 +147,14 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
             : checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
+  if (auto *executor = dyn_cast<FunctionExpr>(call->args[0]);
+      executor && executor->fn->params.size() > 1 &&
+      !checker_.libraryCalls().inLibrary(expr->loc())) {
+    checker_.diags_.error(executor->fn->params[1].loc,
+                          "a Promise is not rejected in tz, so its function gets only "
+                          "'resolve'; an operation that may fail gives a Promise<Result<T, E>>: "
+                          "'resolve(err(e))'");
+  }
   Checker::Signature sig;
   sig.params = {resolverType(value), rejecterType()};
   sig.minArgs = 2;
@@ -236,6 +245,20 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   };
 
   const Type *result = nullptr;
+  bool library = checker_.libraryCalls().inLibrary(member->loc());
+  if (!library &&
+      (name == "catch" || name == "finally" || (name == "then" && call->args.size() == 2))) {
+    return checker_.resultChecker().reject(
+        call, name == "then" ? call->args[1]->loc() : member->loc(),
+        name == "catch"
+            ? std::string("a Promise is not rejected in tz, so it has no 'catch': an operation "
+                          "that may fail gives a Promise<Result<T, E>>; read it after 'await': "
+                          "'const r = await p; if (r.isErr()) ...'")
+        : name == "finally"
+            ? std::string("a Promise is not rejected in tz, so it has no 'finally': 'then' runs "
+                          "every time; write the code after 'await p'")
+            : std::string("'then' takes one function: a Promise is not rejected in tz"));
+  }
   if (name == "then") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
       return call;
@@ -272,8 +295,8 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
   } else {
     checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
                                              type->name() +
-                                             "'; a Promise has 'then', 'catch' and "
-                                             "'finally'");
+                                             "'; a Promise has 'then', and its value is "
+                                             "read with 'await'");
     checkArgsLoosely();
     return call;
   }

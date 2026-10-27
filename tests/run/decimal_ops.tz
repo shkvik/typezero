@@ -1,5 +1,9 @@
 // The expected output is what BigNumber.js 11 computes for the same values
-// with its default settings, which decimals follow (docs/decimal.md).
+// with its default settings, which decimals follow (docs/decimal.md). The
+// values are written as text, as BigNumber.js reads them; each is a number.
+function num(text: string): decimal {
+  return decimal(text).unwrapOr(0)
+}
 const A: string[] = [
   "0", "1", "-1", "0.1", "0.2", "19.99", "-19.99", "2.5", "7", "-0.0001", "1e-7",
   "123456789012345678901234567890", "-98765432109876543210.123456789", "9223372036854775807",
@@ -12,7 +16,7 @@ const B: string[] = [
 ]
 for (const a of A)
   for (const b of B) {
-    const x = decimal(a), y = decimal(b)
+    const x = num(a), y = num(b)
     console.log(x + y, x - y, x * y, x / y, x % y)
   }
 const P: string[] = ["0", "1", "-1", "2", "-2", "0.5", "1.1", "-0.3", "10", "123.456", "1e-5", "3"]
@@ -20,7 +24,7 @@ const N: int[] = [0, 1, 2, 3, 7, 10, 25, -1, -2, -3, -7]
 for (const a of P)
   for (const n of N)
     if (!(a == "0" && n < 0))
-      console.log(decimal(a) ** n)
+      console.log(num(a) ** n)
 const C: string[] = [
   "0", "-0", "1", "1.0", "1.00000000000000000000000001", "-1", "0.1", "0.10",
   "123456789012345678901234567890", "123456789012345678901234567890.0", "1e30", "1e-30",
@@ -28,10 +32,10 @@ const C: string[] = [
 ]
 for (const a of C)
   for (const b of C) {
-    const x = decimal(a), y = decimal(b)
+    const x = num(a), y = num(b)
     console.log(x < y, x <= y, x > y, x >= y, x == y, x != y)
   }
 for (const a of A) {
-  const x = decimal(a)
+  const x = num(a)
   console.log(-x, x * 3 - 2147483647, x + 0.5)
 }

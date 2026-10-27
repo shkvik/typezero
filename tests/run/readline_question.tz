@@ -1,9 +1,9 @@
 // same-as-node
 // question() of node:readline/promises writes the query to the output and
-// gives the next line of stdin (readline_question.in).
+// gives the next line of stdin (readline_question.in), in a Result.
 import { createInterface } from "node:readline/promises"
 
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 const name = await rl.question("Name? ")
-console.log(`hello, ${name}!`)
+console.log(name.isOk() ? `hello, ${name.value}!` : name.error.code)
 rl.close()

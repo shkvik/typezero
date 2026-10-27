@@ -17,6 +17,7 @@ public:
   static std::optional<std::pair<int64_t, int64_t>> intRange(const Type *type);
   const Type *literalMember(const ObjectLitExpr *lit, const Type *target) const;
   const Type *typeIn(const Checker::Flow &flow, const VarSymbol *var) const;
+  std::optional<std::vector<std::string>> knownTexts(const Expr *arg);
   const Type *literalExpectation(const Type *expected, unsigned depth = 0);
 
 private:

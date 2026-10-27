@@ -121,7 +121,9 @@ tz run                   # без файла — "main" из tz.json
   `+ - * / % **` (показатель — целое), унарный `-`, сравнения по значению (`0.30 == 0.3`),
   составное присваивание, `++` / `--`. `int` и `long` становятся `decimal` сами, `double` — только
   через `decimal(x)` (кратчайшая запись, как у `String(x)`), обратно — `Number(x)`;
-  `decimal("1_000.5")` читает строку, как BigNumber.js. `/` даёт 20 знаков после точки с
+  `decimal("1_000.5")` читает строку, как BigNumber.js: литерал проверяется при сборке и даёт
+  `decimal`, а строка, известная только при выполнении, — `Result<decimal, DecimalError>`
+  (`code: "bad_decimal"`, `message`, `text`). `/` даёт 20 знаков после точки с
   округлением half-up. Печать, `String(x)` и шаблоны — без степени. Методы BigNumber.js, которые
   не заменены операторами: `div(y, places, mode)`, `round(places, mode)`, `toFixed`, `toFormat`,
   `toString(base)`, `toExponential`, `toPrecision`, `sqrt`, `abs`, `isInteger`, `decimalPlaces()`,
@@ -248,9 +250,10 @@ tz run                   # без файла — "main" из tz.json
   `decimal`, регулярок и `Json`, переполнение стека — исключения, которые можно поймать.
 - Async (см. «Async»): куски, которые трогают только свои данные, идут на всех ядрах, а результат —
   такой, какой мог бы выдать node; `async` функции, стрелки и методы,
-  `await` (и на верхнем уровне файла), `Promise<T>` с `then` / `catch` / `finally`,
-  `new Promise((resolve, reject) => ...)`, `Promise.resolve` / `reject` / `all` / `allSettled` /
-  `race` / `any` / `withResolvers`, `queueMicrotask`, `process.nextTick`, `setTimeout`,
+  `await` (и на верхнем уровне файла), `Promise<T>` с `then`, `new Promise((resolve) => ...)`,
+  `Promise.resolve` / `all` / `race` / `withResolvers`; `Promise` не отклоняется: ошибка —
+  `Promise<Result<T, E>>`, а `reject`, `catch`, `finally`, `Promise.reject`, `allSettled` и `any`
+  — ошибки компиляции с подсказкой; `queueMicrotask`, `process.nextTick`, `setTimeout`,
   `setInterval`, `setImmediate`, `clearTimeout` / `clearInterval` / `clearImmediate`, у таймеров
   `ref()` / `unref()` / `hasRef()` / `refresh()`. Порядок вывода — как у node; `Promise`, которого
   никто не ждёт, — ошибка компиляции, `void p` отпускает его явно. Ввод-вывод ждёт пул потоков:
@@ -296,13 +299,15 @@ tz run                   # без файла — "main" из tz.json
   слушателей, `newListener` / `removeListener`, событием `error` и предупреждением о лишних
   слушателях; карта событий пишется (`new EventEmitter<{ data: [chunk: string]; end: [] }>()`,
   `class Server extends EventEmitter<Events>`) или выводится из всех `emit` программы;
-  async-слушатели, `captureRejections`, `once(emitter, name)` — `Promise`, `on(emitter, name)` —
-  async-итератор для `for await`. Глобальные, как в node:
+  async-слушатели, `once(emitter, name)` — `Promise` (с `Result`, если эмиттер может испустить
+  `error`), `on(emitter, name)` — async-итератор для `for await`; событие `error` без
+  исключений: кто подписан на эмиттер с `error`, подписан и на `error`. Глобальные, как в node:
   `EventTarget`, `Event`, `CustomEvent<T>`, `AbortController`, `AbortSignal` (`timeout`, `any`),
   `DOMException`.
 - Потоки (см. «Потоки»): `node:stream` — `Readable`, `Writable`, `Duplex`, `Transform`,
-  `PassThrough`, `pipe`, `pipeline`, `finished`, `compose`, `Readable.from`, `for await`, тот же
-  порядок событий, что в node; тип кусков известен при компиляции (`Readable<string>`, в
+  `PassThrough`, `pipeline`, `finished`, `compose`, `Readable.from`, `for await`, тот же
+  порядок событий, что в node; ошибки — `Result` (каждый кусок `for await`, `pipeline`,
+  `finished`, `end()`), `pipe()` нет; тип кусков известен при компиляции (`Readable<string>`, в
   `objectMode` — выводится из `push()`), `setEncoding` меняет его дальше по коду;
   `createReadStream` / `createWriteStream` из `node:fs`, `node:stream/promises`,
   `node:stream/consumers`, `node:string_decoder`.
@@ -1334,10 +1339,11 @@ const text = parseIntSafe("42")
   (`SystemError`) и `node:fs/promises` (`Promise<Result>`), `execSync`, `execFileSync` и
   `spawnSync` (`ExecError`), `node:crypto` там, где важны данные (`CryptoError`), и
   `crypto.subtle` (`Promise<Result>` с `SubtleError`), `Reflect.apply` и `Reflect.construct`
-  (`ReflectError`). Ошибки — объекты с меткой `code`, их типы встроены. `Err` из кода
+  (`ReflectError`), `Intl.Locale.parse` (`LocaleError`), `decimal(text)` (`DecimalError`),
+  `decode` у `TextDecoder` с `fatal` (`DecodeError`). Ошибки — объекты с меткой `code`, их типы встроены. `Err` из кода
   библиотеки получает место вызова в программе. Конструкторы не бросают: что может не
   получиться, проверяет тип аргумента (`HttpStatus`) или проверка при сборке (`new URL`,
-  `new Request`, `new k()` класса-значения), а разбор текста — статический `parse`.
+  `new Request`, `new Intl.Locale`, `new k()` класса-значения), а разбор текста — статический `parse`.
 - **Лишний `await` — ошибка:** `return await x` и `async () => await x` ничего не меняют,
   async-функция и так дождётся `Promise`, который возвращает. Пока в языке есть `try`, внутри
   `try` и `catch` так писать можно: там `await` ловит отказ.
@@ -1589,8 +1595,12 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   `new Buffer(…)` — ошибка, как устаревший в node.
 - **`TextEncoder` / `TextDecoder`**: UTF-8 (`encode`, `encodeInto`), UTF-16LE / BE и все
   однобайтовые кодировки WHATWG (`windows-1251`, `koi8-r`, `iso-8859-5`, `ibm866`, …) с их
-  метками, `fatal` и `ignoreBOM`. Таблица кодировки попадает в программу, только если метку
-  видно в коде (одна — 256 байт; метка, известная только при выполнении, — все 29, ~7 КБ);
+  метками, `fatal` и `ignoreBOM`. С `fatal` `decode` отдаёт `Result<string, DecodeError>` (`Err`
+  с кодом node `ERR_ENCODING_INVALID_ENCODED_DATA` на неправильных байтах вместо `TypeError`):
+  `new TextDecoder("utf-8", { fatal: true })` — тип `FatalTextDecoder`, а без `fatal` (или с
+  `fatal: false`) — `TextDecoder`, и `decode` у него — просто `string`. Таблица кодировки
+  попадает в программу, только если метку видно в коде (одна — 256 байт; метка, известная
+  только при выполнении, — все 29, ~7 КБ);
   таблицы и метки [gen_encodings.mjs](runtime/library/bytes/encodings/gen_encodings.mjs) берёт у самого node.
 - **Многобайтовые кодировки** `TextDecoder`: `gbk` и `gb18030`, `big5`, `euc-jp`, `iso-2022-jp`,
   `shift_jis`, `euc-kr` — декодеры стандарта WHATWG ([cjk.c](runtime/library/bytes/cjk/cjk.c)) с его таблицами,
@@ -1600,7 +1610,7 @@ out[2] = text[0] ?? 0                               // можно: элемен�
   кодировку видно в коде: `gbk` и `gb18030` — +53 КБ, `euc-kr` — +51 КБ, `big5` — +43 КБ,
   `euc-jp` — +40 КБ, `shift_jis` и `iso-2022-jp` — +26 КБ (у трёх японских одна таблица JIS X
   0208, все три — +40 КБ), метка, известная только при выполнении, — все таблицы, +196 КБ. Неправильная
-  последовательность — «�», ASCII-байт после ведущего начинает заново, `fatal` — `TypeError`
+  последовательность — «�», ASCII-байт после ведущего начинает заново, с `fatal` — `Err`
   `The encoded data was not valid for encoding euc-kr`. TextEncoder, как и по стандарту, —
   только UTF-8. node 24 декодирует `big5`, `euc-jp`, `shift_jis` и `euc-kr` конвертерами ICU,
   а не по стандарту: у него нет символов HKSCS в Big5 (`0x8740` — `U+F266` вместо `䏰`) и
@@ -1615,8 +1625,7 @@ out[2] = text[0] ?? 0                               // можно: элемен�
 - **Ошибки при выполнении** — те же исключения, что в node, с его текстом:
   `new Uint8Array(-1)` — `RangeError: Invalid typed array length: -1`, неверное смещение вида —
   `RangeError: start offset of Int32Array should be a multiple of 4`, `Buffer.from(s, enc)` с
-  кодировкой из переменной — `TypeError: Unknown encoding: x`, `fatal` у `TextDecoder` —
-  `TypeError: The encoded data was not valid for encoding utf-8`.
+  кодировкой из переменной — `TypeError: Unknown encoding: x`.
 - **Вывод**: `console.log` печатает как node: `Uint8Array(3) [ 1, 2, 3 ]` (с колонками у длинных),
   `<Buffer 68 65 6c 6c 6f>`, `ArrayBuffer { [Uint8Contents]: <00 00>, [byteLength]: 2 }`,
   `DataView`, `TextEncoder`, `TextDecoder`; `JSON.stringify` — `{"0":1,"1":2}` и
@@ -1653,6 +1662,8 @@ new Intl.PluralRules("ru-RU").select(5)                      // "many" — «5 �
 new Intl.RelativeTimeFormat("ru").format(-3, "days")         // "3 дня назад"
 new Intl.ListFormat("ru").format(["a", "b", "c"])            // "a, b и c"
 [...new Intl.Segmenter("en").segment("👨‍👩‍👧e\u0301")].length   // 2 буквы
+const locale = Intl.Locale.parse(tag)                        // язык из данных — Result
+if (locale.isOk()) price.toLocaleString(locale.value, { style: "currency", currency: "EUR" })
 ```
 
 - **Числа**: `toLocaleString(locale?, options?)` у `int`, `long`, `double` и `decimal` и
@@ -1682,24 +1693,40 @@ new Intl.ListFormat("ru").format(["a", "b", "c"])            // "a, b и c"
   `dateTimeField`; `of` — `string | undefined` при `fallback: "none"`),
   `Intl.getCanonicalLocales` и `supportedLocalesOf` у каждого класса.
 - **Типы**: `Intl.NumberFormat` и другие классы, `Intl.NumberFormatOptions` (и опции других
-  классов, все поля `T | undefined`), `Intl.ResolvedNumberFormatOptions`,
+  классов, все поля `T | undefined`; у опций со списком значений — объединение литералов,
+  `style?: "decimal" | "percent" | "currency" | "unit"`, у цифр — целые в границах, `0..100`),
+  `Intl.ResolvedNumberFormatOptions`,
   `Intl.NumberFormatPart`, `Intl.SegmentData`, `Intl.LDMLPluralRule` пишут в аннотациях, как в
   TS. `console.log` печатает объекты как node: `NumberFormat [Intl.NumberFormat] {}`.
 - Объекты `Intl` лежат в `Map`, `unknown` и обобщённом `T` по ссылке и стоят в объединениях с
   другими типами (`Intl.Collator | Date` сужает `instanceof Date`); два вида `Intl` в одном
   объединении — ошибка: при выполнении их не различить. `Iterable<T>` принимает сегменты
   `segment(text)`, а `collator.compare` годится в `sort` любого массива строк.
-- **Язык**: строкой (`"ru-RU"`, `"de-u-co-phonebk"`), `undefined` или без аргумента — язык
-  системы; языка, которого нет в ICU, — ближайший (`"en-XX"` — `"en"`) или язык системы.
-  Массив языков в конструкторах не берётся (как и у дат); в `getCanonicalLocales` и
-  `supportedLocalesOf` — берётся.
+- **Язык**: строкой, известной при сборке (`"ru-RU"`, `"de-u-co-phonebk"`; константа, выбор
+  из литералов `n > 1 ? "ru" : "en"`, строка после `if (lang == "ru")`, литеральный тип
+  `"ru" | "en"`), или `Intl.Locale`; `undefined` или без аргумента — язык системы; языка,
+  которого нет в ICU, — ближайший (`"en-XX"` — `"en"`) или язык системы. Строка, известная
+  только при выполнении, — ошибка с подсказкой `Intl.Locale.parse(tag)`: он отдаёт
+  `Result<Intl.Locale, LocaleError>` (`code: "bad_locale"`, текст ошибки V8, `tag`), а не
+  `RangeError`. Массив языков в конструкторах не берётся (как и у дат); в `getCanonicalLocales`
+  и `supportedLocalesOf` — берётся, если языки в нём написаны.
+- **`Intl.Locale`**: `new Intl.Locale("en-latn-us")` (литерал проверяется при сборке; опций
+  нет — их пишут в тег: `"th-TH-u-ca-buddhist"`), `Intl.Locale.parse(tag)`, поля `baseName`,
+  `language`, `script`, `region`, `maximize()`, `toString()` — канонический тег, как в node
+  ([locale.tz](library/intl/locale.tz)). Тип — `Intl.Locale`.
 - **Ошибки компиляции** — то, что JS отверг бы при выполнении, когда оно написано в коде: язык не
   по BCP 47 (`"en_US"`), значение не из списка опции (`{ style: "currncy" }`), неизвестная опция,
   валюта не из трёх букв, единица не из ECMA-402, `style: "currency"` без `currency`,
   `Intl.DisplayNames` без `type`, цифры вне границ и минимум больше максимума, `roundingIncrement`
   не из списка, `normalize("NFX")`, единица `RelativeTimeFormat` вроде `"decade"`,
-  `Intl.PluralRules(...)` без `new`. Значения, известные только при выполнении, проверяет
-  рантайм: `RangeError` и `TypeError` с текстами V8.
+  `Intl.PluralRules(...)` без `new`. Значение опции со списком, известное только при выполнении,
+  — тоже ошибка, пока проверка в `if` не сузит его до литералов (`if (s == "short" || ...)`);
+  цифры — `int`, проверенный в `if (n >= 0 && n <= 100)`. Опции из переменной типа
+  `Intl.NumberFormatOptions`, которые не сходятся между собой, рантайм сводит без исключения:
+  максимум цифр поднимается до минимума, `roundingIncrement` берёт равные дробные цифры (как
+  по умолчанию в ECMA-402) и не действует со значащими цифрами. `DisplayNames.of` кода, который
+  не код, — `undefined`. Пока бросают (`RangeError` с текстом V8) только значения без списка,
+  пришедшие из данных: валюта, единица, `numberingSystem`, `collation`, часовой пояс.
 - `toLocaleString` и `localeCompare`, повторяемые в цикле с теми же опциями, создают объект ICU
   один раз: сортировка 100 000 строк через `localeCompare` быстрее, чем в node.
 - В Windows всё это — ICU самой системы (`icu.dll`): exe не растёт. В Linux и macOS данных языков
@@ -1934,18 +1961,27 @@ const [user] = await once(bus, "user")
   проекта читаются в каждом проходе, а `tz.json` и `tz.lock` — один раз. Слушатель события, которое никто не шлёт, — ошибка
   (`no code of the program emits 'usr' on this emitter; it emits 'user'`); одно событие с разными
   типами — ошибка, которая называет оба места; `int` и `double` дают `double`.
-- **async-слушатель** разрешён: `emit` его не ждёт, его `Promise` отпускается, а ошибка в нём
-  завершает программу, как не обработанный отказ в node. У `new EventEmitter({ captureRejections:
-  true })` отказ становится событием `error` на следующем ходу (карта даёт ему `[err: Error]`).
-- **`once(emitter, name, { signal })`** — `Promise` кортежа аргументов следующего события; его
-  отклоняют событие `error` (если оно есть в карте) и `signal` (`AbortError`); у `EventTarget` —
-  `[event]`. Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
+- **async-слушатель** разрешён: `emit` его не ждёт, его `Promise` отпускается; слушатель, который
+  отдаёт `Result` или `Promise<Result>`, — ошибка: `Err` пропал бы. `captureRejections` нет:
+  `Promise` не отклоняется.
+- **Событие `error`** ([events.md](docs/events.md), раздел 4). Своя программа шлёт `error`, а
+  слушателя `error` у этого эмиттера нет нигде — ошибка компиляции (в node такое `error`
+  завершает программу). Функция, которая подписывается на события эмиттера, у которого есть
+  `error` (потоки, сервер, свой эмиттер с `error` в карте), подписывается и на `error` того же
+  эмиттера — в той же функции, на каждом пути (проверка по путям, как у полей конструктора);
+  иначе ошибка с подсказкой. Это же делают `pipeline`, `finished`, `once()`, `on()` и
+  `for await` над потоком: они ошибку забирают сами.
+- **`once(emitter, name, { signal })`** — `Promise` кортежа аргументов следующего события; если
+  эмиттер может испустить `error` или дан `signal` — `Promise<Result<[...], Error>>`: `Err`, если
+  раньше пришло `error` или отмена (`AbortError`). У `EventTarget` — `[event]` (с `signal` — в
+  `Result`). Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
   `setMaxListeners`, `EventEmitter.defaultMaxListeners`.
-- **`for await (const [chunk] of on(emitter, "data", { signal, close }))`** — события по одному,
-  каждое — кортеж аргументов его слушателей, как `on()` node: слушает с вызова, а события, которых
-  ещё никто не ждёт, ждут в очереди; событие `error` (если оно есть в карте) и `signal` заканчивают
-  цикл ошибкой после событий до них, событие из `close` — просто после них; когда цикл кончается
-  (и `break`), слушатели снимаются. `on()` у `EventTarget` — ошибка «пока нет».
+- **`for await (const event of on(emitter, "data", { signal, close }))`** — события по одному,
+  каждое — кортеж аргументов его слушателей (у эмиттера с `error` или с `signal` — в `Result`), как
+  `on()` node: слушает с вызова, а события, которых ещё никто не ждёт, ждут в очереди; событие
+  `error` и `signal` дают `Err` после событий до них и кончают цикл, событие из `close` — просто
+  кончает его; когда цикл кончается (и `break`), слушатели снимаются. `on()` у `EventTarget` —
+  ошибка «пока нет».
 - **`EventTarget`, `Event`, `CustomEvent<T>`, `DOMException`** ([library/events/web.tz](library/events/web.tz))
   — глобальные, и тоже как в node: порядок слушателей (и добавленных во время `dispatchEvent`),
   `once`, `signal`, `capture`, объект с `handleEvent()`, один слушатель — один раз,
@@ -1954,7 +1990,8 @@ const [user] = await once(bus, "user")
   `TypeError`), и `e.detail` у него — `int`; без аннотации — `Event`.
 - **`AbortController` и `AbortSignal`** — на `EventTarget`: `abort(reason?)` (по умолчанию
   `DOMException` `AbortError`), `aborted`, `reason` (`unknown`, как любое значение в JS),
-  `onabort`, `throwIfAborted()`, `AbortSignal.abort()`, `timeout(ms)` (его таймер не держит
+  `onabort` (`throwIfAborted()` — ошибка с подсказкой `if (signal.aborted)`: бросать нечего),
+  `AbortSignal.abort()`, `timeout(ms)` (его таймер не держит
   программу) и `any(signals)`; печать — `AbortController { signal: AbortSignal { aborted: false }
   }`. Порядок — как в node: `onabort` слушает с того места, где его задали впервые (заданный
   `undefined`, он остаётся там и ничего не делает); сигналы `any()` помечаются отменёнными раньше,
@@ -1980,22 +2017,33 @@ const upper = new Transform({
     callback(undefined, chunk.toString().toUpperCase())
   },
 })
-await pipeline(createReadStream("in.txt"), upper, createWriteStream("out.txt"))
+const copied = await pipeline(createReadStream("in.txt"), upper, createWriteStream("out.txt"))
+if (copied.isErr()) console.log(copied.error.message)          // нет файла, нет прав
 
-for await (const text of createReadStream("log.txt", "utf8")) console.log(text.length)  // string
+for await (const text of createReadStream("log.txt", "utf8")) {  // Result<string, Error>
+  if (text.isErr()) break
+  console.log(text.value.length)
+}
 const users = Readable.from([ann, bob])                         // Readable<User>
 ```
 
 - **Код — node.** `node:stream` написан на tz ([library/stream/stream.tz](library/stream/stream.tz)) переносом
   `lib/internal/streams` из node 24 поверх `EventEmitter`: `Readable` (поток и пауза, `read()`,
   `unshift`, событие `readable`), `Writable` (`cork` / `uncork`, `writev`, `final`), `Duplex`,
-  `Transform`, `PassThrough`, `pipe` (ошибку дальше не передаёт, как в node), `pipeline` и
+  `Transform`, `PassThrough`, `pipeline` и
   `finished` (с колбэком и из `node:stream/promises`, где `pipeline` берёт и async-генераторы),
   `compose`, `addAbortSignal`, `Readable.from` (массив, итератор, async-итератор, строка),
   `for await` (выход из цикла уничтожает поток), `destroy` с ошибкой, `_construct`. «Не успеваю» —
   как в node: `highWaterMark` (16 КБ в Windows, 16 кусков в `objectMode`), `write()` даёт `false`,
-  потом `drain`, `pipe` ставит источник на паузу. Порядок событий и вызовов `_read` и `_write` —
-  тот же: тесты сверены с node строка в строку.
+  потом `drain`, `pipeline` ставит источник на паузу. Порядок событий и вызовов `_read` и
+  `_write` — тот же: тесты сверены с node строка в строку.
+- **Ошибки — `Result`** ([streams.md](docs/streams.md), раздел 3): каждый кусок `for await` —
+  `Result<T, Error>` (ошибка потока — `Err` в конце); `pipeline` и `finished` из
+  `node:stream/promises` — `Promise<Result<...>>`; `end()` отдаёт `Promise<Result<void, Error>>`,
+  который выполняется, когда поток дописан (колбэка у `end()` нет); `text`, `json`, `buffer`,
+  `arrayBuffer` из `node:stream/consumers` — тоже `Result`. `pipe()` — ошибка с подсказкой
+  `pipeline`: `pipe` не передаёт ошибку дальше. Слушатели событий потока требуют слушателя
+  `error` (см. «События»).
 - **Тип кусков** известен при компиляции ([streams.md](docs/streams.md)): `Readable<T>`,
   `Writable<T>`, `Duplex<W, R>`, `Transform<W, R>`. По умолчанию — `Buffer`; кодировка при создании
   (`{ encoding: "utf8" }`, `createReadStream(path, "utf8")`) — `string`; в `objectMode` — тип того,
@@ -2003,7 +2051,7 @@ const users = Readable.from([ann, bob])                         // Readable<User
   (выводится по всей программе, как карта событий из `emit`), или явно:
   `new Readable<User>({ objectMode: true, read() {} })`. Этот тип получают слушатель `data`,
   `read()`, `for await` и `_write`; `write("текст")` в поток байтов можно, как в node, а `push(42)`
-  в него и `pipe` потока `User` в поток `Buffer` — ошибки компиляции.
+  в него и `pipeline` потока `User` в поток `Buffer` — ошибки компиляции.
 - **`setEncoding("utf8")`** меняет тип кусков у той же константы (или пути через `readonly`
   поля) с этого места до конца блока: дальше `on("data", s => ...)` получает `string`, а половина
   буквы, которую разрезал кусок, ждёт следующего. Если поток до этого уже ушёл — передан в функцию,
@@ -2022,12 +2070,13 @@ const users = Readable.from([ann, bob])                         // Readable<User
   пуле потоков рантайма (`runtime/library/fs/fs_async/fs_async.c`), как у node через libuv.
 - **`process.stdin`** — `Readable` (байты, после `setEncoding` — строки): читает, только когда его
   слушают, из того же буфера, что `readLine` и `readFileSync(0)`. **`process.stdout`** и
-  **`process.stderr`** — `Writable`, когда программа пользуется ими как потоком (`pipe` в них,
+  **`process.stderr`** — `Writable`, когда программа пользуется ими как потоком (`pipeline` в них,
   `write` с кодировкой или колбэком, `on`, передаёт их дальше): пишут сразу, в одном порядке с
   `console.log`. Так же — `stdin`, `stdout` и `stderr` из `node:process`. Простой
   `process.stdout.write(x)` строки или байтов потоков не подключает: с ними сборка дольше примерно
   на секунду.
-- **`node:stream/consumers`** — `text`, `json` (даёт `Json`), `buffer`, `arrayBuffer`;
+- **`node:stream/consumers`** — `text`, `json` (даёт `Json`), `buffer`, `arrayBuffer`, все с
+  `Result`;
   **`node:string_decoder`** — `StringDecoder` (`utf8`, `utf16le`, `latin1`, `base64`, `hex` и
   другие) с теми же строками, что у node, при любом разрезе кусков.
 - **Скорость** (`bench/stream_lines`): 32 МБ, 800 тыс. строк через `createReadStream` → `Transform`
@@ -2403,8 +2452,9 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
   у неразобранного текста `code` — `"bad_json"`, `message` — текст `SyntaxError` из node
   (`Unexpected token 'x', "[1, x]" is not valid JSON`, `Expected ',' or '}' after property value
   in JSON at position 13 (line 3 column 3)`), `path` — пустой. Второй аргумент (reviver) —
-  ошибка компиляции. `Response.json()`, `Request.json()` и `json()` из
-  `node:stream/consumers` отдают `Promise<Result<Json, JsonError>>`.
+  ошибка компиляции. `Response.json()` и `Request.json()` отдают
+  `Promise<Result<Json, JsonError>>`, `json()` из `node:stream/consumers` —
+  `Promise<Result<Json, Error | JsonError>>`.
 - **`JSON.stringify(x, null, space)`** пишет любое значение: `Json`, объекты и экземпляры классов
   (поля в порядке печати, без `#private`, методов и функций), массивы, кортежи (как массивы),
   `decimal` — строкой (`"19.99"`, как BigNumber.js), `Result` — объектом со значением или
@@ -2606,31 +2656,35 @@ const sleep = (ms: int) => new Promise<void>((resolve) => setTimeout(resolve, ms
 
 async function load(name: string) {
   await sleep(10)
-  if (name == "") throw new Error("нет имени")
   return name.length
 }
 
 console.log(await Promise.all([load("Анна"), load("Борис")]))   // [ 4, 5 ], через 10 мс
-void load("").catch((e) => console.log(e.message))             // «нет имени»; ждать не нужно
 ```
 
 **Как устроено.** Async-функция — корутина LLVM, как генератор-объект, и вызов создаёт один
 объект: заголовок `Promise`, место для значения и фрейм. Вызов выполняет тело до первого `await`,
 а `await` ставит продолжение в очередь микрозадач, когда `Promise` выполнится; пока функция ждёт,
 её объект живёт. `await` значения, которое не `Promise`, тоже занимает оборот очереди, как в node,
-но ничего не выделяет; `await Promise.resolve(x)` — то же, что `await x`. `then`, `catch` и
-`finally` — объект реакции на каждый вызов, а колбэк компилируется в функцию под типы значения.
+но ничего не выделяет; `await Promise.resolve(x)` — то же, что `await x`. `then` — объект
+реакции на каждый вызов, а колбэк компилируется в функцию под типы значения.
 
 **Порядок — как в node.** Очередь микрозадач, очередь `process.nextTick`, таймеры (списки по
 длительности и куча по сроку, как в `lib/internal/timers.js`), `setImmediate` и фазы цикла libuv
 повторены точно, поэтому программа без ввода-вывода печатает то же, что node, на каждом запуске.
 Тесты `// same-as-node` сверяют с node и число оборотов: у `then`, `await`, `return` промиса из
-async-функции и из колбэка `then`, `finally`, `Promise.all` / `race` / `any` / `allSettled`,
+async-функции и из колбэка `then`, `Promise.all` / `race`,
 `queueMicrotask` и `nextTick`. Файл с `import`, `export` или `await` на верхнем уровне — ES-модуль,
 как для node: его код верхнего уровня выполняется внутри микрозадачи, и микрозадачи идут раньше
 `nextTick`; без них — CommonJS, где первыми идут `nextTick`.
 
-**Ошибки.** Исключение в async-функции отклоняет её `Promise`, `await` бросает его снова, и
+**Ошибки.** `Promise` не отклоняется ([errors.md](docs/errors.md), раздел 4): операция, которая
+может не получиться, отдаёт `Promise<Result<T, E>>`, и `Result` разбирают после `await`.
+`reject` в `new Promise`, `.catch`, `.finally`, второй аргумент `then`, `Promise.reject`,
+`allSettled`, `any` — ошибки компиляции с подсказкой; `void` над `Promise<Result>` (и над
+`Result`) — тоже: задача, которую не ждут, разбирает ошибки сама. `process.on("uncaughtException")`
+и `"unhandledRejection"` — ошибка: ловить нечего. Пока исключения ещё есть (их уберёт шаг 5 того
+же плана), исключение в async-функции отклоняет её `Promise`, `await` бросает его снова, и
 `try` / `catch` вокруг `await` работает. Отклонённый `Promise`, который никто не обработал к концу
 оборота, печатает ошибку и её стек в stderr и завершает программу с кодом 1, как node 24, —
 так же исключение в колбэке таймера. Если код верхнего уровня ждёт `Promise`, который больше
@@ -2639,8 +2693,8 @@ async-функции и из колбэка `then`, `finally`, `Promise.all` / `
 
 **Забытый `Promise` — ошибка компиляции**, как с правилом `no-floating-promises` typescript-eslint:
 вызов async-функции отдельной инструкцией, async-стрелка в `forEach`, массив промисов из `map`,
-который никто не берёт. `await p` ждёт, `void p` отпускает явно; `p.catch(f)`, `p.then(f, g)` и
-`finally` после них уже обработаны. Колбэки таймеров, `queueMicrotask` и `process.nextTick` могут
+который никто не берёт. `await p` ждёт, `void p` отпускает явно (но не `Promise<Result>`).
+Колбэки таймеров, `queueMicrotask` и `process.nextTick` могут
 быть async: их `Promise` отпускается, как с `void`, а ошибка в нём завершит программу, как
 необработанная.
 
@@ -2649,11 +2703,12 @@ async-функции и из колбэка `then`, `finally`, `Promise.all` / `
 `for await (const v of setInterval(ms, value))` — интервал, который начинается с первого шага и
 останавливается `break`; `scheduler.wait(ms)` и `scheduler.yield()`. Опции — `signal` и `ref`
 (`ref: false` не держит программу). Отменяют их `AbortController` и `AbortSignal` (см.
-«События»). Отменённое ожидание (таймер, `readFile`, `question`) отклоняется `Error` с именем
-`AbortError` и причиной в `cause` (если причина — `Error`); с сигналом `Promise` проходит через
-`finally()`, как в `lib/timers/promises.js`, — те же обороты очереди, а слушатель рантайма стоит
-среди слушателей программы там, где его добавил вызов, поэтому порядок отказов и микрозадач
-слушателей — как в node.
+«События»). Ожидание с `signal` отдаёт `Result`: таймер — `Promise<Result<T, AbortError>>`
+(`AbortError` — `{ code: "ABORT_ERR"; message }`), `readFile` и другие функции
+`node:fs/promises` — `Err` своего `SystemError` с кодом `"ABORT_ERR"`, `question` — тоже;
+`setInterval` с сигналом при отмене просто кончает `for await`. Без `signal` таймер отдаёт
+просто `Promise<T>`. Слушатель рантайма стоит среди слушателей программы там, где его добавил
+вызов, поэтому отмена приходит в тот же оборот очереди, что отказ в node.
 
 **Что пойдёт параллельно** (шаг 3). Компилятор делит async-код на куски: от `await` до `await`,
 от начала функции до первого `await`, код верхнего уровня и каждый колбэк (`then`, таймеры,
@@ -2687,9 +2742,8 @@ async-функции и из колбэка `then`, `finally`, `Promise.all` / `
 `Promise.all`, `const p = f()`), и каждый колбэк. Куски одной задачи идут друг за другом, разные
 задачи — одновременно, как и копии одной (вызов в цикле или в колбэке `map`, `setInterval`).
 Задача начинается с куска, который её запускает, и идёт с ним и с тем, что может идти после. Задачи
-`await Promise.all([...])` (и `allSettled`) кончаются до кода после этого `await`, если ошибка там
-завершает программу; если её могут поймать (`try` вокруг, `.catch` у вызова), оставшиеся задачи
-могут идти и дальше. Два куска, которые могут идти одновременно и трогают одно место, причём хотя
+`await Promise.all([...])` кончаются до кода после этого `await`, если ошибка там завершает
+программу; если её могут поймать (`try` вокруг), оставшиеся задачи могут идти и дальше. Два куска, которые могут идти одновременно и трогают одно место, причём хотя
 бы один пишет, идут по очереди в порядке node, остальные — параллельно. Async-генератор идёт в
 задаче цикла, который его перебирает. Так рантайм их и выполняет (см. ниже).
 
@@ -3408,8 +3462,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   подсказкой `price * decimal(rate)`, `const x: double = price` — с подсказкой `Number(x)`.
   Деление `decimal` на константу 0 — ошибка компиляции; `decimal` в условии — ошибка, как число.
 - Ошибки `decimal` при выполнении — исключения с именами ошибок JS: деление на ноль —
-  `RangeError: Division by zero`, как `1n / 0n`; `decimal("abc")` — `SyntaxError`, как
-  `BigInt("abc")`; `decimal(NaN)`, корень из отрицательного и результат больше 10^10000000 —
+  `RangeError: Division by zero`, как `1n / 0n`; `decimal(NaN)`, корень из отрицательного и
+  результат больше 10^10000000 —
   `RangeError` (у BigNumber.js — `NaN` и `Infinity`).
 - Чем `decimal` отличается от BigNumber.js: `==` сравнивает значения; `console.log`, `String(x)`
   и `x.toString()` печатают число без степени (`decimal(2) ** 100` — все 31 цифра), а не
@@ -3440,8 +3494,9 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   «yen japonés»). В ICU Windows нет диалектных и коротких названий языков и регионов:
   `Intl.DisplayNames` пишет «English (United States)», а не «American English», и «United
   States» при `style: "short"`, а не «US»; `islamic-civil` там — «Islamic Calendar (tabular, civil
-  epoch)», у node — «Hijri Calendar». `formatRange`, `selectRange`, `Intl.Locale` и
-  `Intl.supportedValuesOf` пока не поддерживаются.
+  epoch)», у node — «Hijri Calendar». `formatRange`, `selectRange`, опции `Intl.Locale`, его
+  `minimize`, `calendar` и прочие поля расширений, `Intl.supportedValuesOf` пока не
+  поддерживаются.
 - Классы различаются по имени: `Size` нельзя передать туда, где ждут `Point` с теми же полями,
   а литерал — туда, где ждут класс (tsc пропускает оба). `instanceof` с классом, которым объект
   быть не может, — ошибка «всегда ложь».
@@ -3468,9 +3523,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   запись, которую не позволяет свой: не кладёт в массив другое `Animal`, не пишет в поле не `Dog`,
   не меняет `readonly`-поле. Компилятор следит, куда значение попадает: в переменные и параметры,
   в `this` методов (метод родителя, вызванный у наследника, видит его как родителя), в колбэки, в
-  поля и элементы массивов, в результаты функций, в функции-значения, а брошенное или
-  отклонённое — туда, где ошибки ловят (`catch`, колбэки `catch` и `then`, `reason` у
-  `allSettled`). Новый массив из элементов (`[...dogs]`, `slice`, `filter`) — уже не тот массив. Иначе ошибка у вызова или присваивания,
+  поля и элементы массивов, в результаты функций, в функции-значения, а брошенное — туда, где
+  ошибки ловят (`catch`). Новый массив из элементов (`[...dogs]`, `slice`, `filter`) — уже не тот массив. Иначе ошибка у вызова или присваивания,
   со строкой записи: `adopt(dogs)` — «line 6 puts a 'Cat' into it, and an array of 'Dog' cannot
   hold one; pass a copy, '[...dogs]'». tsc такие записи пропускает. Анализ осторожный: запись
   через функцию-значение он связывает со всеми функциями, которые программа берёт как значения,
@@ -3515,19 +3569,14 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   этого ставят правило линтера). `r.value` без проверки `isOk()` — ошибка, как в tsc.
 - `yield* r` с `Result` — ошибка: `Result` не перебирают.
 - Async (см. «Async»): `resolve` у `new Promise` берёт значение, а не другой `Promise` (его
-  возвращают из async-функции или колбэка `then`), `reject` и `Promise.reject` — только `Error`, а
-  `Promise.reject(e)` — `Promise<never>`. `Promise<T>` не превращается в `Promise<U>`, даже если
-  `T` превращается в `U` (`Promise<int>` туда, где ждут `Promise<double>`, — ошибка);
-  `==` между промисами — тоже ошибка. `Promise.allSettled` даёт объекты `{ status, value, reason }`,
-  где лишнее поле — `undefined` (у `Promise<void>` поля `value` нет), а у промисов разных типов —
-  кортеж таких объектов, как в TS; `Promise.race` и `Promise.any` промисов разных типов дают их
-  объединение. `await` объединения с `Promise` (`int | Promise<int>`, `Promise<T> | undefined`)
+  возвращают из async-функции или колбэка `then`). `Promise<T>` не превращается в `Promise<U>`,
+  даже если `T` превращается в `U` (`Promise<int>` туда, где ждут `Promise<double>`, — ошибка);
+  `==` между промисами — тоже ошибка. `Promise.race` промисов разных типов даёт их объединение. `await` объединения с `Promise` (`int | Promise<int>`, `Promise<T> | undefined`)
   ждёт промис, если он там, а иначе один ход очереди, как в JS; в объединении — один тип
   `Promise`, а `Promise.all` и другие значений, которые могут быть промисами, пока ошибка.
   Async-колбэк там, где метод берёт его результат (`replace`, `filter`, `find`, `some`, `reduce` и
   другие), — ошибка с подсказкой: в JS `replace` вставил бы `[object Promise]`, а `filter` оставил
-  бы всё. Ошибка `Promise.any`, когда отклонены все, — `Error` с именем `AggregateError`, без
-  поля `errors`. `Promise.all` промисов `void` — `Promise<void>`. Аргументы колбэку после
+  бы всё. `Promise.all` промисов `void` — `Promise<void>`. Аргументы колбэку после
   задержки (`setTimeout(f, 10, x)`) и у `process.nextTick` — ошибка с подсказкой стрелки; таймеры
   печатаются как `Timeout {}` и `Immediate {}`. Async-генераторов и `for await` пока нет. `await`
   на верхнем уровне в нескольких файлах выполняется в порядке загрузки файлов, по очереди (в node
@@ -3538,8 +3587,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   (в node там `undefined`); `rawListeners()` даёт для слушателя `once()` функцию, которая
   печатается `[Function (anonymous)]` (в node — `[Function: bound onceWrapper] { listener: ... }`);
   `currentTarget` после отправки события — `undefined` (в node — `null`); имена событий — только
-  строки, поэтому нет `errorMonitor` и `captureRejectionSymbol`; нет и общего
-  `EventEmitter.captureRejections` (только у каждого эмиттера), `addAbortListener` и
+  строки, поэтому нет `errorMonitor` и `captureRejectionSymbol`; нет `captureRejections`,
+  `addAbortListener` и
   `EventEmitterAsyncResource`; `Object.values` и `Object.entries` эмиттера — ошибки; третий аргумент
   `addEventListener` — только объект опций (не `true`); `reason` отменённого сигнала, который не
   `Error`, не попадает в `cause` ошибки `AbortError` ожиданий рантайма (`cause` у tz — `Error`).

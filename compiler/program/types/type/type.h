@@ -154,6 +154,7 @@ public:
     DataView,
     TextEncoder,
     TextDecoder,
+    FatalTextDecoder,
   };
   Bytes bytes() const { return bytes_; }
   bool isBytes() const { return bytes_ != Bytes::None; }

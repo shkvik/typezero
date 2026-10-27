@@ -3,6 +3,7 @@
 #include "runtime/core/array/array.h"
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/error/error.h"
+#include "runtime/core/fail/fail.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/output/output.h"
 #include "runtime/core/string/string.h"
@@ -1138,8 +1139,10 @@ void *tz_text_decoder_new(void *obj, uint64_t meta, const TzEncodingTable *const
   return NULL;
 }
 
-TZ_COLD static void invalid_data(const char *encoding) {
-  tz_throw(TZ_TYPE_ERROR, "The encoded data was not valid for encoding %s", encoding);
+TZ_COLD static void invalid_data(TzMaker make, const char *encoding) {
+  char message[128];
+  snprintf(message, sizeof message, "The encoded data was not valid for encoding %s", encoding);
+  tz_fail_ascii(make, "ERR_ENCODING_INVALID_ENCODED_DATA", message);
 }
 
 static void put_text(TzTextDecoder *d, TzBuf *out, uint32_t cp) {
@@ -1307,7 +1310,8 @@ static int utf16_stream(TzTextDecoder *d, TzBuf *out, const uint8_t *s, int64_t 
   return 1;
 }
 
-void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, int32_t stream) {
+void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, int32_t stream,
+                    TzMaker make) {
   TzTextDecoder *d = (TzTextDecoder *)decoder;
   *out = tz_str_from_ascii("", 0);
   if (!d->streaming) {
@@ -1355,7 +1359,9 @@ void tz_text_decode(TzStr *out, void *decoder, const uint8_t *data, int64_t n, i
   if (!ok) {
     d->streaming = 0;
     tz_buf_free(&text);
-    invalid_data(tz_text_decoder_name(d));
+    if (make) {
+      invalid_data(make, tz_text_decoder_name(d));
+    }
     return;
   }
   *out = tz_buf_take(&text);

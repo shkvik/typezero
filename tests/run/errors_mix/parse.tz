@@ -21,13 +21,9 @@ export function tagsOf(text: string, flags: string): string[] {
 export function parseLine(line: string, n: int, separator: string, flags: string): Entry {
   const m = lineRegex(separator).exec(line)
   if (m == undefined) throw new ParseError(n, `cannot read '${line}'`)
-  let amount: decimal = 0
-  try {
-    amount = decimal(m[2] ?? "")
-  } catch (e) {
-    throw new ParseError(n, `bad amount '${m[2]}'`, e)
-  }
-  return { name: m[1] ?? "", amount, tags: tagsOf(m[3] ?? "", flags) }
+  const amount = decimal(m[2] ?? "")
+  if (amount.isErr()) throw new ParseError(n, `bad amount '${m[2]}'`, new SyntaxError(amount.error.message))
+  return { name: m[1] ?? "", amount: amount.value, tags: tagsOf(m[3] ?? "", flags) }
 }
 
 export type Config = { limit: decimal; rules: string[]; owner?: { name: string } }

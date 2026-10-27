@@ -154,7 +154,8 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
       if (failed) {
         return 0;
       }
-      mxsd = default_number(o, TZ_IO_MAXIMUM_SIGNIFICANT_DIGITS, mnsd, 21, 21, &failed);
+      mxsd = default_number(o, TZ_IO_MAXIMUM_SIGNIFICANT_DIGITS, 1, 21, 21, &failed);
+      mxsd = mxsd < mnsd ? mnsd : mxsd;
     } else {
       mnsd = 1;
       mxsd = 21;
@@ -174,8 +175,7 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
       } else if (!has_mxfd) {
         mxfd = mxfd_default > mnfd ? mxfd_default : mnfd;
       } else if (mnfd > mxfd) {
-        tz_throw(TZ_RANGE_ERROR, "maximumFractionDigits value is out of range.");
-        return 0;
+        mxfd = mnfd;
       }
     } else {
       mnfd = mnfd_default;
@@ -197,15 +197,10 @@ int tz_nf_digit_options(const TzIntlOptions *o, TzIntl *r, int mnfd_default, int
   } else {
     type = strcmp(priority, "morePrecision") == 0 ? MORE : LESS;
   }
-  if (increment != 1) {
-    if (type != FRACTION) {
-      tz_throw(TZ_TYPE_ERROR, "RoundingType is not fractionDigits");
-      return 0;
-    }
-    if (mxfd != mnfd) {
-      tz_throw(TZ_RANGE_ERROR, "maximumFractionDigits value is out of range.");
-      return 0;
-    }
+  if (increment != 1 && type != FRACTION) {
+    increment = 1;
+  } else if (increment != 1) {
+    mxfd = mnfd;
   }
 
   r->number[TZ_IO_MINIMUM_INTEGER_DIGITS] = mnid;

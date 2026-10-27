@@ -61,9 +61,10 @@ export class Folder implements Source {
 
 export class Memory implements Source {
   data = new Map<string, string>()
-  read(key: string): Promise<string> {
+  async read(key: string): Promise<string> {
     const found = this.data.get(key)
-    return found == undefined ? Promise.reject(new Error(`no ${key}`)) : later(found, 1)
+    if (found == undefined) throw new Error(`no ${key}`)
+    return later(found, 1)
   }
 }
 

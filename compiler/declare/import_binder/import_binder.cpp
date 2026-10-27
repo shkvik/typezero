@@ -58,6 +58,10 @@ void ImportBinder::resolveImports(Module *module) {
         checker_.diags_.note(own->second, "'" + name.as + "' is declared here");
         continue;
       }
+      if (here.nodeNames.count(name.as)) {
+        checker_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");
+        continue;
+      }
       auto [it, inserted] = here.imports.try_emplace(name.as, Checker::Import{*target, name.asLoc});
       if (!inserted) {
         checker_.diags_.error(name.asLoc, "duplicate import of '" + name.as + "'");

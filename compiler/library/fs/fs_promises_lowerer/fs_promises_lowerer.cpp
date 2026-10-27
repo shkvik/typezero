@@ -1,6 +1,7 @@
 #include "compiler/library/fs/fs_promises_lowerer/fs_promises_lowerer.h"
 #include "compiler/library/fs/fs_lowerer/fs_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
 #include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
@@ -127,11 +128,13 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   switch (call->builtin) {
   case Builtin::RlQuestion: {
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
-    result = lowering_.promiseLowerer().newPromise(Type::string());
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_readline_question", voidTy, {ptr, ptr, ptr, i64, ptr}),
-                                  {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
-                                   lowering_.stringLowerer().stringMeta(values[0]), values[1]});
+    result = lowering_.promiseLowerer().newPromise(call->type->promised());
+    lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
+                                                   {ptr, ptr, ptr, i64, ptr, ptr}),
+        {rl.value, result, lowering_.stringLowerer().stringObj(values[0]),
+         lowering_.stringLowerer().stringMeta(values[0]), values[1],
+         lowering_.fsLowerer().systemErrorMaker()});
     for (size_t i = 0; i < values.size(); ++i) {
       lowering_.refCounts().releaseValue(values[i], call->args[i]->type);
     }
@@ -140,11 +143,13 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
   case Builtin::RlQuestionCallback: {
     std::vector<llvm::Value *> values = lowering_.throwLowerer().emitHeldValues(call->args);
     llvm::Value *answer = lowering_.promiseLowerer().newPromise(Type::string());
-    lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                      "tz_readline_question", voidTy, {ptr, ptr, ptr, i64, ptr}),
-                                  {rl.value, answer, lowering_.stringLowerer().stringObj(values[0]),
-                                   lowering_.stringLowerer().stringMeta(values[0]),
-                                   llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
+    lowering_.builder_.CreateCall(
+        lowering_.processLowerer().processFunction("tz_readline_question", voidTy,
+                                                   {ptr, ptr, ptr, i64, ptr, ptr}),
+        {rl.value, answer, lowering_.stringLowerer().stringObj(values[0]),
+         lowering_.stringLowerer().stringMeta(values[0]),
+         llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
+         llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())});
     llvm::Value *done = lowering_.promiseLowerer().newPromise(Type::voidTy());
     const Type *callback = call->args[1]->type;
     lowering_.reactionLowerer().attachReaction(
@@ -200,14 +205,20 @@ llvm::Value *FsPromisesLowerer::emitAsyncIoBuiltin(CallExpr *call) {
                                         {delay, slot, type, signal, ref}, "interval");
     } else {
       result = lowering_.promiseLowerer().newPromise(value);
-      if (given && lowering_.promiseLowerer().promiseValueSize(value)) {
+      llvm::Value *make = llvm::ConstantPointerNull::get(ptr);
+      if (value->isResult()) {
+        make = lowering_.resultLowerer().failureMaker(value->errType());
+        llvm::Value *ok = lowering_.resultLowerer().makeResult(value, lowering_.builder_.getTrue(),
+                                                               given, nullptr);
+        lowering_.builder_.CreateStore(ok, lowering_.promiseLowerer().promiseValueAddress(result));
+      } else if (given && lowering_.promiseLowerer().promiseValueSize(value)) {
         lowering_.builder_.CreateStore(given,
                                        lowering_.promiseLowerer().promiseValueAddress(result));
       }
       lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction("tz_timers_wait", voidTy,
-                                                     {ptr, f64, i32, ptr, i32}),
-          {result, delay, lowering_.builder_.getInt32(immediate), signal, ref});
+                                                     {ptr, f64, i32, ptr, i32, ptr}),
+          {result, delay, lowering_.builder_.getInt32(immediate), signal, ref, make});
     }
     lowering_.refCounts().releaseValue(signal, call->args[call->args.size() - 2]->type);
     return result;

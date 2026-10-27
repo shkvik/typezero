@@ -10,7 +10,6 @@ cb de
 _write end buffer len=3
 _final
 prefinish
-end cb
 finish finished=true
 close
 string chunk string hi utf8
@@ -23,3 +22,6 @@ _writev d
 error boom
 close e
 v finish
+end true
+s end true
+v end true

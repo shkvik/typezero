@@ -14,6 +14,7 @@
 #include "compiler/check/stmt/jump_checker/jump_checker.h"
 #include "compiler/check/stmt/stmt_checker/stmt_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/regex/match_checker/match_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/whole_program/flows/flows.h"
@@ -127,6 +128,7 @@ void LoopChecker::checkFor(ForStmt *stmt) {
 void LoopChecker::checkForOf(ForOfStmt *stmt) {
   if (stmt->isAwait) {
     checker_.asyncChecker().checkForAwait(stmt);
+    checker_.emitterChecker().noteErrorsHandled(stmt->iterable);
     return;
   }
   if (stmt->keys) {

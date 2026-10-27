@@ -3,8 +3,12 @@
 #include "compiler/check/expr/binary_checker/binary_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/constant_folder/constant_folder.h"
+#include "compiler/declare/prelude/prelude.h"
+#include "runtime/library/decimal/decimal_text/decimal_text.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include <cstring>
 
@@ -306,9 +310,35 @@ Expr *DecimalChecker::checkDecimalCall(CallExpr *call, llvm::SMLoc loc) {
   if (type->isError()) {
     return call;
   }
+  const Type *text = type->nonOptional();
+  bool textual =
+      !type->isOptional() && (text->isString() || text->isStringLiteral() ||
+                              (text->isUnion() && llvm::all_of(text->members(), [](const Type *m) {
+                                 return m->isStringLiteral();
+                               })));
   if (type->isInteger() || type->isDecimal()) {
     arg = checker_.typeRelations().convert(arg, Type::decimalTy());
-  } else if (!type->isString() && !type->isFloat()) {
+  } else if (textual) {
+    std::optional<std::vector<std::string>> texts = checker_.literalTypes().knownTexts(arg);
+    for (const std::string &t : texts ? *texts : std::vector<std::string>()) {
+      llvm::SmallVector<llvm::UTF16, 32> units;
+      llvm::convertUTF8ToUTF16String(t, units);
+      if (!tz_decimal_text_ok(reinterpret_cast<const uint16_t *>(units.data()), units.size())) {
+        checker_.diags_.error(arg->loc(), "'" + t +
+                                              "' is no decimal number; write it as one, e.g. "
+                                              "'12.50', '-1e3' or '0x1f'");
+        return call;
+      }
+    }
+    if (!text->isString()) {
+      arg = checker_.typeRelations().convert(arg, Type::string());
+    }
+    call->builtin = Builtin::DecimalOf;
+    call->type =
+        texts ? Type::decimalTy()
+              : Type::result(Type::decimalTy(), checker_.prelude().builtinType("DecimalError"));
+    return call;
+  } else if (!type->isFloat()) {
     std::string message =
         "decimal() takes a string, a number or a decimal, found '" + type->name().str() + "'";
     if (type->isOptional()) {

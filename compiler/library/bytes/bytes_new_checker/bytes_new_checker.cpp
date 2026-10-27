@@ -51,6 +51,38 @@ std::string rangeText(int64_t lo, int64_t hi) {
   return std::to_string(lo) + " to " + std::to_string(hi);
 }
 
+bool mayBeFatal(const Expr *options) {
+  if (options->type->isError()) {
+    return false;
+  }
+  auto *literal = dyn_cast<ObjectLitExpr>(options);
+  if (!literal) {
+    const Field *field = options->type->field("fatal");
+    return field && !field->type->isUndefined();
+  }
+  bool fatal = false;
+  for (const ObjectLitExpr::Property &prop : literal->props) {
+    if (prop.spread) {
+      fatal = fatal || mayBeFatal(prop.value);
+      continue;
+    }
+    if (prop.name != "fatal") {
+      continue;
+    }
+    const Expr *value = prop.value;
+    while (auto *conv = dyn_cast<CastExpr>(value)) {
+      if (!conv->isImplicit()) {
+        break;
+      }
+      value = conv->operand;
+    }
+    auto *flag = dyn_cast<BoolLitExpr>(value);
+    fatal = !isa<UndefinedExpr>(value) && !(flag && !flag->value);
+  }
+
+  return fatal;
+}
+
 }
 
 BytesNewChecker::BytesNewChecker(Checker &checker) : checker_(checker) {}
@@ -160,16 +192,23 @@ Expr *BytesNewChecker::checkBytesNew(NewExpr *expr, const Type *type) {
       lit->type = Type::string();
       checked[1] = lit;
     }
+    bool fatal = false;
     if (call->args.size() == 2) {
       const Type *options = Type::object({{"fatal", Type::optional(Type::boolTy()), false},
                                           {"ignoreBOM", Type::optional(Type::boolTy()), false}});
       Expr *given = checker_.exprChecker().checkExpr(call->args[1], options);
+      fatal = mayBeFatal(given);
       checked.push_back(
           checker_.typeRelations().coerce(given, options, "the options of TextDecoder"));
     }
     call->args = checked;
-    return made(Builtin::TextDecoderNew, type);
+    return made(Builtin::TextDecoderNew, fatal ? Type::bytesType(Bytes::FatalTextDecoder) : type);
   }
+  case Bytes::FatalTextDecoder:
+    checker_.diags_.error(loc, "a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: "
+                               "true })'");
+    checkArgsLoosely();
+    return expr;
   default:
     break;
   }

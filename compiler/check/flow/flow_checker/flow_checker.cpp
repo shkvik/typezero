@@ -104,6 +104,18 @@ Checker::Flow FlowChecker::join(const Checker::Flow &a, const Checker::Flow &b) 
       result.setFields.push_back(field);
     }
   }
+  for (const Checker::EmitterKey &key : a.errorListened) {
+    if (llvm::is_contained(b.errorListened, key)) {
+      result.errorListened.push_back(key);
+    }
+  }
+  result.errorPending = a.errorPending;
+  for (const auto &pending : b.errorPending) {
+    if (llvm::none_of(result.errorPending,
+                      [&](const auto &p) { return p.first == pending.first; })) {
+      result.errorPending.push_back(pending);
+    }
+  }
   result.beforeSuper = a.beforeSuper || b.beforeSuper;
 
   return result;

@@ -28,6 +28,7 @@
 #include "compiler/check/values/global_function_checker/global_function_checker.h"
 #include "compiler/check/values/number_methods/number_methods.h"
 #include "compiler/check/values/string_methods/string_methods.h"
+#include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
 #include "compiler/library/builtin_modules/runtime_object_checker/runtime_object_checker.h"
@@ -216,6 +217,16 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       }
     }
     if (receiver->isClass()) {
+      if (ClassDecl *cls = ClassDeclarer::classOf(receiver);
+          cls && cls->library && cls->name == "AbortSignal" && member->name == "throwIfAborted" &&
+          !checker_.libraryCalls().inLibrary(member->loc())) {
+        checker_.diags_.error(member->loc(),
+                              "'throwIfAborted' is not supported: nothing is thrown in tz; check "
+                              "the signal and return an Err, e.g. 'if (signal.aborted) return "
+                              "err({ code: \"ABORT_ERR\", message: \"aborted\" })'");
+        call->type = Type::error();
+        return call;
+      }
       Expr *checked = checker_.methodCallChecker().checkMethodCall(call, member, expected);
       checker_.httpChecker().checkHeadersCall(call, member);
       return checked;

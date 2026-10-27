@@ -26,6 +26,6 @@ void tz_dec_retain_value(TzDec v);
 void tz_dec_release_value(TzDec v);
 int32_t tz_dec_equal(int64_t a, uint64_t am, int64_t b, uint64_t bm);
 void tz_buf_decimal(TzBuf *out, TzDec v);
-void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta);
+void tz_dec_from_string(TzDec *out, void *obj, uint64_t meta, TzMaker make);
 
 #endif

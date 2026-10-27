@@ -117,13 +117,22 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
             field.name);
         if (const Type *u = field.type->nonOptional(); u->isTagged()) {
           llvm::Value *tag = lowering_.unionLayout().unionTag(loaded);
+          bool atoms = u->slotPart(UnionSlot::Atom) != nullptr;
           llvm::Value *isText = lowering_.builder_.CreateICmpEQ(
-              tag, lowering_.builder_.getInt32(unsigned(UnionSlot::String)));
+              tag,
+              lowering_.builder_.getInt32(unsigned(atoms ? UnionSlot::Atom : UnionSlot::String)));
           llvm::Value *isFlag = lowering_.builder_.CreateICmpEQ(
               tag, lowering_.builder_.getInt32(unsigned(UnionSlot::Bool)));
-          llvm::Value *text = lowering_.builder_.CreateSelect(
-              isText, lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::String),
-              llvm::Constant::getNullValue(lowering_.strTy_));
+          llvm::Value *text = nullptr;
+          if (atoms) {
+            llvm::Value *atom = lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::Atom);
+            text = lowering_.unionLayout().atomString(lowering_.builder_.CreateSelect(
+                isText, atom, llvm::ConstantInt::get(atom->getType(), 0)));
+          } else {
+            text = lowering_.builder_.CreateSelect(
+                isText, lowering_.unionLayout().taggedPart(loaded, u, UnionSlot::String),
+                llvm::Constant::getNullValue(lowering_.strTy_));
+          }
           lowering_.builder_.CreateStore(
               text, lowering_.builder_.CreateConstGEP2_32(
                         textTy, lowering_.builder_.CreateStructGEP(optionsTy, slot, 1), 0,

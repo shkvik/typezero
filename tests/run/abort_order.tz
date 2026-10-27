@@ -3,8 +3,8 @@
 // first set among the listeners (set to undefined, it keeps its place and
 // does nothing); the signals of AbortSignal.any() aborted before the
 // listeners of their source run; and the waits of the runtime that a signal
-// cancels (node:timers/promises, node:fs/promises) rejected in the turns of
-// the queue node takes, among the microtasks of the listeners.
+// cancels (node:timers/promises, node:fs/promises) end in an Err with the
+// code ABORT_ERR (a Promise is not rejected in tz, docs/errors.md).
 import { setTimeout as wait } from "node:timers/promises"
 import { readFile } from "node:fs/promises"
 
@@ -37,23 +37,24 @@ const d = new AbortController()
 d.signal.addEventListener("abort", () => queueMicrotask(() => log("listener micro (before)")))
 const p = wait(1000, "x", { signal: d.signal })
 d.signal.addEventListener("abort", () => queueMicrotask(() => log("listener micro (after)")))
-p.catch((e) => log(`rejected ${e.name} ${e.cause instanceof Error ? e.cause.name : "-"}`))
 d.abort()
-await wait(10)
+const first = await p
+log(first.isErr() ? `aborted ${first.error.code} ${first.error.message}` : first.value)
 
 const e = new AbortController()
 const q = wait(1000, "x", { signal: e.signal })
-q.then(undefined, (err) => log(`rejected 2 ${err.name}`))
 e.signal.addEventListener("abort", () => log("listener sync"))
 e.abort()
 log("after abort")
-await wait(10)
+const second = await q
+log(second.isErr() ? `aborted 2 ${second.error.code}` : second.value)
 
 const f = new AbortController()
 const r = readFile(process.argv[1] ?? "", { signal: f.signal })
-r.then(undefined, (err) => log(`rejected 3 ${err.name}`))
 f.signal.addEventListener("abort", () => queueMicrotask(() => log("listener micro 3")))
 f.abort()
+const read = await r
+log(read.isErr() ? `aborted 3 ${read.error.code}` : "read")
 await wait(10)
 
 // A listener that stops the others does not stop the runtime's.
@@ -62,4 +63,5 @@ h.signal.addEventListener("abort", (ev) => ev.stopImmediatePropagation())
 h.signal.addEventListener("abort", () => log("not called"))
 const s = wait(1000, "x", { signal: h.signal })
 h.abort()
-await s.catch((err) => log(`stopped anyway: ${err.name}`))
+const stopped = await s
+log(stopped.isErr() ? `stopped anyway: ${stopped.error.code}` : stopped.value)

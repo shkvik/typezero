@@ -37,6 +37,8 @@ import { readLines } from "tz:io"
 import { join } from "node:path"
 // expect-error: duplicate import of 'basename'
 import { basename, basename } from "node:path"
+// expect-error: duplicate import of 'basename'
+import { pipeline as basename } from "node:stream"
 // expect-error: a built-in module is not re-exported: import what a file needs from 'node:fs' in that file
 export { readFileSync } from "node:fs"
 

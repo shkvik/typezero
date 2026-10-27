@@ -7,6 +7,7 @@
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
 #include "compiler/declare/type_declarer/type_declarer.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/events/event_map_inference/event_map_inference.h"
 #include "compiler/library/events/event_target_checker/event_target_checker.h"
 #include "compiler/library/process/process_checker/process_checker.h"
@@ -230,6 +231,9 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     return nullptr;
   }
   if (fn == "finished" && promises) {
+    if (!call->args.empty()) {
+      checker_.emitterChecker().noteErrorsHandled(call->args[0]);
+    }
     return nullptr;
   }
   if (checker_.libraryCalls().inLibrary(call->loc())) {
@@ -262,6 +266,7 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
     const Type *options =
         alias ? Type::optional(checker_.typeDeclarer().resolveAlias(alias)) : Type::error();
     Expr *stream = checker_.argumentChecker().checkArg(call->args[0], streamType);
+    checker_.emitterChecker().noteErrorsHandled(stream);
     Expr *opts = call->args.size() == 3
                      ? checker_.argumentChecker().checkArg(call->args[1], options)
                      : undefinedOf(options);
@@ -355,6 +360,9 @@ Expr *StreamPipeline::checkStreamFunction(CallExpr *call, FunctionDecl *decl, ll
       return call;
     }
     stages.push_back(stage);
+    if (stream) {
+      checker_.emitterChecker().noteErrorsHandled(stage);
+    }
     if (i + 1 == count) {
       lastIsStream = stream;
     }

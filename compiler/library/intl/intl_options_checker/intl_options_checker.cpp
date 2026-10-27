@@ -1,8 +1,10 @@
 #include "compiler/library/intl/intl_options_checker/intl_options_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/flow/index_proofs/index_proofs.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
 #include "compiler/library/intl/intl_check_helpers/intl_check_helpers.h"
+#include "compiler/library/intl/intl_checker/intl_checker.h"
 #include "compiler/whole_program/flows/flows.h"
 #include "runtime/library/intl/intl/intl.h"
 #include "llvm/ADT/STLExtras.h"
@@ -175,28 +177,8 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   bool ok = true;
   if (args.size() > from) {
     Expr *&locale = args[from];
-    std::optional<std::u16string> tag = literalText(locale);
     locale = checker_.exprChecker().checkExpr(locale);
-    const Type *type = locale->type;
-    if (type->isError()) {
-      ok = false;
-    } else if (!type->isUndefined() && type != Type::string() &&
-               type != Type::optional(Type::string())) {
-      std::string message = what.str() +
-                            " takes the language as a string, e.g. \"ru-RU\", found '" +
-                            type->name().str() + "'";
-      if (type->isArray()) {
-        message += "; pass one language";
-      }
-      checker_.diags_.error(locale->loc(), message);
-      ok = false;
-    } else if (tag && !isLanguageTag(utf8(*tag))) {
-      checker_.diags_.error(locale->loc(),
-                            "'" + utf8(*tag) +
-                                "' is not a language tag, and JavaScript would throw a "
-                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
-      ok = false;
-    }
+    ok = checker_.intlChecker().checkLocaleArg(locale, what);
   }
   if (args.size() <= from + 1) {
     return ok;
@@ -277,8 +259,12 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
     auto isBoolean = [](const Type *t) {
       return t->isBool() || (t->isLiteral() && t->literalBase()->isBool());
     };
+    auto isNumber = [](const Type *t) {
+      return t->isNumeric() || (t->isLiteral() && t->literalBase()->isNumeric());
+    };
     bool fits = found->kind == 's'   ? isStringLike(value)
-                : found->kind == 'n' ? value->isNumeric()
+                : found->kind == 'n' ? isNumber(value) || (value->isUnion() &&
+                                                           llvm::all_of(value->members(), isNumber))
                 : found->kind == 'b'
                     ? isBoolean(value)
                     : isStringLike(value) || isBoolean(value) ||
@@ -302,10 +288,16 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                              valueList(found->values));
       continue;
     }
-    if (!textOf(field.name) && !found->values.empty() && found->kind != 'n' &&
-        found->kind != 'b') {
+    if (!textOf(field.name) && !found->values.empty() && found->kind != 'n' && found->kind != 'b') {
       bool open = false;
       std::vector<std::string> texts = literalTexts(value, open);
+      if (Expr *given = valueOf(field.name)) {
+        if (std::optional<std::vector<std::string>> known =
+                checker_.literalTypes().knownTexts(given)) {
+          texts = *known;
+          open = false;
+        }
+      }
       auto wrong = llvm::find_if(texts, [&](const std::string &t) {
         return !llvm::is_contained(found->values, t) && !(found->kind == 'g' && t.empty());
       });
@@ -377,8 +369,10 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   static const struct {
     const char *name;
     int min, max;
-  } ranges[] = {{"minimumIntegerDigits", 1, 21},     {"minimumFractionDigits", 0, 100},
-                {"maximumFractionDigits", 0, 100},   {"minimumSignificantDigits", 1, 21},
+  } ranges[] = {{"minimumIntegerDigits", 1, 21},
+                {"minimumFractionDigits", 0, 100},
+                {"maximumFractionDigits", 0, 100},
+                {"minimumSignificantDigits", 1, 21},
                 {"maximumSignificantDigits", 1, 21}};
   auto constantOf = [&](llvm::StringRef name) -> std::optional<double> {
     if (std::optional<double> n = numberOf(name)) {
@@ -407,6 +401,11 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                                " to " + std::to_string(range.max) +
                                ", and JavaScript would throw a RangeError");
       }
+      continue;
+    }
+    if (std::optional<std::pair<int64_t, int64_t>> held =
+            LiteralTypes::intRange(type->field(range.name)->type->nonOptional());
+        held && held->first >= range.min && held->second <= range.max) {
       continue;
     }
     const Expr *value = valueExpr(range.name);
@@ -446,7 +445,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
   };
   for (const char *pair : {"FractionDigits", "SignificantDigits"}) {
     std::string min = std::string("minimum") + pair, max = std::string("maximum") + pair;
-    if (!type->field(min) || !type->field(max) || notAbove(min, max)) {
+    if (!literal || !type->field(min) || !type->field(max) || notAbove(min, max)) {
       continue;
     }
     std::optional<double> low = constantOf(min), high = constantOf(max);
@@ -466,7 +465,7 @@ bool IntlOptionsChecker::checkIntlArgs(std::vector<Expr *> &args, size_t from, I
                 return m->isLiteral() && llvm::is_contained(increments, m->literalNumber());
               });
     }
-    if (known && n != 1.0 && (!n || llvm::is_contained(increments, *n))) {
+    if (literal && known && n != 1.0 && (!n || llvm::is_contained(increments, *n))) {
       if (type->field("minimumSignificantDigits") || type->field("maximumSignificantDigits")) {
         report("roundingIncrement",
                "roundingIncrement rounds to fraction digits, and with significant digits "

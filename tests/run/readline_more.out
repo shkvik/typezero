@@ -1,9 +1,9 @@
 Name? Age? Ann is 42
-question: AbortError
+question: ABORT_ERR
 City? city Paris
 line: one
 line: two
-after close: readline was closed
+after close: ERR_USE_AFTER_CLOSE readline was closed
 rest: three
 rest: four
 end

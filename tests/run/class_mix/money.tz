@@ -41,6 +41,8 @@ export class Money {
       else if (c < "0" || c > "9") return err(`bad amount '${amount}'`)
     }
     if (amount.length == 0 || points > 1) return err(`bad amount '${amount}'`)
-    return ok(new Money(decimal(amount), currency))
+    const value = decimal(amount)
+    if (value.isErr()) return err(`bad amount '${amount}'`)
+    return ok(new Money(value.value, currency))
   }
 }

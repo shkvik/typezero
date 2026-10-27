@@ -5,7 +5,8 @@ done a 4
 done bb 8
 done ccc 12
 total 24, started 3, listening 1
-failed slow: AbortError
+failed slow: ABORT_ERR
+3
 collect: AbortError stop
 first start z
 start listeners 0

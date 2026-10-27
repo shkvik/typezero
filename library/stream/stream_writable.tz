@@ -721,14 +721,15 @@ export function pipeline() {}
 export function finished() {}
 export function compose() {}
 
-export function finishedPromise(stream: Stream, options?: FinishedOptions): Promise<void> {
+export function finishedPromise(stream: Stream, options?: FinishedOptions):
+    Promise<Result<void, Error>> {
   const autoCleanup = options?.cleanup ?? false
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<Result<void, Error>>((resolve) => {
     let cleanup: () => void = () => {}
-    cleanup = eos(stream, options, (err?: Error) => {
+    cleanup = eos(stream, options, (error?: Error) => {
       if (autoCleanup) cleanup()
-      if (err != undefined) reject(err)
-      else resolve()
+      if (error != undefined) resolve(err(error))
+      else resolve(ok())
     })
   })
 }

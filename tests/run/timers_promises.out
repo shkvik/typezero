@@ -14,10 +14,10 @@ x2
 x3
 with signal
 without
-AbortError: The operation was aborted (This operation was aborted)
-AbortError: The operation was aborted (enough)
+ABORT_ERR: The operation was aborted
+ABORT_ERR: The operation was aborted
 tick 1
 tick 2
 tick 3
-AbortError after true
+stopped after true
 end

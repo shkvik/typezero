@@ -9,7 +9,7 @@ class Money {
   show(x: number): string { return this.fmt.format(x) }
 }
 console.log(new Money("EUR").show(3.5))
-function grouping(g: string | boolean): string {
+function grouping(g: "min2" | boolean): string {
   const opts: Intl.NumberFormatOptions = { useGrouping: g, maximumFractionDigits: 1 }
   return new Intl.NumberFormat("en", opts).format(12345.67)
 }

@@ -11,3 +11,4 @@ duplex finish
 p error stream.push() after EOF
 duplex end
 duplex close
+w ended false, duplex ended true

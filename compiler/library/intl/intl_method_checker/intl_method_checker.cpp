@@ -3,6 +3,7 @@
 #include "compiler/check/expr/call_checker/call_checker.h"
 #include "compiler/check/expr/expr_checker/expr_checker.h"
 #include "compiler/check/generics/generic_checker/generic_checker.h"
+#include "compiler/check/types/literal_types/literal_types.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/library/date/date_format_checker/date_format_checker.h"
 #include "compiler/library/intl/intl_checker/intl_checker.h"
@@ -50,31 +51,18 @@ const Type *relativePartType() {
                       "Intl.RelativeTimeFormatPart");
 }
 
-std::string closedArgProblem(const Expr *arg, llvm::ArrayRef<llvm::StringLiteral> allowed,
-                             llvm::StringRef what) {
-  while (auto *conv = llvm::dyn_cast<CastExpr>(arg)) {
-    if (!conv->isImplicit()) {
-      break;
-    }
-    arg = conv->operand;
-  }
-  const Type *type = arg->type ? arg->type->nonOptional() : nullptr;
-  if (!type || type->isError()) {
+std::string closedArgProblem(const Expr *arg, const std::optional<std::vector<std::string>> &texts,
+                             llvm::ArrayRef<llvm::StringLiteral> allowed, llvm::StringRef what) {
+  if (!arg->type || arg->type->isError()) {
     return "";
   }
-  llvm::ArrayRef<const Type *> members =
-      type->isUnion() ? type->members() : llvm::ArrayRef<const Type *>(type);
-  for (const Type *m : members) {
-    if (!m->isStringLiteral()) {
-      return "a string known only when the program runs may be no " + what.str() +
-             ", which JavaScript would throw a RangeError for; compare it with them first, "
-             "e.g. 'if (x == \"" +
-             allowed[0].str() + "\" || x == \"" + allowed[1].str() + "\")'";
-    }
-    std::string text;
-    for (char16_t c : m->literalText()) {
-      text.push_back(char(c));
-    }
+  if (!texts) {
+    return "a string known only when the program runs may be no " + what.str() +
+           ", which JavaScript would throw a RangeError for; compare it with them first, "
+           "e.g. 'if (x == \"" +
+           allowed[0].str() + "\" || x == \"" + allowed[1].str() + "\")'";
+  }
+  for (const std::string &text : *texts) {
     if (!llvm::is_contained(allowed, text)) {
       return "'" + text + "' is no " + what.str() + ", and JavaScript would throw a RangeError";
     }
@@ -196,7 +184,10 @@ Expr *IntlMethodChecker::checkIntlMethod(CallExpr *call, MemberExpr *member) {
                 "a RangeError; the units are year, quarter, month, week, day, hour, "
                 "minute and second, also in the plural");
       } else if (std::string problem =
-                     unit ? "" : closedArgProblem(call->args[1], units, "unit of time");
+                     unit ? ""
+                          : closedArgProblem(call->args[1],
+                                             checker_.literalTypes().knownTexts(call->args[1]),
+                                             units, "unit of time");
                  !problem.empty()) {
         checker_.diags_.error(call->args[1]->loc(), problem);
       }
@@ -292,7 +283,10 @@ Expr *IntlMethodChecker::checkStringLocale(CallExpr *call, MemberExpr *member) {
                                   "' is not a normalization form, and JavaScript would throw a "
                                   "RangeError; it is 'NFC', 'NFD', 'NFKC' or 'NFKD'");
       } else if (std::string problem =
-                     form ? "" : closedArgProblem(call->args[0], forms, "normalization form");
+                     form ? ""
+                          : closedArgProblem(call->args[0],
+                                             checker_.literalTypes().knownTexts(call->args[0]),
+                                             forms, "normalization form");
                  !problem.empty()) {
         checker_.diags_.error(call->args[0]->loc(), problem);
       }

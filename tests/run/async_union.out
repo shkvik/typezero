@@ -1,15 +1,7 @@
 two string
 3
-12
 { k: 1 }
 7
-[
-  { status: 'fulfilled', value: 5 },
-  { status: 'fulfilled', value: 'six' }
-]
-6
-SIX
-3 rejected no true
 [ 9, 'ten' ]
 11
 true undefined

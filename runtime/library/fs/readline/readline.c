@@ -54,6 +54,7 @@ typedef struct Asker {
   int32_t step;
   TzAbortListener listener;
   TzSignal *signal;
+  TzMaker make;
   struct Readline *readline;
 } Asker;
 
@@ -318,8 +319,7 @@ static void readline_serve(Readline *rl) {
     if (!rl->head) {
       rl->tail = NULL;
     }
-    *(TzStr *)((char *)a->promise + TZ_PROMISE_VALUE) = line;
-    tz_promise_fulfill(a->promise);
+    tz_promise_succeed(a->promise, &line, sizeof line);
     asker_free(a);
   }
   tz_instance_release(&rl->base);
@@ -421,25 +421,49 @@ static void readline_close_step(void *object, TzPromise *p) {
 
 void tz_readline_close(void *object) { readline_shut((Readline *)object); }
 
+static void question_failed(TzPromise *p, TzMaker make, TzSignal *signal) {
+  if (!make && signal) {
+    tz_promise_reject(p, tz_abort_error(signal));
+    return;
+  }
+  if (!make) {
+    TzStr message = tz_fs_ascii("readline was closed");
+    tz_promise_reject(p, tz_error_info.make(TZ_ERROR, message.obj, message.meta));
+    return;
+  }
+  if (signal) {
+    tz_fs_abort_failure(make);
+  } else {
+    TzSystemErrorParts parts;
+    memset(&parts, 0, sizeof parts);
+    parts.message = tz_fs_ascii("readline was closed");
+    parts.name = tz_fs_ascii("Error");
+    parts.code = tz_fs_ascii("ERR_USE_AFTER_CLOSE");
+    parts.syscall = tz_fs_ascii("");
+    tz_fs_throw_parts(make, &parts);
+  }
+  void *error = tz_failed;
+  tz_failed = NULL;
+  tz_promise_fail(p, error);
+}
+
 static void question_aborted(TzAbortListener *l) {
   Asker *a = (Asker *)((char *)l - offsetof(Asker, listener));
   Readline *rl = a->readline;
   readline_unlink(rl, a);
-  tz_promise_reject(a->promise, tz_abort_error(a->signal));
+  question_failed(a->promise, a->make, a->signal);
   asker_free(a);
 }
 
 void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t query_meta,
-                          TzSignal *signal) {
+                          TzSignal *signal, TzMaker make) {
   Readline *rl = (Readline *)object;
   if (rl->closed) {
-    TzStr message = tz_fs_ascii("readline was closed");
-    void *error = tz_error_info.make(TZ_ERROR, message.obj, message.meta);
-    tz_promise_reject(p, error);
+    question_failed(p, make, NULL);
     return;
   }
   if (signal && signal->aborted) {
-    tz_promise_reject(p, tz_abort_error(signal));
+    question_failed(p, make, signal);
     return;
   }
   if (rl->output == 1) {
@@ -448,6 +472,7 @@ void tz_readline_question(void *object, TzPromise *p, void *query_obj, uint64_t 
     tz_stderr_write(query_obj, query_meta);
   }
   Asker *a = readline_ask(rl, p, 0);
+  a->make = make;
   if (signal) {
     a->signal = signal;
     tz_ref_retain(signal);

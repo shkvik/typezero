@@ -106,28 +106,8 @@ DateFormatChecker::DateFormatChecker(Checker &checker) : checker_(checker) {}
 bool DateFormatChecker::checkLocaleArgs(std::vector<Expr *> &args, int kind) {
   bool ok = true;
   if (!args.empty()) {
-    std::optional<std::u16string> tag = literalText(args[0]);
     args[0] = checker_.exprChecker().checkExpr(args[0]);
-    const Type *type = args[0]->type;
-    if (type->isError()) {
-      ok = false;
-    } else if (!type->isUndefined() && type != Type::string() &&
-               type != Type::optional(Type::string())) {
-      std::string message = std::string(methodName(kind)) +
-                            " takes the language as a string, e.g. \"ru-RU\", found '" +
-                            type->name().str() + "'";
-      if (type->isArray()) {
-        message += "; pass one language";
-      }
-      checker_.diags_.error(args[0]->loc(), message);
-      ok = false;
-    } else if (tag && !isLanguageTag(utf8(*tag))) {
-      checker_.diags_.error(args[0]->loc(),
-                            "'" + utf8(*tag) +
-                                "' is not a language tag, and JavaScript would throw a "
-                                "RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'");
-      ok = false;
-    }
+    ok = checker_.intlChecker().checkLocaleArg(args[0], methodName(kind));
   }
   if (args.size() < 2) {
     return ok;

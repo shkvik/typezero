@@ -59,7 +59,6 @@ bool bytesMayThrow(const CallExpr *call) {
   case Builtin::BufferReadVar:
   case Builtin::BufferWriteVar:
   case Builtin::BufferSwap:
-  case Builtin::TextDecode:
     return true;
   case Builtin::DataViewGet:
   case Builtin::DataViewSet:

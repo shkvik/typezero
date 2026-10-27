@@ -29,6 +29,9 @@ type RegexError = { code: "bad_regex"; message: string }
 type UrlError = { code: "bad_url"; message: string; input: string }
 type DateError = { code: "bad_date"; message: string; text: string }
 type LocaleError = { code: "bad_locale"; message: string; tag: string }
+type DecodeError = { code: "ERR_ENCODING_INVALID_ENCODED_DATA"; message: string }
+type DecimalError = { code: "bad_decimal"; message: string; text: string }
+type AbortError = { code: "ABORT_ERR"; message: string }
 type CryptoError = { code: string; message: string }
 type RedirectStatus = 301 | 302 | 303 | 307 | 308
 type ReflectError = {
@@ -85,8 +88,7 @@ void Prelude::declarePrelude() {
     source += (status == 200 ? " " : " | ") + std::to_string(status);
   }
   source += "\n";
-  std::unique_ptr<llvm::MemoryBuffer> buffer =
-      llvm::MemoryBuffer::getMemBufferCopy(source, "<tz>");
+  std::unique_ptr<llvm::MemoryBuffer> buffer = llvm::MemoryBuffer::getMemBufferCopy(source, "<tz>");
   llvm::StringRef text = buffer->getBuffer();
   checker_.diags_.sourceMgr().AddNewSourceBuffer(std::move(buffer), llvm::SMLoc());
   Lexer lexer(text, checker_.diags_);

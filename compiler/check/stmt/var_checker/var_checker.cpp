@@ -30,6 +30,24 @@ using llvm::isa;
 
 namespace tz {
 
+namespace {
+
+bool isTextChoice(const Expr *expr) {
+  while (auto *conv = dyn_cast<CastExpr>(expr)) {
+    if (!conv->isImplicit()) {
+      return false;
+    }
+    expr = conv->operand;
+  }
+  if (auto *choice = dyn_cast<ConditionalExpr>(expr)) {
+    return isTextChoice(choice->thenExpr) && isTextChoice(choice->elseExpr);
+  }
+
+  return isa<StringLitExpr>(expr);
+}
+
+}
+
 VarChecker::VarChecker(Checker &checker) : checker_(checker) {}
 
 void VarChecker::checkVarDecl(VarDeclStmt *decl) {
@@ -181,7 +199,9 @@ void VarChecker::checkVarDecl(VarDeclStmt *decl) {
         d.sym->reflectMethod = got->method->decl;
       }
     }
-    if (decl->isConst && value && (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value))) {
+    if (decl->isConst && value &&
+        (isa<ObjectLitExpr>(value) || isa<StringLitExpr>(value) ||
+         (isa<ConditionalExpr>(value) && isTextChoice(value)))) {
       checker_.constLiterals_[d.sym] = value;
     }
     if (!places.empty()) {

@@ -1,18 +1,10 @@
 caught RangeError first true
 finally
-recovered -1
-then(f, g) 5
-then passes 21
 rejection passes through then: through then
 from callback: TypeError in callback
-finally callback
-kept
-finally threw
 executor threw
 7
-10
 Error: deep
     at inner (async_errors.tz:24:20)
     at async middle (async_errors.tz:28:13)
-    at async report (async_errors.tz:90:5)
-handled in nextTick: handled later
+    at async report (async_errors.tz:73:5)

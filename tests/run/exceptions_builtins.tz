@@ -55,7 +55,6 @@ const one: decimal = 1
 const dzero: decimal = 0
 attempt("decimal /", () => console.log(one / dzero))
 attempt("decimal %", () => console.log(one % dzero))
-attempt("decimal parse", () => console.log(decimal("12abc")))
 attempt("decimal NaN", () => console.log(decimal(big * 0 * Infinity)))
 attempt("decimal sqrt", () => console.log((-one).sqrt()))
 attempt("decimal size", () => {

@@ -1,5 +1,5 @@
 // Waiting for I/O with the rest of the language, across files: node:fs/promises
-// with Buffers and encodings and its SystemError rejections, cancelled with an
+// with Buffers and encodings and its SystemError Errs, cancelled with an
 // AbortController; node:timers/promises; a class with
 // [Symbol.asyncIterator]() and an AsyncIterable parameter; async generators
 // in a decorated method, in a generic class and of unknown values; and the
@@ -25,12 +25,9 @@ if (missing.isErr())
   console.log("missing:", missing.error.code, missing.error.syscall)
 const controller = new AbortController()
 controller.abort()
-try {
-  must(await readFile(file, { signal: controller.signal }))
-} catch (e: unknown) {
-  if (e instanceof Error)
-    console.log("cancelled:", e.name)
-}
+const cancelled = await readFile(file, { signal: controller.signal })
+if (cancelled.isErr())
+  console.log("cancelled:", cancelled.error.code)
 
 // 2. Timers that give promises and an async iterator.
 console.log(await setTimeout(2, "later"))
@@ -45,7 +42,8 @@ for await (const tick of setInterval(1, "tick")) {
 const stop = new AbortController()
 const waiting = setTimeout(10000, "never", { signal: stop.signal })
 stop.abort()
-console.log(await waiting.catch(e => `stopped: ${e.name}`))
+const stopped = await waiting
+console.log(stopped.isErr() ? `stopped: ${stopped.error.code}` : stopped.value)
 
 // 3. A class that `for await` iterates, and an AsyncIterable parameter.
 const lines = join(dir, "lines.txt")

@@ -37,7 +37,7 @@ const optional = new EventEmitter<{ end?: [] }>()
 const service = new EventEmitter<{ newListener: [n: int] }>()
 // expect-error: 'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: [chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof bus'
 let plain: EventEmitter
-// expect-error: an emitter that captures rejections emits 'error' with the Error of a rejected async listener, but its event map gives 'error' '[int]'
+// expect-error: so 'new EventEmitter()' takes no arguments
 const capture = new EventEmitter<{ error: [code: int] }>({ captureRejections: true })
 // expect-error: 'on' takes an emitter of node:events, but this is 'int'
 on(5, "data")
@@ -65,3 +65,22 @@ class Other {
 typed.on("end", function (this: Other) {})
 // expect-error: an async listener cannot take 'this'; use the emitter by name
 typed.on("end", async function (this: unknown) {})
+
+// The 'error' event (docs/events.md, section 4): an emitter's 'error' needs a
+// listener somewhere in the program, and a function that listens to an
+// emitter that may emit 'error' listens for 'error' too, on every path.
+const lonely = new EventEmitter<{ error: [message: string]; ping: [] }>()
+// expect-error: 'error' is emitted here, but nothing in the program listens for 'error' on this emitter
+lonely.emit("error", "lost")
+const watched = new EventEmitter<{ error: [message: string]; data: [n: int] }>()
+function listenHalf(flag: boolean) {
+  // expect-error: 'watched' may emit 'error', and nothing listens for it on every path here
+  watched.on("data", (n) => console.log(n))
+  if (flag) watched.on("error", (m) => console.log(m))
+}
+function listenBoth() {
+  watched.on("data", (n) => console.log(n))
+  watched.on("error", (m) => console.log(m))
+}
+listenHalf(true)
+listenBoth()

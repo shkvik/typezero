@@ -51,7 +51,7 @@ show("iso-2022-jp", new Uint8Array([0x1b, 0x24, 0x42, 0x1b, 0x28, 0x42, 0x41, 0x
 show("shift_jis", new Uint8Array([0x93, 0x20, 0xff, 0xa0, 0x93]))
 show("euc-kr", new Uint8Array([0xc7, 0x20, 0xc7, 0xff, 0xff, 0xc7]))
 
-// A fatal decoder throws at the first broken sequence.
+// A fatal decoder gives an Err at the first broken sequence.
 const broken = [
   { name: "gbk", bad: 0xd6 },
   { name: "big5", bad: 0xa4 },
@@ -62,12 +62,9 @@ const broken = [
 ]
 for (const { name, bad } of broken) {
   const decoder = new TextDecoder(name, { fatal: true })
-  try {
-    console.log(decoder.fatal, decoder.decode(new Uint8Array([0x41, bad & 0xff])))
-  } catch (e) {
-    console.log(String(e))
-  }
-  console.log(decoder.decode(new Uint8Array([0x42])))
+  const text = decoder.decode(new Uint8Array([0x41, bad & 0xff]))
+  console.log(decoder.fatal, text.isOk() ? text.value : `${text.error.code}: ${text.error.message}`)
+  console.log(decoder.decode(new Uint8Array([0x42])).unwrapOr("?"))
 }
 
 // A stream: each chunk gives the characters it ends.

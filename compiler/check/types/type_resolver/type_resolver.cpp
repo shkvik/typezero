@@ -77,6 +77,12 @@ const Type *TypeResolver::resolveTypeInner(const TypeRef &ref) {
       checker_.typeDeclarer().resolveEnum(e);
       return e->isString ? Type::string() : Type::intTy();
     }
+    if (ref.name == "Intl.Locale") {
+      if (auto *cls =
+              dyn_cast_or_null<ClassDecl>(checker_.typeDeclarer().lookupType(kIntlLocaleName))) {
+        return ClassValueChecker::finalClass(cls)->type;
+      }
+    }
     if (ref.name.starts_with("Intl.")) {
       if (const Type *intl = IntlChecker::intlTypeNamed(ref.name.drop_front(5))) {
         return intl;

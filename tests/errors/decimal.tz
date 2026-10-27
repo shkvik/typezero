@@ -79,3 +79,11 @@ const big = BigInt(5)
 let count: bigint = 5
 // expect-error: 'typeof x == "bigint"' is not supported
 const isBig = typeof price == "bigint"
+// expect-error: '12abc' is no decimal number; write it as one, e.g. '12.50', '-1e3' or '0x1f'
+const typo = decimal("12abc")
+const unit = process.argv.length > 9 ? "1.5x" : "2"
+// expect-error: '1.5x' is no decimal number
+const chosen = decimal(unit)
+// expect-error: type 'Result<decimal, DecimalError>' is not assignable to type 'decimal'
+const read: decimal = decimal(process.argv[0] ?? "")
+const parsedOk: decimal = decimal(" 1_000.5 ") + decimal(unit == "2" ? unit : "3")

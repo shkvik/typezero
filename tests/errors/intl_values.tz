@@ -1,0 +1,47 @@
+// What JavaScript's Intl rejects when the program runs, from values the
+// program knows only then (docs/intl.md, docs/errors.md, section 7): a
+// language comes as an Intl.Locale, which Intl.Locale.parse gives in a
+// Result; an option is one of its literals; digits are ints checked first.
+const name = process.argv[0] ?? ""
+const count = process.argv.length
+
+// expect-error: a language known only when the program runs may be no language tag, which JavaScript would throw a RangeError for; parse it first: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which Intl.Collator takes
+const a = new Intl.Collator(name)
+// expect-error: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which toLocaleString takes
+const b = (1).toLocaleString(name)
+// expect-error: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which toLocaleDateString takes
+const c = new Date(0).toLocaleDateString(name)
+// expect-error: a language known only when the program runs may be no language tag, which JavaScript would throw a RangeError for; parse it with 'Intl.Locale.parse(tag)', which gives a Result
+const d = new Intl.Locale(name)
+// expect-error: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which Intl.getCanonicalLocales takes
+const e = Intl.getCanonicalLocales(["en", name])
+const names = [name]
+// expect-error: languages known only when the program runs may be no language tags, which JavaScript would throw a RangeError for; parse each with 'Intl.Locale.parse(tag)'
+const f = Intl.getCanonicalLocales(names)
+// expect-error: the option 'style' is 'decimal', 'percent', 'currency' or 'unit', and a string known only when the program runs may be another, which JavaScript would throw a RangeError for; compare it with them first, e.g. 'if (x == "decimal" || x == "percent")'
+const g = new Intl.NumberFormat("en", { style: name })
+// expect-error: maximumFractionDigits is from 0 to 100, and a number known only when the program runs may be outside, which JavaScript would throw a RangeError for; give an int and check it first, e.g. 'if (n >= 0 && n <= 100)'
+const h = new Intl.NumberFormat("en", { maximumFractionDigits: count })
+// expect-error: minimumFractionDigits may be above maximumFractionDigits, which JavaScript would throw a RangeError for; check it first
+if (count <= 100) { const i = new Intl.NumberFormat("en", { minimumFractionDigits: count, maximumFractionDigits: 1 }) }
+// expect-error: roundingIncrement is one of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500 and 5000, and a number known only when the program runs may be another
+const j = new Intl.NumberFormat("en", { roundingIncrement: count })
+// expect-error: a string known only when the program runs may be no normalization form, which JavaScript would throw a RangeError for; compare it with them first, e.g. 'if (x == "NFC" || x == "NFD")'
+const k = "a".normalize(name)
+// expect-error: a string known only when the program runs may be no unit of time
+const l = new Intl.RelativeTimeFormat("en").format(1, name)
+const options: Intl.NumberFormatOptions = { maximumFractionDigits: 2 }
+// expect-error: type 'int' is not assignable to type '0..100 | undefined' of field 'maximumFractionDigits', which holds 0 to 100; the value may be outside: check it first, e.g. 'if (count >= 0 && count <= 100)'
+const m: Intl.NumberFormatOptions = { maximumFractionDigits: count }
+// expect-error: type 'string' is not assignable to type '"short" | "narrow" | "long" | undefined' of field 'style'
+const n: Intl.ListFormatOptions = { style: name }
+
+// What passes: literals, a constant, a choice of literals, a narrowed string,
+// an Intl.Locale, an int checked first, options typed as Intl knows them.
+const lang = "ru"
+const form = count > 1 ? "NFC" : "NFD"
+const p = (1).toLocaleString(lang) + "a".normalize(form)
+if (name == "en") { const q = new Intl.Collator(name) }
+if (count >= 0 && count <= 20) { const r = new Intl.NumberFormat("en", { maximumFractionDigits: count }) }
+const parsed = Intl.Locale.parse(name)
+if (parsed.isOk()) { const s = new Intl.NumberFormat(parsed.value, options).format(1) + new Date(0).toLocaleDateString(parsed.value) }

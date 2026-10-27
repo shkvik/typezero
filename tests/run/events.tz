@@ -109,12 +109,6 @@ try {
 }
 h.once("error", (err) => console.log("handled", err.message))
 console.log(h.emit("error", new Error("now handled")))
-const u = new EventEmitter<{ error: [what: string] }>()
-try {
-  u.emit("error", "boom")
-} catch (err) {
-  console.log(err.message)
-}
 
 // A class of its own, whose methods emit; on() gives the object back as
 // what it is, so calls chain.

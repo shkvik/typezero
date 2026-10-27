@@ -31,10 +31,7 @@ console.log(Buffer.allocUnsafe(0), Buffer.from([255, 0, 1]), Buffer.from("abc").
 console.log(Buffer.from("abc").subarray(1).toString(), Buffer.from("abc").at(-1), `${Buffer.from("hi")}`, String(Buffer.from("ok")))
 console.log(JSON.stringify(Buffer.from("hi")), Buffer.from("he"), Buffer.alloc(0), Buffer.alloc(60))
 console.log(new TextEncoder(), new TextDecoder(), new TextDecoder("utf-16le", { fatal: true }))
-try {
-  new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0xff]))
-} catch (e) {
-  console.log(e.name, e.message)
-}
+const broken = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0xff]))
+console.log(broken.isErr() ? `${broken.error.code} ${broken.error.message}` : broken.value)
 const label = ["foo", "KOI8-R"][1]
 console.log(new TextDecoder(label).decode(new Uint8Array([0xc1, 0xe1])), new TextDecoder("windows-1251").decode(new Uint8Array([0xcf, 0xf0, 0xe8, 0x98])))

@@ -1,8 +1,9 @@
 // same-as-node
 // Writable of node:stream (docs/streams.md): write() gives false at the
 // highWaterMark and 'drain' comes when the writes are done, end() with a
-// chunk and a callback, _final(), writev() of what cork() held, a stream of
-// strings (decodeStrings: false), and a write that fails.
+// chunk, whose Promise of a Result comes when the stream finished, _final(),
+// writev() of what cork() held, a stream of strings (decodeStrings: false),
+// and a write that fails.
 import { Writable } from "node:stream"
 const log = (s: string) => console.log(s)
 const w = new Writable({
@@ -16,6 +17,7 @@ const w = new Writable({
     callback()
   },
 })
+w.on("error", (err) => log(`w error ${err.message}`))
 w.on("drain", () => log("drain"))
 w.on("prefinish", () => log("prefinish"))
 w.on("finish", () => log(`finish finished=${w.writableFinished}`))
@@ -28,7 +30,7 @@ log(`write1 ${w.write("abc")}`)
 log(`write2 ${w.write("de", () => log("cb de"))}`)
 log(`write3 ${w.write(Buffer.from("fgh"))}`)
 log(`needDrain ${w.writableNeedDrain} len ${w.writableLength}`)
-w.end("end", () => log("end cb"))
+void w.end("end").then((r) => log(`end ${r.isOk()}`))
 log(`ended ${w.writableEnded}`)
 
 function more() {
@@ -46,8 +48,9 @@ function more() {
     log(`corked ${v.writableCorked}`)
     v.uncork()
     v.write("d")
-    v.end()
+    void v.end().then((r) => log(`v end ${r.isOk()}`))
   })
+  v.on("error", (err) => log(`v error ${err.message}`))
   v.on("finish", () => log("v finish"))
   const s = new Writable({
     decodeStrings: false,
@@ -57,7 +60,7 @@ function more() {
     },
   })
   s.write("hi")
-  s.end("there", "utf8")
+  void s.end("there", "utf8").then((r) => log(`s end ${r.isOk()}`))
   const e = new Writable({
     write(chunk, enc, cb) {
       void chunk

@@ -1,33 +1,46 @@
 import { Stream, streamChunks } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
 
-export async function text(stream: Stream): Promise<string> {
+export async function text(stream: Stream): Promise<Result<string, Error>> {
   const dec = new StringDecoder("utf8")
   let str = ""
-  for await (const chunk of streamChunks(stream)) {
-    if (typeof chunk == "string") str += chunk
-    else str += dec.write(__tz_chunk<Buffer>(chunk))
+  try {
+    for await (const chunk of streamChunks(stream)) {
+      if (typeof chunk == "string") str += chunk
+      else str += dec.write(__tz_chunk<Buffer>(chunk))
+    }
+  } catch (e) {
+    return err(e)
   }
   str += dec.end()
-  return str
+  return ok(str)
 }
 
-export async function json(stream: Stream): Promise<Result<Json, JsonError>> {
-  return JSON.parse(await text(stream))
+export async function json(stream: Stream): Promise<Result<Json, Error | JsonError>> {
+  const content = await text(stream)
+  if (content.isErr()) return err(content.error)
+  const parsed = JSON.parse(content.value)
+  if (parsed.isErr()) return err(parsed.error)
+  return ok(parsed.value)
 }
 
-export async function buffer(stream: Stream): Promise<Buffer> {
+export async function buffer(stream: Stream): Promise<Result<Buffer, Error>> {
   const chunks: Buffer[] = []
-  for await (const chunk of streamChunks(stream)) {
-    if (typeof chunk == "string") chunks.push(Buffer.from(chunk))
-    else chunks.push(__tz_chunk<Buffer>(chunk))
+  try {
+    for await (const chunk of streamChunks(stream)) {
+      if (typeof chunk == "string") chunks.push(Buffer.from(chunk))
+      else chunks.push(__tz_chunk<Buffer>(chunk))
+    }
+  } catch (e) {
+    return err(e)
   }
-  return Buffer.concat(chunks)
+  return ok(Buffer.concat(chunks))
 }
 
-export async function arrayBuffer(stream: Stream): Promise<ArrayBuffer> {
+export async function arrayBuffer(stream: Stream): Promise<Result<ArrayBuffer, Error>> {
   const all = await buffer(stream)
-  const copy = new Uint8Array(all.length)
-  copy.set(all)
-  return copy.buffer
+  if (all.isErr()) return err(all.error)
+  const copy = new Uint8Array(all.value.length)
+  copy.set(all.value)
+  return ok(copy.buffer)
 }

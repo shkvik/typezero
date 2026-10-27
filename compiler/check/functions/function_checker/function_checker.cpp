@@ -19,6 +19,7 @@
 #include "compiler/infer/return_inferrer/return_inferrer.h"
 #include "compiler/instances/late_classes/late_classes.h"
 #include "compiler/library/bytes/byte_proofs/byte_proofs.h"
+#include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
 #include "compiler/library/tz_modules/tz_modules_checker/tz_modules_checker.h"
 #include "llvm/ADT/STLExtras.h"
@@ -268,7 +269,16 @@ void FunctionChecker::checkFunctionBody(FunctionDecl *fn) {
   checker_.byteProofs().addByteCallbackFacts(fn);
   checker_.argListChecker().declareArgumentList(fn);
   checker_.predicateChecker().beginPredicate(fn);
+  auto outerListened = std::move(checker_.flow_.errorListened);
+  auto outerPending = std::move(checker_.flow_.errorPending);
+  checker_.flow_.errorListened.clear();
+  checker_.flow_.errorPending.clear();
   checker_.closureChecker().checkStatements(fn->body);
+  if (!checker_.flow_.unreachable) {
+    checker_.emitterChecker().reportUnlistenedErrors();
+  }
+  checker_.flow_.errorListened = std::move(outerListened);
+  checker_.flow_.errorPending = std::move(outerPending);
   if (!checker_.flow_.unreachable && sym->asserts) {
     checker_.predicateChecker().notePredicateExit(checker_.flow_, Checker::Flow(), fn->body->loc());
   }

@@ -7,9 +7,9 @@ export class Item {
 export function* parseLines(lines: string[]) {
   for (const line of lines) {
     const [name, price, qty] = line.split(";")
-    if (name == undefined || price == undefined || qty == undefined)
-      yield err(`bad line '${line}'`)
-    else yield ok(new Item(name, decimal(price), parseInt(qty) | 0))
+    const cost = decimal(price ?? "")
+    if (name == undefined || qty == undefined || cost.isErr()) yield err(`bad line '${line}'`)
+    else yield ok(new Item(name, cost.value, parseInt(qty) | 0))
   }
 }
 
