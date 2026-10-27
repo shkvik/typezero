@@ -246,12 +246,11 @@ tz run                   # без файла — "main" из tz.json
   `InstanceType<typeof K>`. Отражение: `Reflect.get`, `Reflect.apply`, `Reflect.construct` с
   проверкой при выполнении (`Result<T, ReflectError>`); `fromJson(User, j)` делает объект
   класса через его конструктор.
-- Исключения (см. «Исключения»): `throw`, `try` / `catch` / `finally` (и `catch` без переменной),
-  `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`, `new Error(message, { cause })`,
-  `e.message`, `e.name`, `e.cause`, `e.stack`, `e.toString()` и `` `${e}` ``, `instanceof` для
-  видов; свои классы ошибок (`class HttpError extends Error`) с полями. Бывшие паники — деление
-  целого на ноль, `Math.round` за пределами `int`, ошибки `decimal`, регулярок и `Json`,
-  переполнение стека — исключения, которые можно поймать.
+- Ошибки (см. «Ошибки» и «Result»): значения `Result<T, E>`, ранний выход через `if`, ошибки —
+  объекты с меткой `code`; `throw`, `try` / `catch` / `finally`, `Error` и его виды — ошибки
+  компиляции с подсказкой. Стек — 1 ГБ на поток; фатальны только его переполнение, нехватка
+  памяти и операции, которые компилятор пока не доказывает (деление целого на ноль, выход за `int`
+  у `Math.round`): `panic: …` и код 2.
 - Async (см. «Async»): куски, которые трогают только свои данные, идут на всех ядрах, а результат —
   такой, какой мог бы выдать node; `async` функции, стрелки и методы,
   `await` (и на верхнем уровне файла), `Promise<T>` с `then`, `new Promise((resolve) => ...)`,
@@ -267,8 +266,8 @@ tz run                   # без файла — "main" из tz.json
   принимают в опции `signal`.
 - Сеть (см. «Сеть»): сервер `serve(options, handler)` из `"tz:http"`, где обработчик получает
   `Request` и отдаёт `Response`, как в Deno и Bun (и `app.fetch` из hono), и клиент `fetch`, как в
-  node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки
-  `TypeError: fetch failed` с причиной. `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
+  node: keep-alive и пул соединений, редиректы, gzip / deflate / br, `AbortSignal`, ошибки —
+  `Err` с `FetchError` (`fetch failed` и причина). `URL` и `URLSearchParams` по стандарту WHATWG, `Headers`,
   `Request`, `Response`, `ReadableStream`, `FormData` — глобальные, как в node; https — на OpenSSL.
 - Ошибки как значения: встроенный `Result<T, E>` (см. «Result»): `ok(v)`, `err(e)`,
   `isOk()` / `isErr()` с сужением, ранний выход `if (r.isErr()) return r`, `value`, `error`,
@@ -403,84 +402,50 @@ b)`), держит окружение на стеке, без выделения
 вызывать так только себя. Вызов через значение функции и нехвостовой вызов (`1 + f(n - 1)`)
 растят стек как обычно.
 
-Стек основного потока — 8 МБ (в Windows по умолчанию 1 МБ). Функция, которая может уйти в
-рекурсию (компилятор видит это по всей программе, через значения функций тоже; хвостовые вызовы
-не в счёт), при входе сравнивает указатель стека с границей и, если места нет, бросает
-`RangeError: Maximum call stack size exceeded` — обычное исключение, которое можно поймать (см.
-«Исключения»). Остальные функции этого не делают. Если стек кончится в коде самого рантайма, это
-сбой рантайма: сообщение и код выхода 2.
+Стек — 1 ГБ на поток, у главного тоже (это резерв адресов: память выделяется по мере роста),
+поэтому кончиться он может только при бесконечной рекурсии. Проверок стека в начале функций нет:
+переполнение ловит защитная страница, и программа завершается — `panic: stack overflow`, код
+выхода 2 (см. «Ошибки»).
 
-## Исключения
+## Ошибки
+
+Исключений в tz нет ([errors.md](docs/errors.md)): ошибка — значение, которое функция возвращает
+в `Result` (см. «Result»), а ранний выход — обычные `if` и `return`.
 
 ```ts
-function parseAge(text: string): int {
-  const n = parseInt(text)
-  if (isNaN(n)) throw new SyntaxError(`не число: ${text}`)
-  return n | 0
+type User = { id: int; name: string }
+type NotFound = { code: "not_found"; message: string; id: int }
+
+function find(users: User[], id: int): Result<User, NotFound> {
+  for (const u of users) if (u.id == id) return ok(u)
+  return err({ code: "not_found", message: `нет пользователя ${id}`, id })
 }
-try {
-  parseAge("x")
-} catch (e) {                  // e — всегда Error
-  if (e instanceof SyntaxError) console.log(e.message)
-} finally {
-  console.log("готово")
-}
+const user = find([{ id: 1, name: "Ann" }], 7)
+if (user.isErr()) console.log(user.error.message)
+else console.log(user.value.name)
 ```
 
-- **Бросать можно только `Error`**: `Error`, `TypeError`, `RangeError`, `SyntaxError`, `URIError`
-  (`throw "нет файла"` — ошибка с подсказкой `throw new Error("нет файла")`). Поэтому у пойманного
-  значения всегда есть `message`, `name` и `stack`, и в `catch (e)` у `e` тип `Error`. В
-  `catch (e: unknown)` из strict TS `e` — `unknown`, как в TS: до `instanceof Error` у него нет
-  полей. `throw u` у `unknown` бросает лежащий в нём `Error`, а что-то другое — `TypeError` («only
-  an Error can be thrown»). Вид различает `instanceof`. `TypeError("…")` без `new` — то же, что с
-  `new`, как в JS (только у видов `Error`, не у своих классов).
-- **Свои ошибки** — обычные классы-наследники `Error` или его видов (см. «Наследование и
-  интерфейсы»): `class HttpError extends Error { constructor(public status: int, message: string)
-  { super(message); this.name = "HttpError" } }`. `TypeError`, `RangeError`, `SyntaxError` и
-  `URIError` — сами наследники `Error`, поэтому `instanceof Error` верно для всех, а `catch`
-  сужает `e` до класса ветки `instanceof`. `name` наследника вида — имя вида (`"RangeError"`), как
-  у прототипа в JS, пока класс не задаст своё. `console.log` печатает после текста поля
-  наследника и причину, как node: `[HttpError: not found] { status: 404 }`; `JSON.stringify` пишет
-  поля и `name`, если его задали, без `message` и `cause` (в JS они не перечисляются):
-  `{"status":404,"name":"HttpError"}`.
-  `new Error(message, { cause })` хранит причину в `e.cause` (`Error | undefined`). `message` и
-  `name` можно менять; `` `${e}` ``, `String(e)` и `e.toString()` дают `"TypeError: текст"`, как
-  `Error.prototype.toString`.
-- **`try` / `catch` / `finally`** — как в JS: `finally` выполняется при любом выходе — обычном, по
-  `return`, `break`, `continue` (и с меткой) и по исключению; `return` в `finally` заменяет и
-  значение, и летящее исключение. `process.exit()` внутри `try` выходит сразу, `finally` не
-  выполняется, как в node.
-- **Как это устроено.** Исключение — второй результат функции, а не раскрутка стека: `throw`
-  кладёт `Error` в ячейку рантайма `tz_thrown` и выходит из функции, освобождая её переменные и
-  временные значения тем же путём, что и `return`; после вызова функции, которая может бросить,
-  стоит одна проверка этой ячейки (предсказуемый переход). Какие функции могут бросить, компилятор
-  знает по всей программе: функция без `throw` и операций, которые бросают, если она не вызывает
-  таких функций, и вызовы её ничего не платят. Вызов через значение функции проверяется, если
-  бросить может какая-нибудь функция этого типа.
-- **Стек** собирается по пути исключения наверх: функция, которая бросила, и каждая, через которую
-  исключение прошло (и та, что его поймала), дописывают своё место — имя, файл и строку со
-  столбцом, как в node: `    at Point.move (D:\app\main.tz:12:5)`. Мест не больше десяти, как
-  у node по умолчанию (`Error.stackTraceLimit`). Стоит это что-то только при броске. Исключение,
-  которое ещё не бросали, мест не имеет: его `stack` — только текст, а `console.log` печатает его
-  в скобках, `[Error: текст]`, как node печатает ошибку без стека.
-- **Не пойманное исключение** — как в node: напечатанное до него дописывается, в stderr уходят
-  ошибка и её стек, код выхода 1.
-- Бывшие паники — исключения с именами и текстами JS: `RangeError: Division by zero` (деление
-  `int` и `long` на ноль, `0 ** -1`, `decimal`),
-  `RangeError: 3000000000 does not fit in int` (`Math.round` и `parseInt` там, где ждут целое),
-  `RangeError: Maximum call stack size exceeded`; у регулярок, `Json` и дат — их ошибки с текстами
-  node: `TypeError` у `matchAll` и `replaceAll` без `g`, `TypeError` у чтения ключа `null` или
-  `undefined` и у значения, которое содержит себя, в `JSON.stringify`, `RangeError: Invalid time value` у `toISOString()` неправильной даты. Рантайм
-  при этом освобождает всё, что успел построить. Ошибка колбэка `replace` выходит из `replace`.
-  Код выхода 2 остался только у сбоев самого рантайма: кончилась память, строка длиннее 2^30
-  символов.
-- **Цена.** Функция, которая может уйти в рекурсию, проверяет стек при входе и потому «может
-  бросить»: после вызовов её — проверка. В такой функции не проверяется вызов, результат которого
-  `return` отдаёт сразу или с арифметикой (`return fib(n - 1) + fib(n - 2)`): исключение остаётся
-  в ячейке, и его увидит вызывающий, а LLVM может превратить такую рекурсию в цикл. Зато этого
-  вызова нет в стеке исключения. На `bench` `fib` не стал медленнее, `binary-trees` (обе его
-  функции рекурсивны) — медленнее примерно на 15%; `sum`, `sieve`, `particles` и `decimal` — как
-  были.
+- **Чего нет**: `throw`, `try` / `catch` / `finally`, `Error`, `TypeError`, `RangeError` и
+  другие виды, `class HttpError extends Error`, `throw()` у генераторов — ошибки компиляции с
+  подсказкой, что писать вместо: `return err(...)`, тип объекта с меткой, `Result` и `if`.
+  `process.on("uncaughtException")` — тоже ошибка: ловить нечего.
+- **Ошибка — объект с меткой.** Свои ошибки — типы объектов с полем `code`; ошибки библиотеки —
+  такие же встроенные типы (`SystemError`, `JsonError`, `FetchError`, `StreamError`…). Разные
+  ошибки в одном `Result` дают объединение, и `if (e.code == "bad_regex")` сужает его до одной.
+- **`Promise` не отклоняется** (см. «Async»): операция, которая может не получиться, отдаёт
+  `Promise<Result<T, E>>`.
+- **Что фатально.** То, что компилятор не может проверить при сборке, завершает программу: в
+  stderr — `panic: текст`, код выхода 2, а напечатанное до этого дописывается. Это переполнение
+  стека (`panic: stack overflow`), нехватка памяти, строка, массив или буфер длиннее предела, и
+  — пока операции с числами не доказываются ([numbers.md](docs/numbers.md)) — деление целого и
+  `decimal` на ноль (`panic: Division by zero`), целое, которое не помещается в `int` у
+  `Math.round` и других (`panic: 3000000000 does not fit in int`), `decimal` больше
+  10^10000000, корень из отрицательного `decimal`, `toISOString()` неправильной даты
+  (`panic: Invalid time value`). Ошибка в коде самой библиотеки — `panic: internal error: …`.
+  Поймать панику нельзя.
+- **Как это устроено.** `Result` — значение без памяти в куче, а ранний выход — обычный
+  `return`: ни ячейки брошенной ошибки, ни проверок после вызовов, ни таблиц раскрутки. Ошибка
+  стоит столько, сколько `if`, который написал программист.
 
 ## Массивы
 
@@ -1393,8 +1358,7 @@ const text = parseIntSafe("42")
   получиться, проверяет тип аргумента (`HttpStatus`) или проверка при сборке (`new URL`,
   `new Request`, `new Intl.Locale`, `new k()` класса-значения), а разбор текста — статический `parse`.
 - **Лишний `await` — ошибка:** `return await x` и `async () => await x` ничего не меняют,
-  async-функция и так дождётся `Promise`, который возвращает. Пока в языке есть `try`, внутри
-  `try` и `catch` так писать можно: там `await` ловит отказ.
+  async-функция и так дождётся `Promise`, который возвращает.
 
 ## Регулярные выражения
 
@@ -1773,8 +1737,10 @@ if (locale.isOk()) price.toLocaleString(locale.value, { style: "currency", curre
   `Intl.NumberFormatOptions`, которые не сходятся между собой, рантайм сводит без исключения:
   максимум цифр поднимается до минимума, `roundingIncrement` берёт равные дробные цифры (как
   по умолчанию в ECMA-402) и не действует со значащими цифрами. `DisplayNames.of` кода, который
-  не код, — `undefined`. Пока бросают (`RangeError` с текстом V8) только значения без списка,
-  пришедшие из данных: валюта, единица, `numberingSystem`, `collation`, часовой пояс.
+  не код, — `undefined`. Неверные значения без списка, пришедшие из данных (валюта, единица,
+  `numberingSystem`, `collation`, часовой пояс), не действуют, как неверный заголовок у
+  `Headers`: `{ style: "currency", currency: "XX1" }` печатает просто число (в node —
+  `RangeError`).
 - `toLocaleString` и `localeCompare`, повторяемые в цикле с теми же опциями, создают объект ICU
   один раз: сортировка 100 000 строк через `localeCompare` быстрее, чем в node.
 - В Windows всё это — ICU самой системы (`icu.dll`): exe не растёт. В Linux и macOS данных языков
@@ -1785,8 +1751,8 @@ if (locale.isOk()) price.toLocaleString(locale.value, { style: "currency", curre
 stdout буферизуется: в файл или другую программу вывод уходит кусками по 8 КБ, в консоль — по
 строкам, а `process.stdout.write` в консоль пишет сразу, как node (это может быть приглашение к
 вводу). Перед записью в stderr буфер сбрасывается, поэтому при `prog > out.txt 2>&1` строки stdout
-и stderr идут в том же порядке, что в node. При любом выходе — обычном, через `process.exit()`, по
-не пойманному исключению или сбою рантайма — напечатанное дописывается.
+и stderr идут в том же порядке, что в node. При любом выходе — обычном, через `process.exit()` или по
+панике — напечатанное дописывается.
 
 `process.exit(code)` завершает программу сразу, и компилятор знает, что код после вызова не
 выполняется: после `if (!file) process.exit(1)` переменная `file` — уже строка, а функция, которая
@@ -1866,7 +1832,7 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   `rmdir`, `unlink`, `rm`, `rename`, `copyFile`, `realpath`, `constants`: те же аргументы и опции,
   что у функций `...Sync` (у `readFile`, `writeFile` и `appendFile` ещё `signal`), а результат —
   `Promise<Result>` того же: ошибка ОС и ноль в пути — `Err` с тем же `SystemError`, `Promise` не
-  отклоняется. Отмена через `signal` пока отклоняет его с `AbortError`. Различия с `...Sync` — как
+  отклоняется. Отмена через `signal` — `Err` с кодом `"ABORT_ERR"`. Различия с `...Sync` — как
   в node: `readdir` с `recursive` идёт, как его async-версия, — каталог, встреченный в списке,
   читается сразу, а обходится последним (стек, а не уровни); `realpath` — путь, который даёт
   система (`GetFinalPathNameByHandle`), с буквами, как на диске; ошибка `mkdir` с `recursive`
@@ -1893,13 +1859,13 @@ for (const entry of readdirSync(".", { withFileTypes: true }).unwrapOr([]))
   уходят слушателям `line` или пропадают. Интерфейс, у которого строк не просят, ничего не читает
   и не держит программу до конца ввода. События (`rl.on("line", ...)`) — с `EventEmitter`
   ([events.md](docs/events.md)), до тех пор ошибка с подсказкой.
-- **`SystemError`** — ошибка в `Err` функций файлов; пока глобальный класс, наследник `Error`, с полями `code` (`"ENOENT"`...), `errno`
-  (число, которое дал бы node: в Windows `-4058`), `syscall`, `path` и `dest`; текст и печать — как
-  в node: `ENOENT: no such file or directory, open 'C:\app\config.txt'`, `e.name` — `"Error"`. Коды
-  те же, что у node на этой ОС: ошибка Windows переводится так же, как это делает libuv (`EPERM` у
-  `unlinkSync` каталога, `EISDIR` у чтения каталога). `rmSync` каталога без `recursive` —
-  `SystemError` с кодом `ERR_FS_EISDIR`, как в node. `SystemError`, `Stats` и `Dirent` делает только
-  рантайм: `new` и `extends` с ними — ошибки.
+- **`SystemError`** — ошибка в `Err` функций файлов, встроенный тип объекта с полями `code`
+  (`"ENOENT"`...), `message`, `errno` (число, которое дал бы node: в Windows `-4058`), `syscall`,
+  `path` и `dest`; `message` — как в node: `ENOENT: no such file or directory, open
+  'C:\app\config.txt'`. Коды те же, что у node на этой ОС: ошибка Windows переводится так же, как
+  это делает libuv (`EPERM` у `unlinkSync` каталога, `EISDIR` у чтения каталога). `rmSync`
+  каталога без `recursive` — `SystemError` с кодом `ERR_FS_EISDIR`, как в node. `Stats` и `Dirent`
+  делает только рантайм: `new` и `extends` с ними — ошибки.
 - **Пути в Windows** — как у node: путь разрешается (`resolve`) и идёт в систему в виде
   `\\?\C:\...`, поэтому длинные пути работают, а ошибки показывают его полным, без префикса. Все
   вызовы — «W»-функции Windows: имена файлов на любом языке работают при любой кодовой странице.
@@ -1983,9 +1949,8 @@ const [user] = await once(bus, "user")
 - **Код — node.** `EventEmitter` написан на tz ([library/events/events.tz](library/events/events.tz)) переносом
   `lib/events.js` из node 24: `_events` — один слушатель или массив, `newListener` — до добавления,
   `removeListener` — после удаления, обёртка `once()` снимает себя перед вызовом, слушатель,
-  добавленный во время `emit`, работает со следующего; `emit("error")` без слушателя бросает
-  ошибку (не `Error` — `ERR_UNHANDLED_ERROR`: `Unhandled error. ('boom')`), исключение слушателя
-  выходит из `emit`; больше `getMaxListeners()` слушателей одного события — предупреждение
+  добавленный во время `emit`, работает со следующего; `emit("error")` без слушателя
+  возвращает `false` (в node — исключение `ERR_UNHANDLED_ERROR`); больше `getMaxListeners()` слушателей одного события — предупреждение
   `MaxListenersExceededWarning` в stderr с текстом node, на следующем ходу. Печать — как в node:
   `EventEmitter { _events: [Object: null prototype] { data: [Function (anonymous)] },
   _eventsCount: 1, _maxListeners: undefined, Symbol(shapeMode): false, Symbol(kCapture): false }`,
@@ -2020,8 +1985,8 @@ const [user] = await once(bus, "user")
   иначе ошибка с подсказкой. Это же делают `pipeline`, `finished`, `once()`, `on()` и
   `for await` над потоком: они ошибку забирают сами.
 - **`once(emitter, name, { signal })`** — `Promise` кортежа аргументов следующего события; если
-  эмиттер может испустить `error` или дан `signal` — `Promise<Result<[...], Error>>`: `Err`, если
-  раньше пришло `error` или отмена (`AbortError`). У `EventTarget` — `[event]` (с `signal` — в
+  эмиттер может испустить `error` или дан `signal` — `Promise<Result<[...], E | AbortError>>`, где
+  `E` — тип ошибки события `error`: `Err`, если раньше пришло `error` или отмена. У `EventTarget` — `[event]` (с `signal` — в
   `Result`). Есть `EventEmitter.once`, `getEventListeners`, `listenerCount`, `getMaxListeners`,
   `setMaxListeners`, `EventEmitter.defaultMaxListeners`.
 - **`for await (const event of on(emitter, "data", { signal, close }))`** — события по одному,
@@ -2068,7 +2033,7 @@ const upper = new Transform({
 const copied = await pipeline(createReadStream("in.txt"), upper, createWriteStream("out.txt"))
 if (copied.isErr()) console.log(copied.error.message)          // нет файла, нет прав
 
-for await (const text of createReadStream("log.txt", "utf8")) {  // Result<string, Error>
+for await (const text of createReadStream("log.txt", "utf8")) {  // Result<string, StreamError>
   if (text.isErr()) break
   console.log(text.value.length)
 }
@@ -2086,8 +2051,8 @@ const users = Readable.from([ann, bob])                         // Readable<User
   потом `drain`, `pipeline` ставит источник на паузу. Порядок событий и вызовов `_read` и
   `_write` — тот же: тесты сверены с node строка в строку.
 - **Ошибки — `Result`** ([streams.md](docs/streams.md), раздел 3): каждый кусок `for await` —
-  `Result<T, Error>` (ошибка потока — `Err` в конце); `pipeline` и `finished` из
-  `node:stream/promises` — `Promise<Result<...>>`; `end()` отдаёт `Promise<Result<void, Error>>`,
+  `Result<T, StreamError>` (ошибка потока — `Err` в конце); `pipeline` и `finished` из
+  `node:stream/promises` — `Promise<Result<...>>`; `end()` отдаёт `Promise<Result<void, StreamError>>`,
   который выполняется, когда поток дописан (колбэка у `end()` нет); `text`, `json`, `buffer`,
   `arrayBuffer` из `node:stream/consumers` — тоже `Result`. `pipe()` — ошибка с подсказкой
   `pipeline`: `pipe` не передаёт ошибку дальше. Слушатели событий потока требуют слушателя
@@ -2184,8 +2149,8 @@ if (pair.isOk()) console.log(sign(undefined, Buffer.from("message"), pair.value.
   у сертификата — `checkPrivateKey` и `verify`, а ещё любая функция с именем алгоритма из
   переменной (`createHash(name)`, `createHmac(name, key)`, `pbkdf2Sync(…, digest)`...) и `createHmac`
   с `KeyObject`. Сертификат читает `X509Certificate.parse(pem)`; `new X509Certificate(...)` —
-  ошибка с этой подсказкой. Числа вне диапазона (`randomBytes(-1)`, `randomInt(5, 5)`, длины у
-  KDF, `timingSafeEqual` разной длины) пока бросают `RangeError`, как в node.
+  ошибка с этой подсказкой. Числа вне диапазона (`randomBytes(-1)`, `randomInt(5, 5)`) — ошибки
+  компиляции, пока проверка в `if` не докажет диапазон (в node — `RangeError`).
 - **Хеш не закрывается** (как в Python и Go): `digest()` можно позвать снова или дописать данные
   после него; в node второй `digest()` бросает `Digest already called`. **Ошибки порядка у шифра**
   (`setAAD` у шифра без AEAD, тег не той длины, `update` после `final`) запоминаются, и их отдаёт
@@ -2470,8 +2435,8 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
 
 - **Чтение** — как в JS: `j.name`, `j["content-type"]`, `j[0]`, `j.length` у массива и строки дают
   `Json | undefined` (ключа нет — `undefined`), и цепочка `j.users[0].name` пишется без `?.`.
-  Ключ у `undefined` или `null` — `TypeError: Cannot read properties of undefined (reading
-  'name')`, как в JS; `?.` даёт `undefined`, и `null` тоже обрывает цепочку.
+  Ключ у `undefined`, `null` и у значения без ключей — `undefined` (в JS — `TypeError: Cannot
+  read properties of undefined`), поэтому `?.` не нужен.
 - **Сужение**: у переменной или параметра типа `Json` проверка `typeof x == "string"`, `"number"`,
   `"boolean"` даёт `string`, `double`, `boolean`, `Array.isArray(x)` — `Json[]` (тот же массив:
   `push` виден через `x`), `x != null` и `x != undefined` убирают `undefined`. Методов у `Json`
@@ -2489,10 +2454,11 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
 - **Без проверки нельзя**: условие (`if (j.debug)` — там может быть `0`), строку (`` `${j}` ``,
   `String(j)`), арифметику; ошибки подсказывают `!= null`, `== true`, `typeof`, `??`,
   `JSON.stringify`.
-- **Запись**: `j.x = v`, `j["x"] = v`, `j[i] = v`; `j.x = undefined` убирает ключ. Элемент массива —
-  не дальше его длины (иначе были бы дыры); запись в строку, число или в массив по ключу, который
-  не индекс, — `TypeError`. `Object.keys`, `Object.values`, `Object.entries` и `for...in` — как в
-  JS: `Object.keys(null)` — `TypeError`, а `for...in` по `null` и `undefined` не делает ни шага.
+- **Запись**: `j.x = v`, `j["x"] = v`, `j[i] = v`; `j.x = undefined` убирает ключ. Элемент массива
+  за его длиной дописывает до себя `null` (дыр нет); запись ключа в строку, число, `null` или в
+  массив по ключу, который не индекс, ничего не делает (в JS — `TypeError`). `Object.keys`,
+  `Object.values`, `Object.entries` и `for...in` — как в JS, но `Object.keys(null)` — пустой
+  массив, а `for...in` по `null` и `undefined` не делает ни шага.
 - **Печать** — как в node, с тем же порядком ключей: ключи-индексы (`"1"`, `"2"`) первыми по
   возрастанию, остальные в порядке появления; повторный ключ в тексте заменяет значение, но не место.
 - **`JSON.parse(text)`** читает по грамматике V8 и отдаёт `Result<Json, JsonError>`. Ошибка —
@@ -2502,7 +2468,7 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
   in JSON at position 13 (line 3 column 3)`), `path` — пустой. Второй аргумент (reviver) —
   ошибка компиляции. `Response.json()` и `Request.json()` отдают
   `Promise<Result<Json, JsonError>>`, `json()` из `node:stream/consumers` —
-  `Promise<Result<Json, Error | JsonError>>`.
+  `Promise<Result<Json, StreamError | JsonError>>`.
 - **`JSON.stringify(x, null, space)`** пишет любое значение: `Json`, объекты и экземпляры классов
   (поля в порядке печати, без `#private`, методов и функций), массивы, кортежи (как массивы),
   `decimal` — строкой (`"19.99"`, как BigNumber.js), `Result` — объектом со значением или
@@ -2511,10 +2477,11 @@ const u = JSON.parse<User>(text)   // Err: { code: 'bad_field', message: 'expect
   групп (`["12","1",null]`, без `index` и `groups`, как в node), дата — ISO-текстом, как её
   `toJSON()` (неправильная — `null`); поле с `undefined` пропускается, в массиве `undefined` и
   функция — `null`, `NaN` и `Infinity` — `null`. Для `T | undefined` и функции результат —
-  `string | undefined`, иначе `string`. `space` — число (до 10) или строка. Вместо replacer —
+  `string | undefined`, иначе `string`; если тип может содержать себя (`Json`, класс с полем своего
+  вида), — `Result` с `JsonError`. `space` — число (до 10) или строка. Вместо replacer —
   только `null` или `undefined`; класс с методом `toJSON` — ошибка компиляции: tz сам не
-  вызывает код программы. Значение, которое содержит себя, — исключение `TypeError: Converting
-  circular structure to JSON` (без строк node о том, где круг).
+  вызывает код программы. Значение, которое содержит себя, — `Err` с кодом `"circular"` и текстом
+  `Converting circular structure to JSON` (без строк node о том, где круг).
 - **`JSON.parse<T>(text)` и `fromJson<T>(j)`** ([narrowing.md](docs/narrowing.md), раздел 3):
   компилятор делает для каждого типа функцию, которая проверяет поля и строит объект. `int` и `long`
   — целое в их пределах (`long` точно и после 2^53: `9007199254740993`), `double` — любое число,
@@ -2636,21 +2603,15 @@ sum([1, 2]), sum(new Set([3])), sum(new Range(0, 4)), sum(new Countdown(4))
 - Значение `yield` — то, что передали в `next(x)`; его тип пишут в `Generator<T, R, N>`, как
   требует TS (без этого — ошибка, как TS7057). `for...of`, spread и методы итераторов передают
   `undefined`, поэтому для генератора, которому нужно значение (`N` без `| undefined`), это ошибки
-  компиляции. Если `next()` без значения продолжит такой `yield`, генератор бросает
-  `TypeError`.
-- Исключение в теле генератора выходит там, где берут его значения (`next()`, `for...of`,
-  spread), и генератор после этого закончен. `try` / `catch` / `finally` внутри генератора
-  работают; генератор с `try` не встраивается в цикл, а становится объектом.
+  компиляции. Если `next()` без значения продолжит такой `yield`, это паника (код 2).
 - `next()` даёт новый объект `{ value, done }`, `value` — `T | R | undefined`: значение `yield`, а в
   конце — то, что вернул генератор (`R`); `for...of` возвращаемое значение не использует.
 - Генератор, который остановили до конца, закрывается, как `return()` в JS: `for...of`, из
-  которого вышли (`break`, `return`, исключение), `take`, `find`, `some` и другие, что перестают
+  которого вышли (`break`, `return`), `take`, `find`, `some` и другие, что перестают
   брать значения, и `yield*` закрываемого генератора закрывают итератор, даже если он живёт и в
-  переменной, а освобождение недоделанного генератора закрывает его тоже. Тогда выполняются
-  `finally` вокруг `yield`, на котором он стоит, изнутри наружу, и дальше он закончен. Исключение
-  из такого `finally` теряется: в JS оно вышло бы из `for...of`, если там не летит другое.
-  Методов `return()` и `throw()` у итераторов пока нет.
-- Если генератор бросили (освободили, не доведя до конца), когда он стоит на `yield` внутри
+  переменной, а освобождение недоделанного генератора закрывает его тоже; дальше он закончен.
+  Метода `return()` у итераторов пока нет, `throw()` нет совсем.
+- Если генератор оставили (освободили, не доведя до конца), когда он стоит на `yield` внутри
   выражения, части которого уже вычислены (`f(s + t, yield x)`), то строки и массивы из этих
   частей не освобождаются; `TZ_CHECK_LEAKS` о них сообщает.
 
@@ -2678,9 +2639,7 @@ for await (const v of [fetchA(), fetchB()]) console.log(v)           // масс
 - `for await` идёт по async-итератору (async-генератор, `setInterval` из `node:timers/promises`,
   `readline`), а по массиву, строке или обычному итератору — ждёт каждый элемент и ещё оборот, как
   итератор спецификации, который оборачивает синхронный. Выход из цикла раньше конца (`break`,
-  `return`, исключение) закрывает итератор (его `return()`) и ждёт, пока закроется: выполняются
-  `finally` вокруг `yield`, в том числе с `await`. Ошибка при закрытии теряется, как у обычного
-  итератора. `yield*` в async-генераторе отдаёт значения другого async-итератора (не ожидая их
+  `return`) закрывает итератор (его `return()`) и ждёт, пока закроется. `yield*` в async-генераторе отдаёт значения другого async-итератора (не ожидая их
   ещё раз) или элементы массива и итератора, каждый дождавшись.
 - Класс или литерал с `async *[Symbol.asyncIterator]()` `for await` обходит через этот метод, а
   параметр `AsyncIterable<T>` берёт такой объект так же, как async-генератор (и выводит из него
@@ -2688,8 +2647,7 @@ for await (const v of [fetchA(), fetchB()]) console.log(v)           // масс
   декораторами.
 - Пока нет: `next()`, `return()` и `throw()` у async-итератора в программе (итерируют его
   `for await`), значения в `next(x)`, `[Symbol.asyncIterator]()`, который не async-генератор.
-  Async-генератор, который бросили недоделанным, просто освобождается, его
-  `finally` не выполняется, как в JS.
+  Async-генератор, который оставили недоделанным, просто освобождается.
 
 ## Async
 
@@ -2731,13 +2689,8 @@ async-функции и из колбэка `then`, `Promise.all` / `race`,
 `reject` в `new Promise`, `.catch`, `.finally`, второй аргумент `then`, `Promise.reject`,
 `allSettled`, `any` — ошибки компиляции с подсказкой; `void` над `Promise<Result>` (и над
 `Result`) — тоже: задача, которую не ждут, разбирает ошибки сама. `process.on("uncaughtException")`
-и `"unhandledRejection"` — ошибка: ловить нечего. Пока исключения ещё есть (их уберёт шаг 5 того
-же плана), исключение в async-функции отклоняет её `Promise`, `await` бросает его снова, и
-`try` / `catch` вокруг `await` работает. Отклонённый `Promise`, который никто не обработал к концу
-оборота, печатает ошибку и её стек в stderr и завершает программу с кодом 1, как node 24, —
-так же исключение в колбэке таймера. Если код верхнего уровня ждёт `Promise`, который больше
-некому выполнить, программа выходит с кодом 13 и тем же предупреждением, что node. В `e.stack` —
-функции, через которые ошибка прошла, а те, что ждали её через `await`, — с `at async`, как в node.
+и `"unhandledRejection"` — ошибка: ловить нечего. Если код верхнего уровня ждёт `Promise`,
+который больше некому выполнить, программа выходит с кодом 13 и тем же предупреждением, что node.
 
 **Забытый `Promise` — ошибка компиляции**, как с правилом `no-floating-promises` typescript-eslint:
 вызов async-функции отдельной инструкцией, async-стрелка в `forEach`, массив промисов из `map`,
@@ -2890,9 +2843,8 @@ await server.stop()
   413). Обработчик — `(req: Request) => Response | Promise<Response>`: подходят и обычная, и
   async-функция, и `app.fetch` из hono (стрелка в поле с лишними необязательными параметрами).
   Сервер знает `port`, `hostname`, `url`, `finished`; `stop()` перестаёт принимать соединения,
-  закрывает те, что ждут запроса, и ждёт ответов на те, что уже идут. Исключение в обработчике
-  (пока в языке есть исключения) — ответ `500 Internal Server Error`, а ошибка со стеком — в
-  stderr; сервер работает дальше.
+  закрывает те, что ждут запроса, и ждёт ответов на те, что уже идут. Ошибки обработчик
+  отдаёт ответом сам: у него нет исключений, которые сервер мог бы превратить в `500`.
 - **Запросы одного соединения** идут по очереди (keep-alive, до 5 с простоя, как в node, и
   конвейер), а разных соединений — одновременно; пока в одном потоке цикла событий, на всех ядрах
   — с параллельным рантаймом ([async.md](docs/async.md), шаг 4). Ответ — заголовки и тело одной
@@ -3212,15 +3164,14 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   программа меняет, результаты рекурсии, длины, которых он не знает), он не подозревает:
   предупреждение о каждом `node.count + 1` было бы шумом; так же — счётчики циклов, которые
   кончаются по данным программы (`while (node != undefined)`).
-- Деление целого на ноль — исключение `RangeError: Division by zero`, как у `1n / 0n` в JS. То
-  же для `0 ** -1`. Деление на константу `0` — ошибка компиляции.
+- Деление целого на ноль — пока паника `panic: Division by zero` и код 2 (у `1n / 0n` в JS —
+  `RangeError`). То же для `0 ** -1`. Деление на константу `0` — ошибка компиляции.
 - Неявных преобразований с потерей нет: `int` сам расширяется до `long` и `double`, `long` — до
   `double` (как в C#). Обратно — так же, как это делают в JS, и с тем же результатом:
   `x | 0` отбрасывает дробную часть (за пределами `int` заворачивается, NaN → 0), у `long`
   оставляет младшие 32 бита (`2166136261 | 0` — `-2128831035`, как в node), а
   `Math.round` / `floor` / `ceil` / `trunc` там, где ждут `int` или `long`, дают целое; если оно
-  не помещается — исключение `RangeError` (JS продолжил бы с числом, которое этот тип не
-  вмещает).
+  не помещается — паника (JS продолжил бы с числом, которое этот тип не вмещает).
 - Побитовые `&`, `|`, `^` работают с 32 битами, как в JS, если с одной из сторон `int` или
   `double`: `long` с другой стороны сначала обрезается до младших 32 бит, результат — `int`
   (`x | 0` и `x |= 0` у `long` — ToInt32 из JS). 64 бита — только между двумя `long`, как в C#
@@ -3379,9 +3330,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   читать ключи можно сразу, а условие, строка, арифметика и методы — только после проверки
   (`typeof`, `Array.isArray`). `==` у него — как `===` (`0 == false` ложно); `j.x = undefined`
   убирает ключ (в node остаётся `x: undefined`); `JSON.parse<T>` проверяет и строит `T` и
-  располагает поля в порядке типа (в TS это `any` без проверки). Ошибки `JSON.parse`, `JSON.parse<T>`
-  и чтения ключа у `undefined` — исключения с именами и текстами JS; деструктуризация `null` говорит
-  `Cannot read properties of null`, а не `Cannot destructure`.
+  располагает поля в порядке типа (в TS это `any` без проверки). `JSON.parse` и `JSON.parse<T>`
+  отдают `Result` с `JsonError`, а ключ у `undefined` и `null` — `undefined` (в JS — `TypeError`).
 - `[]` без типа — ошибка: нужен тип элементов (`let a: int[] = []`). `int[]` нельзя присвоить в
   `double[]` — у них разное представление в памяти; tsc считает оба `number[]`.
 - В массивах нет дыр: `new Array<int>(3)` — это `[0, 0, 0]`, а не три пустых места; увеличение
@@ -3438,14 +3388,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   DEP0190 об аргументах с `shell: true` tz не печатает; в `stdio` — только три потока.
 - `new Array(n)` и `a.length = n` — с доказательством, что `n` не меньше нуля (в JS —
   `RangeError: Invalid array length`).
-- Бросать можно только `Error` (`TypeError`, `RangeError`, `SyntaxError`, `URIError`), и
-  `catch (e)` без типа получает `Error` (в TS — `unknown`), в том числе свой класс-наследник.
-  `e.stack` собирается по пути исключения наверх, поэтому в нём нет функций выше той, что его
-  поймала, а у исключения,
-  которое не бросали, мест нет вовсе (node записывает стек при создании). `name` — поле самого
-  объекта (в JS — свойство прототипа); поэтому `JSON.stringify` пишет `name`, если оно не имя
-  встроенного вида, и ставит его после полей класса (в JS — там, где его присвоили).
-  Деструктуризация в `catch ({ message })` — ошибка с подсказкой `catch (e)`.
+- Исключений нет: `throw`, `try` / `catch` / `finally`, `Error` и его виды — ошибки компиляции,
+  ошибка — значение `Result` (см. «Ошибки»), а `Promise` не отклоняется.
 - Типы объектов точные (см. «Объекты»): объект с лишним полем не подходит туда, где ждут меньше,
   ни в литерале, ни при передаче (`{ x, y, z }` вместо `{ x, y }`; tsc второе пропускает), и
   ошибка называет поле. Одинаковый набор полей — один тип под любым именем; исключение —
@@ -3509,10 +3453,9 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 - `decimal` и `double` сами не смешиваются: `price * rate` с `rate: double` — ошибка с
   подсказкой `price * decimal(rate)`, `const x: double = price` — с подсказкой `Number(x)`.
   Деление `decimal` на константу 0 — ошибка компиляции; `decimal` в условии — ошибка, как число.
-- Ошибки `decimal` при выполнении — исключения с именами ошибок JS: деление на ноль —
-  `RangeError: Division by zero`, как `1n / 0n`; `decimal(NaN)`, корень из отрицательного и
-  результат больше 10^10000000 —
-  `RangeError` (у BigNumber.js — `NaN` и `Infinity`).
+- Ошибки `decimal` при выполнении — пока паника и код 2 (см. «Ошибки»): деление на ноль,
+  `decimal(NaN)`, корень из отрицательного и результат больше 10^10000000 (у BigNumber.js —
+  `NaN` и `Infinity`).
 - Чем `decimal` отличается от BigNumber.js: `==` сравнивает значения; `console.log`, `String(x)`
   и `x.toString()` печатают число без степени (`decimal(2) ** 100` — все 31 цифра), а не
   внутренности объекта; `-0` нет (но `toFixed(2)` отрицательного числа, которое округлилось до
@@ -3527,9 +3470,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
 - `toJSON()` неправильной даты — `undefined` (в JS — `null`, которого нет), поэтому его тип —
   `string | undefined`. `x instanceof Date` вне объединения — ошибка: тип и так говорит, дата ли
   это.
-- Ошибки дат при выполнении — исключения с ошибкой JS: `toISOString()`, `format()` и
-  `formatToParts()` неправильной даты — `RangeError: Invalid time value`; язык, пояс или значение
-  опции, неизвестные при компиляции и неверные, — `RangeError`, несовместимые опции — `TypeError`.
+- `toISOString()`, `format()` и `formatToParts()` неправильной даты — паника `Invalid time value`
+  и код 2 (в JS — `RangeError`).
 - В Windows пояса и языки берутся из ICU системы, а она бывает старше, чем в node 24 (в
   Windows 11 — ICU 72 с базой поясов 2022g и CLDR 42, у node — ICU 78, 2025c и CLDR 48).
   Поэтому мелочи форматирования языков могут отличаться: вид пробела, запятые, `GMT` вместо
@@ -3638,8 +3580,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   строки, поэтому нет `errorMonitor` и `captureRejectionSymbol`; нет `captureRejections`,
   `addAbortListener` и
   `EventEmitterAsyncResource`; `Object.values` и `Object.entries` эмиттера — ошибки; третий аргумент
-  `addEventListener` — только объект опций (не `true`); `reason` отменённого сигнала, который не
-  `Error`, не попадает в `cause` ошибки `AbortError` ожиданий рантайма (`cause` у tz — `Error`).
+  `addEventListener` — только объект опций (не `true`); у `AbortError` ожиданий рантайма нет `cause`:
+  `reason` сигнала в ошибку не попадает.
 - Регулярные выражения (см. «Регулярные выражения»): нет совпадения — `undefined`, а не `null`;
   `match` с `g` — `string[] | undefined`, без `g` — совпадение, где `m[1]` группы, которой может не
   быть, — `string | undefined` (в TS — `string`), а `m.groups` — объект с полем на каждое имя (в
@@ -3647,7 +3589,7 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   быть, даёт `(string | undefined)[]`, как и есть в JS. `lastIndex` — `int`.
 - Ошибки регулярок при выполнении: неверный шаблон — `Err` у `RegExp.parse` с текстом node
   (`Invalid regular expression: /(/: Unterminated group`); `matchAll` и `replaceAll` с
-  регуляркой без `g`, известной только при выполнении, — исключение `TypeError`.
+  регуляркой без `g`, известной только при выполнении, идут по всем совпадениям (в JS — `TypeError`).
 - Свойства строк из `v` (`\p{RGI_Emoji}` и другие наборы эмодзи из нескольких символов) пока не
   поддерживаются. Где V8 отходит от спецификации, tz следует спецификации: с `/iv` `[\q{δ}]`
   совпадает и с `Δ`, `\p{ASCII}` — и с `ſ` (как `[\x00-\x7f]` в V8); одно имя у двух групп, одна
@@ -3656,9 +3598,8 @@ powershell -ExecutionPolicy Bypass -File editors\vscode\install.ps1
   длиной — ошибки компиляции (JS молча обрезает `u8[0] = 300` до 44 и пропускает запись за
   длиной). `buf.slice()` у `Buffer` и `new Buffer(…)` — ошибки. `keys()`, `values()` и
   `entries()` типизированного массива идут по копии, сделанной при вызове (в JS обход видит
-  записи, сделанные во время него). Длина — до 2^30 − 1 байт (в node больше), и `RangeError` у
-  `Buffer.alloc` называет этот предел. У ошибок нет поля `code` node (`ERR_UNKNOWN_ENCODING`):
-  `e.message` тот же, а `String(e)` — без `[ERR_…]`. `Math.max(...u8)`, `u instanceof Uint8Array`,
+  записи, сделанные во время него). Длина — до 2^30 − 1 байт (в node больше); длиннее — паника, которая
+  называет этот предел. `Math.max(...u8)`, `u instanceof Uint8Array`,
   конструктор как значение (`const T = Uint8Array`) и `toLocaleString` пока не поддерживаются.
 
 ## Сборка
@@ -3757,15 +3698,15 @@ CRT, без RTTI и исключений, поэтому `tz` собираетс
 | `compiler/program` | что идёт по конвейеру: `Program` (`program/`), файл программы (`module/`, `source_file/`), по папке на узел AST (`ast/`; `ast.h` подключает их все), символы (`symbols/`), типы (`types/`: класс `Type` и модули функций над типами), диагностика и `Errors` |
 | `compiler/result` | `Result`, `ok` и `err`, как в neverthrow |
 | `compiler/load` | `LoadPass`: файлы программы по импортам и их порядок (`loader/`, `module_resolver/`), встроенные модули на tz и глобальные `tz:web`, `tz:url`, `tz:fetch` (`library_modules/`); токены (`token/`), лексер (`lexer/`): литерал регулярки лексер читает, когда парсер встречает `/` там, где начинается выражение; текст литералов (`literal_text/`); парсер рекурсивным спуском (`parser/`) и его части: токены по одному (`token_cursor/`), операторы, `let`, деструктуризация (раскрывается в обычные объявления через скрытые переменные), выражения, вызовы, первичные выражения, шаблоны, функции, классы, `type` / `interface` / `enum`, `import` / `export`, типы (`*_parser/`) |
-| `compiler/declare` | `DeclarePass`: класс `Error` и его виды (`prelude/`), функции и типы каждого файла (`module_declarer/`), импорты к экспортам (`import_binder/`), псевдонимы, интерфейсы, `enum` и целые константы (`type_declarer/`, `constant_folder/`), классы и цепочки наследования (`class_declarer/`), имена в функциях (`function_names/`); классы тем объявляют их крючки `declare` |
+| `compiler/declare` | `DeclarePass`: встроенные типы ошибок и строк (`prelude/`), функции и типы каждого файла (`module_declarer/`), импорты к экспортам (`import_binder/`), псевдонимы, интерфейсы, `enum` и целые константы (`type_declarer/`, `constant_folder/`), классы и цепочки наследования (`class_declarer/`), имена в функциях (`function_names/`); классы тем объявляют их крючки `declare` |
 | `compiler/infer` | `InferPass`: циклы вызовов функций без типа возврата (`call_cycles/`) и тип возврата по `return` (`return_inferrer/`) |
-| `compiler/check` | `CheckPass` и `Checker` (`checker/`): разрешение имён и проверка типов; неявные преобразования становятся узлами `CastExpr`. По папке на часть языка: выражения (`expr/`: вызовы, члены, присваивания, истинность…), операторы (`stmt/`), поток и доказательства индексов (`flow/`, `facts/`), типы (`types/`: разрешение, отношения, условные и шаблонные типы, тип литерала по месту назначения, объединения, `unknown`), значения (`values/`: методы чисел, строк, массивов), объекты и словари (`objects/`), функции и замыкания (`functions/`), классы, наследование, перегрузка, декораторы (`classes/`), generics (`generics/`), исключения (`errors/`), генераторы и итераторы (`iterators/`), async, `Promise` и таймеры (`async/`); круги карт событий (`event_rounds/`) |
+| `compiler/check` | `CheckPass` и `Checker` (`checker/`): разрешение имён и проверка типов; неявные преобразования становятся узлами `CastExpr`. По папке на часть языка: выражения (`expr/`: вызовы, члены, присваивания, истинность…), операторы (`stmt/`), поток и доказательства индексов (`flow/`, `facts/`), типы (`types/`: разрешение, отношения, условные и шаблонные типы, тип литерала по месту назначения, объединения, `unknown`), значения (`values/`: методы чисел, строк, массивов), объекты и словари (`objects/`), функции и замыкания (`functions/`), классы, наследование, перегрузка, декораторы (`classes/`), generics (`generics/`), `throw` и `try` — только чтобы сказать, что их нет (`errors/`), генераторы и итераторы (`iterators/`), async, `Promise` и таймеры (`async/`); круги карт событий (`event_rounds/`) |
 | `compiler/instances` | `InstancesPass`: классы из class-выражений (`late_classes/`), копии generics и вызовы конструкторов (`constructor_calls/`) |
 | `compiler/whole_program` | `WholeProgramPass`: порядок загрузки (`load_order/`), неиспользуемые функции (`unused/`), запись через более широкий тип (`wide_writes/`, `flows/` и `flow_*`) |
 | `compiler/overflow` | `OverflowPass`: пределы значений `int` по всей программе и предупреждения о переполнении: пределы (`value_range/`), что в программе есть (`program_scan/`), места значений (`slots/`), операторы и выражения (`executor/`, `evaluator/`, `assign_evaluator/`, `builtin_evaluator/`), вызовы и циклы (`call_ranges/`, `loop_ranges/`), сужение условиями (`narrowing/`), предупреждения (`overflow_warnings/`) |
 | `compiler/parallel` | `ParallelPass`: куски async-кода, что каждый читает и пишет, и что из этого пойдёт параллельно (`pieces/`, `code_walk/`, `expr_walk/`, `call_walk/`, `alias_analysis/`, `escape_scan/`, `library_effects/`, `builtin_effects/`, `conflicts/`, `parallel_analysis/`); `--explain-parallel` (`explainer/`, `explain_names/`, `explain_titles/`) |
 | `compiler/memory` | `MemoryPass` → `MemoryPlan`: какие типы могут образовать циклы, и их объекты становятся членами групп (`cycle_scanner/`, `cycle_finder/`, `held_members/`, `memory_analysis/`), владение без счёта (слой 2, `owner_scanner/`), объекты, которые никуда не записываются (слой 1, `store_scanner/`) |
-| `compiler/lower` | `LowerPass` и `Lowering` (`lowering/`): LLVM IR через `IRBuilder`; порядок — объявления, глобальные, функции (`module_builder/`), функции рантайма (`runtime_functions/`), раскладки и описания типов (`layouts/`); по папке на часть языка, как в `check/`: выражения, операторы, значения, объекты и словари, функции, окружения и хвостовые вызовы, классы, таблицы методов и декораторы, объединения и `unknown`, исключения и какие функции могут бросить (`errors/`), генераторы как корутины LLVM и на месте, ленивые цепочки (`iterators/`), async-функции, `Promise` и реакции (`async/`), счётчики ссылок, группы, общие объекты и проверки отладочного режима (`memory/`) |
+| `compiler/lower` | `LowerPass` и `Lowering` (`lowering/`): LLVM IR через `IRBuilder`; порядок — объявления, глобальные, функции (`module_builder/`), функции рантайма (`runtime_functions/`), раскладки и описания типов (`layouts/`); по папке на часть языка, как в `check/`: выражения, операторы, значения, объекты и словари, функции, окружения и хвостовые вызовы, классы, таблицы методов и декораторы, объединения и `unknown`, места в программе для `Err` и памяти (`places/`), `finally` кода библиотеки (`stmt/`), генераторы как корутины LLVM и на месте, ленивые цепочки (`iterators/`), async-функции, `Promise` и реакции (`async/`), счётчики ссылок, группы, общие объекты и проверки отладочного режима (`memory/`) |
 | `compiler/optimize` | `OptimizePass`: машина под цель (`target/`), копирование быстрых путей из `tzrt.bc` (`runtime_linker/`), оптимизации |
 | `compiler/emit` | `EmitPass`: объектный файл; `--emit-llvm` (`ir_writer/`) |
 | `compiler/link` | `LinkPass`: встроенный LLD (`linker/`); какой OpenSSL нужен программе, список чужого кода в exe и `tz licenses` (`licenses/`, `licenses_pass/`) |

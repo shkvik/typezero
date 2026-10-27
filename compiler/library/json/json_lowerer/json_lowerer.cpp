@@ -1,8 +1,6 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/json/from_json_lowerer/from_json_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -48,45 +46,6 @@ bool isNullLiteral(const Expr *expr) {
 
 bool isJsonish(const Type *type) { return type->nonOptional()->isJson(); }
 
-bool mayHoldItself(const Type *type, std::vector<const Type *> &open) {
-  type = type->nonOptional();
-  if (type->isJson() || type->isClass() || type->isBase() || type->isUnknown() ||
-      type->isAnyObject() || llvm::is_contained(open, type)) {
-    return true;
-  }
-  open.push_back(type);
-  bool may = false;
-  if (type->isArray()) {
-    may = mayHoldItself(type->inner(), open);
-  } else if (type->isResult()) {
-    may = mayHoldItself(type->okType(), open) || mayHoldItself(type->errType(), open);
-  } else if (type->isRecord()) {
-    may = mayHoldItself(type->valueType(), open);
-  } else if (type->isObject()) {
-    may = llvm::any_of(type->fields(), [&](const Field &f) { return mayHoldItself(f.type, open); });
-  } else if (type->isUnion()) {
-    may = llvm::any_of(type->members(), [&](const Type *m) { return mayHoldItself(m, open); });
-  }
-  open.pop_back();
-
-  return may;
-}
-
-}
-
-bool jsonReadMayThrow(const Expr *object) {
-  if (!object->type || !object->type->nonOptional()->isJson()) {
-    return false;
-  }
-  auto *link = dyn_cast<CastExpr>(object);
-
-  return !link || !link->shortCircuit;
-}
-
-bool stringifyMayThrow(const Type *type) {
-  std::vector<const Type *> open;
-
-  return mayHoldItself(type, open);
 }
 
 JsonLowerer::JsonLowerer(Lowering &lowering) : lowering_(lowering) {}
@@ -522,8 +481,7 @@ llvm::Value *JsonLowerer::emitJsonCall(CallExpr *call) {
         return text;
       }
       return lowering_.optionalLowerer().makeOptional(
-          text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)),
-          textType);
+          text, lowering_.builder_.CreateICmpNE(defined, lowering_.builder_.getInt32(0)), textType);
     };
     if (!fallible) {
       return written();

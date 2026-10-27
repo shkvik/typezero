@@ -1,13 +1,13 @@
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
 #include "compiler/check/checker/checker.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/MDBuilder.h"
@@ -175,8 +175,8 @@ llvm::Value *CoroutineLowerer::emitCoroutineYield(llvm::Value *value, const Type
   lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(in), givenBlock, noneBlock);
   if (!resultType->isOptional()) {
     lowering_.functionFrame().switchTo(noneBlock);
-    lowering_.throwLowerer().emitPanic("next() resumed a 'yield' that needs a value of type '" +
-                                       resultType->name().str() + "' without one");
+    lowering_.processLowerer().emitPanic("next() resumed a 'yield' that needs a value of type '" +
+                                         resultType->name().str() + "' without one");
   }
   lowering_.functionFrame().switchTo(givenBlock);
   llvm::Value *sent =
@@ -216,7 +216,7 @@ void CoroutineLowerer::emitCoroutineReturn(llvm::Value *value, const Type *type)
   }
   lowering_.functionFrame().emitCleanups(0);
   if (lowering_.async_ && lowering_.async_->generator) {
-    lowering_.asyncGeneratorLowerer().finishAsyncGenerator(nullptr);
+    lowering_.asyncGeneratorLowerer().finishAsyncGenerator();
   }
   lowering_.builder_.CreateBr(c.finalBlock);
   lowering_.functionFrame().startDeadBlock();
@@ -284,7 +284,7 @@ llvm::Value *CoroutineLowerer::emitResume(llvm::Value *it, llvm::Value *out, llv
           lowering_.builder_.getInt32(0)),
       runningBlock, goBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(runningBlock);
-  lowering_.throwLowerer().emitPanic("Generator is already running");
+  lowering_.processLowerer().emitPanic("Generator is already running");
   lowering_.functionFrame().switchTo(goBlock);
   llvm::Value *null = llvm::ConstantPointerNull::get(ptr);
   lowering_.builder_.CreateStore(

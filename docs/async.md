@@ -278,7 +278,7 @@ async-программ без зависимости от времени сра�
    там, где ждут `void`; ошибка на лишний `return await`; `Result` у операций с `AbortSignal`. Сделано 27 октября в коде программы: ошибки с подсказками на `reject`, `.catch`,
    `.finally`, второй аргумент `then`, `Promise.reject`, `allSettled`, `any`, `void` над
    `Promise<Result>` и `process.on("uncaughtException")`; `withResolvers` без `reject`; ожидания
-   с `signal` (`node:timers/promises`, `node:fs/promises`, `question`) отдают `Result`. Осталось:
-   отказы внутри библиотеки на tz (`once`/`on` событий, `pipeline`/`finished` потоков — с
-   [events.md](events.md), шаг 6, и [streams.md](streams.md), шаг 6) и путь «не пойманная ошибка
-   в задаче» — вместе с исключениями ([errors.md](errors.md), шаг 5).
+   с `signal` (`node:timers/promises`, `node:fs/promises`, `question`) отдают `Result`. С шагом 5
+   [errors.md](errors.md) (27 октября) отказов нет и внутри библиотеки на tz, а у `Promise` в
+   рантайме нет состояния «отклонён»: ни поля ошибки, ни списка не обработанных отказов, ни пути
+   «не пойманная ошибка в задаче».

@@ -21,7 +21,5 @@ typedef struct TzSignal {
 int32_t tz_signal_aborted(const void *signal);
 void tz_signal_listen(TzSignal *s, TzAbortListener *l);
 void tz_signal_unlisten(TzAbortListener *l);
-void *tz_abort_error(const void *signal);
-void *tz_signal_reason(const void *signal);
 
 #endif

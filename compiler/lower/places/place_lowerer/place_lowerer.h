@@ -4,17 +4,12 @@
 
 namespace tz {
 
-class UnwindLowerer {
+class PlaceLowerer {
 public:
-  explicit UnwindLowerer(Lowering &lowering);
+  explicit PlaceLowerer(Lowering &lowering);
 
   llvm::Constant *frameDescriptor(llvm::SMLoc loc, const std::string *function = nullptr);
   std::string frameFunctionName() const;
-  llvm::BasicBlock *unwindTarget();
-  llvm::BasicBlock *unwindBlock(size_t scope);
-  llvm::BasicBlock *outerUnwind(size_t scope);
-  void finishScopeUnwind(size_t i);
-  void finishFunctionUnwind();
 
 private:
   Lowering &lowering_;

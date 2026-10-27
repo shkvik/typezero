@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -35,19 +33,15 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   const Type *callbackType = call->args[0]->type;
   llvm::Type *i64 = lowering_.builder_.getInt64Ty(), *ptr = lowering_.builder_.getPtrTy();
   Builtin method = call->builtin;
-  bool throws = false;
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
-  llvm::Value *heldArray = array;
   llvm::Value *callback = lowering_.exprLowerer().emitExpr(call->args[0]);
-  llvm::Value *heldCallback = callback;
   llvm::Value *init =
       call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
   if (method == Builtin::ArrSortWith) {
     bool copy = member->name == "toSorted";
     llvm::Value *target = array;
-    llvm::Value *heldCopy{nullptr, nullptr, nullptr};
     if (copy) {
       target = lowering_.builder_.CreateCall(
           lowering_.processLowerer().processFunction(
@@ -55,19 +49,18 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
           {array, lowering_.builder_.getInt64(0), lowering_.builder_.getInt64(0),
            lowering_.builder_.getInt32(0)},
           "sorted");
-      heldCopy = target;
     }
     llvm::Value *context = lowering_.functionFrame().spill(callback, "compare");
     lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_bytes_sort_with",
                                                    lowering_.builder_.getVoidTy(), {ptr, ptr, ptr}),
         {target, lowering_.callbackMethodLowerer().sortComparator(call), context});
-    lowering_.refCounts().releaseValue(heldCallback, callbackType);
+    lowering_.refCounts().releaseValue(callback, callbackType);
     if (!copy) {
-      return heldArray;
+      return array;
     }
-    lowering_.refCounts().releaseValue(heldArray, arrayType);
-    return heldCopy;
+    lowering_.refCounts().releaseValue(array, arrayType);
+    return target;
   }
 
   bool backward = method == Builtin::ArrReduceRight || method == Builtin::ArrFindLast ||
@@ -109,7 +102,6 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
                                          lowering_.builder_.getInt64(0)},
                                         "kept");
   }
-  llvm::Value *heldOut = out;
   llvm::Value *resultSlot = nullptr;
   if (!reduce && !out && method != Builtin::ArrForEach) {
     resultSlot = lowering_.functionFrame().createStackSlot(
@@ -223,13 +215,13 @@ llvm::Value *BytesCallbackLowerer::emitBytesCallbackMethod(CallExpr *call) {
   lowering_.builder_.CreateBr(headBlock);
 
   lowering_.functionFrame().switchTo(endBlock);
-  lowering_.refCounts().releaseValue(heldCallback, callbackType);
-  lowering_.refCounts().releaseValue(heldArray, arrayType);
+  lowering_.refCounts().releaseValue(callback, callbackType);
+  lowering_.refCounts().releaseValue(array, arrayType);
   if (method == Builtin::ArrMap) {
-    return heldOut;
+    return out;
   }
   if (method == Builtin::ArrFilter) {
-    llvm::Value *kept = heldOut;
+    llvm::Value *kept = out;
     llvm::Value *made = lowering_.builder_.CreateCall(
         lowering_.processLowerer().processFunction("tz_bytes_from_array", ptr,
                                                    {lowering_.builder_.getInt32Ty(), ptr}),

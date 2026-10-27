@@ -3,8 +3,6 @@
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -159,8 +157,7 @@ llvm::Value *TextCodecCalls::emit() {
       llvm::Value *made = lowering_.builder_.CreateCall(
           fn("tz_text_decoder_make", ptr, {i32, ptr, i32, i32}),
           {lowering_.builder_.getInt32(uint32_t(which)), table, fatal, ignore}, "decoder");
-      return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc())
-                     : made;
+      return parsing ? lowering_.resultLowerer().catchFailure(made, call->type, call->loc()) : made;
     }
     std::vector<llvm::Constant *> tables, cjk;
     for (const EncodingTable &t : kEncodingTables) {
@@ -177,9 +174,10 @@ llvm::Value *TextCodecCalls::emit() {
                                       llvm::ConstantArray::get(type, items), name);
     };
     llvm::Value *all = list(tables, "tz.encodings"), *allCjk = list(cjk, "tz.encodings.cjk");
-    llvm::Value *maker = parsing ? static_cast<llvm::Value *>(lowering_.resultLowerer().failureMaker(
-                                       call->type->errType()))
-                                 : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
+    llvm::Value *maker = parsing
+                             ? static_cast<llvm::Value *>(
+                                   lowering_.resultLowerer().failureMaker(call->type->errType()))
+                             : llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
     llvm::Value *made = lowering_.builder_.CreateCall(
         fn("tz_text_decoder_new", ptr, {ptr, i64, ptr, i32, ptr, i32, i32, i32, ptr}),
         {lowering_.stringLowerer().stringObj(label.value),

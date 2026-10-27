@@ -270,8 +270,7 @@ bool Pieces::fnRejectionEnds(unsigned fi, unsigned depth) {
                          : rec.returned && fnRejectionEnds(cf, depth + 1);
         break;
       case Mode::Spawn:
-        ends = rec.voided || (rec.join && !analysis_.joins_.lookup(rec.join).settled &&
-                              rejectionEnds(rec.join, depth + 1));
+        ends = rec.voided || (rec.join && rejectionEnds(rec.join, depth + 1));
         break;
       case Mode::Callback:
         ends = !rec.handled;

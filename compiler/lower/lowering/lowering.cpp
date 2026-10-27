@@ -39,11 +39,6 @@
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/call_lowerer/call_lowerer.h"
@@ -75,10 +70,12 @@
 #include "compiler/lower/objects/dict_method_lowerer/dict_method_lowerer.h"
 #include "compiler/lower/objects/object_lowerer/object_lowerer.h"
 #include "compiler/lower/objects/object_maker/object_maker.h"
+#include "compiler/lower/places/place_lowerer/place_lowerer.h"
 #include "compiler/lower/runtime_functions/runtime_functions.h"
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
@@ -163,11 +160,8 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   objectLayoutsPart_ = std::make_unique<ObjectLayouts>(*this);
   objectLowererPart_ = std::make_unique<ObjectLowerer>(*this);
   tailCallLowererPart_ = std::make_unique<TailCallLowerer>(*this);
-  mayThrowPart_ = std::make_unique<MayThrow>(*this);
-  throwLowererPart_ = std::make_unique<ThrowLowerer>(*this);
-  unwindLowererPart_ = std::make_unique<UnwindLowerer>(*this);
+  placeLowererPart_ = std::make_unique<PlaceLowerer>(*this);
   tryLowererPart_ = std::make_unique<TryLowerer>(*this);
-  errorLowererPart_ = std::make_unique<ErrorLowerer>(*this);
   unionLayoutPart_ = std::make_unique<UnionLayout>(*this);
   unionLowererPart_ = std::make_unique<UnionLowerer>(*this);
   unionMemberLowererPart_ = std::make_unique<UnionMemberLowerer>(*this);
@@ -215,7 +209,7 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   fieldDescTy_ = llvm::StructType::create(ctx, {ptr, i32, i32, ptr}, "tz.field");
   layoutDescTy_ = llvm::StructType::create(ctx, {ptr, ptr, i32, i32, ptr, i32, i32}, "tz.layout");
   promiseTy_ = llvm::StructType::create(ctx, {ptr, ptr, ptr, i32, i32}, "tz.promise");
-  promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, ptr, i32, i32}, "tz.Promise");
+  promiseObjTy_ = llvm::StructType::create(ctx, {i64, ptr, ptr, ptr, i32, i32}, "tz.Promise");
 }
 
 void Lowering::setParallelPlan(const ParallelPlan *plan) {
@@ -248,11 +242,6 @@ void Lowering::orderAt(llvm::SMLoc loc) {
   builder_.CreateCall(processLowerer().processFunction("tz_order_enter", builder_.getVoidTy(), {}));
 }
 
-void Lowering::emitThrowCheckIf(bool throws) {
-  if (throws) {
-    throwLowerer().emitThrowCheck();
-  }
-}
-
 Lowering::~Lowering() = default;
+
 }

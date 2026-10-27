@@ -139,7 +139,7 @@ static int64_t chacha_final(TzCipher *c, uint8_t *out) {
     int ok = CRYPTO_memcmp(mac, c->tag, (size_t)c->tag_length) == 0;
     memset(mac, 0, sizeof mac);
     if (!ok) {
-      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+      tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
       return -1;
     }
   } else {

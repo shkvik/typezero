@@ -1,6 +1,6 @@
 #include "compiler/library/os/os_lowerer/os_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/objects/object_maker/object_maker.h"

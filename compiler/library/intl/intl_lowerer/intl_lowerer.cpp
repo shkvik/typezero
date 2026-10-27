@@ -2,8 +2,6 @@
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
@@ -167,8 +165,6 @@ llvm::Value *IntlLowerer::emitIntlOptions(Expr *locale, Expr *options,
         mark(hasNumber, has, unsigned(index));
       }
     }
-  }
-  for (Lowering::Operand &operand : held) {
   }
   lowering_.builder_.CreateStore(hasText, lowering_.builder_.CreateStructGEP(optionsTy, slot, 3));
   lowering_.builder_.CreateStore(hasNumber, lowering_.builder_.CreateStructGEP(optionsTy, slot, 4));

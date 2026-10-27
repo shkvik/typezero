@@ -1,8 +1,7 @@
 #include "compiler/library/child_process/child_lowerer/child_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -98,10 +97,10 @@ llvm::StructType *ChildLowerer::spawnPartsType() {
   llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i32 = lowering_.builder_.getInt32Ty();
 
   return llvm::StructType::get(
-      lowering_.ctx_, {lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, ptr,
-                       lowering_.strTy_,
-                       llvm::ArrayType::get(lowering_.strTy_, 3), llvm::ArrayType::get(ptr, 3), i32,
-                       i32, i32, i32, i32, i32, i32, llvm::ArrayType::get(i32, 3)});
+      lowering_.ctx_,
+      {lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, lowering_.strTy_, ptr,
+       lowering_.strTy_, llvm::ArrayType::get(lowering_.strTy_, 3), llvm::ArrayType::get(ptr, 3),
+       i32, i32, i32, i32, i32, i32, i32, llvm::ArrayType::get(i32, 3)});
 }
 
 llvm::Value *ChildLowerer::spawnStream(llvm::Value *parts, unsigned stream, const Type *to,

@@ -25,12 +25,6 @@
 namespace tz {
 
 bool staysDuringCall(const Expr *expr);
-struct ThrowSummary;
-bool jsonReadMayThrow(const Expr *object);
-bool stringifyMayThrow(const Type *type);
-bool dateOptionsMayThrow(llvm::ArrayRef<Expr *> args);
-bool bytesMayThrow(const CallExpr *call);
-bool intlCallMayThrow(const CallExpr *call);
 
 class ModuleBuilder;
 class FunctionBuilder;
@@ -85,11 +79,8 @@ class IteratorLowerer;
 class ObjectLayouts;
 class ObjectLowerer;
 class TailCallLowerer;
-class MayThrow;
-class ThrowLowerer;
-class UnwindLowerer;
+class PlaceLowerer;
 class TryLowerer;
-class ErrorLowerer;
 class UnionLayout;
 class UnionLowerer;
 class UnionMemberLowerer;
@@ -144,13 +135,11 @@ private:
     std::vector<llvm::Value *> iterators;
     std::vector<llvm::Value *> dicts;
     std::vector<llvm::Value *> asyncIterators;
-    llvm::BasicBlock *unwind = nullptr;
   };
   struct Operand {
     llvm::Value *value;
     bool owned;
     const Type *type;
-    llvm::Value *heldSlot = nullptr;
   };
   struct EnvLayout {
     llvm::StructType *type = nullptr;
@@ -234,15 +223,7 @@ private:
     llvm::Constant *descriptor = nullptr;
     llvm::Constant *plainDescriptor = nullptr;
   };
-  bool mayThrow(const FunctionDecl *fn) const { return throwing_.contains(fn); }
-  bool typeThrows(const Type *fnType) const { return throwingTypes_.contains(fnType); }
-  void emitThrowCheckIf(bool throws);
   struct TryContext;
-  struct Held {
-    llvm::Value *value;
-    llvm::Value *slot;
-    const Type *type;
-  };
   struct AsyncState {
     llvm::Value *object = nullptr;
     llvm::Value *reactor = nullptr;
@@ -256,8 +237,7 @@ private:
   bool esModule_ = false;
   llvm::StructType *promiseObjTy_ = nullptr;
   llvm::DenseMap<const Type *, llvm::Constant *> promiseLayouts_, resolverInfos_;
-  std::map<std::tuple<Builtin, const Type *, const Type *, const Type *, const Type *>,
-           llvm::Function *>
+  std::map<std::tuple<const Type *, const Type *, const Type *>, llvm::Function *>
       reactionHandlers_;
   std::vector<const ClassDecl *> emittedClasses_;
   llvm::DenseMap<const ClassDecl *, llvm::GlobalVariable *> classInfos_;
@@ -444,20 +424,15 @@ private:
   llvm::Function *objRetainFn_ = nullptr;
   llvm::Function *objReleaseFn_ = nullptr;
   llvm::Function *instanceReleaseFn_ = nullptr;
-  llvm::DenseSet<const FunctionDecl *> throwing_, recursive_;
-  llvm::DenseSet<const Type *> throwingTypes_;
   llvm::DenseSet<const CallExpr *> tailJumps_;
   struct TryContext {
-    enum class Phase { Block, Handler, Finally };
     TryStmt *stmt;
     size_t scopeDepth;
     size_t targetsDepth;
-    Phase phase = Phase::Block;
-    llvm::BasicBlock *handler = nullptr;
+    bool inFinally = false;
     llvm::BasicBlock *finally = nullptr;
-    llvm::BasicBlock *throwEntry = nullptr;
     llvm::Value *completion = nullptr;
-    llvm::Value *pendingError = nullptr, *pendingValue = nullptr;
+    llvm::Value *pendingValue = nullptr;
     bool returns = false;
     struct Exit {
       size_t target;
@@ -466,11 +441,8 @@ private:
     std::vector<Exit> exits;
   };
   std::vector<TryContext> tries_;
-  llvm::BasicBlock *unwindExit_ = nullptr;
-  const CallExpr *returnCall_ = nullptr;
   llvm::SMLoc loc_;
   const llvm::SourceMgr *sourceMgr_ = nullptr;
-  ClassDecl *errorClass_ = nullptr;
 
 public:
   ~Lowering();
@@ -528,11 +500,8 @@ public:
   ObjectLayouts &objectLayouts() const { return *objectLayoutsPart_; }
   ObjectLowerer &objectLowerer() const { return *objectLowererPart_; }
   TailCallLowerer &tailCallLowerer() const { return *tailCallLowererPart_; }
-  MayThrow &mayThrow() const { return *mayThrowPart_; }
-  ThrowLowerer &throwLowerer() const { return *throwLowererPart_; }
-  UnwindLowerer &unwindLowerer() const { return *unwindLowererPart_; }
+  PlaceLowerer &placeLowerer() const { return *placeLowererPart_; }
   TryLowerer &tryLowerer() const { return *tryLowererPart_; }
-  ErrorLowerer &errorLowerer() const { return *errorLowererPart_; }
   UnionLayout &unionLayout() const { return *unionLayoutPart_; }
   UnionLowerer &unionLowerer() const { return *unionLowererPart_; }
   UnionMemberLowerer &unionMemberLowerer() const { return *unionMemberLowererPart_; }
@@ -622,11 +591,8 @@ private:
   friend class ObjectLayouts;
   friend class ObjectLowerer;
   friend class TailCallLowerer;
-  friend class MayThrow;
-  friend class ThrowLowerer;
-  friend class UnwindLowerer;
+  friend class PlaceLowerer;
   friend class TryLowerer;
-  friend class ErrorLowerer;
   friend class UnionLayout;
   friend class UnionLowerer;
   friend class UnionMemberLowerer;
@@ -720,11 +686,8 @@ private:
   std::unique_ptr<ObjectLayouts> objectLayoutsPart_;
   std::unique_ptr<ObjectLowerer> objectLowererPart_;
   std::unique_ptr<TailCallLowerer> tailCallLowererPart_;
-  std::unique_ptr<MayThrow> mayThrowPart_;
-  std::unique_ptr<ThrowLowerer> throwLowererPart_;
-  std::unique_ptr<UnwindLowerer> unwindLowererPart_;
+  std::unique_ptr<PlaceLowerer> placeLowererPart_;
   std::unique_ptr<TryLowerer> tryLowererPart_;
-  std::unique_ptr<ErrorLowerer> errorLowererPart_;
   std::unique_ptr<UnionLayout> unionLayoutPart_;
   std::unique_ptr<UnionLowerer> unionLowererPart_;
   std::unique_ptr<UnionMemberLowerer> unionMemberLowererPart_;

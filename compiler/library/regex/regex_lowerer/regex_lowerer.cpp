@@ -1,8 +1,6 @@
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
 #include "compiler/library/regex/regex_native_lowerer/regex_native_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -328,7 +326,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
     break;
   }
 
-  bool restThrows = call->args.size() > 1 && false;
   Lowering::Operand text = lowering_.refCounts().emitOperand(member->object, laterCannotAssign(-1));
   Lowering::Operand regex = lowering_.refCounts().emitOperand(call->args[0], laterCannotAssign(0));
   Lowering::Operand replacement{nullptr, false, Type::string()};
@@ -341,7 +338,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
   }
   llvm::Value *obj = lowering_.stringLowerer().stringObj(text.value),
               *meta = lowering_.stringLowerer().stringMeta(text.value);
-  bool throws = false;
   llvm::Value *result = nullptr;
   switch (call->builtin) {
   case Builtin::StrMatch:
@@ -367,7 +363,6 @@ llvm::Value *RegexLowerer::emitRegexCall(CallExpr *call) {
          lowering_.stringLowerer().stringMeta(replacement.value),
          lowering_.builder_.getInt32(member->name == "replaceAll")});
     lowering_.refCounts().dropOperand(replacement);
-    throws = !call->regex && member->name == "replaceAll";
     break;
   }
   case Builtin::StrSplitRegex: {
@@ -411,8 +406,6 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
       {replacer, regex, lowering_.stringLowerer().stringObj(text),
        lowering_.stringLowerer().stringMeta(text),
        lowering_.builder_.getInt32(member->name == "replaceAll")});
-  if (!call->regex && member->name == "replaceAll") {
-  }
   llvm::FunctionCallee next = regexFunction("tz_re_replacer_next", ptr, {ptr});
   llvm::FunctionCallee capture = regexFunction("tz_re_replacer_capture", i32, {ptr, ptr, ptr, i32});
 
@@ -454,8 +447,6 @@ llvm::Value *RegexLowerer::emitReplaceWith(CallExpr *call) {
     }
   }
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(function, functionType, args);
-  if (false) {
-  }
   lowering_.builder_.CreateCall(regexFunction("tz_re_replacer_put", voidTy, {ptr, ptr, ptr, i64}),
                                 {replacer, caps, lowering_.stringLowerer().stringObj(result),
                                  lowering_.stringLowerer().stringMeta(result)});

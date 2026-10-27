@@ -137,8 +137,6 @@ bool knownBuiltin(Builtin b) {
     return true;
   }
   switch (b) {
-  case Builtin::ErrorStack:
-  case Builtin::ErrorToString:
   case Builtin::TupleJoin:
   case Builtin::PathJoin:
   case Builtin::PathResolve:
@@ -206,14 +204,9 @@ bool knownBuiltin(Builtin b) {
   case Builtin::RlClose:
   case Builtin::PromiseNew:
   case Builtin::PromiseThen:
-  case Builtin::PromiseCatch:
-  case Builtin::PromiseFinally:
   case Builtin::PromiseResolve:
-  case Builtin::PromiseReject:
   case Builtin::PromiseAll:
-  case Builtin::PromiseAllSettled:
   case Builtin::PromiseRace:
-  case Builtin::PromiseAny:
   case Builtin::PromiseWithResolvers:
   case Builtin::SetTimeout:
   case Builtin::SetInterval:

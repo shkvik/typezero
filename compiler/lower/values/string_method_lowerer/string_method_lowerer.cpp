@@ -1,6 +1,4 @@
 #include "compiler/lower/values/string_method_lowerer/string_method_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -55,8 +53,6 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
       numbers.push_back(lowering_.builder_.CreateSExt(lowering_.exprLowerer().emitExpr(arg),
                                                       lowering_.builder_.getInt64Ty()));
     }
-  }
-  for (Lowering::Operand &str : strings) {
   }
   auto optional = [&](size_t i) -> std::pair<llvm::Value *, llvm::Value *> {
     if (i < numbers.size()) {

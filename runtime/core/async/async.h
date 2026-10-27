@@ -4,7 +4,7 @@
 #include "runtime/core/closure/closure.h"
 #include "runtime/core/tzrt/tzrt.h"
 
-enum { TZ_PROMISE_PENDING = 0, TZ_PROMISE_FULFILLED = 1, TZ_PROMISE_REJECTED = 2 };
+enum { TZ_PROMISE_PENDING = 0, TZ_PROMISE_FULFILLED = 1 };
 
 typedef struct TzPromise TzPromise;
 typedef struct TzReactor TzReactor;
@@ -21,26 +21,20 @@ struct TzPromise {
   int64_t rc;
   const TzLayout *layout;
   TzReactor *head, *tail;
-  void *error;
   uint32_t state;
   uint32_t flags;
 };
 
-#define TZ_PROMISE_VALUE 48
+#define TZ_PROMISE_VALUE 40
 
-enum { TZ_COMBINE_ALL = 0, TZ_COMBINE_ALL_SETTLED = 1, TZ_COMBINE_RACE = 2, TZ_COMBINE_ANY = 3 };
+enum { TZ_COMBINE_ALL = 0, TZ_COMBINE_RACE = 1 };
 
 typedef struct TzCombine {
   const TzLayout *result;
   const TzType *items;
   const TzLayout *tuple;
   uint32_t tuple_size;
-  uint32_t settled_size;
-  const TzLayout *settled;
-  const TzType *value_type;
-  uint32_t status_offset, value_offset, reason_offset;
   void (*const *convert)(void *dst, const void *src);
-  const struct TzCombine *each;
 } TzCombine;
 
 typedef struct TzTimer {
@@ -61,7 +55,6 @@ void tz_promise_trigger(TzPromise *p);
 
 void tz_promise_drop(void *promise);
 void tz_promise_fulfill(TzPromise *p);
-void tz_promise_reject(TzPromise *p, void *error);
 void tz_promise_succeed(TzPromise *p, const void *value, size_t size);
 void tz_promise_fail(TzPromise *p, void *error);
 TzPromise *tz_promise_new(const TzLayout *layout);

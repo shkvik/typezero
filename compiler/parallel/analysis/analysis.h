@@ -96,7 +96,6 @@ private:
   struct JoinInfo {
     unsigned fn = 0;
     Active segs;
-    bool settled = false;
   };
   llvm::DenseMap<const AwaitExpr *, JoinInfo> joins_;
   std::vector<const ClassDecl *> classes_;

@@ -71,27 +71,6 @@ Refs FlowBuiltins::builtin(CallExpr *c, MemberExpr *member, const Refs &receiver
     return {};
   case Builtin::LibAhead:
     return args.empty() ? Refs() : args[0];
-  case Builtin::PromiseReject:
-    for (const Refs &a : args) {
-      flows_.flow(a, flows_.thrown_);
-    }
-    return {};
-  case Builtin::PromiseCatch:
-    if (!c->args.empty()) {
-      flows_.flowCalls().callback(c->args[0], {{flows_.thrown_, 0, 0}});
-    }
-    break;
-  case Builtin::PromiseThen:
-    if (c->args.size() > 1) {
-      flows_.flowCalls().callback(c->args[1], {{flows_.thrown_, 0, 0}});
-    }
-    break;
-  case Builtin::PromiseAllSettled:
-    flows_.flow({{flows_.thrown_, 0, 0}}, flows_.fieldNode("reason"));
-    break;
-  case Builtin::PromiseAny:
-    flows_.flow(holding({{flows_.thrown_, 0, 0}}), flows_.fieldNode("errors"));
-    break;
   default:
     break;
   }

@@ -9,6 +9,7 @@ public:
   explicit ExprLowerer(Lowering &lowering);
 
   llvm::Value *emitExpr(Expr *expr);
+  std::vector<llvm::Value *> emitExprs(llvm::ArrayRef<Expr *> exprs);
   llvm::Value *emitExprKind(Expr *expr);
   llvm::Value *emitOptionalChain(OptionalChainExpr *chain);
   llvm::Value *emitChainLink(CastExpr *link);

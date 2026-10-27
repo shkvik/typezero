@@ -86,27 +86,4 @@ struct ClassDecl : Stmt {
   ClassDecl *staticOwner() { return generic ? generic : this; }
 };
 
-inline bool derivesFromError(const ClassDecl *cls) {
-  for (; cls; cls = cls->parent) {
-    if (cls->builtin && cls->name == "Error") {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-inline constexpr llvm::StringLiteral kErrorKinds[] = {"Error", "TypeError", "RangeError",
-                                                      "SyntaxError", "URIError"};
-
-inline int errorKindIndex(llvm::StringRef name) {
-  for (size_t i = 0; i < std::size(kErrorKinds); ++i) {
-    if (kErrorKinds[i] == name) {
-      return int(i);
-    }
-  }
-
-  return -1;
-}
-
 }

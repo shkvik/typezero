@@ -1,8 +1,6 @@
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/decimal/decimal_literal/decimal_literal.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"

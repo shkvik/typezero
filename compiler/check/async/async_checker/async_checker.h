@@ -16,7 +16,6 @@ public:
   void finishAsyncReturns(FuncSymbol *fn, llvm::ArrayRef<ReturnStmt *> returns);
   Expr *checkAwait(AwaitExpr *await, const Type *expected);
   static const Type *awaitedType(const Type *type);
-  bool isHandledPromise(const Expr *expr) const;
   void checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at);
 
 private:

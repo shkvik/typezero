@@ -3,7 +3,6 @@
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -150,9 +149,8 @@ void ClassInfoLowerer::emitConstructThunk(const ClassDecl *cls, llvm::Function *
           fail();
         });
     llvm::Value *object = lowering_.classLowerer().allocInstance(cls);
-    llvm::Value *held = object;
     lowering_.classLowerer().emitConstruct(object, cls, sym, values);
-    llvm::Value *made = held;
+    llvm::Value *made = object;
     lowering_.functionFrame().emitCleanups(0);
     lowering_.builder_.CreateRet(made);
   }

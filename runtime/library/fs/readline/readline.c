@@ -46,8 +46,6 @@ typedef struct StdinRead {
 
 StdinRead *tz_stdin_read;
 
-extern TzErrorInfo tz_error_info;
-
 typedef struct Asker {
   struct Asker *next;
   TzPromise *promise;

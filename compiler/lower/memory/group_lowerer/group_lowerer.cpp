@@ -1,9 +1,9 @@
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/places/place_lowerer/place_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/memory/memory_plan/memory_plan.h"
 #include "llvm/ADT/STLExtras.h"
@@ -159,7 +159,7 @@ void GroupLowerer::retainObject(llvm::Value *object) {
 }
 
 llvm::Constant *GroupLowerer::groupSite() {
-  llvm::Constant *frame = lowering_.unwindLowerer().frameDescriptor(
+  llvm::Constant *frame = lowering_.placeLowerer().frameDescriptor(
       lowering_.storeLoc_.isValid() ? lowering_.storeLoc_ : lowering_.loc_);
   llvm::Constant *&site = groupSites_[{frame, lowering_.storeField_}];
   if (site) {
@@ -184,7 +184,7 @@ void GroupLowerer::noteUnstored(llvm::Value *object, const Expr *site) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   lowering_.builder_.CreateCall(
       groupFunction("tz_group_note_unstored", lowering_.builder_.getVoidTy(), {ptr, ptr}),
-      {object, lowering_.unwindLowerer().frameDescriptor(site->loc())});
+      {object, lowering_.placeLowerer().frameDescriptor(site->loc())});
 }
 
 }

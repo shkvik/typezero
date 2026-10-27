@@ -1,7 +1,7 @@
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
@@ -192,7 +192,7 @@ llvm::Value *BinaryLowerer::emitIntDivRem(BinaryOp op, llvm::Value *lhs, llvm::V
   lowering_.builder_.CreateCondBr(isZero, throwBlock, okBlock,
                                   llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
   lowering_.functionFrame().switchTo(throwBlock);
-  lowering_.throwLowerer().emitPanic("Division by zero");
+  lowering_.processLowerer().emitPanic("Division by zero");
 
   lowering_.functionFrame().switchTo(okBlock);
   llvm::Value *isMinusOne =

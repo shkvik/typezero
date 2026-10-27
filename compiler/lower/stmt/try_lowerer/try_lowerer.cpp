@@ -1,28 +1,11 @@
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
-#include "compiler/lower/memory/ref_counts/ref_counts.h"
-#include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/MDBuilder.h"
-#include "llvm/Support/ConvertUTF.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
-#include <functional>
-#include <map>
-#include <optional>
-
-using llvm::BasicBlock;
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::isa;
-using llvm::Value;
 
 namespace tz {
 
@@ -44,7 +27,7 @@ Lowering::TryContext *TryLowerer::finallyBetween(size_t target) {
     if (target != ~size_t(0) && t.targetsDepth <= target) {
       return nullptr;
     }
-    if (t.finally && t.phase != Lowering::TryContext::Phase::Finally) {
+    if (!t.inFinally) {
       return &t;
     }
   }
@@ -116,132 +99,73 @@ void TryLowerer::emitReturnOf(llvm::Value *value) {
 }
 
 void TryLowerer::emitTry(TryStmt *stmt) {
-  size_t depth = lowering_.scopes_.size();
+  if (!stmt->finalizer) {
+    lowering_.stmtLowerer().emitStmt(stmt->block);
+    return;
+  }
   {
     Lowering::TryContext t;
     t.stmt = stmt;
-    t.scopeDepth = depth;
+    t.scopeDepth = lowering_.scopes_.size();
     t.targetsDepth = lowering_.targets_.size();
-    if (stmt->handler) {
-      t.handler = lowering_.functionFrame().newBlock("catch");
-    }
-    if (stmt->finalizer) {
-      t.finally = lowering_.functionFrame().newBlock("finally");
-      t.throwEntry = lowering_.functionFrame().newBlock("finally.throw");
-      t.completion =
-          lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "completion");
-      llvm::AllocaInst *slot =
-          lowering_.functionFrame().createStackSlot(lowering_.builder_.getPtrTy(), "pending.error");
-      llvm::IRBuilder<> init(slot->getParent(), std::next(slot->getIterator()));
-      init.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()), slot);
-      t.pendingError = slot;
-    }
+    t.finally = lowering_.functionFrame().newBlock("finally");
+    t.completion =
+        lowering_.functionFrame().createStackSlot(lowering_.builder_.getInt32Ty(), "completion");
     lowering_.tries_.push_back(std::move(t));
   }
   size_t index = lowering_.tries_.size() - 1;
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("try.end");
-  auto leave = [&] {
-    if (!lowering_.functionFrame().blockIsOpen()) {
-      return;
-    }
-    if (stmt->finalizer) {
-      lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0),
-                                     lowering_.tries_[index].completion);
-      lowering_.builder_.CreateBr(lowering_.tries_[index].finally);
-    } else {
-      lowering_.builder_.CreateBr(endBlock);
-    }
-  };
-  auto takeError = [&] {
-    llvm::Value *error = lowering_.builder_.CreateLoad(
-        lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "error");
-    lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                   lowering_.throwLowerer().thrownSlot());
-
-    return error;
-  };
-
   lowering_.stmtLowerer().emitStmt(stmt->block);
-  leave();
-
-  if (stmt->handler) {
-    lowering_.tries_[index].phase = Lowering::TryContext::Phase::Handler;
-    lowering_.functionFrame().switchTo(lowering_.tries_[index].handler);
-    llvm::Value *error = takeError();
-    lowering_.functionFrame().pushScope();
-    if (const VarSymbol *var = stmt->param.sym) {
-      lowering_.storeLowerer().storeVar(
-          var, lowering_.functionFrame().createLocal(var, stmt->param.name), error, false);
-    } else {
-      lowering_.refCounts().releaseValue(error, lowering_.errorClass_->type);
-    }
-    lowering_.stmtLowerer().emitStmt(stmt->handler);
-    lowering_.functionFrame().popScope();
-    leave();
+  if (lowering_.functionFrame().blockIsOpen()) {
+    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(0),
+                                   lowering_.tries_[index].completion);
+    lowering_.builder_.CreateBr(lowering_.tries_[index].finally);
   }
-
-  if (stmt->finalizer) {
-    Lowering::TryContext *t = &lowering_.tries_[index];
-    t->phase = Lowering::TryContext::Phase::Finally;
-    lowering_.functionFrame().switchTo(t->throwEntry);
-    lowering_.builder_.CreateStore(takeError(), t->pendingError);
-    lowering_.builder_.CreateStore(lowering_.builder_.getInt32(1), t->completion);
-    lowering_.builder_.CreateBr(t->finally);
-
-    lowering_.functionFrame().switchTo(t->finally);
-    lowering_.functionFrame().pushScope();
-    const Type *valueType = returnedType(lowering_.currentFn_, lowering_.returnType_);
-    lowering_.scopes_.back().slots.push_back({t->pendingError, lowering_.errorClass_->type});
-    if (t->pendingValue && valueType->isManaged()) {
-      lowering_.scopes_.back().slots.push_back({t->pendingValue, valueType});
+  Lowering::TryContext *t = &lowering_.tries_[index];
+  t->inFinally = true;
+  lowering_.functionFrame().switchTo(t->finally);
+  lowering_.functionFrame().pushScope();
+  const Type *valueType = returnedType(lowering_.currentFn_, lowering_.returnType_);
+  if (t->pendingValue && valueType->isManaged()) {
+    lowering_.scopes_.back().slots.push_back({t->pendingValue, valueType});
+  }
+  lowering_.stmtLowerer().emitStmt(stmt->finalizer);
+  t = &lowering_.tries_[index];
+  if (!lowering_.functionFrame().blockIsOpen()) {
+    lowering_.functionFrame().popScope();
+  } else {
+    llvm::Value *completion =
+        lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(), t->completion, "completion");
+    llvm::Value *value = nullptr;
+    if (t->pendingValue) {
+      llvm::Type *lowered = lowering_.moduleBuilder().lower(valueType);
+      value = lowering_.builder_.CreateLoad(lowered, t->pendingValue);
+      lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), t->pendingValue);
     }
-    lowering_.stmtLowerer().emitStmt(stmt->finalizer);
-    t = &lowering_.tries_[index];
-    if (!lowering_.functionFrame().blockIsOpen()) {
-      lowering_.functionFrame().popScope();
-    } else {
-      llvm::Value *completion = lowering_.builder_.CreateLoad(lowering_.builder_.getInt32Ty(),
-                                                              t->completion, "completion");
-      llvm::Value *error =
-          lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), t->pendingError);
-      lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                     t->pendingError);
-      llvm::Value *value = nullptr;
-      if (t->pendingValue) {
-        llvm::Type *lowered = lowering_.moduleBuilder().lower(valueType);
-        value = lowering_.builder_.CreateLoad(lowered, t->pendingValue);
-        lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), t->pendingValue);
-      }
-      lowering_.functionFrame().popScope();
-      std::vector<Lowering::TryContext::Exit> exits = lowering_.tries_[index].exits;
-      bool returns = lowering_.tries_[index].returns;
-      llvm::BasicBlock *rethrowBlock = lowering_.functionFrame().newBlock("finally.rethrow");
-      llvm::BasicBlock *returnBlock =
-          returns ? lowering_.functionFrame().newBlock("finally.return") : nullptr;
-      llvm::SwitchInst *dispatch =
-          lowering_.builder_.CreateSwitch(completion, endBlock, unsigned(exits.size() + 2));
-      dispatch->addCase(lowering_.builder_.getInt32(1), rethrowBlock);
-      if (returns) {
-        dispatch->addCase(lowering_.builder_.getInt32(2), returnBlock);
-      }
-      std::vector<llvm::BasicBlock *> exitBlocks;
-      for (size_t k = 0; k < exits.size(); ++k) {
-        exitBlocks.push_back(lowering_.functionFrame().newBlock("finally.exit"));
-        dispatch->addCase(lowering_.builder_.getInt32(uint32_t(3 + k)), exitBlocks.back());
-      }
-      lowering_.functionFrame().switchTo(rethrowBlock);
-      lowering_.builder_.CreateStore(error, lowering_.throwLowerer().thrownSlot());
-      lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
-      if (returns) {
-        lowering_.functionFrame().switchTo(returnBlock);
-        emitReturnOf(value);
-        lowering_.builder_.CreateUnreachable();
-      }
-      for (size_t k = 0; k < exits.size(); ++k) {
-        lowering_.functionFrame().switchTo(exitBlocks[k]);
-        emitJumpTo(exits[k].target, exits[k].isBreak);
-        lowering_.builder_.CreateUnreachable();
-      }
+    lowering_.functionFrame().popScope();
+    std::vector<Lowering::TryContext::Exit> exits = lowering_.tries_[index].exits;
+    bool returns = lowering_.tries_[index].returns;
+    llvm::BasicBlock *returnBlock =
+        returns ? lowering_.functionFrame().newBlock("finally.return") : nullptr;
+    llvm::SwitchInst *dispatch =
+        lowering_.builder_.CreateSwitch(completion, endBlock, unsigned(exits.size() + 1));
+    if (returns) {
+      dispatch->addCase(lowering_.builder_.getInt32(2), returnBlock);
+    }
+    std::vector<llvm::BasicBlock *> exitBlocks;
+    for (size_t k = 0; k < exits.size(); ++k) {
+      exitBlocks.push_back(lowering_.functionFrame().newBlock("finally.exit"));
+      dispatch->addCase(lowering_.builder_.getInt32(uint32_t(3 + k)), exitBlocks.back());
+    }
+    if (returns) {
+      lowering_.functionFrame().switchTo(returnBlock);
+      emitReturnOf(value);
+      lowering_.builder_.CreateUnreachable();
+    }
+    for (size_t k = 0; k < exits.size(); ++k) {
+      lowering_.functionFrame().switchTo(exitBlocks[k]);
+      emitJumpTo(exits[k].target, exits[k].isBreak);
+      lowering_.builder_.CreateUnreachable();
     }
   }
   lowering_.tries_.pop_back();

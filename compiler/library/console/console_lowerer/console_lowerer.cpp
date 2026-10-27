@@ -1,8 +1,6 @@
 #include "compiler/library/console/console_lowerer/console_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
@@ -35,10 +33,6 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
     laterCannotAssign[i - 2] =
         laterCannotAssign[i - 1] && AssignLowerer::cannotAssign(call->args[i - 1]);
   }
-  std::vector<bool> laterThrows(count, false);
-  for (size_t i = count; i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || false;
-  }
   std::vector<Lowering::Operand> values;
   for (size_t i = 0; i < count; ++i) {
     if (call->args[i]->type->isUndefined()) {
@@ -47,8 +41,6 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
     } else {
       values.push_back(lowering_.refCounts().emitOperand(call->args[i], laterCannotAssign[i]));
     }
-  }
-  for (Lowering::Operand &value : values) {
   }
 
   bool toStderr = call->builtin == Builtin::ConsoleError;

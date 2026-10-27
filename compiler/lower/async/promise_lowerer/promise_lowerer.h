@@ -14,16 +14,13 @@ public:
   llvm::Constant *promiseLayout(const Type *value);
   llvm::Value *newPromise(const Type *value);
   void fulfillPromise(llvm::Value *promise, llvm::Value *value, const Type *type);
-  void rejectPromise(llvm::Value *promise, llvm::Value *error);
   void followPromise(llvm::Value *promise, llvm::Value *other);
   llvm::Value *emitPromiseNew(CallExpr *call);
   llvm::Value *emitPromiseStatic(CallExpr *call);
   llvm::Constant *resolverInfo(const Type *value);
-  llvm::Constant *rejecterInfo();
 
 private:
   Lowering &lowering_;
-  llvm::Constant *rejecterInfo_ = nullptr;
 };
 
 }

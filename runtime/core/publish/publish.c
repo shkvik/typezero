@@ -165,10 +165,6 @@ static void publish_contents(void *item) {
     if (layout->count) {
       tz_publish_value(layout->fields[0].type, (char *)object + TZ_PROMISE_VALUE);
     }
-    TzPromise *p = (TzPromise *)object;
-    if (p->state == TZ_PROMISE_REJECTED) {
-      publish_ref(p->error);
-    }
   } else if (flags & TZ_LAYOUT_BYTES) {
     if (tz_bytes_kind(object) != TZ_BYTES_ARRAY_BUFFER) {
       publish_ref(((TzBytes *)object)->buffer);

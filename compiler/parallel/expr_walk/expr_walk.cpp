@@ -408,7 +408,7 @@ void ExprWalk::update(const Expr *target) {
 
 void ExprWalk::awaitExpr(const AwaitExpr *a) {
   auto *c = dyn_cast<CallExpr>(strip(a->value));
-  bool join = c && (c->builtin == Builtin::PromiseAll || c->builtin == Builtin::PromiseAllSettled);
+  bool join = c && c->builtin == Builtin::PromiseAll;
   if (join) {
     analysis_.openJoins_.push_back({a, analysis_.cur_});
   }
@@ -423,7 +423,6 @@ void ExprWalk::awaitExpr(const AwaitExpr *a) {
     Analysis::JoinInfo &info = analysis_.joins_[a];
     info.fn = analysis_.fi_;
     merge(info.segs, open.active);
-    info.settled = c->builtin == Builtin::PromiseAllSettled;
   }
   analysis_.codeWalk().moveTo(analysis_.codeWalk().segment(a, SegKind::Await, a->loc()));
 }

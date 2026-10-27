@@ -193,8 +193,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     call->type = Type::promise(type);
     return call;
   }
-  bool library = checker_.libraryCalls().inLibrary(member->loc());
-  if (!library && (name == "reject" || name == "allSettled" || name == "any")) {
+  if (name == "reject" || name == "allSettled" || name == "any") {
     return checker_.resultChecker().reject(
         call, member->loc(),
         name == "reject"
@@ -208,15 +207,6 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
                           "first Err")
             : std::string("'Promise.any' is not needed: a Promise is not rejected, so the first "
                           "to settle gives the first value, 'Promise.race(ps)'"));
-  }
-  if (name == "reject") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
-      return call;
-    }
-    call->builtin = Builtin::PromiseReject;
-    call->args[0] = checker_.argumentChecker().checkArg(call->args[0], checker_.errorClass_->type);
-    call->type = Type::promise(wanted ? wanted : Type::never());
-    return call;
   }
   if (name == "withResolvers") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
@@ -248,19 +238,12 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (value->isError()) {
       return call;
     }
-    std::vector<Field> fields = {{"promise", Type::promise(value), false},
-                                 {"resolve", PromiseChecker::resolverType(value), false}};
-    if (library) {
-      fields.push_back({"reject", checker_.promiseChecker().rejecterType(), false});
-    }
-    call->type = Type::object(std::move(fields));
+    call->type = Type::object({{"promise", Type::promise(value), false},
+                               {"resolve", PromiseChecker::resolverType(value), false}});
     return call;
   }
-  static const std::pair<llvm::StringLiteral, Builtin> lists[] = {
-      {"all", Builtin::PromiseAll},
-      {"allSettled", Builtin::PromiseAllSettled},
-      {"race", Builtin::PromiseRace},
-      {"any", Builtin::PromiseAny}};
+  static const std::pair<llvm::StringLiteral, Builtin> lists[] = {{"all", Builtin::PromiseAll},
+                                                                  {"race", Builtin::PromiseRace}};
   for (const auto &[listName, builtin] : lists) {
     if (name != listName) {
       continue;
@@ -272,7 +255,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     const Type *wantedElement = nullptr;
     if (wanted && builtin == Builtin::PromiseAll && wanted->isArray()) {
       wantedElement = wanted->inner();
-    } else if (wanted && (builtin == Builtin::PromiseRace || builtin == Builtin::PromiseAny)) {
+    } else if (wanted && builtin == Builtin::PromiseRace) {
       wantedElement = wanted;
     }
     const Type *element = nullptr;
@@ -280,7 +263,7 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
     if (!checkPromiseList(call->args[0], wantedElement, element, tuple, fn)) {
       return call;
     }
-    if (!tuple.empty() && (builtin == Builtin::PromiseRace || builtin == Builtin::PromiseAny)) {
+    if (!tuple.empty() && builtin == Builtin::PromiseRace) {
       element = tuple.front();
       for (const Type *t : tuple) {
         const Type *common = LiteralTypes::unionUnify(element, t);
@@ -314,19 +297,6 @@ Expr *PromiseStaticChecker::checkPromiseStatic(CallExpr *call, MemberExpr *membe
         call->type = Type::promise(Type::voidTy());
       } else {
         call->type = Type::promise(Type::array(element));
-      }
-      break;
-    case Builtin::PromiseAllSettled:
-      if (!tuple.empty()) {
-        std::vector<const Type *> results;
-        for (const Type *t : tuple) {
-          results.push_back(
-              checker_.promiseChecker().settledResultType(t->isNever() ? Type::voidTy() : t));
-        }
-        call->type = Type::promise(Type::tuple(results));
-      } else {
-        call->type =
-            Type::promise(Type::array(checker_.promiseChecker().settledResultType(element)));
       }
       break;
     default:

@@ -140,4 +140,5 @@ README.
    `error` по путям, ошибка на `error` без слушателя у своего объекта, ошибка на слушатель с
    `Result`, `Result` у `once()` и `on()`, убрать `captureRejections`, `uncaughtException` и
    `unhandledRejection`. Переписать `library/events/*.tz`. Сделано 27 октября; тип ошибки у
-   `once()` и `on()` пока `Error` (класс) — объектом с меткой он станет с шагом 5 errors.md.
+   `once()` и `on()` — тип ошибки события `error` и `AbortError`, объекты с меткой (шаг 5
+   errors.md).

@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -60,9 +58,7 @@ llvm::Value *BytesMakeCalls::emit() {
           {lowering_.typeDescriptors().typeDescriptor(element), lowering_.builder_.getInt64(0),
            lowering_.builder_.getInt64(0)},
           "values");
-      llvm::Value *held = values;
       lowering_.iteratorLowerer().emitIteratorSpread(values, source, element);
-      values = held;
       made = lowering_.builder_.CreateCall(fn("tz_bytes_from_array", ptr, {i32, ptr}),
                                            {kindOf(type), values}, "bytes");
       lowering_.refCounts().releaseValue(values, Type::array(element));
@@ -88,13 +84,12 @@ llvm::Value *BytesMakeCalls::emit() {
     if (call->args.empty()) {
       return made;
     }
-    llvm::Value *held = made;
     for (size_t i = 0; i < call->args.size(); ++i) {
       lowering_.bytesLowerer().storeElement(lowering_.bytesLowerer().bytesData(made), type,
                                             lowering_.builder_.getInt64(i),
                                             lowering_.exprLowerer().emitExpr(call->args[i]));
     }
-    return held;
+    return made;
   }
   case Builtin::BytesView:
   case Builtin::DataViewNew: {

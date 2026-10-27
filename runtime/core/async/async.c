@@ -17,24 +17,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-TZ_NORETURN void tz_uncaught(void);
-extern TzErrorInfo tz_error_info;
 void tz_err_begin(void);
 void tz_err_end(void);
 double tz_performance_now(void);
 
-enum { HANDLED = 1, LOCKED = 2, LISTED = 4 };
+enum { LOCKED = 2 };
 
 static void retain(void *object) { tz_ref_retain(object); }
 
 static void release(void *object) { tz_obj_release((TzObject *)object); }
 
-static void call(TzFunction fn) {
-  ((void (*)(TzObject *))fn.info->code)(fn.env);
-  if (tz_thrown) {
-    tz_uncaught();
-  }
-}
+static void call(TzFunction fn) { ((void (*)(TzObject *))fn.info->code)(fn.env); }
 
 TzReactor *tz_micro_head, *tz_micro_tail;
 
@@ -101,9 +94,6 @@ void tz_run_microtasks(void) {
   }
 }
 
-TzPromise **tz_rejections;
-size_t tz_rejection_count, tz_rejection_capacity;
-
 static const TzType *value_type(const TzPromise *p) {
   return p->layout->count ? p->layout->fields[0].type : NULL;
 }
@@ -129,8 +119,6 @@ TzPromise *tz_promise_new(const TzLayout *layout) {
   return p;
 }
 
-static const TzType error_type = {TZ_T_OBJECT, sizeof(void *), NULL};
-
 void tz_promise_drop(void *object) {
   TzPromise *p = (TzPromise *)object;
   const TzType *type = value_type(p);
@@ -140,12 +128,6 @@ void tz_promise_drop(void *object) {
       tz_value_release_in(p, type, value_of(p));
     } else if (type) {
       tz_value_release(type, value_of(p));
-    }
-  } else if (p->state == TZ_PROMISE_REJECTED) {
-    if (member && p->error) {
-      tz_value_release_in(p, &error_type, &p->error);
-    } else {
-      release(p->error);
     }
   }
   for (TzReactor *r = p->head; r;) {
@@ -312,42 +294,13 @@ void tz_promise_succeed(TzPromise *p, const void *value, size_t size) {
 void tz_promise_fail(TzPromise *p, void *error) {
   const TzType *type = value_type(p);
   if (!type || type->kind != TZ_T_RESULT) {
-    tz_promise_reject(p, error);
-    return;
+    tz_panicf("internal error: a Promise without a Result failed");
   }
   const TzResultType *result = (const TzResultType *)type;
   char *slot = (char *)value_of(p);
   memset(slot, 0, type->size);
   memcpy(slot + result->error_offset, &error, sizeof error);
   tz_promise_fulfill(p);
-}
-
-void tz_promise_reject(TzPromise *p, void *error) {
-  TZ_ORDERED();
-  p->state = TZ_PROMISE_REJECTED;
-  p->error = error;
-#if TZ_PARALLEL
-  tz_publish_object(error);
-#endif
-  if (p->rc < 0 && error) {
-    tz_group_store(p, error);
-  }
-  if (!(p->flags & (HANDLED | LISTED))) {
-    if (tz_rejection_count == tz_rejection_capacity) {
-      size_t capacity = tz_rejection_capacity ? tz_rejection_capacity * 2 : 8;
-      TzPromise **grown = (TzPromise **)tz_alloc(capacity * sizeof *grown);
-      if (tz_rejection_count) {
-        memcpy(grown, tz_rejections, tz_rejection_count * sizeof *grown);
-      }
-      tz_free(tz_rejections);
-      tz_rejections = grown;
-      tz_rejection_capacity = capacity;
-    }
-    p->flags |= LISTED;
-    retain(p);
-    tz_rejections[tz_rejection_count++] = p;
-  }
-  trigger(p);
 }
 
 int32_t tz_promise_lock(TzPromise *p) {
@@ -362,7 +315,6 @@ int32_t tz_promise_lock(TzPromise *p) {
 
 void tz_promise_react(TzPromise *p, TzReactor *r) {
   TZ_ORDERED();
-  p->flags |= HANDLED;
   if (p->state == TZ_PROMISE_PENDING) {
     r->next = NULL;
     if (p->tail) {
@@ -410,7 +362,6 @@ static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
   if (p->state == TZ_PROMISE_PENDING) {
     r->ahead = (uintptr_t)ahead;
     retain(r->owner);
-    p->flags |= HANDLED;
     r->next = NULL;
     if (p->tail) {
       p->tail->next = r;
@@ -430,7 +381,6 @@ static int await_ahead(TzReactor *r, TzPromise *p, int32_t ahead) {
   await_unlock();
   r->ahead = (uintptr_t)ahead;
   retain(r->owner);
-  p->flags |= HANDLED;
   r->source = p;
   retain(p);
   if (!tz_ahead_local(r)) {
@@ -472,17 +422,12 @@ void tz_async_await(TzReactor *r, TzPromise *p, int32_t ahead) {
 }
 
 static void settle_like(TzPromise *target, const TzPromise *source) {
-  if (source->state == TZ_PROMISE_FULFILLED) {
-    const TzType *type = value_type(target);
-    if (type) {
-      memcpy(value_of(target), value_of(source), type->size);
-      tz_value_retain(type, value_of(target));
-    }
-    tz_promise_fulfill(target);
-  } else {
-    retain(source->error);
-    tz_promise_reject(target, source->error);
+  const TzType *type = value_type(target);
+  if (type) {
+    memcpy(value_of(target), value_of(source), type->size);
+    tz_value_retain(type, value_of(target));
   }
+  tz_promise_fulfill(target);
 }
 
 typedef struct {
@@ -506,11 +451,7 @@ static const TzObjectDesc follow_desc = {follow_drop};
 
 static void follow_settle(TzReactor *r, TzPromise *source) {
   Follow *f = (Follow *)((char *)r - offsetof(Follow, reactor));
-  if (f->first && source->state == TZ_PROMISE_REJECTED) {
-    settle_like(f->target, source);
-  } else {
-    settle_like(f->target, f->first ? f->origin : source);
-  }
+  settle_like(f->target, f->first ? f->origin : source);
 }
 
 static void follow_then(TzReactor *r, TzPromise *source) {
@@ -546,12 +487,10 @@ void tz_promise_follow(TzPromise *p, TzPromise *q) {
 
 const TzLayout tz_promise_void_layout = {tz_promise_drop, NULL, 0, TZ_LAYOUT_PROMISE, NULL, 0, 0};
 
-void tz_promise_finally(TzPromise *derived, TzPromise *original, TzPromise *awaited) {
+static void settle_after_turn(TzPromise *derived, TzPromise *original) {
   TZ_ORDERED();
-  if (!awaited) {
-    awaited = tz_promise_new(&tz_promise_void_layout);
-    awaited->state = TZ_PROMISE_FULFILLED;
-  }
+  TzPromise *awaited = tz_promise_new(&tz_promise_void_layout);
+  awaited->state = TZ_PROMISE_FULFILLED;
   TzPromise *next = tz_promise_new(original->layout);
   retain(next);
   retain(original);
@@ -631,14 +570,6 @@ TzPromise *tz_promise_resolved(const TzLayout *layout) {
   return p;
 }
 
-TzPromise *tz_promise_rejected(const TzLayout *layout, void *error) {
-  TZ_ORDERED();
-  TzPromise *p = tz_promise_new(layout);
-  tz_promise_reject(p, error);
-
-  return p;
-}
-
 typedef struct {
   TzObject base;
   TzPromise *result;
@@ -696,44 +627,7 @@ static char *slot_of(Combine *c, uint32_t i, const TzType **type) {
   return array->data + (size_t)i * array->type->size;
 }
 
-static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
-
-static void *settled_result(const TzCombine *shape, const TzPromise *source) {
-  char *object = (char *)tz_obj_alloc(shape->settled_size);
-  memset(object, 0, shape->settled_size);
-  ((TzInstance *)object)->rc = 1;
-  ((TzInstance *)object)->layout = shape->settled;
-  int fulfilled = source->state == TZ_PROMISE_FULFILLED;
-  *(TzStr *)(object + shape->status_offset) = ascii(fulfilled ? "fulfilled" : "rejected");
-  if (fulfilled) {
-    const TzType *optional = shape->value_type;
-    if (optional && optional->inner->size) {
-      memcpy(object + shape->value_offset, value_of(source), optional->inner->size);
-      tz_value_retain(optional->inner, object + shape->value_offset);
-    }
-    int kind = optional ? optional->inner->kind : 0;
-    if (optional && kind != TZ_T_OBJECT && kind != TZ_T_JSON && kind != TZ_T_UNION &&
-        kind != TZ_T_ATOM) {
-      object[shape->value_offset + optional->inner->size] = 1;
-    }
-  } else {
-    retain(source->error);
-    *(void **)(object + shape->reason_offset) = source->error;
-  }
-
-  return object;
-}
-
 static void combine_done(Combine *c) {
-  if (c->kind == TZ_COMBINE_ANY) {
-    TzStr message = ascii("All promises were rejected");
-    void *error = tz_error_info.make(TZ_ERROR, message.obj, message.meta);
-    TzStr *name = (TzStr *)((char *)error + tz_error_info.name_offset);
-    tz_str_release_value(*name);
-    *name = ascii("AggregateError");
-    tz_promise_reject(c->result, error);
-    return;
-  }
   if (c->container) {
     *(void **)value_of(c->result) = c->container;
   }
@@ -743,7 +637,7 @@ static void combine_done(Combine *c) {
 
 static void settle_from(Combine *c, uint32_t i, const TzPromise *source) {
   void (*convert)(void *, const void *) = c->shape->convert ? c->shape->convert[i] : NULL;
-  if (convert && source->state == TZ_PROMISE_FULFILLED) {
+  if (convert) {
     convert(value_of(c->result), value_of(source));
     tz_promise_fulfill(c->result);
     return;
@@ -757,7 +651,6 @@ static void element_run(TzReactor *r, TzPromise *source) {
   if (c->result->state != TZ_PROMISE_PENDING) {
     return;
   }
-  int fulfilled = source->state == TZ_PROMISE_FULFILLED;
   const TzType *type;
   char *slot;
   switch (c->kind) {
@@ -765,27 +658,12 @@ static void element_run(TzReactor *r, TzPromise *source) {
     settle_from(c, e->index, source);
     return;
   case TZ_COMBINE_ALL:
-    if (!fulfilled) {
-      retain(source->error);
-      tz_promise_reject(c->result, source->error);
-      return;
-    }
     if (!c->container) {
       break;
     }
     slot = slot_of(c, e->index, &type);
     memcpy(slot, value_of(source), type->size);
     tz_value_retain(type, slot);
-    break;
-  case TZ_COMBINE_ALL_SETTLED:
-    slot = slot_of(c, e->index, &type);
-    *(void **)slot = settled_result(c->shape->each ? &c->shape->each[e->index] : c->shape, source);
-    break;
-  case TZ_COMBINE_ANY:
-    if (fulfilled) {
-      settle_from(c, e->index, source);
-      return;
-    }
     break;
   }
   if (--c->remaining == 0) {
@@ -806,8 +684,7 @@ TzPromise *tz_promise_combine(int32_t kind, TzArray *promises, const TzCombine *
   c->shape = shape;
   c->container = NULL;
   uint32_t count = promises->length;
-  if ((kind == TZ_COMBINE_ALL || kind == TZ_COMBINE_ALL_SETTLED) &&
-      (shape->tuple || shape->items)) {
+  if (kind == TZ_COMBINE_ALL && (shape->tuple || shape->items)) {
     if (shape->tuple) {
       char *tuple = (char *)tz_obj_alloc(shape->tuple_size);
       memset(tuple, 0, shape->tuple_size);
@@ -895,25 +772,6 @@ void tz_next_tick(const TzFunctionInfo *info, TzObject *env) {
   tz_tick_tail = t;
 }
 
-static int process_rejections(void) {
-  size_t count = tz_rejection_count;
-  for (size_t i = 0; i < count; ++i) {
-    TzPromise *p = tz_rejections[i];
-    if (!(p->flags & HANDLED)) {
-      retain(p->error);
-      tz_thrown = p->error;
-      tz_uncaught();
-    }
-  }
-  for (size_t i = 0; i < count; ++i) {
-    tz_rejections[i]->flags &= ~LISTED;
-    release(tz_rejections[i]);
-  }
-  tz_rejection_count = 0;
-
-  return 0;
-}
-
 void tz_after_callback(void) {
   do {
     while (tz_tick_head) {
@@ -928,7 +786,7 @@ void tz_after_callback(void) {
       tz_obj_release(callback.env);
     }
     tz_run_microtasks();
-  } while (tz_tick_head || (tz_rejection_count && process_rejections()));
+  } while (tz_tick_head);
 }
 
 typedef struct TimerList {
@@ -1401,12 +1259,8 @@ static void drop_pending_value(TzPromise *p) {
   memset(value_of(p), 0, type->size);
 }
 
-static void settle_aborted(TzPromise *p, TzSignal *signal, TzMaker make) {
+static void settle_aborted(TzPromise *p, TzMaker make) {
   drop_pending_value(p);
-  if (!make) {
-    tz_promise_reject(p, tz_abort_error(signal));
-    return;
-  }
   TzFailParts parts;
   parts.code = "ABORT_ERR";
   parts.message = tz_str_from_ascii("The operation was aborted", 25);
@@ -1455,7 +1309,7 @@ static void wait_aborted(TzAbortListener *l) {
   } else {
     tz_timer_clear(w->timer);
   }
-  settle_aborted(w->inner, w->signal, w->make);
+  settle_aborted(w->inner, w->make);
   tz_obj_release(&w->base);
 }
 
@@ -1463,14 +1317,14 @@ static void wait_finally(TzReactor *r, TzPromise *source) {
   Wait *w = (Wait *)((char *)r - offsetof(Wait, reactor));
   unlist_wait(w);
   tz_signal_unlisten(&w->listener);
-  tz_promise_finally(w->promise, source, NULL);
+  settle_after_turn(w->promise, source);
 }
 
 void tz_timers_wait(TzPromise *p, double delay, int32_t immediate, TzSignal *signal, int32_t ref,
                     TzMaker make) {
   TZ_ORDERED();
   if (signal && signal->aborted) {
-    settle_aborted(p, signal, make);
+    settle_aborted(p, make);
     return;
   }
   Wait *w = (Wait *)tz_obj_alloc(sizeof(Wait));
@@ -1725,20 +1579,14 @@ int32_t tz_agen_yield(TzAsyncGen *g, void *value, const TzType *type) {
 
 int32_t tz_agen_resumed(TzAsyncGen *g) { return g->head ? g->head->close : 0; }
 
-void tz_agen_finish(TzAsyncGen *g, void *error) {
+void tz_agen_finish(TzAsyncGen *g) {
   TZ_ORDERED();
   g->state = AGEN_DONE;
   TzAgenStep *s = agen_pop(g);
   if (s) {
-    if (error) {
-      tz_promise_reject(s->promise, error);
-    } else {
-      fulfill_done(s->promise);
-    }
+    fulfill_done(s->promise);
     release(s->promise);
     tz_free(s);
-  } else if (error) {
-    release(error);
   }
   agen_drain(g);
 }
@@ -1783,7 +1631,7 @@ static void interval_give(Interval *it, TzPromise *p, int32_t turns) {
   fulfill_after(p, turns);
 }
 
-static void interval_stop(Interval *it, void *error) {
+static void interval_stop(Interval *it) {
   it->done = 1;
   tz_signal_unlisten(&it->listener);
   if (it->timer) {
@@ -1794,21 +1642,15 @@ static void interval_stop(Interval *it, void *error) {
   TzPromise *p = it->waiting;
   it->waiting = NULL;
   if (p) {
-    if (error) {
-      tz_promise_reject(p, error);
-    } else {
-      fulfill_done(p);
-    }
+    fulfill_done(p);
     release(p);
-  } else if (error) {
-    release(error);
   }
 }
 
 static void interval_drop(void *object) {
   TZ_ORDERED();
   Interval *it = (Interval *)object;
-  interval_stop(it, NULL);
+  interval_stop(it);
   if (it->signal) {
     release(it->signal);
   }
@@ -1849,7 +1691,7 @@ static void interval_aborted(TzAbortListener *l) {
   if (it->done) {
     return;
   }
-  interval_stop(it, NULL);
+  interval_stop(it);
 }
 
 static void interval_start(Interval *it) {
@@ -1897,7 +1739,7 @@ static void interval_next(void *object, TzPromise *p) {
 static void interval_close(void *object, TzPromise *p) {
   Interval *it = (Interval *)object;
   it->started = 1;
-  interval_stop(it, NULL);
+  interval_stop(it);
   fulfill_after(p, 1);
 }
 
@@ -1922,60 +1764,7 @@ void *tz_timers_interval(double delay, const void *value, const TzType *type, Tz
   return it;
 }
 
-typedef struct {
-  TzObject base;
-  TzReactor reactor;
-  void *error;
-  int32_t turns;
-} Report;
-
-static void report_drop(void *object) { tz_obj_free(object); }
-
-static const TzObjectDesc report_desc = {report_drop};
-
-static void report_run(TzReactor *r, TzPromise *source) {
-  Report *report = (Report *)((char *)r - offsetof(Report, reactor));
-  if (source) {
-    if (source->state != TZ_PROMISE_REJECTED) {
-      return;
-    }
-    retain(source->error);
-    report->error = source->error;
-  }
-  if (--report->turns > 0) {
-    ++report->base.rc;
-    tz_microtask(r);
-    return;
-  }
-  tz_thrown = report->error;
-  tz_uncaught();
-}
-
-static Report *new_report(void *error, int32_t turns) {
-  Report *report = (Report *)tz_obj_alloc(sizeof(Report));
-  report->base.rc = 1;
-  report->base.desc = &report_desc;
-  report->reactor.run = report_run;
-  report->reactor.owner = &report->base;
-  report->reactor.source = NULL;
-  report->reactor.ahead = 0;
-  report->error = error;
-  report->turns = turns;
-
-  return report;
-}
-
-TZ_NORETURN void tz_async_main_failed(void) {
-  void *error = tz_thrown;
-  tz_thrown = NULL;
-  tz_microtask(&new_report(error, 4)->reactor);
-  tz_run_microtasks();
-  tz_thrown = error;
-  tz_uncaught();
-}
-
 void tz_async_main(TzPromise *main) {
-  tz_promise_react(main, &new_report(NULL, 5)->reactor);
   tz_async_run(1);
   if (main->state != TZ_PROMISE_PENDING) {
     return;
@@ -2012,9 +1801,7 @@ void tz_async_shutdown(void) {
   }
   tz_free(tz_timer_heap);
   tz_free(tz_timer_lists);
-  tz_free(tz_rejections);
   tz_timer_heap = NULL;
   tz_timer_lists = NULL;
-  tz_rejections = NULL;
-  tz_timer_heap_capacity = tz_timer_list_capacity = tz_rejection_capacity = 0;
+  tz_timer_heap_capacity = tz_timer_list_capacity = 0;
 }

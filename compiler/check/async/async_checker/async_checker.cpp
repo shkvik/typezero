@@ -286,24 +286,6 @@ void AsyncChecker::checkForAwait(ForOfStmt *stmt) {
   checker_.flowChecker().calledFunction();
 }
 
-bool AsyncChecker::isHandledPromise(const Expr *expr) const {
-  auto *call = dyn_cast<CallExpr>(expr);
-  if (!call) {
-    return false;
-  }
-  if (call->builtin == Builtin::PromiseCatch) {
-    return true;
-  }
-  if (call->builtin == Builtin::PromiseThen) {
-    return call->args.size() == 2 && !call->args[1]->type->isUndefined();
-  }
-  if (call->builtin == Builtin::PromiseFinally) {
-    return isHandledPromise(cast<MemberExpr>(call->callee)->object);
-  }
-
-  return false;
-}
-
 void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::SMLoc at) {
   const Type *type = expr->type;
   if (isa<AssignExpr>(expr)) {
@@ -321,9 +303,6 @@ void AsyncChecker::checkDiscardedPromise(const Expr *expr, bool callback, llvm::
                             "error in one would end the program; wait for all of them with "
                             "'await Promise.all(...)', or keep them in a variable");
     }
-    return;
-  }
-  if (isHandledPromise(expr)) {
     return;
   }
   if (callback) {

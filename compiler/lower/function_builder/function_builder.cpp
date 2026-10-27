@@ -2,8 +2,6 @@
 #include "compiler/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -69,7 +67,6 @@ void FunctionBuilder::beginFunction(llvm::Function *function, FunctionDecl *fn) 
   lowering_.currentFn_ = fn;
   lowering_.returnType_ = fn ? fn->sym->ret : nullptr;
   lowering_.envParam_ = nullptr;
-  lowering_.unwindExit_ = nullptr;
   lowering_.addresses_.clear();
   lowering_.boxSlots_.clear();
   lowering_.envBoxes_.clear();
@@ -124,9 +121,6 @@ void FunctionBuilder::emitParamsAndBody(FunctionDecl *fn, llvm::ArrayRef<llvm::V
       }
     }
   }
-  if (lowering_.recursive_.contains(fn)) {
-    lowering_.throwLowerer().emitStackCheck(fn->loc());
-  }
   lowering_.stmtLowerer().emitStmt(fn->body);
   lowering_.functionFrame().popScope();
 }
@@ -175,7 +169,6 @@ void FunctionBuilder::emitParams(FunctionDecl *fn, llvm::ArrayRef<llvm::Value *>
 
 void FunctionBuilder::finishFunction() {
   closeBody();
-  lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.function_ = nullptr;
 }
 

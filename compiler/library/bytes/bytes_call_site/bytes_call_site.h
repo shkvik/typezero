@@ -30,7 +30,6 @@ protected:
   CallExpr *call;
   MemberExpr *member;
   const Type *type;
-  bool throws;
   llvm::Type *voidTy, *i32, *i64, *f64, *ptr;
 };
 

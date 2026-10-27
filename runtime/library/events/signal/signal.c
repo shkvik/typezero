@@ -6,13 +6,9 @@
 #include "runtime/core/tzrt/tzrt.h"
 #include <string.h>
 
-extern TzErrorInfo tz_error_info;
-
 static void release(void *object) { tz_instance_release((TzInstance *)object); }
 
 static const TzType tz_signal_reason_type = {TZ_T_UNKNOWN, sizeof(void *), NULL};
-
-static TzStr ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
 
 int64_t tz_listen_order;
 
@@ -104,30 +100,4 @@ void tz_lib_signal_run(TzSignal *s, double order, TzMaker make) {
     l->run(l);
   }
   release(s);
-}
-
-void *tz_unknown_error(void *u);
-
-void *tz_signal_reason(const void *signal) {
-  void *reason = ((const TzSignal *)signal)->reason;
-  if (reason) {
-    tz_ref_retain(reason);
-  }
-
-  return tz_unknown_error(reason);
-}
-
-void *tz_abort_error(const void *signal) {
-  TzStr text = ascii("The operation was aborted");
-  void *error = tz_error_info.make(TZ_ERROR, text.obj, text.meta);
-  TzStr *name = (TzStr *)((char *)error + tz_error_info.name_offset);
-  tz_str_release_value(*name);
-  *name = ascii("AbortError");
-  void *reason = ((const TzSignal *)signal)->reason;
-  if (reason && (((TzInstance *)reason)->layout->flags & TZ_LAYOUT_ERROR)) {
-    tz_ref_retain(reason);
-    *(void **)((char *)error + tz_error_info.cause_offset) = reason;
-  }
-
-  return error;
 }

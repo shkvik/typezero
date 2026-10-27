@@ -123,5 +123,5 @@ child.stdout.on("data", s => s.length)          // s: string
    `for await`, у `pipeline`, `finished`, `end()` и `node:stream/consumers`; правило подписки на
    `error`; убрать `pipe()`; переписать перенесённый код node в `library/stream/*.tz`. Сделано
    27 октября снаружи: что видит программа, — `Result`, `pipe()` и колбэк `end()` — ошибки;
-   внутри перенесённый код node ещё бросает и ловит (уйдёт с шагом 5 errors.md), тип ошибки —
-   `Error`.
+   с шагом 5 errors.md (27 октября) и внутри перенесённый код node не бросает и не ловит, тип
+   ошибки — `StreamError`, объект с меткой.

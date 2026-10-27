@@ -2,17 +2,16 @@
 #include "compiler/library/crypto/crypto_api/crypto_api.h"
 #include "compiler/library/date/date_lowerer/date_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/objects/object_maker/object_maker.h"
-#include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/library/result/err_sites/err_sites.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
+#include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/objects/object_maker/object_maker.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -231,8 +230,8 @@ llvm::Value *CryptoLowerer::emitCryptoCall(CallExpr *call) {
     }
     const Type *bytes = Type::bytesType(Type::Bytes::Buffer);
     llvm::Value *text = lowering_.stringLowerer().callReturningString(
-        lowering_.processLowerer().processFunction(
-            "tz_buffer_to_string", voidTy, {ptr, ptr, i32, i64, i64, i32}),
+        lowering_.processLowerer().processFunction("tz_buffer_to_string", voidTy,
+                                                   {ptr, ptr, i32, i64, i64, i32}),
         {value, lowering_.builder_.getInt32(int32_t(textEncoding->value)),
          lowering_.builder_.getInt64(0), lowering_.builder_.getInt64(0),
          lowering_.builder_.getInt32(0)});
@@ -247,30 +246,36 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
              *i64 = lowering_.builder_.getInt64Ty();
   llvm::Value *null = llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy());
 
-  llvm::Value *passphrases[2] = {{nullptr, nullptr, nullptr}, {nullptr, nullptr, nullptr}};
+  const Type *passTypes[2] = {nullptr, nullptr};
+  llvm::Value *passSlots[2] = {nullptr, nullptr};
   for (int k = 0; k < 2; ++k) {
     if (Expr *p = call->args[1 + 5 * k + 4]; !p->type->isUndefined()) {
-      passphrases[k] =
-          lowering_.exprLowerer().emitExpr(p);
+      passTypes[k] = p->type;
+      passSlots[k] = lowering_.functionFrame().createManagedSlot(p->type, "passphrase.held");
+      lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(p), passSlots[k]);
     }
   }
+  auto takePassphrase = [&](int k) {
+    llvm::Type *lowered = lowering_.moduleBuilder().lower(passTypes[k]);
+    llvm::Value *value = lowering_.builder_.CreateLoad(lowered, passSlots[k]);
+    lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), passSlots[k]);
+
+    return value;
+  };
   const Type *resultType = call->type;
   const Type *pairType = resultType->okType();
   llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("keypair.failed");
   bool failing = false;
   auto failWith = [&](llvm::function_ref<void()> release) {
     llvm::Value *failure =
-        lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().failedSlot(), "failure");
+        lowering_.builder_.CreateLoad(ptr, lowering_.resultLowerer().failedSlot(), "failure");
     llvm::BasicBlock *bad = lowering_.functionFrame().newBlock("keypair.bad");
     llvm::BasicBlock *good = lowering_.functionFrame().newBlock("keypair.good");
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(failure), bad, good);
     lowering_.functionFrame().switchTo(bad);
-    for (llvm::Value *&held : passphrases) {
-      if (held.slot) {
-        llvm::Type *lowered = lowering_.moduleBuilder().lower(held.type);
-        llvm::Value *value = lowering_.builder_.CreateLoad(lowered, held.slot);
-        lowering_.builder_.CreateStore(llvm::Constant::getNullValue(lowered), held.slot);
-        lowering_.refCounts().releaseValue(value, held.type);
+    for (int k = 0; k < 2; ++k) {
+      if (passSlots[k]) {
+        lowering_.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
       }
     }
     release();
@@ -298,10 +303,10 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     llvm::Value *keyTypeName = lowering_.exprLowerer().emitExpr(part[2]),
                 *cipher = lowering_.exprLowerer().emitExpr(part[3]);
     llvm::Value *passType = null, *passValue = null;
-    if (passphrases[k].type) {
-      passType = lowering_.typeDescriptors().typeDescriptor(passphrases[k].type);
-      passValue = lowering_.functionFrame().spill(passphrases[k],
-                                                  "passphrase");
+    if (passTypes[k]) {
+      passType = lowering_.typeDescriptors().typeDescriptor(passTypes[k]);
+      passValue = lowering_.functionFrame().spill(takePassphrase(k), "passphrase");
+      passSlots[k] = nullptr;
     }
     std::vector<llvm::Value *> rest = {has,
                                        lowering_.stringLowerer().stringObj(keyTypeName),
@@ -335,11 +340,10 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
     types[k] = pairType->field(k == 0 ? "publicKey" : "privateKey")->type;
     lowering_.refCounts().releaseValue(keyTypeName, Type::string());
     lowering_.refCounts().releaseValue(cipher, Type::string());
-    if (passphrases[k].type) {
+    if (passTypes[k]) {
       lowering_.refCounts().releaseValue(
-          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(passphrases[k].type),
-                                        passValue),
-          passphrases[k].type);
+          lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(passTypes[k]), passValue),
+          passTypes[k]);
     }
     lowering_.refCounts().releaseValue(key, keyType);
     failWith([&] {
@@ -348,9 +352,9 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
       }
     });
   }
-  for (llvm::Value *&held : passphrases) {
-    if (held.slot) {
-      lowering_.refCounts().releaseValue(held, held.type);
+  for (int k = 0; k < 2; ++k) {
+    if (passSlots[k]) {
+      lowering_.refCounts().releaseValue(takePassphrase(k), passTypes[k]);
     }
   }
   useErrors(nullptr);
@@ -360,8 +364,8 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
       values[0], lowering_.objectLayouts().fieldAddress(object, type, "publicKey", true));
   lowering_.builder_.CreateStore(
       values[1], lowering_.objectLayouts().fieldAddress(object, type, "privateKey", true));
-  llvm::Value *made =
-      lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getTrue(), object, nullptr);
+  llvm::Value *made = lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getTrue(),
+                                                           object, nullptr);
   llvm::BasicBlock *madeEnd = lowering_.builder_.GetInsertBlock();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("keypair.end");
   lowering_.builder_.CreateBr(endBlock);
@@ -371,12 +375,13 @@ llvm::Value *CryptoLowerer::emitCryptoKeyPair(CallExpr *call) {
   llvm::BasicBlock *failEnd = nullptr;
   if (failing) {
     useErrors(nullptr);
-    llvm::Value *slot = lowering_.throwLowerer().failedSlot();
+    llvm::Value *slot = lowering_.resultLowerer().failedSlot();
     llvm::Value *failure = lowering_.builder_.CreateLoad(ptr, slot, "failure");
     lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
                                    slot);
-    failed = lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
-                                                  failure, lowering_.errSites().site(call->loc()));
+    failed =
+        lowering_.resultLowerer().makeResult(resultType, lowering_.builder_.getFalse(), nullptr,
+                                             failure, lowering_.errSites().site(call->loc()));
     failEnd = lowering_.builder_.GetInsertBlock();
     lowering_.builder_.CreateBr(endBlock);
   } else {

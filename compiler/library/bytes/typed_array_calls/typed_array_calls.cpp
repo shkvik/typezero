@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"

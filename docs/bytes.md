@@ -124,8 +124,8 @@ u[3] = 1.7                    // ошибка: double в uint8 (как везд�
 
 1. **Типизированные массивы и `DataView`** (сделано) — типы элементов, индексы с доказательствами,
    проверка значений при записи, `subarray` / `slice` / `set` / `fill` / `from` и остальные
-   методы массивов, печать как в node. `RangeError` (`new Uint8Array(-1)`) — после исключений
-   ([errors.md](errors.md), шаг 2).
+   методы массивов, печать как в node. `new Uint8Array(-1)` — ошибка компиляции, пока
+   длина не доказана ([errors.md](errors.md), шаг 4).
 2. **`TextEncoder` / `TextDecoder`, `Buffer`** (сделано) с кодировками из раздела 5, ошибки на
    `Buffer.slice` и `new Buffer`; `readFileSync` без кодировки и `writeFileSync` с байтами;
    `embedBytes` ([modules.md](modules.md), шаг 3).

@@ -1,9 +1,6 @@
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -80,9 +77,6 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
   if (expr->callee && !isa<NameExpr>(expr->callee)) {
     lowering_.stmtLowerer().emitDiscarded(expr->callee);
   }
-  if (cls->builtin) {
-    return lowering_.errorLowerer().emitNewError(expr);
-  }
   const CallExpr *ctor = expr->ctor;
   std::vector<llvm::Value *> args = lowering_.exprLowerer().emitExprs(ctor->args);
   const FuncSymbol *sym = ctor->func;
@@ -93,21 +87,9 @@ llvm::Value *ClassLowerer::emitNew(NewExpr *expr) {
   }
   llvm::Value *object = allocInstance(cls, lowering_.makesMember(expr, cls->type));
   lowering_.groupLowerer().noteUnstored(object, expr);
-  llvm::Value *held =
-      object;
   emitConstruct(object, cls, sym, args);
 
-  return held;
-}
-
-bool ClassLowerer::constructionThrows(const ClassDecl *cls, const FuncSymbol *ctor) const {
-  if (ctor && ctor->decl->cls == cls) {
-    return (!cls->parent && cls->init && false) ||
-           false;
-  }
-
-  return (cls->parent && constructionThrows(cls->parent, ctor)) ||
-         (cls->init && false);
+  return object;
 }
 
 void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, const FuncSymbol *ctor,
@@ -115,28 +97,14 @@ void ClassLowerer::emitConstruct(llvm::Value *object, const ClassDecl *cls, cons
   if (ctor && ctor->decl->cls == cls) {
     std::vector<llvm::Value *> all{object};
     if (!cls->parent && cls->init) {
-      bool initThrows = false;
-      std::vector<llvm::Value *> waiting;
-      for (size_t i = 0; i < args.size(); ++i) {
-        waiting.push_back(args[i]);
-      }
       lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init), {object});
-      for (llvm::Value *&w : waiting) {
-        all.push_back(w);
-      }
-    } else {
-      all.insert(all.end(), args.begin(), args.end());
     }
+    all.insert(all.end(), args.begin(), args.end());
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(ctor->decl), all);
     return;
   }
   if (cls->parent) {
     emitConstruct(object, cls->parent, ctor, args);
-  }
-  if (cls->builtin && cls->parent) {
-    lowering_.builder_.CreateStore(
-        lowering_.stringLowerer().stringLiteral(std::u16string(cls->name.begin(), cls->name.end())),
-        lowering_.objectLayouts().fieldAddress(object, cls->type, "name"));
   }
   if (cls->init) {
     lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(cls->init), {object});

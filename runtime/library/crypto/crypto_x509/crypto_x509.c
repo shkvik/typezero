@@ -17,7 +17,6 @@
 #include <string.h>
 #include <time.h>
 
-
 typedef struct {
   int64_t rc;
   const TzLayout *layout;
@@ -46,7 +45,7 @@ Certificate *tz_openssl_x509_new(const TzType *type, const void *value) {
   BIO_free(bio);
   tz_crypto_data_done(&d);
   if (!cert) {
-    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to parse the certificate");
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "Failed to parse the certificate");
     return NULL;
   }
   ERR_clear_error();
@@ -237,7 +236,7 @@ TzKey *tz_openssl_key_of(void *pkey, int private_key);
 TzKey *tz_openssl_x509_public_key(const Certificate *c) {
   EVP_PKEY *pkey = X509_get_pubkey(c->cert);
   if (!pkey) {
-    tz_openssl_throw(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Failed to get the public key");
+    tz_openssl_fail("ERR_CRYPTO_OPERATION_FAILED", "Failed to get the public key");
     return NULL;
   }
 
@@ -320,8 +319,9 @@ int32_t tz_openssl_x509_check_issued(const Certificate *c, const Certificate *is
 
 int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PRIVATE) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected private.",
-             key->type == TZ_KEY_SECRET ? "secret" : "public");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+                   "Invalid key object type %s, expected private.",
+                   key->type == TZ_KEY_SECRET ? "secret" : "public");
     return 0;
   }
   int ok = X509_check_private_key(c->cert, (EVP_PKEY *)key->pkey) == 1;
@@ -332,8 +332,9 @@ int32_t tz_openssl_x509_check_private_key(const Certificate *c, const TzKey *key
 
 int32_t tz_openssl_x509_verify(const Certificate *c, const TzKey *key) {
   if (key->type != TZ_KEY_PUBLIC) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected public.",
-             key->type == TZ_KEY_SECRET ? "secret" : "private");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+                   "Invalid key object type %s, expected public.",
+                   key->type == TZ_KEY_SECRET ? "secret" : "private");
     return 0;
   }
   int ok = X509_verify(c->cert, (EVP_PKEY *)key->pkey) > 0;

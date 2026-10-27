@@ -3,8 +3,6 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -61,21 +59,12 @@ llvm::Value *ObjectLowerer::emitObjectLiteral(ObjectLitExpr *lit) {
       keys.push_back(i);
     }
   }
-  std::vector<Expr *> exprs;
-  for (const ObjectLitExpr::Property &prop : lit->props) {
-    exprs.push_back(prop.value);
-  }
-  std::vector<llvm::Value *> values;
-  if (llvm::any_of(exprs, [&](Expr *e) { return false; })) {
-    values = lowering_.exprLowerer().emitExprs(exprs);
-  }
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
   lowering_.groupLowerer().noteUnstored(object, lit);
   for (size_t k = 0; k < keys.size(); ++k) {
     unsigned i = keys[k];
-    llvm::Value *value = k < values.size() ? values[k]
-                         : k < lit->props.size()
+    llvm::Value *value = k < lit->props.size()
                              ? lowering_.exprLowerer().emitExpr(lit->props[k].value)
                              : lowering_.optionalLowerer().undefinedValue(type->fields()[i].type);
     lowering_.builder_.CreateStore(
@@ -123,7 +112,6 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
         llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(f.type)),
         lowering_.objectLayouts().fieldAddress(object, type, f.name, true));
   }
-  llvm::Value *held = object;
   for (const ObjectLitExpr::Property &prop : lit->props) {
     if (!prop.spread) {
       if (prop.replaced) {
@@ -182,26 +170,18 @@ llvm::Value *ObjectLowerer::emitSpreadLiteral(ObjectLitExpr *lit) {
     lowering_.refCounts().dropOperand(from);
   }
 
-  return held;
+  return object;
 }
 
 llvm::Value *ObjectLowerer::emitTupleLiteral(ArrayLitExpr *lit) {
   const Type *type = lit->type;
   std::vector<unsigned> keys(type->fields().size());
   std::iota(keys.begin(), keys.end(), 0u);
-  std::vector<Expr *> exprs;
-  for (const ArrayLitExpr::Element &e : lit->elements) {
-    exprs.push_back(e.expr);
-  }
-  std::vector<llvm::Value *> values;
-  if (llvm::any_of(exprs, [&](Expr *e) { return false; })) {
-    values = lowering_.exprLowerer().emitExprs(exprs);
-  }
   bool member = lowering_.makesMember(lit, type);
   llvm::Value *object = lowering_.objectLayouts().allocObject(type, keys, member);
   lowering_.groupLowerer().noteUnstored(object, lit);
-  for (size_t i = 0; i < exprs.size(); ++i) {
-    llvm::Value *value = i < values.size() ? values[i] : lowering_.exprLowerer().emitExpr(exprs[i]);
+  for (size_t i = 0; i < lit->elements.size(); ++i) {
+    llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
     lowering_.builder_.CreateStore(
         value, lowering_.objectLayouts().fieldAddress(object, type, type->fields()[i].name));
     if (member) {

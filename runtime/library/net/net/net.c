@@ -19,8 +19,6 @@
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
-extern TzErrorInfo tz_error_info;
-
 TzMaker tz_net_make;
 int32_t tz_net_started;
 #ifdef _WIN32
@@ -262,10 +260,10 @@ double net_now(void) {
 void tz_net_no_tls(TzPromise *p, TzMaker make) {
   TZ_ORDERED();
   tz_net_make = make;
-  void *error = net_failure("ERR_NO_TLS",
-                            "this program has no TLS for https: tz links it only into programs "
-                            "whose fetch may reach https://, and this one names only http:// "
-                            "URLs; write the URL with https:// (docs/net.md, section 4)");
+  void *error =
+      net_failure("ERR_NO_TLS", "this program has no TLS for https: tz links it only into programs "
+                                "whose fetch may reach https://, and this one names only http:// "
+                                "URLs; write the URL with https:// (docs/net.md, section 4)");
   if (p) {
     tz_promise_fail(p, error);
   } else {

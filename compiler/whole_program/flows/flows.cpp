@@ -83,7 +83,6 @@ Flows::Flows(const llvm::DenseSet<const CastExpr *> &widenings,
   flowBuiltinsPart_ = std::make_unique<FlowBuiltins>(*this);
   flowExprsPart_ = std::make_unique<FlowExprs>(*this);
   unknown_ = node(NodeKind::Unknown, nullptr, "");
-  thrown_ = node(NodeKind::Unknown, nullptr, "thrown");
 }
 
 void Flows::walkProgram(SourceFile &file) {

@@ -11,10 +11,9 @@ public:
   llvm::Value *emitPromiseReaction(CallExpr *call);
   llvm::StructType *reactionType();
   llvm::Function *reactionDrop();
-  llvm::Function *reactionHandler(Builtin kind, const Type *value, const Type *result,
-                                  const Type *onFulfilled, const Type *onRejected);
+  llvm::Function *reactionHandler(const Type *value, const Type *result, const Type *callback);
   void attachReaction(llvm::Value *source, llvm::Value *derived, llvm::Function *handler,
-                      llvm::Value *onFulfilled, llvm::Value *onRejected, bool later = false);
+                      llvm::Value *callback, bool later = false);
 
 private:
   Lowering &lowering_;

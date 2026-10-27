@@ -2,8 +2,6 @@
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -37,41 +35,6 @@ const llvm::StringLiteral kOptionNames[TZ_DTO_COUNT] = {
     "minute",        "second",   "timeZoneName",    "formatMatcher", "dateStyle", "timeStyle",
 };
 
-bool isLiteralText(const Expr *e) {
-  if (auto *cast = dyn_cast<CastExpr>(e); cast && cast->isImplicit()) {
-    return isLiteralText(cast->operand);
-  }
-  auto *tmpl = dyn_cast<TemplateExpr>(e);
-
-  return llvm::isa<StringLitExpr>(e) || (tmpl && tmpl->exprs.empty());
-}
-
-bool isLiteralValue(const Expr *e) {
-  if (auto *cast = dyn_cast<CastExpr>(e); cast && cast->isImplicit()) {
-    return isLiteralValue(cast->operand);
-  }
-
-  return isLiteralText(e) || llvm::isa<BoolLitExpr, IntLitExpr, FloatLitExpr, UndefinedExpr>(e);
-}
-
-}
-
-bool dateOptionsMayThrow(llvm::ArrayRef<Expr *> args) {
-  if (!args.empty() && !args[0]->type->isUndefined() && !isLiteralText(args[0])) {
-    return true;
-  }
-  if (args.size() < 2 || args[1]->type->isUndefined()) {
-    return false;
-  }
-  auto *literal = dyn_cast<ObjectLitExpr>(args[1]);
-  if (!literal) {
-    return true;
-  }
-
-  return llvm::any_of(literal->props, [](const ObjectLitExpr::Property &prop) {
-    return prop.spread || !prop.value || !isLiteralValue(prop.value) || prop.name == "timeZone" ||
-           prop.name == "calendar" || prop.name == "numberingSystem";
-  });
 }
 
 DateLowerer::DateLowerer(Lowering &lowering) : lowering_(lowering) {}
@@ -159,8 +122,6 @@ llvm::Value *DateLowerer::emitDateOptions(llvm::ArrayRef<Expr *> args,
         }
       }
     }
-  }
-  for (Lowering::Operand &operand : held) {
   }
   lowering_.builder_.CreateStore(present,
                                  lowering_.builder_.CreateStructGEP(optionsTy, options, 2));

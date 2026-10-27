@@ -177,9 +177,6 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
                      "'JSON.stringify(x)'");
     return expr;
   }
-  if (checker_.throwChecker().isErrorType(type)) {
-    return checker_.typeRelations().convert(expr, Type::string());
-  }
   if (Checker::holdsObjects(type)) {
     checker_.diags_.error(expr->loc(),
                           "an object cannot be converted to a string: JavaScript would give "
@@ -189,9 +186,8 @@ Expr *ConcatChecker::toStringOperand(Expr *expr) {
   }
   if (const Type *u = type->nonOptional(); u->isUnion() && u->isTagged()) {
     for (const Type *m : u->members()) {
-      if ((m->isObject() && !m->isDate() && !m->isRegExp() &&
-           !checker_.throwChecker().isErrorType(m)) ||
-          m->isDict() || m->isFunction() || m->isIterator()) {
+      if ((m->isObject() && !m->isDate() && !m->isRegExp()) || m->isDict() || m->isFunction() ||
+          m->isIterator()) {
         checker_.diags_.error(expr->loc(), "a value of type '" + type->name() +
                                                "' cannot be converted to a string: it may hold '" +
                                                m->name() + "'; check what it holds first");

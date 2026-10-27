@@ -650,114 +650,6 @@ static void format_match(Ctx *ctx, TzBuf *out, const TzInstance *match, int recu
 
 static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times);
 
-static void format_error(Ctx *ctx, TzBuf *out, const TzInstance *error, int recurse_times) {
-  TzBuf stack;
-  tz_buf_init(&stack);
-  int places = tz_buf_error_stack(&stack, error);
-  TzBuf base;
-  tz_buf_init(&base);
-  if (!places) {
-    tz_buf_push(&base, '[');
-  }
-  for (size_t i = 0; i < stack.length; ++i) {
-    tz_buf_push(&base, stack.data[i]);
-    if (stack.data[i] == '\n') {
-      spaces(&base, ctx->indentation);
-    }
-  }
-  if (!places) {
-    tz_buf_push(&base, ']');
-  }
-  tz_buf_free(&stack);
-  const TzLayout *layout = error->layout;
-  const char *fields = (const char *)error;
-  const TzInstance *cause = (const TzInstance *)tz_error_cause(error);
-  uint32_t shown = cause != NULL;
-  for (uint32_t i = 0; i < layout->count; ++i) {
-    const TzField *field = &layout->fields[i];
-    shown += !tz_error_base_field(field) &&
-             (field->offset == TZ_FIELD_METHOD || field->type->kind != TZ_T_OPTIONAL ||
-              tz_optional_has(field->type, fields + field->offset));
-  }
-  if (!shown) {
-    tz_buf_units(out, base.data, base.length);
-    tz_buf_free(&base);
-    return;
-  }
-  if (recurse_times > kDepth) {
-    tz_buf_push(out, '[');
-    buf_utf8(out, layout->name, layout->name_length);
-    tz_buf_push(out, ']');
-    tz_buf_free(&base);
-    return;
-  }
-  ++recurse_times;
-  ctx->seen[ctx->seen_count++] = error;
-  ctx->current_depth = recurse_times;
-  Entries output = {NULL, 0, 0};
-  for (uint32_t i = 0; i < layout->count; ++i) {
-    const TzField *field = &layout->fields[i];
-    const void *value = fields + field->offset;
-    if (tz_error_base_field(field)) {
-      continue;
-    }
-    int method = field->offset == TZ_FIELD_METHOD;
-    if (!method && field->type->kind == TZ_T_OPTIONAL && !tz_optional_has(field->type, value)) {
-      continue;
-    }
-    TzBuf *entry = entries_add(&output);
-    format_key(entry, field);
-    if (method) {
-      tz_buf_ascii(entry, "[Function: ");
-      buf_utf8(entry, field->name, field->name_length);
-      tz_buf_push(entry, ']');
-      continue;
-    }
-    ctx->indentation += 2;
-    format_value(ctx, entry, field->type, value, recurse_times);
-    ctx->indentation -= 2;
-  }
-  if (cause) {
-    TzBuf *entry = entries_add(&output);
-    tz_buf_ascii(entry, "[cause]: ");
-    ctx->indentation += 2;
-    if (!format_circular(ctx, entry, cause)) {
-      format_object(ctx, entry, cause, recurse_times);
-    }
-    ctx->indentation -= 2;
-  }
-  --ctx->seen_count;
-  size_t start = output.count + (size_t)ctx->indentation + 1 + base.length + 10;
-  int newline = contains(base.data, base.length, '\n');
-  for (size_t i = 0; i < output.count && !newline; ++i) {
-    newline = contains(output.items[i].data, output.items[i].length, '\n');
-  }
-  int single = ctx->current_depth - recurse_times < kCompact &&
-               is_below_break_length(ctx, &output, start) && !newline;
-  tz_buf_units(out, base.data, base.length);
-  if (single) {
-    tz_buf_ascii(out, " { ");
-    join_entries(out, &output, ", ", 0);
-    tz_buf_ascii(out, " }");
-  } else {
-    tz_buf_ascii(out, " {\n");
-    spaces(out, ctx->indentation + 2);
-    join_entries(out, &output, ",\n", ctx->indentation + 2);
-    tz_buf_push(out, '\n');
-    spaces(out, ctx->indentation);
-    tz_buf_push(out, '}');
-  }
-  entries_free(&output);
-  tz_buf_free(&base);
-}
-
-void tz_buf_inspect_error(TzBuf *out, const void *error) {
-  Ctx ctx;
-  memset(&ctx, 0, sizeof ctx);
-  format_error(&ctx, out, (const TzInstance *)error, 0);
-  tz_free((void *)ctx.circular);
-}
-
 static void format_json_key(TzBuf *entry, TzStr key);
 
 static void format_dict(Ctx *ctx, TzBuf *out, const TzMap *m, int recurse_times) {
@@ -878,7 +770,6 @@ static void format_dict_iterator(Ctx *ctx, TzBuf *out, const TzInstance *it, int
 }
 
 static void format_promise(Ctx *ctx, TzBuf *out, const TzPromise *p, int recurse_times) {
-  static const TzType error_type = {TZ_T_OBJECT, sizeof(void *), NULL};
   if (recurse_times > kDepth) {
     tz_buf_ascii(out, "[Promise]");
     return;
@@ -890,13 +781,8 @@ static void format_promise(Ctx *ctx, TzBuf *out, const TzPromise *p, int recurse
   if (p->state == TZ_PROMISE_PENDING) {
     tz_buf_ascii(entry, "<pending>");
   } else {
-    if (p->state == TZ_PROMISE_REJECTED) {
-      tz_buf_ascii(entry, "<rejected> ");
-    }
     ctx->indentation += 2;
-    if (p->state == TZ_PROMISE_REJECTED) {
-      format_value(ctx, entry, &error_type, &p->error, recurse_times);
-    } else if (p->layout->count) {
+    if (p->layout->count) {
       format_value(ctx, entry, p->layout->fields[0].type, (const char *)p + TZ_PROMISE_VALUE,
                    recurse_times);
     } else {
@@ -1156,10 +1042,6 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
   if (layout->flags & TZ_LAYOUT_TIMER) {
     buf_utf8(out, layout->name, layout->name_length);
     tz_buf_ascii(out, " {}");
-    return;
-  }
-  if (layout->flags & TZ_LAYOUT_ERROR) {
-    format_error(ctx, out, object, recurse_times);
     return;
   }
   const char *iterator = layout->flags & TZ_LAYOUT_GENERATOR         ? "Generator"

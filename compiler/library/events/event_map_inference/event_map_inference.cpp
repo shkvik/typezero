@@ -215,8 +215,7 @@ const Type *EventMapInference::fromPortable(const EventInference::Portable &p, l
   case Kind::ClassRef: {
     ClassDecl *cls = nullptr;
     if (p.file.empty()) {
-      cls = checker_.throwChecker().errorKindClass(p.name);
-      if (!cls && checker_.statsClass_ && p.name == checker_.statsClass_->name) {
+      if (checker_.statsClass_ && p.name == checker_.statsClass_->name) {
         cls = checker_.statsClass_;
       }
       if (!cls && checker_.direntClass_ && p.name == checker_.direntClass_->name) {

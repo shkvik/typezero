@@ -26,6 +26,17 @@ llvm::FunctionCallee ProcessLowerer::processFunction(llvm::StringRef name, llvm:
   return callee;
 }
 
+void ProcessLowerer::emitPanic(llvm::StringRef message) {
+  llvm::Value *text = lowering_.stringLowerer().utf8Constant(message.str());
+  llvm::Type *ptr = lowering_.builder_.getPtrTy(), *i64 = lowering_.builder_.getInt64Ty();
+  auto *fn = cast<llvm::Function>(
+      processFunction("tz_panic", lowering_.builder_.getVoidTy(), {ptr, i64}).getCallee());
+  fn->addFnAttr(llvm::Attribute::Cold);
+  fn->addFnAttr(llvm::Attribute::NoReturn);
+  lowering_.builder_.CreateCall(fn, {text, lowering_.builder_.getInt64(message.size())});
+  lowering_.builder_.CreateUnreachable();
+}
+
 llvm::Value *ProcessLowerer::emitProcessBuiltin(CallExpr *call) {
   llvm::Type *voidTy = lowering_.builder_.getVoidTy();
   llvm::Type *i32 = lowering_.builder_.getInt32Ty();

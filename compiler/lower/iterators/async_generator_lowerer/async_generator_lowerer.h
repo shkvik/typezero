@@ -10,7 +10,7 @@ public:
 
   llvm::Constant *asyncGeneratorLayout();
   void emitAsyncGenerator(FunctionDecl *fn, llvm::Function *function);
-  void finishAsyncGenerator(llvm::Value *error);
+  void finishAsyncGenerator();
   llvm::Value *awaitValueOf(llvm::Value *value, const Type *type, llvm::SMLoc loc);
   void agenYield(llvm::Value *value, const Type *type, llvm::SMLoc loc);
   llvm::Value *emitAsyncYield(YieldExpr *yield);

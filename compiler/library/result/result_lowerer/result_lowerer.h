@@ -23,6 +23,8 @@ public:
   llvm::Value *catchFailure(const Type *type, llvm::SMLoc loc,
                             llvm::function_ref<llvm::Value *()> okValue);
   llvm::Function *failureMaker(const Type *errorType);
+  llvm::Value *failedSlot();
+  llvm::Value *isFailed();
   llvm::Value *emitResultCall(CallExpr *call);
   llvm::Value *emitResultMethod(CallExpr *call);
   llvm::Value *emitResultMember(MemberExpr *member);
@@ -30,6 +32,7 @@ public:
 private:
   Lowering &lowering_;
   llvm::DenseMap<const Type *, Lowering::ResultLayout> resultLayouts_;
+  llvm::GlobalVariable *thread_ = nullptr;
 };
 
 }

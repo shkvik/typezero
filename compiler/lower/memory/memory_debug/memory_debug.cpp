@@ -1,10 +1,10 @@
 #include "compiler/lower/memory/memory_debug/memory_debug.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
+#include "compiler/lower/places/place_lowerer/place_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
@@ -63,7 +63,7 @@ void MemoryDebug::checkOwned(const Type *type, llvm::StringRef name, llvm::Value
   lowering_.builder_.CreateCall(
       lowering_.groupLowerer().groupFunction("tz_group_check_owned", lowering_.builder_.getVoidTy(),
                                              {ptr, ptr, ptr, lowering_.builder_.getInt32Ty()}),
-      {object, lowering_.unwindLowerer().frameDescriptor(lowering_.loc_),
+      {object, lowering_.placeLowerer().frameDescriptor(lowering_.loc_),
        lowering_.stringLowerer().utf8Constant(text),
        lowering_.builder_.getInt32(uint32_t(text.size()))});
 }

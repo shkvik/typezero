@@ -1,5 +1,4 @@
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -10,6 +9,7 @@
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"

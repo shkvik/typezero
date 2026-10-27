@@ -330,7 +330,7 @@ static int32_t pool_size(void) {
 static void start_one(int32_t limit) {
   AcquireSRWLockExclusive(&tz_pool_lock);
   if (tz_pool_started < limit) {
-    HANDLE thread = CreateThread(NULL, 8 * 1024 * 1024, worker_main, NULL,
+    HANDLE thread = CreateThread(NULL, (SIZE_T)1 << 30, worker_main, NULL,
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (thread) {
       CloseHandle(thread);

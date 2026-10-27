@@ -60,7 +60,7 @@ typedef struct FsRequest {
 
 FsRequest *tz_fs_fsp_new(TzPromise *p, TzMaker make);
 
-void tz_fs_fsp_reject_thrown(FsRequest *r);
+void tz_fs_fsp_settle_failed(FsRequest *r);
 
 int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta, const char *syscall);
 

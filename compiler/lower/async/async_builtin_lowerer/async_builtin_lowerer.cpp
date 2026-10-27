@@ -4,7 +4,6 @@
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "llvm/ADT/STLExtras.h"
@@ -31,8 +30,6 @@ llvm::Value *AsyncBuiltinLowerer::emitAsyncBuiltin(CallExpr *call) {
   case Builtin::PromiseNew:
     return lowering_.promiseLowerer().emitPromiseNew(call);
   case Builtin::PromiseThen:
-  case Builtin::PromiseCatch:
-  case Builtin::PromiseFinally:
     return lowering_.reactionLowerer().emitPromiseReaction(call);
   case Builtin::SetTimeout:
   case Builtin::SetInterval: {

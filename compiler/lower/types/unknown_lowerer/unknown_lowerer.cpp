@@ -1,7 +1,5 @@
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/library/reflect/class_info_lowerer/class_info_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"

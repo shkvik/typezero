@@ -460,7 +460,7 @@ static void mkdtemp_done(TzWork *w) {
     tz_buf_ascii(&shown, "XXXXXX");
     tz_fs_throw_failure(r->make, r->failure, "mkdtemp", &shown, NULL);
     tz_buf_free(&shown);
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return;
   }
   TzStr name = tz_str_from_utf16(r->dest.given.data, r->dest.given.length);
@@ -550,7 +550,7 @@ static void rm_done(TzWork *w) {
   FsRequest *r = (FsRequest *)w;
   if (r->directory) {
     tz_fs_throw_rm_directory(&r->path, r->make);
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return;
   }
   tz_fs_fsp_done_void(w);

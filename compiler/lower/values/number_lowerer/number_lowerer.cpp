@@ -3,7 +3,6 @@
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"

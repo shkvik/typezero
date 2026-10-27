@@ -157,7 +157,7 @@ Refs FlowCalls::call(CallExpr *c) {
       if (auto *f = llvm::dyn_cast<FunctionExpr>(FlowExprs::ownExpr(arg))) {
         for (size_t i = 0; i < f->fn->params.size(); ++i) {
           if (const VarSymbol *p = f->fn->params[i].sym) {
-            (i == 1 ? flows_.runtimeRejects_ : flows_.runtimeFunctions_).insert(p);
+            flows_.runtimeFunctions_.insert(p);
           }
         }
       }
@@ -199,13 +199,8 @@ Refs FlowCalls::call(CallExpr *c) {
   if (!target) {
     int result = flows_.node(NodeKind::CallResult, c, "");
     flows_.valueCalls_.push_back({c, args, result});
-    if ((callee && callee->var && flows_.runtimeRejects_.count(callee->var)) ||
-        (member && member->name == "reject")) {
-      for (const Refs &a : args) {
-        flows_.flow(a, flows_.thrown_);
-      }
-    } else if ((callee && callee->var && flows_.runtimeFunctions_.count(callee->var)) ||
-               (member && member->name == "resolve")) {
+    if ((callee && callee->var && flows_.runtimeFunctions_.count(callee->var)) ||
+        (member && member->name == "resolve")) {
       for (size_t i = 0; i < args.size(); ++i) {
         flows_.escape(args[i]);
         if (const Type *value = c->args[i]->type; value && !value->isVoid()) {

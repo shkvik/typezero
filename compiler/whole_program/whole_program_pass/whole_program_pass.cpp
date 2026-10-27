@@ -1,9 +1,9 @@
-#include "compiler/declare/prelude/prelude.h"
 #include "compiler/whole_program/whole_program_pass/whole_program_pass.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/check/classes/class_links/class_links.h"
 #include "compiler/check/stmt/var_checker/var_checker.h"
 #include "compiler/declare/module_declarer/module_declarer.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/library/reflect/reflect_checker/reflect_checker.h"
 #include "compiler/program/program/program.h"
@@ -36,9 +36,6 @@ Errors WholeProgramPass::run(Program &program) const {
     }
   }
   checker.popScope();
-  for (ClassDecl *kind : checker.errorKinds_) {
-    file.items.push_back(kind);
-  }
   file.systemError = checker.prelude().builtinType("SystemError");
   checker.classLinks().numberClasses();
   for (ClassDecl *cls : checker.classes_) {

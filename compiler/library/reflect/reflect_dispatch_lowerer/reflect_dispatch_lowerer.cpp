@@ -1,7 +1,6 @@
 #include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
 #include "compiler/library/reflect/reflect_args_lowerer/reflect_args_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -113,24 +112,13 @@ llvm::Constant *ReflectDispatchLowerer::reflectDispatchInfo(
       params.pop_back();
     }
     std::vector<llvm::Value *> values{self};
-    lowering_.reflectArgsLowerer().emitReflectArgs(args, count, sym->minArgs, params, rest, values,
-                                                   [&](llvm::Value *, const Type *, llvm::Value *) {
-                                                     fail("no_variant",
-                                                          "Reflect.apply: no variant of " + what +
-                                                              " takes these arguments");
-                                                   });
+    lowering_.reflectArgsLowerer().emitReflectArgs(
+        args, count, sym->minArgs, params, rest, values,
+        [&](llvm::Value *, const Type *, llvm::Value *) {
+          fail("no_variant", "Reflect.apply: no variant of " + what + " takes these arguments");
+        });
     llvm::Value *result =
         lowering_.builder_.CreateCall(lowering_.classDescriptors().methodCode(variants[v]), values);
-    llvm::BasicBlock *thrownBlock = lowering_.functionFrame().newBlock("variant.thrown");
-    llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("variant.done");
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateIsNotNull(
-            lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot())),
-        thrownBlock, doneBlock, llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-    lowering_.functionFrame().switchTo(thrownBlock);
-    release();
-    lowering_.builder_.CreateRet(null);
-    lowering_.functionFrame().switchTo(doneBlock);
     llvm::Value *value =
         sym->ret->isVoid()
             ? null
@@ -208,15 +196,6 @@ llvm::Function *ReflectDispatchLowerer::invokerFor(const Type *fnType) {
         lowering_.builder_.CreateRet(null);
       });
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(value, fnType, values);
-  llvm::BasicBlock *thrownBlock = lowering_.functionFrame().newBlock("reflect.thrown");
-  llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("reflect.done");
-  lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(lowering_.builder_.CreateLoad(
-                                      ptr, lowering_.throwLowerer().thrownSlot())),
-                                  thrownBlock, doneBlock,
-                                  llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
-  lowering_.functionFrame().switchTo(thrownBlock);
-  lowering_.builder_.CreateRet(null);
-  lowering_.functionFrame().switchTo(doneBlock);
   const Type *ret = fnType->ret();
   lowering_.builder_.CreateRet(ret->isVoid() || !result ? null
                                                         : lowering_.exprLowerer().emitConversion(

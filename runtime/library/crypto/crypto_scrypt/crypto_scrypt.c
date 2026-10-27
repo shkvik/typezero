@@ -116,9 +116,10 @@ TzBytes *tz_crypto_scrypt(const TzType *pt, const void *pv, const TzType *st, co
   uint64_t p = parallelization ? (uint64_t)parallelization : 1;
   int ok = check(n, r, p, maxmem ? (uint64_t)maxmem : 32u << 20);
   if (ok <= 0) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_CRYPTO_INVALID_SCRYPT_PARAMS", ok < 0 ? "Invalid scrypt params: error:030000AC:digital envelope "
-                                      "routines::memory limit exceeded"
-                                    : "Invalid scrypt params");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_SCRYPT_PARAMS",
+                   ok < 0 ? "Invalid scrypt params: error:030000AC:digital envelope "
+                            "routines::memory limit exceeded"
+                          : "Invalid scrypt params");
     return NULL;
   }
   TzCryptoData password, salt;

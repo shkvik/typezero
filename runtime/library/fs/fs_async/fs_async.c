@@ -92,7 +92,7 @@ static void fsp_free(FsRequest *r) {
   tz_free(r);
 }
 
-void tz_fs_fsp_reject_thrown(FsRequest *r) {
+void tz_fs_fsp_settle_failed(FsRequest *r) {
   void *failure = tz_failed;
   if (!failure) {
     tz_panicf("internal error: a file request failed without an error");
@@ -105,7 +105,7 @@ void tz_fs_fsp_reject_thrown(FsRequest *r) {
 int tz_fs_fsp_path(FsRequest *r, void *obj, uint64_t meta, const char *syscall) {
   Path *p = r->paths == 0 ? &r->path : &r->dest;
   if (!tz_fs_path_init(p, obj, meta, r->make, syscall)) {
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return 0;
   }
   ++r->paths;
@@ -123,7 +123,7 @@ static int fsp_signal(FsRequest *r, void *signal) {
     return 1;
   }
   tz_fs_abort_failure(r->make);
-  tz_fs_fsp_reject_thrown(r);
+  tz_fs_fsp_settle_failed(r);
 
   return 0;
 }
@@ -155,7 +155,7 @@ void tz_fs_fsp_fail_system(FsRequest *r, int error, const char *syscall, int sho
 int tz_fs_fsp_succeeded(FsRequest *r) {
   if (r->signal && tz_signal_aborted(r->signal)) {
     tz_fs_abort_failure(r->make);
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return 0;
   }
   if (!r->failed) {
@@ -185,7 +185,7 @@ int tz_fs_fsp_succeeded(FsRequest *r) {
     tz_fs_throw_failure(r->make, r->failure, r->syscall, r->shows > 0 ? &r->path.shown : NULL,
                         r->shows > 1 ? &r->dest.shown : NULL);
   }
-  tz_fs_fsp_reject_thrown(r);
+  tz_fs_fsp_settle_failed(r);
 
   return 0;
 }
@@ -329,7 +329,7 @@ void tz_fsp_read_file(TzPromise *p, void *path_obj, uint64_t path_meta, void *fl
     return;
   }
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return;
   }
   if (!tz_fs_fsp_path(r, path_obj, path_meta, "open")) {
@@ -365,7 +365,7 @@ static FsRequest *write_request(TzPromise *p, void *path_obj, uint64_t path_meta
     return NULL;
   }
   if (!tz_fs_flags_of(flag_obj, flag_meta, &r->flags, make)) {
-    tz_fs_fsp_reject_thrown(r);
+    tz_fs_fsp_settle_failed(r);
     return NULL;
   }
   if (!tz_fs_fsp_path(r, path_obj, path_meta, "open")) {

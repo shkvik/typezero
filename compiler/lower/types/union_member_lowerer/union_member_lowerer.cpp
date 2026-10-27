@@ -1,8 +1,6 @@
 #include "compiler/lower/types/union_member_lowerer/union_member_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -200,7 +198,6 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
   llvm::Value *id = lowering_.unionLowerer().objectClassId(self.value);
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("union.call.end");
   std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
-  bool throws = false;
   for (size_t i = 0; i < call->unionMethods.size(); ++i) {
     const CallExpr::UnionMethod &m = call->unionMethods[i];
     llvm::BasicBlock *next = nullptr;
@@ -223,13 +220,11 @@ llvm::Value *UnionMemberLowerer::emitUnionMethodCall(CallExpr *call) {
                                                    args)
                    : lowering_.builder_.CreateCall(
                          lowering_.classDescriptors().methodCode(m.method->decl), args);
-      throws |= false;
     } else {
       llvm::Value *fn = lowering_.builder_.CreateLoad(
           lowering_.fnTy_,
           lowering_.objectLayouts().fieldAddress(self.value, m.member, member->name));
       result = lowering_.closureLowerer().callFunctionValue(fn, fnType, values);
-      throws |= false;
     }
     if (result && !result->getType()->isVoidTy()) {
       incoming.push_back({result, lowering_.builder_.GetInsertBlock()});

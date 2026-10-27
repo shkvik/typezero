@@ -1,6 +1,7 @@
-// Recursion that runs out of stack throws a RangeError, as in JavaScript.
-// expect-exit: 1
-// expect-stderr: RangeError: Maximum call stack size exceeded
+// Recursion that runs out of stack ends the program (docs/errors.md, section 9):
+// each thread has 1 GB of stack, and running out of it is fatal, with code 2.
+// expect-exit: 2
+// expect-stderr: panic: stack overflow
 function grow(n: long): long {
   return n < 0 ? 0 : grow(n + 1) + grow(n + 2)
 }

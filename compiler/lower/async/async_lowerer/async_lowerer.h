@@ -17,8 +17,6 @@ public:
   llvm::Function *asyncResumeFunction();
   void emitAsyncReturnStmt(ReturnStmt *stmt);
   void emitAsyncReturn(llvm::Value *value);
-  void emitAsyncUnwind();
-  llvm::Constant *asyncFrameDescriptor(llvm::SMLoc loc);
   void suspendAsync(llvm::Value *promise, llvm::SMLoc loc);
   llvm::Value *awaitPromise(llvm::Value *promise, const Type *type, llvm::SMLoc loc);
   static bool holdsPromise(const Type *type);

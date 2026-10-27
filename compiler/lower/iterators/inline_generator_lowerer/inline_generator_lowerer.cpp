@@ -1,7 +1,6 @@
 #include "compiler/lower/iterators/inline_generator_lowerer/inline_generator_lowerer.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"

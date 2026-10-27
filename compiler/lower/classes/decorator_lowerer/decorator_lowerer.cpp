@@ -1,9 +1,10 @@
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
+#include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -115,9 +116,9 @@ llvm::Constant *DecoratorLowerer::implAdapterInfo(FunctionDecl *fn) {
         lowering_.builder_.getInt32(last - cls->id));
     lowering_.builder_.CreateCondBr(matches, callBlock, failBlock);
     lowering_.builder_.SetInsertPoint(failBlock);
-    lowering_.throwLowerer().emitPanic("TypeError: " + cls->name.str() + "." + fn->name.str() +
-                                       " was called with a 'this' that is not an instance of " +
-                                       cls->name.str());
+    lowering_.processLowerer().emitPanic("TypeError: " + cls->name.str() + "." + fn->name.str() +
+                                         " was called with a 'this' that is not an instance of " +
+                                         cls->name.str());
     lowering_.builder_.SetInsertPoint(callBlock);
   }
   std::vector<llvm::Value *> args;
@@ -282,8 +283,6 @@ llvm::Value *DecoratorLowerer::emitMetaCall(CallExpr *call) {
   lowering_.refCounts().releaseValue(key, Type::string());
   lowering_.refCounts().releaseValue(target, Type::anyObject());
   lowering_.refCounts().releaseValue(property, propertyType);
-  if (define && !call->metaKey && !call->designRecord && !isa<StringLitExpr>(call->args[0])) {
-  }
 
   return result;
 }

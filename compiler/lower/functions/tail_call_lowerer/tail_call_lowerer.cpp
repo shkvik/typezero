@@ -1,7 +1,5 @@
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/expr/truth_lowerer/truth_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
@@ -300,7 +298,6 @@ void TailCallLowerer::emitTailGroup(Lowering::TailGroup &group) {
     lowering_.functionBuilder().emitParamsAndBody(member, args);
     lowering_.functionBuilder().closeBody();
   }
-  lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.tailGroup_ = nullptr;
   lowering_.tailStatements_.clear();
   lowering_.function_ = nullptr;

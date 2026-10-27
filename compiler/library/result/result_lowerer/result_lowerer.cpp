@@ -1,7 +1,6 @@
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/result/err_sites/err_sites.h"
 #include "compiler/library/result/result_combine_lowerer/result_combine_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -166,7 +165,7 @@ llvm::Value *ResultLowerer::catchFailure(llvm::Value *value, const Type *type, l
 llvm::Value *ResultLowerer::catchFailure(const Type *type, llvm::SMLoc loc,
                                          llvm::function_ref<llvm::Value *()> okValue) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
-  llvm::Value *slot = lowering_.throwLowerer().failedSlot();
+  llvm::Value *slot = failedSlot();
   llvm::Value *failure = lowering_.builder_.CreateLoad(ptr, slot, "failure");
   BasicBlock *failBlock = lowering_.functionFrame().newBlock("call.failed");
   BasicBlock *okBlock = lowering_.functionFrame().newBlock("call.ok");
@@ -191,6 +190,23 @@ llvm::Value *ResultLowerer::catchFailure(const Type *type, llvm::SMLoc loc,
   phi->addIncoming(done, okEnd);
 
   return phi;
+}
+
+llvm::Value *ResultLowerer::failedSlot() {
+  if (!thread_) {
+    auto *type = llvm::StructType::get(lowering_.builder_.getPtrTy());
+    thread_ = cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_thread", type));
+    thread_->setAlignment(llvm::Align(8));
+    thread_->setThreadLocal(lowering_.parallel_);
+  }
+
+  return lowering_.parallel_ ? lowering_.builder_.CreateThreadLocalAddress(thread_)
+                             : static_cast<llvm::Value *>(thread_);
+}
+
+llvm::Value *ResultLowerer::isFailed() {
+  return lowering_.builder_.CreateIsNotNull(
+      lowering_.builder_.CreateLoad(lowering_.builder_.getPtrTy(), failedSlot()));
 }
 
 llvm::Function *ResultLowerer::failureMaker(const Type *errorType) {
@@ -245,13 +261,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
     }
   }
   auto fnType = [&](size_t i) { return call->args[i]->type; };
-  bool throws = method != Builtin::ResultUnwrapOr && llvm::any_of(call->args, [&](Expr *arg) {
-                  return false;
-                });
-  std::vector<llvm::Value *> held;
-  for (size_t i = 0; i < args.size(); ++i) {
-    held.push_back(args[i]);
-  }
   llvm::Value *value = resultHalf(result, type, false);
   llvm::Value *error = resultHalf(result, type, true);
   llvm::Value *site = resultSite(result, type);
@@ -426,9 +435,6 @@ llvm::Value *ResultLowerer::emitResultMethod(CallExpr *call) {
       phi->addIncoming(b, errEnd);
       returned = phi;
     }
-  }
-  for (llvm::Value *&h : held) {
-    h;
   }
   if (method != Builtin::ResultUnwrapOr) {
     for (size_t i = 0; i < args.size(); ++i) {

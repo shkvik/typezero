@@ -80,26 +80,6 @@ static int32_t json_kind(const TzJson *j) {
   }
 }
 
-extern TzErrorInfo tz_error_info;
-
-void *tz_unknown_error(void *u) {
-  if (u && !as_box(u) && (((const TzInstance *)u)->layout->flags & TZ_LAYOUT_ERROR)) {
-    return u;
-  }
-  int32_t kind = tz_unknown_kind(u);
-  static const char *const names[] = {"undefined", "a number",  "a string",
-                                      "a boolean", "an object", "a function"};
-  char text[96];
-  int n = snprintf(text, sizeof text, "only an Error can be thrown, and this is %s",
-                   kind >= 0 && kind <= 5 ? names[kind] : "not one");
-  if (u) {
-    tz_instance_release((TzInstance *)u);
-  }
-  TzStr message = tz_str_from_ascii(text, (size_t)n);
-
-  return tz_error_info.make(TZ_TYPE_ERROR, message.obj, message.meta);
-}
-
 int32_t tz_unknown_kind(const void *u) {
   if (!u) {
     return TZ_KIND_UNDEFINED;

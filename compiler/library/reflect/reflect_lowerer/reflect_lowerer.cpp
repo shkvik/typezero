@@ -5,7 +5,6 @@
 #include "compiler/library/reflect/reflect_dispatch_lowerer/reflect_dispatch_lowerer.h"
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -84,10 +83,10 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
   lowering_.builder_.CreateStore(
       llvm::ConstantInt::getSigned(i64, -1),
       lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 3));
-  auto failIfThrown = [&](llvm::function_ref<void()> release) {
+  auto failIfFailed = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
     llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
-    lowering_.builder_.CreateCondBr(lowering_.throwLowerer().anyFailure(), failBlock, goBlock,
+    lowering_.builder_.CreateCondBr(lowering_.resultLowerer().isFailed(), failBlock, goBlock,
                                     llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
     lowering_.functionFrame().switchTo(failBlock);
     release();
@@ -100,7 +99,7 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
                                                                      {ptr, ptr, ptr, i64}),
                                 {json, path, lowering_.stringLowerer().utf8Constant(name),
                                  lowering_.builder_.getInt64(name.size())});
-  failIfThrown([] {});
+  failIfFailed([] {});
   auto keyed = [&](llvm::StringRef key) {
     llvm::Value *text =
         lowering_.stringLowerer().stringLiteral(std::u16string(key.begin(), key.end()));
@@ -123,16 +122,14 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
     given.insert(param);
     llvm::Value *item = keyed(param);
     values.push_back(lowering_.fromJsonLowerer().emitFromJson(sym->params[k], item, link));
-    failIfThrown([&] {
+    failIfFailed([&] {
       for (size_t made = 0; made < k; ++made) {
         lowering_.refCounts().releaseValue(values[made], sym->params[made]);
       }
     });
   }
   llvm::Value *object = lowering_.classLowerer().allocInstance(cls);
-  llvm::Value *held = object;
   lowering_.classLowerer().emitConstruct(object, cls, sym, values);
-  object = held;
   for (const Field &f : cls->type->fields()) {
     if (given.contains(f.name) || !llvm::is_contained(cls->jsonFields, f.name)) {
       continue;
@@ -143,7 +140,7 @@ void ReflectLowerer::emitClassFromJson(const ClassDecl *cls, llvm::Function *fn)
     lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(item), setBlock, nextBlock);
     lowering_.functionFrame().switchTo(setBlock);
     llvm::Value *value = lowering_.fromJsonLowerer().emitFromJson(f.type, item, link);
-    failIfThrown([&] { lowering_.refCounts().releaseValue(object, cls->type); });
+    failIfFailed([&] { lowering_.refCounts().releaseValue(object, cls->type); });
     lowering_.storeLowerer().storeBarrier(object, value, f.type);
     lowering_.stmtLowerer().storeReplacing(
         lowering_.objectLayouts().fieldAddress(object, cls->type, f.name), value, f.type);
@@ -345,8 +342,8 @@ llvm::Value *ReflectLowerer::emitReflectNew(NewExpr *expr) {
 
 void ReflectLowerer::useErrors(const Type *errorType) {
   lowering_.builder_.CreateCall(
-      lowering_.unknownLowerer().unknownFunction("tz_reflect_errors", lowering_.builder_.getVoidTy(),
-                                                 {lowering_.builder_.getPtrTy()}),
+      lowering_.unknownLowerer().unknownFunction(
+          "tz_reflect_errors", lowering_.builder_.getVoidTy(), {lowering_.builder_.getPtrTy()}),
       {lowering_.resultLowerer().failureMaker(errorType)});
 }
 

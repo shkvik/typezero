@@ -60,9 +60,6 @@ Expr *ClassMemberChecker::checkClassMember(MemberExpr *member, const Type *expec
   checker_.classDeclarer().completeClass(cls);
   member->type = Type::error();
   llvm::StringRef name = member->name;
-  if (derivesFromError(cls) && name == "stack") {
-    return checker_.throwChecker().checkErrorStack(member);
-  }
   if (Expr *date = checker_.fsDeclarer().checkStatsDate(member, cls)) {
     return date;
   }
@@ -164,12 +161,6 @@ const Type *ClassMemberChecker::checkFieldTarget(MemberExpr *member, bool compou
   llvm::StringRef name = member->name;
   const ClassDecl *owner = nullptr;
   const ClassField *field = ClassBases::findField(cls, name, &owner);
-  if (derivesFromError(cls) && name == "stack") {
-    checker_.diags_.error(member->loc(),
-                          "'stack' cannot be assigned: it is made from the places the error "
-                          "passed on its way up");
-    return Type::error();
-  }
   if (cls == checker_.statsClass_ && checker_.fsDeclarer().checkStatsDate(member, cls)) {
     checker_.diags_.error(member->loc(),
                           "'" + name + "' cannot be assigned: it is made from '" + name +

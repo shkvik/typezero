@@ -1,8 +1,6 @@
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
 #include "compiler/check/checker/checker.h"
 #include "compiler/library/regex/regex_lowerer/regex_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
@@ -95,12 +93,9 @@ llvm::Function *GeneratorLowerer::iterCloseFunction() {
   llvm::BasicBlock *entry = llvm::BasicBlock::Create(lowering_.ctx_, "entry", iterCloseFn_);
   llvm::BasicBlock *checkBlock = llvm::BasicBlock::Create(lowering_.ctx_, "waits", iterCloseFn_);
   llvm::BasicBlock *closeBlock = llvm::BasicBlock::Create(lowering_.ctx_, "close", iterCloseFn_);
-  llvm::BasicBlock *failedBlock =
-      llvm::BasicBlock::Create(lowering_.ctx_, "close.failed", iterCloseFn_);
-  llvm::BasicBlock *closedBlock = llvm::BasicBlock::Create(lowering_.ctx_, "closed", iterCloseFn_);
   llvm::BasicBlock *endBlock = llvm::BasicBlock::Create(lowering_.ctx_, "end", iterCloseFn_);
   llvm::IRBuilder<> b(entry);
-  llvm::Type *ptr = b.getPtrTy(), *i32 = b.getInt32Ty();
+  llvm::Type *i32 = b.getInt32Ty();
   llvm::Value *frame =
       b.CreateConstInBoundsGEP1_64(b.getInt8Ty(), iterCloseFn_->getArg(0), kHeaderSize, "frame");
   b.CreateCondBr(
@@ -114,9 +109,7 @@ llvm::Function *GeneratorLowerer::iterCloseFunction() {
   llvm::Value *close = b.CreateStructGEP(lowering_.promiseTy_, promise, kClose);
   b.CreateCondBr(b.CreateICmpEQ(b.CreateLoad(i32, close), b.getInt32(1)), closeBlock, endBlock);
   b.SetInsertPoint(closeBlock);
-  llvm::Value *saved = b.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(b), "saved");
   llvm::Value *null = llvm::ConstantPointerNull::get(b.getPtrTy());
-  b.CreateStore(null, lowering_.throwLowerer().thrownSlot(b));
   b.CreateStore(b.getInt32(2), close);
   for (unsigned field : {kOut, kIn, kRet}) {
     b.CreateStore(null, b.CreateStructGEP(lowering_.promiseTy_, promise, field));
@@ -126,13 +119,6 @@ llvm::Function *GeneratorLowerer::iterCloseFunction() {
   b.CreateCall(lowering_.coroutineLowerer().coroIntrinsic(llvm::Intrinsic::coro_resume), {frame});
   b.CreateStore(b.getInt32(0), running);
   b.CreateStore(b.getInt32(0), close);
-  llvm::Value *error = b.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(b), "error");
-  b.CreateCondBr(b.CreateIsNotNull(error), failedBlock, closedBlock);
-  b.SetInsertPoint(failedBlock);
-  b.CreateCall(lowering_.objReleaseFn_, {error});
-  b.CreateBr(closedBlock);
-  b.SetInsertPoint(closedBlock);
-  b.CreateStore(saved, lowering_.throwLowerer().thrownSlot(b));
   b.CreateBr(endBlock);
   b.SetInsertPoint(endBlock);
   b.CreateRetVoid();
@@ -177,9 +163,7 @@ void GeneratorLowerer::emitGenerator(FunctionDecl *fn, llvm::Function *function)
   if (lowering_.functionFrame().blockIsOpen()) {
     lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
-  lowering_.unwindLowerer().finishScopeUnwind(0);
   lowering_.scopes_.pop_back();
-  lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.coroutineLowerer().finishCoroutine();
   lowering_.coro_ = nullptr;
   lowering_.function_ = nullptr;
@@ -353,9 +337,7 @@ void GeneratorLowerer::emitPendingIterators() {
     if (lowering_.functionFrame().blockIsOpen()) {
       lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
     }
-    lowering_.unwindLowerer().finishScopeUnwind(0);
     lowering_.scopes_.pop_back();
-    lowering_.unwindLowerer().finishFunctionUnwind();
     lowering_.coroutineLowerer().finishCoroutine();
     lowering_.coro_ = nullptr;
     lowering_.function_ = nullptr;

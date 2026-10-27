@@ -713,9 +713,7 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
     break;
   case TZ_T_OBJECT: {
     const TzInstance *object = *(const TzInstance *const *)value;
-    if (object && (object->layout->flags & TZ_LAYOUT_ERROR)) {
-      tz_buf_error_text(out, object);
-    } else if (object && (object->layout->flags & TZ_LAYOUT_REGEX)) {
+    if (object && (object->layout->flags & TZ_LAYOUT_REGEX)) {
       tz_buf_regex(out, (const TzRegex *)object);
     } else if (object && (object->layout->flags & TZ_LAYOUT_DATE)) {
       TzStr text;

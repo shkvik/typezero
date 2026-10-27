@@ -18,8 +18,6 @@
 #include "compiler/lower/async/async_builtin_lowerer/async_builtin_lowerer.h"
 #include "compiler/lower/classes/class_lowerer/class_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/iterators/iterator_lowerer/iterator_lowerer.h"
@@ -120,9 +118,6 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
     }
     if (isDictBuiltin(call->builtin)) {
       return lowering_.dictMethodLowerer().emitDictCall(call);
-    }
-    if (call->builtin == Builtin::ErrorStack || call->builtin == Builtin::ErrorToString) {
-      return lowering_.errorLowerer().emitErrorBuiltin(call);
     }
     if (cast<MemberExpr>(call->callee)->object->type->isArray()) {
       return lowering_.arrayMethodLowerer().emitArrayMethod(call);

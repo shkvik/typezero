@@ -21,7 +21,7 @@ bool linkExecutable(const llvm::Triple &triple, llvm::ArrayRef<std::string> inpu
       "/nologo",
       "/subsystem:console",
       "/incremental:no",
-      "/stack:8388608",
+      "/stack:1073741824",
       triple.getArch() == llvm::Triple::aarch64 ? "/machine:arm64" : "/machine:x64",
       "/out:" + output.str(),
   };

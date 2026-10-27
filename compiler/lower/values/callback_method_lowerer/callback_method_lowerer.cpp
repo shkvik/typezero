@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_callback_lowerer/bytes_callback_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -43,11 +41,8 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   llvm::Type *i64 = lowering_.builder_.getInt64Ty();
   Builtin method = call->builtin;
 
-  bool throws = false;
   llvm::Value *array = lowering_.exprLowerer().emitExpr(member->object);
-  llvm::Value *heldArray = array;
   llvm::Value *callback = lowering_.exprLowerer().emitExpr(call->args[0]);
-  llvm::Value *heldCallback = callback;
   llvm::Value *init =
       call->args.size() > 1 ? lowering_.exprLowerer().emitExpr(call->args[1]) : nullptr;
 
@@ -55,8 +50,8 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
     llvm::Value *context = lowering_.functionFrame().spill(callback, "compare");
     lowering_.builder_.CreateCall(lowering_.rt_.arrSortWith,
                                   {array, sortComparator(call), context});
-    lowering_.refCounts().releaseValue(heldCallback, callbackType);
-    return heldArray;
+    lowering_.refCounts().releaseValue(callback, callbackType);
+    return array;
   }
 
   bool reduce = method == Builtin::ArrReduce || method == Builtin::ArrReduceRight;
@@ -99,7 +94,6 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   if (out) {
     lowering_.groupLowerer().noteUnstored(out, call);
   }
-  llvm::Value *heldOut = out;
   llvm::Value *resultSlot = nullptr;
   if (!reduce && !out && method != Builtin::ArrForEach) {
     resultSlot = lowering_.functionFrame().createStackSlot(
@@ -152,9 +146,7 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   if (passes == valueArgs + 2) {
     lowering_.refCounts().retainValue(array, arrayType);
   }
-  llvm::Value *heldElement = value;
   llvm::Value *result = lowering_.closureLowerer().callFunctionValue(callback, callbackType, args);
-  heldElement;
   const Type *resultType = callbackType->ret();
 
   llvm::BasicBlock *foundBlock = nullptr;
@@ -248,10 +240,10 @@ llvm::Value *CallbackMethodLowerer::emitCallbackMethod(CallExpr *call) {
   lowering_.builder_.CreateBr(headBlock);
 
   lowering_.functionFrame().switchTo(endBlock);
-  lowering_.refCounts().releaseValue(heldCallback, callbackType);
-  lowering_.refCounts().releaseValue(heldArray, arrayType);
+  lowering_.refCounts().releaseValue(callback, callbackType);
+  lowering_.refCounts().releaseValue(array, arrayType);
   if (out) {
-    return heldOut;
+    return out;
   }
   if (reduce) {
     return reduceResult(call, length, accSlot, accType);
@@ -328,17 +320,6 @@ llvm::Function *CallbackMethodLowerer::sortComparator(CallExpr *call) {
   llvm::Function *outer = lowering_.function_;
   lowering_.function_ = fn;
   lowering_.builder_.SetInsertPoint(llvm::BasicBlock::Create(lowering_.ctx_, "entry", fn));
-  if (false) {
-    llvm::BasicBlock *thrownBlock = llvm::BasicBlock::Create(lowering_.ctx_, "thrown", fn);
-    llvm::BasicBlock *compareBlock = llvm::BasicBlock::Create(lowering_.ctx_, "compare", fn);
-    lowering_.builder_.CreateCondBr(
-        lowering_.builder_.CreateIsNotNull(lowering_.builder_.CreateLoad(
-            lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot())),
-        thrownBlock, compareBlock);
-    lowering_.builder_.SetInsertPoint(thrownBlock);
-    lowering_.builder_.CreateRet(lowering_.builder_.getInt32(0));
-    lowering_.builder_.SetInsertPoint(compareBlock);
-  }
   llvm::Value *callback = lowering_.builder_.CreateLoad(lowering_.fnTy_, fn->getArg(0), "compare");
   size_t passes = std::min<size_t>(callbackType->params().size(), 2);
   std::vector<llvm::Value *> args;

@@ -1,6 +1,4 @@
 #include "compiler/lower/objects/dict_method_lowerer/dict_method_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -161,10 +159,7 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
     Expr *keyExpr = call->args[0], *valueExpr = call->args[1];
     const Type *resultType = call->type;
     llvm::Value *m = lowering_.exprLowerer().emitExpr(receiver);
-    llvm::Value *heldMap = m;
     llvm::Value *kv = lowering_.exprLowerer().emitExpr(keyExpr);
-    llvm::Value *heldKey =
-        kv;
     llvm::Value *entry = lowering_.dictLowerer().emitDictFind(m, kv, key);
     llvm::BasicBlock *lookBlock = lowering_.functionFrame().newBlock("nullish.look");
     llvm::BasicBlock *keepBlock = lowering_.functionFrame().newBlock("nullish.keep");
@@ -199,8 +194,8 @@ llvm::Value *DictMethodLowerer::emitDictCall(CallExpr *call) {
         lowering_.builder_.CreatePHI(lowering_.moduleBuilder().lower(resultType), 2);
     result->addIncoming(kept, keepEnd);
     result->addIncoming(assigned, assignEnd);
-    lowering_.refCounts().releaseValue(heldKey, key);
-    lowering_.refCounts().releaseValue(heldMap, type);
+    lowering_.refCounts().releaseValue(kv, key);
+    lowering_.refCounts().releaseValue(m, type);
     return result;
   }
   default: {
@@ -274,7 +269,6 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   Lowering::Producer producer = lowering_.inlineGeneratorLowerer().prepare(source);
   llvm::Value *map = lowering_.builder_.CreateCall(create, {descriptor}, "map");
   lowering_.groupLowerer().noteUnstored(map, call);
-  llvm::Value *held = map;
   size_t depth = lowering_.scopes_.size();
   llvm::BasicBlock *endBlock = lowering_.functionFrame().newBlock("dict.filled");
   const Type *key = type->keyType(), *value = type->valueType();
@@ -311,7 +305,7 @@ llvm::Value *DictMethodLowerer::emitDictNew(CallExpr *call) {
   };
   producer.run(consumer);
   lowering_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = held;
+  llvm::Value *result = map;
   lowering_.functionFrame().popScope();
 
   return result;
@@ -333,7 +327,6 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   lowering_.builder_.CreateStore(lowering_.exprLowerer().emitExpr(call->args[1]), callback);
   llvm::Value *map = lowering_.builder_.CreateCall(
       lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}), {layout.descriptor}, "map");
-  llvm::Value *held = map;
   llvm::Type *i32 = lowering_.builder_.getInt32Ty();
   if (type->isRecord()) {
     lowering_.builder_.CreateStore(lowering_.builder_.getInt32(4),
@@ -353,11 +346,8 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
     lowering_.builder_.CreateStore(
         lowering_.builder_.CreateAdd(count, lowering_.builder_.getInt32(1)), counter);
     lowering_.refCounts().retainValue(item, element);
-    llvm::Value *heldItem =
-        item;
     llvm::Value *k = lowering_.lazyChainLowerer().callCallback(
         callback, callbackType, {item, count}, {element, Type::intTy()});
-    item = heldItem;
     llvm::Value *added;
     llvm::Value *entry = lowering_.dictLowerer().emitDictAdd(map, k, key, &added);
     lowering_.refCounts().releaseValue(k, key);
@@ -381,7 +371,7 @@ llvm::Value *DictMethodLowerer::emitGroupBy(CallExpr *call) {
   };
   producer.run(consumer);
   lowering_.functionFrame().emitBlock(endBlock);
-  llvm::Value *result = held;
+  llvm::Value *result = map;
   lowering_.functionFrame().popScope();
 
   return result;

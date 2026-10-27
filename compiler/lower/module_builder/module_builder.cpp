@@ -5,8 +5,6 @@
 #include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
@@ -126,7 +124,6 @@ std::unique_ptr<llvm::Module> ModuleBuilder::generate(SourceFile &file) {
     lowering_.classDescriptors().declareMethods(cls);
   }
   lowering_.tailCallLowerer().findTailGroups(functions);
-  false.analyzeThrows(file);
   declareGlobals(file);
   for (FunctionDecl *fn : functions) {
     lowering_.functionBuilder().emitFunction(fn);
@@ -266,7 +263,6 @@ void ModuleBuilder::emitMain(SourceFile &file) {
   lowering_.functionBuilder().setFunctionAttributes(main);
   lowering_.functionBuilder().beginFunction(main, nullptr);
   mainInit_ = lowering_.builder_.CreateCall(lowering_.rt_.init);
-  lowering_.errorLowerer().emitErrorSupport();
   lowering_.functionFrame().pushScope();
   llvm::Type *voidTy = lowering_.builder_.getVoidTy(), *ptr = lowering_.builder_.getPtrTy();
   if (asyncMain) {

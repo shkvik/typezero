@@ -87,9 +87,8 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
           ref.loc, "class '" + cls->name + "' cannot extend itself" +
                        (parent == cls ? std::string() : " through '" + parent->name.str() + "'"));
     } else if (checker_.fsDeclarer().isRuntimeClass(parent)) {
-      checker_.diags_.error(
-          ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
-                       "': only the functions of node:fs make its objects");
+      checker_.diags_.error(ref.loc, "class '" + cls->name + "' cannot extend '" + parent->name +
+                                         "': only the functions of node:fs make its objects");
     } else if (parent && parent->baseExpr && !parent->resolved) {
       checker_.diags_.error(ref.loc,
                             "class '" + cls->name + "' cannot extend '" + parent->name +
@@ -115,9 +114,8 @@ void ClassBases::resolveClassBases(ClassDecl *cls) {
     } else if (!found && isErrorClass(ref.name)) {
       checker_.diags_.error(ref.loc, "there is no '" + ref.name +
                                          "' in tz: an error is a value; make '" + cls->name +
-                                         "' a type of object with a tag, e.g. 'type " +
-                                         cls->name + " = { code: \"" + cls->name +
-                                         "\"; message: string }'");
+                                         "' a type of object with a tag, e.g. 'type " + cls->name +
+                                         " = { code: \"" + cls->name + "\"; message: string }'");
     } else if (found) {
       std::string message =
           "'" + ref.name.str() + "' is not a class, and a class can extend only a class";

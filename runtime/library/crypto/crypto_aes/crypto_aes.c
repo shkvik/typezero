@@ -154,7 +154,7 @@ static int64_t gcm_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t
   }
   if (failed) {
     if (!c->quiet) {
-      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
+      tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
     }
     return -1;
   }
@@ -184,7 +184,7 @@ static int64_t gcm_final(TzCipher *c, uint8_t *out) {
   }
   if (!ok) {
     if (!c->quiet) {
-      tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+      tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
     }
     return -1;
   }

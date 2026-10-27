@@ -324,12 +324,6 @@ Expr *CallChecker::checkCall(CallExpr *call, const Type *expected) {
       return checkDirectCall(call, known->sym, name->loc());
     }
     if (!entry.var && !entry.func) {
-      if (entry.cls && entry.cls == checker_.throwChecker().errorKindClass(name->name) &&
-          name->typeArgs.empty() && !call->optional && !call->hasSpread()) {
-        auto *made = checker_.ctx_.make<NewExpr>(call->loc(), name->name, std::vector<TypeRef>{},
-                                                 call->args);
-        return checker_.exprChecker().checkExpr(made, expected);
-      }
       if (const char *why = !entry.cls ? whyUnsupported(name->name) : nullptr) {
         checker_.diags_.error(name->loc(), "'" + name->name + "' is not supported: " + why);
       } else if (!checker_.nameChecker().checkName(name)->type->isError()) {

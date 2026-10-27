@@ -131,7 +131,7 @@ static void nat_reserve(Nat *x, uint64_t cap) {
     return;
   }
   if (cap > (UINT64_C(1) << 28)) {
-    tz_panicf("RangeError: Maximum decimal size exceeded");
+    tz_panicf("Maximum decimal size exceeded");
   }
   uint64_t grown = (uint64_t)x->cap * 2;
   uint32_t c = (uint32_t)(cap < 4 ? 4 : cap > grown ? cap : grown);

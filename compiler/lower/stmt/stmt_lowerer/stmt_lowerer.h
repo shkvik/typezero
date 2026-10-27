@@ -16,7 +16,6 @@ public:
   void emitReturnValue(Expr *value);
   void emitDiscarded(Expr *expr);
   void storeReplacing(llvm::Value *address, llvm::Value *value, const Type *type);
-  static const CallExpr *returnedCall(const Expr *value);
 
 private:
   Lowering &lowering_;

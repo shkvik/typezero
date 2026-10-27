@@ -21,83 +21,6 @@ namespace tz {
 
 ThrowChecker::ThrowChecker(Checker &checker) : checker_(checker) {}
 
-void ThrowChecker::declareErrorClass() {
-  auto *cls = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), "Error");
-  cls->builtin = true;
-  cls->resolved = cls->declared = true;
-  checker_.classes_.push_back(cls);
-  Type *type = Type::classType("Error", cls);
-  cls->type = type;
-  const Type *optionalError = Type::optional(type);
-  auto field = [&](llvm::StringRef name, const Type *fieldType) {
-    ClassField f;
-    f.name = name;
-    f.resolved = fieldType;
-    f.optional = fieldType->isOptional();
-    f.access = name.starts_with("#") ? Access::Private : Access::Public;
-    cls->fields.push_back(f);
-  };
-  field("message", Type::string());
-  field("name", Type::string());
-  field("cause", optionalError);
-  field("#frames", Type::array(Type::longTy()));
-  std::vector<Field> fields;
-  for (const ClassField &f : cls->fields) {
-    fields.push_back({f.name.str(), f.resolved, false});
-  }
-  type->defineFields(std::move(fields));
-
-  auto *ctor = checker_.ctx_.make<FunctionDecl>(llvm::SMLoc(), "constructor");
-  ctor->cls = cls;
-  ctor->isConstructor = true;
-  ctor->body = checker_.ctx_.make<BlockStmt>(llvm::SMLoc());
-  ctor->checked = true;
-  FuncSymbol *sym = checker_.ctx_.newFunc();
-  sym->name = "constructor";
-  sym->decl = ctor;
-  sym->ret = Type::voidTy();
-  const Type *options = Type::object({{"cause", optionalError, false}});
-  const std::pair<llvm::StringRef, const Type *> params[] = {{"message", Type::string()},
-                                                             {"options", options}};
-  for (const auto &[name, paramType] : params) {
-    Param param;
-    param.name = name;
-    param.optional = true;
-    param.declaredType = Type::optional(paramType);
-    ctor->params.push_back(param);
-    sym->params.push_back(Type::optional(paramType));
-  }
-  ctor->sym = sym;
-  cls->constructors.push_back(ctor);
-  checker_.errorClass_ = cls;
-
-  checker_.errorKinds_ = {cls};
-  for (size_t k = 1; k < std::size(kErrorKinds); ++k) {
-    auto *kind = checker_.ctx_.make<ClassDecl>(llvm::SMLoc(), kErrorKinds[k]);
-    kind->builtin = true;
-    kind->resolved = kind->declared = true;
-    kind->parent = cls;
-    cls->children.push_back(kind);
-    Type *kindType = Type::classType(kErrorKinds[k], kind);
-    kind->type = kindType;
-    kindType->defineFields(std::vector<Field>(type->fields().begin(), type->fields().end()));
-    checker_.classBases().addBase(kindType, type);
-    checker_.errorKinds_.push_back(kind);
-  }
-}
-
-ClassDecl *ThrowChecker::errorKindClass(llvm::StringRef name) const {
-  int kind = errorKindIndex(name);
-
-  return kind >= 0 && size_t(kind) < checker_.errorKinds_.size()
-             ? checker_.errorKinds_[size_t(kind)]
-             : nullptr;
-}
-
-bool ThrowChecker::isErrorType(const Type *type) const {
-  return checker_.errorClass_ && type && derivesFromError(type->classDecl());
-}
-
 void ThrowChecker::checkThrow(ThrowStmt *stmt) {
   checker_.diags_.error(stmt->loc(), "there is no 'throw' in tz: an error is a value; return it, "
                                      "'return err(...)', and give the function a 'Result'");
@@ -137,20 +60,7 @@ void ThrowChecker::checkTry(TryStmt *stmt) {
     checker_.pushScope();
     VarDeclarator &param = stmt->param;
     if (!param.name.empty()) {
-      const Type *caught = checker_.errorClass_->type;
-      if (param.typeAnn) {
-        const TypeRef &ref = *param.typeAnn;
-        if (ref.kind == TypeRef::Kind::Name && ref.name == "unknown") {
-          caught = Type::unknown();
-        } else if (!isErrorType(checker_.typeResolver().resolveType(ref, false))) {
-          checker_.diags_.error(ref.loc, "the caught value is always an Error; leave out the type, "
-                                         "'catch (" +
-                                             param.name +
-                                             ")', and tell kinds apart with "
-                                             "'instanceof'");
-        }
-      }
-      param.sym = checker_.scopes().declareVar(param.name, param.loc, caught, false);
+      param.sym = checker_.scopes().declareVar(param.name, param.loc, Type::error(), false);
     }
     checker_.stmtChecker().checkStmt(stmt->handler);
     checker_.popScope();
@@ -168,25 +78,6 @@ void ThrowChecker::checkTry(TryStmt *stmt) {
   for (Checker::JumpTarget &target : checker_.targets_) {
     target.breaks = withoutChanges(target.breaks, finallyScan);
   }
-}
-
-Expr *ThrowChecker::checkErrorStack(MemberExpr *member) {
-  return checker_.processChecker().builtinCall(member->loc(), member, Builtin::ErrorStack, {},
-                                               Type::string());
-}
-
-Expr *ThrowChecker::checkErrorMethod(CallExpr *call, MemberExpr *member) {
-  if (member->name != "toString") {
-    return nullptr;
-  }
-  if (!checker_.argumentChecker().checkArity(call, member->loc(), 0, 0)) {
-    return call;
-  }
-  call->builtin = Builtin::ErrorToString;
-  call->type = Type::string();
-  member->type = Type::function({}, 0, false, Type::string());
-
-  return call;
 }
 
 }

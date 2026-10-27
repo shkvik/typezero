@@ -1,8 +1,6 @@
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -15,6 +13,7 @@
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/loop_lowerer/loop_lowerer.h"
 #include "compiler/lower/stmt/switch_lowerer/switch_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -83,6 +82,7 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
   case Stmt::Kind::Empty:
   case Stmt::Kind::TypeAlias:
   case Stmt::Kind::Enum:
+  case Stmt::Kind::Throw:
     break;
   case Stmt::Kind::Class:
     if (!cast<ClassDecl>(stmt)->expression) {
@@ -91,9 +91,6 @@ void StmtLowerer::emitStmt(Stmt *stmt) {
     break;
   case Stmt::Kind::Debugger:
     lowering_.builder_.CreateCall(lowering_.rt_.debugger);
-    break;
-  case Stmt::Kind::Throw:
-    lowering_.throwLowerer().emitThrowStmt(cast<ThrowStmt>(stmt));
     break;
   case Stmt::Kind::Try:
     lowering_.tryLowerer().emitTry(cast<TryStmt>(stmt));
@@ -196,54 +193,7 @@ void StmtLowerer::emitReturn(ReturnStmt *stmt) {
     lowering_.tailCallLowerer().emitTailReturn(stmt->value);
     return;
   }
-  const CallExpr *outer = lowering_.returnCall_;
-  if (stmt->value && lowering_.currentFn_ && lowering_.recursive_.contains(lowering_.currentFn_) &&
-      !lowering_.inline_ && !lowering_.coro_ &&
-      !lowering_.tryLowerer().finallyBetween(~size_t(0))) {
-    lowering_.returnCall_ = returnedCall(stmt->value);
-  }
   emitReturnValue(stmt->value);
-  lowering_.returnCall_ = outer;
-}
-
-const CallExpr *StmtLowerer::returnedCall(const Expr *value) {
-  if (!value->type || !(value->type->isNumeric() || value->type->isBool())) {
-    return nullptr;
-  }
-  if (auto *call = dyn_cast<CallExpr>(value)) {
-    return call->builtin == Builtin::None && (call->func || call->method) ? call : nullptr;
-  }
-  if (auto *conv = dyn_cast<CastExpr>(value)) {
-    return conv->isImplicit() && !conv->shortCircuit && conv->operand->type->isNumeric()
-               ? returnedCall(conv->operand)
-               : nullptr;
-  }
-  if (auto *unary = dyn_cast<UnaryExpr>(value)) {
-    return unary->op == UnaryOp::Neg || unary->op == UnaryOp::Not || unary->op == UnaryOp::BitNot
-               ? returnedCall(unary->operand)
-               : nullptr;
-  }
-  auto *bin = dyn_cast<BinaryExpr>(value);
-  if (!bin || !bin->lhs->type->isNumeric()) {
-    return nullptr;
-  }
-  switch (bin->op) {
-  case BinaryOp::Add:
-  case BinaryOp::Sub:
-  case BinaryOp::Mul:
-  case BinaryOp::BitAnd:
-  case BinaryOp::BitOr:
-  case BinaryOp::BitXor:
-  case BinaryOp::Lt:
-  case BinaryOp::Le:
-  case BinaryOp::Gt:
-  case BinaryOp::Ge:
-  case BinaryOp::Eq:
-  case BinaryOp::Ne:
-    return returnedCall(bin->rhs);
-  default:
-    return nullptr;
-  }
 }
 
 void StmtLowerer::emitReturnValue(Expr *expr) {

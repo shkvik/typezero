@@ -1,5 +1,4 @@
 #include "compiler/library/math/math_lowerer/math_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
@@ -84,7 +83,7 @@ llvm::Value *MathLowerer::emitMathCall(CallExpr *call) {
                                     llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
     lowering_.functionFrame().switchTo(badBlock);
     lowering_.builder_.CreateCall(lowering_.rt_.checkedInt32OfLong, {x});
-    lowering_.throwLowerer().emitRuntimeThrow();
+    lowering_.builder_.CreateUnreachable();
     lowering_.functionFrame().switchTo(okBlock);
     return lowering_.builder_.CreateTrunc(x, lowering_.builder_.getInt32Ty());
   }

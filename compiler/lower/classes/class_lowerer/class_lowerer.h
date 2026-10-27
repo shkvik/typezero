@@ -19,7 +19,6 @@ public:
   void emitConstruct(llvm::Value *object, const ClassDecl *cls, const FuncSymbol *ctor,
                      llvm::ArrayRef<llvm::Value *> args);
   llvm::Value *emitSuperCall(CallExpr *call);
-  bool constructionThrows(const ClassDecl *cls, const FuncSymbol *ctor) const;
 
 private:
   Lowering &lowering_;

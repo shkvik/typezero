@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -47,9 +45,9 @@ bool isSignedKind(Bytes kind) {
 
 BytesCallSite::BytesCallSite(Lowering &lowering, CallExpr *call)
     : lowering_(lowering), call(call), member(dyn_cast<MemberExpr>(call->callee)), type(call->type),
-      throws(bytesMayThrow(call)), voidTy(lowering.builder_.getVoidTy()),
-      i32(lowering.builder_.getInt32Ty()), i64(lowering.builder_.getInt64Ty()),
-      f64(lowering.builder_.getDoubleTy()), ptr(lowering.builder_.getPtrTy()) {}
+      voidTy(lowering.builder_.getVoidTy()), i32(lowering.builder_.getInt32Ty()),
+      i64(lowering.builder_.getInt64Ty()), f64(lowering.builder_.getDoubleTy()),
+      ptr(lowering.builder_.getPtrTy()) {}
 
 llvm::FunctionCallee BytesCallSite::fn(llvm::StringRef name, llvm::Type *ret,
                                        llvm::ArrayRef<llvm::Type *> params) {

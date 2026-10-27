@@ -1,8 +1,6 @@
 #include "compiler/library/intl/intl_call_lowerer/intl_call_lowerer.h"
 #include "compiler/library/intl/intl_lowerer/intl_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -42,97 +40,6 @@ int optionIndex(llvm::StringRef name) {
   return at == std::end(kOptionNames) ? -1 : int(at - std::begin(kOptionNames));
 }
 
-const Expr *withoutCasts(const Expr *e) {
-  while (auto *cast = dyn_cast<CastExpr>(e)) {
-    if (!cast->isImplicit()) {
-      break;
-    }
-    e = cast->operand;
-  }
-
-  return e;
-}
-
-bool isLiteralText(const Expr *e) {
-  e = withoutCasts(e);
-  auto *tmpl = dyn_cast<TemplateExpr>(e);
-
-  return llvm::isa<StringLitExpr>(e) || (tmpl && tmpl->exprs.empty());
-}
-
-bool isLiteralNumber(const Expr *e) {
-  e = withoutCasts(e);
-  if (auto *unary = dyn_cast<UnaryExpr>(e); unary && unary->op == UnaryOp::Neg) {
-    e = withoutCasts(unary->operand);
-  }
-
-  return llvm::isa<IntLitExpr, FloatLitExpr>(e);
-}
-
-bool isLiteralValue(const Expr *e) {
-  return isLiteralText(e) || isLiteralNumber(e) ||
-         llvm::isa<BoolLitExpr, UndefinedExpr>(withoutCasts(e));
-}
-
-bool optionsMayThrow(const Expr *locale, const Expr *options) {
-  if (locale && !locale->type->isUndefined() && !isLiteralText(locale)) {
-    return true;
-  }
-  if (!options || options->type->isUndefined()) {
-    return false;
-  }
-  auto *literal = dyn_cast<ObjectLitExpr>(withoutCasts(options));
-  if (!literal) {
-    return true;
-  }
-
-  return llvm::any_of(literal->props, [](const ObjectLitExpr::Property &prop) {
-    return prop.spread || !prop.value || !isLiteralValue(prop.value) ||
-           prop.name == "roundingIncrement";
-  });
-}
-
-const Expr *argAt(const CallExpr *call, size_t i) {
-  return i < call->args.size() ? call->args[i] : nullptr;
-}
-
-bool localesMayThrow(const Expr *arg) {
-  if (!arg) {
-    return false;
-  }
-  if (auto *array = dyn_cast<ArrayLitExpr>(withoutCasts(arg))) {
-    return !llvm::all_of(array->elements, [](const ArrayLitExpr::Element &e) {
-      return !e.spread && isLiteralText(e.expr);
-    });
-  }
-
-  return !isLiteralValue(arg);
-}
-
-}
-
-bool intlCallMayThrow(const CallExpr *call) {
-  switch (call->builtin) {
-  case Builtin::IntlNew:
-    return optionsMayThrow(argAt(call, 1), argAt(call, 2));
-  case Builtin::IntlSupportedLocales:
-    return localesMayThrow(argAt(call, 1)) || optionsMayThrow(nullptr, argAt(call, 2));
-  case Builtin::NumToLocale:
-    return optionsMayThrow(argAt(call, 0), argAt(call, 1));
-  case Builtin::StrLocaleCompare:
-    return optionsMayThrow(argAt(call, 1), argAt(call, 2));
-  case Builtin::IntlCanonicalLocales:
-    return localesMayThrow(argAt(call, 0));
-  case Builtin::StrNormalize:
-    return !call->args.empty() && !isLiteralText(call->args[0]);
-  case Builtin::RtfFormat:
-  case Builtin::RtfFormatToParts:
-    return !isLiteralText(call->args[1]) || !isLiteralNumber(call->args[0]);
-  case Builtin::DnOf:
-    return true;
-  default:
-    return false;
-  }
 }
 
 IntlCallLowerer::IntlCallLowerer(Lowering &lowering) : lowering_(lowering) {}
@@ -142,7 +49,6 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
              *i64 = lowering_.builder_.getInt64Ty(), *f64 = lowering_.builder_.getDoubleTy(),
              *ptr = lowering_.builder_.getPtrTy();
   auto *member = dyn_cast<MemberExpr>(call->callee);
-  bool throws = intlCallMayThrow(call);
   auto receiver = [&](size_t from) {
     auto rest = llvm::ArrayRef<Expr *>(call->args).drop_front(std::min(from, call->args.size()));
     Lowering::Operand self = lowering_.refCounts().emitOperand(
@@ -181,10 +87,8 @@ llvm::Value *IntlCallLowerer::emitIntlCall(CallExpr *call) {
     llvm::Value *locales = lowering_.intlLowerer().emitLocaleArray(at(supported ? 1 : 0));
     llvm::Value *result;
     if (supported) {
-      llvm::Value *heldLocales = locales;
       std::vector<Lowering::Operand> held;
       llvm::Value *options = lowering_.intlLowerer().emitIntlOptions(nullptr, at(2), held);
-      locales = heldLocales;
       const std::u16string &text = cast<StringLitExpr>(call->args[0])->value;
       std::string name;
       llvm::convertUTF16ToUTF8String(

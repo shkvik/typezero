@@ -1,7 +1,5 @@
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -141,7 +139,6 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
     for (const ArrayLitExpr::Element &e : lit->elements) {
       exprs.push_back(e.expr);
     }
-    llvm::Value *held = array;
     llvm::Value *data = arrayData(array);
     for (size_t i = 0; i < lit->elements.size(); ++i) {
       llvm::Value *value = lowering_.exprLowerer().emitExpr(lit->elements[i].expr);
@@ -151,7 +148,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
         lowering_.storeLowerer().groupStore(array, value, element);
       }
     }
-    return held;
+    return array;
   }
 
   size_t plain =
@@ -161,7 +158,6 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
       lit->type, lowering_.builder_.getInt64(0), lowering_.builder_.getInt64(plain),
       lowering_.makesMember(lit, lit->type), "array");
   lowering_.groupLowerer().noteUnstored(array, lit);
-  llvm::Value *held = array;
   for (const ArrayLitExpr::Element &e : lit->elements) {
     if (e.spread && (e.expr->type->isIterator() || e.expr->type->isTypedArray())) {
       lowering_.iteratorLowerer().emitIteratorSpread(array, e.expr, element);
@@ -184,7 +180,7 @@ llvm::Value *ArrayLowerer::emitArrayLiteral(ArrayLitExpr *lit) {
     }
   }
 
-  return held;
+  return array;
 }
 
 llvm::Value *

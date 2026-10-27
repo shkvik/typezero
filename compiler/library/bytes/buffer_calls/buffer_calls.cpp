@@ -2,8 +2,6 @@
 #include "compiler/library/bytes/bytes_lower_helpers/bytes_lower_helpers.h"
 #include "compiler/library/bytes/bytes_lowerer/bytes_lowerer.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -72,8 +70,7 @@ llvm::Value *BufferCalls::emit() {
     lowering_.builder_.CreateBr(endBlock);
     lowering_.functionFrame().switchTo(endBlock);
     lowering_.refCounts().dropOperand(fill);
-    llvm::Value *held = made;
-    return held;
+    return made;
   }
   case Builtin::BufferConcat: {
     Lowering::Operand list = lowering_.refCounts().emitOperand(
@@ -213,8 +210,7 @@ llvm::Value *BufferCalls::emit() {
                                       {self.value, value.value, values[0], values[1], has});
       }
       lowering_.refCounts().dropOperand(value);
-      llvm::Value *held = returnSelf(self);
-      return held;
+      return returnSelf(self);
     }
     llvm::Value *mode = lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])));
     if (valueExpr->type->isString()) {
@@ -256,8 +252,7 @@ llvm::Value *BufferCalls::emit() {
     lowering_.builder_.CreateCall(
         fn("tz_buffer_swap", voidTy, {ptr, i32}),
         {self.value, lowering_.builder_.getInt32(uint32_t(constantOf(call->args[0])))});
-    llvm::Value *held = returnSelf(self);
-    return held;
+    return returnSelf(self);
   }
   case Builtin::BufferToJSON: {
     Lowering::Operand self = receiver(0);

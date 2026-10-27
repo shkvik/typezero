@@ -30,16 +30,6 @@ const Type *awaited(const Type *type) { return type->isPromise() ? type->promise
 
 PromiseChecker::PromiseChecker(Checker &checker) : checker_(checker) {}
 
-const Type *PromiseChecker::settledResultType(const Type *value) {
-  std::vector<Field> fields{{"status", Type::string(), false}};
-  if (!value->isVoid() && !value->isNever()) {
-    fields.push_back({"value", Type::optional(value), false});
-  }
-  fields.push_back({"reason", Type::optional(checker_.errorClass_->type), false});
-
-  return Type::object(std::move(fields), "PromiseSettledResult<" + value->name().str() + ">");
-}
-
 const Type *PromiseChecker::resolverType(const Type *value) {
   std::vector<const Type *> params;
   if (!value->isVoid()) {
@@ -47,10 +37,6 @@ const Type *PromiseChecker::resolverType(const Type *value) {
   }
 
   return Type::function(params, params.size(), false, Type::voidTy());
-}
-
-const Type *PromiseChecker::rejecterType() {
-  return Type::function({checker_.errorClass_->type}, 1, false, Type::voidTy());
 }
 
 const Type *PromiseChecker::executorValueType(const Expr *executor) {
@@ -147,21 +133,22 @@ Expr *PromiseChecker::checkPromiseNew(NewExpr *expr, const Type *expected) {
             : checker_.exprChecker().checkExpr(call->args[0]);
     return call;
   }
+  Checker::Signature sig;
+  sig.params = {resolverType(value)};
   if (auto *executor = dyn_cast<FunctionExpr>(call->args[0]);
-      executor && executor->fn->params.size() > 1 &&
-      !checker_.libraryCalls().inLibrary(expr->loc())) {
+      executor && executor->fn->params.size() > 1) {
     checker_.diags_.error(executor->fn->params[1].loc,
                           "a Promise is not rejected in tz, so its function gets only "
                           "'resolve'; an operation that may fail gives a Promise<Result<T, E>>: "
                           "'resolve(err(e))'");
+    sig.params.push_back(Type::error());
   }
-  Checker::Signature sig;
-  sig.params = {resolverType(value), rejecterType()};
-  sig.minArgs = 2;
+  sig.minArgs = sig.params.size();
   sig.ret = Type::voidTy();
   sig.voidResult = true;
   sig.pad = false;
-  call->args[0] = checker_.callbackChecker().checkFunctionArg(call->args[0], sig, 2, "new Promise");
+  call->args[0] = checker_.callbackChecker().checkFunctionArg(
+      call->args[0], sig, unsigned(sig.params.size()), "new Promise");
   checker_.flowChecker().calledFunction();
   call->type = Type::promise(value);
 
@@ -223,31 +210,8 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
 
     return awaited(arg->type->ret());
   };
-  auto both = [&](const Type *a, const Type *b, llvm::SMLoc loc) -> const Type * {
-    if (a->isVoid() && b->isVoid()) {
-      return a;
-    }
-    if (a->isVoid() || a->isUndefined()) {
-      return b->isVoid() ? b : Type::optional(b);
-    }
-    if (b->isVoid() || b->isUndefined()) {
-      return Type::optional(a);
-    }
-    const Type *common = TypeRelations::unify(a, b);
-    if (!common || common->isError()) {
-      checker_.diags_.error(loc,
-                            "'" + name + "' gives '" + a->name() + "' one way and '" + b->name() +
-                                "' the other, and no type holds both; make them give one type");
-      return Type::error();
-    }
-
-    return common;
-  };
-
   const Type *result = nullptr;
-  bool library = checker_.libraryCalls().inLibrary(member->loc());
-  if (!library &&
-      (name == "catch" || name == "finally" || (name == "then" && call->args.size() == 2))) {
+  if (name == "catch" || name == "finally" || (name == "then" && call->args.size() == 2)) {
     return checker_.resultChecker().reject(
         call, name == "then" ? call->args[1]->loc() : member->loc(),
         name == "catch"
@@ -260,38 +224,15 @@ Expr *PromiseChecker::checkPromiseMethod(CallExpr *call, MemberExpr *member, con
             : std::string("'then' takes one function: a Promise is not rejected in tz"));
   }
   if (name == "then") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 2)) {
+    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
       return call;
     }
     call->builtin = Builtin::PromiseThen;
     const Type *onFulfilled = callback(call->args[0], value);
-    const Type *onRejected =
-        call->args.size() > 1 ? callback(call->args[1], checker_.errorClass_->type) : nullptr;
     if (failed) {
       return call;
     }
-    const Type *fulfilled = onFulfilled ? onFulfilled : value;
-    result = onRejected ? both(fulfilled, onRejected, call->loc()) : fulfilled;
-  } else if (name == "catch") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
-      return call;
-    }
-    call->builtin = Builtin::PromiseCatch;
-    const Type *onRejected = callback(call->args[0], checker_.errorClass_->type);
-    if (failed) {
-      return call;
-    }
-    result = onRejected ? both(value, onRejected, call->loc()) : value;
-  } else if (name == "finally") {
-    if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 1)) {
-      return call;
-    }
-    call->builtin = Builtin::PromiseFinally;
-    callback(call->args[0], nullptr);
-    if (failed) {
-      return call;
-    }
-    result = value;
+    result = onFulfilled ? onFulfilled : value;
   } else {
     checker_.diags_.error(member->loc(), "property '" + name + "' does not exist on type '" +
                                              type->name() +

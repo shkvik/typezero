@@ -1,8 +1,6 @@
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/library/decimal/decimal_lowerer/decimal_lowerer.h"
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/binary_lowerer/binary_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"

@@ -3,7 +3,6 @@
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/classes/decorator_lowerer/decorator_lowerer.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
-#include "compiler/lower/errors/error_lowerer/error_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
@@ -110,9 +109,6 @@ void ClassDescriptors::declareMethods(ClassDecl *cls) {
 
 void ClassDescriptors::emitMethods(ClassDecl *cls) {
   if (cls->builtin) {
-    for (FunctionDecl *ctor : cls->constructors) {
-      lowering_.errorLowerer().emitErrorConstructor(ctor);
-    }
     return;
   }
   for (FunctionDecl *fn : instanceMethods(cls)) {
@@ -243,10 +239,7 @@ llvm::Constant *ClassDescriptors::classDescriptor(const ClassDecl *cls) {
   llvm::Constant *className = shown.empty()
                                   ? llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy())
                                   : lowering_.stringLowerer().utf8Constant(shown);
-  uint32_t flags = derivesFromError(cls) ? 512 : 0;
-  if (library) {
-    flags |= 1073741824;
-  }
+  uint32_t flags = library ? 1073741824 : 0;
   llvm::Constant *base = llvm::ConstantStruct::get(
       lowering_.layoutDescTy_,
       {layout.drop, fields, lowering_.builder_.getInt32(uint32_t(entries.size())),

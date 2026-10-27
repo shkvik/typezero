@@ -187,8 +187,6 @@ TzStr net_utf8(const char *text);
 void net_fulfill(TzPromise **p, const void *value, size_t size);
 void net_reject(TzPromise **p, void *error);
 
-void *tz_signal_reason(const void *signal);
-
 TzBytes *net_bytes(const uint8_t *data, size_t length);
 
 extern TzMaker tz_net_make;

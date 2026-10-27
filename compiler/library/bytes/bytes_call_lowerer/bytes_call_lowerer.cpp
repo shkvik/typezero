@@ -8,8 +8,6 @@
 #include "compiler/library/bytes/text_codec_calls/text_codec_calls.h"
 #include "compiler/library/bytes/typed_array_calls/typed_array_calls.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -35,24 +33,6 @@ using llvm::isa;
 using llvm::Value;
 
 namespace tz {
-
-bool bytesMayThrow(const CallExpr *call) {
-  switch (call->builtin) {
-  case Builtin::BufferAllocFill:
-  case Builtin::BufferFill:
-    return true;
-  case Builtin::BufferFromString:
-    return !isConstant(call->args[1]);
-  case Builtin::BufferByteLength:
-    return call->args.size() > 1 && !isConstant(call->args[1]);
-  case Builtin::BufferToString:
-    return !isConstant(call->args[0]);
-  case Builtin::BufferIndexOf:
-    return !isConstant(call->args[2]);
-  default:
-    return false;
-  }
-}
 
 BytesCallLowerer::BytesCallLowerer(Lowering &lowering) : lowering_(lowering) {}
 

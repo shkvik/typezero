@@ -161,8 +161,6 @@ void tz_out_write(const char *data, size_t len) {
   tz_out_len += len;
 }
 
-#define STACK_MARGIN (256 * 1024)
-
 #ifdef _WIN32
 static void crash_trace(EXCEPTION_POINTERS *info) {
   char line[128];
@@ -194,8 +192,7 @@ static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
   if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
-  static const char message[] =
-      "tz: the runtime ran out of stack (Maximum call stack size exceeded)\n";
+  static const char message[] = "panic: stack overflow\n";
   tz_out_flush(1);
   stream_write(&tz_err_stream, message, sizeof message - 1);
   TerminateProcess(GetCurrentProcess(), 2);
@@ -210,12 +207,6 @@ void tz_thread_stack_init(void) {
 #ifdef _WIN32
   ULONG guarantee = 64 * 1024;
   SetThreadStackGuarantee(&guarantee);
-  ULONG_PTR low, high;
-  GetCurrentThreadStackLimits(&low, &high);
-  tz_stack_limit = (char *)low + STACK_MARGIN;
-#else
-  char here;
-  tz_stack_limit = &here - 8 * 1024 * 1024 + STACK_MARGIN;
 #endif
 }
 
@@ -463,6 +454,9 @@ void tz_debugger(void) {
 }
 
 TZ_NORETURN void tz_panic(const char *message, int64_t len) {
+  if (len < 0) {
+    len = (int64_t)strlen(message);
+  }
   tz_out_flush(1);
   stream_write(&tz_err_stream, "panic: ", 7);
   stream_write(&tz_err_stream, message, (size_t)len);

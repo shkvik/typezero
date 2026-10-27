@@ -3,9 +3,6 @@
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -16,7 +13,9 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
 #include "compiler/lower/module_builder/module_builder.h"
+#include "compiler/lower/places/place_lowerer/place_lowerer.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
@@ -34,13 +33,9 @@ namespace tz {
 
 namespace {
 
-constexpr uint64_t kPromiseHeader = 48;
+constexpr uint64_t kPromiseHeader = 40;
 
 constexpr uint64_t kReactorSize = 40;
-
-enum PromiseField : unsigned { kRc, kLayout, kHead, kTail, kError, kState, kFlags };
-
-constexpr uint32_t kFulfilled = 1;
 
 constexpr uint32_t kAsyncFrameAlign = 8;
 
@@ -201,16 +196,11 @@ void AsyncLowerer::emitAsyncFunction(FunctionDecl *fn, llvm::Function *function)
           args[i], param.defaultValue ? Type::optional(param.sym->type) : param.sym->type);
     }
   }
-  if (lowering_.recursive_.contains(fn)) {
-    lowering_.throwLowerer().emitStackCheck(fn->loc());
-  }
   lowering_.stmtLowerer().emitStmt(fn->body);
   if (lowering_.functionFrame().blockIsOpen()) {
     emitAsyncReturn(nullptr);
   }
-  lowering_.unwindLowerer().finishScopeUnwind(0);
   lowering_.scopes_.pop_back();
-  lowering_.unwindLowerer().finishFunctionUnwind();
   finishAsync();
   lowering_.coro_ = nullptr;
   lowering_.async_ = nullptr;
@@ -238,9 +228,7 @@ llvm::Function *AsyncLowerer::emitAsyncMain(SourceFile &file) {
   if (lowering_.functionFrame().blockIsOpen()) {
     emitAsyncReturn(nullptr);
   }
-  lowering_.unwindLowerer().finishScopeUnwind(0);
   lowering_.scopes_.pop_back();
-  lowering_.unwindLowerer().finishFunctionUnwind();
   finishAsync();
   lowering_.coro_ = nullptr;
   lowering_.async_ = nullptr;
@@ -262,19 +250,6 @@ void AsyncLowerer::emitAsyncReturn(llvm::Value *value) {
   lowering_.promiseLowerer().fulfillPromise(object, nullptr, a.value);
   lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
   lowering_.functionFrame().startDeadBlock();
-}
-
-void AsyncLowerer::emitAsyncUnwind() {
-  llvm::Value *error = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "error");
-  lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(lowering_.builder_.getPtrTy()),
-                                 lowering_.throwLowerer().thrownSlot());
-  if (lowering_.async_->generator) {
-    lowering_.asyncGeneratorLowerer().finishAsyncGenerator(error);
-  } else {
-    lowering_.promiseLowerer().rejectPromise(lowering_.async_->object, error);
-  }
-  lowering_.builder_.CreateBr(lowering_.coro_->finalBlock);
 }
 
 void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
@@ -307,13 +282,6 @@ void AsyncLowerer::emitAsyncReturnStmt(ReturnStmt *stmt) {
   lowering_.tryLowerer().emitReturnOf(value->type->isVoid() ? nullptr : result);
 }
 
-llvm::Constant *AsyncLowerer::asyncFrameDescriptor(llvm::SMLoc loc) {
-  std::string name = lowering_.unwindLowerer().frameFunctionName();
-  name = name.empty() ? "async" : "async " + name;
-
-  return lowering_.unwindLowerer().frameDescriptor(loc, &name);
-}
-
 void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   llvm::Type *ptr = lowering_.builder_.getPtrTy();
   uint32_t site = awaiting_ ? lowering_.aheadStarts_.lookup(awaiting_) : 0;
@@ -325,7 +293,7 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
   if (!lowering_.currentFn_) {
     auto *where =
         cast<llvm::GlobalVariable>(lowering_.module_->getOrInsertGlobal("tz_main_await", ptr));
-    lowering_.builder_.CreateStore(lowering_.unwindLowerer().frameDescriptor(loc), where);
+    lowering_.builder_.CreateStore(lowering_.placeLowerer().frameDescriptor(loc), where);
   }
   lowering_.coroutineLowerer().emitSuspend();
 }
@@ -333,27 +301,6 @@ void AsyncLowerer::suspendAsync(llvm::Value *promise, llvm::SMLoc loc) {
 llvm::Value *AsyncLowerer::awaitPromise(llvm::Value *promise, const Type *type, llvm::SMLoc loc) {
   const Type *value = type->promised();
   suspendAsync(promise, loc);
-  llvm::Value *state = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getInt32Ty(), lowering_.promiseLowerer().promiseField(promise, kState),
-      "state");
-  llvm::BasicBlock *fulfilledBlock = lowering_.functionFrame().newBlock("await.fulfilled");
-  llvm::BasicBlock *rejectedBlock = lowering_.functionFrame().newBlock("await.rejected");
-  lowering_.builder_.CreateCondBr(
-      lowering_.builder_.CreateICmpEQ(state, lowering_.builder_.getInt32(kFulfilled)),
-      fulfilledBlock, rejectedBlock, llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-  lowering_.functionFrame().switchTo(rejectedBlock);
-  llvm::Value *error = lowering_.builder_.CreateLoad(
-      lowering_.builder_.getPtrTy(), lowering_.promiseLowerer().promiseField(promise, kError),
-      "error");
-  lowering_.groupLowerer().retainObject(error);
-  lowering_.refCounts().releaseValue(promise, type);
-  lowering_.builder_.CreateStore(error, lowering_.throwLowerer().thrownSlot());
-  lowering_.builder_.CreateCall(
-      lowering_.processLowerer().processFunction("tz_error_frame", lowering_.builder_.getVoidTy(),
-                                                 {lowering_.builder_.getPtrTy()}),
-      {asyncFrameDescriptor(loc)});
-  lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
-  lowering_.functionFrame().switchTo(fulfilledBlock);
   llvm::Value *result = nullptr;
   if (lowering_.promiseLowerer().promiseValueSize(value)) {
     result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(value),

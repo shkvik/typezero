@@ -303,6 +303,15 @@ llvm::Value *ExprLowerer::emitConditional(ConditionalExpr *cond) {
   return phi;
 }
 
+std::vector<llvm::Value *> ExprLowerer::emitExprs(llvm::ArrayRef<Expr *> exprs) {
+  std::vector<llvm::Value *> values;
+  for (Expr *expr : exprs) {
+    values.push_back(emitExpr(expr));
+  }
+
+  return values;
+}
+
 llvm::Value *ExprLowerer::emitConversion(llvm::Value *value, const Type *from, const Type *to) {
   if (from == to) {
     return value;

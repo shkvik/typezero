@@ -2,7 +2,7 @@
 #include "compiler/library/json/json_lowerer/json_lowerer.h"
 #include "compiler/library/reflect/reflect_lowerer/reflect_lowerer.h"
 #include "compiler/library/regex/matcher_builder/matcher_builder.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -163,10 +163,10 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
   llvm::Value *keyObj = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 1);
   llvm::Value *keyMeta = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 2);
   llvm::Value *at = lowering_.builder_.CreateStructGEP(lowering_.jsonPathTy_, link, 3);
-  auto failIfThrown = [&](llvm::function_ref<void()> release) {
+  auto failIfFailed = [&](llvm::function_ref<void()> release) {
     llvm::BasicBlock *failBlock = lowering_.functionFrame().newBlock("json.failed");
     llvm::BasicBlock *goBlock = lowering_.functionFrame().newBlock("json.fits");
-    lowering_.builder_.CreateCondBr(lowering_.throwLowerer().anyFailure(), failBlock, goBlock,
+    lowering_.builder_.CreateCondBr(lowering_.resultLowerer().isFailed(), failBlock, goBlock,
                                     llvm::MDBuilder(lowering_.ctx_).createUnlikelyBranchWeights());
     lowering_.functionFrame().switchTo(failBlock);
     release();
@@ -246,7 +246,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     llvm::SwitchInst *sw = lowering_.builder_.CreateSwitch(kind, badBlock, unsigned(byKind.size()));
     auto build = [&](const Type *member, llvm::Value *j) {
       llvm::Value *value = emitFromJson(member, j, path);
-      failIfThrown([] {});
+      failIfFailed([] {});
       lowering_.builder_.CreateRet(lowering_.exprLowerer().emitConversion(value, member, type));
     };
     auto tryLiteral = [&](const Type *literal, llvm::Value *j, llvm::function_ref<void()> give) {
@@ -311,7 +311,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     llvm::Value *items = lowering_.builder_.CreateCall(
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_array", ptr, {ptr, ptr, ptr, i64}),
         {json, path, typeName, nameLength}, "items");
-    failIfThrown([] {});
+    failIfFailed([] {});
     llvm::Value *length = lowering_.arrayLowerer().arrayLength(items);
     llvm::Value *result = lowering_.groupLowerer().newArray(Type::array(element),
                                                             lowering_.builder_.getInt64(0), length);
@@ -334,7 +334,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
         ptr, lowering_.arrayLowerer().elementAddress(lowering_.arrayLowerer().arrayData(items),
                                                      Type::json(), i));
     llvm::Value *value = emitFromJson(element, item, link);
-    failIfThrown([&] { lowering_.refCounts().releaseValue(result, type); });
+    failIfFailed([&] { lowering_.refCounts().releaseValue(result, type); });
     lowering_.arrayLowerer().emitPush(result, {value}, element);
     i->addIncoming(lowering_.builder_.CreateAdd(i, lowering_.builder_.getInt64(1)),
                    lowering_.builder_.GetInsertBlock());
@@ -346,7 +346,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_object",
                                              lowering_.builder_.getVoidTy(), {ptr, ptr, ptr, i64}),
         {json, path, typeName, nameLength});
-    failIfThrown([] {});
+    failIfFailed([] {});
     const Type *value = type->valueType();
     llvm::Value *record = lowering_.builder_.CreateCall(
         lowering_.dictLowerer().dictFunction("tz_map_new", ptr, {ptr}),
@@ -373,7 +373,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
     lowering_.builder_.CreateStore(lowering_.stringLowerer().stringObj(key), keyObj);
     lowering_.builder_.CreateStore(lowering_.stringLowerer().stringMeta(key), keyMeta);
     llvm::Value *converted = emitFromJson(value, item, link);
-    failIfThrown([&] { lowering_.refCounts().releaseValue(record, type); });
+    failIfFailed([&] { lowering_.refCounts().releaseValue(record, type); });
     llvm::Value *slot = lowering_.dictLowerer().entryValue(
         lowering_.dictLowerer().emitDictAdd(record, key, Type::string()), type);
     lowering_.storeLowerer().storeIn(record, type, slot, converted, value);
@@ -387,7 +387,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
         lowering_.jsonLowerer().jsonFunction("tz_json_expect_object",
                                              lowering_.builder_.getVoidTy(), {ptr, ptr, ptr, i64}),
         {json, path, typeName, nameLength});
-    failIfThrown([] {});
+    failIfFailed([] {});
     llvm::ArrayRef<Field> fields = type->fields();
     lowering_.builder_.CreateStore(llvm::ConstantInt::getSigned(i64, -1), at);
     std::vector<llvm::Value *> values;
@@ -401,7 +401,7 @@ llvm::Function *FromJsonLowerer::fromJsonFunction(const Type *type) {
            lowering_.stringLowerer().stringMeta(key)},
           fields[k].name);
       values.push_back(emitFromJson(fields[k].type, item, link));
-      failIfThrown([&] {
+      failIfFailed([&] {
         for (unsigned made = 0; made < k; ++made) {
           lowering_.refCounts().releaseValue(values[made], fields[made].type);
         }

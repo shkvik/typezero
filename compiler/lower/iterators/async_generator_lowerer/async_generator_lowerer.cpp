@@ -3,9 +3,6 @@
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/async/async_lowerer/async_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
-#include "compiler/lower/errors/try_lowerer/try_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -16,6 +13,7 @@
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/module_builder/module_builder.h"
 #include "compiler/lower/stmt/stmt_lowerer/stmt_lowerer.h"
+#include "compiler/lower/stmt/try_lowerer/try_lowerer.h"
 #include "compiler/lower/types/optional_lowerer/optional_lowerer.h"
 #include "llvm/IR/MDBuilder.h"
 
@@ -37,9 +35,7 @@ constexpr uint32_t kAgenFrameAlign = 8;
 
 constexpr uint32_t kLayoutAsyncGenerator = 268435456 | 536870912;
 
-constexpr unsigned kPromiseState = 5, kPromiseFlags = 6, kPromiseError = 4;
-
-constexpr uint32_t kPromiseFulfilled = 1;
+constexpr unsigned kPromiseFlags = 5;
 
 constexpr uint32_t kPromiseDone = 8;
 
@@ -154,21 +150,18 @@ void AsyncGeneratorLowerer::emitAsyncGenerator(FunctionDecl *fn, llvm::Function 
   if (lowering_.functionFrame().blockIsOpen()) {
     lowering_.coroutineLowerer().emitCoroutineReturn(nullptr, nullptr);
   }
-  lowering_.unwindLowerer().finishScopeUnwind(0);
   lowering_.scopes_.pop_back();
-  lowering_.unwindLowerer().finishFunctionUnwind();
   lowering_.coroutineLowerer().finishCoroutine();
   lowering_.coro_ = nullptr;
   lowering_.async_ = nullptr;
   lowering_.function_ = nullptr;
 }
 
-void AsyncGeneratorLowerer::finishAsyncGenerator(llvm::Value *error) {
-  llvm::Type *ptr = lowering_.builder_.getPtrTy();
+void AsyncGeneratorLowerer::finishAsyncGenerator() {
   lowering_.builder_.CreateCall(
       lowering_.asyncLowerer().asyncFunction("tz_agen_finish", lowering_.builder_.getVoidTy(),
-                                             {ptr, ptr}),
-      {lowering_.async_->object, error ? error : llvm::ConstantPointerNull::get(ptr)});
+                                             {lowering_.builder_.getPtrTy()}),
+      {lowering_.async_->object});
 }
 
 void AsyncGeneratorLowerer::emitAsyncGeneratorReturn(ReturnStmt *stmt) {
@@ -284,25 +277,6 @@ llvm::Value *AsyncGeneratorLowerer::emitAsyncStep(llvm::Value *slot, const Type 
     lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(ptr), slot);
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {held});
   };
-  llvm::Value *state = lowering_.builder_.CreateLoad(
-      i32, lowering_.promiseLowerer().promiseField(step, kPromiseState), "state");
-  llvm::BasicBlock *fulfilledBlock = lowering_.functionFrame().newBlock("for.await.fulfilled");
-  llvm::BasicBlock *rejectedBlock = lowering_.functionFrame().newBlock("for.await.rejected");
-  lowering_.builder_.CreateCondBr(
-      lowering_.builder_.CreateICmpEQ(state, lowering_.builder_.getInt32(kPromiseFulfilled)),
-      fulfilledBlock, rejectedBlock, llvm::MDBuilder(lowering_.ctx_).createLikelyBranchWeights());
-  lowering_.functionFrame().switchTo(rejectedBlock);
-  llvm::Value *error = lowering_.builder_.CreateLoad(
-      ptr, lowering_.promiseLowerer().promiseField(step, kPromiseError), "error");
-  lowering_.builder_.CreateCall(lowering_.objRetainFn_, {error});
-  lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {step});
-  forget();
-  lowering_.builder_.CreateStore(error, lowering_.throwLowerer().thrownSlot());
-  lowering_.builder_.CreateCall(lowering_.processLowerer().processFunction(
-                                    "tz_error_frame", lowering_.builder_.getVoidTy(), {ptr}),
-                                {lowering_.asyncLowerer().asyncFrameDescriptor(loc)});
-  lowering_.builder_.CreateBr(lowering_.unwindLowerer().unwindTarget());
-  lowering_.functionFrame().switchTo(fulfilledBlock);
   llvm::Value *flags = lowering_.builder_.CreateLoad(
       i32, lowering_.promiseLowerer().promiseField(step, kPromiseFlags), "flags");
   llvm::BasicBlock *doneBlock = lowering_.functionFrame().newBlock("for.await.done");
@@ -344,10 +318,6 @@ void AsyncGeneratorLowerer::closeAsyncIterator(llvm::Value *slot) {
     lowering_.functionFrame().switchTo(nextBlock);
     return;
   }
-  llvm::Value *saved =
-      lowering_.builder_.CreateLoad(ptr, lowering_.throwLowerer().thrownSlot(), "saved");
-  lowering_.builder_.CreateStore(llvm::ConstantPointerNull::get(ptr),
-                                 lowering_.throwLowerer().thrownSlot());
   llvm::Value *closed = lowering_.promiseLowerer().newPromise(Type::voidTy());
   lowering_.builder_.CreateCall(
       lowering_.asyncLowerer().asyncFunction("tz_async_iter_close", lowering_.builder_.getVoidTy(),
@@ -355,7 +325,6 @@ void AsyncGeneratorLowerer::closeAsyncIterator(llvm::Value *slot) {
       {it, closed});
   lowering_.asyncLowerer().suspendAsync(closed, lowering_.loc_);
   lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {closed});
-  lowering_.builder_.CreateStore(saved, lowering_.throwLowerer().thrownSlot());
   lowering_.builder_.CreateBr(nextBlock);
   lowering_.functionFrame().switchTo(nextBlock);
 }

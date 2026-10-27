@@ -42,11 +42,6 @@ Expr *MethodCallChecker::checkMethodCall(CallExpr *call, MemberExpr *member, con
       arg = checker_.exprChecker().checkExpr(arg);
     }
   };
-  if (cls->builtin && derivesFromError(cls)) {
-    if (Expr *checked = checker_.throwChecker().checkErrorMethod(call, member)) {
-      return checked;
-    }
-  }
   if (Expr *checked = checker_.fsDeclarer().checkFsClassMethod(call, member, cls)) {
     return checked;
   }
@@ -160,9 +155,9 @@ Expr *MethodCallChecker::checkClassNew(NewExpr *expr, ClassDecl *cls, const Type
     return expr;
   }
   if (checker_.fsDeclarer().isRuntimeClass(cls)) {
-    checker_.diags_.error(expr->loc(), "'new " + cls->name +
-                                           "' is not possible: only the functions of node:fs make " +
-                                           cls->name);
+    checker_.diags_.error(expr->loc(),
+                          "'new " + cls->name +
+                              "' is not possible: only the functions of node:fs make " + cls->name);
     for (Expr *&arg : expr->args) {
       arg = checker_.exprChecker().checkExpr(arg);
     }

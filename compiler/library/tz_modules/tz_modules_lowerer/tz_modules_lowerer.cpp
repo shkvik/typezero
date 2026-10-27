@@ -4,7 +4,6 @@
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_builder/function_builder.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -130,18 +129,6 @@ llvm::Value *TzModulesLowerer::emitResultAdapter(CastExpr *cast) {
       args.push_back(code->getArg(i));
     }
     llvm::Value *result = lowering_.closureLowerer().callFunctionValue(inner, from, args);
-    if (false) {
-      llvm::BasicBlock *thrownBlock = lowering_.functionFrame().newBlock("adapt.thrown");
-      llvm::BasicBlock *okBlock = lowering_.functionFrame().newBlock("adapt.ok");
-      llvm::Value *error = lowering_.builder_.CreateLoad(
-          lowering_.builder_.getPtrTy(), lowering_.throwLowerer().thrownSlot(), "thrown");
-      lowering_.builder_.CreateCondBr(lowering_.builder_.CreateIsNotNull(error), thrownBlock,
-                                      okBlock);
-      lowering_.functionFrame().switchTo(thrownBlock);
-      lowering_.builder_.CreateRet(
-          llvm::Constant::getNullValue(lowering_.moduleBuilder().lower(to->ret())));
-      lowering_.functionFrame().switchTo(okBlock);
-    }
     lowering_.builder_.CreateRet(from->ret() == to->ret() ? result
                                                           : lowering_.exprLowerer().emitConversion(
                                                                 result, from->ret(), to->ret()));

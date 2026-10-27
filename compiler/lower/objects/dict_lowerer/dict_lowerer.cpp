@@ -1,6 +1,4 @@
 #include "compiler/lower/objects/dict_lowerer/dict_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -334,11 +332,6 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
   llvm::Value *map = lowering_.builder_.CreateCall(
       dictFunction("tz_map_new", ptr, {ptr}),
       {lowering_.makesMember(lit, type) ? layout.descriptor : layout.plainDescriptor}, "record");
-  bool throws = llvm::any_of(lit->props, [&](const ObjectLitExpr::Property &p) {
-    return false ||
-           (p.key && false);
-  });
-  llvm::Value *held = map;
   auto put = [&](llvm::Value *k, llvm::Value *v, const Type *from) {
     llvm::Value *entry = emitDictAdd(map, k, string);
     lowering_.storeLowerer().storeIn(map, type, entryValue(entry, type),
@@ -413,7 +406,7 @@ llvm::Value *DictLowerer::emitRecordLiteral(ObjectLitExpr *lit) {
     lowering_.refCounts().dropOperand(from);
   }
 
-  return held;
+  return map;
 }
 
 }

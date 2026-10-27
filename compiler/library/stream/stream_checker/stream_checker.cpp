@@ -5,11 +5,11 @@
 #include "compiler/check/flow/flow_checker/flow_checker.h"
 #include "compiler/check/types/type_relations/type_relations.h"
 #include "compiler/declare/class_declarer/class_declarer.h"
+#include "compiler/declare/prelude/prelude.h"
 #include "compiler/library/events/emitter_checker/emitter_checker.h"
+#include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/result/result_checker/result_checker.h"
 #include "compiler/library/stream/chunk_types/chunk_types.h"
-#include "compiler/declare/prelude/prelude.h"
-#include "compiler/library/fs/fs_checker/fs_checker.h"
 #include "compiler/library/stream/set_encoding_checker/set_encoding_checker.h"
 #include "compiler/library/tz_modules/library_calls/library_calls.h"
 #include "llvm/ADT/STLExtras.h"
@@ -129,7 +129,8 @@ Expr *StreamChecker::checkStreamIntrinsic(CallExpr *call, NameExpr *name, const 
 }
 
 const Type *StreamChecker::streamCallbackType() {
-  return Type::function({Type::optional(checker_.prelude().builtinType("StreamError"))}, 0, false, Type::voidTy());
+  return Type::function({Type::optional(checker_.prelude().builtinType("StreamError"))}, 0, false,
+                        Type::voidTy());
 }
 
 Expr *StreamChecker::streamChunkArg(Expr *arg, const Type *chunk, bool eof, bool writing,
@@ -266,9 +267,9 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
         checker_.chunkTypes().recordStreamChunk(chunk, call->args[i]->type, call->args[i]->loc());
       }
     }
-    call->type = name == "end"
-                     ? Type::promise(Type::result(Type::voidTy(), checker_.prelude().builtinType("StreamError")))
-                     : Type::boolTy();
+    call->type = name == "end" ? Type::promise(Type::result(
+                                     Type::voidTy(), checker_.prelude().builtinType("StreamError")))
+                               : Type::boolTy();
     return call;
   }
   if (reading) {
@@ -276,10 +277,7 @@ Expr *StreamChecker::checkStreamCall(CallExpr *call, MemberExpr *member, ClassDe
       return call;
     }
     args.push_back(streamChunkArg(call->args[0], chunk, true, false, name, false));
-    args.push_back(
-        call->args.size() > 1
-            ? encodingArg(call->args[1])
-            : undefinedOf(encodingType));
+    args.push_back(call->args.size() > 1 ? encodingArg(call->args[1]) : undefinedOf(encodingType));
     impl = name == "push" ? "_pushChunk" : "_unshiftChunk";
   } else if (name == "write") {
     if (!checker_.argumentChecker().checkArity(call, member->loc(), 1, 3)) {

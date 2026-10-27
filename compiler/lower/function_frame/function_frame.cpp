@@ -1,6 +1,5 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/library/process/process_lowerer/process_lowerer.h"
-#include "compiler/lower/errors/unwind_lowerer/unwind_lowerer.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
 #include "compiler/lower/iterators/async_generator_lowerer/async_generator_lowerer.h"
@@ -56,7 +55,6 @@ void FunctionFrame::popScope() {
   if (blockIsOpen()) {
     emitScopeCleanup(lowering_.scopes_.back());
   }
-  lowering_.unwindLowerer().finishScopeUnwind(lowering_.scopes_.size() - 1);
   lowering_.scopes_.pop_back();
 }
 

@@ -1,6 +1,4 @@
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
@@ -40,8 +38,8 @@ llvm::Value *ArrayMethodLowerer::emitArrayMethod(CallExpr *call) {
       member->object, llvm::all_of(call->args, AssignLowerer::cannotAssign));
 
   auto ownedArgs = [&](size_t from) {
-    std::vector<llvm::Value *> values = lowering_.exprLowerer().emitExprs(
-        llvm::ArrayRef<Expr *>(call->args).drop_front(from));
+    std::vector<llvm::Value *> values =
+        lowering_.exprLowerer().emitExprs(llvm::ArrayRef<Expr *>(call->args).drop_front(from));
 
     return values;
   };

@@ -4,7 +4,7 @@
 #include "compiler/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/async/promise_lowerer/promise_lowerer.h"
 #include "compiler/lower/async/reaction_lowerer/reaction_lowerer.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
+#include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
@@ -154,9 +154,8 @@ llvm::Value *FsPromisesLowerer::emitReadlineBuiltin(CallExpr *call) {
     const Type *callback = call->args[1]->type;
     lowering_.reactionLowerer().attachReaction(
         answer, done,
-        lowering_.reactionLowerer().reactionHandler(Builtin::PromiseThen, Type::string(),
-                                                    Type::voidTy(), callback, nullptr),
-        values[1], nullptr);
+        lowering_.reactionLowerer().reactionHandler(Type::string(), Type::voidTy(), callback),
+        values[1]);
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {done});
     lowering_.builder_.CreateCall(lowering_.instanceReleaseFn_, {answer});
     lowering_.refCounts().releaseValue(values[0], call->args[0]->type);

@@ -163,14 +163,11 @@ void FlowStmts::stmt(Stmt *s) {
     }
     break;
   case Stmt::Kind::Throw:
-    flows_.flow(flows_.flowExprs().expr(llvm::cast<ThrowStmt>(s)->value), flows_.thrown_);
+    flows_.flowExprs().expr(llvm::cast<ThrowStmt>(s)->value);
     break;
   case Stmt::Kind::Try: {
     auto *t = llvm::cast<TryStmt>(s);
     stmt(t->block);
-    if (t->handler && t->param.sym) {
-      flows_.flow({{flows_.thrown_, 0, 0}}, flows_.var(t->param.sym));
-    }
     stmt(t->handler);
     stmt(t->finalizer);
     break;

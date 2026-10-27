@@ -427,19 +427,11 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
       close_with(w, layout->count, ']');
       return 1;
     }
-    int error = (layout->flags & TZ_LAYOUT_ERROR) != 0;
     const TzField *name = NULL;
     tz_buf_push(out, '{');
     uint32_t written = 0;
     for (uint32_t i = 0; i < layout->count; ++i) {
       const TzField *field = &layout->fields[i];
-      if (error && tz_error_base_field(field)) {
-        if (field->name_length == 4 && memcmp(field->name, "name", 4) == 0 &&
-            tz_error_named(object)) {
-          name = field;
-        }
-        continue;
-      }
       if (field->offset == TZ_FIELD_METHOD || field->offset == TZ_FIELD_GETTER ||
           tz_field_is_symbol(layout, field) || !has_json(field->type, fields + field->offset)) {
         continue;

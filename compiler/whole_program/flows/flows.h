@@ -85,7 +85,6 @@ public:
   std::vector<Conversion> conversions;
   int unknown_ = 0;
   std::vector<const Type *> types;
-  int thrown_ = 0;
 
 private:
   int node(NodeKind kind, const void *key, llvm::StringRef name);
@@ -111,7 +110,6 @@ private:
   std::set<const FunctionDecl *> functionSet_;
   std::vector<ValueCall> valueCalls_;
   std::set<const VarSymbol *> runtimeFunctions_;
-  std::set<const VarSymbol *> runtimeRejects_;
   std::vector<bool> plain_;
 
 public:

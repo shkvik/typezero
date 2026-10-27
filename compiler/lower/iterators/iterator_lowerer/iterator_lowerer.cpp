@@ -1,6 +1,5 @@
 #include "compiler/lower/iterators/iterator_lowerer/iterator_lowerer.h"
 #include "compiler/check/checker/checker.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/iterators/coroutine_lowerer/coroutine_lowerer.h"
@@ -150,14 +149,12 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
 
   llvm::Value *array = nullptr, *resultSlot = nullptr, *hasAcc = nullptr;
   const Type *resultType = call->type, *accType = call->type;
-  llvm::Value *heldArray{nullptr, nullptr, nullptr};
   switch (method) {
   case Builtin::ArrayFrom:
   case Builtin::IterToArray: {
     const Type *stored = resultType->inner();
     array = lowering_.groupLowerer().newArray(Type::array(stored), lowering_.builder_.getInt64(0),
                                               lowering_.builder_.getInt64(0));
-    heldArray = array;
     consumer.each = [=, this](llvm::Value *value) -> llvm::Value * {
       if (callback) {
         value = lowering_.lazyChainLowerer().callCallback(
@@ -268,7 +265,7 @@ llvm::Value *IteratorLowerer::emitIteratorSink(CallExpr *call) {
   lowering_.functionFrame().emitBlock(endBlock);
   llvm::Value *result = nullptr;
   if (array) {
-    result = heldArray;
+    result = array;
   } else if (resultSlot) {
     result = lowering_.builder_.CreateLoad(lowering_.moduleBuilder().lower(accType), resultSlot);
     if (hasAcc) {
@@ -289,7 +286,6 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
   const Type *type = member->object->type;
   const Type *element = type->yielded(), *returned = type->returned(), *sent = type->sent();
   llvm::Value *it = lowering_.exprLowerer().emitExpr(member->object);
-  llvm::Value *heldIt = it;
   llvm::Value *sentValue = nullptr, *in = nullptr;
   if (!call->args.empty()) {
     sentValue = lowering_.exprLowerer().emitExpr(call->args[0]);
@@ -341,7 +337,7 @@ llvm::Value *IteratorLowerer::emitNext(CallExpr *call) {
       lowering_.builder_.CreateNot(has),
       lowering_.objectLayouts().fieldAddress(result, resultType, "done"));
   lowering_.groupLowerer().adoptFields(result, resultType);
-  lowering_.refCounts().releaseValue(heldIt, type);
+  lowering_.refCounts().releaseValue(it, type);
 
   return result;
 }

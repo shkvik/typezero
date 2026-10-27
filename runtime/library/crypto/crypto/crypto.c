@@ -60,17 +60,19 @@ static int check_integer(double value, const char *name, double min, double max)
   char text[64];
   number_text(text, sizeof text, value);
   if (value != floor(value) || isinf(value)) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"%s\" is out of range. It must be an integer. "
-             "Received %s",
-             name, text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"%s\" is out of range. It must be an integer. "
+                   "Received %s",
+                   name, text);
     return 0;
   }
   if (value < min || value > max) {
     char low[64], high[64];
     number_text(low, sizeof low, min);
     number_text(high, sizeof high, max);
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"%s\" is out of range. It must be >= %s && <= %s. Received %s", name,
-             low, high, text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"%s\" is out of range. It must be >= %s && <= %s. Received %s",
+                   name, low, high, text);
     return 0;
   }
 
@@ -91,8 +93,7 @@ typedef struct {
   TzStr message;
 } FailureParts;
 
-void tz_crypto_fail(int32_t kind, const char *code, const char *format, ...) {
-  (void)kind;
+void tz_crypto_fail(const char *code, const char *format, ...) {
   char text[512];
   va_list args;
   va_start(args, format);
@@ -165,14 +166,17 @@ int tz_crypto_data(TzCryptoData *out, const TzType *type, const void *value, int
       return 1;
     }
     if (layout == &tz_crypto_public_key_layout || layout == &tz_crypto_private_key_layout) {
-      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", "Invalid key object type %s, expected secret.",
-               layout == &tz_crypto_public_key_layout ? "public" : "private");
+      tz_crypto_fail("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+                     "Invalid key object type %s, expected secret.",
+                     layout == &tz_crypto_public_key_layout ? "public" : "private");
       return 0;
     }
   }
-  tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_TYPE", "The \"%s\" argument must be of type string or an instance of ArrayBuffer, Buffer, "
-           "TypedArray, or DataView.",
-           what);
+  tz_crypto_fail(
+      "ERR_INVALID_ARG_TYPE",
+      "The \"%s\" argument must be of type string or an instance of ArrayBuffer, Buffer, "
+      "TypedArray, or DataView.",
+      what);
 
   return 0;
 }
@@ -260,7 +264,8 @@ TzHash *tz_crypto_hash_new(const TzMd *md, double length) {
     return NULL;
   }
   if (length >= 0 && !md->xof && length != md->size) {
-    tz_crypto_fail(TZ_ERROR, "ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH", "error:030000B2:digital envelope routines::not XOF or invalid length");
+    tz_crypto_fail("ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH",
+                   "error:030000B2:digital envelope routines::not XOF or invalid length");
     return NULL;
   }
   if (length >= 0 && !check_integer(length, "options.outputLength", 0, 4294967295.0)) {
@@ -337,7 +342,8 @@ void tz_crypto_hash_digest_text(TzStr *out, TzHash *h, int32_t encoding) {
 
 TzHash *tz_crypto_hash_copy(TzHash *h, double length) {
   if (length >= 0 && !h->md->xof && length != h->md->size) {
-    tz_crypto_fail(TZ_ERROR, "ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH", "error:030000B2:digital envelope routines::not XOF or invalid length");
+    tz_crypto_fail("ERR_OSSL_EVP_NOT_XOF_OR_INVALID_LENGTH",
+                   "error:030000B2:digital envelope routines::not XOF or invalid length");
     return NULL;
   }
   TzHash *copy = tz_crypto_hash_alloc(h->md, 0);
@@ -427,7 +433,7 @@ static void hmac_key(const TzMd *md, uint8_t *ctx, const uint8_t *key, size_t le
 
 static int hmac_takes(const TzMd *md) {
   if (md->xof || md->block == 0 || md->block > 256) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_DIGEST", "Invalid digest: %s", md->name);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_DIGEST", "Invalid digest: %s", md->name);
     return 0;
   }
 
@@ -532,7 +538,7 @@ TzBytes *tz_crypto_pbkdf2(const TzType *pt, const void *pv, const TzType *st, co
     return NULL;
   }
   if (md->xof) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
+    tz_crypto_fail("ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
     return NULL;
   }
   TzCryptoData password, salt;
@@ -545,7 +551,7 @@ TzBytes *tz_crypto_pbkdf2(const TzType *pt, const void *pv, const TzType *st, co
   }
   TzBytes *result = NULL;
   if (keylen == 0) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
+    tz_crypto_fail("ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
   } else if ((result = tz_buffer_alloc((int64_t)keylen, 0))) {
     tz_crypto_pbkdf2_raw(md, password.data, password.length, salt.data, salt.length, iterations,
                          result->data, (size_t)keylen);
@@ -565,11 +571,11 @@ TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, 
     return NULL;
   }
   if (md->xof || keylen == 0) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
+    tz_crypto_fail("ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed");
     return NULL;
   }
   if (keylen > 255.0 * md->size) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
     return NULL;
   }
   TzCryptoData key, salt, info;
@@ -587,9 +593,10 @@ TzArrayBuffer *tz_crypto_hkdf(const TzMd *md, const TzType *kt, const void *kv, 
   }
   TzArrayBuffer *result = NULL;
   if (info.length > 1024) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"info\" is out of range. It must be must not contain "
-             "more than 1024 bytes. Received %zu",
-             info.length);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"info\" is out of range. It must be must not contain "
+                   "more than 1024 bytes. Received %zu",
+                   info.length);
   } else {
     result = tz_abuf_new((int64_t)keylen);
     tz_crypto_hkdf_raw(md, key.data, key.length, salt.data, salt.length, info.data, info.length,
@@ -656,9 +663,10 @@ TzBytes *tz_crypto_random_bytes(double size) {
   if (isnan(size) || size < 0 || size > 2147483647) {
     char text[64];
     number_text(text, sizeof text, size);
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"size\" is out of range. It must be >= 0 && <= "
-             "2147483647. Received %s",
-             text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"size\" is out of range. It must be >= 0 && <= "
+                   "2147483647. Received %s",
+                   text);
     return NULL;
   }
   TzBytes *b = tz_buffer_alloc((int64_t)size, 0);
@@ -691,9 +699,10 @@ void tz_crypto_random_fill(TzInstance *view, double offset, double size, int32_t
     char total[64], text[64];
     number_text(total, sizeof total, (double)length);
     number_text(text, sizeof text, from + count);
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"size + offset\" is out of range. It must be <= %s. "
-             "Received %s",
-             total, text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"size + offset\" is out of range. It must be <= %s. "
+                   "Received %s",
+                   total, text);
     return;
   }
   tz_crypto_random(data + (int64_t)from, (size_t)count);
@@ -724,33 +733,37 @@ double tz_crypto_random_int(double min, double max) {
   char text[64];
   if (min != floor(min) || fabs(min) > safe) {
     number_text(text, sizeof text, min);
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_TYPE", "The \"min\" argument must be a safe integer. Received type number "
-             "(%s)",
-             text);
+    tz_crypto_fail("ERR_INVALID_ARG_TYPE",
+                   "The \"min\" argument must be a safe integer. Received type number "
+                   "(%s)",
+                   text);
     return 0;
   }
   if (max != floor(max) || fabs(max) > safe) {
     number_text(text, sizeof text, max);
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_TYPE", "The \"max\" argument must be a safe integer. Received type number "
-             "(%s)",
-             text);
+    tz_crypto_fail("ERR_INVALID_ARG_TYPE",
+                   "The \"max\" argument must be a safe integer. Received type number "
+                   "(%s)",
+                   text);
     return 0;
   }
   if (max <= min) {
     char low[64];
     number_text(low, sizeof low, min);
     number_text(text, sizeof text, max);
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"max\" is out of range. It must be greater than the "
-             "value of \"min\" (%s). Received %s",
-             low, text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"max\" is out of range. It must be greater than the "
+                   "value of \"min\" (%s). Received %s",
+                   low, text);
     return 0;
   }
   double range = max - min;
   if (range > 281474976710655.0) {
     number_text(text, sizeof text, range);
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_OUT_OF_RANGE", "The value of \"max - min\" is out of range. It must be <= "
-             "281474976710655. Received %s",
-             text);
+    tz_crypto_fail("ERR_OUT_OF_RANGE",
+                   "The value of \"max - min\" is out of range. It must be <= "
+                   "281474976710655. Received %s",
+                   text);
     return 0;
   }
 
@@ -847,13 +860,13 @@ TzCipher *tz_crypto_cipher_new(const TzCipherAlg *alg, const TzType *kt, const v
               : alg->iv_any == 2 ? nonce.length >= 1 && nonce.length <= 15
                                  : nonce.length == alg->iv_length;
   if (key.length != alg->key_length) {
-    tz_crypto_fail(TZ_RANGE_ERROR, "ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_KEYLEN", "Invalid key length");
   } else if (!iv_ok) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_IV", "Invalid initialization vector");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_IV", "Invalid initialization vector");
   } else if (tag_length >= 0 && alg->kind == TZ_CIPHER_AEAD && !valid_tag_length(alg, tag_length)) {
     char text[64];
     number_text(text, sizeof text, tag_length);
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_AUTH_TAG", "Invalid authentication tag length: %s", text);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_AUTH_TAG", "Invalid authentication tag length: %s", text);
   } else {
     c = (TzCipher *)tz_obj_alloc((int64_t)(sizeof(TzCipher) + alg->ctx_size));
     memset(c, 0, sizeof(TzCipher) + alg->ctx_size);
@@ -876,7 +889,7 @@ TzCipher *tz_crypto_cipher_new(const TzCipherAlg *alg, const TzType *kt, const v
 
 static int64_t cipher_update(TzCipher *c, const uint8_t *in, size_t length, uint8_t *out) {
   if (c->state == 2) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Trying to add data in unsupported state");
     return -1;
   }
   c->state = 1;
@@ -912,16 +925,16 @@ TzBytes *tz_crypto_cipher_update(TzCipher *c, const TzType *type, const void *va
 TzBytes *tz_crypto_cipher_final(TzCipher *c) {
   if (c->has_problem && c->state != 2) {
     c->state = 2;
-    tz_crypto_fail(TZ_ERROR, c->problem_code, "%s", c->problem);
+    tz_crypto_fail(c->problem_code, "%s", c->problem);
     return NULL;
   }
   if (c->state == 2) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state");
     return NULL;
   }
   if (c->decrypt && c->alg->kind == TZ_CIPHER_AEAD && !c->tag_set) {
     c->state = 2;
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
+    tz_crypto_fail("ERR_CRYPTO_AUTH_FAILED", "Unsupported state or unable to authenticate data");
     return NULL;
   }
   uint8_t out[32];
@@ -942,7 +955,7 @@ void tz_crypto_cipher_set_aad(TzCipher *c, const TzType *type, const void *value
 
 static void set_aad(TzCipher *c, const TzType *type, const void *value, double plaintext_length) {
   if (c->alg->kind != TZ_CIPHER_AEAD || c->state != 0 || !c->alg->ops->aad) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAAD");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAAD");
     return;
   }
   TzCryptoData d;
@@ -950,14 +963,14 @@ static void set_aad(TzCipher *c, const TzType *type, const void *value, double p
     return;
   }
   if (!c->alg->ops->aad(c, d.data, d.length, plaintext_length)) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAAD");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAAD");
   }
   tz_crypto_data_done(&d);
 }
 
 TzBytes *tz_crypto_cipher_get_auth_tag(TzCipher *c) {
   if (c->decrypt || c->alg->kind != TZ_CIPHER_AEAD || c->state != 2) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state for operation getAuthTag");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state for operation getAuthTag");
     return NULL;
   }
 
@@ -975,7 +988,7 @@ void tz_crypto_cipher_set_auth_tag(TzCipher *c, const TzType *type, const void *
 
 static void set_auth_tag(TzCipher *c, const TzType *type, const void *value, int32_t encoding) {
   if (c->alg->kind != TZ_CIPHER_AEAD || c->state == 2 || c->tag_set) {
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAuthTag");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAuthTag");
     return;
   }
   TzCryptoData d;
@@ -985,7 +998,8 @@ static void set_auth_tag(TzCipher *c, const TzType *type, const void *value, int
   int custom = c->tag_length != 16;
   if (!valid_tag_length(c->alg, (double)d.length) ||
       (custom && d.length != (size_t)c->tag_length)) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_CRYPTO_INVALID_AUTH_TAG", "Invalid authentication tag length: %zu", d.length);
+    tz_crypto_fail("ERR_CRYPTO_INVALID_AUTH_TAG", "Invalid authentication tag length: %zu",
+                   d.length);
   } else {
     memcpy(c->tag, d.data, d.length);
     c->tag_length = (int32_t)d.length;
@@ -997,7 +1011,7 @@ static void set_auth_tag(TzCipher *c, const TzType *type, const void *value, int
 void tz_crypto_cipher_set_auto_padding(TzCipher *c, int32_t padding) {
   if (c->state == 2) {
     TzCipher *outer = record_problems(c);
-    tz_crypto_fail(TZ_ERROR, "ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAutoPadding");
+    tz_crypto_fail("ERR_CRYPTO_INVALID_STATE", "Invalid state for operation setAutoPadding");
     tz_crypto_recording = outer;
     return;
   }
@@ -1047,7 +1061,7 @@ int64_t tz_crypto_block_update(TzCipher *c, const uint8_t *in, size_t length, ui
 
 static void block_fail(const TzCipher *c, const char *code, const char *message) {
   if (!c->quiet) {
-    tz_crypto_fail(TZ_ERROR, code, "%s", message);
+    tz_crypto_fail(code, "%s", message);
   }
 }
 
@@ -1057,7 +1071,7 @@ int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
     if (!c->padding) {
       if (c->pending) {
         block_fail(c, "ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH",
-                 "error:1C80006B:Provider routines::wrong final block length");
+                   "error:1C80006B:Provider routines::wrong final block length");
         return -1;
       }
       return 0;
@@ -1078,7 +1092,7 @@ int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks) {
   }
   if ((size_t)c->pending != size) {
     block_fail(c, "ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH",
-                 "error:1C80006B:Provider routines::wrong final block length");
+               "error:1C80006B:Provider routines::wrong final block length");
     return -1;
   }
   blocks(c, c->block, size, out);
@@ -1138,9 +1152,10 @@ TzKey *tz_crypto_generate_secret_key(int32_t aes, double bits) {
     if (bits != 128 && bits != 192 && bits != 256) {
       char text[64];
       number_text(text, sizeof text, bits);
-      tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'options.length' must be one of: 128, 192, 256. "
-               "Received %s",
-               text);
+      tz_crypto_fail("ERR_INVALID_ARG_VALUE",
+                     "The property 'options.length' must be one of: 128, 192, 256. "
+                     "Received %s",
+                     text);
       return NULL;
     }
   } else if (!check_integer(bits, "options.length", 8, 2147483647)) {
@@ -1184,8 +1199,9 @@ int32_t tz_crypto_key_asymmetric_type(TzStr *out, const TzKey *key) {
 
 TzBytes *tz_crypto_key_export_secret(const TzKey *key) {
   if (key->type != TZ_KEY_SECRET) {
-    tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The \"options.format\" property must be one of: 'pem', 'der', "
-                            "'jwk'. Received 'buffer'");
+    tz_crypto_fail("ERR_INVALID_ARG_VALUE",
+                   "The \"options.format\" property must be one of: 'pem', 'der', "
+                   "'jwk'. Received 'buffer'");
     return NULL;
   }
 
@@ -1215,9 +1231,10 @@ static int asymmetric_only(const TzKey *key, const char *format) {
   if (key->type != TZ_KEY_SECRET) {
     return 1;
   }
-  tz_crypto_fail(TZ_TYPE_ERROR, "ERR_INVALID_ARG_VALUE", "The property 'options.format' must be one of: undefined, 'buffer', "
-           "'jwk'. Received '%s'",
-           format);
+  tz_crypto_fail("ERR_INVALID_ARG_VALUE",
+                 "The property 'options.format' must be one of: undefined, 'buffer', "
+                 "'jwk'. Received '%s'",
+                 format);
 
   return 0;
 }

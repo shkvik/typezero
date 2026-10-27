@@ -1,6 +1,4 @@
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
-#include "compiler/lower/errors/may_throw/may_throw.h"
-#include "compiler/lower/errors/throw_lowerer/throw_lowerer.h"
 #include "compiler/lower/expr/assign_lowerer/assign_lowerer.h"
 #include "compiler/lower/expr/equality_lowerer/equality_lowerer.h"
 #include "compiler/lower/expr/expr_lowerer/expr_lowerer.h"
@@ -116,16 +114,9 @@ llvm::Value *StringLowerer::emitConcat(BinaryExpr *bin) {
   for (size_t i = parts.size() - 1; i > 0; --i) {
     laterCannotAssign[i - 1] = laterCannotAssign[i] && AssignLowerer::cannotAssign(parts[i]);
   }
-
-  std::vector<bool> laterThrows(parts.size(), false);
-  for (size_t i = parts.size() - 1; i > 0; --i) {
-    laterThrows[i - 1] = laterThrows[i] || false;
-  }
   std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i < parts.size(); ++i) {
     operands.push_back(emitConcatPart(parts[i], laterCannotAssign[i]));
-  }
-  for (Lowering::Operand &operand : operands) {
   }
 
   return concatOperands(operands);
@@ -162,10 +153,6 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
   if (count == 1 && tmpl->quasis[0].empty() && tmpl->quasis[1].empty()) {
     return lowering_.exprLowerer().emitExpr(tmpl->exprs[0]);
   }
-  std::vector<bool> laterThrows(count, false);
-  for (size_t i = count; i > 1; --i) {
-    laterThrows[i - 2] = laterThrows[i - 1] || false;
-  }
   std::vector<Lowering::Operand> operands;
   for (size_t i = 0; i <= count; ++i) {
     if (!tmpl->quasis[i].empty()) {
@@ -174,8 +161,6 @@ llvm::Value *StringLowerer::emitTemplate(TemplateExpr *tmpl) {
     if (i < count) {
       operands.push_back(emitConcatPart(tmpl->exprs[i], laterCannotAssign[i]));
     }
-  }
-  for (Lowering::Operand &operand : operands) {
   }
   if (operands.empty()) {
     return stringLiteral(u"");

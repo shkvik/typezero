@@ -44,7 +44,6 @@ Errors DeclarePass::run(Program &program) const {
   for (const Feature *feature : features_.all()) {
     feature->prepare(checker, file);
   }
-  checker.throwChecker().declareErrorClass();
   for (const Feature *feature : features_.all()) {
     feature->declare(checker);
   }

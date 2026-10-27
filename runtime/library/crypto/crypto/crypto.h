@@ -141,8 +141,8 @@ int tz_crypto_data(TzCryptoData *out, const TzType *type, const void *value, int
 void tz_crypto_data_done(TzCryptoData *d);
 
 void tz_crypto_errors(TzMaker make);
-void tz_crypto_fail(int32_t kind, const char *code, const char *format, ...);
-void tz_openssl_throw(int32_t kind, const char *code, const char *otherwise);
+void tz_crypto_fail(const char *code, const char *format, ...);
+void tz_openssl_fail(const char *code, const char *otherwise);
 
 TzBytes *tz_crypto_buffer(const uint8_t *data, size_t length);
 void tz_crypto_text(TzStr *out, const uint8_t *data, size_t length, int32_t encoding);

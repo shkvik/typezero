@@ -40,8 +40,6 @@ namespace {
 std::optional<CallKind> callbackKind(Builtin builtin) {
   switch (builtin) {
   case Builtin::PromiseThen:
-  case Builtin::PromiseCatch:
-  case Builtin::PromiseFinally:
   case Builtin::SetTimeout:
   case Builtin::SetInterval:
   case Builtin::SetImmediate:
@@ -344,7 +342,7 @@ void CallWalk::builtinCall(const CallExpr *c, const Use &use) {
   }
   Builtin b = c->builtin;
   Use inner;
-  if (b == Builtin::PromiseAll || b == Builtin::PromiseAllSettled) {
+  if (b == Builtin::PromiseAll) {
     inner.join = use.awaited;
   }
   std::optional<CallKind> kind = callbackKind(b);
@@ -399,8 +397,7 @@ void CallWalk::functionArg(const CallExpr *c, const Expr *arg, CallKind kind, co
   rec.call = c;
   if (kind == CallKind::Later) {
     rec.interval |= b == Builtin::SetInterval;
-    rec.handled |= b == Builtin::PromiseThen || b == Builtin::PromiseCatch ||
-                   b == Builtin::PromiseFinally || b == Builtin::RlQuestionCallback;
+    rec.handled |= b == Builtin::PromiseThen || b == Builtin::RlQuestionCallback;
   }
   if (kind == CallKind::Inline && !callsOnce(b)) {
     rec.repeated = true;
